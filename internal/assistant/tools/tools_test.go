@@ -328,3 +328,19 @@ func TestFollowIsToldOnlyOfSuccessfulLaunchesAndMessages(t *testing.T) {
 		t.Fatalf("followed %v, want %v", followed, want)
 	}
 }
+
+func TestViewContextIsServedFromTheMembersOwnSnapshot(t *testing.T) {
+	fc := &fakeCaller{}
+	view := &protocol.AssistantViewContext{Version: 1, Route: protocol.AssistantViewEntry{Name: "run", RunID: "run-1"}}
+	s := &Server{Caller: fc, Member: "m1", View: func() protocol.AssistantViewContextResult {
+		return protocol.AssistantViewContextResult{ViewContext: view, Connected: true}
+	}}
+	raw, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodAssistantViewContext})
+	var got protocol.AssistantViewContextResult
+	if perr != nil || json.Unmarshal(raw, &got) != nil || got.ViewContext.Route.RunID != "run-1" || !got.Connected {
+		t.Fatalf("assistant.view_context = %s, %v", raw, perr)
+	}
+	if calls := fc.called(); len(calls) != 0 {
+		t.Fatalf("assistant.view_context reached the control surface: %v", calls)
+	}
+}

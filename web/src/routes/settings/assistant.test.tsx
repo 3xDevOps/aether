@@ -41,7 +41,7 @@ describe('assistant settings', () => {
     expect(client.assistantSettings).toHaveBeenCalledTimes(1)
     expect(toggle().getAttribute('aria-checked')).toBe('false')
 
-    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false })
+    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false, share_view: true })
     await user.click(toggle())
     dialog = await screen.findByRole('alertdialog')
     await user.click(within(dialog).getByRole('button', { name: 'Turn on' }))
@@ -49,7 +49,7 @@ describe('assistant settings', () => {
     await waitFor(() => expect(toggle().getAttribute('aria-checked')).toBe('true'))
     expect(screen.queryByRole('alertdialog')).toBeNull()
 
-    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false })
+    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true })
     await user.click(toggle())
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(client.assistantSettings).toHaveBeenLastCalledWith({ auto_approve: false })
@@ -59,12 +59,12 @@ describe('assistant settings', () => {
   it('follows auto-approval turned on from the assistant', async () => {
     const user = userEvent.setup()
     const client = show()
-    act(() => useStore.getState().setAssistantStatus({ state: 'idle', agent: 'claude', agents: [], confirmations: [], auto_approve: false, suggest_auto_approve: true }))
+    act(() => useStore.getState().setAssistantStatus({ state: 'idle', agent: 'claude', agents: [], confirmations: [], auto_approve: false, suggest_auto_approve: true, share_view: true }))
     await waitFor(() => expect(toggle()).toHaveProperty('disabled', false))
     act(() => useStore.getState().setAssistantStatus({ ...useStore.getState().assistantStatus!, auto_approve: true, suggest_auto_approve: false }))
     expect(toggle().getAttribute('aria-checked')).toBe('true')
 
-    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false })
+    vi.mocked(client.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true })
     await user.click(toggle())
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(client.assistantSettings).toHaveBeenLastCalledWith({ auto_approve: false })

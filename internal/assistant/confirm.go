@@ -143,7 +143,7 @@ func autoApprovable(c protocol.AssistantConfirmation) bool {
 }
 
 func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
-	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && !time.Now().Before(st.SnoozedUntil), SuggestionOff: st.NoSuggest}
+	return protocol.AssistantSettings{AutoApprove: st.AutoApprove, SuggestAutoApprove: !st.AutoApprove && !st.NoSuggest && st.Approvals >= suggestAfter && !time.Now().Before(st.SnoozedUntil), SuggestionOff: st.NoSuggest, ShareView: st.ShareView}
 }
 
 // approver passes a confirmed call at once when the member turned

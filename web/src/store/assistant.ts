@@ -1,4 +1,4 @@
-import type { AssistantConfirmation, AssistantStatus } from '@/lib/assistant-types'
+import type { AssistantConfirmation, AssistantStatus, ViewContext } from '@/lib/assistant-types'
 import { mobileScreen } from '@/lib/breakpoints'
 import type { RootState } from '@/store'
 import type { SliceCreator } from '@/store/slice'
@@ -22,6 +22,12 @@ export function clampAssistantWidth(width: number): number {
   return Math.min(maxAssistantWidth, Math.max(minAssistantWidth, width))
 }
 
+export interface AssistantAttempt {
+  text: string
+  key: string
+  viewContext?: ViewContext
+}
+
 export interface AssistantSlice {
   assistantOpen: boolean
   assistantWidth: number
@@ -29,8 +35,8 @@ export interface AssistantSlice {
   assistantStatusError: string | null
   assistantConfirmations: AssistantConfirmation[]
   assistantDraft: string
-  /** The prompt being sent and its idempotency key. Kept with the draft so reopening the panel retries under the same key. */
-  assistantAttempt: { text: string; key: string } | null
+  /** The prompt being sent, its idempotency key and view context. Kept with the draft so reopening the panel retries under the same key and context. */
+  assistantAttempt: AssistantAttempt | null
   assistantSending: boolean
   /** Bumped by a new conversation so the stream reconnects from sequence 0. */
   assistantGeneration: number
@@ -42,7 +48,7 @@ export interface AssistantSlice {
   setAssistantStatus: (status: AssistantStatus) => void
   setAssistantStatusError: (error: string | null) => void
   setAssistantDraft: (draft: string) => void
-  setAssistantAttempt: (attempt: { text: string; key: string } | null) => void
+  setAssistantAttempt: (attempt: AssistantAttempt | null) => void
   setAssistantSending: (sending: boolean) => void
   restartAssistantConversation: () => void
   /** A different signed-in member must not see the previous one's assistant. */
@@ -80,6 +86,6 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
     }),
   resetAssistant: () => {
     get().restartAssistantConversation()
-    set({ assistantStatus: null, assistantStatusError: null, assistantDraft: '', assistantNotices: 0 })
+    set({ assistantStatus: null, assistantStatusError: null, assistantDraft: '', assistantNotices: 0, assistantShareChoice: null })
   },
 })

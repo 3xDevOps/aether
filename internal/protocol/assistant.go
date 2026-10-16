@@ -21,6 +21,10 @@ const (
 	MethodAssistantSettings = "assistant.settings"
 	// MethodAssistantDocs is served only on the assistant tool socket.
 	MethodAssistantDocs = "assistant.docs"
+	// MethodAssistantView replaces the caller's latest view context.
+	MethodAssistantView = "assistant.view"
+	// MethodAssistantViewContext is served only on the assistant tool socket.
+	MethodAssistantViewContext = "assistant.view_context"
 )
 
 const (
@@ -62,6 +66,7 @@ type AssistantStatus struct {
 	Error         string                  `json:"error,omitempty"`
 	Confirmations []AssistantConfirmation `json:"confirmations"`
 	AutoApprove   bool                    `json:"auto_approve"`
+	ShareView     bool                    `json:"share_view"`
 	// SuggestAutoApprove means the member approved enough cards by hand
 	// that the dashboard may suggest turning auto-approval on.
 	SuggestAutoApprove bool `json:"suggest_auto_approve"`
@@ -78,6 +83,7 @@ const (
 // AssistantSettingsParams changes each field that is set; none reads.
 type AssistantSettingsParams struct {
 	AutoApprove *bool `json:"auto_approve,omitempty"`
+	ShareView   *bool `json:"share_view,omitempty"`
 	// Suggestion answers the suggestion to turn auto-approval on.
 	Suggestion string `json:"suggestion,omitempty"`
 }
@@ -88,6 +94,8 @@ type AssistantSettings struct {
 	SuggestAutoApprove bool `json:"suggest_auto_approve"`
 	// SuggestionOff means the suggestion will not show again.
 	SuggestionOff bool `json:"suggestion_off"`
+	// ShareView sends the assistant the member's dashboard view context.
+	ShareView bool `json:"share_view"`
 }
 
 type AssistantStartParams struct {
@@ -96,8 +104,52 @@ type AssistantStartParams struct {
 }
 
 type AssistantPromptParams struct {
-	Text           string `json:"text"`
-	IdempotencyKey string `json:"idempotency_key"`
+	Text           string                `json:"text"`
+	IdempotencyKey string                `json:"idempotency_key"`
+	ViewContext    *AssistantViewContext `json:"view_context,omitempty"`
+}
+
+type AssistantViewParams struct {
+	ViewContext *AssistantViewContext `json:"view_context,omitempty"`
+}
+
+// AssistantViewContext is what the member's dashboard shows: ids and view
+// names only, never titles, file contents, drafts or terminal text. Its ids
+// are hints for the assistant's member-scoped tools, never permissions.
+type AssistantViewContext struct {
+	Version    int                  `json:"version"`
+	CapturedAt time.Time            `json:"captured_at"`
+	Route      AssistantViewEntry   `json:"route"`
+	OpenFile   *AssistantViewFile   `json:"open_file,omitempty"`
+	Recent     []AssistantViewEntry `json:"recent,omitempty"`
+}
+
+type AssistantViewEntry struct {
+	Name        string    `json:"name"`
+	WorkspaceID string    `json:"workspace_id,omitempty"`
+	RunID       string    `json:"run_id,omitempty"`
+	MissionID   string    `json:"mission_id,omitempty"`
+	Subagent    string    `json:"subagent,omitempty"`
+	View        string    `json:"view,omitempty"`
+	At          time.Time `json:"at,omitzero"`
+}
+
+type AssistantViewFile struct {
+	Kind        string `json:"kind"`
+	Path        string `json:"path"`
+	RunID       string `json:"run_id,omitempty"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+}
+
+// AssistantViewContextResult is the member's latest view context. Several
+// dashboards share one: the one the server received last wins.
+type AssistantViewContextResult struct {
+	ViewContext *AssistantViewContext `json:"view_context"`
+	// AgeSeconds counts from when the server received it.
+	AgeSeconds int64 `json:"age_seconds,omitempty"`
+	// Connected is true while a dashboard streams the member's assistant
+	// conversation, the only time it sends view updates.
+	Connected bool `json:"connected"`
 }
 
 type AssistantAnswerParams struct {

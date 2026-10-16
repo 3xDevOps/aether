@@ -406,3 +406,43 @@ func TestSuggestionAnswers(t *testing.T) {
 		}
 	})
 }
+
+func TestSettingsWritesKeepViewSharingAndTheSuggestion(t *testing.T) {
+	st := newMemStore()
+	svc := New(Config{Dir: t.TempDir(), Store: st})
+	t.Cleanup(func() { _ = svc.Close() })
+	m := svc.member("m1")
+	ctx := t.Context()
+	if err := svc.SetShareView(ctx, "m1", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := answerCard(t, svc, m, protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run r1"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if row := st.settings["m1"]; row.Approvals != 1 || row.ShareView {
+		t.Fatalf("after counting an approval: %+v, want one approval and view sharing still off", row)
+	}
+	if _, err := svc.SetSettings(ctx, "m1", protocol.AssistantSettingsParams{Suggestion: protocol.AssistantSuggestionLater}); err != nil {
+		t.Fatal(err)
+	}
+	if row := st.settings["m1"]; row.Snoozes != 1 || row.ShareView {
+		t.Fatalf("after answering the suggestion: %+v, want it snoozed and view sharing still off", row)
+	}
+	on := true
+	if got, err := svc.SetSettings(ctx, "m1", protocol.AssistantSettingsParams{AutoApprove: &on}); err != nil || !got.AutoApprove || got.ShareView {
+		t.Fatalf("after turning auto-approval on: %+v, %v, want view sharing still off", got, err)
+	}
+
+	before := st.settings["m1"]
+	if err := svc.SetShareView(ctx, "m1", true); err != nil {
+		t.Fatal(err)
+	}
+	want := before
+	want.ShareView = true
+	if row := st.settings["m1"]; row != want {
+		t.Fatalf("after turning view sharing on: %+v, want %+v", row, want)
+	}
+	if got, err := svc.Settings(ctx, "m1"); err != nil || !got.ShareView || !got.AutoApprove {
+		t.Fatalf("settings = %+v, %v, want auto-approval and view sharing on", got, err)
+	}
+}

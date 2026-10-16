@@ -34,6 +34,8 @@ export interface AssistantStatus {
   auto_approve: boolean
   /** The member approved enough cards by hand that the panel may suggest auto-approval. */
   suggest_auto_approve: boolean
+  /** Prompts carry the member's view context. */
+  share_view: boolean
 }
 
 export interface AssistantSettings {
@@ -41,6 +43,7 @@ export interface AssistantSettings {
   suggest_auto_approve: boolean
   /** The suggestion will not show again. */
   suggestion_off: boolean
+  share_view: boolean
 }
 
 /** Fields left out are not changed; none reads the settings. */
@@ -48,6 +51,7 @@ export interface AssistantSettingsParams {
   auto_approve?: boolean
   /** Answers the suggestion: `later` snoozes it, `never` stops it. */
   suggestion?: 'later' | 'never'
+  share_view?: boolean
 }
 
 export interface AssistantStartParams {
@@ -58,4 +62,24 @@ export interface AssistantStartParams {
 /** A session frame, or the whole status: sent after the ack and whenever the state or the pending confirmations change. */
 export interface AssistantFrame extends SessionFrame {
   status?: AssistantStatus
+}
+
+/** One page of the dashboard: ids and view names only, never titles or content. */
+export interface ViewEntry {
+  name: string
+  workspace_id?: string
+  run_id?: string
+  mission_id?: string
+  subagent?: string
+  view?: string
+  at?: string
+}
+
+/** What `assistant.prompt` and `assistant.view` carry as `view_context`. */
+export interface ViewContext {
+  version: 1
+  captured_at: string
+  route: ViewEntry
+  open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
+  recent?: ViewEntry[]
 }

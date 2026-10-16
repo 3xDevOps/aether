@@ -109,11 +109,15 @@ type member struct {
 	// reset is held while a reset runs, so a viewer that sees the session
 	// end reads the new generation.
 	reset sync.RWMutex
-	// removing refuses new sessions while the member is being removed.
+	// removing refuses new sessions and view contexts while the member is
+	// being removed. It is written under both op and mu.
 	removing bool
 	// settings orders changes to the member's settings with the calls they
 	// decide.
 	settings sync.Mutex
+	// share orders turning view sharing off with the views it drops: a
+	// prompt holds it read-locked through its send.
+	share sync.RWMutex
 
 	mu       sync.Mutex
 	sess     *session
@@ -126,6 +130,10 @@ type member struct {
 	// the last maxKeys that succeeded.
 	attempts map[string]*attempt
 	done     []string
+	// view is the latest view context the member's dashboard sent, and
+	// viewAt when it arrived.
+	view   *protocol.AssistantViewContext
+	viewAt time.Time
 
 	wmu      sync.Mutex
 	watchers map[chan struct{}]struct{}
@@ -278,7 +286,7 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	}
 	status := protocol.AssistantStatus{
 		Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(),
-		AutoApprove: settings.AutoApprove, SuggestAutoApprove: settings.SuggestAutoApprove,
+		AutoApprove: settings.AutoApprove, SuggestAutoApprove: settings.SuggestAutoApprove, ShareView: settings.ShareView,
 	}
 	switch {
 	case live != nil:
@@ -443,7 +451,8 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		cancel()
 		return nil, err
 	}
-	srv := &tools.Server{Caller: s.cfg.Caller(m.id), Confirm: s.approver(m), Member: string(m.id)}
+	srv := &tools.Server{Caller: s.cfg.Caller(m.id), Confirm: s.approver(m), Member: string(m.id),
+		View: func() protocol.AssistantViewContextResult { return s.View(m.id, time.Now()) }}
 	if s.follower != nil {
 		srv.Follow = func(ctx context.Context, run string) { s.follow(ctx, m.id, domain.RunID(run)) }
 	}
@@ -685,12 +694,19 @@ func (s *Service) Fence(ctx context.Context, id domain.MemberID) error {
 	m := s.member(id)
 	m.op.Lock()
 	defer m.op.Unlock()
-	m.removing = true
+	m.fence(true)
 	if err := s.stop(ctx, m); err != nil {
-		m.removing = false
+		m.fence(false)
 		return err
 	}
 	return nil
+}
+
+func (m *member) fence(on bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removing = on
+	m.view, m.viewAt = nil, time.Time{}
 }
 
 // Unfence lets a member whose removal failed use the assistant again.
@@ -698,7 +714,7 @@ func (s *Service) Unfence(id domain.MemberID) {
 	m := s.member(id)
 	m.op.Lock()
 	defer m.op.Unlock()
-	m.removing = false
+	m.fence(false)
 }
 
 func (s *Service) Remove(ctx context.Context, id domain.MemberID) error {
@@ -737,7 +753,7 @@ type attempt struct {
 // turn is running. A key that is in flight or was accepted, even before a
 // restart, is not sent again: a duplicate waits for the first attempt and
 // returns its result.
-func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key string) error {
+func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key string, view *protocol.AssistantViewContext) error {
 	m := s.member(id)
 	a, first := m.begin(key)
 	if !first {
@@ -748,7 +764,13 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 			return ctx.Err()
 		}
 	}
-	dispatched, err := s.send(ctx, m, text, key)
+	m.share.RLock()
+	view, err := s.keepView(ctx, m, view, false)
+	dispatched := false
+	if err == nil {
+		dispatched, err = s.send(ctx, m, text, key, view)
+	}
+	m.share.RUnlock()
 	if err != nil && !dispatched {
 		m.finish(key, a, err)
 		return err
@@ -761,7 +783,7 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 // check, the dispatch and saving the key under the generation it ran in.
 // dispatched is true once the agent may have the prompt; its key then stays
 // reserved even if the caller left or saving it failed.
-func (s *Service) send(ctx context.Context, m *member, text, key string) (dispatched bool, err error) {
+func (s *Service) send(ctx context.Context, m *member, text, key string, view *protocol.AssistantViewContext) (dispatched bool, err error) {
 	m.op.Lock()
 	defer m.op.Unlock()
 	row, err := s.stored(ctx, m.id)
@@ -779,7 +801,7 @@ func (s *Service) send(ctx context.Context, m *member, text, key string) (dispat
 	if err != nil {
 		return false, err
 	}
-	started, err := live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)}, nil)
+	started, err := promptLive(ctx, live, text, view)
 	if errors.Is(err, acphost.ErrPromptUnsent) {
 		// The adapter died after ensure saw it alive and before the prompt
 		// left: once its session has ended, start a new one and send there.
@@ -791,7 +813,7 @@ func (s *Service) send(ctx context.Context, m *member, text, key string) (dispat
 		if live, err = s.ensureLocked(ctx, m, ""); err != nil {
 			return false, err
 		}
-		started, err = live.acp.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(text)}, nil)
+		started, err = promptLive(ctx, live, text, view)
 	}
 	switch {
 	case err == nil && !started:
@@ -805,6 +827,14 @@ func (s *Service) send(ctx context.Context, m *member, text, key string) (dispat
 		return true, errors.Join(err, fmt.Errorf("assistant: %w", saveErr))
 	}
 	return true, err
+}
+
+func promptLive(ctx context.Context, live *session, text string, view *protocol.AssistantViewContext) (bool, error) {
+	blocks, err := promptBlocks(text, view, live.acp.Info().PromptEmbedded)
+	if err != nil {
+		return false, err
+	}
+	return live.acp.PromptIdle(ctx, blocks, nil)
 }
 
 func (m *member) begin(key string) (*attempt, bool) {

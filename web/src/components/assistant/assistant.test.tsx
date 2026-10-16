@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import type { AssistantConfirmation, AssistantSettings, AssistantStatus } from '@/lib/assistant-types'
 import { useStore, createRootStore } from '@/store'
 import { loadWholeItem } from '@/store/session-stream'
+import { viewSyncDelay } from '@/store/view-context'
 import { item, resetItems, ScriptedSession, say, state } from '@/test/acp-stream'
 import { agentInfo, alice, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
@@ -42,7 +43,7 @@ afterAll(() => {
 const ready = [{ name: 'claude', display_name: 'Claude Code', ready: true }]
 
 function status(over: Partial<AssistantStatus> = {}): AssistantStatus {
-  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], auto_approve: false, suggest_auto_approve: false, ...over }
+  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], auto_approve: false, suggest_auto_approve: false, share_view: true, ...over }
 }
 
 const stop: AssistantConfirmation = {
@@ -450,7 +451,7 @@ describe('the auto-approval suggestion', () => {
   })
 
   it('turns auto-approval on without a second dialog and confirms until the next turn', async () => {
-    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false })
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false, share_view: true })
     const aside = await openPanel()
     acpOpen(conversation())
     assistantSocket().send({ status: status({ suggest_auto_approve: true }) })
@@ -470,7 +471,7 @@ describe('the auto-approval suggestion', () => {
     ['Not now', { suggestion: 'later' }, true, /We won't suggest this again\. Auto-approval stays available in/],
     ["Don't suggest again", { suggestion: 'never' }, true, /We won't suggest this again\. Auto-approval stays available in/],
   ] as const)('answers %s (suggestion_off %s) and links to Settings → Assistant', async (button, params, off, confirmation) => {
-    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: off })
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: off, share_view: true })
     const aside = await openPanel()
     acpOpen(conversation())
     assistantSocket().send({ status: status({ suggest_auto_approve: true }) })
@@ -485,7 +486,7 @@ describe('the auto-approval suggestion', () => {
   })
 
   it('drops the answer when the conversation is discarded', async () => {
-    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false })
+    vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true })
     vi.mocked(api.assistantReset).mockResolvedValue(status())
     const aside = await openPanel()
     acpOpen(conversation())
@@ -505,7 +506,7 @@ describe('the auto-approval suggestion', () => {
     assistantSocket().send({ status: status({ suggest_auto_approve: true }) })
     await userEvent.click(within(await within(aside).findByRole('group', { name: title })).getByRole('button', { name: 'Turn on auto-approval' }))
     act(() => useStore.setState({ identityKey: 'someone else' }))
-    await act(async () => resolve({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false }))
+    await act(async () => resolve({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false, share_view: true }))
     expect(useStore.getState().assistantStatus?.auto_approve).toBe(false)
     expect(within(aside).queryByText(/Auto-approval is on\./)).toBeNull()
   })
@@ -519,7 +520,7 @@ describe('the auto-approval suggestion', () => {
     await userEvent.click(within(await within(aside).findByRole('group', { name: title })).getByRole('button', { name: 'Turn on auto-approval' }))
     assistantSocket().send({ status: status({ state: 'running' }) }).items(item('turn_start', 2))
     await waitFor(() => expect(within(aside).queryByRole('button', { name: 'Stop' })).not.toBeNull())
-    await act(async () => resolve({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false }))
+    await act(async () => resolve({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false, share_view: true }))
     expect(useStore.getState().assistantStatus?.auto_approve).toBe(true)
     expect(within(aside).queryByText(/Auto-approval is on\./)).toBeNull()
     assistantSocket().send({ status: status({ auto_approve: true }) }).items(item('turn_end', 2, { stop_reason: 'end_turn' }))
@@ -640,6 +641,8 @@ describe('a retained draft', () => {
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
     const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
     expect(second![1]).toBe(first![1])
+    expect(first![2]).toMatchObject({ version: 1, route: { name: 'board' } })
+    expect(second![2]).toBe(first![2])
     expect(useStore.getState().assistantAttempt).toBeNull()
   })
 
@@ -656,6 +659,41 @@ describe('a retained draft', () => {
     await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(2))
     const [first, second] = vi.mocked(api.assistantPrompt).mock.calls
     expect(second![1]).not.toBe(first![1])
+  })
+})
+
+describe('the view context', () => {
+  it('shows what is sent, and once turned off sends nothing more', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      vi.mocked(api.assistantPrompt).mockResolvedValue({})
+      vi.mocked(api.assistantSettings).mockResolvedValue({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: false })
+      useStore.getState().navigate('run', { runId: 'run-8x2', view: 'changes' })
+      const aside = await openPanel()
+      acpOpen()
+      await act(() => vi.advanceTimersByTimeAsync(viewSyncDelay))
+      expect(api.assistantView).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(api.assistantView).mock.calls[0]![0].route).toMatchObject({ run_id: 'run-8x2', view: 'changes' })
+
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      const chip = await within(aside).findByRole('button', { name: 'Sharing: run run-8x2 · Changes' })
+      expect(chip.getAttribute('aria-describedby')).toBeTruthy()
+      await user.click(chip)
+      expect(within(aside).getByRole('region', { name: 'Sent with this message' }).textContent).toContain('"run_id": "run-8x2"')
+      await user.click(within(aside).getByRole('checkbox', { name: 'Share the page I am on with the assistant' }))
+      expect(api.assistantSettings).toHaveBeenCalledWith({ share_view: false })
+      expect(within(aside).getByRole('button', { name: 'Not sharing this page' })).toBeDefined()
+
+      act(() => useStore.getState().navigate('board'))
+      await act(() => vi.advanceTimersByTimeAsync(5 * viewSyncDelay))
+      await user.type(within(aside).getByRole('textbox', { name: 'Message the assistant' }), 'what is this?{Enter}')
+      await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
+      expect(vi.mocked(api.assistantPrompt).mock.calls[0]![2]).toBeUndefined()
+      expect(api.assistantView).toHaveBeenCalledTimes(1)
+      expect(useStore.getState().assistantStatus?.share_view).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

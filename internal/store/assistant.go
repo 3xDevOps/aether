@@ -40,6 +40,8 @@ type AssistantSettings struct {
 	SnoozedUntil time.Time
 	// NoSuggest stops the suggestion for good.
 	NoSuggest bool
+	// ShareView sends the assistant the member's dashboard view context.
+	ShareView bool
 }
 
 // AssistantStore persists each member's assistant session. Removing a member
@@ -59,8 +61,8 @@ type AssistantStore interface {
 	HasAssistantPromptKey(ctx context.Context, member domain.MemberID, generation int64, key string) (bool, error)
 	// AddAssistantPromptKey records key, keeping the newest MaxAssistantPromptKeys.
 	AddAssistantPromptKey(ctx context.Context, member domain.MemberID, generation int64, key string) error
-	// AssistantSettings returns the member's settings; the zero value when
-	// never set.
+	// AssistantSettings returns the member's settings; when never set, the
+	// zero value but for ShareView, which is on.
 	AssistantSettings(ctx context.Context, member domain.MemberID) (AssistantSettings, error)
 	PutAssistantSettings(ctx context.Context, member domain.MemberID, settings AssistantSettings) error
 }
@@ -174,11 +176,11 @@ func (d *DB) AssistantSettings(ctx context.Context, member domain.MemberID) (Ass
 	var settings AssistantSettings
 	var until int64
 	err := d.db.QueryRowContext(ctx,
-		`SELECT auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off
+		`SELECT auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view
 		 FROM assistant_settings WHERE member_id = ?`, member).
-		Scan(&settings.AutoApprove, &settings.Approvals, &settings.Snoozes, &until, &settings.NoSuggest)
+		Scan(&settings.AutoApprove, &settings.Approvals, &settings.Snoozes, &until, &settings.NoSuggest, &settings.ShareView)
 	if errors.Is(err, sql.ErrNoRows) {
-		return AssistantSettings{}, nil
+		return AssistantSettings{ShareView: true}, nil
 	}
 	if err != nil {
 		return AssistantSettings{}, fmt.Errorf("store: get assistant settings: %w", err)
@@ -195,12 +197,13 @@ func (d *DB) PutAssistantSettings(ctx context.Context, member domain.MemberID, s
 		until = settings.SnoozedUntil.Unix()
 	}
 	_, err := d.db.ExecContext(ctx,
-		`INSERT INTO assistant_settings (member_id, auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, unixepoch())
+		`INSERT INTO assistant_settings (member_id, auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, share_view, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())
 		 ON CONFLICT(member_id) DO UPDATE SET auto_approve = excluded.auto_approve,
 		   manual_approvals = excluded.manual_approvals, suggest_snoozes = excluded.suggest_snoozes,
-		   suggest_after = excluded.suggest_after, suggest_off = excluded.suggest_off, updated_at = excluded.updated_at`,
-		member, settings.AutoApprove, settings.Approvals, settings.Snoozes, until, settings.NoSuggest)
+		   suggest_after = excluded.suggest_after, suggest_off = excluded.suggest_off,
+		   share_view = excluded.share_view, updated_at = excluded.updated_at`,
+		member, settings.AutoApprove, settings.Approvals, settings.Snoozes, until, settings.NoSuggest, settings.ShareView)
 	if err != nil {
 		return fmt.Errorf("store: put assistant settings: %w", mapConstraint(err, ErrNotFound))
 	}

@@ -1731,7 +1731,9 @@ CREATE TABLE assistant_settings (
 	updated_at   INTEGER NOT NULL
 );
 `,
-	// v67: when to suggest turning auto-approval on. manual_approvals counts
+	// v67: share_view sends the assistant the member's dashboard view context.
+	`ALTER TABLE assistant_settings ADD COLUMN share_view INTEGER NOT NULL DEFAULT 1;`,
+	// v68: when to suggest turning auto-approval on. manual_approvals counts
 	// cards approved by hand since the last decline, timeout or answer to
 	// the suggestion; suggest_after is the unix time a "later" answer
 	// snoozes it until; suggest_off stops it for good.

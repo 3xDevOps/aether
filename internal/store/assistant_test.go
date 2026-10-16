@@ -123,10 +123,10 @@ func TestAssistantSettings(t *testing.T) {
 	ctx := context.Background()
 	ada := mustCreateMember(t, db).ID
 
-	if got, err := db.AssistantSettings(ctx, ada); err != nil || got != (AssistantSettings{}) {
-		t.Fatalf("settings before any were set = %+v, %v, want the zero value", got, err)
+	if got, err := db.AssistantSettings(ctx, ada); err != nil || got != (AssistantSettings{ShareView: true}) {
+		t.Fatalf("settings before any were set = %+v, %v, want only view sharing on", got, err)
 	}
-	want := AssistantSettings{AutoApprove: true, Approvals: 2, Snoozes: 1, SnoozedUntil: time.Unix(1_800_000_000, 0).UTC()}
+	want := AssistantSettings{AutoApprove: true, Approvals: 2, Snoozes: 1, SnoozedUntil: time.Unix(1_800_000_000, 0).UTC(), ShareView: true}
 	if err := db.PutAssistantSettings(ctx, ada, want); err != nil {
 		t.Fatal(err)
 	}
