@@ -97,13 +97,23 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 			return nil, fmt.Errorf("%w: %s", ErrHeld, reason)
 		}
 	}
+	// The trial of the last update has not committed: a new swap record
+	// would be overwritten by that Commit.
+	last, err := loadRecord(s.cfg.StateDir)
+	if err != nil {
+		return nil, err
+	}
+	if last != nil && last.Phase == recordVerifying {
+		return nil, fmt.Errorf("%w: %s is still verifying its first start (%s); retry once it has started",
+			ErrBusy, last.ToVersion, recordPath(s.cfg.StateDir))
+	}
 	if !s.claim(pending.Version) {
 		return nil, ErrBusy
 	}
 	// A downgrade is applied by hand, now, so one cut short is not left
 	// pending for an idle moment.
 	if !scheduled && !allowDowngrade {
-		if err := s.cfg.Store.SetPendingServerUpdate(ctx, &pending); err != nil {
+		if err = s.cfg.Store.SetPendingServerUpdate(ctx, &pending); err != nil {
 			s.release()
 			return nil, err
 		}

@@ -548,7 +548,10 @@ and executes the previous binary. A re-exec that fails outright is undone
 the same way. A restored copy loses every write made after it, and the error
 says so with the time of the copy. A rollback that cannot restore a file
 records why and exits with that error instead of executing anything.
-`--status` shows the outcome until the next update:
+Until the new binary has recorded `applied`, another update is refused
+with `a server update is already being applied: v0.9.0 is still verifying
+its first start (...)`. `--status` shows the outcome until the next
+update:
 
 ```
 update        rolled_back v0.8.0 -> v0.9.0

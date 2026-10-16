@@ -868,3 +868,24 @@ func TestAHeldServerDoesNotApply(t *testing.T) {
 		t.Fatalf("aether-server = %q, want it untouched while held", got)
 	}
 }
+
+// A trial that has not committed owns swap.json until its Commit, which
+// would overwrite a new update's record: no update starts before then.
+func TestAnUncommittedTrialRefusesANewUpdate(t *testing.T) {
+	e := newEnv(t, false)
+	if err := saveRecord(e.state, &swapRecord{Phase: recordVerifying, FromVersion: "v0.1.0", ToVersion: "v0.1.5", Binaries: []string{e.self}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := e.svc.Update(t.Context(), "mem_a",
+		protocol.ServerUpdateParams{Version: releaseTagUnderTest, When: protocol.ServerUpdateNow})
+	if !errors.Is(err, ErrBusy) || !strings.Contains(err.Error(), "v0.1.5 is still verifying its first start") {
+		t.Fatalf("Update now = %v, want ErrBusy naming the uncommitted trial", err)
+	}
+	if got := e.read(t, e.self); got != "the old binary" {
+		t.Fatalf("aether-server = %q, want it untouched", got)
+	}
+	rec, err := loadRecord(e.state)
+	if err != nil || rec == nil || rec.ToVersion != "v0.1.5" || rec.Phase != recordVerifying {
+		t.Fatalf("swap record = %+v, %v; want the trial's own", rec, err)
+	}
+}
