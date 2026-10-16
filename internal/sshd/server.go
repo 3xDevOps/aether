@@ -617,6 +617,10 @@ func (s *Server) serveConn(ctx context.Context, c net.Conn, cfg *ssh.ServerConfi
 		case "session":
 			s.spawn(func() { s.handleSession(connCtx, member, nc, abortConn) })
 		case "direct-tcpip":
+			if perr := s.upgradeRequired(connCtx); perr != nil {
+				rejectDirectTCPIP(nc, ssh.Prohibited, perr.Message)
+				continue
+			}
 			s.spawn(func() { s.handleDirectTCPIP(connCtx, member, nc) })
 		default:
 			_ = nc.Reject(ssh.UnknownChannelType, "unsupported channel type")

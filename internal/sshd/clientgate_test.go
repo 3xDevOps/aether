@@ -265,6 +265,16 @@ func TestClientVersionGateStreams(t *testing.T) {
 		})
 	}
 
+	t.Run("direct-tcpip", func(t *testing.T) {
+		_, _, err := client.OpenChannel("direct-tcpip", ssh.Marshal(forwardTestPayload{
+			DestHost: "run:" + string(e.run.ID), DestPort: 1, OrigHost: "127.0.0.1",
+		}))
+		var openErr *ssh.OpenChannelError
+		if !errors.As(err, &openErr) || openErr.Reason != ssh.Prohibited || !strings.Contains(openErr.Message, "run `aether update`") {
+			t.Fatalf("direct-tcpip open = %v, want the upgrade refusal", err)
+		}
+	})
+
 	t.Run("git", func(t *testing.T) {
 		sess, err := client.NewSession()
 		if err != nil {

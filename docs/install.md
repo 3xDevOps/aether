@@ -252,7 +252,9 @@ Run `aether update` on that machine, or **Update now** in the dashboard's
 blocking update screen, then retry. These keep working while the server
 refuses the client, because none of them needs the server: `aether update`,
 the gateway's `update.*` verbs, `server.info`, `server.update_status`,
-and git fetch and push over SSH.
+and git fetch and push over SSH. Everything else is refused, including
+streams and port forwards; a refused forward fails as `administratively
+prohibited` with the same message.
 
 The client sends its version in its SSH banner, `SSH-2.0-Aether
 <version>`. A client from before this change sends none and is treated as
