@@ -8,8 +8,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 )
 
 func TestNativeExtensionDiscoveryOptOut(t *testing.T) {
@@ -171,5 +176,86 @@ func TestOpenCodeNativeInlineJSONC(t *testing.T) {
 	}
 	if env["OPENCODE_CONFIG_CONTENT"] != input {
 		t.Fatal("V2 original inline config was mutated")
+	}
+}
+
+func TestClaudeNativeLaunchMergesHooksIntoOneSettingsDocument(t *testing.T) {
+	p, _ := Lookup("claude")
+	argv := []string{"claude", "--dangerously-skip-permissions", "a task"}
+	native, err := p.PrepareNativeLaunch("/run/aether", argv, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, ok := native.Files[agentstatus.ClaudeSettingsName]
+	if !ok || len(native.Files) != 1 {
+		t.Fatalf("files = %v, want only %s", native.Files, agentstatus.ClaudeSettingsName)
+	}
+	if want := []string{"--settings", "/run/aether/claude-settings.json"}; !reflect.DeepEqual(native.Args, want) {
+		t.Fatalf("args = %v, want %v", native.Args, want)
+	}
+	if !native.ReplacesStatus || native.Reporter != ReporterFull {
+		t.Fatalf("replaces status = %v, reporter = %s", native.ReplacesStatus, native.Reporter)
+	}
+	if native.Env[coordtransport.ManagedHooksEnv] != "1" {
+		t.Fatalf("env = %v, want %s=1", native.Env, coordtransport.ManagedHooksEnv)
+	}
+
+	hooksOf := func(doc []byte) map[string][]any {
+		var parsed struct {
+			Hooks map[string][]any `json:"hooks"`
+		}
+		if decodeErr := json.Unmarshal(doc, &parsed); decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		return parsed.Hooks
+	}
+	inbox, err := coordhooks.Files.ReadFile("claude.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(inbox), "wake") {
+		t.Fatal("the copyable claude.json carries the wake hook, which would block claude -p")
+	}
+	wake := map[string]any{"hooks": []any{map[string]any{
+		"type":        "command",
+		"command":     "/usr/local/bin/aether-internal hook claude wake",
+		"async":       true,
+		"asyncRewake": true,
+		"timeout":     float64(coordhooks.ClaudeWakeTimeout),
+	}}}
+	status, extra, merged := hooksOf(agentstatus.ClaudeSettings), hooksOf(inbox), hooksOf(body)
+	for event := range extra {
+		if _, ok := status[event]; !ok {
+			status[event] = nil
+		}
+	}
+	for event, entries := range status {
+		want := append(slices.Clone(entries), extra[event]...)
+		wakes := 0
+		if event == "SessionStart" || event == "Stop" {
+			want = append(want, wake)
+			wakes = 1
+		}
+		if !reflect.DeepEqual(merged[event], want) {
+			t.Fatalf("%s hooks = %v, want %v", event, merged[event], want)
+		}
+		raw, _ := json.Marshal(merged[event])
+		if got := strings.Count(string(raw), "hook claude wake"); got != wakes {
+			t.Fatalf("%s carries %d wake hooks, want %d", event, got, wakes)
+		}
+	}
+	if len(merged) != len(status) {
+		t.Fatalf("merged events = %d, want %d", len(merged), len(status))
+	}
+
+	for _, name := range []string{"omp", "pi"} {
+		q, _ := Lookup(name)
+		native, err := q.PrepareNativeLaunch("/run/aether", []string{name, "a task"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if native.Env[coordtransport.ManagedHooksEnv] != "1" {
+			t.Fatalf("%s env = %v, want %s=1", name, native.Env, coordtransport.ManagedHooksEnv)
+		}
 	}
 }

@@ -293,7 +293,7 @@ through the same native extension/plugin mechanism.
 
 | Agent CLI | `--agent` | Mail at next boundary | Native idle wake | Enhanced run wake | Copyable asset |
 | --- | --- | --- | --- | --- | --- |
-| Claude Code | `claude` | yes | no | yes | `claude.json` |
+| Claude Code | `claude` | yes | yes, managed Standard launches | yes | `claude.json` |
 | Codex | `codex` | yes | no | yes | `codex.json` |
 | Native pi | `pi` | yes | yes, owning session only | yes | `pi.ts` |
 | OMP | `omp` | yes | yes, main agent only | yes | `omp.ts` |
@@ -352,6 +352,12 @@ test ! -e "$HOME/.omp/agent/extensions/aether.ts" &&
   aether-internal hook file omp.ts > "$HOME/.omp/agent/extensions/aether.ts"
 ```
 
+When the launch loaded the hooks ([managed loading](#managed-native-loading)),
+`aether-internal skill` prints `Inbox hooks (<agent>): loaded by this run's
+launch; do not install a manual copy.` instead of the file check, and
+`skill --hooks` prints that line first. Its file checks cover manual copies
+only.
+
 Do not add a manual copy merely because a managed run-scoped extension is
 absent from the checker’s fixed paths. `skill` is read-only: **configured
 means present on disk, not loaded, trusted, or executed**. It checks standard
@@ -372,12 +378,26 @@ then verify a real context boundary and idle wake before claiming activation.
 
 ### Managed native loading
 
-For the shipped `pi`, `omp`, and `opencode` agents, Aether stages native
-mailbox assets for **coordinated, task-bearing Standard launches**. Taskless,
+For the shipped `claude`, `pi`, `omp`, and `opencode` agents, Aether stages
+native mailbox assets for **coordinated, task-bearing Standard launches**. Taskless,
 Background, disabled-coordination, and custom/overridden argv launches do not
 get this automatic mailbox installation. Manual integrations remain usable
 where the agent supports them; a boundary hook in a Background process does
 not grant it idle wake.
+
+Claude Code accepts one `--settings` value, so the server writes one
+document, `/run/aether/claude-settings.json`, and adds
+`--settings /run/aether/claude-settings.json`. It merges the
+[status reporter](#status-reporting) hooks, the `claude.json` inbox hooks and
+the [idle-wake waiter](#claude-code-inbox-integration). No user or project
+settings file changes. Claude Code runs an identical command hook from several
+settings sources once, so an unmodified manual `claude.json` does not double
+the managed hooks (observed with Claude Code 2.1.301); a modified copy runs
+too. Taskless launches keep the status-only document; Background and Enhanced
+launches load neither.
+
+Every managed launch sets `AETHER_MANAGED_HOOKS=1` in the run environment,
+which switches the `skill` output described above.
 
 For pi, the server stages `/run/aether/aether.ts` and adds
 `-e /run/aether/aether.ts`. For OMP it stages that same filename but adds
@@ -436,19 +456,65 @@ member configuration and does not mount over an existing user plugin path.
 
 ### Claude Code inbox integration
 
-Export `claude.json`; merge into `~/.claude/settings.json` (or
+**Managed.** A coordinated, task-bearing Standard launch of the shipped
+`claude` loads the inbox hooks and the idle-wake waiter through
+`/run/aether/claude-settings.json` ([managed loading](#managed-native-loading)).
+Nothing needs installing. A taskless launch's status-only document is not an
+inbox installation.
+
+**Manual.** Export `claude.json`; merge into `~/.claude/settings.json` (or
 `$CLAUDE_CONFIG_DIR/settings.json`). Project alternatives are
 `.claude/settings.json` and `.claude/settings.local.json`.
 Restart Claude Code and review `/hooks` in its normal workspace-trust UI.
 Honor `disableAllHooks`, `allowManagedHooksOnly`, and managed settings such
-as `/etc/claude-code/managed-settings.json`.
+as `/etc/claude-code/managed-settings.json`. `claude.json` has no waiter, so a
+manual copy announces mail at boundaries only: under `claude -p` an
+`asyncRewake` hook runs in the foreground and would block a Background run.
 
 The supported events are `SessionStart`, `UserPromptSubmit`, `PostToolBatch`,
 and `Stop` from the current [Claude hook API](https://code.claude.com/docs/en/hooks).
 Older releases may lack these events or context outputs. Child-agent events
 do not take ownership of the run mailbox. Stop may request one continuation
-for pending mail or an integrator refresh; it is not an idle watcher. The
-built-in `--settings` status reporter alone is not this inbox installation.
+for pending mail or an integrator refresh.
+
+**Idle wake.** The managed document adds this `asyncRewake` hook to
+`SessionStart` and `Stop`:
+
+```json
+{"type":"command","command":"/usr/local/bin/aether-internal hook claude wake","async":true,"asyncRewake":true,"timeout":604800}
+```
+
+- The waiter claims the session by writing its PID to
+  `$TMPDIR/aether-hook-<run>-claude-wake`, then repeats bounded 30-second
+  server waits. A newer waiter (the next `Stop`, `/clear`, a resume)
+  replaces it. The inbox `UserPromptSubmit` and `PostToolBatch` hooks delete
+  the file, so a busy session has none; a replaced waiter exits within a
+  second. Esc fires no `Stop`, so after an interrupt wake pauses until a turn
+  completes.
+- When the server admits a wake for mail the hooks have not announced, the
+  waiter writes the trusted inbox instruction (never peer text) to stderr,
+  adds the IDs to `$TMPDIR/aether-hook-<run>-claude.json`, and exits 2.
+  Claude Code then starts a turn with no human input. The terminal shows
+  **Stop hook feedback**; the model receives the instruction inside a
+  background task notification as `Stop hook blocking error from command
+  "Stop": ...`. That wording is Claude Code's framing, not an error.
+- On `SessionStart` all unread mail counts as unannounced, so a resumed idle
+  session with mail waiting wakes at once. On `Stop` the waiter first gives
+  the inbox `Stop` hook beside it a second to record what it announced, then
+  wakes only for mail missing from that record: mail the hook announced
+  already blocked the stop, and mail that arrived after the hook's check
+  still wakes the session. A wake admitted while a turn runs joins that turn
+  as one more pointer.
+- Nothing else exits 2. Errors exit 1, after up to five retries with 1 to 16
+  second backoff for transport errors; Claude Code shows them only in
+  `claude --debug`. The next completed turn starts a new waiter.
+- The hook timeout is 604800 seconds (7 days); the waiter exits a minute
+  before it. A session idle longer is not woken until a turn completes.
+- `/exit` and SIGTERM stop the waiters. If Claude Code is killed, the waiter
+  sees its stderr hang up and exits within a second. Subagent events, an
+  Enhanced run, and a missing coordination socket make it exit 0 at once.
+- Protection, human takeover, and swarm authority suppress the wake; the
+  server rechecks them on every 30-second wait.
 
 ### Codex inbox integration
 
@@ -682,7 +748,8 @@ Native receiver errors appear in the agent's own warning UI or stderr. Only
 recoverable helper/transport failures get bounded backoff; unsupported
 protocols and nonretryable helper errors stop observation rather than spinning.
 After exhausting helper retries, pi/OMP require a reload/restart; OpenCode
-pauses until another explicit same-root prompt. Native synchronous send
+pauses until another explicit same-root prompt; Claude Code's waiter exits
+and the next completed turn starts a new one. Native synchronous send
 rejection instead permits [lifecycle-driven recovery with fresh admission](harness-integration.md#keep-observation-and-notification-separate),
 without marking the rejected IDs notified or blindly resending. Fix the
 underlying error first; reloading never erases or acknowledges durable mail.
@@ -711,7 +778,9 @@ container, through whatever the CLI's own mechanism is, for that launch
 alone - by flag where the CLI has one, by environment where it does not -
 and where that mechanism needs a file, the file is written into the run's
 coordination directory. The status-only argument additions are shown below;
-task-bearing native launches also use [managed loading](#managed-native-loading):
+task-bearing native launches also use [managed loading](#managed-native-loading),
+which for `claude` adds the inbox hooks and idle-wake waiter to the same
+`claude-settings.json`:
 
 ```
 claude --dangerously-skip-permissions "<task>" \
