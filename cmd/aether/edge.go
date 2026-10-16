@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -62,7 +63,7 @@ func runEdge(args []string) error {
 	if err != nil {
 		return err
 	}
-	result, err := cli.Link(cli.LinkOptions{Addr: prev.Addr, EdgeURL: edgeURL, Claim: code}, prev)
+	result, err := cli.Link(context.Background(), cli.LinkOptions{Addr: prev.Addr, EdgeURL: edgeURL, Claim: code}, prev)
 	if err != nil {
 		return err
 	}

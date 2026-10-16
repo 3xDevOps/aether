@@ -80,9 +80,9 @@ func localVerbsFor(packaged bool) []string {
 	})
 }
 
-// dialLink is cli.Dial behind a variable so tests can switch links without
-// a server.
-var dialLink = cli.Dial
+// dialLink is cli.DialContext behind a variable so tests can switch links
+// without a server.
+var dialLink = cli.DialContext
 
 // localState is the mutable client-machine state behind /local/v1:
 // the saved link config (link.repo updates it), the background sync
@@ -265,7 +265,9 @@ func (g *Gateway) localLinkApply(_ *http.Request, body []byte) (any, *protocol.E
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: "addr is required"}
 	}
 	prev := g.local.snapshot()
-	result, err := cli.Link(cli.LinkOptions{
+	ctx, cancel := context.WithTimeout(g.ctx, dialTimeout)
+	defer cancel()
+	result, err := cli.Link(ctx, cli.LinkOptions{
 		Addr:   params.Addr,
 		Invite: params.Invite,
 		Name:   params.Name,
@@ -396,7 +398,9 @@ func (g *Gateway) localLinkSwitch(_ *http.Request, body []byte) (any, *protocol.
 		}
 		target = named
 	}
-	conn, err := dialLink(target)
+	ctx, cancel := context.WithTimeout(g.ctx, dialTimeout)
+	defer cancel()
+	conn, err := dialLink(ctx, target)
 	if err != nil {
 		return nil, unreachableError(err)
 	}
