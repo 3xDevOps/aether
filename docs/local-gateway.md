@@ -1210,9 +1210,18 @@ anywhere in the server, so the diff timeline reads the text here and uses
 those events to know when to ask again and which interval to ask for.
 
 With no query params the server renders the run checkout's whole diff against
-the fork point its identity record pins (the `aether.base` commit), covering
-committed work, uncommitted edits and untracked files alike - the same set of
-changes a `run.diff` snapshot counts. Rendering leaves the checkout alone: the
+the run's effective base, covering committed work, uncommitted edits and
+untracked files alike - the same set of changes a `run.diff` snapshot counts.
+The effective base is the newest upstream commit the run's `HEAD` contains:
+the merge base of `HEAD` and the checkout's `refs/remotes/origin/<base
+branch>`, which `git fetch` or `git pull` inside the run updates. A run that
+merges or rebases onto newer upstream work is therefore charged only for its
+own changes, as in a GitHub pull request. The base never moves behind the
+fork point (the `aether.base` commit its identity record pins): when the
+tracking ref is missing, unreadable, or not a descendant of the fork point,
+or the checkout predates the recorded base branch, the fork point is the base.
+The server reads the tracking ref as plain data and never runs Git against the
+checkout's own repository. Rendering leaves the checkout alone: the
 worktree is staged into a scratch index with its own scratch object directory,
 so nothing under the checkout's `.git` - not even the loose objects staging
 hashes - is ever written, and the scratch files are deleted once the patch is
@@ -1249,7 +1258,18 @@ delivered endpoints across ref or event-publication failures.
 Watch snapshots and cumulative-diff staging bound visible input at 128 MiB
 (evidence keeps its 64 MiB input bound); these limits do not evict history.
 A cumulative response after checkout cleanup is the last recorded snapshot,
-not a live filesystem read, and carries `recorded:true`.
+not a live filesystem read, and carries `recorded:true`. It is measured
+against the tree of the effective base that snapshot's stats used, which the
+snapshot store records in the same ref transaction that publishes the
+snapshot, so the pair never splits. Stopping a run's watcher, as run
+completion does, takes one last snapshot first, so the final `run.diff` and
+the recorded diff include changes made in the seconds before the stop.
+
+Each `run.diff` carries `base`, the effective base commit its stats are
+measured against. A fetch that moves `origin/<base branch>` schedules a
+snapshot, and a moved base publishes new stats even when the worktree is
+unchanged, including after a watch restart. `parent_tree` is unchanged: the
+first snapshot's parent is the fork-point tree.
 
 `run.diff` may include `history_gap:true` and a bounded, path-free
 `snapshot_error` when an interval could not be recorded. The next successful
@@ -1270,19 +1290,21 @@ claim the checkout was removed, and it never returns a partial complete diff.
 - Visibility is `run.get`'s, applied by calling it: a member who could not
   read the run over the control channel gets that method's refusal here,
   unchanged.
-- `base` is what the patch is measured from: the fork-point commit on a
-  cumulative render, the `from` tree on an interval one.
+- `base` is what the patch is measured from: the effective base commit on a
+  live cumulative render, its tree when `recorded` is true, the `from` tree on
+  an interval one.
 - `patch` contains the complete rendered diff up to 64 MiB. An oversized
   response sets `truncated:true` and ends at a whole line. The dashboard
   renders the response inline; it does not serve repositories.
 - `503` with `-32004` when the server has no git engine wired, when the run
-  has no checkout left to diff (it finished and was cleaned up), when a
-  requested tree has expired from retained snapshot history (possibly before
-  checkout cleanup), or when
-  rendering ran past the engine's 30s ceiling - the same bound a diff
-  snapshot's git work gets, because staging re-hashes every untracked file
-  and a worktree holding a large un-ignored tree would otherwise be
-  unbounded.
+  has no checkout to diff (`run.patch: this run has no checkout to diff`),
+  when a requested tree has expired from retained snapshot history (possibly
+  before checkout cleanup), or when rendering ran past the engine's 30s
+  ceiling (`run.patch: rendering the diff took longer than 30s: ...`) - the
+  same bound a diff snapshot's git work gets, because staging re-hashes every
+  untracked file and a worktree holding a large un-ignored tree would
+  otherwise be unbounded. Any other failure returns `run.patch:` followed by
+  the engine's error, including the Git command and its output.
 
 ### `GET /api/v1/disk`
 

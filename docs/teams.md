@@ -1074,7 +1074,9 @@ useful answer.
 Per-run diff snapshots feed an overlap index. When two runs touch the same
 file, `aether runs` shows it in the `OVERLAP` column and the dashboard puts an
 overlap warning on both run cards that opens to the shared files and the
-other run. It is early warning, not locking - nothing is blocked.
+other run. It is early warning, not locking - nothing is blocked. A run's
+files are only its own changes: work it merged or rebased in from upstream
+`main` does not count, so pulling `main` does not create overlaps.
 
 On top of that, runs in one workspace can message each other directly through
 their agents, before or after the radar sees an overlap (on by default;

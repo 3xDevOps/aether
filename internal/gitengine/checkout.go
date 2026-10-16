@@ -32,9 +32,12 @@ const (
 // keeps every per-run operation self-describing from the run id alone, so
 // the engine still needs no registration step after a restart.
 type runMeta struct {
-	Base      string             `json:"base"`
-	Branch    string             `json:"branch"`
-	Workspace domain.WorkspaceID `json:"workspace"`
+	Base   string `json:"base"`
+	Branch string `json:"branch"`
+	// BaseBranch is the branch the run forked from; empty for checkouts
+	// created before it was recorded.
+	BaseBranch string             `json:"base_branch,omitempty"`
+	Workspace  domain.WorkspaceID `json:"workspace"`
 }
 
 func (e *Engine) runMetaPath(run domain.RunID) (string, error) {
@@ -186,7 +189,7 @@ func (e *Engine) CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID,
 			return "", "", fmt.Errorf("gitengine: point run %s origin at %s: %w", run, origin, err)
 		}
 	}
-	if err := e.writeRunMeta(run, runMeta{Base: baseCommit, Branch: branch, Workspace: ws}); err != nil {
+	if err := e.writeRunMeta(run, runMeta{Base: baseCommit, Branch: branch, BaseBranch: baseBranch, Workspace: ws}); err != nil {
 		cleanup()
 		return "", "", err
 	}
