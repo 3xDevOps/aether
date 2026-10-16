@@ -54,7 +54,6 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
         }
     }
 
-    /** Shows what the last check found, and runs a new one when it is due. */
     fun resume() {
         val stored = activity.storedUpdate()
         render(stored)
@@ -98,7 +97,6 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
         banner.visibility = View.VISIBLE
     }
 
-    /** Opens the first of [targets] some app takes, else shows why none did. */
     private fun open(targets: List<UpdateTarget>) {
         val failures = mutableListOf<String>()
         for (target in targets) {

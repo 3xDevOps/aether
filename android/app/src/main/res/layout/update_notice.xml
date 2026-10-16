@@ -11,6 +11,7 @@
     android:layout_marginTop="@dimen/update_notice_margin"
     android:layout_marginEnd="@dimen/update_notice_margin"
     android:accessibilityLiveRegion="polite"
+    android:clickable="true"
     android:background="@drawable/update_notice_background"
     android:orientation="vertical"
     android:paddingStart="16dp"
