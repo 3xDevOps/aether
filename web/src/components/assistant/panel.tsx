@@ -294,7 +294,7 @@ export function AssistantPanel() {
     if (supported && (open || useStore.getState().assistantStatus === null)) void refreshAssistant(useStore, api)
   }, [supported, open, identity])
   useEffect(() => (streamable ? connectAssistant(useStore, api) : undefined), [streamable, generation, identity])
-  useEffect(() => (supported ? trackViewContext(useStore) : undefined), [supported, identity])
+  useEffect(() => (supported && share ? trackViewContext(useStore) : undefined), [supported, share, identity])
   useEffect(() => (shown && hasSession && share ? syncViewContext(useStore, api) : undefined), [shown, hasSession, share, identity])
 
   // Opening by hand moves the keyboard in; a panel restored from a reload does not take it.

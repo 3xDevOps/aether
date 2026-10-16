@@ -39,6 +39,10 @@ func TestCleanViewContextDropsMalformedFieldsAndTrimsToFit(t *testing.T) {
 	if err != nil || len(b) > maxViewContextBytes || got.OpenFile == nil || len(got.Recent) == 0 || len(got.Recent) == maxViewRecent {
 		t.Fatalf("oversized context = %d bytes, %d recent, %v, want the oldest pages trimmed to fit", len(b), len(got.Recent), err)
 	}
+	far := &protocol.AssistantViewContext{Version: 1, CapturedAt: time.Date(9999, 12, 31, 23, 0, 0, 0, time.FixedZone("", -2*3600)), Route: protocol.AssistantViewEntry{Name: "board"}}
+	if got, err := CleanViewContext(far); err != nil || !got.CapturedAt.IsZero() {
+		t.Fatalf("a time past year 9999 in UTC = %+v, %v, want it zeroed", got, err)
+	}
 	if got, err := CleanViewContext(&protocol.AssistantViewContext{Version: 2}); got != nil || err != nil {
 		t.Fatalf("an unknown version = %+v, %v, want it dropped", got, err)
 	}
@@ -72,21 +76,30 @@ func TestViewIsPerMemberLastReceivedWinsAndOptOutHolds(t *testing.T) {
 	if got := s.View("m1", now); got.ViewContext != nil {
 		t.Fatalf("View after sharing was turned off and a late update = %+v, want none", got.ViewContext)
 	}
-	if kept, err := s.keepView(ctx, s.member("m1"), newer); kept != nil || err != nil {
+	if kept, err := s.keepView(ctx, s.member("m1"), newer, false); kept != nil || err != nil {
 		t.Fatalf("a prompt's context with sharing off = %+v, %v, want it dropped", kept, err)
 	}
 
 	if err := s.SetShareView(ctx, "m1", true); err != nil {
 		t.Fatal(err)
 	}
+	if kept, err := s.keepView(ctx, s.member("m1"), skewed, false); kept != skewed || err != nil || s.View("m1", now).ViewContext != skewed {
+		t.Fatalf("a prompt's context with none held = %+v, %v, want it sent and kept", kept, err)
+	}
 	if err := s.SetView(ctx, "m1", newer); err != nil {
 		t.Fatal(err)
+	}
+	if kept, err := s.keepView(ctx, s.member("m1"), skewed, false); kept != skewed || err != nil || s.View("m1", now).ViewContext != newer {
+		t.Fatalf("a retried prompt's older context = %+v, %v, want it sent without replacing the newer view", kept, err)
 	}
 	if err := s.Fence(ctx, "m1"); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.SetView(ctx, "m1", newer); err != nil {
+		t.Fatal(err)
+	}
 	if got := s.View("m1", now); got.ViewContext != nil {
-		t.Fatalf("View after Fence = %+v, want it cleared", got.ViewContext)
+		t.Fatalf("View after Fence and a late update = %+v, want none", got.ViewContext)
 	}
 }
 

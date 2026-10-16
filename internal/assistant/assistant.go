@@ -109,11 +109,15 @@ type member struct {
 	// reset is held while a reset runs, so a viewer that sees the session
 	// end reads the new generation.
 	reset sync.RWMutex
-	// removing refuses new sessions while the member is being removed.
+	// removing refuses new sessions and view contexts while the member is
+	// being removed. It is written under both op and mu.
 	removing bool
 	// settings orders changes to the member's settings with the calls they
 	// decide.
 	settings sync.Mutex
+	// share orders turning view sharing off with the views it drops: a
+	// prompt holds it read-locked through its send.
+	share sync.RWMutex
 
 	mu       sync.Mutex
 	sess     *session
@@ -691,13 +695,19 @@ func (s *Service) Fence(ctx context.Context, id domain.MemberID) error {
 	m := s.member(id)
 	m.op.Lock()
 	defer m.op.Unlock()
-	m.removing = true
-	m.clearView()
+	m.fence(true)
 	if err := s.stop(ctx, m); err != nil {
-		m.removing = false
+		m.fence(false)
 		return err
 	}
 	return nil
+}
+
+func (m *member) fence(on bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removing = on
+	m.view, m.viewAt = nil, time.Time{}
 }
 
 // Unfence lets a member whose removal failed use the assistant again.
@@ -705,7 +715,7 @@ func (s *Service) Unfence(id domain.MemberID) {
 	m := s.member(id)
 	m.op.Lock()
 	defer m.op.Unlock()
-	m.removing = false
+	m.fence(false)
 }
 
 func (s *Service) Remove(ctx context.Context, id domain.MemberID) error {
@@ -746,10 +756,6 @@ type attempt struct {
 // returns its result.
 func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key string, view *protocol.AssistantViewContext) error {
 	m := s.member(id)
-	view, err := s.keepView(ctx, m, view)
-	if err != nil {
-		return err
-	}
 	a, first := m.begin(key)
 	if !first {
 		select {
@@ -759,7 +765,13 @@ func (s *Service) Prompt(ctx context.Context, id domain.MemberID, text, key stri
 			return ctx.Err()
 		}
 	}
-	dispatched, err := s.send(ctx, m, text, key, view)
+	m.share.RLock()
+	view, err := s.keepView(ctx, m, view, false)
+	dispatched := false
+	if err == nil {
+		dispatched, err = s.send(ctx, m, text, key, view)
+	}
+	m.share.RUnlock()
 	if err != nil && !dispatched {
 		m.finish(key, a, err)
 		return err

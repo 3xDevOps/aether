@@ -555,14 +555,18 @@ success or a new conversation clears them. `assistantOpen` on desktop persists; 
 [assistant.md](assistant.md#what-it-sees)): the route's ids, the run view
 `RunFrame` reports through `setShownRunView`, the active file only on the
 Files page or its own run's Files view, and `viewHistory`, the last 8 pages,
-never persisted. The prompt's context is kept in the retry attempt with its
+recorded only while sharing is on and never persisted. The prompt's context is kept in the retry attempt with its
 key. While the panel is open and sharing is on, `syncViewContext` sends
 `assistant.view` at most once a second when the context changed, one call at a
-time, retrying a failed one. `ContextChip` (`components/assistant/context-chip.tsx`)
+time, retrying a failed one with backoff and sending it again after each
+prompt. `ContextChip` (`components/assistant/context-chip.tsx`)
 above the composer shows it and turns sharing off with
 `assistant.settings {share_view}`; `assistantShareChoice` holds the choice
-until the server saves it, retrying every 3 seconds, and `status.share_view`
-carries it to other tabs and devices.
+until the server saves it, sending one save at a time so an older choice
+never lands after a newer one, retrying with backoff from 3 seconds up to a
+minute, stopping on `-32004` or `-32602`, or once another member signs in
+(`resetAssistant` drops the choice). `status.share_view` carries it to other
+tabs and devices.
 
 When the assistant launches or messages a run for the member, the server
 follows it and publishes `assistant.notice` on `/ws/events` as the run

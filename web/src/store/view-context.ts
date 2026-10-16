@@ -1,4 +1,4 @@
-import type { Api } from '@/lib/api'
+import { ApiError, type Api } from '@/lib/api'
 import type { ViewContext, ViewEntry } from '@/lib/assistant-types'
 import { isRunView, type RunView } from '@/routes/run/views'
 import type { RootState, RootStore } from '@/store'
@@ -10,6 +10,16 @@ export const maxViewPathBytes = 512
 /** Navigation sends at most one view context per second. */
 export const viewSyncDelay = 1000
 export const shareRetryDelay = 3000
+const maxRetryDelay = 60_000
+
+/** The server refused the call for good (unavailable, invalid params): retrying cannot help. */
+function permanent(err: unknown): boolean {
+  return err instanceof ApiError && (err.code === -32004 || err.code === -32602)
+}
+
+function backoff(base: number, failures: number): number {
+  return Math.min(base * 2 ** failures, maxRetryDelay)
+}
 
 export interface ViewContextSlice {
   /** The last `maxRecent` pages visited, newest first, one per entity. Never persisted. */
@@ -111,14 +121,16 @@ export function viewContextKey(context: ViewContext): string {
   return JSON.stringify({ ...context, captured_at: undefined, recent: context.recent?.map((entry) => ({ ...entry, at: undefined })) })
 }
 
-/** While it runs, sends the server each changed view context, one at a time and debounced, retrying a failed one. */
+/** While it runs, sends the server each changed view context, one at a time and debounced, retrying a failed one with backoff. */
 export function syncViewContext(store: RootStore, client: Pick<Api, 'assistantView'>): () => void {
   let sent = ''
+  let refused = ''
+  let failures = 0
   let sending = false
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | undefined
-  const schedule = () => {
-    if (!stopped && timer === undefined) timer = setTimeout(flush, viewSyncDelay)
+  const schedule = (delay = viewSyncDelay) => {
+    if (!stopped && timer === undefined) timer = setTimeout(flush, delay)
   }
   const flush = () => {
     timer = undefined
@@ -126,17 +138,27 @@ export function syncViewContext(store: RootStore, client: Pick<Api, 'assistantVi
     if (sending || !assistantShareView(s)) return
     const context = buildViewContext(s)
     const key = viewContextKey(context)
-    if (key === sent) return
+    if (key === sent || key === refused) return
     sending = true
     client.assistantView(context).then(() => {
       sent = key
-    }, () => {}).finally(() => {
+      failures = 0
+    }, (err: unknown) => {
+      if (permanent(err)) refused = key
+      else failures++
+    }).finally(() => {
       sending = false
-      schedule()
+      clearTimeout(timer)
+      timer = undefined
+      schedule(backoff(viewSyncDelay, failures))
     })
   }
   schedule()
-  const stop = store.subscribe(schedule)
+  const stop = store.subscribe((s, prior) => {
+    // A prompt may leave its own, older context on the server; send the current one again.
+    if (prior.assistantSending && !s.assistantSending) sent = ''
+    schedule()
+  })
   return () => {
     stopped = true
     stop()
@@ -144,20 +166,37 @@ export function syncViewContext(store: RootStore, client: Pick<Api, 'assistantVi
   }
 }
 
-/** Saves the member's sharing choice on the server, retrying until it lands or they choose again. */
+const shareSaves = new WeakMap<RootStore, { last: Promise<unknown>; retry?: ReturnType<typeof setTimeout> }>()
+
+/**
+ * Saves the member's sharing choice on the server, retrying with backoff
+ * until it lands, the server refuses it for good, or the member chooses
+ * again. Saves go one at a time, so an older choice cannot land after a
+ * newer one, and one is sent only while it is still the signed-in member's
+ * current choice.
+ */
 export function saveShareView(store: RootStore, client: Pick<Api, 'assistantSettings'>, on: boolean, onError: (err: unknown) => void) {
+  const saves = shareSaves.get(store) ?? { last: Promise.resolve() }
+  shareSaves.set(store, saves)
+  clearTimeout(saves.retry)
+  const identity = store.getState().identityKey
+  const current = () => {
+    const s = store.getState()
+    return s.identityKey === identity && s.assistantShareChoice === on
+  }
   store.getState().setAssistantShareChoice(on)
-  const attempt = () => {
-    client.assistantSettings({ share_view: on }).then((settings) => {
+  const attempt = (failures: number) => {
+    saves.last = saves.last.then(() => current() ? client.assistantSettings({ share_view: on }).then((settings) => {
+      if (!current()) return
       const s = store.getState()
-      if (s.assistantShareChoice !== on) return
       s.setAssistantShareChoice(null)
       if (s.assistantStatus) s.setAssistantStatus({ ...s.assistantStatus, ...settings })
     }, (err: unknown) => {
-      if (store.getState().assistantShareChoice !== on) return
+      if (!current()) return
       onError(err)
-      setTimeout(attempt, shareRetryDelay)
-    })
+      if (permanent(err)) store.getState().setAssistantShareChoice(null)
+      else saves.retry = setTimeout(() => attempt(failures + 1), backoff(shareRetryDelay, failures))
+    }) : undefined)
   }
-  attempt()
+  attempt(0)
 }

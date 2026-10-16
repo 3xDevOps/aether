@@ -71,6 +71,5 @@ export interface ViewContext {
   captured_at: string
   route: ViewEntry
   open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
-  layout?: Record<string, boolean>
   recent?: ViewEntry[]
 }

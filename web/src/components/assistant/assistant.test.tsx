@@ -516,7 +516,7 @@ describe('the view context', () => {
       const chip = await within(aside).findByRole('button', { name: 'Sharing: run run-8x2 · Changes' })
       expect(chip.getAttribute('aria-describedby')).toBeTruthy()
       await user.click(chip)
-      expect(within(aside).getByLabelText('Sent with this message').textContent).toContain('"run_id": "run-8x2"')
+      expect(within(aside).getByRole('region', { name: 'Sent with this message' }).textContent).toContain('"run_id": "run-8x2"')
       await user.click(within(aside).getByRole('checkbox', { name: 'Share the page I am on with the assistant' }))
       expect(api.assistantSettings).toHaveBeenCalledWith({ share_view: false })
       expect(within(aside).getByRole('button', { name: 'Not sharing this page' })).toBeDefined()

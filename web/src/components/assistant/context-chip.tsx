@@ -25,6 +25,7 @@ export function ContextChip() {
   const [error, setError] = useState<string>()
   const panelID = useId()
   const hintID = useId()
+  const sentID = useId()
   const context = retained ? retained.viewContext : buildViewContext(useStore.getState())
 
   const setShare = (on: boolean) => {
@@ -38,7 +39,7 @@ export function ContextChip() {
         variant="ghost"
         size="sm"
         aria-expanded={open}
-        aria-controls={panelID}
+        aria-controls={open ? panelID : undefined}
         aria-describedby={hintID}
         onClick={() => setOpen(!open)}
         className={cn('max-w-full self-start px-1 font-normal', open && '[&>svg]:rotate-90')}
@@ -46,8 +47,8 @@ export function ContextChip() {
         <ChevronRight className="size-3" />
         <span className="truncate">{share && context ? `Sharing: ${summary(context)}` : 'Not sharing this page'}</span>
       </Button>
-      <span id={hintID} className="sr-only">What the assistant is told about the page you are on with each message</span>
-      {error && saving && <p role="alert" className="text-ui-sm break-words text-state-failed">{error}; retrying</p>}
+      <span id={hintID} className="sr-only">What the assistant is told about the page you are on, with each message and, while this panel is open, whenever you move to another page</span>
+      {error && <p role="alert" className="text-ui-sm break-words text-state-failed">{saving ? `${error}; retrying` : error}</p>}
       {open && (
         <div id={panelID} className="flex flex-col gap-2 rounded-control border border-seam p-2 text-ui-sm">
           <label className="flex items-center gap-2">
@@ -55,9 +56,12 @@ export function ContextChip() {
             Share the page I am on with the assistant
           </label>
           {share && context ? (
-            <pre aria-label="Sent with this message" className="max-h-48 overflow-auto font-mono text-ui-sm whitespace-pre-wrap break-all text-muted">
-              {JSON.stringify(context, null, 2)}
-            </pre>
+            <section aria-labelledby={sentID} className="flex flex-col gap-1">
+              <h3 id={sentID} className="text-ui-sm font-medium">Sent with this message</h3>
+              <pre className="max-h-48 overflow-auto font-mono text-ui-sm whitespace-pre-wrap break-all text-muted">
+                {JSON.stringify(context, null, 2)}
+              </pre>
+            </section>
           ) : (
             <p className="text-muted">Nothing is sent, and the server forgets what it had, on every device.</p>
           )}

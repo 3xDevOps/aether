@@ -39,7 +39,7 @@ func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantView
 	if v == nil || v.Version != viewContextVersion {
 		return nil, nil
 	}
-	out := &protocol.AssistantViewContext{Version: v.Version, CapturedAt: v.CapturedAt.UTC(), Route: cleanEntry(v.Route)}
+	out := &protocol.AssistantViewContext{Version: v.Version, CapturedAt: cleanTime(v.CapturedAt), Route: cleanEntry(v.Route)}
 	out.Route.At = time.Time{}
 	if f := v.OpenFile; f != nil && (f.Kind == "workspace" || f.Kind == "home") && cleanPath(f.Path) != "" {
 		out.OpenFile = &protocol.AssistantViewFile{Kind: f.Kind, Path: cleanPath(f.Path), RunID: cleanID(f.RunID), WorkspaceID: cleanID(f.WorkspaceID)}
@@ -70,8 +70,16 @@ func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantView
 func cleanEntry(e protocol.AssistantViewEntry) protocol.AssistantViewEntry {
 	return protocol.AssistantViewEntry{
 		Name: cleanWord(e.Name), WorkspaceID: cleanID(e.WorkspaceID), RunID: cleanID(e.RunID), MissionID: cleanID(e.MissionID),
-		Subagent: cleanID(e.Subagent), View: cleanWord(e.View), At: e.At.UTC(),
+		Subagent: cleanID(e.Subagent), View: cleanWord(e.View), At: cleanTime(e.At),
 	}
+}
+
+// cleanTime zeroes a time JSON cannot encode.
+func cleanTime(t time.Time) time.Time {
+	if t = t.UTC(); t.Year() < 1 || t.Year() > 9999 {
+		return time.Time{}
+	}
+	return t
 }
 
 func cleanID(s string) string {
@@ -121,56 +129,57 @@ func promptBlocks(text string, v *protocol.AssistantViewContext, embedded bool) 
 	return append(blocks, block), nil
 }
 
-// keepView makes v the member's latest view context, ordered by when it
-// arrived, and returns it; it returns nil and keeps nothing while the member
-// has sharing off.
-func (s *Service) keepView(ctx context.Context, m *member, v *protocol.AssistantViewContext) (*protocol.AssistantViewContext, error) {
+// keepView returns v while the member shares their view and is not fenced,
+// else nil; the caller holds m.share. With replace, v becomes the latest view
+// context, ordered by when it arrived. A prompt's view is kept only when none
+// is held: a retried prompt carries the context it was first sent with,
+// which a newer assistant.view must win over.
+func (s *Service) keepView(ctx context.Context, m *member, v *protocol.AssistantViewContext, replace bool) (*protocol.AssistantViewContext, error) {
 	if v == nil {
 		return nil, nil
 	}
-	m.settings.Lock()
-	defer m.settings.Unlock()
 	on, err := s.cfg.Store.AssistantShareView(ctx, m.id)
 	if err != nil {
 		return nil, fmt.Errorf("assistant: read the view sharing setting: %w", err)
 	}
-	if !on {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !on || m.removing {
 		return nil, nil
 	}
-	m.mu.Lock()
-	m.view, m.viewAt = v, time.Now()
-	m.mu.Unlock()
+	if replace || m.view == nil {
+		m.view, m.viewAt = v, time.Now()
+	}
 	return v, nil
 }
 
 // SetView replaces the member's latest view context. It is kept in memory
 // only.
 func (s *Service) SetView(ctx context.Context, id domain.MemberID, v *protocol.AssistantViewContext) error {
-	_, err := s.keepView(ctx, s.member(id), v)
+	m := s.member(id)
+	m.share.RLock()
+	defer m.share.RUnlock()
+	_, err := s.keepView(ctx, m, v, true)
 	return err
 }
 
 // SetShareView stores whether the member shares their view context; off
-// forgets the one held, and the setting orders with keepView so an update
-// already on its way cannot bring it back.
+// forgets the one held. It holds m.share, so neither an update already on
+// its way nor a prompt being sent can carry the view past it.
 func (s *Service) SetShareView(ctx context.Context, id domain.MemberID, on bool) error {
 	m := s.member(id)
 	defer m.notify()
-	m.settings.Lock()
-	defer m.settings.Unlock()
+	m.share.Lock()
+	defer m.share.Unlock()
 	if err := s.cfg.Store.SetAssistantShareView(ctx, id, on); err != nil {
 		return fmt.Errorf("assistant: %w", err)
 	}
 	if !on {
-		m.clearView()
+		m.mu.Lock()
+		m.view, m.viewAt = nil, time.Time{}
+		m.mu.Unlock()
 	}
 	return nil
-}
-
-func (m *member) clearView() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.view, m.viewAt = nil, time.Time{}
 }
 
 // View is the member's latest view context, its age since it arrived, and

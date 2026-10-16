@@ -117,8 +117,8 @@ ids. It holds:
 - the last 8 pages you visited this session, newest first, one per run or
   page
 
-It never holds titles, file contents, drafts, terminal text or secrets, and
-the page history is gone on reload. The server cuts it to 4 KiB, dropping the
+It never holds titles, file contents, drafts, terminal text or secrets. The
+page history is recorded only while sharing is on and is gone on reload. The server cuts it to 4 KiB, dropping the
 oldest pages and then the file path. The agent gets it as an
 `aether://view-context` resource, or for an agent without embedded-resource
 support as text between `<aether-view-context>` tags; either way only your
@@ -126,7 +126,8 @@ own text is saved in the transcript. While the panel is open, navigating also
 sends it, at most once a second, so the assistant reads the current page
 mid-turn with `aether_view_context`. The server keeps only the latest one per
 member, in memory; with several tabs or devices the one it received last
-wins. The ids are hints: the assistant looks everything up with the tools
+wins. A retried message still carries the context it was first sent with,
+but does not replace a newer one the server holds. The ids are hints: the assistant looks everything up with the tools
 above, as you.
 
 The line above the message box, **Sharing: run run-8x2 · Changes**, expands

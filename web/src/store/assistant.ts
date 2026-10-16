@@ -86,6 +86,6 @@ export const createAssistantSlice: SliceCreator<AssistantSlice> = (set, get) => 
     }),
   resetAssistant: () => {
     get().restartAssistantConversation()
-    set({ assistantStatus: null, assistantStatusError: null, assistantDraft: '', assistantNotices: 0 })
+    set({ assistantStatus: null, assistantStatusError: null, assistantDraft: '', assistantNotices: 0, assistantShareChoice: null })
   },
 })
