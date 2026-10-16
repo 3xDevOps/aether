@@ -664,11 +664,16 @@ jobs:
         with:
           name: binaries-android
           path: dist
+      # Runs without the signing key, so the signer never links the store.
+      - name: Read the store schema the release migrates to
+        id: store
+        run: echo "schema=$(go run ./internal/store/cmd/schema-version)" >> "$GITHUB_OUTPUT"
       - name: Require all twelve release assets, write checksums and sign the manifest
         working-directory: dist
         env:
           AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
           COMMIT: ${{ needs.release-policy.outputs.sha }}
+          STORE_SCHEMA: ${{ steps.store.outputs.schema }}
         run: |
           assets=(
             aether-server-linux-amd64 aether-server-linux-arm64
@@ -688,7 +693,7 @@ jobs:
           sha256sum "${assets[@]}" > checksums.txt
           sha256sum --check --strict checksums.txt
           go run ../internal/selfupdate/cmd/release-manifest \
-            -version "$GITHUB_REF_NAME" -commit "$COMMIT" -out . "${assets[@]}"
+            -version "$GITHUB_REF_NAME" -commit "$COMMIT" -store-schema "$STORE_SCHEMA" -out . "${assets[@]}"
           diff -u <(printf '%s\n' "${assets[@]}" checksums.txt aether-release.json aether-release.json.sig | sort) \
             <(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
       - name: Publish the GitHub release

@@ -1879,11 +1879,14 @@ release manifest ([Verified releases](#verified-releases)) with
 
 ```sh
 go run ./internal/selfupdate/cmd/release-manifest \
-  -version <tag> -commit <full-sha> -out dist dist/<asset>...
+  -version <tag> -commit <full-sha> -store-schema <n> -out dist dist/<asset>...
 ```
 
-It reads the ed25519 seed from the `AETHER_RELEASE_SIGNING_KEY` repository
-secret, records `store.SchemaVersion()` as `store_schema`, and checks its own
+An earlier step, run without the secret, prints `<n>` with
+`go run ./internal/store/cmd/schema-version`, so the signing process does
+not link the store. The generator reads the ed25519 seed from the
+`AETHER_RELEASE_SIGNING_KEY` repository secret, records `<n>` as
+`store_schema`, and checks its own
 output against the keys the tag's code trusts, so a seed that does not match
 fails here. `release-policy` fails the whole release before any build when
 that secret is not set. [`scripts/publish-release.sh`](../scripts/publish-release.sh)

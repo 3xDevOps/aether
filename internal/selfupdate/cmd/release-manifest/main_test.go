@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func TestGeneratedManifestVerifiesWithTheTrustedKey(t *testing.T) {
@@ -27,7 +26,7 @@ func TestGeneratedManifestVerifiesWithTheTrustedKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(keyEnv, base64.StdEncoding.EncodeToString(seed))
-	if err := run([]string{"-version", "v1.3.0", "-commit", "abc", "-out", dir, cli}); err != nil {
+	if err := run([]string{"-version", "v1.3.0", "-commit", "abc", "-store-schema", "71", "-out", dir, cli}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,7 +47,7 @@ func TestGeneratedManifestVerifiesWithTheTrustedKey(t *testing.T) {
 	if got := m.Assets["aether-linux-amd64"]; got != want {
 		t.Fatalf("asset = %+v, want %+v", got, want)
 	}
-	if m.StoreSchema != store.SchemaVersion() || m.Commit != "abc" ||
+	if m.StoreSchema != 71 || m.Commit != "abc" ||
 		m.NotesURL != "https://github.com/3xDevOps/Aether/releases/tag/v1.3.0" {
 		t.Fatalf("manifest = %+v", m)
 	}
@@ -60,7 +59,7 @@ func TestGenerateRefusesASeedThisBuildDoesNotTrust(t *testing.T) {
 	if err := os.WriteFile(asset, []byte("cli"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := generate("v1.3.0", "abc", []string{asset}, key, time.Now())
+	_, _, err := generate("v1.3.0", "abc", 71, []string{asset}, key, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "not signed by a trusted release key") {
 		t.Fatalf("err = %v, want the untrusted key refused", err)
 	}
@@ -68,7 +67,7 @@ func TestGenerateRefusesASeedThisBuildDoesNotTrust(t *testing.T) {
 
 func TestRunRefusesAMissingKey(t *testing.T) {
 	t.Setenv(keyEnv, "")
-	err := run([]string{"-version", "v1.3.0", "-commit", "abc", "-out", t.TempDir(), "x"})
+	err := run([]string{"-version", "v1.3.0", "-commit", "abc", "-store-schema", "71", "-out", t.TempDir(), "x"})
 	if err == nil || !strings.Contains(err.Error(), keyEnv+" is not set") {
 		t.Fatalf("err = %v, want the missing key named", err)
 	}
