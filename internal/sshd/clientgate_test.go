@@ -186,10 +186,10 @@ func TestClientVersionGateStreams(t *testing.T) {
 					}
 				}
 			}()
-			if ok, err := ch.SendRequest("subsystem", true, ssh.Marshal(struct{ Name string }{name})); err != nil || !ok {
-				t.Fatalf("subsystem %s: ok=%v err=%v", name, ok, err)
+			if ok, rerr := ch.SendRequest("subsystem", true, ssh.Marshal(struct{ Name string }{name})); rerr != nil || !ok {
+				t.Fatalf("subsystem %s: ok=%v err=%v", name, ok, rerr)
 			}
-			if _, err := ch.Write([]byte(`{"run_id":"` + string(e.run.ID) + `"}` + "\n")); err != nil {
+			if _, err = ch.Write([]byte(`{"run_id":"` + string(e.run.ID) + `"}` + "\n")); err != nil {
 				t.Fatalf("write header: %v", err)
 			}
 			line, err := bufio.NewReader(ch).ReadBytes('\n')
@@ -201,7 +201,7 @@ func TestClientVersionGateStreams(t *testing.T) {
 				Code  int    `json:"code"`
 				Error string `json:"error"`
 			}
-			if err := json.Unmarshal(line, &ack); err != nil {
+			if err = json.Unmarshal(line, &ack); err != nil {
 				t.Fatalf("ack %s: %v", line, err)
 			}
 			if ack.OK || ack.Code != protocol.CodeUpgradeRequired || !strings.Contains(ack.Error, "run `aether update`") {

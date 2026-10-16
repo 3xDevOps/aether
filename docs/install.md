@@ -237,6 +237,32 @@ update brings that release's environment image with it - though not into a
 member environment that is already open
 ([environments.md](environments.md#the-standard-image)).
 
+### When the server refuses an older client
+
+Update the server first, then each client. A server refuses every client
+older than its own release, because an older client calls methods and
+expects fields that the server has since changed. The refusal is error
+`-32005` (upgrade required), and the CLI prints it and exits 1:
+
+```
+aether: rpc error -32005: this aether is v0.7.0-alpha.11 and the server runs v0.8.0; update this client first: run `aether update` (desktop: Update in the app; Android: install the latest aether-android.apk), then retry
+```
+
+Run `aether update` on that machine, or **Update now** in the dashboard's
+blocking update screen, then retry. These keep working while the server
+refuses the client, because none of them needs the server: `aether update`,
+the gateway's `update.*` verbs, `server.info`, `server.update_status`,
+and git fetch and push over SSH.
+
+The client sends its version in its SSH banner, `SSH-2.0-Aether
+<version>`. A client from before this change sends none and is treated as
+older than any release. Builds whose version is not a release (`dev`, a
+bare commit) are never refused, and they never cause a refusal. A server
+built past a tag (`v0.8.0-3-gabc123`) asks for that tag (`v0.8.0`), which
+is what `server.info` reports as `min_client_version`. A client newer than
+the server is accepted. `aether link` saves the link before it reports the
+refusal, so after `aether update` there is nothing to link again.
+
 ### Environment image migration
 
 The member environment image change is one-way. Workspaces no longer carry an

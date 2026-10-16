@@ -234,6 +234,17 @@ firewall, and a wrong guess sends the user to fix the wrong thing. Dial
 failures are classified inside the shared dial path, so the `/ws/events`
 refusal frame carries the same code and prefix as a `POST /api/v1` error.
 
+A server whose release is newer than the CLI behind `aether gui` refuses
+that CLI with `-32005` (upgrade required). The gateway passes the refusal
+through as HTTP 426, with `data` set to
+`{"client_version":"v0.7.0","server_version":"v0.8.0","min_client_version":"v0.8.0","command":"aether update"}`.
+A WebSocket gets the same code in its ack frame, then close 1008. The
+gateway never redials or retries on `-32005`, because only an update fixes
+it. `server.info` and `server.update_status` still answer, and so do the
+`update.*` verbs, which never call the server. The server gateway is never
+refused, because it runs inside the server. See
+[install.md](install.md#when-the-server-refuses-an-older-client).
+
 The server gateway performs the equivalent identity lookup on each request.
 WhoIs failures are refused before dispatch; a tagged node is denied and an
 unavailable identity service is reported as `-32004`.
@@ -450,6 +461,7 @@ Status mapping (the code is the authority; the status is a convenience):
 | local bearer token missing or expired | 401 |
 | `-32001` denied, including a tagged WhoIs node, and a foreign `Origin` header | 403 |
 | `-32004` unavailable, including an unavailable WhoIs identity lookup | 503 |
+| `-32005` upgrade required: the server's release is newer than this CLI | 426 |
 | `-32600` invalid request: body not `application/json` | 415 |
 | `-32000` not found | 404 |
 | `-32002` invalid state, `-32003` conflict | 409 |
@@ -1501,7 +1513,7 @@ authority.
 | `forward.start` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"state":"active"}`; idempotent for the same target and port |
 | `forward.stop` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"state":"stopped"}` |
 | `forward.status` | `{}` | `{"forwards":[{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"conns":1}]}` sorted by target, then port |
-| `update.check` | `{"refresh":bool}` (optional; `true` skips the cached release lookup) | `{"cli":{...},"server_version":"v1.2.9","server_behind":bool,"server_error":"...","supervised":bool,"shell_build_error":"...","cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`server_error` only when the server did not answer; `shell_build_error` only when the last in-app desktop rebuild failed; `cli_path` and `install_method` absent when the binary could not be probed) |
+| `update.check` | `{"refresh":bool}` (optional; `true` skips the cached release lookup) | `{"cli":{...},"cli_error":"...","server_version":"v1.2.9","server_behind":bool,"server_error":"...","client_update_required":bool,"min_client_version":"v1.2.9","supervised":bool,"shell_build_error":"...","cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual"}` (`cli_error` only when the release lookup failed; `server_error` only when the server did not answer; `shell_build_error` only when the last in-app desktop rebuild failed; `cli_path` and `install_method` absent when the binary could not be probed) |
 | `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
 | `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |
 | `workspace.selection` | `{}` reads; `{"workspace_id":"..."}` saves; an empty ID clears | `{"workspace_id":"..."}` |
@@ -1820,10 +1832,15 @@ the server snapshot from loading.
   a page load never costs a request to GitHub. `refresh: true` skips the
   cache and dials, and the answer it resolves replaces the cached one; the
   dashboard sets it on the read behind the Update button, which names the
-  release about to be installed. A refresh that cannot reach GitHub is that
-  caller's error - `-32004`, `check for releases: <the lookup's own
-  message>` - rather than the cached answer, and it leaves any cached
-  success in place. A failed lookup is cached for five minutes, so an
+  release about to be installed, and on every **Check for updates…**. A refresh that cannot reach GitHub reports
+  `cli_error`, `check for releases: <the lookup's own message>`, rather
+  than the cached answer, and it leaves any cached success in place. The
+  verb still answers 200, with `cli` holding only this build's own fields,
+  so the server half shows during a GitHub outage.
+  `client_update_required` is true when the server's `min_client_version`
+  is newer than this CLI, which means the server refuses it with `-32005`.
+  It is false when the server does not answer, or when either version is
+  not a release. A failed lookup is cached for five minutes, so an
   offline machine is not re-dialed every time a page loads or a window
   comes back. Lookups are numbered, so one that started earlier never
   replaces the cached answer of one that started later: two straddling a
