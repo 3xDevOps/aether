@@ -85,6 +85,8 @@ type diffWatch struct {
 	lastSnap         time.Time
 	lastHead         string
 	lastTree         string
+	subjectHead      string
+	subject          string
 	lastSnapshotWarn time.Time
 	lastPublishWarn  time.Time
 	lastTreeWarn     time.Time
@@ -135,7 +137,7 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 
 	// Left empty when the published stats were measured against another
 	// base, so a restarted watch republishes them over an unchanged tree.
-	lastBase := e.effectiveBase(ctx, run, checkout, meta.Base, meta.BaseBranch)
+	lastBase := e.effectiveBase(ctx, run, checkout, head, meta.Base, meta.BaseBranch)
 	if published := e.publishedBaseTree(ctx, run); published != "" {
 		if tree, _ := e.gitCheckout(ctx, run, checkout, "rev-parse", lastBase+"^{tree}"); tree != published {
 			lastBase = ""
@@ -796,7 +798,23 @@ func (w *diffWatch) snapshot() {
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 	defer cancel()
 
-	base := w.e.effectiveBase(ctx, w.run, w.checkout, w.base, w.baseBranch)
+	head, headErr := w.e.checkoutHead(ctx, w.run, w.checkout)
+	if headErr != nil {
+		head = ""
+		w.warnSnapshot(headErr)
+	} else if head != w.subjectHead {
+		subject, subjectErr := w.e.headSubject(ctx, w.run, head)
+		if subjectErr != nil {
+			w.warnSnapshot(subjectErr)
+		} else {
+			w.subjectHead, w.subject = head, subject
+		}
+	}
+	headSubject := ""
+	if head != "" && head == w.subjectHead {
+		headSubject = w.subject
+	}
+	base := w.e.effectiveBase(ctx, w.run, w.checkout, head, w.base, w.baseBranch)
 	files, truncated, err := w.e.diffStats(ctx, w.run, w.checkout, base)
 	if err != nil {
 		w.warnSnapshot(err)
@@ -829,7 +847,8 @@ func (w *diffWatch) snapshot() {
 		}
 		attempted = true
 		return publish(events.RunDiffPayload{
-			Files: files, Truncated: truncated, Base: base, Tree: tree, ParentTree: w.lastTree, HistoryGap: w.historyGap,
+			Files: files, Truncated: truncated, Base: base, Head: head, HeadSubject: headSubject,
+			Tree: tree, ParentTree: w.lastTree, HistoryGap: w.historyGap,
 		})
 	})
 	// Acknowledgement cleanup can fail after both the event and ref pair
@@ -846,7 +865,7 @@ func (w *diffWatch) snapshot() {
 		w.lastEvent = time.Now()
 		if !attempted {
 			payload := events.RunDiffPayload{
-				Files: files, Truncated: truncated, Base: base, HistoryGap: true,
+				Files: files, Truncated: truncated, Base: base, Head: head, HeadSubject: headSubject, HistoryGap: true,
 				SnapshotError: "Snapshot history unavailable; current change statistics remain live.",
 			}
 			if errors.Is(treeErr, ErrSnapshotStorageLimit) {

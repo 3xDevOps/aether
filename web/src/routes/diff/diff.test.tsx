@@ -3,10 +3,11 @@ import { api } from '@/lib/api'
 import { ConflictChips } from '@/routes/diff/conflict-chips'
 import { parsePatch } from '@/routes/diff/parse'
 import { ChangesView } from '@/routes/diff'
-import { patchReview } from '@/routes/diff/review'
+import { patchReview, review } from '@/routes/diff/review'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useStore } from '@/store'
-import { initialDiff, intervalKey, type DiffSnapshot, type RunDiffState } from '@/store/diff'
+import { clockTime } from '@/lib/format'
+import { initialDiff, type Checkpoint, type DiffSnapshot, type RunDiffState } from '@/store/diff'
 import { toRecord } from '@/store/runs'
 import type { RunPatch } from '@/lib/types'
 import { alice, bob, roomMessage, run, serverInfo, vera, workspace } from '@/test/fixtures'
@@ -65,7 +66,7 @@ function added(path: string, lines: number): string {
   ].join('\n')
 }
 
-const active = run({ id: 'run_1' })
+const active = run({ id: 'run_1', base_branch: 'main', base_commit: 'abcdef1234567890' })
 const peerRun = run({ id: 'run_2', member_id: bob.id, task: 'the other run' })
 
 function seed(diff?: Partial<RunDiffState>) {
@@ -84,9 +85,8 @@ function seed(diff?: Partial<RunDiffState>) {
 
 const ready = { status: 'ready', base: 'abcdef1234567890', patch, revision: 0, fetched: 0 } as const
 
-/** `snapshots` is newest first, the order `noteDiffSnapshot` builds. */
-function snapshot(time: string, parentTree: string, tree: string): DiffSnapshot {
-  return { time, files: [{ path: 'notes.md', additions: 1, deletions: 1 }], tree, parentTree }
+function checkpoint(time: string, tree: string | undefined, over: Partial<Checkpoint> = {}): Checkpoint {
+  return { time, tree, files: 1, additions: 1, deletions: 1, ...over }
 }
 
 /** The tab holds the run's control lease unless a test says otherwise. */
@@ -108,13 +108,9 @@ function openMenu(name: RegExp | string) {
   fireEvent.pointerDown(screen.getByRole('button', { name }), { button: 0, ctrlKey: false })
 }
 
-function chooseInterval(name: RegExp) {
-  openMenu(/Current diff|What changed/)
-  fireEvent.click(screen.getByRole('menuitemradio', { name }))
-}
-
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(api.workspaceTimeline).mockResolvedValue({ events: [], next_seq: 0, more: false })
   patchReview(active.id, { comments: [], sending: undefined, sent: undefined })
 })
 
@@ -249,7 +245,17 @@ test('recorded changes remain readable without checkout-only publishing', () => 
   expect(screen.getByRole('button', { name: 'Publish…' })).toBeTruthy()
 })
 
-test('a diff snapshot refetches the patch and joins the interval menu', async () => {
+const hour = (h: number) => `2026-08-14T${String(h).padStart(2, '0')}:00:00Z`
+
+/** The Compare menu's row for a checkpoint taken at `time`. */
+const at = (time: string) => new RegExp(`^${clockTime(time).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)
+
+function chooseCompare(name: RegExp | string) {
+  openMenu(/All changes|Since/)
+  fireEvent.click(screen.getByRole('menuitemradio', { name }))
+}
+
+test('a diff snapshot refetches the patch and joins the Compare menu', async () => {
   seed(ready)
   renderDiff()
   expect(api.runPatch).not.toHaveBeenCalled()
@@ -260,157 +266,237 @@ test('a diff snapshot refetches the patch and joins the interval menu', async ()
       time: new Date().toISOString(),
       files: [{ path: 'notes.md', additions: 1, deletions: 0 }],
       tree: 'tree1',
-      parentTree: 'tree0',
     }),
   )
 
   await waitFor(() => expect(api.runPatch).toHaveBeenCalledTimes(1))
-  openMenu('Current diff')
-  expect(screen.getByRole('menuitemradio', { name: /What changed/ }).textContent).toContain('1 file')
-  expect(screen.getByRole('menuitemradio', { name: /Current diff/ }).textContent).toContain('Against abcdef12')
+  expect(api.runPatch).toHaveBeenCalledWith(active.id)
+  openMenu('All changes')
+  expect(screen.getByRole('menuitemradio', { name: /^All changes/ }).textContent).toContain('Against main @ abcdef1')
+  expect(screen.getByRole('menuitemradio', { name: /ago|now/ }).textContent).toContain('1 file')
+  expect(screen.queryByRole('menuitemradio', { name: /Since the run started/ })).toBeNull()
 })
 
-test('selecting an interval fetches that change alone; Current diff, picked or linked, goes back without refetching', async () => {
-  seed({ ...ready, snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')] })
-  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree1', patch: newFile, truncated: false })
+test('checkpoints load from history when the view opens, newest first, and older ones on request', async () => {
+  seed(ready)
+  useStore.setState({ connection: 'live' })
+  const event = (seq: number, time: string, head: string, subject: string, tree: string) => ({
+    seq,
+    time,
+    type: 'run.diff',
+    payload: { files: [{ path: 'notes.md', additions: 2, deletions: 1 }], tree, head, head_subject: subject },
+  })
+  vi.mocked(api.workspaceTimeline).mockImplementation(async (query) =>
+    query.before_seq
+      ? { events: [event(1, hour(9), 'headA', 'first', 'tree0')] as never, next_seq: 9, more: false }
+      : {
+          events: [event(2, hour(10), 'headA', 'first', 'tree1'), event(3, hour(11), 'headB', 'fix the parser', 'tree2')] as never,
+          next_seq: 9,
+          more: true,
+          older_seq: 2,
+        },
+  )
   renderDiff()
 
-  chooseInterval(/What changed/)
+  await waitFor(() => expect(useStore.getState().diffs[active.id].checkpoints).toHaveLength(2))
+  expect(api.workspaceTimeline).toHaveBeenCalledWith({ workspace_id: workspace.id, run_id: active.id, types: ['run.diff'], newest: true, limit: 50 })
+  openMenu('All changes')
+  const rows = screen.getAllByRole('menuitemradio').slice(1)
+  expect(rows.map((row) => row.textContent)).toEqual([
+    expect.stringContaining('fix the parser'),
+    expect.stringMatching(/1 file · \+2\s*−1/),
+  ])
+  expect(rows[0].textContent).toContain(clockTime(hour(11)))
 
-  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
-  expect(api.runPatch).toHaveBeenCalledWith(active.id, { from: 'tree0', to: 'tree1' })
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Show older checkpoints' }))
+  await waitFor(() => expect(screen.getAllByRole('menuitemradio')).toHaveLength(4))
+  expect(api.workspaceTimeline).toHaveBeenLastCalledWith({ workspace_id: workspace.id, run_id: active.id, types: ['run.diff'], newest: true, limit: 50, before_seq: 2 })
+  expect(screen.queryByRole('menuitem', { name: 'Show older checkpoints' })).toBeNull()
+  expect(useStore.getState().diffs[active.id].checkpoints[0]).not.toHaveProperty('files', expect.any(Array))
+})
+
+test('a failed history read shows the server message and Retry reads again', async () => {
+  seed(ready)
+  useStore.setState({ connection: 'live' })
+  vi.mocked(api.workspaceTimeline).mockRejectedValueOnce(new Error('timeline unavailable'))
+  renderDiff()
+
+  await waitFor(() => expect(useStore.getState().diffs[active.id].historyError).toBe('timeline unavailable'))
+  openMenu('All changes')
+  expect(screen.getByText('Checkpoints could not be loaded: timeline unavailable')).toBeTruthy()
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Retry' }))
+  await waitFor(() => expect(api.workspaceTimeline).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(useStore.getState().diffs[active.id].history).toEqual({ more: false, before: undefined }))
+})
+
+const afterCheckpoint = { ...ready, checkpoints: [checkpoint(hour(10), 'tree1')], history: { more: false } }
+
+test('choosing a checkpoint shows what changed since it, refetches on new snapshots, and never shows another comparison meanwhile', async () => {
+  seed(afterCheckpoint)
+  let land: (p: RunPatch) => void = () => {}
+  vi.mocked(api.runPatch).mockReturnValueOnce(new Promise<RunPatch>((resolve) => (land = resolve)))
+  renderDiff()
+
+  chooseCompare(at(hour(10)))
+  expect(await screen.findByText('Loading the diff…')).toBeTruthy()
   expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
-  expect(screen.getByRole('button', { name: /What changed/ })).toBeTruthy()
+  expect(screen.getByRole('button', { name: `Since ${clockTime(hour(10))}` })).toBeTruthy()
+
+  await act(async () => land({ run_id: active.id, base: 'tree1', patch: newFile, truncated: false }))
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
+  expect(api.runPatch).toHaveBeenCalledWith(active.id, { from: 'tree1' })
   expect(useStore.getState().diffs[active.id].base).toBe('abcdef1234567890')
 
-  chooseInterval(/Current diff/)
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree1', patch: newFile + patch, truncated: false })
+  act(() => useStore.getState().noteDiffSnapshot(active.id, { time: hour(11), files: [], tree: 'tree2' }))
   expect(await screen.findByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
-  expect(api.runPatch).toHaveBeenCalledTimes(1)
+  expect(api.runPatch).toHaveBeenLastCalledWith(active.id, { from: 'tree1' })
 
-  chooseInterval(/What changed/)
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'abcdef12', patch, truncated: false })
+  chooseCompare(/^All changes/)
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'newer.txt' })).toBeNull())
+  expect(screen.getByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
+  expect(api.runPatch).toHaveBeenLastCalledWith(active.id)
+})
+
+test('a link to the current diff goes back to All changes', async () => {
+  seed(afterCheckpoint)
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree1', patch: newFile, truncated: false })
+  renderDiff()
+  chooseCompare(at(hour(10)))
   expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
+
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'abcdef12', patch, truncated: false })
   act(() => useStore.getState().navigate('run', { runId: active.id, view: 'changes', diff: 'current' }))
   expect(await screen.findByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'All changes' })).toBeTruthy()
 })
 
-test('a second snapshot of the same file shows only the second change', async () => {
-  const edit = (from: string, to: string) =>
-    ['diff --git a/notes.md b/notes.md', '--- a/notes.md', '+++ b/notes.md', '@@ -1 +1 @@', `-${from}`, `+${to}`, ''].join('\n')
-  seed({
-    ...ready,
-    snapshots: [snapshot('2026-08-14T10:04:00Z', 'tree1', 'tree2'), snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')],
-  })
-  vi.mocked(api.runPatch).mockImplementation(async (_runID, range) => ({
-    run_id: active.id,
-    base: range?.from ?? 'abcdef12',
-    patch: range?.to === 'tree2' ? edit('first edit', 'second edit') : edit('hello', 'first edit'),
-    truncated: false,
-  }))
+test('Since the run started appears only once the base has moved past the fork point, and asks for the fork tree', async () => {
+  seed({ ...ready, forkTree: 'forktree' })
+  useStore.setState({ runs: { [active.id]: toRecord({ ...active, base_commit: 'abcdef1234567890' }) } })
+  const view = renderDiff()
+  openMenu('All changes')
+  expect(screen.queryByRole('menuitemradio', { name: /Since the run started/ })).toBeNull()
+  view.unmount()
+
+  // A recorded patch names its base by tree; the fork tree means no upstream merge.
+  seed({ ...ready, base: 'forktree', forkTree: 'forktree', recorded: true })
+  useStore.setState({ runs: { [active.id]: toRecord({ ...active, base_commit: 'abcdef1234567890' }) } })
+  const recorded = renderDiff()
+  openMenu('All changes')
+  expect(screen.queryByRole('menuitemradio', { name: /Since the run started/ })).toBeNull()
+  recorded.unmount()
+
+  seed({ ...ready, forkTree: 'forktree' })
+  useStore.setState({ runs: { [active.id]: toRecord({ ...active, base_commit: '1111111222222233' }) } })
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'forktree', patch: newFile, truncated: false })
   renderDiff()
+  openMenu('All changes')
+  const row = screen.getByRole('menuitemradio', { name: /Since the run started/ })
+  expect(row.textContent).toContain('Against 1111111')
+  expect(row.textContent).toContain('upstream work merged since')
+  fireEvent.click(row)
 
-  openMenu('Current diff')
-  fireEvent.click(screen.getAllByRole('menuitemradio', { name: /What changed/ })[0])
-  expect(await screen.findByText('+second edit')).toBeTruthy()
-  expect(screen.queryByText('+first edit')).toBeNull()
-
-  openMenu(/What changed/)
-  fireEvent.click(screen.getAllByRole('menuitemradio', { name: /What changed/ })[1])
-  expect(await screen.findByText('+first edit')).toBeTruthy()
-  expect(screen.queryByText('+second edit')).toBeNull()
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
+  expect(api.runPatch).toHaveBeenCalledWith(active.id, { from: 'forktree' })
+  expect(screen.getByRole('button', { name: 'Since the run started' })).toBeTruthy()
 })
 
-test('an interval that fails shows the server message and Refresh retries it', async () => {
-  seed({ ...ready, snapshots: [snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')] })
+test('a comparison that fails shows the server message, keeps the other patch off screen, and Refresh retries it', async () => {
+  seed(afterCheckpoint)
   vi.mocked(api.runPatch).mockRejectedValue(new Error("run.patch: that snapshot's tree is no longer on disk"))
   renderDiff()
 
-  chooseInterval(/What changed/)
-  expect(await screen.findByText("run.patch: that snapshot's tree is no longer on disk")).toBeTruthy()
+  chooseCompare(at(hour(10)))
+  expect((await screen.findByRole('alert')).textContent).toContain("run.patch: that snapshot's tree is no longer on disk")
+  expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
+  expect(api.runPatch).toHaveBeenCalledTimes(1)
 
-  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree0', patch: newFile, truncated: false })
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree1', patch: newFile, truncated: false })
   fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
   expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
+
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'abcdef12', patch, truncated: false })
+  chooseCompare(/^All changes/)
+  expect(await screen.findByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
 })
 
-test('keeps cumulative changes usable across snapshot failures and marks the recovered interval gap', async () => {
+test('a failed refresh of a checkpoint comparison keeps its patch with the server error', async () => {
+  seed(afterCheckpoint)
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree1', patch: newFile, truncated: false })
+  renderDiff()
+  chooseCompare(at(hour(10)))
+  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
+
+  vi.mocked(api.runPatch).mockRejectedValue(new Error('patch store unavailable'))
+  act(() => useStore.getState().noteDiffSnapshot(active.id, { time: hour(11), files: [], tree: 'tree2' }))
+
+  expect((await screen.findByRole('alert')).textContent).toContain('patch store unavailable')
+  expect(screen.getByRole('region', { name: 'newer.txt' })).toBeTruthy()
+})
+
+test('a large checkpoint patch waits for Refresh like a large cumulative one', async () => {
+  seed(afterCheckpoint)
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree1', patch: single('min.js', 1_100_000), truncated: false })
+  renderDiff()
+  chooseCompare(at(hour(10)))
+  expect(await screen.findByRole('region', { name: 'min.js' })).toBeTruthy()
+
+  act(() => useStore.getState().noteDiffSnapshot(active.id, { time: hour(11), files: [], tree: 'tree2' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'New changes · Refresh' }))
+  await waitFor(() => expect(api.runPatch).toHaveBeenCalledTimes(2))
+  expect(api.runPatch).toHaveBeenLastCalledWith(active.id, { from: 'tree1' })
+})
+
+test('checkpoints without a tree cannot be compared against; a gap before a tree does not block it', () => {
+  seed({
+    ...ready,
+    history: { more: false },
+    checkpoints: [
+      checkpoint(hour(13), undefined),
+      checkpoint(hour(12), 'tree3', { historyGap: true }),
+      checkpoint(hour(11), undefined, { historyGap: true, snapshotError: 'Snapshot input exceeded its retained capture limit' }),
+    ],
+  })
+  renderDiff()
+
+  openMenu('All changes')
+  const rows = screen.getAllByRole('menuitemradio').slice(1)
+  expect(rows.map((row) => row.getAttribute('aria-disabled'))).toEqual(['true', null, 'true'])
+  expect(rows[0].textContent).toContain('did not record a tree')
+  expect(rows[2].textContent).toContain('Snapshot input exceeded its retained capture limit')
+  expect(api.runPatch).not.toHaveBeenCalled()
+})
+
+test('keeps all changes usable across snapshot failures', () => {
   const failed: DiffSnapshot = { time: '2026-08-14T10:03:00Z', files: [], historyGap: true, snapshotError: 'Snapshot input exceeded its retained capture limit' }
   seed({ ...ready, snapshots: [failed] })
   renderDiff()
   expect(screen.getByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
   expect(screen.getByRole('status').textContent).toContain(failed.snapshotError)
   expect(api.runPatch).not.toHaveBeenCalled()
-
-  const recovered = { ...snapshot('2026-08-14T10:04:00Z', 'tree0', 'tree2'), historyGap: true }
-  act(() => useStore.getState().setDiff(active.id, { snapshots: [recovered, failed] }))
-  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree0', patch: newFile, truncated: false })
-  openMenu('Current diff')
-  fireEvent.click(screen.getAllByRole('menuitemradio', { name: /What changed/ })[0])
-  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
-  expect(screen.getByRole('status')).toBeTruthy()
-  expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
-  chooseInterval(/Current diff/)
-  expect(screen.getByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
-  expect(api.runPatch).toHaveBeenCalledTimes(1)
 })
 
-test('does not silently show current changes when a historical interval is unavailable on the server', async () => {
-  const selected = snapshot('2026-08-14T10:03:00Z', 'tree0', 'tree1')
-  seed({ ...ready, snapshots: [selected] })
-  vi.mocked(api.runPatch).mockRejectedValue(new Error('Retained snapshot history has expired'))
+test('comments belong to the comparison they were written on', async () => {
+  seed(afterCheckpoint)
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree1', patch, truncated: false })
   renderDiff()
-  chooseInterval(/What changed/)
-  expect(await screen.findByRole('alert')).toBeTruthy()
-  expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
-  chooseInterval(/Current diff/)
-  expect(screen.getByRole('region', { name: 'cmd/main.go' })).toBeTruthy()
-  expect(api.runPatch).toHaveBeenCalledTimes(1)
-})
+  comment('cmd/main.go', '+new line', 'use the helper')
 
-test('a snapshot without a tree cannot request an interval', () => {
-  seed({ ...ready, snapshots: [{ time: '2026-08-14T10:03:00Z', files: [] }] })
-  renderDiff()
+  chooseCompare(at(hour(10)))
+  await waitFor(() => expect(api.runPatch).toHaveBeenCalledTimes(1))
+  comment('notes.md', '+hello', 'and this one')
+  expect(review(active.id).comments.map((c) => [c.body, c.scope])).toEqual([
+    ['use the helper', ''],
+    ['and this one', 'since:tree1'],
+  ])
 
-  openMenu('Current diff')
-  const row = screen.getByRole('menuitemradio', { name: /What changed/ })
-  expect(row.getAttribute('aria-disabled')).toBe('true')
-  expect(api.runPatch).not.toHaveBeenCalled()
-})
-
-test('a selected interval survives menu eviction and a bounded patch-cache reload', async () => {
-  const snapshots = Array.from({ length: 40 }, (_, i) =>
-    snapshot(`2026-08-14T10:${String(i).padStart(2, '0')}:00Z`, `tree${i}`, `tree${i + 1}`),
-  )
-  const oldest = snapshots[snapshots.length - 1]
-  seed({
-    ...ready,
-    snapshots,
-    intervals: { [intervalKey(oldest.parentTree!, oldest.tree!)]: { patch: newFile, truncated: false, status: 'ready' } },
-  })
-  vi.mocked(api.runPatch).mockImplementation(async (_run, range) => ({
-    run_id: active.id,
-    base: range?.from ?? 'abcdef12',
-    patch: range ? newFile : patch,
-    truncated: false,
-  }))
-  renderDiff()
-  openMenu('Current diff')
-  fireEvent.click(screen.getAllByRole('menuitemradio', { name: /What changed/ }).at(-1)!)
-  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
-
-  act(() => useStore.getState().noteDiffSnapshot(active.id, snapshot('2026-08-14T11:00:00Z', 'treeX', 'treeY')))
-  expect(useStore.getState().diffs[active.id].snapshots.some((s) => s.time === oldest.time)).toBe(false)
-  expect(screen.getByRole('region', { name: 'newer.txt' })).toBeTruthy()
-  expect(screen.queryByRole('alert')).toBeNull()
-
-  act(() => {
-    for (let i = 0; i < 41; i++) {
-      useStore.getState().setIntervalPatch(active.id, `other-${i}`, { patch: '', truncated: false, status: 'ready' })
-    }
-  })
-  expect(await screen.findByRole('region', { name: 'newer.txt' })).toBeTruthy()
-  expect(screen.queryByRole('region', { name: 'cmd/main.go' })).toBeNull()
-  expect(screen.queryByRole('alert')).toBeNull()
-  expect(Object.keys(useStore.getState().diffs[active.id].intervals).length).toBeLessThanOrEqual(40)
+  vi.mocked(api.runPatch).mockResolvedValue({ run_id: active.id, base: 'tree1', patch: newFile, truncated: false })
+  act(() => useStore.getState().noteDiffSnapshot(active.id, { time: hour(11), files: [], tree: 'tree2' }))
+  const outdated = within(await screen.findByRole('region', { name: 'Outdated comments' }))
+  expect(outdated.getAllByRole('article')).toHaveLength(1)
+  expect(outdated.getByRole('article').textContent).toContain('and this one')
 })
 
 // The answer is for the revision the request was issued at; anything newer
@@ -829,7 +915,7 @@ test('a comment follows its line through a refresh, and is kept as outdated when
   seed(ready)
   const view = renderDiff()
   comment('cmd/main.go', '+new line', 'use the helper')
-  const refresh = (next: string) => act(() => useStore.getState().applyPatch({ run_id: active.id, base: ready.base, patch: next, truncated: false }, 0))
+  const refresh = (next: string) => act(() => useStore.getState().applyPatch({ run_id: active.id, base: ready.base, patch: next, truncated: false }, 0, ''))
 
   refresh(patch.replace('@@ -10,3 +10,3 @@\n package main', '@@ -10,3 +10,4 @@\n package main\n+import "fmt"'))
   expect(screen.getByRole('article', { name: 'Comment on cmd/main.go:12' }).textContent).toContain('use the helper')

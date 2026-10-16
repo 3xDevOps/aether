@@ -117,6 +117,14 @@ func TestRunPatchSnapshotRange(t *testing.T) {
 		t.Errorf("base = %q, want the from tree", got.Base)
 	}
 
+	patcher.patch = gitengine.Patch{Base: "ccc", ForkTree: "fff"}
+	if err := c.Call(protocol.MethodRunPatch, protocol.RunPatchParams{RunID: string(e.run.ID), From: "ccc"}, &got); err != nil {
+		t.Fatalf("run.patch with from alone: %v", err)
+	}
+	if patcher.got.From != "ccc" || patcher.got.To != "" || got.ForkTree != "fff" {
+		t.Errorf("from-only: engine saw %+v, fork_tree = %q", patcher.got, got.ForkTree)
+	}
+
 	patcher.err = gitengine.ErrInvalidObjectID
 	pe := wireErrOf(t, c.Call(protocol.MethodRunPatch, params, nil))
 	if pe.Code != protocol.CodeInvalidParams {

@@ -8,7 +8,7 @@ import { pruneRuns } from '@/store/runs'
 export interface ReviewComment {
   id: string
   path: string
-  /** The diff it was written on: '' for the current one, else an interval key. */
+  /** The comparison it was written on: '' for All changes, else `comparisonScope`'s value. */
   scope: string
   /** The commented lines as that diff showed them: the anchor, and the quote the agent gets. */
   lines: PatchLine[]

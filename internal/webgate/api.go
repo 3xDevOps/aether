@@ -190,8 +190,8 @@ func (r *configImportReader) Read(p []byte) (int, error) {
 // handlePatch serves GET /api/v1/run/{run}/patch by calling run.patch;
 // protocol.RunPatchResult's JSON tags match what the SPA decodes, so the
 // result bytes pass through verbatim. The optional from and to query
-// parameters name diff-snapshot trees and render that interval instead of
-// the run's whole diff.
+// parameters name diff-snapshot trees: from alone renders what changed since
+// that snapshot, both render that interval, instead of the run's whole diff.
 func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
 	backend, ok := g.Authorize(w, r, false)
 	if !ok {
