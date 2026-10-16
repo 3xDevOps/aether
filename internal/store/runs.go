@@ -299,9 +299,9 @@ func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.Workspac
 // never writes archived_at, outcome_unseen or finish_unopened directly; a
 // changed status or needs-attention reason clears outcome_unseen and sets
 // finish_unopened to whether the new status is terminal, as UpdateRunStatus
-// does. That same change is the only one that writes status_changed_at, from
-// the snapshot, so a caller that moves the status sets it and a rollback
-// restores it. Activity is written only on a live status, and status_seq
+// does. That same change is the only one that writes status_changed_at,
+// review and review_changed_at, from the snapshot, so a caller that moves the
+// status sets them and a rollback restores them. Activity is written only on a live status, and status_seq
 // increases when status, reason or activity changes; r.StatusSeq is set to
 // the stored value.
 func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
@@ -328,6 +328,10 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 	statusChangedAt, err := encodeTimePtr(r.StatusChangedAt)
 	if err != nil {
 		return fmt.Errorf("store: update run: status changed at: %w", err)
+	}
+	reviewChangedAt, err := encodeTimePtr(r.ReviewChangedAt)
+	if err != nil {
+		return fmt.Errorf("store: update run: review changed at: %w", err)
 	}
 	activity := r.Activity
 	if !r.Status.Live() {
@@ -360,8 +364,8 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		     outcome_unseen = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN outcome_unseen ELSE 0 END,
 		     finish_unopened = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN finish_unopened ELSE ? END,
 		     status_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN status_changed_at ELSE ? END,
-		     review_changed_at = CASE WHEN review = '' OR (status = ? AND (status <> 'needs-attention' OR reason = ?)) THEN review_changed_at ELSE ? END,
-		     review = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN review ELSE '' END
+		     review_changed_at = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN review_changed_at ELSE ? END,
+		     review = CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN review ELSE ? END
 		 WHERE id = ? RETURNING status_seq`,
 		r.WorkspaceID, r.MemberID, r.AccountMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, startedAt, finishedAt,
@@ -370,7 +374,7 @@ func (d *DB) UpdateRun(ctx context.Context, r *domain.Run) error {
 		r.Status, r.Reason, activity, r.Status, r.Reason,
 		r.Status, r.Reason, r.Status.Terminal(),
 		r.Status, r.Reason, statusChangedAt,
-		r.Status, r.Reason, now, r.Status, r.Reason, r.ID,
+		r.Status, r.Reason, reviewChangedAt, r.Status, r.Reason, r.Review, r.ID,
 	).Scan(&r.StatusSeq)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
