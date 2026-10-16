@@ -142,6 +142,9 @@ func probeLinkedServer(ctx context.Context) linkedServer {
 		return linkedServer{}
 	}
 	defer func() { _ = conn.Close() }()
+	// Calls take no context; closing the connection is what ends one
+	// stalled past the timeout.
+	defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
 	c, err := conn.Control()
 	if err != nil {
 		return linkedServer{}

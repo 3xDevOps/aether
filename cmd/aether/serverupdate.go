@@ -319,6 +319,9 @@ func dialProbe(cfg cli.Config) serverProbe {
 			return "", status, err
 		}
 		defer func() { _ = conn.Close() }()
+		// Calls take no context; closing the connection is what ends one
+		// stalled past the timeout.
+		defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
 		c, err := conn.Control()
 		if err != nil {
 			return "", status, err
