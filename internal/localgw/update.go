@@ -165,6 +165,9 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 			Message: "release checks are off: " + selfupdate.OptOutEnv + " is set in this process's environment"}
 	case !check.CanSelfUpdate:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: selfupdate.ErrWindows.Error()}
+	case target == "" && check.Latest == "":
+		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
+			Message: "no signed release is published yet; this aether stays on " + check.Version}
 	case target == "":
 		// Nothing to install. Downloading the running version over itself
 		// would answer success for work that changed nothing, and on a
