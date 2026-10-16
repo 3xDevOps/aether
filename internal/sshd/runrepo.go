@@ -243,7 +243,13 @@ func (s *Server) runPRStatus(ctx context.Context, member domain.MemberID, raw js
 	}
 	call, err := s.runRepoAuthority(ctx, member, p.RunID, false)
 	if errors.Is(err, scheduler.ErrNoLiveEnvironment) {
-		return s.recordedPRStatus(ctx, call, p, err)
+		run, runErr := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
+		if runErr != nil {
+			return nil, rpcError(runErr)
+		}
+		if run.Status.Terminal() {
+			return s.recordedPRStatus(ctx, call, p, err)
+		}
 	}
 	if err != nil {
 		return nil, rpcError(err)
@@ -295,9 +301,9 @@ func (s *Server) recordPR(ctx context.Context, run string, pr *runrepo.PullReque
 	}
 }
 
-// recordedPRStatus answers run.pr.status for a run whose container is gone
-// from the pull requests it opened through run.pr.create. Each one last seen
-// open is looked up again with the gh login in the home the run's container
+// recordedPRStatus answers run.pr.status for a finished run whose container
+// is gone from the pull requests it opened through run.pr.create. Each one
+// last seen open is looked up again with the gh login in the home the run's container
 // mounted, the one gh used there, so a merge after the run finished is still
 // recorded. A run with none recorded keeps the error that it has no live
 // environment.

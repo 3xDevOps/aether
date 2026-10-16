@@ -106,14 +106,17 @@ with `gh` directly is not counted.
 
 The server learns a merge only when `run.pr.status` is called for the run;
 it does not poll GitHub, and `insights.get` never calls it. While the run's
-container is up, the call runs `gh` in it, as before. After the container
-is gone, `run.pr.status {"run_id":"<run-id>"}` answers from the recorded
+container is up, the call runs `gh` in it, as before. Once the run has
+finished (completed, merged, failed or abandoned) and its container is
+gone, `run.pr.status {"run_id":"<run-id>"}` answers from the recorded
 pull requests instead: each one last seen open is read again from
 `GET /repos/<owner>/<name>/pulls/<number>` with the `gh` login the
 container used (`~/.config/gh/hosts.yml` in the home it mounted, which is
 the launching member's even on a shared agent login), and the new state is
-recorded. A recorded merge is never set back to open. `target.repository` narrows it to one repository; `expected` is
-not checked. A run with nothing recorded still fails with `-32002` because
+recorded. A recorded merge is never set back to open.
+`target.repository` narrows it to one repository; `expected` is not
+checked. A finished run with nothing recorded, and a queued,
+provisioning, paused or stopping run, still fails with `-32002` because
 it has no live environment. The dashboard's publish dialog calls
 `run.pr.status` only for a live run, so a pull request merged after its run
 finished stays `open` here until a client makes that call.

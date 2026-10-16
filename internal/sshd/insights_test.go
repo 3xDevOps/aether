@@ -376,6 +376,10 @@ func TestInsightsGet(t *testing.T) {
 	if _, perr = status("top6"); perr == nil || perr.Code != protocol.CodeInvalidState {
 		t.Errorf("run.pr.status without a live environment or a recorded PR: error = %+v, want invalid state", perr)
 	}
+	paused, perr := status("top3")
+	if perr == nil || perr.Code != protocol.CodeInvalidState || perr.Message != scheduler.ErrRunPaused.Error() || !reflect.DeepEqual(gh.lookups, lookup) {
+		t.Errorf("run.pr.status of a paused run with a recorded PR = %+v, %+v, lookups %v; want the paused error without asking GitHub", paused, perr, gh.lookups)
+	}
 	merged, perr := get(alice, week)
 	if perr != nil || merged.PullRequests != (protocol.InsightsPullRequests{Opened: 3, Merged: 2}) {
 		t.Errorf("pull requests after the merge was observed = %+v, %+v", merged.PullRequests, perr)
@@ -435,7 +439,10 @@ func TestInsightsGet(t *testing.T) {
 type goneRunRepo struct{}
 
 func (goneRunRepo) Native() *runrepo.Service { return runrepo.New(nil) }
-func (goneRunRepo) Execution(context.Context, domain.Run) (runrepo.Execution, error) {
+func (goneRunRepo) Execution(_ context.Context, run domain.Run) (runrepo.Execution, error) {
+	if !run.Status.Terminal() {
+		return runrepo.Execution{}, scheduler.ErrRunPaused
+	}
 	return runrepo.Execution{}, scheduler.ErrNoLiveEnvironment
 }
 
