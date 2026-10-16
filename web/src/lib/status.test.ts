@@ -169,6 +169,10 @@ describe('run presentation', () => {
   it('shows a paused live run as Paused, grouped under Working', () => {
     const paused = toRecord(run({ status: 'needs-attention', state: 'needs-you', paused: true }))
     expect(presentRun(paused, ctx).state).toBe('paused')
+    for (const review of ['ready', 'later'] as const) {
+      expect(shown({ status: 'needs-attention', state: 'finished', review, paused: true }).state).toBe('paused')
+    }
+    expect(shown({ status: 'completed', review: 'ready', paused: true }).state).toBe('ready')
     expect(groupOf({ state: 'paused' })).toBe('working')
   })
 
