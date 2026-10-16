@@ -14,7 +14,7 @@
     <string name="setup_label">Server name</string>
     <string name="setup_hint">my-server.tailnet-name.ts.net</string>
     <string name="setup_open">Open dashboard</string>
-    <string name="setup_privacy">The app sends nothing anywhere but your server, the Aether edge that relays to it in Aether Edge mode, and github.com, which it asks for the newest release\'s tag at most once an hour. Privacy policy: https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md</string>
+    <string name="setup_privacy">The app sends nothing anywhere but your server, the Aether edge that relays to it in Aether Edge mode, and github.com, which it asks for the newest release\'s tag when the app comes to the front, at most once an hour, and in Aether Edge mode also while the dashboard is open. Privacy policy: https://github.com/3xDevOps/Aether/blob/main/docs/privacy.md</string>
     <string name="setup_licence">Licence: GPL-3.0, https://github.com/3xDevOps/Aether/blob/main/LICENSE. Open source notices: https://github.com/3xDevOps/Aether/blob/main/docs/notices.md</string>
 
     <string name="address_error_empty">Enter the server\'s tailnet name, for example my-server.tailnet-name.ts.net</string>
