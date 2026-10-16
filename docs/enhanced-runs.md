@@ -134,8 +134,8 @@ agent is doing now; while it waits on you it reads "Waiting for your
 approval: <command>" or "Waiting for your answer" with an amber dot. When a
 turn ends without a request, the run waits for your reply: the board, the
 sidebar and the header say **Waiting for your reply** and the header's
-**Reply** focuses the composer. "Agent idle" and "No activity" are kept for
-Standard runs and for real stalls. Scrolling near the top automatically loads
+**Reply** focuses the composer. Standard runs and real stalls show their
+reason instead. Scrolling near the top automatically loads
 older items 200 at a time without moving the text you are reading. A failed
 load shows the server's error with **Retry**. `Esc` in an empty composer moves
 focus to the timeline; `Esc` again leaves the run.
@@ -341,28 +341,29 @@ closed reads `not_sent`.
 
 ## Status
 
-The session reports **working** when a turn starts and **idle** when it ends
-and no background work is left, so an idle enhanced run parks exactly like a
+The session reports **working** when a turn starts and **waiting** when it
+ends and no background work is left, so the enhanced run parks exactly like a
 Standard run whose agent reports its turns. The reason on the parked run says
 how the turn ended, and its [state](failure-handling.md#run-activity)
 whether anyone is needed:
 
 | Reason | State | Cause |
 | --- | --- | --- |
-| `agent idle` | `idle` | The turn ended normally (`end_turn`). |
+| `turn ended without a report` | `waiting` | The turn ended normally (`end_turn`) with no outcome report. Older runs show `agent idle`. |
+| `agent reported success` | `finished` | The agent reported `success` and ended its turn; the run shows **Ready for review** ([failure-handling.md](failure-handling.md#review)). |
 | `needs input: <question>` | `needs-you` | The agent asked you with `aether-internal report --outcome needs-input` ([coordination.md](coordination.md)) and ended its turn. |
 | `blocked: <summary>` | `needs-you` | The agent reported an external blocker and ended its turn. |
-| `<summary>` of a `waiting` report | `waiting-agents` | The agent reported it waits on its own agents and ended its turn. |
-| `turn cancelled` | `idle` | You cancelled the turn, or the agent ended it `cancelled`. |
-| `turn interrupted` | `idle` | The connection that ran the turn ended before it finished: a server restart, or Reopen after one. |
-| `turn ended: <stop reason>` | `idle` | Any other ACP stop reason, such as `max_tokens` or `refusal`. |
+| `<summary>` of a `waiting` report | `waiting-agents`, `waiting-ci` or `waiting-tools` | The agent reported it waits on its own agents, CI or a process (`--for agents`, `ci` or `process`) and ended its turn. |
+| `turn cancelled` | `waiting` | You cancelled the turn, or the agent ended it `cancelled`. |
+| `turn interrupted` | `waiting` | The connection that ran the turn ended before it finished: a server restart, or Reopen after one. |
+| `turn ended: <stop reason>` | `waiting` | Any other ACP stop reason, such as `max_tokens` or `refusal`. |
 | `enhanced turn failed: <error>` | `failed` | The agent failed the prompt while staying connected. |
 | `enhanced session ended: <cause>` | `disconnected` | The adapter exited or closed its output. Reopening the session clears it. |
 | `enhanced session failed: <error>` | `disconnected` | The adapter could not start or open the session. |
 
-Only `agent idle` is a turn end that settles a reported success or failure,
+Only a normal turn end (`end_turn`) settles a reported success or failure,
 and only it shows a `blocked` report; a failed, cancelled or interrupted turn
-parks with its own reason. A `needs-input` report shows at `agent idle` too,
+parks with its own reason. A `needs-input` report shows at a normal turn end too,
 or as soon as its turn ends with only [background work](#background-work)
 left: the run parks with `needs input: <question>` and the push carries the
 question while the tasks keep running. The question stays the run's status
@@ -428,7 +429,7 @@ working through both:
   owes a follow-up after that turn's result, which Claude Code starts about
   100 ms later: the run stays working for two seconds after the turn ends.
   Mail waits while a follow-up is owed.
-- The run is idle once no prompt or autonomous turn runs, no task it waits
+- The run parks once no prompt or autonomous turn runs, no task it waits
   for is live, and no follow-up is owed. It parks with the stop reason of
   the prompt that started the wait when that was not `end_turn`, such as
   `turn ended: max_tokens`.
@@ -477,7 +478,7 @@ that waited and was never delivered keeps them for the next one, as does a
 session that started anew after a failed restore or has refused every
 prompt so far. That block is part of the
 logged prompt. An agent that ends a turn without reporting still parks with
-`agent idle`.
+`turn ended without a report`.
 
 What the agent is doing reaches the dashboard's state line as a `run.agent`
 `tool_call` event, at most once a second: `tool` is the ACP tool kind

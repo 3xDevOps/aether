@@ -556,7 +556,7 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 			case domain.RunNeedsAttention:
 				stretch = stretchWaiting
 			}
-		case domain.ActivityWorking, domain.ActivityWaitingAgents, domain.ActivityWaitingTools:
+		case domain.ActivityWorking, domain.ActivityWaitingAgents, domain.ActivityWaitingCI, domain.ActivityWaitingTools:
 			stretch = stretchWorking
 		case domain.ActivityNeedsYou:
 			stretch = stretchWaiting

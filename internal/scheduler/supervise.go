@@ -651,7 +651,7 @@ func (s *Scheduler) checkStalls(ctx context.Context) {
 				} else {
 					err = s.transitionLocked(ctx, e.runID, e.workspaceID, e.status, domain.RunNeedsAttention, reason, "")
 				}
-			case e.status == domain.RunNeedsAttention && e.activity == domain.ActivityWaitingAgents && idle > waitedFactor*s.cfg.StallThreshold:
+			case e.status == domain.RunNeedsAttention && e.waitExpires() && idle > waitedFactor*s.cfg.StallThreshold:
 				err = s.expireWaitLocked(ctx, e, idle)
 			case released:
 				// The run goes back to being judged on silence alone, so

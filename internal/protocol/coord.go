@@ -85,6 +85,14 @@ const (
 	CoordOutcomeWaiting    = "waiting"
 )
 
+// What a waiting outcome waits for (CoordReportParams.WaitingFor). Empty
+// means agents.
+const (
+	CoordWaitingForAgents  = "agents"
+	CoordWaitingForCI      = "ci"
+	CoordWaitingForProcess = "process"
+)
+
 // Peer authorization states.
 const (
 	// CoordPeerActive is a peer the radar currently has this run in file
@@ -291,6 +299,7 @@ type CoordReportParams struct {
 	Summary        string   `json:"summary" jsonschema:"what you verified; for needs-input the question for the user; for blocked what a human must do; for waiting what you wait on"`
 	EvidenceRefs   []string `json:"evidence_refs,omitempty" jsonschema:"retained evidence packet ids; not for needs-input or waiting"`
 	IdempotencyKey string   `json:"idempotency_key" jsonschema:"a stable key you choose per outcome; retry an unchanged report with the same key"`
+	WaitingFor     string   `json:"waiting_for,omitempty" jsonschema:"only with waiting: agents (the default), ci or process"`
 }
 
 // CoordReportResult is the complete durable outcome receipt. EvidenceRef is

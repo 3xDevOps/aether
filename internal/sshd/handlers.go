@@ -395,6 +395,24 @@ func (s *Server) runClose(ctx context.Context, member domain.MemberID, params js
 	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
 }
 
+func (s *Server) runReview(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.RunReviewParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.RunID == "" {
+		return nil, invalidParams("run_id is required")
+	}
+	if p.Action != protocol.RunReviewComplete && p.Action != protocol.RunReviewLater {
+		return nil, invalidParams(`action must be "complete" or "later"`)
+	}
+	run, err := s.cfg.Runs.Review(ctx, domain.RunID(p.RunID), member, p.Action)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+}
+
 // runRelaunch re-enters the addressed retained TUI run. The retained
 // container still carries the account environment it was launched with, so
 // account-share authorization must be current before the scheduler attaches.

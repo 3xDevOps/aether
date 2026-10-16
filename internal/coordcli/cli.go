@@ -264,7 +264,7 @@ Use task propose --help or task revise --help for revision JSON and required fla
 Worker mutations use the mission authority on the run socket. Dispatch keys
 are explicit identities for retry-safe starts and retries.
 `,
-	"report": `usage: aether-internal report --outcome <success|failure|blocked|needs-input|waiting> (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
+	"report": `usage: aether-internal report [--outcome] <success|failure|blocked|needs-input|waiting> [--for <agents|ci|process>] (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
 
 Record your state. aether-internal skill lists which outcome your role reports
 when. Subagents and spawned workflows never report; they return their results
@@ -806,13 +806,24 @@ func reply(ctx context.Context, socket string, args []string, in io.Reader, errO
 func report(ctx context.Context, socket string, args []string, in io.Reader, errOut io.Writer) (protocol.CoordReportResult, error) {
 	fs := newFlags("report")
 	outcome := fs.String("outcome", "", "success, failure, blocked, needs-input or waiting")
+	waitingFor := fs.String("for", "", "with waiting: agents, ci or process")
 	summary := fs.String("summary", "", "bounded outcome summary")
 	summaryFile := fs.String("summary-file", "", "read summary from a file, or - for stdin")
 	key := fs.String("idempotency-key", "", "stable key used to replay this mutation")
 	refs := stringList{}
 	fs.Var(&refs, "evidence-ref", "evidence reference (repeatable)")
+	positional := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		positional, args = args[0], args[1:]
+	}
 	if err := parseFlags(fs, args); err != nil {
 		return protocol.CoordReportResult{}, err
+	}
+	switch {
+	case positional != "" && *outcome != "":
+		return protocol.CoordReportResult{}, usageError("report: give the outcome once, as --outcome or the first argument")
+	case positional != "":
+		*outcome = positional
 	}
 	if *summary == "" && fs.NArg() > 0 {
 		*summary = strings.Join(fs.Args(), " ")
@@ -825,7 +836,7 @@ func report(ctx context.Context, socket string, args []string, in io.Reader, err
 	if err != nil {
 		return protocol.CoordReportResult{}, err
 	}
-	p := protocol.CoordReportParams{Outcome: *outcome, Summary: text, EvidenceRefs: append([]string(nil), refs...), IdempotencyKey: idempotencyKey}
+	p := protocol.CoordReportParams{Outcome: *outcome, Summary: text, EvidenceRefs: append([]string(nil), refs...), IdempotencyKey: idempotencyKey, WaitingFor: *waitingFor}
 	var out protocol.CoordReportResult
 	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordReport, p, &out); err != nil {
 		return out, err

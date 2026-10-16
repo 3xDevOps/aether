@@ -1387,7 +1387,9 @@ verification evidence and exact delivery.
 ```
 
 `--outcome` is exactly one of `success`, `failure`, `blocked`,
-`needs-input`, or `waiting`. A non-empty summary is required. `--evidence-ref` may be
+`needs-input`, or `waiting`; it may instead be the first argument, as in
+`aether-internal report waiting`. `--for` is `agents`, `ci` or `process`
+and is valid only with `waiting`. A non-empty summary is required. `--evidence-ref` may be
 repeated, and `--summary-file` accepts a file or `-` for standard input. The result contains a durable
 `report_id` and the server-created `evidence_ref`.
 Terminal worker reports wait for concurrent swarm operations to leave admission
@@ -1413,11 +1415,11 @@ What a report does depends on the run:
 - **Interactive run** (`tui` or `acp`, except a swarm worker). At turn end,
   with no permission or question request open, success or failure records
   `needs-attention` with the reason `agent reported success` or
-  `agent reported failure`. The owner sees an unreviewed outcome; after
-  opening it, the dashboard shows **Done** or **Failed** and says the run
-  remains open for follow-up. The composer, native terminal, container and
-  Enhanced agent session remain live. The next working turn clears the idle
-  outcome. A report received after turn end is shown immediately. Without a
+  `agent reported failure`. A success shows **Ready for review** and counts
+  as **Needs you** until the owner marks it complete or later
+  ([review](failure-handling.md#review)); a failure shows **Failed**. The
+  composer, native terminal, container and Enhanced agent session remain
+  live. The next working turn clears the shown outcome and the review. A report received after turn end is shown immediately. Without a
   status reporter, the first poll two minutes after the report shows it;
   the stall detector can also reveal it. Neither path interrupts an open
   input request. A report does not start a retention timer or publish a
@@ -1430,7 +1432,9 @@ What a report does depends on the run:
   finishes it; outstanding input requests prevent that finish. Aether commits
   the work (`aether:` for success, `wip:` for failure), publishes the run
   branch, records `completed` or `failed`, and cleans up its container.
-  A Close or Kill that lands first wins.
+  A Close or Kill that lands first wins. A run completed by its success
+  report shows **Ready for review** until the owner marks it complete or
+  later.
 - **Blocked report.** The summary becomes `blocked: <summary>` at turn end,
   or when an agent without a status reporter stalls. It does not interrupt
   an open input request. Resuming work clears the reason; an older retried
@@ -1452,17 +1456,25 @@ What a report does depends on the run:
   `aether-internal ask`, and a run that already finished (`the run already
   finished; its reported outcome stands, so it cannot ask its user`).
   The question shows whole, up to the 4 KiB summary limit.
-- **Waiting report.** `--outcome waiting` says the turn ends waiting on the
-  run's own agents, for example `--summary 'waiting on 3 workers'`. At turn
-  end the run shows the summary as its reason with state
-  `waiting-agents` instead of `idle`, so it is not **Needs you**; the next
-  turn clears it, and with no activity for three times the stall threshold
-  it becomes `idle`. Every role may report it. Like needs-input it is
-  nonterminal and not durable, and takes no `--evidence-ref`. Report it only
-  where mail resumes the idle session (Enhanced runs, managed Claude Code
-  launches and native pi, omp or OpenCode integrations); elsewhere nothing wakes the agent when a reply
-  arrives, so it waits inside its turn with `inbox --wait 30`, and a
-  Background run's turn end finishes the run. An integrator
+- **Waiting report.** `aether-internal report waiting --for <agents|ci|process>
+  --summary '<why>'` says the turn ends while work the agent started goes
+  on: `agents` (the default) for subagents, swarm workers or other agents it
+  started, `ci` for a CI run or review bot, `process` for a build, deploy or
+  other background command. At turn end the run shows the summary as its
+  reason with state `waiting-agents`, `waiting-ci` or `waiting-tools`
+  (**Waiting for agents**, **Waiting for CI**, **Waiting for process**)
+  instead of `waiting`. It never makes the run **Needs you**. The next turn
+  clears it, and with no activity for three times the stall threshold it
+  becomes `waiting` with `no update for <duration>`. Every role may report
+  it, and it may repeat; runs it starts report their own waits, and
+  subagents never report. Like needs-input it is nonterminal and not durable, and takes no
+  `--evidence-ref`. `--for` with another outcome, or an unknown `--for`
+  value, is refused with `CodeInvalidParams`. Report it only where mail
+  resumes the idle session (Enhanced runs, managed Claude Code launches and
+  native pi, omp or OpenCode integrations); elsewhere nothing wakes the
+  agent when a reply arrives, so it waits inside its turn with
+  `inbox --wait 30`, and a Background run's turn end finishes the run.
+  Nothing re-prompts the agent when CI or a process finishes. An integrator
   of an open mission with a live worker attempt, or worker mail since its
   last turn started that it has not acknowledged, shows `waiting-agents` at
   turn end without reporting it
@@ -1574,14 +1586,15 @@ another account ([usage fallback](teams.md#usage-fallback)); see
 [status reporting](harnesses.md#status-reporting).
 
 After an interactive success or failure `coord.report`, the next `waiting`
-(idle) hook with no input request open makes the outcome reviewable without
+(turn end) hook with no input request open makes the outcome reviewable without
 closing the run. A hook that only opens or closes an input request is not a
-turn end, but closing the last request on an already-idle run can reveal the
+turn end, but closing the last request on an already-parked run can reveal the
 outcome. A Background run still finishes at that boundary. A blocked report
 shows `blocked: <summary>` and a needs-input report shows
-`needs input: <question>`, instead of `agent idle`; a waiting report shows
-activity `waiting-agents` instead of going idle. The first `working` hook
-after an outcome was shown clears that idle reason; older report retries
+`needs input: <question>`, instead of `turn ended without a report`; a
+waiting report shows activity `waiting-agents`, `waiting-ci` or
+`waiting-tools` instead. The first `working` hook after an outcome was shown
+clears that reason; older report retries
 cannot bring it back.
 The scheduler applies a report as part of its durable publication, so a
 server restart or a temporarily unreachable run is retried, not lost.

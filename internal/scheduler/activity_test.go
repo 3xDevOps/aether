@@ -10,6 +10,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -101,18 +102,18 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		activity domain.RunActivity
 		reason   string
 	}{
-		{"turn end", func() { report(idle) }, domain.RunNeedsAttention, domain.ActivityIdle, agentstatus.ReasonIdle},
+		{"turn end", func() { report(idle) }, domain.RunNeedsAttention, domain.ActivityWaiting, turnEndedReason},
 		{"next turn", func() { report(working) }, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
 		{"permission mid-turn", func() { report(permissionInput("open")) }, domain.RunRunning, domain.ActivityNeedsYou, agentstatus.ReasonResumed},
 		{"permission answered", func() { report(permissionInput("close")) }, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
 		{"integrator turn end with a live worker", func() {
 			integrator.workers.Store(true)
 			report(idle)
-		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, agentstatus.ReasonIdle},
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, turnEndedReason},
 		{"the last worker finished", func() {
 			integrator.workers.Store(false)
 			e.sched.refreshActivities(ctx)
-		}, domain.RunNeedsAttention, domain.ActivityIdle, agentstatus.ReasonIdle},
+		}, domain.RunNeedsAttention, domain.ActivityWaiting, turnEndedReason},
 		{"needs-input asked at the turn end", func() {
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
@@ -125,7 +126,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
 			// The summary is the agent's text, never a reason Aether wrote.
-			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-1", "blocked: on 3 workers", time.Now()); err != nil {
+			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-1", "", "blocked: on 3 workers", time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			report(idle)
@@ -134,14 +135,31 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			// A live worker would hold the run in waiting-agents again.
 			integrator.workers.Store(true)
 			quietFor(t, e, 20*time.Millisecond)
-		}, domain.RunNeedsAttention, domain.ActivityIdle, waitedReasonPrefix},
-		{"a waiting outcome shown without a turn end", func() {
-			e.sched.refreshActivities(ctx)
-			expectNoStatusEvent(t, sub, run.ID, "a refresh after the wait expired")
+		}, domain.RunNeedsAttention, domain.ActivityWaiting, waitedReasonPrefix},
+		{"waiting for CI reported", func() {
 			integrator.workers.Store(false)
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
-			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-2", "waited 2m on 2 workers", time.Now()); err != nil {
+			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on PR 12", time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			report(idle)
+		}, domain.RunNeedsAttention, domain.ActivityWaitingCI, "CI on PR 12"},
+		{"the CI wait went stale", func() {
+			quietFor(t, e, 20*time.Millisecond)
+		}, domain.RunNeedsAttention, domain.ActivityWaiting, waitedReasonPrefix},
+		{"waiting for a process reported", func() {
+			report(working)
+			nextActivity(t, sub, run.ID, &seq)
+			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-process", protocol.CoordWaitingForProcess, "release build", time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			report(idle)
+		}, domain.RunNeedsAttention, domain.ActivityWaitingTools, "release build"},
+		{"a waiting outcome shown without a turn end", func() {
+			report(working)
+			nextActivity(t, sub, run.ID, &seq)
+			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-2", "", "no update for 2m on 2 workers", time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			e.sched.mu.Lock()
@@ -150,7 +168,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waited 2m on 2 workers"},
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "no update for 2m on 2 workers"},
 		{"background subagents held after the turn", func() {
 			report(agentstatus.Report{State: agentstatus.Working, Reason: agentstatus.BackgroundReason(2)})
 		}, domain.RunRunning, domain.ActivityWaitingAgents, agentstatus.BackgroundReason(2)},
@@ -159,7 +177,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		}, domain.RunRunning, domain.ActivityWaitingTools, agentstatus.BackgroundReason(1)},
 		{"the held run stalled", func() {
 			quietFor(t, e, 20*time.Millisecond)
-		}, domain.RunNeedsAttention, domain.ActivityIdle, stalledReasonPrefix},
+		}, domain.RunNeedsAttention, domain.ActivityWaiting, stalledReasonPrefix},
 		{"an approval requested mid-turn", func() {
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
@@ -215,6 +233,13 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		if (p.Activity == domain.ActivityFailed || p.Activity == domain.ActivityFinished) != p.OutcomeUnseen {
 			t.Fatalf("%s: outcome_unseen = %v on a %s run", step.name, p.OutcomeUnseen, p.Activity)
 		}
+		// Only a human request, a failure, a disconnect or a success to
+		// review needs anyone; no wait ever does.
+		needs := p.Activity == domain.ActivityNeedsYou || p.Activity == domain.ActivityFailed ||
+			p.Activity == domain.ActivityDisconnected || p.Activity == domain.ActivityFinished
+		if row.NeedsAttention(false) != needs || (p.Review == domain.ReviewReady) != (p.Activity == domain.ActivityFinished) || row.Review != p.Review {
+			t.Fatalf("%s: %s run needs attention %v with review %q (stored %q)", step.name, p.Activity, row.NeedsAttention(false), p.Review, row.Review)
+		}
 	}
 	// Nothing changed: no event, and no new sequence for a client to apply.
 	// A subagent's activity only keeps the run from stalling.
@@ -267,9 +292,9 @@ func TestEveryTurnStartIsRecorded(t *testing.T) {
 	}
 }
 
-// TestAStallIsIdleNotNeedsYou: a stall parks the run, but nobody is asked
+// TestAStallIsWaitingNotNeedsYou: a stall parks the run, but nobody is asked
 // for anything.
-func TestAStallIsIdleNotNeedsYou(t *testing.T) {
+func TestAStallIsWaitingNotNeedsYou(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {
 		cfg.StallThreshold = 200 * time.Millisecond
@@ -279,7 +304,7 @@ func TestAStallIsIdleNotNeedsYou(t *testing.T) {
 	e.startStalls(t)
 	run, _ := e.launchFake(t, "task")
 	p := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention).Payload.(events.RunStatusPayload)
-	if !strings.HasPrefix(p.Reason, "stalled: ") || p.Activity != domain.ActivityIdle {
-		t.Fatalf("stall published %q with activity %q, want a stalled reason and idle", p.Reason, p.Activity)
+	if !strings.HasPrefix(p.Reason, "stalled: ") || p.Activity != domain.ActivityWaiting {
+		t.Fatalf("stall published %q with activity %q, want a stalled reason and waiting", p.Reason, p.Activity)
 	}
 }

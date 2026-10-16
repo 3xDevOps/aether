@@ -867,7 +867,7 @@ commit captured at launch.
 
 | Command | What it does |
 | --- | --- |
-| `aether runs` | Every run you can see, colored by owner, with conflict warnings. `STATUS` is a live run's [state](failure-handling.md#run-activity), else its status. A notice counts the runs that need you; `--needs-you` lists only them. Archived runs are hidden; `--archived` lists only those, with their deletion date. |
+| `aether runs` | Every run you can see, colored by owner, with conflict warnings. `STATUS` is the dashboard label of a live run's [state](failure-handling.md#run-activity) (`Working`, `Waiting for agents`, `Waiting for CI`, `Waiting for process`, `Waiting`, `Needs you`, `Failed`, `Disconnected`), else of its status (`Queued`, `Provisioning`, `Running`, `Needs attention`, `Completed`, `Merged`, `Closed`, `Failed`, `Interrupted`). A reported success, live or completed, reads `Ready for review` until you mark it complete or later; an older parked success reads `Finished`. A notice counts the runs that need you; `--needs-you` lists only them, including runs whose review is `ready`. Archived runs are hidden; `--archived` lists only those, with their deletion date. |
 | `aether who` | Who is online and which runs they are watching. |
 | `aether attach [--read-only] <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer, and without it the attach falls back to read-only by itself. |
 | `aether message <run> "..."` | Send a message to a running agent. Renders as a banner in your member color. |

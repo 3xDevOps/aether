@@ -163,6 +163,9 @@ type Store interface {
 	// ClearRunFinishUnopened clears finish_unopened, and reports whether
 	// this call changed it.
 	ClearRunFinishUnopened(ctx context.Context, id domain.RunID) (bool, error)
+	// SetRunReview moves the run's review to review when it is one of
+	// from, and reports whether this call changed it.
+	SetRunReview(ctx context.Context, id domain.RunID, review domain.RunReview, from ...domain.RunReview) (RunStatusStamp, bool, error)
 	DeleteRun(ctx context.Context, id domain.RunID) error
 	DeleteMission(ctx context.Context, id domain.MissionID, runs []domain.RunID) error
 	// AddRunSteerer records a member other than the run's owner steering

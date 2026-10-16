@@ -429,6 +429,9 @@ func TestCLIMutationsBodiesWaitAckAndReceipts(t *testing.T) {
 	if code, _ = runCLI(t, s.path, []string{"report", "--outcome", "needs-input", "--summary", "which region?", "--idempotency-key", "ask-user"}, ""); code != ExitOK {
 		t.Fatalf("needs-input report exit = %d, want %d", code, ExitOK)
 	}
+	if code, _ = runCLI(t, s.path, []string{"report", "waiting", "--for", "ci", "--summary", "CI on PR 12", "--idempotency-key", "wait-ci"}, ""); code != ExitOK {
+		t.Fatalf("waiting report exit = %d, want %d", code, ExitOK)
+	}
 	if code, _ = runCLI(t, s.path, []string{"send", "--to", "run-2", "--body", "retry", "--idempotency-key", "send-fixed"}, ""); code != ExitOK {
 		t.Fatalf("idempotent send retry exit = %d, want %d", code, ExitOK)
 	}
@@ -440,8 +443,15 @@ func TestCLIMutationsBodiesWaitAckAndReceipts(t *testing.T) {
 			asked = p.Summary == "which region?" && p.IdempotencyKey == "ask-user"
 		}
 	}
-	if !asked {
-		t.Fatalf("no needs-input report reached the socket: %+v", seen)
+	var waited bool
+	for _, req := range seen {
+		var p protocol.CoordReportParams
+		if req.Method == protocol.MethodCoordReport && json.Unmarshal(req.Params, &p) == nil && p.Outcome == protocol.CoordOutcomeWaiting {
+			waited = p.WaitingFor == protocol.CoordWaitingForCI && p.Summary == "CI on PR 12"
+		}
+	}
+	if !asked || !waited {
+		t.Fatalf("no needs-input or waiting report reached the socket: %+v", seen)
 	}
 	var sends []protocol.CoordSendParams
 	for _, req := range seen {

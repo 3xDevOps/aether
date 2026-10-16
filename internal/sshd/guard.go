@@ -117,6 +117,7 @@ func init() {
 	registerGuarded(protocol.MethodRunArchive, permissions.Kill, runTarget, (*Server).runArchive)
 	registerGuarded(protocol.MethodRunSeen, permissions.View, runTarget, (*Server).runSeen)
 	registerGuarded(protocol.MethodRunClose, permissions.Kill, runTarget, (*Server).runClose)
+	registerGuarded(protocol.MethodRunReview, permissions.Kill, runTarget, (*Server).runReview)
 	registerGuarded(protocol.MethodRunPause, permissions.Steer, runTarget, (*Server).runPause)
 	registerGuarded(protocol.MethodRunResume, permissions.Steer, runTarget, (*Server).runResume)
 	registerGuarded(protocol.MethodRunInject, permissions.Steer, runTarget, (*Server).runInject)

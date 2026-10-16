@@ -269,7 +269,7 @@ server tells you itself when the run:
 
 | Kind | When | Body |
 | --- | --- | --- |
-| `finished` | The run is completed, merged, failed, stopped or interrupted | The run's reason, if any |
+| `finished` | The run is completed, merged, failed, stopped or interrupted, or a live run's reported success is ready for review | The run's reason, if any |
 | `needs_input` | The agent asks a question, a permission or a form | `Question: <text>`, `Permission: <title>` or `Form: <title>` |
 | `needs_approval` | An approval is requested for the run | The requested action |
 | `needs_attention` | The run reaches `needs-attention` | Why, worded as in [push notifications](networking.md#notifications) |

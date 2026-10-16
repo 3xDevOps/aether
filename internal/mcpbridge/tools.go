@@ -68,6 +68,7 @@ func reportSchema() (*jsonschema.Schema, error) {
 		"blocked: " + coordhooks.BlockedUse + " " +
 		"waiting: " + coordhooks.WaitingUse + " " +
 		"Which outcomes this run may use depends on its role and launch; the server refuses the others and your instructions list them."
+	schema.Properties["waiting_for"].Enum = []any{protocol.CoordWaitingForAgents, protocol.CoordWaitingForCI, protocol.CoordWaitingForProcess}
 	return schema, nil
 }
 

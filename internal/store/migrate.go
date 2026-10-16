@@ -1792,6 +1792,12 @@ ALTER TABLE assistant_settings ADD COLUMN suggest_off INTEGER NOT NULL DEFAULT 0
 	// v71: the activity a run moved to, so an activity change is a
 	// transition too. Older rows keep '', unknown.
 	`ALTER TABLE run_state_transitions ADD COLUMN activity TEXT NOT NULL DEFAULT '';`,
+	// v72: whether the owner dealt with the success a run's agent reported.
+	// Every older run starts at '', so none of them asks for review.
+	`
+ALTER TABLE runs ADD COLUMN review TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN review_changed_at INTEGER;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

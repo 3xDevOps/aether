@@ -59,6 +59,8 @@ type Run struct {
 	// any member.
 	OutcomeUnseen     bool    `json:"outcome_unseen,omitempty"`
 	FinishUnopened    bool    `json:"finish_unopened,omitempty"`
+	Review            string  `json:"review,omitempty"`
+	ReviewChangedAt   *string `json:"review_changed_at,omitempty"`
 	CreatedAt         string  `json:"created_at"`
 	StartedAt         *string `json:"started_at"`
 	FinishedAt        *string `json:"finished_at"`
@@ -169,6 +171,8 @@ func RunFromDomain(r *domain.Run) Run {
 		ArchivedAt:          rfc3339Ptr(r.ArchivedAt),
 		OutcomeUnseen:       r.OutcomeUnseen,
 		FinishUnopened:      r.FinishUnopened,
+		Review:              string(r.Review),
+		ReviewChangedAt:     rfc3339Ptr(r.ReviewChangedAt),
 		CreatedAt:           rfc3339(r.CreatedAt),
 		StartedAt:           rfc3339Ptr(r.StartedAt),
 		FinishedAt:          rfc3339Ptr(r.FinishedAt),
@@ -404,6 +408,18 @@ type RunProtectParams struct {
 type RunArchiveParams struct {
 	RunID    string `json:"run_id"`
 	Archived bool   `json:"archived"`
+}
+
+// Run review actions.
+const (
+	RunReviewComplete = "complete"
+	RunReviewLater    = "later"
+)
+
+// RunReviewParams.Action is RunReviewComplete or RunReviewLater.
+type RunReviewParams struct {
+	RunID  string `json:"run_id"`
+	Action string `json:"action"`
 }
 
 // RunSeenParams: run.seen is open to any member who may view the run.

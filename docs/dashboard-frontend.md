@@ -1188,7 +1188,7 @@ both show:
 | Condition | Action |
 | --- | --- |
 | Approval request (`approval.decide`) | **Approve**, resolved in place |
-| Enhanced turn ended, agent idle or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
+| Enhanced turn ended without a report, or stalled | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
 | Native permission or question on a Standard run; blocked, held, or an Enhanced failure | **Open terminal** |
 | Native permission or question on an Enhanced run, teammate or swarm question | **Answer** |
 | Usage limit with no account to move to | **Open** |
@@ -1306,11 +1306,13 @@ colour alone. Only Working pulses, and not under `prefers-reduced-motion`.
 | State | Comes from | Group |
 | --- | --- | --- |
 | Working | `state` `working` (a turn is in progress), or `queued` / `provisioning` ("Queued", "Starting") | Working |
-| Waiting on agents | `waiting-agents`: held background subagents or workflows, an integrator with live workers or unread worker mail, or a `waiting` report | Working |
-| Waiting on tools | `waiting-tools`: a tool the agent waits on, such as Claude's Monitor | Working |
+| Waiting for agents | `waiting-agents`: held background subagents or workflows, ACP Task agents, an integrator with live workers or unread worker mail, or a `waiting --for agents` report | Working |
+| Waiting for CI | `waiting-ci`: a `waiting --for ci` report | Working |
+| Waiting for process | `waiting-tools`: a background task the agent holds, such as Claude's Monitor, or a `waiting --for process` report | Working |
+| Waiting | `waiting`, or legacy `idle`: the turn ended with no outcome report, a stall included, or a wait went stale | Working |
 | Needs you | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
-| Idle | `idle`: the turn ended with nothing open, a stall included | Working |
-| Finished | `finished` (an interactive success parked for review), or `completed`, `merged`, `abandoned` ("Closed without merging") | Finished |
+| Ready for review | `finished`, or `completed`, with `review` `ready` or `later` | Needs you for its owner while `review` is `ready`, else Finished |
+| Finished | `finished` without a review (older runs), or `completed`, `merged`, `abandoned` ("Closed without merging") | Finished |
 | Failed | `failed` (an interactive failure parked for review, or a turn that failed), or `failed`, `interrupted` | Needs you for its owner while live and `outcome_unseen`, else Finished, sorted first |
 | Disconnected | `disconnected`: the agent session or process ended while the run is open | Needs you for its owner |
 | Paused | a live run paused by a member | Working |
@@ -1319,21 +1321,33 @@ Live actions (stop, pause, message, Stop waiting) still gate on the wire
 `status` (`running`, `needs-attention`), not on the state.
 
 **`status_seq`** increments on every change of a run's status, state,
-reason or outcome flags. `applyRunStatus` in `src/store/runs.ts` drops a
+reason, outcome flags or review. `applyRunStatus` in `src/store/runs.ts` drops a
 `run.status` event whose `status_seq` is not greater than the one it holds,
 and `toRecord` keeps every field such an event set (status, reason, state,
-`status_seq`, `outcome_unseen`, `finish_unopened`, `finished_at`) when a
+`status_seq`, `outcome_unseen`, `finish_unopened`, `finished_at`, `review`,
+`review_changed_at`) when a
 snapshot is older, so an out-of-order event or a late `run.get` never moves a
 run back. A snapshot at the same `status_seq` never sets `outcome_unseen` or
 `finish_unopened` again once `run.outcome_seen` or opening the run cleared it.
-A kill's prediction clears `state` with the status.
+A kill's prediction clears `state` with the status. A `run.review` event
+(`{"review","review_changed_at","status_seq"}`) sets the review under the
+same `status_seq` rule.
+
+**Review** is the owner's answer to a reported success
+([failure-handling.md](failure-handling.md#review)). `run.review` with
+`action` `complete` closes a live run as `completed` (or records it on a
+`completed` run) and sets `review` to `accepted`; `later` sets it to `later`
+and leaves the run where it is. Both return `{"run": Run}` and need the same
+permission as `run.close`; a live swarm worker is refused.
 
 The Needs you group, its counts and badges follow the run-state attention
 rule push notifications, assistant follow and `aether runs --needs-you`
 share ([failure-handling.md](failure-handling.md)): a live run (`running` or
 `needs-attention`) that is not paused, with `state` `needs-you`,
-`disconnected`, or `failed` while `outcome_unseen`. Finished, Idle, Waiting
-and Working never count. The request rows below need a live, unpaused run
+`disconnected`, or `failed` while `outcome_unseen`; or a live or
+`completed` run, not a swarm worker, with `review` `ready`. Finished,
+Waiting (every `waiting*` state), Working, and a review put off for later or
+accepted never count. The request rows below need a live, unpaused run
 too; only the two swarm rows, an open swarm question and a stopped
 integrator, hold whatever the integrator run's status, paused included.
 Needs you means the viewer can resolve it.
@@ -1359,6 +1373,7 @@ the swarm, which the run's `state` does not cover, so push and
 | `state` `needs-you` with a `needs input: <question>` reason | owner | Agent asks: …, with **Reply** |
 | `state` `needs-you` with a usage limit Aether will not resume | owner | Usage limit reached on …, with **Open** |
 | `state` `needs-you`, any other reason: a permission or question not loaded yet | owner | Open the run to see its request, with **Open** |
+| `review` `ready`, live or `completed` (labelled Ready for review) | owner | Agent reported success, review the result |
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
@@ -1391,10 +1406,10 @@ counts them and shows one row, "laptop waiting for approval" or "2 devices
 waiting for approval", that opens the board.
 
 A condition that applies to someone else leaves the run in Working with
-"Waiting for Alice", labelled Idle when the run needs its owner. A swarm
+"Waiting for Alice", labelled Waiting when the run needs its owner. A swarm
 worker counts only for a blocked report, as in push, or a control hold: its
 integrator handles its other requests, so a worker in `needs-you` reads
-Waiting on agents, "Waiting for the integrator". A stopped integrator counts only while the swarm record names it as
+Waiting for agents, "Waiting for the integrator". A stopped integrator counts only while the swarm record names it as
 current; the dashboard loads the selected workspace's swarms, so another
 workspace's stopped integrator appears once you select that workspace. A
 Background (`headless`) run follows its `state` like any run; the server
@@ -2043,7 +2058,7 @@ session." when the run has no agent terminal; a teammate question offers
 **Reply**, the owner's own question is a plain message), `event`,
 `finished`, and while the run works with no pending input a `live` row (the
 run's `toolActivity`, "Reading src/billing.js", else its state label such as
-"Working" or "Waiting on agents", with that state's dot, which pulses only
+"Working" or "Waiting for agents", with that state's dot, which pulses only
 while Working) and a
 `terminal-note` row, **Live detail is in the Terminal.** with **Open
 terminal**. An "Agent report" event is dropped while the report's agent
@@ -3824,7 +3839,7 @@ questions and queued messages stay contextual to their run, in its Details
   a run belongs to exactly one workspace.
 - **A feed row is a sentence.** `src/components/event-words.tsx` words
   every event type the server declares: "You messaged the agent: “…”",
-  "Needs you: agent idle", "Alice approved “Bash: rm -rf build”", "Failed:
+  "Alice approved “Bash: rm -rf build”", "Failed:
   Agent exited with code 1". The viewer is "You", server reasons go through
   `plainReason` (`src/lib/status.ts`), and room ids, run ids and wire enums
   never appear outside Raw events. Its table is keyed by `src/lib/events.ts`'s
@@ -4987,10 +5002,13 @@ with `run.get` for its title, `paused`, `mission_role` and `member_id`, and
 announces only runs the signed-in member owns, as push does. When `run.get`
 fails it announces nothing. It notifies once per need, keyed on the run's status, state, reason and `status_changed_at`, and
 words it as `internal/push/need.go` does. An event whose `status_seq` is not
-above the last one seen is ignored. `idle`, `waiting-*` and `working` never
-notify. A need counts toward the dock badge and its notification closes when
-the need ends, including on `run.outcome_seen` for an unseen failure. A
-finished result gets one silent, low-urgency notice outside the badge.
+above the last one seen is ignored. `waiting`, `waiting-*` and `working`
+never notify. A need counts toward the dock badge and its notification
+closes when the need ends, including on `run.outcome_seen` for an unseen
+failure and on a `run.review` event that sets `later` or `accepted`. A
+review `ready` gets one silent, low-urgency notice per entry into `ready`,
+counted in the badge; an unseen failure of a run that already ended gets
+one outside it.
 `cd desktop && node --test` runs `desktop/notify.test.js`; `make
 test-scripts` includes it.
 Clicking it pushes `?run=<id>` onto the page's history and dispatches

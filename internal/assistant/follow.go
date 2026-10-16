@@ -183,7 +183,7 @@ func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphos
 	case approval != nil && !worker:
 		n.kind, n.title = events.AssistantNoticeNeedsApproval, label+" needs your approval"
 		n.key, n.body = "approval:"+approval.ID, approval.Action
-	case run.Activity == domain.ActivityFinished && !worker:
+	case run.Activity == domain.ActivityFinished && run.Review == domain.ReviewReady && !worker:
 		n.kind, n.severity, n.title = events.AssistantNoticeFinished, "info", label+" finished"
 		n.key, n.body = "finished:"+run.NeedKey(), run.Reason
 	case run.NeedsAttention(false):
