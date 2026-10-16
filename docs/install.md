@@ -235,6 +235,13 @@ installing v0.9.0 to match the server
 
 `--force` skips asking the server: no refusal, and no matching.
 
+`sudo` usually resets `HOME` to root's, so `sudo aether update` finds no
+link, asks no server, and installs the latest release. To match a server
+that is behind it, pass the server's version, which `aether server update
+--status` prints as `server version`: `sudo aether update --version
+v0.9.0`. Where the binary sits in a directory you own, run `aether update`
+without `sudo`.
+
 With nothing to install, it prints the path of the binary it checked,
 because `sudo` and `PATH` order can each pick a different `aether` than the
 one your shell runs:
@@ -279,6 +286,12 @@ the gateway's `update.*` verbs, `server.info`, `server.update_status`,
 and git fetch and push over SSH. Everything else is refused, including
 streams and port forwards; a refused forward fails as `administratively
 prohibited` with the same message.
+
+An Android app from before this check has no blocking update screen: once
+the server updates, its calls fail with the `-32005` refusal and the app
+offers no update. Tell those users to install the
+latest `aether-android.apk` from the release page by hand
+([Android app](#android-app)).
 
 The client sends its version in its SSH banner, `SSH-2.0-Aether
 <version>`. A client from before this change sends none and is treated as
