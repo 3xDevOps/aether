@@ -932,8 +932,8 @@ from (`getInstallSourceInfo` on Android 11 and newer,
   the Play app (`market://details?id=io.aether.android`), or in the browser
   when Play is missing. **Release notes** opens the GitHub release. GitHub
   publishes a release before Play has reviewed and rolled it out, so a Play
-  install shows the banner only 7 days after the phone first saw that
-  release.
+  install shows the banner only once it has been behind a release for 7
+  days; newer releases in that week do not restart the wait.
 - Installed any other way, such as the APK from a release page: **Open
   release page** opens that release in the browser. Download
   `aether-android.apk` and open it; it installs over the app and keeps its

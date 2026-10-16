@@ -5,23 +5,26 @@ data class UpdateCheck(val version: String, val latest: String, val updateAvaila
 
 /**
  * What the update notice keeps between starts: when it last ran a check,
- * the line that check printed (null until one succeeded), the newest tag and
- * when this phone first saw it, and the tag the member dismissed.
+ * when one last succeeded and the line it printed, since when this install
+ * has been behind a release (0 while current), and the tag the member
+ * dismissed.
  */
 data class StoredUpdate(
     val checkedAt: Long = 0,
+    val answeredAt: Long = 0,
     val line: String? = null,
-    val seenTag: String? = null,
-    val seenAt: Long = 0,
+    val behindSince: Long = 0,
     val dismissed: String? = null,
 )
 
 const val CHECK_INTERVAL_MS = 60 * 60 * 1000L
 
 /**
- * How long a release must have been out before a Play install hears of it.
- * GitHub publishes a release before Play finishes reviewing and rolling it
- * out, and Play is the only one that can install it.
+ * How long a Play install must have been behind a release before it hears
+ * of one. GitHub publishes a release before Play finishes reviewing and
+ * rolling it out, and Play is the only one that can install it. Measured
+ * from the first release it fell behind, so frequent releases cannot keep
+ * restarting the wait.
  */
 const val PLAY_DELAY_MS = 7 * 24 * 60 * 60 * 1000L
 
@@ -55,30 +58,31 @@ fun checkDue(now: Long, checkedAt: Long, appUpdatedAt: Long): Boolean =
  * [stored] after a check at [now] that printed [line], or failed with null.
  * A failed check keeps the last answer and waits for the next interval.
  */
-fun afterCheck(stored: StoredUpdate, now: Long, line: String?): StoredUpdate {
-    val latest = line?.let(::parseUpdateCheck)?.latest ?: return stored.copy(checkedAt = now)
-    val seen = latest.isEmpty() || latest == stored.seenTag
+fun afterCheck(stored: StoredUpdate, now: Long, line: String?, appUpdatedAt: Long): StoredUpdate {
+    val check = line?.let(::parseUpdateCheck) ?: return stored.copy(checkedAt = now)
+    val stillBehind = stored.behindSince != 0L && stored.behindSince >= appUpdatedAt
     return stored.copy(
         checkedAt = now,
+        answeredAt = now,
         line = line,
-        seenTag = if (seen) stored.seenTag else latest,
-        seenAt = if (seen) stored.seenAt else now,
+        behindSince =
+            when {
+                !check.updateAvailable -> 0L
+                stillBehind -> stored.behindSince
+                else -> now
+            },
     )
 }
 
 /**
  * The check the notice shows, or null for none: a newer release the member
- * has not dismissed, from a check made since the app was last updated. A
- * Play install waits [PLAY_DELAY_MS] from when this phone first saw it.
+ * has not dismissed, from a check answered since the app was last updated.
+ * A Play install waits [PLAY_DELAY_MS] after it first fell behind.
  */
 fun noticeFor(stored: StoredUpdate, source: InstallSource, now: Long, appUpdatedAt: Long): UpdateCheck? {
-    if (stored.checkedAt < appUpdatedAt) return null
+    if (stored.answeredAt < appUpdatedAt) return null
     val check = stored.line?.let(::parseUpdateCheck) ?: return null
     if (!check.updateAvailable || !isReleaseTag(check.latest) || check.latest == stored.dismissed) return null
-    if (source == InstallSource.PLAY &&
-        (check.latest != stored.seenTag || now - stored.seenAt < PLAY_DELAY_MS)
-    ) {
-        return null
-    }
+    if (source == InstallSource.PLAY && now - stored.behindSince < PLAY_DELAY_MS) return null
     return check
 }

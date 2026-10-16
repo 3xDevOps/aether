@@ -7,9 +7,9 @@ private const val DASHBOARD_URL = "dashboard_url"
 private const val MODE = "connection_mode"
 private const val GATEWAY_PORT = "gateway_port"
 private const val UPDATE_CHECKED_AT = "update_checked_at"
+private const val UPDATE_ANSWERED_AT = "update_answered_at"
 private const val UPDATE_CHECK = "update_check"
-private const val UPDATE_SEEN_TAG = "update_seen_tag"
-private const val UPDATE_SEEN_AT = "update_seen_at"
+private const val UPDATE_BEHIND_SINCE = "update_behind_since"
 private const val UPDATE_DISMISSED = "update_dismissed"
 
 /** How the shell reaches a server. */
@@ -72,9 +72,9 @@ fun Context.storedUpdate(): StoredUpdate {
     val prefs = prefs()
     return StoredUpdate(
         checkedAt = prefs.getLong(UPDATE_CHECKED_AT, 0),
+        answeredAt = prefs.getLong(UPDATE_ANSWERED_AT, 0),
         line = prefs.getString(UPDATE_CHECK, null),
-        seenTag = prefs.getString(UPDATE_SEEN_TAG, null),
-        seenAt = prefs.getLong(UPDATE_SEEN_AT, 0),
+        behindSince = prefs.getLong(UPDATE_BEHIND_SINCE, 0),
         dismissed = prefs.getString(UPDATE_DISMISSED, null),
     )
 }
@@ -83,9 +83,9 @@ fun Context.storeUpdate(update: StoredUpdate) {
     prefs()
         .edit()
         .putLong(UPDATE_CHECKED_AT, update.checkedAt)
+        .putLong(UPDATE_ANSWERED_AT, update.answeredAt)
         .putString(UPDATE_CHECK, update.line)
-        .putString(UPDATE_SEEN_TAG, update.seenTag)
-        .putLong(UPDATE_SEEN_AT, update.seenAt)
+        .putLong(UPDATE_BEHIND_SINCE, update.behindSince)
         .putString(UPDATE_DISMISSED, update.dismissed)
         .apply()
 }

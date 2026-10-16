@@ -66,7 +66,8 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
                 val line = runCheck(context)
                 main.post {
                     if (destroyed) return@post
-                    val next = afterCheck(activity.storedUpdate(), System.currentTimeMillis(), line)
+                    val next =
+                        afterCheck(activity.storedUpdate(), System.currentTimeMillis(), line, appUpdatedAt())
                     activity.storeUpdate(next)
                     render(next)
                 }
