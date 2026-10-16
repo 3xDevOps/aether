@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -135,6 +136,10 @@ func stageIn(ctx context.Context, m Manifest, asset, dst, dir string) (*Staged, 
 		staged.close(tmp)
 		return nil, fmt.Errorf("chmod staged binary: %w", err)
 	}
+	if err := tmp.Sync(); err != nil {
+		staged.close(tmp)
+		return nil, fmt.Errorf("sync staged binary: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		staged.Discard()
 		return nil, fmt.Errorf("close staged binary: %w", err)
@@ -148,12 +153,27 @@ func (s *Staged) close(f *os.File) {
 	s.Discard()
 }
 
-// Commit renames the staged file over its destination.
+// Commit renames the staged file over its destination and syncs the
+// directory so a crash cannot undo the rename. Windows cannot sync a
+// directory handle.
 func (s *Staged) Commit() error {
 	if err := os.Rename(s.tmp, s.dst); err != nil {
 		return fmt.Errorf("replace %s: %w", s.dst, err)
 	}
 	s.committed = true
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dir, err := os.Open(filepath.Dir(s.dst))
+	if err == nil {
+		err = dir.Sync()
+		if cerr := dir.Close(); err == nil {
+			err = cerr
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("replaced %s but did not sync its directory: %w", s.dst, err)
+	}
 	return nil
 }
 
