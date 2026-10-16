@@ -25,6 +25,8 @@ type githubRepositoryFixture struct {
 	err     error
 	members []domain.MemberID
 	pages   []int
+	pr      githubservice.PullRequest
+	lookups []string
 }
 
 func newGitHubRepositoryFixture() *githubRepositoryFixture {
@@ -50,6 +52,13 @@ func (f *githubRepositoryFixture) Repository(_ context.Context, member domain.Me
 		return githubservice.Account{}, githubservice.Repository{}, errors.New("repository not accessible")
 	}
 	return f.account, f.repo, f.err
+}
+
+func (f *githubRepositoryFixture) PullRequest(_ context.Context, member domain.MemberID, fullName string, number int) (githubservice.Account, githubservice.PullRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lookups = append(f.lookups, fmt.Sprintf("%s %s#%d", member, fullName, number))
+	return f.account, f.pr, f.err
 }
 
 func (f *githubRepositoryFixture) setup(c *Config, mirrorConfig *mirrorservice.Config) {

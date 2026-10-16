@@ -69,6 +69,7 @@ type GitHubOAuthController interface {
 type GitHubService interface {
 	Repositories(context.Context, domain.MemberID, int) (githubservice.RepositoryPage, error)
 	Repository(context.Context, domain.MemberID, string) (githubservice.Account, githubservice.Repository, error)
+	PullRequest(context.Context, domain.MemberID, string, int) (githubservice.Account, githubservice.PullRequest, error)
 }
 
 func (s *Server) githubOAuthStart(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

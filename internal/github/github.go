@@ -153,6 +153,40 @@ func (s *Service) Repository(ctx context.Context, member domain.MemberID, fullNa
 	return account, repo, nil
 }
 
+// PullRequest is a pull request's state as GitHub reports it: open, closed
+// or merged. MergedAt is nil while it is not merged.
+type PullRequest struct {
+	URL, State string
+	MergedAt   *time.Time
+}
+
+func (s *Service) PullRequest(ctx context.Context, member domain.MemberID, fullName string, number int) (Account, PullRequest, error) {
+	if !validFullName(fullName) || number <= 0 {
+		return Account{}, PullRequest{}, errors.New("github: pull request must be an owner/name on github.com and a positive number")
+	}
+	token, account, err := s.Credentials(ctx, member)
+	if err != nil {
+		return Account{}, PullRequest{}, err
+	}
+	var record struct {
+		Number   int        `json:"number"`
+		URL      string     `json:"html_url"`
+		State    string     `json:"state"`
+		MergedAt *time.Time `json:"merged_at"`
+	}
+	if _, err = s.get(ctx, token, "/repos/"+fullName+"/pulls/"+strconv.Itoa(number), &record); err != nil {
+		return Account{}, PullRequest{}, err
+	}
+	if record.Number != number || record.State != "open" && record.State != "closed" {
+		return Account{}, PullRequest{}, errors.New("github: API returned invalid pull request metadata")
+	}
+	pr := PullRequest{URL: record.URL, State: record.State, MergedAt: record.MergedAt}
+	if pr.MergedAt != nil {
+		pr.State = "merged"
+	}
+	return account, pr, nil
+}
+
 func parseCredential(data []byte) (string, string, error) {
 	if len(data) == 0 {
 		return "", "", errors.New("github: no native gh login found; connect GitHub")
