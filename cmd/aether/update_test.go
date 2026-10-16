@@ -7,12 +7,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
+	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -147,5 +151,31 @@ func TestMatchServerInstallsTheServersRelease(t *testing.T) {
 		if got := matchServer(tc.server); got != tc.want {
 			t.Errorf("%s: matchServer = %q, want %q", tc.name, got, tc.want)
 		}
+	}
+}
+
+// On a server host the release's aether-server must know this build's
+// store schema, or it could not open the database.
+func TestUpdateRefusesAServerThatCannotOpenTheDatabase(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("aether-server is installed beside the CLI on Linux only")
+	}
+	rel := releasetest.Serve(t, "v0.9.0", map[string][]byte{"aether-linux-amd64": []byte("cli")})
+	dir := t.TempDir()
+	self := filepath.Join(dir, "aether")
+	if err := checkServerSchema(t.Context(), rel.URL, "v0.9.0", self); err != nil {
+		t.Fatalf("a client-only install: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "aether-server"), []byte("server"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkServerSchema(t.Context(), rel.URL, "v0.9.0", self); err != nil {
+		t.Fatalf("a release at this schema: %v", err)
+	}
+	rel.SetStoreSchema(store.SchemaVersion() - 1)
+	err := checkServerSchema(t.Context(), rel.URL, "v0.9.0", self)
+	want := fmt.Sprintf("it knows store schema %d and this build's server migrates the database to schema %d", store.SchemaVersion()-1, store.SchemaVersion())
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want both schemas named", err)
 	}
 }

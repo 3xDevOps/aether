@@ -474,7 +474,12 @@ takes the latest signed release only when it is newer than the running one,
 and otherwise answers `no update: aether-server v0.9.0 is not older than the
 latest release v0.9.0`. A release whose manifest records an older database
 schema than this server's database is always refused: that binary could not
-open the database.
+open the database. `aether update` on a server host refuses such a release
+the same way, naming both schemas:
+
+```
+aether: refusing to install aether-server v0.9.0: it knows store schema 90 and this build's server migrates the database to schema 91
+```
 
 **The swap.** `--when now` (the default) downloads both binaries and
 verifies them against the manifest before replacing either, then renames

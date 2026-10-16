@@ -20,6 +20,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/shellquote"
+	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -98,6 +99,17 @@ func runUpdate(args []string) error {
 		return err
 	}
 
+	self, err := os.Executable()
+	if err == nil {
+		self, err = filepath.EvalSymlinks(self)
+	}
+	if err != nil {
+		return fmt.Errorf("locate this binary: %w", err)
+	}
+	if err = checkServerSchema(ctx, base, *tag, self); err != nil {
+		return err
+	}
+
 	fmt.Printf("updating aether %s -> %s\n", version.String(), *tag)
 	replaced, err := selfupdate.Update(ctx, base, *tag)
 	for _, path := range replaced {
@@ -119,6 +131,28 @@ func runUpdate(args []string) error {
 	// replaced[0] is this CLI's own path with its symlinks resolved, which
 	// is where the new binary now sits.
 	return rebuildDesktopApp(replaced[0])
+}
+
+// checkServerSchema refuses tag on a server host - a Linux box with
+// aether-server beside self, which selfupdate.Update replaces too - when
+// the release's server does not know the schema this build's server
+// migrates the database to: it could not open the database.
+func checkServerSchema(ctx context.Context, base, tag, self string) error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(self), "aether-server")); err != nil {
+		return nil
+	}
+	m, err := selfupdate.FetchManifestFrom(ctx, base, tag)
+	if err != nil {
+		return err
+	}
+	if m.StoreSchema < store.SchemaVersion() {
+		return fmt.Errorf("refusing to install aether-server %s: it knows store schema %d and this build's server migrates the database to schema %d",
+			tag, m.StoreSchema, store.SchemaVersion())
+	}
+	return nil
 }
 
 // linkedServer is what the server-first check needs from the linked
