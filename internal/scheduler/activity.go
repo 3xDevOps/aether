@@ -33,8 +33,9 @@ const waitedFactor = 3
 type activityFacts struct {
 	status domain.RunStatus
 	// human is an open request for a human: a pending permission, question
-	// or approval, a shown needs-input or blocked outcome, or a usage limit
-	// Aether will not resume from.
+	// or approval, a shown needs-input or blocked outcome, a usage limit
+	// Aether will not resume from, or an Enhanced turn interrupted or
+	// stopped short.
 	human        bool
 	disconnected bool
 	failed       bool
@@ -74,9 +75,12 @@ func disconnectedReason(reason string) bool {
 	return strings.HasPrefix(reason, acpFailedReason) || strings.HasPrefix(reason, acpEndedReason)
 }
 
+// humanReason reports a reason only a member can move on from. A turn
+// cut off or stopped short waits for a message to continue; a cancelled one
+// does not, since the member who cancelled it knows.
 func humanReason(reason string) bool {
 	return strings.HasPrefix(reason, needsInputReasonPrefix) || strings.HasPrefix(reason, blockedReasonPrefix) ||
-		strings.HasPrefix(reason, usageLimitReason)
+		strings.HasPrefix(reason, usageLimitReason) || reason == acpInterruptedReason || strings.HasPrefix(reason, acpStoppedReason)
 }
 
 // failedReason reports a turn the agent could not finish, or its reported

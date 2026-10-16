@@ -302,6 +302,8 @@ function statusBody(run) {
     if (reason.startsWith('blocked: ')) return (worker ? 'Worker blocked: ' : 'Blocked: ') + reason.slice('blocked: '.length)
     if (reason.startsWith('needs input: ')) return reason.slice('needs input: '.length)
     if (reason.startsWith('Usage limit reached on ')) return reason
+    if (reason === 'turn interrupted') return 'Turn interrupted, send a message to continue'
+    if (reason.startsWith('turn ended: ')) return `Turn ended (${reason.slice('turn ended: '.length)}), send a message to continue`
     return 'Waiting for your reply'
   }
   if (run.state === 'disconnected') {
