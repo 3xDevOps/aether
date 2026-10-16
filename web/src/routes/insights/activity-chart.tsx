@@ -102,7 +102,7 @@ export function ActivityChart({
                       refs.current[i] = node
                     }}
                     role="button"
-                    tabIndex={i === focus ? 0 : -1}
+                    tabIndex={i === Math.min(focus, series.length - 1) ? 0 : -1}
                     aria-pressed={isSelected}
                     aria-label={bucketWords(b, bucket)}
                     onClick={() => {
