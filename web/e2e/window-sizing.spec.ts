@@ -56,6 +56,10 @@ function available(over: Record<string, unknown> = {}) {
     // The longest of the three explanations, so the prose above the button is
     // as tall as this prompt ever gets.
     install_method: 'admin-prompt',
+    client_update_required: false,
+    target_version: 'v0.3.0',
+    server_first: false,
+    can_self_update: true,
     ...over,
   }
 }
@@ -100,6 +104,13 @@ async function openDesktop(page: Page, gateway: Gateway): Promise<void> {
         onMaximizedChange: () => () => {},
       },
     }
+  })
+  // A CI checkout has no tags, so the gateway under test reports a bare
+  // commit, which is not a release and so never makes a shell stale. It
+  // reports the release update.check names instead.
+  await page.route('**/api/v1/capabilities', async (route) => {
+    const response = await route.fetch()
+    await route.fulfill({ response, json: { ...(await response.json()), version: 'v0.2.0' } })
   })
   await page.goto(gateway.url)
   const sidebar = page.getByRole('navigation', { name: 'Aether' })
