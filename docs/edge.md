@@ -1007,6 +1007,22 @@ link as the CLI ([local-gateway.md](local-gateway.md)). A phone without the
 Android app's Edge mode reaches a server's dashboard over a tailnet
 ([networking.md](networking.md#the-dashboard)).
 
+A failed connection names the layer that failed, the server id it dialed
+and the edge host: this machine to the edge, this device's authorization,
+the server's registration with the edge, or the relayed connection to the
+server ([local-gateway.md](local-gateway.md#design)). When the edge has
+no live registration for the linked id but sees other servers of your
+account online, the CLI and the dashboard list them:
+
+```
+connect to server <old id>: edge.onaether.dev refused: server is not connected to the edge (HTTP 503)
+  this link names server <old id>, but edge.onaether.dev sees these servers of github account dana online: <new id> (prod)
+  if one is this server under a new id, link it with: aether link --from-edge <id>
+```
+
+A server reinstalled with a new data directory has a new host key and so a
+new id; compare it with `sudo aether-server edge status` before relinking.
+
 The desktop app and the Android app in Edge mode open `aether://join` and
 `aether://claim` links at onboarding's Connect step, which joins with the
 local gateway's `edge.join` or claims with `edge.claim`. The Android app in

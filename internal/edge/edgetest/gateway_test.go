@@ -2,6 +2,7 @@ package edgetest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -40,32 +41,21 @@ func gatewayCall(t *testing.T, g *localgw.Gateway, path, body string, out any) {
 	}
 }
 
-// The desktop onboarding wizard signs in, claims and links a server
-// through the local gateway alone, then reaches it over that link. It
-// then joins another server by an invitation's link, calling edge.join
-// again while the device waits, as the dashboard does, until that
-// server's admin approves the device by its id.
-func TestGatewaySignsInClaimsAndLinks(t *testing.T) {
-	h := newHarness(t)
-	s := h.newServer(edgeproto.PolicyApprovedDevices)
-	testhome.Isolate(t)
-	g, err := localgw.New(localgw.Config{Backend: localgw.NewSSHBackend(cli.Config{})})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = g.Close() })
-
+// gatewaySignIn signs the gateway in to the edge as user, as the
+// dashboard's sign-in step does, confirming the code in user's browser.
+func gatewaySignIn(t *testing.T, h *harness, g *localgw.Gateway, user ghUser, label string) {
+	t.Helper()
 	var login struct {
 		State        string `json:"state"`
 		UserCode     string `json:"user_code"`
 		SigninOrigin string `json:"signin_origin"`
 	}
 	h.advance(5 * time.Minute)
-	gatewayCall(t, g, "/local/v1/edge.login", `{"edge":"`+h.relayURL+`","label":"alice-desktop"}`, &login)
+	gatewayCall(t, g, "/local/v1/edge.login", `{"edge":"`+h.relayURL+`","label":"`+label+`"}`, &login)
 	if login.SigninOrigin != h.signinURL {
 		t.Fatalf("edge.login names sign-in origin %q, want %q", login.SigninOrigin, h.signinURL)
 	}
-	b, err := h.signIn(alice)
+	b, err := h.signIn(user)
 	if err == nil {
 		err = b.approveDevice(login.UserCode)
 	}
@@ -85,6 +75,24 @@ func TestGatewaySignsInClaimsAndLinks(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// The desktop onboarding wizard signs in, claims and links a server
+// through the local gateway alone, then reaches it over that link. It
+// then joins another server by an invitation's link, calling edge.join
+// again while the device waits, as the dashboard does, until that
+// server's admin approves the device by its id.
+func TestGatewaySignsInClaimsAndLinks(t *testing.T) {
+	h := newHarness(t)
+	s := h.newServer(edgeproto.PolicyApprovedDevices)
+	testhome.Isolate(t)
+	g, err := localgw.New(localgw.Config{Backend: localgw.NewSSHBackend(cli.Config{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = g.Close() })
+
+	gatewaySignIn(t, h, g, alice, "alice-desktop")
 
 	h.advance(time.Minute)
 	var linked struct {
@@ -147,4 +155,177 @@ func TestGatewaySignsInClaimsAndLinks(t *testing.T) {
 	if linked.ServerID != other.id || linked.Edge != h.relayURL || linked.Member.Role != "collaborator" {
 		t.Fatalf("edge.join after approval = %+v", linked)
 	}
+}
+
+// gatewayFailure is the error data a gateway request failed with.
+type gatewayFailure struct {
+	Code     int
+	Message  string
+	Refusal  *edgeproto.Refused
+	EdgePath *struct {
+		Layer    string                 `json:"layer"`
+		ServerID string                 `json:"server_id"`
+		Edge     string                 `json:"edge"`
+		Account  string                 `json:"account"`
+		Online   []edgeproto.ServerInfo `json:"online"`
+	}
+}
+
+// serverInfo calls server.info through the gateway and returns its
+// failure, nil when it succeeded.
+func serverInfo(t *testing.T, g *localgw.Gateway) *gatewayFailure {
+	t.Helper()
+	rec := gatewayPost(g, "/api/v1/"+protocol.MethodServerInfo, "{}")
+	if rec.Code == http.StatusOK {
+		return nil
+	}
+	var body webgate.ErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Error == nil {
+		t.Fatalf("server.info = %d: %s", rec.Code, rec.Body)
+	}
+	f := &gatewayFailure{Code: rec.Code, Message: body.Error.Message}
+	if len(body.Error.Data) > 0 {
+		var data struct {
+			Refusal  *edgeproto.Refused `json:"refusal"`
+			EdgePath json.RawMessage    `json:"edge_path"`
+		}
+		if err := json.Unmarshal(body.Error.Data, &data); err != nil {
+			t.Fatalf("server.info error data %s: %v", body.Error.Data, err)
+		}
+		f.Refusal = data.Refusal
+		if len(data.EdgePath) > 0 {
+			f.EdgePath = &struct {
+				Layer    string                 `json:"layer"`
+				ServerID string                 `json:"server_id"`
+				Edge     string                 `json:"edge"`
+				Account  string                 `json:"account"`
+				Online   []edgeproto.ServerInfo `json:"online"`
+			}{}
+			if err := json.Unmarshal(data.EdgePath, f.EdgePath); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return f
+}
+
+// failsAt waits until server.info through g fails at layer on the way to
+// serverID, with refusal kind when it is set, and returns that failure.
+func failsAt(t *testing.T, g *localgw.Gateway, layer, serverID, edgeHost string, kind edgeproto.RefusedKind) *gatewayFailure {
+	t.Helper()
+	var last *gatewayFailure
+	eventually(t, "server.info to fail at "+layer, func() error {
+		last = serverInfo(t, g)
+		switch {
+		case last == nil:
+			return errors.New("server.info succeeded")
+		case last.Code != http.StatusServiceUnavailable || last.EdgePath == nil:
+			return fmt.Errorf("server.info = %d %q without edge_path", last.Code, last.Message)
+		case last.EdgePath.Layer != layer || last.EdgePath.ServerID != serverID || last.EdgePath.Edge != edgeHost:
+			return fmt.Errorf("server.info failed with edge_path %+v: %s", *last.EdgePath, last.Message)
+		case kind != "" && (last.Refusal == nil || last.Refusal.Kind != kind):
+			return fmt.Errorf("server.info refused with %+v, want kind %s: %s", last.Refusal, kind, last.Message)
+		}
+		return nil
+	})
+	return last
+}
+
+func reachable(t *testing.T, g *localgw.Gateway, what string) {
+	t.Helper()
+	eventually(t, what, func() error {
+		if f := serverInfo(t, g); f != nil {
+			return fmt.Errorf("server.info = %d: %s", f.Code, f.Message)
+		}
+		return nil
+	})
+}
+
+// Every failure the dashboard sees through the gateway names the layer of
+// the edge path that failed, the server it dialed and the edge, and the
+// gateway reaches the server again as soon as that layer recovers: after
+// a server restart, an edge restart and a sign-in, and onto the server a
+// link made in a terminal names, while the gateway runs.
+func TestGatewayNamesTheFailedLayerAndRecovers(t *testing.T) {
+	h := newHarness(t)
+	s := h.newServer(edgeproto.PolicyAccount)
+	testhome.Isolate(t)
+	g, err := localgw.New(localgw.Config{Backend: localgw.NewSSHBackend(cli.Config{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = g.Close() })
+	gatewaySignIn(t, h, g, alice, "alice-desktop")
+	h.advance(time.Minute)
+	var linked struct {
+		ServerID string `json:"server_id"`
+	}
+	gatewayCall(t, g, "/local/v1/edge.claim", `{"code":"`+s.claimCode(t, time.Now())+`"}`, &linked)
+	edgeHost := strings.TrimPrefix(h.relayURL, "http://")
+	reachable(t, g, "the claimed server")
+
+	s.stop()
+	f := failsAt(t, g, cli.LayerRegistration, s.id, edgeHost, edgeproto.RefusedNotConnected)
+	if f.EdgePath.Account != "github account "+alice.Login || len(f.EdgePath.Online) != 0 {
+		t.Fatalf("stopped server: edge_path %+v", *f.EdgePath)
+	}
+	s.start()
+	reachable(t, g, "the restarted server")
+
+	h.stopEdge()
+	failsAt(t, g, cli.LayerClientEdge, s.id, edgeHost, "")
+	h.startEdge()
+	eventually(t, "server back on the restarted edge", func() error {
+		if !h.relay().Online(s.id) {
+			return errors.New("not online")
+		}
+		return nil
+	})
+	reachable(t, g, "the server after the edge restarted")
+
+	// The server is reinstalled under a new id: the edge sees the new one
+	// online, and the gateway's link still names the old one.
+	s.stop()
+	other := h.newServer(edgeproto.PolicyAccount)
+	h.claimServer(h.login(alice)[0], other)
+	f = failsAt(t, g, cli.LayerRegistration, s.id, edgeHost, edgeproto.RefusedNotConnected)
+	if len(f.EdgePath.Online) != 1 || f.EdgePath.Online[0].ID != other.id {
+		t.Fatalf("stale link: online %+v, want %s", f.EdgePath.Online, other.id)
+	}
+	if !strings.Contains(f.Message, "aether link --from-edge <id>") {
+		t.Fatalf("stale link message %q names no relink", f.Message)
+	}
+	saved, err := cli.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.ServerID = other.id
+	if err := cli.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	reachable(t, g, "the server a terminal relinked to")
+	var status struct {
+		ServerID string `json:"server_id"`
+	}
+	gatewayCall(t, g, "/local/v1/link.status", "{}", &status)
+	if status.ServerID != other.id {
+		t.Fatalf("link.status names %s after the relink, want %s", status.ServerID, other.id)
+	}
+
+	unclaimed := h.newServer(edgeproto.PolicyAccount)
+	saved.ServerID = unclaimed.id
+	if err := cli.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	failsAt(t, g, cli.LayerRegistration, unclaimed.id, edgeHost, edgeproto.RefusedUnknownServer)
+	saved.ServerID = other.id
+	if err := cli.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	reachable(t, g, "the relinked server again")
+
+	gatewayCall(t, g, "/local/v1/edge.logout", `{"edge":"`+h.relayURL+`"}`, &struct{}{})
+	failsAt(t, g, cli.LayerAuthorization, other.id, edgeHost, "")
+	gatewaySignIn(t, h, g, alice, "alice-desktop")
+	reachable(t, g, "the server after signing in again")
 }

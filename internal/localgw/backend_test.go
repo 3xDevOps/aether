@@ -366,7 +366,8 @@ func TestEventsDialFailureFrameIsUnavailable(t *testing.T) {
 }
 
 // A refusal on the edge path reaches the dashboard as data beside the
-// message, on the API and on the events refusal frame alike.
+// message, with the layer that failed, on the API and on the events
+// refusal frame alike.
 func TestEdgeRefusalCarriesItsKind(t *testing.T) {
 	t.Setenv(cli.ConfigDirEnv, t.TempDir())
 	dir, err := cli.Dir()
@@ -380,8 +381,9 @@ func TestEdgeRefusalCarriesItsKind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := NewSSHBackend(cli.Config{EdgeURL: "https://edge.example.test", ServerID: edgeproto.ServerID(host.PublicKey())})
-	want := `{"refusal":{"kind":"not-signed-in"}}`
+	serverID := edgeproto.ServerID(host.PublicKey())
+	b := NewSSHBackend(cli.Config{EdgeURL: "https://edge.example.test", ServerID: serverID})
+	want := `{"refusal":{"kind":"not-signed-in"},"edge_path":{"layer":"authorization","server_id":"` + serverID + `","edge":"edge.example.test"}}`
 
 	if _, perr := b.Call(context.Background(), protocol.MethodServerInfo, nil); perr == nil || string(perr.Data) != want {
 		t.Fatalf("Call = %+v, want data %s", perr, want)

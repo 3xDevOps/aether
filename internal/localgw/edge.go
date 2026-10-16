@@ -133,26 +133,44 @@ func edgeError(err error) *protocol.Error {
 	return &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error(), Data: refusalData(err)}
 }
 
-// refusalData is the error data {"refusal": <edgeproto.Refused>} of a
-// failure on the edge path, nil for any other. A server's refusal comes
-// before the edge's when a direct and an edge attempt both failed.
+// edgePath is the error data "edge_path": the layer of the edge path
+// that failed, the server dialed and the edge host it was dialed through.
+type edgePath struct {
+	Layer    string                 `json:"layer"`
+	ServerID string                 `json:"server_id"`
+	Edge     string                 `json:"edge,omitempty"`
+	Account  string                 `json:"account,omitempty"`
+	Online   []edgeproto.ServerInfo `json:"online,omitempty"`
+}
+
+// refusalData is the error data of a failure on the edge path, nil for
+// any other: "refusal", an *edgeproto.Refused, when the server, the edge
+// or this client refused, and "edge_path" when the failure is a
+// *cli.EdgePathError. A server's refusal comes before the edge's when a
+// direct and an edge attempt both failed.
 func refusalData(err error) json.RawMessage {
 	var (
-		refused     *edgeproto.Refused
+		data struct {
+			Refusal  *edgeproto.Refused `json:"refusal,omitempty"`
+			EdgePath *edgePath          `json:"edge_path,omitempty"`
+		}
 		edgeRefused *edgeclient.RefusedError
+		path        *cli.EdgePathError
 	)
 	switch {
-	case errors.As(err, &refused):
+	case errors.As(err, &data.Refusal):
 	case errors.As(err, &edgeRefused):
-		refused = edgeproto.RefusedBy(edgeproto.Refusal(edgeRefused.Message))
+		data.Refusal = edgeproto.RefusedBy(edgeproto.Refusal(edgeRefused.Message))
 	case errors.Is(err, edgeclient.ErrNotSignedIn):
-		refused = &edgeproto.Refused{Kind: edgeproto.RefusedNotSignedIn}
-	default:
+		data.Refusal = &edgeproto.Refused{Kind: edgeproto.RefusedNotSignedIn}
+	}
+	if errors.As(err, &path) {
+		data.EdgePath = &edgePath{Layer: path.Layer, ServerID: path.ServerID, Edge: path.Edge, Account: path.Account, Online: path.Online}
+	}
+	if data.Refusal == nil && data.EdgePath == nil {
 		return nil
 	}
-	raw, _ := json.Marshal(struct {
-		Refusal *edgeproto.Refused `json:"refusal"`
-	}{refused})
+	raw, _ := json.Marshal(data)
 	return raw
 }
 
