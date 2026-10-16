@@ -82,6 +82,30 @@ func TestRunReview(t *testing.T) {
 	review(domain.ReviewAccepted, "accepted")
 }
 
+// A success reported after the exit already completed the run asks for
+// review once; the replayed report keeps what the owner chose.
+func TestRunReviewOfASuccessReportedAfterExit(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	workspace := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+	if _, err := db.UpdateRunStatus(ctx, run.ID, domain.RunCompleted, "agent exited; results committed", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	stamp, err := db.FinishRunReported(ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, nil)
+	if err != nil || stamp.Review != domain.ReviewReady || stamp.ReviewChangedAt == nil {
+		t.Fatalf("late success = %+v, %v; want ready", stamp, err)
+	}
+	if _, _, err = db.SetRunReview(ctx, run.ID, domain.ReviewAccepted, domain.ReviewReady); err != nil {
+		t.Fatal(err)
+	}
+	if stamp, err = db.FinishRunReported(ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, nil); err != nil || stamp.Review != domain.ReviewAccepted {
+		t.Fatalf("replayed success = %+v, %v; want accepted kept", stamp, err)
+	}
+}
+
 // Every run from before v72 starts with no review, so none of them asks
 // for one, and a legacy idle activity still reads.
 func TestRunReviewMigrationFromV71(t *testing.T) {

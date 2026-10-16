@@ -518,8 +518,10 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 		return RunStatusStamp{}, fmt.Errorf("store: update run status: %w", err)
 	}
 	// A write that keeps the run's standing keeps its review, so a replayed
-	// report cannot re-arm one the owner already put off or accepted.
-	const review = `(CASE WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN review WHEN ? THEN 'ready' ELSE '' END)`
+	// report cannot re-arm one the owner already put off or accepted. A
+	// success reported over an exit's reason on the same terminal status is
+	// new, so it asks for review.
+	const review = `(CASE WHEN ? AND review = '' AND reason <> ? THEN 'ready' WHEN status = ? AND (status <> 'needs-attention' OR reason = ?) THEN review WHEN ? THEN 'ready' ELSE '' END)`
 	success := reported && (activity == domain.ActivityFinished || status == domain.RunCompleted)
 	var (
 		stamp           RunStatusStamp
@@ -538,8 +540,8 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 		status, reason, activity, started, finished, reported, status, reason,
 		reported, byMember, status, reason, status.Terminal(),
 		status, reason, changed,
-		status, reason, success, changed,
-		status, reason, success, id).Scan(&stamp.StatusSeq, &stamp.OutcomeUnseen, &stamp.FinishUnopened, &stamp.Review, &reviewChangedAt)
+		success, reason, status, reason, success, changed,
+		success, reason, status, reason, success, id).Scan(&stamp.StatusSeq, &stamp.OutcomeUnseen, &stamp.FinishUnopened, &stamp.Review, &reviewChangedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return RunStatusStamp{}, ErrNotFound
