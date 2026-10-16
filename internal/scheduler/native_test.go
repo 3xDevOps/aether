@@ -14,7 +14,7 @@ import (
 )
 
 func TestNativeCoordinationLaunchBoundaries(t *testing.T) {
-	for _, name := range []string{"claude", "codex", "omp", "pi", "opencode"} {
+	for _, name := range []string{"claude", "codex", "copilot", "omp", "pi", "opencode"} {
 		for _, boundary := range []string{"interactive", "taskless", "headless", "disabled", "unconfigured", "override"} {
 			if name == "opencode" && boundary == "interactive" {
 				continue // The versioned mount pair is exercised by its registration test.
@@ -69,6 +69,22 @@ func TestNativeCoordinationLaunchBoundaries(t *testing.T) {
 					}
 					if boundary == "override" && !slices.Contains(argv, "--no-extensions") {
 						t.Fatalf("user disable argument lost: %v", argv)
+					}
+					return
+				}
+				if name == "copilot" {
+					want, readErr := coordhooks.Files.ReadFile("copilot.json")
+					if readErr != nil {
+						t.Fatal(readErr)
+					}
+					if !bytes.Equal(coord.file(run.ID, "copilot-hooks.json"), want) || coord.file(run.ID, "plugin.json") == nil {
+						t.Fatal("copilot run was not staged the plugin manifest and hooks")
+					}
+					if i := slices.Index(argv, "--plugin-dir"); countOf(argv, "--plugin-dir") != 1 || argv[i+1] != coordtransport.MountDir {
+						t.Fatalf("copilot argv = %v, want one --plugin-dir %s", argv, coordtransport.MountDir)
+					}
+					if spec.Env[coordtransport.ManagedHooksEnv] != "1" {
+						t.Fatalf("copilot run lacks %s", coordtransport.ManagedHooksEnv)
 					}
 					return
 				}
