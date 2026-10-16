@@ -622,7 +622,7 @@ waiting, 2 updates", and opening the panel clears them. The stream does not
 mark replayed events, so a notice older than 30 seconds on the server's clock (the offset read from `server.info`) counts toward the
 badge but raises no toast. The desktop app shows the same notice as an OS
 notification that opens the run on click (`desktop/notify.js`), and skips a `needs_attention` one
-when a needs-attention notification for the same run fired within five
+when a needs-you notification for the same run fired within five
 seconds. A phone gets the web push the server sends for the same notice.
 
 Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
@@ -4962,9 +4962,19 @@ hold a member's notifications while they are at a dashboard. A server that
 has no such method, or that the member is still pending on, is not asked
 again.
 
-The desktop shell does not use Web Push. `desktop/notify.js` shows its own
-notification on a `run.status` change to `needs-attention`, reads the run
-with `run.get` for the title and words it as `internal/push/need.go` does.
+The desktop shell does not use Web Push. `desktop/notify.js` applies push's
+rule to each `run.status` event (see
+[failure-handling.md](failure-handling.md#run-activity)): it reads the run
+with `run.get` for its title, `paused`, `mission_role` and `member_id`, and
+announces only runs the signed-in member owns, as push does. When `run.get`
+fails it announces nothing. It notifies once per need, keyed on the run's status, state, reason and `status_changed_at`, and
+words it as `internal/push/need.go` does. An event whose `status_seq` is not
+above the last one seen is ignored. `idle`, `waiting-*` and `working` never
+notify. A need counts toward the dock badge and its notification closes when
+the need ends, including on `run.outcome_seen` for an unseen failure. A
+finished result gets one silent, low-urgency notice outside the badge.
+`cd desktop && node --test` runs `desktop/notify.test.js`; `make
+test-scripts` includes it.
 Clicking it pushes `?run=<id>` onto the page's history and dispatches
 `popstate`, which `bindRouteToUrl` follows, so the run opens without the
 reload that would discard an unsent message.

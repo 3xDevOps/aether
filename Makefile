@@ -215,6 +215,7 @@ test-e2e: build
 # a real host, or a real release. edge-nginx-test.sh runs a real nginx on
 # loopback when one is installed, and skips otherwise.
 test-scripts:
+	cd desktop && node --test
 	sh scripts/install-test.sh
 	sh scripts/install-sysbox-test.sh
 	sh scripts/deploy-test.sh
