@@ -263,7 +263,8 @@ bare commit) are never refused, and they never cause a refusal. A server
 built past a tag (`v0.8.0-3-gabc123`) asks for that tag (`v0.8.0`), which
 is what `server.info` reports as `min_client_version`. A client newer than
 the server is accepted. `aether link` saves the link before it reports the
-refusal, so after `aether update` there is nothing to link again.
+refusal. It sets no git remote for `--repo`, because that needs the
+server, so re-run `aether link --repo` after `aether update`.
 
 ### Environment image migration
 
