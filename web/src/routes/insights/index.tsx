@@ -111,6 +111,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
   const [bucketRuns, setBucketRuns] = useState<BucketRuns>({ kind: 'loading' })
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [prErrors, setPRErrors] = useState<Record<string, string>>({})
+  const [rereadError, setRereadError] = useState('')
   const requestID = useRef(0)
   const bucketID = useRef(0)
   const resolvedZone = Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -134,8 +135,8 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
     try {
       const fresh = await client.insightsGet(params)
       if (id === requestID.current) setLoad({ kind: 'ready', result: fresh })
-    } catch {
-      // The page already shows the first read; the next load picks the change up.
+    } catch (error) {
+      if (id === requestID.current) setRereadError(message(error))
     }
   }, [client])
 
@@ -146,6 +147,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
     setLoad({ kind: 'loading' })
     setSelected(null)
     setPRErrors({})
+    setRereadError('')
     const params = { workspace_id: workspace, scope, from: rfc3339(from), to: rfc3339(to), time_zone: timeZone }
     try {
       const result = await client.insightsGet(params)
@@ -201,6 +203,9 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
             <Callout tone="neutral" role="status">This server does not report insights. Update the server to see them.</Callout>
           )}
           {load.kind === 'failed' && <FailureCallout error={load.message} onRetry={() => void read()} />}
+          {load.kind === 'ready' && rereadError && (
+            <p className="text-ui-sm text-muted">A pull request changed state, but reading Insights again failed: {rereadError}</p>
+          )}
           {load.kind === 'ready' && (
             <Insights
               result={load.result}
