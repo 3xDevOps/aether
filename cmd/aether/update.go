@@ -15,8 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/shellquote"
+	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -34,6 +38,7 @@ func runUpdate(args []string) error {
 	check := fs.Bool("check", false, "only report whether an update is available")
 	jsonOut := fs.Bool("json", false, "with --check, print the check as one JSON line")
 	noApp := fs.Bool("no-app", false, "skip rebuilding the installed desktop app")
+	force := fs.Bool("force", false, "install even when the linked server has not been updated to the release first")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -48,6 +53,9 @@ func runUpdate(args []string) error {
 	}
 	if *check && *noApp {
 		return errors.New("--no-app skips part of an install and --check installs nothing; pick one")
+	}
+	if *check && *force {
+		return errors.New("--force skips a check before an install and --check installs nothing; pick one")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -65,7 +73,14 @@ func runUpdate(args []string) error {
 		return selfupdate.ErrWindows
 	}
 	base := "https://github.com/" + selfupdate.Repo
-	if *tag == "" {
+	var server linkedServer
+	if !*force {
+		server = probeLinkedServer(ctx)
+	}
+	if match := matchServer(server); *tag == "" && match != "" {
+		*tag = match
+		fmt.Printf("installing %s to match the server\n", *tag)
+	} else if *tag == "" {
 		got, err := selfupdate.DefaultChecker().CheckFresh(ctx)
 		if err != nil {
 			return err
@@ -80,6 +95,21 @@ func runUpdate(args []string) error {
 		return reportBinary()
 	}
 
+	if err := serverFirst(os.Stdout, *tag, server); err != nil {
+		return err
+	}
+
+	self, err := os.Executable()
+	if err == nil {
+		self, err = filepath.EvalSymlinks(self)
+	}
+	if err != nil {
+		return fmt.Errorf("locate this binary: %w", err)
+	}
+	if err = checkServerSchema(ctx, base, *tag, self); err != nil {
+		return err
+	}
+
 	fmt.Printf("updating aether %s -> %s\n", version.String(), *tag)
 	replaced, err := selfupdate.Update(ctx, base, *tag)
 	for _, path := range replaced {
@@ -89,7 +119,7 @@ func runUpdate(args []string) error {
 		return err
 	}
 	if len(replaced) > 1 {
-		fmt.Println("restart it: sudo systemctl restart aether-server")
+		fmt.Printf("aether-server on disk is now %s; the running server keeps its old version until you restart it: sudo systemctl restart aether-server\n", *tag)
 		if offerSysbox(ctx, "/etc/os-release", dockerRuntimes) {
 			fmt.Println("Let agents use Docker inside runs: sudo aether-server sysbox install (or Settings → Server in the dashboard)")
 		}
@@ -101,6 +131,107 @@ func runUpdate(args []string) error {
 	// replaced[0] is this CLI's own path with its symlinks resolved, which
 	// is where the new binary now sits.
 	return rebuildDesktopApp(replaced[0])
+}
+
+// checkServerSchema refuses tag on a server host - a Linux box with
+// aether-server beside self, which selfupdate.Update replaces too - when
+// the release's server does not know the schema this build's server
+// migrates the database to: it could not open the database.
+func checkServerSchema(ctx context.Context, base, tag, self string) error {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(self), "aether-server")); err != nil {
+		return nil
+	}
+	m, err := selfupdate.FetchManifestFrom(ctx, base, tag)
+	if err != nil {
+		return err
+	}
+	if m.StoreSchema < store.SchemaVersion() {
+		return fmt.Errorf("refusing to install aether-server %s: it knows store schema %d and this build's server migrates the database to schema %d",
+			tag, m.StoreSchema, store.SchemaVersion())
+	}
+	return nil
+}
+
+// linkedServer is what the server-first check needs from the linked
+// server; reachable is false when there is no link or no answer.
+type linkedServer struct {
+	reachable bool
+	version   string
+	admin     bool
+	capable   bool
+	manual    []string
+}
+
+// probeLinkedServer asks the linked server for its version, this member's
+// role, and whether it can update itself. Anything that stops the answer
+// - no link, an unreachable server - reports it unreachable: the client
+// update never depends on the server.
+func probeLinkedServer(ctx context.Context) linkedServer {
+	cfg, err := cli.Load()
+	if err != nil {
+		return linkedServer{}
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	conn, err := cli.DialContext(ctx, cfg)
+	if err != nil {
+		return linkedServer{}
+	}
+	defer func() { _ = conn.Close() }()
+	// Calls take no context; closing the connection is what ends one
+	// stalled past the timeout.
+	defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
+	c, err := conn.Control()
+	if err != nil {
+		return linkedServer{}
+	}
+	defer func() { _ = c.Close() }()
+	var info protocol.ServerInfoResult
+	if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+		return linkedServer{}
+	}
+	out := linkedServer{reachable: true, version: info.ServerVersion, admin: info.Member.Role == string(domain.RoleAdmin)}
+	var status protocol.ServerUpdateStatusResult
+	if err := c.Call(protocol.MethodServerUpdateStatus, struct{}{}, &status); err == nil {
+		out.capable, out.manual = status.Capable, status.ManualCommands
+	}
+	return out
+}
+
+// matchServer is the release to install with no --version when the linked
+// server runs a newer release than this client: exactly the server's, so
+// the client catches up without moving ahead of it. Empty means the latest
+// release.
+func matchServer(server linkedServer) string {
+	if !server.reachable {
+		return ""
+	}
+	return cli.MatchServer(version.Version, server.version)
+}
+
+// serverFirst refuses to move this client past a linked server that its
+// admin can update: the server goes first, and only to a release every
+// client can install. A member who cannot update the server is told who
+// can and the install goes ahead, as it does when the server is
+// unreachable or already current.
+func serverFirst(w io.Writer, target string, server linkedServer) error {
+	if !server.reachable || !selfupdate.Behind(server.version, target) {
+		return nil
+	}
+	running := printable(server.version)
+	switch {
+	case cli.ServerFirst(server.version, target, server.admin, server.capable):
+		return fmt.Errorf("update the server first: aether server update (the server runs %s and this installs %s; --force skips this check)",
+			running, target)
+	case server.admin:
+		_, _ = fmt.Fprintf(w, "the server runs %s; update it first on the server host: %s\n", running, printable(strings.Join(server.manual, ", then ")))
+	default:
+		_, _ = fmt.Fprintf(w, "the server runs %s; ask a server admin to run: aether server update\n", running)
+	}
+	return nil
 }
 
 func dockerRuntimes(ctx context.Context) (string, error) {

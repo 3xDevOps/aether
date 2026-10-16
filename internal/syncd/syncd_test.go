@@ -350,14 +350,30 @@ func TestWaitReplaced(t *testing.T) {
 	if err := os.WriteFile(path, []byte("v1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if err := waitReplaced(ctx, path, 5*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := waitReplaced(ctx, path, before, 5*time.Millisecond, time.Hour); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("unchanged executable: waitReplaced = %v, want deadline exceeded", err)
 	}
+	// The recheck hands the refused daemon back to Run to ask the server
+	// again, which may have rolled back and stopped refusing.
+	if replaced, err := waitReplaced(context.Background(), path, before, 5*time.Millisecond, 30*time.Millisecond); replaced || err != nil {
+		t.Fatalf("unchanged executable at recheck: waitReplaced = %v, %v; want false, nil", replaced, err)
+	}
 
-	done := make(chan error, 1)
-	go func() { done <- waitReplaced(context.Background(), path, 5*time.Millisecond) }()
+	type result struct {
+		replaced bool
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		replaced, err := waitReplaced(context.Background(), path, before, 5*time.Millisecond, time.Hour)
+		done <- result{replaced, err}
+	}()
 	time.Sleep(20 * time.Millisecond)
 	next := path + ".new"
 	if err := os.WriteFile(next, []byte("v2"), 0o755); err != nil {
@@ -367,11 +383,16 @@ func TestWaitReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("replaced executable: waitReplaced = %v, want nil", err)
+	case got := <-done:
+		if !got.replaced || got.err != nil {
+			t.Fatalf("replaced executable: waitReplaced = %v, %v; want true, nil", got.replaced, got.err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("waitReplaced did not notice the replaced executable")
+	}
+	// Replaced between two waits still counts: the stat is the one from
+	// the first refusal, not from the latest wait.
+	if replaced, err := waitReplaced(context.Background(), path, before, 5*time.Millisecond, time.Hour); !replaced || err != nil {
+		t.Fatalf("executable replaced before the wait: waitReplaced = %v, %v; want true, nil", replaced, err)
 	}
 }

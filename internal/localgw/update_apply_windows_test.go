@@ -58,6 +58,8 @@ func TestUpdateCheckReportsNoSelfUpdateOnWindows(t *testing.T) {
 			UpdateAvailable bool `json:"update_available"`
 			CanSelfUpdate   bool `json:"can_self_update"`
 		} `json:"cli"`
+		TargetVersion string `json:"target_version"`
+		CanSelfUpdate bool   `json:"can_self_update"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
@@ -65,7 +67,10 @@ func TestUpdateCheckReportsNoSelfUpdateOnWindows(t *testing.T) {
 	if !got.CLI.UpdateAvailable {
 		t.Error("update_available = false; Windows still gets told about a release")
 	}
-	if got.CLI.CanSelfUpdate {
+	if got.CLI.CanSelfUpdate || got.CanSelfUpdate {
 		t.Error("can_self_update = true on Windows")
+	}
+	if got.TargetVersion != releaseTag {
+		t.Errorf("target_version = %q, want %s to install by hand", got.TargetVersion, releaseTag)
 	}
 }

@@ -5,12 +5,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -196,8 +198,29 @@ func serve(args []string) error {
 			return fmt.Errorf("invalid --agent-definitions JSON: %w", err)
 		}
 	}
+	// The last update's swap record is read before the store opens: a
+	// start that has to roll back must do so before this binary migrates
+	// the database.
+	host := serverupdate.HostProcess()
+	stateDir := server.UpdateStateDir(*o.dataDir)
+	trial, err := serverupdate.Boot(stateDir, host)
+	if err != nil {
+		return err
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	ctx, stopServe := context.WithCancelCause(ctx)
+	defer stopServe(nil)
+	var (
+		drainMu sync.Mutex
+		drained []string
+	)
+	drain := func(argv []string) {
+		drainMu.Lock()
+		drained = argv
+		drainMu.Unlock()
+		stopServe(errors.New("restarting for a server update"))
+	}
 	srv, err := server.New(ctx, server.Config{
 		DataDir:           *o.dataDir,
 		Addr:              *o.addr,
@@ -218,7 +241,7 @@ func serve(args []string) error {
 		// The one place a process is granted the right to replace itself
 		// and to ask systemd for a restart. Nothing else supplies it, so
 		// no test binary can reach the host's service manager.
-		SelfUpdate: serverupdate.Config{Host: serverupdate.HostProcess()},
+		SelfUpdate: serverupdate.Config{Host: host, Drain: drain},
 
 		StallThreshold:   *o.stallThreshold,
 		PollInterval:     *o.pollInterval,
@@ -233,15 +256,65 @@ func serve(args []string) error {
 		SysboxInstaller:  true,
 	})
 	if err != nil {
-		return err
+		return trial.Fail(err)
 	}
+	// server.New has migrated the store, so the trial's deadline starts
+	// now. At the deadline the process exits rather than cancelling ctx: a
+	// start stuck somewhere that ignores ctx would otherwise never end.
+	deadline, err := trial.Migrated()
+	if err != nil {
+		return trial.Fail(errors.Join(err, srv.Close()))
+	}
+	if !deadline.IsZero() {
+		timer := time.AfterFunc(time.Until(deadline), func() {
+			if expired := trial.Expire(); expired != nil {
+				slog.Error("serverupdate: exiting so the next start rolls back", "error", expired)
+				os.Exit(1)
+			}
+		})
+		defer timer.Stop()
+	}
+	go commitWhenServing(ctx, srv, trial)
 	web := ""
 	if url := srv.WebURL(); url != "" {
 		web = " and the dashboard on " + url
 	}
 	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s%s (data dir %s)%s\n",
 		version.String(), *o.addr, web, *o.dataDir, from)
-	return srv.Run(ctx)
+	err = srv.Run(ctx)
+	drainMu.Lock()
+	argv := drained
+	drainMu.Unlock()
+	if argv != nil {
+		return errors.Join(err, serverupdate.ExecAfterDrain(stateDir, host, argv))
+	}
+	if err != nil {
+		return trial.Fail(err)
+	}
+	return nil
+}
+
+// commitWhenServing commits the start once the SSH listener is bound and
+// the scheduler has recovered the runs from before it: the store opened
+// and migrated in server.New, so the new binary is known to work.
+func commitWhenServing(ctx context.Context, srv *server.Server, trial *serverupdate.Trial) {
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for srv.SSHAddr() == nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return
+	case <-srv.Recovered():
+	}
+	if err := trial.Commit(ctx, srv.Store(), srv.Bus()); err != nil {
+		slog.Error("serverupdate: record the update outcome", "error", err)
+	}
 }
 
 // applyConfigFile loads path and applies it to fs, which must already be

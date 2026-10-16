@@ -7,12 +7,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/selfupdate/releasetest"
+	"github.com/3xDevOps/Aether/internal/store"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 func TestWarnShadowedNamesADifferentAetherInPath(t *testing.T) {
@@ -100,5 +105,88 @@ func TestUpdatePackagedChecksButNeverApplies(t *testing.T) {
 	err = runUpdate(nil)
 	if err == nil || !strings.Contains(err.Error(), "update the Android app instead") {
 		t.Fatalf("packaged apply = %v, want the refusal", err)
+	}
+}
+
+func TestServerFirstRefusesWhenAnAdminCanUpdateTheServer(t *testing.T) {
+	var out bytes.Buffer
+	err := serverFirst(&out, "v0.9.0", linkedServer{reachable: true, version: "v0.8.0", admin: true, capable: true})
+	if err == nil || !strings.HasPrefix(err.Error(), "update the server first: aether server update") {
+		t.Fatalf("err = %v, want the server-first refusal", err)
+	}
+}
+
+func TestServerFirstProceeds(t *testing.T) {
+	for name, server := range map[string]linkedServer{
+		"unreachable":   {},
+		"current":       {reachable: true, version: "v0.9.0", admin: true, capable: true},
+		"ahead":         {reachable: true, version: "v0.9.1", admin: true, capable: true},
+		"dev server":    {reachable: true, version: "dev", admin: true, capable: true},
+		"member":        {reachable: true, version: "v0.8.0"},
+		"manual server": {reachable: true, version: "v0.8.0", admin: true, manual: []string{"sudo aether update"}},
+	} {
+		var out bytes.Buffer
+		if err := serverFirst(&out, "v0.9.0", server); err != nil {
+			t.Errorf("%s: err = %v, want the install to proceed", name, err)
+		}
+	}
+}
+
+func TestServerFirstNeutralizesTheServersVersion(t *testing.T) {
+	var out bytes.Buffer
+	if err := serverFirst(&out, "v0.9.0", linkedServer{reachable: true, version: "v0.8.0-rc\x1b[2J"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "the server runs v0.8.0-rc [2J") {
+		t.Fatalf("output = %q, want control characters neutralized", out.String())
+	}
+}
+
+func TestMatchServerInstallsTheServersRelease(t *testing.T) {
+	old := version.Version
+	version.Version = "v0.8.0"
+	t.Cleanup(func() { version.Version = old })
+	for _, tc := range []struct {
+		name   string
+		server linkedServer
+		want   string
+	}{
+		{"ahead", linkedServer{reachable: true, version: "v0.9.0"}, "v0.9.0"},
+		{"ahead from source", linkedServer{reachable: true, version: "v0.9.0-3-gabc1234"}, "v0.9.0"},
+		{"same", linkedServer{reachable: true, version: "v0.8.0"}, ""},
+		{"behind", linkedServer{reachable: true, version: "v0.7.0"}, ""},
+		{"dev server", linkedServer{reachable: true, version: "dev"}, ""},
+		{"not a tag", linkedServer{reachable: true, version: "0.9.0"}, ""},
+		{"unreachable", linkedServer{}, ""},
+	} {
+		if got := matchServer(tc.server); got != tc.want {
+			t.Errorf("%s: matchServer = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// On a server host the release's aether-server must know this build's
+// store schema, or it could not open the database.
+func TestUpdateRefusesAServerThatCannotOpenTheDatabase(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("aether-server is installed beside the CLI on Linux only")
+	}
+	rel := releasetest.Serve(t, "v0.9.0", map[string][]byte{"aether-linux-amd64": []byte("cli")})
+	dir := t.TempDir()
+	self := filepath.Join(dir, "aether")
+	if err := checkServerSchema(t.Context(), rel.URL, "v0.9.0", self); err != nil {
+		t.Fatalf("a client-only install: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "aether-server"), []byte("server"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkServerSchema(t.Context(), rel.URL, "v0.9.0", self); err != nil {
+		t.Fatalf("a release at this schema: %v", err)
+	}
+	rel.SetStoreSchema(store.SchemaVersion() - 1)
+	err := checkServerSchema(t.Context(), rel.URL, "v0.9.0", self)
+	want := fmt.Sprintf("it knows store schema %d and this build's server migrates the database to schema %d", store.SchemaVersion()-1, store.SchemaVersion())
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("err = %v, want both schemas named", err)
 	}
 }

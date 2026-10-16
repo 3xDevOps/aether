@@ -1588,7 +1588,7 @@ authority.
 | `forward.start` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"state":"active"}`; idempotent for the same target and port |
 | `forward.stop` | `{"target":"run:<run-id>|terminal","port":1455}` | `{"target":"run:<run-id>|terminal","port":1455,"state":"stopped"}` |
 | `forward.status` | `{}` | `{"forwards":[{"target":"run:<run-id>|terminal","port":1455,"local_port":1455,"conns":1}]}` sorted by target, then port |
-| `update.check` | `{"refresh":bool}` (optional; `true` skips the cached release lookup) | `{"cli":{...},"cli_error":"...","server_version":"v1.2.9","server_behind":bool,"server_error":"...","client_update_required":bool,"min_client_version":"v1.2.9","supervised":bool,"shell_build_error":"...","cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual","target_version":"v1.3.0"}` (`target_version` empty when `update.apply` would install nothing; `cli_error` only when the release lookup failed; `server_error` only when the server did not answer; `shell_build_error` only when the last in-app desktop rebuild failed; `cli_path` and `install_method` absent when the binary could not be probed) |
+| `update.check` | `{"refresh":bool}` (optional; `true` skips the cached release lookup) | `{"cli":{...},"cli_error":"...","server_version":"v1.2.9","server_behind":bool,"server_error":"...","client_update_required":bool,"min_client_version":"v1.2.9","supervised":bool,"shell_build_error":"...","cli_path":"/usr/local/bin/aether","install_method":"direct"\|"admin-prompt"\|"manual","target_version":"v1.3.0","server_first":bool,"can_self_update":bool}` (`target_version` empty when there is no release to move to or `server_first` is true; `cli_error` only when the release lookup failed; `server_error` only when the server did not answer; `shell_build_error` only when the last in-app desktop rebuild failed; `cli_path` and `install_method` absent when the binary could not be probed) |
 | `update.apply` | `{}` | `{"updated":["/usr/local/bin/aether"],"version":"v1.3.0","restarting":bool,"rebuilding":bool,"note":"...","restart_command":"..."}` (`restart_command` only when `aether-server` was replaced too) |
 | `update.status` | `{}` | `{"phase":"packaging","lines_tail":["..."],"error":"..."}` - the desktop-app rebuild `update.apply` started (`error` only when `phase` is `error`) |
 | `workspace.selection` | `{}` reads; `{"workspace_id":"..."}` saves; an empty ID clears | `{"workspace_id":"..."}` |
@@ -1927,12 +1927,20 @@ the server snapshot from loading.
   (`aether gui --json`), which is what decides whether `update.apply` may
   restart it. `shell_build_error`
   is present only when the last in-app desktop rebuild failed, and carries
-  that build's own error. `target_version` is the release `update.apply`
-  would install, so the dashboard can name it before the click: the linked
+  that build's own error. `target_version` is the release this CLI should
+  move to, so the dashboard can name it before the click: the linked
   server's release (`server_version` without a `git describe` tail) when it
   is a release tag newer than this CLI, otherwise `latest` when that is
-  newer, otherwise empty. It is empty too for a dev build, with
-  `AETHER_NO_UPDATE_CHECK` set, on Windows, and with `AETHER_PACKAGED` set.
+  newer, otherwise empty. It is empty too for a dev build and with
+  `AETHER_NO_UPDATE_CHECK` set. `can_self_update` is true when
+  `update.apply` can install it here; it is false for a dev build, on
+  Windows, and with `AETHER_PACKAGED` set, where `target_version` is still
+  reported so the client can link its release page. `server_first` is true
+  when the linked server runs a release older than the target, this member
+  is an admin, and `server.update_status` reports the server `capable` of
+  updating itself: `target_version` is then empty and `update.apply`
+  refuses with `-32002` and `update the server first: aether server
+  update`, the rule `aether update` applies.
 - `cli_path` is the binary `update.apply` would replace, symlinks resolved,
   and `install_method` how: `direct` when its directory is writable by this
   user, so the swap just happens; `admin-prompt` when it is not and the
@@ -2085,8 +2093,10 @@ the server snapshot from loading.
     a terminal on this Mac``. Also a dev build, `AETHER_NO_UPDATE_CHECK`
     set, Windows, and nothing to install: `already on <latest>, the newest
     release` when neither the server nor the latest release is ahead of
-    this build (downloading it over itself would report success for work that changed
-    nothing, and restart the app for nothing).
+    this build (downloading it over itself would report success for work
+    that changed nothing, and restart the app for nothing), or `no signed
+    release is published yet; this aether stays on <version>` when no
+    release has a signed manifest and the server names none.
   - `-32003` (conflict, 409): `an update is already running in this
     gateway` - a second click from another tab while the dialog is up.
   - `-32004` (unavailable, 503): everything else, carrying the real
