@@ -126,7 +126,6 @@ func handshake(ctx context.Context, nc net.Conn, addr string, conf *ssh.ClientCo
 	return &clockedConn{Conn: cc, read: read}, chans, reqs, nil
 }
 
-// readClock records when its connection last delivered bytes.
 type readClock struct {
 	net.Conn
 	last atomic.Int64
