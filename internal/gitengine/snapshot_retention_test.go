@@ -357,7 +357,7 @@ func TestSnapshotOversizedInputLeavesCurrentFilesAndRecovery(t *testing.T) {
 	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.writeWatchSnapshot(ctx, "run1", checkout, nil); !errors.Is(err, ErrSnapshotStorageLimit) {
+	if _, err := e.writeWatchSnapshot(ctx, "run1", checkout, "", nil); !errors.Is(err, ErrSnapshotStorageLimit) {
 		t.Fatalf("snapshot bound: %v", err)
 	}
 	if _, err := e.RunPatch(ctx, "run1", PatchRequest{}); !errors.Is(err, ErrSnapshotStorageLimit) {
@@ -376,7 +376,7 @@ func TestSnapshotOversizedInputLeavesCurrentFilesAndRecovery(t *testing.T) {
 	if err := os.WriteFile(path, []byte("latest useful content\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.writeWatchSnapshot(ctx, "run1", checkout, nil); err != nil {
+	if _, err := e.writeWatchSnapshot(ctx, "run1", checkout, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	patch, err := e.RunPatch(ctx, "run1", PatchRequest{})
@@ -396,7 +396,7 @@ func TestEvidenceCopyAndRangeReadersSurviveConcurrentSnapshots(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, "notes.txt"), []byte("valuable evidence\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	tree, err := e.writeWatchSnapshot(ctx, "run1", checkout, nil)
+	tree, err := e.writeWatchSnapshot(ctx, "run1", checkout, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,7 +569,7 @@ func TestSnapshotHistorySurvivesFormerCountAndAgeLimits(t *testing.T) {
 			if _, err := e.gitInput(ctx, store, gitEnv(), []byte(refs.String()), "update-ref", "--stdin"); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := e.writeWatchSnapshot(ctx, "run1", checkout, nil); err != nil {
+			if _, err := e.writeWatchSnapshot(ctx, "run1", checkout, "", nil); err != nil {
 				t.Fatal(err)
 			}
 			if err := e.RemoveRunCheckout(ctx, "run1"); err != nil {

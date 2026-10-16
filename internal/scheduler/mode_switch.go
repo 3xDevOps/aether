@@ -290,21 +290,40 @@ func (m modeSwitch) writeTerminal(ctx context.Context) (string, harness.Reporter
 		return "", 0, fmt.Errorf("load the run's model: %w", err)
 	}
 	argv := m.profile.ResumeCommand(m.session, current.Model)
+	base, err := m.s.harnessEnvironment(ctx, m.run, m.profile, current.Model)
+	if err != nil {
+		return "", 0, err
+	}
 	var native harness.NativeLaunch
 	if m.c.enabled && m.run.Task != "" {
-		if native, err = m.profile.PrepareNativeLaunch(coordtransport.MountDir, argv, nil); err != nil {
+		if native, err = m.profile.PrepareNativeLaunch(coordtransport.MountDir, argv, base); err != nil {
 			return "", 0, fmt.Errorf("prepare native coordination: %w", err)
 		}
 	}
 	tui := *m.run
-	tui.Mode = domain.LaunchTUI
-	launch, err := newCoordinationLaunch(m.c.enabled, &tui, m.profile, native)
+	tui.Mode, tui.ACP = domain.LaunchTUI, false
+	instructions, err := m.s.launchInstructions(ctx, &tui, m.profile, m.entry.missionAssigned, native)
 	if err != nil {
 		return "", 0, err
 	}
-	env := make(map[string]string)
-	maps.Copy(env, launch.env)
-	maps.Copy(env, native.Env)
+	launch, err := newCoordinationLaunch(m.c.enabled, &tui, m.profile, native, instructions)
+	if err != nil {
+		return "", 0, err
+	}
+	// The container already holds base; the command exports only what it
+	// changes, merged into base as the launch path merges it.
+	merged := maps.Clone(base)
+	if err := harness.MergeEnv(merged, launch.env); err != nil {
+		return "", 0, err
+	}
+	maps.Copy(merged, native.Env)
+	env := make(map[string]string, len(launch.env)+len(native.Env))
+	for key := range launch.env {
+		env[key] = merged[key]
+	}
+	for key := range native.Env {
+		env[key] = merged[key]
+	}
 	nonce := rand.Text()
 	files := maps.Clone(launch.files)
 	files[coordtransport.NextCommandName] = nextCommand(nonce, native.Command(append(argv, launch.args...)), env)

@@ -1,18 +1,13 @@
 package gitengine
 
 import (
-	"bytes"
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,7 +17,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/rootfs"
 )
 
 // newWatcher is replaced by tests that need the kernel to refuse a watcher.
@@ -42,7 +36,10 @@ type diffWatch struct {
 	run      domain.RunID
 	checkout string
 	base     string
-	watcher  *fsnotify.Watcher
+	// baseBranch names the upstream branch effectiveBase tracks; empty for
+	// checkouts that predate it.
+	baseBranch string
+	watcher    *fsnotify.Watcher
 	// polling is set when the kernel refused the watcher or a directory
 	// watch, and makes loop attempt a snapshot every MaxInterval. watcher is
 	// nil when the checkout root could not be watched at all.
@@ -74,6 +71,8 @@ type diffWatch struct {
 	lastChange atomic.Int64 // unix nanos of the last fsnotify event; 0 = none
 
 	stopOnce sync.Once
+	// final is written before done closes and read by loop after it.
+	final    bool
 	done     chan struct{}
 	finished chan struct{}
 
@@ -89,6 +88,11 @@ type diffWatch struct {
 	lastSnapshotWarn time.Time
 	lastPublishWarn  time.Time
 	lastTreeWarn     time.Time
+	// lastBase is the effective base the published stats were measured
+	// against, and lastTip the origin/<baseBranch> commit last read. A fetch
+	// can move the base without touching the worktree.
+	lastBase string
+	lastTip  string
 }
 
 // StartDiffWatch begins diff-snapshot watching for a run's checkout,
@@ -129,6 +133,14 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 	}
 	e.mu.Unlock()
 
+	// Left empty when the published stats were measured against another
+	// base, so a restarted watch republishes them over an unchanged tree.
+	lastBase := e.effectiveBase(ctx, run, checkout, meta.Base, meta.BaseBranch)
+	if published := e.publishedBaseTree(ctx, run); published != "" {
+		if tree, _ := e.gitCheckout(ctx, run, checkout, "rev-parse", lastBase+"^{tree}"); tree != published {
+			lastBase = ""
+		}
+	}
 	refDir := filepath.Dir(filepath.Join(checkout, ".git", "refs", "heads", meta.Branch))
 	if err := os.MkdirAll(refDir, 0o755); err != nil {
 		return fmt.Errorf("gitengine: create ref watch directory %s: %w", refDir, err)
@@ -138,6 +150,7 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 		run:          run,
 		checkout:     checkout,
 		base:         meta.Base,
+		baseBranch:   meta.BaseBranch,
 		watchedDirs:  make(map[string]struct{}),
 		metadataDirs: make(map[string]struct{}),
 		done:         make(chan struct{}),
@@ -147,11 +160,14 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 		lastSnap: time.Now().Add(-e.cfg.MinInterval),
 		lastHead: head,
 		lastTree: lastTree,
+		lastBase: lastBase,
+		lastTip:  e.upstreamTip(checkout, meta.BaseBranch),
 	}
 	_, gapErr := os.Stat(filepath.Join(checkout+snapshotStoreSuffix, "history-gap"))
 	w.historyGap = !errors.Is(gapErr, os.ErrNotExist)
-	// A durable unacknowledged gap needs a retry even in a quiet checkout.
-	w.dirty = w.historyGap
+	// A durable unacknowledged gap, or stats published against another base,
+	// needs a retry even in a quiet checkout.
+	w.dirty = w.historyGap || lastBase == ""
 	if w.dirty {
 		w.lastEvent = time.Now()
 	}
@@ -217,15 +233,21 @@ func (w *diffWatch) watchCheckout(ctx context.Context, refDir string) error {
 	return err
 }
 
-// StopDiffWatch stops the run's diff watcher. The registry entry survives
-// so later branch publications keep their workspace scope. Idempotent.
+// StopDiffWatch stops the run's diff watcher after one last snapshot, so the
+// final run.diff and the published tree include changes still waiting on the
+// quiet-period timer. The registry entry survives so later branch
+// publications keep their workspace scope. Idempotent.
 func (e *Engine) StopDiffWatch(run domain.RunID) {
+	e.stopDiffWatch(run, true)
+}
+
+func (e *Engine) stopDiffWatch(run domain.RunID, final bool) {
 	e.mu.Lock()
 	w := e.watches[run]
 	delete(e.watches, run)
 	e.mu.Unlock()
 	if w != nil {
-		w.stop()
+		w.stop(final)
 	}
 }
 
@@ -246,8 +268,11 @@ func (e *Engine) LastFileChange(run domain.RunID) (time.Time, bool) {
 	return time.Unix(0, nanos), true
 }
 
-func (w *diffWatch) stop() {
-	w.stopOnce.Do(func() { close(w.done) })
+func (w *diffWatch) stop(final bool) {
+	w.stopOnce.Do(func() {
+		w.final = final
+		close(w.done)
+	})
 	<-w.finished
 }
 
@@ -680,6 +705,11 @@ func (w *diffWatch) loop() {
 				w.dirty = true
 			}
 			if w.headDirty && !now.Before(w.headEvent.Add(w.e.cfg.QuietPeriod)) && !now.Before(w.headRetryAt) {
+				if tip := w.e.upstreamTip(w.checkout, w.baseBranch); tip != w.lastTip {
+					w.lastTip = tip
+					w.lastEvent = now
+					w.dirty = true
+				}
 				ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 				if w.checkHead(ctx) {
 					w.headDirty = false
@@ -705,6 +735,14 @@ func (w *diffWatch) loop() {
 			}
 			w.arm(timer, time.Now())
 		case <-w.done:
+			if w.final {
+				w.snapshot()
+				// The first capture may only have republished a recovered
+				// interval, or failed; either leaves the watch dirty.
+				if w.dirty {
+					w.snapshot()
+				}
+			}
 			return
 		}
 	}
@@ -758,7 +796,8 @@ func (w *diffWatch) snapshot() {
 	ctx, cancel := context.WithTimeout(context.Background(), snapshotTimeout)
 	defer cancel()
 
-	files, truncated, err := w.e.diffStats(ctx, w.run, w.checkout, w.base)
+	base := w.e.effectiveBase(ctx, w.run, w.checkout, w.base, w.baseBranch)
+	files, truncated, err := w.e.diffStats(ctx, w.run, w.checkout, base)
 	if err != nil {
 		w.warnSnapshot(err)
 		return
@@ -782,15 +821,15 @@ func (w *diffWatch) snapshot() {
 		return err
 	}
 	attempted := false
-	tree, treeErr := w.e.writeWatchSnapshot(ctx, w.run, w.checkout, func(tree string) error {
+	tree, treeErr := w.e.writeWatchSnapshot(ctx, w.run, w.checkout, base, func(tree string) error {
 		// Only a durable unchanged boundary suppresses publication. A failed
 		// append must retry even if the checkout has not changed again.
-		if tree == w.lastTree && !w.historyGap {
+		if tree == w.lastTree && base == w.lastBase && !w.historyGap {
 			return nil
 		}
 		attempted = true
 		return publish(events.RunDiffPayload{
-			Files: files, Truncated: truncated, Tree: tree, ParentTree: w.lastTree, HistoryGap: w.historyGap,
+			Files: files, Truncated: truncated, Base: base, Tree: tree, ParentTree: w.lastTree, HistoryGap: w.historyGap,
 		})
 	})
 	// Acknowledgement cleanup can fail after both the event and ref pair
@@ -807,7 +846,7 @@ func (w *diffWatch) snapshot() {
 		w.lastEvent = time.Now()
 		if !attempted {
 			payload := events.RunDiffPayload{
-				Files: files, Truncated: truncated, HistoryGap: true,
+				Files: files, Truncated: truncated, Base: base, HistoryGap: true,
 				SnapshotError: "Snapshot history unavailable; current change statistics remain live.",
 			}
 			if errors.Is(treeErr, ErrSnapshotStorageLimit) {
@@ -818,6 +857,7 @@ func (w *diffWatch) snapshot() {
 			}
 		}
 	} else {
+		w.lastBase = base
 		// A recovered inflight tree may predate the current checkout. Take
 		// one more normal-timer snapshot, even if that checkout is now quiet.
 		w.dirty = w.historyGap
@@ -877,130 +917,4 @@ func (w *diffWatch) warnTree(err error) {
 	w.lastTreeWarn = now
 	slog.Warn("gitengine: diff snapshot tree could not be written; this interval has no per-interval diff",
 		"run", string(w.run), "error", err)
-}
-
-// errCountBudget refuses an untracked file the stat set has no budget left
-// to read.
-var errCountBudget = errors.New("gitengine: untracked content exceeds the stat set's read budget")
-
-var rawStatus = map[byte]string{'A': "added", 'D': "deleted"}
-
-// diffStats builds the snapshot stat set: raw status and numstat against
-// base for tracked work (committed and uncommitted) plus untracked files,
-// added at their line counts. Both listings use -z (NUL-separated, unquoted) so non-ASCII
-// paths survive verbatim, and --no-renames so a rename reports its real
-// old and new paths rather than a munged "old => new". Never mutates the
-// index. Sorted by path.
-//
-// Every changed path is listed, because the overlap index reads them. What
-// is bounded is the untracked content read to count lines: at most
-// MaxSnapshotInputBytes, the most a snapshot would stage. truncated reports
-// a file left unread at zero, which makes the totals a floor.
-func (e *Engine) diffStats(ctx context.Context, run domain.RunID, checkout, base string) (files []events.FileDiffStat, truncated bool, err error) {
-	out, err := e.gitCheckout(ctx, run, checkout, "diff", "--raw", "--numstat", "--no-renames", "-z", base)
-	if err != nil {
-		return nil, false, err
-	}
-	files = make([]events.FileDiffStat, 0, 8)
-	status := map[string]string{}
-	tokens := strings.Split(out, "\x00")
-	for i := 0; i < len(tokens); i++ {
-		if strings.HasPrefix(tokens[i], ":") && i+1 < len(tokens) {
-			status[tokens[i+1]] = cmp.Or(rawStatus[tokens[i][len(tokens[i])-1]], "modified")
-			i++
-			continue
-		}
-		parts := strings.SplitN(tokens[i], "\t", 3)
-		if len(parts) != 3 {
-			continue
-		}
-		add, _ := strconv.Atoi(parts[0]) // "-" (binary) parses as 0
-		del, _ := strconv.Atoi(parts[1])
-		files = append(files, events.FileDiffStat{Path: parts[2], Additions: add, Deletions: del, Status: status[parts[2]]})
-	}
-	untracked, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, "ls-files", "--others", "--exclude-standard", "-z")
-	if err != nil {
-		return nil, false, err
-	}
-	checkoutRoot, err := os.OpenRoot(checkout)
-	if err != nil {
-		return nil, false, fmt.Errorf("gitengine: open checkout for diff stats: %w", err)
-	}
-	defer func() { _ = checkoutRoot.Close() }()
-	budget := int64(MaxSnapshotInputBytes)
-	for path := range strings.SplitSeq(untracked, "\x00") {
-		if path == "" {
-			continue
-		}
-		lines, read, err := countLines(ctx, checkoutRoot, path, budget)
-		if errors.Is(err, errCountBudget) {
-			truncated = true
-		} else if err != nil {
-			continue
-		}
-		budget -= read
-		files = append(files, events.FileDiffStat{Path: path, Additions: lines, Status: "added"})
-	}
-	slices.SortFunc(files, func(a, b events.FileDiffStat) int {
-		return strings.Compare(a.Path, b.Path)
-	})
-	return files, truncated, nil
-}
-
-// countBytesCap bounds how much of a single untracked file a snapshot will
-// read; beyond it the line count is truncated. Keeps multi-GB build
-// artifacts from stalling the watch loop.
-const countBytesCap = 8 << 20
-
-// countLines counts the lines in an untracked path (a trailing partial line
-// counts) and reports how many bytes it read to do so. A symlink counts as
-// one line (git's view of its content) and is never followed - the target
-// may be a FIFO or device that would block the watch loop forever. Only
-// regular files are read, capped at countBytesCap, and one whose read would
-// not fit in budget is refused unread with errCountBudget.
-func countLines(ctx context.Context, root *os.Root, path string, budget int64) (lines int, read int64, err error) {
-	fi, err := root.Lstat(path)
-	if err != nil {
-		return 0, 0, err
-	}
-	if fi.Mode()&fs.ModeSymlink != 0 {
-		return 1, 0, nil
-	}
-	if !fi.Mode().IsRegular() {
-		return 0, 0, fmt.Errorf("gitengine: not a regular file: %s", path)
-	}
-	need := min(fi.Size(), countBytesCap)
-	if need > budget {
-		return 0, 0, errCountBudget
-	}
-	f, err := rootfs.Open(root, path)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer func() { _ = f.Close() }()
-	var (
-		buf    [32 * 1024]byte
-		endsNL = true
-	)
-	for read < need {
-		if err := ctx.Err(); err != nil {
-			return 0, 0, err
-		}
-		n, err := f.Read(buf[:min(int64(len(buf)), need-read)])
-		if n > 0 {
-			read += int64(n)
-			lines += bytes.Count(buf[:n], []byte{'\n'})
-			endsNL = buf[n-1] == '\n'
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return 0, 0, err
-		}
-	}
-	if !endsNL {
-		lines++
-	}
-	return lines, read, nil
 }

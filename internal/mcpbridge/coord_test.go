@@ -3,16 +3,20 @@ package mcpbridge
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -302,5 +306,98 @@ func waitForMessageEvent(t *testing.T, sub events.Subscription, messageID string
 		case <-deadline:
 			t.Fatal("timed out waiting for the coord.message event")
 		}
+	}
+}
+
+// The guidance an agent and its subagents read before any call: server
+// instructions carrying the run's role card, and a report schema that
+// enumerates every outcome.
+func TestBridgeGuidesAgentsBeforeAnyCall(t *testing.T) {
+	stack := newCoordStack(t)
+	cs := session(t, stack.sockB, nil)
+	instructions := cs.InitializeResult().Instructions
+	if !strings.HasPrefix(instructions, "You are Aether run "+string(stack.runB)) || strings.Contains(instructions, "Aether hosts this run") {
+		t.Fatalf("instructions must be the run's role card alone: %q", instructions)
+	}
+	tools, err := cs.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools.Tools {
+		schema, err := json.Marshal(tool.InputSchema)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var input struct {
+			Properties map[string]struct {
+				Enum        []string `json:"enum"`
+				Description string   `json:"description"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(schema, &input); err != nil {
+			t.Fatal(err)
+		}
+		for name, property := range input.Properties {
+			if property.Description == "" {
+				t.Errorf("%s.%s has no description", tool.Name, name)
+			}
+		}
+		for name, want := range map[string]string{toolSend: coordhooks.ReceiptRule, toolAsk: "listed by aether_status", toolInbox: coordhooks.UntrustedRule, toolReply: "reaches only the run that asked"} {
+			if tool.Name == name && !strings.Contains(tool.Description, want) {
+				t.Errorf("%s description lacks %q: %q", name, want, tool.Description)
+			}
+		}
+		if tool.Name != toolReport {
+			continue
+		}
+		want := []string{"success", "failure", "blocked", "needs-input", "waiting"}
+		if !slices.Equal(input.Properties["outcome"].Enum, want) {
+			t.Errorf("outcome enum = %v, want %v", input.Properties["outcome"].Enum, want)
+		}
+		if !strings.HasPrefix(tool.Description, coordhooks.SubagentRule) {
+			t.Errorf("aether_report description must lead with the subagent rule: %q", tool.Description)
+		}
+	}
+}
+
+// Instructions follow what the run may do and what its system prompt
+// already carries.
+func TestBridgeInstructionsFollowTheRun(t *testing.T) {
+	for _, tc := range []struct {
+		name, background, enhanced, card string
+		capabilities                     []string
+		want, refuse                     []string
+	}{
+		{name: "no reports", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordInbox},
+			want: []string{"aether-internal skill"}, refuse: []string{"aether_report", "needs-input", "waiting"}},
+		{name: "background", background: "1", enhanced: "1", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport},
+			want: []string{"role: background", "never report needs-input or waiting"}, refuse: []string{"- needs-input", "- waiting"}},
+		{name: "standard", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport},
+			want: []string{"- needs-input: only", "never report waiting"}, refuse: []string{"- waiting"}},
+		{name: "card in system prompt", enhanced: "1", card: "1", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport},
+			want: []string{coordhooks.Brief(coordhooks.Guide{Role: coordhooks.RoleInteractive, Wake: true})}, refuse: []string{"You are Aether run"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(coordtransport.BackgroundEnv, tc.background)
+			t.Setenv(coordtransport.EnhancedEnv, tc.enhanced)
+			t.Setenv(coordtransport.WakeEnv, "")
+			t.Setenv(coordtransport.RoleCardEnv, tc.card)
+			status, err := json.Marshal(protocol.CoordStatusResult{WireVersion: protocol.CoordWireVersion, RunID: "run-1", Capabilities: tc.capabilities})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := newFakeCoord(t, func(protocol.Request) protocol.Response { return protocol.Response{Result: status} })
+			instructions := session(t, fake.path, nil).InitializeResult().Instructions
+			for _, want := range tc.want {
+				if !strings.Contains(instructions, want) {
+					t.Errorf("instructions lack %q: %q", want, instructions)
+				}
+			}
+			for _, refuse := range tc.refuse {
+				if strings.Contains(instructions, refuse) {
+					t.Errorf("instructions carry %q: %q", refuse, instructions)
+				}
+			}
+		})
 	}
 }

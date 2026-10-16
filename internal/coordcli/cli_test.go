@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -185,33 +187,60 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 	}
 }
 
-// Outcome guidance is selected by the live assignment, not merely by whether
-// the coordination socket belongs to a mission.
-func TestCLIReportHelpListsNeedsInput(t *testing.T) {
-	for _, want := range []string{"success|failure|blocked|needs-input", "Needs you reason", "you MUST report needs-input"} {
-		if !strings.Contains(commandUsages["report"], want) {
-			t.Fatalf("report help lacks %q: %s", want, commandUsages["report"])
-		}
-	}
-}
-
+// Outcome guidance is selected by the live assignment, launch mode and
+// capabilities, not merely by whether the socket belongs to a mission.
 func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
-	for role, want := range map[string]string{"ordinary": ordinaryOutcomes, "worker": workerOutcomes, "integrator": integratorOutcomes} {
-		status := protocol.CoordStatusResult{RunID: "run-current", Capabilities: []string{protocol.MethodCoordInbox}}
-		if role != "ordinary" {
-			status.Assignment = &protocol.CoordMissionAssignment{Role: role, MissionID: "mission-current"}
-		}
-		var out bytes.Buffer
-		if code, err := writeSkill(&out, &status); err != nil || code != ExitOK {
-			t.Fatalf("%s skill = %d, %v", role, code, err)
-		}
-		if raw := out.String(); !strings.Contains(raw, want) {
-			t.Fatalf("%s skill lacks its outcome guidance: %s", role, raw)
-		}
-		raw := out.String()
-		if strings.Contains(raw, "needs-input") == (role == "worker") || strings.Contains(raw, "end a turn silently") {
-			t.Fatalf("%s skill has wrong needs-input guidance: %s", role, raw)
-		}
+	reports := []string{protocol.MethodCoordInbox, protocol.MethodCoordReport}
+	backgroundRule := "never report needs-input or waiting"
+	for _, tc := range []struct {
+		name, role, background, enhanced string
+		capabilities                     []string
+		want, refuse                     []string
+	}{
+		{name: "ordinary", capabilities: reports,
+			want: []string{ordinaryOutcomes, "- needs-input: only", "never report waiting"}, refuse: []string{"- waiting:"}},
+		{name: "enhanced", enhanced: "1", capabilities: reports,
+			want: []string{ordinaryOutcomes, "- needs-input: only", "- waiting: "}, refuse: []string{"never report waiting"}},
+		{name: "background", background: "1", capabilities: reports,
+			want: []string{backgroundOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting"}},
+		{name: "worker", role: "worker", enhanced: "1", capabilities: reports,
+			want: []string{workerOutcomes, "- needs-input: not for workers", "- waiting: "}},
+		{name: "background worker", role: "worker", background: "1", enhanced: "1", capabilities: reports,
+			want: []string{workerOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting"}},
+		{name: "integrator", role: "integrator", capabilities: reports,
+			want: []string{integratorOutcomes, "mission plan show --wait 30`; never report waiting"}, refuse: []string{"- waiting:"}},
+		{name: "background integrator", role: "integrator", background: "1", capabilities: reports,
+			want: []string{integratorOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting"}},
+		{name: "no reports", capabilities: []string{protocol.MethodCoordInbox},
+			want: []string{"aether-internal inbox --wait 30"}, refuse: []string{"- waiting", "Report your state"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(coordtransport.BackgroundEnv, tc.background)
+			t.Setenv(coordtransport.EnhancedEnv, tc.enhanced)
+			t.Setenv(coordtransport.WakeEnv, "")
+			status := protocol.CoordStatusResult{RunID: "run-current", Capabilities: tc.capabilities}
+			if tc.role != "" {
+				status.Assignment = &protocol.CoordMissionAssignment{Role: tc.role, MissionID: "mission-current"}
+			}
+			var out bytes.Buffer
+			if code, err := writeSkill(&out, &status); err != nil || code != ExitOK {
+				t.Fatalf("skill = %d, %v", code, err)
+			}
+			raw := out.String()
+			for _, want := range tc.want {
+				if !strings.Contains(raw, want) {
+					t.Fatalf("skill lacks %q: %s", want, raw)
+				}
+			}
+			for _, refuse := range tc.refuse {
+				if strings.Contains(raw, refuse) {
+					t.Fatalf("skill carries %q: %s", refuse, raw)
+				}
+			}
+			if tc.name != "no reports" && !strings.Contains(raw, coordhooks.SubagentRule) {
+				t.Fatalf("skill lacks the subagent rule: %s", raw)
+			}
+		})
 	}
 }
 
@@ -659,7 +688,7 @@ func TestCLISkillForAnAgentNamedApartFromItsCommand(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	status := protocol.CoordStatusResult{
 		RunID:        "run-current",
-		Capabilities: []string{protocol.MethodCoordInbox},
+		Capabilities: []string{protocol.MethodCoordInbox, protocol.MethodCoordReport},
 		Assignment:   &protocol.CoordMissionAssignment{Role: "worker", MissionID: "mission-current"},
 	}
 	var out bytes.Buffer

@@ -221,11 +221,15 @@ identity socket, including when conflict coordination is disabled. Member
 terminals and verification containers do not inherit a run identity.
 Staging failure refuses creation rather than silently omitting the CLI.
 
-No agent receives an automatic Aether MCP registration flag or config.
-Supported agents receive a short native per-launch discovery hint;
+Standard and non-ACP Background launches get no Aether MCP registration;
+Enhanced runs and ACP Background launches get the
+[MCP bridge](mcp-bridge.md#registration) over ACP. Shipped
+agents other than `gemini` and `cursor` carry the run's agent instructions
+in their system prompt
+([How Aether launches them](#how-aether-launches-them));
 `aether-internal skill` loads live capability and assignment guidance.
 Containers without run identity receive only general guidance, not borrowed
-authority. OpenCode's discovery configuration does not depend on the optional
+authority. OpenCode's instructions do not depend on the optional
 lifecycle-status plugin.
 
 The startup switches follow the vendor references: [Claude CLI
@@ -402,12 +406,13 @@ not grant it idle wake.
 Claude Code accepts one `--settings` value, so the server writes one
 document, `/run/aether/claude-settings.json`, and adds
 `--settings /run/aether/claude-settings.json`. It merges the
-[status reporter](#status-reporting) hooks, the `claude.json` inbox hooks and
-the [idle-wake waiter](#claude-code-inbox-integration). No user or project
+[status reporter](#status-reporting) hooks, the `claude.json` inbox hooks
+except `Stop`, and the [idle-wake waiter](#claude-code-inbox-integration). No user or project
 settings file changes. Claude Code runs an identical command hook from several
 settings sources once, so an unmodified manual `claude.json` does not double
 the managed hooks (observed with Claude Code 2.1.301); a modified copy runs
-too. Taskless launches keep the status-only document; Background and Enhanced
+too. A manual copy's `Stop` hook does nothing inside a managed launch, which
+sets `AETHER_MANAGED_HOOKS=1`. Taskless launches keep the status-only document; Background and Enhanced
 launches load neither.
 
 Codex takes the `codex.json` hooks as four `-c` arguments, `hooks.SessionStart`,
@@ -468,8 +473,9 @@ those majors.
 
 - **V1:** `/run/aether/opencode-native-v1.json` merges the workspace's inline
   config with file URLs for `/run/aether/opencode-v1.js` and
-  `/run/aether/opencode-status.js`, preserving unrelated fields and plugin
-  entries. The wrapper supplies it through `OPENCODE_CONFIG_CONTENT`.
+  `/run/aether/opencode-status.js` and with `/run/aether/instructions.md`
+  under `instructions`, preserving unrelated fields and existing entries.
+  The wrapper supplies it through `OPENCODE_CONFIG_CONTENT`.
 - **V2:** the wrapper adds `--standalone`, selecting a private TUI-owned
   server rather than the member home's detached service. This keeps server
   and receiver lifetime tied to this run and avoids cross-container service
@@ -507,10 +513,24 @@ manual copy announces mail at boundaries only: under `claude -p` an
 `asyncRewake` hook runs in the foreground and would block a Background run.
 
 The supported events are `SessionStart`, `UserPromptSubmit`, `PostToolBatch`,
-and `Stop` from the current [Claude hook API](https://code.claude.com/docs/en/hooks).
+`SubagentStart`, and `Stop` from the current [Claude hook API](https://code.claude.com/docs/en/hooks).
 Older releases may lack these events or context outputs. Child-agent events
-do not take ownership of the run mailbox. Stop may request one continuation
-for pending mail or an integrator refresh.
+do not take ownership of the run mailbox; `SubagentStart` tells the subagent
+never to report and how to note its edits to overlapping peers. In a manual
+copy, Stop may request one continuation for pending mail or an integrator
+refresh.
+
+The managed document leaves out the inbox `Stop` hook. Claude Code runs
+`Stop` hooks in parallel, so its block for unread mail would continue a turn
+the status reporter already ended. Instead, at turn end the waiter below waits
+for mail no hook has announced and wakes a new turn for it. The `Stop` hook of
+a manual `claude.json` copy exits without output when `AETHER_MANAGED_HOOKS=1`,
+so it does nothing inside a managed launch and still checks mail at turn end
+in a Background `claude -p` run that shares the same `~/.claude`.
+`SessionStart` has no matcher, so it fires at startup,
+resume, compaction and clear. The launch's system prompt carries the role
+card, so the hook prints only the pending notices, all of them again after
+compaction or clear.
 
 **Idle wake.** The managed document adds this `asyncRewake` hook to
 `SessionStart` and `Stop`:
@@ -534,12 +554,10 @@ for pending mail or an integrator refresh.
   background task notification as `Stop hook blocking error from command
   "Stop": ...`. That wording is Claude Code's framing, not an error.
 - On `SessionStart` all unread mail counts as unannounced, so a resumed idle
-  session with mail waiting wakes at once. On `Stop` the waiter first gives
-  the inbox `Stop` hook beside it a second to record what it announced, then
-  wakes only for mail missing from that record: mail the hook announced
-  already blocked the stop, and mail that arrived after the hook's check
-  still wakes the session. A wake admitted while a turn runs joins that turn
-  as one more pointer.
+  session with mail waiting wakes at once. On `Stop` the waiter wakes only
+  for mail missing from that record: mail a hook already announced in the
+  turn does not start another. A wake admitted while a turn runs joins that
+  turn as one more pointer.
 - Nothing else exits 2. Errors exit 1, after up to five retries with 1 to 16
   second backoff for transport errors; Claude Code shows them only in
   `claude --debug`. The next completed turn starts a new waiter.
@@ -1005,11 +1023,12 @@ The following disable or exclude automatic reporting:
 - **Enhanced runs.** `--mode enhanced` needs no reporter: the session host
   reports both ends of every turn itself ([enhanced-runs.md](enhanced-runs.md)).
 - **`--conflict-coordination=false`.** Lifecycle reporting is disabled, but
-  the run identity socket, canonical CLI and discovery remain available.
+  the run identity socket, canonical CLI and agent instructions, without
+  report lines, remain available.
 - **An argv override.** A `--agent-definitions` entry that redefines a
   shipped agent drops the status arguments, status environment, and
-  taskless discovery mechanism - nothing checks the overridden command is
-  still that CLI.
+  system-prompt instruction mechanism - nothing checks the overridden command
+  is still that CLI.
 - **Truthy `OPENCODE_PURE` in the workspace environment.** `1` or
   case-insensitive `true` disables OpenCode's external plugins, Aether's
   included; `0` and `false` do not. Aether preserves the member's choice.
@@ -1090,49 +1109,39 @@ whole rather than dangling an empty flag. Background mode has no interactive
 surface, so it still requires a task. An Enhanced run without a task waits
 for the first message.
 
-Task-bearing and taskless launches use the same capability-neutral discovery
-instruction:
+Every Standard launch of a shipped agent, with or without a task, and every
+Background launch that does not use ACP carries the run's [agent instructions](coordination.md#agent-instructions)
+(its role card and the co-author rule) for that launch only:
 
-```
-Run the shell command `aether-internal skill` to read this run's live identity, capabilities, and any assignment before acting. This is a CLI command, not a harness skill to install. Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. Use only available capabilities and report only what you verified.
-```
-
-For a taskless launch, the same instruction is delivered through the
-vendor-native startup mechanism, without inventing an initial user prompt:
-
-| CLI | Taskless discovery mechanism |
+| CLI | Mechanism |
 | --- | --- |
-| `claude` | `--append-system-prompt` |
-| `codex` | one-launch `-c developer_instructions="..."` |
-| `pi`, `omp` | `--append-system-prompt` |
-| `opencode` | ephemeral `instructions` file in `OPENCODE_CONFIG_CONTENT` |
-| `copilot`, `gemini`, `cursor` | none: a taskless Standard launch gets no hint, and a task-bearing launch carries the instruction in its prompt |
+| `claude`, `pi`, `omp` | `--append-system-prompt "<instructions>"` |
+| `codex` | `-c developer_instructions="<instructions>"`, which adds to Codex's built-in instructions. The setting replaces any `developer_instructions` from `config.toml`, so Aether puts the top-level value of `~/.codex/config.toml` in your Aether home first. Aether does not follow a symlinked or hard-linked `config.toml`, so its value is replaced too. A value from a Codex profile, a project `.codex/config.toml` or a `CODEX_HOME` set in the workspace is not read and is replaced for that launch; put such instructions in `AGENTS.md` |
+| `opencode` | `/run/aether/instructions.md` appended to `instructions` in `OPENCODE_CONFIG_CONTENT`, after any entries your workspace variable already lists; managed V1 merges it into `/run/aether/opencode-native-v1.json` |
+| `copilot` | `/run/aether/aether.instructions.md`, loaded through `COPILOT_CUSTOM_INSTRUCTIONS_DIRS=/run/aether` after the repository's own instructions; a directory list your workspace variable already sets is kept ahead of it |
+| `gemini` | none: a task-bearing launch carries the instructions after the task, and a taskless one gets none. Gemini puts only `~/.gemini/GEMINI.md` in its system prompt, and `GEMINI_SYSTEM_MD` would replace the whole prompt. Loading `/run/aether` through `--include-directories` would make every Standard launch stop on Gemini's "Do you trust the following folders" prompt, because `GEMINI_CLI_TRUST_WORKSPACE` trusts only the working directory |
+| `cursor` | none: a task-bearing launch carries the instructions after the task, and a taskless one gets none |
 
-The instruction is short and runtime-scoped. The `skill` command loads the
-version-matched assignment, role guidance, and workflow from the staged CLI.
-The server stages that `/usr/local/bin/aether-internal` CLI and the run's
-`/run/aether/coord3.sock` automatically. No manual skill install, identity
-flag, repository instruction, or persistent member-home write is needed.
-The agent should run `aether-internal skill` before acting, then use the CLI
-for coordination. Report a terminal outcome only after the assigned work is
-finished. While coordination reporting is enabled, a task prompt also
-carries a report rule for the run's role
-([enhanced-runs.md](enhanced-runs.md#run-instructions)): an ordinary
-interactive run MUST report `needs-input` with its question when it needs
-you, and success, failure or blocked when a task is done, impossible or
-blocked. The co-author rule still asks the agent to read
-`/run/aether/co-authors` before each commit. Only the prompt
-the agent receives changes: the stored task, branch slug, and every CLI and
-dashboard surface keep what the member typed. See [coordination.md](coordination.md).
+The system prompt survives compaction; instructions after the task do not. The task prompt stays exactly what the
+member typed, as do the stored task, branch slug, and every CLI and dashboard
+surface. Switching an Enhanced run to Standard carries the
+instructions to the new launch. Enhanced runs receive them over ACP instead
+([enhanced-runs.md](enhanced-runs.md#run-instructions)).
 
-Custom agents, `fake`, and argv-overridden shipped agents do not receive
-guessed vendor flags or a fabricated initial task. They still get the staged
-CLI and the run identity socket. Their authors must call `aether-internal
-skill` manually or through their own native taskless startup mechanism. Aether
-does not create permanent repository settings, mutate member configuration,
-register MCP servers, or claim tools exist merely to make discovery appear
-successful. Standalone help works without a socket; standalone `skill` gives
-short capability-neutral discovery, never a borrowed run identity.
+The card tells the agent to run `aether-internal skill` before acting. `skill`
+loads the version-matched assignment, role guidance, and workflow from the
+staged `/usr/local/bin/aether-internal`, which reaches the run through
+`/run/aether/coord3.sock`. No manual skill install, identity flag, repository
+instruction, or persistent member-home write is needed.
+
+Custom agents, `fake`, and argv-overridden shipped agents get no guessed
+vendor flags. A task-bearing launch gets the instructions appended after the
+task; a taskless one gets none, so its author must call `aether-internal
+skill` manually or through the agent's own startup mechanism. They still get
+the staged CLI and the run identity socket. Aether does not create permanent
+repository settings or mutate member configuration. Standalone help works
+without a socket; standalone `skill` gives short capability-neutral guidance,
+never a borrowed run identity.
 
 ### Agent development workflow
 
@@ -1917,7 +1926,8 @@ matches those bytes. No path automatically synchronizes later local changes.
 ## Adding an agent
 
 The registry defines argv templates for both modes, credential/configuration
-roots, denylist, API-key passthrough, taskless discovery, status reporting,
+roots, denylist, API-key passthrough, system-prompt instructions
+(`InstructionArgs`/`InstructionEnv`), status reporting,
 the install command (`InstallScript`), and the optional pre-launch update
 command (`UpdateScript`), which must be a cheap no-op when the CLI is current
 and must update only the program.

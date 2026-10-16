@@ -462,30 +462,15 @@ Limits:
 
 ### Run instructions
 
-Every run whose container has the run socket gets three rules: the
-discovery instruction ([harnesses.md](harnesses.md#how-aether-launches-them)),
-a report rule while coordination reporting is enabled, and the co-author
-rule. The report rule depends on the run. An ordinary interactive run gets:
-
-```
-When you need the user's decision or information, you MUST run `aether-internal report --outcome needs-input --summary "<your question>"` and then end your turn; the reply arrives as your next prompt. When a task you were given is done or cannot be done, or an external blocker stops it, you MUST report success, failure or blocked with `aether-internal report` before ending that turn. A turn that only answers or discusses, or that ends waiting on workers, peers or mail, ends without a report.
-```
-
-A Background run gets:
-
-```
-Before your final turn ends you MUST run `aether-internal report` with outcome success or failure, or blocked if an external blocker stops you.
-```
-
-A swarm worker or integrator gets:
-
-```
-Report outcomes only as `aether-internal skill` describes for your role; do not report while waiting on workers or peers.
-```
+Every run whose container has the run socket gets the
+[agent instructions](coordination.md#agent-instructions): its role card,
+with report lines while coordination reporting is enabled, and the
+co-author rule.
 
 Claude's adapter takes the rules as `_meta.systemPrompt.append` on
 `session/new`, `session/resume` and `session/load`, so a run with no task
-gets them too, and its task prompt is the bare task. Every other agent gets
+gets them too, and its task prompt is the bare task; its MCP bridge then
+sends only the short brief. Every other agent gets
 them appended to its task prompt. Without a task, they go in a separate text
 block after the first message or mail prompt the agent accepts. A message
 that waited and was never delivered keeps them for the next one, as does a

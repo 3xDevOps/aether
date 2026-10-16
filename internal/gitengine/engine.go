@@ -156,7 +156,7 @@ func (e *Engine) Close() error {
 	e.watches = make(map[domain.RunID]*diffWatch)
 	e.mu.Unlock()
 	for _, w := range watches {
-		w.stop()
+		w.stop(false)
 	}
 	if e.checkoutsRoot != nil {
 		return e.checkoutsRoot.Close()

@@ -50,8 +50,8 @@ test('lines are named by the new file unless every one was removed', () => {
 
 test('the message orders comments by file then line and fences a quote that holds a fence', () => {
   const files = [
-    { path: 'a.go', status: 'modified' as const, additions: 2, deletions: 1, lines: [hunk, del('old', 1), add('```', 1), add('new', 2)] },
-    { path: 'b.go', status: 'deleted' as const, additions: 0, deletions: 1, lines: [hunk, del('gone', 7)] },
+    { path: 'a.go', status: 'modified' as const, additions: 2, deletions: 1, contentLines: 3, size: 0, text: '', lines: [hunk, del('old', 1), add('```', 1), add('new', 2)] },
+    { path: 'b.go', status: 'deleted' as const, additions: 0, deletions: 1, contentLines: 1, size: 0, text: '', lines: [hunk, del('gone', 7)] },
   ]
   const entries = reviewEntries([
     comment([del('gone', 7)], { id: 'c1', path: 'b.go', body: 'keep this' }),

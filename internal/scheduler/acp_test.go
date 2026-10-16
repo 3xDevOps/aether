@@ -23,6 +23,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/collab"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -202,7 +203,9 @@ func (w *acpWire) prompts(t *testing.T) [][]acp.ContentBlock {
 	return prompts
 }
 
-func (w *acpWire) sessionNewMeta(t *testing.T) map[string]any {
+// sessionNew is the first session/new's _meta and the environment it gives
+// the aether MCP server.
+func (w *acpWire) sessionNew(t *testing.T) (map[string]any, map[string]string) {
 	t.Helper()
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -210,15 +213,27 @@ func (w *acpWire) sessionNewMeta(t *testing.T) map[string]any {
 		var request struct {
 			Method string `json:"method"`
 			Params struct {
-				Meta map[string]any `json:"_meta"`
+				Meta       map[string]any `json:"_meta"`
+				McpServers []struct {
+					Name string            `json:"name"`
+					Env  []acp.EnvVariable `json:"env"`
+				} `json:"mcpServers"`
 			} `json:"params"`
 		}
 		if err := json.Unmarshal(line, &request); err == nil && request.Method == acp.AgentMethodSessionNew {
-			return request.Params.Meta
+			env := map[string]string{}
+			for _, server := range request.Params.McpServers {
+				if server.Name == "aether" {
+					for _, v := range server.Env {
+						env[v.Name] = v.Value
+					}
+				}
+			}
+			return request.Params.Meta, env
 		}
 	}
 	t.Fatal("no session/new on the wire")
-	return nil
+	return nil, nil
 }
 
 func textOf(blocks []acp.ContentBlock) []string {
@@ -1259,9 +1274,13 @@ func TestEnhancedRunSendsInstructionsAsSystemPromptWhenTheAgentTakesOne(t *testi
 	}
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
 	wire := &rt.all()[0].wire
-	system, _ := wire.sessionNewMeta(t)["systemPrompt"].(map[string]any)
-	if got := system["append"]; got != e.sched.runInstructions(false, false) || got == "" {
+	meta, mcpEnv := wire.sessionNew(t)
+	system, _ := meta["systemPrompt"].(map[string]any)
+	if got := system["append"]; got != e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true}) || got == "" {
 		t.Fatalf("session/new systemPrompt.append %q, want the run instructions", got)
+	}
+	if mcpEnv[coordtransport.RoleCardEnv] != "1" {
+		t.Fatalf("aether MCP env %v, want the bridge told the system prompt carries the card", mcpEnv)
 	}
 	prompts := wire.prompts(t)
 	if len(prompts) != 1 || !slices.Equal(textOf(prompts[0]), []string{"say pong"}) {
@@ -1276,11 +1295,11 @@ func TestEnhancedRunAppendsInstructionsToTheTaskWithoutASystemPromptRoute(t *tes
 	run := e.launchACP(t, "say pong")
 	waitItems(t, e.sched, run.ID, "the task's turn", turnEnded("end_turn", 1))
 	wire := &rt.all()[0].wire
-	if meta := wire.sessionNewMeta(t); meta["systemPrompt"] != nil {
-		t.Fatalf("session/new _meta %+v, want no system prompt", meta)
+	if meta, mcpEnv := wire.sessionNew(t); meta["systemPrompt"] != nil || mcpEnv[coordtransport.RoleCardEnv] != "" {
+		t.Fatalf("session/new _meta %+v, MCP env %v; want no system prompt and the bridge sending the card", meta, mcpEnv)
 	}
 	prompts := wire.prompts(t)
-	if want := e.sched.withCoAuthorInstruction("say pong", false, false); len(prompts) != 1 || !slices.Equal(textOf(prompts[0]), []string{want}) {
+	if want := withInstructions("say pong", e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})); len(prompts) != 1 || !slices.Equal(textOf(prompts[0]), []string{want}) {
 		t.Fatalf("prompts %+v, want the task with the instructions", prompts)
 	}
 }
@@ -1301,7 +1320,7 @@ func TestEnhancedTasklessRunDeliversInstructionsWithTheFirstMessageOnly(t *testi
 	if len(prompts) != 2 {
 		t.Fatalf("prompts %+v, want two", prompts)
 	}
-	if want := []string{"first", "\n\n" + e.sched.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"first", "\n\n" + e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("first prompt %q, want the message and the instructions", textOf(prompts[0]))
 	}
 	if got := textOf(prompts[1]); !slices.Equal(got, []string{"second"}) {
@@ -1327,7 +1346,7 @@ func TestEnhancedTasklessRunDeliversInstructionsWithTheFirstMailPrompt(t *testin
 	if len(prompts) != 2 {
 		t.Fatalf("prompts %+v, want two", prompts)
 	}
-	if want := []string{"inbox hint", "\n\n" + e.sched.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"inbox hint", "\n\n" + e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("mail prompt %q, want the hint and the instructions", textOf(prompts[0]))
 	}
 	if got := textOf(prompts[1]); !slices.Equal(got, []string{"second"}) {
@@ -1365,7 +1384,7 @@ func TestEnhancedTasklessRunKeepsInstructionsAcrossARestartBeforeAnyTurn(t *test
 	if len(prompts) != 1 {
 		t.Fatalf("prompts %+v, want one", prompts)
 	}
-	if want := []string{"first", "\n\n" + s2.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"first", "\n\n" + s2.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("first prompt %q, want the message and the instructions", textOf(prompts[0]))
 	}
 }
@@ -1406,7 +1425,7 @@ func TestEnhancedTasklessRunKeepsInstructionsAcrossARestartAfterOnlyRefusedPromp
 	if len(prompts) != 1 {
 		t.Fatalf("prompts %+v, want one", prompts)
 	}
-	if want := []string{"second", "\n\n" + s2.runInstructions(false, false)}; !slices.Equal(textOf(prompts[0]), want) {
+	if want := []string{"second", "\n\n" + s2.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("first answered prompt %q, want the message and the instructions", textOf(prompts[0]))
 	}
 }
@@ -1433,7 +1452,7 @@ func TestEnhancedTasklessRunKeepsInstructionsWhenTheFirstMessageIsDropped(t *tes
 	waitFor(t, "the instructions given back", func() bool {
 		e.sched.acp.mu.Lock()
 		defer e.sched.acp.mu.Unlock()
-		return e.sched.acp.runs[run.ID].instructions == e.sched.runInstructions(false, false)
+		return e.sched.acp.runs[run.ID].instructions == e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})
 	})
 }
 
@@ -1461,7 +1480,7 @@ func TestEnhancedTasklessRunAppendsInstructionsOnceToConcurrentPrompts(t *testin
 	waitFor(t, "the turns to finish", func() bool { return e.sched.IdleEnhanced(run.ID) && assistantSaidNow(e, run.ID, "pong") })
 	count := 0
 	for _, prompt := range rt.all()[0].wire.prompts(t) {
-		if slices.Contains(textOf(prompt), "\n\n"+e.sched.runInstructions(false, false)) {
+		if slices.Contains(textOf(prompt), "\n\n"+e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})) {
 			count++
 		}
 	}
@@ -1478,7 +1497,7 @@ func TestEnhancedTasklessRunGetsInstructionsBackFromABusyWake(t *testing.T) {
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
 	sess := e.sched.acp.session(run.ID)
 	instructions, settle := e.sched.acp.claimInstructions(run.ID, sess)
-	if instructions != e.sched.runInstructions(false, false) {
+	if instructions != e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true}) {
 		t.Fatalf("claimed %q, want the run instructions", instructions)
 	}
 	if again, _ := e.sched.acp.claimInstructions(run.ID, sess); again != "" {
