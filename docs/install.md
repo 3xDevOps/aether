@@ -935,12 +935,14 @@ restarts it on resume if it died.
 
 Android may reclaim the dashboard's renderer process while the app is in the
 background, for example while you confirm a sign-in code in the browser. The
-app reloads the dashboard when you return to it. If the renderer crashes
-instead, the app shows `The dashboard's renderer crashed` with **Retry** and
-**Connection** rather than reloading into the same crash. On Android 10 and
-newer, a renderer that stops responding is ended instead of freezing the app
-into an "isn't responding" dialog, and the app shows `The dashboard's renderer
-stopped responding and was ended`, again with **Retry** and **Connection**.
+app reloads the dashboard when you return to it. Any other renderer loss shows
+a screen with **Retry** and **Connection** instead of reloading into the same
+failure: `Android stopped the dashboard's renderer` for one killed while on
+screen, `The dashboard's renderer crashed` for a crash. On Android 10 and
+newer, a renderer that WebView reports unresponsive twice in a row (at least
+5 seconds apart) is ended instead of freezing the app into an "isn't
+responding" dialog, and the app shows `The dashboard's renderer stopped
+responding and was ended`. A failed gateway's screen stays in front of these.
 `adb logcat -s aether` shows each renderer loss.
 
 **Multiple servers.** In Edge mode, Settings > This computer lists **Saved

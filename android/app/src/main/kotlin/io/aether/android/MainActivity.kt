@@ -210,7 +210,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        reloadReclaimed()
+        if (!reloadOnStart) return
+        reloadOnStart = false
+        loaded?.let(web::loadUrl)
     }
 
     override fun onResume() {
@@ -324,15 +326,25 @@ class MainActivity : ComponentActivity() {
             web.setWebViewRenderProcessClient(
                 rendererWatch,
                 object : WebViewRenderProcessClient() {
+                    private var reports = 0
+
                     override fun onRenderProcessUnresponsive(view: WebView, renderer: WebViewRenderProcess?) {
-                        Log.w(TAG, "dashboard renderer not responding; ending it")
+                        reports++
+                        Log.w(TAG, "dashboard renderer not responding ($reports in a row)")
+                        if (!endsUnresponsiveRenderer(reports)) return
                         // Set first: onRenderProcessGone can run before
                         // terminate returns.
                         terminatedRenderer = true
-                        if (renderer?.terminate() != true) terminatedRenderer = false
+                        if (renderer?.terminate() == true) {
+                            Log.w(TAG, "ended the dashboard renderer")
+                        } else {
+                            terminatedRenderer = false
+                        }
                     }
 
-                    override fun onRenderProcessResponsive(view: WebView, renderer: WebViewRenderProcess?) {}
+                    override fun onRenderProcessResponsive(view: WebView, renderer: WebViewRenderProcess?) {
+                        reports = 0
+                    }
                 },
             )
         }
@@ -425,6 +437,9 @@ class MainActivity : ComponentActivity() {
                 // Android reclaims the renderer of an app in the background,
                 // as while the member signs in to Edge in the browser.
                 override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    // The page's file input dies with it.
+                    fileChooser?.onReceiveValue(null)
+                    fileChooser = null
                     val parent = view.parent as ViewGroup
                     val index = parent.indexOfChild(view)
                     val params = view.layoutParams
@@ -432,25 +447,33 @@ class MainActivity : ComponentActivity() {
                     view.destroy()
                     web = WebView(this@MainActivity).apply { id = R.id.web }
                     parent.addView(web, index, params)
+                    // The insets pass ran before this WebView existed.
+                    ViewCompat.requestApplyInsets(parent)
                     configureWebView()
                     syncBackCallback()
-                    val loss = rendererLoss(detail.didCrash(), terminatedRenderer)
+                    val loss =
+                        rendererLoss(
+                            detail.didCrash(),
+                            terminatedRenderer,
+                            lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED),
+                        )
                     terminatedRenderer = false
                     Log.w(TAG, "dashboard renderer gone: $loss")
-                    when (loss) {
-                        RendererLoss.RELOAD -> {
-                            reloadOnStart = true
-                            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) reloadReclaimed()
+                    val message =
+                        when (loss) {
+                            RendererLoss.RELOAD -> {
+                                reloadOnStart = true
+                                return true
+                            }
+                            RendererLoss.KILLED -> R.string.renderer_killed
+                            RendererLoss.CRASHED -> R.string.renderer_crashed
+                            RendererLoss.UNRESPONSIVE -> R.string.renderer_unresponsive
                         }
-                        RendererLoss.CRASHED -> {
-                            rendererLost = true
-                            showFailure(getString(R.string.renderer_crashed), "")
-                        }
-                        RendererLoss.UNRESPONSIVE -> {
-                            rendererLost = true
-                            showFailure(getString(R.string.renderer_unresponsive), "")
-                        }
-                    }
+                    // The gateway's failure says more than this one: with no
+                    // gateway there was no dashboard to lose.
+                    if (gatewayError.visibility == View.VISIBLE && !rendererLost) return true
+                    rendererLost = true
+                    showFailure(getString(message), "")
                     return true
                 }
             }
@@ -644,12 +667,6 @@ class MainActivity : ComponentActivity() {
                 },
             )
         gateway?.start()
-    }
-
-    private fun reloadReclaimed() {
-        if (!reloadOnStart) return
-        reloadOnStart = false
-        loaded?.let(web::loadUrl)
     }
 
     private fun showFailure(title: String, message: String) {
