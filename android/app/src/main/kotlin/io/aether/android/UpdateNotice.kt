@@ -29,7 +29,7 @@ private const val CHECK_TIMEOUT_SECONDS = 30L
 class UpdateNotice(private val activity: Activity, private val banner: View) {
     private val main = Handler(Looper.getMainLooper())
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
-    private val source = installSourceFor(installerPackage(activity))
+    private var facts: InstallFacts? = null
     private var check: Future<*>? = null
     private var destroyed = false
     private var shown = ""
@@ -47,6 +47,7 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
             banner.visibility = View.GONE
         }
         action.setOnClickListener {
+            val source = facts?.source ?: return@setOnClickListener
             open(updateTargets(source, activity.packageName, shown).orEmpty())
         }
         notes.setOnClickListener {
@@ -58,16 +59,20 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
         val stored = activity.storedUpdate()
         render(stored)
         if (check?.isDone == false) return
-        if (!checkDue(System.currentTimeMillis(), stored.checkedAt, appUpdatedAt())) return
         val context = activity.applicationContext
         check =
             executor.submit {
-                val line = runCheck(context)
+                val read = installFacts(context)
+                val due = checkDue(System.currentTimeMillis(), stored.checkedAt, read.updatedAt)
+                val line = if (due) runCheck(context) else null
                 main.post {
                     if (destroyed) return@post
-                    val next =
-                        afterCheck(activity.storedUpdate(), System.currentTimeMillis(), line, appUpdatedAt())
-                    activity.storeUpdate(next)
+                    facts = read
+                    var next = activity.storedUpdate()
+                    if (due) {
+                        next = afterCheck(next, System.currentTimeMillis(), line, read.updatedAt)
+                        activity.storeUpdate(next)
+                    }
                     render(next)
                 }
             }
@@ -80,14 +85,15 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
     }
 
     private fun render(stored: StoredUpdate) {
-        val found = noticeFor(stored, source, System.currentTimeMillis(), appUpdatedAt())
-        if (found == null) {
+        val read = facts
+        val found = read?.let { noticeFor(stored, it.source, System.currentTimeMillis(), it.updatedAt) }
+        if (read == null || found == null) {
             banner.visibility = View.GONE
             return
         }
         if (found.latest != shown) error.visibility = View.GONE
         shown = found.latest
-        val play = source == InstallSource.PLAY
+        val play = read.source == InstallSource.PLAY
         title.text = activity.getString(R.string.update_title, found.latest)
         running.text = activity.getString(R.string.update_running, found.version)
         detail.setText(if (play) R.string.update_play_detail else R.string.update_release_detail)
@@ -116,11 +122,6 @@ class UpdateNotice(private val activity: Activity, private val banner: View) {
         error.text = failures.joinToString("\n")
         error.visibility = View.VISIBLE
     }
-
-    // The flags overload is the only one before API 33.
-    @Suppress("DEPRECATION")
-    private fun appUpdatedAt(): Long =
-        activity.packageManager.getPackageInfo(activity.packageName, 0).lastUpdateTime
 }
 
 /**

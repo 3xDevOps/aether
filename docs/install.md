@@ -924,22 +924,27 @@ update --check --json` in the background, so the release lookup and version
 order are the desktop's. A check that fails, offline for example, shows
 nothing and runs again an hour later. When a newer release is out, a banner
 over the top of the dashboard names the new version and the one you run,
-with one button. Which button depends on where Android says the app came
-from (`getInstallSourceInfo` on Android 11 and newer,
+with one button. Which button depends on who signed the app and which
+installer Android recorded (`getInstallSourceInfo` on Android 11 and newer,
 `getInstallerPackageName` before):
 
-- Installed by Google Play: **Open Google Play** opens the app's listing in
-  the Play app (`market://details?id=io.aether.android`), or in the browser
-  when Play is missing. **Release notes** opens the GitHub release. GitHub
-  publishes a release before Play has reviewed and rolled it out, so a Play
-  install shows the banner only once it has been behind a release for 7
-  days; newer releases in that week do not restart the wait.
-- Installed any other way, such as the APK from a release page: **Open
-  release page** opens that release in the browser. Download
-  `aether-android.apk` and open it; it installs over the app and keeps its
-  data, because every release is signed with the same key. A `make
+- Installed by Google Play, or signed with any key but the release key:
+  **Open Google Play** opens the app's listing in the Play app
+  (`market://details?id=io.aether.android`), or in the browser when Play is
+  missing. **Release notes** opens the GitHub release. Play App Signing
+  re-signs what Play serves, so a Play build installed through another store
+  or as sideloaded split APKs still updates from Play. GitHub publishes a
+  release before Play has reviewed and rolled it out, so this banner shows
+  only once the app has been behind a release for 7 days; newer releases in
+  that week do not restart the wait.
+- Installed any other way and signed with the release key, such as the APK
+  from a release page: **Open release page** opens that release in the
+  browser. Download `aether-android.apk` and open it; it installs over the
+  app and keeps its data. The release key's certificate SHA-256 is
+  `2d7e0777aa8a24ac0090dcdd4c620910c9ef13c7775b1576ed69230f1dd37c3a`, as
+  `apksigner verify --print-certs aether-android.apk` prints it. A `make
   android-debug` build is signed with another key, so Android will not
-  install the release APK over it.
+  install the release APK over it, and its banner points at Google Play.
 
 If the page does not open, the banner shows Android's own error. Dismissing
 the banner silences that version only, on this phone; the next release shows

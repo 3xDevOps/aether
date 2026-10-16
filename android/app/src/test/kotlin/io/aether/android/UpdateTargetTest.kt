@@ -10,17 +10,27 @@ private const val PACKAGE = "io.aether.android"
 
 class UpdateTargetTest {
     @Test
-    fun playInstallsUpdateFromPlay() {
-        assertEquals(InstallSource.PLAY, installSourceFor("com.android.vending"))
-        assertEquals(InstallSource.PLAY, installSourceFor("com.google.android.feedback"))
+    fun playInstallsUpdateFromPlayWhateverTheSigner() {
+        for (signed in listOf(true, false)) {
+            assertEquals(InstallSource.PLAY, installSourceFor("com.android.vending", signed))
+            assertEquals(InstallSource.PLAY, installSourceFor("com.google.android.feedback", signed))
+        }
     }
 
     @Test
-    fun everyOtherInstallUpdatesFromTheRelease() {
-        assertEquals(InstallSource.RELEASE, installSourceFor(null))
-        assertEquals(InstallSource.RELEASE, installSourceFor("com.google.android.packageinstaller"))
-        assertEquals(InstallSource.RELEASE, installSourceFor("com.android.chrome"))
-        assertEquals(InstallSource.RELEASE, installSourceFor("org.fdroid.fdroid"))
+    fun onlyTheReleaseKeyTakesTheReleaseApk() {
+        for (installer in listOf(null, "com.google.android.packageinstaller", "com.android.chrome", "org.fdroid.fdroid")) {
+            assertEquals(installer, InstallSource.RELEASE, installSourceFor(installer, true))
+        }
+    }
+
+    // Play App Signing re-signs Play builds, so the release APK never installs
+    // over one, whether Aurora Store or a split-APK sideload put it there.
+    @Test
+    fun anyOtherSignerUpdatesFromPlay() {
+        for (installer in listOf(null, "com.aurora.store", "com.google.android.packageinstaller")) {
+            assertEquals(installer, InstallSource.PLAY, installSourceFor(installer, false))
+        }
     }
 
     @Test
