@@ -1,8 +1,3 @@
-// The update prompt for a CLI an app installs, the Android app's sidecar.
-// The gateway reports the release but never installs it; the button opens
-// the page that does - the Play listing or the GitHub release - and the
-// member updates there.
-
 import { useState } from 'react'
 import { Smartphone } from '@/components/icons'
 import { Button } from '@/components/ui/button'

@@ -79,7 +79,7 @@ device-to-device transfer (`allowBackup=false` and
   dashboard is open, the CLI asks `github.com` for the tag of the newest
   Aether release so the dashboard can say an update exists. An answer is
   reused for an hour; a failed request is retried after five minutes at the
-  soonest; GitHub sees the phone's IP address and that request, nothing about
+  soonest, and a restarted gateway asks again; GitHub sees the phone's IP address and that request, nothing about
   you or your server. It never downloads the release: you install it from
   Google Play or the release page. The CLI resolves host names with plain DNS over port 53 to the active
   network's DNS servers, bypassing Android Private DNS (DNS-over-TLS), so that

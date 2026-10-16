@@ -83,8 +83,8 @@ Everything is encrypted in transit. Deletion: the edge's Account page, linked
 from the privacy policy. The permission `ACCESS_NETWORK_STATE` reads the
 active network's DNS servers into `resolv.conf`; they are not sent anywhere.
 In Edge mode the bundled CLI asks `github.com` for the newest release's tag,
-reusing an answer for an hour and retrying a failed request after five minutes
-at the soonest; the request carries no user data, and nothing is
+reusing an answer for an hour, retrying a failed request after five minutes at
+the soonest and asking again when the gateway restarts; the request carries no user data, and nothing is
 downloaded or installed.
 
 ## Other declarations on the same page
