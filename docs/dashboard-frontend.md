@@ -568,8 +568,8 @@ seconds. A phone gets the web push the server sends for the same notice.
 Entry points: the **Assistant** button (`components/assistant/button.tsx`, one
 component mounted in one place at a time: the sidebar's **New run** row (a secondary
 icon button to its right, which keeps the workspace switcher's room), the top bar's first row while the sidebar is hidden, or
-the phone toolbar under 768px; keeping it out of the top bar's row keeps every
-header destination visible at 768px), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
+the phone toolbar under 768px; keeping it out of the top bar's row leaves that
+row to the header destinations), `Mod+Shift+Space`, the palette's **Ask Aether**, a secondary
 **Ask Aether** in the board's empty states, and **Stuck? Ask Aether** under
 each onboarding step.
 
