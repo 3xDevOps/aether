@@ -500,6 +500,10 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 					g.Role, g.Background = coordhooks.RoleBackground, true
 				}
 				command := strings.Join(e.rt.byName(string(run.ID)).spec.Command, "\x00")
+				// Gemini's interactive UI asks to trust every included directory.
+				if name == "gemini" && strings.Contains(command, "--include-directories") {
+					t.Fatalf("gemini command %q includes a directory", command)
+				}
 				profile, _ := harness.Lookup(name)
 				env := e.rt.byName(string(run.ID)).spec.Env
 				if background := env[coordtransport.BackgroundEnv] == "1"; background != g.Background {

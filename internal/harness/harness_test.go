@@ -219,12 +219,12 @@ func TestStatusReporters(t *testing.T) {
 	}
 }
 
-// Every shipped CLI but Cursor carries run instructions in context it keeps
+// Every shipped CLI but Gemini and Cursor carries run instructions in context it keeps
 // through compaction, through a per-launch mechanism, never a member-home or
 // repository instruction file.
 func TestInstructionMechanisms(t *testing.T) {
 	const text = "line one\nsay \"<hi>\""
-	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode", "copilot", "gemini"} {
+	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode", "copilot"} {
 		p, ok := Lookup(name)
 		if !ok {
 			t.Fatalf("Lookup(%q) missing", name)
@@ -239,7 +239,7 @@ func TestInstructionMechanisms(t *testing.T) {
 				t.Errorf("%s instruction args kept a placeholder: %v", name, args)
 			}
 		}
-		if (len(env) > 0 || name == "gemini") != (p.InstructionsFile != "") {
+		if (len(env) > 0) != (p.InstructionsFile != "") {
 			t.Errorf("%s loads instructions from a file %v, but writes InstructionsFile %q", name, len(env) > 0, p.InstructionsFile)
 		}
 		switch name {
@@ -258,17 +258,13 @@ func TestInstructionMechanisms(t *testing.T) {
 			if env["COPILOT_CUSTOM_INSTRUCTIONS_DIRS"] != "/run/aether" || !strings.HasSuffix(p.InstructionsFile, ".instructions.md") {
 				t.Errorf("copilot instruction env %v does not load %s", env, p.InstructionsFile)
 			}
-		case "gemini":
-			if !slices.Equal(args, []string{"--include-directories=/run/aether"}) || p.InstructionsFile != "GEMINI.md" {
-				t.Errorf("gemini instruction args = %q with file %q", args, p.InstructionsFile)
-			}
 		default:
 			if !slices.Equal(args, []string{"--append-system-prompt", text}) {
 				t.Errorf("%s instruction args = %q", name, args)
 			}
 		}
 	}
-	for _, name := range []string{"cursor", "custom"} {
+	for _, name := range []string{"gemini", "cursor", "custom"} {
 		if p, _ := Lookup(name); p.CarriesInstructions() {
 			t.Fatalf("%s profile must not carry instruction wiring: %+v", name, p)
 		}

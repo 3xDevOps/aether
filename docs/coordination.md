@@ -521,16 +521,16 @@ for a mission role. The waiting line needs `AETHER_ENHANCED=1` or
 native integration file (Claude Code, pi, OMP and OpenCode; Codex's and
 Copilot CLI's hooks cannot wake it), and a status without `protected: true`.
 `AETHER_ROLE_CARD=1` marks a launch that already carries the card in its
-system prompt or startup context, so hooks and the bridge do not repeat it.
+system prompt, so hooks and the bridge do not repeat it.
 
 Where the instructions go:
 
 - Standard and non-ACP Background launches of a shipped agent, with or
-  without a task, carry them in the agent's system prompt (Gemini CLI: its
-  session context), so they survive compaction; see
-  [harnesses.md](harnesses.md#how-aether-launches-them). Cursor CLI, custom
-  definitions and admin overrides have no such mechanism and get them
-  appended to the task prompt; a taskless launch of one gets none.
+  without a task, carry them in the agent's system prompt, so they survive
+  compaction; see [harnesses.md](harnesses.md#how-aether-launches-them).
+  Gemini CLI, Cursor CLI, custom definitions and admin overrides have no
+  such mechanism and get them appended to the task prompt; a taskless
+  launch of one gets none.
 - Enhanced runs get them as described in
   [enhanced-runs.md](enhanced-runs.md#run-instructions).
 - The `SessionStart` hook prints the role card only when the launch does

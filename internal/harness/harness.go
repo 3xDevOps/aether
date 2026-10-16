@@ -606,13 +606,11 @@ var profiles = map[string]Profile{
 		// In a folder it does not trust, Gemini drops yolo to default and
 		// skips ~/.gemini/.env.
 		Env: map[string]string{"GEMINI_CLI_TRUST_WORKSPACE": "true"},
-		// Only ~/.gemini/GEMINI.md reaches Gemini's system prompt, and
-		// GEMINI_SYSTEM_MD replaces it. An included directory's GEMINI.md
-		// goes into the session context, which compression keeps.
-		InstructionArgs:  []string{"--include-directories=" + CoordPlaceholder},
-		InstructionsFile: "GEMINI.md",
-		EnvPassthrough:   []string{"GEMINI_API_KEY"},
-		CredentialPaths:  []string{".gemini/oauth_creds.json", ".gemini/.env"},
+		// No InstructionArgs: the interactive UI asks to trust every
+		// --include-directories entry, and GEMINI_CLI_TRUST_WORKSPACE covers
+		// only the working directory.
+		EnvPassthrough:  []string{"GEMINI_API_KEY"},
+		CredentialPaths: []string{".gemini/oauth_creds.json", ".gemini/.env"},
 		// Gemini writes oauth_creds.json to a temporary file and renames it
 		// over the old one, and rewrites it in place when that rename fails.
 		PinnedLogins:  []string{".gemini/oauth_creds.json"},

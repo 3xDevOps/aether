@@ -224,8 +224,8 @@ Staging failure refuses creation rather than silently omitting the CLI.
 Standard and non-ACP Background launches get no Aether MCP registration;
 Enhanced runs and ACP Background launches get the
 [MCP bridge](mcp-bridge.md#registration) over ACP. Shipped
-agents other than `cursor` carry the run's agent instructions in their
-system prompt or startup context
+agents other than `gemini` and `cursor` carry the run's agent instructions
+in their system prompt
 ([How Aether launches them](#how-aether-launches-them));
 `aether-internal skill` loads live capability and assignment guidance.
 Containers without run identity receive only general guidance, not borrowed
@@ -1111,8 +1111,7 @@ for the first message.
 
 Every Standard launch of a shipped agent, with or without a task, and every
 Background launch that does not use ACP carries the run's [agent instructions](coordination.md#agent-instructions)
-(its role card and the co-author rule) in context the agent keeps through
-compaction, for that launch only:
+(its role card and the co-author rule) for that launch only:
 
 | CLI | Mechanism |
 | --- | --- |
@@ -1120,10 +1119,10 @@ compaction, for that launch only:
 | `codex` | `-c developer_instructions="<instructions>"`, which adds to Codex's built-in instructions. The setting replaces any `developer_instructions` from `config.toml`, so Aether puts the top-level value of `~/.codex/config.toml` in your Aether home first. Aether does not follow a symlinked or hard-linked `config.toml`, so its value is replaced too. A value from a Codex profile, a project `.codex/config.toml` or a `CODEX_HOME` set in the workspace is not read and is replaced for that launch; put such instructions in `AGENTS.md` |
 | `opencode` | `/run/aether/instructions.md` appended to `instructions` in `OPENCODE_CONFIG_CONTENT`, after any entries your workspace variable already lists; managed V1 merges it into `/run/aether/opencode-native-v1.json` |
 | `copilot` | `/run/aether/aether.instructions.md`, loaded through `COPILOT_CUSTOM_INSTRUCTIONS_DIRS=/run/aether` after the repository's own instructions; a directory list your workspace variable already sets is kept ahead of it |
-| `gemini` | `/run/aether/GEMINI.md`, loaded through `--include-directories=/run/aether`. Gemini puts only `~/.gemini/GEMINI.md` in its system prompt, and `GEMINI_SYSTEM_MD` would replace the whole prompt, so the file joins the session context that Gemini restores after compression |
+| `gemini` | none: a task-bearing launch carries the instructions after the task, and a taskless one gets none. Gemini puts only `~/.gemini/GEMINI.md` in its system prompt, and `GEMINI_SYSTEM_MD` would replace the whole prompt. Loading `/run/aether` through `--include-directories` would make every Standard launch stop on Gemini's "Do you trust the following folders" prompt, because `GEMINI_CLI_TRUST_WORKSPACE` trusts only the working directory |
 | `cursor` | none: a task-bearing launch carries the instructions after the task, and a taskless one gets none |
 
-The system prompt, and Gemini's session context, survive compaction. The task prompt stays exactly what the
+The system prompt survives compaction; instructions after the task do not. The task prompt stays exactly what the
 member typed, as do the stored task, branch slug, and every CLI and dashboard
 surface. Switching an Enhanced run to Standard carries the
 instructions to the new launch. Enhanced runs receive them over ACP instead
