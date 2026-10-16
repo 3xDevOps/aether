@@ -121,11 +121,16 @@ test('a replay reconnect that goes live clears the edge refusal before it', asyn
   const problem = page.getByRole('status').filter({ hasText: 'Server registration failed' })
   await expect(problem).toContainText('has no live registration for server')
   await expect(problem).toContainText('aether-server edge status')
+  // The announcer is screen-reader only; the line on screen must say the same.
+  const line = page.getByText(/^Server registration failed · /).filter({ visible: true })
+  await expect(line.first()).toBeVisible()
+  await expect(line.first()).toContainText('has no live registration for server')
   await expect(footer).toHaveAccessibleName(/, Unreachable$/)
   expect(subscribes[0]?.replay).toBe(true)
 
   refusing = false
   await expect(footer).toHaveAccessibleName(/, Live$/, { timeout: 10_000 })
   await expect(problem).toHaveCount(0)
+  await expect(line).toHaveCount(0)
   await expect(page.getByText(/Live · /)).toHaveCount(0)
 })
