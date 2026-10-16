@@ -192,6 +192,15 @@ test('a completed success notifies until accepted; an old finished run never doe
   assert.equal(shown.length, 1)
 })
 
+test('a success put off while its run is read never notifies', async () => {
+  const run = lead('r11')
+  const read = status(run, { status: 'completed', state: '', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
+  await review(run, 'later')
+  await read
+  assert.equal(shown.length, 0)
+  assert.equal(badge, 0)
+})
+
 test("another member's run never notifies or counts", async () => {
   const run = { ...lead('r7'), member_id: 'someone-else' }
   await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'blocked: no credentials for the registry' })
