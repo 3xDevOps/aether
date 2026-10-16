@@ -27,6 +27,17 @@ export interface AssistantStatus {
   agents: AssistantAgent[]
   error?: string
   confirmations: AssistantConfirmation[]
+  /** Confirmed tools run without a card, as if approved. */
+  auto_approve: boolean
+}
+
+export interface AssistantSettings {
+  auto_approve: boolean
+}
+
+/** Fields left out are not changed; none reads the settings. */
+export interface AssistantSettingsParams {
+  auto_approve?: boolean
 }
 
 export interface AssistantStartParams {

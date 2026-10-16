@@ -44,6 +44,10 @@ type AssistantStore interface {
 	HasAssistantPromptKey(ctx context.Context, member domain.MemberID, generation int64, key string) (bool, error)
 	// AddAssistantPromptKey records key, keeping the newest MaxAssistantPromptKeys.
 	AddAssistantPromptKey(ctx context.Context, member domain.MemberID, generation int64, key string) error
+	// AssistantAutoApprove reports whether the member lets the assistant's
+	// confirmed tools run without a card; false when never set.
+	AssistantAutoApprove(ctx context.Context, member domain.MemberID) (bool, error)
+	SetAssistantAutoApprove(ctx context.Context, member domain.MemberID, on bool) error
 }
 
 func (d *DB) GetAssistantSession(ctx context.Context, member domain.MemberID) (*AssistantSession, error) {
@@ -147,6 +151,30 @@ func (d *DB) AddAssistantPromptKey(ctx context.Context, member domain.MemberID, 
 	}
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("store: add assistant prompt key: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) AssistantAutoApprove(ctx context.Context, member domain.MemberID) (bool, error) {
+	var on bool
+	err := d.db.QueryRowContext(ctx,
+		`SELECT auto_approve FROM assistant_settings WHERE member_id = ?`, member).Scan(&on)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: get assistant auto-approval: %w", err)
+	}
+	return on, nil
+}
+
+func (d *DB) SetAssistantAutoApprove(ctx context.Context, member domain.MemberID, on bool) error {
+	_, err := d.db.ExecContext(ctx,
+		`INSERT INTO assistant_settings (member_id, auto_approve, updated_at) VALUES (?, ?, unixepoch())
+		 ON CONFLICT(member_id) DO UPDATE SET auto_approve = excluded.auto_approve, updated_at = excluded.updated_at`,
+		member, on)
+	if err != nil {
+		return fmt.Errorf("store: set assistant auto-approval: %w", mapConstraint(err, ErrNotFound))
 	}
 	return nil
 }

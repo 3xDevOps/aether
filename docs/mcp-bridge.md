@@ -206,7 +206,9 @@ member id and the server rejects any param containing `member_id`, except the `r
 | Reversible | `aether_pause_run`, `aether_resume_run` |
 | Confirmed | `aether_launch_run`, `aether_message_run`, `aether_stop_run`, `aether_save_environment` |
 
-A confirmed call blocks until the member approves it in the dashboard. A
-decline, timeout or closed session fails the call with the reason. `aether_docs`
+A confirmed call blocks until the member approves it in the dashboard, or
+runs at once when the member turned on
+[auto-approval](assistant.md#auto-approval). A decline, timeout or closed
+session fails the call with the reason. `aether_docs`
 reads the guides in `docs/`, which the server binary embeds. Without
 `--assistant` the bridge serves the coordination tools above, unchanged.

@@ -512,7 +512,9 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   320px of room the sheet is used instead.
 - **Phone:** a right side sheet, a `dialog` named "Assistant".
 - **Header:** the agent and state, **New conversation** (confirms, then
-  `assistant.reset`) and **Close assistant**.
+  `assistant.reset`) and **Close assistant**. While `auto_approve` is on, a
+  line under it says the assistant acts without asking, with **Change in
+  Settings**.
 - **Body:** by `assistant.status` state. `setup` lists each agent with its
   reason and opens `AgentSetup` in place; `needs_restart` is a callout with a
   button that calls `assistant.start {restart_environment: true}`; `failed`
@@ -4629,6 +4631,12 @@ through either gateway:
   [Keyboard and focus](#keyboard-and-focus)).
 - **Notifications**: **Notify this device when a run needs me**, described
   under [Push notifications](#push-notifications).
+- **Assistant**, where the assistant is available (`useAssistantAvailable`):
+  **Let the assistant act without asking** reads and sets `assistant.settings`
+  `auto_approve`. Turning it on first asks **Let the assistant act without
+  asking?** with the warning that the assistant will launch, message and stop
+  runs and save the environment on its own; turning it off does not ask. A
+  refusal stays in the dialog or under the row.
 - **This computer**, only on the local gateway: the linked **Server** and
   **Repository** (`link.status`) with **Link another server** (**Link a server**
 before any), **Saved servers** (the default link, then named ones) with

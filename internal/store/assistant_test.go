@@ -115,3 +115,32 @@ func TestAssistantFollows(t *testing.T) {
 		t.Fatalf("follows survived the run: %+v", follows)
 	}
 }
+
+func TestAssistantAutoApprove(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	ada := mustCreateMember(t, db).ID
+
+	if on, err := db.AssistantAutoApprove(ctx, ada); err != nil || on {
+		t.Fatalf("auto-approval before it was set = %v, %v, want off", on, err)
+	}
+	if err := db.SetAssistantAutoApprove(ctx, ada, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ResetAssistantSession(ctx, ada); err != nil {
+		t.Fatal(err)
+	}
+	if on, err := db.AssistantAutoApprove(ctx, ada); err != nil || !on {
+		t.Fatalf("auto-approval after a new conversation = %v, %v, want on", on, err)
+	}
+	if err := db.SetAssistantAutoApprove(ctx, ada, false); err != nil {
+		t.Fatal(err)
+	}
+	if on, err := db.AssistantAutoApprove(ctx, ada); err != nil || on {
+		t.Fatalf("auto-approval after turning it off = %v, %v", on, err)
+	}
+	if err := db.SetAssistantAutoApprove(ctx, "mem-missing", true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("setting an unknown member's auto-approval = %v, want ErrNotFound", err)
+	}
+}

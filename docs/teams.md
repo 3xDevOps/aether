@@ -886,6 +886,7 @@ commit captured at launch.
 | `aether ssh-config` | Make every run an ssh host, `<run-id>.aether`, for `ssh`, `scp`, `sftp`, `rsync` and editors. Run it once per computer. See [terminal.md](terminal.md#ssh-and-editors). |
 | `aether ssh [ssh options] <run> [command]` | Open a login shell in a live run's checkout, or run one command there and exit with its status. Needs what a run shell needs: steer, and use of the run's agent account. |
 | `aether member git [--name <name>] [--email <email>] [member-id]` | Show or set the name and email every commit made for that member is authored as. Members set their own; an admin can set anyone's. |
+| `aether member assistant [--auto-approve on\|off]` | Show or set whether your [assistant](assistant.md#auto-approval) launches, messages and stops runs and saves your environment without a card. Only your own. |
 | `aether github connect` | Finish connecting GitHub after `gh auth login` in your Environment: sets up git credentials there, generates and registers a commit signing key. See [environment-home.md](environment-home.md#connect-github). |
 | `aether workspace origin [--workspace <name-or-id>] [<url>\|--clear]` | Show or set the checkout Origin run checkouts use for pushing review branches. Needs the push capability. |
 | `aether workspace env list\|set\|unset\|import\|script` | The workspace's variables, secrets and setup script, which every new run in it gets. Any member can `list` and print the `script`; changing either needs the admin role. See [environments.md](environments.md#workspace-environment). |

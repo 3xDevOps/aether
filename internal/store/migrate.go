@@ -1722,6 +1722,15 @@ CREATE TABLE assistant_follows (
 );
 CREATE INDEX idx_assistant_follows_run ON assistant_follows(run_id);
 `,
+	// v66: a member's assistant settings. auto_approve lets the assistant's
+	// confirmed tools run without a card.
+	`
+CREATE TABLE assistant_settings (
+	member_id    TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+	auto_approve INTEGER NOT NULL DEFAULT 0,
+	updated_at   INTEGER NOT NULL
+);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

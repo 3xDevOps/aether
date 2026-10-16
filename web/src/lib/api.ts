@@ -204,7 +204,7 @@ import type {
   WorkspaceImportParams,
   WorkspaceImportResult,
 } from '@/lib/run-repository-types'
-import type { AssistantStartParams, AssistantStatus } from '@/lib/assistant-types'
+import type { AssistantSettings, AssistantSettingsParams, AssistantStartParams, AssistantStatus } from '@/lib/assistant-types'
 import type { SessionHistory, SessionItem, SessionLease } from '@/lib/session-types'
 
 export const API_BASE = '/api/v1'
@@ -629,6 +629,7 @@ export const api = {
     call<unknown>('assistant.confirm', { confirmation_id: confirmationID, approve }),
   assistantItem: (seq: number) => call<{ item: SessionItem }>('assistant.item', { seq }).then((r) => r.item),
   assistantReset: () => call<AssistantStatus>('assistant.reset', {}),
+  assistantSettings: (params: AssistantSettingsParams = {}) => call<AssistantSettings>('assistant.settings', params),
   assistantHistory: (beforeSeq?: number, limit?: number) =>
     call<SessionHistory>('assistant.history', { before_seq: beforeSeq, limit }),
   runACPCancel: (runID: string, lease: SessionLease) =>

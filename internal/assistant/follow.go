@@ -349,16 +349,25 @@ func (s *Service) deliver(n notice) bool {
 	return true
 }
 
-// transcribe puts n in the member's transcript: in the live session, or else
-// in the item log, which no session writes while the member's op lock is held.
+// transcribe puts n in the member's transcript.
 func (s *Service) transcribe(m *member, n notice) error {
+	return s.record(context.Background(), m, n.severity, n.title, n.body)
+}
+
+// record puts a notice in the member's transcript, unless ctx ended while it
+// waited for the member's op lock: in the live session, or else in the item
+// log, which no session writes while m.op is held.
+func (s *Service) record(ctx context.Context, m *member, severity, title, body string) error {
 	m.op.Lock()
 	defer m.op.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if m.removing {
 		return ErrRemoving
 	}
 	if live := m.live(); live != nil {
-		err := live.acp.Notice(n.severity, n.title, n.body)
+		err := live.acp.Notice(severity, title, body)
 		if err == nil {
 			return nil
 		}
@@ -375,7 +384,7 @@ func (s *Service) transcribe(m *member, n notice) error {
 	if err != nil {
 		return err
 	}
-	appendErr := log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Severity: n.severity, Title: n.title, Description: n.body}})
+	appendErr := log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Severity: severity, Title: title, Description: body}})
 	if err = errors.Join(appendErr, log.Close()); err != nil {
 		return err
 	}
@@ -383,4 +392,15 @@ func (s *Service) transcribe(m *member, n notice) error {
 	m.signalLocked()
 	m.mu.Unlock()
 	return nil
+}
+
+// note is record without waiting for m.op while a session is live: a stopped
+// session refuses the notice, which then goes through record.
+func (s *Service) note(ctx context.Context, m *member, severity, title, body string) error {
+	if live := m.live(); live != nil {
+		if err := live.acp.Notice(severity, title, body); !errors.Is(err, acphost.ErrClosed) {
+			return err
+		}
+	}
+	return s.record(ctx, m, severity, title, body)
 }

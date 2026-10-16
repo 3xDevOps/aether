@@ -111,6 +111,9 @@ type member struct {
 	reset sync.RWMutex
 	// removing refuses new sessions while the member is being removed.
 	removing bool
+	// settings orders changes to the member's settings with the calls they
+	// decide.
+	settings sync.Mutex
 
 	mu       sync.Mutex
 	sess     *session
@@ -269,7 +272,11 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	m.mu.Lock()
 	live, starting, failure := m.liveLocked(), m.starting, m.err
 	m.mu.Unlock()
-	status := protocol.AssistantStatus{Agents: agents, Error: failure, Confirmations: m.confirms.snapshot()}
+	auto, err := s.cfg.Store.AssistantAutoApprove(ctx, id)
+	if err != nil {
+		return protocol.AssistantStatus{}, fmt.Errorf("assistant: %w", err)
+	}
+	status := protocol.AssistantStatus{Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(), AutoApprove: auto}
 	switch {
 	case live != nil:
 		status.Agent = live.agent
@@ -433,7 +440,7 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 		cancel()
 		return nil, err
 	}
-	srv := &tools.Server{Caller: s.cfg.Caller(m.id), Confirm: m.confirms.confirm, Member: string(m.id)}
+	srv := &tools.Server{Caller: s.cfg.Caller(m.id), Confirm: s.approver(m), Member: string(m.id)}
 	if s.follower != nil {
 		srv.Follow = func(ctx context.Context, run string) { s.follow(ctx, m.id, domain.RunID(run)) }
 	}
