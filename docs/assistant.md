@@ -4,7 +4,7 @@ The assistant is a chat panel in the dashboard where you ask Aether for
 things in plain language: "what's the status of my runs?", "launch a run to
 fix the flaky login test", "install Rust in my environment". It acts with
 your permissions and asks before it launches, messages or stops a run, or
-saves your environment.
+saves your environment, unless you turn on [auto-approval](#auto-approval).
 
 It is not a run. It is an [Enhanced](enhanced-runs.md) session of your own
 Claude Code or Codex, started in your [environment](terminal.md) container
@@ -98,7 +98,7 @@ documentation of the server you run.
 
 Read tools, pause and resume run immediately; the events name you as the actor.
 Confirmed tools wait for your approval, including launching a run and
-messaging one.
+messaging one, unless auto-approval is on.
 
 Environment changes, such as installing a toolchain, are not an Aether tool.
 The assistant runs them in its own shell in your environment container, then
@@ -123,6 +123,54 @@ failure and not retry. The server enforces this; the assistant cannot
 approve for you. If the agent's call goes away, for example because you
 stopped the turn, its card is withdrawn.
 
+An approved call is noted in the transcript before it runs, as a notice
+titled `Approved: <summary>` with `<method> passed after you approved its card.`, for example `Approved: Stop run run-8x2...
+("Add retry to uploader")`. The server log gets an `assistant approval` line
+with your member id, the method, the summary and `auto=false`.
+
+## Auto-approval
+
+**Settings > Assistant > Let the assistant act without asking** lets the
+confirmed tools run at once, as if you had approved their card. It is off by
+default, and it is yours alone: it applies only to your assistant. Turning it
+on in the dashboard asks first, with a warning that the assistant will launch,
+message and stop runs and save your environment on its own. The CLI does not
+ask:
+
+```sh
+aether member assistant                     # show the setting
+aether member assistant --auto-approve on
+aether member assistant --auto-approve off
+```
+
+Over the API it is `assistant.settings` (`{"auto_approve":true}`), and
+`assistant.status` reports it as `auto_approve`. While it is on, the panel
+says **Acts without asking** under its header.
+
+- **The server decides.** It reads the setting on every confirmed call, so a
+  change applies to the live session at once, with no restart. A call and a
+  change of the setting never overlap: each call sees the setting from before
+  or after the change, and the transcript shows them in that order. Cards
+  already open when you turn it on stay open until you answer them.
+- **The assistant cannot change it.** Only `assistant.settings`, called as
+  you from the dashboard or the CLI, changes it. The assistant's tool socket
+  does not serve that method, and no tool reads or sets it.
+- **Every action is still recorded.** An auto-approved call is noted in the
+  transcript before it runs, as `Auto-approved: <summary>` with `<method> passed
+  without a card: auto-approval is on.`, and the server log line has
+  `auto=true`. If the note cannot be written, the call does not run. Turning
+  the setting on or off is noted too. The run's own events name you as the
+  actor, as with an approved card.
+- **Notifications are unchanged.** Runs the assistant launches or messages
+  are [followed](#notifications) the same way.
+
+With auto-approval on, nothing checks a launch, message, stop or save before
+it happens. Text the assistant reads from runs, files and web pages can carry
+injected instructions; the assistant is told to treat it as data, but that is
+an instruction, not a control. Any program in your environment can also call
+the tool socket directly, and gets the same pass. See
+[security.md](security.md#the-assistant).
+
 ## Shell and file tools
 
 The assistant's own shell and file tools are the agent's, and they run without
@@ -130,7 +178,8 @@ asking. The session starts in the same mode Enhanced runs use: Claude Code
 `bypassPermissions` (the ACP form of `--dangerously-skip-permissions`), Codex
 `agent-full-access`. Installing a tool, editing a file or running a command in
 your environment therefore needs no click. Only the Aether actions above
-(launch, message, stop, save the environment) wait for a card. If the mode
+(launch, message, stop, save the environment) wait for a card, and with
+auto-approval on not even those. If the mode
 cannot be set, the start fails with `assistant: set the "<mode>" mode: <error>`.
 A question the agent asks you still appears as a card.
 
@@ -212,6 +261,8 @@ The panel and the API show these as written.
 | `assistant: open the claude session; stderr: ...` | The adapter failed to start. The agent's stderr is appended; fix it in `aether terminal`, then **Retry** |
 | `assistant: no such pending confirmation: <id>` | The card was already answered or expired |
 | `the member did not answer within 10m0s` | A confirmation timed out |
+| `<method> was not approved: record the approval: <error>` | The approval could not be noted in the transcript, so the call did not run |
+| `<method> was not approved: read the auto-approval setting: <error>` | The server could not read the setting, so the call did not run |
 | `the assistant session ended before the member answered` | The session stopped while a card was open |
 | `the assistant is not configured on this server` | The server runs without the assistant |
 | `assistant: the server is shutting down` | Try again after the restart |

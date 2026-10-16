@@ -486,16 +486,28 @@ container, driven from the dashboard. The boundaries:
   call goes away. The socket does not serve
   `assistant.confirm`; the approval is a control call from the member's own
   dashboard session.
+- **Auto-approval is the member's, and off by default.** With
+  `assistant.settings` `auto_approve` on, the server passes those four
+  methods without a card. The server reads the stored setting on each call;
+  nothing the assistant sends is consulted. The tool socket serves neither
+  `assistant.settings` nor `assistant.confirm`, so the assistant cannot turn
+  it on or approve for itself; only a control call authenticated as the
+  member, from their dashboard or CLI, can. Approved and auto-approved calls
+  alike are written to the member's transcript before they run, and a call
+  whose note cannot be written does not run.
 - **Shell work does not ask.** The session starts in the mode Enhanced runs
   use (Claude Code `bypassPermissions`, Codex `agent-full-access`), so the
   agent's shell and file tools run without a prompt. The tiers above are the
   only approvals, and they are enforced by the server, not the harness.
 - **Run text is untrusted.** Transcripts and output the assistant reads can
   contain injected instructions. The assistant's instructions say to treat
-  them as data, but the control is the server: a steered assistant still
-  cannot launch, message or stop a run, or save the environment, without a
-  click. It can run commands in the member's environment, which is the
-  member's own container.
+  them as data, but the control is the server: with auto-approval off, a
+  steered assistant still cannot launch, message or stop a run, or save the
+  environment, without a click. With it on, that click is gone, and for the
+  agent the instruction is the only guard: a steered assistant can launch
+  runs, message any run the member can message, stop runs and save the
+  environment. It can run commands in the member's environment, which is the
+  member's own container, either way.
 - **Notices name the run.** Aether follows the runs the assistant launches or
   messages and writes a notice to the member's own transcript and to their
   devices through Web Push. A notice holds the run's title and a reason,
@@ -515,9 +527,23 @@ Stated plainly:
   `~/.claude` settings or hooks, or `.bashrc`, that the assistant then loads.
 - Code running in the member's environment container can reach the tool socket
   while a session is live. It gets the read tools and pause/resume at once;
-  anything else still needs the member's approval on a card.
-- Every action beyond reading and pause/resume needs that approval, and the
-  card text comes from the server, not the agent.
+  anything else needs the member's approval on a card, or nothing while
+  auto-approval is on.
+- With auto-approval off, every action beyond reading and pause/resume needs
+  that approval, and the card text comes from the server, not the agent.
+  Turning auto-approval on trades that check for speed; the transcript then
+  shows what passed, after the fact.
+- With auto-approval on, any code running in the member's environment
+  container gets the confirmed tools too, not only the agent: a shell script,
+  a package install hook, or a `~/.claude` hook or `.bashrc` line a run
+  planted in the shared home. Such code can launch, message and stop runs,
+  and `env.save` can persist it into the image new runs and terminals start
+  from.
+- The assistant cannot change the setting as long as no Aether control
+  credential is stored in the member's environment home. A member who signs
+  the `aether` CLI in there gives the assistant, and every run that mounts
+  that home, the means to call `assistant.settings` and `assistant.confirm`
+  as them.
 
 The agent is a process in the member's
 environment container, the same as `aether terminal`. It can read the member's

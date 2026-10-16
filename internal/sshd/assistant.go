@@ -34,6 +34,8 @@ type AssistantService interface {
 	Generation(ctx context.Context, member domain.MemberID) (int64, error)
 	Fence(ctx context.Context, member domain.MemberID) error
 	Unfence(member domain.MemberID)
+	Settings(ctx context.Context, member domain.MemberID) (protocol.AssistantSettings, error)
+	SetAutoApprove(ctx context.Context, member domain.MemberID, on bool) (protocol.AssistantSettings, error)
 }
 
 func init() {
@@ -46,6 +48,7 @@ func init() {
 	registerMethod(protocol.MethodAssistantReset, (*Server).assistantReset)
 	registerMethod(protocol.MethodAssistantHistory, (*Server).assistantHistory)
 	registerMethod(protocol.MethodAssistantItem, (*Server).assistantItem)
+	registerMethod(protocol.MethodAssistantSettings, (*Server).assistantSettings)
 }
 
 var errAssistantUnavailable = &protocol.Error{Code: protocol.CodeUnavailable, Message: "the assistant is not configured on this server"}
@@ -141,6 +144,31 @@ func (s *Server) assistantConfirm(_ context.Context, member domain.MemberID, raw
 		return nil, assistantError(err)
 	}
 	return struct{}{}, nil
+}
+
+// assistantSettings reads or changes the caller's own assistant settings. The
+// assistant's tool socket does not serve it, so the assistant cannot change
+// what gates it.
+func (s *Server) assistantSettings(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	svc := s.cfg.Services.Assistant
+	if svc == nil {
+		return nil, errAssistantUnavailable
+	}
+	p, perr := decodeParams[protocol.AssistantSettingsParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	var settings protocol.AssistantSettings
+	var err error
+	if p.AutoApprove != nil {
+		settings, err = svc.SetAutoApprove(ctx, member, *p.AutoApprove)
+	} else {
+		settings, err = svc.Settings(ctx, member)
+	}
+	if err != nil {
+		return nil, assistantError(err)
+	}
+	return settings, nil
 }
 
 func (s *Server) assistantReset(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {

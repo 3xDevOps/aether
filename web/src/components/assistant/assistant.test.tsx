@@ -42,7 +42,7 @@ afterAll(() => {
 const ready = [{ name: 'claude', display_name: 'Claude Code', ready: true }]
 
 function status(over: Partial<AssistantStatus> = {}): AssistantStatus {
-  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], ...over }
+  return { state: 'idle', agent: 'claude', agents: ready, confirmations: [], auto_approve: false, ...over }
 }
 
 const stop: AssistantConfirmation = {
@@ -262,6 +262,17 @@ describe('states', () => {
     expect(await within(aside).findByText('adapter exited: exit status 1')).toBeDefined()
     await userEvent.click(within(aside).getByRole('button', { name: 'Retry' }))
     expect(api.assistantStart).toHaveBeenCalledWith({})
+  })
+
+  it('says when it acts without asking and links to the setting', async () => {
+    const aside = await openPanel()
+    expect(within(aside).queryByText(/Acts without asking/)).toBeNull()
+    acpOpen()
+    assistantSocket().send({ status: status({ auto_approve: true }) })
+    expect(await within(aside).findByText(/Acts without asking/)).toBeDefined()
+    expect(within(aside).getByText(/launches, messages and stops runs and saves your environment without asking/)).toBeDefined()
+    await userEvent.click(within(aside).getByRole('button', { name: 'Change in Settings' }))
+    expect(useStore.getState().route.name).toBe('settings')
   })
 
   it('offers example prompts that fill the composer', async () => {

@@ -75,6 +75,16 @@ function useAnnouncement(): string {
   return text
 }
 
+function AutoApproveLine() {
+  const navigate = useStore((s) => s.navigate)
+  return (
+    <p className="mx-3 mt-3 flex shrink-0 flex-wrap items-center gap-x-2 text-ui-sm text-muted">
+      <span>Acts without asking: launches, messages, stops and saves need no card.</span>
+      <Button variant="link" size="sm" onClick={() => navigate('settings', {})}>Change in Settings</Button>
+    </p>
+  )
+}
+
 function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | null> }) {
   const { status, session, confirmations, running } = useAssistantState()
   const error = useStore((s) => s.assistantStatusError)
@@ -105,6 +115,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
           {session.streamError}
         </Callout>
       )}
+      {status.auto_approve && <AutoApproveLine />}
       {session?.truncatedBefore && (
         <Callout tone="needs-you" role="status" className="mx-3 mt-3 shrink-0">
           Earlier conversation has expired. Retained items remain.
@@ -115,7 +126,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
       ) : hasRows ? (
         <Transcript session={session} />
       ) : (
-        <EmptyConversation onPick={(text) => {
+        <EmptyConversation autoApprove={status.auto_approve} onPick={(text) => {
           setDraft(text)
           textarea.current?.focus()
         }} />

@@ -30,25 +30,7 @@ func TestIntegrationAssistantFollowsRun(t *testing.T) {
 	defer env.stop()
 	store := env.srv.Store()
 
-	pusherPath, pusher := writeClientKey(t)
-	if err := store.CreateMember(ctx, &domain.Member{DisplayName: "Pusher", PublicKey: string(ssh.MarshalAuthorizedKey(pusher.PublicKey())), Color: "#3cb44b", Role: domain.RoleAdmin}); err != nil {
-		t.Fatal(err)
-	}
-	ws := &domain.Workspace{Name: "follow", BaseBranch: domain.DefaultBaseBranch}
-	if err := store.CreateWorkspace(ctx, ws); err != nil {
-		t.Fatal(err)
-	}
-	seed := t.TempDir()
-	gitEnv := append(os.Environ(),
-		"GIT_SSH_COMMAND=ssh -i "+pusherPath+" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes")
-	runGit(t, seed, gitEnv, "init", "-q", "-b", "main")
-	runGit(t, seed, gitEnv, "config", "user.name", "E2E")
-	runGit(t, seed, gitEnv, "config", "user.email", "e2e@localhost")
-	runGit(t, seed, gitEnv, "config", "commit.gpgsign", "false")
-	writeFile(t, filepath.Join(seed, "README.md"), "# follow\n")
-	runGit(t, seed, gitEnv, "add", "-A")
-	runGit(t, seed, gitEnv, "commit", "-q", "-m", "seed")
-	runGit(t, seed, gitEnv, "push", "-q", fmt.Sprintf("ssh://aether@%s/%s.git", waitSSHAddr(t, env.srv), ws.ID), "main")
+	ws := seedAssistantWorkspace(t, ctx, env, "follow")
 
 	sub, err := env.srv.Bus().Subscribe(ctx, events.SubscribeOptions{Buffer: 4096})
 	if err != nil {
@@ -187,4 +169,31 @@ func TestIntegrationAssistantFollowsRun(t *testing.T) {
 	if attentionNotices != 1 || finishedNotices != 1 {
 		t.Fatalf("transcript holds %d needs-attention and %d finished notices, want one each: %v", attentionNotices, finishedNotices, history.Frames)
 	}
+}
+
+// seedAssistantWorkspace creates a workspace with one commit on main, pushed
+// by a second admin.
+func seedAssistantWorkspace(t *testing.T, ctx context.Context, env *assistantEnv, name string) *domain.Workspace {
+	t.Helper()
+	store := env.srv.Store()
+	pusherPath, pusher := writeClientKey(t)
+	if err := store.CreateMember(ctx, &domain.Member{DisplayName: "Pusher", PublicKey: string(ssh.MarshalAuthorizedKey(pusher.PublicKey())), Color: "#3cb44b", Role: domain.RoleAdmin}); err != nil {
+		t.Fatal(err)
+	}
+	ws := &domain.Workspace{Name: name, BaseBranch: domain.DefaultBaseBranch}
+	if err := store.CreateWorkspace(ctx, ws); err != nil {
+		t.Fatal(err)
+	}
+	seed := t.TempDir()
+	gitEnv := append(os.Environ(),
+		"GIT_SSH_COMMAND=ssh -i "+pusherPath+" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes")
+	runGit(t, seed, gitEnv, "init", "-q", "-b", "main")
+	runGit(t, seed, gitEnv, "config", "user.name", "E2E")
+	runGit(t, seed, gitEnv, "config", "user.email", "e2e@localhost")
+	runGit(t, seed, gitEnv, "config", "commit.gpgsign", "false")
+	writeFile(t, filepath.Join(seed, "README.md"), "# "+name+"\n")
+	runGit(t, seed, gitEnv, "add", "-A")
+	runGit(t, seed, gitEnv, "commit", "-q", "-m", "seed")
+	runGit(t, seed, gitEnv, "push", "-q", fmt.Sprintf("ssh://aether@%s/%s.git", waitSSHAddr(t, env.srv), ws.ID), "main")
+	return ws
 }

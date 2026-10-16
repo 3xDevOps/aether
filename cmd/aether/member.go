@@ -17,14 +17,14 @@ import (
 func init() {
 	register(command{
 		name:  "member",
-		short: "list, approve, color, set the git identity of, change the role of, link, list or unlink the edge accounts of, merge, transfer server ownership to, or remove members",
+		short: "list, approve, color, set the git identity of, set your assistant's auto-approval, change the role of, link, list or unlink the edge accounts of, merge, transfer server ownership to, or remove members",
 		run:   runMember,
 	})
 }
 
 func runMember(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether member <list|approve|color|git|role|link|identities|unlink|merge|merges|transfer|remove>")
+		return fmt.Errorf("usage: aether member <list|approve|color|git|assistant|role|link|identities|unlink|merge|merges|transfer|remove>")
 	}
 	switch args[0] {
 	case "list":
@@ -43,6 +43,8 @@ func runMember(args []string) error {
 		return memberColor(args[1:])
 	case "git":
 		return memberGit(args[1:])
+	case "assistant":
+		return memberAssistant(args[1:])
 	case "role":
 		return memberRole(args[1:])
 	case "link":

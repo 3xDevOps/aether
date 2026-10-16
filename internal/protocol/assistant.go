@@ -15,6 +15,10 @@ const (
 	MethodAssistantReset   = "assistant.reset"
 	MethodAssistantHistory = "assistant.history"
 	MethodAssistantItem    = "assistant.item"
+	// MethodAssistantSettings reads the caller's assistant settings, or
+	// changes them with a field set. The assistant's tool socket does not
+	// serve it.
+	MethodAssistantSettings = "assistant.settings"
 	// MethodAssistantDocs is served only on the assistant tool socket.
 	MethodAssistantDocs = "assistant.docs"
 )
@@ -52,6 +56,17 @@ type AssistantStatus struct {
 	Agents        []AssistantAgent        `json:"agents"`
 	Error         string                  `json:"error,omitempty"`
 	Confirmations []AssistantConfirmation `json:"confirmations"`
+	AutoApprove   bool                    `json:"auto_approve"`
+}
+
+// AssistantSettingsParams changes each field that is set; none reads.
+type AssistantSettingsParams struct {
+	AutoApprove *bool `json:"auto_approve,omitempty"`
+}
+
+type AssistantSettings struct {
+	// AutoApprove runs confirmed tools without a card, as if approved.
+	AutoApprove bool `json:"auto_approve"`
 }
 
 type AssistantStartParams struct {
