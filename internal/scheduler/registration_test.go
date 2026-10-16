@@ -102,8 +102,8 @@ func TestHarnessStatusReporterRegistration(t *testing.T) {
 	if i := slices.Index(argv, "--settings"); i < 0 || i+1 >= len(argv) || argv[i+1] != settingsPath {
 		t.Fatalf("interactive claude argv = %v, want --settings %s in it", argv, settingsPath)
 	}
-	if got := coord.file(tui.ID, agentstatus.ClaudeSettingsName); !bytes.Equal(got, agentstatus.ClaudeSettings) {
-		t.Fatalf("settings written for the run = %s, want the embedded asset", got)
+	if got := coord.file(tui.ID, agentstatus.ClaudeSettingsName); !bytes.Equal(got, claudeNativeSettings(t)) {
+		t.Fatalf("settings written for the run = %s, want the merged status and inbox document", got)
 	}
 	if got := e.reporterOf(t, tui.ID); got != harness.ReporterFull {
 		t.Fatalf("interactive claude run recorded reporter %s, want %s", got, harness.ReporterFull)
@@ -150,6 +150,16 @@ func (e *testEnv) reporterOf(t *testing.T, run domain.RunID) harness.Reporter {
 		t.Fatalf("run %s is not supervised", run)
 	}
 	return entry.reporter
+}
+
+func claudeNativeSettings(t *testing.T) []byte {
+	t.Helper()
+	p, _ := harness.Lookup("claude")
+	native, err := p.PrepareNativeLaunch(coordtransport.MountDir, []string{"claude", "a task"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return native.Files[agentstatus.ClaudeSettingsName]
 }
 
 func tuiHarnessCommand(t *testing.T, command []string) []string {
@@ -225,6 +235,9 @@ func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 		if !bytes.Equal(body, coord.file(tui.ID, file)) {
 			t.Fatalf("%s discovery package points at the wrong API or status asset", id)
 		}
+	}
+	if got := spec.Env[coordtransport.ManagedHooksEnv]; got != "1" {
+		t.Fatalf("interactive opencode run %s = %q, want 1", coordtransport.ManagedHooksEnv, got)
 	}
 	if got := e.reporterOf(t, tui.ID); got != harness.ReporterFull {
 		t.Fatalf("interactive opencode run recorded reporter %s, want %s", got, harness.ReporterFull)

@@ -387,9 +387,10 @@ npm install -g --prefix "$stage"{extra} "{pkg}@$latest" || exit 1
 // deployment configuration and declares no credentials or key passthrough.
 var profiles = map[string]Profile{
 	"claude": {
-		Name:        "claude",
-		DisplayName: "Claude Code",
-		TUIArgs:     []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
+		Name:               "claude",
+		DisplayName:        "Claude Code",
+		NativeCoordination: true,
+		TUIArgs:            []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
 		// Claude Code refuses stream-json in print mode without --verbose.
 		HeadlessArgs:    []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
 		ACPArgs:         []string{claudeACP.Binary},
