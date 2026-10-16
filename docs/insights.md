@@ -65,7 +65,7 @@ top-level.
 | `by_workspace`, `by_agent` | Runs launched, finished (`completed` or `merged`) and failed in the range, per workspace and per agent and model, most launched first. A `model` of `""` is the agent's default model. |
 | `swarms` | Swarms created in the range, scoped by their accountable member: how many, how many are now completed or cancelled, `agents` (distinct worker and integrator runs they started that still exist) and `tasks_accepted`. |
 | `needs_you` | Runs in scope waiting for a member right now, as on the Board, swarm runs included. Ignores the range. |
-| `recent` | Up to 50 runs that finished in the range, newest first, with the last pull request the run recorded. |
+| `recent` | Up to 50 runs that finished in the range, newest first, with the last pull request the run recorded. `title` is the run's title, or the first non-blank line of its task when it has none, cut to 120 characters, as the dashboard names runs. |
 
 ## Durations
 

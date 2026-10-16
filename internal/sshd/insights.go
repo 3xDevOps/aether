@@ -11,6 +11,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/push"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -154,7 +155,7 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 			start = *r.StartedAt
 		}
 		out.Recent = append(out.Recent, protocol.InsightsRecentRun{
-			RunID: string(r.ID), Title: r.Title, WorkspaceID: string(r.WorkspaceID), Status: string(r.Status),
+			RunID: string(r.ID), Title: push.RunTitle(&domain.Run{Title: r.Title, Task: r.Task}), WorkspaceID: string(r.WorkspaceID), Status: string(r.Status),
 			Reason: r.Reason, Harness: r.Harness, Model: r.Model,
 			CreatedAt: r.CreatedAt.Format(time.RFC3339), FinishedAt: r.FinishedAt.Format(time.RFC3339),
 			DurationSeconds: seconds(r.FinishedAt.Sub(start)), PRURL: r.PRURL, PRState: r.PRState,

@@ -115,6 +115,7 @@ func TestInsightsGet(t *testing.T) {
 	// 03-09 in UTC; top4 ends at 01:00 PST on 03-08, before the change.
 	run("top1", alice, alpha, "claude", "", domain.RunCompleted, "", "2026-03-07T10:00:00-08:00", ptr("2026-03-07T10:01:00-08:00"), ptr("2026-03-07T11:01:00-08:00"))
 	run("top2", alice, alpha, "codex", "gpt-5", domain.RunFailed, "", "2026-03-08T23:30:00-07:00", nil, ptr("2026-03-09T00:30:00-07:00"))
+	exec(`UPDATE runs SET title = '', task = ? WHERE id = 'top2'`, "\n  fix the parser  \nthen the printer")
 	run("top3", alice, beta, "claude", "", domain.RunRunning, "", "2026-03-09T09:00:00-07:00", ptr("2026-03-09T09:00:00-07:00"), nil)
 	run("top4", alice, alpha, "claude", "", domain.RunAbandoned, "killed", "2026-03-06T12:00:00-08:00", ptr("2026-03-06T12:00:00-08:00"), ptr("2026-03-08T01:00:00-08:00"))
 	run("top6", alice, alpha, "claude", "", domain.RunNeedsAttention, "", "2026-03-01T12:00:00-08:00", ptr("2026-03-01T12:00:00-08:00"), nil)
@@ -260,6 +261,7 @@ func TestInsightsGet(t *testing.T) {
 		{"cost", mine.Cost, protocol.InsightsCost{MeteredRuns: 1, UnmeteredRuns: 2, CostUSD: 2, InputTokens: 1500, OutputTokens: 150}},
 		{"pull requests", mine.PullRequests, protocol.InsightsPullRequests{Opened: 2, Merged: 1}},
 		{"recent order", recentIDs(mine.Recent), []string{"top2", "top4", "top1"}},
+		{"untitled recent top2", mine.Recent[0].Title, "fix the parser"},
 		{"recent top1", mine.Recent[2], protocol.InsightsRecentRun{RunID: "top1", Title: "title top1", WorkspaceID: string(alpha),
 			Status: "completed", Harness: "claude", CreatedAt: "2026-03-07T18:00:00Z", FinishedAt: "2026-03-07T19:01:00Z",
 			DurationSeconds: 3600, PRURL: "https://github.com/acme/app/pull/top1", PRState: "merged"}},

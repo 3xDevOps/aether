@@ -130,6 +130,7 @@ type InsightsPullRequests struct {
 type InsightsRun struct {
 	ID          domain.RunID
 	Title       string
+	Task        string
 	WorkspaceID domain.WorkspaceID
 	Status      domain.RunStatus
 	Reason      string
@@ -567,7 +568,7 @@ func insightsStateTimes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args [
 
 func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT r.id, r.title, r.workspace_id, r.status, r.reason, r.harness, r.model,
+		SELECT r.id, r.title, r.task, r.workspace_id, r.status, r.reason, r.harness, r.model,
 			r.created_at, r.started_at, r.finished_at, COALESCE(p.url, ''), COALESCE(p.state, '')
 		FROM runs r
 		LEFT JOIN run_pull_requests p ON p.rowid = (
@@ -583,7 +584,7 @@ func insightsRecent(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any
 			created, finished int64
 			started           *int64
 		)
-		if scanErr := row.Scan(&r.ID, &r.Title, &r.WorkspaceID, &r.Status, &r.Reason, &r.Harness, &r.Model,
+		if scanErr := row.Scan(&r.ID, &r.Title, &r.Task, &r.WorkspaceID, &r.Status, &r.Reason, &r.Harness, &r.Model,
 			&created, &started, &finished, &r.PRURL, &r.PRState); scanErr != nil {
 			return nil, scanErr
 		}
