@@ -209,6 +209,7 @@ type Store interface {
 	PushStore
 	AssistantStore
 	AssistantFollowStore
+	InsightsStore
 
 	Close() error
 }

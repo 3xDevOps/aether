@@ -7,12 +7,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/fallback"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runrepo"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // RunRepoService resolves only a stored live run. The transport supplies human
@@ -242,6 +246,9 @@ func (s *Server) runPRStatus(ctx context.Context, member domain.MemberID, raw js
 	if err == nil {
 		status, err = call.native.LookupPR(ctx, call.execution, runrepo.PRTarget(p.Target))
 	}
+	if status.PullRequest != nil {
+		s.recordPR(ctx, p.RunID, status.PullRequest, false)
+	}
 	return protocol.RunPRStatusResult{Identity: status.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(status.PullRequest), Output: runrepo.FailureOutput(status.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
 }
 
@@ -255,7 +262,27 @@ func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw js
 		return nil, rpcError(err)
 	}
 	created, err := call.native.CreatePR(ctx, call.execution, runrepo.PRCreateRequest{Expected: p.Expected, Target: runrepo.PRTarget(p.Target), Title: p.Title, Body: p.Body, Draft: p.Draft, ExpectedLogin: p.ExpectedLogin})
+	if created.PullRequest != nil {
+		s.recordPR(ctx, p.RunID, created.PullRequest, created.Created || created.Reconciled)
+	}
 	return protocol.RunPRCreateResult{Identity: created.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(created.PullRequest), Created: created.Created, Reconciled: created.Reconciled, CreationUncertain: created.CreationUncertain, Output: runrepo.FailureOutput(created.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
+}
+
+// recordPR keeps the PR a run opened, or the state of one it opened before,
+// for insights. A failure is only logged: the GitHub side already happened
+// and must not be reported as failed.
+func (s *Server) recordPR(ctx context.Context, run string, pr *runrepo.PullRequest, opened bool) {
+	record := s.cfg.Store.ObserveRunPullRequest
+	if opened {
+		record = s.cfg.Store.RecordRunPullRequest
+	}
+	err := record(ctx, &store.RunPullRequest{
+		RunID: domain.RunID(run), Repository: strings.ToLower(pr.Target.Repository), Number: pr.Number,
+		URL: pr.URL, State: pr.State, MergedAt: pr.MergedAt, ObservedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		slog.Warn("sshd: record run pull request", "run", run, "error", err)
+	}
 }
 
 func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {

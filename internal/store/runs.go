@@ -433,7 +433,9 @@ func (d *DB) FinishRunByMember(ctx context.Context, id domain.RunID, status doma
 // retention relabels keep it. finish_unopened follows the same rule, except
 // that byMember clears it and any other change into a terminal status sets
 // it. status_changed_at moves to now on the changes that do not keep the
-// flags. SET expressions see the row before the update.
+// flags. SET expressions see the row before the update. A status or reason
+// change is also recorded as a run_state_transitions row, in the same
+// transaction.
 func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, startedAt, finishedAt *time.Time, reported, byMember bool) error {
 	if !status.Valid() {
 		return fmt.Errorf("store: update run status: invalid status %q", status)
@@ -450,7 +452,18 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 	if err != nil {
 		return fmt.Errorf("store: update run status: %w", err)
 	}
-	err = notFoundOnZeroRows(d.db.ExecContext(ctx,
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: update run status: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx,
+		`INSERT INTO run_state_transitions (run_id, workspace_id, from_status, to_status, reason, at)
+		 SELECT id, workspace_id, status, ?, ?, ? FROM runs WHERE id = ? AND (status <> ? OR reason <> ?)`,
+		status, reason, changed, id, status, reason); err != nil {
+		return fmt.Errorf("store: update run status: record transition: %w", err)
+	}
+	err = notFoundOnZeroRows(tx.ExecContext(ctx,
 		`UPDATE runs SET status = ?, reason = ?,
 		     started_at = COALESCE(?, started_at),
 		     finished_at = COALESCE(?, finished_at),
@@ -461,10 +474,16 @@ func (d *DB) updateRunStatus(ctx context.Context, id domain.RunID, status domain
 		status, reason, started, finished, reported, status, reason,
 		reported, byMember, status, reason, status.Terminal(),
 		status, reason, changed, id))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: update run status: %w", err)
+	if errors.Is(err, ErrNotFound) {
+		return err
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("store: update run status: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: update run status: commit: %w", err)
+	}
+	return nil
 }
 
 // TransferRun reassigns a run's owner. Existence of the new owner is
