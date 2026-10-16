@@ -937,7 +937,11 @@ Android may reclaim the dashboard's renderer process while the app is in the
 background, for example while you confirm a sign-in code in the browser. The
 app reloads the dashboard when you return to it. If the renderer crashes
 instead, the app shows `The dashboard's renderer crashed` with **Retry** and
-**Connection** rather than reloading into the same crash.
+**Connection** rather than reloading into the same crash. On Android 10 and
+newer, a renderer that stops responding is ended instead of freezing the app
+into an "isn't responding" dialog, and the app shows `The dashboard's renderer
+stopped responding and was ended`, again with **Retry** and **Connection**.
+`adb logcat -s aether` shows each renderer loss.
 
 **Multiple servers.** In Edge mode, Settings > This computer lists **Saved
 servers** (the default link plus named ones). **Switch** relinks the gateway in

@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Message
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
@@ -21,6 +22,8 @@ import android.webkit.ServiceWorkerController
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebViewRenderProcess
+import android.webkit.WebViewRenderProcessClient
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
@@ -34,6 +37,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import java.io.ByteArrayInputStream
+import java.util.concurrent.Executors
+
+private const val TAG = "aether"
 
 /**
  * The whole shell: one WebView on a dashboard.
@@ -75,8 +81,19 @@ class MainActivity : ComponentActivity() {
     /** Set when the dashboard's renderer was reclaimed, until it is reloaded. */
     private var reloadOnStart = false
 
-    /** Set while the failure panel shows a renderer crash rather than the gateway's. */
-    private var rendererCrashed = false
+    /** Set while the failure panel shows a lost renderer rather than the gateway. */
+    private var rendererLost = false
+
+    /**
+     * Set when the shell ends a renderer that stopped responding. Written on
+     * [rendererWatch], read where the renderer's loss is handled.
+     */
+    @Volatile
+    private var terminatedRenderer = false
+
+    // Not the main thread: a WebView waiting on a hung renderer can be
+    // blocking it.
+    private val rendererWatch = Executors.newSingleThreadExecutor()
 
     /**
      * Whether the platform backgrounds this window itself when back is
@@ -140,7 +157,7 @@ class MainActivity : ComponentActivity() {
         connection.setOnClickListener { openSetup() }
         gatewayError = findViewById(R.id.gateway_error)
         findViewById<Button>(R.id.gateway_retry).setOnClickListener {
-            if (rendererCrashed) connect(null) else startGateway()
+            if (rendererLost) connect(null) else startGateway()
         }
         findViewById<Button>(R.id.gateway_connection).setOnClickListener { openSetup() }
 
@@ -206,6 +223,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         stopGateway()
+        rendererWatch.shutdown()
         super.onDestroy()
     }
 
@@ -213,8 +231,8 @@ class MainActivity : ComponentActivity() {
         gatewayError.visibility = View.GONE
         // The WebView a renderer crash left behind is empty, so the
         // dashboard loads again even at an unchanged address.
-        val reload = rendererCrashed
-        rendererCrashed = false
+        val reload = rendererLost
+        rendererLost = false
         when (mode) {
             ConnectionMode.TAILSCALE -> {
                 stopGateway()
@@ -298,6 +316,23 @@ class MainActivity : ComponentActivity() {
         // Lets `chrome://inspect` attach to a debuggable build; a release
         // build stays closed. See docs/dashboard-frontend.md.
         WebView.setWebContentsDebuggingEnabled(debuggable)
+
+        // WebView's main thread waits on its renderer without a limit, so a
+        // renderer that is alive but stuck freezes the app into an ANR.
+        // Ending it hands over to onRenderProcessGone, which shows it.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            web.setWebViewRenderProcessClient(
+                rendererWatch,
+                object : WebViewRenderProcessClient() {
+                    override fun onRenderProcessUnresponsive(view: WebView, renderer: WebViewRenderProcess?) {
+                        Log.w(TAG, "dashboard renderer not responding; ending it")
+                        terminatedRenderer = renderer?.terminate() == true
+                    }
+
+                    override fun onRenderProcessResponsive(view: WebView, renderer: WebViewRenderProcess?) {}
+                },
+            )
+        }
 
         web.webViewClient =
             object : WebViewClient() {
@@ -396,15 +431,22 @@ class MainActivity : ComponentActivity() {
                     parent.addView(web, index, params)
                     configureWebView()
                     syncBackCallback()
-                    // A crash would come back on the same page, so only a
-                    // renderer Android reclaimed is reloaded unasked, and not
-                    // until the window is on screen again.
-                    if (detail.didCrash()) {
-                        rendererCrashed = true
-                        showFailure(getString(R.string.renderer_crashed), "")
-                    } else {
-                        reloadOnStart = true
-                        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) reloadReclaimed()
+                    val loss = rendererLoss(detail.didCrash(), terminatedRenderer)
+                    terminatedRenderer = false
+                    Log.w(TAG, "dashboard renderer gone: $loss")
+                    when (loss) {
+                        RendererLoss.RELOAD -> {
+                            reloadOnStart = true
+                            if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) reloadReclaimed()
+                        }
+                        RendererLoss.CRASHED -> {
+                            rendererLost = true
+                            showFailure(getString(R.string.renderer_crashed), "")
+                        }
+                        RendererLoss.UNRESPONSIVE -> {
+                            rendererLost = true
+                            showFailure(getString(R.string.renderer_unresponsive), "")
+                        }
                     }
                     return true
                 }
@@ -594,7 +636,7 @@ class MainActivity : ComponentActivity() {
                 onFailed = { message ->
                     gatewayUrl = null
                     loaded = null
-                    rendererCrashed = false
+                    rendererLost = false
                     showFailure(getString(R.string.gateway_stopped), message)
                 },
             )
