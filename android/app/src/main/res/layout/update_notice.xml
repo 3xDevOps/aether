@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The update notice over the top of the WebView: the new version, the one
-     running, how it installs, one button and a dismiss. Its top margin is set
-     with the window insets in MainActivity. -->
+     running, how it installs, one button and a dismiss. Its top, start and end
+     margins are set with the window insets in MainActivity. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/update_notice"
     android:layout_width="match_parent"

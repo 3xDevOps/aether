@@ -251,6 +251,11 @@ class MainActivity : ComponentActivity() {
             connection.requestLayout()
             val noticeParams = notice.layoutParams as ViewGroup.MarginLayoutParams
             noticeParams.topMargin = noticeMargin + if (pageHandlesSafeAreas) bars.top else 0
+            if (pageHandlesSafeAreas) {
+                val rtl = notice.layoutDirection == View.LAYOUT_DIRECTION_RTL
+                noticeParams.marginStart = noticeMargin + if (rtl) bars.right else bars.left
+                noticeParams.marginEnd = noticeMargin + if (rtl) bars.left else bars.right
+            }
             notice.requestLayout()
             val panel = gatewayError
             panel.setPadding(
