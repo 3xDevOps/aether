@@ -1286,7 +1286,7 @@ colour alone. Only Working pulses, and not under `prefers-reduced-motion`.
 | Needs you | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
 | Idle | `idle`: the turn ended with nothing open, a stall included | Working |
 | Finished | `finished` (an interactive success parked for review), or `completed`, `merged`, `abandoned` ("Closed without merging") | Finished |
-| Failed | `failed` (an interactive failure parked for review), or `failed`, `interrupted` | Needs you for its owner while live or unreviewed, else Finished, sorted first |
+| Failed | `failed` (an interactive failure parked for review, or an Enhanced turn that failed), or `failed`, `interrupted` | Needs you for its owner while live or unreviewed, else Finished, sorted first |
 | Disconnected | `disconnected`: the agent session or process ended while the run is open | Needs you for its owner |
 | Paused | a live run paused by a member | Working |
 
@@ -1318,7 +1318,7 @@ Waiting and Working never count. Needs you means the viewer can resolve it.
 | `activity` `needs-you` with a `blocked: <summary>` reason | owner; a worker's accountable human | Blocked: … / Worker blocked: … |
 | `activity` `needs-you`, any other reason | owner | the reason: Agent asks: … |
 | Usage limit with no account to move to (reason starts `Usage limit reached on `, at `needs-attention`, or `failed` with `finish_unopened`) | owner | the server's reason verbatim: Usage limit reached on Alice's account; no fallback has usage left |
-| `activity` `failed`, or a `failed` run with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / Failed, review the result |
+| `activity` `failed`, or a `failed` run with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … / Failed, review the result |
 
 A device waiting for approval is not a run, so `deviceNeeds` in the same
 file turns it into a card for an admin, and a member's own pending device

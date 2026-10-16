@@ -210,7 +210,6 @@ describe('needs you conditions', () => {
     ['idle', 'stalled: no output or file changes for 10m0s', 'No output or file changes for 10m0s'],
     ['idle', 'turn cancelled', 'Turn cancelled'],
     ['idle', 'turn ended: max_tokens', 'Stopped: the reply reached its token limit'],
-    ['idle', 'enhanced turn failed: acphost: session/prompt: EOF', 'Turn failed: acphost: session/prompt: EOF'],
     ['waiting-agents', 'waiting on 3 workers', 'waiting on 3 workers'],
     ['waiting-agents', 'working in background: 2 tasks', 'Working in background: 2 tasks'],
     ['waiting-tools', '', 'Waiting on a tool'],
@@ -221,6 +220,11 @@ describe('needs you conditions', () => {
       expect(waitingOn(parked, stateContext())).toBeUndefined()
       expect(presentRun(parked, stateContext())).toEqual({ state: activity, reason: shown })
     }
+  })
+
+  it('labels a failed turn Failed with its reason', () => {
+    const failed = record({ mode: 'acp', acp: true, status: 'needs-attention', activity: 'failed', reason: 'enhanced turn failed: acphost: session/prompt: EOF' })
+    expect(presentRun(failed, stateContext())).toMatchObject({ state: 'failed', reason: 'Turn failed: acphost: session/prompt: EOF', needsYou: { id: 'failed' } })
   })
 
   it("labels a disconnected agent with the server's reason", () => {

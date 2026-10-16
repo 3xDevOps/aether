@@ -377,10 +377,11 @@ export const needsYouConditions: NeedsYouCondition[] = [
     holds: (run) => run.activity === 'failed' || (run.status === 'failed' && awaitingReview(run)),
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'open', label: 'Review' }),
-    reason: (run) =>
-      run.activity === 'failed'
-        ? 'Agent reported failure; review the result. Run remains open for follow-up.'
-        : 'Failed, review the result',
+    reason: (run) => {
+      if (run.activity !== 'failed') return 'Failed, review the result'
+      if (run.reason && run.reason !== 'agent reported failure') return plainReason(run.reason)
+      return 'Agent reported failure; review the result. Run remains open for follow-up.'
+    },
   }),
 ]
 
