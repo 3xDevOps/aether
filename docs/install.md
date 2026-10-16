@@ -459,33 +459,45 @@ aether: rpc error -32002: release preflight failed: aether-android.apk (https://
 ```
 
 **Downgrades.** A tag older than the running release is refused unless
-`--allow-downgrade` is passed, which only works with `--when now`. A release
-whose manifest records an older database schema than this server's database
-is always refused: that binary could not open the database.
+`--allow-downgrade` is passed, which only works with `--when now`; the tag
+the server already runs is always refused. Without `--version` the server
+takes the latest signed release only when it is newer than the running one,
+and otherwise answers `no update: aether-server v0.9.0 is not older than the
+latest release v0.9.0`. A release whose manifest records an older database
+schema than this server's database is always refused: that binary could not
+open the database.
 
 **The swap.** `--when now` (the default) downloads both binaries and
 verifies them against the manifest before replacing either, then renames
 `aether-server` and the `aether` beside it into place. The files they
-replace stay beside them as `aether-server.prev` and `aether.prev`. When the
-release migrates the database, the server first copies it to
-`<data-dir>/server-update/aether.db.pre-update`. It then closes its
-listeners and the database and re-executes the new binary with the same
-argv and environment, keeping the same PID: the shipped unit is
+replace stay beside them as `aether-server.prev` and `aether.prev`. Until
+both renames are done, `<data-dir>/server-update/swap.json` says `swapping`,
+and a start that finds it so puts the `.prev` files back. The server then
+closes its listeners and the database. When the release migrates the
+database, it copies it to `<data-dir>/server-update/aether.db.pre-update`
+now, so the copy holds every write. It re-executes the new binary with the
+same argv and environment, keeping the same PID: the shipped unit is
 `Restart=on-failure`, so a clean exit would not come back. If the re-exec
 itself fails under systemd, the server falls back to
 `systemctl restart aether-server`.
 
 **Rollback.** The new binary records the update `applied` only after it has
-opened and migrated the database and bound its SSH listener. If it exits
-before that more than twice, or has not done it 5 minutes after its first
-start, it puts the `.prev` binaries back, restores the database copy when
-the schema already moved, records `rolled_back` with the error, and executes
-the previous binary. A re-exec that fails outright is undone the same way.
+opened and migrated the database, bound its SSH listener, and recovered the
+runs and terminals from before the restart, and then deletes the database
+copy. A migration may take as long as it needs; once
+it finishes, the binary has 5 minutes to bind and record, or it exits. If it
+exits before recording more than twice, or the next start finds those 5
+minutes gone, that start restores the database copy when the schema already
+moved, puts the `.prev` binaries back, records `rolled_back` with the error,
+and executes the previous binary. A re-exec that fails outright is undone
+the same way. A restored copy loses every write made after it, and the error
+says so with the time of the copy. A rollback that cannot restore a file
+records why and exits with that error instead of executing anything.
 `--status` shows the outcome until the next update:
 
 ```
 update        rolled_back v0.8.0 -> v0.9.0
-error         v0.9.0 started 2 times without finishing its boot: store: apply migration 91: ...
+error         v0.9.0 started 2 times without finishing its boot: store: apply migration 91: ...; database restored to its snapshot of 2026-10-16T09:12:03Z; changes made after it are lost
 ```
 
 `aether server update` prints each phase - checking the release, applying,
@@ -503,7 +515,8 @@ set, does not check.
 **Recovering by hand.** When the new binary cannot start far enough to roll
 itself back, restore the previous one on the server host. The database
 lines are only needed if `<data-dir>/server-update/aether.db.pre-update`
-exists:
+exists, which it does only while an update that migrates the database has
+not been recorded `applied`:
 
 ```sh
 sudo systemctl stop aether-server
@@ -526,8 +539,13 @@ running inside it and both survive the restart like any other run. An SSH
 connection left open into a paused run still holds the update back. A second
 `--when idle` call replaces the pending one, and `--cancel` clears it. The
 update stays pending until the swap, so a server that stops mid-download
-retries it at the next idle moment. A release it cannot fetch at that moment
-is retried at the next idle poll, up to three attempts.
+retries it at the next idle moment; an `--allow-downgrade` update is not
+left pending and has to be run again. A release it cannot fetch at that
+moment - its manifest, a binary, or a client asset the preflight checks
+answering with a network error, 5xx or 429 - is retried at the next idle
+poll, up to three attempts. A run that starts while the release
+downloads puts the previous binaries back, and the update waits for the
+next idle moment.
 
 A run that survives the restart keeps the Aether helper binary its
 container was created with. What a newer server adds to that helper, such as
@@ -1674,7 +1692,7 @@ automatic.
 | `profiles/` | Content-addressed agent-profile snapshots. |
 | `invites/` | Outstanding one-time invite codes. |
 | `coord/` | Per-run coordination sockets and read-only run assets. `coord/<run-id>/captures/` holds explicit browser/terminal PNGs and metadata: at most 64 images, 128 MiB total, 8 MiB each. The limit refuses new captures until deletion; owned mount cleanup removes them. Retained closed TUI and completed swarm runs retain this mount until expiry/deletion. |
-| `server-update/` | Server update state: `swap.json`, the last update's versions, outcome and replaced binaries, read before the database opens; `check.json`, the release-check schedule; and `aether.db.pre-update`, the database as it was before the last update that migrated it. |
+| `server-update/` | Server update state: `swap.json`, the last update's versions, outcome and replaced binaries, read before the database opens; `check.json`, the release-check schedule; and `aether.db.pre-update`, the database as it was before an update that migrates it, deleted once that update is recorded `applied`. |
 | `scheduler/`, `runtime/` | Scheduler state and the staged MCP bridge binary. Private browser lifecycle journals and control sockets are under `scheduler/browser/<run-hash>/`, not mounted into the run or stored in source. Browser profiles are transient companion state, not saved member images. |
 
 Member homes, mirror credentials and workspace secrets are server-owned

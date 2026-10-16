@@ -30,10 +30,6 @@ type ServerUpdateStore interface {
 	SetLastServerUpdate(ctx context.Context, last ServerUpdateAttempt) error
 	// SchemaVersion is the highest migration applied to this database.
 	SchemaVersion(ctx context.Context) (int, error)
-	// Snapshot writes a consistent copy of the database to path, which
-	// must not exist. An update takes one before a release migrates the
-	// schema, so a rollback can restore it.
-	Snapshot(ctx context.Context, path string) error
 }
 
 // Outcome values of ServerUpdateAttempt.
@@ -171,9 +167,18 @@ func (d *DB) SchemaVersion(ctx context.Context) (int, error) {
 	return v, nil
 }
 
-func (d *DB) Snapshot(ctx context.Context, path string) error {
-	if _, err := d.db.ExecContext(ctx, `VACUUM INTO ?`, path); err != nil {
-		return fmt.Errorf("store: snapshot to %s: %w", path, err)
+// SnapshotFile writes a consistent copy of the database at db to path,
+// which must not exist, without opening it as a store. An update takes one
+// once the server has closed the store and before a release migrates the
+// schema, so a rollback can restore it.
+func SnapshotFile(db, path string) error {
+	conn, err := sql.Open("sqlite", "file:"+url.PathEscape(db)+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return fmt.Errorf("store: open %s: %w", db, err)
+	}
+	defer conn.Close() //nolint:errcheck // read-only
+	if _, err := conn.Exec(`VACUUM INTO ?`, path); err != nil {
+		return fmt.Errorf("store: snapshot %s to %s: %w", db, path, err)
 	}
 	return nil
 }

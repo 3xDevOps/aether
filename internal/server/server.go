@@ -558,6 +558,10 @@ func (s *Server) Bus() events.Bus { return s.bus }
 // bound it.
 func (s *Server) SSHAddr() net.Addr { return s.ssh.Addr() }
 
+// Recovered is closed once the scheduler has reconciled the runs and
+// terminals from before this start.
+func (s *Server) Recovered() <-chan struct{} { return s.sched.RecoveryReady() }
+
 // Run ensures every workspace has its bare repo, then serves SSH and runs
 // the scheduler until ctx is done or one of them fails, and finally shuts
 // everything down in dependency order. Run owns shutdown on every path:

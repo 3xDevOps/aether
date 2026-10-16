@@ -22,13 +22,17 @@ import (
 // committing before the next start rolls it back.
 const maxTrialBoots = 2
 
-// trialDeadline is how long the new binary has, from its first start, to
-// open and migrate the store and bind its listeners.
+// trialDeadline is how long the new binary has, once it has migrated the
+// store, to bind its listeners and commit.
 const trialDeadline = 5 * time.Minute
+
+// storeAttempts is how many times Commit tries to record the outcome.
+const storeAttempts = 3
 
 // Record phases. The record outlives the swap so the status call can name
 // both versions of the last update.
 const (
+	recordSwapping   = "swapping"
 	recordVerifying  = "verifying"
 	recordApplied    = "applied"
 	recordRolledBack = "rolled_back"
@@ -47,7 +51,8 @@ type swapRecord struct {
 	// file sits beside it as <path>.prev.
 	Binaries []string `json:"binaries"`
 	// Database and Snapshot are set when the release migrates the schema:
-	// Snapshot is a copy of Database taken at SchemaBefore.
+	// Snapshot is a copy of Database at SchemaBefore, taken once the server
+	// has drained, right before the exec.
 	Database     string    `json:"database,omitempty"`
 	Snapshot     string    `json:"snapshot,omitempty"`
 	SchemaBefore int       `json:"schema_before,omitempty"`
@@ -106,10 +111,26 @@ func writeFileAtomic(path string, data []byte) error {
 	if err == nil {
 		err = os.Rename(tmp.Name(), path)
 	}
+	if err == nil {
+		err = syncDir(filepath.Dir(path))
+	}
 	if err != nil {
 		return fmt.Errorf("serverupdate: write %s: %w", path, err)
 	}
 	return nil
+}
+
+// syncDir makes a rename in dir survive a power loss.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // keepPrevious links each binary to <path>.prev before it is replaced, so
@@ -161,24 +182,49 @@ func restorePrevious(paths []string) error {
 	return errors.Join(errs...)
 }
 
-// rollBack restores the previous binaries, and the database snapshot when
-// the new binary already migrated past it, then records cause. The store
-// must not be open in this process.
+// rollBack restores the database snapshot when the new binary already
+// migrated past it, then the previous binaries, and records cause. The
+// database goes first so a rollback cut short leaves the new binary on its
+// own schema, and a rerun finds the schema back at SchemaBefore. The store
+// must not be open in this process. An error means the rollback is
+// incomplete; it is recorded, and the caller must not execute Binaries[0].
 func rollBack(dir string, rec *swapRecord, cause string) error {
-	errs := []error{restorePrevious(rec.Binaries)}
-	if rec.Snapshot != "" {
-		current, err := store.ReadSchemaVersion(rec.Database)
-		// An unreadable database is restored too: the old binary cannot
-		// use it either way.
-		if err != nil || current > rec.SchemaBefore {
-			errs = append(errs, restoreDatabase(rec.Database, rec.Snapshot))
-		}
+	restored, err := restoreSnapshot(rec)
+	if err == nil {
+		err = restorePrevious(rec.Binaries)
 	}
 	rec.Phase, rec.Error, rec.Recorded = recordRolledBack, cause, false
-	if err := errors.Join(errs...); err != nil {
-		rec.Error = cause + "; rollback incomplete: " + err.Error()
+	if restored != "" {
+		rec.Error += "; " + restored
 	}
-	return saveRecord(dir, rec)
+	if err != nil {
+		rec.Error += "; rollback incomplete: " + err.Error()
+	}
+	return errors.Join(err, saveRecord(dir, rec))
+}
+
+// restoreSnapshot puts the pre-update database back when the database is
+// past SchemaBefore, and says what was restored: every write made after
+// the snapshot is gone. Otherwise those writes would be lost for nothing,
+// so it does nothing.
+func restoreSnapshot(rec *swapRecord) (string, error) {
+	if rec.Snapshot == "" {
+		return "", nil
+	}
+	// An unreadable database is restored too: the old binary cannot use it
+	// either way.
+	if current, err := store.ReadSchemaVersion(rec.Database); err == nil && current <= rec.SchemaBefore {
+		return "", nil
+	}
+	info, err := os.Stat(rec.Snapshot)
+	if err != nil {
+		return "", fmt.Errorf("restore %s: %w", rec.Database, err)
+	}
+	if err := restoreDatabase(rec.Database, rec.Snapshot); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("database restored to its snapshot of %s; changes made after it are lost",
+		info.ModTime().UTC().Format(time.RFC3339)), nil
 }
 
 // restoreDatabase puts the snapshot back. The WAL and shared-memory files
@@ -195,9 +241,22 @@ func restoreDatabase(db, snapshot string) error {
 	return nil
 }
 
+// takeSnapshot copies the database the swap record names, if any, once
+// nothing writes to it any more.
+func takeSnapshot(rec *swapRecord) error {
+	if rec.Snapshot == "" {
+		return nil
+	}
+	if err := store.SnapshotFile(rec.Database, rec.Snapshot); err != nil {
+		return fmt.Errorf("snapshot the database before the update: %w", err)
+	}
+	return nil
+}
+
 // Trial is one server start seen against the last update's swap record.
-// cmd/aether-server begins it before it opens the store, commits it once
-// the server serves, and fails it when the start does not get that far.
+// cmd/aether-server begins it before it opens the store, starts its
+// deadline once the store is migrated, commits it once the server serves,
+// and fails it when the start does not get that far.
 type Trial struct {
 	dir  string
 	host Host
@@ -210,9 +269,10 @@ type Trial struct {
 // start of the new binary is counted, and one past maxTrialBoots or the
 // deadline rolls back and re-executes the previous binary, so Boot only
 // returns in that case with the error that stopped it; the caller exits
-// and the service manager starts the restored binary. A start of a binary the record
-// does not expect - the operator put another one in place - closes the
-// trial as rolled back by hand.
+// and the service manager starts the restored binary. A start of a binary
+// the record does not expect - the operator put another one in place -
+// closes the trial as rolled back by hand. A swap that stopped halfway is
+// undone.
 func Boot(dir string, host Host) (*Trial, error) {
 	t := &Trial{dir: dir, host: host}
 	rec, err := loadRecord(dir)
@@ -222,22 +282,22 @@ func Boot(dir string, host Host) (*Trial, error) {
 		slog.Error("serverupdate: ignoring the swap record", "error", err)
 		return t, nil
 	}
-	if rec == nil || rec.Phase != recordVerifying {
-		t.rec = rec
+	t.rec = rec
+	switch {
+	case rec == nil:
 		return t, nil
-	}
-	if version.Version != rec.ToVersion {
-		rec.Phase, rec.Recorded = recordRolledBack, false
-		rec.Error = fmt.Sprintf("aether-server %s started instead of %s before the update finished", version.Version, rec.ToVersion)
-		t.rec = rec
-		return t, saveRecord(dir, rec)
+	case rec.Phase == recordSwapping:
+		cause := fmt.Sprintf("the update to %s stopped while it replaced the binaries", rec.ToVersion)
+		if version.Version == rec.FromVersion {
+			return t, rollBack(dir, rec, cause)
+		}
+		return t, t.rollBackAndExec(cause)
+	case rec.Phase != recordVerifying:
+		return t, nil
+	case version.Version != rec.ToVersion:
+		return t, t.closeByHand()
 	}
 	rec.Boots++
-	now := time.Now().UTC()
-	if rec.Deadline.IsZero() {
-		rec.Deadline = now.Add(trialDeadline)
-	}
-	t.rec = rec
 	switch {
 	case rec.Boots > maxTrialBoots:
 		cause := fmt.Sprintf("%s started %d times without finishing its boot", rec.ToVersion, rec.Boots-1)
@@ -245,21 +305,64 @@ func Boot(dir string, host Host) (*Trial, error) {
 			cause += ": " + rec.Error
 		}
 		return t, t.rollBackAndExec(cause)
-	case now.After(rec.Deadline):
-		return t, t.rollBackAndExec(fmt.Sprintf("%s did not finish its boot within %s", rec.ToVersion, trialDeadline))
+	case !rec.Deadline.IsZero() && time.Now().After(rec.Deadline):
+		return t, t.rollBackAndExec(fmt.Sprintf("%s did not finish its boot within %s of migrating the database", rec.ToVersion, trialDeadline))
 	}
 	return t, saveRecord(dir, rec)
 }
 
-// Deadline is when a trial start must have committed; zero when this start
-// is not a trial.
-func (t *Trial) Deadline() time.Time {
+// closeByHand records a start of a binary other than the one under trial.
+// When it is the previous one, the database goes back to the snapshot
+// first if the new binary migrated it, since the previous binary cannot
+// run on that schema; if that fails the record stays as it is, so every
+// start retries rather than serving on the migrated database.
+func (t *Trial) closeByHand() error {
+	rec := t.rec
+	detail := fmt.Sprintf("aether-server %s started instead of %s before the update finished", version.Version, rec.ToVersion)
+	if version.Version == rec.FromVersion {
+		restored, err := restoreSnapshot(rec)
+		if err != nil {
+			return fmt.Errorf("serverupdate: %s: %w", detail, err)
+		}
+		if restored != "" {
+			detail += "; " + restored
+		}
+	}
+	rec.Phase, rec.Error, rec.Recorded = recordRolledBack, detail, false
+	return saveRecord(t.dir, rec)
+}
+
+// Migrated starts the deadline once this start has opened and migrated the
+// store, so a slow migration is never cut short, and returns it; zero when
+// this start is not a trial. A later start of the same trial keeps the
+// first deadline.
+func (t *Trial) Migrated() (time.Time, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.rec == nil || t.rec.Phase != recordVerifying {
-		return time.Time{}
+		return time.Time{}, nil
 	}
-	return t.rec.Deadline
+	if t.rec.Deadline.IsZero() {
+		next := *t.rec
+		next.Deadline = time.Now().UTC().Add(trialDeadline)
+		if err := saveRecord(t.dir, &next); err != nil {
+			return time.Time{}, err
+		}
+		t.rec = &next
+	}
+	return t.rec.Deadline, nil
+}
+
+// Expire runs at the deadline: a start that has not committed records why
+// and returns the error to exit with, so the next start rolls back. It
+// returns nil once the start committed.
+func (t *Trial) Expire() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.rec == nil || t.rec.Phase != recordVerifying {
+		return nil
+	}
+	return t.failLocked(fmt.Errorf("%s did not finish its boot within %s of migrating the database", t.rec.ToVersion, trialDeadline))
 }
 
 // Fail records why a trial start stopped before it committed, so the
@@ -269,6 +372,10 @@ func (t *Trial) Deadline() time.Time {
 func (t *Trial) Fail(cause error) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.failLocked(cause)
+}
+
+func (t *Trial) failLocked(cause error) error {
 	if t.rec == nil || t.rec.Phase != recordVerifying {
 		return cause
 	}
@@ -279,7 +386,7 @@ func (t *Trial) Fail(cause error) error {
 func (t *Trial) rollBackAndExec(cause string) error {
 	slog.Error("serverupdate: rolling back", "from", t.rec.ToVersion, "to", t.rec.FromVersion, "cause", cause)
 	if err := rollBack(t.dir, t.rec, cause); err != nil {
-		return err
+		return fmt.Errorf("serverupdate: %s: %w", t.rec.Error, err)
 	}
 	if !t.host.complete() {
 		return errors.New("serverupdate: rolled back, but this build cannot re-execute; start aether-server again")
@@ -291,23 +398,50 @@ func (t *Trial) rollBackAndExec(cause string) error {
 
 // Commit finishes the start once the store is migrated and the listeners
 // are bound: the new binary records the update applied, and a restored
-// one records the rollback. Either way the outcome is written once.
+// one records the rollback. The swap record is marked applied before
+// anything else, since a start that finds it verifying rolls back; the
+// pre-update snapshot is deleted with it. The outcome then goes to the
+// store and the feed once; a start that could not write it tries again.
 func (t *Trial) Commit(ctx context.Context, st store.Store, bus events.Bus) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	rec := t.rec
-	if rec == nil || rec.Recorded {
+	if t.rec == nil || t.rec.Recorded || t.rec.Phase == recordSwapping {
 		return nil
 	}
+	rec := *t.rec
+	rec.At = time.Now().UTC()
 	outcome, phase := store.ServerUpdateRolledBack, events.ServerUpdateRolledBack
-	if rec.Phase == recordVerifying {
-		rec.Phase, rec.Error = recordApplied, ""
+	if rec.Phase != recordRolledBack {
 		outcome, phase = store.ServerUpdateApplied, events.ServerUpdateApplied
 	}
-	rec.At = time.Now().UTC()
-	if err := st.SetLastServerUpdate(ctx, store.ServerUpdateAttempt{
-		Version: rec.ToVersion, Outcome: outcome, Detail: rec.Error, At: rec.At,
-	}); err != nil {
+	if rec.Phase == recordVerifying {
+		snapshot := rec.Snapshot
+		rec.Phase, rec.Error, rec.Snapshot = recordApplied, "", ""
+		if err := saveRecord(t.dir, &rec); err != nil {
+			return err
+		}
+		t.rec = &rec
+		if snapshot != "" {
+			if err := os.Remove(snapshot); err != nil && !errors.Is(err, os.ErrNotExist) {
+				slog.Warn("serverupdate: remove the pre-update database snapshot", "path", snapshot, "error", err)
+			}
+		}
+	}
+	attempt := store.ServerUpdateAttempt{Version: rec.ToVersion, Outcome: outcome, Detail: rec.Error, At: rec.At}
+	var err error
+	for i := range storeAttempts {
+		if err = st.SetLastServerUpdate(ctx, attempt); err == nil {
+			break
+		}
+		if i < storeAttempts-1 {
+			select {
+			case <-ctx.Done():
+				return errors.Join(err, ctx.Err())
+			case <-time.After(time.Second):
+			}
+		}
+	}
+	if err != nil {
 		return err
 	}
 	publish(ctx, st, bus, events.ServerUpdatePayload{
@@ -315,27 +449,27 @@ func (t *Trial) Commit(ctx context.Context, st store.Store, bus events.Bus) erro
 		ActorID: domain.MemberID(rec.RequestedBy), Detail: rec.Error,
 	})
 	rec.Recorded = true
-	if rec.Snapshot != "" && outcome == store.ServerUpdateApplied {
-		// The new binary owns the database now; the snapshot stays as the
-		// operator's way back until the next update replaces it.
-		slog.Info("serverupdate: pre-update database snapshot kept", "path", rec.Snapshot)
-	}
-	return saveRecord(t.dir, rec)
+	t.rec = &rec
+	return saveRecord(t.dir, &rec)
 }
 
-// ExecAfterDrain re-executes argv once the server has shut down for an
-// update. It returns only when the exec failed; the swap is then rolled
-// back and the previous binary executed instead, and the returned error
-// says both what failed and what was restored.
+// ExecAfterDrain snapshots the database when the update migrates it and
+// re-executes argv once the server has shut down for an update. It
+// returns only when either failed; the swap is then rolled back and the
+// previous binary executed instead, and the returned error says both what
+// failed and what was restored.
 func ExecAfterDrain(dir string, host Host, argv []string) error {
-	err := host.Exec(argv[0], argv, os.Environ())
-	if err == nil {
-		err = errors.New("returned without replacing the process")
+	rec, err := loadRecord(dir)
+	if err != nil || rec == nil || rec.Phase != recordVerifying {
+		return errors.Join(fmt.Errorf("serverupdate: no swap to restart onto in %s", dir), err)
 	}
-	cause := fmt.Errorf("re-exec %s: %w", argv[0], err)
-	rec, lerr := loadRecord(dir)
-	if lerr != nil || rec == nil || rec.Phase != recordVerifying {
-		return errors.Join(cause, lerr)
+	cause := takeSnapshot(rec)
+	if cause == nil {
+		err = host.Exec(argv[0], argv, os.Environ())
+		if err == nil {
+			err = errors.New("returned without replacing the process")
+		}
+		cause = fmt.Errorf("re-exec %s: %w", argv[0], err)
 	}
 	t := &Trial{dir: dir, host: host, rec: rec}
 	return errors.Join(cause, t.rollBackAndExec(cause.Error()))

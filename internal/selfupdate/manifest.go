@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -195,6 +196,21 @@ type statusError struct {
 }
 
 func (e *statusError) Error() string { return "GET " + e.url + ": " + e.status }
+
+// Transient reports whether err is a failure of the network or the release
+// host - a transport error, a server error, or rate limiting - rather than
+// of the release itself, so a later attempt may succeed.
+func Transient(err error) bool {
+	if errors.Is(err, errInsecureRedirect) {
+		return false
+	}
+	var status *statusError
+	if errors.As(err, &status) {
+		return status.code >= http.StatusInternalServerError || status.code == http.StatusTooManyRequests
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
 
 // retryDelays are the waits between download attempts; their count plus
 // one is the number of attempts.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // ErrDowngrade is returned for a target older than the running release
@@ -61,6 +62,9 @@ var anonymous = &http.Client{Timeout: 30 * time.Second, CheckRedirect: selfupdat
 // is downloaded: the release's signed manifest, the direction, the
 // database schema, and every client asset as an anonymous client sees it.
 func (s *Service) preflight(ctx context.Context, tag string, allowDowngrade bool) (selfupdate.Manifest, error) {
+	if tag == version.Version {
+		return selfupdate.Manifest{}, fmt.Errorf("%w: this server already runs %s", ErrPreflight, tag)
+	}
 	m, err := s.releases().Fetch(ctx, tag)
 	if err != nil {
 		return m, fmt.Errorf("%w: %w", ErrPreflight, retryable{err})
@@ -90,18 +94,42 @@ func (s *Service) preflight(ctx context.Context, tag string, allowDowngrade bool
 	return m, nil
 }
 
+// probeRetryDelay is the wait before probeAsset asks again after a
+// failure of the network or the release host.
+var probeRetryDelay = time.Second
+
 // probeAsset checks that url answers an anonymous request with 200 and
-// the manifest's size. HEAD first; a host that refuses HEAD gets a GET
-// whose body is never read.
+// the manifest's size, asking twice when the first answer is a failure of
+// the network or the host.
 func probeAsset(ctx context.Context, url string, size int64) error {
+	err := probeOnce(ctx, url, size)
+	if !errors.As(err, new(retryable)) {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return err
+	case <-time.After(probeRetryDelay):
+	}
+	return probeOnce(ctx, url, size)
+}
+
+// probeOnce asks HEAD first; a host that refuses HEAD gets a GET whose
+// body is never read. Both ask for the uncompressed body, whose length is
+// what the manifest records.
+func probeOnce(ctx context.Context, url string, size int64) error {
 	var last error
 	for _, method := range []string{http.MethodHead, http.MethodGet} {
 		req, err := http.NewRequestWithContext(ctx, method, url, nil)
 		if err != nil {
 			return err
 		}
+		req.Header.Set("Accept-Encoding", "identity")
 		resp, err := anonymous.Do(req)
 		if err != nil {
+			if selfupdate.Transient(err) {
+				return retryable{err}
+			}
 			return err
 		}
 		_ = resp.Body.Close()
@@ -109,6 +137,8 @@ func probeAsset(ctx context.Context, url string, size int64) error {
 		case resp.StatusCode == http.StatusMethodNotAllowed && method == http.MethodHead:
 			last = fmt.Errorf("HEAD answered %s", resp.Status)
 			continue
+		case resp.StatusCode >= http.StatusInternalServerError || resp.StatusCode == http.StatusTooManyRequests:
+			return retryable{fmt.Errorf("%s answered %s", method, resp.Status)}
 		case resp.StatusCode != http.StatusOK:
 			return fmt.Errorf("%s answered %s", method, resp.Status)
 		case resp.ContentLength != size:

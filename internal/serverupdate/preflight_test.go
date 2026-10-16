@@ -2,6 +2,8 @@ package serverupdate
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"runtime"
 	"strings"
@@ -133,14 +135,21 @@ func TestOlderStoreSchemaIsAlwaysRefused(t *testing.T) {
 	e.untouched(t)
 }
 
-// A release that migrates the database gets a copy of it first, which a
-// rollback restores.
+// A release that migrates the database gets a copy of it right before the
+// restart, which a rollback restores.
 func TestAMigratingReleaseSnapshotsTheDatabase(t *testing.T) {
 	e := newEnv(t, false)
+	e.underSystemd = true
 	e.rel.SetStoreSchema(store.SchemaVersion() + 1)
-	if err := e.updateNow(t, protocol.ServerUpdateParams{}); err != nil {
+	_, restart, err := e.svc.Update(t.Context(), "mem_admin",
+		protocol.ServerUpdateParams{Version: releaseTagUnderTest, When: protocol.ServerUpdateNow})
+	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
+	if _, err = os.Stat(snapshotPath(e.state)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("snapshot before the restart: %v, want none yet", err)
+	}
+	restart()
 	rec, err := loadRecord(e.state)
 	if err != nil || rec == nil {
 		t.Fatalf("swap record = %v, %v", rec, err)
@@ -237,5 +246,67 @@ func TestAFailedScheduledDownloadIsRetriedFromPending(t *testing.T) {
 		if rec, _ := loadRecord(e.state); rec != nil {
 			t.Fatalf("a failed download left a swap record: %+v", rec)
 		}
+	}
+}
+
+func TestTheRunningReleaseIsNeverReapplied(t *testing.T) {
+	setVersion(t, releaseTagUnderTest)
+	e := newEnv(t, false)
+	err := e.updateNow(t, protocol.ServerUpdateParams{AllowDowngrade: true})
+	if !errors.Is(err, ErrPreflight) || !strings.Contains(err.Error(), "this server already runs v0.2.0") {
+		t.Fatalf("err = %v, want the re-apply refused", err)
+	}
+	e.untouched(t)
+}
+
+// A failure of the network or the release host leaves a scheduled update
+// pending for a later idle poll instead of dropping it.
+func TestATransientPreflightFailureKeepsTheUpdatePending(t *testing.T) {
+	old := probeRetryDelay
+	probeRetryDelay = 0
+	t.Cleanup(func() { probeRetryDelay = old })
+	e := newEnv(t, false)
+	if _, _, err := e.svc.Update(t.Context(), "mem_a",
+		protocol.ServerUpdateParams{Version: releaseTagUnderTest, When: protocol.ServerUpdateIdle}); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	e.setUnavailable("aether-android.apk")
+	e.svc.Tick(t.Context())
+	state, err := e.db.GetServerUpdate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Pending == nil || state.Last != nil {
+		t.Fatalf("after a 503: %+v, want it still pending with no outcome", state)
+	}
+	if n := e.unavailableHits("aether-android.apk"); n != 2 {
+		t.Fatalf("the unavailable asset was asked %d times, want 2", n)
+	}
+	e.untouched(t)
+	e.heal()
+	e.underSystemd = true
+	e.svc.Tick(t.Context())
+	if got := e.read(t, e.self); got != newServerBinary {
+		t.Fatalf("aether-server = %q, want the retried update applied", got)
+	}
+}
+
+// The probe asks for the uncompressed body: a compressed answer has no
+// usable length.
+func TestProbeAssetAsksForTheUncompressedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		if r.Header.Get("Accept-Encoding") != "identity" {
+			http.Error(w, "Accept-Encoding = "+r.Header.Get("Accept-Encoding"), http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte("12345"))
+	}))
+	t.Cleanup(srv.Close)
+	if err := probeAsset(t.Context(), srv.URL, 5); err != nil {
+		t.Fatal(err)
 	}
 }

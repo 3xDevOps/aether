@@ -101,7 +101,7 @@ func serverUpdateError(err error) *protocol.Error {
 	case errors.Is(err, serverupdate.ErrBadTag), errors.Is(err, serverupdate.ErrBadWhen),
 		errors.Is(err, serverupdate.ErrIdleDowngrade), errors.Is(err, serverupdate.ErrDowngrade):
 		return invalidParams(err.Error())
-	case errors.Is(err, serverupdate.ErrPreflight):
+	case errors.Is(err, serverupdate.ErrPreflight), errors.Is(err, serverupdate.ErrUpToDate):
 		return &protocol.Error{Code: protocol.CodeInvalidState, Message: err.Error()}
 	case errors.Is(err, serverupdate.ErrBusy), errors.Is(err, serverupdate.ErrHeld):
 		return &protocol.Error{Code: protocol.CodeConflict, Message: err.Error()}

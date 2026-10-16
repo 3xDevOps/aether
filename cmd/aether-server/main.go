@@ -221,14 +221,6 @@ func serve(args []string) error {
 		drainMu.Unlock()
 		stopServe(errors.New("restarting for a server update"))
 	}
-	if deadline := trial.Deadline(); !deadline.IsZero() {
-		timer := time.AfterFunc(time.Until(deadline), func() {
-			if !trial.Deadline().IsZero() {
-				stopServe(errBootDeadline)
-			}
-		})
-		defer timer.Stop()
-	}
 	srv, err := server.New(ctx, server.Config{
 		DataDir:           *o.dataDir,
 		Addr:              *o.addr,
@@ -266,6 +258,22 @@ func serve(args []string) error {
 	if err != nil {
 		return trial.Fail(err)
 	}
+	// server.New has migrated the store, so the trial's deadline starts
+	// now. At the deadline the process exits rather than cancelling ctx: a
+	// start stuck somewhere that ignores ctx would otherwise never end.
+	deadline, err := trial.Migrated()
+	if err != nil {
+		return trial.Fail(errors.Join(err, srv.Close()))
+	}
+	if !deadline.IsZero() {
+		timer := time.AfterFunc(time.Until(deadline), func() {
+			if expired := trial.Expire(); expired != nil {
+				slog.Error("serverupdate: exiting so the next start rolls back", "error", expired)
+				os.Exit(1)
+			}
+		})
+		defer timer.Stop()
+	}
 	go commitWhenServing(ctx, srv, trial)
 	web := ""
 	if url := srv.WebURL(); url != "" {
@@ -280,20 +288,15 @@ func serve(args []string) error {
 	if argv != nil {
 		return errors.Join(err, serverupdate.ExecAfterDrain(stateDir, host, argv))
 	}
-	if cause := context.Cause(ctx); errors.Is(cause, errBootDeadline) {
-		err = errors.Join(cause, err)
-	}
 	if err != nil {
 		return trial.Fail(err)
 	}
 	return nil
 }
 
-var errBootDeadline = errors.New("the server did not finish its boot before the update's deadline")
-
-// commitWhenServing commits the start once the SSH listener is bound: the
-// store opened and migrated in server.New, so the new binary is known to
-// work.
+// commitWhenServing commits the start once the SSH listener is bound and
+// the scheduler has recovered the runs from before it: the store opened
+// and migrated in server.New, so the new binary is known to work.
 func commitWhenServing(ctx context.Context, srv *server.Server, trial *serverupdate.Trial) {
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
@@ -303,6 +306,11 @@ func commitWhenServing(ctx context.Context, srv *server.Server, trial *serverupd
 			return
 		case <-tick.C:
 		}
+	}
+	select {
+	case <-ctx.Done():
+		return
+	case <-srv.Recovered():
 	}
 	if err := trial.Commit(ctx, srv.Store(), srv.Bus()); err != nil {
 		slog.Error("serverupdate: record the update outcome", "error", err)

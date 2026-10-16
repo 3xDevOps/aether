@@ -87,6 +87,11 @@ func TestReleaseCheckBacksOffAndPersists(t *testing.T) {
 	}
 
 	feed.set(selfupdate.Manifest{Version: "v9.9.9", NotesURL: "https://github.com/3xDevOps/Aether/releases/tag/v9.9.9"}, nil)
+	// Any member may refresh, so a check younger than refreshEvery stands.
+	if got, err = restarted.Status(t.Context(), protocol.ServerUpdateStatusParams{Refresh: true}); err != nil || got.CheckError != second.Error {
+		t.Fatalf("refresh within %s = %+v, %v; want the cached check", refreshEvery, got, err)
+	}
+	now = now.Add(refreshEvery)
 	got, err = restarted.Status(t.Context(), protocol.ServerUpdateStatusParams{Refresh: true})
 	if err != nil {
 		t.Fatal(err)

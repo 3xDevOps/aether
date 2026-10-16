@@ -55,6 +55,9 @@ type env struct {
 	poisoned map[string]bool
 	// missing names assets the release host answers 404 for.
 	missing map[string]bool
+	// unavailable names assets the release host answers 503 for, and
+	// counts the requests for each.
+	unavailable map[string]int
 	// stalled, when set, receives once the server binary's download has
 	// started, which then waits for resume.
 	stalled, resume chan struct{}
@@ -91,10 +94,34 @@ func (e *env) setMissing(asset string) {
 	e.missing = map[string]bool{asset: true}
 }
 
+func (e *env) setUnavailable(asset string) {
+	e.poisonMu.Lock()
+	defer e.poisonMu.Unlock()
+	e.unavailable = map[string]int{asset: 0}
+}
+
+// unavailableHit counts a request for an unavailable asset and reports
+// whether it is one.
+func (e *env) unavailableHit(asset string) bool {
+	e.poisonMu.Lock()
+	defer e.poisonMu.Unlock()
+	n, ok := e.unavailable[asset]
+	if ok {
+		e.unavailable[asset] = n + 1
+	}
+	return ok
+}
+
+func (e *env) unavailableHits(asset string) int {
+	e.poisonMu.Lock()
+	defer e.poisonMu.Unlock()
+	return e.unavailable[asset]
+}
+
 func (e *env) heal() {
 	e.poisonMu.Lock()
 	defer e.poisonMu.Unlock()
-	e.poisoned, e.missing = nil, nil
+	e.poisoned, e.missing, e.unavailable = nil, nil, nil
 }
 
 type execCall struct {
@@ -135,6 +162,10 @@ func (e *env) releaseServer(t *testing.T, tag string) *httptest.Server {
 		}
 		if e.isMissing(name) {
 			http.NotFound(w, r)
+			return
+		}
+		if e.unavailableHit(name) {
+			http.Error(w, "try again later", http.StatusServiceUnavailable)
 			return
 		}
 		if e.isPoisoned(name) {
@@ -476,6 +507,7 @@ func TestUpdateRejectsWhatIsNotAReleaseTag(t *testing.T) {
 }
 
 func TestUpdateWithNoVersionResolvesTheLatestRelease(t *testing.T) {
+	setVersion(t, "v0.1.0")
 	e := newEnv(t, false)
 	res, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateIdle})
 	if err != nil {
@@ -483,6 +515,64 @@ func TestUpdateWithNoVersionResolvesTheLatestRelease(t *testing.T) {
 	}
 	if res.Version != "v0.2.0" {
 		t.Fatalf("version = %q, want the latest release v0.2.0", res.Version)
+	}
+}
+
+// With no version, only a release newer than the running server is an
+// update; a release feed with nothing signed yet is no update either.
+func TestUpdateWithNoVersionNeverGoesBackwards(t *testing.T) {
+	setVersion(t, "v0.3.0")
+	e := newEnv(t, false)
+	_, _, err := e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateNow})
+	if !errors.Is(err, ErrUpToDate) || !strings.Contains(err.Error(), "aether-server v0.3.0 is not older than the latest release v0.2.0") {
+		t.Fatalf("err = %v, want no update", err)
+	}
+	e.untouched(t)
+	e.rel.Unsign()
+	if _, _, err = e.svc.Update(t.Context(), "mem_a", protocol.ServerUpdateParams{When: protocol.ServerUpdateNow}); !errors.Is(err, ErrUpToDate) {
+		t.Fatalf("err = %v, want no update for a release without a manifest", err)
+	}
+	if state, serr := e.db.GetServerUpdate(t.Context()); serr != nil || state.Last != nil {
+		t.Fatalf("last = %+v, %v; no update is not a failed attempt", state.Last, serr)
+	}
+}
+
+// A run that starts while a scheduled release downloads undoes the swap;
+// the update stays pending for the next idle moment.
+func TestARunStartedDuringTheDownloadUndoesTheSwap(t *testing.T) {
+	e := newEnv(t, false)
+	if _, _, err := e.svc.Update(t.Context(), "mem_a",
+		protocol.ServerUpdateParams{Version: releaseTagUnderTest, When: protocol.ServerUpdateIdle}); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	calls := 0
+	e.svc.cfg.Busy = func(context.Context) domain.ServerBusy {
+		calls++
+		if calls == 1 {
+			return domain.ServerBusy{}
+		}
+		return domain.ServerBusy{Runs: 1}
+	}
+	e.svc.Tick(t.Context())
+	for _, path := range []string{e.self, e.sibling} {
+		if got := e.read(t, path); got != "the old binary" {
+			t.Fatalf("%s = %q, want the previous binary back", path, got)
+		}
+	}
+	if rec, err := loadRecord(e.state); err != nil || rec != nil {
+		t.Fatalf("swap record = %+v, %v; want none", rec, err)
+	}
+	state, err := e.db.GetServerUpdate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Pending == nil || state.Last != nil {
+		t.Fatalf("state = %+v, want the update still pending", state)
+	}
+	select {
+	case call := <-e.execs:
+		t.Fatalf("re-executed %v while a run was working", call.argv)
+	default:
 	}
 }
 

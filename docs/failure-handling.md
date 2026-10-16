@@ -367,26 +367,34 @@ database or edit `schema_migrations` to bypass the failure.
 
 ### Interrupted or failed server update
 
-An update started by `aether server update` stays pending until both
-binaries are replaced. A server that stops during the download leaves it
-pending, and the next idle moment after the restart retries it. A scheduled
-update that cannot fetch the release's manifest or a binary is retried at
-the next idle poll, up to three attempts, then recorded `failed` with the
-error. Nothing is
-replaced until every binary has downloaded and verified.
+An update started by `aether server update`, other than an
+`--allow-downgrade` one, stays pending until both binaries are replaced. A
+server that stops during the download leaves it pending, and the next idle
+moment after the restart retries it. A scheduled update that cannot fetch
+the release's manifest or a binary, or whose preflight finds a client asset
+failing with a network error, 5xx or 429, is retried at the next idle poll,
+up to three attempts, then recorded `failed` with the error. Nothing is
+replaced until every binary has downloaded and verified. A server that
+stops while it renames the binaries puts the `.prev` files back on its next
+start and records `rolled_back`.
 
-After the swap, the new binary has to open and migrate the database and
-bind its SSH listener. If it exits first more than twice, or is still not
-there 5 minutes after its first start, the next start rolls back: the
-`.prev` binaries go back into place, the pre-update database copy is
-restored if the schema already moved, and the previous binary records
-`rolled_back` with the error. A re-exec that fails outright is rolled back
-by the running server. `aether server update --status` prints it:
+After the swap, the new binary has to open and migrate the database, then
+bind its SSH listener and recover the runs from before the restart within 5
+minutes of the migration finishing. If it
+exits first more than twice, or misses those 5 minutes, the next start
+rolls back: the pre-update database copy is restored if the schema already
+moved, losing every write made after it, the `.prev` binaries go back into
+place, and the previous binary records `rolled_back` with the error. A
+re-exec that fails outright is rolled back by the running server. `aether
+server update --status` prints it:
 
 ```text
 update        rolled_back v0.8.0 -> v0.9.0
-error         v0.9.0 started 2 times without finishing its boot: store: apply migration 91: ...
+error         v0.9.0 started 2 times without finishing its boot: store: apply migration 91: ...; database restored to its snapshot of 2026-10-16T09:12:03Z; changes made after it are lost
 ```
+
+A rollback that cannot restore a file records `rollback incomplete:` with
+the error and exits without executing either binary.
 
 Fix the cause, then update again. A binary that cannot start at all cannot
 roll itself back; restore it by hand with the commands in

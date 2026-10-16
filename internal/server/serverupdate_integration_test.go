@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -328,6 +329,8 @@ type updateHarness struct {
 	member                     *domain.Member
 	execs                      chan string
 	drained                    chan []string
+	// skew moves the update service's clock forward.
+	skew atomic.Int64
 }
 
 func newUpdateHarness(t *testing.T, release *releasetest.Release) *updateHarness {
@@ -373,8 +376,8 @@ type running struct {
 }
 
 // start boots a server process reporting ver, through the same steps
-// cmd/aether-server takes: the trial first, then the server, then the
-// commit once SSH is bound.
+// cmd/aether-server takes: the trial first, then the server and the
+// trial's deadline, then the commit once SSH is bound and runs recovered.
 func (h *updateHarness) start(t *testing.T, ctx context.Context, ver string) *running {
 	t.Helper()
 	setServerVersion(t, ver)
@@ -392,6 +395,7 @@ func (h *updateHarness) start(t *testing.T, ctx context.Context, ver string) *ru
 			Checker:    selfupdate.NewChecker(h.release.URL, time.Hour),
 			Executable: h.serverBin,
 			Host:       h.host(t),
+			Now:        func() time.Time { return time.Now().Add(time.Duration(h.skew.Load())) },
 			Drain: func(argv []string) {
 				h.drained <- argv
 				cancel()
@@ -401,6 +405,10 @@ func (h *updateHarness) start(t *testing.T, ctx context.Context, ver string) *ru
 	if err != nil {
 		cancel()
 		t.Fatalf("server.New: %v", err)
+	}
+	if _, err = trial.Migrated(); err != nil {
+		cancel()
+		t.Fatalf("Migrated: %v", err)
 	}
 	if h.member == nil {
 		h.member = &domain.Member{
@@ -419,6 +427,7 @@ func (h *updateHarness) start(t *testing.T, ctx context.Context, ver string) *ru
 	done := make(chan error, 1)
 	go func() { done <- srv.Run(runCtx) }()
 	addr := waitSSHAddr(t, srv)
+	<-srv.Recovered()
 	if err := trial.Commit(ctx, srv.Store(), srv.Bus()); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
@@ -677,6 +686,14 @@ func TestIntegrationServerUpdateBackgroundCheck(t *testing.T) {
 
 	release.SetLatest("v0.2.0")
 	var fresh protocol.ServerUpdateStatusResult
+	if err := srv.ctrl.Call(protocol.MethodServerUpdateStatus, protocol.ServerUpdateStatusParams{Refresh: true}, &fresh); err != nil {
+		t.Fatal(err)
+	}
+	if fresh.CheckError != st.CheckError {
+		t.Fatalf("a refresh right after a check = %+v, want that check's answer", fresh)
+	}
+	h.skew.Store(int64(time.Minute))
+	fresh = protocol.ServerUpdateStatusResult{}
 	if err := srv.ctrl.Call(protocol.MethodServerUpdateStatus, protocol.ServerUpdateStatusParams{Refresh: true}, &fresh); err != nil {
 		t.Fatal(err)
 	}

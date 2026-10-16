@@ -16,7 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
-// maxRetries is how many consecutive failed downloads a pending update
+// maxRetries is how many consecutive retryable failures a pending update
 // gets before it is recorded failed.
 const maxRetries = 3
 
@@ -49,7 +49,7 @@ func (s *Service) Tick(ctx context.Context) {
 	}
 	restart, err := s.apply(ctx, *state.Pending, false, true)
 	if err != nil {
-		if !errors.Is(err, ErrBusy) && !errors.Is(err, ErrHeld) {
+		if !errors.Is(err, ErrBusy) && !errors.Is(err, ErrHeld) && !errors.Is(err, errBecameBusy) {
 			slog.Error("serverupdate: scheduled update failed", "version", state.Pending.Version, "error", err)
 		}
 		return
@@ -79,10 +79,12 @@ func (s *Service) busyNow(ctx context.Context) domain.ServerBusy {
 // apply checks, downloads, and swaps the release, and returns the restart,
 // which re-executes the server and never returns on success. The update is
 // pending until the swap is recorded, so a process that dies mid-download
-// retries it at the next idle moment; a scheduled update that cannot
-// reach the release is retried up to maxRetries polls. Any other failure leaves the
-// running binaries untouched, clears the pending row, and is reported as
-// `last` on server.update_status.
+// retries it at the next idle moment; a scheduled update whose preflight
+// or download fails on the network is retried up to maxRetries polls, and
+// one that finds the server busy again after the download is undone and
+// waits for the next idle moment. Any other failure leaves the running
+// binaries untouched, clears the pending row, and is reported as `last` on
+// server.update_status.
 func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, allowDowngrade, scheduled bool) (func(), error) {
 	// The invariant every caller depends on, checked where it is used
 	// rather than at each call site: nothing downloads a release or
@@ -98,7 +100,9 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	if !s.claim(pending.Version) {
 		return nil, ErrBusy
 	}
-	if !scheduled {
+	// A downgrade is applied by hand, now, so one cut short is not left
+	// pending for an idle moment.
+	if !scheduled && !allowDowngrade {
 		if err := s.cfg.Store.SetPendingServerUpdate(ctx, &pending); err != nil {
 			s.release()
 			return nil, err
@@ -106,22 +110,24 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	}
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdatePreflight, pending.Version, "")
 	m, err := s.preflight(ctx, pending.Version, allowDowngrade)
-	var rec *swapRecord
-	if err == nil {
-		s.setPhase(protocol.ServerUpdatePhaseApplying)
-		s.publish(ctx, pending.RequestedBy, events.ServerUpdateApplying, pending.Version, "")
-		rec, err = s.swap(ctx, pending, m)
-	}
 	if err != nil {
-		var r retryable
-		if scheduled && errors.As(err, &r) && s.retry() {
-			slog.Warn("serverupdate: release unreachable; retrying at the next idle poll", "version", pending.Version, "error", err)
-			s.release()
-			return nil, err
-		}
-		return nil, s.fail(ctx, pending, err)
+		return nil, s.failOrRetry(ctx, pending, scheduled, err)
+	}
+	s.setPhase(protocol.ServerUpdatePhaseApplying)
+	s.publish(ctx, pending.RequestedBy, events.ServerUpdateApplying, pending.Version, "")
+	rec, err := s.swap(ctx, pending, m)
+	if err != nil {
+		return nil, s.failOrRetry(ctx, pending, scheduled, err)
 	}
 	slog.Info("serverupdate: binaries replaced", "version", pending.Version, "paths", rec.Binaries)
+	if scheduled && !s.busyNow(ctx).Idle() {
+		if err := s.unswap(rec); err != nil {
+			return nil, s.fail(ctx, pending, fmt.Errorf("a run started during the download, and undoing the swap failed: %w", err))
+		}
+		s.release()
+		s.publish(ctx, pending.RequestedBy, events.ServerUpdateScheduled, pending.Version, errBecameBusy.Error())
+		return nil, errBecameBusy
+	}
 	if err := s.cfg.Store.SetPendingServerUpdate(ctx, nil); err != nil {
 		slog.Warn("serverupdate: clear the applied pending update", "error", err)
 	}
@@ -132,27 +138,44 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	return func() { s.restart(restartCtx, pending, rec) }, nil
 }
 
-// retryable marks a failure reaching the release - its manifest or a
-// binary - which a scheduled update retries.
+// errBecameBusy is a scheduled update undone because the server stopped
+// being idle while the release downloaded.
+var errBecameBusy = errors.New("a run started while the release downloaded; the update applies at the next idle moment")
+
+// retryable marks a failure of the network or the release host, which a
+// scheduled update retries at a later idle poll.
 type retryable struct{ error }
 
 func (r retryable) Unwrap() error { return r.error }
 
-// retry counts one more failed attempt at the pending update and reports
-// whether it gets another.
-func (s *Service) retry() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.retries++
-	return s.retries < maxRetries
+// failOrRetry records err, except that a scheduled update whose failure is
+// retryable stays pending for the next idle poll, up to maxRetries times.
+func (s *Service) failOrRetry(ctx context.Context, pending store.PendingServerUpdate, scheduled bool, err error) error {
+	if scheduled && errors.As(err, new(retryable)) {
+		s.mu.Lock()
+		if s.retrying.Version != pending.Version || !s.retrying.RequestedAt.Equal(pending.RequestedAt) {
+			s.retrying, s.retries = pending, 0
+		}
+		s.retries++
+		again := s.retries < maxRetries
+		s.mu.Unlock()
+		if again {
+			slog.Warn("serverupdate: scheduled update failed; retrying at the next idle poll", "version", pending.Version, "error", err)
+			s.release()
+			return err
+		}
+	}
+	return s.fail(ctx, pending, err)
 }
 
-// swap snapshots the database when the release migrates it, keeps each
-// binary as <path>.prev, installs the release, and writes the swap record
-// the next start reads. A failure restores whatever it replaced.
+// swap keeps each binary as <path>.prev, installs the release, and writes
+// the swap record the next start reads. Before the first rename the record
+// says swapping, so a start after a crash mid-swap puts the previous
+// binaries back. When the release migrates the database the record names
+// the snapshot the restart takes. A failure restores whatever it replaced.
 func (s *Service) swap(ctx context.Context, pending store.PendingServerUpdate, m selfupdate.Manifest) (*swapRecord, error) {
 	rec := &swapRecord{
-		Phase:       recordVerifying,
+		Phase:       recordSwapping,
 		FromVersion: version.Version,
 		ToVersion:   pending.Version,
 		RequestedBy: string(pending.RequestedBy),
@@ -168,18 +191,15 @@ func (s *Service) swap(ctx context.Context, pending store.PendingServerUpdate, m
 	}
 	if s.cfg.Database != "" && m.StoreSchema > schema {
 		snap := snapshotPath(s.cfg.StateDir)
-		if err = os.MkdirAll(s.cfg.StateDir, 0o700); err != nil {
-			return nil, err
-		}
 		if err = os.Remove(snap); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("remove the last database snapshot: %w", err)
-		}
-		if err = s.cfg.Store.Snapshot(ctx, snap); err != nil {
-			return nil, err
 		}
 		rec.Database, rec.Snapshot, rec.SchemaBefore = s.cfg.Database, snap, schema
 	}
 	if err = keepPrevious(rec.Binaries); err != nil {
+		return nil, err
+	}
+	if err = saveRecord(s.cfg.StateDir, rec); err != nil {
 		return nil, err
 	}
 	replaced, err := selfupdate.UpdateBinaries(ctx,
@@ -188,12 +208,28 @@ func (s *Service) swap(ctx context.Context, pending store.PendingServerUpdate, m
 		if rerr := restorePrevious(replaced); rerr != nil {
 			return nil, errors.Join(err, rerr)
 		}
-		return nil, retryable{err}
+		return nil, errors.Join(retryable{fmt.Errorf("download failed: %w", err)}, removeRecord(s.cfg.StateDir))
 	}
+	rec.Phase = recordVerifying
 	if err := saveRecord(s.cfg.StateDir, rec); err != nil {
-		return nil, errors.Join(err, restorePrevious(rec.Binaries))
+		return nil, errors.Join(err, s.unswap(rec))
 	}
 	return rec, nil
+}
+
+// unswap puts the previous binaries back and drops the swap record.
+func (s *Service) unswap(rec *swapRecord) error {
+	if err := restorePrevious(rec.Binaries); err != nil {
+		return err
+	}
+	return removeRecord(s.cfg.StateDir)
+}
+
+func removeRecord(dir string) error {
+	if err := os.Remove(recordPath(dir)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("serverupdate: remove %s: %w", recordPath(dir), err)
+	}
+	return nil
 }
 
 func fileExists(path string) bool {
@@ -250,6 +286,10 @@ func (s *Service) restart(ctx context.Context, pending store.PendingServerUpdate
 		s.cfg.Drain(argv)
 		return
 	}
+	if err := takeSnapshot(rec); err != nil {
+		s.undo(ctx, pending, rec, err)
+		return
+	}
 	err := s.cfg.Host.Exec(s.self, argv, os.Environ())
 	if err == nil {
 		// syscall.Exec never returns on success, so reaching here at all
@@ -273,7 +313,7 @@ func (s *Service) restart(ctx context.Context, pending store.PendingServerUpdate
 }
 
 // undo restores the previous binaries after a restart that never reached
-// the new one. Nothing migrated the database, so the snapshot is dropped.
+// the new one. Nothing migrated the database, so any snapshot is dropped.
 func (s *Service) undo(ctx context.Context, pending store.PendingServerUpdate, rec *swapRecord, cause error) {
 	detail := fmt.Sprintf("%v; restored %s", cause, rec.FromVersion)
 	if err := restorePrevious(rec.Binaries); err != nil {

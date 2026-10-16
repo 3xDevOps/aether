@@ -176,6 +176,7 @@ func TestServerUpdateRefusalsMapToCodes(t *testing.T) {
 		{fmt.Errorf("%w: v0.1.0 is older than the running v0.2.0", serverupdate.ErrDowngrade), protocol.CodeInvalidParams},
 		{serverupdate.ErrIdleDowngrade, protocol.CodeInvalidParams},
 		{fmt.Errorf("%w: aether-android.apk (https://example.invalid/a): HEAD answered 404 Not Found", serverupdate.ErrPreflight), protocol.CodeInvalidState},
+		{fmt.Errorf("%w: aether-server v0.2.0 is not older than the latest release v0.2.0", serverupdate.ErrUpToDate), protocol.CodeInvalidState},
 	} {
 		e := updateEnv(t, &stubUpdates{err: tc.err})
 		err := controlClient(t, e).Call(protocol.MethodServerUpdate,

@@ -92,8 +92,8 @@ func TestBootWithoutARecordIsNotATrial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !trial.Deadline().IsZero() {
-		t.Fatal("a start with no swap record has a deadline")
+	if deadline, err := trial.Migrated(); err != nil || !deadline.IsZero() {
+		t.Fatalf("a start with no swap record has a deadline %v (%v)", deadline, err)
 	}
 	cause := errors.New("bind: address already in use")
 	if err := trial.Fail(cause); err != cause {
@@ -114,8 +114,8 @@ func TestBootRollsBackAfterRepeatedUncommittedStarts(t *testing.T) {
 		if err != nil {
 			t.Fatalf("boot within the limit: %v", err)
 		}
-		if trial.Deadline().IsZero() {
-			t.Fatal("a trial start has no deadline")
+		if deadline, merr := trial.Migrated(); merr != nil || deadline.IsZero() {
+			t.Fatalf("a trial start has no deadline (%v)", merr)
 		}
 	}
 	_, err := Boot(e.state, e.host)
@@ -177,61 +177,235 @@ func TestFailedStartsRollBackWithTheRealError(t *testing.T) {
 	}
 }
 
+// database is a store under e.dir with a snapshot of it at its current
+// schema, and, when migrated, a later migration applied as a new binary
+// would.
+func (e *trialEnv) database(t *testing.T, migrated bool) (dbPath, snap string, before int) {
+	t.Helper()
+	dbPath = filepath.Join(e.dir, "aether.db")
+	db, err := storetest.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before, err = db.SchemaVersion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(e.state, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	snap = snapshotPath(e.state)
+	if err = store.SnapshotFile(dbPath, snap); err != nil {
+		t.Fatal(err)
+	}
+	if migrated {
+		raw, oerr := sql.Open("sqlite", dbPath)
+		if oerr != nil {
+			t.Fatal(oerr)
+		}
+		if _, oerr = raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, 0)`, before+1); oerr != nil {
+			t.Fatal(oerr)
+		}
+		_ = raw.Close()
+	}
+	return dbPath, snap, before
+}
+
+func schemaOf(t *testing.T, dbPath string) int {
+	t.Helper()
+	got, err := store.ReadSchemaVersion(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
 // The database copy goes back only when the new binary already migrated
 // past it; otherwise writes made since the copy would be lost for nothing.
 func TestRollbackRestoresTheDatabaseOnlyWhenTheSchemaMoved(t *testing.T) {
 	for _, migrated := range []bool{false, true} {
 		e := newTrialEnv(t)
-		dbPath := filepath.Join(e.dir, "aether.db")
-		db, err := storetest.Open(dbPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ctx := context.Background()
-		before, err := db.SchemaVersion(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = os.MkdirAll(e.state, 0o700); err != nil {
-			t.Fatal(err)
-		}
-		snap := snapshotPath(e.state)
-		if err = db.Snapshot(ctx, snap); err != nil {
-			t.Fatal(err)
-		}
-		if err = db.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if migrated {
-			raw, oerr := sql.Open("sqlite", dbPath)
-			if oerr != nil {
-				t.Fatal(oerr)
-			}
-			if _, oerr = raw.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, 0)`, before+1); oerr != nil {
-				t.Fatal(oerr)
-			}
-			_ = raw.Close()
-		}
+		dbPath, snap, before := e.database(t, migrated)
 		e.write(t, swapRecord{Boots: maxTrialBoots, Database: dbPath, Snapshot: snap, SchemaBefore: before})
-		if _, err = Boot(e.state, e.host); err == nil {
+		if _, err := Boot(e.state, e.host); err == nil {
 			t.Fatal("expected a rollback")
 		}
-		got, err := store.ReadSchemaVersion(dbPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != before {
+		if got := schemaOf(t, dbPath); got != before {
 			t.Fatalf("migrated=%v: schema after rollback = %d, want %d", migrated, got, before)
 		}
 		if _, err := os.Stat(snap); migrated == (err == nil) {
 			t.Fatalf("migrated=%v: snapshot present = %v", migrated, err == nil)
 		}
+		if restored := strings.Contains(e.record(t).Error, "database restored to its snapshot of"); restored != migrated {
+			t.Fatalf("migrated=%v: error %q, want the restore named only when it happened", migrated, e.record(t).Error)
+		}
 	}
+}
+
+// The database goes back before the binaries, and a rollback that cannot
+// put a binary back records it and executes nothing: the file at the
+// server's path may still be the release that failed.
+func TestAnIncompleteRollbackDoesNotExecute(t *testing.T) {
+	e := newTrialEnv(t)
+	dbPath, snap, before := e.database(t, true)
+	if err := os.Remove(prevPath(e.server)); err != nil {
+		t.Fatal(err)
+	}
+	e.write(t, swapRecord{Boots: maxTrialBoots, Database: dbPath, Snapshot: snap, SchemaBefore: before})
+	_, err := Boot(e.state, e.host)
+	if err == nil || !strings.Contains(err.Error(), "restore "+e.server) {
+		t.Fatalf("Boot = %v, want the failed restore named", err)
+	}
+	if len(e.execs) != 0 {
+		t.Fatalf("execs = %v, want none after an incomplete rollback", e.execs)
+	}
+	if got := schemaOf(t, dbPath); got != before {
+		t.Fatalf("schema = %d, want the database restored to %d first", got, before)
+	}
+	if rec := e.record(t); rec.Phase != recordRolledBack || !strings.Contains(rec.Error, "rollback incomplete: restore "+e.server) {
+		t.Fatalf("record = %+v, want the incomplete rollback recorded", rec)
+	}
+}
+
+// The previous binary started by hand, or by a rollback cut short after
+// the binaries, must not run on the schema the new one migrated to.
+func TestThePreviousBinaryRestoresAMigratedDatabase(t *testing.T) {
+	setVersion(t, "v0.1.0")
+	e := newTrialEnv(t)
+	dbPath, snap, before := e.database(t, true)
+	e.write(t, swapRecord{ToVersion: "v0.2.0", FromVersion: "v0.1.0", Database: dbPath, Snapshot: snap, SchemaBefore: before})
+	if _, err := Boot(e.state, e.host); err != nil {
+		t.Fatal(err)
+	}
+	if got := schemaOf(t, dbPath); got != before {
+		t.Fatalf("schema = %d, want %d", got, before)
+	}
+	if rec := e.record(t); rec.Phase != recordRolledBack || !strings.Contains(rec.Error, "database restored to its snapshot of") {
+		t.Fatalf("record = %+v", rec)
+	}
+}
+
+// A swap cut short between renames puts every previous binary back, and
+// a start of the new server executes the restored one.
+func TestBootUndoesAnInterruptedSwap(t *testing.T) {
+	for _, running := range []string{"v0.1.0", "v0.2.0"} {
+		setVersion(t, running)
+		e := newTrialEnv(t)
+		e.write(t, swapRecord{Phase: recordSwapping, ToVersion: "v0.2.0", FromVersion: "v0.1.0"})
+		_, err := Boot(e.state, e.host)
+		if readFile(t, e.server) != "old server" || readFile(t, e.cli) != "old cli" {
+			t.Fatalf("running %s: the previous binaries were not restored", running)
+		}
+		if rec := e.record(t); rec.Phase != recordRolledBack || !strings.Contains(rec.Error, "stopped while it replaced the binaries") {
+			t.Fatalf("running %s: record = %+v", running, rec)
+		}
+		if running == "v0.1.0" && (err != nil || len(e.execs) != 0) {
+			t.Fatalf("the previous binary: Boot = %v, execs %v; want it to go on starting", err, e.execs)
+		}
+		if running == "v0.2.0" && len(e.execs) != 1 {
+			t.Fatalf("the new binary: execs = %v, want the restored server executed", e.execs)
+		}
+	}
+}
+
+// The deadline starts once the store is migrated: a slow migration is
+// never cut short, and a start that misses the deadline after it records
+// why.
+func TestTheDeadlineStartsAfterTheMigration(t *testing.T) {
+	e := newTrialEnv(t)
+	e.write(t, swapRecord{At: time.Now().Add(-time.Hour)})
+	trial, err := Boot(e.state, e.host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.record(t); !rec.Deadline.IsZero() {
+		t.Fatalf("deadline before the migration = %v, want none", rec.Deadline)
+	}
+	if _, err = Boot(e.state, e.host); err != nil {
+		t.Fatalf("a second start an hour into a migration rolled back: %v", err)
+	}
+	started := time.Now()
+	deadline, err := trial.Migrated()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deadline.Before(started.Add(trialDeadline-time.Second)) || deadline.After(time.Now().Add(trialDeadline)) {
+		t.Fatalf("deadline = %v, want %s after the migration", deadline, trialDeadline)
+	}
+	if again, _ := trial.Migrated(); !again.Equal(deadline) {
+		t.Fatalf("second Migrated = %v, want the first deadline kept", again)
+	}
+	err = trial.Expire()
+	if err == nil || !strings.Contains(err.Error(), "of migrating the database") {
+		t.Fatalf("Expire = %v, want the missed deadline", err)
+	}
+	if rec := e.record(t); rec.Error != err.Error() || !rec.Deadline.Equal(deadline) {
+		t.Fatalf("record = %+v, want the deadline and the error", rec)
+	}
+}
+
+// The swap record is marked applied before the outcome goes to the store,
+// so a store that refuses the write never leaves a record a later start
+// would roll back; that start records the outcome instead.
+func TestCommitMarksTheSwapAppliedBeforeTheStore(t *testing.T) {
+	e := newTrialEnv(t)
+	e.write(t, swapRecord{})
+	db, bus := commitDeps(t, e)
+	trial, err := Boot(e.state, e.host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refusing := &refusingStore{Store: db}
+	if err = trial.Commit(t.Context(), refusing, bus); err == nil {
+		t.Fatal("Commit over a refusing store succeeded")
+	}
+	if refusing.calls != storeAttempts {
+		t.Fatalf("store writes = %d, want %d", refusing.calls, storeAttempts)
+	}
+	if rec := e.record(t); rec.Phase != recordApplied || rec.Recorded {
+		t.Fatalf("record = %+v, want applied and not yet recorded", rec)
+	}
+	if err = trial.Expire(); err != nil {
+		t.Fatalf("Expire after the swap record was marked applied: %v", err)
+	}
+	for range maxTrialBoots + 1 {
+		again, berr := Boot(e.state, e.host)
+		if berr != nil {
+			t.Fatalf("a start after the commit rolled back: %v", berr)
+		}
+		trial = again
+	}
+	if err = trial.Commit(t.Context(), db, bus); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.GetServerUpdate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Last == nil || state.Last.Outcome != store.ServerUpdateApplied || !e.record(t).Recorded {
+		t.Fatalf("last = %+v, want applied recorded by the later start", state.Last)
+	}
+}
+
+type refusingStore struct {
+	store.Store
+	calls int
+}
+
+func (r *refusingStore) SetLastServerUpdate(context.Context, store.ServerUpdateAttempt) error {
+	r.calls++
+	return errors.New("database is locked")
 }
 
 func TestCommitRecordsAppliedOnceFromTheNewProcess(t *testing.T) {
 	e := newTrialEnv(t)
-	e.write(t, swapRecord{RequestedBy: "mem-admin"})
+	snap := snapshotPath(e.state)
+	e.write(t, swapRecord{RequestedBy: "mem-admin", Snapshot: snap})
+	if err := os.WriteFile(snap, []byte("the old database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	db, bus := commitDeps(t, e)
 	trial, err := Boot(e.state, e.host)
 	if err != nil {
@@ -240,8 +414,11 @@ func TestCommitRecordsAppliedOnceFromTheNewProcess(t *testing.T) {
 	if err = trial.Commit(t.Context(), db, bus); err != nil {
 		t.Fatal(err)
 	}
-	if !trial.Deadline().IsZero() {
-		t.Fatal("a committed start still has a deadline")
+	if err = trial.Expire(); err != nil {
+		t.Fatalf("a committed start expired: %v", err)
+	}
+	if _, err = os.Stat(snap); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the pre-update snapshot outlived the commit: %v", err)
 	}
 	state, err := db.GetServerUpdate(t.Context())
 	if err != nil {
@@ -255,8 +432,11 @@ func TestCommitRecordsAppliedOnceFromTheNewProcess(t *testing.T) {
 	}
 	// The next start is an ordinary one.
 	again, err := Boot(e.state, e.host)
-	if err != nil || !again.Deadline().IsZero() {
-		t.Fatalf("start after commit: deadline %v, err %v", again.Deadline(), err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deadline, _ := again.Migrated(); !deadline.IsZero() {
+		t.Fatalf("start after commit has a deadline %v", deadline)
 	}
 }
 

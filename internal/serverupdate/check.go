@@ -65,6 +65,10 @@ func backoff(n int) time.Duration {
 	return min(d, checkInterval)
 }
 
+// refreshEvery is the least time between the checks that
+// server.update_status refresh can force, since any member may call it.
+const refreshEvery = time.Minute
+
 // checks reports whether this server runs the background check: a build
 // with no release version has nothing to compare, so on the default feed
 // it never dials, and neither does a process with the opt-out set.
@@ -115,11 +119,13 @@ func (s *Service) Close() error {
 
 // runCheck asks the release feed for the newest signed release and
 // persists the answer. Callers that queued behind a check that started
-// after they did take its answer instead of asking again.
+// after they did take its answer instead of asking again. Checks are
+// serialized by runMu, the only writer of check, so readers holding
+// checkMu never wait on the network.
 func (s *Service) runCheck(ctx context.Context) checkState {
 	asked := s.checkRuns.Load()
-	s.checkMu.Lock()
-	defer s.checkMu.Unlock()
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
 	if s.checkRuns.Load() != asked {
 		return s.check
 	}
@@ -143,7 +149,9 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 		st.NextAt = now.Add(jitter(backoff(st.Failures)))
 		slog.Warn("serverupdate: release check failed", "error", err, "retry_at", st.NextAt)
 	}
+	s.checkMu.Lock()
 	s.check = st
+	s.checkMu.Unlock()
 	if data, merr := json.Marshal(st); merr == nil {
 		if werr := writeFileAtomic(checkPath(s.cfg.StateDir), data); werr != nil {
 			slog.Warn("serverupdate: persist release check", "error", werr)
@@ -152,9 +160,16 @@ func (s *Service) runCheck(ctx context.Context) checkState {
 	return st
 }
 
-// refresh runs a check now and moves the background schedule after it.
+// refresh runs a check now and moves the background schedule after it,
+// unless a check ran within refreshEvery, whose answer then stands.
 func (s *Service) refresh(ctx context.Context) {
 	if !s.checks() {
+		return
+	}
+	s.checkMu.Lock()
+	recent := s.cfg.Now().Sub(s.check.CheckedAt) < refreshEvery
+	s.checkMu.Unlock()
+	if recent {
 		return
 	}
 	s.runCheck(ctx)

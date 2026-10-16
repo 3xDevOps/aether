@@ -65,6 +65,10 @@ var ErrHeld = errors.New("a server update cannot be applied now")
 // ErrBusy is returned when an update is already being applied.
 var ErrBusy = errors.New("a server update is already being applied")
 
+// ErrUpToDate is returned for an update with no version when the release
+// feed has nothing newer than the running server.
+var ErrUpToDate = errors.New("no update")
+
 // ErrIdleDowngrade is returned for a downgrade scheduled for an idle
 // moment: a downgrade is applied by hand, now.
 var ErrIdleDowngrade = errors.New(`allow_downgrade applies now only: use --when now`)
@@ -135,10 +139,12 @@ type Service struct {
 	// phase and target are the update in progress in this process.
 	phase  string
 	target string
-	// retries counts consecutive attempts at the pending update that
-	// could not reach the release.
-	retries int
+	// retries counts consecutive retryable failures of retrying, the
+	// pending request they belong to.
+	retries  int
+	retrying store.PendingServerUpdate
 
+	runMu     sync.Mutex
 	checkMu   sync.Mutex
 	check     checkState
 	checkRuns atomic.Uint64
@@ -375,8 +381,10 @@ func (s *Service) cancel(ctx context.Context, actor domain.MemberID) (protocol.S
 }
 
 // resolveTag validates a client-supplied tag or asks the release feed for
-// the newest one. The tag only ever names a release in the pinned
-// repository; a URL from the client is never followed.
+// the newest signed one, which must be newer than the running server: an
+// older release marked latest is never a reason to downgrade. The tag only
+// ever names a release in the pinned repository; a URL from the client is
+// never followed.
 func (s *Service) resolveTag(ctx context.Context, tag string) (string, error) {
 	if tag != "" {
 		if !selfupdate.ValidTag(tag) {
@@ -385,8 +393,14 @@ func (s *Service) resolveTag(ctx context.Context, tag string) (string, error) {
 		return tag, nil
 	}
 	m, err := s.releases().Latest(ctx)
+	if errors.Is(err, selfupdate.ErrNoRelease) {
+		return "", fmt.Errorf("%w: %w", ErrUpToDate, err)
+	}
 	if err != nil {
 		return "", err
+	}
+	if !selfupdate.Behind(version.Version, m.Version) {
+		return "", fmt.Errorf("%w: aether-server %s is not older than the latest release %s", ErrUpToDate, version.Version, m.Version)
 	}
 	return m.Version, nil
 }
