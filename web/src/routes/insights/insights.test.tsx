@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
+import type { Api } from '@/lib/api'
 import type { InsightsParams } from '@/lib/types'
 import { InsightsRoute } from '@/routes/insights'
 import { rfc3339 } from '@/routes/insights/model'
@@ -165,5 +166,27 @@ describe('insights page', () => {
     render(<InsightsRoute params={{}} client={fakeApi({ insightsGet: vi.fn(async () => { throw new ApiError(404, 'insights.get: not found') }) })} />)
     expect((await screen.findByRole('status')).textContent).toBe('This server does not report insights. Update the server to see them.')
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('refreshes open pull requests one at a time and re-reads once when one merged', async () => {
+    seed()
+    const open = [
+      insightsRun({ run_id: 'run_a', title: 'Merged since', pr_url: 'https://github.com/acme/app/pull/7', pr_state: 'open' }),
+      insightsRun({ run_id: 'run_b', title: 'Token expired', pr_url: 'https://github.com/acme/app/pull/8', pr_state: 'open' }),
+    ]
+    const merged = insightsRun({ ...open[0], pr_state: 'merged' })
+    const insightsGet = vi.fn()
+      .mockResolvedValueOnce(insights({ recent: open }))
+      .mockResolvedValue(insights({ recent: [merged, open[1]] }))
+    const runPRStatus = vi.fn<Api['runPRStatus']>(async ({ run_id }) => {
+      if (run_id === 'run_b') throw new ApiError(502, 'run.pr.status: github: 401 Bad credentials')
+      return { identity: 'alice', account_member_id: alice.id, pull_request: { number: 7, url: open[0].pr_url, state: 'merged', title: '', draft: false, repository: 'acme/app', base_branch: '', head_repository: '', head_branch: '', head_oid: '' }, output: { exit_code: 0, truncated: false } }
+    })
+    render(<InsightsRoute params={{}} client={fakeApi({ insightsGet, runPRStatus })} />)
+
+    expect(await screen.findByRole('link', { name: 'PR #7 (merged)' })).toBeDefined()
+    expect(runPRStatus.mock.calls.map(([p]) => p)).toEqual([{ run_id: 'run_a' }, { run_id: 'run_b' }])
+    expect(insightsGet).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('link', { name: 'PR #8 (open)' }).getAttribute('title')).toBe('Could not refresh this pull request: run.pr.status: github: 401 Bad credentials')
   })
 })

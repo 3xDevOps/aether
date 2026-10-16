@@ -62,7 +62,7 @@ export function Tiles({ result, before }: { result: InsightsResult; before: stri
   )
 }
 
-function FinishedRow({ run, workspace, agent }: { run: InsightsRun; workspace: string; agent: string }) {
+function FinishedRow({ run, workspace, agent, prError }: { run: InsightsRun; workspace: string; agent: string; prError?: string }) {
   const navigate = useStore((s) => s.navigate)
   const { label, tone } = outcome(run)
   const title = run.title || 'Untitled run'
@@ -82,7 +82,7 @@ function FinishedRow({ run, workspace, agent }: { run: InsightsRun; workspace: s
         <span className="tabular-nums">{duration(run.duration_seconds)}</span>
         {run.pr_url && (
           <CardControls>
-            <a href={run.pr_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+            <a href={run.pr_url} target="_blank" rel="noreferrer" title={prError && `Could not refresh this pull request: ${prError}`} className="text-accent hover:underline">
               {pr ? `PR #${pr}` : 'Pull request'}{run.pr_state && ` (${run.pr_state})`}
             </a>
           </CardControls>
@@ -99,6 +99,7 @@ export function FinishedList({
   onRetry,
   workspaceOf,
   agentNames,
+  prErrors,
 }: {
   list: BucketRuns
   filter: string | null
@@ -106,6 +107,7 @@ export function FinishedList({
   onRetry: () => void
   workspaceOf: (id: string) => string
   agentNames: Record<string, string>
+  prErrors: Record<string, string>
 }) {
   const [all, setAll] = useState(false)
   const runs = list.kind === 'ready' ? list.runs : []
@@ -127,7 +129,7 @@ export function FinishedList({
         <ul className="flex min-w-0 flex-col gap-2">
           {shown.map((run) => (
             <li key={run.run_id}>
-              <FinishedRow run={run} workspace={workspaceOf(run.workspace_id)} agent={agentLabel(run.harness, run.model, agentNames)} />
+              <FinishedRow run={run} workspace={workspaceOf(run.workspace_id)} agent={agentLabel(run.harness, run.model, agentNames)} prError={prErrors[run.run_id]} />
             </li>
           ))}
         </ul>

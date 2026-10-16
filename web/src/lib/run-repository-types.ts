@@ -146,8 +146,8 @@ export interface RunPRTarget {
 
 export interface RunPRStatusParams {
   run_id: string
-  expected: RunGitExpected
-  target: RunPRTarget
+  expected?: RunGitExpected
+  target?: RunPRTarget
 }
 
 export interface RunPRCreateParams {

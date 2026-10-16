@@ -110,11 +110,34 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
   const [selected, setSelected] = useState<Selection | null>(null)
   const [bucketRuns, setBucketRuns] = useState<BucketRuns>({ kind: 'loading' })
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
+  const [prErrors, setPRErrors] = useState<Record<string, string>>({})
   const requestID = useRef(0)
   const bucketID = useRef(0)
   const resolvedZone = Intl.DateTimeFormat().resolvedOptions().timeZone
   const timeZone = resolvedZone && resolvedZone !== 'Etc/Unknown' ? resolvedZone : ''
   const problem = useConnectionProblem()
+
+  // A finished run's pull request stays open in the record until run.pr.status reads it again from GitHub.
+  const refreshPRs = useCallback(async (id: number, result: InsightsResult, params: InsightsParams) => {
+    let changed = false
+    for (const run of result.recent.filter((r) => r.pr_state === 'open').slice(0, 10)) {
+      if (id !== requestID.current) return
+      try {
+        const status = await client.runPRStatus({ run_id: run.run_id })
+        if (status.error) setPRErrors((errors) => ({ ...errors, [run.run_id]: status.error! }))
+        if (status.pull_request && status.pull_request.state !== run.pr_state) changed = true
+      } catch (error) {
+        setPRErrors((errors) => ({ ...errors, [run.run_id]: message(error) }))
+      }
+    }
+    if (!changed || id !== requestID.current) return
+    try {
+      const fresh = await client.insightsGet(params)
+      if (id === requestID.current) setLoad({ kind: 'ready', result: fresh })
+    } catch {
+      // The page already shows the first read; the next load picks the change up.
+    }
+  }, [client])
 
   const read = useCallback(async () => {
     const id = ++requestID.current
@@ -122,14 +145,18 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
     bucketID.current++
     setLoad({ kind: 'loading' })
     setSelected(null)
+    setPRErrors({})
+    const params = { workspace_id: workspace, scope, from: rfc3339(from), to: rfc3339(to), time_zone: timeZone }
     try {
-      const result = await client.insightsGet({ workspace_id: workspace, scope, from: rfc3339(from), to: rfc3339(to), time_zone: timeZone })
-      if (id === requestID.current) setLoad({ kind: 'ready', result })
+      const result = await client.insightsGet(params)
+      if (id !== requestID.current) return
+      setLoad({ kind: 'ready', result })
+      if (caps.hasMethod('run.pr.status')) void refreshPRs(id, result, params)
     } catch (error) {
       if (id !== requestID.current) return
       setLoad(error instanceof ApiError && (error.status === 404 || error.code === METHOD_NOT_FOUND) ? { kind: 'unsupported' } : { kind: 'failed', message: message(error) })
     }
-  }, [client, period, workspace, scope, timeZone])
+  }, [client, period, workspace, scope, timeZone, caps, refreshPRs])
 
   useEffect(() => {
     if (connection === 'live') void read()
@@ -186,6 +213,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
               everyone={scope === 'everyone'}
               workspaceOf={(id) => load.result.by_workspace.find((w) => w.workspace_id === id)?.name ?? workspaceNames[id] ?? id}
               agentNames={agentNames}
+              prErrors={prErrors}
               onBoard={() => navigate('board')}
               emptyAction={(
                 <div className="flex flex-wrap justify-center gap-2">
@@ -213,6 +241,7 @@ function Insights({
   everyone,
   workspaceOf,
   agentNames,
+  prErrors,
   onBoard,
   emptyAction,
 }: {
@@ -226,6 +255,7 @@ function Insights({
   everyone: boolean
   workspaceOf: (id: string) => string
   agentNames: Record<string, string>
+  prErrors: Record<string, string>
   onBoard: () => void
   emptyAction: ReactNode
 }) {
@@ -276,6 +306,7 @@ function Insights({
         onRetry={() => onSelect(selected)}
         workspaceOf={workspaceOf}
         agentNames={agentNames}
+        prErrors={prErrors}
       />
       {heatmap}
       <Breakdown result={result} agentNames={agentNames} />

@@ -3790,7 +3790,13 @@ when the event stream comes back live, dropping answers to an older request.
 - **Finished work.** The server's 50 most recent runs that ended, ten shown
   until **Show all**: title, outcome badge, workspace, agent and model
   ("default model" when the run used the agent's own), duration, pull
-  request link and relative end time. A row opens the run.
+  request link and relative end time. A row opens the run. The server
+  learns a merge only when `run.pr.status` is called for the run, so after
+  each load the page calls `run.pr.status {"run_id":"<run-id>"}` one after
+  another for up to ten listed runs whose pull request is recorded `open`,
+  then reads `insights.get` again once if any state changed. A failed call
+  leaves the row as it was and puts the error in the pull request link's
+  tooltip.
 - **Last 26 weeks.** A calendar heatmap of runs active each day in one
   accent hue, with a Fewer to More scale. It is one tab stop; arrow keys
   move by day and week, and each day is labelled with its date and count.
