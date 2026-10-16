@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -108,16 +109,51 @@ func dial(ctx context.Context, cfg Config, user string, requireAuth bool) (*Conn
 }
 
 // handshake runs the SSH handshake over nc until ctx ends, which closes nc.
+// The connection it returns remembers when nc last delivered bytes.
 func handshake(ctx context.Context, nc net.Conn, addr string, conf *ssh.ClientConfig) (ssh.Conn, <-chan ssh.NewChannel, <-chan *ssh.Request, error) {
 	stop := context.AfterFunc(ctx, func() { _ = nc.Close() })
-	cc, chans, reqs, err := ssh.NewClientConn(nc, addr, conf)
+	read := &readClock{Conn: nc}
+	cc, chans, reqs, err := ssh.NewClientConn(read, addr, conf)
 	if !stop() {
 		if err == nil {
 			_ = cc.Close()
 		}
 		return nil, nil, nil, ctx.Err()
 	}
-	return cc, chans, reqs, err
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return &clockedConn{Conn: cc, read: read}, chans, reqs, nil
+}
+
+// readClock records when its connection last delivered bytes.
+type readClock struct {
+	net.Conn
+	last atomic.Int64
+}
+
+func (r *readClock) Read(p []byte) (int, error) {
+	n, err := r.Conn.Read(p)
+	if n > 0 {
+		r.last.Store(time.Now().UnixNano())
+	}
+	return n, err
+}
+
+type clockedConn struct {
+	ssh.Conn
+	read *readClock
+}
+
+// LastRead is when the server last sent anything on the connection: a
+// keepalive reply or any channel's data. A busy connection on a slow link
+// keeps delivering bytes while a keepalive reply queues behind them.
+func (c *Conn) LastRead() time.Time {
+	clocked, ok := c.client.Conn.(*clockedConn)
+	if !ok {
+		return time.Time{}
+	}
+	return time.Unix(0, clocked.read.last.Load())
 }
 
 // Ping waits for the server to answer a keepalive until ctx ends. A

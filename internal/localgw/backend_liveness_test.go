@@ -28,7 +28,7 @@ func TestSSHBackendRedialsASilentConnection(t *testing.T) {
 	home := testhome.Isolate(t)
 	server := listen(t)
 	connections := serveControl(t, server, nil)
-	path := newSilencer(t, server.Addr().String())
+	path := newSilencer(t, server.Addr().String(), 0)
 	b := NewSSHBackend(cli.Config{Addr: path.addr(), KnownHosts: filepath.Join(home, "known_hosts")})
 	t.Cleanup(func() { _ = b.Close() })
 
@@ -42,40 +42,130 @@ func TestSSHBackendRedialsASilentConnection(t *testing.T) {
 	if _, perr := b.Call(ctx, protocol.MethodServerInfo, nil); perr != nil {
 		t.Fatalf("call on a silent connection = %v after %v, want it answered over a new one", perr, time.Since(start))
 	}
+	if elapsed := time.Since(start); elapsed > (keepaliveCount+1)*keepaliveInterval+time.Second {
+		t.Fatalf("silent connection dropped after %v, want within %d keepalive intervals", elapsed, keepaliveCount+1)
+	}
 	if got := connections.Load(); got != 2 {
 		t.Fatalf("server accepted %d connections, want 2", got)
 	}
 }
 
-// A call whose connection went silent after the request left may have
-// reached the server. It fails without a replay: run.launch carries no
-// request key, and a replay would start a second run.
-func TestSSHBackendDoesNotReplayACallLostOnASilentConnection(t *testing.T) {
+// A weak mobile link queues the keepalive reply behind the data already in
+// flight. A transfer that keeps the connection busy for many keepalive
+// intervals must survive: its bytes prove the connection alive.
+func TestSSHBackendKeepsASlowBusyConnection(t *testing.T) {
 	shortenKeepalive(t, 100*time.Millisecond, 200*time.Millisecond)
 	home := testhome.Isolate(t)
 	server := listen(t)
-	var path *silencer
-	var launches atomic.Int32
-	serveControl(t, server, func(method string) bool {
-		if method != protocol.MethodRunLaunch {
-			return true
+	payload := strings.Repeat("a", 1<<20)
+	connections := serveControl(t, server, func(method string) json.RawMessage {
+		if method != protocol.MethodHomeDownload {
+			return json.RawMessage(`{}`)
 		}
-		launches.Add(1)
-		path.silence()
-		return false
+		return json.RawMessage(`{"data":"` + payload + `"}`)
 	})
-	path = newSilencer(t, server.Addr().String())
+	path := newSilencer(t, server.Addr().String(), 12*time.Millisecond)
 	b := NewSSHBackend(cli.Config{Addr: path.addr(), KnownHosts: filepath.Join(home, "known_hosts")})
+	t.Cleanup(func() { _ = b.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	result, perr := b.Call(ctx, protocol.MethodHomeDownload, nil)
+	if perr != nil {
+		t.Fatalf("download over a slow link = %v after %v, want it delivered", perr, time.Since(start))
+	}
+	if len(result) < len(payload) {
+		t.Fatalf("download returned %d bytes, want at least %d", len(result), len(payload))
+	}
+	if elapsed := time.Since(start); elapsed < 10*keepaliveInterval {
+		t.Fatalf("download took %v, want the link slow enough to span many keepalive intervals", elapsed)
+	}
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("server accepted %d connections, want the first kept", got)
+	}
+}
+
+// A call whose connection went silent after the request left may have
+// reached the server. One unsafe to repeat fails without a replay, since a
+// replayed run.launch starts a second run; a read is answered over a new
+// connection.
+func TestSSHBackendReplaysOnlySafeCallsLostOnASilentConnection(t *testing.T) {
+	for _, tc := range []struct {
+		method    string
+		wantCalls int32
+	}{
+		{method: protocol.MethodRunLaunch, wantCalls: 1},
+		{method: protocol.MethodRunList, wantCalls: 2},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			shortenKeepalive(t, 100*time.Millisecond, 200*time.Millisecond)
+			home := testhome.Isolate(t)
+			server := listen(t)
+			var path *silencer
+			var calls atomic.Int32
+			serveControl(t, server, func(method string) json.RawMessage {
+				if method != tc.method {
+					return json.RawMessage(`{}`)
+				}
+				if calls.Add(1) > 1 {
+					return json.RawMessage(`{}`)
+				}
+				path.silence()
+				return nil
+			})
+			path = newSilencer(t, server.Addr().String(), 0)
+			b := NewSSHBackend(cli.Config{Addr: path.addr(), KnownHosts: filepath.Join(home, "known_hosts")})
+			t.Cleanup(func() { _ = b.Close() })
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, perr := b.Call(ctx, tc.method, nil)
+			if tc.wantCalls == 1 {
+				if perr == nil || perr.Code != protocol.CodeUnavailable || !strings.Contains(perr.Message, "stopped answering keepalives") {
+					t.Fatalf("%s on a connection gone silent = %v, want unavailable without a replay", tc.method, perr)
+				}
+			} else if perr != nil {
+				t.Fatalf("%s on a connection gone silent = %v, want it answered over a new one", tc.method, perr)
+			}
+			if got := calls.Load(); got != tc.wantCalls {
+				t.Fatalf("server received %d %s calls, want %d", got, tc.method, tc.wantCalls)
+			}
+		})
+	}
+}
+
+// A config reload relinks to the same server while a request waits on a
+// dial; the request follows the new config instead of failing.
+func TestSSHBackendRequestFollowsARelinkDuringADial(t *testing.T) {
+	home := testhome.Isolate(t)
+	stuck := listen(t)
+	go func() {
+		for {
+			conn, err := stuck.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { _ = conn.Close() })
+		}
+	}()
+	server := listen(t)
+	serveControl(t, server, nil)
+	knownHosts := filepath.Join(home, "known_hosts")
+	b := NewSSHBackend(cli.Config{Addr: stuck.Addr().String(), KnownHosts: knownHosts})
 	t.Cleanup(func() { _ = b.Close() })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, perr := b.Call(ctx, protocol.MethodRunLaunch, nil)
-	if perr == nil || perr.Code != protocol.CodeUnavailable || !strings.Contains(perr.Message, "stopped answering keepalives") {
-		t.Fatalf("launch on a connection gone silent = %v, want unavailable without a replay", perr)
-	}
-	if got := launches.Load(); got != 1 {
-		t.Fatalf("server received %d launches, want 1", got)
+	answered := make(chan *protocol.Error, 1)
+	go func() {
+		_, perr := b.Call(ctx, protocol.MethodServerInfo, nil)
+		answered <- perr
+	}()
+	time.Sleep(100 * time.Millisecond)
+	b.Relink(cli.Config{Addr: server.Addr().String(), KnownHosts: knownHosts}, nil)
+	if perr := <-answered; perr != nil {
+		t.Fatalf("call waiting on a dial a relink abandoned = %v, want it answered over the new config", perr)
 	}
 }
 
@@ -154,9 +244,9 @@ func listen(t *testing.T) net.Listener {
 }
 
 // serveControl serves SSH on ln, answering keepalives and each control
-// call answer allows, every call when answer is nil, with an empty result.
-// It counts the connections it accepts.
-func serveControl(t *testing.T, ln net.Listener, answer func(method string) bool) *atomic.Int32 {
+// call with the result answer gives, none for a nil one; a nil answer
+// gives every call an empty result. It counts the connections it accepts.
+func serveControl(t *testing.T, ln net.Listener, answer func(method string) json.RawMessage) *atomic.Int32 {
 	t.Helper()
 	signer, err := ssh.NewSignerFromKey(testhome.Ed25519Key(t))
 	if err != nil {
@@ -201,10 +291,14 @@ func serveControl(t *testing.T, ln net.Listener, answer func(method string) bool
 							if json.NewDecoder(channel).Decode(&rpc) != nil {
 								return
 							}
-							if answer != nil && !answer(rpc.Method) {
+							result := json.RawMessage(`{}`)
+							if answer != nil {
+								result = answer(rpc.Method)
+							}
+							if result == nil {
 								return
 							}
-							_ = json.NewEncoder(channel).Encode(protocol.Response{JSONRPC: "2.0", ID: rpc.ID, Result: json.RawMessage(`{}`)})
+							_ = json.NewEncoder(channel).Encode(protocol.Response{JSONRPC: "2.0", ID: rpc.ID, Result: result})
 							return
 						}
 					}()
@@ -215,16 +309,17 @@ func serveControl(t *testing.T, ln net.Listener, answer func(method string) bool
 	return &connections
 }
 
-// silencer relays TCP to target. silence stops every connection open so
-// far from carrying anything, without closing it, as a network that went
-// away does; connections opened later work.
+// silencer relays TCP to target, pausing pace after each 4 KiB toward the
+// client when pace is set, as a weak mobile link does. silence stops every
+// connection open so far from carrying anything, without closing it, as a
+// network that went away does; connections opened later work.
 type silencer struct {
 	ln     net.Listener
 	mu     sync.Mutex
 	silent chan struct{}
 }
 
-func newSilencer(t *testing.T, target string) *silencer {
+func newSilencer(t *testing.T, target string, pace time.Duration) *silencer {
 	t.Helper()
 	s := &silencer{ln: listen(t), silent: make(chan struct{})}
 	go func() {
@@ -242,8 +337,8 @@ func newSilencer(t *testing.T, target string) *silencer {
 			s.mu.Lock()
 			silent := s.silent
 			s.mu.Unlock()
-			go relay(server, client, silent)
-			go relay(client, server, silent)
+			go relay(server, client, silent, 0)
+			go relay(client, server, silent, pace)
 		}
 	}()
 	return s
@@ -258,9 +353,13 @@ func (s *silencer) silence() {
 	s.silent = make(chan struct{})
 }
 
-func relay(dst io.Writer, src io.Reader, silent <-chan struct{}) {
+func relay(dst io.Writer, src io.Reader, silent <-chan struct{}, pace time.Duration) {
 	buf := make([]byte, 32<<10)
+	if pace > 0 {
+		buf = buf[:4<<10]
+	}
 	for {
+		time.Sleep(pace)
 		n, err := src.Read(buf)
 		select {
 		case <-silent:

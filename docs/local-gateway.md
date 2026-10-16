@@ -189,10 +189,13 @@ the tailnet.
 
 For the local backend, a replay-safe call that fails on transport (a server
 restart or dropped network) redials once and retries once before surfacing
-`-32004` (unavailable). `config.import`, `workspace.import`, `agent.install`,
-`terminal.exec`, `assistant.start`, `assistant.prompt`, `assistant.answer`, `assistant.confirm`, `assistant.reset`, `github.oauth.start`, `github.oauth.cancel`, mirror configure/refresh/adopt/disable,
-`home.mkdir`, `home.rename`, `home.remove`, `home.upload`,
-`dev.*`, `run.git.*` and `run.pr.*` are not replayed: a lost response may follow committed writes,
+`-32004` (unavailable). A method unsafe to run twice is not replayed: one
+whose second run creates a duplicate (`run.launch`, `template.launch`,
+`workspace.add`, `member.invite`), repeats an external side effect
+(`server.update`, `terminal.exec`, `github.connect`, `run.git.*`,
+`run.pr.*`, `dev.*`), or fails where the first succeeded (`run.delete`,
+`run.pause`, `home.rename`, `approval.decide`). The full list is `noReplay`
+in `internal/localgw/backend.go`. Their lost response may follow a committed write,
 so uncertainty surfaces immediately. A subsequent explicit request can
 reconnect. A call with no answer after 60 seconds fails with `-32004` and
 is not retried; `home.upload`, `home.download` and `terminal.file`, which
@@ -203,14 +206,19 @@ triggers a redial only when a keepalive shows the connection is actually gone,
 because tearing down a healthy connection would kill its other live streams.
 
 A network that goes away without a reset, as when a phone sleeps or moves
-between Wi-Fi and mobile data, leaves the connection open and silent. The
-gateway sends an SSH keepalive every 15 seconds and drops the connection when
-one goes unanswered for 10 seconds; every call and stream waiting on it then
-fails or redials. A call already sent on that connection fails with `-32004`
-and is not replayed, like a call past its 60 seconds: the server may have run
-it. Requests that arrive while a dial is in progress wait for
-that one dial, each only as long as its own request lasts, and a dial gives up
-after 90 seconds. A link (`link.apply`, `edge.link`, `edge.claim`,
+between Wi-Fi and mobile data, leaves the connection open and silent. Any
+byte from the server, a keepalive reply or a stream's data, proves the
+connection alive, so a large download on a slow link is never mistaken for
+a dead one. After 30 seconds without one the gateway sends an SSH keepalive,
+and after 90 seconds without one it drops the connection, so an idle phone's
+radio can sleep and a dead connection goes within two minutes. Every call
+and stream waiting on a dropped connection then fails or redials. A call
+already sent on it is replayed under the rule above; one that is not fails
+with `-32004` and `the server stopped answering keepalives`. Requests that
+arrive while a dial is in progress wait for that one dial, each only as long
+as its own request lasts, and a dial gives up after 90 seconds. A dial
+abandoned because the link changed, by `link.apply` or a config reload,
+hands its waiting requests to a dial of the new link. A link (`link.apply`, `edge.link`, `edge.claim`,
 `edge.join`) is bounded the same way, including the `server.info` call that
 completes it.
 
