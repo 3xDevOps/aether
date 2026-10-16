@@ -273,6 +273,7 @@ describe('states', () => {
     expect(within(aside).getByText(/launches, messages and stops your runs and saves your environment without asking/)).toBeDefined()
     await userEvent.click(within(aside).getByRole('button', { name: 'Change in Settings' }))
     expect(useStore.getState().route.name).toBe('settings')
+    expect(useStore.getState().assistantOpen).toBe(true)
   })
 
   it('offers example prompts that fill the composer', async () => {
@@ -560,6 +561,18 @@ describe('on a phone', () => {
     assistantSocket().send({ status: status({ confirmations: [stop] }) })
     await userEvent.click(await within(sheet).findByRole('button', { name: 'Skip these cards…' }))
     expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'assistant' } })
+    expect(useStore.getState().assistantOpen).toBe(false)
+  })
+
+  it('closes the sheet when the auto-approval line links to Settings', async () => {
+    atViewport(500)
+    render(<AppShell />)
+    await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+    const sheet = await screen.findByRole('dialog', { name: 'Assistant' })
+    acpOpen()
+    assistantSocket().send({ status: status({ auto_approve: true }) })
+    await userEvent.click(await within(sheet).findByRole('button', { name: 'Change in Settings' }))
+    expect(useStore.getState().route.name).toBe('settings')
     expect(useStore.getState().assistantOpen).toBe(false)
   })
 })

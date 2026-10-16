@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type * as React from 'react'
 import { MessageSquarePlus, X } from '@/components/icons'
 import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
@@ -78,10 +78,15 @@ function useAnnouncement(): string {
 
 function AutoApproveLine() {
   const navigate = useStore((s) => s.navigate)
+  const sheet = useContext(AssistantSheet)
+  const open = () => {
+    navigate('settings', {})
+    if (sheet) useStore.getState().setAssistantOpen(false)
+  }
   return (
     <p className="mx-3 mt-3 flex shrink-0 flex-wrap items-center gap-x-2 text-ui-sm text-muted">
       <span>Acts without asking: launches, saves, and messages or stops your own runs with no card.</span>
-      <Button variant="link" size="sm" onClick={() => navigate('settings', {})}>Change in Settings</Button>
+      <Button variant="link" size="sm" onClick={open}>Change in Settings</Button>
     </p>
   )
 }

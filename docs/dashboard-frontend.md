@@ -548,8 +548,9 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   line clears at the next turn or a new conversation, and is dropped if
   another member signed in before the answer arrived. A refusal stays in the
   notice, focused. The server decides when the suggestion is due; see
-  [assistant.md](assistant.md#the-suggestion). Both Settings links close the
-  panel when it is a sheet, and leave a docked panel open.
+  [assistant.md](assistant.md#the-suggestion). These links, **Skip these
+  cards…** and the **Acts without asking** line's **Change in Settings**
+  close the panel when it is a sheet, and leave a docked panel open.
 
 State lives in `store/assistant.ts`. The transcript is the `AcpSession` under
 `acpSessions.assistant`, built by the run reducers and kept out of `runs`, so
