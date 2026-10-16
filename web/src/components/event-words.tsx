@@ -3,8 +3,9 @@ import { Participants } from '@/components/messages/message-row'
 import type { EventType } from '@/lib/events'
 import { budgetStateLabel, money } from '@/lib/format'
 import { memberName, resolveMember } from '@/lib/member-name'
-import { plainReason } from '@/lib/status'
-import type { BudgetState, Event, RoomMessageKind, RoomMessageState, RunStatus } from '@/lib/types'
+import { plainReason } from '@/lib/reasons'
+import { stateLabel } from '@/lib/status'
+import type { BudgetState, Event, RoomMessageKind, RoomMessageState, RunActivity, RunStatus } from '@/lib/types'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useStore } from '@/store'
 
@@ -48,11 +49,9 @@ function MissionName({ id }: { id: unknown }) {
   return objective ? `“${objective.split('\n')[0]}”` : 'a swarm'
 }
 
-const statusWords: Record<RunStatus, string> = {
+const statusWords: Record<Exclude<RunStatus, 'running' | 'needs-attention'>, string> = {
   queued: 'Run queued',
   provisioning: 'Run starting',
-  running: 'Agent working',
-  'needs-attention': 'Needs you',
   completed: 'Finished',
   merged: 'Merged',
   abandoned: 'Closed without merging',
@@ -64,10 +63,11 @@ function statusLine(p: Payload): string {
   const to = text(p.to) as RunStatus
   const reason = text(p.reason)
   if (to === 'abandoned' && reason === 'killed') return 'Stopped'
-  const word = statusWords[to] ?? 'Run changed state'
+  const live = to === 'running' || to === 'needs-attention'
+  const word = live ? stateLabel[(text(p.activity) || 'working') as RunActivity] : statusWords[to] ?? 'Run changed state'
   if (!reason || (to === 'running' && reason === 'agent resumed')) return word
   const plain = plainReason(reason)
-  return `${word}: ${to === 'needs-attention' ? plain.charAt(0).toLowerCase() + plain.slice(1) : plain}`
+  return `${word}: ${live ? plain.charAt(0).toLowerCase() + plain.slice(1) : plain}`
 }
 
 const steerStates: Record<RoomMessageState, string> = {

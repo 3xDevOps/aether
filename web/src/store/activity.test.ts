@@ -22,7 +22,7 @@ describe('run activity', () => {
     store.setState({ workspaces: { [workspace.id]: workspace } })
     store.getState().setRuns([run()])
     const client = fakeApi()
-    const activity = () => store.getState().runs.run_1.activity
+    const activity = () => store.getState().runs.run_1.toolActivity
 
     await applyEvent(store, agentEvent(1, { kind: 'session', harness_session_id: 's' }), client)
     expect(activity()).toBeUndefined()
@@ -55,7 +55,7 @@ describe('run activity', () => {
     store.setState({ workspaces: { [workspace.id]: workspace } })
     store.getState().setRuns([run()])
     const client = fakeApi()
-    const activity = () => store.getState().runs.run_1.activity
+    const activity = () => store.getState().runs.run_1.toolActivity
 
     await applyEvent(store, agentEvent(1, { kind: 'tool_call', tool: 'execute', verb: 'Running', detail: 'go test ./...' }), client)
     expect(activity()).toMatchObject({ verb: 'Running', target: 'go test ./...' })
@@ -69,7 +69,7 @@ describe('run activity', () => {
     store.setState({ workspaces: { [workspace.id]: workspace } })
     store.getState().setRuns([run()])
     const client = fakeApi()
-    const activity = () => store.getState().runs.run_1.activity
+    const activity = () => store.getState().runs.run_1.toolActivity
 
     await applyEvent(store, agentEvent(1, { kind: 'tool_call', tool: 'Read', tool_use_id: 'a', detail: 'src/auth.ts' }), client)
     await applyEvent(store, agentEvent(2, { kind: 'tool_call', tool: 'Bash', tool_use_id: 'b', detail: 'go test ./...' }), client)
@@ -94,7 +94,7 @@ describe('run activity', () => {
     store.setState({ workspaces: { [workspace.id]: workspace } })
     store.getState().setRuns([run()])
     const client = fakeApi()
-    const activity = () => store.getState().runs.run_1.activity
+    const activity = () => store.getState().runs.run_1.toolActivity
     const status = (seq: number, to: string): Event => ({
       ...agentEvent(seq, { from: 'running', to }),
       type: 'run.status',

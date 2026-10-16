@@ -4,7 +4,7 @@ interface ToolCall {
 }
 
 /** What a run's agent is doing, from its latest `run.agent` event. */
-export interface RunActivity {
+export interface ToolActivity {
   /** "Reading" while a tool runs, "Read" once it returned. */
   verb: string
   /** The file, command or task the tool was given, else the tool's name. */
@@ -57,10 +57,10 @@ export function toolTenses(payload: AgentPayload): [string, string] {
 
 /** The activity after one agent event, or `previous` when it changes nothing shown. */
 export function nextActivity(
-  previous: RunActivity | undefined,
+  previous: ToolActivity | undefined,
   payload: AgentPayload,
   at: string,
-): RunActivity | undefined {
+): ToolActivity | undefined {
   switch (payload.kind) {
     case 'tool_call':
     case 'subagent': {

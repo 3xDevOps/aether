@@ -58,19 +58,18 @@ function resetsIn(resetsAt: string | undefined, now: number): string | null {
   return minutes % 60 === 0 ? `resets in ${hours}h` : `resets in ${hours}h ${minutes % 60}m`
 }
 
-function tone(percent: number): Tone {
+type MeterTone = Extract<Tone, 'failed' | 'needs-you' | 'done'>
+
+function tone(percent: number): MeterTone {
   if (percent >= 100) return 'failed'
   if (percent >= 80) return 'needs-you'
   return 'done'
 }
 
-const fill: Record<Tone, string> = {
+const fill: Record<MeterTone, string> = {
   failed: 'bg-state-failed',
   'needs-you': 'bg-state-needs-you',
   done: 'bg-state-done',
-  working: 'bg-state-working',
-  paused: 'bg-state-paused',
-  neutral: 'bg-icon-faint',
 }
 
 function ProviderRow({ name, provider, now }: { name: UsageProviderName; provider: UsageProvider | undefined; now: number }) {

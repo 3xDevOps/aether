@@ -10,7 +10,8 @@ import type { Api } from '@/lib/api'
 import { useClock } from '@/lib/clock'
 import { message } from '@/lib/format'
 import { memberName } from '@/lib/member-name'
-import { plainReason } from '@/lib/status'
+import { plainReason } from '@/lib/reasons'
+import { stateLabel, stateTone } from '@/lib/status'
 import type { AgentInfo, MissionAttempt, MissionAttemptState, MissionTask, MissionTaskScope } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { connectors } from '@/components/shell/sidebar-runs'
@@ -109,10 +110,11 @@ interface RunLineProps {
   to?: string | null
 }
 
-function RunRow({ runID, label, tone, pulse = false, detail, shimmer = false, from, to }: {
+function RunRow({ runID, label, tone, state, pulse = false, detail, shimmer = false, from, to }: {
   runID: string
   label: string
   tone: Tone
+  state?: string
   pulse?: boolean
   detail: string
   shimmer?: boolean
@@ -128,7 +130,7 @@ function RunRow({ runID, label, tone, pulse = false, detail, shimmer = false, fr
       className="h-auto min-h-7 w-full justify-start gap-2 py-1 text-left whitespace-normal coarse:min-h-11"
       onClick={() => navigate('run', { runId: runID })}
     >
-      <StatusDot tone={tone} pulse={pulse} />
+      <StatusDot tone={tone} pulse={pulse} label={state} />
       <span className="line-clamp-2 min-w-0 flex-1 text-ui-sm md:block md:truncate">
         <span className="text-text">{label}</span>
         <span className={cn(shimmer && 'live-shimmer')}> · {detail}</span>
@@ -145,10 +147,11 @@ function LoadedRunLine({ run, label, lead, note, from, to }: RunLineProps & { ru
     <RunRow
       runID={run.id}
       label={label}
-      tone={shown.state}
+      tone={stateTone[shown.state]}
       pulse={working}
       shimmer={working}
-      detail={[lead, shown.reason, note].filter(Boolean).join(' · ')}
+      state={stateLabel[shown.state]}
+      detail={[lead ?? stateLabel[shown.state], shown.reason, note].filter(Boolean).join(' · ')}
       from={from}
       to={run.finished_at ?? to}
     />

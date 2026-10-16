@@ -123,7 +123,7 @@ test('an Enhanced run holding background work stays working, asks while it waits
   await box.fill('hold in background')
   await box.press('Enter')
   await expect(log.getByText('started', { exact: true })).toBeVisible()
-  await expect(runs.getByRole('button', { name: /^Working · .* · Working in background: 1 task/ })).toBeVisible()
+  await expect(runs.getByRole('button', { name: /^Waiting on (agents|tools) · .* · Working in background: 1 task/ })).toBeVisible()
   await expect(header.getByText('Working in background: 1 task')).toBeVisible()
   // Past acpmock's 2 s BackgroundDelay, the held task still keeps the run working.
   await page.waitForTimeout(3_000)
@@ -144,7 +144,8 @@ test('an Enhanced run holding background work stays working, asks while it waits
   await page.waitForTimeout(3_000)
   const parked = (await statuses()).filter((event) => event.seq > released && event.payload.to === 'needs-attention')
   expect(parked.map((event) => event.payload.reason)).toEqual(['agent idle'])
-  await expect(header.getByText('Waiting for your reply')).toBeVisible()
+  await expect(header.getByText('Agent idle')).toBeVisible()
+  await expect(runs.getByRole('button', { name: /^Idle · / })).toBeVisible()
 
   await box.fill('hold in background')
   await box.press('Enter')

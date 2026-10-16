@@ -36,7 +36,7 @@ function openNextNeedsYou() {
   const waiting = sidebarGroups({ workspace: s.activeWorkspace, mineOnly: s.mineOnly, ctx })
     .find((group) => group.key === 'needs-you')
     ?.runs.flatMap((tree) => [tree, ...tree.children])
-    .filter((row) => row.state === 'needs-you') ?? []
+    .filter((row) => row.needsYou) ?? []
   if (waiting.length === 0) return
   const current = waiting.findIndex((row) => {
     const route = needsYouRoute(row.run, ctx)

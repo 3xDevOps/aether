@@ -35,7 +35,7 @@ const history: Event[] = [
     run_id: 'run_1',
     actor_id: bob.id,
     type: 'run.status',
-    payload: { to: 'needs-attention', reason: 'waiting on a question' },
+    payload: { to: 'needs-attention', activity: 'needs-you', reason: 'waiting on a question', status_seq: 2 },
   },
 ]
 
@@ -244,7 +244,7 @@ describe('activity feed', () => {
     fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' })
     fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Raw events' }))
     expect(await screen.findByText('run.status')).toBeDefined()
-    expect(screen.getByText('{"to":"needs-attention","reason":"waiting on a question"}')).toBeDefined()
+    expect(screen.getByText('{"to":"needs-attention","activity":"needs-you","reason":"waiting on a question","status_seq":2}')).toBeDefined()
   })
 
   it('mounts only the rows near the viewport of a long log', async () => {

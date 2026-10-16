@@ -5,7 +5,7 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { useIsMobile } from '@/lib/breakpoints'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { memberName, resolveMember } from '@/lib/member-name'
-import { clipLabel, runLabel, type PresentationState } from '@/lib/status'
+import { clipLabel, runLabel, stateTone, type PresentationState } from '@/lib/status'
 import { cn, surface } from '@/lib/utils'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useStore } from '@/store'
@@ -14,6 +14,8 @@ import { isTerminal, type RunRecord } from '@/store/runs'
 interface Shown {
   run: RunRecord
   state: PresentationState
+  /** The row lists in Needs you. */
+  waiting: boolean
   reason: string
   since: string
   /** A swarm parent's worker counts. */
@@ -80,7 +82,7 @@ const dayAndTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', tim
 // Default and Large text sizes. Larger text or a shorter window gives lines up in `Details`.
 const peopleLines = 7
 
-function Details({ run, state, reason, since, counts, people }: Shown) {
+function Details({ run, state, waiting, reason, since, counts, people }: Shown) {
   const self = useStore((s) => s.info?.member.id)
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
@@ -121,12 +123,12 @@ function Details({ run, state, reason, since, counts, people }: Shown) {
         {/* An agent's own title has no length limit; every other title already stops where clipLabel does. */}
         <p className={cn('text-ui font-medium break-words', squeeze > peopleLines && 'line-clamp-3')}>{clipLabel(runLabel(run))}</p>
         <p className="flex gap-1.5">
-          <StatusDot tone={state} className="mt-0.75" />
+          <StatusDot tone={stateTone[state]} className="mt-0.75" />
           <span
             className={cn(
               'min-w-0 break-words',
               squeeze < peopleLines ? 'line-clamp-3' : 'line-clamp-1',
-              state !== 'needs-you' && 'text-muted',
+              !waiting && 'text-muted',
             )}
           >
             {reason}
@@ -150,7 +152,7 @@ function Details({ run, state, reason, since, counts, people }: Shown) {
         <dd>{dayAndTime.format(new Date(started))}</dd>
         {since !== started && (
           <>
-            <dt>{state === 'needs-you' ? 'Waiting since' : isTerminal(run.status) ? 'Finished' : 'Last change'}</dt>
+            <dt>{waiting ? 'Waiting since' : isTerminal(run.status) ? 'Finished' : 'Last change'}</dt>
             <dd>{dayAndTime.format(new Date(since))}</dd>
           </>
         )}

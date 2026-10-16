@@ -7,7 +7,7 @@ import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { PaneHeader } from '@/components/ui/pane-header'
-import { StatusDot, type Tone } from '@/components/ui/status-dot'
+import { StatusDot } from '@/components/ui/status-dot'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
@@ -16,7 +16,7 @@ import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
-import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, stateTone } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -31,14 +31,6 @@ import { queuedSteers, unansweredQuestions } from '@/store/collaboration'
 import { useHeaderPrimary, useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import { stateContextOf } from '@/store/selectors'
-
-export const stateTone: Record<PresentationState, Tone> = {
-  'needs-you': 'needs-you',
-  working: 'working',
-  paused: 'paused',
-  done: 'done',
-  failed: 'failed',
-}
 
 export interface RunNavigation {
   go: (view: RunView) => void

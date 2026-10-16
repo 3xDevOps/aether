@@ -38,7 +38,7 @@ function archivedRows(s: RunsInput): RunRow[] {
       run,
       state: shown.state,
       reason: shown.reason,
-      group: groupOf(shown.state),
+      group: groupOf(shown),
       since: run.stateChangedAt,
       waitingSince: run.stateChangedAt,
       owner: resolveMember(s.ctx, run.member_id).member,

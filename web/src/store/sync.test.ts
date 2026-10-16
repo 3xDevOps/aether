@@ -928,6 +928,29 @@ describe('applyEvent', () => {
     expect(store.getState().lastSeq).toBe(5)
   })
 
+  it('drops a status event or snapshot older than the status_seq it holds', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => [run({ activity: 'working', status_seq: 3 })]) }))
+    const held = () => {
+      const { status, activity, reason, status_seq } = store.getState().runs.run_1
+      return { status, activity, reason, status_seq }
+    }
+    const status = (seq: number, payload: Event['payload']) =>
+      applyEvent(store, statusEvent({ id: `evt_${seq}`, seq, payload }), fakeApi())
+
+    await status(10, { from: 'running', to: 'needs-attention', activity: 'waiting-agents', reason: 'waiting on 3 workers', status_seq: 5 })
+    expect(held()).toEqual({ status: 'needs-attention', activity: 'waiting-agents', reason: 'waiting on 3 workers', status_seq: 5 })
+    // Delivered out of order: the stream's seq is newer, the run's status_seq is not.
+    await status(11, { from: 'running', to: 'needs-attention', activity: 'idle', reason: 'agent idle', status_seq: 4 })
+    await status(12, { from: 'needs-attention', to: 'needs-attention', activity: 'idle', reason: 'agent idle', status_seq: 5 })
+    expect(held()).toMatchObject({ activity: 'waiting-agents', status_seq: 5 })
+    store.getState().upsertRun(run({ activity: 'working', status_seq: 3 }))
+    expect(held()).toMatchObject({ status: 'needs-attention', activity: 'waiting-agents', status_seq: 5 })
+
+    await status(13, { from: 'needs-attention', to: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which port?', status_seq: 6 })
+    expect(held()).toEqual({ status: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which port?', status_seq: 6 })
+  })
+
   it('takes the status-change time from the wire and moves it only when the server does', async () => {
     const store = createRootStore()
     const finished = run({

@@ -6,7 +6,7 @@ import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { useDelayed } from '@/lib/hooks'
-import { runLabel, stateLabel, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, stateTone, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useRunPresentation } from '@/store/hooks'
@@ -22,7 +22,7 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const tree = useMemo(() => nestWorkers(runs), [runs])
   const shown = (id: string, workers: RunRow[]) =>
-    expanded[id] ?? true ? workers : workers.filter((worker) => worker.state === 'needs-you')
+    expanded[id] ?? true ? workers : workers.filter((worker) => worker.needsYou)
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && runs.length === 0)
 
@@ -123,7 +123,7 @@ function nestWorkers(runs: RunRow[]): { row: RunRow; workers: RunRow[] }[] {
   return [...top]
 }
 
-const foldable = (workers: RunRow[]) => workers.filter((worker) => worker.state !== 'needs-you').length
+const foldable = (workers: RunRow[]) => workers.filter((worker) => !worker.needsYou).length
 
 const workersID = (runID: string) => `workers-${runID}`
 
@@ -169,7 +169,7 @@ function Row({
             {toggle.expanded ? <ChevronDown /> : <ChevronRight />}
           </Button>
         )}
-        <StatusDot tone={state} label={stateLabel[state]} className="mt-1.5" />
+        <StatusDot tone={stateTone[state]} label={stateLabel[state]} className="mt-1.5" />
         <div className="min-w-0 flex-1">
           <button
             type="button"
@@ -243,7 +243,7 @@ export function RunStatusChip({ run }: { run: RunRecord }) {
 export function StatusChip({ state }: { state: PresentationState }) {
   return (
     <span className="inline-flex min-h-5 items-center gap-1.5 rounded-[2px] border border-seam/80 px-1.5 py-px text-ui-sm leading-4 text-text">
-      <StatusDot tone={state} />
+      <StatusDot tone={stateTone[state]} />
       <span>{stateLabel[state]}</span>
     </span>
   )

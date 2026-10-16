@@ -94,7 +94,7 @@ describe('session rows', () => {
   })
 
   it('ends a working run with what the agent is doing and where to watch it live', () => {
-    const working = { ...toRecord(run()), activity: { verb: 'Reading', target: 'src/billing.js', at: '2026-08-14T10:03:00Z', running: {} } }
+    const working = { ...toRecord(run()), toolActivity: { verb: 'Reading', target: 'src/billing.js', at: '2026-08-14T10:03:00Z', running: {} } }
     expect(rows({ run: working, events: [], room: [], memberName, paused: false }).slice(-2)).toEqual([
       { kind: 'live', label: 'Reading src/billing.js' },
       { kind: 'terminal-note' },

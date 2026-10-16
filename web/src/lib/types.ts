@@ -15,6 +15,17 @@ export type RunStatus =
   | 'failed'
   | 'interrupted'
 
+/** What a live run waits on, from the scheduler; set only while `status` is `running` or `needs-attention`. */
+export type RunActivity =
+  | 'working'
+  | 'waiting-agents'
+  | 'waiting-tools'
+  | 'needs-you'
+  | 'idle'
+  | 'finished'
+  | 'failed'
+  | 'disconnected'
+
 export interface RunInputRequest {
   id: string
   session_id: string
@@ -42,6 +53,9 @@ export interface Run {
   acp?: boolean
   switching?: 'tui' | 'acp'
   status: RunStatus
+  activity?: RunActivity | ''
+  /** Increments on every change of status, activity or reason. */
+  status_seq?: number
   branch: string
   last_commit?: string
   last_commit_at?: string | null
@@ -790,6 +804,8 @@ export interface RunStatusPayload {
   from?: RunStatus
   to: RunStatus
   reason?: string
+  activity?: RunActivity | ''
+  status_seq: number
   /** The run's flags after this transition; absent means false. */
   outcome_unseen?: boolean
   finish_unopened?: boolean

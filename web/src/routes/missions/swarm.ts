@@ -70,7 +70,7 @@ export function swarmLines(ctx: StateContext): Record<string, SwarmLine> {
     if (!missionID || !row.run.mission_role) continue
     const line = (lines[missionID] ??= { counts: '', needsYou: false, unread: 0 })
     const count = (counts[missionID] ??= { working: 0, needsYou: 0, done: 0, failed: 0 })
-    if (row.state === 'needs-you' && !line.needsYou) {
+    if (row.needsYou && !line.needsYou) {
       line.needsYou = true
       line.reason = row.reason
     }
@@ -83,7 +83,7 @@ export function swarmLines(ctx: StateContext): Record<string, SwarmLine> {
       }
       continue
     }
-    if (row.state === 'needs-you') count.needsYou++
+    if (row.needsYou) count.needsYou++
     else if (row.group === 'working') count.working++
     else if (row.state === 'failed') count.failed++
     else count.done++

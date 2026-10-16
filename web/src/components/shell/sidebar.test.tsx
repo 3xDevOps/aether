@@ -11,8 +11,8 @@ Element.prototype.scrollIntoView = vi.fn()
 
 const runs = [
   run(),
-  run({ id: 'run_2', task: 'answer the schema question', status: 'needs-attention' }),
-  run({ id: 'run_3', task: 'ship the invoice export', status: 'completed', outcome_unseen: true, workspace_id: otherWorkspace.id }),
+  run({ id: 'run_2', task: 'answer the schema question', status: 'needs-attention', activity: 'needs-you' }),
+  run({ id: 'run_3', task: 'ship the invoice export', status: 'failed', outcome_unseen: true, workspace_id: otherWorkspace.id }),
   run({ id: 'run_4', task: 'tidy the readme', status: 'merged' }),
 ]
 
@@ -77,7 +77,7 @@ describe('shell landmarks', () => {
 
     const groups = runList().getAllByRole('heading', { level: 2 })
     expect(groups.map((heading) => heading.textContent)).toEqual(['Needs you2', 'Working1', 'Finished1'])
-    const finished = runList().getByRole('button', { name: /^Finished/ })
+    const finished = runList().getByRole('button', { name: /^Finished\s*\d+$/ })
     expect(finished.getAttribute('aria-expanded')).toBe('true')
     expect(runList().getByText('tidy the readme')).toBeDefined()
     fireEvent.click(finished)
@@ -89,7 +89,7 @@ describe('shell landmarks', () => {
 describe('run rows', () => {
   it('lists every Needs you row', () => {
     const waiting = Array.from({ length: 7 }, (_, i) =>
-      run({ id: `run_wait_${i}`, task: `question ${i}`, status: 'needs-attention' }))
+      run({ id: `run_wait_${i}`, task: `question ${i}`, status: 'needs-attention', activity: 'needs-you' }))
     useStore.setState({ runs: Object.fromEntries(waiting.map((r) => [r.id, toRecord(r)])) })
     render(<AppShell />)
 
@@ -100,13 +100,13 @@ describe('run rows', () => {
     const enhanced = { mode: 'acp', acp: true } as const
     useStore.setState({
       runs: Object.fromEntries([
-        run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running', reason: 'working in background: 2 tasks' }),
-        run({ ...enhanced, id: 'run_asking', task: 'asking agent', status: 'needs-attention', reason: 'needs input: Which database?' }),
+        run({ ...enhanced, id: 'run_busy', task: 'busy agent', status: 'running', activity: 'waiting-agents', reason: 'working in background: 2 tasks' }),
+        run({ ...enhanced, id: 'run_asking', task: 'asking agent', status: 'needs-attention', activity: 'needs-you', reason: 'needs input: Which database?' }),
       ].map((r) => [r.id, toRecord(r)])),
     })
     render(<AppShell />)
 
-    expect(runList().getByRole('button', { name: /^Working · busy agent · Working in background: 2 tasks/ })).toBeDefined()
+    expect(runList().getByRole('button', { name: /^Waiting on agents · busy agent · Working in background: 2 tasks/ })).toBeDefined()
     expect(runList().getByRole('button', { name: /^Needs you · asking agent · Agent asks: Which database\?/ })).toBeDefined()
   })
 
@@ -181,8 +181,8 @@ describe('run rows', () => {
     }
 
     expect(shown('Failed', 'bump the linter')).toEqual({ unopened: true, muted: false })
-    expect(shown('Done', 'port the parser')).toEqual({ unopened: true, muted: false })
-    expect(shown('Done', 'tidy the readme')).toEqual({ unopened: false, muted: true })
+    expect(shown('Finished', 'port the parser')).toEqual({ unopened: true, muted: false })
+    expect(shown('Finished', 'tidy the readme')).toEqual({ unopened: false, muted: true })
 
     act(() => useStore.getState().applyFinishOpened('run_5'))
 
@@ -362,7 +362,7 @@ describe('run rows', () => {
   it('prefixes a Needs you row from another workspace and answers it where it waits', () => {
     render(<AppShell />)
 
-    const row = runList().getByRole('button', { name: /^Needs you · docs-site · ship the invoice export/ })
+    const row = runList().getByRole('button', { name: /^Failed · docs-site · ship the invoice export/ })
     const item = row.closest('[data-slot="list-row"]') as HTMLElement
     fireEvent.click(within(item).getByRole('button', { name: 'Review' }))
 
@@ -395,7 +395,7 @@ describe('run rows', () => {
 
   it('opens what a Needs you row waits on, not always its terminal', () => {
     render(<AppShell />)
-    fireEvent.click(runList().getByRole('button', { name: /^Needs you · docs-site · ship the invoice export/ }))
+    fireEvent.click(runList().getByRole('button', { name: /^Failed · docs-site · ship the invoice export/ }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_3', view: 'changes' } })
   })
 

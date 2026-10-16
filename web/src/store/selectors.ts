@@ -88,7 +88,7 @@ export function runRows(ctx: StateContext): RunRow[] {
       reason: shown.reason,
       needsYou: shown.needsYou?.id,
       unread: shown.unread,
-      group: groupOf(shown.state),
+      group: groupOf(shown),
       since,
       waitingSince: since,
       owner: resolveMember(ctx, run.member_id).member,
@@ -109,15 +109,15 @@ function swarmRoot(rows: RunRow[], ctx: StateContext): RunRow {
 }
 
 function swarmTree(root: RunRow, members: RunRow[]): RunTree {
-  const children = members.filter((row) => row.state === 'needs-you')
+  const children = members.filter((row) => row.needsYou)
   const counts = { working: 0, needsYou: 0, done: 0, failed: 0 }
   for (const row of members) {
-    if (row.state === 'needs-you') counts.needsYou++
+    if (row.needsYou) counts.needsYou++
     else if (row.group === 'working') counts.working++
     else if (row.state === 'failed') counts.failed++
     else counts.done++
   }
-  const waits = [root, ...children].filter((row) => row.state === 'needs-you')
+  const waits = [root, ...children].filter((row) => row.needsYou)
   return {
     ...root,
     group: children.length > 0 ? 'needs-you' : root.group,
@@ -207,7 +207,7 @@ export function sidebarGroups(s: RunsInput, devices = 0): SidebarGroup[] {
       count:
         key === 'needs-you'
           ? groups[key].reduce(
-              (n, tree) => n + Number(tree.state === 'needs-you') + tree.children.length,
+              (n, tree) => n + Number(tree.needsYou !== undefined) + tree.children.length,
               devices,
             )
           : groups[key].length,
@@ -217,7 +217,7 @@ export function sidebarGroups(s: RunsInput, devices = 0): SidebarGroup[] {
 export function needsYouByWorkspace(ctx: StateContext): Record<string, number> {
   const counts: Record<string, number> = {}
   for (const row of runRows(ctx)) {
-    if (row.state !== 'needs-you') continue
+    if (!row.needsYou) continue
     counts[row.run.workspace_id] = (counts[row.run.workspace_id] ?? 0) + 1
   }
   return counts

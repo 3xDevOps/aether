@@ -75,7 +75,7 @@ describe('run list swarm ordering', () => {
   const runs = [
     run({ id: 'run_solo', task: 'solo', created_at: '2026-08-14T10:00:00Z' }),
     run({ id: 'run_int', task: 'integrate', mission_id: 'm1', mission_role: 'integrator', created_at: '2026-08-14T10:01:00Z' }),
-    run({ id: 'run_ask', task: 'asking worker', mission_id: 'm1', mission_role: 'worker', integrator_run_id: 'run_int', mode: 'headless', status: 'needs-attention', reason: 'blocked: no database access', created_at: '2026-08-14T10:02:00Z' }),
+    run({ id: 'run_ask', task: 'asking worker', mission_id: 'm1', mission_role: 'worker', integrator_run_id: 'run_int', mode: 'headless', status: 'needs-attention', activity: 'needs-you', reason: 'blocked: no database access', created_at: '2026-08-14T10:02:00Z' }),
     run({ id: 'run_busy', task: 'busy worker', mission_id: 'm1', mission_role: 'worker', integrator_run_id: 'run_int', created_at: '2026-08-14T10:03:00Z' }),
   ]
 

@@ -68,7 +68,7 @@ export function useNeedsYouRuns(ids: string[]): ReadonlySet<string> {
   const needy = useStore(
     useShallow((s) => {
       const ctx = stateContextOf(s, now)
-      return ids.filter((id) => s.runs[id] && presentRun(s.runs[id], ctx).state === 'needs-you')
+      return ids.filter((id) => s.runs[id] && presentRun(s.runs[id], ctx).needsYou !== undefined)
     }),
   )
   return useMemo(() => new Set(needy), [needy])

@@ -1,4 +1,5 @@
 import { memberName as storeMemberName } from '@/lib/member-name'
+import { plainReason } from '@/lib/reasons'
 import type {
   Approval,
   Device,
@@ -40,13 +41,11 @@ export type NeedsYouID =
   | 'swarm-question'
   | 'integrator-down'
   | 'control-hold'
-  | 'enhanced-failure'
+  | 'disconnected'
   | 'blocked'
   | 'needs-input'
   | 'usage-limit'
-  | 'turn-ended'
-  | 'stopped'
-  | 'unreviewed-finish'
+  | 'failed'
 
 export interface PrimaryAction {
   kind: 'approve' | 'reply' | 'open'
@@ -55,8 +54,12 @@ export interface PrimaryAction {
 
 export const openAction: PrimaryAction = { kind: 'open', label: 'Open' }
 
+/** How a row in Needs you is labelled: a request, or a run that needs intervention. */
+export type AttentionState = 'needs-you' | 'failed' | 'disconnected'
+
 export interface NeedsYouCondition {
   id: NeedsYouID
+  state: AttentionState
   applies: (run: RunRecord, ctx: StateContext) => boolean
   waitsOn: (run: RunRecord, ctx: StateContext) => string | undefined
   reason: (run: RunRecord, ctx: StateContext) => string
@@ -67,6 +70,7 @@ export interface NeedsYouCondition {
 
 interface Spec {
   id: NeedsYouID
+  state?: AttentionState
   holds: (run: RunRecord, ctx: StateContext) => boolean
   resolvers: (run: RunRecord, ctx: StateContext) => (string | undefined)[]
   admins?: boolean
@@ -85,6 +89,7 @@ function condition(spec: Spec): NeedsYouCondition {
     spec.holds(run, ctx)
   return {
     id: spec.id,
+    state: spec.state ?? 'needs-you',
     target: spec.target,
     action: spec.action,
     reason: spec.reason,
@@ -108,23 +113,10 @@ export const terminalAction: PrimaryAction = { kind: 'open', label: 'Open termin
 const answerIn = (run: RunRecord, enhancedLabel: string): PrimaryAction =>
   isEnhanced(run) ? { kind: 'open', label: enhancedLabel } : terminalAction
 
-/** An interactive report parks the live session, rather than finishing its runtime. */
-export function reportedOutcome(
-  run: Pick<Run, 'status'> & Partial<Pick<Run, 'mode' | 'mission_role' | 'reason'>>,
-): 'success' | 'failure' | undefined {
-  if (run.status !== 'needs-attention' || run.mission_role === 'worker' ||
-    (run.mode !== 'tui' && run.mode !== 'acp')) return undefined
-  if (run.reason === 'agent reported success') return 'success'
-  if (run.reason === 'agent reported failure') return 'failure'
-  return undefined
-}
-
 // `outcome_unseen` is owner-scoped on the server.
-export function awaitingReview(
-  run: Pick<Run, 'status' | 'outcome_unseen'> & Partial<Pick<Run, 'mode' | 'mission_role' | 'reason'>>,
-): boolean {
+export function awaitingReview(run: Pick<Run, 'status' | 'outcome_unseen' | 'activity'>): boolean {
   return run.outcome_unseen === true &&
-    (run.status === 'completed' || run.status === 'failed' || reportedOutcome(run) !== undefined)
+    (run.status === 'completed' || run.status === 'failed' || run.activity === 'finished' || run.activity === 'failed')
 }
 
 export function isPaused(run: RunRecord, ctx: Pick<StateContext, 'pausedRuns'>): boolean {
@@ -228,47 +220,14 @@ function swarmHuman(run: RunRecord, ctx: StateContext): string | undefined {
 }
 
 const blockedPrefix = 'blocked: '
-// Mirrors needsInputReasonPrefix in internal/scheduler/reported.go.
-export const needsInputPrefix = 'needs input: '
-// Mirrors the acp*Reason constants in internal/scheduler/acp_turn.go.
-const enhancedFailureLabels = {
-  'enhanced session failed: ': 'Enhanced could not start',
-  'enhanced session ended: ': 'Agent disconnected',
-  'enhanced turn failed: ': 'Turn failed',
-} as const
-export const enhancedReasonPrefixes = Object.keys(enhancedFailureLabels) as (keyof typeof enhancedFailureLabels)[]
-export const stalledPrefix = 'stalled:'
 // Mirrors usageLimitReason in internal/scheduler/usage_fallback.go.
 const usageLimitPrefix = 'Usage limit reached on '
 
 const usageLimited = (run: RunRecord) => run.reason?.startsWith(usageLimitPrefix) === true
 
-function enhancedFailure(run: RunRecord): string | undefined {
-  const prefix = enhancedReasonPrefixes.find((p) => run.reason?.startsWith(p))
-  return prefix === undefined ? undefined : `${enhancedFailureLabels[prefix]}: ${run.reason!.slice(prefix.length)}`
-}
+const reasonOf = (run: RunRecord, fallback: string) => (run.reason ? plainReason(run.reason) : fallback)
 
-const turnEndedPrefix = 'turn ended: '
-export const stopReasons: Record<string, string> = {
-  max_tokens: 'the reply reached its token limit',
-  max_turn_requests: 'too many model requests in one turn',
-  refusal: 'the agent refused',
-}
-
-export const stoppedBecause = (stop: string) => `Stopped: ${stopReasons[stop] ?? stop}`
-
-// Mirrors acpIdleReason in internal/scheduler/acp_turn.go.
-function turnEndedReason(reason: string | undefined): string {
-  if (reason === 'turn cancelled') return 'Turn cancelled'
-  if (reason === 'turn interrupted') return 'Turn interrupted'
-  if (reason?.startsWith(turnEndedPrefix)) {
-    const stop = reason.slice(turnEndedPrefix.length)
-    return stoppedBecause(stop)
-  }
-  return 'Waiting for your reply'
-}
-
-// Order matters: the reason-prefix rows must precede `stopped`, which matches any parked run.
+// Checked in order; the specific requests precede the agent's own `needs-you`.
 export const needsYouConditions: NeedsYouCondition[] = [
   condition({
     id: 'permission',
@@ -371,12 +330,13 @@ export const needsYouConditions: NeedsYouCondition[] = [
     action: () => terminalAction,
   }),
   condition({
-    id: 'enhanced-failure',
+    id: 'disconnected',
+    state: 'disconnected',
     target: 'terminal',
     background: true,
-    holds: (run) => enhancedFailure(run) !== undefined,
+    holds: (run) => run.activity === 'disconnected',
     resolvers: (run) => [run.member_id],
-    reason: (run) => enhancedFailure(run)!,
+    reason: (run) => reasonOf(run, 'Agent disconnected'),
     action: () => terminalAction,
   }),
   condition({
@@ -384,7 +344,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     target: 'terminal',
     background: true,
     supervised: true,
-    holds: (run) => run.status === 'needs-attention' && run.reason?.startsWith(blockedPrefix) === true,
+    holds: (run) => run.activity === 'needs-you' && run.reason?.startsWith(blockedPrefix) === true,
     resolvers: (run, ctx) => [run.mission_role === 'worker' ? swarmHuman(run, ctx) : run.member_id],
     reason: (run) =>
       `${run.mission_role === 'worker' ? 'Worker blocked' : 'Blocked'}: ${run.reason?.slice(blockedPrefix.length)}`,
@@ -393,10 +353,10 @@ export const needsYouConditions: NeedsYouCondition[] = [
   condition({
     id: 'needs-input',
     target: 'run',
-    holds: (run, ctx) =>
-      run.status === 'needs-attention' && !isPaused(run, ctx) && run.reason?.startsWith(needsInputPrefix) === true,
+    background: true,
+    holds: (run, ctx) => run.activity === 'needs-you' && !isPaused(run, ctx),
     resolvers: (run) => [run.member_id],
-    reason: (run) => `Agent asks: ${run.reason?.slice(needsInputPrefix.length)}`,
+    reason: (run) => reasonOf(run, 'The agent needs you'),
     action: () => ({ kind: 'reply', label: 'Reply' }),
   }),
   condition({
@@ -410,52 +370,17 @@ export const needsYouConditions: NeedsYouCondition[] = [
     action: () => openAction,
   }),
   condition({
-    id: 'turn-ended',
-    target: 'run',
-    holds: (run, ctx) =>
-      isEnhanced(run) &&
-      run.status === 'needs-attention' &&
-      reportedOutcome(run) === undefined &&
-      !isPaused(run, ctx) &&
-      !run.reason?.startsWith(stalledPrefix) &&
-      !run.reason?.startsWith(blockedPrefix) &&
-      !run.reason?.startsWith(needsInputPrefix) &&
-      !usageLimited(run) &&
-      enhancedFailure(run) === undefined,
-    resolvers: (run) => [run.member_id],
-    action: () => ({ kind: 'reply', label: 'Reply' }),
-    reason: (run) => turnEndedReason(run.reason),
-  }),
-  condition({
-    id: 'stopped',
-    target: 'run',
-    holds: (run, ctx) =>
-      run.status === 'needs-attention' &&
-      reportedOutcome(run) === undefined &&
-      !isPaused(run, ctx) &&
-      !run.reason?.startsWith(blockedPrefix) &&
-      !run.reason?.startsWith(needsInputPrefix) &&
-      !usageLimited(run) &&
-      enhancedFailure(run) === undefined,
-    resolvers: (run) => [run.member_id],
-    action: () => ({ kind: 'reply', label: 'Reply' }),
-    reason: (run, ctx) => {
-      const label = run.reason?.startsWith(stalledPrefix) ? 'No activity' : 'Agent idle'
-      return run.stateChangedAtEstimated ? label : `${label} for ${waited(run.stateChangedAt, ctx.now)}`
-    },
-  }),
-  condition({
-    id: 'unreviewed-finish',
+    id: 'failed',
+    state: 'failed',
     target: 'changes',
     background: true,
-    holds: (run) => awaitingReview(run),
+    holds: (run) => run.activity === 'failed' || (run.status === 'failed' && awaitingReview(run)),
     resolvers: (run) => [run.member_id],
     action: () => ({ kind: 'open', label: 'Review' }),
-    reason: (run) => {
-      const outcome = reportedOutcome(run)
-      if (outcome) return `Agent reported ${outcome}; review the result. Run remains open for follow-up.`
-      return run.status === 'failed' ? 'Failed, review the result' : 'Finished, review the result'
-    },
+    reason: (run) =>
+      run.activity === 'failed'
+        ? 'Agent reported failure; review the result. Run remains open for follow-up.'
+        : 'Failed, review the result',
   }),
 ]
 
