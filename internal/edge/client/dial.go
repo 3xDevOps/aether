@@ -74,7 +74,7 @@ func (c *Client) dial(ctx context.Context, op, serverID, path string) (net.Conn,
 		}
 		// websocket.Dial keeps at most the first KiB of a refused body.
 		body, _ := io.ReadAll(resp.Body)
-		return nil, c.refusal(op, c.origin, resp.StatusCode, body)
+		return nil, c.refusal(op, c.origin, resp, body)
 	}
 	if err := checkVersion(c.host, resp); err != nil {
 		_ = ws.CloseNow()

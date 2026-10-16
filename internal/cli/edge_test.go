@@ -365,6 +365,20 @@ func TestDialLinkedNamesTheFailedLayer(t *testing.T) {
 	if !errors.As(err, &path) || path.Layer != LayerClientEdge {
 		t.Fatalf("edge down: %v", err)
 	}
+	for _, status := range []int{http.StatusFound, http.StatusForbidden, http.StatusNotFound,
+		http.StatusProxyAuthRequired, http.StatusTooManyRequests} {
+		between := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+			rw.Header().Set("Location", "http://portal.example.test/")
+			rw.WriteHeader(status)
+			_, _ = rw.Write([]byte("<html>sign in to the network</html>"))
+		}))
+		t.Cleanup(between.Close)
+		w.signIn(t, between.URL)
+		_, err = DialLinked(context.Background(), Config{ServerID: w.serverID(), EdgeURL: between.URL}, "aether")
+		if !errors.As(err, &path) || path.Layer != LayerClientEdge {
+			t.Fatalf("HTTP %d from something in between: %v", status, err)
+		}
+	}
 }
 
 func TestEdgeSSHCommandNamesThePathEntry(t *testing.T) {

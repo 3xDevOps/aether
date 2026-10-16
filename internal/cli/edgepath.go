@@ -84,7 +84,7 @@ func edgeFailure(edge *edgeclient.Client, serverID string, session *edgeclient.S
 // answer, or an answer from a proxy in between, is the way to the edge.
 func relayLayer(err error) string {
 	var refused *edgeclient.RefusedError
-	if !errors.As(err, &refused) {
+	if !errors.As(err, &refused) || !refused.FromEdge {
 		return LayerClientEdge
 	}
 	r := edgeproto.Refusal(refused.Message)
