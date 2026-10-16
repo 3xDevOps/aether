@@ -27,6 +27,21 @@ type AssistantSession struct {
 	UpdatedAt  time.Time
 }
 
+// AssistantSettings is a member's assistant settings and the state of the
+// suggestion to turn auto-approval on.
+type AssistantSettings struct {
+	// AutoApprove lets the assistant's confirmed tools run without a card.
+	AutoApprove bool
+	// Approvals counts cards approved by hand since the last decline,
+	// timeout or answer to the suggestion.
+	Approvals int
+	// Snoozes counts the suggestions answered "later".
+	Snoozes      int
+	SnoozedUntil time.Time
+	// NoSuggest stops the suggestion for good.
+	NoSuggest bool
+}
+
 // AssistantStore persists each member's assistant session. Removing a member
 // removes theirs.
 type AssistantStore interface {
@@ -44,10 +59,10 @@ type AssistantStore interface {
 	HasAssistantPromptKey(ctx context.Context, member domain.MemberID, generation int64, key string) (bool, error)
 	// AddAssistantPromptKey records key, keeping the newest MaxAssistantPromptKeys.
 	AddAssistantPromptKey(ctx context.Context, member domain.MemberID, generation int64, key string) error
-	// AssistantAutoApprove reports whether the member lets the assistant's
-	// confirmed tools run without a card; false when never set.
-	AssistantAutoApprove(ctx context.Context, member domain.MemberID) (bool, error)
-	SetAssistantAutoApprove(ctx context.Context, member domain.MemberID, on bool) error
+	// AssistantSettings returns the member's settings; the zero value when
+	// never set.
+	AssistantSettings(ctx context.Context, member domain.MemberID) (AssistantSettings, error)
+	PutAssistantSettings(ctx context.Context, member domain.MemberID, settings AssistantSettings) error
 }
 
 func (d *DB) GetAssistantSession(ctx context.Context, member domain.MemberID) (*AssistantSession, error) {
@@ -155,26 +170,39 @@ func (d *DB) AddAssistantPromptKey(ctx context.Context, member domain.MemberID, 
 	return nil
 }
 
-func (d *DB) AssistantAutoApprove(ctx context.Context, member domain.MemberID) (bool, error) {
-	var on bool
+func (d *DB) AssistantSettings(ctx context.Context, member domain.MemberID) (AssistantSettings, error) {
+	var settings AssistantSettings
+	var until int64
 	err := d.db.QueryRowContext(ctx,
-		`SELECT auto_approve FROM assistant_settings WHERE member_id = ?`, member).Scan(&on)
+		`SELECT auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off
+		 FROM assistant_settings WHERE member_id = ?`, member).
+		Scan(&settings.AutoApprove, &settings.Approvals, &settings.Snoozes, &until, &settings.NoSuggest)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return AssistantSettings{}, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("store: get assistant auto-approval: %w", err)
+		return AssistantSettings{}, fmt.Errorf("store: get assistant settings: %w", err)
 	}
-	return on, nil
+	if until > 0 {
+		settings.SnoozedUntil = time.Unix(until, 0).UTC()
+	}
+	return settings, nil
 }
 
-func (d *DB) SetAssistantAutoApprove(ctx context.Context, member domain.MemberID, on bool) error {
+func (d *DB) PutAssistantSettings(ctx context.Context, member domain.MemberID, settings AssistantSettings) error {
+	var until int64
+	if !settings.SnoozedUntil.IsZero() {
+		until = settings.SnoozedUntil.Unix()
+	}
 	_, err := d.db.ExecContext(ctx,
-		`INSERT INTO assistant_settings (member_id, auto_approve, updated_at) VALUES (?, ?, unixepoch())
-		 ON CONFLICT(member_id) DO UPDATE SET auto_approve = excluded.auto_approve, updated_at = excluded.updated_at`,
-		member, on)
+		`INSERT INTO assistant_settings (member_id, auto_approve, manual_approvals, suggest_snoozes, suggest_after, suggest_off, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, unixepoch())
+		 ON CONFLICT(member_id) DO UPDATE SET auto_approve = excluded.auto_approve,
+		   manual_approvals = excluded.manual_approvals, suggest_snoozes = excluded.suggest_snoozes,
+		   suggest_after = excluded.suggest_after, suggest_off = excluded.suggest_off, updated_at = excluded.updated_at`,
+		member, settings.AutoApprove, settings.Approvals, settings.Snoozes, until, settings.NoSuggest)
 	if err != nil {
-		return fmt.Errorf("store: set assistant auto-approval: %w", mapConstraint(err, ErrNotFound))
+		return fmt.Errorf("store: put assistant settings: %w", mapConstraint(err, ErrNotFound))
 	}
 	return nil
 }

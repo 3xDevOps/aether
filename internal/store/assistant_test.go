@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
@@ -116,31 +117,33 @@ func TestAssistantFollows(t *testing.T) {
 	}
 }
 
-func TestAssistantAutoApprove(t *testing.T) {
+func TestAssistantSettings(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
 	ctx := context.Background()
 	ada := mustCreateMember(t, db).ID
 
-	if on, err := db.AssistantAutoApprove(ctx, ada); err != nil || on {
-		t.Fatalf("auto-approval before it was set = %v, %v, want off", on, err)
+	if got, err := db.AssistantSettings(ctx, ada); err != nil || got != (AssistantSettings{}) {
+		t.Fatalf("settings before any were set = %+v, %v, want the zero value", got, err)
 	}
-	if err := db.SetAssistantAutoApprove(ctx, ada, true); err != nil {
+	want := AssistantSettings{AutoApprove: true, Approvals: 2, Snoozes: 1, SnoozedUntil: time.Unix(1_800_000_000, 0).UTC()}
+	if err := db.PutAssistantSettings(ctx, ada, want); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ResetAssistantSession(ctx, ada); err != nil {
 		t.Fatal(err)
 	}
-	if on, err := db.AssistantAutoApprove(ctx, ada); err != nil || !on {
-		t.Fatalf("auto-approval after a new conversation = %v, %v, want on", on, err)
+	if got, err := db.AssistantSettings(ctx, ada); err != nil || got != want {
+		t.Fatalf("settings after a new conversation = %+v, %v, want %+v", got, err, want)
 	}
-	if err := db.SetAssistantAutoApprove(ctx, ada, false); err != nil {
+	want = AssistantSettings{NoSuggest: true}
+	if err := db.PutAssistantSettings(ctx, ada, want); err != nil {
 		t.Fatal(err)
 	}
-	if on, err := db.AssistantAutoApprove(ctx, ada); err != nil || on {
-		t.Fatalf("auto-approval after turning it off = %v, %v", on, err)
+	if got, err := db.AssistantSettings(ctx, ada); err != nil || got != want {
+		t.Fatalf("settings after an update = %+v, %v, want %+v", got, err, want)
 	}
-	if err := db.SetAssistantAutoApprove(ctx, "mem-missing", true); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("setting an unknown member's auto-approval = %v, want ErrNotFound", err)
+	if err := db.PutAssistantSettings(ctx, "mem-missing", want); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("setting an unknown member's settings = %v, want ErrNotFound", err)
 	}
 }

@@ -36,11 +36,14 @@ func memberAssistant(args []string) error {
 		if err := c.Call(protocol.MethodAssistantSettings, p, &settings); err != nil {
 			return err
 		}
-		state := "off: launching, messaging and stopping runs and saving the environment wait for your approval"
+		state := "off: each action below waits for your approval on a card"
 		if settings.AutoApprove {
-			state = "on: the assistant launches, messages and stops runs and saves the environment without asking"
+			state = "on: the actions below run without a card, noted in the transcript first"
 		}
 		fmt.Println("auto-approve  " + state)
+		fmt.Println("covers        launching runs, messaging and stopping your own runs, saving your environment")
+		fmt.Println("always asks   messaging or stopping another member's run, and any other action that asks")
+		fmt.Println("not covered   the assistant's own shell and file tools, which never ask")
 		return nil
 	})
 }

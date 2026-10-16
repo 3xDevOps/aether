@@ -17,29 +17,29 @@ import (
 )
 
 type memStore struct {
-	mu   sync.Mutex
-	rows map[domain.MemberID]*store.AssistantSession
-	keys map[string]bool
-	auto map[domain.MemberID]bool
-	// autoReads counts AssistantAutoApprove calls.
-	autoReads int
+	mu       sync.Mutex
+	rows     map[domain.MemberID]*store.AssistantSession
+	keys     map[string]bool
+	settings map[domain.MemberID]store.AssistantSettings
+	// settingsReads counts AssistantSettings calls.
+	settingsReads int
 }
 
 func newMemStore() *memStore {
-	return &memStore{rows: map[domain.MemberID]*store.AssistantSession{}, keys: map[string]bool{}, auto: map[domain.MemberID]bool{}}
+	return &memStore{rows: map[domain.MemberID]*store.AssistantSession{}, keys: map[string]bool{}, settings: map[domain.MemberID]store.AssistantSettings{}}
 }
 
-func (m *memStore) AssistantAutoApprove(_ context.Context, id domain.MemberID) (bool, error) {
+func (m *memStore) AssistantSettings(_ context.Context, id domain.MemberID) (store.AssistantSettings, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.autoReads++
-	return m.auto[id], nil
+	m.settingsReads++
+	return m.settings[id], nil
 }
 
-func (m *memStore) SetAssistantAutoApprove(_ context.Context, id domain.MemberID, on bool) error {
+func (m *memStore) PutAssistantSettings(_ context.Context, id domain.MemberID, settings store.AssistantSettings) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.auto[id] = on
+	m.settings[id] = settings
 	return nil
 }
 

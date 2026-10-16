@@ -272,11 +272,14 @@ func (s *Service) Status(ctx context.Context, id domain.MemberID) (protocol.Assi
 	m.mu.Lock()
 	live, starting, failure := m.liveLocked(), m.starting, m.err
 	m.mu.Unlock()
-	auto, err := s.cfg.Store.AssistantAutoApprove(ctx, id)
+	settings, err := s.Settings(ctx, id)
 	if err != nil {
-		return protocol.AssistantStatus{}, fmt.Errorf("assistant: %w", err)
+		return protocol.AssistantStatus{}, err
 	}
-	status := protocol.AssistantStatus{Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(), AutoApprove: auto}
+	status := protocol.AssistantStatus{
+		Agents: agents, Error: failure, Confirmations: m.confirms.snapshot(),
+		AutoApprove: settings.AutoApprove, SuggestAutoApprove: settings.SuggestAutoApprove,
+	}
 	switch {
 	case live != nil:
 		status.Agent = live.agent

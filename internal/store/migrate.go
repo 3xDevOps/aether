@@ -1731,6 +1731,16 @@ CREATE TABLE assistant_settings (
 	updated_at   INTEGER NOT NULL
 );
 `,
+	// v67: when to suggest turning auto-approval on. manual_approvals counts
+	// cards approved by hand since the last decline, timeout or answer to
+	// the suggestion; suggest_after is the unix time a "later" answer
+	// snoozes it until; suggest_off stops it for good.
+	`
+ALTER TABLE assistant_settings ADD COLUMN manual_approvals INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE assistant_settings ADD COLUMN suggest_snoozes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE assistant_settings ADD COLUMN suggest_after INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE assistant_settings ADD COLUMN suggest_off INTEGER NOT NULL DEFAULT 0;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
