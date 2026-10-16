@@ -23,6 +23,8 @@ const (
 	needsInputPrefix = "needs input: "
 	usageLimitPrefix = "Usage limit reached on "
 	turnFailedPrefix = "enhanced turn failed: "
+	interrupted      = "turn interrupted"
+	turnEndedPrefix  = "turn ended: "
 	reportedPrefix   = "agent reported "
 	reportedFailure  = reportedPrefix + "failure"
 
@@ -121,6 +123,12 @@ func statusBody(run *domain.Run, worker bool) string {
 		}
 		if strings.HasPrefix(run.Reason, usageLimitPrefix) {
 			return run.Reason
+		}
+		if run.Reason == interrupted {
+			return "Turn interrupted, send a message to continue"
+		}
+		if rest, ok := strings.CutPrefix(run.Reason, turnEndedPrefix); ok {
+			return "Turn ended (" + rest + "), send a message to continue"
 		}
 		return "Waiting for your reply"
 	case domain.ActivityDisconnected:

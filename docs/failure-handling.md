@@ -582,7 +582,7 @@ the container and shell are still healthy, not that an OOM spared them.
 | --- | --- |
 | The ACP server fails to start, or its session cannot open (not logged in) | The run stays up on its login shell and parks at `needs-attention` with `enhanced session failed: <error>`; the item log gets the same notice. Messages are refused with `scheduler: the enhanced session is not running: <error>`. Pausing and resuming the run (**Retry Enhanced** in the Session view) starts a fresh session. |
 | The ACP server exits on its own | A turn in flight ends with **Turn interrupted**, background tasks the run waited for get a **Background work interrupted** notice, pending requests are cancelled, and the run parks with `enhanced session ended: <exit code>; stderr: <tail>`. |
-| Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted** and the run parks with `turn interrupted`; background tasks the old server was running are gone. |
+| Server restart or hard kill | Recovery stops the previous ACP server (Docker cannot reattach an exec's stdio) and attempts to restore the stored session in a fresh one: `session/resume`, else `session/load` without re-logging history. A turn cut off by the restart is logged as **Turn interrupted** and the run parks with `turn interrupted`, state `needs-you`; background tasks the old server was running are gone. |
 | A turn is cancelled, or Stop ends a wait for background work | The run parks with `turn cancelled`, not `agent idle`. |
 | A Claude background task never ends | The run stays `running` with `working in background: <n> tasks` until Stop. While such a task is live, the run parks `stalled:` only after three times the stall threshold with nothing from the agent ([enhanced-runs.md](enhanced-runs.md#background-work)). |
 | The session cannot be restored | A new session starts, and the log says why the old one could not be restored. |
@@ -880,8 +880,8 @@ published change of the run's status, reason, state or outcome flags; each
 | `working` | A turn is in progress. |
 | `waiting-agents` | No turn runs, but the run awaits its own agents: Claude background subagents or workflows, an integrator's live worker attempts or worker mail since its last turn started, or a `waiting` report this turn. |
 | `waiting-tools` | No turn runs, and the agent waits on a background tool, such as a Claude monitor. A backgrounded shell such as a dev server does not count. |
-| `needs-you` | A human request is open: a `needs-input` or `blocked` report, a pending permission, question or approval, or a usage limit Aether will not continue from on another account. A Background run's question does not count: it has no terminal to answer it in. |
-| `idle` | The turn ended with none of the above, including a stall. |
+| `needs-you` | A human request is open: a `needs-input` or `blocked` report, a pending permission, question or approval, a usage limit Aether will not continue from on another account, or an interactive Enhanced turn that ended `turn interrupted` or `turn ended: <stop reason>` and waits for a message to continue. A Background run's question does not count: it has no terminal to answer it in. |
+| `idle` | The turn ended with none of the above, including a stall and `turn cancelled`: whoever cancelled the turn already knows. |
 | `finished` | An interactive run reported `success` and is parked for review. |
 | `failed` | An interactive run reported `failure`, its Enhanced turn failed (`enhanced turn failed:`), or Claude's turn stopped on an error (`agent failed`). |
 | `disconnected` | The Enhanced session failed or ended while the run is open. Reopening the session clears it. |
@@ -901,7 +901,7 @@ notices all apply it:
 | `failed`, result not yet seen by the owner | yes | once, on the transition |
 | `failed`, result seen | no | no |
 | `finished` | no; the board lists it under Finished until seen | a non-urgent notice once |
-| `working`, `waiting-agents`, `waiting-tools`, `idle` | no | no |
+| `working`, `waiting-agents`, `waiting-tools`, `idle` (including `turn cancelled`) | no | no |
 | any state while paused | no | no |
 
 A swarm worker's requests go to its integrator, so only its `blocked`

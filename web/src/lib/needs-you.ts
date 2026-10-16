@@ -217,6 +217,8 @@ const usageLimitPrefix = 'Usage limit reached on '
 
 const asks = (run: RunRecord) => run.reason?.startsWith(needsInputPrefix) === true
 const usageLimited = (run: RunRecord) => run.reason?.startsWith(usageLimitPrefix) === true
+// Mirrors acpInterruptedReason and acpStoppedReason in internal/scheduler/acp_turn.go.
+const turnCutShort = (run: RunRecord) => run.reason === 'turn interrupted' || run.reason?.startsWith('turn ended: ') === true
 
 // Checked in order; the specific requests precede the agent's own `needs-you`.
 export const needsYouConditions: NeedsYouCondition[] = [
@@ -350,9 +352,13 @@ export const needsYouConditions: NeedsYouCondition[] = [
     // Any other needs-you is a request not loaded here yet, so it reads neutrally.
     holds: (run) => run.state === 'needs-you',
     resolvers: (run) => [run.member_id],
-    reason: (run) => (asks(run) || usageLimited(run) ? plainReason(run.reason!) : 'Open the run to see its request'),
+    reason: (run) => {
+      if (turnCutShort(run)) return `${plainReason(run.reason!)} · reply to continue`
+      return asks(run) || usageLimited(run) ? plainReason(run.reason!) : 'Open the run to see its request'
+    },
     // A Background run takes no input.
-    action: (run) => (asks(run) && run.mode !== 'headless' ? { kind: 'reply', label: 'Reply' } : openAction),
+    action: (run) =>
+      (asks(run) || turnCutShort(run)) && run.mode !== 'headless' ? { kind: 'reply', label: 'Reply' } : openAction,
   }),
   condition({
     id: 'failed',

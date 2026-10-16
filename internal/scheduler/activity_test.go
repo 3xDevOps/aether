@@ -63,7 +63,8 @@ func nextActivity(t *testing.T, sub events.Subscription, run domain.RunID, seq *
 
 // TestRunActivityFollowsWhatTheRunWaitsOn walks one run through every cause
 // of a parked or working run and checks the activity each transition
-// publishes and stores: only a human request is needs-you.
+// publishes and stores: only a human request, or a turn only a member can
+// continue, is needs-you.
 func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 	t.Parallel()
 	var integrator *integratorStore
@@ -182,6 +183,19 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
+		{"an Enhanced turn interrupted", func() {
+			report(agentstatus.Report{State: agentstatus.Idle, Reason: acpInterruptedReason})
+		}, domain.RunNeedsAttention, domain.ActivityNeedsYou, acpInterruptedReason},
+		{"an Enhanced turn stopped at its token limit", func() {
+			report(working)
+			nextActivity(t, sub, run.ID, &seq)
+			report(agentstatus.Report{State: agentstatus.Idle, Reason: acpIdleReason("max_tokens")})
+		}, domain.RunNeedsAttention, domain.ActivityNeedsYou, acpStoppedReason + "max_tokens"},
+		{"an Enhanced turn cancelled", func() {
+			report(working)
+			nextActivity(t, sub, run.ID, &seq)
+			report(agentstatus.Report{State: agentstatus.Idle, Reason: acpCancelledReason})
+		}, domain.RunNeedsAttention, domain.ActivityIdle, acpCancelledReason},
 		{"the agent's turn failed", func() {
 			report(agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonFailed})
 		}, domain.RunNeedsAttention, domain.ActivityFailed, agentstatus.ReasonFailed},
