@@ -579,11 +579,18 @@ both renames are done, `<data-dir>/server-update/swap.json` says `swapping`,
 and a start that finds it so puts the `.prev` files back. The server then
 closes its listeners and the database. When the release migrates the
 database, it copies it to `<data-dir>/server-update/aether.db.pre-update`
-now, so the copy holds every write. It re-executes the new binary with the
-same argv and environment, keeping the same PID: the shipped unit is
-`Restart=on-failure`, so a clean exit would not come back. If the re-exec
-itself fails under systemd, the server falls back to
-`systemctl restart aether-server`.
+now, so the copy holds every write. Under the shipped systemd unit the
+server then exits with status 75 (`EX_TEMPFAIL`) and systemd starts the new
+binary: a new PID, and the stop and start show in `systemctl status` and
+`journalctl -u aether-server`. The unit's `RestartForceExitStatus=75` and
+`SuccessExitStatus=75` make systemd restart on that status without logging a
+failure. A unit installed before this release has neither line, but
+`Restart=on-failure` restarts the server on any non-zero exit, so updates
+work the same and the journal logs the exit as `Failed with result
+'exit-code'`. `sudo aether-server install` rewrites the unit and keeps
+`/etc/aether/server.conf`; run `sudo systemctl daemon-reload` afterwards. A
+foreground `aether-server serve`, with no systemd unit around it, re-executes
+the new binary in place with the same argv, environment and PID.
 
 **Rollback.** The new binary records the update `applied` only after it has
 opened and migrated the database, bound its SSH listener, and recovered the
@@ -593,7 +600,7 @@ it finishes, the binary has 5 minutes to bind and record, or it exits. If it
 exits before recording more than twice, or the next start finds those 5
 minutes gone, that start restores the database copy when the schema already
 moved, puts the `.prev` binaries back, records `rolled_back` with the error,
-and executes the previous binary. A re-exec that fails outright is undone
+and starts the previous binary the same way. A re-exec that fails outright is undone
 the same way. A restored copy loses every write made after it, and the error
 says so with the time of the copy. A rollback that cannot restore a file
 records why and exits with that error instead of executing anything.

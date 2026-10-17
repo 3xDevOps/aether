@@ -383,6 +383,14 @@ func (t *Trial) failLocked(cause error) error {
 	return errors.Join(cause, saveRecord(t.dir, t.rec))
 }
 
+// ErrRestartUnit is returned instead of re-executing when the systemd unit
+// will start the next binary itself. The caller exits with status 75.
+var ErrRestartUnit = errors.New("exiting with status 75 so systemd starts aether-server")
+
+func (h Host) restartsUnit() bool {
+	return h.RestartsOnExit75 != nil && h.RestartsOnExit75()
+}
+
 func (t *Trial) rollBackAndExec(cause string) error {
 	slog.Error("serverupdate: rolling back", "from", t.rec.ToVersion, "to", t.rec.FromVersion, "cause", cause)
 	if err := rollBack(t.dir, t.rec, cause); err != nil {
@@ -390,6 +398,9 @@ func (t *Trial) rollBackAndExec(cause string) error {
 	}
 	if !t.host.complete() {
 		return errors.New("serverupdate: rolled back, but this build cannot re-execute; start aether-server again")
+	}
+	if t.host.restartsUnit() {
+		return fmt.Errorf("%w %s", ErrRestartUnit, t.rec.FromVersion)
 	}
 	self := t.rec.Binaries[0]
 	err := t.host.Exec(self, append([]string{self}, os.Args[1:]...), os.Environ())
@@ -455,7 +466,8 @@ func (t *Trial) Commit(ctx context.Context, st store.Store, bus events.Bus) erro
 
 // ExecAfterDrain snapshots the database when the update migrates it and
 // re-executes argv once the server has shut down for an update. It
-// returns only when either failed; the swap is then rolled back and the
+// returns only when either failed, or with ErrRestartUnit when the systemd
+// unit starts the new binary instead; the swap is then rolled back and the
 // previous binary executed instead, and the returned error says both what
 // failed and what was restored.
 func ExecAfterDrain(dir string, host Host, argv []string) error {
@@ -465,6 +477,9 @@ func ExecAfterDrain(dir string, host Host, argv []string) error {
 	}
 	cause := takeSnapshot(rec)
 	if cause == nil {
+		if host.restartsUnit() {
+			return fmt.Errorf("%w %s", ErrRestartUnit, rec.ToVersion)
+		}
 		err = host.Exec(argv[0], argv, os.Environ())
 		if err == nil {
 			err = errors.New("returned without replacing the process")

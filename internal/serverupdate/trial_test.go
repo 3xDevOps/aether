@@ -474,3 +474,48 @@ func commitDeps(t *testing.T, e *trialEnv) (*store.DB, events.Bus) {
 	t.Cleanup(func() { _ = db.Close() })
 	return db, newTestBus(t)
 }
+
+// Under a unit that restarts on status 75, an update must leave through
+// systemd instead of re-executing, so the restart shows in the journal.
+func TestRestartThroughTheUnitInsteadOfExec(t *testing.T) {
+	e := newTrialEnv(t)
+	e.write(t, swapRecord{})
+	e.host.RestartsOnExit75 = func() bool { return true }
+
+	err := ExecAfterDrain(e.state, e.host, []string{e.server, "serve"})
+	if !errors.Is(err, ErrRestartUnit) || !strings.Contains(err.Error(), version.Version) {
+		t.Fatalf("ExecAfterDrain = %v, want ErrRestartUnit naming %s", err, version.Version)
+	}
+	e.write(t, swapRecord{Boots: maxTrialBoots})
+	if _, err = Boot(e.state, e.host); !errors.Is(err, ErrRestartUnit) {
+		t.Fatalf("rollback Boot = %v, want ErrRestartUnit", err)
+	}
+	if readFile(t, e.server) != "old server" || e.record(t).Phase != recordRolledBack {
+		t.Fatal("the rollback did not restore the binaries and record itself")
+	}
+	if len(e.execs) != 0 {
+		t.Fatalf("execs = %v, want none", e.execs)
+	}
+
+	e.write(t, swapRecord{})
+	e.host.RestartsOnExit75 = nil
+	if err = ExecAfterDrain(e.state, e.host, []string{e.server, "serve"}); errors.Is(err, ErrRestartUnit) || len(e.execs) == 0 {
+		t.Fatalf("a foreground server must exec in place: err = %v, execs = %v", err, e.execs)
+	}
+}
+
+func TestRestartsOnExit75(t *testing.T) {
+	for show, want := range map[string]bool{
+		"Restart=on-failure\nRestartForceExitStatus=\nSuccessExitStatus=\n":     true,
+		"Restart=on-failure\nRestartForceExitStatus=75\nSuccessExitStatus=75\n": true,
+		"Restart=on-failure\nRestartForceExitStatus=\nSuccessExitStatus=75\n":   false,
+		"Restart=always\nRestartForceExitStatus=\nSuccessExitStatus=75\n":       true,
+		"Restart=no\nRestartForceExitStatus=\nSuccessExitStatus=\n":             false,
+		"Restart=no\nRestartForceExitStatus=75\nSuccessExitStatus=\n":           true,
+		"": false,
+	} {
+		if got := restartsOnExit75(show); got != want {
+			t.Errorf("restartsOnExit75(%q) = %v, want %v", show, got, want)
+		}
+	}
+}

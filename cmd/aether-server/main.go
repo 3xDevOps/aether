@@ -79,6 +79,9 @@ func exitOn(err error) {
 		return
 	}
 	_, _ = fmt.Fprintln(os.Stderr, "aether-server:", err)
+	if errors.Is(err, serverupdate.ErrRestartUnit) {
+		os.Exit(75)
+	}
 	os.Exit(1)
 }
 

@@ -207,6 +207,8 @@ func TestDefaultUnitKeepsOperationalDirectives(t *testing.T) {
 		"StateDirectory=aether",
 		"StateDirectoryMode=0700",
 		"Restart=on-failure",
+		"RestartForceExitStatus=75",
+		"SuccessExitStatus=75",
 		"KillSignal=SIGTERM",
 		"TimeoutStopSec=90",
 		"LimitNOFILE=65536",
