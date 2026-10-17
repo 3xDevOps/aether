@@ -76,12 +76,6 @@ function Wait-DesktopSidecar([Diagnostics.Process]$Process) {
     } while ($true)
 }
 
-function Invoke-Timed([string]$Label, [scriptblock]$Command) {
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    & $Command
-    Write-Host ('Timing: {0}: {1:N1}s' -f $Label, $clock.Elapsed.TotalSeconds)
-}
-
 # Times every phase `aether gui build --json` reports, from one phase line
 # to the next.
 function Invoke-GuiBuild([string]$Label, [string[]]$Arguments) {
@@ -131,13 +125,7 @@ try {
     $asset = Join-Path $mirror 'aether-windows-amd64.exe'
     Copy-Item -LiteralPath $Cli -Destination $asset
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash
-    $checksums = "$hash  aether-windows-amd64.exe`n"
-    if ($DesktopZip) {
-        $zip = Join-Path $mirror 'aether-desktop-windows-amd64.zip'
-        Copy-Item -LiteralPath $DesktopZip -Destination $zip
-        $checksums += "$((Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash)  aether-desktop-windows-amd64.zip`n"
-    }
-    [IO.File]::WriteAllText((Join-Path $mirror 'checksums.txt'), $checksums)
+    [IO.File]::WriteAllText((Join-Path $mirror 'checksums.txt'), "$hash  aether-windows-amd64.exe`n")
 
     $serverScript = Join-Path $root 'release-server.cjs'
     @'
@@ -145,7 +133,7 @@ const http = require('node:http')
 const fs = require('node:fs')
 const path = require('node:path')
 const root = process.argv[2]
-const files = new Set(fs.readdirSync(root))
+const files = new Set(['aether-windows-amd64.exe', 'checksums.txt'])
 const server = http.createServer((req, res) => {
   const name = req.url.replace('/v0.5.1-alpha.4/', '')
   if (!files.has(name)) { res.writeHead(404); res.end(); return }
@@ -196,25 +184,17 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
     $installed = Join-Path $cliDir 'aether.exe'
     $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
 
-    # The source lane's first round leaves the desktop to install.ps1, as a
-    # development build's client install does; every other round installs
-    # the CLI alone and runs gui build itself.
-    foreach ($round in 1..2) {
-        if (-not $DesktopZip -and $round -eq 1) {
-            Invoke-Timed "install.ps1 round $round" {
-                & $installer -Version 'v0.5.1-alpha.4'
-                if (-not $?) { throw "Automatic install $round failed." }
-            }
+    # The CLI is a development build, so install.ps1's own gui build builds
+    # the desktop from source. The third round installs over that desktop
+    # with gui build itself.
+    foreach ($round in 1..3) {
+        if ($round -le 2) {
+            & $installer -Version 'v0.5.1-alpha.4'
+            if (-not $?) { throw "Automatic install $round failed." }
+        } elseif ($DesktopZip) {
+            Invoke-GuiBuild 'gui build --zip' @('--zip', $DesktopZip)
         } else {
-            Invoke-Timed "install.ps1 -Role none round $round" {
-                & $installer -Version 'v0.5.1-alpha.4' -Role none
-                if (-not $?) { throw "CLI install $round failed." }
-            }
-            if ($DesktopZip) {
-                Invoke-GuiBuild "gui build --zip round $round" @('--zip', $zip)
-            } else {
-                Invoke-GuiBuild "gui build --source round $round" @('--source')
-            }
+            Invoke-GuiBuild 'gui build --source' @('--source')
         }
         if ((Get-FileHash -Algorithm SHA256 -LiteralPath $installed).Hash -ne $hash) {
             throw 'Desktop installation changed the CLI.'
