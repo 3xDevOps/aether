@@ -227,7 +227,8 @@ answer, for example behind a proxy only Windows' own settings name. curl.exe
 runs with `-q`, so a `.curlrc` or `_curlrc` cannot turn off its TLS checks or
 set a proxy. A connection that takes over 15 seconds, or a download that stays
 below 1 KB/s for 60 seconds, is abandoned. If the installed CLI already has
-the release's SHA-256, it is neither downloaded nor replaced. The old version
+the release's SHA-256, it is neither downloaded nor replaced; a CLI the
+installer cannot read is downloaded and replaced. The old version
 in `old -> new` is read from the installed `aether.exe`'s file properties,
 without running it. The output is a numbered list of steps:
 

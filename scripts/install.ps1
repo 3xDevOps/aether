@@ -623,8 +623,12 @@ function Read-AetherRelease {
         return
     }
     $binaryPath = Join-Path $Directory $asset
-    if ((Test-Path -LiteralPath $Wanted.Installed -PathType Leaf) -and
-        (Get-FileHash -LiteralPath $Wanted.Installed -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -ceq $expected) {
+    $installedHash = $null
+    if (Test-Path -LiteralPath $Wanted.Installed -PathType Leaf) {
+        # An unreadable CLI is replaceable through its directory: download.
+        $installedHash = (Get-FileHash -LiteralPath $Wanted.Installed -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash
+    }
+    if ($null -ne $installedHash -and $installedHash.ToLowerInvariant() -ceq $expected) {
         $binaryPath = $Wanted.Installed
         $Release.Unchanged = $true
         Write-AetherDetail ('{0}  not downloaded: {1} has the same SHA-256' -f $asset, $Wanted.Installed)
