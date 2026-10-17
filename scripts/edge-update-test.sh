@@ -2,7 +2,8 @@
 # Exercises scripts/edge-update.sh against stubbed docker, curl, flock and
 # sleep, the same style as deploy-test.sh. The docker stub keeps a small
 # world in files: which digest runs, what the channel tag points to, the
-# database schema, and which releases fail. A real edge is not involved.
+# database and its backups, and which releases fail. A real edge is not
+# involved.
 set -eu
 
 script_dir=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
@@ -19,29 +20,40 @@ image=ghcr.io/3xdevops/aether-edge
 A=sha256:$(printf '%064d' 0 | tr 0 a)
 B=sha256:$(printf '%064d' 0 | tr 0 b)
 C=sha256:$(printf '%064d' 0 | tr 0 c)
+D=sha256:$(printf '%064d' 0 | tr 0 d)
 
 # World files, per digest under $WORLD/<name>/<digest>:
 #   version     the release the image is (label and version --json)
+#   label       a version label that differs from version
+#   reports     a version the running container reports instead
 #   supports    the highest database schema the image supports
 #   floor       the compat floor its migrations leave in the database
 #   up-fails    docker compose up fails for it
 #   unready     healthcheck --ready fails in it
+#   claimed     claimed servers while it runs (default 3)
+#   slow        readiness reports 0 claimed servers this many times first
 #   fingerprint served on /v1/edge while it runs (default SHA256:good)
-# and $WORLD/channel, $WORLD/running, $WORLD/db (schema floor).
+# and $WORLD/channel, $WORLD/running, $WORLD/db ("schema floor data"),
+# $WORLD/backups/<name>, and the switches backup-fails, restore-fails and
+# schema-fails.
 cat >"$bin/docker" <<'EOF'
 #!/bin/sh
 set -eu
 printf 'docker %s\n' "$*" >>"$CMD_LOG"
 w="$WORLD"
 get() { cat "$w/$1/$2" 2>/dev/null || echo "${3:-}"; }
+backup() {
+	[ ! -f "$w/backup-fails" ] || { echo "aether-edge: backup: disk full" >&2; exit 1; }
+	cp "$w/db" "$w/backups/$(basename "$1")"
+}
 image=ghcr.io/3xdevops/aether-edge
 case "$1" in
 pull) exit 0 ;;
 image)
-	ref="$5"
+	d="${5#*@}"
 	case "$4" in
 	*RepoDigests*) echo "$image@$(cat "$w/channel")" ;;
-	*image.version*) get version "${ref#*@}" ;;
+	*image.version*) get label "$d" "$(get version "$d")" ;;
 	esac
 	exit 0
 	;;
@@ -59,29 +71,35 @@ run)
 	version) printf '{"version":"%s","commit":"abc","store_schema":%s}\n' "$(get version "$d")" "$(get supports "$d" 1)" ;;
 	release-check) exit "$(cat "$w/release-check" 2>/dev/null || echo 0)" ;;
 	schema)
-		read -r schema floor <"$w/db"
+		[ ! -f "$w/schema-fails" ] || { echo "aether-edge: edge.db: file is not a database" >&2; exit 1; }
+		read -r schema floor data <"$w/db"
 		printf '{"schema":%s,"compat_floor":%s,"supported":%s}\n' "$schema" "$floor" "$(get supports "$d" 1)"
 		;;
+	backup) backup "$2" ;;
 	restore)
-		[ ! -f "$w/restore-fails" ] || exit 1
-		cp "$w/db.backup" "$w/db"
+		[ ! -f "$w/restore-fails" ] || { echo "aether-edge: restore: disk full" >&2; exit 1; }
+		[ -z "$(cat "$w/running")" ] || { echo "aether-edge: restore: an edge holds edge.lock" >&2; exit 1; }
+		cp "$w/backups/$(basename "$2")" "$w/db"
 		;;
 	esac
 	exit 0
 	;;
 exec)
 	running="$(cat "$w/running")"
-	[ -n "$running" ] || { echo "container not running" >&2; exit 1; }
+	[ -n "$running" ] || { echo "Error response from daemon: container is not running" >&2; exit 1; }
 	case "$3 $4" in
-	"aether-edge backup")
-		[ ! -f "$w/backup-fails" ] || { echo "aether-edge: backup: disk full" >&2; exit 1; }
-		cp "$w/db" "$w/db.backup"
-		;;
-	"aether-edge version") printf '{"version":"%s","commit":"abc"}\n' "$(get version "$running")" ;;
+	"aether-edge backup") backup "$5" ;;
+	"aether-edge version") printf '{"version":"%s","commit":"abc"}\n' "$(get reports "$running" "$(get version "$running")")" ;;
 	"aether-edge healthcheck")
 		[ ! -f "$w/unready/$running" ] || { echo "aether-edge: healthcheck: not ready" >&2; exit 1; }
+		claimed="$(get claimed "$running" 3)"
+		slow="$(get slow "$running" 0)"
+		if [ "$slow" -gt 0 ]; then
+			echo $((slow - 1)) >"$w/slow/$running"
+			claimed=0
+		fi
 		printf '{"status":"ready","version":"%s","protocol":{"version":1,"min_version":1},"servers":{"claimed":%s,"unclaimed":0}}\n' \
-			"$(get version "$running")" "$(get claimed "$running" 3)"
+			"$(get version "$running")" "$claimed"
 		;;
 	esac
 	exit 0
@@ -94,11 +112,11 @@ compose)
 		d="$(sed -n 's/^AETHER_EDGE_DIGEST=//p' "$env_file")"
 		[ ! -f "$w/up-fails/$d" ] || exit 1
 		: >"$w/running"
-		read -r schema floor <"$w/db"
+		read -r schema floor data <"$w/db"
 		supports="$(get supports "$d" 1)"
 		if [ "$supports" -gt "$schema" ]; then
-			echo "$supports $(get floor "$d" "$supports")" >"$w/db"
-		elif [ "$schema" -gt "$supports" ] && [ "$floor" -gt "$supports" ]; then
+			echo "$supports $(get floor "$d" "$supports") $data" >"$w/db"
+		elif [ "$floor" -gt "$supports" ]; then
 			exit 1
 		fi
 		echo "$d" >"$w/running"
@@ -178,18 +196,30 @@ assert_state() {
 	grep -qx "state=$1" "$state/state" || fail "expected state $1, got $(cat "$state/state" 2>/dev/null)"
 }
 
+assert_db() {
+	[ "$(cat "$world/db")" = "$1" ] || fail "expected database '$1', got '$(cat "$world/db")'"
+}
+
+assert_denied() {
+	grep -q "^$1 " "$state/failed" 2>/dev/null || fail "$1 not in failed"
+}
+
 # Fresh world: A (v1.0.0) runs, the channel points to B (v1.1.0), C is
-# v0.9.0, every image supports schema 1 and the database is at 1.
+# v0.9.0, D is v1.2.0. Every image supports schema 1; the database is at 1
+# and holds "old".
 reset() {
 	rm -rf "$world" "$state" "$compose_dir"
-	mkdir -p "$world/version" "$world/supports" "$world/floor" "$world/up-fails" \
-		"$world/unready" "$world/claimed" "$world/fingerprint" "$compose_dir"
+	for d in version label reports supports floor up-fails unready claimed slow fingerprint backups; do
+		mkdir -p "$world/$d"
+	done
+	mkdir -p "$compose_dir"
 	echo v1.0.0 >"$world/version/$A"
 	echo v1.1.0 >"$world/version/$B"
 	echo v0.9.0 >"$world/version/$C"
+	echo v1.2.0 >"$world/version/$D"
 	echo "$B" >"$world/channel"
 	echo "$A" >"$world/running"
-	echo "1 1" >"$world/db"
+	echo "1 1 old" >"$world/db"
 	printf 'COMPOSE_PROJECT_NAME=edge\nAETHER_EDGE_DIGEST=%s\n' "$A" >"$compose_dir/.env"
 	: >"$log"
 }
@@ -203,6 +233,12 @@ run() {
 	got=$?
 	set -e
 	[ "$got" = "$want" ] || fail "edge-update $* exited $got, expected $want"
+}
+
+# Simulates the edge writing to its database.
+write_db() {
+	read -r schema floor _ <"$world/db"
+	echo "$schema $floor $1" >"$world/db"
 }
 
 # --- success: verify, back up, switch, check -----------------------------
@@ -228,7 +264,7 @@ assert_out "now running v1.1.0"
 : >"$log"
 run 0 --rollback
 assert "aether-edge backup /var/lib/aether-edge/backups/pre-rollback-v1.1.0-"
-assert_before " stop aether-edge" "schema --json"
+assert "--volumes-from aether-edge $image@$A schema --json"
 refute "restore"
 assert_digest "$A"
 assert_state idle
@@ -238,6 +274,45 @@ grep -q "^$B v1.1.0 rolled back by an operator" "$state/failed" || fail "rolled-
 run 0
 assert_out "skipping $B"
 refute "aether-edge backup"
+
+# --- manual rollback over a migration restores the pre-update backup -------
+
+reset
+echo 2 >"$world/supports/$B"
+echo 2 >"$world/floor/$B"
+run 0
+assert_db "2 2 old"
+write_db new
+run 0 --rollback
+assert_before " stop aether-edge" "restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
+assert_db "1 1 old"
+assert_digest "$A"
+
+# --- a failed manual rollback puts back the newer data ---------------------
+
+reset
+echo 2 >"$world/supports/$B"
+echo 2 >"$world/floor/$B"
+run 0
+write_db new
+touch "$world/unready/$A"
+run 1 --rollback
+assert "restore /var/lib/aether-edge/backups/pre-rollback-v1.1.0-"
+assert_db "2 2 new"
+assert_digest "$B"
+assert_state idle
+
+# --- manual rollback of an edge that is down -------------------------------
+
+reset
+run 0
+touch "$world/up-fails/$B"
+: >"$world/running"
+: >"$log"
+run 0 --rollback
+assert "--volumes-from aether-edge $image@$B backup /var/lib/aether-edge/backups/pre-rollback-v1.1.0-"
+assert_out "recorded by the last update"
+assert_digest "$A"
 
 # --- no-op: the channel already points to the running digest ---------------
 
@@ -274,6 +349,14 @@ refute "aether-edge backup"
 refute "compose"
 assert_digest "$A"
 
+# --- a label that disagrees with the image is refused ----------------------
+
+reset
+echo v1.1.1 >"$world/label/$B"
+run 1
+assert_out "reports version v1.1.0 but is labelled v1.1.1"
+refute "compose"
+
 # --- held for a blocking manual step ---------------------------------------
 
 reset
@@ -288,6 +371,20 @@ assert_digest "$A"
 run 0 --manual-steps-done
 assert_digest "$B"
 assert_state idle
+
+# --- --manual-steps-done passes only the release that was held -------------
+
+reset
+echo 3 >"$world/release-check"
+run 3
+echo "$D" >"$world/channel"
+run 3 --manual-steps-done
+assert_out "applies only to a held release"
+assert_digest "$A"
+reset
+echo 3 >"$world/release-check"
+run 3 --manual-steps-done
+assert_digest "$A"
 
 # --- downgrade refused before any verification -----------------------------
 
@@ -319,12 +416,21 @@ reset
 touch "$world/unready/$B"
 run 1
 assert_out "rolled back to v1.0.0"
-assert_before " stop aether-edge" "--user 65532:65532 --volumes-from aether-edge $image@$A schema --json"
+assert "--user 65532:65532 --volumes-from aether-edge $image@$A schema --json"
 refute "restore"
+refute " stop aether-edge"
 assert_digest "$A"
 assert_state idle
 grep -q "^$B v1.1.0 aether-edge healthcheck --ready fails" "$state/failed" || fail "failed release not denied"
 [ "$(cat "$world/running")" = "$A" ] || fail "old release not running"
+
+# --- the new edge reports another version: rollback ------------------------
+
+reset
+echo v1.0.9 >"$world/reports/$B"
+run 1
+assert_out "the container reports version 'v1.0.9', expected v1.1.0"
+assert_digest "$A"
 
 # --- the new edge lost its key: rollback ------------------------------------
 
@@ -341,9 +447,9 @@ echo 2 >"$world/supports/$B"
 echo 2 >"$world/floor/$B"
 touch "$world/unready/$B"
 run 1
-assert "--user 65532:65532 --volumes-from aether-edge $image@$A restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
+assert_before " stop aether-edge" "--user 65532:65532 --volumes-from aether-edge $image@$A restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
 assert_before "schema --json" "restore /var/lib"
-[ "$(cat "$world/db")" = "1 1" ] || fail "database not restored"
+assert_db "1 1 old"
 assert_digest "$A"
 assert_state idle
 
@@ -355,7 +461,15 @@ echo 1 >"$world/floor/$B"
 touch "$world/unready/$B"
 run 1
 refute "restore"
-[ "$(cat "$world/db")" = "2 1" ] || fail "database changed"
+assert_db "2 1 old"
+assert_digest "$A"
+
+# --- an unreadable database is restored -------------------------------------
+
+reset
+touch "$world/unready/$B" "$world/schema-fails"
+run 1
+assert "restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
 assert_digest "$A"
 
 # --- rollback fails: broken, and later runs never loop ----------------------
@@ -365,10 +479,26 @@ touch "$world/unready/$B" "$world/up-fails/$A"
 run 1
 assert_state broken
 assert_out "State is broken"
+assert_denied "$B"
 : >"$log"
 run 1
 assert_out "state is broken since"
 refute "docker"
+rm "$state/state"
+rm "$world/up-fails/$A"
+echo "$A" >"$world/running"
+run 0
+assert_out "skipping $B"
+
+# --- a failed restore is broken too ------------------------------------------
+
+reset
+echo 2 >"$world/supports/$B"
+echo 2 >"$world/floor/$B"
+touch "$world/unready/$B" "$world/restore-fails"
+run 1
+assert_state broken
+assert_out "aether-edge restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
 
 # --- interrupted run: a reboot during the switch is finished ---------------
 
@@ -384,6 +514,7 @@ fingerprint='SHA256:good'
 servers=3
 backup='/var/lib/aether-edge/backups/pre-update-v1.1.0.db'
 restore=''
+restored=0
 reason=''
 since=2026-01-01T00:00:00Z
 EOF
@@ -406,16 +537,33 @@ assert_out "rolled back to v1.0.0"
 assert_digest "$A"
 assert_state idle
 
-# --- interrupted rollback is redone ----------------------------------------
+# --- servers missing after the rollback do not make it broken ---------------
+
+reset
+mkdir -p "$state"
+cp "$tmp/interrupted" "$state/state"
+touch "$world/unready/$B"
+echo 1 >"$world/claimed/$A"
+run 1
+assert_out "rolled back to v1.0.0"
+assert_state idle
+
+# --- a reboot after the restore stopped the edge: --recover at boot --------
 
 reset
 mkdir -p "$state"
 sed 's/^state=switching/state=rolling-back/' "$tmp/interrupted" >"$state/state"
-echo "$B" >"$world/running"
-run 1
+cp "$world/db" "$world/backups/pre-update-v1.1.0.db"
+: >"$world/running"
+run 1 --recover
 assert_out "rolling back to v1.0.0"
+refute "docker pull"
 assert_digest "$A"
 assert_state idle
+: >"$log"
+run 0 --recover
+assert_out "no interrupted run to recover"
+refute "docker"
 
 # --- another run holds the lock --------------------------------------------
 
@@ -424,6 +572,7 @@ touch "$world/locked"
 run 0
 assert_out "another run holds"
 refute "docker"
+run 1 --rollback
 
 # --- a release that failed before is skipped -------------------------------
 
@@ -435,8 +584,12 @@ assert_out "skipping $B, which failed before: v1.1.0 checks failed"
 refute "release-check"
 refute "compose"
 
-# --- servers that do not come back trigger a rollback ----------------------
+# --- servers have the configured time to come back -------------------------
 
+reset
+echo 2 >"$world/slow/$B"
+run 0
+assert_digest "$B"
 reset
 echo 1 >"$world/claimed/$B"
 run 1
@@ -446,7 +599,15 @@ reset
 echo 2 >"$world/claimed/$B"
 export AETHER_EDGE_UPDATE_SERVER_TOLERANCE=1
 run 0
-unset AETHER_EDGE_UPDATE_SERVER_TOLERANCE
 assert_digest "$B"
+
+# --- bad numbers are refused before anything runs --------------------------
+
+reset
+export AETHER_EDGE_UPDATE_SERVER_TOLERANCE=x
+run 1
+assert_out "tolerance must be a whole number, not 'x'"
+[ ! -s "$log" ] || fail "commands ran despite a bad setting"
+unset AETHER_EDGE_UPDATE_SERVER_TOLERANCE
 
 echo "edge-update-test: ok"

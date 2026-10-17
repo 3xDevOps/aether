@@ -12,5 +12,8 @@ ExecStart=/usr/local/sbin/aether-edge-update
 StateDirectory=aether-edge-update
 StateDirectoryMode=0700
 UMask=0077
-# A pull, a backup, two 180-second health waits and the server checks.
-TimeoutStartSec=30min
+# A pull, a backup, and for the update and a rollback each a 180-second
+# health wait and up to AETHER_EDGE_UPDATE_SERVER_WAIT seconds of checks,
+# each check bounded to 30 seconds. A kill mid-switch leaves the rest to
+# aether-edge-update-recover.service at the next boot, or to the next run.
+TimeoutStartSec=1h

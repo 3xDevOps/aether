@@ -7,6 +7,7 @@
 #   aether-edge-update                       # update once (the timer runs this)
 #   aether-edge-update --check               # resolve and verify only
 #   aether-edge-update --rollback            # back to the previous release
+#   aether-edge-update --recover             # only finish an interrupted run
 #
 # Exit status: 0 updated, up to date or another run holds the lock; 3 held
 # for a manual step; 1 anything else, including a completed rollback.
@@ -29,7 +30,7 @@ die() {
 usage() {
 	cat >&2 <<'EOF'
 usage: aether-edge-update [--check] [--channel <tag>] [--manual-steps-done]
-       aether-edge-update --rollback
+       aether-edge-update --rollback | --recover
 EOF
 	exit 2
 }
@@ -41,6 +42,7 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 	--check) mode=check ;;
 	--rollback) mode=rollback ;;
+	--recover) mode=recover ;;
 	--manual-steps-done) manual_steps_done=1 ;;
 	--channel)
 		[ $# -ge 2 ] || usage
@@ -63,6 +65,12 @@ relay_url="${AETHER_EDGE_UPDATE_RELAY_URL:-}"
 tolerance="${AETHER_EDGE_UPDATE_SERVER_TOLERANCE:-0}"
 server_wait="${AETHER_EDGE_UPDATE_SERVER_WAIT:-120}"
 
+for v in tolerance server_wait; do
+	eval "n=\$$v"
+	case "$n" in
+	'' | *[!0-9]*) die "$v must be a whole number, not '$n' (AETHER_EDGE_UPDATE_SERVER_TOLERANCE, AETHER_EDGE_UPDATE_SERVER_WAIT)" ;;
+	esac
+done
 [ -n "$relay_url" ] || die "AETHER_EDGE_UPDATE_RELAY_URL is not set; set it in $config to the edge's relay origin, such as https://edge.example.com"
 
 # Reads one field of the compact JSON the edge prints. Nested objects are
@@ -118,6 +126,7 @@ write_state() {
 		echo "servers=$servers"
 		echo "backup=$(quote "$backup")"
 		echo "restore=$(quote "$restore")"
+		echo "restored=$restored"
 		echo "reason=$(quote "$reason")"
 		echo "since=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	} >"$state_dir/state.tmp"
@@ -128,17 +137,21 @@ compose() {
 	docker compose --env-file "$digest_file" "$@"
 }
 
+is_digest() {
+	printf '%s\n' "$1" | grep -Eqx 'sha256:[0-9a-f]{64}'
+}
+
 current_digest() {
-	d="$(sed -n 's/^AETHER_EDGE_DIGEST=//p' "$digest_file" 2>/dev/null | tail -n 1)"
-	case "$d" in
-	sha256:*) echo "$d" ;;
-	*) die "no AETHER_EDGE_DIGEST=sha256:<digest> line in $digest_file; write the digest the edge runs there (docs/edge.md, \"Automatic updates\")" ;;
-	esac
+	d="$(sed -n 's/^AETHER_EDGE_DIGEST=//p' "$digest_file" | tail -n 1)"
+	is_digest "$d" ||
+		die "no AETHER_EDGE_DIGEST=sha256:<digest> line in $digest_file; write the digest the edge runs there (docs/edge.md, \"Automatic updates\")"
+	echo "$d"
 }
 
 write_digest() {
+	others="$(grep -v '^AETHER_EDGE_DIGEST=' "$digest_file")" || [ $? = 1 ] || return 1
 	{
-		grep -v '^AETHER_EDGE_DIGEST=' "$digest_file" 2>/dev/null || true
+		[ -z "$others" ] || printf '%s\n' "$others"
 		echo "AETHER_EDGE_DIGEST=$1"
 	} >"$digest_file.tmp" && mv "$digest_file.tmp" "$digest_file"
 }
@@ -156,7 +169,7 @@ edge_fingerprint() {
 }
 
 claimed_servers() {
-	out="$(docker exec "$service" aether-edge healthcheck --ready --json)" || return 1
+	out="$(timeout 30 docker exec "$service" aether-edge healthcheck --ready --json)" || return 1
 	n="$(printf '%s\n' "$out" | json_get claimed)"
 	case "$n" in
 	'' | *[!0-9]*) return 1 ;;
@@ -165,14 +178,15 @@ claimed_servers() {
 }
 
 # Polls readiness, the public fingerprint and the claimed-server count of
-# the running edge, which must report version $1. Sets why on failure.
+# the running edge, which must report version $1 and have at least $2
+# claimed servers. Sets why on failure.
 post_checks() {
-	got="$(docker exec "$service" aether-edge version --json | json_get version)" || got=""
+	got="$(timeout 30 docker exec "$service" aether-edge version --json | json_get version)" || got=""
 	if [ "$got" != "$1" ]; then
 		why="the container reports version '${got}', expected $1"
 		return 1
 	fi
-	want=$((servers - tolerance))
+	want="$2"
 	attempts=$((server_wait / 5))
 	[ "$attempts" -ge 1 ] || attempts=1
 	i=0
@@ -196,36 +210,52 @@ post_checks() {
 	done
 }
 
-# Restores backup $2 when the database is beyond what image $1 can run.
-# The edge must be stopped, since restore refuses while it holds edge.lock.
+# Restores backup $2 when image $1 cannot run the database, or always
+# when $3 is 1. Restore refuses while an edge holds edge.lock, so the edge
+# is stopped only then. Sets why on failure.
 prepare_db() {
-	if out="$(docker run --rm --network none --user 65532:65532 --volumes-from "$service" "$image@$1" schema --json)"; then
-		schema="$(printf '%s\n' "$out" | json_get schema)"
-		floor="$(printf '%s\n' "$out" | json_get compat_floor)"
-		supported="$(printf '%s\n' "$out" | json_get supported)"
-		if [ "$floor" -le "$supported" ]; then
-			say "database schema $schema (compat floor $floor) runs on an edge that supports $supported; keeping it"
-			return 0
+	if [ "$3" != 1 ]; then
+		if out="$(docker run --rm --network none --user 65532:65532 --volumes-from "$service" "$image@$1" schema --json)"; then
+			floor="$(printf '%s\n' "$out" | json_get compat_floor)"
+			supported="$(printf '%s\n' "$out" | json_get supported)"
+			case "$floor$supported" in
+			'' | *[!0-9]*)
+				why="aether-edge schema --json printed $out"
+				return 1
+				;;
+			esac
+			if [ "$floor" -le "$supported" ]; then
+				say "the database (compat floor $floor) runs on a release that supports schema $supported; keeping it"
+				return 0
+			fi
+			say "the database (compat floor $floor) is beyond schema $supported, the newest this release supports; restoring $2"
+		else
+			rc=$?
+			if [ "$rc" != 1 ]; then
+				why="docker run $image@$1 schema --json exited $rc"
+				return 1
+			fi
+			say "aether-edge schema cannot read the database; restoring $2"
 		fi
-		say "database schema $schema (compat floor $floor) is beyond the $supported this release supports; restoring $2"
-	else
-		say "cannot read the database schema with $1; restoring $2"
+	fi
+	if ! compose stop "$service"; then
+		why="docker compose stop $service failed"
+		return 1
 	fi
 	if ! docker run --rm --network none --user 65532:65532 --volumes-from "$service" "$image@$1" restore "$2"; then
 		why="aether-edge restore $2 failed"
 		return 1
 	fi
+	restored=1
+	write_state "$state"
 }
 
-# Runs digest $1, release $2. With a backup $3 the edge is stopped first and
-# the backup restored when the database requires it. Sets why on failure.
+# Runs digest $1, release $2, with at least $5 claimed servers. With a
+# backup $3, first restores it as prepare_db decides ($4 forces it).
+# Sets why on failure.
 switch_to() {
 	if [ -n "$3" ]; then
-		if ! compose stop "$service"; then
-			why="docker compose stop $service failed"
-			return 1
-		fi
-		prepare_db "$1" "$3" || return 1
+		prepare_db "$1" "$3" "$4" || return 1
 	fi
 	if ! write_digest "$1"; then
 		why="cannot write $digest_file"
@@ -235,23 +265,28 @@ switch_to() {
 		why="docker compose up $service did not become healthy"
 		return 1
 	fi
-	post_checks "$2"
+	post_checks "$2" "$5"
 }
 
 deny() {
+	! grep -q "^$1 " "$state_dir/failed" 2>/dev/null || return 0
 	printf '%s %s %s\n' "$1" "$2" "$(printf '%s' "$3" | tr '\n' ' ')" >>"$state_dir/failed"
 }
 
+# Returns to the release before the switch. A database the switch restored
+# is always put back from the backup taken before it. The server count is
+# not required here: the release ran before, and a server that went away
+# meanwhile must not leave the edge broken.
 revert() {
 	reason="$1"
 	say "rolling back to $from_version ($from_digest): $reason"
+	deny "$to_digest" "$to_version" "$reason"
 	write_state rolling-back
-	if ! switch_to "$from_digest" "$from_version" "$backup"; then
+	if ! switch_to "$from_digest" "$from_version" "$backup" "$restored" 0; then
 		reason="rollback to $from_version failed: $why; after: $reason"
 		write_state broken
 		die "$reason. State is broken; docs/edge.md, \"Automatic updates\", has the recovery"
 	fi
-	deny "$to_digest" "$to_version" "$reason"
 	reason=""
 	write_state idle
 	die "rolled back to $from_version after $to_version failed; $to_digest is in $state_dir/failed"
@@ -274,19 +309,39 @@ succeed() {
 
 # Finishes the switch recorded in the state file, or rolls it back.
 finish() {
-	if switch_to "$to_digest" "$to_version" "$restore"; then
+	if switch_to "$to_digest" "$to_version" "$restore" 0 $((servers - tolerance)); then
 		succeed
 	else
 		revert "$why"
 	fi
 }
 
+# Records the fingerprint and claimed servers of the running digest $2 and
+# backs up its database as $1. A rollback works on an edge that is down:
+# it falls back to the fingerprint of the last update and to a backup from
+# a stopped container.
 record_pre_state() {
-	fingerprint="$(edge_fingerprint)" || die "GET $relay_url/v1/edge failed; the running edge must answer before an update"
-	servers="$(claimed_servers)" || die "aether-edge healthcheck --ready --json failed in $service; the running edge must be ready before an update"
+	if fp="$(edge_fingerprint)"; then
+		fingerprint="$fp"
+	elif [ "$mode" = rollback ] && [ -n "$fingerprint" ]; then
+		say "GET $relay_url/v1/edge failed; the rolled-back edge must serve $fingerprint, recorded by the last update"
+	else
+		die "GET $relay_url/v1/edge failed; the running edge must answer before an update"
+	fi
+	if n="$(claimed_servers)"; then
+		servers="$n"
+	elif [ "$mode" = rollback ]; then
+		servers=0
+	else
+		die "aether-edge healthcheck --ready --json failed in $service; the running edge must be ready before an update"
+	fi
 	backup="$backups/$1-$(date -u +%Y%m%dT%H%M%SZ).db"
-	docker exec "$service" aether-edge backup "$backup" ||
-		die "aether-edge backup $backup failed; nothing changed"
+	if ! timeout 300 docker exec "$service" aether-edge backup "$backup"; then
+		if [ "$mode" != rollback ] ||
+			! docker run --rm --network none --user 65532:65532 --volumes-from "$service" "$image@$2" backup "$backup"; then
+			die "aether-edge backup $backup failed; nothing changed"
+		fi
+	fi
 	say "backed up the database to $backup; fingerprint $fingerprint, $servers claimed servers"
 }
 
@@ -294,8 +349,7 @@ update() {
 	cur="$(current_digest)"
 	docker pull --quiet "$image:$channel" >/dev/null || die "docker pull $image:$channel failed"
 	new="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image:$channel" | sed -n "s|^$image@||p")"
-	[ "$(printf '%s\n' "$new" | grep -c .)" = 1 ] ||
-		die "$image:$channel has $(printf '%s\n' "$new" | grep -c .) repository digests, expected one: ${new}"
+	is_digest "$new" || die "$image:$channel has no single repository digest: '${new}'"
 	if [ "$new" = "$cur" ]; then
 		say "up to date: $channel is $cur"
 		exit 0
@@ -316,9 +370,11 @@ update() {
 	else
 		rc=$?
 		[ "$rc" = 3 ] || die "release-check refused $new_version ($new); nothing changed"
-		if [ "$manual_steps_done" = 1 ]; then
+		if [ "$manual_steps_done" = 1 ] && [ "$held_digest" = "$new" ]; then
 			say "release-check holds $new_version; continuing because of --manual-steps-done"
 		else
+			[ "$manual_steps_done" = 0 ] ||
+				say "--manual-steps-done applies only to a held release, and $new_version ($new) was not held before"
 			if [ "$mode" = update ]; then
 				kind=update from_digest="$cur" from_version="$cur_version" to_digest="$new" to_version="$new_version"
 				reason="release-check holds $new_version: do the manual steps it printed, then run aether-edge-update --manual-steps-done"
@@ -341,9 +397,9 @@ update() {
 	printf '%s\n' "$from_json" >"$state_dir/from.json"
 	printf '%s\n' "$to_json" >"$state_dir/to.json"
 
-	record_pre_state "pre-update-$new_version"
+	record_pre_state "pre-update-$new_version" "$cur"
 	kind=update from_digest="$cur" from_version="$cur_version" to_digest="$new" to_version="$new_version"
-	restore="" reason=""
+	restore="" restored=0 reason=""
 	write_state switching
 	say "updating $cur_version ($cur) to $new_version ($new)"
 	finish
@@ -354,9 +410,9 @@ rollback() {
 	read -r prev_digest prev_version prev_backup <"$state_dir/previous"
 	cur="$(current_digest)"
 	cur_version="$(image_version "$cur")" || die "aether-edge version --json failed in $image@$cur"
-	record_pre_state "pre-rollback-$cur_version"
+	record_pre_state "pre-rollback-$cur_version" "$cur"
 	kind=rollback from_digest="$cur" from_version="$cur_version" to_digest="$prev_digest" to_version="$prev_version"
-	restore="$prev_backup" reason=""
+	restore="$prev_backup" restored=0 reason=""
 	write_state switching
 	say "rolling back $cur_version ($cur) to $prev_version ($prev_digest)"
 	finish
@@ -367,12 +423,13 @@ chmod 0700 "$state_dir"
 exec 9>"$state_dir/lock"
 if ! flock -n 9; then
 	say "another run holds $state_dir/lock; exiting"
+	[ "$mode" != rollback ] && [ "$manual_steps_done" = 0 ] || exit 1
 	exit 0
 fi
 cd "$compose_dir"
 
 state=idle kind=update from_digest="" from_version="" to_digest="" to_version=""
-fingerprint="" servers=0 backup="" restore="" reason="" since=""
+fingerprint="" servers=0 backup="" restore="" restored=0 reason="" since=""
 # shellcheck disable=SC1091 # written by write_state
 [ ! -f "$state_dir/state" ] || . "$state_dir/state"
 
@@ -384,14 +441,18 @@ switching | rolling-back)
 	elif [ "$state" = switching ]; then
 		say "finishing the interrupted switch to $to_version ($to_digest)"
 		finish
-		exit 0
+		[ "$mode" = rollback ] || exit 0
 	else
 		revert "$reason"
 	fi
 	;;
 esac
 
+held_digest=""
+[ "$state" != held ] || held_digest="$to_digest"
+
 case "$mode" in
 rollback) rollback ;;
+recover) say "no interrupted run to recover" ;;
 *) update ;;
 esac

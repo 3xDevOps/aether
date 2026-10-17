@@ -1688,7 +1688,8 @@ channel, and rolls back when the new release fails its checks. A systemd
 timer runs it once a day. Each run:
 
 1. Takes the lock `/var/lib/aether-edge-update/lock`. When another run
-   holds it, logs `another run holds ...` and exits 0.
+   holds it, logs `another run holds ...` and exits 0, or 1 for
+   `--rollback` and `--manual-steps-done`.
 2. Finishes or rolls back a run that a reboot interrupted
    ([State files](#state-files)).
 3. Pulls `ghcr.io/3xdevops/aether-edge:<channel>` and reads its digest and
@@ -1713,13 +1714,15 @@ timer runs it once a day. Each run:
    fingerprint, which fails when the edge lost `edge_key` or its data
    mount; and the claimed servers return to the count before, less a
    tolerance, within a time limit.
-8. When step 6 or 7 fails, rolls back: stops the new edge, runs
-   `aether-edge schema --json` from the old image against the data
-   directory, restores the backup only when the old release cannot run the
-   database (`supported` below `compat_floor`) or the schema is unreadable,
-   starts the old digest and repeats the checks. The new digest goes into
-   `failed`, and the run exits 1. When the rollback fails too, the state
-   becomes `broken`.
+8. When step 6 or 7 fails, rolls back. The new digest goes into `failed`.
+   It runs `aether-edge schema --json` from the old image against the data
+   directory. Only when the old release cannot run the database
+   (`supported` below `compat_floor`), or `schema` cannot read it, does it
+   stop the edge and restore the backup. It then starts the old digest and
+   repeats the checks except the server count: the old release ran before,
+   and a server that went offline meanwhile must not stop the rollback.
+   The run exits 1. When the rollback fails too, the state becomes
+   `broken`.
 
 It never downgrades and never runs a digest that a signed release does not
 name. Logs go to standard error, which the unit sends to the journal:
@@ -1762,9 +1765,11 @@ sudo curl -fsSL -o /etc/aether-edge-update.env "$src/packaging/edge/aether-edge-
 sudoedit /etc/aether-edge-update.env
 sudo curl -fsSL -o /etc/systemd/system/aether-edge-update.service "$src/packaging/systemd/aether-edge-update.service"
 sudo curl -fsSL -o /etc/systemd/system/aether-edge-update.timer "$src/packaging/systemd/aether-edge-update.timer"
+sudo curl -fsSL -o /etc/systemd/system/aether-edge-update-recover.service "$src/packaging/systemd/aether-edge-update-recover.service"
 sudo aether-edge-update --check
 sudo systemctl daemon-reload
 sudo systemctl enable --now aether-edge-update.timer
+sudo systemctl enable aether-edge-update-recover.service
 systemctl list-timers aether-edge-update.timer
 ```
 
@@ -1825,7 +1830,13 @@ In `/var/lib/aether-edge-update`:
 
 A run that finds `switching` runs the new release and its checks again,
 then keeps it or rolls back. A run that finds `rolling-back` repeats the
-rollback.
+rollback. A host that reboots mid-run may come back with the edge stopped,
+since `restart: unless-stopped` does not restart a container the updater
+stopped. `aether-edge-update-recover.service` runs `aether-edge-update
+--recover` at boot, which finishes or rolls back the interrupted run and
+never starts a new update. A run killed by its timeout, or by `systemctl
+stop`, waits for the next run; run `sudo aether-edge-update --recover`
+to recover it now.
 
 **`held`**: the release needs a manual step. Read the step in the journal,
 the `aether-edge: hold: <reason>` lines `release-check` printed. Each run
@@ -1835,7 +1846,9 @@ holds again and exits 3 until you take it. Then:
 sudo aether-edge-update --manual-steps-done
 ```
 
-That run treats the hold as passed and keeps every other check.
+That run treats the hold as passed and keeps every other check. It applies
+only to the digest that was held: when the channel has moved on, the new
+release is held again.
 
 **`broken`**: the rollback failed, and every run exits 1 with `state is
 broken since <time>: <reason>` and changes nothing. Read the reason in
@@ -1858,13 +1871,16 @@ sudo aether-edge-update --rollback
 ```
 
 This returns to the digest in `previous`. It backs up the database to
-`pre-rollback-<version>-<UTC time>.db`, stops the edge, restores the
-pre-update backup in `previous` only when the older release cannot run
-the database, starts the older digest and runs the same checks. A restore
-loses every change since the update, such as sign-ins and new device
-tokens. The digest it left goes into `failed`, so the timer does not
-install it again, and `previous` is removed. When a check fails, it
-returns to the release it started from.
+`pre-rollback-<version>-<UTC time>.db`. It restores the pre-update backup
+in `previous` only when the older release cannot run the database, then
+starts the older digest and runs the same checks. A restore loses every
+change since the update, such as sign-ins and new device tokens. The
+digest it left goes into `failed`, so the timer does not install it again,
+and `previous` is removed. When a check fails, it returns to the release
+it started from and restores the pre-rollback backup if it had restored.
+It also works when the current edge is down: it then checks the
+fingerprint the last update recorded and backs up from a stopped
+container.
 
 Backups stay in `data/backups/` until you delete them. They hold the
 accounts and device-token hashes but not `edge_key`; keep them as private

@@ -1,0 +1,16 @@
+[Unit]
+Description=Aether edge: finish an update a reboot interrupted
+Documentation=https://github.com/3xDevOps/Aether/blob/main/docs/edge.md#automatic-updates
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aether-edge-update --recover
+StateDirectory=aether-edge-update
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStartSec=1h
+
+[Install]
+WantedBy=multi-user.target
