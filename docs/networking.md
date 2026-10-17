@@ -493,9 +493,20 @@ certificates) that an existing install may not have, and it is the server's
 only HTTP port. So `web-port` defaults to `0` and turning it on is a deliberate
 act. `aether-server setup` offers 443 by default on a host that already has
 tailscaled, because a phone reaching the dashboard is the point of putting the
-server on a tailnet, and on a tailnet that is not ready the server runs
-without the dashboard, names what to enable, and starts the dashboard once it
-is.
+server on a tailnet. On a fresh config setup first checks that tailscaled
+answers, that it reports HTTPS certificates for the tailnet, that the host holds
+its tailnet addresses (tailscaled with `--tun=userspace-networking` does not),
+and that nothing already listens on port 443 there. When a check fails, setup
+offers `0` and prints the reason and the fix:
+
+```
+Defaulting to 0: HTTPS certificates are off for this tailnet; enable MagicDNS and HTTPS certificates on the DNS page of the Tailscale admin console, then run: sudo aether-server config set web-port 443
+```
+
+Typing `443` at the question still sets it; on a tailnet that is not ready the
+server then runs without the dashboard, names what to enable, and starts the
+dashboard once it is. Re-running setup keeps the `web-port` already in the
+config.
 
 ---
 
