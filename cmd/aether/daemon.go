@@ -99,7 +99,8 @@ func daemonInstall(args []string) error {
 	if err != nil {
 		return err
 	}
-	if out, err := exec.Command("git", "-C", repo, "rev-parse", "--is-inside-work-tree").CombinedOutput(); err != nil {
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "--is-inside-work-tree").CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "true" {
 		return fmt.Errorf("--repo %s is not inside a git work tree: %s", repo, strings.TrimSpace(string(out)))
 	}
 	path, activate, err := localops.InstallDaemonUnit(*cfg)
