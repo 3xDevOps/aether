@@ -2327,9 +2327,8 @@ checks out the authorized SHA and runs independently:
   it stamps the tag into `desktop/package.json`, runs `npm ci` and
   `electron-builder --dir --win`, checks the stamp inside `app.asar`, and
   zips the unpacked app at the archive root with sorted entries and fixed
-  timestamps, so the same commit yields the same zip. It launches the app
-  without a CLI, requires its `aether CLI not found` dialog, and uploads
-  `binaries-desktop-windows-<arch>`.
+  timestamps. It launches the app without a CLI, requires its
+  `aether CLI not found` dialog, and uploads `binaries-desktop-windows-<arch>`.
 - `windows-defender` scans both Windows CLIs and both desktop zips
   ([Windows Defender and SmartScreen](#windows-defender-and-smartscreen)).
 - `android` separately builds and verifies the signed APK and AAB with

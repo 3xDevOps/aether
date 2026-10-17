@@ -3,8 +3,8 @@ description: >
   Package the desktop shell for one Windows architecture with
   electron-builder's unpacked target and zip its contents at the archive
   root as aether-desktop-windows-<arch>.zip, the asset `aether gui build`
-  installs. Entries are sorted, use forward slashes and carry a fixed
-  timestamp, so the same app bytes always produce the same zip.
+  installs, then launch the unpacked app. Entries are sorted, use forward
+  slashes and carry a fixed timestamp.
 inputs:
   version:
     description: "Release tag the shell reports, such as v1.2.3"
@@ -53,9 +53,7 @@ runs:
       env:
         ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       run: |
-        start=$SECONDS
         npm ci --no-audit --no-fund
-        echo "npm ci: $((SECONDS - start))s"
     - name: Package the unpacked app
       id: package
       shell: bash
@@ -70,9 +68,7 @@ runs:
           arm64) flag=--arm64 ;;
           *) echo "::error::unsupported desktop architecture $ARCH"; exit 1 ;;
         esac
-        start=$SECONDS
         node node_modules/electron-builder/cli.js --dir --win "$flag" --publish never
-        echo "electron-builder: $((SECONDS - start))s"
         apps=(dist/win*-unpacked)
         if [ "${#apps[@]}" -ne 1 ] || [ ! -f "${apps[0]}/aether-desktop.exe" ]; then
           echo "::error::expected one dist/win*-unpacked/aether-desktop.exe, found: ${apps[*]}"
@@ -105,7 +101,6 @@ runs:
         APP: ${{ steps.package.outputs.app }}
         ZIP: ${{ runner.temp }}/aether-desktop-windows-${{ inputs.arch }}.zip
       run: |
-        start=$SECONDS
         python - "$APP" "$ZIP" <<'PY'
         import os, sys, zipfile
         root, out = sys.argv[1], sys.argv[2]
@@ -122,6 +117,34 @@ runs:
                 with open(os.path.join(root, name), "rb") as source:
                     archive.writestr(entry, source.read())
         PY
-        echo "zip: $((SECONDS - start))s"
-        echo "$(sha256sum "$ZIP" | cut -d' ' -f1) $(stat -c %s "$ZIP") bytes $ZIP"
         echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+    # Without a CLI the shell's first act is its "aether CLI not found"
+    # dialog, so seeing that text proves the packaged runtime and main.js
+    # start on this architecture.
+    - name: Launch the unpacked app
+      shell: pwsh
+      env:
+        APP: ${{ steps.package.outputs.app }}
+      run: |
+        Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+        $env:AETHER_BIN = Join-Path $env:RUNNER_TEMP 'no-aether-here.exe'
+        $app = Start-Process -FilePath (Join-Path $env:APP 'aether-desktop.exe') -ArgumentList "--user-data-dir=`"$env:RUNNER_TEMP\desktop-profile`"" -PassThru
+        try {
+          $deadline = [DateTime]::UtcNow.AddSeconds(60)
+          $text = ''
+          do {
+            $app.Refresh()
+            if ($app.HasExited) { throw "aether-desktop.exe exited with code $($app.ExitCode) before it opened a window." }
+            if ($app.MainWindowHandle -ne [IntPtr]::Zero) {
+              $window = [Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+              $text = ($window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
+                ForEach-Object { $_.Current.Name }) -join ' | '
+              if ($text -like '*aether CLI not found*') { break }
+            }
+            if ([DateTime]::UtcNow -gt $deadline) { throw "aether-desktop.exe did not report the missing CLI. Window '$($app.MainWindowTitle)': $text" }
+            Start-Sleep -Milliseconds 250
+          } while ($true)
+          Write-Host "Window '$($app.MainWindowTitle)': $text"
+        } finally {
+          & "$env:SystemRoot\System32\taskkill.exe" /PID $app.Id /T /F | Out-Null
+        }

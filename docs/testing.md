@@ -105,6 +105,16 @@ Layers, per the design spec's testing strategy:
   gh workflow run edge-image.yml --ref main -f ref=refs/pull/<n>/head   # a pull request from a fork
   ```
 
+  The `desktop-windows` job runs
+  [`.github/actions/desktop-windows-zip`](../.github/actions/desktop-windows-zip/action.yml)
+  on `windows-latest` and `windows-11-arm`, the steps `release.yml` runs for
+  each tag: it packages the desktop with `electron-builder --dir`, checks
+  the version stamped into `app.asar`, zips it and launches it. A pull request runs it only when
+  `scripts/ci-classify-desktop.sh`, also from the base revision, says a
+  changed path is under `desktop/`, the action, the classifier or
+  `ci.yml`; a push to `main`, the merge queue and a failed classification
+  always run it.
+
   These jobs are the merge gate the E2E suite owns.
   The runtime capacity scenario starts its own Docker and containerd daemons
   with private sockets, storage roots, and network/mount namespaces; it never

@@ -458,36 +458,6 @@ jobs:
         with:
           version: ${{ github.ref_name }}
           arch: ${{ matrix.arch }}
-      # Without a CLI the shell's first act is its "aether CLI not found"
-      # dialog, so seeing that text proves the packaged runtime and main.js
-      # start on this architecture.
-      - name: Launch the unpacked app
-        shell: pwsh
-        env:
-          APP: ${{ steps.desktop.outputs.app }}
-        run: |
-          Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
-          $env:AETHER_BIN = Join-Path $env:RUNNER_TEMP 'no-aether-here.exe'
-          $app = Start-Process -FilePath (Join-Path $env:APP 'aether-desktop.exe') -ArgumentList "--user-data-dir=`"$env:RUNNER_TEMP\desktop-profile`"" -PassThru
-          try {
-            $deadline = [DateTime]::UtcNow.AddSeconds(60)
-            $text = ''
-            do {
-              $app.Refresh()
-              if ($app.HasExited) { throw "aether-desktop.exe exited with code $($app.ExitCode) before it opened a window." }
-              if ($app.MainWindowHandle -ne [IntPtr]::Zero) {
-                $window = [Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
-                $text = ($window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
-                  ForEach-Object { $_.Current.Name }) -join ' | '
-                if ($text -like '*aether CLI not found*') { break }
-              }
-              if ([DateTime]::UtcNow -gt $deadline) { throw "aether-desktop.exe did not report the missing CLI. Window '$($app.MainWindowTitle)': $text" }
-              Start-Sleep -Milliseconds 250
-            } while ($true)
-            Write-Host "Window '$($app.MainWindowTitle)': $text"
-          } finally {
-            & "$env:SystemRoot\System32\taskkill.exe" /PID $app.Id /T /F | Out-Null
-          }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: binaries-desktop-windows-${{ matrix.arch }}
@@ -503,7 +473,7 @@ jobs:
     permissions:
       contents: read
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
