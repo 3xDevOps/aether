@@ -2091,9 +2091,15 @@ takes the release through these states:
 3. Upload every asset to the draft, delete any asset the draft should not
    have, download all of it back through the API, and check it against the
    signed manifest.
-4. Publish the draft. It becomes Latest only if no published release has a
-   higher version, so an older tag that finishes later does not take Latest.
+4. Check that the tag still names the commit `release-policy` authorized,
+   then publish the draft without making it Latest. A tag moved since then
+   fails the run and leaves the draft unpublished.
 5. Download every asset anonymously, as clients do, and check it again.
+6. Mark Latest: the highest version among published, non-prerelease
+   releases that carry `aether-release.json`, read from a fresh release
+   listing. Every run does this after its own publish, so whichever run
+   publishes last leaves Latest on the highest version, even when an older
+   tag finishes after a newer one.
 
 The release is published as a normal release, not a GitHub prerelease,
 because `scripts/install.sh` and `internal/selfupdate` resolve GitHub's
@@ -2185,17 +2191,17 @@ that secret is not set. [`scripts/publish-release.sh`](../scripts/publish-releas
 then runs steps 2 to 5 above. It compares each asset's SHA-256 and size with
 the manifest, requires `checksums.txt` to match, and compares
 `checksums.txt`, `aether-release.json` and `aether-release.json.sig`
-byte for byte with what it signed. Only after the release is published and
-verified do `standard-latest` and `edge-latest` move their respective
-`latest` tags to the verified images, and only when no published release has
-a higher version; each checks that `latest` carries the expected
-architecture digests.
+byte for byte with what it signed. `standard-latest` and `edge-latest` run
+after the release job and move their `latest` tags to the verified images
+only if `gh api repos/<owner>/<repo>/releases/latest` names this tag when
+they run; otherwise they leave `latest` alone and say why in the job summary.
+Each checks that `latest` carries the expected architecture digests.
 
 Push release tags one at a time: GitHub starts no workflow for any tag when
-more than three are pushed at once. Releases share one workflow-wide
-concurrency group, so one release runs at a time; GitHub keeps one pending
-run per group and cancels an older pending one, so rerun any release run that
-shows as cancelled.
+more than three are pushed at once. Each tag has its own concurrency group,
+`release-refs/tags/<tag>`, so releases of different tags run in parallel and
+one tag never cancels another's run; a second run for the same tag waits for
+the first.
 
 The workflow also publishes the [edge](edge.md#in-a-container) image
 `ghcr.io/3xdevops/aether-edge` for linux/amd64 and linux/arm64, built from
@@ -2309,9 +2315,12 @@ choose **Re-run failed jobs**, or run
 `gh run rerun <run-id> --failed`. The publisher reuses the draft: it uploads
 every asset again with `gh release upload --clobber`, removes strays and
 verifies again, without changing the release notes. Producer artifact uploads
-also allow replacement on rerun. A rerun after the release is published only
-verifies it; assets signed by a published manifest are never replaced, so a
-bad published release needs a new tag. A published release without
+also allow replacement on rerun. A rerun after the release is published
+requires the published `aether-release.json` to name the same commit and
+version as the run's build, fails with `tag <tag> was published from commit
+<sha>; this run built <sha>` when it does not, verifies every published asset
+against that manifest and sets Latest again. Assets signed by a published
+manifest are never replaced, so a bad published release needs a new tag. A published release without
 `aether-release.json`, left by the old workflow or created by hand, is
 incomplete: the publisher returns it to a draft, which takes it off
 `/releases/latest`, then completes it like any other draft.

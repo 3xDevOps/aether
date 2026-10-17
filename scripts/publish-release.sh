@@ -1,5 +1,6 @@
 #!/bin/sh
-# The release workflow's concurrency group runs one release at a time.
+# The release workflow's concurrency group runs one release per tag at a
+# time; releases of different tags run in parallel.
 set -eu
 
 if [ "$#" -ne 2 ]; then
@@ -10,6 +11,7 @@ fi
 tag="$1"
 dist="$2"
 repo="${GITHUB_REPOSITORY:?publish-release: GITHUB_REPOSITORY must name the repository}"
+commit="${COMMIT:?publish-release: COMMIT must be the commit the release was built from}"
 script_dir=$(dirname -- "$0")
 manifest="$dist/aether-release.json"
 signature="$manifest.sig"
@@ -70,8 +72,41 @@ verify_public() {
 
 # One listing, not `gh release view`: gh looks drafts and published releases
 # up separately and can report a failed lookup as a missing release.
-gh api --paginate "repos/$repo/releases?per_page=100" \
-	--jq '.[] | "\(.tag_name) \(.draft) \(.prerelease) \([.assets[].name] | join(","))"' >"$tmp/releases"
+list_releases() {
+	gh api --paginate "repos/$repo/releases?per_page=100" \
+		--jq '.[] | "\(.tag_name) \(.draft) \(.prerelease) \([.assets[].name] | join(","))"' >"$tmp/releases"
+}
+
+# The tag may have moved since release-policy resolved it.
+require_tag_commit() {
+	tagged=$(gh api "repos/$repo/commits/$tag" --jq .sha)
+	[ "$tagged" = "$commit" ] ||
+		fail "tag $tag now names $tagged; this run built $commit, so $tag is not published"
+}
+
+# Latest goes to the highest version among complete published releases.
+# Every run recomputes it after its own publish from a fresh listing, so the
+# run that publishes last sees every release and leaves Latest correct
+# however parallel releases interleave.
+reconcile_latest() {
+	list_releases
+	best=
+	best_code=0
+	while read -r other draft prerelease others; do
+		[ "$draft $prerelease" = "false false" ] || continue
+		case ",$others," in *,aether-release.json,*) ;; *) continue ;; esac
+		code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null </dev/null) || continue
+		if [ "$code" -gt "$best_code" ]; then
+			best=$other
+			best_code=$code
+		fi
+	done <"$tmp/releases"
+	[ -n "$best" ] || fail "no published release carries aether-release.json to mark Latest"
+	gh release edit "$best" --latest=true
+	echo "Latest is $best"
+}
+
+list_releases
 awk -v tag="$tag" '$1 == tag' "$tmp/releases" >"$tmp/release"
 case $(wc -l <"$tmp/release" | tr -d ' ') in
 0) state=none ;;
@@ -80,26 +115,18 @@ case $(wc -l <"$tmp/release" | tr -d ' ') in
 esac
 printf '%s\n' "${names:-}" | tr ',' '\n' | sed '/^$/d' >"$tmp/names"
 
-# Latest, on GitHub and for the image latest tags, goes to the highest
-# version, so an older tag that finishes after a newer one does not take it.
-# Release notes start at the release below.
+# Release notes start at the highest published release below the tag.
 ours=$(sh "$script_dir/android-version-code.sh" "$tag")
-latest=true
 previous=
 previous_code=0
 while read -r other draft prerelease _; do
 	[ "$draft $prerelease" = "false false" ] || continue
 	code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null </dev/null) || continue
-	if [ "$code" -gt "$ours" ]; then
-		latest=false
-	elif [ "$code" -lt "$ours" ] && [ "$code" -gt "$previous_code" ]; then
+	if [ "$code" -lt "$ours" ] && [ "$code" -gt "$previous_code" ]; then
 		previous=$other
 		previous_code=$code
 	fi
 done <"$tmp/releases"
-if [ -n "${GITHUB_OUTPUT:-}" ]; then
-	echo "latest=$latest" >>"$GITHUB_OUTPUT"
-fi
 
 if [ "$state" = false ]; then
 	if grep -qx 'aether-release\.json' "$tmp/names"; then
@@ -107,12 +134,21 @@ if [ "$state" = false ]; then
 		rm -rf "$tmp/public"
 		mkdir "$tmp/public"
 		fetch aether-release.json aether-release.json.sig
-		jq -r '.assets | keys[]' "$manifest" >"$tmp/ours"
-		jq -r '.assets | keys[]' "$tmp/public/aether-release.json" | diff -u "$tmp/ours" - >&2 ||
-			fail "$tag is published with a manifest that lists other assets than $manifest; publish a new tag"
 		cp "$tmp/public/aether-release.json" "$tmp/published.json"
+		for field in commit version; do
+			was=$(jq -r ".$field" "$tmp/published.json")
+			built=$(jq -r ".$field" "$manifest")
+			[ "$was" = "$built" ] || fail "tag $tag was published from $field $was; this run built $built"
+		done
+		{
+			jq -r '.assets | keys[]' "$tmp/published.json"
+			printf '%s\n' checksums.txt aether-release.json aether-release.json.sig
+		} | sort >"$tmp/signed"
+		sort "$tmp/names" | diff -u "$tmp/signed" - >&2 ||
+			fail "published $tag holds other assets than its aether-release.json lists"
 		verify_public "$tmp/published.json"
 		echo "$tag is already published and verified"
+		reconcile_latest
 		exit 0
 	fi
 	echo "publish-release: $tag is published without aether-release.json, so it is incomplete; returning it to a draft until it is verified" >&2
@@ -121,6 +157,7 @@ if [ "$state" = false ]; then
 fi
 
 if [ "$state" = none ]; then
+	require_tag_commit
 	gh release create "$tag" --draft --verify-tag --title "$tag" --generate-notes \
 		${previous:+"--notes-start-tag=$previous"}
 fi
@@ -139,10 +176,12 @@ for name in checksums.txt aether-release.json aether-release.json.sig; do
 	cmp "$dist/$name" "$tmp/draft/$name" >&2 || fail "draft $tag/$name differs from $dist/$name"
 done
 
-gh release edit "$tag" --draft=false --latest="$latest"
+require_tag_commit
+gh release edit "$tag" --draft=false --latest=false
 verify_public "$manifest"
 fetch aether-release.json aether-release.json.sig
 for name in aether-release.json aether-release.json.sig; do
 	cmp "$dist/$name" "$tmp/public/$name" >&2 || fail "$public/$name differs from $dist/$name"
 done
-echo "published $tag (latest: $latest)"
+echo "published $tag"
+reconcile_latest

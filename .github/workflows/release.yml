@@ -13,10 +13,12 @@ defaults:
   run:
     shell: bash
 
-# Any two releases queue. Publishing different tags at the same time would
-# still race on the GHCR `latest` tag and on /releases/latest.
+# One run per tag at a time; different tags run in parallel. GitHub keeps
+# one pending run per group and cancels older pending ones, so a shared group
+# would silently drop a release. publish-release.sh recomputes Latest after
+# every publish, and the image latest jobs follow GitHub's Latest.
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -649,8 +651,6 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    outputs:
-      latest: ${{ steps.publish.outputs.latest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -703,31 +703,46 @@ jobs:
           diff -u <(printf '%s\n' "${assets[@]}" checksums.txt aether-release.json aether-release.json.sig | sort) \
             <(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
       - name: Publish the GitHub release
-        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.release-policy.outputs.sha }}
         run: sh scripts/publish-release.sh "$GITHUB_REF_NAME" dist
 
   # latest moves only after the release is published, to the index
   # edge-manifest already pushed, so a release that fails earlier leaves it
-  # where it was and nothing is rebuilt. An older tag than the newest
-  # published release never moves it.
+  # where it was and nothing is rebuilt. It moves only while this tag is
+  # GitHub's Latest, checked when the job runs, so a re-run of an older
+  # release never moves it back.
   edge-latest:
     needs: [edge-manifest, release]
-    if: ${{ needs.release.outputs.latest == 'true' }}
     permissions:
+      contents: read
       packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Require this release to be GitHub's Latest
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          if [ "$latest" = "$GITHUB_REF_NAME" ]; then
+            echo "move=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "edge latest stays: GitHub's Latest is $latest, not $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        if: steps.latest.outputs.move == 'true'
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        if: steps.latest.outputs.move == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Move latest to the published edge image
+        if: steps.latest.outputs.move == 'true'
         env:
           DIGEST: ${{ needs.edge-manifest.outputs.digest }}
         run: |
@@ -751,19 +766,33 @@ jobs:
 
   standard-latest:
     needs: [standard-manifest, release]
-    if: ${{ needs.release.outputs.latest == 'true' }}
     permissions:
+      contents: read
       packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Require this release to be GitHub's Latest
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          if [ "$latest" = "$GITHUB_REF_NAME" ]; then
+            echo "move=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "standard latest stays: GitHub's Latest is $latest, not $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        if: steps.latest.outputs.move == 'true'
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        if: steps.latest.outputs.move == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Move latest to the published standard image
+        if: steps.latest.outputs.move == 'true'
         env:
           DIGEST: ${{ needs.standard-manifest.outputs.digest }}
         run: |
