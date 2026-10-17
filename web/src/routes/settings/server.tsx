@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useCheckForUpdates, useUpdateNotice, useUpdateTargets } from '@/components/update-banner'
 import { checkedTime, packagedLine, verbatim } from '@/components/update-banner-shared'
 import { CopyableCommand } from '@/components/copyable-command'
@@ -31,6 +32,9 @@ function diskParts(disk: DiskUsage): string[] {
   ]
 }
 
+/** The server retries a tailnet dashboard that cannot start, so its error can clear or appear while Settings is open. */
+const tailnetDashboardRecheckMs = 30_000
+
 function knownBytes(bytes: number | undefined): string {
   return bytes === undefined ? 'unknown' : formatBytes(bytes)
 }
@@ -44,6 +48,21 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
   const openUpdates = useStore((s) => s.setUpdatesOpen)
   const clearDismissed = useStore((s) => s.clearDismissedUpdates)
   const checkForUpdates = useCheckForUpdates(client)
+  useEffect(() => {
+    const read = () =>
+      client.serverInfo().then(
+        (fresh) => {
+          const s = useStore.getState()
+          if (s.info && s.info.tailnet_dashboard_error !== fresh.tailnet_dashboard_error) {
+            s.setInfo({ ...s.info, tailnet_dashboard_error: fresh.tailnet_dashboard_error })
+          }
+        },
+        () => {},
+      )
+    void read()
+    const timer = setInterval(read, tailnetDashboardRecheckMs)
+    return () => clearInterval(timer)
+  }, [client])
   const disk = info?.disk
   if (!info) return null
   const failed = [server, cli].find((t) => t.state === 'check_failed')
@@ -93,6 +112,12 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
           </div>
         )}
       </SettingRow>
+      {info.tailnet_dashboard_error && (
+        <SettingRow label="Tailnet dashboard" help="Not serving. The server keeps retrying; restart it after a config change.">
+          <p className={cn(verbatim, 'text-state-failed')}>{info.tailnet_dashboard_error}</p>
+          <CopyableCommand command="sudo systemctl restart aether-server" />
+        </SettingRow>
+      )}
       <DockerInRunsRow client={client} />
       {!disk && (
         <SettingRow label="Disk" help="Storage accounting unavailable.">

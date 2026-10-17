@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/servergw"
@@ -229,8 +231,8 @@ func TestIntegrationServerGateway(t *testing.T) {
 	whois.set(sshd.WhoIsIdentity{Login: "ada@example.com", NodeID: "node-ada"}, nil)
 
 	// HTTPS on the tailnet: the certificate comes from tailscaled's
-	// LocalAPI for the node's MagicDNS name, and a tailnet without HTTPS
-	// certificates refuses to start.
+	// LocalAPI for the node's MagicDNS name, and Start refuses a tailnet
+	// without HTTPS certificates.
 	certPEM, keyPEM := selfSignedPair(t, "aether.test")
 	issuing := fakeTailscaled(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/localapi/v0/cert/aether.test" || r.URL.Query().Get("type") != "pair" {
@@ -286,6 +288,120 @@ func TestIntegrationServerGateway(t *testing.T) {
 	}
 	verifyNoLeaks(t)
 }
+
+// TestIntegrationServerRunsWithoutTheDashboard starts a server whose
+// tailnet dashboard cannot get its HTTPS certificate, as on a tailnet with
+// HTTPS certificates disabled: SSH still serves, the edge agent still
+// dials its edge, and server.info carries tailscaled's refusal and the fix.
+// Once certificates are enabled, the dashboard starts without a restart.
+func TestIntegrationServerRunsWithoutTheDashboard(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	rt, _, verifyNoLeaks := pickRuntime(t)
+	whois := &stubWhoIs{}
+	whois.set(sshd.WhoIsIdentity{Login: "ada@example.com", NodeID: "node-ada"}, nil)
+	dataDir := filepath.Join(t.TempDir(), "data")
+	webPort := freePort(t)
+	srv, err := New(ctx, Config{
+		DataDir: dataDir, Addr: "127.0.0.1:0", Runtime: rt, WhoIs: whois,
+		WebPort: webPort, EdgeURL: fmt.Sprintf("http://127.0.0.1:%d", freePort(t)),
+	})
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	certPEM, keyPEM := selfSignedPair(t, "aether.test")
+	var certsEnabled atomic.Bool
+	tailscaled := fakeTailscaled(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/localapi/v0/status":
+			_, _ = io.WriteString(w, `{"Self":{"DNSName":"aether.test.","TailscaleIPs":["127.0.0.1"]}}`)
+		case certsEnabled.Load():
+			_, _ = w.Write(certPEM)
+			_, _ = w.Write(keyPEM)
+		default:
+			http.Error(w, "your Tailscale account does not support getting TLS certs", http.StatusInternalServerError)
+		}
+	})
+	srv.tailnet.Certs = reachability.NewTailscale(tailscaled)
+	runDone := make(chan error, 1)
+	runCtx, stopServer := context.WithCancel(ctx)
+	defer stopServer()
+	go func() { runDone <- srv.Run(runCtx) }()
+
+	client, err := dialNoAuth(waitSSHAddr(t, srv), "aether", nil)
+	if err != nil {
+		t.Fatalf("ssh: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	ctrl := openControl(t, client)
+	var info protocol.ServerInfoResult
+	for deadline := time.Now().Add(30 * time.Second); info.TailnetDashboardError == ""; time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("server.info never reported the tailnet dashboard error")
+		}
+		if err := ctrl.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+			t.Fatalf("server.info: %v", err)
+		}
+	}
+	if !strings.Contains(info.TailnetDashboardError, "your Tailscale account does not support getting TLS certs") ||
+		!strings.Contains(info.TailnetDashboardError, "enable MagicDNS and HTTPS certificates") {
+		t.Fatalf("tailnet_dashboard_error = %q, want tailscaled's refusal and the fix", info.TailnetDashboardError)
+	}
+
+	state := edgeagent.OpenState(dataDir)
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		status, ran, err := state.Status()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ran && !status.Connected && strings.Contains(status.Error, "connection refused") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("edge status = %+v (ran %v), want a refused dial", status, ran)
+		}
+	}
+
+	certsEnabled.Store(true)
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		var after protocol.ServerInfoResult
+		if err := ctrl.Call(protocol.MethodServerInfo, struct{}{}, &after); err != nil {
+			t.Fatalf("server.info: %v", err)
+		}
+		if after.TailnetDashboardError == "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("tailnet_dashboard_error = %q after certificates were enabled, want it cleared", after.TailnetDashboardError)
+		}
+	}
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(certPEM)
+	tlsClient := &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "aether.test", MinVersion: tls.VersionTLS12},
+	}}
+	resp, err := tlsClient.Get(fmt.Sprintf("https://127.0.0.1:%d/api/v1/capabilities", webPort))
+	if err != nil {
+		t.Fatalf("https capabilities: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("https capabilities = %d", resp.StatusCode)
+	}
+
+	stopServer()
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("server.Run: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("server did not shut down")
+	}
+	verifyNoLeaks(t)
+}
+
 func TestIntegrationServerGatewayHTTPSConfigImport(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

@@ -1094,9 +1094,8 @@ WhoIs authenticates each request.
 
 The disk gauge in Settings > **Server** renders when `server.info` carries a
 `disk` object (`used_bytes`, `total_bytes`). That field does not arrive with
-`server.info`: `protocol.ServerInfoResult` is shared with the CLI and frozen,
-so the gateway serves the number on `GET /api/v1/disk` and the team reads
-write it onto the stored info, which is the gauge's only reader. The field
+`server.info`: the gateway serves the number on `GET /api/v1/disk` and the
+team reads write it onto the stored info, which is the gauge's only reader. The field
 stays optional and the gauge stays hidden if the read fails. What `statfs`
 answers is the whole filesystem holding the data directory, not the directory
 itself, and the gauge is labelled as that: it is the number that says whether
@@ -4985,7 +4984,11 @@ before any), **Saved servers** (the default link, then named ones) with
   repository-add controls.
 - **Server**: the server version and protocol, **Check for updates…** (named
   **Check now** after a failed check, whose error shows verbatim below it)
-  and **Update…** when an update is waiting; data-filesystem used and available space, separate from
+  and **Update…** when an update is waiting; **Tailnet dashboard**, only
+  when `server.info` carries `tailnet_dashboard_error`, with that error
+  verbatim and the restart command a config change needs, re-read every 30
+  seconds while the section is open because the server keeps retrying;
+  data-filesystem used and available space, separate from
   Aether's attributed worktrees, transcripts, database, repositories, homes,
   managed caches, evidence and other data. Snapshots are included in worktrees, not added
   again. Daemon-wide Docker accounting includes non-Aether workloads and has

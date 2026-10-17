@@ -273,10 +273,10 @@ No token or install is needed to open this URL. Port 443 gives that bare URL;
 any other port appends `:<port>`. The server-hosted dashboard has no
 machine-local verbs or onboarding wizard, but its authenticated **Files** view
 can edit the shared member home. Use local `aether gui` for the directory
-picker and other local filesystem or repository actions. The startup line names
-what it bound:
+picker and other local filesystem or repository actions. Once the dashboard
+serves, the server logs its URL:
 ```
-aether-server <version> serving SSH on :2222 and the dashboard on https://my-server.tailnet-name.ts.net/ (data dir /var/lib/aether)
+INFO server: serving the dashboard url=https://my-server.tailnet-name.ts.net/
 ```
 
 On Android, the [app on every release](install.md#android-app) in its
@@ -411,8 +411,9 @@ off the next time Settings opens. What the push service receives is in
   operator (`sudo tailscale set --operator=<user>`). The shipped systemd unit
   runs as root.
 
-Plain HTTP is never offered - there is no redirect and no cleartext port. A
-server that cannot get the certificate does not start.
+Plain HTTP is never offered - there is no redirect and no cleartext port.
+Without the certificate the server serves no dashboard
+([When it does not start](#when-it-does-not-start)).
 
 ### Who you are on it
 
@@ -432,8 +433,8 @@ capability checks a CLI call does.
 **The trust boundary is the same one, and it now covers the browser.** WhoIs
 names the device's owner, not the person holding the phone. Tagged nodes are
 refused here too. `--tailnet-require-key` and `web-port` are mutually
-exclusive: HTTP cannot present a key, so a server set to require one refuses
-to start with the dashboard on.
+exclusive: HTTP cannot present a key, so a server set to require one does not
+start the dashboard.
 
 Key-only and invite-code servers - anything with no tailscaled, including
 one reached through an edge - have no server-hosted dashboard in this release.
@@ -450,11 +451,23 @@ and starts the bundled CLI with `AETHER_RESOLV_CONF` set to that path. The CLI
 honours the variable only when `/etc/resolv.conf` is absent, so it changes
 nothing on a computer.
 
-### Where it refuses
+### When it does not start
 
-The server refuses to **start** rather than serving something it cannot
-identify or encrypt. Each message is printed on stderr and lands in
-`journalctl -u aether-server`:
+Rather than serve something it cannot identify or encrypt, the dashboard does
+not start. It is optional, so the server keeps serving SSH and the edge
+without it and says why: at error level in `journalctl -u aether-server`
+(`server: the tailnet dashboard is not serving; the server runs without it`),
+and verbatim in **Settings > Server** of a dashboard opened another way, such
+as `aether gui`.
+
+The first two reasons below are checked once, when the server starts: fix
+them, then `sudo systemctl restart aether-server`. For the others the server
+tries again after 5 seconds, then less often, up to every 5 minutes, and logs
+each new reason once. So a server that starts before tailscaled has
+connected, or before HTTPS certificates are enabled, starts the dashboard by
+itself and logs `server: serving the dashboard`. A dashboard whose listeners
+all stop later is reported the same way and stays down until a restart. The
+reasons:
 
 | Message | What to do |
 | --- | --- |
@@ -476,12 +489,13 @@ request, with the JSON error body the dashboard shows:
 ### Why it is off by default
 
 The listener has hard prerequisites (tailscaled, MagicDNS, HTTPS
-certificates) that an existing install may not have, and a server that failed
-to start after an upgrade would be the wrong way to find that out. So
-`web-port` defaults to `0` and turning it on is a deliberate act. `aether-server setup`
-offers 443 by default on a host that already has tailscaled, because a phone
-reaching the dashboard is the point of putting the server on a tailnet, and a
-tailnet that is not ready says exactly what to enable on the first start.
+certificates) that an existing install may not have, and it is the server's
+only HTTP port. So `web-port` defaults to `0` and turning it on is a deliberate
+act. `aether-server setup` offers 443 by default on a host that already has
+tailscaled, because a phone reaching the dashboard is the point of putting the
+server on a tailnet, and on a tailnet that is not ready the server runs
+without the dashboard, names what to enable, and starts the dashboard once it
+is.
 
 ---
 

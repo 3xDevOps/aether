@@ -226,6 +226,9 @@ type ServerInfoResult struct {
 	TailnetHostname string `json:"tailnet_hostname,omitempty"`
 	// Whether the server resolves tailnet identities (WhoIs) for keyless auth.
 	TailnetIdentityAuth bool `json:"tailnet_identity_auth,omitempty"`
+	// TailnetDashboardError is why the dashboard web-port asks for is not
+	// serving on the tailnet; empty while it serves and when web-port is 0.
+	TailnetDashboardError string `json:"tailnet_dashboard_error,omitempty"`
 	// MinClientVersion is the oldest client release the server serves:
 	// its own release, any `git describe` tail removed.
 	MinClientVersion string `json:"min_client_version"`

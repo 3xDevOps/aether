@@ -281,12 +281,8 @@ func serve(args []string) error {
 		defer timer.Stop()
 	}
 	go commitWhenServing(ctx, srv, trial)
-	web := ""
-	if url := srv.WebURL(); url != "" {
-		web = " and the dashboard on " + url
-	}
-	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s%s (data dir %s)%s\n",
-		version.String(), *o.addr, web, *o.dataDir, from)
+	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s (data dir %s)%s\n",
+		version.String(), *o.addr, *o.dataDir, from)
 	warnIfUnitOutdated()
 	err = srv.Run(ctx)
 	drainMu.Lock()

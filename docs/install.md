@@ -1872,12 +1872,14 @@ setup and serve directly:
 aether-server serve --data-dir /var/lib/aether --addr :2222
 ```
 
-It prints one startup line naming what it bound, the dashboard included when
-`--web-port` is set:
+It prints one startup line naming what it serves:
 
 ```
-aether-server <version> serving SSH on :2222 and the dashboard on https://my-server.tailnet-name.ts.net/ (data dir /var/lib/aether)
+aether-server <version> serving SSH on :2222 (data dir /var/lib/aether)
 ```
+
+With `--web-port` set it also logs the dashboard's URL once that serves, or
+why it does not ([networking.md](networking.md#when-it-does-not-start)).
 
 Serve options, which are also the config-file keys. For duration options, `0`
 uses the default; negative values have the semantics in the table.

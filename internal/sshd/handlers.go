@@ -20,19 +20,35 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
+// SetTailnetDashboardError records why the tailnet dashboard is not
+// serving, for server.info to report; nil clears it.
+func (s *Server) SetTailnetDashboardError(err error) {
+	msg := ""
+	if err != nil {
+		msg = err.Error()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tailnetDashboardErr = msg
+}
+
 func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
 	m, err := s.cfg.Store.GetMember(ctx, member)
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	s.mu.Lock()
+	dashboardErr := s.tailnetDashboardErr
+	s.mu.Unlock()
 	return protocol.ServerInfoResult{
-		ServerVersion:       s.cfg.release,
-		ProtocolVersion:     protocol.Version,
-		Time:                time.Now().UTC().Format(time.RFC3339),
-		Member:              protocol.MemberFromDomain(m),
-		TailnetHostname:     s.cfg.TailnetHostname,
-		TailnetIdentityAuth: s.cfg.WhoIs != nil,
-		MinClientVersion:    s.minClientVersion(),
+		ServerVersion:         s.cfg.release,
+		ProtocolVersion:       protocol.Version,
+		Time:                  time.Now().UTC().Format(time.RFC3339),
+		Member:                protocol.MemberFromDomain(m),
+		TailnetHostname:       s.cfg.TailnetHostname,
+		TailnetIdentityAuth:   s.cfg.WhoIs != nil,
+		TailnetDashboardError: dashboardErr,
+		MinClientVersion:      s.minClientVersion(),
 	}, nil
 }
 

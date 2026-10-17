@@ -27,6 +27,7 @@ function client(statuses: SysboxStatus[], install: SysboxStatus = { state: 'inst
   return {
     sysboxStatus: vi.fn(async () => (rest.length > 1 ? rest.shift()! : rest[0]!)),
     sysboxInstall: vi.fn(async () => install),
+    serverInfo: vi.fn(async () => serverInfo),
   } as unknown as Api & { sysboxStatus: ReturnType<typeof vi.fn>; sysboxInstall: ReturnType<typeof vi.fn> }
 }
 
