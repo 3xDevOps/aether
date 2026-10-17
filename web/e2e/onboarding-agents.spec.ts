@@ -5,7 +5,7 @@
 // command, the container it runs in and everything agent.list reports are
 // real.
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
 import { expect, test } from './fixtures'
@@ -111,4 +111,20 @@ test('a failed install shows the command error and its output', async ({ page, a
   await wizard.back().click()
   await wizard.expectStep('Agent')
   await expect(agent.row('Codex')).toContainText('Not installed')
+})
+
+test('removing an agent deletes its links and agent.list reports it not installed', async ({ aether }) => {
+  const alice = await aether.member('alice')
+  await alice.api.local('link.apply', { addr: aether.server.addr, name: alice.name })
+  const id = await memberID(alice)
+  aether.installClaudeACPMock(id)
+  const bin = path.join(aether.server.memberHome(id), '.local', 'bin')
+  const installed = async () =>
+    (await alice.api.rpc<{ agents: { name: string; installed: boolean }[] }>('agent.list')).agents.find((a) => a.name === 'claude')?.installed
+  expect(await installed()).toBe(true)
+
+  const result = await alice.api.rpc<{ removed: string[] }>('agent.remove', { name: 'claude' })
+  expect(result.removed).toEqual(['~/.local/bin/claude', '~/.local/bin/claude-agent-acp'])
+  expect(existsSync(path.join(bin, 'claude'))).toBe(false)
+  expect(await installed()).toBe(false)
 })

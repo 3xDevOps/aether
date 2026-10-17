@@ -534,6 +534,15 @@ func (d *DB) GetHarnessDefinition(ctx context.Context, member domain.MemberID, n
 	return def, nil
 }
 
+func (d *DB) DeleteHarnessDefinition(ctx context.Context, member domain.MemberID, name string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`DELETE FROM harness_definitions WHERE member_id = ? AND name = ?`, member, name))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("store: delete harness definition: %w", err)
+	}
+	return err
+}
+
 func (d *DB) ListHarnessDefinitions(ctx context.Context, member domain.MemberID) ([]*HarnessDefinition, error) {
 	rows, err := d.db.QueryContext(ctx, `SELECT `+harnessDefinitionCols+`
 		FROM harness_definitions WHERE member_id = ? ORDER BY name`, member)

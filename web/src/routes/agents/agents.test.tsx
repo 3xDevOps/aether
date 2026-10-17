@@ -118,6 +118,64 @@ describe('agents page', () => {
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Run Claude Code' }))
   })
 
+  it('removes an agent after confirming, and reloads the list', async () => {
+    mount()
+    await flush()
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'More for Claude Code' }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Remove Claude Code?' })
+    expect(dialog.textContent).toContain('Deletes ~/.local/bin/claude')
+    expect(dialog.textContent).toContain("New runs can't start it; running runs keep going.")
+    expect(dialog.textContent).toContain('Its login, settings and package files stay. Set up installs it again.')
+
+    vi.mocked(api.agentList).mockClear()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await flush()
+    expect(api.agentRemove).toHaveBeenCalledWith('claude')
+    expect(api.agentList).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect((document.activeElement as HTMLElement | null)?.dataset.agentAction).toBe('claude')
+  })
+
+  it('keeps the dialog open with the refusal when the server refuses a removal', async () => {
+    vi.mocked(api.agentRemove).mockRejectedValueOnce(new Error('agent "claude" is not installed in your environment: ~/.local/bin/claude does not exist'))
+    mount()
+    await flush()
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'More for Claude Code' }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove…' }))
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Remove' }))
+    await flush()
+    expect(within(screen.getByRole('alertdialog')).getByRole('alert').textContent).toContain('is not installed in your environment')
+  })
+
+  it('offers removing a member agent', async () => {
+    mount()
+    await flush()
+    fireEvent.click(screen.getByRole('button', { name: 'More agents (1)' }))
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'More for myagent' }), { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove…' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Remove myagent?' })
+    expect(dialog.textContent).toContain('Deletes your myagent definition.')
+    expect(dialog.textContent).toContain('Add agent… registers it again.')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await flush()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add agent…' }))
+  })
+
+  it('hides Remove without agent.remove', async () => {
+    useStore.setState({ capabilities: { gateway: 'server', methods: ['agent.list', 'agent.install', 'run.launch'], ws: [] } })
+    mount()
+    await flush()
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'More for Claude Code' }), { button: 0, ctrlKey: false })
+    expect(await screen.findByRole('menuitem', { name: 'Set up again' })).toBeDefined()
+    expect(screen.queryByRole('menuitem', { name: 'Remove…' })).toBeNull()
+  })
+
   it('adds a custom agent from the header', async () => {
     mount()
     await flush()

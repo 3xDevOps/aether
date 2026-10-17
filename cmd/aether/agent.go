@@ -16,23 +16,47 @@ import (
 func init() {
 	register(command{
 		name:  "agent",
-		short: "manage agents: add, list",
+		short: "manage agents: add, list, remove",
 		run:   runAgent,
 	})
 }
 
 func runAgent(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether agent <add|list>")
+		return fmt.Errorf("usage: aether agent <add|list|remove>")
 	}
 	switch args[0] {
 	case "add":
 		return agentAdd(args[1:])
 	case "list":
 		return agentList(args[1:])
+	case "remove":
+		return agentRemove(args[1:])
 	default:
 		return fmt.Errorf("unknown agent command %q", args[0])
 	}
+}
+
+func agentRemove(args []string) error {
+	if len(args) != 1 || args[0] == "" {
+		return fmt.Errorf("usage: aether agent remove <name>")
+	}
+	return withControl(func(c *protocol.Client) error {
+		var result protocol.AgentRemoveResult
+		if err := c.Call(protocol.MethodAgentRemove, protocol.AgentRemoveParams{Name: args[0]}, &result); err != nil {
+			return err
+		}
+		if len(result.Removed) == 0 {
+			_, err := fmt.Fprintf(os.Stdout, "removed agent %s\n", args[0])
+			return err
+		}
+		for _, path := range result.Removed {
+			if _, err := fmt.Fprintf(os.Stdout, "removed %s\n", path); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func agentList(args []string) error {

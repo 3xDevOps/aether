@@ -208,6 +208,7 @@ type Store interface {
 	UpsertHarnessDefinition(ctx context.Context, d *HarnessDefinition) error
 	GetHarnessDefinition(ctx context.Context, member domain.MemberID, name string) (*HarnessDefinition, error)
 	ListHarnessDefinitions(ctx context.Context, member domain.MemberID) ([]*HarnessDefinition, error)
+	DeleteHarnessDefinition(ctx context.Context, member domain.MemberID, name string) error
 
 	ApprovalStore
 	TemplateStore

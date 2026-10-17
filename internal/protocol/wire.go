@@ -772,6 +772,16 @@ type AgentInstallResult struct {
 	Error             string `json:"error,omitempty"`
 }
 
+type AgentRemoveParams struct {
+	Name string `json:"name"`
+}
+
+// AgentRemoveResult lists the ~/.local/bin links a shipped agent's removal
+// deleted. A member agent's removal deletes a definition and lists nothing.
+type AgentRemoveResult struct {
+	Removed []string `json:"removed,omitempty"`
+}
+
 // AgentModelsParams: AccountMemberID as in AgentListParams; Refresh bypasses
 // the server's cache.
 type AgentModelsParams struct {

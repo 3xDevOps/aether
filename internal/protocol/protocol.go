@@ -102,6 +102,9 @@ const (
 	// AgentInstallTimeout passes, whichever is first.
 	MethodAgentInstall = "agent.install"
 	MethodAgentModels  = "agent.models"
+	// MethodAgentRemove deletes a shipped agent's ~/.local/bin links, or a
+	// member agent's definition, in the caller's own environment.
+	MethodAgentRemove = "agent.remove"
 )
 
 // AgentInstallTimeout bounds one agent.install.
