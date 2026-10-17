@@ -168,7 +168,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build browser-image browser-smoke edge-image test test-integration test-e2e test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
+.PHONY: all build browser-image browser-smoke edge-image test test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
 
 all: build
 
@@ -210,6 +210,13 @@ test-integration:
 test-e2e: build
 	cd web && $(BUN) run test:e2e $(E2E_ARGS)
 
+# TestEdgeUpgrade updates real edge containers with scripts/edge-update.sh,
+# from the previous release through failed and migrating test builds of this
+# tree (docs/testing.md, "Edge upgrade qualification"). It needs root,
+# Docker with Compose and buildx, jq, curl, and git history with tags.
+test-edge-upgrade:
+	go test -count=1 -timeout=17m -tags edgeupgrade -run '^TestEdgeUpgrade$$' -v ./internal/edge/edgetest/
+
 # The shell scripts in scripts/ have hermetic tests of their own: every
 # external command they call is stubbed, so nothing here touches the network,
 # a real host, or a real release. edge-nginx-test.sh runs a real nginx on
@@ -236,6 +243,7 @@ test-native-hooks:
 
 vet:
 	go vet ./...
+	go vet -tags edgeupgrade ./internal/edge/edgetest/
 
 # golangci-lint cannot decode export data produced by a Go newer than the one
 # that built it, so on a host whose default Go is ahead of go.mod's toolchain
@@ -253,6 +261,7 @@ lint:
 	$(GOLANGCI_LINT) config verify \
 		--schema "file://$$(go env GOMODCACHE)/$(GOLANGCI_LINT_MODULE)/jsonschema/golangci.next.jsonschema.json"
 	$(GOLANGCI_LINT) run
+	$(GOLANGCI_LINT) run --build-tags edgeupgrade ./internal/edge/edgetest/
 
 lint-workflows:
 	@command -v shellcheck >/dev/null 2>&1 || { \

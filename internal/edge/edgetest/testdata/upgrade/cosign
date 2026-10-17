@@ -1,0 +1,22 @@
+#!/bin/sh
+# cosign verify-attestation for scripts/edge-update.sh in TestEdgeUpgrade:
+# prints the attestation promote-edge.yml signs when it promotes a digest
+# to stable, for a digest the test promoted. $QUALIFY_PROMOTED/<digest>
+# holds its release tag.
+set -eu
+identity=https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main
+case " $* " in
+" verify-attestation "*" --certificate-identity $identity "*) ;;
+*)
+	echo "cosign stub: unexpected arguments: $*" >&2
+	exit 1
+	;;
+esac
+for ref; do :; done
+digest=${ref##*@}
+tag=$(cat "$QUALIFY_PROMOTED/$digest" 2>/dev/null) || {
+	echo "Error: no matching attestations" >&2
+	exit 1
+}
+payload=$(printf '{"predicate":{"channel":"stable","tag":"%s","digest":"%s"}}' "$tag" "$digest" | base64 | tr -d '\n')
+printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s"}\n' "$payload"

@@ -477,6 +477,30 @@ jobs:
             echo "::warning title=aether-edge is not public::$image cannot be read anonymously: $(printf '%s' "$out" | tail -n 1). A repository administrator must open https://github.com/orgs/3xDevOps/packages/container/package/aether-edge, choose Package settings, set Danger Zone > Change visibility to Public, and, if the package page does not show 3xDevOps/aether as its repository, use Connect repository to link it."
           fi
 
+  # make test-edge-upgrade on this commit: the previous release, then
+  # scripts/edge-update.sh through failed and migrating builds of it, in
+  # real containers and without a registry outside the runner.
+  # promote-edge.yml refuses to promote a release whose run has no
+  # successful job of this name.
+  edge-qualify:
+    needs: release-policy
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.release-policy.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Qualify an edge upgrade
+        run: sudo env "PATH=$PATH" "HOME=$HOME" make test-edge-upgrade
+
   release-binaries:
     needs: release-policy
     permissions:
@@ -828,7 +852,7 @@ jobs:
   # published only after the draft is downloaded back and matches the
   # signed manifest, so installers never see a release without its assets.
   release:
-    needs: [release-policy, release-binaries, desktop-windows, windows-defender, android, browser-manifest, edge-manifest, standard-manifest]
+    needs: [release-policy, release-binaries, desktop-windows, windows-defender, android, browser-manifest, edge-manifest, edge-qualify, standard-manifest]
     environment: release
     permissions:
       contents: write

@@ -1874,6 +1874,19 @@ When `supported` is below `compat_floor`, restore the backup with the same
 in place of `schema --json`. Then put the old digest in `.env` and run
 `docker compose up -d --wait aether-edge`.
 
+Every release is qualified before it publishes: the `edge-qualify` job
+in `release.yml` runs `make test-edge-upgrade`
+([testing](testing.md#edge-upgrade-qualification)). In real containers it
+updates the previous release to this one, by hand when the previous one
+predates `aether-edge-update`, and then with `aether-edge-update` through
+a release that never turns healthy, one that migrates and then fails, an
+additive migration and a `--rollback` onto the migrated database. After
+each it checks that the edge key, accounts and claimed servers survived
+and that owners reach their servers. A server of the previous release
+enrolls with, is claimed through and relays through the new edge.
+`promote-edge.yml` moves `stable` only to a release whose `edge-qualify`
+succeeded.
+
 An edge, servers and clients built from the `v0.5.2-alpha.3` tag must all
 be replaced by this release together; a mix of that build and this one
 does not interoperate.
