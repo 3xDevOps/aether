@@ -127,7 +127,7 @@ func stageIn(ctx context.Context, m Manifest, asset, dst, dir string) (*Staged, 
 		return nil, fmt.Errorf("stage update in %s: %w", dir, err)
 	}
 	staged := &Staged{dst: dst, tmp: tmp.Name()}
-	want, err := m.Download(ctx, asset, tmp)
+	want, err := m.Download(ctx, asset, tmp, nil)
 	if err != nil {
 		staged.close(tmp)
 		return nil, err

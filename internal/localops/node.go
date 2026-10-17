@@ -342,7 +342,7 @@ func fetchNodeArchive(ctx context.Context, dir string, rel nodeRelease, url stri
 	}
 	name := f.Name()
 	sum := sha256.New()
-	written, err := io.Copy(f, io.TeeReader(io.LimitReader(resp.Body, maxNodeArchive), sum))
+	written, err := io.Copy(f, io.TeeReader(io.LimitReader(resp.Body, maxNodeArchive), io.MultiWriter(sum, selfupdate.NewProgress(out, resp.ContentLength))))
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}

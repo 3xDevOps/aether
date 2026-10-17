@@ -84,13 +84,14 @@ func DesktopAssetName(goarch string) string {
 }
 
 // Download streams the asset name into f, checks it against the size and
-// sha256 m lists for it, and returns that entry.
-func (m Manifest) Download(ctx context.Context, name string, f *os.File) (Asset, error) {
+// sha256 m lists for it, and returns that entry. A download that runs long
+// reports its size to progress; nil keeps it silent.
+func (m Manifest) Download(ctx context.Context, name string, f *os.File, progress io.Writer) (Asset, error) {
 	want, ok := m.Assets[name]
 	if !ok {
 		return Asset{}, fmt.Errorf("release %s does not publish %s", m.Version, name)
 	}
-	if err := download(ctx, m.AssetURL(name), f, want); err != nil {
+	if err := download(ctx, m.AssetURL(name), f, want, progress); err != nil {
 		return Asset{}, fmt.Errorf("download %s: %w", name, err)
 	}
 	return want, nil
@@ -299,8 +300,9 @@ func fetchSmall(ctx context.Context, url string) ([]byte, error) {
 }
 
 // download streams url into f, starting it over on every attempt, and
-// checks the bytes against want. Nothing beyond want.Size is read.
-func download(ctx context.Context, url string, f *os.File, want Asset) error {
+// checks the bytes against want. Nothing beyond want.Size is read. Each
+// attempt counts its progress from zero.
+func download(ctx context.Context, url string, f *os.File, want Asset, progress io.Writer) error {
 	return retry(ctx, func() (bool, error) {
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return false, err
@@ -317,7 +319,7 @@ func download(ctx context.Context, url string, f *os.File, want Asset) error {
 			return false, fmt.Errorf("size mismatch: %s is %d bytes, the manifest says %d", url, resp.ContentLength, want.Size)
 		}
 		h := sha256.New()
-		n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, want.Size+1))
+		n, err := io.Copy(io.MultiWriter(f, h, NewProgress(progress, want.Size)), io.LimitReader(resp.Body, want.Size+1))
 		if err != nil {
 			return ctx.Err() == nil, fmt.Errorf("GET %s: %w", url, err)
 		}

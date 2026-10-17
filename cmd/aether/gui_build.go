@@ -31,6 +31,15 @@ type buildEvent struct {
 	Error string `json:"error,omitempty"`
 }
 
+// Downloading and done are absent: their steps already print a line.
+var phaseNotes = map[string]string{
+	localops.PhaseUnpacking:    "unpacking the desktop app sources",
+	localops.PhaseFetchingNode: "checking for Node.js",
+	localops.PhaseDependencies: "running npm install; a first build downloads packages and can take a few minutes",
+	localops.PhasePackaging:    "packaging the app with electron-builder; a first build downloads Electron (about 100 MB)",
+	localops.PhaseInstalling:   "installing the app",
+}
+
 // guiBuild installs the desktop app where the desktop lists applications,
 // so the dashboard opens as a native window without a source checkout. On
 // Windows it downloads the release's prebuilt app; elsewhere it packages
@@ -67,6 +76,9 @@ func guiBuildTo(args []string, events io.Writer) error {
 	}
 	emit := func(ev buildEvent) {
 		if !*jsonOut {
+			if note, ok := phaseNotes[ev.Phase]; ok {
+				_, _ = fmt.Fprintln(notes, note)
+			}
 			return
 		}
 		line, err := json.Marshal(ev)

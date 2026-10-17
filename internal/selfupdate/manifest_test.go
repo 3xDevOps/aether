@@ -199,7 +199,7 @@ func TestDownloadRestartsAnInterruptedBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	if err = download(t.Context(), srv.URL+"/bin", f, want); err != nil {
+	if err = download(t.Context(), srv.URL+"/bin", f, want, nil); err != nil {
 		t.Fatal(err)
 	}
 	if n := hits.Load(); n != 2 {
@@ -235,7 +235,7 @@ func TestDownloadRejectsAStreamedBodyLongerThanTheManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = f.Close() }()
-	err = download(t.Context(), srv.URL+"/bin", f, want)
+	err = download(t.Context(), srv.URL+"/bin", f, want, nil)
 	if err == nil || !strings.Contains(err.Error(), "sent 7 bytes, the manifest says 6") {
 		t.Fatalf("err = %v, want a streamed size mismatch", err)
 	}
