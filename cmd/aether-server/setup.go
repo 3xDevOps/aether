@@ -2,12 +2,16 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/netip"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -71,9 +75,12 @@ func askSetup(configPath string) (map[string]string, bool, error) {
 		<-done
 	}()
 
-	_, tailscaled := os.Stat(reachability.DefaultTailscaledSocket)
+	var tailscaled *reachability.Tailscale
+	if _, err := os.Stat(reachability.DefaultTailscaledSocket); err == nil {
+		tailscaled = reachability.NewTailscale("")
+	}
 	p := newPrompter(os.Stdout, os.Stdin)
-	values, err := askServerOptions(p, configPath, tailscaled == nil)
+	values, err := askServerOptions(p, configPath, tailscaled)
 	if values == nil || err != nil {
 		return nil, false, err
 	}
@@ -155,11 +162,11 @@ func reportEdge(w io.Writer, options *flag.FlagSet) (string, error) {
 
 // askServerOptions walks the operator through the handful of options a
 // server install actually chooses, seeding each default from the existing
-// config file so re-running setup is not destructive. tailnet says whether
-// tailscaled is on this host, which is what makes the dashboard port
-// worth offering. It returns a nil map when the operator declines the
-// summary.
-func askServerOptions(p *prompter, configPath string, tailnet bool) (map[string]string, error) {
+// config file so re-running setup is not destructive. tailscaled is the
+// LocalAPI client when tailscaled is on this host, which is what makes the
+// dashboard port worth offering, and nil otherwise. It returns a nil map
+// when the operator declines the summary.
+func askServerOptions(p *prompter, configPath string, tailscaled *reachability.Tailscale) (map[string]string, error) {
 	w := p.w
 	current, err := serversetup.Load(configPath)
 	if err != nil {
@@ -194,23 +201,26 @@ func askServerOptions(p *prompter, configPath string, tailnet bool) (map[string]
 		"Also require pubkey verification on tailnet connections (true/false)", def("tailnet-require-key"))
 
 	// The dashboard cannot present a key, so it is only offered where it
-	// could start: tailscaled on this host and no key requirement. The
-	// default is on there, because a phone reaching the dashboard is the
-	// point of putting the server on a tailnet, and a tailnet without
-	// HTTPS certificates fails the first start with the fix in the error.
-	if tailnet && values["tailnet-require-key"] != "true" {
-		webDefault := def("web-port")
-		if _, ok := current["web-port"]; !ok {
-			webDefault = "443"
-		}
+	// could start: tailscaled on this host and no key requirement. Only a
+	// first run probes for the default: on a live server the dashboard
+	// itself holds the port.
+	if tailscaled != nil && values["tailnet-require-key"] != "true" {
 		_, _ = fmt.Fprintln(w, "\nThe server can host the dashboard over HTTPS on its tailnet address, so a")
 		_, _ = fmt.Fprintln(w, "phone or any tailnet device opens https://<this host's MagicDNS name>/ with")
 		_, _ = fmt.Fprintln(w, "no token. The tailnet needs MagicDNS and HTTPS certificates enabled; 0 keeps")
 		_, _ = fmt.Fprintln(w, "the server SSH-only.")
+		webDefault := def("web-port")
+		if _, ok := current["web-port"]; !ok {
+			webDefault = strconv.Itoa(dashboardPort)
+			if err := dashboardBlocked(tailscaled, dashboardPort); err != nil {
+				webDefault = "0"
+				_, _ = fmt.Fprintf(w, "Defaulting to 0: %v, then run: sudo aether-server config set web-port %d\n", err, dashboardPort)
+			}
+		}
 		values["web-port"] = p.ask("web-port", "Dashboard HTTPS port on the tailnet (0 = off)", webDefault)
 	}
 
-	askEdge(p, current, tailnet, values)
+	askEdge(p, current, tailscaled != nil, values)
 	if values["edge-url"] != "" {
 		askEdgeAccess(p, values)
 	}
@@ -223,6 +233,46 @@ func askServerOptions(p *prompter, configPath string, tailnet bool) (map[string]
 		return nil, p.err
 	}
 	return values, nil
+}
+
+// dashboardPort is the port that makes the dashboard https://<MagicDNS name>/.
+const dashboardPort = 443
+
+// dashboardBlocked says why the tailnet dashboard could not start on port,
+// or nil when it could. Like servergw.Start it needs one tailnet address
+// that binds, but a port in use on any address blocks, because clients on
+// that address family would reach the other service. EACCES counts as
+// bindable: setup runs as root, so only a non-root caller such as a test
+// sees it.
+func dashboardBlocked(tailscaled *reachability.Tailscale, port int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	node, err := tailscaled.Self(ctx)
+	if err != nil {
+		return fmt.Errorf("tailscaled did not report this node: %w; connect this host to the tailnet", err)
+	}
+	if len(node.CertDomains) == 0 {
+		return errors.New("HTTPS certificates are off for this tailnet; enable MagicDNS and HTTPS certificates on the DNS page of the Tailscale admin console")
+	}
+	if len(node.Addrs) == 0 {
+		return fmt.Errorf("tailscaled reports no tailnet address for %s; connect this host to the tailnet", node.DNSName)
+	}
+	var unbound []error
+	for _, addr := range node.Addrs {
+		ln, err := net.Listen("tcp", netip.AddrPortFrom(addr, uint16(port)).String())
+		switch {
+		case err == nil:
+			_ = ln.Close()
+		case errors.Is(err, syscall.EADDRINUSE):
+			return fmt.Errorf("%w; answer another port such as 8443 below, or free port %d there", err, port)
+		case !errors.Is(err, syscall.EACCES):
+			unbound = append(unbound, err)
+		}
+	}
+	if len(unbound) == len(node.Addrs) {
+		return fmt.Errorf("%w; tailscaled must put the tailnet addresses on this host's TUN interface, which --tun=userspace-networking does not", unbound[0])
+	}
+	return nil
 }
 
 // askEdge sets edge-url, the one place the edge is turned on. Without

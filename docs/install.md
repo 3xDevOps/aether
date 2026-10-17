@@ -1777,10 +1777,12 @@ address, data directory, and tailnet policy (Enter accepts each default),
 and writes the systemd unit and the config file. On a host that already runs
 tailscaled, and where tailnet connections are not required to carry a key, it
 asks one more question -
-`Dashboard HTTPS port on the tailnet (0 = off)`, defaulting to `443` on a
-fresh config - which is how a phone on the tailnet reaches the dashboard
-([networking.md](networking.md#the-dashboard)). Without tailscaled it turns
-on the edge, the relay the Aether project runs at `https://edge.onaether.dev`
+`Dashboard HTTPS port on the tailnet (0 = off)` - which is how a phone on the
+tailnet reaches the dashboard ([networking.md](networking.md#the-dashboard)).
+On a fresh config it defaults to `443` when the dashboard can start there and
+to `0` otherwise, with a line naming the reason and the fix
+([networking.md](networking.md#why-it-is-off-by-default)). Without tailscaled
+it turns on the edge, the relay the Aether project runs at `https://edge.onaether.dev`
 that lets clients reach the server over SSH with a GitHub sign-in
 ([edge.md](edge.md)), and prints what the edge can see and the command that
 turns it off; with tailscaled it asks, defaulting to no. With the edge on

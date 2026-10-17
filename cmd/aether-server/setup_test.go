@@ -3,16 +3,24 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/reachability"
 	"github.com/3xDevOps/Aether/internal/serversetup"
 	"github.com/3xDevOps/Aether/internal/sysbox"
 )
@@ -28,7 +36,7 @@ func answers(lines ...string) *strings.Reader {
 func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 	var out bytes.Buffer
 	in := answers("", "", "", "", "2", "yes")
-	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +59,7 @@ func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 func TestAskServerOptionsUsesTypedAnswers(t *testing.T) {
 	var out bytes.Buffer
 	in := answers(":2300", "/srv/aether", "true", "true", "1", "yes")
-	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +82,7 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "yes")), path, false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "yes")), path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +94,7 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 	var out bytes.Buffer
 	in := answers("", "", "not-a-bool", "true", "", "2", "yes")
-	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +108,7 @@ func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 
 func TestAskServerOptionsDeclinedWritesNothing(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "no")), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "no")), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,26 +117,147 @@ func TestAskServerOptionsDeclinedWritesNothing(t *testing.T) {
 	}
 }
 
+// fakeTailscaled answers the LocalAPI status request the way tailscaled
+// does for a node at addrs, reporting a certificate name when certs is set,
+// as a tailnet with HTTPS certificates enabled does.
+func fakeTailscaled(t *testing.T, certs bool, addrs ...string) *reachability.Tailscale {
+	t.Helper()
+	certDomains := "null"
+	if certs {
+		certDomains = `["box.tail1234.ts.net"]`
+	}
+	ips, err := json.Marshal(addrs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sock := filepath.Join(t.TempDir(), "ts.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/localapi/v0/status" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"Self":{"DNSName":"box.tail1234.ts.net.","TailscaleIPs":%s},"CertDomains":%s}`, ips, certDomains)
+	})}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+	return reachability.NewTailscale(sock)
+}
+
+// startable is a tailnet address that binds port 443 as root and refuses
+// it only with EACCES otherwise, so the dashboard can start there either way.
+const startable = "127.0.0.1"
+
 func TestAskServerOptionsOffersTheDashboardOnATailnet(t *testing.T) {
+	if ln, err := net.Listen("tcp", net.JoinHostPort(startable, strconv.Itoa(dashboardPort))); errors.Is(err, syscall.EADDRINUSE) {
+		t.Skipf("the dashboard cannot start at %s on this host: %v", startable, err)
+	} else if err == nil {
+		_ = ln.Close()
+	}
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), true)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if values["web-port"] != "443" {
-		t.Errorf("web-port = %q, want 443 by default on a tailnet host", values["web-port"])
+		t.Errorf("web-port = %q, want 443 by default where the dashboard can start", values["web-port"])
 	}
-	if !strings.Contains(out.String(), "HTTPS certificates") {
-		t.Errorf("dashboard prompt does not name what the tailnet needs:\n%s", out.String())
+	if !strings.Contains(out.String(), "HTTPS certificates") || strings.Contains(out.String(), "Defaulting to 0") {
+		t.Errorf("dashboard prompt does not name what the tailnet needs, or reports a blocker:\n%s", out.String())
 	}
 
 	out.Reset()
-	values, err = askServerOptions(newPrompter(&out, answers("", "", "", "", "8443", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), true)
+	values, err = askServerOptions(newPrompter(&out, answers("", "", "", "", "8443", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if values["web-port"] != "8443" {
 		t.Errorf("web-port = %q, want the typed 8443", values["web-port"])
+	}
+}
+
+func TestAskServerOptionsDefaultsTheDashboardOffWhereItCannotStart(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tailscaled func(*testing.T) *reachability.Tailscale
+		want       string
+	}{
+		"no HTTPS certificates": {
+			func(t *testing.T) *reachability.Tailscale { return fakeTailscaled(t, false, startable) },
+			"Defaulting to 0: HTTPS certificates are off for this tailnet; enable MagicDNS and HTTPS certificates on the DNS page of the Tailscale admin console, then run: sudo aether-server config set web-port 443\n",
+		},
+		"tailscaled unreachable": {
+			func(t *testing.T) *reachability.Tailscale {
+				return reachability.NewTailscale(filepath.Join(t.TempDir(), "absent.sock"))
+			},
+			"connect: no such file or directory; connect this host to the tailnet, then run: sudo aether-server config set web-port 443\n",
+		},
+		"no tailnet address": {
+			func(t *testing.T) *reachability.Tailscale { return fakeTailscaled(t, true) },
+			"Defaulting to 0: tailscaled reports no tailnet address for box.tail1234.ts.net; connect this host to the tailnet, then run: sudo aether-server config set web-port 443\n",
+		},
+		"tailnet address not on this host": {
+			func(t *testing.T) *reachability.Tailscale { return fakeTailscaled(t, true, "192.0.2.1") },
+			"Defaulting to 0: listen tcp 192.0.2.1:443: bind: cannot assign requested address; tailscaled must put the tailnet addresses on this host's TUN interface, which --tun=userspace-networking does not, then run: sudo aether-server config set web-port 443\n",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), tc.tailscaled(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if values["web-port"] != "0" || !strings.Contains(out.String(), tc.want) {
+				t.Errorf("web-port = %q, want 0 and the reason %q in:\n%s", values["web-port"], tc.want, out.String())
+			}
+			if !strings.Contains(out.String(), "Dashboard HTTPS port on the tailnet (0 = off) [0]: ") {
+				t.Errorf("the dashboard question is not asked with 0 as the default:\n%s", out.String())
+			}
+
+			values, err = askServerOptions(newPrompter(io.Discard, answers("", "", "", "", "443", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), tc.tailscaled(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if values["web-port"] != "443" {
+				t.Errorf("web-port = %q, want the typed 443", values["web-port"])
+			}
+		})
+	}
+}
+
+func TestAskServerOptionsKeepsAConfiguredDashboardPort(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	if err := serversetup.WriteConfig(path, map[string]string{"web-port": "443"}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "", "yes")), path, fakeTailscaled(t, false, startable))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["web-port"] != "443" || strings.Contains(out.String(), "Defaulting to 0") {
+		t.Errorf("web-port = %q, want the configured 443 kept without a blocker:\n%s", values["web-port"], out.String())
+	}
+}
+
+func TestDashboardBlockedByAPortInUse(t *testing.T) {
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
+	port := held.Addr().(*net.TCPAddr).Port
+	err = dashboardBlocked(fakeTailscaled(t, true, "127.0.0.1"), port)
+	want := fmt.Sprintf("listen tcp 127.0.0.1:%d: bind: address already in use; answer another port such as 8443 below, or free port %d there", port, port)
+	if err == nil || err.Error() != want {
+		t.Errorf("dashboardBlocked = %v, want %q", err, want)
+	}
+
+	_ = held.Close()
+	if err := dashboardBlocked(fakeTailscaled(t, true, "127.0.0.1", "192.0.2.1"), port); err != nil {
+		t.Errorf("dashboardBlocked with the port free on one of two addresses = %v, want nil", err)
 	}
 }
 
@@ -141,8 +270,12 @@ func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
 		"tailnet-require-key": {true, []string{"", "", "", "true", "", "yes"}},
 	} {
 		t.Run(name, func(t *testing.T) {
+			var tailscaled *reachability.Tailscale
+			if tc.tailnet {
+				tailscaled = fakeTailscaled(t, true, startable)
+			}
 			var out bytes.Buffer
-			values, err := askServerOptions(newPrompter(&out, answers(tc.input...)), filepath.Join(t.TempDir(), "absent.conf"), tc.tailnet)
+			values, err := askServerOptions(newPrompter(&out, answers(tc.input...)), filepath.Join(t.TempDir(), "absent.conf"), tailscaled)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -158,7 +291,7 @@ func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
 
 func TestAskServerOptionsTurnsTheEdgeOnWithoutTailscale(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +312,7 @@ func TestAskServerOptionsKeepsTheEdgeOffWhenConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "yes")), path, false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "yes")), path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +328,7 @@ func TestAskServerOptionsOffersTheEdgeOnATailnet(t *testing.T) {
 			input = append(input, "1")
 		}
 		var out bytes.Buffer
-		values, err := askServerOptions(newPrompter(&out, answers(append(input, "yes")...)), filepath.Join(t.TempDir(), "absent.conf"), true)
+		values, err := askServerOptions(newPrompter(&out, answers(append(input, "yes")...)), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -209,7 +342,7 @@ func TestAskServerOptionsOffersTheEdgeOnATailnet(t *testing.T) {
 // again, and input that ends unanswered writes nothing.
 func TestAskServerOptionsRequiresAnAccessPolicy(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "3", "account", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "3", "account", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +362,7 @@ func TestAskServerOptionsRequiresAnAccessPolicy(t *testing.T) {
 	}
 
 	out.Reset()
-	values, err = askServerOptions(newPrompter(&out, answers("", "", "", "", "")), filepath.Join(t.TempDir(), "absent.conf"), false)
+	values, err = askServerOptions(newPrompter(&out, answers("", "", "", "", "")), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err == nil || values != nil {
 		t.Fatalf("setup without a policy answer = %v, %v; want refused", values, err)
 	}
@@ -243,7 +376,7 @@ func TestAskServerOptionsAsksNoPolicyWithTheEdgeOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "yes")), path, false)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "yes")), path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
