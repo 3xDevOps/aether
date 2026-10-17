@@ -281,6 +281,7 @@ func serve(args []string) error {
 	}
 	_, _ = fmt.Fprintf(os.Stderr, "aether-server %s serving SSH on %s%s (data dir %s)%s\n",
 		version.String(), *o.addr, web, *o.dataDir, from)
+	warnIfUnitOutdated()
 	err = srv.Run(ctx)
 	drainMu.Lock()
 	argv := drained
@@ -348,4 +349,23 @@ func applyConfigFile(fs *flag.FlagSet, path string, optional bool) (string, erro
 		return "", nil
 	}
 	return " from " + path, nil
+}
+
+// warnIfUnitOutdated tells the operator when the installed systemd unit is not
+// the one this release ships. It only reads the unit: a daemon-reload has
+// host-wide effects, so applying the new unit stays the operator's call.
+func warnIfUnitOutdated() {
+	if os.Getenv("INVOCATION_ID") == "" {
+		return
+	}
+	outdated, err := serversetup.UnitOutdated(serversetup.UnitPath)
+	if err != nil {
+		slog.Warn("could not check whether the systemd unit is up to date", "error", err)
+		return
+	}
+	if outdated {
+		slog.Warn("the installed systemd unit differs from this release's; apply it with: "+
+			"sudo aether-server install --sysbox=false && sudo systemctl daemon-reload && sudo systemctl restart "+serversetup.ServiceName,
+			"unit", serversetup.UnitPath)
+	}
 }

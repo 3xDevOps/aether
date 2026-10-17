@@ -1,5 +1,11 @@
 package serversetup
 
+import (
+	"errors"
+	"fmt"
+	"os"
+)
+
 // ServiceName is the system service identifier.
 const ServiceName = "aether-server"
 
@@ -77,3 +83,17 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 `
+
+// UnitOutdated reports whether the unit file at path exists and differs from
+// DefaultUnit(). A missing file is not outdated: the server may not run under
+// this unit at all.
+func UnitOutdated(path string) (bool, error) {
+	got, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("serversetup: read %s: %w", path, err)
+	}
+	return string(got) != DefaultUnit(), nil
+}

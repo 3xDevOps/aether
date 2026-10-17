@@ -375,3 +375,21 @@ func TestApplyStillRejectsAnUnknownOption(t *testing.T) {
 		t.Fatal("Apply accepted an unknown option, want an error")
 	}
 }
+
+func TestUnitOutdated(t *testing.T) {
+	dir := t.TempDir()
+	same := filepath.Join(dir, "same.service")
+	old := filepath.Join(dir, "old.service")
+	if err := os.WriteFile(same, []byte(DefaultUnit()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(old, []byte(strings.Replace(DefaultUnit(), "OOMScoreAdjust=-500\n", "", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]bool{same: false, old: true, filepath.Join(dir, "missing.service"): false} {
+		got, err := UnitOutdated(path)
+		if err != nil || got != want {
+			t.Errorf("UnitOutdated(%s) = %v, %v; want %v, nil", filepath.Base(path), got, err, want)
+		}
+	}
+}
