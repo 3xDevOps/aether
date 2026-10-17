@@ -68,7 +68,7 @@ run)
 	d="${1#*@}"
 	shift
 	case "$1" in
-	version) printf '{"version":"%s","commit":"abc","store_schema":%s}\n' "$(get version "$d")" "$(get supports "$d" 1)" ;;
+	version) printf '{"protocol":{"version":1,"min_version":1},"version":"%s","commit":"abc","store_schema":%s}\n' "$(get version "$d")" "$(get supports "$d" 1)" ;;
 	release-check) exit "$(cat "$w/release-check" 2>/dev/null || echo 0)" ;;
 	schema)
 		[ ! -f "$w/schema-fails" ] || { echo "aether-edge: edge.db: file is not a database" >&2; exit 1; }
@@ -98,7 +98,7 @@ exec)
 			echo $((slow - 1)) >"$w/slow/$running"
 			claimed=0
 		fi
-		printf '{"status":"ready","version":"%s","protocol":{"version":1,"min_version":1},"servers":{"claimed":%s,"unclaimed":0}}\n' \
+		printf '{"status":"ready","checks":{"db":"ok","claimed":0},"version":"%s","protocol":{"version":1,"min_version":1},"servers":{"claimed":%s,"unclaimed":0}}\n' \
 			"$(get version "$running")" "$claimed"
 		;;
 	esac
@@ -141,18 +141,27 @@ EOF
 
 # Answers with one attestation whose predicate promotes the digest on
 # stable as its version, or as $WORLD/promotion/<digest> says ("<channel>
-# <tag>", or "none" for no attestation).
+# <tag> [<digest>]", or "none" for no attestation). Like cosign, it refuses
+# when the signer, $WORLD/signer if set, is not the identity and workflow
+# ref asked for.
 cat >"$bin/cosign" <<'EOF'
 #!/bin/sh
 set -eu
 printf 'cosign %s\n' "$*" >>"$CMD_LOG"
-for ref; do :; done
-d="${ref#*@}"
+signer="$(cat "$WORLD/signer" 2>/dev/null || echo https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main)"
+while [ $# -gt 1 ]; do
+	case "$1" in
+	--certificate-identity) [ "$2" = "$signer" ] || { echo "error: expected SAN value \"$2\", got \"$signer\"" >&2; exit 1; } ;;
+	--certificate-github-workflow-ref) [ "$2" = "${signer##*@}" ] || { echo "error: expected GitHub Workflow Ref \"$2\"" >&2; exit 1; } ;;
+	esac
+	shift
+done
+d="${1#*@}"
 promotion="$(cat "$WORLD/promotion/$d" 2>/dev/null || echo "stable $(cat "$WORLD/version/$d")")"
 [ "$promotion" != none ] || { echo "Error: no matching attestations:" >&2; exit 1; }
-channel="${promotion% *}"
-tag="${promotion#* }"
-statement="$(printf '{"_type":"https://in-toto.io/Statement/v1","subject":[{"name":"ghcr.io/3xdevops/aether-edge","digest":{"sha256":"%s"}}],"predicateType":"https://github.com/3xDevOps/aether/edge-promotion/v1","predicate":{"channel":"%s","tag":"%s","digest":"%s"}}' "${d#sha256:}" "$channel" "$tag" "$d")"
+set -- $promotion
+channel="$1" tag="$2" subject="${3:-$d}"
+statement="$(printf '{"_type":"https://in-toto.io/Statement/v1","subject":[{"name":"ghcr.io/3xdevops/aether-edge","digest":{"sha256":"%s"}}],"predicateType":"https://github.com/3xDevOps/aether/edge-promotion/v1","predicate":{"channel":"%s","tag":"%s","digest":"%s"}}' "${d#sha256:}" "$channel" "$tag" "$subject")"
 printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures":[{"sig":"x"}]}\n' "$(printf '%s' "$statement" | base64 -w0)"
 EOF
 
@@ -370,13 +379,24 @@ assert_digest "$A"
 
 # --- a digest stable was not promoted to: nothing changes -----------------
 
-for promotion in none "stable v1.0.5" "latest v1.1.0"; do
+for promotion in none "stable v1.0.5" "latest v1.1.0" "stable v1.1.0 $D"; do
 	reset
 	echo "$promotion" >"$world/promotion/$B"
 	run 1
 	assert_out "has no valid promotion attestation"
 	refute "release-check"
 	refute "compose"
+	assert_digest "$A"
+done
+
+# --- a promotion signed from a branch or by another workflow is refused ----
+
+for signer in promote-edge.yml@refs/heads/evil release.yml@refs/heads/main; do
+	reset
+	echo "https://github.com/3xDevOps/aether/.github/workflows/$signer" >"$world/signer"
+	run 1
+	assert_out "has no valid promotion attestation"
+	refute "release-check"
 	assert_digest "$A"
 done
 

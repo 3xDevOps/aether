@@ -1747,8 +1747,9 @@ name. Logs go to standard error, which the unit sends to the journal:
 #### Installing the updater
 
 The updater needs Docker with the Compose plugin, `curl`, `flock`
-(util-linux) and [cosign](https://github.com/sigstore/cosign) 3 on the
-host, outbound HTTPS to `ghcr.io`, `github.com` and
+(util-linux), `jq` 1.6 or later and
+[cosign](https://github.com/sigstore/cosign) 3 on the host
+(`sudo apt-get install jq` on Debian and Ubuntu), outbound HTTPS to `ghcr.io`, `github.com` and
 `tuf-repo-cdn.sigstore.dev`, and the edge running from
 [`packaging/edge/compose.yaml`](../packaging/edge/compose.yaml) in
 `/opt/aether-edge`. That file runs the image pinned by digest, with
@@ -1807,7 +1808,7 @@ systemctl list-timers aether-edge-update.timer
 
 `--check` resolves and verifies the channel's release, prints `would
 update <version> (<digest>) to <version> (<digest>)`, and changes nothing.
-Without cosign it fails with `cosign not found`.
+Without cosign or jq it fails with `cosign not found` or `jq not found`.
 `.env` holds `AETHER_EDGE_DIGEST` and is rewritten by the updater; other
 lines in it are kept.
 

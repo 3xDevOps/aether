@@ -75,11 +75,7 @@ for v in tolerance server_wait; do
 done
 [ -n "$relay_url" ] || die "AETHER_EDGE_UPDATE_RELAY_URL is not set; set it in $config to the edge's relay origin, such as https://edge.example.com"
 
-# Reads one field of the compact JSON the edge prints. Nested objects are
-# flattened, so the first match wins: top-level fields come first.
-json_get() {
-	tr ',{}' '\n' | sed -n "s/^[[:space:]]*\"$1\"[[:space:]]*:[[:space:]]*//p" | head -n 1 | tr -d '"'
-}
+command -v jq >/dev/null || die "jq not found; install it (docs/edge.md, \"Installing the updater\")"
 
 # Exits 0 when release $1 sorts before $2 by SemVer precedence.
 version_lt() {
@@ -167,48 +163,32 @@ verify_promotion() {
 		--certificate-oidc-issuer https://token.actions.githubusercontent.com \
 		--certificate-github-workflow-ref refs/heads/main \
 		"$image@$1")" || return 1
-	printf '%s\n' "$atts" | while IFS= read -r line; do
-		printf '%s\n' "$line" | sed -n 's/.*"payload":"\([^"]*\)".*/\1/p' | base64 -d |
-			sed -n 's/.*"predicate":{\([^}]*\)}.*/{\1}/p'
-		echo
-	done | {
-		while IFS= read -r predicate; do
-			[ "$(printf '%s\n' "$predicate" | json_get channel)" = "$channel" ] &&
-				[ "$(printf '%s\n' "$predicate" | json_get tag)" = "$2" ] &&
-				[ "$(printf '%s\n' "$predicate" | json_get digest)" = "$1" ] &&
-				exit 0
-		done
-		say "no promotion attestation of $1 names channel $channel and release $2"
-		exit 1
-	}
+	printf '%s\n' "$atts" | jq -e --arg c "$channel" --arg t "$2" --arg d "$1" \
+		'.payload | @base64d | fromjson | .predicate | select(.channel == $c and .tag == $t and .digest == $d)' >/dev/null && return 0
+	say "no promotion attestation of $1 names channel $channel and release $2"
+	return 1
 }
 
 image_version() {
 	out="$(docker run --rm --network none "$image@$1" version --json)" || return 1
-	printf '%s\n' "$out" | json_get version
+	printf '%s\n' "$out" | jq -er '.version | strings'
 }
 
 edge_fingerprint() {
 	out="$(curl -fsS --max-time 10 -H 'Aether-Edge-Version: 1' "$relay_url/v1/edge")" || return 1
-	fp="$(printf '%s\n' "$out" | json_get fingerprint)"
-	[ -n "$fp" ] || return 1
-	echo "$fp"
+	printf '%s\n' "$out" | jq -er '.fingerprint | strings'
 }
 
 claimed_servers() {
 	out="$(timeout 30 docker exec "$service" aether-edge healthcheck --ready --json)" || return 1
-	n="$(printf '%s\n' "$out" | json_get claimed)"
-	case "$n" in
-	'' | *[!0-9]*) return 1 ;;
-	esac
-	echo "$n"
+	printf '%s\n' "$out" | jq -er 'select(.status == "ready") | .servers.claimed | numbers'
 }
 
 # Polls readiness, the public fingerprint and the claimed-server count of
 # the running edge, which must report version $1 and have at least $2
 # claimed servers. Sets why on failure.
 post_checks() {
-	got="$(timeout 30 docker exec "$service" aether-edge version --json | json_get version)" || got=""
+	got="$(timeout 30 docker exec "$service" aether-edge version --json | jq -r .version)" || got=""
 	if [ "$got" != "$1" ]; then
 		why="the container reports version '${got}', expected $1"
 		return 1
@@ -243,14 +223,11 @@ post_checks() {
 prepare_db() {
 	if [ "$3" != 1 ]; then
 		if out="$(docker run --rm --network none --user 65532:65532 --volumes-from "$service" "$image@$1" schema --json)"; then
-			floor="$(printf '%s\n' "$out" | json_get compat_floor)"
-			supported="$(printf '%s\n' "$out" | json_get supported)"
-			case "$floor$supported" in
-			'' | *[!0-9]*)
+			if ! floor="$(printf '%s\n' "$out" | jq -er '.compat_floor | numbers')" ||
+				! supported="$(printf '%s\n' "$out" | jq -er '.supported | numbers')"; then
 				why="aether-edge schema --json printed $out"
 				return 1
-				;;
-			esac
+			fi
 			if [ "$floor" -le "$supported" ]; then
 				say "the database (compat floor $floor) runs on a release that supports schema $supported; keeping it"
 				return 0
@@ -429,7 +406,7 @@ update() {
 
 	from_json="$(docker run --rm --network none "$image@$cur" version --json)" || die "aether-edge version --json failed in $image@$cur"
 	to_json="$(docker run --rm --network none "$image@$new" version --json)" || die "aether-edge version --json failed in $image@$new"
-	got="$(printf '%s\n' "$to_json" | json_get version)"
+	got="$(printf '%s\n' "$to_json" | jq -r .version)"
 	[ "$got" = "$new_version" ] || die "$image@$new reports version $got but is labelled $new_version"
 	printf '%s\n' "$from_json" >"$state_dir/from.json"
 	printf '%s\n' "$to_json" >"$state_dir/to.json"
