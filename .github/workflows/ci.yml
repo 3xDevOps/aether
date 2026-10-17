@@ -276,6 +276,53 @@ jobs:
           mode: save
           save-modules: 'true'
 
+  # Docker inside a run: the standard image on a Sysbox host, on both
+  # supported server architectures.
+  nested-docker:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build the standard environment image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/standard/Dockerfile
+          load: true
+          tags: aether-standard:ci
+          cache-from: type=gha,scope=standard-${{ matrix.arch }}-main
+      - name: Install Sysbox
+        run: sudo sh scripts/install-sysbox.sh
+      - name: Docker inside a run container (real Docker, Sysbox)
+        run: |
+          sudo env "PATH=$PATH" "HOME=$HOME" \
+            AETHER_NESTED_DOCKER_TEST_IMAGE=aether-standard:ci \
+            make test-integration INTEGRATION_PKGS=./internal/runtime \
+              INTEGRATION_RUN='^TestDockerNestedDocker$'
+      - name: Aether limit tests against a nested daemon
+        run: sudo sh scripts/nested-docker-smoke.sh aether-standard:ci
+
   # Build the same Dockerfile on both supported server architectures. This
   # gate is display-free; browser libraries and Chromium exist only inside
   # the image, and no registry write credentials enter a PR job.
