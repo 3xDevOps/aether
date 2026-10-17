@@ -6,8 +6,8 @@
 #   draft                 upload everything, drop stray assets, download it
 #                         all back and verify it, then publish
 #   published, signed     verify the public downloads; never re-upload
-#   published, unsigned   a release made by the old flow: upload, verify,
-#                         then the signature and the manifest last
+#   published, unsigned   incomplete: return it to a draft and continue as
+#                         for a draft
 #
 # The release workflow's concurrency group runs one release at a time.
 set -eu
@@ -104,20 +104,9 @@ if [ "$state" = false ]; then
 		echo "$tag is already published and verified"
 		exit 0
 	fi
-	set --
-	for file in "$dist"/*; do
-		case "${file##*/}" in
-		aether-release.json | aether-release.json.sig) ;;
-		*) set -- "$@" "$file" ;;
-		esac
-	done
-	gh release upload "$tag" --clobber "$@"
-	verify_public "$manifest"
-	# Clients treat a release missing either file as unsigned, so the
-	# manifest goes up last and a failure before it leaves this retryable.
-	gh release upload "$tag" --clobber "$signature"
-	gh release upload "$tag" "$manifest"
-	exit 0
+	echo "publish-release: $tag is published without aether-release.json, so it is incomplete; returning it to a draft until it is verified" >&2
+	gh release edit "$tag" --draft=true
+	state=true
 fi
 
 # Latest goes to the highest version, so an older tag that finishes after a

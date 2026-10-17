@@ -174,29 +174,24 @@ if grep -q "release upload" "$log"; then
 	exit 1
 fi
 
-# A release published by the old flow without a manifest is completed:
-# assets, anonymous verification, then the signature and manifest last.
-export GH_ASSETS="aether-linux-amd64"
+# A release published without a manifest is incomplete: it goes back to a
+# draft, then is uploaded, verified and published from there.
+export GH_ASSETS="aether-linux-amd64" GH_PUBLISHED="v0.1.0"
 run
-printf '%s\n' "$view" \
-	"release upload $tag --clobber $dist/aether-linux-amd64 $dist/checksums.txt" \
-	"curl $url/aether-linux-amd64" \
-	"curl $url/checksums.txt" \
-	"release upload $tag --clobber $dist/aether-release.json.sig" \
-	"release upload $tag $dist/aether-release.json" \
-	>"$expected"
+{
+	printf '%s\n' "$view" "release edit $tag --draft=true" "$upload_all"
+	publish_lines true
+} >"$expected"
 diff -u "$expected" "$log"
+grep -q "returning it to a draft" "$tmp/err"
 
-# ... and never gets the manifest if a download does not match it.
+# A public download that does not match after publishing fails the job.
+export GH_STATE=draft
 if CURL_TAMPER=aether-linux-amd64 run; then
-	echo "publish-release accepted a download that does not match the manifest" >&2
+	echo "publish-release accepted a public download that does not match the manifest" >&2
 	exit 1
 fi
 grep -q "$url/aether-linux-amd64 is 9 bytes with sha256 .*; the manifest says 7 bytes with sha256 $sum" "$tmp/err"
-if grep -q "aether-release.json" "$log"; then
-	echo "publish-release uploaded the manifest after a failed verification" >&2
-	exit 1
-fi
 
 # A GitHub API failure is reported as GitHub gave it, not as a missing release.
 export GH_STATE=error

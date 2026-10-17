@@ -2308,9 +2308,10 @@ every asset again with `gh release upload --clobber`, removes strays and
 verifies again, without changing the release notes. Producer artifact uploads
 also allow replacement on rerun. A rerun after the release is published only
 verifies it; assets signed by a published manifest are never replaced, so a
-bad published release needs a new tag. A release published by the old
-workflow without `aether-release.json` is completed in place: assets first,
-then the signature and the manifest last.
+bad published release needs a new tag. A published release without
+`aether-release.json`, left by the old workflow or created by hand, is
+incomplete: the publisher returns it to a draft, which takes it off
+`/releases/latest`, then completes it like any other draft.
 
 Enable [immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)
 in the repository settings. The workflow adds every asset while the release
