@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"io"
 	"path/filepath"
 	"strings"
@@ -298,6 +299,8 @@ func TestInstallSysboxReportsWithoutFailingSetup(t *testing.T) {
 		"done":        {nil, ""},
 		"unsupported": {&sysbox.UnsupportedError{Reason: "kernel 5.4 cannot ID-map bind mounts"}, "Docker inside runs is unavailable on this host: kernel 5.4 cannot ID-map bind mounts\n"},
 		"failure":     {errors.New("sysbox: install: exit status 1: checksum mismatch"), "checksum mismatch\nInstall it later with: sudo aether-server sysbox install\n"},
+		"detached": {&sysbox.DetachedError{Unit: "aether-sysbox-install"}, "Stopped waiting for Sysbox: the installer keeps running as the aether-sysbox-install unit; " +
+			"`systemctl status aether-sysbox-install` shows whether it has finished\nOnce it has, check Docker inside runs with: aether-server sysbox status\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			installs := fakeSysbox(t, false, func(io.Writer) error { return tc.err })
@@ -307,5 +310,106 @@ func TestInstallSysboxReportsWithoutFailingSetup(t *testing.T) {
 				t.Errorf("installs = %d, output %q; want it to contain %q", *installs, out.String(), tc.want)
 			}
 		})
+	}
+}
+
+// The next steps come last: below the Sysbox installer's output and the
+// claim link, with the activation line once and no escape codes off a
+// terminal.
+func TestWriteSetupEndsOnNextSteps(t *testing.T) {
+	fakeSysbox(t, false, func(w io.Writer) error {
+		_, err := io.WriteString(w, "sysbox installer output\n")
+		return err
+	})
+	t.Setenv("SUDO_USER", "")
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	values := map[string]string{"data-dir": dataDir, "edge-url": edgeagent.DefaultURL, "edge-access": string(edgeproto.PolicyApprovedDevices)}
+	var out bytes.Buffer
+	if err := writeSetup(&out, filepath.Join(dir, "aether-server.service"), filepath.Join(dir, "server.conf"), values, false, true); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
+	code := strings.TrimPrefix(lines[len(lines)-1], "       aether link --claim ")
+	if claim, ok, err := edgeagent.OpenState(dataDir).ClaimCode(); err != nil || !ok || claim.Hash != edgeproto.HashToken(code) {
+		t.Fatalf("last line %q does not carry the issued claim code (%v, %v):\n%s", lines[len(lines)-1], ok, err, got)
+	}
+	sysboxAt, claimAt, nextAt := strings.Index(got, "sysbox installer output"), strings.Index(got, "claim link: "), strings.Index(got, "\nnext:\n")
+	if sysboxAt < 0 || claimAt < sysboxAt || nextAt < claimAt {
+		t.Errorf("want Sysbox output, then the claim link, then the next steps:\n%s", got)
+	}
+	if !strings.HasSuffix(got, "\n       "+serversetup.ActivateCommand+"\n"+
+		"  2. on your computer, open the claim link above with the Aether app, or paste it\n"+
+		"     into the app's Connect page; in a terminal:\n"+
+		"       aether link --claim "+code+"\n") {
+		t.Errorf("output does not end on starting the server and claiming it:\n%s", got)
+	}
+	if n := strings.Count(got, "systemctl daemon-reload"); n != 1 {
+		t.Errorf("activation line printed %d times, want once:\n%s", n, got)
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("escape codes written to a non-terminal:\n%q", got)
+	}
+}
+
+// optionsOf is the serve options with values set, as configuredOptions
+// returns them.
+func optionsOf(t *testing.T, values map[string]string) *flag.FlagSet {
+	t.Helper()
+	fs := serveFlagSet()
+	if _, err := serversetup.Apply(fs, values); err != nil {
+		t.Fatal(err)
+	}
+	return fs
+}
+
+// Setup run through sudo gets a command its user can paste; a root shell
+// gets the bare one.
+func TestPrintNextStepsPrefixesSudoForASudoUser(t *testing.T) {
+	for sudoUser, want := range map[string]string{
+		"ubuntu": "sudo systemctl daemon-reload && sudo systemctl enable --now aether-server",
+		"":       "\n       " + serversetup.ActivateCommand + "\n",
+	} {
+		t.Setenv("SUDO_USER", sudoUser)
+		var out bytes.Buffer
+		if err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": ":2300"}), ""); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), want) || !strings.HasSuffix(out.String(), "\n       aether link <this-host>:2300\n") {
+			t.Errorf("SUDO_USER=%q: want %q and a link to the configured port:\n%s", sudoUser, want, out.String())
+		}
+	}
+}
+
+// `aether-server install --edge-url` issues no claim code, so on a server
+// without an owner step 2 is the command that issues one.
+func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
+	t.Setenv("SUDO_USER", "ubuntu")
+	var out bytes.Buffer
+	o := optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": edgeagent.DefaultURL})
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(out.String(), "\n       sudo aether-server edge claim-code\n") {
+		t.Errorf("want step 2 to issue a claim code:\n%s", out.String())
+	}
+
+	out.Reset()
+	if err := printNextSteps(&out, "/srv/it's here/server.conf", o, ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(out.String(), `sudo aether-server edge claim-code --config '/srv/it'\''s here/server.conf'`+"\n") {
+		t.Errorf("want the claim command to name the config install wrote, shell-quoted:\n%s", out.String())
+	}
+}
+
+// An addr without a port fails before the block starts, never halfway
+// through it.
+func TestPrintNextStepsRefusesAnAddrWithoutAPortBeforePrinting(t *testing.T) {
+	var out bytes.Buffer
+	err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": "2222"}), "")
+	if err == nil || !strings.Contains(err.Error(), `addr "2222"`) || out.Len() != 0 {
+		t.Errorf("err = %v, output %q; want the addr error and nothing printed", err, out.String())
 	}
 }

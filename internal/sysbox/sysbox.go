@@ -32,6 +32,15 @@ type BrokenError struct{ Reason string }
 
 func (e *BrokenError) Error() string { return e.Reason }
 
+// DetachedError is an install the caller stopped waiting for while it runs
+// in its systemd unit. The unit keeps going: stopping apt or dpkg midway
+// can leave packages half-configured.
+type DetachedError struct{ Unit string }
+
+func (e *DetachedError) Error() string {
+	return fmt.Sprintf("the installer keeps running as the %s unit; `systemctl status %s` shows whether it has finished", e.Unit, e.Unit)
+}
+
 // UnsupportedError is the install script's refusal to run on this host.
 type UnsupportedError struct{ Reason string }
 
@@ -105,9 +114,12 @@ func runScript(ctx context.Context, script string, out io.Writer) error {
 		err = cmd.Run()
 	}
 	var exit *exec.ExitError
+	var detached *DetachedError
 	switch {
 	case err == nil:
 		return nil
+	case errors.As(err, &detached):
+		return err
 	case errors.As(err, &exit) && exit.ExitCode() == unsupportedExit:
 		return &UnsupportedError{Reason: last.String()}
 	case errors.As(err, &exit) && exit.ExitCode() == brokenExit:
@@ -144,6 +156,9 @@ func runInUnit(ctx context.Context, script string, out io.Writer) error {
 	err = cmd.Run()
 	close(done)
 	<-followed
+	if err != nil && ctx.Err() != nil {
+		return &DetachedError{Unit: unitName}
+	}
 	return err
 }
 

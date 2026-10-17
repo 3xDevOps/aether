@@ -44,6 +44,13 @@ func TestRunScriptInUnit(t *testing.T) {
 	if err := runScript(t.Context(), "exit 1\n", &out); err == nil || errors.As(err, &unsupported) {
 		t.Fatalf("exit 1 = %v, want a plain failure", err)
 	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	var detached *DetachedError
+	if err := runScript(ctx, "sleep 5\n", &out); !errors.As(err, &detached) || detached.Unit != unitName {
+		t.Fatalf("cancelled wait = %v, want a DetachedError naming the unit", err)
+	}
 }
 
 func TestRunScriptExitCodes(t *testing.T) {

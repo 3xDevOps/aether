@@ -310,7 +310,7 @@ The server id is derived from the SSH host key,
 new server, which must be claimed and linked again.
 
 Until an account claims it, the edge relays nothing for a server but claim
-connections. Setup prints:
+connections. Setup ends on:
 
 ```
 edge: https://edge.onaether.dev
@@ -318,8 +318,13 @@ edge access: approved-devices
 server id: <server id>
 edge key: pinned when the server first connects; `aether-server edge status` shows it
 claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid until 3:04PM, 5 attempts)
-open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:
-  aether link --claim <server id>-<secret>
+
+next:
+  1. start the server on this machine:
+       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
+  2. on your computer, open the claim link above with the Aether app, or paste it
+     into the app's Connect page; in a terminal:
+       aether link --claim <server id>-<secret>
 ```
 
 The claim link carries the **claim code**, `<server id>-<secret>`. Open

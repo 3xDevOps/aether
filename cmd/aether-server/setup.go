@@ -20,6 +20,36 @@ import (
 )
 
 func setup(args []string) error {
+	fs := flag.NewFlagSet("setup", flag.ExitOnError)
+	configPath := fs.String("config", serversetup.DefaultConfigPath, "options file to write")
+	unitPath := fs.String("unit", serversetup.UnitPath, "systemd unit file to write")
+	force := fs.Bool("force", false, "overwrite an existing config file")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return errors.New("setup asks questions and needs a terminal; use `aether-server install` with flags instead")
+	}
+	// Refuse before the questions rather than after them: nobody should
+	// answer six prompts only to be told the write needs sudo.
+	if err := requireRoot(); err != nil {
+		return err
+	}
+	values, sysbox, err := askSetup(*configPath)
+	if err != nil {
+		return err
+	}
+	if values == nil {
+		_, _ = fmt.Fprintln(os.Stdout, "nothing written")
+		return nil
+	}
+	return writeSetup(os.Stdout, *unitPath, *configPath, values, *force, sysbox)
+}
+
+// askSetup asks setup's questions, and whether to install Sysbox. A signal
+// at a prompt ends setup with nothing written; the handler ends with the
+// questions so that installSysbox can take Ctrl-C for itself.
+func askSetup(configPath string) (map[string]string, bool, error) {
 	// Notify overrides inherited ignored signals while a prompt is blocked.
 	signals := make(chan os.Signal, 1)
 	done := make(chan struct{})
@@ -41,43 +71,34 @@ func setup(args []string) error {
 		<-done
 	}()
 
-	fs := flag.NewFlagSet("setup", flag.ExitOnError)
-	configPath := fs.String("config", serversetup.DefaultConfigPath, "options file to write")
-	unitPath := fs.String("unit", serversetup.UnitPath, "systemd unit file to write")
-	force := fs.Bool("force", false, "overwrite an existing config file")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		return errors.New("setup asks questions and needs a terminal; use `aether-server install` with flags instead")
-	}
-	// Refuse before the questions rather than after them: nobody should
-	// answer six prompts only to be told the write needs sudo.
-	if err := requireRoot(); err != nil {
-		return err
-	}
 	_, tailscaled := os.Stat(reachability.DefaultTailscaledSocket)
 	p := newPrompter(os.Stdout, os.Stdin)
-	values, err := askServerOptions(p, *configPath, tailscaled == nil)
+	values, err := askServerOptions(p, configPath, tailscaled == nil)
+	if values == nil || err != nil {
+		return nil, false, err
+	}
+	return values, askSysbox(p), nil
+}
+
+// writeSetup issues the claim code after the slow Sysbox install, so the
+// code's 30 minutes start when the person can use it.
+func writeSetup(w io.Writer, unitPath, configPath string, values map[string]string, force, sysbox bool) error {
+	if err := writeAndReport(w, unitPath, configPath, values, force); err != nil {
+		return err
+	}
+	if sysbox {
+		_, _ = fmt.Fprintln(w)
+		installSysbox(w)
+	}
+	options, err := configuredOptions(configPath)
 	if err != nil {
 		return err
 	}
-	if values == nil {
-		_, _ = fmt.Fprintln(os.Stdout, "nothing written")
-		return nil
-	}
-	wantSysbox := askSysbox(p)
-	if err := writeAndReport(os.Stdout, *unitPath, *configPath, values, *force); err != nil {
+	claimCode, err := reportEdge(w, options)
+	if err != nil {
 		return err
 	}
-	if err := reportEdge(os.Stdout, *configPath); err != nil {
-		return err
-	}
-	if wantSysbox {
-		_, _ = fmt.Fprintln(os.Stdout)
-		installSysbox(os.Stdout)
-	}
-	return nil
+	return printNextSteps(w, configPath, options, claimCode)
 }
 
 // askSysbox offers Docker inside runs unless the daemon already has Sysbox.
@@ -90,32 +111,24 @@ func askSysbox(p *prompter) bool {
 }
 
 // reportEdge prints what a person needs to reach the server through the
-// edge the written config names: the server id, the pinned edge key, and
-// a claim code while the server has no owner. It
-// reads the config back because an existing file is kept without --force.
-func reportEdge(w io.Writer, configPath string) error {
-	values, err := serversetup.Load(configPath)
-	if err != nil {
-		return err
-	}
-	fs := serveFlagSet()
-	if _, err = serversetup.Apply(fs, values); err != nil {
-		return err
-	}
-	edgeURL := fs.Lookup("edge-url").Value.String()
+// edge the options name: the server id, the pinned edge key, and a claim
+// link while the server has no owner. It returns the claim code inside
+// that link, or "" when the edge is off or the server has an owner.
+func reportEdge(w io.Writer, options *flag.FlagSet) (string, error) {
+	edgeURL := options.Lookup("edge-url").Value.String()
 	if edgeURL == "" {
-		return nil
+		return "", nil
 	}
-	dataDir := fs.Lookup("data-dir").Value.String()
+	dataDir := options.Lookup("data-dir").Value.String()
 	id, err := serverID(dataDir)
 	if err != nil {
-		return err
+		return "", err
 	}
-	_, _ = fmt.Fprintf(w, "\nedge: %s\nedge access: %s\nserver id: %s\n", edgeURL, fs.Lookup("edge-access").Value, id)
+	_, _ = fmt.Fprintf(w, "\nedge: %s\nedge access: %s\nserver id: %s\n", edgeURL, options.Lookup("edge-access").Value, id)
 	state := edgeagent.OpenState(dataDir)
 	pinned, err := state.PinnedKey()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if pinned != nil {
 		_, _ = fmt.Fprintf(w, "edge key: %s\n", edgeproto.EdgeKeyFingerprint(pinned))
@@ -124,17 +137,20 @@ func reportEdge(w io.Writer, configPath string) error {
 	}
 	owner, err := state.Owner()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if owner != nil {
 		_, _ = fmt.Fprintf(w, "owner: %s\n", describeAccount(*owner))
-		return nil
+		return "", nil
 	}
 	code, expires, err := state.IssueClaimCode(id, "", time.Now())
 	if err != nil {
-		return err
+		return "", err
 	}
-	return printClaimCode(w, edgeURL, code, expires)
+	if err := printClaimLink(w, edgeURL, code, expires); err != nil {
+		return "", err
+	}
+	return code, nil
 }
 
 // askServerOptions walks the operator through the handful of options a

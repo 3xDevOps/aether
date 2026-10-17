@@ -3,8 +3,10 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"errors"
-	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,8 +14,6 @@ import (
 	"syscall"
 	"testing"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 func TestSetupCommandStopsAtConfirmationWithoutWriting(t *testing.T) {
@@ -43,25 +43,7 @@ func TestSetupCommandStopsAtConfirmationWithoutWriting(t *testing.T) {
 			unitPath := filepath.Join(dir, "aether-server.service")
 			dataPath := filepath.Join(dir, "data")
 
-			fd, err := unix.Open("/dev/ptmx", unix.O_RDWR|unix.O_NOCTTY|unix.O_CLOEXEC|unix.O_NONBLOCK, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			master := os.NewFile(uintptr(fd), "/dev/ptmx")
-			t.Cleanup(func() { _ = master.Close() })
-			ptn, err := unix.IoctlGetInt(fd, unix.TIOCGPTN)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = unix.IoctlSetPointerInt(fd, unix.TIOCSPTLCK, 0); err != nil {
-				t.Fatal(err)
-			}
-			slave, err := os.OpenFile(fmt.Sprintf("/dev/pts/%d", ptn), os.O_RDWR|unix.O_NOCTTY, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = slave.Close() })
-
+			master, slave := openPTY(t)
 			cmd := exec.Command("/bin/sh", "-c", "trap '' INT; exec \"$@\"", "setup-test",
 				os.Args[0], "-test.run=^TestSetupCommandStopsAtConfirmationWithoutWriting$")
 			cmd.Env = append(os.Environ(),
@@ -127,5 +109,29 @@ func TestSetupCommandStopsAtConfirmationWithoutWriting(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Ctrl-C during the Sysbox install stops only the installer: the files are
+// written by then, so setup still ends on how to start them.
+func TestSetupEndsOnNextStepsWhenSysboxIsInterrupted(t *testing.T) {
+	fakeSysbox(t, false, nil)
+	sysboxInstall = func(ctx context.Context, _ io.Writer) error {
+		if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+			return err
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	t.Setenv("SUDO_USER", "")
+	dir := t.TempDir()
+	var out bytes.Buffer
+	if err := writeSetup(&out, filepath.Join(dir, "aether-server.service"), filepath.Join(dir, "server.conf"),
+		map[string]string{"data-dir": filepath.Join(dir, "data")}, false, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Docker inside runs is not installed: context canceled\n") ||
+		!strings.HasSuffix(out.String(), "\n       aether link <this-host>:2222\n") {
+		t.Errorf("want the cancelled install reported and the next steps last:\n%s", out.String())
 	}
 }

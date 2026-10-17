@@ -48,9 +48,11 @@ echo "open it from your application menu as Aether"
 EOF
 
 # Stands in for the real binary. A completed setup writes the systemd unit,
-# which is what the installer checks afterwards. SETUP_FAILS is a setup that
-# errors; SETUP_DECLINES is the operator answering no to the summary, which
-# the real command reports by exiting 0 having written nothing.
+# which is what the installer checks afterwards, and ends on its next steps.
+# It usually writes within the installer's marker's file time, which counts
+# as written. SETUP_FAILS is a setup that errors;
+# SETUP_DECLINES is the operator answering no to the summary, which the real
+# command reports by exiting 0 having written nothing.
 cat >"$fixtures/aether-server" <<'EOF'
 #!/bin/sh
 printf 'aether-server %s\n' "$*" >>"$CMD_LOG"
@@ -59,8 +61,10 @@ if [ "${SETUP_DECLINES:-0}" = 1 ]; then
 	echo "nothing written"
 	exit 0
 fi
-: >"$AETHER_UNIT_PATH"
-echo "systemctl daemon-reload && systemctl enable --now aether-server"
+touch "$AETHER_UNIT_PATH"
+echo "next:"
+echo "  1. start the server on this machine:"
+echo "       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
 EOF
 
 # $fixtures/releases/<tag>/ holds what each tag publishes, $fixtures/latest
@@ -264,10 +268,10 @@ case "${1:-}" in
 esac
 EOF
 
-# Never root, so the server path always goes through sudo.
+# Not root unless STUB_UID says so, so the server path goes through sudo.
 cat >"$bin/id" <<'EOF'
 #!/bin/sh
-echo 1000
+echo "${STUB_UID:-1000}"
 EOF
 
 # Logs, then runs the command as a real root would. STUB_ROOT_DIR names the
@@ -378,22 +382,31 @@ not_printed() { ! grep -Fq "$1" "$out" || fail "should not be in output: $1"; }
 # Only the cases that redirect stderr separately can use this; everywhere else
 # stderr is folded into $out.
 no_stderr() { [ ! -s "$err" ] || fail "wrote to stderr"; }
+# Output that is not a terminal carries no color.
+plain() { ! grep -q "$(printf '\033')" "$out" || fail "escape codes in output that is not a terminal"; }
+activations() { grep -c "systemctl daemon-reload" "$out" || true; }
+ends_with() { [ "$(tail -n 1 "$out")" = "$1" ] || fail "last line is not: $1"; }
 
 question="What is this machine?"
 
-# Every run must end on the quickstart pointer.
+# Every run prints the quickstart pointer.
 quickstart="https://github.com/3xDevOps/Aether/blob/main/docs/quickstart.md"
 
 # --- --role server: aether-server setup runs -----------------------------
 
+# Setup's next steps hold the one activation line, and only the guide
+# follows them.
 reset "--role server"
 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether-server setup"
 not_ran "aether gui build"
 grep -q "^sudo .*aether-server setup$" "$log" || fail "setup did not go through sudo"
-printed "systemctl daemon-reload && systemctl enable --now aether-server"
-printed "This machine is your Aether server"
-printed "$quickstart"
+[ "$(activations)" = 1 ] || fail "printed the activation line $(activations) times, want once"
+[ "$(sed -n '/systemctl daemon-reload/,$p' "$out")" = "$(printf '%s\n\n%s' \
+	"       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server" \
+	"Read the quickstart before going further: $quickstart")" ] ||
+	fail "more than the guide follows setup's next steps"
+plain
 
 # --- a failing setup still lands on the docs, with the rerun command -----
 
@@ -401,8 +414,11 @@ reset "--role server, setup fails"
 SETUP_FAILS=1 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether-server setup"
 not_ran "aether gui build"
-printed "sudo aether-server setup"
+printed "This machine is your Aether server"
 printed "$quickstart"
+ends_with "  aether link <this-host>:2222   # from your own machine; the first link becomes admin"
+printed "  sudo aether-server setup       # config, systemd unit, and how to start it"
+plain
 
 # --- declining setup exits 0 but writes nothing: no activation line ------
 
@@ -410,15 +426,33 @@ reset "--role server, setup declined"
 SETUP_DECLINES=1 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether-server setup"
 printed "sudo aether-server setup"
-! grep -Fq "systemctl daemon-reload" "$out" || fail "offered to activate a service that was never written"
+[ "$(activations)" = 0 ] || fail "offered to activate a service that was never written"
 printed "$quickstart"
 
 # --- declining on a box that already has a unit: activating it is right --
+#
+# The installer's own next steps print it, once, with sudo for a user who
+# is not root and without it for root.
 
 reset "--role server, declined but a unit is already installed"
-: >"$AETHER_UNIT_PATH"
+touch -t 200001010000 "$AETHER_UNIT_PATH"
 SETUP_DECLINES=1 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
-printed "systemctl daemon-reload && systemctl enable --now aether-server"
+printed "  sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
+[ "$(activations)" = 1 ] || fail "printed the activation line $(activations) times, want once"
+ends_with "  aether link <this-host>:2222   # from your own machine; the first link becomes admin"
+
+reset "--role server as root, declined but a unit is already installed"
+touch -t 200001010000 "$AETHER_UNIT_PATH"
+SUDO_USER="" STUB_UID=0 SETUP_DECLINES=1 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
+! grep -q "^sudo .*aether-server setup$" "$log" || fail "root ran setup through sudo"
+printed "  systemctl daemon-reload && systemctl enable --now aether-server"
+not_printed "sudo systemctl"
+
+# Piped to `sudo sh`, the installer is root but the person is not.
+reset "--role server through sudo, declined but a unit is already installed"
+touch -t 200001010000 "$AETHER_UNIT_PATH"
+SUDO_USER=ubuntu STUB_UID=0 SETUP_DECLINES=1 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
+printed "  sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
 
 # --- --role client: aether gui build runs --------------------------------
 
@@ -427,8 +461,9 @@ sh "$script" --role client >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether gui build"
 not_ran "aether-server setup"
 printed "This machine is a client"
-printed "aether link <server-host>:2222"
 printed "$quickstart"
+ends_with "  aether link <server-host>:2222 # the first link on a fresh server becomes admin"
+plain
 
 # --- --role none: binaries only ------------------------------------------
 
@@ -438,6 +473,8 @@ not_ran "aether gui build"
 not_ran "aether-server setup"
 printed "Nothing else was set up on this machine"
 printed "$quickstart"
+ends_with "  aether link <server>:2222      # from a client; the first link becomes admin"
+plain
 
 # --- AETHER_ROLE=client is the same as --role client ---------------------
 

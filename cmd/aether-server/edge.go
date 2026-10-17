@@ -236,9 +236,10 @@ func edgeClaimCode(w io.Writer, dataDir, edgeURL string, admin domain.MemberID) 
 	if err != nil {
 		return err
 	}
-	if err := printClaimCode(w, edgeURL, code, expires); err != nil {
+	if err := printClaimLink(w, edgeURL, code, expires); err != nil {
 		return err
 	}
+	_, _ = fmt.Fprintf(w, "open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:\n  aether link --claim %s\n", code)
 	if m != nil {
 		_, _ = fmt.Fprintf(w, "the claim binds the claiming account to admin %s (%s) and approves the claiming device; it creates no member and changes no role\n",
 			m.DisplayName, m.ID)
@@ -304,13 +305,12 @@ func adminsOf(members []*domain.Member) string {
 	return strings.Join(admins, ", ")
 }
 
-func printClaimCode(w io.Writer, edgeURL, code string, expires time.Time) error {
+func printClaimLink(w io.Writer, edgeURL, code string, expires time.Time) error {
 	link, err := edgeproto.ClaimLink(edgeURL, code)
 	if err != nil {
 		return err
 	}
 	_, _ = fmt.Fprintf(w, "claim link: %s (valid until %s, %d attempts)\n", link, expires.Local().Format(time.Kitchen), edgeproto.ClaimCodeAttempts)
-	_, _ = fmt.Fprintf(w, "open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:\n  aether link --claim %s\n", code)
 	return nil
 }
 
