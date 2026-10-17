@@ -89,6 +89,11 @@ type Daemon struct {
 	fetch func(ctx context.Context) error
 	push  func(ctx context.Context) error
 
+	// executable and updatePoll let tests stand in for the running binary
+	// and its check interval.
+	executable func() (string, error)
+	updatePoll time.Duration
+
 	lastSeq    uint64 // event-stream resume cursor, touched only in runSession
 	lastPushed string // base tip last pushed, touched only in pushBase
 
@@ -162,6 +167,8 @@ func New(cfg Config) (*Daemon, error) {
 	}
 	d.fetch = d.fetchRuns
 	d.push = d.pushBase
+	d.executable = os.Executable
+	d.updatePoll = updatePoll
 	return d, nil
 }
 
@@ -169,74 +176,67 @@ func New(cfg Config) (*Daemon, error) {
 // exponential backoff plus jitter on any failure. The backoff resets only
 // after a session that was acknowledged and held for stableSession, so a
 // long-lived connection dropping reconnects promptly while an ack-then-
-// drop server still backs off. A server that refuses this client's
-// release ends the daemon once this executable is replaced: an update
-// fixes that, and a supervisor restarting the daemon sooner would only be
-// refused again. Until then the daemon asks again every upgradeRecheck,
+// drop server still backs off. Run also returns an error, in any state,
+// once this executable is replaced on disk: the service manager restarts
+// the daemon on a failure exit, so the new binary takes over. A server
+// that refuses this client's release is asked again every upgradeRecheck,
 // because a server that rolls back a trial release or is downgraded stops
 // refusing with no update here.
 func (d *Daemon) Run(ctx context.Context) error {
+	exe, err := d.executable()
+	if err != nil {
+		return fmt.Errorf("find this executable to watch for updates: %w", err)
+	}
+	image, err := os.Stat(exe)
+	if err != nil {
+		return fmt.Errorf("stat this executable to watch for updates: %w", err)
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	go watchReplaced(ctx, cancel, exe, image, d.updatePoll)
+
 	attempt := 0
-	var exe string
-	var refusedExe os.FileInfo
 	for {
 		started := time.Now()
 		subscribed, err := d.connectOnce(ctx)
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return context.Cause(ctx)
 		}
+		var delay time.Duration
 		if protocol.IsUpgradeRequired(err) {
 			slog.Error("syncd: refused; waiting for this executable to be updated", "error", err, "recheck", upgradeRecheck)
-			if refusedExe == nil {
-				var exeErr error
-				if exe, exeErr = os.Executable(); exeErr == nil {
-					refusedExe, exeErr = os.Stat(exe)
-				}
-				if exeErr != nil {
-					return fmt.Errorf("%w; find this executable to wait for its update: %w", err, exeErr)
-				}
-			}
-			replaced, waitErr := waitReplaced(ctx, exe, refusedExe, updatePoll, upgradeRecheck)
-			if waitErr != nil {
-				return waitErr
-			}
-			if replaced {
-				return fmt.Errorf("%w; %s changed, so exiting to run it", err, exe)
-			}
-			continue
+			delay = upgradeRecheck
+		} else {
+			attempt = nextAttempt(attempt, subscribed, time.Since(started))
+			delay = backoffDelay(attempt, rand.Float64())
+			slog.Warn("syncd: disconnected; reconnecting", "error", err, "delay", delay)
 		}
-		attempt = nextAttempt(attempt, subscribed, time.Since(started))
-		delay := backoffDelay(attempt, rand.Float64())
-		slog.Warn("syncd: disconnected; reconnecting", "error", err, "delay", delay)
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		}
 	}
 }
 
-// updatePoll is how often a refused daemon checks whether its executable
-// was replaced, and upgradeRecheck how often it asks the server again.
+// updatePoll is how often the daemon checks whether its executable was
+// replaced, and upgradeRecheck how often a refused daemon asks the server
+// again.
 const (
 	updatePoll     = 30 * time.Second
 	upgradeRecheck = 5 * time.Minute
 )
 
-// waitReplaced reports true once path names a file other than before, or
-// that file's size or modification time changes, and false once recheck
-// passes with neither. It returns ctx.Err() when ctx ends first.
-func waitReplaced(ctx context.Context, path string, before os.FileInfo, poll, recheck time.Duration) (bool, error) {
+// watchReplaced cancels ctx with an error once path names a file other than
+// before, or that file's size or modification time changes. It returns when
+// ctx ends.
+func watchReplaced(ctx context.Context, cancel context.CancelCauseFunc, path string, before os.FileInfo, poll time.Duration) {
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
-	deadline := time.NewTimer(recheck)
-	defer deadline.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			return false, ctx.Err()
-		case <-deadline.C:
-			return false, nil
+			return
 		case <-ticker.C:
 		}
 		now, err := os.Stat(path)
@@ -244,7 +244,8 @@ func waitReplaced(ctx context.Context, path string, before os.FileInfo, poll, re
 			continue
 		}
 		if !os.SameFile(before, now) || now.Size() != before.Size() || !now.ModTime().Equal(before.ModTime()) {
-			return true, nil
+			cancel(fmt.Errorf("%s was replaced; exiting so the service manager starts the new binary", path))
+			return
 		}
 	}
 }
@@ -278,13 +279,13 @@ func backoffDelay(attempt int, jitter float64) time.Duration {
 // connectOnce runs one full connect-subscribe-follow cycle; it returns
 // whether the subscription was acknowledged.
 func (d *Daemon) connectOnce(ctx context.Context) (subscribed bool, err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	client, stream, err := d.connect(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = client.Close() }()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	go keepalive(ctx, client)
 	return d.runSession(ctx, stream)
 }
@@ -310,6 +311,9 @@ func (d *Daemon) connect(ctx context.Context) (*ssh.Client, io.ReadWriteCloser, 
 	if err != nil {
 		return nil, nil, err
 	}
+	// NewSession and RequestSubsystem wait on the server and ignore ctx;
+	// closing the client on ctx ends makes them return.
+	context.AfterFunc(ctx, func() { _ = client.Close() })
 	sess, err := client.NewSession()
 	if err != nil {
 		_ = client.Close()
@@ -356,7 +360,10 @@ func (d *Daemon) dial(ctx context.Context) (*ssh.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", d.cfg.Server, err)
 	}
+	// ssh.NewClientConn ignores ctx; closing the conn makes it return.
+	stop := context.AfterFunc(ctx, func() { _ = nc.Close() })
 	cc, chans, reqs, err := ssh.NewClientConn(nc, d.cfg.Server, conf)
+	stop()
 	if err != nil {
 		_ = nc.Close()
 		return nil, auth.Explain(fmt.Errorf("ssh handshake with %s: %w", d.cfg.Server, err))

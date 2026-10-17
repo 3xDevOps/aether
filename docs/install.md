@@ -317,13 +317,20 @@ server, so re-run `aether link --repo` after `aether update`. A dashboard
 claim or join through an edge still moves the clone's `aether` remote onto
 the edge before it reports the refusal, because that is local git config.
 
-A refused sync daemon (`aether daemon run`) logs the refusal and waits,
-checking every 30 seconds whether its executable on disk changed. Once
-`aether update` replaces it, the daemon exits 1 and its systemd or
-launchd unit starts the new binary. Until then the unit does not restart
-it into the same refusal. Every 5 minutes the daemon reconnects, so a
-server that rolled back its update or was downgraded gets its sync back
-without a restart.
+A sync daemon (`aether daemon run`) checks every 30 seconds whether its
+executable on disk changed. Once `aether update` replaces it, the daemon
+exits 1 and its systemd, launchd or Windows task service starts the new
+binary. About 30 seconds is how long the daemon takes to notice and exit;
+the new binary then starts within seconds under systemd and launchd, and
+after one minute under the Windows task.
+A refused daemon logs the refusal and waits; its service is not restarted
+into the same refusal. Every 5 minutes it reconnects, so a server that
+rolled back its update or was downgraded gets its sync back without a
+restart.
+
+Daemons from `v0.7.0-alpha.11` and older do not do this. After updating to
+the next release, restart the service once: `systemctl --user restart
+aether-daemon` (macOS: `launchctl kickstart -k gui/$(id -u)/com.aether.daemon`).
 
 ### Verified releases
 
