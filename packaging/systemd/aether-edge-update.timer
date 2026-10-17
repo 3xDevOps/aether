@@ -1,0 +1,13 @@
+[Unit]
+Description=Aether edge automatic update window
+Documentation=https://github.com/3xDevOps/Aether/blob/main/docs/edge.md#automatic-updates
+
+[Timer]
+# The maintenance window: the run starts at a random point in the hour
+# after OnCalendar, and a window missed while the host was off runs at boot.
+OnCalendar=*-*-* 04:00:00 UTC
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

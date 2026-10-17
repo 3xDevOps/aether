@@ -1641,6 +1641,36 @@ migrated database with `edgestore: database schema version <n> is newer
 than this binary supports (<m>)`; to roll back, restore the backup taken
 before the upgrade.
 
+In a container, `aether-edge-update` performs these steps and rolls back
+on failure ([Automatic updates](#automatic-updates)). By hand, in the
+directory of the Compose file:
+
+```sh
+docker pull ghcr.io/3xdevops/aether-edge:<release-tag>        # prints Digest: sha256:<digest>
+docker run --rm ghcr.io/3xdevops/aether-edge@<running-digest> \
+  release-check --tag <release-tag> --digest sha256:<digest> --from <running-version>
+docker exec aether-edge aether-edge backup /var/lib/aether-edge/backups/pre-update-<release-tag>.db
+sed -i 's/^AETHER_EDGE_DIGEST=.*/AETHER_EDGE_DIGEST=sha256:<digest>/' .env
+docker compose up -d --wait --wait-timeout 180 aether-edge
+```
+
+`release-check` runs from the image you already trust. It exits 0 when
+the release's signed `aether-release.json` names that digest, 3 when the
+upgrade needs a manual step first (it prints the step), and 1 otherwise.
+To go back, stop the edge and ask the old image whether it can run the
+database:
+
+```sh
+docker compose stop aether-edge
+docker run --rm --network none --user 65532:65532 --volumes-from aether-edge \
+  ghcr.io/3xdevops/aether-edge@<old-digest> schema --json
+```
+
+When `supported` is below `compat_floor`, restore the backup with the same
+`docker run` and `restore /var/lib/aether-edge/backups/pre-update-<release-tag>.db`
+in place of `schema --json`. Then put the old digest in `.env` and run
+`docker compose up -d --wait aether-edge`.
+
 An edge, servers and clients built from the `v0.5.2-alpha.3` tag must all
 be replaced by this release together; a mix of that build and this one
 does not interoperate.
@@ -1649,6 +1679,196 @@ Every handshake carries a protocol version. The edge accepts any server or
 client at or above its minimum version, including newer ones, which speak
 down. An older one is refused with `upgrade required: <minimum>` (HTTP 426
 for clients). Protocol version 1 is the only version and the minimum.
+
+### Automatic updates
+
+`aether-edge-update` ([`scripts/edge-update.sh`](../scripts/edge-update.sh))
+updates an edge that runs in Docker Compose to the newest release on a
+channel, and rolls back when the new release fails its checks. A systemd
+timer runs it once a day. Each run:
+
+1. Takes the lock `/var/lib/aether-edge-update/lock`. When another run
+   holds it, logs `another run holds ...` and exits 0.
+2. Finishes or rolls back a run that a reboot interrupted
+   ([State files](#state-files)).
+3. Pulls `ghcr.io/3xdevops/aether-edge:<channel>` and reads its digest and
+   its `org.opencontainers.image.version` label. The running digest: exits
+   0. A digest in the `failed` list: logs `skipping <digest>, which failed
+   before` and exits 0. A version not newer than the running one: exits 1.
+4. Runs `aether-edge release-check` from the running image. It verifies
+   the release's signed `aether-release.json` with the release keys built
+   into that image and requires it to name this digest. An error exits 1.
+   A hold, a manual step the upgrade needs first, records the `held` state
+   and exits 3. Nothing has changed yet.
+5. Records the fingerprint `<relay>/v1/edge` serves and the claimed-server
+   count from `aether-edge healthcheck --ready --json`, then backs up the
+   database with `aether-edge backup` to
+   `/var/lib/aether-edge/backups/pre-update-<version>-<UTC time>.db` in the
+   data directory. If any of these fails, the run exits 1 before any
+   change.
+6. Writes the new digest to `.env` and runs `docker compose up -d --wait
+   --wait-timeout 180 aether-edge`.
+7. Checks the new edge: it reports the new version; `healthcheck --ready`
+   passes; `<relay>/v1/edge`, fetched through the proxy, serves the same
+   fingerprint, which fails when the edge lost `edge_key` or its data
+   mount; and the claimed servers return to the count before, less a
+   tolerance, within a time limit.
+8. When step 6 or 7 fails, rolls back: stops the new edge, runs
+   `aether-edge schema --json` from the old image against the data
+   directory, restores the backup only when the old release cannot run the
+   database (`supported` below `compat_floor`) or the schema is unreadable,
+   starts the old digest and repeats the checks. The new digest goes into
+   `failed`, and the run exits 1. When the rollback fails too, the state
+   becomes `broken`.
+
+It never downgrades and never runs a digest that a signed release does not
+name. Logs go to standard error, which the unit sends to the journal:
+`journalctl -u aether-edge-update`.
+
+#### Installing the updater
+
+The updater needs Docker with the Compose plugin, `curl` and `flock`
+(util-linux) on the host, and the edge running from
+[`packaging/edge/compose.yaml`](../packaging/edge/compose.yaml) in
+`/opt/aether-edge`. That file runs the image pinned by digest, with
+`pull_policy: never` so that neither a reboot nor `docker compose up` moves
+it, `restart: unless-stopped`, a 30-second stop grace period, a read-only
+root filesystem, `./data` as the data directory and `./github-client-secret`
+as the client secret ([In a container](#in-a-container)). Traefik on the
+external network `proxy` routes both host names to port 8443; give Traefik
+a fixed address on that network and put it in
+`AETHER_EDGE_TRUSTED_PROXIES`. Traefik replaces a client's
+`X-Forwarded-For` unless its entry point trusts that client's address
+(`forwardedHeaders.trustedIPs` or `forwardedHeaders.insecure`); keep both
+unset on the entry point the edge uses.
+
+```sh
+src=https://raw.githubusercontent.com/3xDevOps/Aether/<release-tag>
+sudo install -d -m 0755 /opt/aether-edge
+sudo install -d -m 0700 -o 65532 -g 65532 /opt/aether-edge/data
+sudo curl -fsSL -o /opt/aether-edge/compose.yaml "$src/packaging/edge/compose.yaml"
+sudoedit /opt/aether-edge/compose.yaml
+sudo sh -c 'umask 077 && cat > /opt/aether-edge/github-client-secret'   # paste, then Ctrl-D
+sudo chown 65532 /opt/aether-edge/github-client-secret
+sudo chmod 0400 /opt/aether-edge/github-client-secret
+
+docker pull ghcr.io/3xdevops/aether-edge:stable                        # prints Digest: sha256:<digest>
+echo 'AETHER_EDGE_DIGEST=sha256:<digest>' | sudo tee /opt/aether-edge/.env
+(cd /opt/aether-edge && sudo docker compose up -d --wait aether-edge)
+
+sudo curl -fsSL -o /usr/local/sbin/aether-edge-update "$src/scripts/edge-update.sh"
+sudo chmod 0755 /usr/local/sbin/aether-edge-update
+sudo curl -fsSL -o /etc/aether-edge-update.env "$src/packaging/edge/aether-edge-update.env.example"
+sudoedit /etc/aether-edge-update.env
+sudo curl -fsSL -o /etc/systemd/system/aether-edge-update.service "$src/packaging/systemd/aether-edge-update.service"
+sudo curl -fsSL -o /etc/systemd/system/aether-edge-update.timer "$src/packaging/systemd/aether-edge-update.timer"
+sudo aether-edge-update --check
+sudo systemctl daemon-reload
+sudo systemctl enable --now aether-edge-update.timer
+systemctl list-timers aether-edge-update.timer
+```
+
+`--check` resolves and verifies the channel's release, prints `would
+update <version> (<digest>) to <version> (<digest>)`, and changes nothing.
+`.env` holds `AETHER_EDGE_DIGEST` and is rewritten by the updater; other
+lines in it are kept.
+
+The timer's window is `OnCalendar=*-*-* 04:00:00 UTC` with
+`RandomizedDelaySec=1h`; `Persistent=true` runs a window the host missed
+while it was off at the next boot. Change it with `sudo systemctl edit
+aether-edge-update.timer`; an `OnCalendar=` drop-in starts with an empty
+`OnCalendar=` line to replace the packaged one.
+
+To be told about failures, holds and rollbacks, add `OnFailure=` to the
+service; it runs on every non-zero exit. For example, a unit that posts the
+last log lines to a webhook:
+
+```ini
+# /etc/systemd/system/edge-alert@.service
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'journalctl -u %i -n 50 --no-pager | curl -fsS --data-binary @- <webhook-url>'
+```
+
+```sh
+sudo systemctl edit aether-edge-update.service   # add: [Unit] OnFailure=edge-alert@%n.service
+```
+
+#### Updater configuration
+
+`aether-edge-update` reads `/etc/aether-edge-update.env` on every run
+(`AETHER_EDGE_UPDATE_CONFIG` names another file), so a run by hand uses the
+same settings as the timer
+([`packaging/edge/aether-edge-update.env.example`](../packaging/edge/aether-edge-update.env.example)).
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AETHER_EDGE_UPDATE_RELAY_URL` | required | The relay origin, such as `https://edge.example.com` |
+| `AETHER_EDGE_UPDATE_CHANNEL` | `stable` | The image tag to follow; `--channel <tag>` overrides it for one run. `latest` takes every release, pre-releases included |
+| `AETHER_EDGE_UPDATE_COMPOSE_DIR` | `/opt/aether-edge` | The directory of `compose.yaml` |
+| `AETHER_EDGE_UPDATE_DIGEST_FILE` | `<compose dir>/.env` | The file holding `AETHER_EDGE_DIGEST` |
+| `AETHER_EDGE_UPDATE_STATE` | `/var/lib/aether-edge-update` | The state directory, mode 0700 |
+| `AETHER_EDGE_UPDATE_SERVER_WAIT` | `120` | Seconds the claimed servers have to reconnect |
+| `AETHER_EDGE_UPDATE_SERVER_TOLERANCE` | `0` | Claimed servers that may stay away, for servers that go offline on their own |
+
+#### State files
+
+In `/var/lib/aether-edge-update`:
+
+| File | Holds |
+| --- | --- |
+| `state` | `state=` `idle`, `switching` (between the backup and passing checks), `rolling-back`, `held` or `broken`, with the two releases, the fingerprint, the server count, the backup and the reason |
+| `current` | The digest and version the last update installed |
+| `previous` | The digest, version and pre-update backup of the release before it, for `--rollback` |
+| `failed` | One line per digest never to install again: digest, version, reason |
+| `from.json`, `to.json` | `aether-edge version --json` of the two images of the last update |
+
+A run that finds `switching` runs the new release and its checks again,
+then keeps it or rolls back. A run that finds `rolling-back` repeats the
+rollback.
+
+**`held`**: the release needs a manual step. Read the step in the journal,
+the `aether-edge: hold: <reason>` lines `release-check` printed. Each run
+holds again and exits 3 until you take it. Then:
+
+```sh
+sudo aether-edge-update --manual-steps-done
+```
+
+That run treats the hold as passed and keeps every other check.
+
+**`broken`**: the rollback failed, and every run exits 1 with `state is
+broken since <time>: <reason>` and changes nothing. Read the reason in
+`state` and the journal, then run the edge on a release you trust: put
+its digest in `.env`, restore a backup first if `schema --json` asks for
+it ([Upgrades](#upgrades)), and run `docker compose up -d --wait
+aether-edge`. Then delete the state so that the next run starts over:
+
+```sh
+sudo rm /var/lib/aether-edge-update/state
+```
+
+**A digest in `failed`** is skipped on every run. Delete its line to try it
+again.
+
+#### Rolling back by hand
+
+```sh
+sudo aether-edge-update --rollback
+```
+
+This returns to the digest in `previous`. It backs up the database to
+`pre-rollback-<version>-<UTC time>.db`, stops the edge, restores the
+pre-update backup in `previous` only when the older release cannot run
+the database, starts the older digest and runs the same checks. A restore
+loses every change since the update, such as sign-ins and new device
+tokens. The digest it left goes into `failed`, so the timer does not
+install it again, and `previous` is removed. When a check fails, it
+returns to the release it started from.
+
+Backups stay in `data/backups/` until you delete them. They hold the
+accounts and device-token hashes but not `edge_key`; keep them as private
+as the data directory.
 
 ### Operator commands
 

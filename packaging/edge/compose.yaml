@@ -1,0 +1,49 @@
+# The edge in Docker Compose behind Traefik, updated by
+# scripts/edge-update.sh: docs/edge.md, "Automatic updates". Replace every
+# <...> value; example.com names are placeholders too.
+#
+# The image is pinned by digest. AETHER_EDGE_DIGEST comes from .env beside
+# this file, which only the updater writes, and pull_policy: never keeps a
+# reboot or a `docker compose up` on that digest.
+services:
+  aether-edge:
+    image: ghcr.io/3xdevops/aether-edge@${AETHER_EDGE_DIGEST:?set AETHER_EDGE_DIGEST=sha256:<digest> in .env}
+    container_name: aether-edge
+    pull_policy: never
+    restart: unless-stopped
+    # SIGTERM drains every server; Docker's default 10 seconds is too short.
+    stop_grace_period: 30s
+    read_only: true
+    environment:
+      AETHER_EDGE_SIGNIN_ORIGIN: https://auth.example.com
+      AETHER_EDGE_RELAY_ORIGIN: https://edge.example.com
+      AETHER_EDGE_PROXY_LISTEN: ":8443"
+      # Traefik's own fixed address on the proxy network, never its subnet.
+      AETHER_EDGE_TRUSTED_PROXIES: <traefik-address>/32
+      AETHER_EDGE_EGRESS_BUDGET: "0"
+      AETHER_EDGE_GITHUB_CLIENT_ID: <github-client-id>
+      AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE: /run/secrets/github-client-secret
+    secrets:
+      - github-client-secret
+    volumes:
+      # edge_key and edge.db; owned by uid 65532, mode 0700.
+      - ./data:/var/lib/aether-edge
+    networks:
+      - proxy
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: proxy
+      traefik.http.routers.aether-edge.rule: Host(`auth.example.com`) || Host(`edge.example.com`)
+      traefik.http.routers.aether-edge.entrypoints: websecure
+      traefik.http.routers.aether-edge.tls.certresolver: <certresolver>
+      traefik.http.services.aether-edge.loadbalancer.server.port: "8443"
+
+secrets:
+  # Readable by uid 65532 only: chown 65532 github-client-secret && chmod 0400 github-client-secret
+  github-client-secret:
+    file: ./github-client-secret
+
+networks:
+  # Shared with Traefik, which has a fixed address on it.
+  proxy:
+    external: true

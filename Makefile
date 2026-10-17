@@ -227,6 +227,7 @@ test-scripts:
 	sh scripts/ci-classify-edge-test.sh
 	sh scripts/edge-go-version-test.sh
 	sh scripts/edge-nginx-test.sh
+	sh scripts/edge-update-test.sh
 
 # Native adapter lifecycle regressions use Node 22.13+ built-ins only.
 test-native-hooks:
