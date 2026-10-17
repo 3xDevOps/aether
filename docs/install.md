@@ -258,6 +258,18 @@ with the command that updates that one:
 warning: aether in PATH is /home/ada/.local/bin/aether, a different binary; update it with: /home/ada/.local/bin/aether update
 ```
 
+After an update, `journalctl -u aether-server` and `systemctl status
+aether-server` warn when the installed unit (`/etc/systemd/system/aether-server.service`)
+differs from the one the release ships. The warning names the command that
+applies it, which rewrites only the unit and keeps `/etc/aether/server.conf`:
+
+```
+sudo aether-server install --sysbox=false && sudo systemctl daemon-reload && sudo systemctl restart aether-server
+```
+
+Put local changes in a drop-in (`sudo systemctl edit aether-server`), not in
+the unit file, or the warning repeats.
+
 Re-running either installer upgrades the client without changing its data.
 On Windows, close Aether first and rerun `install.ps1`; the default also
 rebuilds the desktop app. `aether update` still refuses on Windows.
