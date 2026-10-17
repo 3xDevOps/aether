@@ -296,8 +296,12 @@ in that time fails the command with the unit's state.
 **On a client**, `aether update` replaces the running CLI with the latest release only if it
 is newer (or installs `--version <tag>`), verifying it against the release's
 signed manifest ([Verified releases](#verified-releases)). On Linux, an
-`aether-server` beside the CLI is updated too, but not restarted: use
-`sudo aether-server update` on a server host. The command never asks
+`aether-server` beside the CLI is updated too, but not restarted; restart it
+yourself (`sudo systemctl restart aether-server` under a unit). On a host
+where the `aether-server` systemd unit runs as root, `sudo aether update`
+instead runs `sudo aether-server update [--version <tag>]`, which swaps,
+restarts and rolls back the server; `--no-app` and `--force` do not apply
+there. The command never asks
 for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
 a stock install, is refused before anything is downloaded. The refusal names
 the probe file it could not create (the number varies) and ends with the
@@ -573,8 +577,9 @@ when you deliberately choose another binary. If the recorded CLI is moved or
 deleted, set `AETHER_BIN` or rebuild the app with the installed CLI instead of
 silently falling back to a different copy.
 
-A machine with no app installed builds nothing and downloads nothing, so a
-server box never sees this step. If the app is running when the rebuild
+A machine with no app installed builds nothing and downloads nothing. A
+server host with a systemd unit skips this step: `aether update` prints the
+rebuild command instead. If the app is running when the rebuild
 finishes, the command says to restart it. A rebuild that fails prints the
 build's own error and the command to rerun, and exits non-zero - but the CLI
 update itself already succeeded, and the message says so.
