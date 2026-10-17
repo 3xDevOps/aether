@@ -219,15 +219,17 @@ chooses it, for `aether-windows-<arch>.exe`, with these differences. PowerShell
 has no ed25519 verifier, so the script does not check
 `aether-release.json.sig`. It says so, and checks the binary's SHA-256 and
 size against `checksums.txt` and `aether-release.json`. It refuses an
-`AETHER_BASE_URL` that is not `https`. And once a release
-ships any prebuilt `aether-desktop-windows-<arch>.zip`, a client install also
-needs this architecture's zip listed there; `-Role none` does not.
+`AETHER_BASE_URL` that is not `https`.
 
 Downloads use `%SystemRoot%\System32\curl.exe` (Windows 10 1803 and later)
 and fall back to `Invoke-WebRequest` when it is missing or gets no HTTP
-answer, for example behind a proxy only Windows' own settings name. If the
-installed CLI already has the release's SHA-256, it is neither downloaded
-nor replaced. The output is a numbered list of steps:
+answer, for example behind a proxy only Windows' own settings name. curl.exe
+runs with `-q`, so a `.curlrc` or `_curlrc` cannot turn off its TLS checks or
+set a proxy. A connection that takes over 15 seconds, or a download that stays
+below 1 KB/s for 60 seconds, is abandoned. If the installed CLI already has
+the release's SHA-256, it is neither downloaded nor replaced. The old version
+in `old -> new` is read from the installed `aether.exe`'s file properties,
+without running it. The output is a numbered list of steps:
 
 ```
 aether install: windows/amd64, CLI and desktop app
@@ -260,9 +262,10 @@ and `installing`, and the last line says `installed` rather than
 `built and installed`. The build's own output goes to
 `%LOCALAPPDATA%\aether\install-desktop.log`; if the step fails, the
 installer prints the log's last 20 lines and the `gui build` command to
-rerun. An error is printed once on stderr and the script exits 1; when the
-script is dot-sourced, the error is thrown to the caller instead. When Smart
-App Control is on, a warning line says it may block the unsigned binaries.
+rerun. An error is printed once on stderr and the script exits 1, whether it
+is run with `-File`, `&` or dot-sourced; the calling shell keeps running and
+`$LASTEXITCODE` is 1. Content run through `Invoke-Expression` has no script
+to exit, so there the error is thrown to the caller.
 
 Only the current user's `PATH` is updated, without duplicating the install
 directory or removing other entries. Expandable entries such as `%SystemRoot%`
@@ -287,10 +290,15 @@ For a fresh desktop installation, run the default command above. To reinstall
 or upgrade, close Aether and rerun it, retaining `-BinDir` if you selected a
 custom CLI location. Downloads and checksum failures leave the installed
 binary alone. If `aether.exe` or `aether-desktop.exe` is running from the
-install directories, the installer lists each process with its pid, prints
-the `Stop-Process -Id <pids>` and rerun commands, and changes nothing; any
-other refusal to replace the CLI reports the Windows error the same way. A
-desktop-step failure keeps the installed CLI and returns failure.
+install directories, or Windows reports `aether.exe` as locked, the installer
+lists each running process with its pid, prints the `Stop-Process -Id <pids>`
+and rerun commands, and changes nothing. When the sync daemon's Scheduled
+Task `aether-daemon` exists, it also prints `schtasks /End /TN aether-daemon`:
+the task restarts a daemon killed by `Stop-Process` within a minute. The
+daemon starts again at the next sign-in, or at once with
+`schtasks /Run /TN aether-daemon`. Any other failure to replace the CLI
+reports the Windows error alone. A desktop-step failure keeps the installed
+CLI and returns failure.
 Configuration and SSH files are untouched.
 
 The installer does not request administrator access, change execution policy,
@@ -1065,6 +1073,7 @@ policy before deciding what happened; these are not interchangeable systems.
 | Browser download blocked or flagged | Edge uses Microsoft Defender SmartScreen; Chrome uses Google Safe Browsing, and other security tools may also intervene | Browser's exact warning and download details; follow organization policy |
 | "Windows protected your PC" on launch | Windows SmartScreen reputation check | Named application and publisher, signature details, and organization policy |
 | File disappears or "virus detected" | Microsoft Defender antivirus or another antivirus product | Protection History/security product report, detection name, and affected path |
+| "Smart App Control blocked an app that may be unsafe", or the CLI fails with "An Application Control policy has blocked this file" | Smart App Control, which runs only signed apps or apps Microsoft's cloud already trusts | **Windows Security > App & browser control > Smart App Control**. The installer cannot and will not bypass it; signed releases are the fix |
 
 Do not disable protection, add exclusions, or restore/run a quarantined file
 to work around a warning. A matching checksum establishes download integrity,

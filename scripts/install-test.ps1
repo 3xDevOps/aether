@@ -144,6 +144,12 @@ function Start-AetherFixtureServer {
                 $relative = $context.Request.Url.AbsolutePath.Trim('/')
                 Add-Content -LiteralPath $RequestLog -Value $relative
                 $response = $context.Response
+                $agentFile = Join-Path $Root 'only-agent.txt'
+                if ((Test-Path -LiteralPath $agentFile -PathType Leaf) -and
+                    -not ([string]$context.Request.UserAgent).StartsWith([IO.File]::ReadAllText($agentFile))) {
+                    $response.Abort()
+                    continue
+                }
                 $response.StatusCode = 404
                 $body = $null
                 $latestFile = Join-Path $Root 'latest.txt'
@@ -222,8 +228,7 @@ function Write-AetherRelease {
         [Parameter(Mandatory = $true)][string] $ArmPayload,
         [bool] $BadAmdChecksum = $false,
         [string] $ManifestVersion = $Tag,
-        [string[]] $Omit = @(),
-        [string[]] $DesktopZips = @()
+        [string[]] $Omit = @()
     )
     $dir = Join-Path $ReleaseRoot $Tag
     if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
@@ -237,14 +242,6 @@ function Write-AetherRelease {
     if ($BadAmdChecksum) { $amdHash = ('0' * 64) }
     $lines = @(('{0}  aether-windows-amd64.exe' -f $amdHash))
     $lines += ('{0}  aether-windows-arm64.exe' -f $armHash)
-    $zipEntries = [ordered]@{}
-    foreach ($zip in $DesktopZips) {
-        $zipPath = Join-Path $dir $zip
-        [IO.File]::WriteAllText($zipPath, 'desktop ' + $zip)
-        $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        $lines += ('{0}  {1}' -f $zipHash, $zip)
-        $zipEntries[$zip] = [ordered]@{ sha256 = $zipHash; size = (Get-Item -LiteralPath $zipPath).Length }
-    }
     [IO.File]::WriteAllText((Join-Path $dir 'checksums.txt'), (($lines -join "`r`n") + "`r`n"))
     $manifest = [ordered]@{
         schema = 1
@@ -258,7 +255,6 @@ function Write-AetherRelease {
             'aether-windows-arm64.exe' = [ordered]@{ sha256 = $armHash; size = (Get-Item -LiteralPath $armPath).Length }
         }
     }
-    foreach ($zip in $zipEntries.Keys) { $manifest.assets[$zip] = $zipEntries[$zip] }
     [IO.File]::WriteAllText((Join-Path $dir 'aether-release.json'), (ConvertTo-Json -InputObject $manifest -Depth 5))
     [IO.File]::WriteAllText((Join-Path $dir 'aether-release.json.sig'), 'dW52ZXJpZmllZA==')
     foreach ($name in $Omit) {
@@ -365,18 +361,13 @@ import (
 )
 
 func main() {
-    args := strings.Join(os.Args[1:], " ")
-    if args == "version" {
-        fmt.Println("aether v0.0.0-fixture (none)")
-        return
-    }
-    if args != "gui build --json" {
-        fmt.Fprintln(os.Stderr, "unsupported fixture command")
-        os.Exit(64)
-    }
     logPath := os.Getenv("AETHER_FIXTURE_LOG")
     if logPath != "" {
         _ = os.WriteFile(logPath, []byte("invoked"), 0644)
+    }
+    if strings.Join(os.Args[1:], " ") != "gui build --json" {
+        fmt.Fprintln(os.Stderr, "unsupported fixture command")
+        os.Exit(64)
     }
     for i := 1; i <= 25; i++ {
         fmt.Fprintf(os.Stderr, "fixture build output %d\n", i)
@@ -574,42 +565,44 @@ func main() {
     Assert-AetherTest (Test-Path -LiteralPath (Join-Path $noneBin 'aether.exe') -PathType Leaf) 'CLI-only install did not install the CLI'
     Assert-AetherTest (-not (Test-Path -LiteralPath $noneLog)) 'CLI-only opt out invoked GUI build'
 
-    # A desktop failure is nonzero, leaves the newly installed CLI, and restores
-    # AETHER_BIN even when the installer is dot-sourced by an interactive host.
+    # A desktop failure leaves the newly installed CLI and restores AETHER_BIN.
+    # Run with & or dot-sourced, the installer prints the error once, ends
+    # with exit 1 and returns to its caller.
     $failureCase = Join-Path $root 'failure-case'
     $failureBin = Join-Path $failureCase 'bin'
     New-Item -ItemType Directory -Path $failureBin -Force | Out-Null
     $failureLog = Join-Path $root 'failure.log'
     $restoreResult = Join-Path $root 'restored-aether-bin.txt'
-    $wrapper = Join-Path $root 'dot-source-wrapper.ps1'
     $installerLiteral = $installer.Replace("'", "''")
     $failureCaseLiteral = $failureCase.Replace("'", "''")
     $restoreLiteral = $restoreResult.Replace("'", "''")
-    $wrapperSource = @"
+    Write-AetherRelease $releaseRoot $version $fixture $fixture
+    foreach ($operator in @('&', '.')) {
+        $wrapper = Join-Path $root 'caller-wrapper.ps1'
+        $wrapperSource = @"
 `$env:AETHER_BIN = 'caller-sentinel'
 Set-Location -LiteralPath '$failureCaseLiteral'
-try {
-    . '$installerLiteral' -Version '$version' -Role client -BinDir '.\bin'
-}
-catch {
-    [IO.File]::WriteAllText('$restoreLiteral', [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process'))
-    throw
-}
+$operator '$installerLiteral' -Version '$version' -Role client -BinDir '.\bin'
 [IO.File]::WriteAllText('$restoreLiteral', [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process'))
+'caller continued: ' + `$LASTEXITCODE
+exit `$LASTEXITCODE
 "@
-    [IO.File]::WriteAllText($wrapper, $wrapperSource)
-    Write-AetherRelease $releaseRoot $version $fixture $fixture
-    $result = Invoke-AetherPowerShellFile $wrapper @() @{
-        AETHER_BASE_URL = $baseUrl
-        AETHER_FIXTURE_LOG = $failureLog
-        AETHER_GUI_FAIL = '1'
+        [IO.File]::WriteAllText($wrapper, $wrapperSource)
+        Remove-Item -LiteralPath $restoreResult -Force -ErrorAction SilentlyContinue
+        $result = Invoke-AetherPowerShellFile $wrapper @() @{
+            AETHER_BASE_URL = $baseUrl
+            AETHER_FIXTURE_LOG = $failureLog
+            AETHER_GUI_FAIL = '1'
+        }
+        Assert-AetherEqual 1 $result.ExitCode ("desktop failure under {0} did not exit 1: {1}" -f $operator, $result.Output)
+        Assert-AetherTest ($result.Stdout.Contains('caller continued: 1')) ("installer under {0} did not return to its caller: {1}" -f $operator, $result.Output)
+        Assert-AetherTest ($result.Stderr.Contains('aether install: error: the desktop app was not installed: fixture desktop failure')) ("desktop failure was not reported: " + $result.Output)
+        Assert-AetherEqual 1 ([regex]::Matches($result.Stderr, 'fixture desktop failure').Count) ("desktop failure under {0} printed the error more than once: {1}" -f $operator, $result.Stderr)
+        $failureDesktopLog = Join-Path $env:LOCALAPPDATA 'aether\install-desktop.log'
+        Assert-AetherTest ($result.Stderr.Contains(('last 20 lines of {0}:' -f $failureDesktopLog)) -and $result.Stderr.Contains('  fixture build output 25') -and -not $result.Stderr.Contains('fixture build output 5' + [Environment]::NewLine)) ("desktop failure did not print the log tail: " + $result.Output)
+        Assert-AetherTest (Test-Path -LiteralPath (Join-Path $failureBin 'aether.exe') -PathType Leaf) 'desktop failure lost the installed CLI'
+        Assert-AetherEqual 'caller-sentinel' ([IO.File]::ReadAllText($restoreResult)) ("installer under {0} did not restore AETHER_BIN" -f $operator)
     }
-    Assert-AetherTest ($result.ExitCode -ne 0) 'desktop failure was reported as success'
-    Assert-AetherTest ($result.Stderr.Contains('aether install: error: the desktop app was not installed: fixture desktop failure')) ("desktop failure was not reported: " + $result.Output)
-    $failureDesktopLog = Join-Path $env:LOCALAPPDATA 'aether\install-desktop.log'
-    Assert-AetherTest ($result.Stderr.Contains(('last 20 lines of {0}:' -f $failureDesktopLog)) -and $result.Stderr.Contains('  fixture build output 25') -and -not $result.Stderr.Contains('fixture build output 5' + [Environment]::NewLine)) ("desktop failure did not print the log tail: " + $result.Output)
-    Assert-AetherTest (Test-Path -LiteralPath (Join-Path $failureBin 'aether.exe') -PathType Leaf) 'desktop failure lost the installed CLI'
-    Assert-AetherEqual 'caller-sentinel' ([IO.File]::ReadAllText($restoreResult)) 'dot-sourced installer did not restore AETHER_BIN'
 
     # Old client releases are rejected before download/install/build mutation;
     # role none remains the deliberate escape hatch for an old CLI.
@@ -648,32 +641,6 @@ catch {
         Assert-AetherTest (Get-AetherTestBytesEqual $fixture (Join-Path $supportedBin 'aether.exe')) 'supported release did not install the CLI'
         Assert-AetherTest (Test-Path -LiteralPath $supportedLog -PathType Leaf) 'supported release did not invoke GUI build'
     }
-
-    # Once a release ships any prebuilt desktop zip, a client install needs
-    # this architecture's zip listed; a CLI-only install does not.
-    $zipBin = Join-Path $root 'zip-bin'
-    New-Item -ItemType Directory -Path $zipBin -Force | Out-Null
-    $zipCli = Join-Path $zipBin 'aether.exe'
-    [IO.File]::WriteAllText($zipCli, 'old zip CLI')
-    Write-AetherRelease $releaseRoot 'v0.7.0-alpha.20' $fixture $fixture -DesktopZips @('aether-desktop-windows-arm64.zip')
-    Write-AetherRelease $releaseRoot 'v0.7.0-alpha.19' $fixture $fixture -DesktopZips @('aether-desktop-windows-amd64.zip', 'aether-desktop-windows-arm64.zip')
-    $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.7.0-alpha.20', '-Role', 'client', '-BinDir', $zipBin) @{ AETHER_BASE_URL = $baseUrl }
-    Assert-AetherTest ($result.ExitCode -ne 0) 'a client install without its desktop zip succeeded'
-    Assert-AetherTest ($result.Stderr.Contains('v0.7.0-alpha.20 is incomplete (checksums.txt does not list aether-desktop-windows-amd64.zip)')) ("missing desktop zip was not reported: " + $result.Output)
-    Assert-AetherEqual 'old zip CLI' ([IO.File]::ReadAllText($zipCli)) 'missing desktop zip replaced the CLI'
-    $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.7.0-alpha.20', '-Role', 'none', '-BinDir', $zipBin) @{ AETHER_BASE_URL = $baseUrl }
-    Assert-AetherEqual 0 $result.ExitCode ("CLI-only install of a release without this desktop zip failed: " + $result.Output)
-    [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.7.0-alpha.21')
-    Write-AetherApi $releaseRoot -Tags @('v0.7.0-alpha.21', 'v0.7.0-alpha.20', 'v0.7.0-alpha.19')
-    [IO.File]::WriteAllText($requestLog, '')
-    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'client', '-BinDir', $zipBin) @{
-        AETHER_BASE_URL = $baseUrl
-        AETHER_LATEST_URL = ($baseUrl + '/latest')
-        AETHER_API_URL = ($baseUrl + '/api')
-    }
-    Assert-AetherEqual 0 $result.ExitCode ("fallback to a release with this desktop zip failed: " + $result.Output)
-    Assert-AetherTest ($result.Stdout.Contains('installing v0.7.0-alpha.19, the newest complete release')) ("fallback skipped to the wrong release: " + $result.Output)
-    Assert-AetherTest (@([IO.File]::ReadAllLines($requestLog) | Where-Object { $_.StartsWith('v0.7.0-alpha.20/') }).Count -eq 0) 'fallback probed a release without this desktop zip'
 
     # Simulate 32-bit PowerShell on a 64-bit ARM host.  The native override is
     # authoritative and only the arm64 asset may be requested/installed.
@@ -757,13 +724,18 @@ catch {
     $requests = @([IO.File]::ReadAllLines($requestLog))
     Assert-AetherTest (@($requests | Where-Object { -not $_.StartsWith('v0.7.0-alpha.9/') }).Count -eq 0) ("pinned release requested other paths: " + ($requests -join ', '))
 
-    # An upgrade names the version it replaces.
+    # The old CLI's version comes from its VERSIONINFO, never from running
+    # it; without one, the upgrade names only the new version.
     $upgradeBin = Join-Path $root 'upgrade-bin'
+    $upgradeLog = Join-Path $root 'upgrade.log'
     New-Item -ItemType Directory -Path $upgradeBin -Force | Out-Null
     Copy-Item -LiteralPath $fixture -Destination (Join-Path $upgradeBin 'aether.exe')
-    $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.7.0-alpha.9', '-Role', 'none', '-BinDir', $upgradeBin) $selectEnv
+    $upgradeEnv = $selectEnv.Clone()
+    $upgradeEnv.AETHER_FIXTURE_LOG = $upgradeLog
+    $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.7.0-alpha.9', '-Role', 'none', '-BinDir', $upgradeBin) $upgradeEnv
     Assert-AetherEqual 0 $result.ExitCode ("upgrade failed: " + $result.Output)
-    Assert-AetherTest ($result.Stdout.Contains('[2/2] installing the CLI: v0.0.0-fixture -> v0.7.0-alpha.9')) ("upgrade did not name both versions: " + $result.Output)
+    Assert-AetherTest ($result.Stdout.Contains('[2/2] installing the CLI v0.7.0-alpha.9')) ("upgrade without VERSIONINFO named an old version: " + $result.Output)
+    Assert-AetherTest (-not (Test-Path -LiteralPath $upgradeLog)) 'upgrade executed the old CLI'
 
     # A release from before v0.7.0-alpha.12 has neither manifest file; pinned
     # or latest, it installs on checksums.txt alone and says so.
@@ -861,18 +833,29 @@ catch {
     Assert-AetherTest ($result.Stderr.Contains('no complete release for windows/amd64')) ("too-old fallback was not skipped: " + $result.Output)
     Assert-AetherTest (-not $result.Output.Contains('too old')) ("too-old fallback threw instead of skipping: " + $result.Output)
 
-    # When curl.exe gets no HTTP answer (here a .curlrc names a dead proxy),
-    # Invoke-WebRequest resolves and downloads the release instead.
+    # curl.exe ignores .curlrc: with one naming a dead proxy and the server
+    # dropping every client but curl, the install still succeeds.
     $curlHome = Join-Path $root 'curl-home'
     New-Item -ItemType Directory -Path $curlHome -Force | Out-Null
     foreach ($name in @('.curlrc', '_curlrc')) {
         [IO.File]::WriteAllText((Join-Path $curlHome $name), "proxy = `"http://127.0.0.1:1`"`n")
     }
-    $fallbackEnv = $selectEnv.Clone()
-    $fallbackEnv.CURL_HOME = $curlHome
+    $curlrcEnv = $selectEnv.Clone()
+    $curlrcEnv.CURL_HOME = $curlHome
+    $agentFile = Join-Path $releaseRoot 'only-agent.txt'
     [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.7.0-alpha.9')
+    [IO.File]::WriteAllText($agentFile, 'curl/')
     [IO.File]::WriteAllText($selectCli, 'old select CLI')
-    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $fallbackEnv
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $curlrcEnv
+    Assert-AetherEqual 0 $result.ExitCode ("curl.exe read a .curlrc: " + $result.Output)
+    Assert-AetherEqual 'cli v0.7.0-alpha.9' ([IO.File]::ReadAllText($selectCli)) 'curl.exe install with a .curlrc installed the wrong CLI'
+
+    # When curl.exe gets no HTTP answer (here the server drops it),
+    # Invoke-WebRequest resolves and downloads the release instead.
+    [IO.File]::WriteAllText($agentFile, 'Mozilla/')
+    [IO.File]::WriteAllText($selectCli, 'old select CLI')
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $selectEnv
+    Remove-Item -LiteralPath $agentFile -Force
     Assert-AetherEqual 0 $result.ExitCode ("Invoke-WebRequest fallback failed: " + $result.Output)
     Assert-AetherEqual 'cli v0.7.0-alpha.9' ([IO.File]::ReadAllText($selectCli)) 'Invoke-WebRequest fallback installed the wrong CLI'
     [IO.File]::WriteAllText($selectCli, 'old select CLI')
