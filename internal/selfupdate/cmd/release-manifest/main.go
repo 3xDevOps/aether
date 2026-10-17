@@ -2,23 +2,29 @@
 //
 //	AETHER_RELEASE_SIGNING_KEY=<base64 seed> \
 //	  go run ./internal/selfupdate/cmd/release-manifest -version v0.8.0 -commit <sha> \
-//	  -store-schema "$(go run ./internal/store/cmd/schema-version)" -out <dir> <asset>...
+//	  -store-schema "$(go run ./internal/store/cmd/schema-version)" \
+//	  -images images.json -out <dir> <asset>...
 //
-// It takes the store schema as a flag rather than importing internal/store,
-// so the process holding the signing key links nothing but the signer.
+// It takes the store schema as a flag and the image digests and edge
+// section as a file written by internal/edge/cmd/release-edge, rather than
+// importing the stores, so the process holding the signing key links
+// nothing but the signer.
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
@@ -39,18 +45,23 @@ func run(args []string) error {
 	tag := fs.String("version", "", "release tag the manifest describes")
 	commit := fs.String("commit", "", "full commit the release was built from")
 	storeSchema := fs.Int("store-schema", 0, "store schema version the release migrates to")
+	images := fs.String("images", "", "JSON file of the release's image digests and edge section")
 	out := fs.String("out", "", "directory to write "+selfupdate.ManifestName+" and its signature into")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *tag == "" || *commit == "" || *storeSchema <= 0 || *out == "" || fs.NArg() == 0 {
-		return errors.New("usage: release-manifest -version <tag> -commit <sha> -store-schema <n> -out <dir> <asset> [<asset>]")
+	if *tag == "" || *commit == "" || *storeSchema <= 0 || *images == "" || *out == "" || fs.NArg() == 0 {
+		return errors.New("usage: release-manifest -version <tag> -commit <sha> -store-schema <n> -images <file> -out <dir> <asset> [<asset>]")
+	}
+	img, err := readImages(*images)
+	if err != nil {
+		return err
 	}
 	key, err := signingKey(os.Getenv(keyEnv))
 	if err != nil {
 		return err
 	}
-	data, sig, err := generate(*tag, *commit, *storeSchema, fs.Args(), key, time.Now().UTC())
+	data, sig, err := generate(*tag, *commit, *storeSchema, img, fs.Args(), key, time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -58,6 +69,20 @@ func run(args []string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(*out, selfupdate.SignatureName), sig, 0o644)
+}
+
+func readImages(path string) (selfupdate.ImageRelease, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return selfupdate.ImageRelease{}, err
+	}
+	var img selfupdate.ImageRelease
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&img); err != nil {
+		return selfupdate.ImageRelease{}, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return img, nil
 }
 
 func signingKey(seed string) (ed25519.PrivateKey, error) {
@@ -74,7 +99,10 @@ func signingKey(seed string) (ed25519.PrivateKey, error) {
 // generate hashes every asset, signs the manifest, and verifies the result
 // the way an updater will, so a seed that does not match a key this build
 // trusts fails here rather than on every client.
-func generate(tag, commit string, storeSchema int, assets []string, key ed25519.PrivateKey, now time.Time) (data, sig []byte, err error) {
+func generate(tag, commit string, storeSchema int, img selfupdate.ImageRelease, assets []string, key ed25519.PrivateKey, now time.Time) (data, sig []byte, err error) {
+	if err = img.Validate(tag); err != nil {
+		return nil, nil, err
+	}
 	m := selfupdate.Manifest{
 		Schema:      selfupdate.ManifestSchema,
 		Version:     tag,
@@ -83,6 +111,8 @@ func generate(tag, commit string, storeSchema int, assets []string, key ed25519.
 		NotesURL:    "https://github.com/" + selfupdate.Repo + "/releases/tag/" + tag,
 		StoreSchema: storeSchema,
 		Assets:      map[string]selfupdate.Asset{},
+		Images:      img.Images,
+		Edge:        &img.Edge,
 	}
 	for _, path := range assets {
 		name := filepath.Base(path)
@@ -96,8 +126,12 @@ func generate(tag, commit string, storeSchema int, assets []string, key ed25519.
 	if data, sig, err = selfupdate.SignManifest(m, key); err != nil {
 		return nil, nil, err
 	}
-	if _, err := selfupdate.VerifyManifest(data, sig, tag); err != nil {
+	signed, err := selfupdate.VerifyManifest(data, sig, tag)
+	if err != nil {
 		return nil, nil, fmt.Errorf("verify the signed manifest: %w", err)
+	}
+	if signed.Edge == nil || !reflect.DeepEqual(selfupdate.ImageRelease{Images: signed.Images, Edge: *signed.Edge}, img) {
+		return nil, nil, errors.New("the signed manifest does not carry the images and edge section it was given")
 	}
 	return data, sig, nil
 }

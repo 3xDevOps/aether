@@ -22,14 +22,16 @@ while IFS= read -r path || [ -n "$path" ]; do
 	# fails when an imported package is missing here. internal/edge/ also
 	# holds edgetest, the end-to-end suite, and the agent and client it
 	# runs against the edge.
-	cmd/aether-edge/* | internal/domain/* | internal/edge/* | internal/version/*)
+	cmd/aether-edge/* | internal/domain/* | internal/edge/* | internal/version/* | \
+		internal/macinstall/* | internal/selfupdate/* | internal/shellquote/*)
 		printf '%s\n' true
 		exit 0
 		;;
 	go.mod | go.sum | Makefile | .dockerignore | images/edge/* | \
 		scripts/ci-classify-edge* | scripts/edge-* | \
 		.github/workflows/ci.yml | .github/workflows/edge-image.yml | \
-		.github/workflows/release.yml)
+		.github/workflows/promote-edge.yml | .github/workflows/release.yml | \
+		packaging/edge/* | packaging/systemd/aether-edge.service)
 		printf '%s\n' true
 		exit 0
 		;;
@@ -38,9 +40,9 @@ while IFS= read -r path || [ -n "$path" ]; do
 	cmd/* | internal/*) ;;
 	docs/* | web/* | android/* | desktop/* | packaging/windows/*) ;;
 	images/browser/* | images/smoke/* | images/standard/*) ;;
-	scripts/android-* | scripts/ci-classify-changes* | scripts/deploy* | \
-		scripts/install* | scripts/make-icons.py | scripts/public-audit.sh | \
-		scripts/publish-release*) ;;
+	scripts/android-* | scripts/ci-classify-changes* | scripts/ci-classify-desktop* | \
+		scripts/deploy* | scripts/install* | scripts/make-icons.py | \
+		scripts/public-audit.sh | scripts/publish-release*) ;;
 	.github/actions/* | .github/workflows/windows-install.yml | .gitignore | .golangci.yml) ;;
 	*/*)
 		printf '%s\n' true

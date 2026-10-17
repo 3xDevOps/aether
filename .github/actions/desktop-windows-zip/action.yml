@@ -1,0 +1,150 @@
+name: Windows desktop zip
+description: >
+  Package the desktop shell for one Windows architecture with
+  electron-builder's unpacked target and zip its contents at the archive
+  root as aether-desktop-windows-<arch>.zip, the asset `aether gui build`
+  installs, then launch the unpacked app. Entries are sorted, use forward
+  slashes and carry a fixed timestamp.
+inputs:
+  version:
+    description: "Release tag the shell reports, such as v1.2.3"
+    required: true
+  arch:
+    description: "amd64 or arm64"
+    required: true
+outputs:
+  zip:
+    description: "Path of the zip"
+    value: ${{ steps.zip.outputs.zip }}
+  app:
+    description: "Path of the unpacked app the zip holds"
+    value: ${{ steps.package.outputs.app }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 22
+    # A copy, so the stamped manifest never reaches a CLI built from this
+    # checkout, whose embedded shell sources must stay the committed ones.
+    - name: Stamp the shell version
+      id: stamp
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+      run: |
+        build="$(cygpath -m "$RUNNER_TEMP")/desktop-windows"
+        rm -rf "$build"
+        cp -R desktop "$build"
+        node -e '
+          const fs = require("node:fs")
+          const [file, tag] = process.argv.slice(1)
+          const manifest = JSON.parse(fs.readFileSync(file, "utf8"))
+          manifest.version = tag.replace(/^v/, "")
+          manifest.aetherCliVersion = tag
+          fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n")
+        ' "$build/package.json" "$VERSION"
+        echo "dir=$build" >> "$GITHUB_OUTPUT"
+    # electron-builder downloads the Electron runtime for the target
+    # architecture itself; the postinstall copy would be a second download.
+    - name: Install the locked shell dependencies
+      shell: bash
+      working-directory: ${{ steps.stamp.outputs.dir }}
+      env:
+        ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      run: |
+        npm ci --no-audit --no-fund
+    - name: Package the unpacked app
+      id: package
+      shell: bash
+      working-directory: ${{ steps.stamp.outputs.dir }}
+      env:
+        ARCH: ${{ inputs.arch }}
+        BUILD: ${{ steps.stamp.outputs.dir }}
+        CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      run: |
+        case "$ARCH" in
+          amd64) flag=--x64 ;;
+          arm64) flag=--arm64 ;;
+          *) echo "::error::unsupported desktop architecture $ARCH"; exit 1 ;;
+        esac
+        node node_modules/electron-builder/cli.js --dir --win "$flag" --publish never
+        apps=(dist/win*-unpacked)
+        if [ "${#apps[@]}" -ne 1 ] || [ ! -f "${apps[0]}/aether-desktop.exe" ]; then
+          echo "::error::expected one dist/win*-unpacked/aether-desktop.exe, found: ${apps[*]}"
+          exit 1
+        fi
+        echo "app=$BUILD/${apps[0]}" >> "$GITHUB_OUTPUT"
+    # The dashboard reads the shell's version from the package.json inside
+    # app.asar; a shell that misreports it is flagged as out of date.
+    - name: Check the packaged shell version
+      shell: bash
+      working-directory: ${{ steps.stamp.outputs.dir }}
+      env:
+        APP: ${{ steps.package.outputs.app }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        node -e '
+          const asar = require("@electron/asar")
+          const [app, tag] = process.argv.slice(1)
+          const manifest = JSON.parse(asar.extractFile(app + "/resources/app.asar", "package.json"))
+          if (manifest.aetherCliVersion !== tag) {
+            console.error(`app.asar package.json has aetherCliVersion ${manifest.aetherCliVersion}, not ${tag}`)
+            process.exit(1)
+          }
+          console.log(`app.asar package.json: version ${manifest.version}, aetherCliVersion ${manifest.aetherCliVersion}`)
+        ' "$APP" "$VERSION"
+    - name: Zip the unpacked app
+      id: zip
+      shell: bash
+      env:
+        APP: ${{ steps.package.outputs.app }}
+        ZIP: ${{ runner.temp }}/aether-desktop-windows-${{ inputs.arch }}.zip
+      run: |
+        python - "$APP" "$ZIP" <<'PY'
+        import os, sys, zipfile
+        root, out = sys.argv[1], sys.argv[2]
+        names = sorted(
+            os.path.relpath(os.path.join(parent, name), root).replace(os.sep, "/")
+            for parent, _, files in os.walk(root)
+            for name in files
+        )
+        with zipfile.ZipFile(out, "w") as archive:
+            for name in names:
+                entry = zipfile.ZipInfo(name, (1980, 1, 1, 0, 0, 0))
+                entry.compress_type = zipfile.ZIP_DEFLATED
+                entry.external_attr = 0o644 << 16
+                with open(os.path.join(root, name), "rb") as source:
+                    archive.writestr(entry, source.read())
+        PY
+        echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+    # Without a CLI the shell's first act is its "aether CLI not found"
+    # dialog, so seeing that text proves the packaged runtime and main.js
+    # start on this architecture.
+    - name: Launch the unpacked app
+      shell: pwsh
+      env:
+        APP: ${{ steps.package.outputs.app }}
+      run: |
+        Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+        $env:AETHER_BIN = Join-Path $env:RUNNER_TEMP 'no-aether-here.exe'
+        $app = Start-Process -FilePath (Join-Path $env:APP 'aether-desktop.exe') -ArgumentList "--user-data-dir=`"$env:RUNNER_TEMP\desktop-profile`"" -PassThru
+        try {
+          $deadline = [DateTime]::UtcNow.AddSeconds(60)
+          $text = ''
+          do {
+            $app.Refresh()
+            if ($app.HasExited) { throw "aether-desktop.exe exited with code $($app.ExitCode) before it opened a window." }
+            if ($app.MainWindowHandle -ne [IntPtr]::Zero) {
+              $window = [Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+              $text = ($window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
+                ForEach-Object { $_.Current.Name }) -join ' | '
+              if ($text -like '*aether CLI not found*') { break }
+            }
+            if ([DateTime]::UtcNow -gt $deadline) { throw "aether-desktop.exe did not report the missing CLI. Window '$($app.MainWindowTitle)': $text" }
+            Start-Sleep -Milliseconds 250
+          } while ($true)
+          Write-Host "Window '$($app.MainWindowTitle)': $text"
+        } finally {
+          & "$env:SystemRoot\System32\taskkill.exe" /PID $app.Id /T /F | Out-Null
+        }

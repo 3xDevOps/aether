@@ -1179,6 +1179,11 @@ export interface AgentInstallResult {
   error?: string
 }
 
+/** agent.remove: the `~/.local/bin` links a shipped agent's removal deleted; none for a member's agent. */
+export interface AgentRemoveResult {
+  removed?: string[]
+}
+
 /** A member-supplied custom harness launch definition (agent.register). */
 export interface AgentDefinition {
   name: string
@@ -1805,6 +1810,7 @@ export interface UpdateApplyResult {
 export interface UpdateBuildStatus {
   phase:
     | 'idle'
+    | 'downloading'
     | 'unpacking'
     | 'fetching node'
     | 'installing dependencies'

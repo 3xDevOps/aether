@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -741,12 +742,57 @@ func TestShutdownDrains(t *testing.T) {
 	if err := e.r.Shutdown(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	next[edgeproto.Drain](t, a)
+	if d := next[edgeproto.Drain](t, a); d.RetryAfterMS != drainRetryAfter.Milliseconds() || d.JitterMS != drainJitter.Milliseconds() {
+		t.Fatalf("drain = %+v, want the reconnect hint", d)
+	}
+	if !e.r.Metrics().Draining {
+		t.Fatal("metrics do not report draining")
+	}
 	if err := a.closedWith(t); !strings.Contains(err.Error(), errDraining.Error()) {
 		t.Fatalf("closed with %v", err)
 	}
 	_, resp, err := websocket.Dial(t.Context(), e.wsBase+edgeproto.PathServerControl, nil)
 	if err == nil || resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("enrollment while draining: %v", err)
+	}
+}
+
+// TestShutdownIsBounded stops with one server the drain cannot reach and
+// one relayed connection open: the splice closes at spliceGrace, and
+// Shutdown returns when its context ends instead of waiting on the server.
+func TestShutdownIsBounded(t *testing.T) {
+	e := newEnv(t)
+	a := claimedAgent(t, e)
+	acct := account("1")
+	e.dir.addMember(a.id, acct)
+	_, token := e.addDevice(t, acct, "dev-1")
+	client, _ := e.connect(t, a, token)
+	stuck := claimedAgent(t, e)
+	unready(e, stuck.id)
+
+	const deadline = spliceGrace + time.Second
+	ctx, cancel := context.WithTimeout(t.Context(), deadline)
+	defer cancel()
+	start := time.Now()
+	done := make(chan error, 1)
+	go func() { done <- e.r.Shutdown(ctx) }()
+
+	if _, err := client.Read(make([]byte, 1)); err == nil {
+		t.Fatal("relayed connection read data during shutdown")
+	}
+	if took := time.Since(start); took < spliceGrace-100*time.Millisecond || took > spliceGrace+500*time.Millisecond {
+		t.Fatalf("relayed connection closed %s into shutdown, want about %s", took, spliceGrace)
+	}
+	next[edgeproto.Drain](t, a)
+	select {
+	case err := <-done:
+		if took := time.Since(start); took < deadline-100*time.Millisecond {
+			t.Fatalf("Shutdown returned %s in, before the unreachable server's drain timed out", took)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(deadline + time.Second):
+		t.Fatalf("Shutdown still running %s after a %s deadline", time.Since(start), deadline)
 	}
 }

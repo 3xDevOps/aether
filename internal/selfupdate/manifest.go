@@ -55,6 +55,10 @@ type Manifest struct {
 	// applies.
 	StoreSchema int              `json:"store_schema"`
 	Assets      map[string]Asset `json:"assets"`
+	// Images maps each container image the release publishes, by name
+	// (aether-edge), to its index digest.
+	Images map[string]string `json:"images,omitempty"`
+	Edge   *Edge             `json:"edge,omitempty"`
 
 	baseURL string
 }
@@ -67,6 +71,105 @@ type Asset struct {
 
 var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
+// Edge is what a host updating a container edge needs to know about the
+// release, beyond the image itself.
+type Edge struct {
+	Image       string `json:"image"`
+	ImageDigest string `json:"image_digest"`
+	// StoreSchema is the highest edge store migration the release applies;
+	// StoreCompatFloor is the oldest schema a binary must support to open a
+	// database this release has migrated.
+	StoreSchema      int          `json:"store_schema"`
+	StoreCompatFloor int          `json:"store_compat_floor"`
+	Protocol         EdgeProtocol `json:"protocol"`
+	// MinUpgradeFrom is the oldest release that may upgrade straight to
+	// this one.
+	MinUpgradeFrom string       `json:"min_upgrade_from"`
+	ManualSteps    []ManualStep `json:"manual_steps"`
+}
+
+// EdgeProtocol is the range of edge protocol versions the release speaks.
+type EdgeProtocol struct {
+	Version    int `json:"version"`
+	MinVersion int `json:"min_version"`
+}
+
+// ManualStep is an operator action an upgrade across Since needs. A
+// blocking step holds an automatic update until the operator has done it.
+type ManualStep struct {
+	ID       string `json:"id"`
+	Since    string `json:"since"`
+	Summary  string `json:"summary"`
+	DocURL   string `json:"doc_url"`
+	Blocking bool   `json:"blocking"`
+}
+
+// ImageRelease is the image half of a manifest: what release-manifest
+// reads from the file its -images flag names.
+type ImageRelease struct {
+	Images map[string]string `json:"images"`
+	Edge   Edge              `json:"edge"`
+}
+
+const EdgeImage = "ghcr.io/3xdevops/aether-edge"
+
+// ImageNames are the images every release publishes.
+var ImageNames = []string{"aether-browser", "aether-edge", "aether-standard"}
+
+// Validate checks r names exactly ImageNames, each by digest, and that its
+// edge section describes tag and the aether-edge image.
+func (r ImageRelease) Validate(tag string) error {
+	if len(r.Images) != len(ImageNames) {
+		return fmt.Errorf("images: want exactly %s, got %d", strings.Join(ImageNames, ", "), len(r.Images))
+	}
+	for _, name := range ImageNames {
+		if !ValidImageDigest(r.Images[name]) {
+			return fmt.Errorf("images: %s has digest %q, not sha256:<64 hex>", name, r.Images[name])
+		}
+	}
+	if r.Edge.Image != EdgeImage {
+		return fmt.Errorf("edge: image %s is not %s", r.Edge.Image, EdgeImage)
+	}
+	if r.Edge.ImageDigest != r.Images["aether-edge"] {
+		return fmt.Errorf("edge: image digest %s is not the aether-edge image %s", r.Edge.ImageDigest, r.Images["aether-edge"])
+	}
+	return r.Edge.Validate(tag)
+}
+
+var imageDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// ValidImageDigest reports whether d is an OCI sha256 digest.
+func ValidImageDigest(d string) bool { return imageDigest.MatchString(d) }
+
+// Validate checks e describes release tag completely.
+func (e Edge) Validate(tag string) error {
+	switch {
+	case e.Image == "":
+		return errors.New("edge: no image")
+	case !ValidImageDigest(e.ImageDigest):
+		return fmt.Errorf("edge: image digest %q is not sha256:<64 hex>", e.ImageDigest)
+	case e.StoreSchema < 1 || e.StoreCompatFloor < 1 || e.StoreCompatFloor > e.StoreSchema:
+		return fmt.Errorf("edge: store schema %d with compat floor %d", e.StoreSchema, e.StoreCompatFloor)
+	case e.Protocol.MinVersion < 1 || e.Protocol.Version < e.Protocol.MinVersion:
+		return fmt.Errorf("edge: protocol versions %d to %d", e.Protocol.MinVersion, e.Protocol.Version)
+	case !ValidTag(e.MinUpgradeFrom) || Behind(tag, e.MinUpgradeFrom):
+		return fmt.Errorf("edge: min_upgrade_from %q is not a release tag at or below %s", e.MinUpgradeFrom, tag)
+	}
+	ids := map[string]bool{}
+	for _, s := range e.ManualSteps {
+		switch {
+		case s.ID == "" || ids[s.ID]:
+			return fmt.Errorf("edge: manual step id %q is empty or repeated", s.ID)
+		case !ValidTag(s.Since) || Behind(tag, s.Since):
+			return fmt.Errorf("edge: manual step %s: since %q is not a release tag at or below %s", s.ID, s.Since, tag)
+		case s.Summary == "" || !strings.HasPrefix(s.DocURL, "https://"):
+			return fmt.Errorf("edge: manual step %s needs a summary and an https doc_url", s.ID)
+		}
+		ids[s.ID] = true
+	}
+	return nil
+}
+
 // AssetURL is where the release publishes the asset name.
 func (m Manifest) AssetURL(name string) string {
 	base := m.baseURL
@@ -74,6 +177,27 @@ func (m Manifest) AssetURL(name string) string {
 		base = defaultBaseURL
 	}
 	return base + "/releases/download/" + m.Version + "/" + name
+}
+
+// DesktopAssetName names the prebuilt Windows desktop app for goarch:
+// electron-builder's win-unpacked directory, zipped with its contents at the
+// root.
+func DesktopAssetName(goarch string) string {
+	return "aether-desktop-windows-" + goarch + ".zip"
+}
+
+// Download streams the asset name into f, checks it against the size and
+// sha256 m lists for it, and returns that entry. A download that runs long
+// reports its size to progress; nil keeps it silent.
+func (m Manifest) Download(ctx context.Context, name string, f *os.File, progress io.Writer) (Asset, error) {
+	want, ok := m.Assets[name]
+	if !ok {
+		return Asset{}, fmt.Errorf("release %s does not publish %s", m.Version, name)
+	}
+	if err := download(ctx, m.AssetURL(name), f, want, progress); err != nil {
+		return Asset{}, fmt.Errorf("download %s: %w", name, err)
+	}
+	return want, nil
 }
 
 // FetchManifest downloads tag's manifest and signature and verifies them.
@@ -279,8 +403,9 @@ func fetchSmall(ctx context.Context, url string) ([]byte, error) {
 }
 
 // download streams url into f, starting it over on every attempt, and
-// checks the bytes against want. Nothing beyond want.Size is read.
-func download(ctx context.Context, url string, f *os.File, want Asset) error {
+// checks the bytes against want. Nothing beyond want.Size is read. Each
+// attempt counts its progress from zero.
+func download(ctx context.Context, url string, f *os.File, want Asset, progress io.Writer) error {
 	return retry(ctx, func() (bool, error) {
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			return false, err
@@ -297,7 +422,7 @@ func download(ctx context.Context, url string, f *os.File, want Asset) error {
 			return false, fmt.Errorf("size mismatch: %s is %d bytes, the manifest says %d", url, resp.ContentLength, want.Size)
 		}
 		h := sha256.New()
-		n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, want.Size+1))
+		n, err := io.Copy(io.MultiWriter(f, h, NewProgress(progress, want.Size)), io.LimitReader(resp.Body, want.Size+1))
 		if err != nil {
 			return ctx.Err() == nil, fmt.Errorf("GET %s: %w", url, err)
 		}

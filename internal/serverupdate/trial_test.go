@@ -536,3 +536,60 @@ func TestRestartsOnExit75(t *testing.T) {
 		}
 	}
 }
+
+// A reboot between the swap and the snapshot starts the new binary with
+// no snapshot; it takes one before the store can migrate, and rolls back
+// when it cannot.
+func TestBootTakesTheSnapshotAnInterruptedUpdateSkipped(t *testing.T) {
+	e := newTrialEnv(t)
+	dbPath, snap, before := e.database(t, false)
+	if err := os.Remove(snap); err != nil {
+		t.Fatal(err)
+	}
+	e.write(t, swapRecord{Database: dbPath, Snapshot: snap, SchemaBefore: before})
+	if _, err := Boot(e.state, e.host); err != nil {
+		t.Fatalf("Boot: %v", err)
+	}
+	if got := schemaOf(t, snap); got != before {
+		t.Fatalf("snapshot schema = %d, want %d", got, before)
+	}
+
+	e = newTrialEnv(t)
+	dbPath, _, before = e.database(t, false)
+	e.write(t, swapRecord{Database: dbPath, Snapshot: filepath.Join(e.dir, "missing", "aether.db.pre-update"), SchemaBefore: before})
+	if _, err := Boot(e.state, e.host); err == nil {
+		t.Fatal("Boot without a snapshot it can take did not roll back")
+	}
+	if readFile(t, e.server) != "old server" || e.record(t).Phase != recordRolledBack {
+		t.Fatalf("server = %q, record = %+v; want the previous binary restored", readFile(t, e.server), e.record(t))
+	}
+}
+
+// stagingStore stages another update while the outcome is written, as a
+// second `aether-server update` can once the first saw the record applied.
+type stagingStore struct {
+	store.Store
+	stage func()
+}
+
+func (s stagingStore) SetLastServerUpdate(ctx context.Context, a store.ServerUpdateAttempt) error {
+	s.stage()
+	return s.Store.SetLastServerUpdate(ctx, a)
+}
+
+func TestCommitKeepsTheRecordOfAnUpdateStagedMeanwhile(t *testing.T) {
+	e := newTrialEnv(t)
+	e.write(t, swapRecord{})
+	db, bus := commitDeps(t, e)
+	trial, err := Boot(e.state, e.host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := stagingStore{Store: db, stage: func() { e.write(t, swapRecord{ToVersion: "v9.9.9", FromVersion: version.Version}) }}
+	if err = trial.Commit(t.Context(), staging, bus); err != nil {
+		t.Fatal(err)
+	}
+	if rec := e.record(t); rec.Phase != recordVerifying || rec.ToVersion != "v9.9.9" {
+		t.Fatalf("record = %+v, want the update staged during the commit", rec)
+	}
+}

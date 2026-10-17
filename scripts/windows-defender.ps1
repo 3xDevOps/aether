@@ -8,7 +8,9 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateSet('StartUpdate', 'Update', 'Prepare', 'Scan')]
     [string]$Mode,
-    [string]$ArtifactDirectory = 'dist'
+    [string]$ArtifactDirectory = 'dist',
+    # Scan only: the file names in ArtifactDirectory that must all be present.
+    [string[]]$Artifacts
 )
 
 Set-StrictMode -Version Latest
@@ -192,59 +194,68 @@ if ($Mode -eq 'Prepare') {
     return
 }
 
+if (-not $Artifacts) { throw 'Scan needs -Artifacts: the file names in -ArtifactDirectory to scan.' }
 $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
 if ($state.RunID -ne $env:GITHUB_RUN_ID -or $state.RunAttempt -ne $env:GITHUB_RUN_ATTEMPT) {
     throw 'Defender baseline is not from this workflow run and attempt.'
 }
 Assert-Protection
 $failures = @()
+# Every file whose bytes must survive the scan, mapped to its SHA256 before
+# it: each artifact, and every file a zip artifact holds. A zip is scanned
+# both whole and extracted, as a user's machine meets it.
 $hashes = [ordered]@{}
-$paths = [ordered]@{}
-$names = @('aether-windows-amd64.exe', 'aether-windows-arm64.exe')
-Write-Evidence '| Binary | SHA256 before scan |'
+$scans = [ordered]@{}
+$extracted = Join-Path $env:RUNNER_TEMP 'aether-defender-extracted'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+Write-Evidence '| Artifact | SHA256 before scan |'
 Write-Evidence '| --- | --- |'
-foreach ($name in $names) {
-    $path = Join-Path $ArtifactDirectory $name
+foreach ($name in $Artifacts) {
     try {
-        $file = Get-Item -LiteralPath $path
+        $file = Get-Item -LiteralPath (Join-Path $ArtifactDirectory $name)
         if ($file -isnot [System.IO.FileInfo] -or $file.Length -eq 0) {
-            throw 'Expected a nonempty executable file.'
+            throw 'Expected a nonempty file.'
         }
         # Defender's service cannot resolve paths relative to this shell.
-        $paths[$name] = $file.FullName
-        $hashes[$name] = (Get-FileHash -LiteralPath $paths[$name] -Algorithm SHA256).Hash
-        Write-Evidence "| $name | $($hashes[$name]) |"
+        $scans[$name] = $file.FullName
+        $hashes[$file.FullName] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        Write-Evidence "| $name | $($hashes[$file.FullName]) |"
+        if ($file.Extension -eq '.zip') {
+            $dir = Join-Path $extracted $file.BaseName
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($file.FullName, $dir)
+            $contents = @(Get-ChildItem -LiteralPath $dir -File -Recurse)
+            foreach ($entry in $contents) {
+                $hashes[$entry.FullName] = (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash
+            }
+            $scans["$name (extracted, $($contents.Count) files)"] = $dir
+        }
     } catch {
         $failures += "${name}: missing, quarantined, or unreadable before scanning: $_"
     }
 }
-foreach ($name in $names) {
-    if (-not $hashes.Contains($name)) { continue }
-    $path = $paths[$name]
+foreach ($label in $scans.Keys) {
+    $path = $scans[$label]
     try {
         Write-Host "Scanning $path with remediation enabled"
         & $mpcmdrun -Scan -ScanType 3 -File $path
         $code = $LASTEXITCODE
-        Write-Evidence "${name}: MpCmdRun exit $code."
-        if ($code -ne 0) { $failures += "${name}: MpCmdRun exit $code" }
+        Write-Evidence "${label}: MpCmdRun exit $code."
+        if ($code -ne 0) { $failures += "${label}: MpCmdRun exit $code" }
     } catch {
-        $failures += "${name}: scan failed: $_"
+        $failures += "${label}: scan failed: $_"
     }
 }
 # A successful native exit code can mean that remediation succeeded. It does
-# not clear a detection, and both files must still match their original bytes.
-foreach ($name in $names) {
+# not clear a detection, and every file must still match its original bytes.
+foreach ($path in $hashes.Keys) {
     try {
-        if (-not $paths.Contains($name)) {
-            throw 'No executable file was resolved before scanning.'
-        }
-        $hash = (Get-FileHash -LiteralPath $paths[$name] -Algorithm SHA256).Hash
-        Write-Evidence "${name}: SHA256 after scan $hash."
-        if (-not $hashes.Contains($name) -or $hash -ne $hashes[$name]) {
-            $failures += "${name}: SHA256 changed during scanning"
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        if ($scans.Values -contains $path) { Write-Evidence "$(Split-Path -Leaf $path): SHA256 after scan $hash." }
+        if ($hash -ne $hashes[$path]) {
+            $failures += "${path}: SHA256 changed during scanning"
         }
     } catch {
-        $failures += "${name}: missing, quarantined, or unreadable after scanning: $_"
+        $failures += "${path}: missing, quarantined, or unreadable after scanning: $_"
     }
 }
 $newDetections = @(Get-MpThreatDetection | Where-Object { [string]$_.DetectionID -notin @($state.DetectionIDs) })
@@ -266,4 +277,4 @@ if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Evidence "FAIL: $failure" }
     throw 'Windows Defender validation failed; see the evidence above.'
 }
-Write-Evidence 'Both Windows architectures passed: unchanged SHA256, no new detections, and effective protection still enabled.'
+Write-Evidence "All $($Artifacts.Count) artifacts passed: unchanged SHA256, no new detections, and effective protection still enabled."

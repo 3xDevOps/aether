@@ -1387,6 +1387,31 @@ name also records a launch definition under that member; **Add agent…**
 registers one with a Standard, a Background and an optional Enhanced command,
 an optional Enhanced start mode and an optional login file.
 
+### Removing an agent
+
+```sh
+aether agent remove <name>
+```
+
+Removing a
+shipped agent deletes its `~/.local/bin` links (`claude` and
+`claude-agent-acp`), which makes `agent.list` report it `installed: false`,
+so the launcher stops offering it. Removing your own agent deletes its
+definition, so a launch answers `unknown harness "x"; register it with:
+aether agent add x`; the executable it names is left alone. On the Agents
+page, the row's **More** menu has **Remove…** when the gateway serves
+`agent.remove`. **Set up** or **Add agent…** brings the agent back.
+
+Removal deletes only those links or that definition. The package files
+(`~/.local/lib/node_modules`, `~/.local/share/claude/versions`), the login,
+the agent's settings and your runs' history stay. Runs already going keep
+going; a mode switch, resume, reattach or usage fallback that needs the
+removed agent fails until you set it up again. Swarm choices and templates
+keep the agent's name, and their launches fail the same way. Removal acts on
+your own home only: a member on your shared account who has no installation
+of their own still runs your installed copy. It is refused while an install
+or a harness update runs in the home.
+
 The Agents page shows **Installed** or **Not installed** and **Login found**
 or **No login found** for your account. These checks look for the executable
 and the login file; the agent verifies its vendor login when it starts. Shipped agents need no
@@ -1496,7 +1521,8 @@ or `OPENAI_API_KEY` in the server environment is the API-key alternative.
 definition of the same name. If you ran `aether agent add omp` before Aether
 shipped it, your stored definition is ignored from now on and runs use the
 launch template in the table above. `aether agent list` skips the stored row,
-which stays in the server's database - there is no command that removes one.
+which stays in the server's database. `aether agent remove omp` cannot reach
+it, because the shipped name wins.
 To launch your own build, register it under a name Aether does not ship.
 
 ### opencode

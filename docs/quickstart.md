@@ -45,7 +45,7 @@ in `/usr/local/bin`, with `sudo`. A client gets the `aether` CLI alone in
 updates; if that directory is not on your `PATH`, the script prints the one
 line that adds it, and the app finds it either way. macOS is a client
 platform, so it only ever gets `aether`. Later, `aether update` upgrades
-whatever is installed.
+a client and `sudo aether-server update` a server.
 
 It then finishes that side's setup: [step 2](#2-start-the-server) on the
 server, the desktop app ([step 7](#prefer-a-native-window)) on a client. To
@@ -899,8 +899,9 @@ the desktop app or `aether gui` on the computer holding the clone.
 lived in its own window - with desktop notifications and a dock badge when a
 run needs you, plus `aether://run/<id>` deep links - build
 the desktop app. Answering **client** in step 1 already did this. Nothing has
-to be installed first - the CLI fetches its own Node.js copy when the machine
-has none, which makes the first build longer:
+to be installed first. On Windows the CLI downloads the release's prebuilt
+app; on Linux and macOS it builds the app, fetching its own Node.js copy when
+the machine has none, which makes the first build longer:
 
 ```sh
 aether gui build
@@ -912,9 +913,10 @@ prints the path), or the Start Menu (Windows). Open it like any other app.
 
 Two things to know:
 
-- **There is no download.** No release publishes an installer. `aether gui
-  build` packages the Electron shell on your machine from sources carried in
-  the CLI. Details in [install.md](install.md#desktop-app).
+- **There is no installer.** On Windows `aether gui build` installs the
+  prebuilt app the release's signed manifest lists; elsewhere it packages the
+  Electron shell on your machine from sources carried in the CLI. Details in
+  [install.md](install.md#desktop-app).
 - **It is not a standalone client.** The app does not bundle `aether`; it
   launches `aether gui` from your `PATH`, and the dashboard lives inside that
   CLI binary. Install the CLI ([step 1](#1-install)); on an unlinked machine,

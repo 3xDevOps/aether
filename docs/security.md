@@ -1655,8 +1655,18 @@ cannot be replayed under a new tag, and checks every download's size and
 SHA-256 against it. [install.md](install.md#verified-releases) shows the
 same check done by hand.
 
+The prebuilt Windows desktop app, `aether-desktop-windows-<arch>.zip`, is one
+of those assets. `aether gui build` on Windows installs it only after the
+same signature, version and size-and-SHA-256 checks, and extracts it through
+a directory-confined writer that refuses entries escaping the install
+directory and stops past 1 GiB. `aether gui build --zip <path>` has no
+manifest to check a local zip against, so it checks only the app layout;
+compare the zip with `checksums.txt` first.
+
 The private key is a 32-byte seed, base64-encoded, held only in the
-`AETHER_RELEASE_SIGNING_KEY` Actions secret. Only the final `release` job
+`AETHER_RELEASE_SIGNING_KEY` Actions secret, which belongs in the `release`
+environment restricted to `v*` tags ([Protecting the signing
+key](install.md#protecting-the-signing-key)). Only the final `release` job
 reads it, after the publisher and exact-main-CI gates. The generator refuses
 to write a manifest the tag's own trusted keys would reject, so a wrong
 secret fails the release, not the clients.

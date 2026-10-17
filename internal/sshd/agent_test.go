@@ -626,3 +626,134 @@ func TestAgentListFindsAntigravityAsAgy(t *testing.T) {
 		t.Fatalf("antigravity with its token file = %+v, want login found", a)
 	}
 }
+
+// homeRemovingRuns runs RemoveAgent against a real member home; the
+// scheduler's own claim on the home is tested in package scheduler.
+type homeRemovingRuns struct {
+	*fakeRuns
+	homes *memberhome.Manager
+}
+
+func (r homeRemovingRuns) RemoveAgent(_ context.Context, member domain.MemberID, executables []string) ([]string, error) {
+	var removed []string
+	for _, executable := range executables {
+		err := r.homes.HomeRemove(member, ".local/bin/"+executable)
+		if errors.Is(err, memberhome.ErrConfigNotFound) {
+			continue
+		}
+		if err != nil {
+			return removed, err
+		}
+		removed = append(removed, "~/.local/bin/"+executable)
+	}
+	return removed, nil
+}
+
+func TestAgentRemove(t *testing.T) {
+	t.Parallel()
+	s, owner := newAgentTestServer(t)
+	ctx := context.Background()
+	grantee := &domain.Member{DisplayName: "grantee", TailnetLogin: "grantee@example.com", Role: domain.RoleCollaborator}
+	if err := s.cfg.Store.CreateMember(ctx, grantee); err != nil {
+		t.Fatal(err)
+	}
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Homes = homes
+	s.cfg.Runs = homeRemovingRuns{&fakeRuns{}, homes}
+	remove := func(member domain.MemberID, name string) (any, *protocol.Error) {
+		raw, marshalErr := json.Marshal(protocol.AgentRemoveParams{Name: name})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		return s.agentRemove(ctx, member, raw)
+	}
+	installed := func(member domain.MemberID, name string) bool {
+		raw, marshalErr := json.Marshal(protocol.AgentListParams{})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		result, perr := s.agentList(ctx, member, raw)
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		for _, agent := range result.(protocol.AgentListResult).Agents {
+			if agent.Name == name {
+				return agent.Installed
+			}
+		}
+		t.Fatalf("agent.list has no %q", name)
+		return false
+	}
+	linkClaude := func(member domain.MemberID) (version string) {
+		installInHome(t, homes, member, ".local/share/claude/versions/1.0", ".local/bin/claude-agent-acp")
+		home, pathErr := homes.Path(member)
+		if pathErr != nil {
+			t.Fatal(pathErr)
+		}
+		version = filepath.Join(home, ".local/share/claude/versions/1.0")
+		if linkErr := os.Symlink("/root/.local/share/claude/versions/1.0", filepath.Join(home, ".local/bin/claude")); linkErr != nil {
+			t.Fatal(linkErr)
+		}
+		return version
+	}
+	ownerVersion := linkClaude(owner.ID)
+	linkClaude(grantee.ID)
+
+	if !installed(grantee.ID, "claude") {
+		t.Fatal("claude is not installed before removal")
+	}
+	got, perr := remove(grantee.ID, "claude")
+	if perr != nil {
+		t.Fatalf("remove claude: %v", perr)
+	}
+	want := protocol.AgentRemoveResult{Removed: []string{"~/.local/bin/claude", "~/.local/bin/claude-agent-acp"}}
+	if !slices.Equal(got.(protocol.AgentRemoveResult).Removed, want.Removed) {
+		t.Fatalf("removed = %v, want %v", got, want)
+	}
+	if installed(grantee.ID, "claude") {
+		t.Error("claude is still installed after removal")
+	}
+	if !installed(owner.ID, "claude") {
+		t.Error("removing in the grantee's home touched the owner's links")
+	}
+	home, err := homes.Path(grantee.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, ".local/share/claude/versions/1.0")); statErr != nil {
+		t.Errorf("package file after removal: %v, want it kept", statErr)
+	}
+	if _, statErr := os.Stat(ownerVersion); statErr != nil {
+		t.Errorf("owner's package file: %v", statErr)
+	}
+	_, perr = remove(grantee.ID, "claude")
+	if perr == nil || perr.Message != `agent "claude" is not installed in your environment: ~/.local/bin/claude does not exist` {
+		t.Fatalf("second removal = %v, want the not installed refusal", perr)
+	}
+
+	if _, perr = callAgentRegister(t, s, grantee.ID, validAgentDefinition()); perr != nil {
+		t.Fatal(perr)
+	}
+	if _, perr = remove(grantee.ID, "mybot"); perr != nil {
+		t.Fatalf("remove mybot: %v", perr)
+	}
+	if rows, listErr := s.cfg.Store.ListHarnessDefinitions(ctx, grantee.ID); listErr != nil || len(rows) != 0 {
+		t.Fatalf("definitions after removal = %v, %v; want none", rows, listErr)
+	}
+	_, perr = remove(grantee.ID, "mybot")
+	if perr == nil || perr.Message != `you have no agent "mybot"; aether agent list shows yours` {
+		t.Fatalf("second member removal = %v, want the no agent refusal", perr)
+	}
+	for _, name := range []string{"", "custom"} {
+		if _, perr = remove(grantee.ID, name); perr == nil || perr.Code != protocol.CodeInvalidParams {
+			t.Errorf("remove %q = %v, want invalid params", name, perr)
+		}
+	}
+	s.cfg.Homes = nil
+	if _, perr = remove(grantee.ID, "claude"); perr == nil || perr.Code != protocol.CodeUnavailable {
+		t.Errorf("remove without homes = %v, want unavailable", perr)
+	}
+}

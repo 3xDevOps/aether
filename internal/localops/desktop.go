@@ -62,7 +62,7 @@ func DesktopBuildDir() (string, error) {
 	return filepath.Join(cache, "aether", "desktop-build"), nil
 }
 
-// lockDesktopBuild serializes builds over one build directory. The lock is
+// LockDesktopBuild serializes builds over one build directory. The lock is
 // an exclusive advisory lock on a lock file in the directory, held by the
 // kernel for the build's lifetime: a holder that crashes releases it
 // without any staleness guessing, and no two builders can hold it at
@@ -70,7 +70,7 @@ func DesktopBuildDir() (string, error) {
 // range and closes the handle; the empty lock file remains as the stable
 // inode that waiting builders share. The returned unlock is safe to call
 // more than once.
-func lockDesktopBuild(ctx context.Context, buildDir string) (func(), error) {
+func LockDesktopBuild(ctx context.Context, buildDir string) (func(), error) {
 	if err := os.MkdirAll(buildDir, 0o755); err != nil {
 		return nil, fmt.Errorf("localops: create desktop build dir: %w", err)
 	}
@@ -97,11 +97,13 @@ func lockDesktopBuild(ctx context.Context, buildDir string) (func(), error) {
 	}, nil
 }
 
-// The phases a desktop build reports, in the order BuildDesktop and
-// `aether gui build` run them. `--json` prints one line per phase and the
-// gateway turns them into the dashboard's progress line, so these strings
-// are a contract (docs/local-gateway.md).
+// The phases a desktop build reports, in the order `aether gui build` runs
+// them: downloading for a prebuilt app, unpacking through packaging for a
+// build from source, then installing. `--json` prints one line per phase
+// and the gateway turns them into the dashboard's progress line, so these
+// strings are a contract (docs/local-gateway.md).
 const (
+	PhaseDownloading  = "downloading"
 	PhaseUnpacking    = "unpacking"
 	PhaseFetchingNode = "fetching node"
 	PhaseDependencies = "installing dependencies"
@@ -113,13 +115,14 @@ const (
 
 // BuildDesktop packages the Electron shell in src for this machine: it
 // writes the sources into buildDir, stamps the full CLI build identity and
-// its executable path independently of the npm package version, installs the
-// npm dependencies, and runs electron-builder's unpacked (--dir) target.
+// the executable at cliPath independently of the npm package version,
+// installs the npm dependencies desktop/package-lock.json pins, and runs
+// electron-builder's unpacked (--dir) target.
 // npm and electron-builder output stream to stdout and stderr. phase, when
 // non-nil, is called with each Phase* constant as
 // that step starts. It returns the unpacked app: a directory on linux and
 // windows, the .app bundle on darwin.
-func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, stdout, stderr io.Writer, phase func(string)) (string, error) {
+func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion, cliPath string, stdout, stderr io.Writer, phase func(string)) (string, error) {
 	if phase == nil {
 		phase = func(string) {}
 	}
@@ -127,7 +130,7 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 	// sharing the cache - several runner accounts on one machine, or two
 	// terminals - would otherwise race npm install in the same
 	// node_modules and corrupt it.
-	unlock, err := lockDesktopBuild(ctx, buildDir)
+	unlock, err := LockDesktopBuild(ctx, buildDir)
 	if err != nil {
 		return "", err
 	}
@@ -135,14 +138,6 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 	phase(PhaseUnpacking)
 	if err = writeTree(buildDir, src); err != nil {
 		return "", fmt.Errorf("localops: write shell sources: %w", err)
-	}
-	cliPath, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("localops: locate CLI for shell: %w", err)
-	}
-	cliPath, err = filepath.EvalSymlinks(cliPath)
-	if err != nil {
-		return "", fmt.Errorf("localops: resolve CLI for shell: %w", err)
 	}
 	if err = stampShellVersion(buildDir, cliVersion, cliPath); err != nil {
 		return "", err
@@ -185,12 +180,12 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion string, s
 	}
 	phase(PhaseDependencies)
 	npm := tools.npm
-	npmArgs := make([]string, 0, 4)
+	npmArgs := make([]string, 0, 5)
 	if runtime.GOOS == "windows" {
 		npm = tools.node
 		npmArgs = append(npmArgs, tools.npm)
 	}
-	npmArgs = append(npmArgs, "install", "--no-audit", "--no-fund")
+	npmArgs = append(npmArgs, "install", "--no-audit", "--no-fund", "--prefer-offline")
 	if err := run(npm, npmArgs...); err != nil {
 		return "", err
 	}
@@ -304,17 +299,35 @@ const (
 	installOldPrefix     = ".aether-old-"
 )
 
-// InstallDesktop copies the unpacked app at built into the application
-// directory desktopLayout picks for goos and registers a launcher so the
-// desktop environment lists it. home is the user's home directory; icon is
-// the PNG the linux launcher shows.
+// DesktopSource fills dir, which does not exist yet, with the app
+// InstallDesktop publishes.
+type DesktopSource func(dir string) error
+
+func DesktopFrom(built string) DesktopSource {
+	return func(dir string) error {
+		if err := os.CopyFS(dir, os.DirFS(built)); err != nil {
+			return fmt.Errorf("localops: copy %s to %s: %w", built, dir, err)
+		}
+		return nil
+	}
+}
+
+// cliBindingFile is where InstallDesktop records the CLI the app launches,
+// relative to the app on linux and windows; desktop/cli-binding.js reads it
+// from process.resourcesPath.
+const cliBindingFile = "resources/aether-cli.json"
+
+// InstallDesktop puts the app src provides into the application directory
+// desktopLayout picks for goos, records cliPath as the CLI it launches, and
+// registers a launcher so the desktop environment lists it. home is the
+// user's home directory; icon is the PNG the linux launcher shows.
 //
 // The new app is staged beside the target and swapped in by rename: the app
 // being replaced is often the one the user is looking at, and deleting a
 // running Electron's own files takes that window down with it. An earlier
 // install at app.Superseded is removed after the new app is in place, so a
 // failed copy never costs the last working install.
-func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
+func InstallDesktop(goos, home string, src DesktopSource, cliPath string, icon []byte) (DesktopApp, error) {
 	app, err := desktopLayout(goos, home)
 	if err != nil {
 		return DesktopApp{}, err
@@ -333,11 +346,18 @@ func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 	}
 	defer func() { _ = os.RemoveAll(staging) }()
 	staged := filepath.Join(staging, filepath.Base(app.App))
-	if err := os.CopyFS(staged, os.DirFS(built)); err != nil {
-		return DesktopApp{}, fmt.Errorf("localops: copy %s to %s: %w", built, staged, err)
+	if err := src(staged); err != nil {
+		return DesktopApp{}, err
 	}
 	// Everything that belongs inside the app goes in before the swap, so
-	// the directory the rename publishes is already complete.
+	// the directory the rename publishes is already complete. A darwin
+	// bundle is left alone: a file added after signing breaks its seal, and
+	// the source build stamped the CLI path into package.json before that.
+	if goos != "darwin" {
+		if err := writeCLIBinding(staged, cliPath); err != nil {
+			return DesktopApp{}, err
+		}
+	}
 	if goos == "linux" {
 		if err := os.WriteFile(filepath.Join(staged, desktopIcon), icon, 0o644); err != nil {
 			return DesktopApp{}, err
@@ -364,7 +384,7 @@ func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 		if err := os.MkdirAll(filepath.Dir(app.Launcher), 0o755); err != nil {
 			return DesktopApp{}, err
 		}
-		exe := filepath.Join(app.App, "aether-desktop.exe")
+		exe := filepath.Join(app.App, desktopExe)
 		if err := writeShellLink(app.Launcher, exe, filepath.Dir(exe)); err != nil {
 			return DesktopApp{}, fmt.Errorf("localops: create Start Menu shortcut: %w", err)
 		}
@@ -378,6 +398,23 @@ func InstallDesktop(goos, home, built string, icon []byte) (DesktopApp, error) {
 		}
 	}
 	return app, nil
+}
+
+func writeCLIBinding(staged, cliPath string) error {
+	data, err := json.Marshal(struct {
+		Path string `json:"path"`
+	}{cliPath})
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(staged, filepath.FromSlash(cliBindingFile))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("localops: record the CLI for the app: %w", err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		return fmt.Errorf("localops: record the CLI for the app: %w", err)
+	}
+	return nil
 }
 
 // swapInstalled publishes staged at target with two renames: the installed

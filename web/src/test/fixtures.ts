@@ -816,6 +816,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     agentModels: vi.fn(async () => ({ models: [], source: 'none' as const })),
     agentRegister: vi.fn(async () => ({})),
     agentInstall: vi.fn(async () => ({ log_tail: 'installed\n', installed: true, enhanced_installed: false })),
+    agentRemove: vi.fn(async () => ({})),
     runProtect: vi.fn(async () => ({})),
     runArchive: vi.fn(async (runID: string, archived: boolean) =>
       run({

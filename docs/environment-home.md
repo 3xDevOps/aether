@@ -142,6 +142,9 @@ environment then opens with the agent's login command typed, and
 **Check** reads `agent.list` back: **Installed**, **Enhanced installed**, and
 **Login found** when the agent's login file exists in this home. It does not
 save the environment image; the home already persists the install.
+`aether agent remove <name>` or **Remove…** on the Agents page undoes it: it
+deletes the agent's `~/.local/bin` links and nothing else, so the packages,
+login and settings stay ([harnesses.md](harnesses.md#removing-an-agent)).
 
 Discovery follows relative symlinks and absolute links under `/root` or
 `/home/aether` within your home. Claude's native installer uses an

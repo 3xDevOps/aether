@@ -24,23 +24,27 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/edge/relay"
 	edge "github.com/3xDevOps/Aether/internal/edge/service"
-	"github.com/3xDevOps/Aether/internal/version"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
 // shutdownTimeout bounds a clean stop: drain to every server, then the
-// HTTP servers.
-const shutdownTimeout = 10 * time.Second
+// HTTP servers. It stays below the 30 seconds docs/edge.md gives the
+// container runtime to stop the edge before it kills it.
+const shutdownTimeout = 20 * time.Second
 
 // commands are aether-edge's top-level commands.
 var commands = map[string]func(args []string) error{
-	"version": func([]string) error {
-		_, err := fmt.Println("aether-edge", version.String())
-		return err
-	},
+	"version":     func(args []string) error { return versionCmd(args, os.Stdout) },
 	"serve":       serve,
-	"healthcheck": func(args []string) error { return healthcheck(args, os.Getenv) },
+	"healthcheck": func(args []string) error { return healthcheck(args, os.Getenv, os.Stdout) },
 	"servers":     func(args []string) error { return servers(args, os.Getenv, os.Stdout) },
 	"accounts":    func(args []string) error { return accounts(args, os.Getenv, os.Stdout) },
+	"schema":      func(args []string) error { return schemaCmd(args, os.Getenv, os.Stdout) },
+	"backup":      func(args []string) error { return backupCmd(args, os.Getenv, os.Stdout, os.Stderr) },
+	"restore":     func(args []string) error { return restoreCmd(args, os.Getenv, os.Stdout) },
+	"release-check": func(args []string) error {
+		return releaseCheck(args, selfupdate.FetchManifest, os.Stdout)
+	},
 }
 
 func main() {
@@ -58,7 +62,13 @@ func main() {
 }
 
 func exit(err error) {
+	var hold *holdError
 	switch {
+	case errors.As(err, &hold):
+		for _, reason := range hold.reasons {
+			_, _ = fmt.Fprintln(os.Stderr, "aether-edge: hold:", reason)
+		}
+		os.Exit(3)
 	case err == nil, errors.Is(err, flag.ErrHelp):
 	case errors.Is(err, errUsage):
 		os.Exit(2)
@@ -72,11 +82,15 @@ func usage() {
 	_, _ = fmt.Fprint(os.Stderr, `usage: aether-edge <command>
 
 commands:
-  serve        run the edge (aether-edge serve -h lists its options)
-  healthcheck  exit 0 when the edge on this machine answers, 1 with the reason
-  servers      list, remove, block and unblock servers
-  accounts     list, block, unblock and delete accounts
-  version      print the version
+  serve          run the edge (aether-edge serve -h lists its options)
+  healthcheck    exit 0 when the edge on this machine answers (--ready: is ready), 1 with the reason
+  servers        list, remove, block and unblock servers
+  accounts       list, block, unblock and delete accounts
+  schema         print the database's schema version and compat floor [--json]
+  backup         copy the database while the edge runs: backup [--with-key] <file|dir|->
+  restore        replace the database of a stopped edge: restore [--key <file>] <file>
+  release-check  verify a release's signed edge image; exit 3 when its upgrade must hold
+  version        print the version [--json]
 `)
 }
 
@@ -88,6 +102,22 @@ func serve(args []string) (err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err = checkDataDir(o.dataDir); err != nil {
+		return err
+	}
+	unlock, err := lockPath(filepath.Join(o.dataDir, lockFile), exclusive)
+	if errors.Is(err, errLocked) {
+		return fmt.Errorf("%w; an edge already serves %s, or a restore or an operator command runs on it: one edge per data directory", err, o.dataDir)
+	}
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	unlockDB, err := lockPath(filepath.Join(o.dataDir, dbLockFile), shared)
+	if err != nil {
+		return err
+	}
+	defer unlockDB()
+	if err = removeStaleKeys(o.dataDir); err != nil {
 		return err
 	}
 
@@ -117,7 +147,8 @@ func serve(args []string) (err error) {
 		MaxHeaderBytes:    64 << 10,
 		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelWarn),
 	}
-	metrics := &http.Server{Handler: metricsHandler(rl), ReadHeaderTimeout: 10 * time.Second}
+	var listener listenerState
+	metrics := &http.Server{Handler: metricsHandler(svc, rl, &listener), ReadHeaderTimeout: 10 * time.Second}
 
 	errc := make(chan error, 3)
 	metricsLn, err := net.Listen("tcp", o.metricsListen)
@@ -133,7 +164,7 @@ func serve(args []string) (err error) {
 			return fmt.Errorf("development listener: %w", err)
 		}
 		slog.Warn("aether-edge: development mode: plain HTTP, no certificates", "listen", ln.Addr())
-		go func() { errc <- serveHTTP("edge", web, ln) }()
+		go func() { errc <- listener.serve("edge", web, ln) }()
 	case o.proxyListen != "":
 		var ln net.Listener
 		if ln, err = net.Listen("tcp", o.proxyListen); err != nil {
@@ -146,7 +177,7 @@ func serve(args []string) (err error) {
 		}
 		slog.Info("aether-edge: behind a reverse proxy: plain HTTP, client addresses from "+relay.HeaderForwardedFor,
 			"listen", ln.Addr(), "proxies", proxies)
-		go func() { errc <- serveHTTP("edge", web, ln) }()
+		go func() { errc <- listener.serve("edge", web, ln) }()
 	default:
 		tlsConfig := edgeTLS(o)
 		if public, err = net.Listen("tcp", o.listen); errors.Is(err, fs.ErrPermission) {
@@ -155,7 +186,7 @@ func serve(args []string) (err error) {
 		} else if err != nil {
 			return fmt.Errorf("public listener: %w", err)
 		}
-		go func() { errc <- serveHTTP("edge", web, tls.NewListener(rl.Listener(public), tlsConfig)) }()
+		go func() { errc <- listener.serve("edge", web, tls.NewListener(rl.Listener(public), tlsConfig)) }()
 	}
 	// The metrics listener serves /healthz, so it answers only once the
 	// edge's own listener is up.
@@ -167,10 +198,13 @@ func serve(args []string) (err error) {
 		err = nil
 	case err = <-errc:
 	}
+	// A second signal during the drain kills the edge.
+	stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
-	// Drain first: servers hear the edge is stopping and reconnect with
-	// backoff instead of reading a dropped socket as an outage.
+	// Drain first: /readyz answers draining from here on, and servers hear
+	// the edge is stopping and when to reconnect instead of reading a
+	// dropped socket as an outage.
 	err = errors.Join(err, rl.Shutdown(shutdownCtx))
 	if public != nil {
 		err = errors.Join(err, ignoreClosed(public.Close()))

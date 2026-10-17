@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
+	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -47,11 +48,49 @@ func (r repository) Fetch(ctx context.Context, tag string) (selfupdate.Manifest,
 	return selfupdate.FetchManifestFrom(ctx, string(r), tag)
 }
 
-func (s *Service) releases() Releases {
-	if s.cfg.Releases != nil {
-		return s.cfg.Releases
+// feed is releases, or the repository at baseURL when there is none.
+func feed(releases Releases, baseURL string) Releases {
+	if releases != nil {
+		return releases
 	}
-	return repository(s.cfg.Checker.BaseURL())
+	return repository(baseURL)
+}
+
+func (s *Service) releases() Releases {
+	return feed(s.cfg.Releases, s.cfg.Checker.BaseURL())
+}
+
+// Plan is what moving an installation to a release needs: where it lives
+// and where releases come from. The server fills it from its own state;
+// `aether-server update` fills it from the config file.
+type Plan struct {
+	// Releases is the signed release feed. Nil reads the repository at
+	// BaseURL.
+	Releases Releases
+	BaseURL  string
+	// Self is the aether-server binary to replace, symlinks resolved.
+	Self     string
+	StateDir string
+	// Database is the store's file, snapshotted before a release that
+	// migrates it. Empty skips the snapshot.
+	Database string
+	// Schema reads the database's current schema version.
+	Schema      func(context.Context) (int, error)
+	Now         func() time.Time
+	RequestedBy string
+}
+
+func (s *Service) plan(pending store.PendingServerUpdate) Plan {
+	return Plan{
+		Releases:    s.cfg.Releases,
+		BaseURL:     s.cfg.Checker.BaseURL(),
+		Self:        s.self,
+		StateDir:    s.cfg.StateDir,
+		Database:    s.cfg.Database,
+		Schema:      s.cfg.Store.SchemaVersion,
+		Now:         s.cfg.Now,
+		RequestedBy: string(pending.RequestedBy),
+	}
 }
 
 // anonymous asks for release assets the way a client without credentials
@@ -61,19 +100,20 @@ var anonymous = &http.Client{Timeout: 30 * time.Second, CheckRedirect: selfupdat
 // preflight decides whether this server may move to tag, before anything
 // is downloaded: the release's signed manifest, the direction, the
 // database schema, and every client asset as an anonymous client sees it.
-func (s *Service) preflight(ctx context.Context, tag string, allowDowngrade bool) (selfupdate.Manifest, error) {
+func preflight(ctx context.Context, p Plan, tag string, allowDowngrade bool) (selfupdate.Manifest, error) {
 	if tag == version.Version {
 		return selfupdate.Manifest{}, fmt.Errorf("%w: this server already runs %s", ErrPreflight, tag)
 	}
-	m, err := s.releases().Fetch(ctx, tag)
+	m, err := feed(p.Releases, p.BaseURL).Fetch(ctx, tag)
 	if err != nil {
 		return m, fmt.Errorf("%w: %w", ErrPreflight, retryable{err})
 	}
-	if selfupdate.Behind(tag, s.core) && !allowDowngrade {
+	core := version.ReleaseCore(version.Version)
+	if selfupdate.Behind(tag, core) && !allowDowngrade {
 		return m, fmt.Errorf("%w: %s is older than the running %s; pass --allow-downgrade (allow_downgrade) to install it anyway",
-			ErrDowngrade, tag, s.core)
+			ErrDowngrade, tag, core)
 	}
-	schema, err := s.cfg.Store.SchemaVersion(ctx)
+	schema, err := p.Schema(ctx)
 	if err != nil {
 		return m, err
 	}

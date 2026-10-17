@@ -110,27 +110,51 @@ func admin(group, usage string, args []string, getenv func(string) string, out i
 			return err
 		}
 	}
-	s, err := openStore(*dataDir)
+	s, unlock, err := openStore(*dataDir)
 	if err != nil {
 		return err
 	}
+	defer unlock()
 	return errors.Join(cmd.run(context.Background(), s, arg, out), s.Close())
 }
 
-// openStore opens the database of an existing edge. It never creates
-// one, and runs only as the database's owner: SQLite creates its -wal and
-// -shm files as whoever opens the database first, and a root-owned one
-// would lock the edge out of its own database.
-func openStore(dataDir string) (*edgestore.Store, error) {
-	path := filepath.Join(dataDir, "edge.db")
-	info, err := os.Stat(path)
+// openStore opens the database of an existing edge, and returns it with
+// the release of its locks. Beside a running edge, which holds edge.lock,
+// it does not migrate, and refuses a database this binary would migrate or
+// cannot run on. It refuses while a restore replaces the database.
+func openStore(dataDir string) (*edgestore.Store, func(), error) {
+	path, err := edgeDB(dataDir)
 	if err != nil {
-		return nil, fmt.Errorf("no edge database: %w; name the data directory with --data or AETHER_EDGE_DATA", err)
+		return nil, nil, err
 	}
-	if err := checkOwner(path, info); err != nil {
-		return nil, err
+	unlock, err := lockPath(filepath.Join(dataDir, lockFile), exclusive)
+	beside := errors.Is(err, errLocked)
+	switch {
+	case beside:
+		unlock = func() {}
+	case err != nil:
+		return nil, nil, err
 	}
-	return edgestore.Open(path)
+	unlockDB, err := lockDB(dataDir)
+	if err != nil {
+		unlock()
+		return nil, nil, err
+	}
+	release := func() { unlockDB(); unlock() }
+	open := edgestore.Open
+	if beside {
+		open = edgestore.OpenCurrent
+	}
+	s, err := open(path)
+	if err != nil {
+		release()
+		if beside {
+			err = fmt.Errorf("%w; an edge is running on %s, so run this command with the same image or binary as the running edge, as in docker exec <container> aether-edge servers list",
+				err, dataDir)
+		}
+		return nil, nil, err
+	}
+	return s, release, nil
 }
 
 func checkServerID(id string) error {

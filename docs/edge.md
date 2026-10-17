@@ -1265,17 +1265,101 @@ linux/amd64 and linux/arm64: the `aether-edge` binary and CA certificates on
 a distroless base, with no shell. It runs `aether-edge serve` as uid and gid
 65532 and carries no configuration.
 
-Each release tags it with the release tag, the full commit SHA,
-`sha-<short-sha>` and `latest`. Pin a release tag, or better its digest,
-which no later push can move; `docker pull
-ghcr.io/3xdevops/aether-edge:<release-tag>` prints it as `Digest:`.
-`latest` moves with every release, so an unattended restart can upgrade the
-database schema under you ([Upgrades](#upgrades)); do not run it in
-production.
+Each release tags it with the release tag, the full commit SHA and
+`sha-<short-sha>`, which no later release moves, and two channels:
+
+| Tag | Moves to | Use |
+| --- | --- | --- |
+| `latest` | every release, alphas included, once it is published and GitHub's Latest | trying a release; never production |
+| `stable` | a published release an admin promoted after it qualified and soaked ([Promoting an edge release to stable](install.md#promoting-an-edge-release-to-stable)); never to an older one | production |
+
+`latest` can upgrade the database schema under an unattended restart
+([Upgrades](#upgrades)). In production pin `stable` by digest, which no
+push can move, and change the digest deliberately:
 
 ```
-ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
+ghcr.io/3xdevops/aether-edge:stable@sha256:<digest>
 ```
+
+`docker buildx imagetools inspect ghcr.io/3xdevops/aether-edge:stable`
+prints the digest `stable` names now as `Digest:`. Both channel tags carry
+the release's index byte for byte, so the digest is the same as the
+release tag's.
+
+#### Verifying an image
+
+The release signs each image's index digest in `aether-release.json`
+([Verified releases](install.md#verified-releases)). Before running a
+new digest, ask the edge you already run, not the new image, whether a
+release signed it and which manual steps an upgrade from your release
+needs:
+
+```sh
+docker exec <container> aether-edge release-check \
+  --tag <release-tag> --digest sha256:<digest> --from <running-tag>
+```
+
+It verifies the manifest with the release keys built into the binary and
+exits 0 when the upgrade may go ahead, 3 with each reason on stderr
+(`aether-edge: hold: ...`) when it must wait: a blocking manual step, a
+`--from` below the release's `min_upgrade_from`, or a `--from` newer than
+the release. `--from` is required. `--json` prints the report, including
+the edge section and the applicable steps, as one JSON object.
+
+It does not decide whether you can roll back. The report shows the new
+release's `store_compat_floor`, but whether the old binary opens the
+database after the new one migrated it is answered by the old image:
+`docker run --rm -v <data>:/var/lib/aether-edge <old image> schema --json`
+reports `supported`.
+
+Every image index and each of its platform images also carries a GitHub
+artifact attestation: SLSA build provenance signed through Sigstore,
+naming the workflow, tag and commit that built it. Check one with the
+GitHub CLI:
+
+```sh
+gh attestation verify oci://ghcr.io/3xdevops/aether-edge@sha256:<digest> \
+  --repo 3xDevOps/aether \
+  --signer-workflow 3xDevOps/aether/.github/workflows/release.yml \
+  --source-ref refs/tags/<release-tag> --deny-self-hosted-runners
+```
+
+or with cosign 2.4 or later, which reads the attestation stored next to
+the image in the registry:
+
+```sh
+cosign verify-attestation --new-bundle-format \
+  --type https://slsa.dev/provenance/v1 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/release.yml@refs/tags/<release-tag> \
+  ghcr.io/3xdevops/aether-edge@sha256:<digest>
+```
+
+A digest `stable` names also carries a promotion attestation from
+`promote-edge.yml` on `main`, with the predicate
+`{"channel":"stable","tag":"<release-tag>","digest":"sha256:<digest>"}`.
+A host that follows `stable` requires it, since repository write access
+alone can move a tag:
+
+```sh
+gh attestation verify oci://ghcr.io/3xdevops/aether-edge@sha256:<digest> \
+  --repo 3xDevOps/aether \
+  --signer-workflow 3xDevOps/aether/.github/workflows/promote-edge.yml \
+  --source-ref refs/heads/main --deny-self-hosted-runners \
+  --predicate-type https://github.com/3xDevOps/aether/edge-promotion/v1 \
+  --format json --jq '.[].verificationResult.statement.predicate'
+```
+
+```sh
+cosign verify-attestation --new-bundle-format \
+  --type https://github.com/3xDevOps/aether/edge-promotion/v1 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main \
+  ghcr.io/3xdevops/aether-edge@sha256:<digest>
+```
+
+Check that the printed predicate names `stable`, the digest and the tag
+`release-check` verified.
 
 | What | How |
 | --- | --- |
@@ -1283,8 +1367,8 @@ ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
 | Data directory | `/var/lib/aether-edge`, declared as a volume ([What the data directory holds](#what-the-data-directory-holds)) |
 | Client secret | A file, named by `AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE` ([The client secret](#the-client-secret)) |
 | Listening | Behind a reverse proxy on a container network, or with the edge's own certificates on a published port ([Listening](#listening)) |
-| Health | The image's `HEALTHCHECK` runs `aether-edge healthcheck` every 30 seconds, after a 30-second start period, and marks the container unhealthy after 3 failures. On a runtime that ignores `HEALTHCHECK`, use the same command as the probe. It reads `AETHER_EDGE_METRICS_LISTEN`, so change the metrics address with that variable, not with a `--metrics-listen` flag on `serve` |
-| Stop | `SIGTERM`: the edge sends `drain` to every server and exits 0 within 10 seconds, or exits 1 if shutdown takes longer. Docker's default grace period is also 10 seconds, so give it more: `--stop-timeout 30` |
+| Health | The image's `HEALTHCHECK` runs `aether-edge healthcheck`, the liveness check, every second during a 30-second start period and every 30 seconds after, and marks the container unhealthy after 3 failures. A reverse proxy that routes on Docker health, such as Traefik, routes to a restarted edge about a second after it listens. The one-second start interval needs Docker Engine 25 or later; an older engine probes every 30 seconds from the start, so a restart costs up to 30 seconds without routing. `aether-edge healthcheck --ready` is the readiness check ([Monitoring](#monitoring)); keep it out of `HEALTHCHECK`: a proxy that routes on Docker health would stop routing new connections whenever the database answers slowly. On a runtime that ignores `HEALTHCHECK`, use the same commands as the probes. They read `AETHER_EDGE_METRICS_LISTEN`, so change the metrics address with that variable, not with a `--metrics-listen` flag on `serve` |
+| Stop | `SIGTERM`: readiness turns `draining`, the edge sends `drain` to every server, gives relayed connections 2 seconds to finish, and exits 0 within 20 seconds, or exits 1 if shutdown takes longer. Docker's default grace period is 10 seconds, so give it more: `--stop-timeout 30`, or `stop_grace_period: 30s` in Compose |
 | Metrics | Loopback only, inside the container: scrape them from a container that shares its network namespace (`--network container:aether-edge`) ([Monitoring](#monitoring)) |
 | Root filesystem | May be read-only (`--read-only`): the edge writes only to the data directory, and SQLite keeps its temporary tables in memory |
 | Operator commands | `docker exec <container> aether-edge servers list`, as the image's user ([Operator commands](#operator-commands)) |
@@ -1293,15 +1377,18 @@ ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
 
 `/var/lib/aether-edge` holds `edge.db`, the database of accounts, device
 tokens, owners and owed deletions; `edge_key`, the edge signing key every
-enrolled server pins; and, when the edge obtains its own certificates, the
-ACME cache in `acme/` ([Backup and recovery](#backup-and-recovery)). It
-must outlive every container. Mount a named volume, which takes the image's
+enrolled server pins; `backups/`, the database copies the edge takes before
+it migrates; `edge.lock` and `edge.db.lock`, held by the running edge; and, when the edge
+obtains its own certificates, the ACME cache in `acme/`
+([Backup and recovery](#backup-and-recovery)). It must outlive every
+container. Mount a named volume, which takes the image's
 ownership; a directory owned by uid 65532 (`chown -R 65532:65532 <dir> &&
 chmod 0700 <dir>`); or a directory the edge's uid writes through its group,
 such as `root:<gid>` mode `2770` on a platform that runs the container with
 that supplementary group. The edge refuses a directory its uid cannot
-write, one that others can enter, and an `edge_key` or `edge.db` another
-uid owns, since it creates both 0600:
+write, one that others can enter, and an `edge_key`, `edge.db`,
+`edge.lock`, `edge.db.lock` or `backups/` another uid owns, since it
+creates them 0600 and 0700:
 
 ```
 aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is not writable by uid 65532, the user aether-edge runs as: permission denied; give that user write access as the directory's owner or through its group, or name another with --data or AETHER_EDGE_DATA
@@ -1320,12 +1407,10 @@ accept, so whoever holds it can act as the edge
 ([What an attacker can do](#what-an-attacker-can-do)). Encrypt backups and
 store them where only the edge's operators can read them.
 
-The image has no `sqlite3`: back up by copying the volume while the
-container is stopped, or run `sqlite3 edge.db ".backup <file>"` as uid 65532
-from another container that mounts the volume. The fingerprint servers pin
+Back up and restore with the image's own `aether-edge backup` and
+`aether-edge restore`; both work on a read-only root filesystem
+([Backup and recovery](#backup-and-recovery)). The fingerprint servers pin
 is in `GET /v1/edge` ([First start and checks](#first-start-and-checks)).
-To upgrade, back up, then start the new tag's container with the same
-volume.
 
 #### The client secret
 
@@ -1400,7 +1485,7 @@ is the whole configuration. Replace every `<...>` in it.
 | `--trusted-proxies` | `AETHER_EDGE_TRUSTED_PROXIES` | none: the proxy is on loopback ([A proxy that is not on this host](#a-proxy-that-is-not-on-this-host)) |
 | `--listen` | `AETHER_EDGE_LISTEN` | `:443`, with the edge's own certificates; unused with `--proxy-listen` |
 | `--data` | `AETHER_EDGE_DATA` | `/var/lib/aether-edge` |
-| `--metrics-listen` | `AETHER_EDGE_METRICS_LISTEN` | `127.0.0.1:9464`, loopback only; serves `/metrics` and `/healthz` |
+| `--metrics-listen` | `AETHER_EDGE_METRICS_LISTEN` | `127.0.0.1:9464`, loopback only; serves `/metrics`, `/healthz` and `/readyz` |
 | `--acme-email` | `AETHER_EDGE_ACME_EMAIL` | none |
 | `--acme-directory` | `AETHER_EDGE_ACME_DIRECTORY` | `https://acme-v02.api.letsencrypt.org/directory` |
 | `--egress-budget` | `AETHER_EDGE_EGRESS_BUDGET` | `0`: bytes per UTC month, a plain integer; 0 = none |
@@ -1536,16 +1621,41 @@ format:
 | `aether_edge_relayed_bytes_total` | Bytes relayed since the edge started |
 | `aether_edge_egress_month_bytes` | Bytes relayed this UTC month, the figure the budget counts |
 | `aether_edge_throttled` | `1` once the monthly egress budget is spent |
+| `aether_edge_draining` | `1` once the edge is stopping |
+| `aether_edge_servers_by_protocol{version="..."}` | Servers holding a control connection, by the protocol version negotiated with each ([Upgrades](#upgrades)) |
+| `aether_edge_github_errors_total` | Calls to GitHub, during sign-in, that failed |
 | `aether_edge_refusals_total{reason="..."}` | Refused connections and enrollments by reason, such as `enrollment refused`, `upgrade required`, `too many connections from one address` or `no forwarded client address` |
 
 Scrape it from the edge host itself or over an SSH tunnel; it is never
-exposed. `aether-edge healthcheck` asks the edge on the same machine for
-`/healthz` on that listener, reading `AETHER_EDGE_METRICS_LISTEN` or
-`--metrics-listen` as `serve` does, and exits 0, or 1 with the reason:
+exposed. The same listener serves two checks:
+
+| Path | Command | Answers 200 when |
+| --- | --- | --- |
+| `/healthz` | `aether-edge healthcheck` | The process serves. The listener answers only once the public listener is open, and checks nothing else: this is liveness |
+| `/readyz` | `aether-edge healthcheck --ready` | The edge database answers a read within a second, the public listener serves, and the edge is not stopping. Otherwise 503 |
+
+Each command asks the edge on the same machine, reading
+`AETHER_EDGE_METRICS_LISTEN` or `--metrics-listen` as `serve` does, and
+exits 0, or 1 with the reason:
 
 ```
 aether-edge: healthcheck: no edge answers on 127.0.0.1:9464: Get "http://127.0.0.1:9464/healthz": dial tcp 127.0.0.1:9464: connect: connection refused; when serve was given --metrics-listen, give this command the same address or set AETHER_EDGE_METRICS_LISTEN for both
+aether-edge: healthcheck: edge is not ready (draining): draining: the edge is stopping
 ```
+
+`/readyz` answers JSON; `aether-edge healthcheck --json` prints it and
+implies `--ready`. `status` is `ready`, `draining` once a stop began,
+`starting` while a check fails before the edge was first ready, or
+`unready` while one fails after; a failing check holds its error instead of
+`ok`:
+
+```json
+{"status":"ready","version":"<release-tag>","protocol":{"version":1,"min_version":1},"checks":{"db":"ok","listener":"ok","draining":false},"servers":{"claimed":12,"unclaimed":1}}
+```
+
+Neither check asks GitHub or the ACME CA: an edge that cannot reach them
+still relays every enrolled server. Watch
+`aether_edge_github_errors_total` and certificate expiry instead.
 
 Alert on `aether_edge_throttled` equal to 1 and on
 `aether_edge_egress_month_bytes` passing a fraction of the budget; on a fall
@@ -1597,22 +1707,41 @@ The data directory, `/var/lib/aether-edge`:
 | --- | --- |
 | `edge.db` (with `edge.db-wal`, `edge.db-shm`) | Accounts, edge sessions, devices, claimed servers with owners, kinds, announced policies and directories, which servers each account was admitted to, deletions owed to servers, egress counters, blocked server ids and accounts. Bearer secrets are stored only as SHA-256 hashes |
 | `edge_key` | The Ed25519 key grants are signed with, OpenSSH format, 0600. The edge refuses to start if group or others can read it: `edge: signing key <path> has mode 0644; run chmod 600 <path>` |
+| `backups/` | 0700. `edge-v<from>-v<to>-<UTC time>.db`, taken before each migration: the newest 5 are kept, and the newest from each schema version. `edge-before-restore-<UTC time>.db` (with its `-wal`) and `edge_key-before-restore-<UTC time>`, the files a restore replaced, are never removed |
+| `edge.lock`, `edge.db.lock` | Locked by the running edge, so a second edge on the same directory exits, and by `restore` and the operator commands. `flock` does not lock across NFS: keep the directory on a local filesystem |
 | `acme/` | Without a proxy: the two names' certificates, their keys and the ACME account key |
 
 Keep:
 
 - **`edge_key`, once, offline**, right after the first start. It never
-  changes. If it is lost, the edge makes a new one and every server refuses
-  the edge with `edge key changed` until its operator runs `sudo
-  aether-server edge trust`. Clients need no action.
-- **`edge.db`, daily.** `.backup` copies a consistent snapshot while the
-  edge runs (needs the `sqlite3` package):
+  changes. If it is lost while `edge.db` holds accounts or servers, the
+  edge does not start:
 
-  ```sh
-  sudo -u aether-edge sqlite3 /var/lib/aether-edge/edge.db ".backup /var/lib/aether-edge/edge-backup.db"
+  ```
+  aether-edge: edge: signing key /var/lib/aether-edge/edge_key is missing, and edge.db holds accounts or servers that pin it, so the edge does not make a new one: put the key back with aether-edge restore --key <key file> <database backup>, or copy it to /var/lib/aether-edge/edge_key with mode 0600, or move edge.db aside to start a new edge identity
   ```
 
-  Copy `edge-backup.db` off the machine. A lost `edge.db` forgets every
+  Without the key, start over with a new data directory: the edge makes a
+  new key, and every server refuses the edge with `edge key changed` until
+  its operator runs `sudo aether-server edge trust`.
+- **`edge.db`, daily.** `aether-edge backup` copies a consistent snapshot
+  while the edge runs, through a read-only connection, and checks the copy
+  with `PRAGMA integrity_check`. It never migrates. Name a directory (the
+  copy is `edge-v<schema>-<UTC time>.db` in it), a new file (an existing
+  one is never overwritten), or `-` for standard output; `--with-key`
+  copies `edge_key` to `<file>.key` too:
+
+  ```sh
+  sudo install -d -o aether-edge -m 0700 /var/backups/aether-edge
+  sudo -u aether-edge aether-edge backup /var/backups/aether-edge/
+  docker exec aether-edge aether-edge backup - > edge-$(date -u +%Y%m%d).db
+  ```
+
+  Keep daily copies off the data volume: `backup` never removes old
+  copies, and a full volume stops the pre-migration backup and with it the
+  next upgrade. Rotate them, for example with `find
+  /var/backups/aether-edge -name 'edge-v*' -mtime +14 -delete`, and copy
+  them off the machine. A lost `edge.db` forgets every
   account, device token and owner: each client runs `aether login` again,
   and each server drops its owner when it reconnects and logs
   ``edge: the edge does not know this server's owner; claim it again with a code from `aether-server edge claim-code` ``.
@@ -1623,23 +1752,88 @@ Keep:
   nginx, `/etc/letsencrypt/` and `/etc/nginx/conf.d/aether-edge.conf`, or
   the steps to recreate them.
 
+To restore, stop the edge and run `aether-edge restore` as its user with
+the data directory mounted. It checks the copy's integrity and refuses a
+copy this binary cannot run on. It saves the current `edge.db` and its WAL
+byte for byte to `backups/edge-before-restore-<UTC time>.db`, folds the
+WAL into `edge.db`, removes the `-wal` and `-shm` files and renames the
+copy into place. `--key <file>` restores `edge_key` too, after saving the
+current one to `backups/edge_key-before-restore-<UTC time>`, and prints
+its fingerprint. Without `--key`, `edge_key` must already be in the data
+directory:
+
+```sh
+sudo systemctl stop aether-edge
+sudo -u aether-edge aether-edge restore /var/lib/aether-edge/backups/<backup>.db
+sudo systemctl start aether-edge
+
+docker compose stop edge
+docker compose run --rm --no-deps edge restore /var/lib/aether-edge/backups/<backup>.db
+docker compose start edge
+```
+
+A restore stopped between replacing `edge.db` and `edge_key` leaves the
+new database beside the old key; run the same restore again. The next
+restore or start removes the `edge_key.*.tmp` file it left.
+
+With the edge running, a restore is refused; so is one while an operator
+command has the database open:
+
+```
+aether-edge: another aether-edge process holds the lock: /var/lib/aether-edge/edge.lock; an edge is running on /var/lib/aether-edge: stop it first (docker compose stop, or sudo systemctl stop aether-edge), then restore
+```
+
+`aether-edge schema --json` prints the database's schema version, its
+compat floor and the schema this binary supports, read-only:
+`{"schema":1,"compat_floor":1,"supported":1}`.
+
 ### Upgrades
 
 ```sh
-sudo -u aether-edge sqlite3 /var/lib/aether-edge/edge.db ".backup /var/lib/aether-edge/edge-pre-<release-tag>.db"
+sudo -u aether-edge aether-edge backup /var/lib/aether-edge/backups/
 # download and check the new binary as in Installing, then:
 sudo install -m 0755 aether-edge-linux-<arch> /usr/local/bin/aether-edge
 sudo systemctl restart aether-edge
 ```
 
+In a container, back up with `docker exec <container> aether-edge backup
+/var/lib/aether-edge/backups/`, then start the new tag's container with
+the same volume.
+
 Fetch the unit and the environment example of the new release too, and
 compare them with yours. On `SIGTERM` the edge sends `drain` to every
-server, then closes within 10 seconds. Every relayed connection drops;
-servers reconnect with backoff, clients redial, and runs are unaffected.
-The database schema migrates forward on start. An older binary refuses a
-migrated database with `edgestore: database schema version <n> is newer
-than this binary supports (<m>)`; to roll back, restore the backup taken
-before the upgrade.
+server, then closes within 20 seconds. Every relayed connection drops;
+servers reconnect 3 to 8 seconds later, as `drain` asks, clients redial,
+and runs are unaffected.
+
+The database schema migrates forward on start. Before it migrates, the
+edge copies `edge.db` to `backups/edge-v<from>-v<to>-<UTC time>.db` and
+checks the copy; without a good copy it does not migrate and exits. The
+first start of a release that records compat floors (below) also takes
+one, `edge-v1-v1-<UTC time>.db`, before it adds the column that holds
+them.
+
+```
+aether-edge: edgestore: back up /var/lib/aether-edge/edge.db to /var/lib/aether-edge/backups/edge-v1-v2-20261017T051604.402617Z.db before migrating schema 1 to 2: edgestore: copy /var/lib/aether-edge/edge.db to /var/lib/aether-edge/backups/edge-v1-v2-20261017T051604.402617Z.db.3829104755.tmp: database or disk is full (13); the edge does not migrate without a verified backup: make /var/lib/aether-edge/backups writable by uid 65532 with room for a copy of the database, then start the edge again
+```
+
+Each migration records a compat floor: the lowest schema a binary must
+support to run correctly on the database. A migration keeps the previous
+floor only when it adds a table, an index, or a nullable or defaulted
+column that an older binary can ignore and stay correct. One that an
+older binary must read or maintain, such as a new revocation or block,
+raises the floor to its own version. On a database whose floor it meets,
+the older binary runs unmigrated, logging
+`edgestore: the database was migrated by a newer binary; running on it unmigrated, as its compat floor allows`.
+After any other migration the older binary refuses the database and names
+the backup to restore:
+
+```
+aether-edge: edgestore: database schema version 2 is newer than this binary supports (1); run a binary that supports schema 2 or later, or stop the edge and restore the backup taken before the upgrade: aether-edge restore --data /var/lib/aether-edge /var/lib/aether-edge/backups/edge-v1-v2-20261017T050000.000000Z.db
+```
+
+To roll back, stop the edge, restore that backup with the new binary or
+image (older releases have no `restore`), then start the older one. Writes made since the upgrade are lost.
 
 In a container, `aether-edge-update` performs these steps and rolls back
 on failure ([Automatic updates](#automatic-updates)). By hand, in the
@@ -1684,10 +1878,22 @@ An edge, servers and clients built from the `v0.5.2-alpha.3` tag must all
 be replaced by this release together; a mix of that build and this one
 does not interoperate.
 
-Every handshake carries a protocol version. The edge accepts any server or
-client at or above its minimum version, including newer ones, which speak
-down. An older one is refused with `upgrade required: <minimum>` (HTTP 426
-for clients). Protocol version 1 is the only version and the minimum.
+Every handshake carries a protocol version. The two sides speak the lower
+of their two versions. The edge accepts any server or client at or above
+its minimum version, including newer ones, which speak down. An older one
+is refused with `upgrade required: <minimum>` (HTTP 426 for clients).
+Protocol version 1 is the only version and the minimum;
+`aether_edge_servers_by_protocol` shows the versions connected servers
+speak.
+
+A change either side can ignore, such as a new optional field or a new
+message type, does not change the version: each side skips message types
+it does not know and ignores fields it does not know. A change the other
+side must understand raises the version, and the edge keeps accepting the
+previous version for at least one release after, so servers can be
+upgraded after the edge. `drain` gained its reconnect hint this way: a
+server that predates it reconnects with backoff, and one that knows it
+clamps a hint outside 0 to 60 seconds instead of refusing the message.
 
 ### Automatic updates
 
@@ -1993,6 +2199,24 @@ opens the database, and a root-owned one would lock the edge out. `--data`
 (default `AETHER_EDGE_DATA`, else `/var/lib/aether-edge`) goes before the
 argument.
 
+While an edge runs, it holds `edge.lock`, and the commands never migrate:
+they refuse a database their binary would migrate or cannot run on, so run
+them with the running edge's binary or image, as `docker exec <container>
+aether-edge servers list` does:
+
+```
+aether-edge: edgestore: /var/lib/aether-edge/edge.db is at schema version 2 with compat floor 2, and this binary supports 1; an edge is running on /var/lib/aether-edge, so run this command with the same image or binary as the running edge, as in docker exec <container> aether-edge servers list
+```
+
+During a restore they are refused with `a restore is replacing
+/var/lib/aether-edge/edge.db: run the command again once it finishes`.
+
+With no edge running, they take the lock themselves and migrate as a start
+does, backup first. `aether-edge version --json` prints the binary's
+version, commit, store schema, compat floor and protocol versions.
+`backup`, `restore` and `schema` are in
+[Backup and recovery](#backup-and-recovery).
+
 The commands list, remove, block and delete. None grants anything: no
 command approves a device, records an owner or admits an account to a
 server. `unblock` lifts only a block the operator set.
@@ -2083,7 +2307,7 @@ legitimate.
 | Failure | Behaviour |
 | --- | --- |
 | Edge down | [During an edge outage](#during-an-edge-outage) |
-| Edge restart | Relayed connections drop; servers and clients reconnect; runs are unaffected |
+| Edge restart | `/readyz` answers `draining`; the edge sends `drain`, and relayed connections get 2 seconds to finish before they drop. Servers log `edge is restarting (drain); reconnecting in <wait>` and reconnect 3 to 8 seconds later, or after their longer backoff when the previous connection lasted under a minute, so an edge in a restart loop is not redialed every few seconds; clients redial; runs are unaffected. A server whose `drain` write does not complete within 10 seconds is dropped without it and reconnects with backoff |
 | Server offline | `503 server is not connected to the edge`. The edge drops a control connection when its socket closes, when a write to it fails, or after 60 seconds without a message from the server |
 | Server reconnecting while a client connects | The edge sends the connection to the server's new control connection, once |
 | Claim recorded, not yet applied to the live control connection | `409 server is connected to the edge but not claimed`; retry |
@@ -2120,7 +2344,7 @@ only be verified on the live host.
 
    ```sh
    sudo apt-get update
-   sudo apt-get install nginx certbot python3-certbot-nginx sqlite3 curl
+   sudo apt-get install nginx certbot python3-certbot-nginx curl
    ```
 
 2. **Firewall** ([Firewall](#firewall)): 22, 80 and 443 from anywhere in
@@ -2202,8 +2426,9 @@ only be verified on the live host.
 10. **Signing key.** Record the fingerprint from `sudo ssh-keygen -lf
     /var/lib/aether-edge/edge_key`, publish it on this page, and store
     `edge_key` offline.
-11. **Backups.** Schedule the daily `edge.db` backup and copy it off the
-    machine ([Backup and recovery](#backup-and-recovery)).
+11. **Backups.** Schedule `sudo -u aether-edge aether-edge backup
+    /var/backups/aether-edge/` daily, rotate the copies, and copy them off
+    the machine ([Backup and recovery](#backup-and-recovery)).
 12. **Log retention** for the journal (`<retention>`) and nginx's access
     log ([Logs](#logs)).
 13. **Monitoring**: the external probes and metric alerts in

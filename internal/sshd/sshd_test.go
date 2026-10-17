@@ -808,6 +808,13 @@ func (f *fakeRuns) InstallAgent(_ context.Context, member domain.MemberID, comma
 	}
 	return "installed", 0, nil
 }
+func (f *fakeRuns) RemoveAgent(_ context.Context, member domain.MemberID, executables []string) ([]string, error) {
+	if err := f.record(fmt.Sprintf("agent-remove:%s:%s", member, strings.Join(executables, ","))); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
 func (f *fakeRuns) SaveTerminalImage(_ context.Context, actor domain.MemberID, run domain.RunID, extension string, data []byte) (string, error) {
 	if err := f.record(fmt.Sprintf("terminal-image:%s:%s:%s:%d", actor, run, extension, len(data))); err != nil {
 		return "", err

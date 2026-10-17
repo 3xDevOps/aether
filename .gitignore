@@ -29,9 +29,10 @@ go.work.sum
 
 # Build output
 /dist/
-# `go build` with no -o leaves these two at the repo root.
+# `go build` with no -o leaves these at the repo root.
 /aether
 /aether-server
+/aether-edge
 
 # Dashboard SPA. Dependencies and build output stay out of git; the committed
 # web/dist/.gitkeep is what keeps `go:embed all:dist` compiling on a clean
@@ -50,12 +51,10 @@ web/tsconfig.tsbuildinfo
 web/test-results/
 web/playwright-report/
 
-# Desktop shell. Dependencies and installers stay out of git; the Electron
-# build is reproducible from desktop/package.json. No npm lockfile is
-# committed either - the repo toolchain is Bun, which cannot write one.
+# Desktop shell. Dependencies and installers stay out of git; the build
+# installs exactly what desktop/package-lock.json pins.
 desktop/node_modules/
 desktop/dist/
-desktop/package-lock.json
 
 # Android shell. Gradle's outputs and caches stay out of git; the wrapper, its
 # distribution checksum and the generated launcher icons are committed.

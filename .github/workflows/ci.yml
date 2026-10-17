@@ -39,15 +39,16 @@ jobs:
   # scripts/ci-classify-changes.sh: a pull request can edit its own copy,
   # and that copy is not what this job runs. A rename is classified by its
   # old path as well as its new one, so a move into docs/ still runs the
-  # code jobs. The edge output follows the same rules with
-  # scripts/ci-classify-edge.sh, and a failure of that classifier alone
-  # also fails open.
+  # code jobs. The edge and desktop outputs follow the same rules with
+  # scripts/ci-classify-edge.sh and scripts/ci-classify-desktop.sh, and a
+  # failure of either classifier alone also fails open.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
       edge: ${{ steps.classify.outputs.edge }}
+      desktop: ${{ steps.classify.outputs.desktop }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,6 +56,7 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           sparse-checkout: |
             scripts/ci-classify-changes.sh
+            scripts/ci-classify-desktop.sh
             scripts/ci-classify-edge.sh
           sparse-checkout-cone-mode: false
       - name: Classify changed paths
@@ -64,15 +66,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "edge=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' code=true edge=true desktop=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # previous_filename covers a rename into docs/: the destination
           # alone would look like a docs-only change and skip the code jobs.
           if ! files=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --paginate --jq '.[] | .filename, (.previous_filename // empty)'); then
-            echo "code=true" >> "$GITHUB_OUTPUT"
-            echo "edge=true" >> "$GITHUB_OUTPUT"
+            printf '%s\n' code=true edge=true desktop=true >> "$GITHUB_OUTPUT"
             exit 0
           fi
           code=$(printf '%s\n' "$files" | sh scripts/ci-classify-changes.sh)
@@ -81,6 +81,10 @@ jobs:
             edge=true
           fi
           echo "edge=$edge" >> "$GITHUB_OUTPUT"
+          if ! desktop=$(printf '%s\n' "$files" | sh scripts/ci-classify-desktop.sh); then
+            desktop=true
+          fi
+          echo "desktop=$desktop" >> "$GITHUB_OUTPUT"
 
   # Runs on every pull request, including a docs-only one. This is the
   # docs-only gate.
@@ -656,6 +660,31 @@ jobs:
           path: ~/.npm
           key: npm-${{ runner.os }}-${{ runner.environment }}-${{ hashFiles('desktop/package.json') }}
 
+  # The packaging and launch check release.yml runs for each tag, on both
+  # Windows architectures, when scripts/ci-classify-desktop.sh says a
+  # changed path can affect the desktop app.
+  desktop-windows:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.desktop == 'true') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/desktop-windows-zip
+        with:
+          version: v0.0.0-ci
+          arch: ${{ matrix.arch }}
+
   # The client ships for Windows, so it gets a real Windows runner. Only the
   # client's package closure is built and tested: the server is Linux-only by
   # design and internal/gitengine does not compile for Windows. Docs-only
@@ -831,4 +860,4 @@ jobs:
           path: dist
       - name: Scan both Windows clients
         shell: powershell
-        run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist
+        run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist -Artifacts aether-windows-amd64.exe, aether-windows-arm64.exe

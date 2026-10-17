@@ -1,9 +1,10 @@
 # electron-builder configuration for the Aether desktop shell.
 #
 # The aether CLI binary is NOT bundled. The shell discovers it at launch:
-# AETHER_BIN first, then PATH, then the install script's default locations
-# (/usr/local/bin, ~/.local/bin). Install the CLI and link it before
-# launching the app - see docs/install.md.
+# AETHER_BIN first, then the CLI `aether gui build` recorded in
+# resources/aether-cli.json, then PATH, then the install script's default
+# locations (/usr/local/bin, ~/.local/bin). Install the CLI and link it
+# before launching the app - see docs/install.md.
 appId: io.aether.desktop
 productName: Aether
 
@@ -16,9 +17,14 @@ directories:
 
 files:
   - main.js
+  - cli-binding.js
   - notify.js
   - preload.js
   - package.json
+
+# The dashboard is English only; every other Chromium locale is dead weight.
+electronLanguages:
+  - en-US
 
 # aether://run/<id> deep links (main.js handleDeepLink). macOS reads the
 # scheme from the bundle's Info.plist, so a runtime

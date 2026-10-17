@@ -105,6 +105,16 @@ Layers, per the design spec's testing strategy:
   gh workflow run edge-image.yml --ref main -f ref=refs/pull/<n>/head   # a pull request from a fork
   ```
 
+  The `desktop-windows` job runs
+  [`.github/actions/desktop-windows-zip`](../.github/actions/desktop-windows-zip/action.yml)
+  on `windows-latest` and `windows-11-arm`, the steps `release.yml` runs for
+  each tag: it packages the desktop with `electron-builder --dir`, checks
+  the version stamped into `app.asar`, zips it and launches it. A pull request runs it only when
+  `scripts/ci-classify-desktop.sh`, also from the base revision, says a
+  changed path is under `desktop/`, the action, the classifier or
+  `ci.yml`; a push to `main`, the merge queue and a failed classification
+  always run it.
+
   These jobs are the merge gate the E2E suite owns.
   The runtime capacity scenario starts its own Docker and containerd daemons
   with private sockets, storage roots, and network/mount namespaces; it never
@@ -235,13 +245,20 @@ downloads Defender definitions in the background. It then runs
 `-Mode Prepare`, which removes the hosted runner's inherited exclusions,
 enables Defender realtime, script, archive, and first-seen cloud scanning,
 and waits for that update before running `scripts/install-smoke.ps1`.
-A local release mirror labels the checkout build `v0.5.1-alpha.4` and serves
-its exact bytes and checksum; it does not download or claim to test the
-historical published release with that tag.
+A local release mirror serves the checkout build, a development build, under
+the tag `v0.5.1-alpha.4` with its exact bytes and checksum; it does not
+download or claim to test the historical published release with that tag.
+Because the CLI is a development build, `install.ps1`'s own `aether gui build`
+builds the desktop from source.
 The smoke refuses to run unless both `GITHUB_ACTIONS=true` and
 `RUNNER_ENVIRONMENT=github-hosted`, before changing files or registry state.
-It installs and reinstalls into an isolated app/config tree and verifies the
-unchanged CLI. It retains the real hosted user's `USERPROFILE`, `HOME`, and
+It installs and reinstalls into an isolated app/config tree, then installs
+the desktop a third time over the existing one: the Windows PowerShell 5.1
+lane, with Node on `PATH`, runs `aether gui build --zip` on a zip packaged
+by [`.github/actions/desktop-windows-zip`](../.github/actions/desktop-windows-zip/action.yml),
+and the PowerShell 7 lane, with no Node on `PATH`, runs
+`aether gui build --source`. That third build prints a `Timing:` line for
+each phase `--json` reports. Every round verifies the unchanged CLI. It retains the real hosted user's `USERPROFILE`, `HOME`, and
 `APPDATA` so child-process Known Folder expansion matches the shell.
 `LOCALAPPDATA` is redirected only through installation and the private-Node
 check, then restored before creating `Shell.Application`, querying AppsFolder,
@@ -1312,7 +1329,7 @@ evidence that they have been executed or passed on a particular checkout.
 | `header-navigation` | Resizing with a destination focused hands focus to **More navigation**; choosing an overflow destination focuses its heading; widening with a menu item focused closes the menu and focuses the now-visible current destination. Changing **Text size** to Larger and back repartitions navigation while Board and Swarms stay visible |
 | `keyboard-focus` | Escape closes a dialog or the sidebar footer menu on a run without leaving the run; focused shell controls paint the app's outline with computed style and 3:1 contrast against the actual background; the sidebar resizes by pointer delta and by keyboard, and at its minimum width keeps Search, New run and Mine inside it |
 | `mission-candidate-review` | A swarm created from **Swarms > New swarm** with a shell-fixture integrator: the integrator's question answered from **Questions for you** and folded to `Answered by`, a task proposed and started without a human plan gate, a worker taken with **Take control** on its run and freed with **Release control** on the swarm page, and, without a reload, the worker's report listed under **Agent messages** and the integrator-prepared candidate shown read-only under **Integration**. Attaches `mission candidate progress surface` |
-| `onboarding-agents` | The Agent step's setup against the member's real environment container, with a stub `npm` in the environment home standing in for the registry: the comparison starting on Enhanced from `enhanced_default` before the adapter is installed, `agent.install` running the real Codex install command, the terminal opening with `codex login` typed, the check reporting "No login found" and never "signed in", then "Login found" once the login file exists, and the row turning to **Run Codex**. An Enhanced pass installs the adapter in the same call and seeds First run in Enhanced; a failed install shows "Install failed" with the command's own output |
+| `onboarding-agents` | The Agent step's setup against the member's real environment container, with a stub `npm` in the environment home standing in for the registry: the comparison starting on Enhanced from `enhanced_default` before the adapter is installed, `agent.install` running the real Codex install command, the terminal opening with `codex login` typed, the check reporting "No login found" and never "signed in", then "Login found" once the login file exists, and the row turning to **Run Codex**. An Enhanced pass installs the adapter in the same call and seeds First run in Enhanced; a failed install shows "Install failed" with the command's own output; `agent.remove` deletes Claude's `~/.local/bin` links and `agent.list` then reports it not installed |
 | `onboarding-configuration` | The Agent step's collapsed **Agent config files** disclosure: the prompt shown byte for byte, **Copy prompt** putting exactly that text on the browser's real clipboard, and **Open remote files** reaching Files with **Home** unfolded, where a configuration file written through `config.write` in place of an agent's `aether config push` shows under `.claude` |
 | `onboarding-first-member` | A fresh server through the steps Connect, Repository, Agent and First run: Connect (first identity becomes admin, SSH key generated, the git identity this machine's `git config` offers saved at the bottom of the step), then Repository: create the workspace, point it at a local repository, push, and read git's own `[new branch]` in the "What git did" panel |
 | `onboarding-first-run` | Launching the first run from the launch form on an agent installed into the member's environment home, watching its work complete, using the reusable shell after the agent exits, and closing the run as **Merged** from **More > Close run…**; and, with nothing installed, the step saying "No agent is installed yet" instead of the form and sending the reader back to Agent |
@@ -1377,7 +1394,9 @@ duplicating the browser smoke path:
   and `config.import`.
 - `web/src/components/agents/agent-setup.test.tsx` covers the Standard and
   Enhanced comparison, `agent.install` with and without the adapter, the
-  install failure, and the login wording.
+  install failure, and the login wording. `agents.test.tsx` also covers
+  **Remove…** in the **More** menu, its confirmation copy, the reload after
+  `agent.remove` and a refusal staying in the dialog.
 - `web/src/store/files.test.ts` covers drafts surviving live-run cache
   invalidation and newer typing surviving an in-flight save.
 - `web/src/routes/files/home.test.tsx` covers the Home tree: each kind of

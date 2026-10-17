@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
@@ -72,6 +73,9 @@ func runUpdate(args []string) error {
 		// there is no reason to resolve a tag that cannot be installed.
 		return selfupdate.ErrWindows
 	}
+	if handed, err := handOffToServerUpdate(ctx, *tag, os.Stdout); handed || err != nil {
+		return err
+	}
 	base := "https://github.com/" + selfupdate.Repo
 	var server linkedServer
 	if !*force {
@@ -99,12 +103,9 @@ func runUpdate(args []string) error {
 		return err
 	}
 
-	self, err := os.Executable()
-	if err == nil {
-		self, err = filepath.EvalSymlinks(self)
-	}
+	self, err := executablePath()
 	if err != nil {
-		return fmt.Errorf("locate this binary: %w", err)
+		return err
 	}
 	if err = checkServerSchema(ctx, base, *tag, self); err != nil {
 		return err
@@ -134,6 +135,81 @@ func runUpdate(args []string) error {
 	// replaced[0] is this CLI's own path with its symlinks resolved, which
 	// is where the new binary now sits.
 	return rebuildDesktopApp(replaced[0])
+}
+
+// The calls the hand-off makes, behind variables so a test can stand in
+// for systemd and for replacing the process.
+var (
+	systemctlShowServer = func(ctx context.Context) ([]byte, error) {
+		return exec.CommandContext(ctx, "systemctl", "show", "aether-server", "-p", "LoadState", "-p", "User").Output()
+	}
+	execProcess = syscall.Exec
+)
+
+// handOffToServerUpdate replaces this process with `aether-server update`
+// on a host that runs aether-server as a root systemd unit (a unit with a
+// non-root User= is refused by aether-server update): that command
+// preflights, swaps, restarts the unit and rolls back a failed start,
+// which this one does not. A Linux box with aether-server beside the CLI
+// but no unit, a developer's foreground server, is left to the caller.
+// The desktop app is only named, never rebuilt. handed is false when
+// nothing was done.
+func handOffToServerUpdate(ctx context.Context, tag string, out io.Writer) (handed bool, err error) {
+	if runtime.GOOS != "linux" {
+		return false, nil
+	}
+	self, err := executablePath()
+	if err != nil {
+		return false, err
+	}
+	server := filepath.Join(filepath.Dir(self), "aether-server")
+	if _, err := os.Stat(server); err != nil || !rootUnitLoaded(ctx) {
+		return false, nil
+	}
+	argv := []string{server, "update"}
+	if tag != "" {
+		argv = append(argv, "--version", tag)
+	}
+	if who, err := lookupRealUser(); err == nil {
+		if app, ok := installedDesktopApp(runtime.GOOS, who); ok {
+			_, _ = fmt.Fprintf(out, "the desktop app at %s is not rebuilt on a server host; rebuild it with: %s\n",
+				app, strings.Join(rebuildAppArgv(self, who, false), " "))
+		}
+	}
+	_, _ = fmt.Fprintf(out, "this is a server host; handing off to: sudo %s\n", strings.Join(argv, " "))
+	if err := execProcess(server, argv, os.Environ()); err != nil {
+		return false, fmt.Errorf("run %s: %w", strings.Join(argv, " "), err)
+	}
+	return true, nil
+}
+
+// rootUnitLoaded is true when the aether-server unit exists and runs as
+// root, which is User= empty or "root".
+func rootUnitLoaded(ctx context.Context) bool {
+	out, err := systemctlShowServer(ctx)
+	if err != nil {
+		return false
+	}
+	loaded, user := false, "root"
+	for _, line := range strings.Split(string(out), "\n") {
+		if v, ok := strings.CutPrefix(line, "LoadState="); ok {
+			loaded = v == "loaded"
+		} else if v, ok := strings.CutPrefix(line, "User="); ok && v != "" {
+			user = v
+		}
+	}
+	return loaded && user == "root"
+}
+
+func executablePath() (string, error) {
+	self, err := os.Executable()
+	if err == nil {
+		self, err = filepath.EvalSymlinks(self)
+	}
+	if err != nil {
+		return "", fmt.Errorf("locate this binary: %w", err)
+	}
+	return self, nil
 }
 
 // checkServerSchema refuses tag on a server host - a Linux box with

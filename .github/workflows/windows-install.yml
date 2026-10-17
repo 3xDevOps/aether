@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   install:
-    name: install (${{ matrix.shell }}, ${{ matrix.node }})
+    name: install (${{ matrix.shell }}, Node ${{ matrix.node }}, desktop ${{ matrix.desktop }})
     runs-on: windows-latest
     timeout-minutes: 30
     strategy:
@@ -16,11 +16,11 @@ jobs:
       matrix:
         include:
           - shell: powershell
-            node: system
-            smokeArgs: ''
+            node: on PATH
+            desktop: zip
           - shell: pwsh
             node: downloaded
-            smokeArgs: '-WithoutNode'
+            desktop: source
     defaults:
       run:
         shell: ${{ matrix.shell }}
@@ -64,28 +64,41 @@ jobs:
             -file-version 0.5.1.0 -product-version 0.5.1.0 `
             -o cmd/aether/resource_windows_amd64.syso packaging/windows/versioninfo.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go build -trimpath -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=v0.5.1-alpha.4 -X github.com/3xDevOps/Aether/internal/version.Commit=$env:GITHUB_SHA" -o "$env:RUNNER_TEMP/aether.exe" ./cmd/aether
+          go build -trimpath -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=dev -X github.com/3xDevOps/Aether/internal/version.Commit=$env:GITHUB_SHA" -o "$env:RUNNER_TEMP/aether.exe" ./cmd/aether
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # CI's native Windows job owns module-cache writes and the localops
       # unit regressions. Only this lane writes the installer's compiler
       # cache, before Defender is armed: archiving under its realtime scan
       # took eight minutes.
       - uses: ./.github/actions/go-cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shell == 'powershell' && matrix.node == 'system'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.shell == 'powershell'
         with:
           mode: save
           variant: windows-install
           save-modules: 'false'
+      - id: desktop
+        if: matrix.desktop == 'zip'
+        uses: ./.github/actions/desktop-windows-zip
+        with:
+          version: v0.5.1-alpha.4
+          arch: amd64
       - name: Enable Defender realtime and cloud protection
         shell: powershell
         run: ./scripts/windows-defender.ps1 -Mode Prepare
       - name: Install, rebuild, and launch the desktop under Defender
-        run: ./scripts/install-smoke.ps1 -Cli "$env:RUNNER_TEMP/aether.exe" ${{ matrix.smokeArgs }}
+        env:
+          DESKTOP_ZIP: ${{ steps.desktop.outputs.zip }}
+        run: |
+          if ($env:DESKTOP_ZIP) {
+            ./scripts/install-smoke.ps1 -Cli "$env:RUNNER_TEMP/aether.exe" -DesktopZip $env:DESKTOP_ZIP
+          } else {
+            ./scripts/install-smoke.ps1 -Cli "$env:RUNNER_TEMP/aether.exe" -WithoutNode
+          }
       - name: Upload the installed desktop screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-desktop-${{ matrix.shell }}-${{ matrix.node }}
+          name: windows-desktop-${{ matrix.desktop }}
           path: ${{ runner.temp }}/windows-desktop.png
           if-no-files-found: ignore
           retention-days: 7

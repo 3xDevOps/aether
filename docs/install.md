@@ -55,7 +55,7 @@ afterwards.
 | Answer | What is installed, and where | What it runs next |
 | --- | --- | --- |
 | `server` | On Linux both `aether` and `aether-server`, into `/usr/local/bin`, root-owned, using `sudo` when it has to; on a machine with no `sudo` at all it falls back to `~/.local/bin`. | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, the dashboard port on a tailnet host, then the systemd activation line. |
-| `client` | `aether` alone, into `~/.local/bin`, created if it is missing. No `sudo`, and the files stay yours. | `aether gui build` - packages and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
+| `client` | `aether` alone, into `~/.local/bin`, created if it is missing. No `sudo`, and the files stay yours. | `aether gui build` - builds and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
 | `none` | The same as `server`, `sudo` fallback included. | Nothing further. The binaries are installed and the script stops. |
 
 A client gets `~/.local/bin` because the dashboard's **Update now** button
@@ -102,20 +102,20 @@ instead, preserving the interrupted command's exit status.
 This script covers Linux and macOS. Windows uses the
 [PowerShell installer](#windows-install-script) below.
 
-A checksum mismatch aborts the install. The script needs `curl` or `wget`, and
-`sha256sum` or `shasum`.
+The script needs `curl`, and `sha256sum` or `shasum`. With OpenSSL 3 on
+`PATH` it also checks the release signature.
 
 Options, as flags or environment variables:
 
 | Flag | Variable | Effect |
 | --- | --- | --- |
-| `--version <tag>` | `AETHER_VERSION` | Install a specific release instead of the latest. |
+| `--version <tag>` | `AETHER_VERSION` | Install exactly this release, or fail if it is not complete. |
 | `--bin-dir <dir>` | `AETHER_BIN_DIR` | Install somewhere else, whichever role is chosen. |
 | `--client` | `AETHER_COMPONENTS=client` | CLI only. |
 | `--server` | `AETHER_COMPONENTS=server` | Server only. |
 | `--role <role>` | `AETHER_ROLE` | Answer the role question up front: `server`, `client`, or `none` to skip it. |
 | | `AETHER_REPO` | Pull from a fork. |
-| | `AETHER_BASE_URL` | Pull from a mirror of the release assets. |
+| | `AETHER_BASE_URL` | Pull release assets from an HTTPS mirror; `latest` and the API still come from GitHub. |
 
 Passing flags through a pipe needs `sh -s --`:
 
@@ -123,6 +123,57 @@ Passing flags through a pipe needs `sh -s --`:
 curl -fsSL .../install.sh | sh -s -- --client --bin-dir ~/bin
 curl -fsSL .../install.sh | sh -s -- --role server
 ```
+
+### Which release it installs
+
+A release is complete for this install when it publishes `checksums.txt`,
+every binary this OS, CPU and component choice needs, and a `checksums.txt`
+line for each, plus `aether-release.json` and `aether-release.json.sig`.
+Releases before `v0.7.0-alpha.12` predate signing and are complete without
+those two files; from that tag on, a release missing either one is still
+uploading, failed, or was tampered with.
+
+Without `--version`, the script follows `github.com/<repo>/releases/latest`.
+GitHub can list a release there while its assets are still uploading, or
+after its build failed. When that tag is not complete, the script asks
+`api.github.com/repos/<repo>/releases`, ignores drafts and prereleases, and
+installs the highest semver release that is older than the latest tag,
+signed and complete, saying why:
+
+```
+aether install: v0.7.0-alpha.12 is not fully published yet (no checksums.txt); installing v0.7.0-alpha.11, the newest complete release, for linux/amd64
+```
+
+`--version <tag>` installs exactly that tag, prereleases included, or stops:
+
+```
+aether install: v0.7.0-alpha.12 has no published aether-linux-amd64; it may still be building or may have failed - not installing a different version
+```
+
+Every file comes from the one chosen tag. When the release has a manifest,
+the script verifies `aether-release.json.sig` against the release keys built
+into it (the same keys as `internal/selfupdate/keys.go`), requires the
+manifest's `version` to be the tag, and checks each binary's SHA-256 and
+size against both the manifest and `checksums.txt`. Without OpenSSL 3 -
+macOS ships LibreSSL - it says the signature was not verified and checks
+the rest. A release from before signing is checked against `checksums.txt`
+only, and the script prints that.
+
+A checksum or size mismatch, a bad signature, a manifest that lists a
+binary `checksums.txt` omits, a cut-off download or any network error stops
+the install; none of them makes the script try another release. Every binary is downloaded and verified before any installed one is
+replaced, so those failures leave the previous install as it was. Each
+binary is then renamed into place from a copy in the same directory,
+`aether-server` before `aether`; if a rename fails, the script names which
+binaries are new and which are still the previous version. Rerunning is
+safe. Only HTTPS is used. An unreachable GitHub is reported with curl's
+error, and an API rate limit with its status:
+
+```
+aether install: GitHub API rate limit exceeded (HTTP 403 from https://api.github.com/repos/3xDevOps/Aether/releases?per_page=100, x-ratelimit-remaining: 0, x-ratelimit-reset: 1792209652); pass --version <tag> to install a specific release
+```
+
+The API is only asked when the latest release is not complete.
 
 ## Windows install script
 
@@ -138,9 +189,9 @@ Windows is a client platform, so there is no server/client question. By
 default the script downloads the native x64 or ARM64 CLI, verifies its SHA-256
 against the release's `checksums.txt`, installs it at
 `%LOCALAPPDATA%\Programs\Aether\aether.exe`, and runs that binary's
-`gui build`. The result is the desktop app in the Start Menu as **Aether**.
-The CLI supplies Node.js when needed; neither Node nor Go needs installing
-first.
+`gui build`, which downloads the release's prebuilt desktop app
+([Desktop app](#desktop-app)). The result is the desktop app in the Start Menu
+as **Aether**. Neither Node nor Go needs installing first.
 
 Desktop setup requires `v0.5.1-alpha.4` or newer: the supported path needs the
 separate desktop directory, direct-Node build, native shortcut creation, and
@@ -157,17 +208,71 @@ Older releases are refused before downloading or replacing the CLI.
 
 | Parameter | Variable | Effect |
 | --- | --- | --- |
-| `-Version <tag>` | `AETHER_VERSION` | Select a release; otherwise resolve the latest published release. |
+| `-Version <tag>` | `AETHER_VERSION` | Install exactly this release, or fail if it is not complete; otherwise install the newest complete release. |
 | `-BinDir <dir>` | `AETHER_BIN_DIR` | Choose the CLI directory, never the desktop app's managed directory. |
 | `-Role client\|none` | `AETHER_ROLE` | `client` installs the CLI and desktop; `none` stops after the CLI. The default is `client`, including unattended runs. |
 | | `AETHER_REPO` | Download from a GitHub fork. |
 | | `AETHER_BASE_URL` | Download from a release-asset mirror. |
 
+The release is chosen as the [install script](#which-release-it-installs)
+chooses it, for `aether-windows-<arch>.exe`, with these differences. PowerShell
+has no ed25519 verifier, so the script does not check
+`aether-release.json.sig`. It says so, and checks the binary's SHA-256 and
+size against `checksums.txt` and `aether-release.json`. It refuses an
+`AETHER_BASE_URL` that is not `https`.
+
+Downloads use `%SystemRoot%\System32\curl.exe` (Windows 10 1803 and later)
+and fall back to `Invoke-WebRequest` when it is missing or gets no HTTP
+answer, for example behind a proxy only Windows' own settings name. curl.exe
+runs with `-q`, so a `.curlrc` or `_curlrc` cannot turn off its TLS checks or
+set a proxy. A connection that takes over 15 seconds, or a download that stays
+below 1 KB/s for 60 seconds, is abandoned. If the installed CLI already has
+the release's SHA-256, it is neither downloaded nor replaced; a CLI the
+installer cannot read is downloaded and replaced. The old version
+in `old -> new` is read from the installed `aether.exe`'s file properties,
+without running it. The output is a numbered list of steps:
+
+```
+aether install: windows/amd64, CLI and desktop app
+[1/3] downloading the newest complete release
+      latest release: v0.7.0-alpha.13
+      https://github.com/3xDevOps/Aether/releases/download/v0.7.0-alpha.13/
+      checksums.txt                         1.0 KB  0.3s
+      aether-release.json                   2.0 KB  0.3s
+      aether-release.json.sig                 89 B  0.3s
+      aether-windows-amd64.exe             30.3 MB  0.5s
+      verified aether-windows-amd64.exe SHA-256 and size against checksums.txt and aether-release.json; aether-release.json.sig is not checked (PowerShell has no ed25519 verifier)
+[2/3] installing the CLI: v0.7.0-alpha.12 -> v0.7.0-alpha.13
+      C:\Users\<you>\AppData\Local\Programs\Aether\aether.exe
+[3/3] installing the desktop app (the build output follows)
+downloading https://github.com/3xDevOps/Aether/releases/download/v0.7.0-alpha.13/aether-desktop-windows-amd64.zip (99 MB)
+  42 of 99 MB (42%)
+  verified against the signed aether-release.json
+installing the app
+installed C:\Users\<you>\AppData\Local\Programs\Aether Desktop
+launcher C:\Users\<you>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Aether.lnk
+open it from the Start Menu as Aether
+      installed C:\Users\<you>\AppData\Local\Programs\Aether Desktop\aether-desktop.exe
+next:
+  open Aether from the Start menu, or link from a new terminal:
+  aether link <server-host>:2222
+done: Aether v0.7.0-alpha.13 installed in 24.4s
+```
+
+Step 3 runs `aether gui build` with its output unchanged, so its download
+progress, and on a source build its npm and electron-builder messages, appear
+as they happen. An error is printed once on stderr. Run with `-File`, or with
+`&` or `.` at a prompt, the script then exits 1 and sets `$LASTEXITCODE`.
+Called from another script or through `Invoke-Expression`, it throws instead,
+so a caller's `catch` sees the failure and an interactive session stays
+open.
+
 Only the current user's `PATH` is updated, without duplicating the install
 directory or removing other entries. Expandable entries such as `%SystemRoot%`
 keep their registry type. The current PowerShell process also gets the
-directory; existing applications keep their old environment. Sign out and
-back in if another terminal still cannot find the CLI. An older CLI,
+directory, and the change is broadcast, so terminals opened from Explorer or
+the Start menu afterwards find `aether`. Terminals that were already open
+keep their old `PATH`. An older CLI,
 alias, or function can still shadow `aether`: `Get-Command aether -All`
 shows which command runs. The installer never deletes a shadowing copy.
 The desktop built by the installer records the CLI it just installed, so an
@@ -184,9 +289,17 @@ to inspect the actual registration.
 For a fresh desktop installation, run the default command above. To reinstall
 or upgrade, close Aether and rerun it, retaining `-BinDir` if you selected a
 custom CLI location. Downloads and checksum failures leave the installed
-binary alone; a locked binary reports the Windows error rather than deleting
-it first. A desktop-build failure keeps the installed CLI, returns failure,
-and prints the explicit command to retry. Configuration and SSH files are untouched.
+binary alone. If `aether.exe` or `aether-desktop.exe` is running from the
+install directories, or Windows reports `aether.exe` as locked, the installer
+lists each running process with its pid, prints the `Stop-Process -Id <pids>`
+and rerun commands, and changes nothing. When the sync daemon's Scheduled
+Task `aether-daemon` exists, it also prints `schtasks /End /TN aether-daemon`:
+the task restarts a daemon killed by `Stop-Process` within a minute. The
+daemon starts again at the next sign-in, or at once with
+`schtasks /Run /TN aether-daemon`. Any other failure to replace the CLI
+reports the Windows error alone. A desktop-step failure keeps the installed
+CLI, returns failure, and prints the `gui build` command to rerun.
+Configuration and SSH files are untouched.
 
 The installer does not request administrator access, change execution policy,
 disable Defender, add exclusions, or unblock quarantined files. If policy
@@ -198,11 +311,52 @@ Defender will accept an unsigned binary; see [Defender and SmartScreen](#windows
 
 ## Upgrading
 
-`aether update` replaces the running CLI with the latest release only if it
+**On a server host**, run:
+
+```sh
+sudo aether-server update [--version <tag>]
+```
+
+It installs the latest release (or `--version <tag>`) with the same
+preflight, `.prev` copies, database snapshot and automatic rollback as the
+dashboard's **Update now**, stops and starts the
+`aether-server` systemd unit around the swap, and waits until the new binary
+has either committed or been rolled back:
+
+```
+aether-server v0.9.0 -> v0.9.1
+https://github.com/3xDevOps/Aether/releases/tag/v0.9.1
+aether-server  v0.9.0 -> v0.9.1  restarted (pid 1234 -> 5678)
+aether         /usr/local/bin/aether  v0.9.1
+```
+
+A rollback prints the recorded reason and exits non-zero; read the new
+binary's log with `sudo journalctl -u aether-server -n 50`. When systemd
+refuses to start the new binary at all, the command stops the unit, puts the
+previous release back (and the database snapshot, if a start had already
+migrated it), starts it, and exits non-zero with the `systemctl start` error.
+With no `aether-server` systemd unit on the host, or with a unit that runs as
+a non-root `User=` (the unprivileged setup in the unit's comment), it refuses
+before changing anything: use `sudo aether update` and restart the server
+yourself. It takes the data directory and listen address from the unit's
+`ExecStart` and the `--config` file it names, and refuses when that
+`ExecStart` runs another `aether-server` binary, naming the one to use. It
+reads the database's schema without opening or migrating it. When the host
+already has the latest release on disk but the unit still runs an earlier
+file, as after `aether update`, it just restarts the unit onto the installed
+binary (a stopped unit is started) and waits up to two minutes for the server
+to accept connections on its `--addr`. A server that exits or restarts again
+in that time fails the command with the unit's state.
+
+**On a client**, `aether update` replaces the running CLI with the latest release only if it
 is newer (or installs `--version <tag>`), verifying it against the release's
 signed manifest ([Verified releases](#verified-releases)). On Linux, an
-`aether-server` beside the CLI is updated too; restart it with
-`sudo systemctl restart aether-server`. The command never asks
+`aether-server` beside the CLI is updated too, but not restarted; restart it
+yourself (`sudo systemctl restart aether-server` under a unit). On a host
+where the `aether-server` systemd unit runs as root, `sudo aether update`
+instead runs `sudo aether-server update [--version <tag>]`, which swaps,
+restarts and rolls back the server; `--no-app` and `--force` do not apply
+there. The command never asks
 for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
 a stock install, is refused before anything is downloaded. The refusal names
 the probe file it could not create (the number varies) and ends with the
@@ -337,8 +491,9 @@ aether-daemon` (macOS: `launchctl kickstart -k gui/$(id -u)/com.aether.daemon`).
 Each release since signing began publishes `aether-release.json`, listing
 every asset's SHA-256 and size, and `aether-release.json.sig`, a base64
 ed25519 signature over the file's exact bytes. The release workflow uploads
-these two last, after downloading every other asset back anonymously and
-matching it against the manifest. An updater - `aether update`, the
+them with every other asset to a draft release and publishes it only after
+downloading every asset back and matching it against the manifest
+([Releases](#releases)). An updater - `aether update`, the
 dashboard's **Update now**, `aether server update` - installs a release only
 when:
 
@@ -380,6 +535,14 @@ sha256sum aether-linux-amd64
 
 `openssl` prints `Signature Verified Successfully`, and the two digests must
 match. On macOS use `shasum -a 256` in place of `sha256sum`.
+
+The manifest also signs the release's images. `images` maps
+`aether-browser`, `aether-edge` and `aether-standard` to the index digest
+each published, and `edge` carries what a host updating a container edge
+checks: `image`, `image_digest`, `store_schema` and `store_compat_floor` of
+the edge database, the `protocol` range, `min_upgrade_from` and
+`manual_steps`. `aether-edge release-check` reads them
+([Verifying an image](edge.md#verifying-an-image)).
 
 ### Settings an update does not rewrite
 
@@ -477,8 +640,9 @@ when you deliberately choose another binary. If the recorded CLI is moved or
 deleted, set `AETHER_BIN` or rebuild the app with the installed CLI instead of
 silently falling back to a different copy.
 
-A machine with no app installed builds nothing and downloads nothing, so a
-server box never sees this step. If the app is running when the rebuild
+A machine with no app installed builds nothing and downloads nothing. A
+server host with a systemd unit skips this step: `aether update` prints the
+rebuild command instead. If the app is running when the rebuild
 finishes, the command says to restart it. A rebuild that fails prints the
 build's own error and the command to rerun, and exits non-zero - but the CLI
 update itself already succeeded, and the message says so.
@@ -604,7 +768,9 @@ both renames are done, `<data-dir>/server-update/swap.json` says `swapping`,
 and a start that finds it so puts the `.prev` files back. The server then
 closes its listeners and the database. When the release migrates the
 database, it copies it to `<data-dir>/server-update/aether.db.pre-update`
-now, so the copy holds every write. Under the shipped systemd unit the
+now, so the copy holds every write. A new binary that starts without that
+copy - the host rebooted between the swap and the copy - takes it before it
+opens the database, and rolls back if it cannot. Under the shipped systemd unit the
 server then exits with status 75 (`EX_TEMPFAIL`) and systemd starts the new
 binary: a new PID, and the stop and start show in `systemctl status` and
 `journalctl -u aether-server`. The unit's `RestartForceExitStatus=75` and
@@ -761,19 +927,23 @@ upgrade, so a Claude Code login refreshed there reaches recipients' runs:
 
 ## Manual install
 
-Every release publishes bare binaries plus `checksums.txt`:
+Every release publishes bare binaries, the Windows desktop app, and
+`checksums.txt`:
 
 ```
-aether-server-linux-amd64   aether-server-linux-arm64
-aether-edge-linux-amd64     aether-edge-linux-arm64
-aether-linux-amd64          aether-linux-arm64
-aether-darwin-amd64         aether-darwin-arm64
-aether-windows-amd64.exe    aether-windows-arm64.exe
+aether-server-linux-amd64          aether-server-linux-arm64
+aether-edge-linux-amd64            aether-edge-linux-arm64
+aether-linux-amd64                 aether-linux-arm64
+aether-darwin-amd64                aether-darwin-arm64
+aether-windows-amd64.exe           aether-windows-arm64.exe
+aether-desktop-windows-amd64.zip   aether-desktop-windows-arm64.zip
 ```
 
 `aether-server` and `aether-edge` are Linux-only. The Windows and macOS assets
-are the client. `aether-edge` is only for running your own edge
-([edge.md](edge.md)); servers and clients do not need it. It also ships as
+are the client. The `aether-desktop-windows` zips hold the unpacked Windows
+desktop app that `aether gui build` installs ([Desktop app](#desktop-app)).
+`aether-edge` is only for running your own edge ([edge.md](edge.md)); servers
+and clients do not need it. It also ships as
 the image `ghcr.io/3xdevops/aether-edge:<release-tag>`
 ([edge.md](edge.md#in-a-container)).
 
@@ -804,6 +974,15 @@ repair the desktop, use `v0.5.1-alpha.4` or newer and run
 records this CLI rather than a different `aether` on `PATH`.
 To upgrade, rerun the PowerShell installer or replace the CLI manually;
 there is no `aether update` on Windows.
+
+To install the desktop app from a zip you downloaded, verify it the same way,
+then hand it to the CLI. `gui build` itself checks only the zip's layout, not
+its origin:
+
+```powershell
+Get-FileHash -Algorithm SHA256 .\aether-desktop-windows-amd64.zip
+& "$dir\aether.exe" gui build --zip .\aether-desktop-windows-amd64.zip
+```
 
 ### Recovering commands after a Windows desktop build
 
@@ -902,6 +1081,7 @@ policy before deciding what happened; these are not interchangeable systems.
 | Browser download blocked or flagged | Edge uses Microsoft Defender SmartScreen; Chrome uses Google Safe Browsing, and other security tools may also intervene | Browser's exact warning and download details; follow organization policy |
 | "Windows protected your PC" on launch | Windows SmartScreen reputation check | Named application and publisher, signature details, and organization policy |
 | File disappears or "virus detected" | Microsoft Defender antivirus or another antivirus product | Protection History/security product report, detection name, and affected path |
+| "Smart App Control blocked an app that may be unsafe", or the CLI fails with "An Application Control policy has blocked this file" | Smart App Control, which runs only signed apps or apps Microsoft's cloud already trusts | **Windows Security > App & browser control > Smart App Control**. The installer cannot and will not bypass it; signed releases are the fix |
 
 Do not disable protection, add exclusions, or restore/run a quarantined file
 to work around a warning. A matching checksum establishes download integrity,
@@ -928,12 +1108,13 @@ These measures do not confer publisher trust. Releases remain unsigned;
 Defender or SmartScreen may still flag a new binary.
 
 Release publication is gated on a Defender scan of the exact final x64 and
-ARM64 release binaries, downloaded from the build artifact without rebuilding.
-The gate records SHA-256 hashes and definition/protection evidence, checks
-effective real-time/cloud/sample-submission settings, and rejects missing or
-changed files, scan errors, or new detections (including remediated ones).
-That verdict covers those bytes and scan conditions, not signing, reputation,
-the locally built desktop, or a guarantee of warning-free execution on a
+ARM64 CLI binaries and desktop zips, downloaded from the build artifacts
+without rebuilding. Each zip is scanned whole and extracted. The gate records
+SHA-256 hashes and definition/protection evidence, checks effective
+real-time/cloud/sample-submission settings, and rejects missing or changed
+files, scan errors, or new detections (including remediated ones). That
+verdict covers those bytes and scan conditions, not signing, reputation, a
+desktop built from source, or a guarantee of warning-free execution on a
 different machine.
 
 ## The Windows client
@@ -1009,9 +1190,10 @@ and deep links: `aether://run/<id>` opens a run, and an edge invitation's
 step to join or claim ([edge.md](edge.md#the-dashboard)). The notification shows only while the app
 is open; a phone gets one through the server-hosted dashboard
 ([networking.md](networking.md#notifications)). It is the same SPA
-with the same full SSH authority, just without a browser tab to lose. No
-release publishes it; the CLI builds it for you, and needs nothing installed
-first. The Windows installer builds it by default; on Linux and macOS,
+with the same full SSH authority, just without a browser tab to lose. On
+Windows the CLI downloads the prebuilt app its release publishes; on Linux and
+macOS it builds the app on your machine. Neither needs anything installed
+first. The Windows installer installs it by default; on Linux and macOS,
 answering `client` to the install script's question does the same.
 This is the command by hand. The window opens at 1280 by 840 and stops
 at 960 by 600, the smallest size the dashboard's own layout holds.
@@ -1023,12 +1205,40 @@ aether gui build
 On Linux and macOS, cancelling the build with SIGINT exits 130; SIGTERM exits
 143. Ordinary build failures exit 1 and print the build's original error.
 
-The CLI carries the shell sources, unpacks them into your cache directory
+On Windows, a release CLI fetches its release's signed `aether-release.json`,
+downloads `aether-desktop-windows-amd64.zip` (or `-arm64`) into
+`%LOCALAPPDATA%\aether\desktop-build` (`--build-dir` overrides), checks its
+size and SHA-256 against the manifest, and extracts it into the install
+location below. Nothing is built, and nothing but the app's own files is
+written. The download is about 100 MB and is deleted after the install.
+While it runs, the command prints a line such as `  42 of 104 MB (40%)` every
+5 seconds. If the manifest cannot be fetched or the zip fails its check, the
+command fails with that error and names `aether gui build --source`. Three cases build from
+source instead:
+
+- `aether gui build --source`, for a machine that should build its own app.
+- A development build of the CLI (`aether version` prints `dev` or a `git
+  describe` version), which has no release to download from.
+- A release that publishes no desktop zip. The CLI prints
+  `release <tag> does not publish aether-desktop-windows-<arch>.zip; building
+  the desktop app from source` and carries on.
+
+`aether gui build --zip <path>` installs a desktop zip you already have, for
+an offline machine or a CI smoke test. No signed manifest vouches for a local
+zip, so the CLI checks only that it is a Windows desktop app
+(`aether-desktop.exe` at its root); verify the zip against the release's
+`checksums.txt` first.
+
+### Building the desktop app from source
+
+On Linux and macOS, and on Windows in the cases above, the CLI unpacks the
+shell sources it carries into your cache directory
 (`~/.cache/aether/desktop-build` on Linux,
 `~/Library/Caches/aether/desktop-build` on macOS,
 `%LOCALAPPDATA%\aether\desktop-build` on Windows; `--build-dir` overrides), runs
-`npm install` and electron-builder there, and installs the result where your
-desktop lists applications:
+`npm install` there to install exactly the Electron and electron-builder
+versions `desktop/package-lock.json` pins, runs electron-builder, and installs
+the result. Either way the app lands where your desktop lists applications:
 
 | OS | App | Launcher |
 | --- | --- | --- |
@@ -1057,7 +1267,10 @@ changes and no shell profile is edited. So the first build needs network
 access, and later builds reuse the cached copy; a build that fetches a newer
 pinned version deletes the old one. A failed download or a checksum mismatch
 fails `aether gui build` with the error and the URL to fetch by hand; it
-never falls back to a system Node older than 22.
+never falls back to a system Node older than 22. The Node.js download prints
+the same progress lines as the desktop zip, and a source build prints one
+line as each step starts: unpacking, the Node.js check, `npm install`,
+electron-builder, and installing.
 The CLI runs electron-builder through Node directly, avoiding `npx` shell
 wrappers and their handling of spaces and metacharacters in Windows paths.
 
@@ -1065,7 +1278,11 @@ The first build downloads the Electron runtime (about 100 MB) into
 electron-builder's own cache (`~/.cache/electron` and
 `~/.cache/electron-builder` on Linux, `~/Library/Caches/electron` and
 `~/Library/Caches/electron-builder` on macOS, `%LOCALAPPDATA%\electron\Cache`
-and `%LOCALAPPDATA%\electron-builder` on Windows), so rebuilding is quick.
+and `%LOCALAPPDATA%\electron-builder` on Windows), and `node_modules` stays
+in the build directory, so rebuilding is quick.
+
+### Managing the installed app
+
 Run `aether gui build` again to replace an installed app; on macOS it also
 removes an older copy from the other Applications folder. The new app is
 staged beside the installed one and swapped in with a rename, so an app that
@@ -1073,11 +1290,12 @@ is running while you rebuild it keeps working until you restart it - deleting
 its files under it would take the window down. Windows still holds a running
 program's files open, so close the Aether window there first. To remove
 everything, delete the two paths in the table, the `aether` cache directory
-(the build directory and the private Node copy), and those caches.
+(the build directory and the private Node copy), and, after a source build,
+those caches.
 
 `aether gui build --json` prints one JSON line per phase on stdout and leaves
 the build's own output on stderr, which is how the dashboard follows a rebuild
-it started:
+it started. A build from source reports:
 
 ```json
 {"phase":"unpacking"}
@@ -1088,6 +1306,10 @@ it started:
 {"phase":"done","path":"/home/you/.local/share/aether/desktop"}
 ```
 
+A Windows install of the prebuilt app reports `downloading`, then
+`installing` and `done`; `--zip` reports `installing` and `done`. A release
+without the zip reports `downloading` and then the source build's phases.
+
 A failure ends with `{"phase":"error","error":"..."}` carrying the build's own
 message, and the command still exits non-zero.
 
@@ -1095,13 +1317,15 @@ The app requires the `aether` CLI installed first; it does not bundle the
 binary. As a build-time check, `aether gui build` requires an installed CLI
 discoverable through `AETHER_BIN`, then `PATH`, then the installer defaults:
 `%LOCALAPPDATA%\Programs\Aether` on Windows, `/usr/local/bin` and
-`~/.local/bin` on Linux and macOS. The new shell records the path of the CLI
-that built it. At launch, `AETHER_BIN` overrides that path; otherwise the
+`~/.local/bin` on Linux and macOS. The install records the path of the CLI
+that ran it in the app's `resources/aether-cli.json` (on macOS, which keeps
+the bundle untouched after signing, in the app's `package.json` at build
+time). At launch, `AETHER_BIN` overrides that path; otherwise the
 shell starts the recorded executable, not another copy on the desktop
 session's `PATH`. If that executable is gone or cannot run, the error names
 its exact path: restore it, set `AETHER_BIN` to a working CLI, or rerun that
-installed CLI's `gui build` command. Older shells without a recorded path
-still search `PATH` and the installer defaults. This CLI selection is
+installed CLI's `gui build` command. Shells without a recorded path search
+`PATH` and the installer defaults. This CLI selection is
 the launcher's job alone: once the app is running, the dashboard's agent
 detection and scans widen `PATH` from your login shell each time they look,
 so coding agents installed through a shell profile are found from the
@@ -2049,7 +2273,8 @@ what is actually there.
 
 The `aether` cache directory - `~/.cache/aether` above, and its macOS and
 Windows equivalents below - holds the desktop build directory and the private
-Node copy `aether gui build` downloads on a machine without Node 22+.
+Node copy a source build of the desktop app downloads on a machine without
+Node 22+.
 
 On macOS the desktop state is `~/Library/Application Support/aether-desktop`,
 the app is `/Applications/Aether.app` (or `~/Applications/Aether.app` for a
@@ -2108,26 +2333,46 @@ paused. Delete them once you have salvaged what you want.
 
 Choose a tag whose exact commit has passed the full `CI` workflow on a push to
 `main` in this repository. From a trusted `main` checkout, with `gh`
-authenticated and `jq` installed, check an existing local tag before pushing
-it and publishing an ordinary, non-draft GitHub release. Alpha versions use
-the same procedure, for example `v0.4.0-alpha.1`:
+authenticated and `jq` installed, check the local tag, then push it. Alpha
+versions use the same procedure, for example `v0.4.0-alpha.1`:
 
 ```sh
 sh scripts/release-ci-check.sh 3xDevOps/aether "$(git rev-parse 'v0.4.0-alpha.1^{commit}')" &&
-git push origin v0.4.0-alpha.1 &&
-gh release create v0.4.0-alpha.1 --title v0.4.0-alpha.1 --generate-notes
+git push origin v0.4.0-alpha.1
 ```
 
-Publish alpha tags as normal releases, not GitHub prereleases, because
-`scripts/install.sh` and `internal/selfupdate` resolve GitHub's
-`/releases/latest` endpoint. Do not add `--prerelease` or `--draft`.
+Do not create the GitHub release yourself. Pushing a `v*` tag runs
+[`.github/workflows/release.yml`](../.github/workflows/release.yml), which
+takes the release through these states:
 
-Publishing the release runs
-[`.github/workflows/release.yml`](../.github/workflows/release.yml). Only an
-admin publisher passes `publisher-policy`; other publishers and failed
-permission lookups skip the downstream jobs. `release-policy` checks out
-trusted `refs/heads/main`, validates the tag syntax, resolves the tag's full
-commit SHA and requires it to match the release event's SHA. It runs the
+1. Build and test every asset and image from the tag's commit.
+2. Create the release as a draft with generated notes that start at the
+   highest published release below the tag. Drafts are invisible to
+   `/releases/latest`, `scripts/install.sh` and update checks.
+3. Upload every asset to the draft, delete any asset the draft should not
+   have, download all of it back through the API, and check it against the
+   signed manifest.
+4. Check that the tag still names the commit `release-policy` authorized,
+   then publish the draft as a normal release without making it Latest. A tag moved since then
+   fails the run and leaves the draft unpublished.
+5. Download every asset anonymously, as clients do, and check it again.
+6. Mark Latest: the highest version among published, non-prerelease
+   releases that carry `aether-release.json`, read from a fresh release
+   listing. Every run does this after its own publish and lists again after
+   each change until the listing agrees, so Latest ends on the highest
+   version even when an older tag finishes after a newer one.
+
+The release is published as a normal release, not a GitHub prerelease,
+because `scripts/install.sh` and `internal/selfupdate` resolve GitHub's
+`/releases/latest` endpoint, which skips prereleases.
+
+`publisher-policy` passes only when both the tag's pusher and whoever
+started the run attempt, including a re-run, are repository admins; anyone
+else and failed permission lookups skip the downstream jobs. The workflow
+runs from the tagged commit, so also add a tag ruleset that lets only admins
+create, update or delete `v*` tags. `release-policy` checks
+out trusted `refs/heads/main`, validates the tag syntax, resolves the tag's
+full commit SHA and requires it to match the pushed commit. It runs the
 checker from that trusted checkout, not from the tag's code.
 
 [`scripts/release-ci-check.sh`](../scripts/release-ci-check.sh) accepts only
@@ -2138,7 +2383,7 @@ Missing, pending or failed CI, malformed or incomplete API results and lookup
 errors fail closed. A PR run, another commit's green run or an older successful
 attempt cannot authorize a release. The accepted run URL and SHA appear in the
 release job summary. If CI is still running, wait for it to finish successfully
-and rerun the release workflow.
+and rerun the release workflow run for the tag.
 
 The release workflow reuses that full main CI result instead of rerunning Go
 vet and unit tests. After policy succeeds, every source-building producer
@@ -2149,6 +2394,16 @@ checks out the authorized SHA and runs independently:
   each macOS or Windows lane builds only its CLI. They call
   `make release-binaries VERSION="$GITHUB_REF_NAME"` with platform overrides
   and upload `binaries-go-<goos>-<goarch>`.
+- `desktop-windows` packages the desktop app on native amd64
+  (`windows-latest`) and arm64 (`windows-11-arm`) runners with
+  [`.github/actions/desktop-windows-zip`](../.github/actions/desktop-windows-zip/action.yml):
+  it stamps the tag into `desktop/package.json`, runs `npm ci` and
+  `electron-builder --dir --win`, checks the stamp inside `app.asar`, and
+  zips the unpacked app at the archive root with sorted entries and fixed
+  timestamps. It launches the app without a CLI, requires its
+  `aether CLI not found` dialog, and uploads `binaries-desktop-windows-<arch>`.
+- `windows-defender` scans both Windows CLIs and both desktop zips
+  ([Windows Defender and SmartScreen](#windows-defender-and-smartscreen)).
 - `android` separately builds and verifies the signed APK and AAB with
   `make android VERSION="$GITHUB_REF_NAME"`, then uploads `binaries-android`.
   It is the only job that receives the Android signing secrets.
@@ -2167,24 +2422,36 @@ Browser publishes `ghcr.io/3xdevops/aether-browser:<tag>`; standard publishes
 pulls of the tested architecture digests. Edge's private-package exception is
 described below.
 
+Each manifest job then attests the index digest and both platform digests
+with `actions/attest`: SLSA build provenance, signed through Sigstore and
+pushed to the registry next to the image. It verifies each attestation
+with `gh attestation verify oci://<image>@<digest> --repo <owner>/<repo>
+--signer-workflow <owner>/<repo>/.github/workflows/release.yml --source-ref
+refs/tags/<tag> --deny-self-hosted-runners` before the release job may
+start. The per-architecture builds set `provenance: false` and `sbom:
+false`, so the pushed images carry no attestation manifests of their own
+and each index lists exactly linux/amd64 and linux/arm64.
+
 Manifest digest lookups use `docker buildx imagetools inspect <image>
 --format '{{.Manifest.Digest}}'`. Do not pipe the inspection output through
 an early-exiting reader such as `awk '... { print; exit }'`: closing Docker's
 stdout pipe can fail the release with exit code 255 even when the digest is
 correct.
 
-The final `release` job requires all six Go lanes, signed Android and all three
-verified image manifests. It downloads artifacts from this workflow run only,
-never promotes unsigned CI builds, and requires exactly these twelve nonempty,
-regular, non-symlink files in `dist/`:
+The final `release` job requires all six Go lanes, both desktop zips, the
+Defender scan, signed Android and all three verified image manifests. It
+downloads artifacts from this workflow run only, never promotes unsigned CI
+builds, and requires exactly these fourteen nonempty, regular, non-symlink
+files in `dist/`:
 
 ```text
-aether-server-linux-amd64  aether-server-linux-arm64
-aether-edge-linux-amd64    aether-edge-linux-arm64
-aether-linux-amd64         aether-linux-arm64
-aether-darwin-amd64        aether-darwin-arm64
-aether-windows-amd64.exe   aether-windows-arm64.exe
-aether-android.apk        aether-android.aab
+aether-server-linux-amd64         aether-server-linux-arm64
+aether-edge-linux-amd64           aether-edge-linux-arm64
+aether-linux-amd64                aether-linux-arm64
+aether-darwin-amd64               aether-darwin-arm64
+aether-windows-amd64.exe          aether-windows-arm64.exe
+aether-desktop-windows-amd64.zip  aether-desktop-windows-arm64.zip
+aether-android.apk                aether-android.aab
 ```
 
 Missing or unexpected files, including unsigned Android names, stop the upload.
@@ -2193,32 +2460,50 @@ release manifest ([Verified releases](#verified-releases)) with
 
 ```sh
 go run ./internal/selfupdate/cmd/release-manifest \
-  -version <tag> -commit <full-sha> -store-schema <n> -out dist dist/<asset>...
+  -version <tag> -commit <full-sha> -store-schema <n> -images images.json \
+  -out dist dist/<asset>...
 ```
 
-An earlier step, run without the secret, prints `<n>` with
-`go run ./internal/store/cmd/schema-version`, so the signing process does
-not link the store. The generator reads the ed25519 seed from the
-`AETHER_RELEASE_SIGNING_KEY` repository secret, records `<n>` as
-`store_schema`, and checks its own
-output against the keys the tag's code trusts, so a seed that does not match
-fails here. `release-policy` fails the whole release before any build when
-that secret is not set. [`scripts/publish-release.sh`](../scripts/publish-release.sh)
-then uploads the twelve assets and `checksums.txt`, downloads each asset
-anonymously from
-`https://github.com/<repository>/releases/download/<tag>/<name>`, compares
-its SHA-256 and size with the manifest, and only then uploads
-`aether-release.json.sig`, then `aether-release.json`. Updaters treat a
-release missing either file as unsigned, so a run that fails between the two
-can be rerun; it replaces the lone signature. It refuses a release that
-already has `aether-release.json` rather than replace assets that manifest
-signed; publish a new tag instead. Only after that succeeds do `standard-latest`
-and `edge-latest` move their respective `latest` tags to the verified images;
-each checks that `latest` carries the expected architecture digests. Releases
-share one workflow-wide concurrency group. The GitHub release itself is
-already published when the workflow starts, so a failed run can still leave
-`/releases/latest` pointing at a release without a manifest. Updaters treat
-that as no update. Image `latest` is not moved by a failed pre-upload run.
+Earlier steps, run without the secret, print `<n>` with
+`go run ./internal/store/cmd/schema-version` and write `images.json` with
+
+```sh
+go run ./internal/edge/cmd/release-edge -tag <tag> -image aether-browser=<digest> \
+  -image aether-edge=<digest> -image aether-standard=<digest> > images.json
+```
+
+from the three manifest jobs' digests, so the signing process links
+neither store. `release-edge` takes the edge store schema, compat floor and
+protocol from the tag's code and the rest from
+[`packaging/edge/upgrade.json`](#edge-upgrade-record), and refuses a stale
+record. The generator refuses an `images.json` that lacks an image or whose
+edge digest is not the `aether-edge` digest, and after signing checks that
+the manifest carries exactly what it was given. The generator reads the ed25519 seed from the
+`AETHER_RELEASE_SIGNING_KEY` secret ([Protecting the signing
+key](#protecting-the-signing-key)), records `<n>` as `store_schema`, and
+checks its own output against the keys the tag's code trusts, so a seed
+that does not match fails here. The `signing-key` job, in the `release`
+environment, fails the whole release before any build or push when that
+secret is not set. [`scripts/publish-release.sh`](../scripts/publish-release.sh)
+then runs steps 2 to 5 above. It compares each asset's SHA-256 and size with
+the manifest, requires `checksums.txt` to match, and compares
+`checksums.txt`, `aether-release.json` and `aether-release.json.sig`
+byte for byte with what it signed. `standard-latest` and `edge-latest` run
+after the release job and move their `latest` tags to the verified images
+only if `gh api repos/<owner>/<repo>/releases/latest` names this tag when
+they run; otherwise they leave `latest` alone and say why in the job summary.
+Each copies the published index's exact bytes to `latest` with `crane tag
+<image>@<digest> latest` (crane is downloaded at a pinned version and
+SHA-256), so `latest` has the signed and attested digest, checks that
+`latest` resolves to it, then that GitHub's Latest still names this tag. If a parallel release took Latest
+in between, the job fails with `GitHub's Latest moved to <tag>`; re-run the
+latest jobs of that release.
+
+Push release tags one at a time: GitHub starts no workflow for any tag when
+more than three are pushed at once. Each tag has its own concurrency group,
+`release-refs/tags/<tag>`, so releases of different tags run in parallel and
+one tag never cancels another's run; a second run for the same tag waits for
+the first.
 
 The workflow also publishes the [edge](edge.md#in-a-container) image
 `ghcr.io/3xdevops/aether-edge` for linux/amd64 and linux/arm64, built from
@@ -2233,11 +2518,15 @@ binaries. Nothing reaches a tag before it is tested:
    tag, the full commit SHA and `sha-<short-sha>`. It checks that every tag
    names one index digest and that the index carries the two tested images,
    resolves the tags at the registry, pulls each architecture by its own
-   digest, and lists the digests in the job summary. The release job waits
-   for it, so a failed edge image uploads no assets.
+   digest, lists the digests in the job summary, and attests and verifies
+   the three digests. The release job waits for it, so a failed edge image
+   uploads no assets, and signs its digest into the manifest's `edge`
+   section.
 3. `edge-latest` moves `latest` to that digest only after the release job
-   has uploaded the assets. A release that fails earlier leaves `latest` on
-   the previous release.
+   has published the release. A release that fails earlier leaves `latest`
+   on the previous release.
+4. `stable` moves only when an admin promotes the release
+   ([Promoting an edge release to stable](#promoting-an-edge-release-to-stable)).
 
 A new GHCR package starts private. For **edge only**, the workflow does not fail
 on that, by design: the image is published and pullable with credentials, and
@@ -2323,10 +2612,30 @@ store listing and Android prints it in the phone's app info, where `v0.4.0`
 reads as part of the number. `v0.4.0-alpha.6` ships as versionName
 `0.4.0-alpha.6` and versionCode 400106.
 
-If the release workflow fails, rerun it for the published release after fixing
-the cause. The publisher uploads missing assets to the existing release and
-replaces same-named assets with `gh release upload --clobber`, without changing
-its release notes. Producer artifact uploads also allow replacement on rerun.
+A release that fails before publication leaves at most a draft: no
+published release, no moved image `latest` tag, nothing installers or update
+checks can see. A failure after publication, in the anonymous check or a
+`latest` job, leaves the release published and complete: it was verified
+through the API first. Fix the cause, then open the failed run under the repository's **Actions** tab and
+choose **Re-run failed jobs**, or run
+`gh run rerun <run-id> --failed`. The publisher reuses the draft: it uploads
+every asset again with `gh release upload --clobber`, removes strays and
+verifies again, without changing the release notes. Producer artifact uploads
+also allow replacement on rerun. A rerun after the release is published
+requires the published `aether-release.json` to name the same commit and
+version as the run's build, fails with `tag <tag> was published from commit
+<sha>; this run built <sha>` when it does not, verifies every published asset
+against that manifest and sets Latest again. Assets signed by a published
+manifest are never replaced, so a bad published release needs a new tag. A published release without
+`aether-release.json`, left by the old workflow or created by hand, is
+incomplete: the publisher returns it to a draft, which takes it off
+`/releases/latest`, then completes it like any other draft.
+
+Enable [immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)
+in the repository settings. The workflow adds every asset while the release
+is a draft, so immutability, which applies from publication on, changes
+nothing for it and stops anyone from replacing a published asset or moving
+its tag. It does not apply to releases published before it is enabled.
 
 Every version-bearing release producer uses the release tag explicitly: Go
 uses `make release-binaries VERSION="$GITHUB_REF_NAME"` (including Windows
@@ -2360,3 +2669,135 @@ it builds all ten Go binaries, then Android APK and AAB with the existing
 signing environment (unsigned when none is configured). It still needs
 Docker for Android. Without an explicit `VERSION`, local builds continue to
 use `git describe`; full history also keeps short commit stamping consistent.
+
+### Edge upgrade record
+
+[`packaging/edge/upgrade.json`](../packaging/edge/upgrade.json) holds what
+only a person can decide about upgrading an edge to the next release:
+
+| Field | Meaning |
+| --- | --- |
+| `min_upgrade_from` | Oldest release that may upgrade straight to this one. Raise it when a migration or protocol change needs an intermediate release |
+| `manual_steps` | Every operator action an upgrade needs, kept across releases: `id`, `since` (the first release that needs it), `summary`, `doc_url` (https) and `blocking`. A blocking step holds an automatic update from any release below `since` until the operator does it |
+| `store_schema`, `store_compat_floor`, `protocol` | The edge store schema, its compat floor and the protocol range the code has now |
+| `files` | SHA-256 of `images/edge/Dockerfile`, `packaging/edge/aether-edge.env.example` and `packaging/systemd/aether-edge.service`, the files that shape what an edge host runs |
+
+The last two rows are not decisions but a tripwire. `go test
+./internal/edge/cmd/release-edge` fails, naming each value, when they
+disagree with the code or the files, and so does the release:
+
+```
+release-edge: packaging/edge/upgrade.json is out of date: store_schema is 2, packaging/edge/upgrade.json records 1; ...
+```
+
+`go test ./cmd/aether-edge` also fails when the edge reads an
+`AETHER_EDGE_*` variable that `packaging/edge/aether-edge.env.example`
+does not list, so a new variable changes that file's hash. A pull request
+that adds a migration, a protocol version, an environment variable, or a
+change to the image or the unit therefore edits this file. Decide then whether
+the upgrade needs a manual step or a higher `min_upgrade_from`, and record
+the new values. Never remove a step: an edge several releases behind still
+needs it.
+
+### Promoting an edge release to stable
+
+`ghcr.io/3xdevops/aether-edge:stable` is the production channel
+([In a container](edge.md#in-a-container)). Nothing moves it but
+[`.github/workflows/promote-edge.yml`](../.github/workflows/promote-edge.yml),
+run by hand. It is manual because a production edge is one instance with
+no fleet to report a bad release, and its database migrations do not run
+backwards: a person decides that a release has proved itself.
+
+1. Wait 24 hours after the release is published, and look for problems
+   reported against it.
+2. Read the release's digest: `docker buildx imagetools inspect
+   ghcr.io/3xdevops/aether-edge:<tag>` prints it as `Digest:`.
+3. Run the workflow:
+
+   ```sh
+   gh workflow run promote-edge.yml -f tag=<tag> -f digest=sha256:<digest>
+   ```
+
+   Add `-f soak_override_reason='<why>'` to promote before 24 hours; the
+   reason goes into the job summary.
+
+The workflow runs only when both the user who dispatched it and the user
+who started the attempt are repository admins. It checks out `main`,
+never builds, and refuses unless:
+
+- the release is published, not a draft;
+- `aether-edge release-check`, built from `main` with its embedded release
+  keys, verifies the release's `aether-release.json` and finds the input
+  digest as `edge.image_digest`;
+- the release workflow run that built the tag's commit passed its
+  `edge-qualify` job, the edge upgrade qualification, or, in a run that
+  has no such job, succeeded as a whole;
+- the release was published at least 24 hours ago, or
+  `soak_override_reason` is set;
+- `ghcr.io/3xdevops/aether-edge:<tag>` resolves to the input digest, the
+  index and both platform images carry attestations from this
+  repository's release workflow for `refs/tags/<tag>`, and all three read
+  anonymously;
+- the release is not older than the one `stable` carries, by
+  `scripts/android-version-code.sh` order of the image's
+  `org.opencontainers.image.version` label. The same release is a no-op;
+- the release `stable` carries is at or above the new release's
+  `min_upgrade_from`, so hosts following `stable` never land on a release
+  they cannot upgrade from. Promote an intermediate release first.
+
+Blocking manual steps do not stop a promotion: each host's updater holds
+on them until its operator acts.
+
+It then copies the index's exact bytes to `stable` with `crane tag`,
+checks that `stable` resolves to the digest anonymously and that its
+attestation verifies, and writes the tag, digest, previous `stable`,
+actor, qualification evidence and override reason to the job summary.
+Last, also when `stable` already named the digest, it attests the
+promotion: predicate type
+`https://github.com/3xDevOps/aether/edge-promotion/v1`, predicate
+`{"channel":"stable","tag":"<tag>","digest":"<digest>"}`, pushed to the
+registry, and verifies it as a host does
+([Verifying an image](edge.md#verifying-an-image)).
+
+The admin check and the refusal to run from any ref but `main` cover the
+workflow as it is on `main`. `workflow_dispatch` runs the file from the
+dispatched ref, so anyone who can push a branch can run an edited copy
+with a `packages: write` token and move `stable`. Such a run cannot
+produce the promotion attestation hosts require: its certificate names
+the branch, not `refs/heads/main`. The `edge-promotion` environment
+([Protecting the signing key](#protecting-the-signing-key)) keeps it from
+even starting.
+Promotions share one concurrency group, `promote-edge`; GitHub keeps one
+pending run per group, so dispatch the next only after the previous ends.
+
+To roll back a production edge, pin the previous digest on the host and
+restore the database backup taken before the upgrade if its schema moved.
+Do not move `stable` back: the workflow refuses an older release, and
+other hosts following `stable` would downgrade into a schema they cannot
+open.
+
+### Protecting the signing key
+
+The `signing-key` and release jobs run in the GitHub environment `release` and
+`promote-edge.yml`'s promotion job in `edge-promotion`; a job that names an
+environment creates it on its first run. A repository secret is readable by
+any workflow on any branch, so a branch that edits a workflow could read
+`AETHER_RELEASE_SIGNING_KEY` and sign a manifest every updater trusts. An
+admin closes that in **Settings > Environments**:
+
+1. In `release`, add the secret `AETHER_RELEASE_SIGNING_KEY` with the seed,
+   then delete the repository secret of that name. Only jobs that name
+   `release` can then read it. Until the repository secret is deleted, it
+   still works: GitHub resolves an environment secret first and falls back
+   to the repository secret of the same name.
+2. In `release`, set **Deployment branches and tags** to **Selected
+   branches and tags** with the tag rule `v*`. A workflow edited on a
+   branch can name the environment, but GitHub refuses to run that job
+   outside a `v*` tag, so the key is read only by a release, whose tags
+   only admins may push.
+3. In `edge-promotion`, allow only the branch `main`. A promotion from an
+   edited copy on another branch then never starts.
+4. Optionally, add required reviewers to either environment: each
+   promotion then waits for one approval, and each release for two, at
+   `signing-key` before any build and at the release job before
+   publishing.

@@ -4353,7 +4353,12 @@ login found" (from `login_found`), "Standard · Enhanced" or "Standard", and
 one button by state: **Set up** while not installed, **Log in** while
 installed with no login found, and **Run** once ready, with **Set up again**
 in the row's **More** menu; closing a setup returns focus to that row's
-button. On the Agents page an installed agent's row also has a **Default
+button. On the Agents page only, where the gateway serves `agent.remove`, the
+**More** menu of a member agent or an installed agent also has **Remove…**.
+It opens `RemoveAgent` (`remove-agent.tsx`), a confirmation that says what is
+deleted (`~/.local/bin/<executable>`, plus the Enhanced adapter's link, or the
+member's definition) and what stays; a refusal appears in the open dialog, and
+success reloads the shared agent list, so the launcher's picker updates too. On the Agents page an installed agent's row also has a **Default
 mode** select, shown as "Default: Standard", which writes `launchDefaults`
 without changing which agent **New run** preselects. Once one agent is
 installed the page folds the rest under **More agents (n)**. **What's the
@@ -5643,8 +5648,9 @@ that runs a newer release than a client refuses that client
   the dialog and runs a check.
 - **The desktop shell has a prompt of its own.** The SPA ships inside the
   CLI, but the Electron shell around it is whatever `aether gui build`
-  last produced. That build records the complete CLI version and its
-  executable path beside the shell's npm-valid `package.json` version.
+  last installed. The shell's `package.json` carries the complete CLI
+  version beside its npm-valid version, and the install records the CLI's
+  executable path in `resources/aether-cli.json`.
   `desktop/main.js` starts the recorded binary ahead of `PATH` (unless
   `AETHER_BIN` overrides it) and hands the build version to the renderer.
   `desktop/preload.js` exposes it as `window.aetherDesktop.shellVersion`.
