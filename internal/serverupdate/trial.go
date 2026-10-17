@@ -1,6 +1,7 @@
 package serverupdate
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -383,6 +385,8 @@ func (t *Trial) failLocked(cause error) error {
 	return errors.Join(cause, saveRecord(t.dir, t.rec))
 }
 
+const probeTimeout = 30 * time.Second
+
 // ErrRestartUnit is returned instead of re-executing when the systemd unit
 // will start the next binary itself. The caller exits with status 75.
 var ErrRestartUnit = errors.New("exiting with status 75 so systemd starts aether-server")
@@ -478,13 +482,22 @@ func ExecAfterDrain(dir string, host Host, argv []string) error {
 	cause := takeSnapshot(rec)
 	if cause == nil {
 		if host.restartsUnit() {
-			return fmt.Errorf("%w %s", ErrRestartUnit, rec.ToVersion)
+			// systemd cannot roll back a binary it fails to exec, and no
+			// Boot would run, so prove the new one starts first.
+			ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+			out, perr := exec.CommandContext(ctx, argv[0], "version").CombinedOutput()
+			cancel()
+			if perr == nil {
+				return fmt.Errorf("%w %s", ErrRestartUnit, rec.ToVersion)
+			}
+			cause = fmt.Errorf("the new aether-server does not run: %w: %s", perr, bytes.TrimSpace(out))
+		} else {
+			err = host.Exec(argv[0], argv, os.Environ())
+			if err == nil {
+				err = errors.New("returned without replacing the process")
+			}
+			cause = fmt.Errorf("re-exec %s: %w", argv[0], err)
 		}
-		err = host.Exec(argv[0], argv, os.Environ())
-		if err == nil {
-			err = errors.New("returned without replacing the process")
-		}
-		cause = fmt.Errorf("re-exec %s: %w", argv[0], err)
 	}
 	t := &Trial{dir: dir, host: host, rec: rec}
 	return errors.Join(cause, t.rollBackAndExec(cause.Error()))

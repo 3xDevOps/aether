@@ -66,7 +66,7 @@ func unitRestartsOnExit75() bool {
 		return false
 	}
 	out, err := exec.Command("systemctl", "show", "aether-server",
-		"--property=Restart,RestartForceExitStatus,SuccessExitStatus").Output()
+		"--property=Restart,RestartForceExitStatus,RestartPreventExitStatus,SuccessExitStatus").Output()
 	return err == nil && restartsOnExit75(string(out))
 }
 
@@ -82,6 +82,9 @@ func restartsOnExit75(show string) bool {
 	}
 	lists75 := func(k string) bool {
 		return slices.Contains(props[k], "75") || slices.Contains(props[k], "TEMPFAIL")
+	}
+	if lists75("RestartPreventExitStatus") {
+		return false
 	}
 	return slices.Equal(props["Restart"], []string{"always"}) || lists75("RestartForceExitStatus") ||
 		slices.Equal(props["Restart"], []string{"on-failure"}) && !lists75("SuccessExitStatus")

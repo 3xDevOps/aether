@@ -481,10 +481,26 @@ func TestRestartThroughTheUnitInsteadOfExec(t *testing.T) {
 	e := newTrialEnv(t)
 	e.write(t, swapRecord{})
 	e.host.RestartsOnExit75 = func() bool { return true }
+	runnable := filepath.Join(t.TempDir(), "aether-server")
+	if err := os.WriteFile(runnable, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	err := ExecAfterDrain(e.state, e.host, []string{e.server, "serve"})
+	err := ExecAfterDrain(e.state, e.host, []string{runnable, "serve"})
 	if !errors.Is(err, ErrRestartUnit) || !strings.Contains(err.Error(), version.Version) {
 		t.Fatalf("ExecAfterDrain = %v, want ErrRestartUnit naming %s", err, version.Version)
+	}
+	f := newTrialEnv(t)
+	f.host.RestartsOnExit75 = func() bool { return true }
+	f.write(t, swapRecord{})
+	broken := filepath.Join(t.TempDir(), "aether-server")
+	if err = os.WriteFile(broken, []byte("#!/bin/sh\necho exec format\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err = ExecAfterDrain(f.state, f.host, []string{broken, "serve"})
+	if !errors.Is(err, ErrRestartUnit) || !strings.Contains(err.Error(), "does not run") || !strings.Contains(err.Error(), "exec format") ||
+		readFile(t, f.server) != "old server" || f.record(t).Phase != recordRolledBack {
+		t.Fatalf("a new binary that does not run was not rolled back: %v", err)
 	}
 	e.write(t, swapRecord{Boots: maxTrialBoots})
 	if _, err = Boot(e.state, e.host); !errors.Is(err, ErrRestartUnit) {
@@ -512,6 +528,7 @@ func TestRestartsOnExit75(t *testing.T) {
 		"Restart=always\nRestartForceExitStatus=\nSuccessExitStatus=75\n":       true,
 		"Restart=no\nRestartForceExitStatus=\nSuccessExitStatus=\n":             false,
 		"Restart=no\nRestartForceExitStatus=75\nSuccessExitStatus=\n":           true,
+		"Restart=always\nRestartPreventExitStatus=75\n":                         false,
 		"": false,
 	} {
 		if got := restartsOnExit75(show); got != want {
