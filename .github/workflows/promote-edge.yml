@@ -1,0 +1,249 @@
+name: Promote edge to stable
+
+# Moves ghcr.io/3xdevops/aether-edge:stable to a published release's image,
+# by copying the exact index the release signed and attested. It never
+# builds and never moves stable to an older release. docs/install.md,
+# Promoting an edge release to stable, describes when to run it.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to promote, such as v0.8.0
+        required: true
+        type: string
+      digest:
+        description: Index digest of ghcr.io/3xdevops/aether-edge:<tag>, sha256:<64 hex>
+        required: true
+        type: string
+      soak_override_reason:
+        description: Why to promote a release published less than 24 hours ago; empty enforces the soak
+        required: false
+        type: string
+        default: ''
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+# One promotion at a time, so two cannot interleave their checks of the
+# version stable carries.
+concurrency:
+  group: promote-edge
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/3xdevops/aether-edge
+  CRANE_VERSION: v0.22.1
+  CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+
+jobs:
+  publisher-policy:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.select.outputs.allowed }}
+    steps:
+      - name: Check the promoter
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # A re-run keeps the dispatcher as GITHUB_ACTOR, so whoever started
+        # this attempt must be an admin too.
+        run: |
+          allowed=true
+          for user in "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"; do
+            permission=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/collaborators/${user}/permission" \
+              --jq '.permission' 2>/dev/null || true)
+            # A failed lookup deliberately refuses the promotion.
+            if [ "$permission" != admin ]; then
+              allowed=false
+              echo "::error::$user is not an admin of $GITHUB_REPOSITORY; only admins promote edge releases"
+            fi
+          done
+          echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
+
+  promote:
+    needs: publisher-policy
+    if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
+    permissions:
+      contents: read
+      actions: read
+      attestations: read
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TAG: ${{ inputs.tag }}
+      DIGEST: ${{ inputs.digest }}
+      REASON: ${{ inputs.soak_override_reason }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      # The verifier, its embedded release keys and the version ordering
+      # come from main, never from the release being promoted.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: refs/heads/main
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Install crane
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/crane.tgz" \
+            "https://github.com/google/go-containerregistry/releases/download/$CRANE_VERSION/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "$CRANE_SHA256  $RUNNER_TEMP/crane.tgz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/crane.tgz" -C "$RUNNER_TEMP" crane
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Validate the inputs
+        run: |
+          sh scripts/android-version-code.sh "$TAG" >/dev/null
+          if ! [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::digest $DIGEST is not sha256:<64 lowercase hex>"
+            exit 1
+          fi
+      - name: Require a published release
+        id: release
+        run: |
+          release=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
+          if [ "$(printf '%s' "$release" | jq -r .draft)" != false ]; then
+            echo "::error::release $TAG is a draft; promote only a published release"
+            exit 1
+          fi
+          echo "published_at=$(printf '%s' "$release" | jq -er .published_at)" >> "$GITHUB_OUTPUT"
+      - name: Verify the signed manifest names this edge image
+        id: manifest
+        run: |
+          report=$(go run ./cmd/aether-edge release-check --tag "$TAG" --digest "$DIGEST" --json)
+          echo "commit=$(printf '%s' "$report" | jq -er .commit)" >> "$GITHUB_OUTPUT"
+      - name: Require the release run to have qualified the edge
+        env:
+          COMMIT: ${{ steps.manifest.outputs.commit }}
+        # Until release.yml has an edge-qualify job, the whole release run
+        # must have succeeded.
+        run: |
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/release.yml/runs?event=push&branch=$TAG&per_page=100" |
+            jq -c --arg sha "$COMMIT" '[.workflow_runs[] | select(.head_sha == $sha)] | max_by(.run_number) // empty')
+          if [ -z "$run" ]; then
+            echo "::error::no release workflow run built $TAG from $COMMIT"
+            exit 1
+          fi
+          id=$(printf '%s' "$run" | jq -r .id)
+          url=$(printf '%s' "$run" | jq -r .html_url)
+          qualify=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?filter=latest&per_page=100" |
+            jq -s '[.[].jobs[] | select(.name == "edge-qualify" or (.name | startswith("edge-qualify ")))]')
+          if [ "$(printf '%s' "$qualify" | jq length)" -gt 0 ]; then
+            if ! printf '%s' "$qualify" | jq -e 'all(.conclusion == "success")' >/dev/null; then
+              echo "::error::edge-qualify did not succeed in $url"
+              exit 1
+            fi
+            evidence="edge-qualify succeeded in $url"
+          else
+            if [ "$(printf '%s' "$run" | jq -r '.status + " " + (.conclusion // "")')" != "completed success" ]; then
+              echo "::error::the release run $url has not succeeded, and it has no edge-qualify job"
+              exit 1
+            fi
+            evidence="the release run $url succeeded (it has no edge-qualify job)"
+          fi
+          echo "EVIDENCE=$evidence" >> "$GITHUB_ENV"
+      - name: Require a 24-hour soak
+        env:
+          PUBLISHED_AT: ${{ steps.release.outputs.published_at }}
+        run: |
+          age=$(( $(date +%s) - $(date -d "$PUBLISHED_AT" +%s) ))
+          if [ "$age" -lt 86400 ] && [ -z "$REASON" ]; then
+            echo "::error::$TAG was published $((age / 3600)) hours ago; wait until 24 hours have passed or give soak_override_reason"
+            exit 1
+          fi
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Require the tag, its attestation and anonymous pulls
+        run: |
+          tagged=$(crane digest "$IMAGE:$TAG")
+          if [ "$tagged" != "$DIGEST" ]; then
+            echo "::error::$IMAGE:$TAG is $tagged, not $DIGEST"
+            exit 1
+          fi
+          verify() {
+            for attempt in 1 2 3; do
+              gh attestation verify "oci://$1" --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --source-ref "refs/tags/$TAG" --deny-self-hosted-runners && return 0
+              [ "$attempt" = 3 ] || sleep 10
+            done
+            return 1
+          }
+          verify "$IMAGE@$DIGEST"
+          anonymous=$(mktemp -d)
+          DOCKER_CONFIG=$anonymous crane manifest "$IMAGE@$DIGEST" > "$RUNNER_TEMP/index.json"
+          for platform in $(jq -r '.manifests[].digest' "$RUNNER_TEMP/index.json"); do
+            verify "$IMAGE@$platform"
+            DOCKER_CONFIG=$anonymous crane manifest "$IMAGE@$platform" >/dev/null
+          done
+      - name: Refuse to move stable backwards
+        id: order
+        run: |
+          if ! current=$(crane digest "$IMAGE:stable" 2>&1); then
+            if [[ $current != *MANIFEST_UNKNOWN* ]]; then
+              echo "::error::cannot read $IMAGE:stable: $current"
+              exit 1
+            fi
+            echo "$IMAGE:stable does not exist yet" >> "$GITHUB_STEP_SUMMARY"
+            echo "move=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          carried=$(crane config --platform linux/amd64 "$IMAGE@$current" |
+            jq -er '.config.Labels["org.opencontainers.image.version"]')
+          want=$(sh scripts/android-version-code.sh "$TAG")
+          have=$(sh scripts/android-version-code.sh "$carried")
+          if [ "$want" -lt "$have" ]; then
+            echo "::error::$IMAGE:stable carries $carried; $TAG is older, and stable never moves backwards"
+            exit 1
+          fi
+          if [ "$want" -eq "$have" ]; then
+            if [ "$current" != "$DIGEST" ]; then
+              echo "::error::$IMAGE:stable carries $carried as $current, not $DIGEST"
+              exit 1
+            fi
+            echo "$IMAGE:stable already is $TAG, \`$DIGEST\`; nothing moved" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "previous=$carried $current" >> "$GITHUB_OUTPUT"
+          echo "move=true" >> "$GITHUB_OUTPUT"
+      # crane tag writes the same manifest bytes under the new tag, so
+      # stable has the digest the release signed and attested.
+      - name: Move stable
+        if: steps.order.outputs.move == 'true'
+        env:
+          PREVIOUS: ${{ steps.order.outputs.previous }}
+        run: |
+          crane tag "$IMAGE@$DIGEST" stable
+          moved=$(crane digest "$IMAGE:stable")
+          if [ "$moved" != "$DIGEST" ]; then
+            echo "::error::$IMAGE:stable is $moved after the move, not $DIGEST"
+            exit 1
+          fi
+          gh attestation verify "oci://$IMAGE:stable" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+            --source-ref "refs/tags/$TAG" --deny-self-hosted-runners
+          anonymous=$(mktemp -d)
+          test "$(DOCKER_CONFIG=$anonymous crane digest "$IMAGE:stable")" = "$DIGEST"
+          {
+            echo "### $IMAGE:stable"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Tag | \`$TAG\` |"
+            echo "| Digest | \`$DIGEST\` |"
+            echo "| Previous | \`${PREVIOUS:-none}\` |"
+            echo "| Actor | $GITHUB_ACTOR (run started by $GITHUB_TRIGGERING_ACTOR) |"
+            echo "| Qualification | $EVIDENCE |"
+            echo "| Soak override | ${REASON:-none} |"
+          } >> "$GITHUB_STEP_SUMMARY"
