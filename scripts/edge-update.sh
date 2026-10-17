@@ -564,7 +564,7 @@ update() {
 
 	record_pre_state "pre-update-$new_version" "$cur"
 	kind=update from_digest="$cur" from_version="$cur_version" to_digest="$new" to_version="$new_version"
-	restore="" restored=0 retry=0 reason=""
+	restore="" restored=0 restore_at="" retry=0 reason=""
 	write_state switching
 	say "updating $cur_version ($cur) to $new_version ($new)"
 	finish
@@ -594,7 +594,7 @@ rollback() {
 	esac
 	record_pre_state "pre-rollback-$cur_version" "$cur"
 	kind=rollback from_digest="$cur" from_version="$cur_version" to_digest="$prev_digest" to_version="$prev_version"
-	restore="$prev_backup" restored=0 retry=0 reason=""
+	restore="$prev_backup" restored=0 restore_at="" retry=0 reason=""
 	write_state switching
 	say "rolling back $cur_version ($cur) to $prev_version ($prev_digest)"
 	finish

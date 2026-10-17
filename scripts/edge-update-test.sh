@@ -248,7 +248,7 @@ promotion="$(cat "$WORLD/promotion/$d" 2>/dev/null || echo "stable $(cat "$WORLD
 set -- $promotion
 channel="$1" tag="$2" subject="${3:-$d}"
 statement="$(printf '{"_type":"https://in-toto.io/Statement/v1","subject":[{"name":"ghcr.io/3xdevops/aether-edge","digest":{"sha256":"%s"}}],"predicateType":"https://github.com/3xDevOps/aether/edge-promotion/v1","predicate":{"channel":"%s","tag":"%s","digest":"%s"}}' "${d#sha256:}" "$channel" "$tag" "$subject")"
-printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures":[{"sig":"x"}]}\n' "$(printf '%s' "$statement" | base64 -w0)"
+printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures":[{"sig":"x"}]}\n' "$(printf '%s' "$statement" | base64 | tr -d '\n')"
 EOF
 
 cat >"$bin/flock" <<'EOF'
@@ -272,7 +272,14 @@ fi
 PATH="${PATH#*:}" exec date "$@"
 EOF
 
-chmod 0755 "$bin/docker" "$bin/cosign" "$bin/curl" "$bin/flock" "$bin/sleep" "$bin/date"
+# macOS has no timeout(1); the stubs never hang, so run the command.
+cat >"$bin/timeout" <<'EOF'
+#!/bin/sh
+shift
+exec "$@"
+EOF
+
+chmod 0755 "$bin/docker" "$bin/cosign" "$bin/curl" "$bin/flock" "$bin/sleep" "$bin/date" "$bin/timeout"
 
 state="$tmp/state"
 compose_dir="$tmp/compose"
@@ -385,7 +392,7 @@ grep -qx COMPOSE_PROJECT_NAME=edge "$compose_dir/.env" || fail "other .env lines
 assert_state idle
 grep -qx "$B v1.1.0" "$state/current" || fail "current not recorded"
 grep -q "^$A v1.0.0 /var/lib/aether-edge/backups/pre-update-v1.1.0-[0-9TZ]*\.db$" "$state/previous" || fail "previous not recorded"
-[ "$(stat -c %a "$state")" = 700 ] || fail "state directory is not 0700"
+[ "$(ls -ld "$state" | cut -c1-10)" = drwx------ ] || fail "state directory is not 0700"
 grep -q '"store_compat_floor":1' "$state/from.json" || fail "from.json not recorded"
 assert_out "now running v1.1.0"
 
@@ -443,6 +450,14 @@ run 1 --rollback --restore-backup
 assert "restore /var/lib/aether-edge/backups/edge-before-restore-"
 refute "restore /var/lib/aether-edge/backups/pre-rollback-"
 assert_db "2 2 last"
+assert_digest "$B"
+assert_state idle
+# A second failed rollback puts back its own copy, not the first one's.
+rm -f "$world/write-on-stop"
+write_db newer
+/bin/sleep 1
+run 1 --rollback --restore-backup
+assert_db "2 2 newer"
 assert_digest "$B"
 assert_state idle
 
