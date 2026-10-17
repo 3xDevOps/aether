@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -340,5 +341,45 @@ func TestOpenCurrent(t *testing.T) {
 		if err == nil {
 			closeStore(t, s)
 		}
+	}
+}
+
+// Without hard links, a backup still lands and still never replaces a file.
+func TestBackupWithoutHardLinks(t *testing.T) {
+	defer func(l func(string, string) error) { link = l }(link)
+	link = func(oldname, newname string) error {
+		return &os.LinkError{Op: "link", Old: oldname, New: newname, Err: syscall.EPERM}
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "edge.db")
+	closeStore(t, openSteps(t, path, testSteps))
+	dst := filepath.Join(dir, "copy.db")
+	if got, err := Backup(path, dst); err != nil || got.Version != 2 {
+		t.Fatalf("Backup = %+v, %v", got, err)
+	}
+	if _, err := verify(dst); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Backup(path, dst); err == nil || !strings.Contains(err.Error(), "exists") {
+		t.Fatalf("Backup over an existing file = %v", err)
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, "*.tmp")); len(left) != 0 {
+		t.Fatalf("Backup left %v behind", left)
+	}
+}
+
+// A copy that fails leaves no temporary file behind.
+func TestFailedBackupLeavesNoTemp(t *testing.T) {
+	dir := t.TempDir()
+	junk := filepath.Join(dir, "junk.db")
+	if err := os.WriteFile(junk, []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := t.TempDir()
+	if _, err := Backup(junk, filepath.Join(out, "copy.db")); err == nil {
+		t.Fatal("Backup of a junk file succeeded")
+	}
+	if left, _ := os.ReadDir(out); len(left) != 0 {
+		t.Fatalf("the failed backup left %v behind", left)
 	}
 }

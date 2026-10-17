@@ -12,7 +12,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
+
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // BackupDir is the directory beside the database that holds the backups
@@ -154,14 +158,38 @@ func Backup(src, dst string) (Schema, error) {
 	if err != nil {
 		return Schema{}, err
 	}
-	defer os.Remove(tmp) //nolint:errcheck // once linked, the copy lives on as dst
-	// A link, unlike a rename, fails on an existing dst.
-	if err := os.Link(tmp, dst); errors.Is(err, fs.ErrExist) {
+	defer os.Remove(tmp) //nolint:errcheck // once published, the copy lives on as dst
+	if err := publish(tmp, dst); errors.Is(err, fs.ErrExist) {
 		return Schema{}, fmt.Errorf("edgestore: %s exists; name a new file or a directory", dst)
 	} else if err != nil {
 		return Schema{}, fmt.Errorf("edgestore: %w", err)
 	}
 	return s, SyncDir(filepath.Dir(dst))
+}
+
+// link is os.Link; tests replace it to stand in for a filesystem without
+// hard links.
+var link = os.Link
+
+// publish puts tmp in place as dst, failing on an existing dst as a link
+// does. Where the filesystem has no hard links, such as SMB, an O_EXCL
+// reservation of dst comes before the rename.
+func publish(tmp, dst string) error {
+	err := link(tmp, dst)
+	if !errors.Is(err, syscall.EPERM) && !errors.Is(err, syscall.ENOTSUP) && !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if err = f.Close(); err == nil {
+		err = os.Rename(tmp, dst)
+	}
+	if err != nil {
+		os.Remove(dst) //nolint:errcheck // the rename error takes precedence
+	}
+	return err
 }
 
 // StageRestore writes a verified copy of src beside dst, for
@@ -185,12 +213,14 @@ func StageRestore(src, dst string) (string, Schema, error) {
 // FinishRestore replaces the database at dst with staged. Nothing else may
 // have dst open. dst's WAL is checkpointed first, so its committed writes
 // stay in dst should the replacement fail; then its -wal and -shm files,
-// which belong to it, are removed.
+// which belong to it, are removed. Only a dst in use stops the restore: one
+// too damaged to checkpoint is what a restore replaces, and the caller has
+// saved it and its WAL.
 func FinishRestore(staged, dst string) error {
 	_, err := os.Stat(dst)
 	switch {
 	case err == nil:
-		if err = checkpoint(dst); err != nil {
+		if err = checkpoint(dst); errors.Is(err, errInUse) {
 			return err
 		}
 	case !errors.Is(err, fs.ErrNotExist):
@@ -207,6 +237,8 @@ func FinishRestore(staged, dst string) error {
 	return SyncDir(filepath.Dir(dst))
 }
 
+var errInUse = errors.New("the database is in use")
+
 func checkpoint(path string) error {
 	db, err := openRW(path)
 	if err != nil {
@@ -215,10 +247,14 @@ func checkpoint(path string) error {
 	defer db.Close() //nolint:errcheck // the checkpoint result is what counts
 	var busy, frames, done int
 	if err := db.QueryRow(`PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &frames, &done); err != nil {
+		var se *sqlite.Error
+		if errors.As(err, &se) && se.Code()&0xff == sqlite3.SQLITE_BUSY {
+			err = fmt.Errorf("%w: %v", errInUse, err)
+		}
 		return fmt.Errorf("edgestore: checkpoint %s: %w", path, err)
 	}
 	if busy != 0 {
-		return fmt.Errorf("edgestore: checkpoint %s: the database is in use", path)
+		return fmt.Errorf("edgestore: checkpoint %s: %w", path, errInUse)
 	}
 	return nil
 }
@@ -227,12 +263,12 @@ func checkpoint(path string) error {
 // VACUUM INTO, syncs it, checks the copy's integrity, and returns its path
 // and schema. The file is created 0600 first, because VACUUM INTO would
 // create it with the umask's mode.
-func snapshot(src, dst string) (tmp string, s Schema, err error) {
+func snapshot(src, dst string) (_ string, s Schema, err error) {
 	f, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".*.tmp")
 	if err != nil {
 		return "", Schema{}, fmt.Errorf("edgestore: %w", err)
 	}
-	tmp = f.Name()
+	tmp := f.Name()
 	defer func() {
 		if err != nil {
 			os.Remove(tmp) //nolint:errcheck // the copy error takes precedence
