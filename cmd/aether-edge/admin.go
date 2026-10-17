@@ -135,10 +135,7 @@ func openStore(dataDir string) (*edgestore.Store, func(), error) {
 	case err != nil:
 		return nil, nil, err
 	}
-	unlockDB, err := lockPath(filepath.Join(dataDir, dbLockFile), shared)
-	if errors.Is(err, errLocked) {
-		err = fmt.Errorf("%w; a restore is replacing %s: run the command again once it finishes", err, path)
-	}
+	unlockDB, err := lockDB(dataDir)
 	if err != nil {
 		unlock()
 		return nil, nil, err

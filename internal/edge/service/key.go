@@ -37,7 +37,7 @@ func loadKey(dataDir string, store *edgestore.Store) (ed25519.PrivateKey, error)
 		}
 		if has {
 			return nil, fmt.Errorf("edge: signing key %s is missing, and edge.db holds accounts or servers that pin it, so the edge does not make a new one: "+
-				"put the key back with aether-edge restore --key <key file> <database backup>, or copy it to %s with mode 0600", path, path)
+				"put the key back with aether-edge restore --key <key file> <database backup>, or copy it to %s with mode 0600, or move edge.db aside to start a new edge identity", path, path)
 		}
 		return createKey(path)
 	}

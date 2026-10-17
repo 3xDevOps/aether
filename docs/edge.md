@@ -1609,7 +1609,7 @@ Keep:
   edge does not start:
 
   ```
-  aether-edge: edge: signing key /var/lib/aether-edge/edge_key is missing, and edge.db holds accounts or servers that pin it, so the edge does not make a new one: put the key back with aether-edge restore --key <key file> <database backup>, or copy it to /var/lib/aether-edge/edge_key with mode 0600
+  aether-edge: edge: signing key /var/lib/aether-edge/edge_key is missing, and edge.db holds accounts or servers that pin it, so the edge does not make a new one: put the key back with aether-edge restore --key <key file> <database backup>, or copy it to /var/lib/aether-edge/edge_key with mode 0600, or move edge.db aside to start a new edge identity
   ```
 
   Without the key, start over with a new data directory: the edge makes a
@@ -1623,11 +1623,16 @@ Keep:
   copies `edge_key` to `<file>.key` too:
 
   ```sh
-  sudo -u aether-edge aether-edge backup /var/lib/aether-edge/backups/
+  sudo install -d -o aether-edge -m 0700 /var/backups/aether-edge
+  sudo -u aether-edge aether-edge backup /var/backups/aether-edge/
   docker exec aether-edge aether-edge backup - > edge-$(date -u +%Y%m%d).db
   ```
 
-  Copy the file off the machine. A lost `edge.db` forgets every
+  Keep daily copies off the data volume: `backup` never removes old
+  copies, and a full volume stops the pre-migration backup and with it the
+  next upgrade. Rotate them, for example with `find
+  /var/backups/aether-edge -name 'edge-v*' -mtime +14 -delete`, and copy
+  them off the machine. A lost `edge.db` forgets every
   account, device token and owner: each client runs `aether login` again,
   and each server drops its owner when it reconnects and logs
   ``edge: the edge does not know this server's owner; claim it again with a code from `aether-server edge claim-code` ``.
@@ -1657,6 +1662,10 @@ docker compose stop edge
 docker compose run --rm --no-deps edge restore /var/lib/aether-edge/backups/<backup>.db
 docker compose start edge
 ```
+
+A restore stopped between replacing `edge.db` and `edge_key` leaves the
+new database beside the old key; run the same restore again. The next
+restore or start removes the `edge_key.*.tmp` file it left.
 
 With the edge running, a restore is refused; so is one while an operator
 command has the database open:
@@ -1713,8 +1722,8 @@ the backup to restore:
 aether-edge: edgestore: database schema version 2 is newer than this binary supports (1); run a binary that supports schema 2 or later, or stop the edge and restore the backup taken before the upgrade: aether-edge restore /var/lib/aether-edge/backups/edge-v1-v2-20261017T050000.000000Z.db
 ```
 
-To roll back, stop the edge, restore that backup with the older binary or
-image, and start it. Writes made since the upgrade are lost.
+To roll back, stop the edge, restore that backup with the new binary or
+image (older releases have no `restore`), then start the older one. Writes made since the upgrade are lost.
 
 An edge, servers and clients built from the `v0.5.2-alpha.3` tag must all
 be replaced by this release together; a mix of that build and this one
@@ -1961,8 +1970,8 @@ only be verified on the live host.
     /var/lib/aether-edge/edge_key`, publish it on this page, and store
     `edge_key` offline.
 11. **Backups.** Schedule `sudo -u aether-edge aether-edge backup
-    /var/lib/aether-edge/backups/` daily and copy the backups off the
-    machine ([Backup and recovery](#backup-and-recovery)).
+    /var/backups/aether-edge/` daily, rotate the copies, and copy them off
+    the machine ([Backup and recovery](#backup-and-recovery)).
 12. **Log retention** for the journal (`<retention>`) and nginx's access
     log ([Logs](#logs)).
 13. **Monitoring**: the external probes and metric alerts in

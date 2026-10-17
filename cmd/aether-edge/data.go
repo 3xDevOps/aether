@@ -70,6 +70,11 @@ func schemaCmd(args []string, getenv func(string) string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	unlock, err := lockDB(*dataDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	s, err := edgestore.ReadSchema(db)
 	if err != nil {
 		return err
@@ -98,6 +103,13 @@ func backupCmd(args []string, getenv func(string) string, out, errOut io.Writer)
 	if err != nil {
 		return err
 	}
+	// Held across reading edge_key and edge.db, so a restore cannot pair
+	// one edge's key with another's database.
+	unlock, err := lockDB(*dataDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if target == "-" {
 		if *withKey {
 			return errors.New("--with-key needs a file or directory: standard output carries only the database")
@@ -192,6 +204,9 @@ func restoreCmd(args []string, getenv func(string) string, out io.Writer) error 
 		return err
 	}
 	defer unlockDB()
+	if err = removeStaleKeys(data); err != nil {
+		return err
+	}
 
 	keyDst := filepath.Join(data, keyFile)
 	var key []byte
@@ -247,6 +262,9 @@ func restoreCmd(args []string, getenv func(string) string, out io.Writer) error 
 		}
 		saved = append(saved, dst)
 	}
+	if err = edgestore.SyncDir(backups); err != nil {
+		return err
+	}
 
 	if err = edgestore.FinishRestore(staged, db); err != nil {
 		return fmt.Errorf("%w; %s was not replaced", err, db)
@@ -266,6 +284,31 @@ func restoreCmd(args []string, getenv func(string) string, out io.Writer) error 
 	}
 	_, err = io.WriteString(out, msg)
 	return err
+}
+
+// lockDB takes the data directory's edge.db.lock shared, so a restore
+// cannot replace edge.db while it is open, and returns its release.
+func lockDB(dataDir string) (func(), error) {
+	unlock, err := lockPath(filepath.Join(dataDir, dbLockFile), shared)
+	if errors.Is(err, errLocked) {
+		err = fmt.Errorf("%w; a restore is replacing %s: run the command again once it finishes", err, filepath.Join(dataDir, "edge.db"))
+	}
+	return unlock, err
+}
+
+// removeStaleKeys removes the staged keys a restore left behind when it
+// stopped before renaming one into place. The caller holds edge.lock.
+func removeStaleKeys(dataDir string) error {
+	stale, err := filepath.Glob(filepath.Join(dataDir, keyFile+".*.tmp"))
+	if err != nil {
+		return err
+	}
+	for _, f := range stale {
+		if err = os.Remove(f); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // copyNew copies the file at src, byte for byte, so a database too damaged

@@ -180,6 +180,13 @@ func TestDataLock(t *testing.T) {
 	if _, err = run(t, dir, "accounts", "list"); err == nil || !strings.Contains(err.Error(), "a restore is replacing") {
 		t.Fatalf("accounts list during a restore: %v", err)
 	}
+	err = backupCmd([]string{"--data", dir, "--with-key", t.TempDir()}, envOf(nil), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "a restore is replacing") {
+		t.Fatalf("backup during a restore: %v", err)
+	}
+	if err = schemaCmd([]string{"--data", dir}, envOf(nil), &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "a restore is replacing") {
+		t.Fatalf("schema during a restore: %v", err)
+	}
 	unlockDB()
 	unlock()
 
@@ -228,5 +235,54 @@ func TestSchemaJSON(t *testing.T) {
 	v := edgestore.SchemaVersion()
 	if got["schema"] != v || got["compat_floor"] != edgestore.CompatFloor() || got["supported"] != v {
 		t.Fatalf("schema --json = %s", out.String())
+	}
+}
+
+// A restore replaces a database too damaged to open, and keeps it byte for
+// byte; it also clears a key an interrupted restore left staged.
+func TestRestoreOverDamagedDatabase(t *testing.T) {
+	src, _ := newEdge(t, "octo")
+	for name, damage := range map[string]func([]byte) []byte{
+		"junk": func([]byte) []byte { return []byte("not a database") },
+		"malformed": func(b []byte) []byte {
+			for i := 100; i < len(b); i++ {
+				b[i] = 0xa5
+			}
+			return b
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dst, _ := newEdge(t, "other")
+			db := filepath.Join(dst, "edge.db")
+			data, err := os.ReadFile(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data = damage(data)
+			if err = os.WriteFile(db, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stale := filepath.Join(dst, keyFile+".123.tmp")
+			if err = os.WriteFile(stale, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			if err = restoreCmd([]string{"--data", dst, filepath.Join(src, "edge.db")}, envOf(nil), &out); err != nil {
+				t.Fatalf("restore: %v\n%s", err, out.String())
+			}
+			if listed, err := run(t, dst, "accounts", "list"); err != nil || !strings.Contains(listed, "octo") {
+				t.Fatalf("accounts after the restore:\n%s%v", listed, err)
+			}
+			saved, _ := filepath.Glob(filepath.Join(dst, "backups", "edge-before-restore-*.db"))
+			if len(saved) != 1 {
+				t.Fatalf("saved databases: %v", saved)
+			}
+			if got, err := os.ReadFile(saved[0]); err != nil || !bytes.Equal(got, data) {
+				t.Fatalf("the saved database differs from the damaged one: %v", err)
+			}
+			if _, err := os.Stat(stale); !os.IsNotExist(err) {
+				t.Fatalf("the stale staged key survived: %v", err)
+			}
+		})
 	}
 }

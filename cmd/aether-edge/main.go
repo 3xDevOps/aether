@@ -105,6 +105,9 @@ func serve(args []string) (err error) {
 		return err
 	}
 	defer unlockDB()
+	if err = removeStaleKeys(o.dataDir); err != nil {
+		return err
+	}
 
 	svc, err := edge.New(edge.Config{
 		DataDir: o.dataDir, SigninOrigin: o.signinOrigin, RelayOrigin: o.relayOrigin,
