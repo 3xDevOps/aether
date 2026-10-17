@@ -1,10 +1,11 @@
 name: Release
 
-# Publishing a non-draft GitHub release starts the trusted release workflow.
-# Tag-sourced builds run only after publisher and exact-main-CI authorization.
+# Pushing a release tag starts the trusted release workflow. Tag-sourced
+# builds run only after publisher and exact-main-CI authorization, and the
+# GitHub release stays a draft until every asset is uploaded and verified.
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v*']
 
 permissions: {}
 
@@ -12,10 +13,12 @@ defaults:
   run:
     shell: bash
 
-# Any two releases queue. Publishing different tags at the same time would
-# still race on the GHCR `latest` tag and on /releases/latest.
+# One run per tag at a time; different tags run in parallel. GitHub keeps
+# one pending run per group and cancels older pending ones, so a shared group
+# would silently drop a release. publish-release.sh recomputes Latest after
+# every publish, and the image latest jobs follow GitHub's Latest.
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -30,16 +33,20 @@ jobs:
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
+        # A re-run keeps the pusher as GITHUB_ACTOR, so whoever started this
+        # attempt must be an admin too.
         run: |
-          permission=$(gh api \
-            "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_ACTOR}/permission" \
-            --jq '.permission' 2>/dev/null || true)
-          # A failed lookup deliberately disables the release.
-          if [ "$permission" = admin ]; then
-            echo "allowed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "allowed=false" >> "$GITHUB_OUTPUT"
-          fi
+          allowed=true
+          for user in "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"; do
+            permission=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/collaborators/${user}/permission" \
+              --jq '.permission' 2>/dev/null || true)
+            # A failed lookup deliberately disables the release.
+            if [ "$permission" != admin ]; then
+              allowed=false
+            fi
+          done
+          echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
 
   # This is the only validation reuse boundary. The tag is resolved once and
   # every producer checks out that commit, never an unsigned CI artifact.
@@ -57,7 +64,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # Read policy scripts from trusted main before executing tag code.
-          # workflow_sha can name the tag revision on a release event.
+          # workflow_sha names the tag revision on a tag push.
           ref: refs/heads/main
           persist-credentials: false
           fetch-depth: 0
@@ -77,7 +84,7 @@ jobs:
         run: |
           sh scripts/android-version-code.sh "$GITHUB_REF_NAME"
           sha=$(git rev-parse "$GITHUB_REF^{commit}")
-          test "$sha" = "$GITHUB_SHA"
+          test "$sha" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
           url=$(sh scripts/release-ci-check.sh "$GITHUB_REPOSITORY" "$sha")
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Release validation: $url (exact main commit \`$sha\`)" >> "$GITHUB_STEP_SUMMARY"
@@ -635,10 +642,9 @@ jobs:
           echo "Standard manifest: \`$image@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
 
   # No producer may be skipped/failed: the complete run-specific asset set and
-  # every tested image must be ready before updating the published release.
-  # The manifest goes up last, after every other asset is downloaded back
-  # anonymously and matches it: updaters ignore a release until then, even
-  # though GitHub already lists it as Latest.
+  # every tested image must be ready before the release is drafted. It is
+  # published only after the draft is downloaded back and matches the
+  # signed manifest, so installers never see a release without its assets.
   release:
     needs: [release-policy, release-binaries, windows-defender, android, browser-manifest, edge-manifest, standard-manifest]
     permissions:
@@ -699,27 +705,46 @@ jobs:
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.release-policy.outputs.sha }}
         run: sh scripts/publish-release.sh "$GITHUB_REF_NAME" dist
 
-  # latest moves only after the release's assets are uploaded, to the index
+  # latest moves only after the release is published, to the index
   # edge-manifest already pushed, so a release that fails earlier leaves it
-  # where it was and nothing is rebuilt.
+  # where it was and nothing is rebuilt. It moves only while this tag is
+  # GitHub's Latest, checked when the job runs, so a re-run of an older
+  # release never moves it back.
   edge-latest:
     needs: [edge-manifest, release]
     permissions:
+      contents: read
       packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Require this release to be GitHub's Latest
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          if [ "$latest" = "$GITHUB_REF_NAME" ]; then
+            echo "move=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "edge latest stays: GitHub's Latest is $latest, not $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        if: steps.latest.outputs.move == 'true'
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        if: steps.latest.outputs.move == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Move latest to the published edge image
+        if: steps.latest.outputs.move == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ needs.edge-manifest.outputs.digest }}
         run: |
           image=ghcr.io/3xdevops/aether-edge
@@ -738,23 +763,46 @@ jobs:
             echo "::error::$image:latest does not carry the images of the published $DIGEST"
             exit 1
           fi
+          # A parallel release can take Latest after the check above; the
+          # move may then have overwritten its image.
+          now=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          if [ "$now" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::GitHub's Latest moved to $now while $image:latest moved to $GITHUB_REF_NAME; re-run the latest jobs of the $now release"
+            exit 1
+          fi
           echo "$image:latest is $GITHUB_REF_NAME, \`$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
 
   standard-latest:
     needs: [standard-manifest, release]
     permissions:
+      contents: read
       packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Require this release to be GitHub's Latest
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          if [ "$latest" = "$GITHUB_REF_NAME" ]; then
+            echo "move=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "standard latest stays: GitHub's Latest is $latest, not $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        if: steps.latest.outputs.move == 'true'
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        if: steps.latest.outputs.move == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Move latest to the published standard image
+        if: steps.latest.outputs.move == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ needs.standard-manifest.outputs.digest }}
         run: |
           image=ghcr.io/3xdevops/aether-standard
@@ -769,6 +817,13 @@ jobs:
           published=$(carried "$image@$DIGEST")
           if [ "$moved" != "$published" ]; then
             echo "::error::$image:latest does not carry the images of the published $DIGEST"
+            exit 1
+          fi
+          # A parallel release can take Latest after the check above; the
+          # move may then have overwritten its image.
+          now=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          if [ "$now" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::GitHub's Latest moved to $now while $image:latest moved to $GITHUB_REF_NAME; re-run the latest jobs of the $now release"
             exit 1
           fi
           echo "$image:latest is $GITHUB_REF_NAME, \`$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
