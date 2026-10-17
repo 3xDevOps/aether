@@ -118,6 +118,10 @@ jobs:
           context: .
           file: images/browser/Dockerfile
           load: true
+          # Off, so a containerd image store cannot add unknown/unknown
+          # attestation manifests to what is pushed and joined.
+          provenance: false
+          sbom: false
           tags: ghcr.io/3xdevops/aether-browser:${{ github.ref_name }}-${{ matrix.arch }}
           cache-from: type=gha,scope=browser-${{ matrix.arch }}-main
       - name: Prove sandbox, local app, actions, captures and streams
@@ -140,8 +144,13 @@ jobs:
     needs: browser-image
     permissions:
       packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      digest: ${{ steps.verify.outputs.digest }}
     steps:
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -156,6 +165,7 @@ jobs:
       # New GHCR packages must be made public by the repository administrator.
       # An authenticated pull alone would ship a companion users cannot fetch.
       - name: Verify tested browser manifests and anonymous pulls
+        id: verify
         run: |
           config=$(mktemp -d)
           trap 'rm -rf "$config"' EXIT
@@ -176,6 +186,41 @@ jobs:
             docker --config "$config" pull "$image@$platform"
             pulled=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image@$platform")
             test "$pulled" = "linux/$arch"
+            echo "$arch=$platform" >> "$GITHUB_OUTPUT"
+          done
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Attest the index
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/3xdevops/aether-browser
+          subject-digest: ${{ steps.verify.outputs.digest }}
+          push-to-registry: true
+      - name: Attest linux/amd64
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/3xdevops/aether-browser
+          subject-digest: ${{ steps.verify.outputs.amd64 }}
+          push-to-registry: true
+      - name: Attest linux/arm64
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/3xdevops/aether-browser
+          subject-digest: ${{ steps.verify.outputs.arm64 }}
+          push-to-registry: true
+      - name: Verify the aether-browser attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGESTS: ${{ steps.verify.outputs.digest }} ${{ steps.verify.outputs.amd64 }} ${{ steps.verify.outputs.arm64 }}
+        # The attestation API can answer a moment after the upload.
+        run: |
+          for digest in $DIGESTS; do
+            for attempt in 1 2 3 4 5; do
+              gh attestation verify "oci://ghcr.io/3xdevops/aether-browser@$digest" --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --source-ref "$GITHUB_REF" --deny-self-hosted-runners && continue 2
+              [ "$attempt" = 5 ] || sleep 5
+            done
+            exit 1
           done
 
   # Each architecture is built, loaded and smoke-tested on a native runner,
@@ -230,6 +275,10 @@ jobs:
           context: .
           file: images/edge/Dockerfile
           load: true
+          # Off, so a containerd image store cannot add unknown/unknown
+          # attestation manifests to what is pushed and joined.
+          provenance: false
+          sbom: false
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ steps.commit.outputs.short }}
@@ -256,6 +305,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -306,6 +358,7 @@ jobs:
       # Pulls with this job's login: a package GHCR has just created is
       # private until an administrator makes it public.
       - name: Verify and pull both edge image architectures
+        id: verify
         env:
           TAGS: ${{ steps.edge-meta.outputs.tags }}
           DIGEST: ${{ steps.publish.outputs.digest }}
@@ -354,6 +407,40 @@ jobs:
               exit 1
             fi
             echo "| linux/$arch | \`$image@$platform\` |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$arch=$platform" >> "$GITHUB_OUTPUT"
+          done
+      - name: Attest the index
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/3xdevops/aether-edge
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+      - name: Attest linux/amd64
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/3xdevops/aether-edge
+          subject-digest: ${{ steps.verify.outputs.amd64 }}
+          push-to-registry: true
+      - name: Attest linux/arm64
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/3xdevops/aether-edge
+          subject-digest: ${{ steps.verify.outputs.arm64 }}
+          push-to-registry: true
+      - name: Verify the aether-edge attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGESTS: ${{ steps.publish.outputs.digest }} ${{ steps.verify.outputs.amd64 }} ${{ steps.verify.outputs.arm64 }}
+        # The attestation API can answer a moment after the upload.
+        run: |
+          for digest in $DIGESTS; do
+            for attempt in 1 2 3 4 5; do
+              gh attestation verify "oci://ghcr.io/3xdevops/aether-edge@$digest" --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --source-ref "$GITHUB_REF" --deny-self-hosted-runners && continue 2
+              [ "$attempt" = 5 ] || sleep 5
+            done
+            exit 1
           done
       # Not a release failure: the image is published and pullable with
       # credentials. Until the package is public, users cannot pull it.
@@ -562,6 +649,10 @@ jobs:
           context: .
           file: images/standard/Dockerfile
           load: true
+          # Off, so a containerd image store cannot add unknown/unknown
+          # attestation manifests to what is pushed and joined.
+          provenance: false
+          sbom: false
           tags: ${{ steps.standard-meta.outputs.tags }}
           labels: ${{ steps.standard-meta.outputs.labels }}
           cache-from: type=gha,scope=standard-${{ matrix.arch }}-main
@@ -583,6 +674,9 @@ jobs:
     needs: [release-policy, standard-image]
     permissions:
       packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -609,6 +703,7 @@ jobs:
           test -n "$digest"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
       - name: Verify tested manifest contents and anonymous pulls
+        id: verify
         env:
           COMMIT: ${{ needs.release-policy.outputs.sha }}
           DIGEST: ${{ steps.publish.outputs.digest }}
@@ -638,8 +733,42 @@ jobs:
             pulled=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image@$platform")
             test "$pulled" = "linux/$arch"
             echo "Standard linux/$arch: \`$image@$platform\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "$arch=$platform" >> "$GITHUB_OUTPUT"
           done
           echo "Standard manifest: \`$image@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Attest the index
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/3xdevops/aether-standard
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+      - name: Attest linux/amd64
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/3xdevops/aether-standard
+          subject-digest: ${{ steps.verify.outputs.amd64 }}
+          push-to-registry: true
+      - name: Attest linux/arm64
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/3xdevops/aether-standard
+          subject-digest: ${{ steps.verify.outputs.arm64 }}
+          push-to-registry: true
+      - name: Verify the aether-standard attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGESTS: ${{ steps.publish.outputs.digest }} ${{ steps.verify.outputs.amd64 }} ${{ steps.verify.outputs.arm64 }}
+        # The attestation API can answer a moment after the upload.
+        run: |
+          for digest in $DIGESTS; do
+            for attempt in 1 2 3 4 5; do
+              gh attestation verify "oci://ghcr.io/3xdevops/aether-standard@$digest" --repo "$GITHUB_REPOSITORY" \
+                --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+                --source-ref "$GITHUB_REF" --deny-self-hosted-runners && continue 2
+              [ "$attempt" = 5 ] || sleep 5
+            done
+            exit 1
+          done
 
   # No producer may be skipped/failed: the complete run-specific asset set and
   # every tested image must be ready before the release is drafted. It is
@@ -674,6 +803,17 @@ jobs:
       - name: Read the store schema the release migrates to
         id: store
         run: echo "schema=$(go run ./internal/store/cmd/schema-version)" >> "$GITHUB_OUTPUT"
+      # Also without the key: the image digests, and the edge section from
+      # this build and packaging/edge/upgrade.json, which it refuses when stale.
+      - name: Write the image digests and edge section the manifest signs
+        env:
+          BROWSER: ${{ needs.browser-manifest.outputs.digest }}
+          EDGE: ${{ needs.edge-manifest.outputs.digest }}
+          STANDARD: ${{ needs.standard-manifest.outputs.digest }}
+        run: |
+          go run ./internal/edge/cmd/release-edge -tag "$GITHUB_REF_NAME" \
+            -image "aether-browser=$BROWSER" -image "aether-edge=$EDGE" -image "aether-standard=$STANDARD" \
+            > "$RUNNER_TEMP/images.json"
       - name: Require all twelve release assets, write checksums and sign the manifest
         working-directory: dist
         env:
@@ -699,7 +839,8 @@ jobs:
           sha256sum "${assets[@]}" > checksums.txt
           sha256sum --check --strict checksums.txt
           go run ../internal/selfupdate/cmd/release-manifest \
-            -version "$GITHUB_REF_NAME" -commit "$COMMIT" -store-schema "$STORE_SCHEMA" -out . "${assets[@]}"
+            -version "$GITHUB_REF_NAME" -commit "$COMMIT" -store-schema "$STORE_SCHEMA" \
+            -images "$RUNNER_TEMP/images.json" -out . "${assets[@]}"
           diff -u <(printf '%s\n' "${assets[@]}" checksums.txt aether-release.json aether-release.json.sig | sort) \
             <(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
       - name: Publish the GitHub release
@@ -732,8 +873,17 @@ jobs:
           else
             echo "edge latest stays: GitHub's Latest is $latest, not $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Install crane
         if: steps.latest.outputs.move == 'true'
+        env:
+          CRANE_VERSION: v0.22.1
+          CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/crane.tgz" \
+            "https://github.com/google/go-containerregistry/releases/download/$CRANE_VERSION/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "$CRANE_SHA256  $RUNNER_TEMP/crane.tgz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/crane.tgz" -C "$RUNNER_TEMP" crane
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         if: steps.latest.outputs.move == 'true'
@@ -748,19 +898,12 @@ jobs:
           DIGEST: ${{ needs.edge-manifest.outputs.digest }}
         run: |
           image=ghcr.io/3xdevops/aether-edge
-          docker buildx imagetools create --tag "$image:latest" "$image@$DIGEST"
-          # Compared by the images it carries: the tool may write the list
-          # again, which changes the list's digest and none of its images.
-          carried() {
-            raw=$(docker buildx imagetools inspect --raw "$1")
-            printf '%s' "$raw" | jq -er '[.manifests[] | "\(.platform.os)/\(.platform.architecture) \(.digest)"] | sort | join("\n") | select(length > 0)'
-          }
-          # An inspection that fails or lists no image is a failure, not
-          # two empty answers that agree.
-          moved=$(carried "$image:latest")
-          published=$(carried "$image@$DIGEST")
-          if [ "$moved" != "$published" ]; then
-            echo "::error::$image:latest does not carry the images of the published $DIGEST"
+          # crane tag writes the index's own bytes under latest, so latest
+          # has the digest the release signed and attested.
+          crane tag "$image@$DIGEST" latest
+          moved=$(crane digest "$image:latest")
+          if [ "$moved" != "$DIGEST" ]; then
+            echo "::error::$image:latest is $moved, not the published $DIGEST"
             exit 1
           fi
           # A parallel release can take Latest after the check above; the
@@ -791,8 +934,17 @@ jobs:
           else
             echo "standard latest stays: GitHub's Latest is $latest, not $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Install crane
         if: steps.latest.outputs.move == 'true'
+        env:
+          CRANE_VERSION: v0.22.1
+          CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/crane.tgz" \
+            "https://github.com/google/go-containerregistry/releases/download/$CRANE_VERSION/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "$CRANE_SHA256  $RUNNER_TEMP/crane.tgz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/crane.tgz" -C "$RUNNER_TEMP" crane
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         if: steps.latest.outputs.move == 'true'
         with:
@@ -806,17 +958,10 @@ jobs:
           DIGEST: ${{ needs.standard-manifest.outputs.digest }}
         run: |
           image=ghcr.io/3xdevops/aether-standard
-          docker buildx imagetools create --tag "$image:latest" "$image@$DIGEST"
-          # As with edge-latest, compare carried images rather than a list
-          # digest that imagetools may rewrite without changing its contents.
-          carried() {
-            raw=$(docker buildx imagetools inspect --raw "$1")
-            printf '%s' "$raw" | jq -er '[.manifests[] | "\(.platform.os)/\(.platform.architecture) \(.digest)"] | sort | join("\n") | select(length > 0)'
-          }
-          moved=$(carried "$image:latest")
-          published=$(carried "$image@$DIGEST")
-          if [ "$moved" != "$published" ]; then
-            echo "::error::$image:latest does not carry the images of the published $DIGEST"
+          crane tag "$image@$DIGEST" latest
+          moved=$(crane digest "$image:latest")
+          if [ "$moved" != "$DIGEST" ]; then
+            echo "::error::$image:latest is $moved, not the published $DIGEST"
             exit 1
           fi
           # A parallel release can take Latest after the check above; the
