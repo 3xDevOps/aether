@@ -63,6 +63,8 @@ func main() {
 		exitOn(sysboxCmd(args))
 	case "config":
 		exitOn(configCmd(args))
+	case "update":
+		exitOn(updateCmd(args))
 	case "edge":
 		exitOn(edgeCmd(args))
 	case "device":
@@ -94,6 +96,7 @@ commands:
   setup    walk through the install interactively
   sysbox   status | install: let runs start their own Docker daemon
   config   show | path | set <key> <value> | edit
+  update   [--version <tag>]: replace the server and aether binaries and restart the service
   edge     status | claim-code | trust | leave
   device   approve <code> | review: approve or revoke members' edge devices
   version  print the version
