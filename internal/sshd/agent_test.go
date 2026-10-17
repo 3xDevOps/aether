@@ -576,3 +576,53 @@ func TestAgentListFindsCursorAsAgent(t *testing.T) {
 		t.Fatalf("cursor with ~/.config/cursor/auth.json = %+v, want login found", a)
 	}
 }
+
+// Antigravity's CLI runs as agy and installs to ~/.local/bin/agy; it has no
+// Enhanced mode.
+func TestAgentListFindsAntigravityAsAgy(t *testing.T) {
+	t.Parallel()
+	s, member := newAgentTestServer(t)
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Homes = homes
+	home, err := homes.Path(member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	antigravity := func() protocol.AgentInfo {
+		result, rpcErr := s.agentList(context.Background(), member.ID, nil)
+		if rpcErr != nil {
+			t.Fatalf("agentList: %+v", rpcErr)
+		}
+		for _, a := range result.(protocol.AgentListResult).Agents {
+			if a.Name == "antigravity" {
+				return a
+			}
+		}
+		t.Fatal("agent.list does not list antigravity")
+		return protocol.AgentInfo{}
+	}
+	if a := antigravity(); a.Installed || a.Executable != "agy" || a.DisplayName != "Antigravity CLI" {
+		t.Fatalf("antigravity before install = %+v, want not installed, executable agy", a)
+	}
+	write := func(rel string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(home, rel)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, rel), []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".local/bin/agy")
+	a := antigravity()
+	if !a.Installed || a.EnhancedInstalled || a.Enhanced != "none" || a.DefaultMode != "tui" || a.LoginFound == nil || *a.LoginFound {
+		t.Fatalf("antigravity with ~/.local/bin/agy = %+v, want installed, Standard only, no login found", a)
+	}
+	write(".gemini/antigravity-cli/antigravity-oauth-token")
+	if a := antigravity(); a.LoginFound == nil || !*a.LoginFound {
+		t.Fatalf("antigravity with its token file = %+v, want login found", a)
+	}
+}

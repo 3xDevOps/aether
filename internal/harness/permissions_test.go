@@ -49,7 +49,8 @@ var noPromptSettings = map[string]noPrompt{
 		acpMode: "yolo",
 		modes:   []string{"default", "autoEdit", "yolo", "plan"},
 	},
-	"cursor": {flag: "--force", inACP: true},
+	"cursor":      {flag: "--force", inACP: true},
+	"antigravity": {flag: "--dangerously-skip-permissions"},
 }
 
 func TestEveryShippedAgentRunsWithoutPermissionPrompts(t *testing.T) {

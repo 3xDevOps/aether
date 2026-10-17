@@ -262,3 +262,15 @@ func TestEnhancedMissionWorkerOfCursorRunsAgentACP(t *testing.T) {
 		t.Fatalf("AETHER_HARNESS = %q, want cursor", got)
 	}
 }
+
+func TestEnhancedLaunchOfAntigravityIsRefused(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t)
+	err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "antigravity", domain.LaunchACP, "")
+	if err == nil {
+		t.Fatal("ValidateMissionLaunch accepted an Enhanced antigravity launch")
+	}
+	if _, err = e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "say pong", "antigravity", domain.LaunchACP); err == nil {
+		t.Fatal("Launch accepted an Enhanced antigravity run")
+	}
+}

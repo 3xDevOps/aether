@@ -734,3 +734,20 @@ func TestCLISkillForCursorReportsCursorHooks(t *testing.T) {
 		t.Fatalf("skill hook summary = %s", raw)
 	}
 }
+
+func TestCLISkillForAntigravityReportsNoPackagedHooks(t *testing.T) {
+	t.Setenv("AETHER_HARNESS", "antigravity")
+	t.Setenv("HOME", t.TempDir())
+	status := protocol.CoordStatusResult{
+		RunID:        "run-current",
+		Capabilities: []string{protocol.MethodCoordInbox},
+		Assignment:   &protocol.CoordMissionAssignment{Role: "worker", MissionID: "mission-current"},
+	}
+	var out bytes.Buffer
+	if code, err := writeSkill(&out, &status); err != nil || code != ExitOK {
+		t.Fatalf("skill = %d, %v", code, err)
+	}
+	if raw := out.String(); !strings.Contains(raw, "Inbox hooks: no packaged integration for harness antigravity;") {
+		t.Fatalf("skill hook summary = %s", raw)
+	}
+}

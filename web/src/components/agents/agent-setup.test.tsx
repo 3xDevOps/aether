@@ -217,6 +217,11 @@ describe('agent setup', () => {
     expect(screen.getByText(/aether terminal/).textContent).toBe('aether terminal\nclaude')
   })
 
+  it('types the Antigravity login command with its agy executable', () => {
+    setUp(agentInfo({ name: 'antigravity', display_name: 'Antigravity CLI', executable: 'agy', enhanced: 'none' }))
+    expect(screen.getByText(/aether terminal/).textContent).toBe('aether terminal\nagy')
+  })
+
   it('types the Cursor login command with its agent executable', () => {
     setUp(agentInfo({ name: 'cursor', display_name: 'Cursor CLI', executable: 'agent', enhanced: 'native' }))
     expect(screen.getByText(/aether terminal/).textContent).toBe('aether terminal\nNO_OPEN_BROWSER=1 agent login')

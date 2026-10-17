@@ -404,3 +404,38 @@ func TestMissionWorkerOfCursorRunsAgent(t *testing.T) {
 		t.Fatalf("worker command ends %q, want %q", cmd[max(0, len(cmd)-len(want)):], want)
 	}
 }
+
+func TestMissionWorkerOfAntigravityRunsAgy(t *testing.T) {
+	e := newTestEnv(t, nil)
+	for _, mode := range []domain.LaunchMode{domain.LaunchTUI, domain.LaunchHeadless} {
+		t.Run(string(mode), func(t *testing.T) {
+			runID := domain.RunID("antigravity-worker-" + string(mode))
+			if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "antigravity", mode, "gemini-3-pro"); err != nil {
+				t.Fatalf("ValidateMissionLaunch of an antigravity worker with a model: %v", err)
+			}
+			run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
+				WorkspaceID: e.ws.ID, RunID: runID, Actor: e.member.ID,
+				RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "do the work",
+				Harness: "antigravity", Mode: mode, Model: "gemini-3-pro",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			container := e.rt.byName(string(run.ID))
+			if container == nil {
+				t.Fatal("worker container not created")
+			}
+			if got := container.spec.Env["AETHER_HARNESS"]; got != "antigravity" {
+				t.Fatalf("AETHER_HARNESS = %q, want antigravity", got)
+			}
+			task := "--prompt-interactive=do the work"
+			if mode == domain.LaunchHeadless {
+				task = "--print=do the work"
+			}
+			want := []string{"aether-run-supervisor", "agy", "--dangerously-skip-permissions", "--model", "gemini-3-pro", task}
+			if cmd := container.spec.Command; len(cmd) < len(want) || !slices.Equal(cmd[len(cmd)-len(want):], want) {
+				t.Fatalf("worker command ends %q, want %q", cmd[max(0, len(cmd)-len(want)):], want)
+			}
+		})
+	}
+}

@@ -23,6 +23,8 @@ run.
 | `cursor` | `agent --force acp` | the `--force` flag |
 | custom | the definition's `ACPArgs` / `acp_args` / `--acp` | the session mode in `ACPMode` / `acp_mode` / `--acp-mode`, else whatever the definition passes |
 
+`antigravity` has no Enhanced mode; see [Antigravity CLI](harnesses.md#antigravity-cli).
+
 Like Standard, an Enhanced run acts without asking by default. The session
 mode stays yours to change in the run.
 

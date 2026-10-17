@@ -529,7 +529,7 @@ Where the instructions go:
 - Standard and non-ACP Background launches of a shipped agent, with or
   without a task, carry them in the agent's system prompt, so they survive
   compaction; see [harnesses.md](harnesses.md#how-aether-launches-them).
-  Gemini CLI, Cursor CLI, custom definitions and admin overrides have no
+  Gemini CLI, Cursor CLI, Antigravity CLI, custom definitions and admin overrides have no
   such mechanism and get them appended to the task prompt; a taskless
   launch of one gets none.
 - Enhanced runs get them as described in
