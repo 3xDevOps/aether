@@ -54,7 +54,7 @@ afterwards.
 
 | Answer | What is installed, and where | What it runs next |
 | --- | --- | --- |
-| `server` | On Linux both `aether` and `aether-server`, into `/usr/local/bin`, root-owned, using `sudo` when it has to; on a machine with no `sudo` at all it falls back to `~/.local/bin`. | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, the dashboard port on a tailnet host, then the systemd activation line. |
+| `server` | On Linux both `aether` and `aether-server`, into `/usr/local/bin`, root-owned, using `sudo` when it has to; on a machine with no `sudo` at all it falls back to `~/.local/bin`. | `sudo aether-server setup` - the interactive server install below: listen address, data directory, whether people reach the server over the host's tailnet and, if so, the tailnet policy and dashboard port, then the systemd activation line. |
 | `client` | `aether` alone, into `~/.local/bin`, created if it is missing. No `sudo`, and the files stay yours. | `aether gui build` - builds and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
 | `none` | The same as `server`, `sudo` fallback included. | Nothing further. The binaries are installed and the script stops. |
 
@@ -1773,24 +1773,54 @@ post-commit index boundary are explained in
 ## First boot
 
 `aether-server setup` walks you through the install: it asks for the listen
-address, data directory, and tailnet policy (Enter accepts each default),
-and writes the systemd unit and the config file. On a host that already runs
-tailscaled, and where tailnet connections are not required to carry a key, it
-asks one more question -
-`Dashboard HTTPS port on the tailnet (0 = off)` - which is how a phone on the
-tailnet reaches the dashboard ([networking.md](networking.md#the-dashboard)).
-On a fresh config it defaults to `443` when the dashboard can start there and
-to `0` otherwise, with a line naming the reason and the fix
-([networking.md](networking.md#why-it-is-off-by-default)). Without tailscaled
-it turns on the edge, the relay the Aether project runs at `https://edge.onaether.dev`
-that lets clients reach the server over SSH with a GitHub sign-in
-([edge.md](edge.md)), and prints what the edge can see and the command that
-turns it off; with tailscaled it asks, defaulting to no. With the edge on
-it asks who may reach the server through it, `1` (account access) or `2`
-(approved devices), and repeats the question until answered
-([edge.md](edge.md#access-policies)). Setup is the only thing that turns
-the edge on: `edge-url` is empty unless the config file or a flag names an
-edge, so an upgrade never enrolls an existing server.
+address and data directory (Enter accepts each default, and a re-run takes
+each default from the existing config), and writes the systemd unit and the
+config file.
+
+On a host that runs tailscaled, setup names the tailnet the host is on and
+asks `Will people reach this server over the tailnet <name>`. On a tailnet the
+server signs people in by their tailnet login, with no key, and tailscaled is
+sometimes there for something else, such as a proxy into another network, so
+a first run defaults to no. When tailscaled cannot report its tailnet, setup
+prints the error and asks about `this host's tailnet` instead.
+
+- **No** turns tailnet sign-in off and continues as on a host without
+  tailscaled, with the edge on even where an earlier run left `edge-url`
+  empty. Setup writes `tailnet-auto-join = false` and
+  `tailnet-require-key = true`, so a tailnet login neither registers as a
+  member nor becomes a fresh server's admin; edge and SSH key sign-in are
+  unaffected.
+- **Yes** asks the tailnet policy: auto-join, off unless the config has it
+  on, and whether tailnet connections must also present a key, off on a
+  first run. A re-run offers the saved key requirement back, so Enter never
+  drops it; after a no, answer `false` to sign in by tailnet login alone.
+  Where no key is required it asks
+  `Dashboard HTTPS port on the tailnet (0 = off)`, which is how a phone on
+  the tailnet reaches the dashboard
+  ([networking.md](networking.md#the-dashboard)). On a fresh config that
+  defaults to `443` when the dashboard can start there and to `0` otherwise,
+  with a line naming the reason and the fix
+  ([networking.md](networking.md#why-it-is-off-by-default)).
+
+A re-run defaults the tailnet question to yes when the config shows tailnet
+use: an empty or missing `edge-url`, a `web-port` line, or `tailnet-auto-join`
+on. Otherwise it defaults to no, which keeps what a no wrote and treats a
+config written before Tailscale was installed as not on the tailnet. Without
+tailscaled, setup asks nothing about the tailnet and writes
+`tailnet-auto-join = false`, so once Tailscale is installed tailnet logins
+join pending, except that the first to reach a server with no members becomes
+its admin.
+
+Without a tailnet - no tailscaled, or a no - setup turns on the edge, the
+relay the Aether project runs at `https://edge.onaether.dev` that lets
+clients reach the server over SSH with a GitHub sign-in ([edge.md](edge.md)),
+and prints what the edge can see and the command that turns it off; on a
+tailnet it asks, defaulting to no. With the edge on it asks who may reach the
+server through it, `1` (account access) or `2` (approved devices), and
+repeats the question until answered ([edge.md](edge.md#access-policies)).
+Setup is the only thing that turns the edge on: `edge-url` is empty unless
+the config file or a flag names an edge, so an upgrade never enrolls an
+existing server.
 The last question, unless Docker already has Sysbox, is `Let agents use Docker
 inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)`,
 defaulting to yes; setup installs it after writing the files. On a host that
@@ -1817,9 +1847,12 @@ sudo aether-server setup
 
 For an unattended install, `aether-server install` writes the same files from
 flags instead of questions - any serve option below is accepted, and options
-you leave off keep tracking the binary's defaults across upgrades. The edge
-stays off unless you pass `--edge-url`, which is refused without
-`--edge-access account` or `--edge-access approved-devices`:
+you leave off keep tracking the binary's defaults across upgrades. It asks
+nothing about the tailnet, so on a host with tailscaled, tailnet sign-in stays
+on unless you pass `--tailnet-require-key`: the first tailnet login to reach a
+fresh server becomes its admin, and later ones join pending, or approved with
+`--tailnet-auto-join`. The edge stays off unless you pass `--edge-url`, which
+is refused without `--edge-access account` or `--edge-access approved-devices`:
 
 ```sh
 sudo aether-server install --addr :2222 --tailnet-auto-join
@@ -1910,7 +1943,7 @@ uses the default; negative values have the semantics in the table.
 | `--standard-image` | `ghcr.io/3xdevops/aether-standard:<build-version>` | Standard image used for members who have not saved an environment. |
 | `--container-runtime` | `auto` | OCI runtime for run and Environment containers: `auto` uses `sysbox-runc` when Docker has it registered, else the daemon default; `runc` opts out; any other value names a registered runtime. See [environments.md](environments.md#docker-inside-runs). |
 | `--browser-image` | `ghcr.io/3xdevops/aether-browser:<exact-release-version>`; `aether/browser:test` for development builds | Lazy sandboxed browser companion. Explicit flag overrides persisted config, then `AETHER_BROWSER_IMAGE`, then the build default. |
-| `--edge-url` | empty (off) | Edge the server enrolls with, for members without a direct or tailnet route. `aether-server setup` sets it to `https://edge.onaether.dev` on a host without tailscaled. See [edge.md](edge.md). |
+| `--edge-url` | empty (off) | Edge the server enrolls with, for members without a direct or tailnet route. `aether-server setup` sets it to `https://edge.onaether.dev` on a host without tailscaled, or when you answer no to its tailnet question. See [edge.md](edge.md). |
 | `--edge-access` | `approved-devices` | Who may reach the server through the edge: `account` (signing in is enough) or `approved-devices` (each new device waits until a person approves it). `install` refuses `--edge-url` without it. See [edge.md](edge.md#access-policies). |
 | `--tailnet-auto-join` | off | Tailnet identities join approved instead of pending. |
 | `--tailnet-require-key` | off | Tailnet connections must also present a registered SSH key; mutually exclusive with `--web-port`, whose browser cannot present a key. |

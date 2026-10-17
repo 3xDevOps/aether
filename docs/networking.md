@@ -41,8 +41,9 @@ tailscale status --self
 `tailscale status --self` prints the machine's tailnet hostname
 (`my-server.tailnet-name.ts.net`); that is what you hand teammates. Then
 install the server as usual (`sudo aether-server setup`; see
-[install.md](install.md#first-boot)) - it detects the tailscaled socket and
-reports the tailnet hostname itself.
+[install.md](install.md#first-boot)) - it detects the tailscaled socket, names
+the tailnet, and asks `Will people reach this server over the tailnet <name>`.
+Answer `yes`: the first-run default, no, turns tailnet sign-in off.
 
 The server checks for the tailscaled socket **at startup**. If it is there,
 tailnet identity is on; if not, the server is key-only. Start Tailscale before
@@ -116,7 +117,7 @@ Every failure falls back to key authentication rather than locking anyone out:
 | --- | --- |
 | `tailnet identity unavailable; key authentication required` | The lookup failed - the connection did not arrive over the tailnet, or tailscaled is down. Informational; the key path then runs normally. |
 | `tagged tailnet node; key authentication required` | The connecting node is tagged. |
-| `tailnet login <x> must also present a registered SSH key` | `--tailnet-require-key` is set. |
+| `tailnet login <x> must also present a registered SSH key` | `--tailnet-require-key` is set, as `aether-server setup` does when you answer no to its tailnet question. `sudo aether-server config set tailnet-require-key false`, then `sudo systemctl restart aether-server`, turns tailnet sign-in back on. |
 
 You will see the first message routinely on a tailnet-enabled server whenever
 something connects over loopback or the LAN. It is not an error.
@@ -136,9 +137,10 @@ server user, `sudo tailscale set --operator=<user>`.
 An edge is a relay both the server and your client dial out to, so neither
 needs an open port, a tailnet or a copied SSH key. The project runs one at
 `https://edge.onaether.dev`, and `aether-server setup` turns it on when the
-host has no tailscaled. SSH still runs end to end: the edge splices bytes and
-cannot read them. You sign in once with GitHub and link the server with
-the link you were given, which the desktop app also opens:
+host has no tailscaled or you answer no to its tailnet question. SSH still
+runs end to end: the edge splices bytes and cannot read them. You sign in
+once with GitHub and link the server with the link you were given, which the
+desktop app also opens:
 
 ```sh
 aether login
@@ -287,9 +289,10 @@ Edge mode needs no tailnet and no `web-port`: it runs the local gateway on the
 phone and reaches the server through the [edge](edge.md).
 
 `web-port` defaults to `0`, which leaves the server SSH-only. `aether-server
-setup` asks for it on a tailnet host when `--tailnet-require-key` is off;
-`aether-server install --web-port 443` and `aether-server config set web-port
-443` set it without questions ([install.md](install.md#first-boot)).
+setup` asks for it after a yes to its tailnet question, when
+`--tailnet-require-key` is off; `aether-server install --web-port 443` and
+`aether-server config set web-port 443` set it without questions
+([install.md](install.md#first-boot)).
 
 ### Add it to your home screen
 
@@ -491,13 +494,14 @@ request, with the JSON error body the dashboard shows:
 The listener has hard prerequisites (tailscaled, MagicDNS, HTTPS
 certificates) that an existing install may not have, and it is the server's
 only HTTP port. So `web-port` defaults to `0` and turning it on is a deliberate
-act. `aether-server setup` offers 443 by default on a host that already has
-tailscaled, because a phone reaching the dashboard is the point of putting the
-server on a tailnet. On a fresh config setup first checks that tailscaled
-answers, that it reports HTTPS certificates for the tailnet, that the host holds
-its tailnet addresses (tailscaled with `--tun=userspace-networking` does not),
-and that nothing already listens on port 443 there. When a check fails, setup
-offers `0` and prints the reason and the fix:
+act. `aether-server setup` offers 443 by default once you answer that people
+reach the server over the tailnet, because a phone reaching the dashboard is
+the point of putting the server on a tailnet. On a fresh config setup first
+checks that tailscaled answers, that it reports HTTPS certificates for the
+tailnet, that the host holds its tailnet addresses (tailscaled with
+`--tun=userspace-networking` does not), and that nothing already listens on
+port 443 there. When a check fails, setup offers `0` and prints the reason and
+the fix:
 
 ```
 Defaulting to 0: HTTPS certificates are off for this tailnet; enable MagicDNS and HTTPS certificates on the DNS page of the Tailscale admin console, then run: sudo aether-server config set web-port 443

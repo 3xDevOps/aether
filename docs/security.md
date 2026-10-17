@@ -1340,10 +1340,12 @@ can do under each policy, with the tests that show it; the reasons follow.
 - **A server uses an edge only when its operator chose one.** `edge-url` is
   empty unless the config file or a flag names an edge. `aether-server
   setup` is the only command that sets it without being told: on a host
-  without tailscaled it turns on the project's edge and prints what that
-  edge sees and how to turn it off; with tailscaled it asks, defaulting to
-  no. An upgraded server whose config never named an edge stays off it and
-  discloses nothing (`TestIntegrationUpgradeFromMainWithoutTheEdge`).
+  without tailscaled, or when the operator answers that people will not
+  reach the server over the host's tailnet, it turns on the project's edge
+  and prints what that edge sees and how to turn it off; on a tailnet it
+  asks, defaulting to no. An upgraded server whose config never named an
+  edge stays off it and discloses nothing
+  (`TestIntegrationUpgradeFromMainWithoutTheEdge`).
 - **The server trusts an edge by its signing key, not its host name.** It
   keeps one pinned edge key, whatever `edge-url` names, and its owner per
   edge key. A new host name of the same edge keeps both. A different key,

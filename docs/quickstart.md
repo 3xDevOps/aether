@@ -85,25 +85,29 @@ if you skipped the question:
 sudo aether-server setup
 ```
 
-It asks for the listen address, data directory, and tailnet policy - plus, on
-a host that already runs tailscaled, the dashboard's HTTPS port on the tailnet
-and whether to use the edge (Enter accepts each default) - and, with the edge
-on, who may reach the server through it, a question with no default. It also
+It asks for the listen address and data directory (Enter accepts each
+default). On a host that already runs tailscaled, it names the tailnet and
+asks whether people will reach the server over it. On a first run Enter means
+no, because tailscaled may be there for something else: setup turns tailnet
+sign-in off and continues as on a host without tailscaled. Yes asks the
+tailnet policy, the dashboard's HTTPS port on the tailnet and whether to use
+the edge too ([install.md](install.md#first-boot)). With the edge on, setup
+asks who may reach the server through it, a question with no default. It also
 offers to install Sysbox on Ubuntu and Debian, which lets agents run Docker
 inside their runs ([environments.md](environments.md#docker-inside-runs)).
 It then writes the files and, if you said yes, runs the Sysbox installer.
 
-On a host without tailscaled, setup turns on the **edge**: a relay the Aether
-project runs at `https://edge.onaether.dev` that the server and your machine
-both dial out to, so neither needs an open port ([edge.md](edge.md)). Setup
-prints what the edge can see and `aether-server config set edge-url ""`,
-which turns it off. It then asks for the **access policy**: `1` (account
-access) lets people you invite in by signing in with GitHub; `2`
-(approved devices) makes each new device wait until a person approves it.
-[edge.md](edge.md#access-policies) compares them. After the Sysbox installer,
-setup prints the server's id and a **claim link**, which makes whoever uses it
-first the server's admin. The claim code inside it, `<server id>-<secret>`, is
-what `aether link --claim` takes.
+On a host without tailscaled, or after a no, setup turns on the **edge**: a
+relay the Aether project runs at `https://edge.onaether.dev` that the server
+and your machine both dial out to, so neither needs an open port
+([edge.md](edge.md)). Setup prints what the edge can see and
+`aether-server config set edge-url ""`, which turns it off. It then asks for
+the **access policy**: `1` (account access) lets people you invite in by
+signing in with GitHub; `2` (approved devices) makes each new device wait
+until a person approves it. [edge.md](edge.md#access-policies) compares
+them. After the Sysbox installer, setup prints the server's id and a **claim
+link**, which makes whoever uses it first the server's admin. The claim code
+inside it, `<server id>-<secret>`, is what `aether link --claim` takes.
 
 Once it writes the files, setup ends on `next:`, the commands left for you, in
 bold orange on a terminal (`NO_COLOR` turns the color off). Run through

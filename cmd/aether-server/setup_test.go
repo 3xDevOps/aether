@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -27,39 +28,28 @@ import (
 
 // answers builds the stdin an operator would type: one line per prompt, in
 // the order askServerOptions asks them, ending with the write confirmation.
-// Without Tailscale the edge is on, and the last answer before the
-// confirmation chooses its access policy.
+// Without Tailscale there are no tailnet questions and the edge is on, so
+// the last answer before the confirmation chooses its access policy.
 func answers(lines ...string) *strings.Reader {
 	return strings.NewReader(strings.Join(lines, "\n") + "\n")
 }
 
 func TestAskServerOptionsEmptyAnswersTakeDefaults(t *testing.T) {
 	var out bytes.Buffer
-	in := answers("", "", "", "", "2", "yes")
+	in := answers("", "", "2", "yes")
 	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{
-		"addr":                ":2222",
-		"data-dir":            "/var/lib/aether",
-		"tailnet-auto-join":   "false",
-		"tailnet-require-key": "false",
-	}
-	for k, v := range want {
-		if values[k] != v {
-			t.Errorf("%s = %q, want the default %q", k, values[k], v)
-		}
-	}
-	if !strings.Contains(out.String(), "anyone already on your tailnet") {
-		t.Errorf("auto-join prompt does not explain the security tradeoff:\n%s", out.String())
+	if values["addr"] != ":2222" || values["data-dir"] != "/var/lib/aether" {
+		t.Errorf("values = %v, want the service defaults for addr and data-dir", values)
 	}
 }
 
 func TestAskServerOptionsUsesTypedAnswers(t *testing.T) {
 	var out bytes.Buffer
-	in := answers(":2300", "/srv/aether", "true", "true", "1", "yes")
-	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), nil)
+	in := answers(":2300", "/srv/aether", "yes", "true", "true", "", "yes")
+	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +72,7 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "yes")), path, nil)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "2", "yes")), path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,8 +83,8 @@ func TestAskServerOptionsSeedsDefaultsFromExistingConfig(t *testing.T) {
 
 func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 	var out bytes.Buffer
-	in := answers("", "", "not-a-bool", "true", "", "2", "yes")
-	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), nil)
+	in := answers("", "", "yes", "not-a-bool", "true", "", "", "", "yes")
+	values, err := askServerOptions(newPrompter(&out, in), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +98,7 @@ func TestAskServerOptionsRejectsBadValueAndReasks(t *testing.T) {
 
 func TestAskServerOptionsDeclinedWritesNothing(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "no")), filepath.Join(t.TempDir(), "absent.conf"), nil)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "2", "no")), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,8 +108,9 @@ func TestAskServerOptionsDeclinedWritesNothing(t *testing.T) {
 }
 
 // fakeTailscaled answers the LocalAPI status request the way tailscaled
-// does for a node at addrs, reporting a certificate name when certs is set,
-// as a tailnet with HTTPS certificates enabled does.
+// does for a node at addrs on the tailnet alice@example.com, reporting a
+// certificate name when certs is set, as a tailnet with HTTPS certificates
+// enabled does.
 func fakeTailscaled(t *testing.T, certs bool, addrs ...string) *reachability.Tailscale {
 	t.Helper()
 	certDomains := "null"
@@ -140,7 +131,8 @@ func fakeTailscaled(t *testing.T, certs bool, addrs ...string) *reachability.Tai
 			http.NotFound(w, r)
 			return
 		}
-		_, _ = fmt.Fprintf(w, `{"Self":{"DNSName":"box.tail1234.ts.net.","TailscaleIPs":%s},"CertDomains":%s}`, ips, certDomains)
+		_, _ = fmt.Fprintf(w, `{"Self":{"DNSName":"box.tail1234.ts.net.","TailscaleIPs":%s},"CertDomains":%s,`+
+			`"MagicDNSSuffix":"tail1234.ts.net","CurrentTailnet":{"Name":"alice@example.com"}}`, ips, certDomains)
 	})}
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
@@ -151,6 +143,255 @@ func fakeTailscaled(t *testing.T, certs bool, addrs ...string) *reachability.Tai
 // it only with EACCES otherwise, so the dashboard can start there either way.
 const startable = "127.0.0.1"
 
+// Without Tailscale nothing asks about the tailnet, and auto-join is
+// written off for a Tailscale installed later. A key requirement already in
+// the config stays.
+func TestAskServerOptionsAsksNoTailnetQuestionsWithoutTailscale(t *testing.T) {
+	for name, tc := range map[string]struct {
+		config, want map[string]string
+	}{
+		"first run": {nil, map[string]string{"tailnet-auto-join": "false"}},
+		"re-run": {map[string]string{"tailnet-auto-join": "true", "tailnet-require-key": "true"},
+			map[string]string{"tailnet-auto-join": "false", "tailnet-require-key": "true"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "server.conf")
+			if tc.config != nil {
+				if err := serversetup.WriteConfig(path, tc.config); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var out bytes.Buffer
+			values, err := askServerOptions(newPrompter(&out, answers("", "", "2", "yes")), path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{"tailnet-auto-join", "tailnet-require-key"} {
+				if values[key] != tc.want[key] {
+					t.Errorf("%s = %q, want %q", key, values[key], tc.want[key])
+				}
+			}
+			for _, asked := range []string{"Will people reach", "Auto-approve", "require pubkey"} {
+				if strings.Contains(out.String(), asked) {
+					t.Errorf("asked %q without Tailscale:\n%s", asked, out.String())
+				}
+			}
+		})
+	}
+}
+
+// tailscaled can be on a tailnet for something else, so the first tailnet
+// question names that tailnet, or says why it cannot, and Enter turns
+// tailnet sign-in off and the edge on, exactly as without Tailscale.
+func TestAskServerOptionsTurnsTailnetSignInOffByDefault(t *testing.T) {
+	for name, tc := range map[string]struct {
+		tailscaled func(*testing.T) *reachability.Tailscale
+		want       []string
+	}{
+		"named tailnet": {
+			func(t *testing.T) *reachability.Tailscale { return fakeTailscaled(t, true, startable) },
+			[]string{"\nThis host is on the tailnet alice@example.com.\n",
+				"Will people reach this server over the tailnet alice@example.com (yes/no) [no]: "},
+		},
+		"unreadable tailnet": {
+			func(t *testing.T) *reachability.Tailscale {
+				return reachability.NewTailscale(filepath.Join(t.TempDir(), "absent.sock"))
+			},
+			[]string{"\ntailscaled is installed, but setup cannot read which tailnet it is on: status: ",
+				"connect: no such file or directory\n",
+				"Will people reach this server over this host's tailnet (yes/no) [no]: "},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			values, err := askServerOptions(newPrompter(&out, answers("", "", "", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), tc.tailscaled(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := map[string]string{
+				"addr":                ":2222",
+				"data-dir":            "/var/lib/aether",
+				"tailnet-auto-join":   "false",
+				"tailnet-require-key": "true",
+				"edge-url":            edgeagent.DefaultURL,
+				"edge-access":         string(edgeproto.PolicyApprovedDevices),
+			}
+			if !maps.Equal(values, want) {
+				t.Errorf("values = %v, want %v", values, want)
+			}
+			for _, say := range append(tc.want, "Answer no if Tailscale is here for something else",
+				"\nTailnet sign-in is off, so setup turns on the edge at https://edge.onaether.dev, run by the Aether project.\n",
+				"client IP addresses", `aether-server config set edge-url ""`) {
+				if !strings.Contains(out.String(), say) {
+					t.Errorf("setup does not say %q:\n%s", say, out.String())
+				}
+			}
+			for _, asked := range []string{"Auto-approve", "require pubkey", "Dashboard HTTPS port", "Reach this server through the edge too"} {
+				if strings.Contains(out.String(), asked) {
+					t.Errorf("asked %q after a no:\n%s", asked, out.String())
+				}
+			}
+		})
+	}
+}
+
+// A yes asks the tailnet questions, with auto-join off and the edge off
+// unless typed.
+func TestAskServerOptionsAsksTheTailnetQuestionsOnYes(t *testing.T) {
+	var out bytes.Buffer
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "yes", "", "", "", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"addr":                ":2222",
+		"data-dir":            "/var/lib/aether",
+		"tailnet-auto-join":   "false",
+		"tailnet-require-key": "false",
+		"web-port":            "443",
+		"edge-url":            "",
+	}
+	if !maps.Equal(values, want) {
+		t.Errorf("values = %v, want %v", values, want)
+	}
+	for _, say := range []string{"anyone already on your tailnet", "Auto-approve tailnet identities (true/false) [false]: ",
+		"Reach this server through the edge too (yes/no) [no]: "} {
+		if !strings.Contains(out.String(), say) {
+			t.Errorf("setup does not say %q:\n%s", say, out.String())
+		}
+	}
+}
+
+// A re-run defaults the tailnet question to yes only for a config that
+// shows tailnet use: the edge off, a web-port, or auto-join on.
+func TestAskServerOptionsDefaultsTheTailnetQuestionToTheConfig(t *testing.T) {
+	edgeOn := map[string]string{"edge-url": edgeagent.DefaultURL, "edge-access": "approved-devices"}
+	with := func(kv ...string) map[string]string {
+		config := maps.Clone(edgeOn)
+		for i := 0; i < len(kv); i += 2 {
+			config[kv[i]] = kv[i+1]
+		}
+		return config
+	}
+	for name, tc := range map[string]struct {
+		config map[string]string
+		want   string
+	}{
+		"first run":                        {nil, "no"},
+		"what a no writes":                 {with("tailnet-auto-join", "false", "tailnet-require-key", "true"), "no"},
+		"written without tailscaled":       {with("tailnet-auto-join", "false"), "no"},
+		"written by install with the edge": {with("addr", ":2222"), "no"},
+		"key required as 1, the edge on":   {with("tailnet-require-key", "1"), "no"},
+		"a web-port":                       {with("tailnet-require-key", "false", "web-port", "0"), "yes"},
+		"auto-join on":                     {with("tailnet-auto-join", "1"), "yes"},
+		"the edge off":                     {map[string]string{"tailnet-require-key": "true", "edge-url": ""}, "yes"},
+		"written by install, no edge-url":  {map[string]string{"addr": ":2222", "data-dir": "/var/lib/aether"}, "yes"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "server.conf")
+			if tc.config != nil {
+				if err := serversetup.WriteConfig(path, tc.config); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var out bytes.Buffer
+			_, _ = askServerOptions(newPrompter(&out, answers("", "", "")), path, fakeTailscaled(t, true, startable))
+			if want := "over the tailnet alice@example.com (yes/no) [" + tc.want + "]: "; !strings.Contains(out.String(), want) {
+				t.Errorf("setup does not ask %q:\n%s", want, out.String())
+			}
+		})
+	}
+}
+
+// Pressing Enter through a re-run writes the config the first run wrote,
+// whichever way the tailnet question was answered.
+func TestAskServerOptionsRerunKeepsTheTailnetAnswer(t *testing.T) {
+	for name, tc := range map[string]struct{ first, rerun []string }{
+		"no":                   {[]string{"", "", "", "2", "yes"}, []string{"", "", "", "2", "yes"}},
+		"yes":                  {[]string{"", "", "yes", "true", "", "", "", "yes"}, []string{"", "", "", "", "", "", "", "yes"}},
+		"yes, a key, the edge": {[]string{"", "", "yes", "", "true", "yes", "2", "yes"}, []string{"", "", "", "2", "yes"}},
+		"yes, a key, edge off": {[]string{"", "", "yes", "", "true", "", "yes"}, []string{"", "", "", "", "", "", "yes"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "server.conf")
+			first, err := askServerOptions(newPrompter(io.Discard, answers(tc.first...)), path, fakeTailscaled(t, true, startable))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = serversetup.WriteConfig(path, first); err != nil {
+				t.Fatal(err)
+			}
+			rerun, err := askServerOptions(newPrompter(io.Discard, answers(tc.rerun...)), path, fakeTailscaled(t, true, startable))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !maps.Equal(rerun, first) {
+				t.Errorf("re-run wrote %v, want the first run's %v", rerun, first)
+			}
+		})
+	}
+}
+
+// Changing the answer on a re-run gets what the new answer promises: a no
+// turns the edge on even where a yes left it off, and a yes after a no
+// turns tailnet sign-in and the dashboard on once the key requirement is
+// answered false.
+func TestAskServerOptionsRerunChangesTheTailnetAnswer(t *testing.T) {
+	for name, tc := range map[string]struct {
+		first, rerun []string
+		want         map[string]string
+	}{
+		"yes, then no": {[]string{"", "", "yes", "", "", "", "", "yes"}, []string{"", "", "no", "2", "yes"}, map[string]string{
+			"tailnet-auto-join": "false", "tailnet-require-key": "true",
+			"edge-url": edgeagent.DefaultURL, "edge-access": string(edgeproto.PolicyApprovedDevices),
+		}},
+		"no, then yes": {[]string{"", "", "", "2", "yes"}, []string{"", "", "yes", "", "false", "", "", "2", "yes"}, map[string]string{
+			"tailnet-auto-join": "false", "tailnet-require-key": "false", "web-port": "443",
+			"edge-url": edgeagent.DefaultURL, "edge-access": string(edgeproto.PolicyApprovedDevices),
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "server.conf")
+			first, err := askServerOptions(newPrompter(io.Discard, answers(tc.first...)), path, fakeTailscaled(t, true, startable))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = serversetup.WriteConfig(path, first); err != nil {
+				t.Fatal(err)
+			}
+			rerun, err := askServerOptions(newPrompter(io.Discard, answers(tc.rerun...)), path, fakeTailscaled(t, true, startable))
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.want["addr"], tc.want["data-dir"] = ":2222", "/var/lib/aether"
+			if !maps.Equal(rerun, tc.want) {
+				t.Errorf("re-run wrote %v, want %v", rerun, tc.want)
+			}
+		})
+	}
+}
+
+// A keyed tailnet server with the edge on looks like what a no writes, so a
+// yes must offer its key requirement back rather than drop it on Enter.
+func TestAskServerOptionsYesKeepsASavedKeyRequirement(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	saved := map[string]string{"tailnet-auto-join": "false", "tailnet-require-key": "true",
+		"edge-url": edgeagent.DefaultURL, "edge-access": string(edgeproto.PolicyApprovedDevices)}
+	if err := serversetup.WriteConfig(path, saved); err != nil {
+		t.Fatal(err)
+	}
+	values, err := askServerOptions(newPrompter(io.Discard, answers("", "", "yes", "", "", "", "2", "yes")), path, fakeTailscaled(t, true, startable))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["tailnet-require-key"] != "true" {
+		t.Errorf("tailnet-require-key = %q after a yes with Enter, want the saved true", values["tailnet-require-key"])
+	}
+	if _, ok := values["web-port"]; ok {
+		t.Errorf("web-port = %q, want no dashboard while a key is required", values["web-port"])
+	}
+}
+
 func TestAskServerOptionsOffersTheDashboardOnATailnet(t *testing.T) {
 	if ln, err := net.Listen("tcp", net.JoinHostPort(startable, strconv.Itoa(dashboardPort))); errors.Is(err, syscall.EADDRINUSE) {
 		t.Skipf("the dashboard cannot start at %s on this host: %v", startable, err)
@@ -158,7 +399,7 @@ func TestAskServerOptionsOffersTheDashboardOnATailnet(t *testing.T) {
 		_ = ln.Close()
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "yes", "", "", "", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +411,7 @@ func TestAskServerOptionsOffersTheDashboardOnATailnet(t *testing.T) {
 	}
 
 	out.Reset()
-	values, err = askServerOptions(newPrompter(&out, answers("", "", "", "", "8443", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
+	values, err = askServerOptions(newPrompter(&out, answers("", "", "yes", "", "", "8443", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), fakeTailscaled(t, true, startable))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +446,7 @@ func TestAskServerOptionsDefaultsTheDashboardOffWhereItCannotStart(t *testing.T)
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
-			values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), tc.tailscaled(t))
+			values, err := askServerOptions(newPrompter(&out, answers("", "", "yes", "", "", "", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), tc.tailscaled(t))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -216,7 +457,7 @@ func TestAskServerOptionsDefaultsTheDashboardOffWhereItCannotStart(t *testing.T)
 				t.Errorf("the dashboard question is not asked with 0 as the default:\n%s", out.String())
 			}
 
-			values, err = askServerOptions(newPrompter(io.Discard, answers("", "", "", "", "443", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), tc.tailscaled(t))
+			values, err = askServerOptions(newPrompter(io.Discard, answers("", "", "yes", "", "", "443", "", "yes")), filepath.Join(t.TempDir(), "absent.conf"), tc.tailscaled(t))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -233,7 +474,7 @@ func TestAskServerOptionsKeepsAConfiguredDashboardPort(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "", "yes")), path, fakeTailscaled(t, false, startable))
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "", "", "yes")), path, fakeTailscaled(t, false, startable))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,8 +507,9 @@ func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
 		tailnet bool
 		input   []string
 	}{
-		"no tailscaled":       {false, []string{"", "", "", "", "2", "yes"}},
-		"tailnet-require-key": {true, []string{"", "", "", "true", "", "yes"}},
+		"no tailscaled":       {false, []string{"", "", "2", "yes"}},
+		"tailnet-require-key": {true, []string{"", "", "yes", "", "true", "", "yes"}},
+		"key typed as 1":      {true, []string{"", "", "yes", "", "1", "", "yes"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var tailscaled *reachability.Tailscale
@@ -291,7 +533,7 @@ func TestAskServerOptionsSkipsTheDashboardWithoutTailnetIdentity(t *testing.T) {
 
 func TestAskServerOptionsTurnsTheEdgeOnWithoutTailscale(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), nil)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +554,7 @@ func TestAskServerOptionsKeepsTheEdgeOffWhenConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "yes")), path, nil)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "yes")), path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +565,7 @@ func TestAskServerOptionsKeepsTheEdgeOffWhenConfigured(t *testing.T) {
 
 func TestAskServerOptionsOffersTheEdgeOnATailnet(t *testing.T) {
 	for answer, want := range map[string]string{"": "", "yes": edgeagent.DefaultURL} {
-		input := []string{"", "", "", "", "", answer}
+		input := []string{"", "", "yes", "", "", "", answer}
 		if want != "" {
 			input = append(input, "1")
 		}
@@ -342,7 +584,7 @@ func TestAskServerOptionsOffersTheEdgeOnATailnet(t *testing.T) {
 // again, and input that ends unanswered writes nothing.
 func TestAskServerOptionsRequiresAnAccessPolicy(t *testing.T) {
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "", "3", "account", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), nil)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "3", "account", "2", "yes")), filepath.Join(t.TempDir(), "absent.conf"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +618,7 @@ func TestAskServerOptionsAsksNoPolicyWithTheEdgeOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	values, err := askServerOptions(newPrompter(&out, answers("", "", "", "", "yes")), path, nil)
+	values, err := askServerOptions(newPrompter(&out, answers("", "", "yes")), path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

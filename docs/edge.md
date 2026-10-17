@@ -269,8 +269,9 @@ or, for tailnet access, removing the device from the tailnet.
 ### Turning it on
 
 The edge is off until you turn it on. `aether-server setup` offers it:
-without tailscaled it turns on `https://edge.onaether.dev` and prints what
-the edge can see; with tailscaled it asks, defaulting to no. Otherwise only
+without tailscaled, or when you answer that people will not reach the server
+over the host's tailnet, it turns on `https://edge.onaether.dev` and prints
+what the edge can see; on a tailnet it asks, defaulting to no. Otherwise only
 `aether-server install --edge-url <url> --edge-access <policy>` or the
 config keys turn it on, so a config written before the edge existed never
 dials one.

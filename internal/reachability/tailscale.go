@@ -18,9 +18,9 @@ import (
 const DefaultTailscaledSocket = "/var/run/tailscale/tailscaled.sock"
 
 // Tailscale reads what the local tailscaled knows about this node - its
-// MagicDNS name and addresses, and the HTTPS certificate it can issue for
-// that name - over the LocalAPI unix socket. Like the sshd WhoIs client it
-// is a minimal internal client rather than a dependency on the
+// tailnet, MagicDNS name and addresses, and the HTTPS certificate it can
+// issue for that name - over the LocalAPI unix socket. Like the sshd WhoIs
+// client it is a minimal internal client rather than a dependency on the
 // tailscale.com/client/local module. As an Adapter, any failure - no
 // socket, daemon down, empty DNS name - means "not present": callers fall
 // through to the next adapter.
@@ -65,6 +65,9 @@ type Node struct {
 	// CertDomains are the names tailscaled can issue HTTPS certificates
 	// for; empty until HTTPS certificates are enabled for the tailnet.
 	CertDomains []string
+	// Tailnet is the name of the tailnet the node is on, or its MagicDNS
+	// suffix where tailscaled reports no name.
+	Tailnet string
 }
 
 // Self reads GET /localapi/v0/status for this node.
@@ -78,7 +81,9 @@ func (t *Tailscale) Self(ctx context.Context) (Node, error) {
 			DNSName      string
 			TailscaleIPs []netip.Addr
 		}
-		CertDomains []string
+		CertDomains    []string
+		MagicDNSSuffix string
+		CurrentTailnet struct{ Name string }
 	}
 	if err := json.Unmarshal(body, &st); err != nil {
 		return Node{}, fmt.Errorf("status decode: %w", err)
@@ -87,7 +92,11 @@ func (t *Tailscale) Self(ctx context.Context) (Node, error) {
 	if name == "" {
 		return Node{}, fmt.Errorf("status has no DNS name")
 	}
-	return Node{DNSName: name, Addrs: st.Self.TailscaleIPs, CertDomains: st.CertDomains}, nil
+	tailnet := st.CurrentTailnet.Name
+	if tailnet == "" {
+		tailnet = st.MagicDNSSuffix
+	}
+	return Node{DNSName: name, Addrs: st.Self.TailscaleIPs, CertDomains: st.CertDomains, Tailnet: tailnet}, nil
 }
 
 // Certificate fetches the node's HTTPS certificate and key for domain

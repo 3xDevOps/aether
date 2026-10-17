@@ -82,7 +82,7 @@ func TestSetupCommandStopsAtConfirmationWithoutWriting(t *testing.T) {
 				}
 			}
 			waitFor("SSH listen address")
-			if _, err := master.Write([]byte("127.0.0.1:2222\n" + dataPath + "\nfalse\ntrue\n")); err != nil {
+			if _, err := master.Write([]byte("127.0.0.1:2222\n" + dataPath + "\n")); err != nil {
 				t.Fatal(err)
 			}
 			waitFor("Choose 1 or 2")
