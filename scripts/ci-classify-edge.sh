@@ -38,9 +38,9 @@ while IFS= read -r path || [ -n "$path" ]; do
 	cmd/* | internal/*) ;;
 	docs/* | web/* | android/* | desktop/* | packaging/windows/*) ;;
 	images/browser/* | images/smoke/* | images/standard/*) ;;
-	scripts/android-* | scripts/ci-classify-changes* | scripts/deploy* | \
-		scripts/install* | scripts/make-icons.py | scripts/public-audit.sh | \
-		scripts/publish-release*) ;;
+	scripts/android-* | scripts/ci-classify-changes* | scripts/ci-classify-desktop* | \
+		scripts/deploy* | scripts/install* | scripts/make-icons.py | \
+		scripts/public-audit.sh | scripts/publish-release*) ;;
 	.github/actions/* | .github/workflows/windows-install.yml | .gitignore | .golangci.yml) ;;
 	*/*)
 		printf '%s\n' true

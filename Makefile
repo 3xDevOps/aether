@@ -224,6 +224,7 @@ test-scripts:
 	sh scripts/android-version-code-test.sh
 	sh scripts/android-verify-signature-test.sh
 	sh scripts/ci-classify-changes-test.sh
+	sh scripts/ci-classify-desktop-test.sh
 	sh scripts/ci-classify-edge-test.sh
 	sh scripts/edge-go-version-test.sh
 	sh scripts/edge-nginx-test.sh
