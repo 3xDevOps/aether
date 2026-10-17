@@ -1671,7 +1671,7 @@ With the edge running, a restore is refused; so is one while an operator
 command has the database open:
 
 ```
-aether-edge: another aether-edge process holds the data directory's lock: /var/lib/aether-edge/edge.lock; an edge is running on /var/lib/aether-edge: stop it first (docker compose stop, or sudo systemctl stop aether-edge), then restore
+aether-edge: another aether-edge process holds the lock: /var/lib/aether-edge/edge.lock; an edge is running on /var/lib/aether-edge: stop it first (docker compose stop, or sudo systemctl stop aether-edge), then restore
 ```
 
 `aether-edge schema --json` prints the database's schema version, its
