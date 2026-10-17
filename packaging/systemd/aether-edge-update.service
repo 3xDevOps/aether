@@ -1,0 +1,22 @@
+[Unit]
+Description=Aether edge automatic update
+Documentation=https://github.com/3xDevOps/Aether/blob/main/docs/edge.md#automatic-updates
+Wants=network-online.target
+After=network-online.target docker.service
+# Notification: add OnFailure=<your-notify-unit>.service in a drop-in. It
+# runs on every failure, a hold (exit 3) and a rollback included.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/aether-edge-update
+StateDirectory=aether-edge-update
+StateDirectoryMode=0700
+UMask=0077
+# A pull, a backup, and for the update and a rollback each a 180-second
+# health wait and up to AETHER_EDGE_UPDATE_PUBLIC_WAIT plus
+# AETHER_EDGE_UPDATE_SERVER_WAIT seconds of checks.
+TimeoutStartSec=1h
+# A run stopped mid-switch, by the timeout or systemctl stop, marks the
+# switch for rollback; this rolls it back, and is a no-op otherwise.
+ExecStopPost=/usr/local/sbin/aether-edge-update --recover
+TimeoutStopSec=30min
