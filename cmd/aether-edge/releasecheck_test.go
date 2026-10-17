@@ -19,10 +19,11 @@ var releaseKey = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize
 
 func edgeDigest(c string) string { return "sha256:" + strings.Repeat(c, 64) }
 
-// serveRelease publishes tag with edge as its signed edge section, signed
+// serveRelease publishes v1.5.0 with edge as its signed edge section, signed
 // by key, and returns a fetch that reads it the way release-check does.
-func serveRelease(t *testing.T, tag string, edge *selfupdate.Edge, key ed25519.PrivateKey) func(context.Context, string) (selfupdate.Manifest, error) {
+func serveRelease(t *testing.T, edge *selfupdate.Edge, key ed25519.PrivateKey) func(context.Context, string) (selfupdate.Manifest, error) {
 	t.Helper()
+	const tag = "v1.5.0"
 	t.Cleanup(selfupdate.TrustKeysForTest(releaseKey.Public().(ed25519.PublicKey)))
 	data, sig, err := selfupdate.SignManifest(selfupdate.Manifest{
 		Schema: selfupdate.ManifestSchema, Version: tag, Commit: "c0ffee", PublishedAt: time.Now(),
@@ -37,8 +38,8 @@ func serveRelease(t *testing.T, tag string, edge *selfupdate.Edge, key ed25519.P
 	mux.HandleFunc("/releases/download/"+tag+"/"+selfupdate.SignatureName, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(sig) })
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return func(ctx context.Context, tag string) (selfupdate.Manifest, error) {
-		return selfupdate.FetchManifestFrom(ctx, srv.URL, tag)
+	return func(ctx context.Context, name string) (selfupdate.Manifest, error) {
+		return selfupdate.FetchManifestFrom(ctx, srv.URL, name)
 	}
 }
 
@@ -56,7 +57,7 @@ func testEdge() *selfupdate.Edge {
 }
 
 func TestReleaseCheckListsTheStepsAnUpgradeCrosses(t *testing.T) {
-	fetch := serveRelease(t, "v1.5.0", testEdge(), releaseKey)
+	fetch := serveRelease(t, testEdge(), releaseKey)
 	cases := []struct {
 		from  string
 		steps []string
@@ -97,7 +98,7 @@ func TestReleaseCheckListsTheStepsAnUpgradeCrosses(t *testing.T) {
 }
 
 func TestReleaseCheckPrintsTheEdgeSection(t *testing.T) {
-	fetch := serveRelease(t, "v1.5.0", testEdge(), releaseKey)
+	fetch := serveRelease(t, testEdge(), releaseKey)
 	var out bytes.Buffer
 	if err := releaseCheck([]string{"--tag", "v1.5.0", "--digest", edgeDigest("e")}, fetch, &out); err != nil {
 		t.Fatal(err)
@@ -121,13 +122,13 @@ func TestReleaseCheckRefuses(t *testing.T) {
 		args  []string
 		want  string
 	}{
-		{"another digest", serveRelease(t, "v1.5.0", testEdge(), releaseKey),
+		{"another digest", serveRelease(t, testEdge(), releaseKey),
 			[]string{"--digest", edgeDigest("f")}, "signs the edge image " + edgeDigest("e") + ", not " + edgeDigest("f")},
-		{"an untrusted signature", serveRelease(t, "v1.5.0", testEdge(), other),
+		{"an untrusted signature", serveRelease(t, testEdge(), other),
 			[]string{"--digest", edgeDigest("e")}, "not signed by a trusted release key"},
-		{"a release without an edge section", serveRelease(t, "v1.5.0", nil, releaseKey),
+		{"a release without an edge section", serveRelease(t, nil, releaseKey),
 			[]string{"--digest", edgeDigest("e")}, "predates signed edge releases"},
-		{"a --from that is not a tag", serveRelease(t, "v1.5.0", testEdge(), releaseKey),
+		{"a --from that is not a tag", serveRelease(t, testEdge(), releaseKey),
 			[]string{"--digest", edgeDigest("e"), "--from", "dev"}, `--from "dev" is not a release tag`},
 	}
 	for _, c := range cases {

@@ -88,7 +88,7 @@ func run(args []string, stdout io.Writer) error {
 		return err
 	}
 	if *tag == "" || fs.NArg() != 0 {
-		return errors.New("usage: release-edge -tag <tag> -image <name>=<digest>...")
+		return errors.New("usage: release-edge -tag <tag> -image <name>=<digest> [-image <name>=<digest>]")
 	}
 	u, err := readUpgrade(".")
 	if err != nil {
@@ -106,7 +106,7 @@ func run(args []string, stdout io.Writer) error {
 			ManualSteps:      u.ManualSteps,
 		},
 	}
-	if err := r.Validate(*tag); err != nil {
+	if err = r.Validate(*tag); err != nil {
 		return err
 	}
 	out, err := json.MarshalIndent(r, "", "  ")

@@ -100,7 +100,7 @@ func signingKey(seed string) (ed25519.PrivateKey, error) {
 // the way an updater will, so a seed that does not match a key this build
 // trusts fails here rather than on every client.
 func generate(tag, commit string, storeSchema int, img selfupdate.ImageRelease, assets []string, key ed25519.PrivateKey, now time.Time) (data, sig []byte, err error) {
-	if err := img.Validate(tag); err != nil {
+	if err = img.Validate(tag); err != nil {
 		return nil, nil, err
 	}
 	m := selfupdate.Manifest{

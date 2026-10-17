@@ -65,6 +65,7 @@ jobs:
             fi
           done
           echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
+          [ "$allowed" = true ]
 
   promote:
     needs: publisher-policy
@@ -120,6 +121,7 @@ jobs:
         run: |
           report=$(go run ./cmd/aether-edge release-check --tag "$TAG" --digest "$DIGEST" --json)
           echo "commit=$(printf '%s' "$report" | jq -er .commit)" >> "$GITHUB_OUTPUT"
+          echo "min_upgrade_from=$(printf '%s' "$report" | jq -er .edge.min_upgrade_from)" >> "$GITHUB_OUTPUT"
       - name: Require the release run to have qualified the edge
         env:
           COMMIT: ${{ steps.manifest.outputs.commit }}
@@ -183,16 +185,21 @@ jobs:
           verify "$IMAGE@$DIGEST"
           anonymous=$(mktemp -d)
           DOCKER_CONFIG=$anonymous crane manifest "$IMAGE@$DIGEST" > "$RUNNER_TEMP/index.json"
-          for platform in $(jq -r '.manifests[].digest' "$RUNNER_TEMP/index.json"); do
+          platforms=$(jq -er '.manifests | select(length == 2) | map(.digest) | join(" ")' "$RUNNER_TEMP/index.json")
+          for platform in $platforms; do
             verify "$IMAGE@$platform"
             DOCKER_CONFIG=$anonymous crane manifest "$IMAGE@$platform" >/dev/null
           done
-      - name: Refuse to move stable backwards
+      # Hosts following stable hold at a release they cannot upgrade from,
+      # so stable must not skip past a release's min_upgrade_from.
+      - name: Refuse to move stable backwards or past min_upgrade_from
         id: order
+        env:
+          MIN_UPGRADE_FROM: ${{ steps.manifest.outputs.min_upgrade_from }}
         run: |
-          if ! current=$(crane digest "$IMAGE:stable" 2>&1); then
-            if [[ $current != *MANIFEST_UNKNOWN* ]]; then
-              echo "::error::cannot read $IMAGE:stable: $current"
+          if ! current=$(crane digest "$IMAGE:stable" 2>"$RUNNER_TEMP/stable.err"); then
+            if ! grep -q MANIFEST_UNKNOWN "$RUNNER_TEMP/stable.err"; then
+              echo "::error::cannot read $IMAGE:stable: $(cat "$RUNNER_TEMP/stable.err")"
               exit 1
             fi
             echo "$IMAGE:stable does not exist yet" >> "$GITHUB_STEP_SUMMARY"
@@ -205,6 +212,10 @@ jobs:
           have=$(sh scripts/android-version-code.sh "$carried")
           if [ "$want" -lt "$have" ]; then
             echo "::error::$IMAGE:stable carries $carried; $TAG is older, and stable never moves backwards"
+            exit 1
+          fi
+          if [ "$have" -lt "$(sh scripts/android-version-code.sh "$MIN_UPGRADE_FROM")" ]; then
+            echo "::error::$IMAGE:stable carries $carried; $TAG upgrades only from $MIN_UPGRADE_FROM or later, so promote a release between them first"
             exit 1
           fi
           if [ "$want" -eq "$have" ]; then

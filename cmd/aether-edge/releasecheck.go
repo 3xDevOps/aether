@@ -56,7 +56,7 @@ func releaseCheck(args []string, fetch func(context.Context, string) (selfupdate
 	if m.Edge == nil {
 		return fmt.Errorf("release %s has no edge section in its signed %s; it predates signed edge releases", *tag, selfupdate.ManifestName)
 	}
-	if err := m.Edge.Validate(*tag); err != nil {
+	if err = m.Edge.Validate(*tag); err != nil {
 		return fmt.Errorf("release %s: %w", *tag, err)
 	}
 	if m.Edge.ImageDigest != *digest {

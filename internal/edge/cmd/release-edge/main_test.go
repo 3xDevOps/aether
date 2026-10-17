@@ -74,7 +74,7 @@ func TestRunWritesWhatReleaseManifestSigns(t *testing.T) {
 		t.Fatal(err)
 	}
 	var r selfupdate.ImageRelease
-	if err := json.Unmarshal(out.Bytes(), &r); err != nil {
+	if err = json.Unmarshal(out.Bytes(), &r); err != nil {
 		t.Fatal(err)
 	}
 	if r.Edge.ImageDigest != digest("e") || r.Edge.Image != edgeImage || r.Edge.ManualSteps == nil {

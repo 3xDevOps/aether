@@ -2645,7 +2645,18 @@ never builds, and refuses unless:
   anonymously;
 - the release is not older than the one `stable` carries, by
   `scripts/android-version-code.sh` order of the image's
-  `org.opencontainers.image.version` label. The same release is a no-op.
+  `org.opencontainers.image.version` label. The same release is a no-op;
+- the release `stable` carries is at or above the new release's
+  `min_upgrade_from`, so hosts following `stable` never land on a release
+  they cannot upgrade from. Promote an intermediate release first.
+
+Blocking manual steps do not stop a promotion: each host's updater holds
+on them until its operator acts.
+
+The admin check covers the workflow as it is on `main`. `workflow_dispatch`
+runs the file from the dispatched ref, so anyone who can push a branch can
+run an edited copy with the same `packages: write` token; limit write
+access to the repository accordingly.
 
 It then copies the index's exact bytes to `stable` with `crane tag`,
 checks that `stable` resolves to the digest anonymously and that its

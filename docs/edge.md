@@ -1290,12 +1290,13 @@ release tag's.
 
 The release signs each image's index digest in `aether-release.json`
 ([Verified releases](install.md#verified-releases)). Before running a
-digest, check it is the one a release signed and see the manual steps an
-upgrade from your current release needs:
+new digest, ask the edge you already run, not the new image, whether a
+release signed it and which manual steps an upgrade from your release
+needs:
 
 ```sh
-docker run --rm ghcr.io/3xdevops/aether-edge@sha256:<digest> \
-  release-check --tag <release-tag> --digest sha256:<digest> --from <running-tag>
+docker exec <container> aether-edge release-check \
+  --tag <release-tag> --digest sha256:<digest> --from <running-tag>
 ```
 
 It verifies the manifest with the release keys built into the binary and
