@@ -1265,16 +1265,67 @@ linux/amd64 and linux/arm64: the `aether-edge` binary and CA certificates on
 a distroless base, with no shell. It runs `aether-edge serve` as uid and gid
 65532 and carries no configuration.
 
-Each release tags it with the release tag, the full commit SHA,
-`sha-<short-sha>` and `latest`. Pin a release tag, or better its digest,
-which no later push can move; `docker pull
-ghcr.io/3xdevops/aether-edge:<release-tag>` prints it as `Digest:`.
-`latest` moves with every release, so an unattended restart can upgrade the
-database schema under you ([Upgrades](#upgrades)); do not run it in
-production.
+Each release tags it with the release tag, the full commit SHA and
+`sha-<short-sha>`, which no later release moves, and two channels:
+
+| Tag | Moves to | Use |
+| --- | --- | --- |
+| `latest` | every release, alphas included, once it is published and GitHub's Latest | trying a release; never production |
+| `stable` | a published release an admin promoted after it qualified and soaked ([Promoting an edge release to stable](install.md#promoting-an-edge-release-to-stable)); never to an older one | production |
+
+`latest` can upgrade the database schema under an unattended restart
+([Upgrades](#upgrades)). In production pin `stable` by digest, which no
+push can move, and change the digest deliberately:
 
 ```
-ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
+ghcr.io/3xdevops/aether-edge:stable@sha256:<digest>
+```
+
+`docker buildx imagetools inspect ghcr.io/3xdevops/aether-edge:stable`
+prints the digest `stable` names now as `Digest:`. Both channel tags carry
+the release's index byte for byte, so the digest is the same as the
+release tag's.
+
+#### Verifying an image
+
+The release signs each image's index digest in `aether-release.json`
+([Verified releases](install.md#verified-releases)). Before running a
+digest, check it is the one a release signed and see the manual steps an
+upgrade from your current release needs:
+
+```sh
+docker run --rm ghcr.io/3xdevops/aether-edge@sha256:<digest> \
+  release-check --tag <release-tag> --digest sha256:<digest> --from <running-tag>
+```
+
+It verifies the manifest with the release keys built into the binary and
+exits 0 when the upgrade may go ahead, 3 with each reason on stderr
+(`aether-edge: hold: ...`) when it must wait: a blocking manual step, a
+`--from` below the release's `min_upgrade_from`, or a `--from` newer than
+the release. `--json` prints the report, including the edge section and
+the applicable steps, as one JSON object.
+
+Every image index and each of its platform images also carries a GitHub
+artifact attestation: SLSA build provenance signed through Sigstore,
+naming the workflow, tag and commit that built it. Check one with the
+GitHub CLI:
+
+```sh
+gh attestation verify oci://ghcr.io/3xdevops/aether-edge@sha256:<digest> \
+  --repo 3xDevOps/aether \
+  --signer-workflow 3xDevOps/aether/.github/workflows/release.yml \
+  --source-ref refs/tags/<release-tag> --deny-self-hosted-runners
+```
+
+or with cosign 2.4 or later, which reads the attestation stored next to
+the image in the registry:
+
+```sh
+cosign verify-attestation --new-bundle-format \
+  --type https://slsa.dev/provenance/v1 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/release.yml@refs/tags/<release-tag> \
+  ghcr.io/3xdevops/aether-edge@sha256:<digest>
 ```
 
 | What | How |
