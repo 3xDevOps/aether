@@ -1186,10 +1186,11 @@ try {
 }
 catch {
     [Console]::Error.WriteLine(("aether install: error: {0}" -f $_.Exception.Message))
-    # Run from a file (-File, & or dot-sourced), exit ends only this script
-    # and sets $LASTEXITCODE, so PowerShell prints no second error record.
-    # Content run by Invoke-Expression has no script to exit; rethrow.
-    if (-not [string]::IsNullOrEmpty($PSCommandPath)) {
+    # Run directly (-File, or & at a prompt), exit ends only this script,
+    # sets $LASTEXITCODE and prints no second error record. Called from another
+    # script, dot-sourced, or run by Invoke-Expression, rethrow so the caller's
+    # catch sees the failure and an interactive host stays alive.
+    if (-not [string]::IsNullOrEmpty($PSCommandPath) -and [string]::IsNullOrEmpty($MyInvocation.PSCommandPath) -and $MyInvocation.InvocationName -ne '.') {
         exit 1
     }
     throw

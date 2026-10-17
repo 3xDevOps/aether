@@ -255,10 +255,10 @@ done: Aether v0.7.0-alpha.12 installed in 24.4s
 
 Step 3 runs `aether gui build` with its output unchanged, so its download
 progress, npm and electron-builder messages appear as they happen. An error
-is printed once on stderr and the script exits 1, whether it is run with
-`-File`, `&` or dot-sourced; the calling shell keeps running and
-`$LASTEXITCODE` is 1. Content run through `Invoke-Expression` has no script
-to exit, so there the error is thrown to the caller.
+is printed once on stderr. Run with `-File` or `&` at a prompt, the script
+then exits 1 and sets `$LASTEXITCODE`. Called from another script, dot-sourced,
+or run through `Invoke-Expression`, it throws instead, so a caller's `catch`
+sees the failure and an interactive session stays open.
 
 Only the current user's `PATH` is updated, without duplicating the install
 directory or removing other entries. Expandable entries such as `%SystemRoot%`

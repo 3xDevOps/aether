@@ -559,8 +559,8 @@ func main() {
     Assert-AetherTest (-not (Test-Path -LiteralPath $noneLog)) 'CLI-only opt out invoked GUI build'
 
     # A desktop failure leaves the newly installed CLI and restores AETHER_BIN.
-    # Run with & or dot-sourced, the installer prints the error once, ends
-    # with exit 1 and returns to its caller.
+    # Called from a script with & or dot-sourced, the installer prints the
+    # error once and throws, so the caller's catch sees it.
     $failureCase = Join-Path $root 'failure-case'
     $failureBin = Join-Path $failureCase 'bin'
     New-Item -ItemType Directory -Path $failureBin -Force | Out-Null
@@ -575,10 +575,14 @@ func main() {
         $wrapperSource = @"
 `$env:AETHER_BIN = 'caller-sentinel'
 Set-Location -LiteralPath '$failureCaseLiteral'
-$operator '$installerLiteral' -Version '$version' -Role client -BinDir '.\bin'
+try {
+    $operator '$installerLiteral' -Version '$version' -Role client -BinDir '.\bin'
+    'caller was not told'
+}
+catch {
+    'caller caught: ' + `$_.Exception.Message
+}
 [IO.File]::WriteAllText('$restoreLiteral', [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process'))
-'caller continued: ' + `$LASTEXITCODE
-exit `$LASTEXITCODE
 "@
         [IO.File]::WriteAllText($wrapper, $wrapperSource)
         Remove-Item -LiteralPath $restoreResult -Force -ErrorAction SilentlyContinue
@@ -587,8 +591,8 @@ exit `$LASTEXITCODE
             AETHER_FIXTURE_LOG = $failureLog
             AETHER_GUI_FAIL = '1'
         }
-        Assert-AetherEqual 1 $result.ExitCode ("desktop failure under {0} did not exit 1: {1}" -f $operator, $result.Output)
-        Assert-AetherTest ($result.Stdout.Contains('caller continued: 1')) ("installer under {0} did not return to its caller: {1}" -f $operator, $result.Output)
+        Assert-AetherEqual 0 $result.ExitCode ("wrapper under {0} failed: {1}" -f $operator, $result.Output)
+        Assert-AetherTest ($result.Stdout.Contains('caller caught: aether gui build exited with code 23. The CLI is installed; rerun: ')) ("installer under {0} did not throw to its caller: {1}" -f $operator, $result.Output)
         Assert-AetherTest ($result.Stderr.Contains('aether install: error: aether gui build exited with code 23')) ("desktop failure was not reported: " + $result.Output)
         Assert-AetherTest ($result.Stderr.Contains('fixture desktop failure')) ("desktop failure output did not reach the console: " + $result.Output)
         Assert-AetherEqual 1 ([regex]::Matches($result.Stderr, 'exited with code 23').Count) ("desktop failure under {0} printed the error more than once: {1}" -f $operator, $result.Stderr)
