@@ -303,7 +303,6 @@ const (
 // InstallDesktop publishes.
 type DesktopSource func(dir string) error
 
-// DesktopFrom copies the unpacked app electron-builder wrote at built.
 func DesktopFrom(built string) DesktopSource {
 	return func(dir string) error {
 		if err := os.CopyFS(dir, os.DirFS(built)); err != nil {
