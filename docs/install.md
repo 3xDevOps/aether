@@ -256,11 +256,48 @@ Defender will accept an unsigned binary; see [Defender and SmartScreen](#windows
 
 ## Upgrading
 
-`aether update` replaces the running CLI with the latest release only if it
+**On a server host**, run:
+
+```sh
+sudo aether-server update [--version <tag>]
+```
+
+It installs the latest release (or `--version <tag>`) with the same
+preflight, `.prev` copies, database snapshot and automatic rollback as the
+dashboard's **Update now**, stops and starts the
+`aether-server` systemd unit around the swap, and waits until the new binary
+has either committed or been rolled back:
+
+```
+aether-server v0.9.0 -> v0.9.1
+https://github.com/3xDevOps/Aether/releases/tag/v0.9.1
+aether-server  v0.9.0 -> v0.9.1  restarted (pid 1234 -> 5678)
+aether         /usr/local/bin/aether  v0.9.1
+```
+
+A rollback prints the recorded reason and exits non-zero; read the new
+binary's log with `sudo journalctl -u aether-server -n 50`. When systemd
+refuses to start the new binary at all, the command stops the unit, puts the
+previous release back (and the database snapshot, if a start had already
+migrated it), starts it, and exits non-zero with the `systemctl start` error.
+With no `aether-server` systemd unit on the host, or with a unit that runs as
+a non-root `User=` (the unprivileged setup in the unit's comment), it refuses
+before changing anything: use `sudo aether update` and restart the server
+yourself. It also refuses when the unit's `ExecStart` runs another
+`aether-server` binary or `--data-dir` than the command reads from its own
+flags and `--config`, and names the one to use. It reads the database's
+schema without opening or migrating it. When the host already has the latest
+release on disk but the unit still runs an earlier file, as after
+`aether update`, it just restarts the unit onto the installed binary (a
+stopped unit is started) and waits up to two minutes for the server to
+accept connections on its `--addr`. A server that exits or restarts again
+in that time fails the command with the unit's state.
+
+**On a client**, `aether update` replaces the running CLI with the latest release only if it
 is newer (or installs `--version <tag>`), verifying it against the release's
 signed manifest ([Verified releases](#verified-releases)). On Linux, an
-`aether-server` beside the CLI is updated too; restart it with
-`sudo systemctl restart aether-server`. The command never asks
+`aether-server` beside the CLI is updated too, but not restarted: use
+`sudo aether-server update` on a server host. The command never asks
 for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
 a stock install, is refused before anything is downloaded. The refusal names
 the probe file it could not create (the number varies) and ends with the
@@ -663,7 +700,9 @@ both renames are done, `<data-dir>/server-update/swap.json` says `swapping`,
 and a start that finds it so puts the `.prev` files back. The server then
 closes its listeners and the database. When the release migrates the
 database, it copies it to `<data-dir>/server-update/aether.db.pre-update`
-now, so the copy holds every write. Under the shipped systemd unit the
+now, so the copy holds every write. A new binary that starts without that
+copy - the host rebooted between the swap and the copy - takes it before it
+opens the database, and rolls back if it cannot. Under the shipped systemd unit the
 server then exits with status 75 (`EX_TEMPFAIL`) and systemd starts the new
 binary: a new PID, and the stop and start show in `systemctl status` and
 `journalctl -u aether-server`. The unit's `RestartForceExitStatus=75` and

@@ -299,6 +299,17 @@ func Boot(dir string, host Host) (*Trial, error) {
 	case version.Version != rec.ToVersion:
 		return t, t.closeByHand()
 	}
+	// An update cut short between its swap and its snapshot - a reboot,
+	// or a killed `aether-server update` - starts the new binary with no
+	// copy to roll a migration back to. Nothing has opened the store yet,
+	// so the copy is taken now, while the schema is still SchemaBefore.
+	if rec.Snapshot != "" && !fileExists(rec.Snapshot) {
+		if current, serr := store.ReadSchemaVersion(rec.Database); serr == nil && current <= rec.SchemaBefore {
+			if serr = takeSnapshot(rec); serr != nil {
+				return t, t.rollBackAndExec(serr.Error())
+			}
+		}
+	}
 	rec.Boots++
 	switch {
 	case rec.Boots > maxTrialBoots:
@@ -465,6 +476,28 @@ func (t *Trial) Commit(ctx context.Context, st store.Store, bus events.Bus) erro
 	})
 	rec.Recorded = true
 	t.rec = &rec
+	// The applied record above already let `aether-server update` return,
+	// so another update may have staged since. Its record is left alone;
+	// the lock keeps one from being staged while this one is checked.
+	var unlock func()
+	for {
+		if unlock, err = Lock(t.dir); err == nil {
+			break
+		}
+		if !errors.Is(err, ErrBusy) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	defer unlock()
+	current, err := loadRecord(t.dir)
+	if err != nil || current == nil || current.Phase != rec.Phase || current.ToVersion != rec.ToVersion || current.FromVersion != rec.FromVersion {
+		return err
+	}
 	return saveRecord(t.dir, &rec)
 }
 

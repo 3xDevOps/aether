@@ -97,18 +97,23 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 			return nil, fmt.Errorf("%w: %s", ErrHeld, reason)
 		}
 	}
-	// The trial of the last update has not committed: a new swap record
-	// would be overwritten by that Commit.
-	last, err := loadRecord(s.cfg.StateDir)
-	if err != nil {
-		return nil, err
-	}
-	if last != nil && last.Phase == recordVerifying {
-		return nil, fmt.Errorf("%w: %s is still verifying its first start (%s); retry once it has started",
-			ErrBusy, last.ToVersion, recordPath(s.cfg.StateDir))
-	}
 	if !s.claim(pending.Version) {
 		return nil, ErrBusy
+	}
+	unlock, err := Lock(s.cfg.StateDir)
+	if err != nil {
+		s.release()
+		return nil, err
+	}
+	s.mu.Lock()
+	s.unlock = unlock
+	s.mu.Unlock()
+	// The trial of the last update has not committed: a new swap record
+	// would be overwritten by that Commit. Checked under the lock, so
+	// `aether-server update` cannot stage a release in between.
+	if err = ensureSettled(s.cfg.StateDir); err != nil {
+		s.release()
+		return nil, err
 	}
 	// A downgrade is applied by hand, now, so one cut short is not left
 	// pending for an idle moment.
@@ -119,7 +124,8 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 		}
 	}
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdatePreflight, pending.Version, "")
-	m, err := s.preflight(ctx, pending.Version, allowDowngrade)
+	plan := s.plan(pending)
+	m, err := preflight(ctx, plan, pending.Version, allowDowngrade)
 	if err != nil {
 		return nil, s.failOrRetry(ctx, pending, scheduled, err)
 	}
@@ -128,13 +134,13 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	}
 	s.setPhase(protocol.ServerUpdatePhaseApplying)
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdateApplying, pending.Version, "")
-	rec, err := s.swap(ctx, pending, m)
+	rec, err := swap(ctx, plan, pending.Version, m)
 	if err != nil {
 		return nil, s.failOrRetry(ctx, pending, scheduled, err)
 	}
 	slog.Info("serverupdate: binaries replaced", "version", pending.Version, "paths", rec.Binaries)
 	if scheduled && !s.busyNow(ctx).Idle() {
-		if err := s.unswap(rec); err != nil {
+		if err := unswap(s.cfg.StateDir, rec); err != nil {
 			return nil, s.fail(ctx, pending, fmt.Errorf("a run started during the download, and undoing the swap failed: %w", err))
 		}
 		s.release()
@@ -181,61 +187,74 @@ func (s *Service) failOrRetry(ctx context.Context, pending store.PendingServerUp
 	return s.fail(ctx, pending, err)
 }
 
+// ensureSettled refuses while the last update's trial has not committed:
+// a new swap record would be overwritten by that Commit.
+func ensureSettled(dir string) error {
+	last, err := loadRecord(dir)
+	if err != nil {
+		return err
+	}
+	if last != nil && last.Phase == recordVerifying {
+		return fmt.Errorf("%w: %s is still verifying its first start (%s); retry once it has started",
+			ErrBusy, last.ToVersion, recordPath(dir))
+	}
+	return nil
+}
+
 // swap keeps each binary as <path>.prev, installs the release, and writes
 // the swap record the next start reads. Before the first rename the record
 // says swapping, so a start after a crash mid-swap puts the previous
 // binaries back. When the release migrates the database the record names
 // the snapshot the restart takes. A failure restores whatever it replaced.
-func (s *Service) swap(ctx context.Context, pending store.PendingServerUpdate, m selfupdate.Manifest) (*swapRecord, error) {
+func swap(ctx context.Context, p Plan, tag string, m selfupdate.Manifest) (*swapRecord, error) {
 	rec := &swapRecord{
 		Phase:       recordSwapping,
 		FromVersion: version.Version,
-		ToVersion:   pending.Version,
-		RequestedBy: string(pending.RequestedBy),
-		Binaries:    []string{s.self},
-		At:          s.cfg.Now().UTC(),
+		ToVersion:   tag,
+		RequestedBy: p.RequestedBy,
+		Binaries:    []string{p.Self},
+		At:          p.Now().UTC(),
 	}
-	if sibling := filepath.Join(filepath.Dir(s.self), "aether"); fileExists(sibling) {
+	if sibling := filepath.Join(filepath.Dir(p.Self), "aether"); fileExists(sibling) {
 		rec.Binaries = append(rec.Binaries, sibling)
 	}
-	schema, err := s.cfg.Store.SchemaVersion(ctx)
+	schema, err := p.Schema(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if s.cfg.Database != "" && m.StoreSchema > schema {
-		snap := snapshotPath(s.cfg.StateDir)
+	if p.Database != "" && m.StoreSchema > schema {
+		snap := snapshotPath(p.StateDir)
 		if err = os.Remove(snap); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("remove the last database snapshot: %w", err)
 		}
-		rec.Database, rec.Snapshot, rec.SchemaBefore = s.cfg.Database, snap, schema
+		rec.Database, rec.Snapshot, rec.SchemaBefore = p.Database, snap, schema
 	}
 	if err = keepPrevious(rec.Binaries); err != nil {
 		return nil, err
 	}
-	if err = saveRecord(s.cfg.StateDir, rec); err != nil {
+	if err = saveRecord(p.StateDir, rec); err != nil {
 		return nil, err
 	}
-	replaced, err := selfupdate.UpdateBinaries(ctx,
-		s.cfg.Checker.BaseURL(), pending.Version, s.self, "aether-server", "aether")
+	replaced, err := selfupdate.UpdateBinaries(ctx, p.BaseURL, tag, p.Self, "aether-server", "aether")
 	if err != nil {
 		if rerr := restorePrevious(replaced); rerr != nil {
 			return nil, errors.Join(err, rerr)
 		}
-		return nil, errors.Join(retryable{fmt.Errorf("download failed: %w", err)}, removeRecord(s.cfg.StateDir))
+		return nil, errors.Join(retryable{fmt.Errorf("download failed: %w", err)}, removeRecord(p.StateDir))
 	}
 	rec.Phase = recordVerifying
-	if err := saveRecord(s.cfg.StateDir, rec); err != nil {
-		return nil, errors.Join(err, s.unswap(rec))
+	if err := saveRecord(p.StateDir, rec); err != nil {
+		return nil, errors.Join(err, unswap(p.StateDir, rec))
 	}
 	return rec, nil
 }
 
 // unswap puts the previous binaries back and drops the swap record.
-func (s *Service) unswap(rec *swapRecord) error {
+func unswap(dir string, rec *swapRecord) error {
 	if err := restorePrevious(rec.Binaries); err != nil {
 		return err
 	}
-	return removeRecord(s.cfg.StateDir)
+	return removeRecord(dir)
 }
 
 func removeRecord(dir string) error {
@@ -282,6 +301,10 @@ func (s *Service) release() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.applying, s.phase, s.target = false, "", ""
+	if s.unlock != nil {
+		s.unlock()
+		s.unlock = nil
+	}
 }
 
 // restart re-executes the new binary in place. syscall.Exec keeps the PID

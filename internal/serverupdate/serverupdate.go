@@ -74,9 +74,13 @@ var ErrUpToDate = errors.New("no update")
 var ErrIdleDowngrade = errors.New(`allow_downgrade applies now only: use --when now`)
 
 // ManualCommands is what an admin runs on the server host when the server
-// cannot update itself.
+// cannot update itself. `aether-server update` refuses a unit that runs as
+// another user, so such a server names the replace-and-restart pair.
 func ManualCommands() []string {
-	return []string{"sudo aether update", "sudo systemctl restart aether-server"}
+	if os.Geteuid() != 0 {
+		return []string{"sudo aether update", "sudo systemctl restart aether-server"}
+	}
+	return []string{"sudo aether-server update"}
 }
 
 // Config wires the service. Store, Bus, and StateDir are required;
@@ -127,9 +131,6 @@ type Service struct {
 	// started is the file at self when the service was built, which is
 	// the image this process runs.
 	started os.FileInfo
-	// core is the release the running build descends from; downgrades
-	// are measured against it.
-	core string
 	// incapable is why this process cannot update itself, fixed at
 	// construction and empty when it can. It covers the reasons that
 	// cannot change while the process runs - a binary that could not be
@@ -139,6 +140,8 @@ type Service struct {
 
 	mu       sync.Mutex
 	applying bool
+	// unlock frees the update lock taken with applying.
+	unlock func()
 	// phase and target are the update in progress in this process.
 	phase  string
 	target string
@@ -178,7 +181,7 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	s := &Service{cfg: cfg, core: version.ReleaseCore(version.Version), kick: make(chan struct{}, 1)}
+	s := &Service{cfg: cfg, kick: make(chan struct{}, 1)}
 	check, cerr := loadCheck(cfg.StateDir)
 	if cerr != nil {
 		slog.Warn("serverupdate: release check state unreadable; checking afresh", "error", cerr)
@@ -372,7 +375,7 @@ func (s *Service) Update(ctx context.Context, actor domain.MemberID, p protocol.
 	if p.When == protocol.ServerUpdateIdle {
 		// Refused now rather than at the idle moment, when nobody is
 		// watching: the release must already be complete.
-		if _, err = s.preflight(ctx, tag, false); err != nil {
+		if _, err = preflight(ctx, s.plan(pending), tag, false); err != nil {
 			return protocol.ServerUpdateResult{}, nil, err
 		}
 		// One pending update at a time: a second request replaces the

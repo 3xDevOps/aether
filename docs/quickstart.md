@@ -45,7 +45,7 @@ in `/usr/local/bin`, with `sudo`. A client gets the `aether` CLI alone in
 updates; if that directory is not on your `PATH`, the script prints the one
 line that adds it, and the app finds it either way. macOS is a client
 platform, so it only ever gets `aether`. Later, `aether update` upgrades
-whatever is installed.
+a client and `sudo aether-server update` a server.
 
 It then finishes that side's setup: [step 2](#2-start-the-server) on the
 server, the desktop app ([step 7](#prefer-a-native-window)) on a client. To
