@@ -1,0 +1,48 @@
+#!/bin/sh
+# docker for scripts/edge-update.sh in TestEdgeUpgrade: the real docker
+# ($QUALIFY_DOCKER), with the updater's image mapped to the test registry
+# ($QUALIFY_IMAGE) and back in the digests it reads. release-check is
+# answered here instead: the image's binary trusts only the real release
+# keys and fetches from github.com. Release <tag> signs the digest in
+# $QUALIFY_RELEASES/<tag>.
+set -eu
+from=ghcr.io/3xdevops/aether-edge
+to=$QUALIFY_IMAGE
+
+check=0
+for a; do
+	shift
+	case $a in
+	"$from"*) a=$to${a#"$from"} ;;
+	release-check) check=1 ;;
+	esac
+	set -- "$@" "$a"
+done
+
+if [ "$check" = 1 ]; then
+	tag="" digest=""
+	while [ $# -gt 1 ]; do
+		case $1 in
+		--tag) tag=$2 ;;
+		--digest) digest=$2 ;;
+		esac
+		shift
+	done
+	signed=$(cat "$QUALIFY_RELEASES/$tag" 2>/dev/null) || {
+		echo "aether-edge: download the $tag manifest: GET https://github.com/3xDevOps/Aether/releases/download/$tag/aether-release.json: 404 Not Found" >&2
+		exit 1
+	}
+	if [ "$signed" != "$digest" ]; then
+		echo "aether-edge: release $tag signs the edge image $signed, not $digest; do not run it" >&2
+		exit 1
+	fi
+	printf '{"version":"%s","hold":false,"reasons":[],"applicable_steps":[]}\n' "$tag"
+	exit 0
+fi
+
+if [ "$1" = image ] && [ "$2" = inspect ]; then
+	out=$("$QUALIFY_DOCKER" "$@")
+	printf '%s\n' "$out" | sed "s|^$to@|$from@|"
+	exit 0
+fi
+exec "$QUALIFY_DOCKER" "$@"

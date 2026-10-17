@@ -1130,6 +1130,69 @@ when the two differ and names both versions:
 edge-go-version-test: images/edge/Dockerfile builds with golang:1.26.8, but go.mod pins go1.26.9; change the golang tag and its @sha256 digest in images/edge/Dockerfile to 1.26.9 (or go.mod's toolchain line to go1.26.8)
 ```
 
+## Edge upgrade qualification
+
+`TestEdgeUpgrade` in `internal/edge/edgetest`, behind the `edgeupgrade`
+build tag, updates real edge containers with
+[`scripts/edge-update.sh`](../scripts/edge-update.sh). It needs root (the
+data directory belongs to uid 65532), Docker with Compose and buildx, `jq`,
+`curl`, Go, and git history with tags:
+
+```sh
+sudo env "PATH=$PATH" "HOME=$HOME" make test-edge-upgrade
+```
+
+It builds `images/edge/Dockerfile` five times and pushes each to a
+`registry:3` container: the previous release (`git describe --tags
+HEAD^`, in a `git worktree`), this tree as `v99.0.0-qualify.1`, and three
+builds of this tree with migrations appended to the edge store's: one
+that fails, one that raises the compat floor followed by one that fails,
+and one additive one. The edge runs from `packaging/edge/compose.yaml`,
+with a `compose.override.yaml` for the registry, origins and test CA,
+behind an nginx container in Traefik's place. nginx also answers for
+`github.com` and `api.github.com` with the test's certificate, in front of
+the fake GitHub of `harness_test.go`, so real sign-ins create accounts.
+Clients sign in, and two servers of this tree enroll and are claimed
+through the previous release. Then, in order:
+
+1. `aether-edge-update` refuses an image without `version --json` and
+   prints the first upgrade, which the test performs as
+   [docs/edge.md](edge.md#first-upgrade) describes. A previous release
+   with the updater's commands is updated by `aether-edge-update` instead.
+2. The failing migration never turns healthy: the updater rolls back
+   without a restore and lists the digest in `failed`; the next run skips
+   it.
+3. The raised floor migrates and then fails: the rollback restores the
+   pre-update backup and the old binary runs on it.
+4. The additive migration updates; the edge took its own pre-migration
+   backup and the updater its `pre-update-` one.
+5. A server of the previous release, built in its worktree from
+   `testdata/upgrade/previous_server_test.go` against that release's
+   harness, enrolls with the new edge, is claimed and relays.
+6. `aether-edge-update --rollback` runs the old binary on the additive
+   schema without a restore.
+
+After each step the edge must serve the first fingerprint on `/v1/edge`
+through the proxy, list both accounts and servers, report ready with both
+servers claimed, and each owner must reach their server. Two commands
+are stubs on `PATH`, from `testdata/upgrade/`: `cosign` prints the
+promotion attestation for a digest the test promoted, and `docker`
+passes everything to the real docker except `release-check`, which it
+answers from the digests the test built. A production binary trusts only
+the release keys built into it and fetches manifests from github.com, so
+a hermetic release-check would need a trust override in shipped binaries;
+the signature check stays covered by `cmd/aether-edge/releasecheck_test.go`
+and by `promote-edge.yml`, which runs it against the published release.
+The stub also maps `ghcr.io/3xdevops/aether-edge`, which the updater
+names, to the test registry.
+
+Nothing leaves the machine except pulls of base images and Go modules,
+and every container, network, image and worktree it creates is removed
+on exit. It takes about two minutes with warm caches. The `upgrade` job
+of `.github/workflows/edge-image.yml` runs it on pull requests that
+`scripts/ci-classify-edge.sh` classifies as edge changes, and the
+`edge-qualify` job of `release.yml` runs it before a release publishes.
+
 ## The dashboard end-to-end suite
 
 `web/e2e/` drives the dashboard the way a person does: a Chromium browser on
