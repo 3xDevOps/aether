@@ -1878,7 +1878,7 @@ only be verified on the live host.
 
    ```sh
    sudo apt-get update
-   sudo apt-get install nginx certbot python3-certbot-nginx sqlite3 curl
+   sudo apt-get install nginx certbot python3-certbot-nginx curl
    ```
 
 2. **Firewall** ([Firewall](#firewall)): 22, 80 and 443 from anywhere in
@@ -1960,7 +1960,8 @@ only be verified on the live host.
 10. **Signing key.** Record the fingerprint from `sudo ssh-keygen -lf
     /var/lib/aether-edge/edge_key`, publish it on this page, and store
     `edge_key` offline.
-11. **Backups.** Schedule the daily `edge.db` backup and copy it off the
+11. **Backups.** Schedule `sudo -u aether-edge aether-edge backup
+    /var/lib/aether-edge/backups/` daily and copy the backups off the
     machine ([Backup and recovery](#backup-and-recovery)).
 12. **Log retention** for the journal (`<retention>`) and nginx's access
     log ([Logs](#logs)).
