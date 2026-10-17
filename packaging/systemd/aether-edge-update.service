@@ -13,7 +13,10 @@ StateDirectory=aether-edge-update
 StateDirectoryMode=0700
 UMask=0077
 # A pull, a backup, and for the update and a rollback each a 180-second
-# health wait and up to AETHER_EDGE_UPDATE_SERVER_WAIT seconds of checks,
-# each check bounded to 30 seconds. A kill mid-switch leaves the rest to
-# aether-edge-update-recover.service at the next boot, or to the next run.
+# health wait and up to AETHER_EDGE_UPDATE_PUBLIC_WAIT plus
+# AETHER_EDGE_UPDATE_SERVER_WAIT seconds of checks.
 TimeoutStartSec=1h
+# A run stopped mid-switch, by the timeout or systemctl stop, marks the
+# switch for rollback; this rolls it back, and is a no-op otherwise.
+ExecStopPost=/usr/local/sbin/aether-edge-update --recover
+TimeoutStopSec=30min

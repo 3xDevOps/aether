@@ -1647,9 +1647,10 @@ directory of the Compose file:
 
 ```sh
 docker pull ghcr.io/3xdevops/aether-edge:stable               # prints Digest: sha256:<digest>
-cosign verify-attestation --type https://github.com/3xDevOps/aether/edge-promotion/v1 \
-  --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main \
+cosign verify-attestation --new-bundle-format \
+  --type https://github.com/3xDevOps/aether/edge-promotion/v1 \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main \
   ghcr.io/3xdevops/aether-edge@sha256:<digest> >/dev/null
 docker run --rm ghcr.io/3xdevops/aether-edge@<running-digest> \
   release-check --tag <release-tag> --digest sha256:<digest> --from <running-version>
@@ -1670,7 +1671,7 @@ database:
 
 ```sh
 docker compose stop aether-edge
-docker run --rm --network none --user 65532:65532 --volumes-from aether-edge \
+docker run --rm --network none --user 65532:65532 -v "$PWD/data:/var/lib/aether-edge" \
   ghcr.io/3xdevops/aether-edge@<old-digest> schema --json
 ```
 
@@ -1704,6 +1705,8 @@ timer runs it once a day. Each run:
    its `org.opencontainers.image.version` label. The running digest: exits
    0. A digest in the `failed` list: logs `skipping <digest>, which failed
    before` and exits 0. A version not newer than the running one: exits 1.
+   A running image without `version --json`, `release-check`, `backup` and
+   `schema`: exits 1 with the steps of the [first upgrade](#first-upgrade).
 4. Verifies with `cosign verify-attestation` that the digest carries a
    promotion attestation, type
    `https://github.com/3xDevOps/aether/edge-promotion/v1`, signed by
@@ -1715,9 +1718,11 @@ timer runs it once a day. Each run:
 5. Runs `aether-edge release-check` from the running image. It verifies
    the release's signed `aether-release.json` with the release keys built
    into that image and requires it to name this digest. An error exits 1.
-   A hold, a manual step the upgrade needs first, records the `held` state
-   and exits 3. Nothing has changed yet.
-6. Records the fingerprint `<relay>/v1/edge` serves and the claimed-server
+   A hold records the `held` state and exits 3: a blocking manual step,
+   or a running release older than the new release's `min_upgrade_from`.
+   Nothing has changed yet.
+6. Records the fingerprint `<relay>/v1/edge` serves, waiting up to
+   `AETHER_EDGE_UPDATE_PUBLIC_WAIT` seconds for it, and the claimed-server
    count from `aether-edge healthcheck --ready --json`, then backs up the
    database with `aether-edge backup` to
    `/var/lib/aether-edge/backups/pre-update-<version>-<UTC time>.db` in the
@@ -1729,12 +1734,18 @@ timer runs it once a day. Each run:
    passes; `<relay>/v1/edge`, fetched through the proxy, serves the same
    fingerprint, which fails when the edge lost `edge_key` or its data
    mount; and the claimed servers return to the count before, less a
-   tolerance, within a time limit.
-9. When step 7 or 8 fails, rolls back. The new digest goes into `failed`.
-   It runs `aether-edge schema --json` from the old image against the data
-   directory. Only when the old release cannot run the database
-   (`supported` below `compat_floor`), or `schema` cannot read it, does it
-   stop the edge and restore the backup. It then starts the old digest and
+   tolerance (10%, rounded up), within a time limit. The proxy gets its
+   own wait: after a boot, Traefik may route to the edge minutes after
+   Docker reports it healthy.
+9. When step 7 or 8 fails, rolls back. The new digest goes into `failed`,
+   except when only the server count failed: a server can be offline for
+   reasons of its own, so the run records the reason in `state` and the
+   next run tries the release again. It runs `aether-edge schema --json`
+   from the old image against the data directory, the host directory that
+   `docker compose config` shows bound to `/var/lib/aether-edge`, so this
+   works when Compose has removed the container. Only when the old
+   release cannot run the database (`supported` below `compat_floor`), or
+   `schema` cannot read it, does it stop the edge and restore the backup. It then starts the old digest and
    repeats the checks except the server count: the old release ran before,
    and a server that went offline meanwhile must not stop the rollback.
    The run exits 1. When the rollback fails too, the state becomes
@@ -1806,6 +1817,9 @@ sudo systemctl enable aether-edge-update-recover.service
 systemctl list-timers aether-edge-update.timer
 ```
 
+An edge that already runs from an older image needs the
+[first upgrade](#first-upgrade) by hand once.
+
 `--check` resolves and verifies the channel's release, prints `would
 update <version> (<digest>) to <version> (<digest>)`, and changes nothing.
 Without cosign or jq it fails with `cosign not found` or `jq not found`.
@@ -1833,6 +1847,34 @@ ExecStart=/bin/sh -c 'journalctl -u %i -n 50 --no-pager | curl -fsS --data-binar
 sudo systemctl edit aether-edge-update.service   # add: [Unit] OnFailure=edge-alert@%n.service
 ```
 
+#### First upgrade
+
+The updater runs `version --json`, `release-check`, `backup` and `schema`
+from the image the edge runs now, which is already trusted; it never runs
+them from the release it is still verifying. An image from before these
+commands makes every run exit 1 with
+`<image>@<digest> predates aether-edge version --json, release-check, backup and schema`
+and the steps below, filled in. Do them once, in `/opt/aether-edge`:
+
+```sh
+docker pull ghcr.io/3xdevops/aether-edge:stable                        # prints Digest: sha256:<digest>
+cosign verify-attestation --new-bundle-format \
+  --type https://github.com/3xDevOps/aether/edge-promotion/v1 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main \
+  ghcr.io/3xdevops/aether-edge@sha256:<digest> | jq -r .payload | base64 -d | jq .predicate
+sudo docker compose stop aether-edge
+sudo cp -a data data.pre-update
+sudo sed -i 's/^AETHER_EDGE_DIGEST=.*/AETHER_EDGE_DIGEST=sha256:<digest>/' .env
+sudo docker compose up -d --wait aether-edge
+```
+
+The predicate must name `stable`, the digest and the release tag;
+`gh attestation verify` checks the same
+([In a container](#in-a-container)). The edge migrates the database on its
+first start; `data.pre-update` is the copy to restore if the new release
+fails. From then on the updater does the rest.
+
 #### Updater configuration
 
 `aether-edge-update` reads `/etc/aether-edge-update.env` on every run
@@ -1847,8 +1889,9 @@ same settings as the timer
 | `AETHER_EDGE_UPDATE_COMPOSE_DIR` | `/opt/aether-edge` | The directory of `compose.yaml` |
 | `AETHER_EDGE_UPDATE_DIGEST_FILE` | `<compose dir>/.env` | The file holding `AETHER_EDGE_DIGEST` |
 | `AETHER_EDGE_UPDATE_STATE` | `/var/lib/aether-edge-update` | The state directory, mode 0700 |
+| `AETHER_EDGE_UPDATE_PUBLIC_WAIT` | `300` | Seconds `<relay>/v1/edge` has to answer through the proxy, before an update and after each switch |
 | `AETHER_EDGE_UPDATE_SERVER_WAIT` | `120` | Seconds the claimed servers have to reconnect |
-| `AETHER_EDGE_UPDATE_SERVER_TOLERANCE` | `0` | Claimed servers that may stay away, for servers that go offline on their own |
+| `AETHER_EDGE_UPDATE_SERVER_TOLERANCE` | `10%` | Claimed servers that may stay away, as a count such as `1` or a percentage, rounded up; `0` requires every one |
 
 #### State files
 
@@ -1856,7 +1899,7 @@ In `/var/lib/aether-edge-update`:
 
 | File | Holds |
 | --- | --- |
-| `state` | `state=` `idle`, `switching` (between the backup and passing checks), `rolling-back`, `held` or `broken`, with the two releases, the fingerprint, the server count, the backup and the reason |
+| `state` | `state=` `idle`, `switching` (between the backup and passing checks), `rolling-back`, `held` or `broken`, with the two releases, the fingerprint, the server count, the backup, whether the release is retried, and the reason |
 | `current` | The digest and version the last update installed |
 | `previous` | The digest, version and pre-update backup of the release before it, for `--rollback` |
 | `failed` | One line per digest never to install again: digest, version, reason |
@@ -1868,9 +1911,17 @@ rollback. A host that reboots mid-run may come back with the edge stopped,
 since `restart: unless-stopped` does not restart a container the updater
 stopped. `aether-edge-update-recover.service` runs `aether-edge-update
 --recover` at boot, which finishes or rolls back the interrupted run and
-never starts a new update. A run killed by its timeout, or by `systemctl
-stop`, waits for the next run; run `sudo aether-edge-update --recover`
-to recover it now.
+never starts a new update. It starts after Docker, which can be before
+Traefik routes to the edge; the public check waits for that
+(`AETHER_EDGE_UPDATE_PUBLIC_WAIT`). A switch stopped by the unit's
+`TimeoutStartSec=` or by `systemctl stop` becomes `rolling-back`, and the
+unit's `ExecStopPost=` runs `--recover`, which rolls it back and leaves
+the release to be retried by the next run. A run killed with `SIGKILL`
+is recovered by the next run or `sudo aether-edge-update --recover`.
+
+A `state` file that is empty or has no valid `state=` line makes every
+run exit 1 with `has no valid state= line`: check which digest the edge
+runs, then delete the file.
 
 **`held`**: the release needs a manual step. Read the step in the journal,
 the `aether-edge: hold: <reason>` lines `release-check` printed. Each run
@@ -1882,7 +1933,11 @@ sudo aether-edge-update --manual-steps-done
 
 That run treats the hold as passed and keeps every other check. It applies
 only to the digest that was held: when the channel has moved on, the new
-release is held again.
+release is held again. It passes only blocking manual steps. A hold
+because the running release is older than the new release's
+`min_upgrade_from` exits 1 with `--manual-steps-done passes only blocking
+manual steps`; upgrade by hand to a release at or above it first
+([Upgrades](#upgrades)).
 
 **`broken`**: the rollback failed, and every run exits 1 with `state is
 broken since <time>: <reason>` and changes nothing. Read the reason in
@@ -1905,16 +1960,26 @@ sudo aether-edge-update --rollback
 ```
 
 This returns to the digest in `previous`. It backs up the database to
-`pre-rollback-<version>-<UTC time>.db`. It restores the pre-update backup
-in `previous` only when the older release cannot run the database, then
-starts the older digest and runs the same checks. A restore loses every
-change since the update, such as sign-ins and new device tokens. The
-digest it left goes into `failed`, so the timer does not install it again,
-and `previous` is removed. When a check fails, it returns to the release
-it started from and restores the pre-rollback backup if it had restored.
-It also works when the current edge is down: it then checks the
-fingerprint the last update recorded and backs up from a stopped
-container.
+`pre-rollback-<version>-<UTC time>.db` and starts the older digest with
+the same checks. When the older release cannot run the database, the
+rollback has to restore the pre-update backup in `previous`, which loses
+every account, device, sign-in and server change since that backup. It
+then changes nothing and exits 1 with the backup's time and age. To roll
+back anyway:
+
+```sh
+sudo aether-edge-update --rollback --restore-backup
+```
+
+The automatic rollback right after a failed update restores without this
+flag: its backup is minutes old.
+
+The digest a manual rollback leaves goes into `failed`, so the timer does
+not install it again, and `previous` is removed. When a check fails, the
+rollback returns to the release it started from and restores the pre-rollback backup if it had restored.
+It also works when the current edge is down or its container is gone: it
+then checks the fingerprint the last update recorded and backs up with
+the current image from the data directory.
 
 Backups stay in `data/backups/` until you delete them. They hold the
 accounts and device-token hashes but not `edge_key`; keep them as private

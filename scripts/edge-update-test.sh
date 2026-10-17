@@ -1,9 +1,9 @@
 #!/bin/sh
-# Exercises scripts/edge-update.sh against stubbed docker, curl, flock and
-# sleep, the same style as deploy-test.sh. The docker stub keeps a small
-# world in files: which digest runs, what the channel tag points to, the
-# database and its backups, and which releases fail. A real edge is not
-# involved.
+# Exercises scripts/edge-update.sh against stubbed docker, curl, cosign,
+# flock and sleep, the same style as deploy-test.sh. The docker stub keeps
+# a small world in files: which digest runs, what the channel tag points
+# to, the database and its backups, and which releases fail. A real edge
+# is not involved.
 set -eu
 
 script_dir=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
@@ -28,14 +28,23 @@ D=sha256:$(printf '%064d' 0 | tr 0 d)
 #   reports     a version the running container reports instead
 #   supports    the highest database schema the image supports
 #   floor       the compat floor its migrations leave in the database
+#   legacy      the image predates version --json and release-check
+#   no-release-check  the image has version --json but not release-check
 #   up-fails    docker compose up fails for it
+#   gone-after-up  its container is removed right after it starts
+#   term-on-up  docker compose up sends SIGTERM to the updater once
 #   unready     healthcheck --ready fails in it
 #   claimed     claimed servers while it runs (default 3)
 #   slow        readiness reports 0 claimed servers this many times first
 #   fingerprint served on /v1/edge while it runs (default SHA256:good)
 # and $WORLD/channel, $WORLD/running, $WORLD/db ("schema floor data"),
-# $WORLD/backups/<name>, and the switches backup-fails, restore-fails and
-# schema-fails.
+# $WORLD/data/backups/<name>, $WORLD/release-check ("<exit> [min]"),
+# $WORLD/unrouted (how many /v1/edge requests the proxy answers 404
+# first), $WORLD/extra-digest (a second repository digest), and the
+# switches backup-fails, restore-fails, schema-fails and gone (no
+# container until the next up). The JSON is what aether-edge prints:
+# version and schema --json (#453), healthcheck --ready --json (#455) and
+# release-check --json (#454).
 cat >"$bin/docker" <<'EOF'
 #!/bin/sh
 set -eu
@@ -44,7 +53,11 @@ w="$WORLD"
 get() { cat "$w/$1/$2" 2>/dev/null || echo "${3:-}"; }
 backup() {
 	[ ! -f "$w/backup-fails" ] || { echo "aether-edge: backup: disk full" >&2; exit 1; }
-	cp "$w/db" "$w/backups/$(basename "$1")"
+	cp "$w/db" "$w/data/backups/$(basename "$1")"
+}
+version_json() {
+	printf '{"version":"%s","commit":"abc","store_schema":%s,"store_compat_floor":%s,"protocol":{"version":1,"min_version":1}}\n' \
+		"$1" "$(get supports "$2" 1)" "$(get floor "$2" "$(get supports "$2" 1)")"
 }
 image=ghcr.io/3xdevops/aether-edge
 case "$1" in
@@ -52,7 +65,10 @@ pull) exit 0 ;;
 image)
 	d="${5#*@}"
 	case "$4" in
-	*RepoDigests*) echo "$image@$(cat "$w/channel")" ;;
+	*RepoDigests*)
+		echo "$image@$(cat "$w/channel")"
+		[ ! -f "$w/extra-digest" ] || echo "$image@$(cat "$w/extra-digest")"
+		;;
 	*image.version*) get label "$d" "$(get version "$d")" ;;
 	esac
 	exit 0
@@ -61,15 +77,40 @@ run)
 	shift
 	while [ $# -gt 0 ]; do
 		case "$1" in
+		--volumes-from) [ ! -f "$w/gone" ] || { echo "docker: Error response from daemon: No such container: $2." >&2; exit 125; } ;;
+		-v) [ "$2" = "$w/data:/var/lib/aether-edge" ] || { echo "docker stub: unexpected mount $2" >&2; exit 2; } ;;
 		*@sha256:*) break ;;
 		esac
 		shift
 	done
 	d="${1#*@}"
 	shift
+	if [ -f "$w/legacy/$d" ]; then
+		[ "$1" = version ] || { echo "aether-edge: unknown command \"$1\"" >&2; exit 2; }
+		echo "aether-edge $(get version "$d") (abc)"
+		exit 0
+	fi
 	case "$1" in
-	version) printf '{"protocol":{"version":1,"min_version":1},"version":"%s","commit":"abc","store_schema":%s}\n' "$(get version "$d")" "$(get supports "$d" 1)" ;;
-	release-check) exit "$(cat "$w/release-check" 2>/dev/null || echo 0)" ;;
+	version) version_json "$(get version "$d")" "$d" ;;
+	release-check)
+		[ ! -f "$w/no-release-check/$d" ] || { echo "aether-edge: unknown command \"release-check\"" >&2; exit 2; }
+		tag="$3" digest="$5" from="$7"
+		rc=0 kind=""
+		[ ! -f "$w/release-check" ] || read -r rc kind <"$w/release-check"
+		[ "$rc" != 1 ] || { echo "aether-edge: release $tag signs the edge image sha256:0, not $digest; do not run it" >&2; exit 1; }
+		steps='[]' reasons='[]' hold=false reason=""
+		if [ "$rc" = 3 ] && [ "$kind" = min ]; then
+			reason="$tag upgrades only from v1.0.5 or later; upgrade $from to v1.0.5 first"
+			reasons="[\"$reason\"]" hold=true
+		elif [ "$rc" = 3 ]; then
+			reason="manual step rotate-key (since v1.1.0) must be done first: rotate the edge key; see https://example.com/rotate"
+			steps='[{"id":"rotate-key","since":"v1.1.0","summary":"rotate the edge key","doc_url":"https://example.com/rotate","blocking":true}]'
+			reasons="[\"$reason\"]" hold=true
+		fi
+		printf '{"version":"%s","commit":"abc","edge":{"image":"%s","image_digest":"%s","store_schema":1,"store_compat_floor":1,"protocol":{"version":1,"min_version":1},"min_upgrade_from":"v0.5.2-alpha.4","manual_steps":%s},"applicable_steps":%s,"hold":%s,"reasons":%s}\n' \
+			"$tag" "$image" "$digest" "$steps" "$steps" "$hold" "$reasons"
+		[ "$hold" = false ] || { echo "aether-edge: hold: $reason" >&2; exit 3; }
+		;;
 	schema)
 		[ ! -f "$w/schema-fails" ] || { echo "aether-edge: edge.db: file is not a database" >&2; exit 1; }
 		read -r schema floor data <"$w/db"
@@ -78,28 +119,31 @@ run)
 	backup) backup "$2" ;;
 	restore)
 		[ ! -f "$w/restore-fails" ] || { echo "aether-edge: restore: disk full" >&2; exit 1; }
-		[ -z "$(cat "$w/running")" ] || { echo "aether-edge: restore: an edge holds edge.lock" >&2; exit 1; }
-		cp "$w/backups/$(basename "$2")" "$w/db"
+		[ -z "$(cat "$w/running")" ] || { echo "aether-edge: another aether-edge process holds the lock; an edge is running on /var/lib/aether-edge" >&2; exit 1; }
+		cp "$w/data/backups/$(basename "$2")" "$w/db"
 		;;
 	esac
 	exit 0
 	;;
 exec)
+	[ ! -f "$w/gone" ] || { echo "Error response from daemon: No such container: aether-edge" >&2; exit 1; }
 	running="$(cat "$w/running")"
 	[ -n "$running" ] || { echo "Error response from daemon: container is not running" >&2; exit 1; }
 	case "$3 $4" in
 	"aether-edge backup") backup "$5" ;;
-	"aether-edge version") printf '{"version":"%s","commit":"abc"}\n' "$(get reports "$running" "$(get version "$running")")" ;;
+	"aether-edge version") version_json "$(get reports "$running" "$(get version "$running")")" "$running" ;;
 	"aether-edge healthcheck")
-		[ ! -f "$w/unready/$running" ] || { echo "aether-edge: healthcheck: not ready" >&2; exit 1; }
 		claimed="$(get claimed "$running" 3)"
 		slow="$(get slow "$running" 0)"
 		if [ "$slow" -gt 0 ]; then
 			echo $((slow - 1)) >"$w/slow/$running"
 			claimed=0
 		fi
-		printf '{"status":"ready","checks":{"db":"ok","claimed":0},"version":"%s","protocol":{"version":1,"min_version":1},"servers":{"claimed":%s,"unclaimed":0}}\n' \
-			"$(get version "$running")" "$claimed"
+		status=ready db=ok
+		[ ! -f "$w/unready/$running" ] || status=unready db="database is locked"
+		printf '{"status":"%s","version":"%s","protocol":{"version":1,"min_version":1},"checks":{"db":"%s","listener":"ok","draining":false},"servers":{"claimed":%s,"unclaimed":0}}\n' \
+			"$status" "$(get version "$running")" "$db" "$claimed"
+		[ "$status" = ready ] || { echo "aether-edge: healthcheck: edge is not ready (unready): db: $db" >&2; exit 1; }
 		;;
 	esac
 	exit 0
@@ -107,10 +151,18 @@ exec)
 compose)
 	env_file="$3"
 	case "$4" in
+	config)
+		printf '{"name":"edge","services":{"aether-edge":{"volumes":[{"type":"bind","source":"%s","target":"/var/lib/aether-edge","bind":{}}]}}}\n' "$w/data"
+		;;
 	stop) : >"$w/running" ;;
 	up)
 		d="$(sed -n 's/^AETHER_EDGE_DIGEST=//p' "$env_file")"
+		if [ -f "$w/term-on-up/$d" ]; then
+			rm "$w/term-on-up/$d"
+			kill -TERM "$PPID"
+		fi
 		[ ! -f "$w/up-fails/$d" ] || exit 1
+		rm -f "$w/gone"
 		: >"$w/running"
 		read -r schema floor data <"$w/db"
 		supports="$(get supports "$d" 1)"
@@ -120,6 +172,7 @@ compose)
 			exit 1
 		fi
 		echo "$d" >"$w/running"
+		[ ! -f "$w/gone-after-up/$d" ] || touch "$w/gone"
 		;;
 	esac
 	exit 0
@@ -133,17 +186,25 @@ cat >"$bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
 printf 'curl %s\n' "$*" >>"$CMD_LOG"
+unrouted="$(cat "$WORLD/unrouted" 2>/dev/null || echo 0)"
+if [ "$unrouted" -gt 0 ]; then
+	echo $((unrouted - 1)) >"$WORLD/unrouted"
+	echo "curl: (22) The requested URL returned error: 404" >&2
+	exit 22
+fi
 running="$(cat "$WORLD/running")"
-[ -n "$running" ] || exit 7
+if [ -z "$running" ] || [ -f "$WORLD/gone" ]; then
+	echo "curl: (22) The requested URL returned error: 502" >&2
+	exit 22
+fi
 fp="$(cat "$WORLD/fingerprint/$running" 2>/dev/null || echo SHA256:good)"
-printf '{"signin_origin":"https://auth.example.com","key":"k","fingerprint":"%s","version":1,"min_version":1}\n' "$fp"
+printf '{"signin_origin":"https://auth.example.com","key":"MCowBQYDK2VwAyEA","fingerprint":"%s","version":1,"min_version":1}\n' "$fp"
 EOF
 
 # Answers with one attestation whose predicate promotes the digest on
 # stable as its version, or as $WORLD/promotion/<digest> says ("<channel>
 # <tag> [<digest>]", or "none" for no attestation). Like cosign, it refuses
-# when the signer, $WORLD/signer if set, is not the identity and workflow
-# ref asked for.
+# when the signer, $WORLD/signer if set, is not the identity asked for.
 cat >"$bin/cosign" <<'EOF'
 #!/bin/sh
 set -eu
@@ -152,7 +213,6 @@ signer="$(cat "$WORLD/signer" 2>/dev/null || echo https://github.com/3xDevOps/ae
 while [ $# -gt 1 ]; do
 	case "$1" in
 	--certificate-identity) [ "$2" = "$signer" ] || { echo "error: expected SAN value \"$2\", got \"$signer\"" >&2; exit 1; } ;;
-	--certificate-github-workflow-ref) [ "$2" = "${signer##*@}" ] || { echo "error: expected GitHub Workflow Ref \"$2\"" >&2; exit 1; } ;;
 	esac
 	shift
 done
@@ -180,9 +240,10 @@ chmod 0755 "$bin/docker" "$bin/cosign" "$bin/curl" "$bin/flock" "$bin/sleep"
 
 state="$tmp/state"
 compose_dir="$tmp/compose"
+mount="-v $world/data:/var/lib/aether-edge"
 export CMD_LOG="$log" WORLD="$world" PATH="$bin:$PATH"
 export AETHER_EDGE_UPDATE_CONFIG="$tmp/none" AETHER_EDGE_UPDATE_STATE="$state" AETHER_EDGE_UPDATE_COMPOSE_DIR="$compose_dir"
-export AETHER_EDGE_UPDATE_RELAY_URL=https://edge.example.com AETHER_EDGE_UPDATE_SERVER_WAIT=15
+export AETHER_EDGE_UPDATE_RELAY_URL=https://edge.example.com AETHER_EDGE_UPDATE_SERVER_WAIT=15 AETHER_EDGE_UPDATE_PUBLIC_WAIT=30
 
 fail() {
 	echo "edge-update-test: $*" >&2
@@ -230,12 +291,16 @@ assert_denied() {
 	grep -q "^$1 " "$state/failed" 2>/dev/null || fail "$1 not in failed"
 }
 
+refute_denied() {
+	! grep -q "^$1 " "$state/failed" 2>/dev/null || fail "$1 in failed"
+}
+
 # Fresh world: A (v1.0.0) runs, the channel points to B (v1.1.0), C is
 # v0.9.0, D is v1.2.0. Every image supports schema 1; the database is at 1
 # and holds "old".
 reset() {
 	rm -rf "$world" "$state" "$compose_dir"
-	for d in version label promotion reports supports floor up-fails unready claimed slow fingerprint backups; do
+	for d in version label promotion reports supports floor legacy no-release-check up-fails gone-after-up term-on-up unready claimed slow fingerprint data/backups; do
 		mkdir -p "$world/$d"
 	done
 	mkdir -p "$compose_dir"
@@ -267,15 +332,13 @@ write_db() {
 	echo "$schema $floor $1" >"$world/db"
 }
 
-# --- success: verify, back up, switch, check -----------------------------
-
 reset
 run 0
 assert "docker pull --quiet $image:stable"
 assert "docker run --rm $image@$A release-check --tag v1.1.0 --digest $B --from v1.0.0 --json"
 assert_before "docker exec aether-edge aether-edge backup /var/lib/aether-edge/backups/pre-update-v1.1.0-" "up -d --wait --wait-timeout 180 aether-edge"
 assert_before "release-check" "aether-edge backup"
-assert "cosign verify-attestation --type https://github.com/3xDevOps/aether/edge-promotion/v1 --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-ref refs/heads/main $image@$B"
+assert "cosign verify-attestation --new-bundle-format --type https://github.com/3xDevOps/aether/edge-promotion/v1 --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main $image@$B"
 assert_before "cosign verify-attestation" "release-check"
 refute "restore"
 refute " stop aether-edge"
@@ -285,15 +348,16 @@ assert_state idle
 grep -qx "$B v1.1.0" "$state/current" || fail "current not recorded"
 grep -q "^$A v1.0.0 /var/lib/aether-edge/backups/pre-update-v1.1.0-[0-9TZ]*\.db$" "$state/previous" || fail "previous not recorded"
 [ "$(stat -c %a "$state")" = 700 ] || fail "state directory is not 0700"
+grep -q '"store_compat_floor":1' "$state/from.json" || fail "from.json not recorded"
 assert_out "now running v1.1.0"
 
-# --- manual rollback to the recorded previous release ----------------------
-
+# A manual rollback that needs no restore.
 : >"$log"
 run 0 --rollback
 assert "aether-edge backup /var/lib/aether-edge/backups/pre-rollback-v1.1.0-"
-assert "--volumes-from aether-edge $image@$A schema --json"
+assert "$mount $image@$A schema --json"
 refute "restore"
+refute "--volumes-from"
 assert_digest "$A"
 assert_state idle
 grep -q "^$B v1.1.0 rolled back by an operator" "$state/failed" || fail "rolled-back release not denied"
@@ -303,55 +367,65 @@ run 0
 assert_out "skipping $B"
 refute "aether-edge backup"
 
-# --- manual rollback over a migration restores the pre-update backup -------
-
+# A manual rollback over a migration refuses to restore the old backup
+# until the operator passes --restore-backup.
 reset
 echo 2 >"$world/supports/$B"
 echo 2 >"$world/floor/$B"
 run 0
 assert_db "2 2 old"
 write_db new
-run 0 --rollback
+touch -d '10 days ago' "$world"/data/backups/pre-update-v1.1.0-*.db
+: >"$log"
+run 1 --rollback
+assert_out "10 days ago"
+assert_out "Every account, device, sign-in and server change since then is lost"
+assert_out "--rollback --restore-backup"
+refute "restore /var"
+refute " stop aether-edge"
+refute "aether-edge backup"
+assert_db "2 2 new"
+assert_digest "$B"
+assert_state idle
+run 0 --rollback --restore-backup
 assert_before " stop aether-edge" "restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
 assert_db "1 1 old"
 assert_digest "$A"
+run 2 --restore-backup
 
-# --- a failed manual rollback puts back the newer data ---------------------
-
+# A failed manual rollback puts back the newer data.
 reset
 echo 2 >"$world/supports/$B"
 echo 2 >"$world/floor/$B"
 run 0
 write_db new
 touch "$world/unready/$A"
-run 1 --rollback
+run 1 --rollback --restore-backup
 assert "restore /var/lib/aether-edge/backups/pre-rollback-v1.1.0-"
 assert_db "2 2 new"
 assert_digest "$B"
 assert_state idle
 
-# --- manual rollback of an edge that is down -------------------------------
+# A manual rollback of an edge that is down, or whose container is gone.
+for down in stopped gone; do
+	reset
+	run 0
+	touch "$world/up-fails/$B"
+	if [ "$down" = gone ]; then touch "$world/gone"; else : >"$world/running"; fi
+	: >"$log"
+	run 0 --rollback
+	assert "$mount $image@$B backup /var/lib/aether-edge/backups/pre-rollback-v1.1.0-"
+	assert_out "recorded by the last update"
+	assert_digest "$A"
+done
 
-reset
-run 0
-touch "$world/up-fails/$B"
-: >"$world/running"
-: >"$log"
-run 0 --rollback
-assert "--volumes-from aether-edge $image@$B backup /var/lib/aether-edge/backups/pre-rollback-v1.1.0-"
-assert_out "recorded by the last update"
-assert_digest "$A"
-
-# --- no-op: the channel already points to the running digest ---------------
-
+# No-op: the channel already points to the running digest.
 reset
 echo "$A" >"$world/channel"
 run 0
 assert_out "up to date"
 refute "release-check"
 refute "compose"
-
-# --- --check resolves and verifies, changes nothing ------------------------
 
 reset
 run 0 --check
@@ -361,14 +435,24 @@ refute "aether-edge backup"
 refute "compose"
 assert_digest "$A"
 
-# --- --channel picks another tag -------------------------------------------
-
 reset
 run 0 --check --channel latest
 assert "docker pull --quiet $image:latest"
 
-# --- verification failure: nothing changes ---------------------------------
+# A tag that resolves to two digests is refused, not split by line.
+reset
+echo "$D" >"$world/extra-digest"
+run 1
+assert_out "has no single repository digest"
+refute "release-check"
 
+reset
+printf 'AETHER_EDGE_DIGEST=sha256:abc\n' >"$compose_dir/.env"
+run 1
+assert_out "no AETHER_EDGE_DIGEST=sha256:<digest> line"
+refute "docker"
+
+# Verification failure: nothing changes.
 reset
 echo 1 >"$world/release-check"
 run 1
@@ -377,8 +461,7 @@ refute "aether-edge backup"
 refute "compose"
 assert_digest "$A"
 
-# --- a digest stable was not promoted to: nothing changes -----------------
-
+# A digest stable was not promoted to.
 for promotion in none "stable v1.0.5" "latest v1.1.0" "stable v1.1.0 $D"; do
 	reset
 	echo "$promotion" >"$world/promotion/$B"
@@ -389,8 +472,7 @@ for promotion in none "stable v1.0.5" "latest v1.1.0" "stable v1.1.0 $D"; do
 	assert_digest "$A"
 done
 
-# --- a promotion signed from a branch or by another workflow is refused ----
-
+# A promotion signed from a branch or by another workflow.
 for signer in promote-edge.yml@refs/heads/evil release.yml@refs/heads/main; do
 	reset
 	echo "https://github.com/3xDevOps/aether/.github/workflows/$signer" >"$world/signer"
@@ -400,15 +482,11 @@ for signer in promote-edge.yml@refs/heads/evil release.yml@refs/heads/main; do
 	assert_digest "$A"
 done
 
-# --- latest is not promoted: no attestation needed --------------------------
-
 reset
 echo none >"$world/promotion/$B"
 run 0 --channel latest
 refute "cosign"
 assert_digest "$B"
-
-# --- cosign is a prerequisite ---------------------------------------------
 
 reset
 mkdir -p "$tmp/nocosign"
@@ -423,8 +501,6 @@ set -e
 assert_out "cosign not found"
 refute "docker"
 
-# --- a label that disagrees with the image is refused ----------------------
-
 reset
 echo v1.1.1 >"$world/label/$B"
 echo "stable v1.1.1" >"$world/promotion/$B"
@@ -432,13 +508,29 @@ run 1
 assert_out "reports version v1.1.0 but is labelled v1.1.1"
 refute "compose"
 
-# --- held for a blocking manual step ---------------------------------------
+# A running image from before the updater's commands gets the manual first
+# upgrade, and nothing runs from the candidate.
+for missing in legacy no-release-check; do
+	reset
+	touch "$world/$missing/$A"
+	run 1
+	assert_out "predates aether-edge version --json, release-check, backup and schema"
+	assert_out "cosign verify-attestation --new-bundle-format"
+	assert_out "AETHER_EDGE_DIGEST=$B in $compose_dir/.env"
+	assert_out "docker compose up -d --wait aether-edge"
+	refute "$image@$B release-check"
+	refute "$image@$B version"
+	refute "aether-edge backup"
+	refute "compose"
+	assert_digest "$A"
+done
 
+# Held for a blocking manual step.
 reset
 echo 3 >"$world/release-check"
 run 3
 assert_state held
-grep -q "^reason=.*manual-steps-done" "$state/state" || fail "held state has no reason"
+grep -q "^reason=.*manual step rotate-key.*manual-steps-done" "$state/state" || fail "held state has no reason"
 refute "aether-edge backup"
 refute "compose"
 assert_digest "$A"
@@ -447,8 +539,7 @@ run 0 --manual-steps-done
 assert_digest "$B"
 assert_state idle
 
-# --- --manual-steps-done passes only the release that was held -------------
-
+# --manual-steps-done passes only the release that was held.
 reset
 echo 3 >"$world/release-check"
 run 3
@@ -461,8 +552,19 @@ echo 3 >"$world/release-check"
 run 3 --manual-steps-done
 assert_digest "$A"
 
-# --- downgrade refused before any verification -----------------------------
+# --manual-steps-done never passes a min_upgrade_from hold.
+reset
+echo "3 min" >"$world/release-check"
+run 3
+assert_state held
+grep -q "^reason=.*upgrades only from v1.0.5" "$state/state" || fail "held state has no reason"
+! grep -q "^reason=.*manual-steps-done" "$state/state" || fail "held state offers --manual-steps-done"
+run 1 --manual-steps-done
+assert_out "passes only blocking manual steps, and release-check holds v1.1.0 for more: v1.1.0 upgrades only from v1.0.5"
+refute "compose"
+assert_digest "$A"
 
+# Downgrade refused before any verification.
 reset
 echo "$C" >"$world/channel"
 run 1
@@ -475,8 +577,6 @@ echo v1.1.0 >"$world/version/$A"
 run 1
 assert_out "not newer than the running v1.1.0"
 
-# --- backup failure aborts before any change -------------------------------
-
 reset
 touch "$world/backup-fails"
 run 1
@@ -485,13 +585,12 @@ refute "compose"
 assert_digest "$A"
 [ ! -e "$state/state" ] || fail "state written before the backup succeeded"
 
-# --- unhealthy new release: rollback without restore -----------------------
-
+# Unhealthy new release: rollback without restore.
 reset
 touch "$world/unready/$B"
 run 1
 assert_out "rolled back to v1.0.0"
-assert "--user 65532:65532 --volumes-from aether-edge $image@$A schema --json"
+assert "--user 65532:65532 $mount $image@$A schema --json"
 refute "restore"
 refute " stop aether-edge"
 assert_digest "$A"
@@ -499,15 +598,11 @@ assert_state idle
 grep -q "^$B v1.1.0 aether-edge healthcheck --ready fails" "$state/failed" || fail "failed release not denied"
 [ "$(cat "$world/running")" = "$A" ] || fail "old release not running"
 
-# --- the new edge reports another version: rollback ------------------------
-
 reset
 echo v1.0.9 >"$world/reports/$B"
 run 1
 assert_out "the container reports version 'v1.0.9', expected v1.1.0"
 assert_digest "$A"
-
-# --- the new edge lost its key: rollback ------------------------------------
 
 reset
 echo SHA256:other >"$world/fingerprint/$B"
@@ -515,21 +610,33 @@ run 1
 assert_out "lost its edge_key"
 assert_digest "$A"
 
-# --- migrated, then failed: rollback restores the backup -------------------
-
+# Migrated, then failed: the rollback restores the backup.
 reset
 echo 2 >"$world/supports/$B"
 echo 2 >"$world/floor/$B"
 touch "$world/unready/$B"
 run 1
-assert_before " stop aether-edge" "--user 65532:65532 --volumes-from aether-edge $image@$A restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
+assert_before " stop aether-edge" "--user 65532:65532 $mount $image@$A restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
 assert_before "schema --json" "restore /var/lib"
 assert_db "1 1 old"
 assert_digest "$A"
 assert_state idle
 
-# --- additive migration within the compat floor: no restore ---------------
+# The same when Compose removed the new container: the old image reaches
+# the data directory through the bind mount.
+reset
+echo 2 >"$world/supports/$B"
+echo 2 >"$world/floor/$B"
+touch "$world/gone-after-up/$B"
+run 1
+assert_out "rolled back to v1.0.0"
+assert "$mount $image@$A restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
+refute "--volumes-from"
+assert_db "1 1 old"
+assert_digest "$A"
+assert_state idle
 
+# An additive migration within the compat floor: no restore.
 reset
 echo 2 >"$world/supports/$B"
 echo 1 >"$world/floor/$B"
@@ -539,16 +646,13 @@ refute "restore"
 assert_db "2 1 old"
 assert_digest "$A"
 
-# --- an unreadable database is restored -------------------------------------
-
 reset
 touch "$world/unready/$B" "$world/schema-fails"
 run 1
 assert "restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
 assert_digest "$A"
 
-# --- rollback fails: broken, and later runs never loop ----------------------
-
+# The rollback fails: broken, and later runs never loop.
 reset
 touch "$world/unready/$B" "$world/up-fails/$A"
 run 1
@@ -565,8 +669,6 @@ echo "$A" >"$world/running"
 run 0
 assert_out "skipping $B"
 
-# --- a failed restore is broken too ------------------------------------------
-
 reset
 echo 2 >"$world/supports/$B"
 echo 2 >"$world/floor/$B"
@@ -575,8 +677,30 @@ run 1
 assert_state broken
 assert_out "aether-edge restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
 
-# --- interrupted run: a reboot during the switch is finished ---------------
+# A rollback is recorded before the release is denied: when the denylist
+# cannot be written, the state already says rolling-back.
+reset
+touch "$world/unready/$B"
+mkdir -p "$state/failed"
+run 2
+assert_state rolling-back
+rmdir "$state/failed"
+run 1
+assert_out "rolled back to v1.0.0"
+assert_denied "$B"
+assert_digest "$A"
 
+# An empty or garbled state file is an error, never idle.
+for content in "" "garbage=1"; do
+	reset
+	mkdir -p "$state"
+	printf '%s' "$content" >"$state/state"
+	run 1
+	assert_out "has no valid state= line"
+	refute "docker"
+done
+
+# Interrupted run: a reboot during the switch is finished.
 reset
 cat >"$tmp/interrupted" <<EOF
 state=switching
@@ -601,7 +725,14 @@ refute "docker pull"
 assert_digest "$B"
 assert_state idle
 
-# --- interrupted run that cannot finish is rolled back ---------------------
+# At boot the proxy may route only after a while; the public check waits.
+reset
+mkdir -p "$state"
+cp "$tmp/interrupted" "$state/state"
+echo 4 >"$world/unrouted"
+run 0 --recover
+assert_digest "$B"
+assert_state idle
 
 reset
 mkdir -p "$state"
@@ -612,8 +743,7 @@ assert_out "rolled back to v1.0.0"
 assert_digest "$A"
 assert_state idle
 
-# --- servers missing after the rollback do not make it broken ---------------
-
+# Servers missing after the rollback do not make it broken.
 reset
 mkdir -p "$state"
 cp "$tmp/interrupted" "$state/state"
@@ -623,24 +753,39 @@ run 1
 assert_out "rolled back to v1.0.0"
 assert_state idle
 
-# --- a reboot after the restore stopped the edge: --recover at boot --------
-
+# A reboot after the restore stopped the edge: --recover at boot.
 reset
 mkdir -p "$state"
 sed 's/^state=switching/state=rolling-back/' "$tmp/interrupted" >"$state/state"
-cp "$world/db" "$world/backups/pre-update-v1.1.0.db"
+cp "$world/db" "$world/data/backups/pre-update-v1.1.0.db"
 : >"$world/running"
 run 1 --recover
 assert_out "rolling back to v1.0.0"
 refute "docker pull"
 assert_digest "$A"
 assert_state idle
+assert_denied "$B"
 : >"$log"
 run 0 --recover
 assert_out "no interrupted run to recover"
 refute "docker"
 
-# --- another run holds the lock --------------------------------------------
+# SIGTERM mid-switch, as from TimeoutStartSec: the switch is marked for a
+# rollback that ExecStopPost=--recover performs, and the release is
+# retried later.
+reset
+touch "$world/term-on-up/$B"
+run 1
+assert_out "stopped by a signal during the switch to v1.1.0; aether-edge-update --recover rolls it back"
+assert_state rolling-back
+grep -qx "retry=1" "$state/state" || fail "interrupted switch not marked for retry"
+run 1 --recover
+assert_out "the next run retries $B"
+refute_denied "$B"
+assert_digest "$A"
+assert_state idle
+run 0
+assert_digest "$B"
 
 reset
 touch "$world/locked"
@@ -648,8 +793,6 @@ run 0
 assert_out "another run holds"
 refute "docker"
 run 1 --rollback
-
-# --- a release that failed before is skipped -------------------------------
 
 reset
 mkdir -p "$state"
@@ -659,30 +802,51 @@ assert_out "skipping $B, which failed before: v1.1.0 checks failed"
 refute "release-check"
 refute "compose"
 
-# --- servers have the configured time to come back -------------------------
-
+# Servers have the configured time to come back.
 reset
 echo 2 >"$world/slow/$B"
 run 0
 assert_digest "$B"
-reset
-echo 1 >"$world/claimed/$B"
-run 1
-assert_out "1 claimed servers reconnected within 15s, expected at least 3"
-assert_digest "$A"
+
+# By default 10% of the claimed servers, rounded up, may stay away.
 reset
 echo 2 >"$world/claimed/$B"
-export AETHER_EDGE_UPDATE_SERVER_TOLERANCE=1
 run 0
 assert_digest "$B"
 
-# --- bad numbers are refused before anything runs --------------------------
+# Too few servers: rolled back, not denied, retried on the next run.
+reset
+echo 1 >"$world/claimed/$B"
+run 1
+assert_out "1 claimed servers reconnected within 15s, expected at least 2"
+assert_out "the next run retries $B"
+refute_denied "$B"
+assert_digest "$A"
+assert_state idle
+grep -q "^reason=.*next run retries" "$state/state" || fail "retry not recorded"
+rm "$world/claimed/$B"
+run 0
+assert_digest "$B"
 
 reset
-export AETHER_EDGE_UPDATE_SERVER_TOLERANCE=x
+echo 2 >"$world/claimed/$B"
+export AETHER_EDGE_UPDATE_SERVER_TOLERANCE=0
 run 1
-assert_out "tolerance must be a whole number, not 'x'"
-[ ! -s "$log" ] || fail "commands ran despite a bad setting"
+assert_out "2 claimed servers reconnected within 15s, expected at least 3"
+reset
+echo 1 >"$world/claimed/$B"
+export AETHER_EDGE_UPDATE_SERVER_TOLERANCE=50%
+run 0
+assert_digest "$B"
+
+# Bad settings are refused before anything runs.
+for bad in x 10%% %; do
+	reset
+	export AETHER_EDGE_UPDATE_SERVER_TOLERANCE="$bad"
+	run 1
+	assert_out "AETHER_EDGE_UPDATE_SERVER_TOLERANCE a count or a percentage such as 10%"
+	[ ! -s "$log" ] || fail "commands ran despite a bad setting"
+done
 unset AETHER_EDGE_UPDATE_SERVER_TOLERANCE
 
 echo "edge-update-test: ok"
