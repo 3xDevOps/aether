@@ -671,7 +671,15 @@ func (q *qualify) previousServer(bin, worktree string, c *client) {
 	if err = cmd.Start(); err != nil {
 		q.t.Fatal(err)
 	}
+	waited := false
 	enrolled, done := make(chan string, 1), make(chan struct{})
+	q.t.Cleanup(func() {
+		if !waited {
+			_ = cmd.Process.Kill()
+			<-done
+			_ = cmd.Wait()
+		}
+	})
 	go func() {
 		defer close(done)
 		sc := bufio.NewScanner(stdout)
@@ -693,6 +701,7 @@ func (q *qualify) previousServer(bin, worktree string, c *client) {
 		_ = cmd.Process.Kill()
 		<-done
 		_ = cmd.Wait()
+		waited = true
 		q.t.Fatalf("the previous release's server did not enroll:\n%s%s", &log, &stderr)
 	}
 	q.claim(c, id, code)
@@ -702,6 +711,7 @@ func (q *qualify) previousServer(bin, worktree string, c *client) {
 	}
 	_ = stdin.Close()
 	<-done
+	waited = true
 	if err := cmd.Wait(); err != nil {
 		q.t.Fatalf("the previous release's server: %v\n%s%s", err, &log, &stderr)
 	}
