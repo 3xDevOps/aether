@@ -415,6 +415,7 @@ var noReplay = map[string]bool{
 	protocol.MethodGitHubOAuthStart:  true,
 	protocol.MethodGitHubOAuthCancel: true,
 	protocol.MethodAgentInstall:      true,
+	protocol.MethodAgentRemove:       true,
 	protocol.MethodProfilePush:       true,
 	protocol.MethodSyncConflict:      true,
 }

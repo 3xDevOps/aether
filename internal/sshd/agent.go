@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -22,6 +23,7 @@ func init() {
 	registerMethod(protocol.MethodAgentList, (*Server).agentList)
 	registerGuarded(protocol.MethodAgentModels, permissions.Launch, nil, (*Server).agentModels)
 	registerGuarded(protocol.MethodAgentInstall, permissions.Launch, nil, (*Server).agentInstall)
+	registerGuarded(protocol.MethodAgentRemove, permissions.Launch, nil, (*Server).agentRemove)
 }
 
 // reservedAgentNames are names a member can never register: "custom" is the
@@ -261,4 +263,39 @@ func (s *Server) agentInstall(ctx context.Context, member domain.MemberID, raw j
 	}
 	result.Installed, result.EnhancedInstalled = info.Installed, info.EnhancedInstalled
 	return result, nil
+}
+
+// agentRemove resolves name the way a launch does: a shipped name wins over
+// a member's definition of it. It always acts on the caller's own home.
+func (s *Server) agentRemove(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.AgentRemoveParams](raw)
+	if perr != nil {
+		return nil, perr
+	}
+	if p.Name == "" {
+		return nil, invalidParams("name is required")
+	}
+	if s.cfg.Homes == nil {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "persistent homes are not enabled"}
+	}
+	if profile, shipped := harness.Lookup(p.Name); shipped && p.Name != "custom" {
+		executables := []string{profile.TUIArgs[0]}
+		if len(profile.ACPArgs) > 0 && profile.ACPArgs[0] != profile.TUIArgs[0] {
+			executables = append(executables, profile.ACPArgs[0])
+		}
+		removed, err := s.cfg.Runs.RemoveAgent(ctx, member, executables)
+		if err != nil {
+			return nil, rpcError(err)
+		}
+		if len(removed) == 0 {
+			return nil, invalidParams(fmt.Sprintf("agent %q is not installed in your environment: ~/.local/bin/%s does not exist", p.Name, executables[0]))
+		}
+		return protocol.AgentRemoveResult{Removed: removed}, nil
+	}
+	if err := s.cfg.Store.DeleteHarnessDefinition(ctx, member, p.Name); errors.Is(err, store.ErrNotFound) {
+		return nil, invalidParams(fmt.Sprintf("you have no agent %q; aether agent list shows yours", p.Name))
+	} else if err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.AgentRemoveResult{}, nil
 }

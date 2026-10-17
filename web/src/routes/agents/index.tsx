@@ -1,9 +1,10 @@
-import { type ComponentProps, useState } from 'react'
+import { type ComponentProps, useRef, useState } from 'react'
 import { AddAgent } from '@/components/agents/add-agent'
 import { defaultMode, enhancedSupported, label } from '@/components/agents/agent-copy'
 import { AgentExtras } from '@/components/agents/agent-extras'
 import { AgentList } from '@/components/agents/agent-list'
 import { AgentSetup } from '@/components/agents/agent-setup'
+import { RemoveAgent } from '@/components/agents/remove-agent'
 import { ModeOverview } from '@/components/agents/mode-comparison'
 import { modes } from '@/components/launch/modes'
 import { ArrowLeft } from '@/components/icons'
@@ -46,7 +47,7 @@ function DefaultMode({ agent }: { agent: AgentInfo }) {
   )
 }
 
-function AgentRows({ agents, ...actions }: { agents: AgentInfo[] } & Pick<ComponentProps<typeof AgentList>, 'onSetUp' | 'onRun' | 'returnFocusTo'>) {
+function AgentRows({ agents, ...actions }: { agents: AgentInfo[] } & Pick<ComponentProps<typeof AgentList>, 'onSetUp' | 'onRun' | 'onRemove' | 'returnFocusTo'>) {
   const list = (shown: AgentInfo[], label?: string) => (
     <AgentList agents={shown} label={label} extra={(agent) => agent.installed === true && <DefaultMode agent={agent} />} {...actions} />
   )
@@ -71,6 +72,8 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
   const [returnFocusTo, setReturnFocusTo] = useState('')
   const [github, setGithub] = useState<GitHubConnectResult | null>(null)
   const [compare, setCompare] = useState(false)
+  const [removing, setRemoving] = useState<AgentInfo | null>(null)
+  const addButton = useRef<HTMLButtonElement>(null)
   const loading = useDelayed(agents === null && error === null)
   const canSetUp = caps.hasMethod('agent.install') || caps.hasWS('terminal')
   const settingUp = agents?.find((agent) => agent.name === screen)
@@ -78,6 +81,14 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
   const openSetup = (name: string) => {
     setReturnFocusTo(name)
     setScreen(name)
+  }
+
+  // A shipped agent keeps its row and its Set up button; a member agent's row goes, and Add agent… brings it back.
+  const focusAfterRemoval = (agent: AgentInfo) => {
+    const target = agent.source === 'member'
+      ? addButton.current
+      : Array.from(document.querySelectorAll<HTMLElement>('[data-agent-action]')).find((action) => action.dataset.agentAction === agent.name)
+    target?.focus()
   }
 
   const run = (agent: AgentInfo) => {
@@ -92,7 +103,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
         title="Agents"
         actions={screen
           ? <Button size="sm" variant="ghost" onClick={close}><ArrowLeft />All agents</Button>
-          : caps.hasMethod('agent.register') && <Button size="sm" variant="secondary" onClick={() => setScreen(addScreen)}>Add agent…</Button>}
+          : caps.hasMethod('agent.register') && <Button ref={addButton} size="sm" variant="secondary" onClick={() => setScreen(addScreen)}>Add agent…</Button>}
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-5 px-4 py-6 sm:px-6">
@@ -123,6 +134,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
                   agents={agents}
                   onSetUp={canSetUp ? (agent) => openSetup(agent.name) : undefined}
                   onRun={caps.hasMethod('run.launch') ? run : undefined}
+                  onRemove={caps.hasMethod('agent.remove') ? setRemoving : undefined}
                   returnFocusTo={returnFocusTo}
                 />
               )}
@@ -131,6 +143,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
           )}
         </div>
       </div>
+      {removing && <RemoveAgent agent={removing} client={client} onRemoved={reload} focusAfterRemoval={() => focusAfterRemoval(removing)} onClose={() => setRemoving(null)} />}
       <Dialog open={compare} onOpenChange={setCompare}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>

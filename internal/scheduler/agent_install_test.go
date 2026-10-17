@@ -3,6 +3,10 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -117,6 +121,64 @@ func TestHarnessUpdateSkipsAHomeAnAgentInstallHolds(t *testing.T) {
 	launchNotes(t, e, "claude", domain.LaunchTUI)
 	if n := len(rt.updates()); n != 1 {
 		t.Fatalf("update containers after the install finished = %d, want 1", n)
+	}
+}
+
+func TestRemoveAgentDeletesTheLinkNotItsTarget(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".local", "share", "claude", "versions", "1.0")
+	bin := filepath.Join(home, ".local", "bin")
+	for _, dir := range []string{filepath.Dir(target), bin} {
+		if err = os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = os.WriteFile(target, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(target, filepath.Join(bin, "claude")); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := e.sched.RemoveAgent(t.Context(), e.member.ID, []string{"claude", "claude-agent-acp"})
+	if err != nil || !slices.Equal(removed, []string{"~/.local/bin/claude"}) {
+		t.Fatalf("RemoveAgent = %v, %v; want only the link that existed", removed, err)
+	}
+	if _, err = os.Lstat(filepath.Join(bin, "claude")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("link after removal: %v, want it gone", err)
+	}
+	if _, err = os.Stat(target); err != nil {
+		t.Fatalf("link target after removal: %v, want it kept", err)
+	}
+	if removed, err = e.sched.RemoveAgent(t.Context(), e.member.ID, []string{"claude"}); err != nil || len(removed) != 0 {
+		t.Fatalf("second RemoveAgent = %v, %v; want nothing removed", removed, err)
+	}
+}
+
+func TestRemoveAgentIsRefusedWhileAnInstallRuns(t *testing.T) {
+	t.Parallel()
+	e, _, installStarted, releaseInstall := installHomeEnv(t)
+	installed := make(chan error, 1)
+	go func() {
+		_, _, err := e.sched.InstallAgent(t.Context(), e.member.ID, "install-it")
+		installed <- err
+	}()
+	<-installStarted
+
+	if _, err := e.sched.RemoveAgent(t.Context(), e.member.ID, []string{"claude"}); !errors.Is(err, ErrAgentInstallRunning) {
+		t.Fatalf("RemoveAgent during an install: error = %v, want %v", err, ErrAgentInstallRunning)
+	}
+	close(releaseInstall)
+	if err := <-installed; err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if removed, err := e.sched.RemoveAgent(t.Context(), e.member.ID, []string{"claude"}); err != nil || len(removed) != 1 {
+		t.Fatalf("RemoveAgent after the install: %v, %v; want the claude link removed and the guard released", removed, err)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -67,6 +68,37 @@ func (s *Scheduler) InstallAgent(ctx context.Context, member domain.MemberID, co
 		return "", 0, fmt.Errorf("agent install: did not finish within %s; the end of its output:\n%s", protocol.AgentInstallTimeout, tail)
 	}
 	return tail, code, nil
+}
+
+// RemoveAgent deletes the ~/.local/bin links named by executables from the
+// member's home and returns those that existed. It claims the home like an
+// install, so neither an install nor a launch's harness update restores a
+// link meanwhile. HomeRemove deletes a symlink itself, not its target.
+func (s *Scheduler) RemoveAgent(ctx context.Context, member domain.MemberID, executables []string) ([]string, error) {
+	homePath, err := s.cfg.Homes.Path(member)
+	if err != nil {
+		return nil, fmt.Errorf("agent remove: resolve the member home: %w", err)
+	}
+	if err = s.holdHomeForInstall(ctx, member, homePath); err != nil {
+		return nil, err
+	}
+	defer func() {
+		s.mu.Lock()
+		delete(s.agentInstalls, member)
+		s.mu.Unlock()
+	}()
+	var removed []string
+	for _, executable := range executables {
+		err = s.cfg.Homes.HomeRemove(member, ".local/bin/"+executable)
+		if errors.Is(err, memberhome.ErrConfigNotFound) {
+			continue
+		}
+		if err != nil {
+			return removed, fmt.Errorf("agent remove: delete ~/.local/bin/%s: %w", executable, err)
+		}
+		removed = append(removed, "~/.local/bin/"+executable)
+	}
+	return removed, nil
 }
 
 // holdHomeForInstall claims homePath once no harness update runs in it;

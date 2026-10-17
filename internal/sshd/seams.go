@@ -136,6 +136,7 @@ type RunController interface {
 	// InstallAgent returns the end of the install command's output and its
 	// exit code.
 	InstallAgent(ctx context.Context, member domain.MemberID, command string) (string, int, error)
+	RemoveAgent(ctx context.Context, member domain.MemberID, executables []string) ([]string, error)
 	// SaveTerminalImage writes validated image bytes to the target account's
 	// persistent home and returns its absolute container-visible path.
 	SaveTerminalImage(ctx context.Context, actor domain.MemberID, run domain.RunID, extension string, data []byte) (string, error)

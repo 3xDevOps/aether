@@ -4353,7 +4353,12 @@ login found" (from `login_found`), "Standard · Enhanced" or "Standard", and
 one button by state: **Set up** while not installed, **Log in** while
 installed with no login found, and **Run** once ready, with **Set up again**
 in the row's **More** menu; closing a setup returns focus to that row's
-button. On the Agents page an installed agent's row also has a **Default
+button. On the Agents page only, where the gateway serves `agent.remove`, the
+**More** menu of a member agent or an installed agent also has **Remove…**.
+It opens `RemoveAgent` (`remove-agent.tsx`), a confirmation that says what is
+deleted (`~/.local/bin/<executable>`, plus the Enhanced adapter's link, or the
+member's definition) and what stays; a refusal appears in the open dialog, and
+success reloads the shared agent list, so the launcher's picker updates too. On the Agents page an installed agent's row also has a **Default
 mode** select, shown as "Default: Standard", which writes `launchDefaults`
 without changing which agent **New run** preselects. Once one agent is
 installed the page folds the rest under **More agents (n)**. **What's the

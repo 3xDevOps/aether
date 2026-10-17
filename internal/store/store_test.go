@@ -1257,6 +1257,25 @@ func TestHarnessDefinitionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDeleteHarnessDefinition(t *testing.T) {
+	t.Parallel()
+	db := openTestDB(t)
+	ctx := context.Background()
+	m := mustCreateMember(t, db)
+	if err := db.UpsertHarnessDefinition(ctx, &HarnessDefinition{MemberID: m.ID, Name: "mytool", Definition: []byte(`{}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteHarnessDefinition(ctx, m.ID, "mytool"); err != nil {
+		t.Fatalf("DeleteHarnessDefinition: %v", err)
+	}
+	if _, err := db.GetHarnessDefinition(ctx, m.ID, "mytool"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get after delete: %v, want ErrNotFound", err)
+	}
+	if err := db.DeleteHarnessDefinition(ctx, m.ID, "mytool"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second delete: %v, want ErrNotFound", err)
+	}
+}
+
 func TestHarnessDefinitionNotFound(t *testing.T) {
 	t.Parallel()
 	db := openTestDB(t)
