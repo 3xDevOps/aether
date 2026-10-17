@@ -91,11 +91,21 @@ func TestGeneratedManifestVerifiesWithTheTrustedKey(t *testing.T) {
 
 func TestGenerateRefusesImagesThatDisagree(t *testing.T) {
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{3}, ed25519.SeedSize))
-	img := testImages()
-	img.Edge.ImageDigest = digest("f")
-	_, _, err := generate("v1.3.0", "abc", 71, img, nil, key, time.Now())
-	if err == nil || !strings.Contains(err.Error(), "is not the aether-edge image") {
-		t.Fatalf("err = %v, want the mismatched edge digest refused", err)
+	for _, c := range []struct {
+		name   string
+		change func(*selfupdate.ImageRelease)
+		want   string
+	}{
+		{"another edge digest", func(r *selfupdate.ImageRelease) { r.Edge.ImageDigest = digest("f") }, "is not the aether-edge image"},
+		{"another repository", func(r *selfupdate.ImageRelease) { r.Edge.Image = "ghcr.io/3xdevops/aether-browser" }, "is not ghcr.io/3xdevops/aether-edge"},
+		{"a step newer than the release", func(r *selfupdate.ImageRelease) { r.Edge.ManualSteps[0].Since = "v1.4.0" }, `since "v1.4.0" is not a release tag at or below v1.3.0`},
+	} {
+		img := testImages()
+		c.change(&img)
+		_, _, err := generate("v1.3.0", "abc", 71, img, nil, key, time.Now())
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
+		}
 	}
 }
 

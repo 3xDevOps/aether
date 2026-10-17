@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -100,15 +101,16 @@ func TestReleaseCheckListsTheStepsAnUpgradeCrosses(t *testing.T) {
 func TestReleaseCheckPrintsTheEdgeSection(t *testing.T) {
 	fetch := serveRelease(t, testEdge(), releaseKey)
 	var out bytes.Buffer
-	if err := releaseCheck([]string{"--tag", "v1.5.0", "--digest", edgeDigest("e")}, fetch, &out); err != nil {
-		t.Fatal(err)
+	if err := releaseCheck([]string{"--tag", "v1.5.0", "--digest", edgeDigest("e"), "--from", "v1.4.0"}, fetch, &out); err == nil {
+		t.Fatal("want the blocking unit step to hold")
 	}
+	got := regexp.MustCompile(` {2,}`).ReplaceAllString(out.String(), "  ")
 	for _, want := range []string{
-		"image          ghcr.io/3xdevops/aether-edge@" + edgeDigest("e"),
-		"store schema   4, compat floor 3",
-		"manual steps   blocking unit (since v1.5.0-alpha.2): replace the unit https://example.com/unit",
+		"image  ghcr.io/3xdevops/aether-edge@" + edgeDigest("e"),
+		"store schema  4, compat floor 3",
+		"manual steps from v1.4.0  blocking unit (since v1.5.0-alpha.2): replace the unit https://example.com/unit",
 	} {
-		if !strings.Contains(out.String(), want) {
+		if !strings.Contains(got, want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
 	}
@@ -123,13 +125,20 @@ func TestReleaseCheckRefuses(t *testing.T) {
 		want  string
 	}{
 		{"another digest", serveRelease(t, testEdge(), releaseKey),
-			[]string{"--digest", edgeDigest("f")}, "signs the edge image " + edgeDigest("e") + ", not " + edgeDigest("f")},
+			[]string{"--digest", edgeDigest("f"), "--from", "v1.4.0"}, "signs the edge image " + edgeDigest("e") + ", not " + edgeDigest("f")},
 		{"an untrusted signature", serveRelease(t, testEdge(), other),
-			[]string{"--digest", edgeDigest("e")}, "not signed by a trusted release key"},
+			[]string{"--digest", edgeDigest("e"), "--from", "v1.4.0"}, "not signed by a trusted release key"},
 		{"a release without an edge section", serveRelease(t, nil, releaseKey),
-			[]string{"--digest", edgeDigest("e")}, "predates signed edge releases"},
+			[]string{"--digest", edgeDigest("e"), "--from", "v1.4.0"}, "predates signed edge releases"},
 		{"a --from that is not a tag", serveRelease(t, testEdge(), releaseKey),
 			[]string{"--digest", edgeDigest("e"), "--from", "dev"}, `--from "dev" is not a release tag`},
+		{"no --from", serveRelease(t, testEdge(), releaseKey),
+			[]string{"--digest", edgeDigest("e")}, "--from <tag>"},
+		{"a step newer than the release", serveRelease(t, func() *selfupdate.Edge {
+			e := testEdge()
+			e.ManualSteps = append(e.ManualSteps, selfupdate.ManualStep{ID: "later", Since: "v1.6.0", Summary: "s", DocURL: "https://example.com/later", Blocking: true})
+			return e
+		}(), releaseKey), []string{"--digest", edgeDigest("e"), "--from", "v1.4.0"}, `since "v1.6.0" is not a release tag at or below v1.5.0`},
 	}
 	for _, c := range cases {
 		err := releaseCheck(append([]string{"--tag", "v1.5.0"}, c.args...), c.fetch, &bytes.Buffer{})

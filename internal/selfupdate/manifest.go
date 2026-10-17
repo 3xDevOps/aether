@@ -111,6 +111,8 @@ type ImageRelease struct {
 	Edge   Edge              `json:"edge"`
 }
 
+const EdgeImage = "ghcr.io/3xdevops/aether-edge"
+
 // ImageNames are the images every release publishes.
 var ImageNames = []string{"aether-browser", "aether-edge", "aether-standard"}
 
@@ -124,6 +126,9 @@ func (r ImageRelease) Validate(tag string) error {
 		if !ValidImageDigest(r.Images[name]) {
 			return fmt.Errorf("images: %s has digest %q, not sha256:<64 hex>", name, r.Images[name])
 		}
+	}
+	if r.Edge.Image != EdgeImage {
+		return fmt.Errorf("edge: image %s is not %s", r.Edge.Image, EdgeImage)
 	}
 	if r.Edge.ImageDigest != r.Images["aether-edge"] {
 		return fmt.Errorf("edge: image digest %s is not the aether-edge image %s", r.Edge.ImageDigest, r.Images["aether-edge"])
@@ -155,8 +160,8 @@ func (e Edge) Validate(tag string) error {
 		switch {
 		case s.ID == "" || ids[s.ID]:
 			return fmt.Errorf("edge: manual step id %q is empty or repeated", s.ID)
-		case !ValidTag(s.Since):
-			return fmt.Errorf("edge: manual step %s: since %q is not a release tag", s.ID, s.Since)
+		case !ValidTag(s.Since) || Behind(tag, s.Since):
+			return fmt.Errorf("edge: manual step %s: since %q is not a release tag at or below %s", s.ID, s.Since, tag)
 		case s.Summary == "" || !strings.HasPrefix(s.DocURL, "https://"):
 			return fmt.Errorf("edge: manual step %s needs a summary and an https doc_url", s.ID)
 		}

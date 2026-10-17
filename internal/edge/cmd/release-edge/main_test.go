@@ -24,7 +24,7 @@ func TestUpgradeRecordMatchesTheCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	edge := selfupdate.Edge{
-		Image: edgeImage, ImageDigest: "sha256:" + strings.Repeat("a", 64),
+		Image: selfupdate.EdgeImage, ImageDigest: "sha256:" + strings.Repeat("a", 64),
 		StoreSchema: u.StoreSchema, StoreCompatFloor: u.StoreCompatFloor, Protocol: u.Protocol,
 		MinUpgradeFrom: u.MinUpgradeFrom, ManualSteps: u.ManualSteps,
 	}
@@ -77,7 +77,7 @@ func TestRunWritesWhatReleaseManifestSigns(t *testing.T) {
 	if err = json.Unmarshal(out.Bytes(), &r); err != nil {
 		t.Fatal(err)
 	}
-	if r.Edge.ImageDigest != digest("e") || r.Edge.Image != edgeImage || r.Edge.ManualSteps == nil {
+	if r.Edge.ImageDigest != digest("e") || r.Edge.Image != selfupdate.EdgeImage || r.Edge.ManualSteps == nil {
 		t.Fatalf("edge = %+v", r.Edge)
 	}
 

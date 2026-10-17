@@ -13,7 +13,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
-const releaseCheckUsage = "usage: aether-edge release-check --tag <tag> --digest sha256:<digest> [--from <tag>] [--json]"
+const releaseCheckUsage = "usage: aether-edge release-check --tag <tag> --digest sha256:<digest> --from <tag> [--json]"
 
 // holdError is a release the edge must not move to until an operator acts.
 type holdError struct{ reasons []string }
@@ -33,20 +33,21 @@ type releaseReport struct {
 }
 
 // releaseCheck verifies tag's signed manifest names digest as its edge
-// image and, given --from, whether the upgrade to it must hold.
+// image and whether the upgrade to it from --from must hold.
 func releaseCheck(args []string, fetch func(context.Context, string) (selfupdate.Manifest, error), out io.Writer) error {
 	fs := flag.NewFlagSet("aether-edge release-check", flag.ContinueOnError)
 	tag := fs.String("tag", "", "release tag to check")
 	digest := fs.String("digest", "", "index digest of the edge image to run")
-	from := fs.String("from", "", "release tag the edge runs now")
+	from := fs.String("from", "", "release tag the edge runs now (required); whether that release can open the database\n"+
+		"after the upgrade migrates it is not checked here: run aether-edge schema --json with its image")
 	asJSON := fs.Bool("json", false, "print the report as JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *tag == "" || *digest == "" || fs.NArg() != 0 {
+	if *tag == "" || *digest == "" || *from == "" || fs.NArg() != 0 {
 		return errors.New(releaseCheckUsage)
 	}
-	if *from != "" && !selfupdate.ValidTag(*from) {
+	if !selfupdate.ValidTag(*from) {
 		return fmt.Errorf("--from %q is not a release tag such as v0.7.0", *from)
 	}
 	m, err := fetch(context.Background(), *tag)
@@ -64,23 +65,21 @@ func releaseCheck(args []string, fetch func(context.Context, string) (selfupdate
 	}
 	r := releaseReport{Version: m.Version, Commit: m.Commit, Edge: *m.Edge,
 		ApplicableSteps: []selfupdate.ManualStep{}, Reasons: []string{}}
-	if *from != "" {
-		switch {
-		case selfupdate.Behind(*tag, *from):
-			r.Reasons = append(r.Reasons, fmt.Sprintf("refusing a downgrade: %s is older than %s", *tag, *from))
-		case selfupdate.Behind(*from, m.Edge.MinUpgradeFrom):
-			r.Reasons = append(r.Reasons, fmt.Sprintf("%s upgrades only from %s or later; upgrade %s to %s first",
-				*tag, m.Edge.MinUpgradeFrom, *from, m.Edge.MinUpgradeFrom))
+	switch {
+	case selfupdate.Behind(*tag, *from):
+		r.Reasons = append(r.Reasons, fmt.Sprintf("refusing a downgrade: %s is older than %s", *tag, *from))
+	case selfupdate.Behind(*from, m.Edge.MinUpgradeFrom):
+		r.Reasons = append(r.Reasons, fmt.Sprintf("%s upgrades only from %s or later; upgrade %s to %s first",
+			*tag, m.Edge.MinUpgradeFrom, *from, m.Edge.MinUpgradeFrom))
+	}
+	for _, s := range m.Edge.ManualSteps {
+		if !selfupdate.Behind(*from, s.Since) {
+			continue
 		}
-		for _, s := range m.Edge.ManualSteps {
-			if !selfupdate.Behind(*from, s.Since) || selfupdate.Behind(*tag, s.Since) {
-				continue
-			}
-			r.ApplicableSteps = append(r.ApplicableSteps, s)
-			if s.Blocking {
-				r.Reasons = append(r.Reasons, fmt.Sprintf("manual step %s (since %s) must be done first: %s; see %s",
-					s.ID, s.Since, s.Summary, s.DocURL))
-			}
+		r.ApplicableSteps = append(r.ApplicableSteps, s)
+		if s.Blocking {
+			r.Reasons = append(r.Reasons, fmt.Sprintf("manual step %s (since %s) must be done first: %s; see %s",
+				s.ID, s.Since, s.Summary, s.DocURL))
 		}
 	}
 	r.Hold = len(r.Reasons) > 0
@@ -105,10 +104,7 @@ func writeReleaseReport(out io.Writer, r releaseReport, from string) error {
 	_, _ = fmt.Fprintf(tw, "store schema\t%d, compat floor %d\n", e.StoreSchema, e.StoreCompatFloor)
 	_, _ = fmt.Fprintf(tw, "protocol\t%d to %d\n", e.Protocol.MinVersion, e.Protocol.Version)
 	_, _ = fmt.Fprintf(tw, "upgrades from\t%s or later\n", e.MinUpgradeFrom)
-	steps, label := e.ManualSteps, "manual steps"
-	if from != "" {
-		steps, label = r.ApplicableSteps, "manual steps from "+from
-	}
+	steps, label := r.ApplicableSteps, "manual steps from "+from
 	if len(steps) == 0 {
 		_, _ = fmt.Fprintf(tw, "%s\tnone\n", label)
 	}

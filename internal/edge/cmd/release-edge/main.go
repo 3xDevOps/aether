@@ -1,14 +1,4 @@
-// Command release-edge writes the image digests and edge section a release
-// manifest signs, for release-manifest's -images flag:
-//
-//	go run ./internal/edge/cmd/release-edge -tag <tag> \
-//	  -image aether-edge=sha256:<digest> -image aether-standard=sha256:<digest> \
-//	  -image aether-browser=sha256:<digest> > images.json
-//
-// Run from the repository root. Store schema, compat floor and protocol
-// come from this build; min_upgrade_from and manual_steps come from
-// packaging/edge/upgrade.json, which it refuses while the values that file
-// records disagree with the code and packaging files.
+// Command release-edge writes the image digests and edge section that release-manifest signs.
 package main
 
 import (
@@ -31,21 +21,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
-// edgeImage is the repository every release pushes the edge image to.
-const edgeImage = "ghcr.io/3xdevops/aether-edge"
-
-// upgradePath is the hand-written upgrade record, relative to the
-// repository root.
 const upgradePath = "packaging/edge/upgrade.json"
 
-// recordedFiles are the packaging files an edge operator copies onto the
-// host, so a change to any of them may need a manual step.
+// recordedFiles are the files that shape what an edge host runs, so a
+// change to any of them may need a manual step. Sorted.
 var recordedFiles = []string{
+	"images/edge/Dockerfile",
 	"packaging/edge/aether-edge.env.example",
 	"packaging/systemd/aether-edge.service",
 }
 
-// upgrade is packaging/edge/upgrade.json.
 type upgrade struct {
 	StoreSchema      int                     `json:"store_schema"`
 	StoreCompatFloor int                     `json:"store_compat_floor"`
@@ -97,7 +82,7 @@ func run(args []string, stdout io.Writer) error {
 	r := selfupdate.ImageRelease{
 		Images: images,
 		Edge: selfupdate.Edge{
-			Image:            edgeImage,
+			Image:            selfupdate.EdgeImage,
 			ImageDigest:      images["aether-edge"],
 			StoreSchema:      u.StoreSchema,
 			StoreCompatFloor: u.StoreCompatFloor,
