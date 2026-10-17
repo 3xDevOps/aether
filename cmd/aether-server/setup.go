@@ -39,7 +39,8 @@ func setup(args []string) error {
 	if err := requireRoot(); err != nil {
 		return err
 	}
-	values, sysbox, err := askSetup(*configPath)
+	docker := checkDocker(os.Stdout)
+	values, sysbox, err := askSetup(*configPath, docker)
 	if err != nil {
 		return err
 	}
@@ -47,13 +48,14 @@ func setup(args []string) error {
 		_, _ = fmt.Fprintln(os.Stdout, "nothing written")
 		return nil
 	}
-	return writeSetup(os.Stdout, *unitPath, *configPath, values, *force, sysbox)
+	return writeSetup(os.Stdout, *unitPath, *configPath, values, *force, sysbox, docker)
 }
 
-// askSetup asks setup's questions, and whether to install Sysbox. A signal
-// at a prompt ends setup with nothing written; the handler ends with the
-// questions so that installSysbox can take Ctrl-C for itself.
-func askSetup(configPath string) (map[string]string, bool, error) {
+// askSetup asks whether to go on without Docker when docker is false, then
+// setup's questions, and whether to install Sysbox. A signal at a prompt
+// ends setup with nothing written; the handler ends with the questions so
+// that installSysbox can take Ctrl-C for itself.
+func askSetup(configPath string, docker bool) (map[string]string, bool, error) {
 	// Notify overrides inherited ignored signals while a prompt is blocked.
 	signals := make(chan os.Signal, 1)
 	done := make(chan struct{})
@@ -75,21 +77,38 @@ func askSetup(configPath string) (map[string]string, bool, error) {
 		<-done
 	}()
 
+	p := newPrompter(os.Stdout, os.Stdin)
+	if !docker {
+		if err := askWithoutDocker(p); err != nil {
+			return nil, false, err
+		}
+	}
 	var tailscaled *reachability.Tailscale
 	if _, err := os.Stat(reachability.DefaultTailscaledSocket); err == nil {
 		tailscaled = reachability.NewTailscale("")
 	}
-	p := newPrompter(os.Stdout, os.Stdin)
 	values, err := askServerOptions(p, configPath, tailscaled)
 	if values == nil || err != nil {
 		return nil, false, err
 	}
-	return values, askSysbox(p), nil
+	return values, askSysbox(p, docker), nil
+}
+
+func askWithoutDocker(p *prompter) error {
+	yes := p.confirm("Continue without Docker", false)
+	switch {
+	case p.err != nil:
+		return p.err
+	case !yes:
+		return errors.New("nothing written; install or start Docker, then run setup again")
+	}
+	return nil
 }
 
 // writeSetup issues the claim code after the slow Sysbox install, so the
-// code's 30 minutes start when the person can use it.
-func writeSetup(w io.Writer, unitPath, configPath string, values map[string]string, force, sysbox bool) error {
+// code's 30 minutes start when the person can use it. Without Docker the
+// server cannot start, so it issues none and next: says how to get one.
+func writeSetup(w io.Writer, unitPath, configPath string, values map[string]string, force, sysbox, docker bool) error {
 	if err := writeAndReport(w, unitPath, configPath, values, force); err != nil {
 		return err
 	}
@@ -101,16 +120,21 @@ func writeSetup(w io.Writer, unitPath, configPath string, values map[string]stri
 	if err != nil {
 		return err
 	}
-	claimCode, err := reportEdge(w, options)
+	claimCode, err := reportEdge(w, options, docker)
 	if err != nil {
 		return err
 	}
-	return printNextSteps(w, configPath, options, claimCode)
+	return printNextSteps(w, configPath, options, claimCode, docker)
 }
 
-// askSysbox offers Docker inside runs unless the daemon already has Sysbox.
-func askSysbox(p *prompter) bool {
-	if p.err != nil || sysboxOn() {
+func askSysbox(p *prompter, docker bool) bool {
+	switch {
+	case p.err != nil:
+		return false
+	case !docker:
+		_, _ = fmt.Fprintln(p.w, "\n"+sysboxNeedsDocker)
+		return false
+	case sysboxOn():
 		return false
 	}
 	_, _ = fmt.Fprintln(p.w)
@@ -118,10 +142,10 @@ func askSysbox(p *prompter) bool {
 }
 
 // reportEdge prints what a person needs to reach the server through the
-// edge the options name: the server id, the pinned edge key, and a claim
-// link while the server has no owner. It returns the claim code inside
-// that link, or "" when the edge is off or the server has an owner.
-func reportEdge(w io.Writer, options *flag.FlagSet) (string, error) {
+// edge the options name: the server id, the pinned edge key, and, with
+// claim set, a claim link while the server has no owner. It returns the
+// claim code inside that link, or "" when it issued none.
+func reportEdge(w io.Writer, options *flag.FlagSet, claim bool) (string, error) {
 	edgeURL := options.Lookup("edge-url").Value.String()
 	if edgeURL == "" {
 		return "", nil
@@ -148,6 +172,9 @@ func reportEdge(w io.Writer, options *flag.FlagSet) (string, error) {
 	}
 	if owner != nil {
 		_, _ = fmt.Fprintf(w, "owner: %s\n", describeAccount(*owner))
+		return "", nil
+	}
+	if !claim {
 		return "", nil
 	}
 	code, expires, err := state.IssueClaimCode(id, "", time.Now())

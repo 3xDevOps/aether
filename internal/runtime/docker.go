@@ -135,13 +135,7 @@ func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 		return "", err
 	}
 	if slices.ContainsFunc(spec.Mounts, func(m Mount) bool { return m.Subpath != "" }) {
-		// Negotiating here settles the version the create request is sent
-		// at, so ClientVersion reports it rather than the client's maximum.
-		ping, err := d.cli.Ping(ctx, client.PingOptions{NegotiateAPIVersion: true})
-		if err != nil {
-			return "", fmt.Errorf("runtime: read docker engine API version: %w", err)
-		}
-		if err := requireSubpathAPI(ping.APIVersion, d.cli.ClientVersion()); err != nil {
+		if err := d.CheckSubpathAPI(ctx); err != nil {
 			return "", err
 		}
 	}
@@ -351,14 +345,30 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 // silently mounts the whole base, so a subpath mount is refused there.
 const minSubpathAPI = "1.45"
 
+// ErrSubpathAPI is wrapped by CheckSubpathAPI's error when the daemon
+// answered but a mount beneath a member home would be refused.
+var ErrSubpathAPI = errors.New("cannot mount a path beneath a member home")
+
+// CheckSubpathAPI asks the daemon for its API version and fails when it
+// does not answer or cannot take a subpath mount. Negotiating settles the
+// version later requests are sent at, so ClientVersion reports it rather
+// than the client's maximum.
+func (d *Docker) CheckSubpathAPI(ctx context.Context) error {
+	ping, err := d.cli.Ping(ctx, client.PingOptions{NegotiateAPIVersion: true})
+	if err != nil {
+		return fmt.Errorf("runtime: read docker engine API version: %w", err)
+	}
+	return requireSubpathAPI(ping.APIVersion, d.cli.ClientVersion())
+}
+
 // requireSubpathAPI checks the client version too: negotiation never sends
 // below the engine's, so a lower one is a DOCKER_API_VERSION pin.
 func requireSubpathAPI(engine, sent string) error {
 	if engine == "" || versions.LessThan(engine, minSubpathAPI) {
-		return fmt.Errorf("runtime: docker engine API %q cannot mount a path beneath a member home; that needs API %s (Docker Engine 26.0) or newer", engine, minSubpathAPI)
+		return fmt.Errorf("runtime: docker engine API %q %w; that needs API %s (Docker Engine 26.0) or newer", engine, ErrSubpathAPI, minSubpathAPI)
 	}
 	if versions.LessThan(sent, minSubpathAPI) {
-		return fmt.Errorf("runtime: docker client sends API %q (DOCKER_API_VERSION), which cannot mount a path beneath a member home; that needs API %s or newer", sent, minSubpathAPI)
+		return fmt.Errorf("runtime: docker client sends API %q (DOCKER_API_VERSION), which %w; that needs API %s or newer", sent, ErrSubpathAPI, minSubpathAPI)
 	}
 	return nil
 }

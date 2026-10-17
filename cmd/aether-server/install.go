@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/attribution"
@@ -33,18 +34,30 @@ func install(args []string) error {
 	if err := requireRoot(); err != nil {
 		return err
 	}
-	if err := writeAndReport(os.Stdout, *unitPath, *configPath, values, *force); err != nil {
+	return writeInstall(os.Stdout, *unitPath, *configPath, values, *force, *sysbox)
+}
+
+// writeInstall carries on when Docker does not answer, since automation
+// may install it next, but leaves Sysbox out: its installer needs Docker.
+func writeInstall(w io.Writer, unitPath, configPath string, values map[string]string, force, sysbox bool) error {
+	docker := checkDocker(w)
+	if err := writeAndReport(w, unitPath, configPath, values, force); err != nil {
 		return err
 	}
-	if *sysbox && !sysboxOn() {
-		_, _ = fmt.Fprintln(os.Stdout)
-		installSysbox(os.Stdout)
+	if sysbox {
+		switch {
+		case !docker:
+			_, _ = fmt.Fprintln(w, "\n"+sysboxNeedsDocker)
+		case !sysboxOn():
+			_, _ = fmt.Fprintln(w)
+			installSysbox(w)
+		}
 	}
-	options, err := configuredOptions(*configPath)
+	options, err := configuredOptions(configPath)
 	if err != nil {
 		return err
 	}
-	return printNextSteps(os.Stdout, *configPath, options, "")
+	return printNextSteps(w, configPath, options, "", docker)
 }
 
 // requireEdgeAccess refuses to turn the edge on without a policy: who
@@ -108,8 +121,9 @@ func configuredOptions(configPath string) (*flag.FlagSet, error) {
 // and install print it last, so the Sysbox installer's output cannot bury
 // it. It never runs systemctl itself: installing must not restart a live
 // server as a side effect (this is the `aether daemon install` convention
-// - render and tell). claimCode is the code reportEdge issued, or "".
-func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claimCode string) error {
+// - render and tell). claimCode is the code reportEdge issued, or "";
+// docker is whether the Docker daemon answered.
+func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claimCode string, docker bool) error {
 	sudo := ""
 	if os.Getenv("SUDO_USER") != "" {
 		sudo = "sudo "
@@ -147,8 +161,17 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 		reach = "on your computer (the first link on a fresh server becomes admin):\n       " +
 			show("aether link <this-host>:"+port)
 	}
-	_, _ = fmt.Fprintf(w, "\n%s\n  1. start the server on this machine:\n       %s\n  2. %s\n", show("next:"),
-		show(strings.ReplaceAll(serversetup.ActivateCommand, "systemctl", sudo+"systemctl")), reach)
+	steps := []string{
+		"start the server on this machine:\n       " + show(strings.ReplaceAll(serversetup.ActivateCommand, "systemctl", sudo+"systemctl")),
+		reach,
+	}
+	if !docker {
+		steps = slices.Insert(steps, 0, "install or start Docker on this machine:\n       "+show(dockerInstall))
+	}
+	_, _ = fmt.Fprintf(w, "\n%s\n", show("next:"))
+	for i, step := range steps {
+		_, _ = fmt.Fprintf(w, "  %d. %s\n", i+1, step)
+	}
 	return nil
 }
 
