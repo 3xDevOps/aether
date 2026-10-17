@@ -160,3 +160,19 @@ feat(cli)!: drop the aether dash command
 - `docs/` contains public operational and protocol documentation.
 
 `CLAUDE.md` carries the same public guidance for tools that look for that file.
+
+## Cursor Cloud specific instructions
+
+Cloud Agents keep a managed `~/.gitconfig` that rewrites `github.com` URLs
+to an authenticated HTTPS remote. `git remote get-url` follows that
+rewrite, so `make test` fails `TestOriginURL` and
+`TestRecordWorkspaceOriginToleratesARefusal`. Run the suite with a global
+config that has only a name and email:
+
+```sh
+git config --file /tmp/aether-gitconfig user.name "Aether Test"
+git config --file /tmp/aether-gitconfig user.email test@example.com
+GIT_CONFIG_GLOBAL=/tmp/aether-gitconfig make test
+```
+
+Leave `~/.gitconfig` in place. Pushes use it.
