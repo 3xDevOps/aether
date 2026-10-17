@@ -190,3 +190,19 @@ func TestUpdateRefusesAServerThatCannotOpenTheDatabase(t *testing.T) {
 		t.Fatalf("err = %v, want both schemas named", err)
 	}
 }
+
+func TestUpdateCommandNamesSudoForAnUnwritableDirectory(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes anywhere")
+	}
+	dir := t.TempDir()
+	if got := updateCommandIn(dir); got != "aether update" {
+		t.Fatalf("writable dir: %q", got)
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if got := updateCommandIn(dir); got != "sudo aether update" {
+		t.Fatalf("read-only dir: %q", got)
+	}
+}

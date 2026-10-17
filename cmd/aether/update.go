@@ -110,6 +110,9 @@ func runUpdate(args []string) error {
 		return err
 	}
 
+	if err = selfupdate.CheckWritable(filepath.Dir(self)); err != nil {
+		return err
+	}
 	fmt.Printf("updating aether %s -> %s\n", version.String(), *tag)
 	replaced, err := selfupdate.Update(ctx, base, *tag)
 	for _, path := range replaced {
@@ -310,6 +313,26 @@ func reportCheck(ctx context.Context, asJSON bool) error {
 	return nil
 }
 
+// updateCommand is the command that updates this binary: root-owned
+// installs, the default from scripts/install.sh, need sudo.
+func updateCommand() string {
+	self, err := os.Executable()
+	if err == nil {
+		self, err = filepath.EvalSymlinks(self)
+	}
+	if err != nil {
+		return "aether update"
+	}
+	return updateCommandIn(filepath.Dir(self))
+}
+
+func updateCommandIn(dir string) string {
+	if selfupdate.CheckWritable(dir) != nil {
+		return "sudo aether update"
+	}
+	return "aether update"
+}
+
 func printCheck(got selfupdate.Check) {
 	switch {
 	case got.Disabled:
@@ -319,7 +342,7 @@ func printCheck(got selfupdate.Check) {
 	case got.UpdateAvailable && got.Packaged != "":
 		fmt.Printf("update available: %s (running %s); update the %s\n", got.Latest, version.String(), got.Packaged)
 	case got.UpdateAvailable:
-		fmt.Printf("update available: %s (running %s); run: aether update\n", got.Latest, version.String())
+		fmt.Printf("update available: %s (running %s); run: %s\n", got.Latest, version.String(), updateCommand())
 	case got.Latest == "":
 		fmt.Printf("no signed release is published yet (running %s)\n", version.String())
 	case got.Latest == version.Version:
