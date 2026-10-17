@@ -30,5 +30,5 @@ test('without a binding file the stamped path is used', (t) => {
 
 test('a binding file without an absolute path is an error, not a fallback', (t) => {
   assert.throws(() => boundCli(resources(t, '{"path":"aether"}'), { aetherCliPath: cli }), /absolute path/)
-  assert.throws(() => boundCli(resources(t, 'not json'), {}), SyntaxError)
+  assert.throws(() => boundCli(resources(t, 'not json'), {}), /aether-cli\.json: Unexpected token/)
 })

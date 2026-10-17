@@ -9,16 +9,22 @@ const path = require('node:path')
 // file existed stamped the path into package.json instead. Empty when
 // neither names one.
 function boundCli(resourcesPath, manifest) {
+  const file = path.join(resourcesPath, 'aether-cli.json')
   let raw
   try {
-    raw = fs.readFileSync(path.join(resourcesPath, 'aether-cli.json'), 'utf8')
+    raw = fs.readFileSync(file, 'utf8')
   } catch (err) {
     if (err.code !== 'ENOENT') throw err
     return manifest.aetherCliPath || ''
   }
-  const bound = JSON.parse(raw).path
+  let bound
+  try {
+    bound = JSON.parse(raw).path
+  } catch (err) {
+    throw new Error(`${file}: ${err.message}`)
+  }
   if (typeof bound !== 'string' || !path.isAbsolute(bound)) {
-    throw new Error(`${path.join(resourcesPath, 'aether-cli.json')}: "path" must be an absolute path`)
+    throw new Error(`${file}: "path" must be an absolute path`)
   }
   return bound
 }

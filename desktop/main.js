@@ -23,7 +23,15 @@ const notify = require('./notify')
 // Older shells only carried the package version.
 const manifest = require('./package.json')
 const shellVersion = manifest.aetherCliVersion || manifest.version
-const installedBy = boundCli(process.resourcesPath, manifest)
+// A damaged binding file is reported through fatal() once the app is ready,
+// not as Electron's uncaught-exception dialog at load.
+let installedBy = ''
+let bindingError = null
+try {
+  installedBy = boundCli(process.resourcesPath, manifest)
+} catch (err) {
+  bindingError = err
+}
 
 // The exit status `aether gui --json` uses to say it replaced this app on
 // disk: relaunch the shell, do not respawn the sidecar (localgw.ExitRelaunch).
@@ -130,6 +138,13 @@ function main() {
   }
 
   function startSidecar() {
+    if (bindingError) {
+      fatal(
+        'aether CLI binding unreadable',
+        `${bindingError.message}\n\nRun aether gui build again to reinstall the app.`,
+      )
+      return
+    }
     const bin = locateAether()
     if (!bin) {
       fatal(
