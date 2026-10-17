@@ -904,7 +904,7 @@ identify its callers.
 - **Tailnet addresses only, HTTPS only.** It binds the host's tailnet
   addresses and nothing else, with the certificate tailscaled issues for the
   node's MagicDNS name. There is no cleartext port and no redirect, and a
-  server that cannot fetch that certificate refuses to start.
+  server that cannot fetch that certificate does not start the dashboard.
 - **Identity is WhoIs, per request, with no token at all.** Every call and
   every WebSocket handshake is resolved through the same tailnet WhoIs
   lookup and member mapping the SSH `none` auth uses. Nothing is issued to

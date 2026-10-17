@@ -531,6 +531,8 @@ export interface ServerInfo {
   member: Member
   tailnet_hostname?: string
   tailnet_identity_auth?: boolean
+  /** Why the dashboard web-port asks for is not serving on the tailnet. */
+  tailnet_dashboard_error?: string
   disk?: DiskUsage
   /** Client-side failure from the separate disk request. */
   diskError?: string

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { ThemeEffect } from '@/components/theme'
 import type { GatewayCapabilities } from '@/lib/types'
 import { SettingsRoute } from '@/routes/settings'
+import { ServerSection } from '@/routes/settings/server'
 import { createRootStore, useStore, type RootState } from '@/store'
 import { runLabel } from '@/lib/status'
 import { toRecord } from '@/store/runs'
@@ -190,6 +191,29 @@ describe('settings view', () => {
     const server = screen.getByRole('region', { name: 'Server' })
     expect(within(server).getByText(/Updates come from the Android app: install its new version to update Aether\./)).toBeDefined()
     expect(within(server).queryByRole('button', { name: 'Update…' })).toBeNull()
+  })
+
+  it("shows why the server's tailnet dashboard is not serving, verbatim", () => {
+    const refusal = 'servergw: HTTPS certificate for box.tail.ts.net: cert box.tail.ts.net: status 500: your Tailscale account does not support getting TLS certs; enable MagicDNS and HTTPS certificates for the tailnet in the Tailscale admin console (DNS page), or set web-port to 0'
+    seed({ info: { ...serverInfo, tailnet_dashboard_error: refusal } })
+    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    const server = screen.getByRole('region', { name: 'Server' })
+    expect(within(server).getByText('Tailnet dashboard')).toBeDefined()
+    expect(within(server).getByText(refusal)).toBeDefined()
+    expect(within(server).getByText('sudo systemctl restart aether-server')).toBeDefined()
+  })
+
+  it('re-reads whether the tailnet dashboard serves, since the server keeps retrying it', async () => {
+    const refusal = 'servergw: listen: no tailnet address could be bound'
+    seed()
+    const serverInfoRead = vi.fn(async () => ({ ...serverInfo, tailnet_dashboard_error: refusal }))
+    const { unmount } = render(<ServerSection client={fakeApi({ serverInfo: serverInfoRead })} />)
+    expect(await screen.findByText(refusal)).toBeDefined()
+    unmount()
+
+    seed({ info: { ...serverInfo, tailnet_dashboard_error: refusal } })
+    render(<ServerSection client={fakeApi()} />)
+    await waitFor(() => expect(screen.queryByText('Tailnet dashboard')).toBeNull())
   })
 
   it('keeps the server admin rows from a collaborator', () => {

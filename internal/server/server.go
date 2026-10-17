@@ -53,6 +53,14 @@ const (
 	standardImageRepo = "ghcr.io/3xdevops/aether-standard"
 )
 
+const (
+	tailscaledTimeout = 5 * time.Second
+	webRetryMin       = 5 * time.Second
+	// webRetryMax bounds how often a dashboard that cannot start asks
+	// tailscaled for a certificate, which can mean a Let's Encrypt order.
+	webRetryMax = 5 * time.Minute
+)
+
 // DefaultStandardImage is the published image matching this build.
 var DefaultStandardImage = standardImageRepo + ":" + releaseImageTag(version.Version)
 
@@ -78,7 +86,8 @@ type Config struct {
 	// WebPort serves the dashboard over HTTPS on the server's tailnet
 	// addresses at this port; 0 leaves the server SSH-only. It needs
 	// tailscaled on this host with MagicDNS and HTTPS certificates
-	// enabled for the tailnet, and refuses to start without them.
+	// enabled for the tailnet; without them the server runs without the
+	// dashboard and server.info reports why.
 	WebPort int
 	// Runtime overrides the Docker runtime, primarily for tests.
 	Runtime runtime.Runtime
@@ -402,15 +411,14 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	s.adapters = adapter.NewManager(s.bus, s.db, s.pty)
 	whois := cfg.WhoIs
 	var node reachability.Node
-	var nodeErr error
 	tailscaled := reachability.NewTailscale("")
 	if _, statErr := os.Stat(sshd.DefaultTailscaledSocket); whois == nil && statErr == nil {
 		whois = sshd.NewLocalWhoIs("")
 		// Read the node once at startup; server.info reports the MagicDNS
-		// name verbatim and the web gateway binds the addresses.
-		// Best-effort for SSH: an unreachable LocalAPI leaves them empty.
-		discoverCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		node, nodeErr = tailscaled.Self(discoverCtx)
+		// name verbatim. Best-effort: an unreachable LocalAPI leaves it
+		// empty.
+		discoverCtx, cancel := context.WithTimeout(ctx, tailscaledTimeout)
+		node, _ = tailscaled.Self(discoverCtx)
 		cancel()
 	}
 	workspaces := &workspaceDeletion{store: s.db, runs: s.sched, git: s.git, bus: s.bus, secrets: secrets}
@@ -503,15 +511,66 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		if cfg.WebPort < 0 || cfg.WebPort > 65535 {
 			return nil, fmt.Errorf("server: web-port %d is not a port", cfg.WebPort)
 		}
-		if s.web, err = servergw.New(servergw.Config{SSH: s.ssh}); err != nil {
-			return nil, fmt.Errorf("server: web-port %d: %w", cfg.WebPort, err)
+		s.tailnet = servergw.Tailnet{Port: cfg.WebPort, Certs: tailscaled}
+		var webErr error
+		if s.web, webErr = servergw.New(servergw.Config{SSH: s.ssh}); webErr != nil {
+			s.webFailed(fmt.Errorf("server: web-port %d: %w", cfg.WebPort, webErr))
 		}
-		if nodeErr != nil {
-			return nil, fmt.Errorf("server: web-port %d: tailscaled did not report this node: %w", cfg.WebPort, nodeErr)
-		}
-		s.tailnet = servergw.Tailnet{Node: node, Port: cfg.WebPort, Certs: tailscaled}
 	}
 	return s, nil
+}
+
+// webFailed reports why the tailnet dashboard is not serving. The
+// dashboard is optional, so SSH and the edge keep serving.
+func (s *Server) webFailed(err error) {
+	slog.Error("server: the tailnet dashboard is not serving; the server runs without it", "error", err)
+	s.ssh.SetTailnetDashboardError(err)
+}
+
+// serveWeb starts the tailnet dashboard and serves it until ctx ends. A
+// failed start is retried: at boot tailscaled can answer before it knows
+// the node, and HTTPS certificates can be enabled while the server runs.
+// Each new reason is reported once, and cleared once the dashboard serves.
+func (s *Server) serveWeb(ctx context.Context) {
+	tn := s.tailnet
+	reported := ""
+	for delay := webRetryMin; ; delay = min(2*delay, webRetryMax) {
+		lookupCtx, cancel := context.WithTimeout(ctx, tailscaledTimeout)
+		node, err := tn.Certs.Self(lookupCtx)
+		cancel()
+		if err != nil {
+			err = fmt.Errorf("server: web-port %d: tailscaled did not report this node: %w", tn.Port, err)
+		} else {
+			tn.Node = node
+			err = s.web.Start(ctx, tn)
+		}
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if err.Error() != reported {
+			reported = err.Error()
+			s.webFailed(err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+	}
+	s.ssh.SetTailnetDashboardError(nil)
+	url := fmt.Sprintf("https://%s:%d/", tn.Node.DNSName, tn.Port)
+	if tn.Port == 443 {
+		url = "https://" + tn.Node.DNSName + "/"
+	}
+	slog.Info("server: serving the dashboard", "url", url)
+	select {
+	case <-s.web.Done():
+		s.webFailed(fmt.Errorf("server: web: %w", s.web.Err()))
+	case <-ctx.Done():
+	}
 }
 
 // StorePath is the server's database under dataDir.
@@ -530,18 +589,6 @@ func newEdgeAgent(cfg Config, sshSrv *sshd.Server) (*edgeagent.Agent, error) {
 	}
 	return edgeagent.New(edgeagent.Config{EdgeURL: cfg.EdgeURL, DataDir: cfg.DataDir, HostKey: hostKey, SSH: sshSrv,
 		AccessPolicy: cfg.EdgeAccess})
-}
-
-// WebURL is the address the dashboard is served at, empty when the
-// server is SSH-only.
-func (s *Server) WebURL() string {
-	if s.web == nil {
-		return ""
-	}
-	if s.tailnet.Port == 443 {
-		return "https://" + s.tailnet.Node.DNSName + "/"
-	}
-	return fmt.Sprintf("https://%s:%d/", s.tailnet.Node.DNSName, s.tailnet.Port)
 }
 
 // Store is the server's persistence layer.
@@ -581,15 +628,10 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.assistant.StartFollowing(ctx); err != nil {
 		return errors.Join(err, s.Close())
 	}
-	if s.web != nil {
-		if err := s.web.Start(ctx, s.tailnet); err != nil {
-			return errors.Join(err, s.Close())
-		}
-	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errc := make(chan error, 3)
+	errc := make(chan error, 2)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	if s.edge != nil {
@@ -602,15 +644,12 @@ func (s *Server) Run(ctx context.Context) error {
 		}()
 	}
 	if s.web != nil {
+		// Nor does the dashboard, and SSH does not wait on its
+		// certificate fetch.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			select {
-			case <-s.web.Done():
-				errc <- fmt.Errorf("server: web: %w", s.web.Err())
-				cancel()
-			case <-runCtx.Done():
-			}
+			s.serveWeb(runCtx)
 		}()
 	}
 	go func() {

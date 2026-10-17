@@ -160,6 +160,9 @@ type Server struct {
 	// edgeOwner records ownership at the edge; nil while no edge agent
 	// runs. Guarded by mu.
 	edgeOwner EdgeOwner
+	// tailnetDashboardErr is what server.info reports as
+	// tailnet_dashboard_error. Guarded by mu.
+	tailnetDashboardErr string
 
 	// wg counts every handler goroutine (per-connection, per-channel, and
 	// per-subsystem); Close waits on it so no handler outlives shutdown.

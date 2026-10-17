@@ -38,6 +38,7 @@ type Tailnet struct {
 // tailnet address that binds, and serves in the background. It refuses
 // to start without the certificate, naming what the tailnet has to have
 // enabled, or when no address binds at all; plain HTTP is never offered.
+// A failed Start leaves nothing bound, so it can be called again.
 // The context bounds setup only; Close stops the gateway.
 func (g *Gateway) Start(ctx context.Context, tn Tailnet) error {
 	if len(tn.Node.Addrs) == 0 {
