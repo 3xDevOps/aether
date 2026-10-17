@@ -1,10 +1,11 @@
 name: Release
 
-# Publishing a non-draft GitHub release starts the trusted release workflow.
-# Tag-sourced builds run only after publisher and exact-main-CI authorization.
+# Pushing a release tag starts the trusted release workflow. Tag-sourced
+# builds run only after publisher and exact-main-CI authorization, and the
+# GitHub release stays a draft until every asset is uploaded and verified.
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v*']
 
 permissions: {}
 
@@ -57,7 +58,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # Read policy scripts from trusted main before executing tag code.
-          # workflow_sha can name the tag revision on a release event.
+          # workflow_sha names the tag revision on a tag push.
           ref: refs/heads/main
           persist-credentials: false
           fetch-depth: 0
@@ -77,7 +78,7 @@ jobs:
         run: |
           sh scripts/android-version-code.sh "$GITHUB_REF_NAME"
           sha=$(git rev-parse "$GITHUB_REF^{commit}")
-          test "$sha" = "$GITHUB_SHA"
+          test "$sha" = "$(git rev-parse "$GITHUB_SHA^{commit}")"
           url=$(sh scripts/release-ci-check.sh "$GITHUB_REPOSITORY" "$sha")
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Release validation: $url (exact main commit \`$sha\`)" >> "$GITHUB_STEP_SUMMARY"
@@ -635,10 +636,9 @@ jobs:
           echo "Standard manifest: \`$image@$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
 
   # No producer may be skipped/failed: the complete run-specific asset set and
-  # every tested image must be ready before updating the published release.
-  # The manifest goes up last, after every other asset is downloaded back
-  # anonymously and matches it: updaters ignore a release until then, even
-  # though GitHub already lists it as Latest.
+  # every tested image must be ready before the release is drafted. It is
+  # published only after the draft is downloaded back and matches the
+  # signed manifest, so installers never see a release without its assets.
   release:
     needs: [release-policy, release-binaries, windows-defender, android, browser-manifest, edge-manifest, standard-manifest]
     permissions:
@@ -701,7 +701,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: sh scripts/publish-release.sh "$GITHUB_REF_NAME" dist
 
-  # latest moves only after the release's assets are uploaded, to the index
+  # latest moves only after the release is published, to the index
   # edge-manifest already pushed, so a release that fails earlier leaves it
   # where it was and nothing is rebuilt.
   edge-latest:

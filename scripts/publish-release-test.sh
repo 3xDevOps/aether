@@ -1,35 +1,60 @@
 #!/bin/sh
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 dist="$tmp/dist"
+published="$tmp/published"
 bin="$tmp/bin"
 log="$tmp/gh.log"
-mkdir -p "$dist" "$bin"
+mkdir -p "$dist" "$published" "$bin"
 printf '%s\n' binary >"$dist/aether-linux-amd64"
-printf '%s\n' checksum >"$dist/checksums.txt"
+(cd "$dist" && sha256sum aether-linux-amd64 >checksums.txt)
 sum=$(sha256sum "$dist/aether-linux-amd64" | cut -d ' ' -f 1)
-printf '{"schema":1,"version":"v0.1.0-test","assets":{"aether-linux-amd64":{"sha256":"%s","size":7}}}\n' "$sum" \
+printf '{"schema":1,"version":"v0.2.0","assets":{"aether-linux-amd64":{"sha256":"%s","size":7}}}\n' "$sum" \
 	>"$dist/aether-release.json"
 printf '%s\n' signature >"$dist/aether-release.json.sig"
+# What an earlier run published: the same assets under a manifest signed
+# at another time.
+cp "$dist"/* "$published"/
+printf '{"schema":1,"version":"v0.2.0","published":"earlier","assets":{"aether-linux-amd64":{"sha256":"%s","size":7}}}\n' "$sum" \
+	>"$published/aether-release.json"
 
+# GH_STATE is none, draft, published or error; GH_ASSETS are the release's
+# assets, GH_PUBLISHED the published release tags and GH_DRAFT_BODY a
+# replacement for the draft's binary.
 cat >"$bin/gh" <<'EOF'
 #!/bin/sh
 set -eu
-printf '%s\n' "$*" >>"$GH_LOG"
+case "$1 $2" in
+"release download") printf 'release download %s\n' "$3" >>"$GH_LOG" ;;
+*) printf '%s\n' "$*" >>"$GH_LOG" ;;
+esac
 case "$1 $2" in
 "release view")
-	[ "${GH_EXISTING:-0}" = 1 ] || exit 1
+	case $GH_STATE in
+	none) echo "release not found" >&2 && exit 1 ;;
+	error) echo "HTTP 502: Bad Gateway (https://api.github.com/repos/3xDevOps/Aether/releases)" >&2 && exit 1 ;;
+	draft) echo true ;;
+	published) echo false ;;
+	esac
 	printf '%s\n' ${GH_ASSETS:-}
 	;;
-"release create" | "release upload") exit 0 ;;
+"release list") printf '%s\n' ${GH_PUBLISHED:-} ;;
+"release download")
+	mkdir -p "$5"
+	cp "$DIST"/* "$5"/
+	if [ -n "${GH_DRAFT_BODY:-}" ]; then
+		printf '%s\n' "$GH_DRAFT_BODY" >"$5/aether-linux-amd64"
+	fi
+	;;
+"release create" | "release upload" | "release edit" | "release delete-asset") ;;
 *) exit 2 ;;
 esac
 EOF
-# Serves the anonymous download from dist, or CURL_BODY when set.
+# Serves anonymous downloads from PUBLIC, except a tampered CURL_TAMPER.
 cat >"$bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
@@ -39,82 +64,150 @@ while [ "$#" -gt 1 ]; do
 	shift
 done
 printf 'curl %s\n' "$1" >>"$GH_LOG"
-if [ -n "${CURL_BODY:-}" ]; then
-	printf '%s\n' "$CURL_BODY" >"$out"
+if [ "${1##*/}" = "${CURL_TAMPER:-}" ]; then
+	printf '%s\n' tampered >"$out"
 else
-	cp "$DIST/${1##*/}" "$out"
+	cp "$PUBLIC/${1##*/}" "$out"
 fi
 EOF
 chmod 0755 "$bin/gh" "$bin/curl"
-export GH_LOG="$log" DIST="$dist" GITHUB_REPOSITORY=3xDevOps/Aether
+export GH_LOG="$log" DIST="$dist" PUBLIC="$dist" GITHUB_REPOSITORY=3xDevOps/Aether
 export PATH="$bin:$PATH"
 
-tag="v0.1.0-test"
-url="https://github.com/3xDevOps/Aether/releases/download/$tag/aether-linux-amd64"
+tag="v0.2.0"
+url="https://github.com/3xDevOps/Aether/releases/download/$tag"
+view="release view $tag --json isDraft,assets --jq .isDraft, .assets[].name"
+list="release list --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq .[].tagName"
+upload_all="release upload $tag --clobber $dist/aether-linux-amd64 $dist/aether-release.json $dist/aether-release.json.sig $dist/checksums.txt"
 expected="$tmp/expected.log"
 
-sh "$script_dir/publish-release.sh" "$tag" "$dist" >/dev/null
-printf '%s\n' \
-	"release view $tag --json assets --jq .assets[].name" \
-	"release create $tag --title $tag --generate-notes $dist/aether-linux-amd64 $dist/checksums.txt" \
-	"curl $url" \
-	"release upload $tag --clobber $dist/aether-release.json.sig" \
-	"release upload $tag $dist/aether-release.json" \
+run() {
+	: >"$log"
+	sh "$script_dir/publish-release.sh" "$tag" "$dist" >/dev/null 2>"$tmp/err"
+}
+
+publish_lines() {
+	printf '%s\n' \
+		"release download $tag" \
+		"release edit $tag --draft=false --latest=$1" \
+		"curl $url/aether-linux-amd64" \
+		"curl $url/checksums.txt" \
+		"curl $url/aether-release.json" \
+		"curl $url/aether-release.json.sig"
+}
+
+# A fresh tag becomes a draft, is verified, then published as Latest.
+export GH_STATE=none GH_PUBLISHED="v0.1.0 v0.2.0-alpha.3"
+run
+{
+	printf '%s\n' "$view" "$list" \
+		"release create $tag --draft --verify-tag --title $tag --generate-notes --notes-start-tag=v0.2.0-alpha.3" \
+		"$upload_all"
+	publish_lines true
+} >"$expected"
+diff -u "$expected" "$log"
+
+# A retry finds the draft a partial upload left and completes it.
+export GH_STATE=draft GH_ASSETS="aether-linux-amd64"
+run
+{
+	printf '%s\n' "$view" "$list" "$upload_all"
+	publish_lines true
+} >"$expected"
+diff -u "$expected" "$log"
+
+# An asset the draft should not carry is removed before publishing.
+export GH_ASSETS="aether-linux-amd64 aether-linux-amd64.old"
+run
+{
+	printf '%s\n' "$view" "$list" "$upload_all" \
+		"release delete-asset $tag aether-linux-amd64.old --yes"
+	publish_lines true
+} >"$expected"
+diff -u "$expected" "$log"
+
+# A draft that does not match the manifest stays a draft.
+if GH_DRAFT_BODY=tampered run; then
+	echo "publish-release published a draft that does not match the manifest" >&2
+	exit 1
+fi
+grep -q "draft $tag/aether-linux-amd64 is 9 bytes with sha256 .*; the manifest says 7 bytes with sha256 $sum" "$tmp/err"
+if grep -q "release edit" "$log"; then
+	echo "publish-release published after a failed draft verification" >&2
+	exit 1
+fi
+
+# An older tag that finishes after a newer one does not take Latest.
+export GH_STATE=none GH_PUBLISHED="v0.3.0 v0.1.0 nightly"
+run
+{
+	printf '%s\n' "$view" "$list" \
+		"release create $tag --draft --verify-tag --title $tag --generate-notes --notes-start-tag=v0.1.0" \
+		"$upload_all"
+	publish_lines false
+} >"$expected"
+diff -u "$expected" "$log"
+
+# A rerun after publication verifies the public assets against the
+# published manifest and uploads nothing.
+export GH_STATE=published GH_ASSETS="aether-linux-amd64 checksums.txt aether-release.json aether-release.json.sig"
+PUBLIC="$published" run
+printf '%s\n' "$view" \
+	"curl $url/aether-release.json" \
+	"curl $url/aether-release.json.sig" \
+	"curl $url/aether-linux-amd64" \
+	"curl $url/checksums.txt" \
 	>"$expected"
 diff -u "$expected" "$log"
 
-: >"$log"
-export GH_EXISTING=1 GH_ASSETS="aether-linux-amd64 checksums.txt"
-sh "$script_dir/publish-release.sh" "$tag" "$dist" >/dev/null
-printf '%s\n' \
-	"release view $tag --json assets --jq .assets[].name" \
+# A published release whose assets no longer match its manifest fails.
+if PUBLIC="$published" CURL_TAMPER=aether-linux-amd64 run; then
+	echo "publish-release accepted a published release that does not match its manifest" >&2
+	exit 1
+fi
+grep -q "$url/aether-linux-amd64 is 9 bytes" "$tmp/err"
+if grep -q "release upload" "$log"; then
+	echo "publish-release re-uploaded a signed release" >&2
+	exit 1
+fi
+
+# A release published by the old flow without a manifest is completed:
+# assets, anonymous verification, then the signature and manifest last.
+export GH_ASSETS="aether-linux-amd64"
+run
+printf '%s\n' "$view" \
 	"release upload $tag --clobber $dist/aether-linux-amd64 $dist/checksums.txt" \
-	"curl $url" \
+	"curl $url/aether-linux-amd64" \
+	"curl $url/checksums.txt" \
 	"release upload $tag --clobber $dist/aether-release.json.sig" \
 	"release upload $tag $dist/aether-release.json" \
 	>"$expected"
 diff -u "$expected" "$log"
 
-# A download that does not match the manifest never gets the manifest.
-: >"$log"
-if CURL_BODY=tampered sh "$script_dir/publish-release.sh" "$tag" "$dist" 2>"$tmp/err"; then
+# ... and never gets the manifest if a download does not match it.
+if CURL_TAMPER=aether-linux-amd64 run; then
 	echo "publish-release accepted a download that does not match the manifest" >&2
 	exit 1
 fi
-grep -q "the manifest says 7 bytes with sha256 $sum" "$tmp/err"
+grep -q "$url/aether-linux-amd64 is 9 bytes with sha256 .*; the manifest says 7 bytes with sha256 $sum" "$tmp/err"
 if grep -q "aether-release.json" "$log"; then
 	echo "publish-release uploaded the manifest after a failed verification" >&2
 	exit 1
 fi
 
-# A signature left without its manifest by an interrupted run is replaced.
-: >"$log"
-export GH_ASSETS="aether-linux-amd64 checksums.txt aether-release.json.sig"
-sh "$script_dir/publish-release.sh" "$tag" "$dist" >/dev/null
-printf '%s\n' \
-	"release view $tag --json assets --jq .assets[].name" \
-	"release upload $tag --clobber $dist/aether-linux-amd64 $dist/checksums.txt" \
-	"curl $url" \
-	"release upload $tag --clobber $dist/aether-release.json.sig" \
-	"release upload $tag $dist/aether-release.json" \
-	>"$expected"
-diff -u "$expected" "$log"
-
-# A release that already has a manifest is never re-uploaded.
-: >"$log"
-export GH_ASSETS="aether-linux-amd64 aether-release.json"
-if sh "$script_dir/publish-release.sh" "$tag" "$dist" 2>"$tmp/err"; then
-	echo "publish-release re-uploaded a signed release" >&2
+# A GitHub API failure is reported as GitHub gave it, not as a missing release.
+export GH_STATE=error
+if run; then
+	echo "publish-release continued after a failed release lookup" >&2
 	exit 1
 fi
-grep -q "already has a signed manifest" "$tmp/err"
-printf '%s\n' "release view $tag --json assets --jq .assets[].name" >"$expected"
+grep -q "HTTP 502: Bad Gateway" "$tmp/err"
+printf '%s\n' "$view" >"$expected"
 diff -u "$expected" "$log"
 
-# No manifest, no release.
-: >"$log"
+# No signature, no release.
 rm "$dist/aether-release.json.sig"
-if sh "$script_dir/publish-release.sh" "$tag" "$dist" 2>"$tmp/err"; then
+if run; then
 	echo "publish-release published without a signature" >&2
 	exit 1
 fi

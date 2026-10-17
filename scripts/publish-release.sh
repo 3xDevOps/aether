@@ -1,4 +1,15 @@
 #!/bin/sh
+# Publishes dist/ as the GitHub release for <tag>, resuming whatever state an
+# earlier run left:
+#
+#   no release            create a draft, then continue as for a draft
+#   draft                 upload everything, drop stray assets, download it
+#                         all back and verify it, then publish
+#   published, signed     verify the public downloads; never re-upload
+#   published, unsigned   a release made by the old flow: upload, verify,
+#                         then the signature and the manifest last
+#
+# The release workflow's concurrency group runs one release at a time.
 set -eu
 
 if [ "$#" -ne 2 ]; then
@@ -9,69 +20,145 @@ fi
 tag="$1"
 dist="$2"
 repo="${GITHUB_REPOSITORY:?publish-release: GITHUB_REPOSITORY must name the repository}"
+script_dir=$(dirname -- "$0")
 manifest="$dist/aether-release.json"
 signature="$manifest.sig"
+public="https://github.com/$repo/releases/download/$tag"
+
+fail() {
+	echo "publish-release: $1" >&2
+	exit 1
+}
 
 if [ ! -d "$dist" ]; then
-	echo "publish-release: distribution directory not found: $dist" >&2
-	exit 1
+	fail "distribution directory not found: $dist"
 fi
-for file in "$manifest" "$signature"; do
+for file in "$manifest" "$signature" "$dist/checksums.txt"; do
 	if [ ! -s "$file" ]; then
-		echo "publish-release: $file is missing; sign the release with release-manifest first" >&2
-		exit 1
+		fail "$file is missing; write checksums.txt and sign the release with release-manifest first"
 	fi
 done
 
-set --
-for file in "$dist"/*; do
-	case "${file##*/}" in
-	aether-release.json | aether-release.json.sig) ;;
-	*) set -- "$@" "$file" ;;
-	esac
-done
-if [ "$#" -eq 0 ]; then
-	echo "publish-release: no release assets in $dist" >&2
-	exit 1
-fi
-
-# A published manifest has signed the assets beside it; replacing them
-# under it would break every updater, so a signed release is never redone.
-# A signature without its manifest is left by an interrupted run and is
-# replaced below.
-if names=$(gh release view "$tag" --json assets --jq '.assets[].name' 2>/dev/null); then
-	if printf '%s\n' "$names" | grep -qx 'aether-release\.json'; then
-		echo "publish-release: $tag already has a signed manifest; publish a new tag instead of re-uploading" >&2
-		exit 1
-	fi
-	gh release upload "$tag" --clobber "$@"
-else
-	gh release create "$tag" --title "$tag" --generate-notes "$@"
-fi
-
-# Clients download anonymously, so the release is verified the same way
-# before the manifest that makes it installable goes up.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
-jq -r '.assets | to_entries[] | "\(.key) \(.value.sha256) \(.value.size)"' "$manifest" >"$tmp/assets"
-while read -r name sum size; do
-	url="https://github.com/$repo/releases/download/$tag/$name"
-	if [ ! -f "$dist/$name" ]; then
-		echo "publish-release: the manifest lists $name, which is not in $dist" >&2
-		exit 1
-	fi
-	curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-		--retry 5 --retry-delay 5 --retry-all-errors --output "$tmp/download" "$url"
-	got=$(sha256sum "$tmp/download" | cut -d ' ' -f 1)
-	got_size=$(wc -c <"$tmp/download" | tr -d ' ')
-	if [ "$got" != "$sum" ] || [ "$got_size" != "$size" ]; then
-		echo "publish-release: $url is $got_size bytes with sha256 $got; the manifest says $size bytes with sha256 $sum" >&2
-		exit 1
-	fi
-	echo "verified $url"
-done <"$tmp/assets"
+(cd "$dist" && ls) >"$tmp/expected"
 
-# Clients treat a release missing either file as unsigned, so the manifest
-# goes up last and a failure before it leaves the release retryable.
-gh release upload "$tag" --clobber "$signature"
-gh release upload "$tag" "$manifest"
+# Requires every asset the manifest lists to be in dir with its size and
+# SHA-256, and checksums.txt to match them.
+verify() {
+	jq -r '.assets | to_entries[] | "\(.key) \(.value.sha256) \(.value.size)"' "$1" >"$tmp/entries"
+	while read -r name sum size; do
+		[ -f "$2/$name" ] || fail "$3 has no $name, which the manifest lists"
+		got=$(sha256sum "$2/$name" | cut -d ' ' -f 1)
+		got_size=$(wc -c <"$2/$name" | tr -d ' ')
+		if [ "$got" != "$sum" ] || [ "$got_size" != "$size" ]; then
+			fail "$3/$name is $got_size bytes with sha256 $got; the manifest says $size bytes with sha256 $sum"
+		fi
+	done <"$tmp/entries"
+	(cd "$2" && sha256sum --check --strict --quiet checksums.txt) ||
+		fail "$3/checksums.txt does not match the assets beside it"
+}
+
+# Downloads assets the way clients do: anonymously. Retries cover a release
+# that has just been published and is not yet served everywhere.
+fetch() {
+	for name in "$@"; do
+		curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+			--retry 10 --retry-delay 6 --retry-all-errors --output "$tmp/public/$name" "$public/$name"
+	done
+}
+
+verify_public() {
+	rm -rf "$tmp/public"
+	mkdir "$tmp/public"
+	# Word splitting on purpose: asset names contain no spaces.
+	# shellcheck disable=SC2046
+	fetch $(jq -r '.assets | keys[]' "$1") checksums.txt
+	verify "$1" "$tmp/public" "$public"
+	echo "verified $public"
+}
+
+if view=$(gh release view "$tag" --json isDraft,assets --jq '.isDraft, .assets[].name' 2>"$tmp/err"); then
+	state=$(printf '%s\n' "$view" | head -n 1)
+	printf '%s\n' "$view" | tail -n +2 >"$tmp/names"
+elif [ "$(cat "$tmp/err")" = "release not found" ]; then
+	state=none
+	: >"$tmp/names"
+else
+	cat "$tmp/err" >&2
+	fail "cannot read the release for $tag"
+fi
+
+if [ "$state" = false ]; then
+	if grep -qx 'aether-release\.json' "$tmp/names"; then
+		# Assets signed by a published manifest are never replaced.
+		rm -rf "$tmp/public"
+		mkdir "$tmp/public"
+		fetch aether-release.json aether-release.json.sig
+		jq -r '.assets | keys[]' "$manifest" >"$tmp/ours"
+		jq -r '.assets | keys[]' "$tmp/public/aether-release.json" | diff -u "$tmp/ours" - >&2 ||
+			fail "$tag is published with a manifest that lists other assets than $manifest; publish a new tag"
+		cp "$tmp/public/aether-release.json" "$tmp/published.json"
+		verify_public "$tmp/published.json"
+		echo "$tag is already published and verified"
+		exit 0
+	fi
+	set --
+	for file in "$dist"/*; do
+		case "${file##*/}" in
+		aether-release.json | aether-release.json.sig) ;;
+		*) set -- "$@" "$file" ;;
+		esac
+	done
+	gh release upload "$tag" --clobber "$@"
+	verify_public "$manifest"
+	# Clients treat a release missing either file as unsigned, so the
+	# manifest goes up last and a failure before it leaves this retryable.
+	gh release upload "$tag" --clobber "$signature"
+	gh release upload "$tag" "$manifest"
+	exit 0
+fi
+
+# Latest goes to the highest version, so an older tag that finishes after a
+# newer one does not take it; release notes start at the release below.
+ours=$(sh "$script_dir/android-version-code.sh" "$tag")
+latest=true
+previous=
+previous_code=0
+published=$(gh release list --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq '.[].tagName')
+for other in $published; do
+	code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null) || continue
+	if [ "$code" -gt "$ours" ]; then
+		latest=false
+	elif [ "$code" -lt "$ours" ] && [ "$code" -gt "$previous_code" ]; then
+		previous=$other
+		previous_code=$code
+	fi
+done
+
+if [ "$state" = none ]; then
+	gh release create "$tag" --draft --verify-tag --title "$tag" --generate-notes \
+		${previous:+"--notes-start-tag=$previous"}
+fi
+gh release upload "$tag" --clobber "$dist"/*
+while read -r name; do
+	grep -qxF "$name" "$tmp/expected" || gh release delete-asset "$tag" "$name" --yes </dev/null
+done <"$tmp/names"
+
+# Drafts cannot be downloaded anonymously, so the draft is read back through
+# the API before publishing.
+gh release download "$tag" --dir "$tmp/draft"
+(cd "$tmp/draft" && ls) | diff -u "$tmp/expected" - >&2 ||
+	fail "draft $tag does not hold exactly the assets in $dist"
+verify "$manifest" "$tmp/draft" "draft $tag"
+for name in checksums.txt aether-release.json aether-release.json.sig; do
+	cmp "$dist/$name" "$tmp/draft/$name" >&2 || fail "draft $tag/$name differs from $dist/$name"
+done
+
+gh release edit "$tag" --draft=false --latest="$latest"
+verify_public "$manifest"
+fetch aether-release.json aether-release.json.sig
+for name in aether-release.json aether-release.json.sig; do
+	cmp "$dist/$name" "$tmp/public/$name" >&2 || fail "$public/$name differs from $dist/$name"
+done
+echo "published $tag (latest: $latest)"
