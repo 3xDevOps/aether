@@ -159,3 +159,31 @@ third=$(fingerprint "$name-3")
 stop "$name-3"
 [ "$third" != "$first" ] || fail "a new volume kept the edge key $first"
 ok "a new volume makes a new edge key $third"
+
+# 4. A running edge backs up through docker exec, refuses a restore, and a
+# restore into the stopped edge's volume keeps its edge key.
+start "$name-4" "$name-a"
+rt exec "$name-4" /usr/local/bin/aether-edge backup - >"$work/streamed.db" 2>"$work/out" ||
+	fail "backup - in a running edge: $(cat "$work/out")"
+[ "$(head -c 15 "$work/streamed.db")" = "SQLite format 3" ] || fail "backup - wrote no SQLite database"
+ok "backup - from a running edge: $(cat "$work/out")"
+rt exec "$name-4" /usr/local/bin/aether-edge backup /var/lib/aether-edge/backups/smoke.db >"$work/out" 2>&1 ||
+	fail "backup to a file in a running edge: $(cat "$work/out")"
+status=0
+rt exec "$name-4" /usr/local/bin/aether-edge restore /var/lib/aether-edge/backups/smoke.db >"$work/out" 2>&1 || status=$?
+if [ "$status" -ne 1 ] || ! grep -q 'stop it first' "$work/out"; then
+	fail "restore in a running edge: exit $status, want 1 and a refusal: $(cat "$work/out")"
+fi
+ok "restore in a running edge is refused: $(cat "$work/out")"
+stop "$name-4"
+rt cp "$work/streamed.db" "$name-4:/var/lib/aether-edge/streamed.db"
+rt run --rm --read-only -v "$name-a:/var/lib/aether-edge" "$image" restore /var/lib/aether-edge/streamed.db >"$work/out" 2>&1 ||
+	fail "restore into a stopped edge's volume: $(cat "$work/out")"
+ok "restore into a stopped edge's volume: $(cat "$work/out")"
+rt rm "$name-4" >/dev/null
+
+start "$name-5" "$name-a"
+fifth=$(fingerprint "$name-5")
+stop "$name-5"
+[ "$fifth" = "$first" ] || fail "after a restore: fingerprint $fifth, want $first"
+ok "a restore keeps the edge key $first"

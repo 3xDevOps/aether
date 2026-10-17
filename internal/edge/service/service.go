@@ -161,10 +161,11 @@ func New(cfg Config) (*Service, error) {
 	if err = os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("edge: create data directory: %w", err)
 	}
-	if s.key, err = loadOrCreateKey(filepath.Join(cfg.DataDir, keyFile)); err != nil {
+	if s.store, err = edgestore.Open(filepath.Join(cfg.DataDir, "edge.db")); err != nil {
 		return nil, err
 	}
-	if s.store, err = edgestore.Open(filepath.Join(cfg.DataDir, "edge.db")); err != nil {
+	if s.key, err = loadKey(cfg.DataDir, s.store); err != nil {
+		s.store.Close() //nolint:errcheck // the key error takes precedence
 		return nil, err
 	}
 	return s, nil
