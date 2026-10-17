@@ -345,36 +345,24 @@ func TestRunBranchRefspec(t *testing.T) {
 	}
 }
 
-func TestWaitReplaced(t *testing.T) {
+func TestRunExitsWhenExecutableIsReplaced(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether")
 	if err := os.WriteFile(path, []byte("v1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if _, err := waitReplaced(ctx, path, before, 5*time.Millisecond, time.Hour); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("unchanged executable: waitReplaced = %v, want deadline exceeded", err)
-	}
-	// The recheck hands the refused daemon back to Run to ask the server
-	// again, which may have rolled back and stopped refusing.
-	if replaced, err := waitReplaced(context.Background(), path, before, 5*time.Millisecond, 30*time.Millisecond); replaced || err != nil {
-		t.Fatalf("unchanged executable at recheck: waitReplaced = %v, %v; want false, nil", replaced, err)
-	}
+	d, _, _ := newTestDaemon(t, "")
+	d.cfg.Server = "127.0.0.1:1" // nothing listens here, so Run backs off
+	d.executable = func() (string, error) { return path, nil }
+	d.updatePoll = 5 * time.Millisecond
+	done := make(chan error, 1)
+	go func() { done <- d.Run(context.Background()) }()
 
-	type result struct {
-		replaced bool
-		err      error
+	time.Sleep(50 * time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("Run returned %v before the executable changed", err)
+	default:
 	}
-	done := make(chan result, 1)
-	go func() {
-		replaced, err := waitReplaced(context.Background(), path, before, 5*time.Millisecond, time.Hour)
-		done <- result{replaced, err}
-	}()
-	time.Sleep(20 * time.Millisecond)
 	next := path + ".new"
 	if err := os.WriteFile(next, []byte("v2"), 0o755); err != nil {
 		t.Fatal(err)
@@ -383,16 +371,11 @@ func TestWaitReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case got := <-done:
-		if !got.replaced || got.err != nil {
-			t.Fatalf("replaced executable: waitReplaced = %v, %v; want true, nil", got.replaced, got.err)
+	case err := <-done:
+		if err == nil || errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), path) {
+			t.Fatalf("Run = %v, want a non-cancel error naming %s", err, path)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("waitReplaced did not notice the replaced executable")
-	}
-	// Replaced between two waits still counts: the stat is the one from
-	// the first refusal, not from the latest wait.
-	if replaced, err := waitReplaced(context.Background(), path, before, 5*time.Millisecond, time.Hour); !replaced || err != nil {
-		t.Fatalf("executable replaced before the wait: waitReplaced = %v, %v; want true, nil", replaced, err)
+		t.Fatal("Run did not exit after the executable was replaced")
 	}
 }
