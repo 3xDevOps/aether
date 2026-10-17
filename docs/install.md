@@ -1202,9 +1202,10 @@ downloads `aether-desktop-windows-amd64.zip` (or `-arm64`) into
 `%LOCALAPPDATA%\aether\desktop-build` (`--build-dir` overrides), checks its
 size and SHA-256 against the manifest, and extracts it into the install
 location below. Nothing is built, and nothing but the app's own files is
-written. The download is about 100 MB and is deleted after the install. If
-the manifest cannot be fetched or the zip fails its check, the command fails
-with that error and names `aether gui build --source`. Three cases build from
+written. The download is about 100 MB and is deleted after the install.
+While it runs, the command prints a line such as `  42 of 104 MB (40%)` every
+5 seconds. If the manifest cannot be fetched or the zip fails its check, the
+command fails with that error and names `aether gui build --source`. Three cases build from
 source instead:
 
 - `aether gui build --source`, for a machine that should build its own app.
@@ -1258,7 +1259,10 @@ changes and no shell profile is edited. So the first build needs network
 access, and later builds reuse the cached copy; a build that fetches a newer
 pinned version deletes the old one. A failed download or a checksum mismatch
 fails `aether gui build` with the error and the URL to fetch by hand; it
-never falls back to a system Node older than 22.
+never falls back to a system Node older than 22. The Node.js download prints
+the same progress lines as the desktop zip, and a source build prints one
+line as each step starts: unpacking, the Node.js check, `npm install`,
+electron-builder, and installing.
 The CLI runs electron-builder through Node directly, avoiding `npx` shell
 wrappers and their handling of spaces and metacharacters in Windows paths.
 

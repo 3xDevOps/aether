@@ -55,7 +55,7 @@ func DownloadDesktop(ctx context.Context, baseURL, tag, goarch, dir string, out 
 		return "", fmt.Errorf("localops: stage the desktop app download in %s: %w", dir, err)
 	}
 	_, _ = fmt.Fprintf(out, "downloading %s%s\n", m.AssetURL(name), megabytes(want.Size))
-	_, err = m.Download(ctx, name, f)
+	_, err = m.Download(ctx, name, f, out)
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}
