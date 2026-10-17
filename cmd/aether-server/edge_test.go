@@ -67,7 +67,10 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 	if err := edgeStatus(&out, dir, edgeagent.DefaultURL, edgeproto.PolicyApprovedDevices, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{id, edgeproto.EdgeKeyFingerprint(pub), "5 attempts left", "never connected", "edge access  approved-devices"} {
+	for _, want := range []string{id, edgeproto.EdgeKeyFingerprint(pub), "5 attempts left", "edge access  approved-devices",
+		"connection   never connected: no server using " + dir + " has recorded an attempt to reach the edge\n",
+		"why          the service is not running, is still starting, exits during startup, or started before edge-url was set and needs a restart\n",
+		"next         sudo systemctl status aether-server; sudo journalctl -u aether-server -n 50 --no-pager"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("status lacks %q:\n%s", want, out.String())
 		}

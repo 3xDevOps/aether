@@ -279,6 +279,7 @@ dials one.
 sudo aether-server config set edge-url https://edge.onaether.dev
 sudo aether-server config set edge-access approved-devices
 sudo aether-server config set edge-url ""     # off
+sudo systemctl restart aether-server          # apply the change
 ```
 
 The server keeps one outbound control connection to the edge, pinging
@@ -433,8 +434,21 @@ end noticing leaves:
 
 ```
 connection   stale: reported connected since <time>, but server process <pid> is not running; it stopped without closing the connection
-next         sudo systemctl status aether-server; sudo journalctl -u aether-server -n 50
+next         sudo systemctl status aether-server; sudo journalctl -u aether-server -n 50 --no-pager
 ```
+
+The server writes `status.json` when its first connection attempt
+succeeds or fails, and when it stops, so without the file `edge status`
+prints:
+
+```
+connection   never connected: no server using /var/lib/aether has recorded an attempt to reach the edge
+why          the service is not running, is still starting, exits during startup, or started before edge-url was set and needs a restart
+next         sudo systemctl status aether-server; sudo journalctl -u aether-server -n 50 --no-pager
+```
+
+The server dials the edge only after the rest of its startup succeeds, so
+a startup error shows only in the journal.
 
 A server started before an upgrade records no heartbeat. `edge status`
 then prints `connected since <time>, unchecked` and

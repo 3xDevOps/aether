@@ -26,6 +26,8 @@ import (
 
 const edgeUsage = "usage: aether-server edge <status|claim-code [--admin <member id>]|trust|leave> [--config <file>]"
 
+const serviceLogNext = "next\tsudo systemctl status aether-server; sudo journalctl -u aether-server -n 50 --no-pager"
+
 // edgeURLValue is the edge-url option: an edge URL, or empty for no edge.
 // Validating it as a flag makes `config set` and the config file refuse a
 // URL the agent would refuse at startup.
@@ -181,10 +183,12 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	stale := status.Stale(now)
 	switch {
 	case !ran:
-		_, _ = fmt.Fprintln(tw, "connection\tnever connected; the server has not run with this edge")
+		_, _ = fmt.Fprintf(tw, "connection\tnever connected: no server using %s has recorded an attempt to reach the edge\n", dataDir)
+		_, _ = fmt.Fprintln(tw, "why\tthe service is not running, is still starting, exits during startup, or started before edge-url was set and needs a restart")
+		_, _ = fmt.Fprintln(tw, serviceLogNext)
 	case stale != nil:
 		_, _ = fmt.Fprintf(tw, "connection\tstale: reported connected since %s, but %v\n", status.Since.Local().Format(time.DateTime), stale)
-		_, _ = fmt.Fprintln(tw, "next\tsudo systemctl status aether-server; sudo journalctl -u aether-server -n 50")
+		_, _ = fmt.Fprintln(tw, serviceLogNext)
 	case status.Connected && status.Heartbeat.IsZero():
 		_, _ = fmt.Fprintf(tw, "connection\tconnected since %s, unchecked: the running server records no heartbeat, so it predates this version\n",
 			status.Since.Local().Format(time.DateTime))
