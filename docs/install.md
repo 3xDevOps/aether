@@ -215,17 +215,64 @@ Older releases are refused before downloading or replacing the CLI.
 | | `AETHER_BASE_URL` | Download from a release-asset mirror. |
 
 The release is chosen as the [install script](#which-release-it-installs)
-chooses it, for `aether-windows-<arch>.exe`, with one difference: PowerShell
+chooses it, for `aether-windows-<arch>.exe`, with these differences. PowerShell
 has no ed25519 verifier, so the script does not check
 `aether-release.json.sig`. It says so, and checks the binary's SHA-256 and
 size against `checksums.txt` and `aether-release.json`. It refuses an
 `AETHER_BASE_URL` that is not `https`.
 
+Downloads use `%SystemRoot%\System32\curl.exe` (Windows 10 1803 and later)
+and fall back to `Invoke-WebRequest` when it is missing or gets no HTTP
+answer, for example behind a proxy only Windows' own settings name. curl.exe
+runs with `-q`, so a `.curlrc` or `_curlrc` cannot turn off its TLS checks or
+set a proxy. A connection that takes over 15 seconds, or a download that stays
+below 1 KB/s for 60 seconds, is abandoned. If the installed CLI already has
+the release's SHA-256, it is neither downloaded nor replaced; a CLI the
+installer cannot read is downloaded and replaced. The old version
+in `old -> new` is read from the installed `aether.exe`'s file properties,
+without running it. The output is a numbered list of steps:
+
+```
+aether install: windows/amd64, CLI and desktop app
+[1/3] downloading the newest complete release
+      latest release: v0.7.0-alpha.13
+      https://github.com/3xDevOps/Aether/releases/download/v0.7.0-alpha.13/
+      checksums.txt                         1.0 KB  0.3s
+      aether-release.json                   2.0 KB  0.3s
+      aether-release.json.sig                 89 B  0.3s
+      aether-windows-amd64.exe             30.3 MB  0.5s
+      verified aether-windows-amd64.exe SHA-256 and size against checksums.txt and aether-release.json; aether-release.json.sig is not checked (PowerShell has no ed25519 verifier)
+[2/3] installing the CLI: v0.7.0-alpha.12 -> v0.7.0-alpha.13
+      C:\Users\<you>\AppData\Local\Programs\Aether\aether.exe
+[3/3] installing the desktop app (the build output follows)
+downloading https://github.com/3xDevOps/Aether/releases/download/v0.7.0-alpha.13/aether-desktop-windows-amd64.zip (99 MB)
+  42 of 99 MB (42%)
+  verified against the signed aether-release.json
+installing the app
+installed C:\Users\<you>\AppData\Local\Programs\Aether Desktop
+launcher C:\Users\<you>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Aether.lnk
+open it from the Start Menu as Aether
+      installed C:\Users\<you>\AppData\Local\Programs\Aether Desktop\aether-desktop.exe
+next:
+  open Aether from the Start menu, or link from a new terminal:
+  aether link <server-host>:2222
+done: Aether v0.7.0-alpha.13 installed in 24.4s
+```
+
+Step 3 runs `aether gui build` with its output unchanged, so its download
+progress, and on a source build its npm and electron-builder messages, appear
+as they happen. An error is printed once on stderr. Run with `-File`, or with
+`&` or `.` at a prompt, the script then exits 1 and sets `$LASTEXITCODE`.
+Called from another script or through `Invoke-Expression`, it throws instead,
+so a caller's `catch` sees the failure and an interactive session stays
+open.
+
 Only the current user's `PATH` is updated, without duplicating the install
 directory or removing other entries. Expandable entries such as `%SystemRoot%`
 keep their registry type. The current PowerShell process also gets the
-directory; existing applications keep their old environment. Sign out and
-back in if another terminal still cannot find the CLI. An older CLI,
+directory, and the change is broadcast, so terminals opened from Explorer or
+the Start menu afterwards find `aether`. Terminals that were already open
+keep their old `PATH`. An older CLI,
 alias, or function can still shadow `aether`: `Get-Command aether -All`
 shows which command runs. The installer never deletes a shadowing copy.
 The desktop built by the installer records the CLI it just installed, so an
@@ -242,9 +289,17 @@ to inspect the actual registration.
 For a fresh desktop installation, run the default command above. To reinstall
 or upgrade, close Aether and rerun it, retaining `-BinDir` if you selected a
 custom CLI location. Downloads and checksum failures leave the installed
-binary alone; a locked binary reports the Windows error rather than deleting
-it first. A desktop-build failure keeps the installed CLI, returns failure,
-and prints the explicit command to retry. Configuration and SSH files are untouched.
+binary alone. If `aether.exe` or `aether-desktop.exe` is running from the
+install directories, or Windows reports `aether.exe` as locked, the installer
+lists each running process with its pid, prints the `Stop-Process -Id <pids>`
+and rerun commands, and changes nothing. When the sync daemon's Scheduled
+Task `aether-daemon` exists, it also prints `schtasks /End /TN aether-daemon`:
+the task restarts a daemon killed by `Stop-Process` within a minute. The
+daemon starts again at the next sign-in, or at once with
+`schtasks /Run /TN aether-daemon`. Any other failure to replace the CLI
+reports the Windows error alone. A desktop-step failure keeps the installed
+CLI, returns failure, and prints the `gui build` command to rerun.
+Configuration and SSH files are untouched.
 
 The installer does not request administrator access, change execution policy,
 disable Defender, add exclusions, or unblock quarantined files. If policy
@@ -1018,6 +1073,7 @@ policy before deciding what happened; these are not interchangeable systems.
 | Browser download blocked or flagged | Edge uses Microsoft Defender SmartScreen; Chrome uses Google Safe Browsing, and other security tools may also intervene | Browser's exact warning and download details; follow organization policy |
 | "Windows protected your PC" on launch | Windows SmartScreen reputation check | Named application and publisher, signature details, and organization policy |
 | File disappears or "virus detected" | Microsoft Defender antivirus or another antivirus product | Protection History/security product report, detection name, and affected path |
+| "Smart App Control blocked an app that may be unsafe", or the CLI fails with "An Application Control policy has blocked this file" | Smart App Control, which runs only signed apps or apps Microsoft's cloud already trusts | **Windows Security > App & browser control > Smart App Control**. The installer cannot and will not bypass it; signed releases are the fix |
 
 Do not disable protection, add exclusions, or restore/run a quarantined file
 to work around a warning. A matching checksum establishes download integrity,
