@@ -482,9 +482,11 @@ into the same refusal. Every 5 minutes it reconnects, so a server that
 rolled back its update or was downgraded gets its sync back without a
 restart.
 
-Daemons from `v0.7.0-alpha.11` and older do not do this. After updating to
-the next release, restart the service once: `systemctl --user restart
-aether-daemon` (macOS: `launchctl kickstart -k gui/$(id -u)/com.aether.daemon`).
+Daemons from `v0.7.0-alpha.12` and older do not do this. After updating from
+one of them, restart the service once: `systemctl --user restart
+aether-daemon` (macOS: `launchctl kickstart -k gui/$(id -u)/com.aether.daemon`;
+Windows: `schtasks /End /TN aether-daemon`, then `schtasks /Run /TN
+aether-daemon`).
 
 ### Verified releases
 
