@@ -226,9 +226,13 @@ func (s *Service) incapableReason() string {
 	if s.incapable != "" {
 		return s.incapable
 	}
-	if s.replacedOnDisk() {
-		return fmt.Sprintf("%s was replaced on disk but this process still runs %s; restart onto it: sudo systemctl restart aether-server",
-			s.self, version.Version)
+	s.mu.Lock()
+	applying := s.applying
+	s.mu.Unlock()
+	// This process's own swap replaces the file and restarts onto it, so
+	// status ignores the replacement while one is in flight.
+	if reason := s.replacedOnDisk(); reason != "" && !applying {
+		return reason
 	}
 	if err := selfupdate.CheckWritable(filepath.Dir(s.self)); err != nil {
 		return notWritable
@@ -236,19 +240,20 @@ func (s *Service) incapableReason() string {
 	return ""
 }
 
-// replacedOnDisk reports whether the file at self is no longer the one this
-// process started from, as after `sudo aether update` without a restart. A
-// swap would then keep the new release as the rollback target. This
-// process's own swap is exempt: it replaces the file and restarts onto it.
-func (s *Service) replacedOnDisk() bool {
-	s.mu.Lock()
-	applying := s.applying
-	s.mu.Unlock()
-	if applying || s.started == nil {
-		return false
+// replacedOnDisk is why this process must restart before it can update,
+// empty when the file at self is still the one it started from. A file
+// replaced behind its back, as by `sudo aether update` without a restart,
+// would be kept as the rollback target of a swap.
+func (s *Service) replacedOnDisk() string {
+	if s.started == nil {
+		return ""
 	}
 	now, err := os.Stat(s.self)
-	return err == nil && !os.SameFile(s.started, now)
+	if err != nil || os.SameFile(s.started, now) {
+		return ""
+	}
+	return fmt.Sprintf("%s was replaced on disk but this process still runs %s; restart onto it: sudo systemctl restart aether-server",
+		s.self, version.Version)
 }
 
 // Status reports the server's own update state. The release fields come

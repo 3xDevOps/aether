@@ -61,6 +61,8 @@ type env struct {
 	// stalled, when set, receives once the server binary's download has
 	// started, which then waits for resume.
 	stalled, resume chan struct{}
+	// onRequest, when set, runs before the release host answers a request.
+	onRequest func()
 }
 
 // companionAsset is the aether binary that sits beside aether-server.
@@ -156,6 +158,9 @@ func (e *env) releaseServer(t *testing.T, tag string) *httptest.Server {
 	e.rel = rel
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name := path.Base(r.URL.Path)
+		if e.onRequest != nil {
+			e.onRequest()
+		}
 		if e.stalled != nil && r.Method == http.MethodGet && strings.HasPrefix(name, "aether-server-") {
 			e.stalled <- struct{}{}
 			<-e.resume
@@ -890,15 +895,21 @@ func TestAnUncommittedTrialRefusesANewUpdate(t *testing.T) {
 	}
 }
 
+// replaceBinary swaps in a different file by rename, as `aether update` does.
+func replaceBinary(t *testing.T, path string) {
+	t.Helper()
+	next := path + ".next"
+	if err := os.WriteFile(next, []byte("the release `aether update` installed"), 0o755); err != nil {
+		t.Errorf("write: %v", err)
+	}
+	if err := os.Rename(next, path); err != nil {
+		t.Errorf("replace the binary: %v", err)
+	}
+}
+
 func TestServerRunningAReplacedBinaryAsksForARestart(t *testing.T) {
 	e := newEnv(t, false)
-	next := e.self + ".next"
-	if err := os.WriteFile(next, []byte("the release `aether update` installed"), 0o755); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if err := os.Rename(next, e.self); err != nil {
-		t.Fatalf("replace the binary: %v", err)
-	}
+	replaceBinary(t, e.self)
 
 	_, _, err := e.svc.Update(t.Context(), "mem_a",
 		protocol.ServerUpdateParams{Version: "v0.2.0", When: protocol.ServerUpdateNow})
@@ -915,5 +926,21 @@ func TestServerRunningAReplacedBinaryAsksForARestart(t *testing.T) {
 	data, err := os.ReadFile(e.self + ".prev")
 	if err == nil {
 		t.Fatalf("a refused update must not keep %s as .prev", data)
+	}
+}
+
+func TestBinaryReplacedDuringPreflightIsNotKeptAsPrev(t *testing.T) {
+	e := newEnv(t, false)
+	var once sync.Once
+	e.onRequest = func() {
+		once.Do(func() { replaceBinary(t, e.self) })
+	}
+	_, _, err := e.svc.Update(t.Context(), "mem_a",
+		protocol.ServerUpdateParams{Version: "v0.2.0", When: protocol.ServerUpdateNow})
+	if !errors.Is(err, ErrIncapable) || !strings.Contains(err.Error(), "was replaced on disk") {
+		t.Fatalf("Update error = %v, want ErrIncapable naming the replacement", err)
+	}
+	if _, err := os.Stat(e.self + ".prev"); err == nil {
+		t.Fatal("the replaced binary was kept as .prev")
 	}
 }
