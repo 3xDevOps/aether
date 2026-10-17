@@ -2005,10 +2005,6 @@ sudo sh -c 'umask 077 && cat > /opt/aether-edge/github-client-secret'   # paste,
 sudo chown 65532 /opt/aether-edge/github-client-secret
 sudo chmod 0400 /opt/aether-edge/github-client-secret
 
-docker pull ghcr.io/3xdevops/aether-edge:stable                        # prints Digest: sha256:<digest>
-echo 'AETHER_EDGE_DIGEST=sha256:<digest>' | sudo tee /opt/aether-edge/.env
-(cd /opt/aether-edge && sudo docker compose up -d --wait aether-edge)
-
 sudo curl -fsSL -o /usr/local/sbin/aether-edge-update "$src/scripts/edge-update.sh"
 sudo chmod 0755 /usr/local/sbin/aether-edge-update
 sudo curl -fsSL -o /etc/aether-edge-update.env "$src/packaging/edge/aether-edge-update.env.example"
@@ -2016,7 +2012,12 @@ sudoedit /etc/aether-edge-update.env
 sudo curl -fsSL -o /etc/systemd/system/aether-edge-update.service "$src/packaging/systemd/aether-edge-update.service"
 sudo curl -fsSL -o /etc/systemd/system/aether-edge-update.timer "$src/packaging/systemd/aether-edge-update.timer"
 sudo curl -fsSL -o /etc/systemd/system/aether-edge-update-recover.service "$src/packaging/systemd/aether-edge-update-recover.service"
-sudo aether-edge-update --check
+
+docker pull ghcr.io/3xdevops/aether-edge:stable                        # prints Digest: sha256:<digest>
+echo 'AETHER_EDGE_DIGEST=sha256:<digest>' | sudo tee /opt/aether-edge/.env
+sudo aether-edge-update --check                                         # verified the running <version> (sha256:<digest>)
+(cd /opt/aether-edge && sudo docker compose up -d --wait aether-edge)
+
 sudo systemctl daemon-reload
 sudo systemctl enable --now aether-edge-update.timer
 sudo systemctl enable aether-edge-update-recover.service
@@ -2026,8 +2027,15 @@ systemctl list-timers aether-edge-update.timer
 An edge that already runs from an older image needs the
 [first upgrade](#first-upgrade) by hand once.
 
-`--check` resolves and verifies the channel's release, prints `would
-update <version> (<digest>) to <version> (<digest>)`, and changes nothing.
+`--check` first verifies the digest in `.env`, the one the edge runs or
+is about to run, as an update verifies a new one: the promotion
+attestation with cosign (step 4), then `release-check` from that image,
+and prints `verified the running <version> (<digest>)`. Run it before the
+first `up`: until it passes, nothing from the pulled image has run. Then it
+resolves and verifies the channel's release, prints `up to date` or
+`would update <version> (<digest>) to <version> (<digest>)`, and changes
+nothing. On `latest` the running digest has no attestation, so only its
+own `release-check` vouches for it.
 Without cosign or jq it fails with `cosign not found` or `jq not found`.
 `.env` holds `AETHER_EDGE_DIGEST` and is rewritten by the updater; other
 lines in it are kept.
@@ -2105,7 +2113,7 @@ In `/var/lib/aether-edge-update`:
 
 | File | Holds |
 | --- | --- |
-| `state` | `state=` `idle`, `switching` (between the backup and passing checks), `rolling-back`, `held` or `broken`, with the two releases, the fingerprint, the server count, the backup, whether the release is retried, and the reason |
+| `state` | `state=` `idle`, `switching` (between the backup and passing checks), `rolling-back`, `held` or `broken`, with the two releases, the fingerprint, the server count, the backup, whether and since when a restore started, whether the release is retried, and the reason |
 | `current` | The digest and version the last update installed |
 | `previous` | The digest, version and pre-update backup of the release before it, for `--rollback` |
 | `failed` | One line per digest never to install again: digest, version, reason |
@@ -2182,7 +2190,13 @@ flag: its backup is minutes old.
 
 The digest a manual rollback leaves goes into `failed`, so the timer does
 not install it again, and `previous` is removed. When a check fails, the
-rollback returns to the release it started from and restores the pre-rollback backup if it had restored.
+rollback returns to the release it started from. If it had started a
+restore, it puts back the `edge-before-restore-<UTC time>.db` that
+`aether-edge restore` saved, the database as it was when the edge
+stopped; the state records the restore before it starts, so a restore
+that fails after replacing the database, or a signal or reboot during it,
+is undone the same way by the rollback or by `--recover`. No such copy
+means the database was never replaced, and it is kept.
 It also works when the current edge is down or its container is gone: it
 then checks the fingerprint the last update recorded and backs up with
 the current image from the data directory.

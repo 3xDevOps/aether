@@ -1,6 +1,6 @@
 #!/bin/sh
 # Exercises scripts/edge-update.sh against stubbed docker, curl, cosign,
-# flock and sleep, the same style as deploy-test.sh. The docker stub keeps
+# flock, sleep and date, the same style as deploy-test.sh. The docker stub keeps
 # a small world in files: which digest runs, what the channel tag points
 # to, the database and its backups, and which releases fail. A real edge
 # is not involved.
@@ -40,9 +40,14 @@ D=sha256:$(printf '%064d' 0 | tr 0 d)
 # and $WORLD/channel, $WORLD/running, $WORLD/db ("schema floor data"),
 # $WORLD/data/backups/<name>, $WORLD/release-check ("<exit> [min]"),
 # $WORLD/unrouted (how many /v1/edge requests the proxy answers 404
-# first), $WORLD/extra-digest (a second repository digest), and the
-# switches backup-fails, restore-fails, schema-fails and gone (no
-# container until the next up). The JSON is what aether-edge prints:
+# first), $WORLD/extra-digest (a second repository digest), $WORLD/reasons
+# (the JSON reasons of a min_upgrade_from hold), $WORLD/clock (the seconds
+# date +%s prints and sleep advances), and the switches backup-fails,
+# restore-fails, schema-fails, gone (no container until the next up),
+# hang (a refused /v1/edge request takes curl's 10 s timeout),
+# write-on-stop (the edge writes "last" as it stops), and the one-shot
+# restore-fails-after (restore fails after replacing the database) and
+# term-on-restore (SIGTERM to the updater once restore replaced it). The JSON is what aether-edge prints:
 # version and schema --json (#453), healthcheck --ready --json (#455) and
 # release-check --json (#454).
 cat >"$bin/docker" <<'EOF'
@@ -97,11 +102,13 @@ run)
 		tag="$3" digest="$5" from="$7"
 		rc=0 kind=""
 		[ ! -f "$w/release-check" ] || read -r rc kind <"$w/release-check"
+		from="${from:?release-check requires --from}"
 		[ "$rc" != 1 ] || { echo "aether-edge: release $tag signs the edge image sha256:0, not $digest; do not run it" >&2; exit 1; }
 		steps='[]' reasons='[]' hold=false reason=""
 		if [ "$rc" = 3 ] && [ "$kind" = min ]; then
 			reason="$tag upgrades only from v1.0.5 or later; upgrade $from to v1.0.5 first"
 			reasons="[\"$reason\"]" hold=true
+			[ ! -f "$w/reasons" ] || reasons="$(cat "$w/reasons")"
 		elif [ "$rc" = 3 ]; then
 			reason="manual step rotate-key (since v1.1.0) must be done first: rotate the edge key; see https://example.com/rotate"
 			steps='[{"id":"rotate-key","since":"v1.1.0","summary":"rotate the edge key","doc_url":"https://example.com/rotate","blocking":true}]'
@@ -120,7 +127,19 @@ run)
 	restore)
 		[ ! -f "$w/restore-fails" ] || { echo "aether-edge: restore: disk full" >&2; exit 1; }
 		[ -z "$(cat "$w/running")" ] || { echo "aether-edge: another aether-edge process holds the lock; an edge is running on /var/lib/aether-edge" >&2; exit 1; }
+		n=$(($(cat "$w/restores" 2>/dev/null || echo 0) + 1))
+		echo "$n" >"$w/restores"
+		cp "$w/db" "$w/data/backups/edge-before-restore-$(date -u +%Y%m%dT%H%M%S).$(printf '%06d' "$n")Z.db"
 		cp "$w/data/backups/$(basename "$2")" "$w/db"
+		if [ -f "$w/restore-fails-after" ]; then
+			rm "$w/restore-fails-after"
+			echo "aether-edge: sync /var/lib/aether-edge: input/output error" >&2
+			exit 1
+		fi
+		if [ -f "$w/term-on-restore" ]; then
+			rm "$w/term-on-restore"
+			kill -TERM "$PPID"
+		fi
 		;;
 	esac
 	exit 0
@@ -154,7 +173,13 @@ compose)
 	config)
 		printf '{"name":"edge","services":{"aether-edge":{"volumes":[{"type":"bind","source":"%s","target":"/var/lib/aether-edge","bind":{}}]}}}\n' "$w/data"
 		;;
-	stop) : >"$w/running" ;;
+	stop)
+		if [ -f "$w/write-on-stop" ]; then
+			read -r schema floor _ <"$w/db"
+			echo "$schema $floor last" >"$w/db"
+		fi
+		: >"$w/running"
+		;;
 	up)
 		d="$(sed -n 's/^AETHER_EDGE_DIGEST=//p' "$env_file")"
 		if [ -f "$w/term-on-up/$d" ]; then
@@ -189,6 +214,7 @@ printf 'curl %s\n' "$*" >>"$CMD_LOG"
 unrouted="$(cat "$WORLD/unrouted" 2>/dev/null || echo 0)"
 if [ "$unrouted" -gt 0 ]; then
 	echo $((unrouted - 1)) >"$WORLD/unrouted"
+	[ ! -f "$WORLD/hang" ] || echo $(($(cat "$WORLD/clock") + 10)) >"$WORLD/clock"
 	echo "curl: (22) The requested URL returned error: 404" >&2
 	exit 22
 fi
@@ -233,10 +259,20 @@ EOF
 
 cat >"$bin/sleep" <<'EOF'
 #!/bin/sh
-exit 0
+c="$(cat "$WORLD/clock" 2>/dev/null)" || exit 0
+echo $((c + $1)) >"$WORLD/clock"
 EOF
 
-chmod 0755 "$bin/docker" "$bin/cosign" "$bin/curl" "$bin/flock" "$bin/sleep"
+cat >"$bin/date" <<'EOF'
+#!/bin/sh
+if [ "$*" = +%s ] && [ -f "$WORLD/clock" ]; then
+	cat "$WORLD/clock"
+	exit 0
+fi
+PATH="${PATH#*:}" exec date "$@"
+EOF
+
+chmod 0755 "$bin/docker" "$bin/cosign" "$bin/curl" "$bin/flock" "$bin/sleep" "$bin/date"
 
 state="$tmp/state"
 compose_dir="$tmp/compose"
@@ -304,6 +340,8 @@ reset() {
 		mkdir -p "$world/$d"
 	done
 	mkdir -p "$compose_dir"
+	now="$(date +%s)"
+	echo "$now" >"$world/clock"
 	echo v1.0.0 >"$world/version/$A"
 	echo v1.1.0 >"$world/version/$B"
 	echo v0.9.0 >"$world/version/$C"
@@ -375,7 +413,7 @@ echo 2 >"$world/floor/$B"
 run 0
 assert_db "2 2 old"
 write_db new
-touch -d '10 days ago' "$world"/data/backups/pre-update-v1.1.0-*.db
+touch -d "@$(($(cat "$world/clock") - 10 * 86400))" "$world"/data/backups/pre-update-v1.1.0-*.db
 : >"$log"
 run 1 --rollback
 assert_out "10 days ago"
@@ -393,15 +431,49 @@ assert_db "1 1 old"
 assert_digest "$A"
 run 2 --restore-backup
 
-# A failed manual rollback puts back the newer data.
+# A failed manual rollback puts back the database the restore replaced,
+# with the writes since its pre-rollback backup, not that backup.
 reset
 echo 2 >"$world/supports/$B"
 echo 2 >"$world/floor/$B"
 run 0
 write_db new
-touch "$world/unready/$A"
+touch "$world/unready/$A" "$world/write-on-stop"
 run 1 --rollback --restore-backup
-assert "restore /var/lib/aether-edge/backups/pre-rollback-v1.1.0-"
+assert "restore /var/lib/aether-edge/backups/edge-before-restore-"
+refute "restore /var/lib/aether-edge/backups/pre-rollback-"
+assert_db "2 2 last"
+assert_digest "$B"
+assert_state idle
+
+# A restore that fails after replacing the database is undone too.
+reset
+echo 2 >"$world/supports/$B"
+echo 2 >"$world/floor/$B"
+run 0
+write_db new
+touch "$world/restore-fails-after"
+run 1 --rollback --restore-backup
+assert_out "aether-edge restore /var/lib/aether-edge/backups/pre-update-v1.1.0-"
+assert "restore /var/lib/aether-edge/backups/edge-before-restore-"
+assert_db "2 2 new"
+assert_digest "$B"
+assert_state idle
+
+# So is one a signal interrupts: the state records the restore before it
+# starts, and --recover puts the database back.
+reset
+echo 2 >"$world/supports/$B"
+echo 2 >"$world/floor/$B"
+run 0
+write_db new
+touch "$world/term-on-restore"
+run 1 --rollback --restore-backup
+assert_state rolling-back
+grep -qx "restored=1" "$state/state" || fail "restore not recorded"
+assert_db "1 1 old"
+run 1 --recover
+assert "restore /var/lib/aether-edge/backups/edge-before-restore-"
 assert_db "2 2 new"
 assert_digest "$B"
 assert_state idle
@@ -426,6 +498,30 @@ run 0
 assert_out "up to date"
 refute "release-check"
 refute "compose"
+
+# --check verifies the running digest, so one pinned by hand is checked
+# before its first start, and nothing runs from it before cosign passes.
+reset
+echo "$A" >"$world/channel"
+run 0 --check
+assert "cosign verify-attestation --new-bundle-format --type https://github.com/3xDevOps/aether/edge-promotion/v1 --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main $image@$A"
+assert_before "cosign verify-attestation" "$image@$A version --json"
+assert "docker run --rm $image@$A release-check --tag v1.0.0 --digest $A --from v1.0.0 --json"
+assert_out "verified the running v1.0.0 ($A)"
+assert_out "up to date"
+refute "compose"
+reset
+echo "$A" >"$world/channel"
+echo none >"$world/promotion/$A"
+run 1 --check
+assert_out "the running v1.0.0 ($A) has no valid promotion attestation on stable"
+refute "$image@$A version"
+refute "release-check"
+reset
+echo "$A" >"$world/channel"
+echo 1 >"$world/release-check"
+run 1 --check
+assert_out "release-check refused the running v1.0.0 ($A)"
 
 reset
 run 0 --check
@@ -551,6 +647,23 @@ reset
 echo 3 >"$world/release-check"
 run 3 --manual-steps-done
 assert_digest "$A"
+
+# A reason with backslashes, quotes and command substitutions survives the
+# state file as it is, and the next run reads it.
+reset
+echo "3 min" >"$world/release-check"
+cat >"$world/reasons" <<'EOF'
+["a\\c b \\\\ 'single' \"double\" $(touch pwned) `touch pwned` end"]
+EOF
+run 3
+run 3
+assert_out "end"
+expected="release-check holds v1.1.0: $(jq -r '.[0]' "$world/reasons")"
+# shellcheck disable=SC1091,SC2154 # the state file sets reason
+(cd "$tmp" && . "$state/state" && [ "$reason" = "$expected" ]) || fail "reason changed in the state file: $(cat "$state/state")"
+if [ -e "$tmp/pwned" ] || [ -e "$compose_dir/pwned" ]; then
+	fail "the state file ran a command"
+fi
 
 # --manual-steps-done never passes a min_upgrade_from hold.
 reset
@@ -724,6 +837,14 @@ assert_out "finishing the interrupted switch"
 refute "docker pull"
 assert_digest "$B"
 assert_state idle
+
+# The public check ends at its deadline, counting curl's own timeout.
+reset
+touch "$world/hang"
+echo 100 >"$world/unrouted"
+run 1
+assert_out "GET https://edge.example.com/v1/edge failed; the running edge must answer before an update"
+[ "$(grep -c '^curl' "$log")" = 3 ] || fail "expected 3 requests in 30 s, got $(grep -c '^curl' "$log")"
 
 # At boot the proxy may route only after a while; the public check waits.
 reset
