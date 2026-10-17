@@ -9,6 +9,7 @@ describe('refusedByServer', () => {
     expect(refusedByServer(new ApiError(502, 'Bad Gateway'))).toBe(false)
     expect(refusedByServer(new ApiError(503, 'run.room.post: server unreachable: connection reset', -32004))).toBe(false)
     expect(refusedByServer(new ApiError(503, 'run.room.post: network unreachable: no route to host', -32004))).toBe(false)
+    expect(refusedByServer(new ApiError(503, 'run.room.post: server did not answer run.room.post within 1m0s', -32004))).toBe(false)
     expect(refusedByServer(new ApiError(503, 'run.room.post: server unreachable: device pending approval', -32004, {
       refusal: { kind: 'device-pending', approval_code: 'ABCD-1234' },
     }))).toBe(false)

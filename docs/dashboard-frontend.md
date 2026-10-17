@@ -1146,8 +1146,9 @@ server's error, which replaces the timeout failure and drops **Retry**,
 unless an attempt of that mutation was answered first.
 Only a JSON-RPC error from the server is a refusal; a failure that carries no
 answer, such as `Failed to fetch`, a gateway 502 or 504, the local
-gateway's `server unreachable:` or `network unreachable:`, or any error
-whose data carries an edge-path `refusal`, is treated like the deadline,
+gateway's `server unreachable:`, `network unreachable:` or
+`server did not answer`, or any error whose data carries an edge-path
+`refusal`, is treated like the deadline,
 with its own error text and **Retry**, because the server may have
 committed.
 

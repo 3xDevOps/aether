@@ -135,6 +135,82 @@ func TestSSHBackendReplaysOnlySafeCallsLostOnASilentConnection(t *testing.T) {
 	}
 }
 
+// A server handler that does not answer within the call's bound fails that
+// call alone. The connection stays up, so a call already in flight on it is
+// answered without a replay and nothing redials.
+func TestSSHBackendSlowCallFailsAlone(t *testing.T) {
+	oldTimeout := callTimeout
+	callTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { callTimeout = oldTimeout })
+	home := testhome.Isolate(t)
+	server := listen(t)
+	started := make(chan struct{}, 4)
+	release := make(chan struct{})
+	releaseAll := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseAll)
+	var disks, downloads atomic.Int32
+	connections := serveControl(t, server, func(method string) json.RawMessage {
+		switch method {
+		case protocol.MethodServerDisk:
+			disks.Add(1)
+		case protocol.MethodHomeDownload:
+			downloads.Add(1)
+		default:
+			return json.RawMessage(`{}`)
+		}
+		started <- struct{}{}
+		<-release
+		if method == protocol.MethodServerDisk {
+			return nil
+		}
+		return json.RawMessage(`{}`)
+	})
+	b := NewSSHBackend(cli.Config{Addr: server.Addr().String(), KnownHosts: filepath.Join(home, "known_hosts")})
+	t.Cleanup(func() { _ = b.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	disk := make(chan *protocol.Error, 1)
+	download := make(chan *protocol.Error, 1)
+	go func() {
+		_, perr := b.Call(ctx, protocol.MethodServerDisk, nil)
+		disk <- perr
+	}()
+	go func() {
+		_, perr := b.Call(ctx, protocol.MethodHomeDownload, nil)
+		download <- perr
+	}()
+	for range 2 {
+		select {
+		case <-started:
+		case perr := <-disk:
+			t.Fatalf("server.disk ended before its handler started: %v", perr)
+		case perr := <-download:
+			t.Fatalf("home.download ended before its handler started: %v", perr)
+		case <-ctx.Done():
+			t.Fatal("the handlers did not start within 10s")
+		}
+	}
+
+	perr := <-disk
+	releaseAll()
+	if want := "server did not answer server.disk within 500ms"; perr == nil || perr.Code != protocol.CodeUnavailable || perr.Message != want {
+		t.Fatalf("server.disk past its bound = %v, want unavailable %q", perr, want)
+	}
+	if perr := <-download; perr != nil {
+		t.Fatalf("home.download in flight beside the slow call = %v, want it answered", perr)
+	}
+	if got := disks.Load(); got != 1 {
+		t.Fatalf("server received %d server.disk calls, want 1", got)
+	}
+	if got := downloads.Load(); got != 1 {
+		t.Fatalf("server received %d home.download calls, want 1", got)
+	}
+	if got := connections.Load(); got != 1 {
+		t.Fatalf("server accepted %d connections, want 1", got)
+	}
+}
+
 // A config reload relinks to the same server while a request waits on a
 // dial; the request follows the new config instead of failing.
 func TestSSHBackendRequestFollowsARelinkDuringADial(t *testing.T) {

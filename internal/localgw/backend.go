@@ -253,9 +253,10 @@ func unreachableError(err error) *protocol.Error {
 	return &protocol.Error{Code: protocol.CodeUnavailable, Message: prefix + err.Error(), Data: refusalData(err)}
 }
 
-// callTimeout bounds one control round-trip. A black-holed TCP connection
-// (suspend/resume, network switch) never errors on its own.
-const callTimeout = 60 * time.Second
+// callTimeout bounds one control call. Only that call fails when it passes:
+// a slow server handler is not a dead connection, and the keepalive drops a
+// dead one. A variable so a test can shorten it.
+var callTimeout = 60 * time.Second
 
 // transferTimeout is the server's lifetime for one large control frame: a
 // 64 MiB file does not cross a slow link within callTimeout.
@@ -273,11 +274,9 @@ func callBound(method string) time.Duration {
 	return callTimeout
 }
 
-// errWedged marks a call that outlived the watchdog; its connection is presumed dead.
-var errWedged = errors.New("control call timed out")
-
 // roundTrip runs one call on its own channel. Cancellation and the watchdog
-// close the channel to unblock the pending read.
+// close only that channel, to unblock the pending read. Their errors are
+// coded so Call does not repeat a call the server may still be running.
 func roundTrip(ctx context.Context, client *protocol.Client, method string, params json.RawMessage) (json.RawMessage, error) {
 	var callParams any
 	if len(params) > 0 {
@@ -293,7 +292,8 @@ func roundTrip(ctx context.Context, client *protocol.Client, method string, para
 		err := client.Call(method, callParams, &result)
 		done <- outcome{result: result, err: err}
 	}()
-	watchdog := time.NewTimer(callBound(method))
+	bound := callBound(method)
+	watchdog := time.NewTimer(bound)
 	defer watchdog.Stop()
 	select {
 	case out := <-done:
@@ -304,12 +304,12 @@ func roundTrip(ctx context.Context, client *protocol.Client, method string, para
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "request cancelled"}
 	case <-watchdog.C:
 		_ = client.Close()
-		return nil, errWedged
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: fmt.Sprintf("server did not answer %s within %v", method, bound)}
 	}
 }
 
-// callOnce drops the connection on transport failures and wedges so the next
-// attempt redials; server refusals and cancellations leave it alone.
+// callOnce drops the connection on transport failures so the next attempt
+// redials; server refusals, cancellations and timeouts leave it alone.
 func (b *sshBackend) callOnce(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, error) {
 	conn, cfg, err := b.live(ctx)
 	if err != nil {
@@ -332,12 +332,7 @@ func (b *sshBackend) callOnce(ctx context.Context, method string, params json.Ra
 	b.mu.Lock()
 	silent := b.silent == conn
 	b.mu.Unlock()
-	switch {
-	case errors.Is(err, errWedged):
-		// Coded so Call does not retry: a second wait on a wedged path
-		// doubles the worst case.
-		return nil, unreachableError(endToEnd(cfg, err))
-	case silent:
+	if silent {
 		return nil, endToEnd(cfg, fmt.Errorf("%w: %w", errSilent, err))
 	}
 	return nil, endToEnd(cfg, err)

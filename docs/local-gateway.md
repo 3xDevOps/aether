@@ -197,9 +197,12 @@ whose second run creates a duplicate (`run.launch`, `template.launch`,
 `run.pause`, `agent.remove`, `home.rename`, `approval.decide`). The full list is `noReplay`
 in `internal/localgw/backend.go`. Their lost response may follow a committed write,
 so uncertainty surfaces immediately. A subsequent explicit request can
-reconnect. A call with no answer after 60 seconds fails with `-32004` and
-is not retried; `home.upload`, `home.download` and `terminal.file`, which
-carry up to 64 MiB, get 15 minutes. A server refusal passes through untouched as that `protocol.Error`;
+reconnect. A call with no answer after 60 seconds fails with `-32004`
+`server did not answer <method> within 1m0s` and is not retried;
+`home.upload`, `home.download` and `terminal.file`, which carry up to
+64 MiB, get 15 minutes. Only that call's channel closes: a slow server
+handler is not a dead connection, so the connection, its streams and its
+other calls stay up. The keepalive below drops a dead one. A server refusal passes through untouched as that `protocol.Error`;
 in particular, busy retention admission requires an explicit retry, not
 automatic replay. Streams have a separate guard: a channel that fails to open
 triggers a redial only when a keepalive shows the connection is actually gone,
@@ -227,13 +230,13 @@ link and leaves the reload to a later request rather than wait. A link (`link.ap
 `edge.join`) is bounded the same way, including the `server.info` call that
 completes it.
 
-Every `-32004` carries a message prefix that says who has to fix it, and both
-map to HTTP 503 as before. `network unreachable: ` means this machine could
+A `-32004` for a failed connection carries a message prefix that says who
+has to fix it, and both map to HTTP 503 as before. `network unreachable: ` means this machine could
 not even attempt the connection (DNS resolution failed, or the kernel
 reported no route or an interface down), so the user fixes their own
 connectivity. `server unreachable: ` is everything else and is the default: a
-refused connection, a dial timeout, a failed SSH handshake, or a wedged call,
-where the server is the thing to check. The split stops at unambiguous cases
+refused connection, a dial timeout, or a failed SSH handshake, where the
+server is the thing to check. The split stops at unambiguous cases
 on purpose, since a refusal or a timeout cannot tell a stopped server from a
 firewall, and a wrong guess sends the user to fix the wrong thing. Dial
 failures are classified inside the shared dial path, so the `/ws/events`

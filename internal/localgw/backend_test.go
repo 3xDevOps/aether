@@ -142,7 +142,6 @@ func TestUnreachableErrorClassification(t *testing.T) {
 		{"econnrefused", opErr(syscall.ECONNREFUSED), "server unreachable: "},
 		{"timeout", fmt.Errorf("cli: dial: %w", os.ErrDeadlineExceeded), "server unreachable: "},
 		{"handshake", errors.New("cli: ssh handshake with 127.0.0.1:1: ssh: handshake failed"), "server unreachable: "},
-		{"wedged", errWedged, "server unreachable: "},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
