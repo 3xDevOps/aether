@@ -11,6 +11,8 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/unix"
+
+	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
 )
 
 func checkOwner(path string, info fs.FileInfo) error {
@@ -50,7 +52,7 @@ func checkDataDir(dir string) error {
 		return fmt.Errorf("data directory %s has mode %04o, which lets every user on this machine into the directory of the edge's signing key; run chmod o-rwx %s",
 			dir, perm, dir)
 	}
-	for _, name := range []string{"edge_key", "edge.db"} {
+	for _, name := range []string{keyFile, "edge.db", lockFile, edgestore.BackupDir} {
 		path := filepath.Join(dir, name)
 		info, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {

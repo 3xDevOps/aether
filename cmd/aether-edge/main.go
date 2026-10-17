@@ -24,7 +24,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/edge/relay"
 	edge "github.com/3xDevOps/Aether/internal/edge/service"
-	"github.com/3xDevOps/Aether/internal/version"
 )
 
 // shutdownTimeout bounds a clean stop: drain to every server, then the
@@ -33,14 +32,14 @@ const shutdownTimeout = 10 * time.Second
 
 // commands are aether-edge's top-level commands.
 var commands = map[string]func(args []string) error{
-	"version": func([]string) error {
-		_, err := fmt.Println("aether-edge", version.String())
-		return err
-	},
+	"version":     func(args []string) error { return versionCmd(args, os.Stdout) },
 	"serve":       serve,
 	"healthcheck": func(args []string) error { return healthcheck(args, os.Getenv) },
 	"servers":     func(args []string) error { return servers(args, os.Getenv, os.Stdout) },
 	"accounts":    func(args []string) error { return accounts(args, os.Getenv, os.Stdout) },
+	"schema":      func(args []string) error { return schemaCmd(args, os.Getenv, os.Stdout) },
+	"backup":      func(args []string) error { return backupCmd(args, os.Getenv, os.Stdout, os.Stderr) },
+	"restore":     func(args []string) error { return restoreCmd(args, os.Getenv, os.Stdout) },
 }
 
 func main() {
@@ -76,7 +75,10 @@ commands:
   healthcheck  exit 0 when the edge on this machine answers, 1 with the reason
   servers      list, remove, block and unblock servers
   accounts     list, block, unblock and delete accounts
-  version      print the version
+  schema       print the database's schema version and compat floor [--json]
+  backup       copy the database while the edge runs: backup [--with-key] <file|dir|->
+  restore      replace the database of a stopped edge: restore [--key <file>] <file>
+  version      print the version [--json]
 `)
 }
 
@@ -90,6 +92,14 @@ func serve(args []string) (err error) {
 	if err = checkDataDir(o.dataDir); err != nil {
 		return err
 	}
+	unlock, err := lockData(o.dataDir)
+	if errors.Is(err, errLocked) {
+		return fmt.Errorf("%w; an edge already serves %s, or an operator command runs on it: one edge per data directory", err, o.dataDir)
+	}
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	svc, err := edge.New(edge.Config{
 		DataDir: o.dataDir, SigninOrigin: o.signinOrigin, RelayOrigin: o.relayOrigin,

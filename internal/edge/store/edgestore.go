@@ -333,7 +333,7 @@ func readSchema(db *sql.DB) (Schema, error) {
 		floor = "COALESCE(compat_floor, version)"
 	}
 	var s Schema
-	if err := db.QueryRow(`SELECT COALESCE(MAX(version), 0), COALESCE(MAX(` + floor + `), 0) FROM schema_migrations`).Scan(&s.Version, &s.CompatFloor); err != nil {
+	if err := db.QueryRow(`SELECT COALESCE(MAX(version), 0), COALESCE(MAX(`+floor+`), 0) FROM schema_migrations`).Scan(&s.Version, &s.CompatFloor); err != nil {
 		return Schema{}, fmt.Errorf("edgestore: read schema version: %w", err)
 	}
 	return s, nil
