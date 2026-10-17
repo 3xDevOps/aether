@@ -1196,8 +1196,10 @@ systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
 That second line is the Linux one. `daemon install` prints the activation
 command for whatever platform you are on: `launchctl load` on macOS,
 `schtasks /Create` on Windows. A unit installed by an older release that still
-contains `--sync-origin` will fail after upgrade; reinstall it with the
-command above and activate the newly written unit. There is no recurring
+contains `--sync-origin` keeps restarting after upgrade;
+reinstall it with the command above and activate the newly written unit. The
+reinstalled unit shows `failed` in `systemctl --user status aether-daemon`
+when its arguments are bad. There is no recurring
 dashboard **Sync from origin** action.
 
 ---

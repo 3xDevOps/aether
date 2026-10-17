@@ -396,3 +396,22 @@ func TestWaitReplaced(t *testing.T) {
 		t.Fatalf("executable replaced before the wait: waitReplaced = %v, %v; want true, nil", replaced, err)
 	}
 }
+
+func TestValidateServerAddr(t *testing.T) {
+	for addr, ok := range map[string]bool{
+		"moss:2222":     true,
+		"10.0.0.5:2222": true,
+		"[::1]:2222":    true,
+		"--sync-origin": false,
+		"host":          false,
+		"host:":         false,
+		"host:ssh":      false,
+		":2222":         false,
+		"-x:2222":       false,
+		"host:99999":    false,
+	} {
+		if err := ValidateServerAddr(addr); (err == nil) != ok {
+			t.Errorf("ValidateServerAddr(%q) = %v, want ok=%v", addr, err, ok)
+		}
+	}
+}

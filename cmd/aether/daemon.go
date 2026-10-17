@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/syncd"
@@ -50,6 +52,9 @@ func daemonRun(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if fs.NArg() > 0 {
+		return &exitStatusError{code: 2, err: fmt.Errorf("unexpected argument %q", fs.Arg(0))}
+	}
 	repo, err := filepath.Abs(cfg.RepoPath)
 	if err != nil {
 		return err
@@ -57,7 +62,7 @@ func daemonRun(args []string) error {
 	cfg.RepoPath = repo
 	d, err := syncd.New(*cfg)
 	if err != nil {
-		return err
+		return &exitStatusError{code: 2, err: err}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -79,8 +84,24 @@ func daemonInstall(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
 	if cfg.Server == "" && cfg.ServerID == "" {
 		return errors.New("daemon install: --server or --server-id is required")
+	}
+	if cfg.Server != "" {
+		if err := syncd.ValidateServerAddr(cfg.Server); err != nil {
+			return err
+		}
+	}
+	repo, err := filepath.Abs(cfg.RepoPath)
+	if err != nil {
+		return err
+	}
+	out, err := exec.Command("git", "-C", repo, "rev-parse", "--is-inside-work-tree").CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "true" {
+		return fmt.Errorf("--repo %s is not inside a git work tree: %s", repo, strings.TrimSpace(string(out)))
 	}
 	path, activate, err := localops.InstallDaemonUnit(*cfg)
 	if err != nil {
