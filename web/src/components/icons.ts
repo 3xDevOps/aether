@@ -24,6 +24,7 @@ import {
   Lock as LucideLock,
   MessageSquare as LucideMessageSquare,
   PanelLeft as LucidePanelLeft,
+  Orbit as LucideOrbit,
   Pause as LucidePause,
   Pi as LucidePi,
   Play as LucidePlay,
@@ -261,6 +262,7 @@ export const UserPlus = icon(LucideUserPlus)
 export const WifiOff = icon(LucideWifiOff)
 export const Columns2 = icon(LucideColumns2)
 export const MousePointer2 = icon(LucideMousePointer2)
+export const Orbit = icon(LucideOrbit)
 export const RotateCw = icon(LucideRotateCw)
 export const Smartphone = icon(LucideSmartphone)
 export const Tablet = icon(LucideTablet)

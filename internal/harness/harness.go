@@ -635,6 +635,21 @@ var profiles = map[string]Profile{
 		InstallScript: "curl -fsS https://cursor.com/install | bash",
 		UpdateScript:  "agent update",
 	},
+	// agy has no ACP mode, so Antigravity is Standard and Background only.
+	"antigravity": {
+		Name:         "antigravity",
+		DisplayName:  "Antigravity CLI",
+		TUIArgs:      []string{"agy", "--dangerously-skip-permissions", "--prompt-interactive=" + TaskPlaceholder},
+		HeadlessArgs: []string{"agy", "--dangerously-skip-permissions", "--print=" + TaskPlaceholder},
+		ModelArgs:    []string{"--model", ModelPlaceholder},
+		// An API key also needs "modelProvider":"gemini" in
+		// ~/.gemini/antigravity-cli/settings.json.
+		EnvPassthrough:  []string{"GEMINI_API_KEY"},
+		CredentialPaths: []string{".gemini/antigravity-cli/antigravity-oauth-token"},
+		DenyNames:       []string{"antigravity-oauth-token"},
+		InstallScript:   "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+		UpdateScript:    "agy update",
+	},
 	"custom": {Name: "custom"},
 }
 

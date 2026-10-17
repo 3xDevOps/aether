@@ -169,7 +169,7 @@ rewrites it, so a recipient's run can also overwrite it, log out (`/logout` in
 Claude Code and `codex logout` revoke the owner's session at the vendor), or
 replace it: `/login` in Claude Code or `codex login` in a shared run writes
 the recipient's own login into the owner's file. For the file logins
-(`claude`, `codex`, `pi`, `opencode`, `copilot`, `gemini`, `cursor`) that is
+(`claude`, `codex`, `pi`, `opencode`, `copilot`, `gemini`, `cursor`, `antigravity`) that is
 loss of the login, not access to anything else in the owner's home. For `omp`, see above.
 
 **How the path is mounted.** The owner's own containers control every path
@@ -231,6 +231,10 @@ rename too, and rewrites it in place when the rename fails, so Aether mounts
 it in place on the same terms as Claude's file above, and the same
 stop-and-reopen applies. `~/.gemini/.env` is shared but not pinned: Gemini
 only reads it. A share of `gemini` hands over a `GEMINI_API_KEY` kept there.
+
+**Antigravity's login file.** `~/.gemini/antigravity-cli/antigravity-oauth-token`
+is shared like Claude's but not pinned: whether `agy` replaces it by rename is
+unverified, and so is whether `agy` can refresh it as a shared mount.
 
 **Non-root images.** With a non-root image, a run hands the login path to its
 own uid before it starts. For `omp` that is the whole `~/.omp/agent`, so a

@@ -21,6 +21,10 @@ const logins: Record<string, { command: string; hint: string }> = {
     command: 'NO_BROWSER=true gemini',
     hint: 'Gemini CLI needs a paid Gemini API key or Gemini Code Assist Standard or Enterprise. For a key, put GEMINI_API_KEY=<key> in ~/.gemini/.env instead. Google sign-in works only with Code Assist Standard or Enterprise; personal Google accounts moved to Antigravity CLI on 2026-06-18.',
   },
+  antigravity: {
+    command: 'agy',
+    hint: 'Choose Google OAuth, open the printed URL, and paste the code here. For an API key, set GEMINI_API_KEY and "modelProvider":"gemini" in ~/.gemini/antigravity-cli/settings.json.',
+  },
   cursor: { command: 'NO_OPEN_BROWSER=1 agent login', hint: 'Cursor CLI runs as agent. Open the printed URL in your browser.' },
 }
 

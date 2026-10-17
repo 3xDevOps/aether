@@ -150,7 +150,7 @@ const pairs: [fg: string, bg: string, min: number][] = [
   ...[...states, 'diff-add', 'diff-del'].map((fg): [string, string, number] => [fg, 'canvas', 4.5]),
   ['control-border', 'canvas', 3],
   ['icon-faint', 'canvas', 3],
-  ...['claude', 'codex', 'pi', 'omp', 'opencode', 'copilot', 'gemini', 'cursor'].map((agent): [string, string, number] => [`agent-${agent}`, 'canvas', 3]),
+  ...['claude', 'codex', 'pi', 'omp', 'opencode', 'copilot', 'gemini', 'cursor', 'antigravity'].map((agent): [string, string, number] => [`agent-${agent}`, 'canvas', 3]),
 ]
 
 describe.each([

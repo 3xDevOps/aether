@@ -570,7 +570,7 @@ account, not to one workspace. **Set up** opens three numbered steps:
    output. Once the agent is installed, your Environment's terminal opens
    with its login command typed: `claude` then `/login`, `codex login`, `pi` then
    `/login`, `omp`, `opencode auth login`, `copilot login --device-code`,
-   `NO_BROWSER=true gemini`, or `NO_OPEN_BROWSER=1 agent login`.
+   `NO_BROWSER=true gemini`, `NO_OPEN_BROWSER=1 agent login`, or `agy`.
 3. **Check** reads `agent.list` again and shows **Installed**, **Enhanced
    installed**, and **Login found** or **No login found**. Aether only looks
    for the agent's login file; the agent itself proves the login when it

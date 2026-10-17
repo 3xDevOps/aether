@@ -191,6 +191,7 @@
   --agent-copilot: #2f7d4a;
   --agent-gemini: #1f6fd1;
   --agent-cursor: #9a6a00;
+  --agent-antigravity: #c2410c;
   --tone-soft: 8%;
 
   --overlay-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.18);
@@ -237,6 +238,7 @@
   --agent-copilot: #6ccf8e;
   --agent-gemini: #7ab4ff;
   --agent-cursor: #e8b84a;
+  --agent-antigravity: #ff9466;
   --tone-soft: 12%;
 
   --overlay-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.6);
@@ -357,6 +359,7 @@
   --color-agent-copilot: var(--agent-copilot);
   --color-agent-gemini: var(--agent-gemini);
   --color-agent-cursor: var(--agent-cursor);
+  --color-agent-antigravity: var(--agent-antigravity);
 
   /* `accent` is a fill for backgrounds and borders but the link colour for
      text. Tailwind reads the property namespace before `--color-*`. */

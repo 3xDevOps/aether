@@ -465,7 +465,7 @@ func TestDisabledCoordinationKeepsTasklessDiscoveryWithoutLifecycleHooks(t *test
 // the agent keeps through compaction where it has a place for it, else
 // after the task.
 func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
-	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode", "copilot", "gemini", "cursor", "fake"} {
+	for _, name := range []string{"claude", "codex", "pi", "omp", "opencode", "copilot", "gemini", "cursor", "antigravity", "fake"} {
 		for _, tc := range []struct {
 			mode domain.LaunchMode
 			task string

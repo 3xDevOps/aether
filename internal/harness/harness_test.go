@@ -15,8 +15,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-func TestRegistryShipsNineProfiles(t *testing.T) {
-	want := []string{"claude", "codex", "copilot", "cursor", "custom", "gemini", "omp", "opencode", "pi"}
+func TestRegistryShipsTenProfiles(t *testing.T) {
+	want := []string{"antigravity", "claude", "codex", "copilot", "cursor", "custom", "gemini", "omp", "opencode", "pi"}
 	var got []string
 	for _, p := range Profiles() {
 		got = append(got, p.Name)
@@ -30,8 +30,8 @@ func TestRegistryShipsNineProfiles(t *testing.T) {
 // modes and run its executable, which need not be its name; login-flow
 // harnesses must declare their credential paths.
 func TestProfileDefaults(t *testing.T) {
-	executables := map[string]string{"cursor": "agent"}
-	for _, name := range []string{"claude", "codex", "copilot", "cursor", "gemini", "omp", "opencode", "pi"} {
+	executables := map[string]string{"antigravity": "agy", "cursor": "agent"}
+	for _, name := range []string{"antigravity", "claude", "codex", "copilot", "cursor", "gemini", "omp", "opencode", "pi"} {
 		p, ok := Lookup(name)
 		if !ok {
 			t.Fatalf("Lookup(%q) missing", name)
@@ -166,15 +166,16 @@ func TestOmpProfile(t *testing.T) {
 // land there.
 func TestStatusReporters(t *testing.T) {
 	want := map[string]Reporter{
-		"claude":   ReporterFull,
-		"codex":    ReporterTurnEnd,
-		"omp":      ReporterFull,
-		"pi":       ReporterFull,
-		"opencode": ReporterFull,
-		"copilot":  ReporterNone,
-		"gemini":   ReporterNone,
-		"cursor":   ReporterNone,
-		"custom":   ReporterNone,
+		"claude":      ReporterFull,
+		"codex":       ReporterTurnEnd,
+		"omp":         ReporterFull,
+		"pi":          ReporterFull,
+		"opencode":    ReporterFull,
+		"antigravity": ReporterNone,
+		"copilot":     ReporterNone,
+		"gemini":      ReporterNone,
+		"cursor":      ReporterNone,
+		"custom":      ReporterNone,
 	}
 	for name, reporter := range want {
 		p, ok := Lookup(name)
@@ -606,7 +607,7 @@ func TestUpdateScripts(t *testing.T) {
 			t.Errorf("%s has an update script but no install script or TUI argv", p.Name)
 		}
 	}
-	if want := []string{"claude", "codex", "copilot", "cursor", "gemini", "omp", "pi"}; !slices.Equal(updated, want) {
+	if want := []string{"antigravity", "claude", "codex", "copilot", "cursor", "gemini", "omp", "pi"}; !slices.Equal(updated, want) {
 		t.Fatalf("profiles with an update script = %v, want %v", updated, want)
 	}
 	if pi, _ := Lookup("pi"); strings.Contains(pi.UpdateScript, "update --self") {

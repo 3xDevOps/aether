@@ -28,7 +28,7 @@ Two rules shape everything below:
 
 The quota reader supports native OAuth subscription logins for Claude Code and
 Codex only. API-key logins, `pi`, `omp`, `opencode`, `copilot`, `gemini`,
-`cursor`, `fake`, and deployment custom agents are not quota sources. The
+`cursor`, `antigravity`, `fake`, and deployment custom agents are not quota sources. The
 dashboard explains an unsupported source rather than treating missing usage
 as zero. Native vendor reauthentication remains a member action in the
 Environment; Aether does not refresh or rewrite OAuth files.
@@ -79,7 +79,7 @@ your", ...; the full list is in `internal/acphost/usagelimit.go`).
 | `opencode` | V1, any mode | a generic error after retries | no |
 | `pi` | any | text headless; over ACP the error is dropped | no |
 | `omp` | any | text | no: its sessions live in the shared `~/.omp/agent`, so none can resume on another account |
-| `copilot`, `gemini`, `cursor` | any | none matched | no |
+| `copilot`, `gemini`, `cursor`, `antigravity` | any | none matched | no |
 
 Transient 429s share Claude's `rate_limit` kind ("Server is temporarily
 limiting requests (not your usage limit)") and are not matched, nor is
@@ -101,6 +101,7 @@ its turn with the vendor's error.
 | `copilot` | GitHub Copilot CLI | `~/.copilot/config.json` | - | `COPILOT_GITHUB_TOKEN` | `COPILOT_ALLOW_ALL=true` | plugin (`--plugin-dir`) | PTY | yes, npm | native (`copilot --acp`) | no |
 | `gemini` | Gemini CLI | `~/.gemini/oauth_creds.json`, `~/.gemini/.env` | - | `GEMINI_API_KEY` | `GEMINI_CLI_TRUST_WORKSPACE=true` | - | PTY | yes, npm | native (`gemini --acp`) | no |
 | `cursor` | Cursor CLI (runs as `agent`) | `~/.config/cursor/auth.json` | - | `CURSOR_API_KEY` | - | - | PTY | yes, vendor script | native (`agent acp`) | no |
+| `antigravity` | Antigravity CLI (runs as `agy`) | `~/.gemini/antigravity-cli/antigravity-oauth-token` | - | `GEMINI_API_KEY` | - | - | PTY | yes, vendor script | none | no |
 | `fake` | a script you name | - | - | - | - | - | PTY | no | none | no |
 | `custom` | deployment-supplied | - | - | - | - | - | PTY | no | only with `ACPArgs` | no |
 
@@ -224,7 +225,7 @@ Staging failure refuses creation rather than silently omitting the CLI.
 Standard and non-ACP Background launches get no Aether MCP registration;
 Enhanced runs and ACP Background launches get the
 [MCP bridge](mcp-bridge.md#registration) over ACP. Shipped
-agents other than `gemini` and `cursor` carry the run's agent instructions
+agents other than `gemini`, `cursor` and `antigravity` carry the run's agent instructions
 in their system prompt
 ([How Aether launches them](#how-aether-launches-them));
 `aether-internal skill` loads live capability and assignment guidance.
@@ -319,6 +320,7 @@ through the same native extension/plugin mechanism.
 | Copilot CLI | `copilot` | yes, managed Standard launches | no | yes | `copilot.json` |
 | Gemini CLI | `gemini` | yes, once installed by hand | no | yes | `gemini.json` |
 | Cursor CLI | `cursor` | yes, once installed by hand | no | yes | `cursor.json` |
+| Antigravity CLI | `antigravity` | no packaged hooks | no | no | none |
 | Fake | `fake` | explicit inbox only | no | with `ACPArgs` | none |
 | Other/custom | deployment or member definition | adapter required | native API required | with `ACPArgs` | `generic.sh` |
 
@@ -434,6 +436,10 @@ file, Gemini skips system files not owned by root, and extensions load
 only from `~/.gemini/extensions`. Cursor's `--plugin-dir` loads only when
 logged in and needs a path at least three directories deep; it is not
 verified live, so it stays manual for now.
+
+Antigravity CLI has no packaged inbox hooks. `agy` reads `hooks.json` from
+`~/.gemini/config/hooks.json` or `.agents/hooks.json`, but has no per-launch
+flag or environment variable to load one, and Aether ships no asset for it.
 
 Every managed launch, whether it loads a file or arguments, sets
 `AETHER_MANAGED_HOOKS=1` in the run environment, which switches the `skill`
@@ -1008,7 +1014,7 @@ both survive an Aether server restart for a still-live run. The server emits
 deltas as new opens. Actual run termination or reopen clears the old
 lifetime's requests. See [failure-handling.md](failure-handling.md).
 
-`copilot`, `gemini` and `cursor` have no reporter in Standard mode.
+`copilot`, `gemini`, `cursor` and `antigravity` have no reporter in Standard mode.
 
 For an agent with a **Status** of `-`, nothing changes: the run is judged
 on silence alone and parks at `needs-attention` (Needs you) after `--stall-threshold`
@@ -1121,6 +1127,7 @@ Background launch that does not use ACP carries the run's [agent instructions](c
 | `copilot` | `/run/aether/aether.instructions.md`, loaded through `COPILOT_CUSTOM_INSTRUCTIONS_DIRS=/run/aether` after the repository's own instructions; a directory list your workspace variable already sets is kept ahead of it |
 | `gemini` | none: a task-bearing launch carries the instructions after the task, and a taskless one gets none. Gemini puts only `~/.gemini/GEMINI.md` in its system prompt, and `GEMINI_SYSTEM_MD` would replace the whole prompt. Loading `/run/aether` through `--include-directories` would make every Standard launch stop on Gemini's "Do you trust the following folders" prompt, because `GEMINI_CLI_TRUST_WORKSPACE` trusts only the working directory |
 | `cursor` | none: a task-bearing launch carries the instructions after the task, and a taskless one gets none |
+| `antigravity` | none: a task-bearing launch carries the instructions after the task, and a taskless one gets none |
 
 The system prompt survives compaction; instructions after the task do not. The task prompt stays exactly what the
 member typed, as do the stored task, branch slug, and every CLI and dashboard
@@ -1215,6 +1222,7 @@ boundaries instead of automatically merging. See [native Git guidance](coordinat
 | `copilot` | `copilot --allow-all --interactive={task}` | `copilot --allow-all --prompt={task}` |
 | `gemini` | `gemini --approval-mode=yolo --prompt-interactive={task}` | `gemini --approval-mode=yolo --prompt={task}` |
 | `cursor` | `agent --force --trust {task}` | `agent -p --force --trust {task}` |
+| `antigravity` | `agy --dangerously-skip-permissions --prompt-interactive={task}` | `agy --dangerously-skip-permissions --print={task}` |
 
 Every `claude` **run** also gets `IS_SANDBOX=1`. Runs execute as root on the
 standard image, and Claude Code refuses `--dangerously-skip-permissions` as
@@ -1233,8 +1241,8 @@ working directory. Gemini in a folder it does not trust silently drops
 No shipped agent asks for permission by default, in any mode. Enhanced runs
 start Claude Code in session mode `bypassPermissions` and Codex in
 `agent-full-access`, and run `omp acp --auto-approve`. Copilot runs with
-`--allow-all`, Gemini in approval mode and session mode `yolo`, and Cursor
-with `--force`. OpenCode has no flag for it, so every `opencode` launch - Standard, Background, Enhanced and
+`--allow-all`, Gemini in approval mode and session mode `yolo`, Cursor
+with `--force`, and Antigravity with `--dangerously-skip-permissions`. OpenCode has no flag for it, so every `opencode` launch - Standard, Background, Enhanced and
 resume - gets `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT`. The
 workspace's own value of that variable is merged over it key by key, so a
 workspace that sets `permission` keeps its rules; Aether's plugin and
@@ -1245,7 +1253,7 @@ names each agent's setting.
 A **model** chosen at launch (`aether run --model <model>`, the **Model**
 field in the dashboard) is passed to the agent as is; empty keeps the agent's
 default. Each agent's flags, read from its CLI help on 2026-10-11 (`copilot`,
-`gemini` and `cursor` on 2026-10-16):
+`gemini` and `cursor` on 2026-10-16, `antigravity` on 2026-10-17):
 
 | `--agent` | Standard, Background, resume | Enhanced |
 | --- | --- | --- |
@@ -1257,6 +1265,7 @@ default. Each agent's flags, read from its CLI help on 2026-10-11 (`copilot`,
 | `copilot` | `--model <model>` | `model` option, else `session/set_model` |
 | `gemini` | `--model <model>` | `model` option, else `session/set_model` |
 | `cursor` | `--model <model>` | `model` option, else `session/set_model` |
+| `antigravity` | `--model <model>` | none: no Enhanced mode |
 | custom definition | refused | `model` option, else `session/set_model` |
 | `fake` | refused | refused |
 
@@ -1620,6 +1629,53 @@ Its ACP modes are `agent`, `plan` and `ask`, and Aether sets none. In an
 Enhanced run, a Cursor team whose admin enables auto-run controls without
 "Run Everything" overrides `--force`, and the agent asks again.
 
+### Antigravity CLI
+
+Google moved personal Gemini CLI users to Antigravity CLI on 2026-06-18
+([announcement](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)).
+Its executable is `agy`; its name in Aether is `antigravity`: pick that at
+launch. `AETHER_HARNESS` keys on it too.
+
+Install it from `aether terminal`; the script puts a plain file at
+`~/.local/bin/agy`:
+
+```sh
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+```
+
+`agy` has no login subcommand. Run `agy`, choose Google OAuth or a Google
+Cloud project, open the printed URL and paste the authorization code back; no
+browser is needed in the container. The login lands in
+`~/.gemini/antigravity-cli/antigravity-oauth-token`.
+
+For an API key, set `GEMINI_API_KEY` in the server environment or the
+Environment, and put `"modelProvider":"gemini"` in
+`~/.gemini/antigravity-cli/settings.json`. For Google Cloud application
+default credentials, set `AGY_ADC_AUTH=true`.
+
+Standard and Background launches pass `--dangerously-skip-permissions`, so
+the agent never asks. In Standard mode it has no status reporter and no
+packaged inbox hooks (see [Inbox integrations](#installation-and-activation)),
+and a taskless launch carries no run instructions.
+
+Antigravity has no Enhanced mode, so `agent.list` reports `enhanced: none`
+and an Enhanced launch is refused:
+
+- `agy` 1.4.0 has no ACP mode: `agy help acp` answers "unknown subcommand:
+  acp".
+- Google's ACP server is a separate package, `antigravity-acp`. It is a 336 MB
+  download that unpacks to 1.06 GB, and keeps its own login in
+  `~/.gemini/antigravity-acp/acp_token.json` instead of reusing `agy`'s.
+- Its Google sign-in redirects to `http://127.0.0.1:<random port>/` and has no
+  paste-code fallback, so it cannot finish inside a run container. Only a
+  Gemini API key or a Google Cloud login works there, after a manual
+  `settings.json` edit.
+
+Not verified: the `agy` binary contains a "Do you trust the contents of this
+project?" dialog, and whether `--dangerously-skip-permissions` skips it needs
+a logged-in check. Whether `agy` rewrites its token file by rename is also
+unverified, so Aether does not pin it.
+
 ### `fake`
 
 The deterministic test agent. It has no login and no fixed command: the
@@ -1735,6 +1791,7 @@ update.
 | `copilot` | reads the latest version with `npm view @github/copilot version`; when `copilot --version` differs, runs `npm install -g --prefix <stage> "@github/copilot@<version>"` |
 | `gemini` | reads the latest version with `npm view @google/gemini-cli version`; when `gemini --version` differs, runs `npm install -g --prefix <stage> "@google/gemini-cli@<version>"` |
 | `cursor` | `agent update`, which installs the new version under `~/.local/share/cursor-agent/versions` and prints `Already up to date` when current |
+| `antigravity` | `agy update`, which exits 0 when current |
 
 For `claude`, `codex`, and `pi`, an installed
 [enhanced-mode adapter](#enhanced-mode-adapters) is then brought to its pinned

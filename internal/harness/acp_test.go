@@ -63,7 +63,7 @@ func TestACPRegistryPins(t *testing.T) {
 
 func TestEnhancedSupport(t *testing.T) {
 	want := map[string]Enhanced{
-		"claude": EnhancedAdapter, "codex": EnhancedAdapter, "pi": EnhancedAdapter,
+		"antigravity": EnhancedNone, "claude": EnhancedAdapter, "codex": EnhancedAdapter, "pi": EnhancedAdapter,
 		"omp": EnhancedNative, "opencode": EnhancedNative, "copilot": EnhancedNative, "gemini": EnhancedNative,
 		"cursor": EnhancedNative, "custom": EnhancedNone,
 	}
