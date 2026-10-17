@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Cli,
+    # Install the desktop from this prebuilt zip instead of building it.
+    [string]$DesktopZip,
     [switch]$WithoutNode
 )
 
@@ -74,6 +76,32 @@ function Wait-DesktopSidecar([Diagnostics.Process]$Process) {
     } while ($true)
 }
 
+function Invoke-Timed([string]$Label, [scriptblock]$Command) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    & $Command
+    Write-Host ('Timing: {0}: {1:N1}s' -f $Label, $clock.Elapsed.TotalSeconds)
+}
+
+# Times every phase `aether gui build --json` reports, from one phase line
+# to the next.
+function Invoke-GuiBuild([string]$Label, [string[]]$Arguments) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $script:buildEvent = $null
+    $script:phaseStart = 0
+    & $installed gui build @Arguments --json | ForEach-Object {
+        Write-Host $_
+        $now = $clock.Elapsed.TotalSeconds
+        if ($script:buildEvent) { Write-Host ('Timing: {0}: {1}: {2:N1}s' -f $Label, $script:buildEvent.phase, ($now - $script:phaseStart)) }
+        $script:buildEvent = $_ | ConvertFrom-Json
+        $script:phaseStart = $now
+    }
+    $code = $LASTEXITCODE
+    Write-Host ('Timing: {0}: {1:N1}s' -f $Label, $clock.Elapsed.TotalSeconds)
+    if ($code -ne 0 -or -not $script:buildEvent -or $script:buildEvent.phase -ne 'done') {
+        throw "aether gui build $Arguments exited with code $code; last event: $($script:buildEvent | ConvertTo-Json -Compress)"
+    }
+}
+
 function Write-ShellDiagnostics {
     $sessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
     $explorers = @(Get-Process -Name explorer -ErrorAction SilentlyContinue)
@@ -103,7 +131,13 @@ try {
     $asset = Join-Path $mirror 'aether-windows-amd64.exe'
     Copy-Item -LiteralPath $Cli -Destination $asset
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $asset).Hash
-    [IO.File]::WriteAllText((Join-Path $mirror 'checksums.txt'), "$hash  aether-windows-amd64.exe`n")
+    $checksums = "$hash  aether-windows-amd64.exe`n"
+    if ($DesktopZip) {
+        $zip = Join-Path $mirror 'aether-desktop-windows-amd64.zip'
+        Copy-Item -LiteralPath $DesktopZip -Destination $zip
+        $checksums += "$((Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash)  aether-desktop-windows-amd64.zip`n"
+    }
+    [IO.File]::WriteAllText((Join-Path $mirror 'checksums.txt'), $checksums)
 
     $serverScript = Join-Path $root 'release-server.cjs'
     @'
@@ -111,7 +145,7 @@ const http = require('node:http')
 const fs = require('node:fs')
 const path = require('node:path')
 const root = process.argv[2]
-const files = new Set(['aether-windows-amd64.exe', 'checksums.txt'])
+const files = new Set(fs.readdirSync(root))
 const server = http.createServer((req, res) => {
   const name = req.url.replace('/v0.5.1-alpha.4/', '')
   if (!files.has(name)) { res.writeHead(404); res.end(); return }
@@ -162,9 +196,26 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
     $installed = Join-Path $cliDir 'aether.exe'
     $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
 
+    # The source lane's first round leaves the desktop to install.ps1, as a
+    # development build's client install does; every other round installs
+    # the CLI alone and runs gui build itself.
     foreach ($round in 1..2) {
-        & $installer -Version 'v0.5.1-alpha.4'
-        if (-not $?) { throw "Automatic install $round failed." }
+        if (-not $DesktopZip -and $round -eq 1) {
+            Invoke-Timed "install.ps1 round $round" {
+                & $installer -Version 'v0.5.1-alpha.4'
+                if (-not $?) { throw "Automatic install $round failed." }
+            }
+        } else {
+            Invoke-Timed "install.ps1 -Role none round $round" {
+                & $installer -Version 'v0.5.1-alpha.4' -Role none
+                if (-not $?) { throw "CLI install $round failed." }
+            }
+            if ($DesktopZip) {
+                Invoke-GuiBuild "gui build --zip round $round" @('--zip', $zip)
+            } else {
+                Invoke-GuiBuild "gui build --source round $round" @('--source')
+            }
+        }
         if ((Get-FileHash -Algorithm SHA256 -LiteralPath $installed).Hash -ne $hash) {
             throw 'Desktop installation changed the CLI.'
         }

@@ -831,4 +831,4 @@ jobs:
           path: dist
       - name: Scan both Windows clients
         shell: powershell
-        run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist
+        run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist -Artifacts aether-windows-amd64.exe, aether-windows-arm64.exe

@@ -859,19 +859,23 @@ upgrade, so a Claude Code login refreshed there reaches recipients' runs:
 
 ## Manual install
 
-Every release publishes bare binaries plus `checksums.txt`:
+Every release publishes bare binaries, the Windows desktop app, and
+`checksums.txt`:
 
 ```
-aether-server-linux-amd64   aether-server-linux-arm64
-aether-edge-linux-amd64     aether-edge-linux-arm64
-aether-linux-amd64          aether-linux-arm64
-aether-darwin-amd64         aether-darwin-arm64
-aether-windows-amd64.exe    aether-windows-arm64.exe
+aether-server-linux-amd64          aether-server-linux-arm64
+aether-edge-linux-amd64            aether-edge-linux-arm64
+aether-linux-amd64                 aether-linux-arm64
+aether-darwin-amd64                aether-darwin-arm64
+aether-windows-amd64.exe           aether-windows-arm64.exe
+aether-desktop-windows-amd64.zip   aether-desktop-windows-arm64.zip
 ```
 
 `aether-server` and `aether-edge` are Linux-only. The Windows and macOS assets
-are the client. `aether-edge` is only for running your own edge
-([edge.md](edge.md)); servers and clients do not need it. It also ships as
+are the client. The `aether-desktop-windows` zips hold the unpacked Windows
+desktop app that `aether gui build` installs ([Desktop app](#desktop-app)).
+`aether-edge` is only for running your own edge ([edge.md](edge.md)); servers
+and clients do not need it. It also ships as
 the image `ghcr.io/3xdevops/aether-edge:<release-tag>`
 ([edge.md](edge.md#in-a-container)).
 
@@ -902,6 +906,15 @@ repair the desktop, use `v0.5.1-alpha.4` or newer and run
 records this CLI rather than a different `aether` on `PATH`.
 To upgrade, rerun the PowerShell installer or replace the CLI manually;
 there is no `aether update` on Windows.
+
+To install the desktop app from a zip you downloaded, verify it the same way,
+then hand it to the CLI. `gui build` itself checks only the zip's layout, not
+its origin:
+
+```powershell
+Get-FileHash -Algorithm SHA256 .\aether-desktop-windows-amd64.zip
+& "$dir\aether.exe" gui build --zip .\aether-desktop-windows-amd64.zip
+```
 
 ### Recovering commands after a Windows desktop build
 
