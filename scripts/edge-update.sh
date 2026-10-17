@@ -5,7 +5,7 @@
 # install steps, configuration, state files and recovery.
 #
 #   aether-edge-update                       # update once (the timer runs this)
-#   aether-edge-update --check               # resolve and verify only
+#   aether-edge-update --check               # verify the running and the new release only
 #   aether-edge-update --rollback            # back to the previous release
 #   aether-edge-update --recover             # only finish an interrupted run
 #
@@ -21,7 +21,7 @@ promotion_type=https://github.com/3xDevOps/aether/edge-promotion/v1
 promoter=https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main
 
 say() {
-	echo "edge-update: $*" >&2
+	printf 'edge-update: %s\n' "$*" >&2
 }
 
 die() {
@@ -124,20 +124,21 @@ replace() {
 write_state() {
 	state="$1"
 	{
-		echo "state=$state"
-		echo "kind=$kind"
-		echo "from_digest=$from_digest"
-		echo "from_version=$(quote "$from_version")"
-		echo "to_digest=$to_digest"
-		echo "to_version=$(quote "$to_version")"
-		echo "fingerprint=$(quote "$fingerprint")"
-		echo "servers=$servers"
-		echo "backup=$(quote "$backup")"
-		echo "restore=$(quote "$restore")"
-		echo "restored=$restored"
-		echo "retry=$retry"
-		echo "reason=$(quote "$reason")"
-		echo "since=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+		printf 'state=%s\n' "$state"
+		printf 'kind=%s\n' "$kind"
+		printf 'from_digest=%s\n' "$from_digest"
+		printf 'from_version=%s\n' "$(quote "$from_version")"
+		printf 'to_digest=%s\n' "$to_digest"
+		printf 'to_version=%s\n' "$(quote "$to_version")"
+		printf 'fingerprint=%s\n' "$(quote "$fingerprint")"
+		printf 'servers=%s\n' "$servers"
+		printf 'backup=%s\n' "$(quote "$backup")"
+		printf 'restore=%s\n' "$(quote "$restore")"
+		printf 'restored=%s\n' "$restored"
+		printf 'restore_at=%s\n' "$restore_at"
+		printf 'retry=%s\n' "$retry"
+		printf 'reason=%s\n' "$(quote "$reason")"
+		printf 'since=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 	} >"$state_dir/state.tmp"
 	replace "$state_dir/state.tmp" "$state_dir/state"
 }
@@ -160,14 +161,6 @@ current_digest() {
 	is_digest "$d" ||
 		die "no AETHER_EDGE_DIGEST=sha256:<digest> line in $digest_file; write the digest the edge runs there (docs/edge.md, \"Automatic updates\")"
 	echo "$d"
-}
-
-write_digest() {
-	others="$(grep -v '^AETHER_EDGE_DIGEST=' "$digest_file")" || [ $? = 1 ] || return 1
-	{
-		[ -z "$others" ] || printf '%s\n' "$others"
-		echo "AETHER_EDGE_DIGEST=$1"
-	} >"$digest_file.tmp" && replace "$digest_file.tmp" "$digest_file"
 }
 
 # Sets data_dir to the host directory Compose binds as the edge's data, so
@@ -225,6 +218,28 @@ verify_promotion() {
 	return 1
 }
 
+# Verifies the running digest $1 as an update verifies a new one, so that
+# --check vets a digest pinned by hand before its first start. Sets
+# from_json.
+verify_running() {
+	docker pull --quiet "$image@$1" >/dev/null || die "docker pull $image@$1 failed"
+	v="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image@$1")" ||
+		die "cannot read the version label of $image@$1"
+	[ -n "$v" ] || die "$image@$1 has no org.opencontainers.image.version label"
+	if [ "$channel" = latest ]; then
+		say "latest is not a promoted channel; only the running image's own release-check vouches for $v ($1)"
+	else
+		verify_promotion "$1" "$v" ||
+			die "the running $v ($1) has no valid promotion attestation on $channel from promote-edge.yml on main; do not run it"
+	fi
+	from_json="$(version_json "$1")" || exit 1
+	got="$(printf '%s\n' "$from_json" | jq -r .version)"
+	[ "$got" = "$v" ] || die "$image@$1 reports version $got but is labelled $v"
+	docker run --rm "$image@$1" release-check --tag "$v" --digest "$1" --from "$v" --json >/dev/null ||
+		die "release-check refused the running $v ($1); do not run it"
+	say "verified the running $v ($1)"
+}
+
 edge_fingerprint() {
 	out="$(curl -fsS --max-time 10 -H 'Aether-Edge-Version: 1' "$relay_url/v1/edge")" || return 1
 	printf '%s\n' "$out" | jq -er '.fingerprint | strings'
@@ -233,10 +248,9 @@ edge_fingerprint() {
 # Polls edge_fingerprint for up to public_wait seconds: after a boot the
 # proxy may route to the edge only minutes after it is healthy.
 public_fingerprint() {
-	i=0
+	deadline=$(($(date +%s) + public_wait))
 	until edge_fingerprint; do
-		i=$((i + 5))
-		[ "$i" -lt "$public_wait" ] || return 1
+		[ "$(date +%s)" -lt "$deadline" ] || return 1
 		sleep 5
 	done
 }
@@ -244,16 +258,6 @@ public_fingerprint() {
 claimed_servers() {
 	out="$(timeout 30 docker exec "$service" aether-edge healthcheck --ready --json)" || return 1
 	printf '%s\n' "$out" | jq -er 'select(.status == "ready") | .servers.claimed | numbers'
-}
-
-# Prints how many of $1 claimed servers must reconnect after a switch. A
-# percentage rounds up, so 10% lets one of a few servers stay away.
-min_servers() {
-	case "$tolerance" in
-	*%) away=$((($1 * ${tolerance%\%} + 99) / 100)) ;;
-	*) away="$tolerance" ;;
-	esac
-	echo $(($1 - away))
 }
 
 # Checks that the running edge reports version $1, serves the recorded
@@ -273,9 +277,7 @@ post_checks() {
 		why="$relay_url/v1/edge serves fingerprint $fp instead of $fingerprint: the edge lost its edge_key or its data mount"
 		return 1
 	fi
-	attempts=$((server_wait / 5))
-	[ "$attempts" -ge 1 ] || attempts=1
-	i=0
+	deadline=$(($(date +%s) + server_wait))
 	while :; do
 		if ! n="$(claimed_servers)"; then
 			why="aether-edge healthcheck --ready fails in $service"
@@ -287,8 +289,7 @@ post_checks() {
 			why="$n claimed servers reconnected within ${server_wait}s, expected at least $2"
 			retry=1
 		fi
-		i=$((i + 1))
-		[ "$i" -lt "$attempts" ] || return 1
+		[ "$(date +%s)" -lt "$deadline" ] || return 1
 		sleep 5
 	done
 }
@@ -321,7 +322,10 @@ db_needs_restore() {
 
 # Restores backup $2 when image $1 cannot run the database, or always
 # when $3 is 1. Restore refuses while an edge holds edge.lock, so the edge
-# is stopped only then. Sets why on failure.
+# is stopped only then. The restore is recorded before it starts: a crash
+# or a failure after it replaced the database must still be undone, from
+# the edge-before-restore copy it saved from restore_at on. Sets why on
+# failure.
 prepare_db() {
 	if [ "$3" != 1 ]; then
 		rc=0
@@ -332,6 +336,9 @@ prepare_db() {
 		esac
 	fi
 	resolve_data || return 1
+	restored=1
+	[ -n "$restore_at" ] || restore_at="$(date -u +%Y%m%dT%H%M%S)"
+	write_state "$state"
 	say "restoring $2"
 	if ! compose stop "$service"; then
 		why="docker compose stop $service failed"
@@ -341,8 +348,6 @@ prepare_db() {
 		why="aether-edge restore $2 failed"
 		return 1
 	fi
-	restored=1
-	write_state "$state"
 }
 
 # Runs digest $1, release $2, with at least $5 claimed servers. With a
@@ -352,7 +357,11 @@ switch_to() {
 	if [ -n "$3" ]; then
 		prepare_db "$1" "$3" "$4" || return 1
 	fi
-	if ! write_digest "$1"; then
+	others="$(grep -v '^AETHER_EDGE_DIGEST=' "$digest_file")" && rc=0 || rc=$?
+	if [ "$rc" -gt 1 ] || ! {
+		[ -z "$others" ] || printf '%s\n' "$others"
+		printf 'AETHER_EDGE_DIGEST=%s\n' "$1"
+	} >"$digest_file.tmp" || ! replace "$digest_file.tmp" "$digest_file"; then
 		why="cannot write $digest_file"
 		return 1
 	fi
@@ -363,13 +372,32 @@ switch_to() {
 	post_checks "$2" "$5"
 }
 
+# Sets undo to the oldest database copy, as the edge sees it, that
+# aether-edge restore saved from restore_at on, or to nothing when there is
+# none. Sets why on failure.
+before_restore() {
+	resolve_data || return 1
+	undo=""
+	for f in "$data_dir"/backups/edge-before-restore-*.db; do
+		[ -f "$f" ] || continue
+		name="${f##*/}"
+		if awk -v a="${name#edge-before-restore-}" -v b="$restore_at" 'BEGIN { exit !(a >= b) }'; then
+			undo="$backups/$name"
+			return 0
+		fi
+	done
+}
+
 deny() {
 	! grep -q "^$1 " "$state_dir/failed" 2>/dev/null || return 0
 	printf '%s %s %s\n' "$1" "$2" "$(printf '%s' "$3" | tr '\n' ' ')" >>"$state_dir/failed"
 }
 
 # Returns to the release before the switch. A database the switch restored
-# is always put back from the backup taken before it. The server count is
+# is put back from the copy aether-edge restore saved of it; when there is
+# none, the restore never replaced it. A database the update migrated is
+# restored from the pre-update backup when the old release cannot run it.
+# The server count is
 # not required here: the release ran before, and a server that went away
 # meanwhile must not leave the edge broken. With retry=1 the release is
 # not denied, and the next run tries it again.
@@ -380,7 +408,10 @@ revert() {
 	if [ "$retry" != 1 ]; then
 		deny "$to_digest" "$to_version" "$reason"
 	fi
-	if ! switch_to "$from_digest" "$from_version" "$backup" "$restored" 0; then
+	undo="$backup"
+	[ "$kind" != rollback ] || undo=""
+	if [ "$kind" = rollback ] && [ "$restored" = 1 ] && ! before_restore ||
+		! switch_to "$from_digest" "$from_version" "$undo" "$restored" 0; then
 		reason="rollback to $from_version failed: $why; after: $reason"
 		write_state broken
 		die "$reason. State is broken; docs/edge.md, \"Automatic updates\", has the recovery"
@@ -400,20 +431,26 @@ succeed() {
 		deny "$from_digest" "$from_version" "rolled back by an operator"
 		rm -f "$state_dir/previous"
 	else
-		echo "$from_digest $from_version $backup" >"$state_dir/previous.tmp"
+		printf '%s %s %s\n' "$from_digest" "$from_version" "$backup" >"$state_dir/previous.tmp"
 		replace "$state_dir/previous.tmp" "$state_dir/previous"
 	fi
-	echo "$to_digest $to_version" >"$state_dir/current.tmp"
+	printf '%s %s\n' "$to_digest" "$to_version" >"$state_dir/current.tmp"
 	replace "$state_dir/current.tmp" "$state_dir/current"
 	reason=""
 	write_state idle
 	say "now running $to_version ($to_digest)"
 }
 
-# Finishes the switch recorded in the state file, or rolls it back.
+# Finishes the switch recorded in the state file, or rolls it back. A
+# tolerance percentage rounds up, so 10% lets one of a few servers stay
+# away.
 finish() {
 	retry=0
-	if switch_to "$to_digest" "$to_version" "$restore" 0 "$(min_servers "$servers")"; then
+	case "$tolerance" in
+	*%) away=$(((servers * ${tolerance%\%} + 99) / 100)) ;;
+	*) away="$tolerance" ;;
+	esac
+	if switch_to "$to_digest" "$to_version" "$restore" 0 $((servers - away)); then
 		succeed
 	else
 		revert "$why"
@@ -459,6 +496,7 @@ update() {
 	docker pull --quiet "$image:$channel" >/dev/null || die "docker pull $image:$channel failed"
 	new="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image:$channel" | sed -n "s|^$image@||p")"
 	is_digest "$new" || die "$image:$channel has no single repository digest: '${new}'"
+	[ "$mode" != check ] || verify_running "$cur"
 	if [ "$new" = "$cur" ]; then
 		say "up to date: $channel is $cur"
 		exit 0
@@ -470,7 +508,7 @@ update() {
 	new_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image@$new")" ||
 		die "cannot read the version label of $image@$new"
 	[ -n "$new_version" ] || die "$image@$new has no org.opencontainers.image.version label"
-	from_json="$(version_json "$cur")" || exit 1
+	[ -n "$from_json" ] || from_json="$(version_json "$cur")" || exit 1
 	cur_version="$(printf '%s\n' "$from_json" | jq -r .version)"
 	version_lt "$cur_version" "$new_version" ||
 		die "refusing $new_version ($new) on $channel: not newer than the running $cur_version"
@@ -587,8 +625,8 @@ fi
 cd "$compose_dir"
 
 state=idle kind=update from_digest="" from_version="" to_digest="" to_version=""
-fingerprint="" servers=0 backup="" restore="" restored=0 retry=0 reason="" since=""
-data_dir="" new=""
+fingerprint="" servers=0 backup="" restore="" restored=0 restore_at="" retry=0 reason="" since=""
+data_dir="" new="" from_json=""
 if [ -e "$state_dir/state" ]; then
 	state=""
 	[ -r "$state_dir/state" ] || die "cannot read $state_dir/state"
