@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math/big"
 	"net"
 	"net/http"
@@ -182,6 +183,11 @@ func newQualify(t *testing.T) *qualify {
 		t.Fatal(err)
 	}
 	q.root = q.mustRun("git", "rev-parse", "--show-toplevel")
+	// The updater execs into the container by its fixed name, so the test
+	// edge cannot run beside a real one.
+	if id := q.dockerRun("ps", "-aq", "--filter", "name=^aether-edge$"); id != "" {
+		t.Fatalf("a container named aether-edge already exists (%s); TestEdgeUpgrade runs its own edge under that name. Run it on a host without an edge, or remove that container: docker rm -f aether-edge", id)
+	}
 
 	q.network = fmt.Sprintf("aether-edge-qualify-%d", os.Getpid())
 	q.dockerRun("network", "create", q.network)
@@ -250,7 +256,8 @@ func newQualify(t *testing.T) *qualify {
 		t.Fatal(err)
 	}
 	q.write(filepath.Join(q.dir, "compose.yaml"), compose, 0o644)
-	q.write(filepath.Join(q.dir, "compose.override.yaml"), fmt.Appendf(nil, `services:
+	q.write(filepath.Join(q.dir, "compose.override.yaml"), fmt.Appendf(nil, `name: %s
+services:
   aether-edge:
     image: %s/aether-edge@${AETHER_EDGE_DIGEST:?set AETHER_EDGE_DIGEST=sha256:<digest> in .env}
     environment:
@@ -265,7 +272,7 @@ networks:
   proxy:
     name: %s
     external: true
-`, q.registry, port, port, proxyIP, q.network), 0o644)
+`, q.network, q.registry, port, port, proxyIP, q.network), 0o644)
 	q.write(filepath.Join(q.dir, "ca.pem"), cert, 0o444)
 	q.write(filepath.Join(q.dir, "github-client-secret"), []byte("fake-client-secret\n"), 0o400)
 	q.mkdir(filepath.Join(q.dir, "data"), 0o700)
@@ -618,17 +625,24 @@ func (q *qualify) backups(pattern string) []string {
 // release's edgetest package, in its worktree, and returns the test
 // binary, or the error.
 func (q *qualify) buildPreviousServer(worktree string) string {
-	src, err := os.ReadFile(filepath.Join("testdata", "upgrade", "previous_server_test.go"))
-	if err != nil {
-		return "error: " + err.Error()
+	// A release that ships previous_server_test.go keeps its own, which
+	// compiled against its harness; only older ones get this tree's.
+	dst := filepath.Join(worktree, "internal", "edge", "edgetest", "previous_server_test.go")
+	_, err := os.Stat(dst)
+	if errors.Is(err, fs.ErrNotExist) {
+		var src []byte
+		if src, err = os.ReadFile("previous_server_test.go"); err == nil {
+			err = os.WriteFile(dst, src, 0o644)
+		}
 	}
-	if err = os.WriteFile(filepath.Join(worktree, "internal", "edge", "edgetest", "zz_previous_server_test.go"), src, 0o644); err != nil {
+	if err != nil {
 		return "error: " + err.Error()
 	}
 	bin := filepath.Join(q.work, "previous-server.test")
 	cmd := exec.Command("go", "test", "-c", "-tags", "edgeupgrade", "-o", bin, "./internal/edge/edgetest")
 	cmd.Dir = worktree
-	if out, err := cmd.CombinedOutput(); err != nil {
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		return fmt.Sprintf("error: go test -c in %s: %v\n%s", worktree, err, out)
 	}
 	return bin

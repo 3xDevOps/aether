@@ -1166,9 +1166,9 @@ through the previous release. Then, in order:
    pre-update backup and the old binary runs on it.
 4. The additive migration updates; the edge took its own pre-migration
    backup and the updater its `pre-update-` one.
-5. A server of the previous release, built in its worktree from
-   `testdata/upgrade/previous_server_test.go` against that release's
-   harness, enrolls with the new edge, is claimed and relays.
+5. A server of the previous release, built in its worktree from that
+   release's `previous_server_test.go` (this tree's when it has none)
+   against its harness, enrolls with the new edge, is claimed and relays.
 6. `aether-edge-update --rollback` runs the old binary on the additive
    schema without a restore.
 
@@ -1188,7 +1188,11 @@ names, to the test registry.
 
 Nothing leaves the machine except pulls of base images and Go modules,
 and every container, network, image and worktree it creates is removed
-on exit. It takes about two minutes with warm caches. The `upgrade` job
+on exit. It refuses to start while a container named `aether-edge`
+exists, since the updater addresses the edge by that name; its Compose
+project is `aether-edge-qualify-<pid>`. It takes about two minutes with
+warm caches. `make vet` and `make lint` check the `edgeupgrade` files, so
+a harness change that breaks them fails in the pull request. The `upgrade` job
 of `.github/workflows/edge-image.yml` runs it on pull requests that
 `scripts/ci-classify-edge.sh` classifies as edge changes, and the
 `edge-qualify` job of `release.yml` runs it before a release publishes.

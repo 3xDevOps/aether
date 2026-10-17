@@ -215,7 +215,7 @@ test-e2e: build
 # tree (docs/testing.md, "Edge upgrade qualification"). It needs root,
 # Docker with Compose and buildx, jq, curl, and git history with tags.
 test-edge-upgrade:
-	go test -count=1 -timeout=25m -tags edgeupgrade -run '^TestEdgeUpgrade$$' -v ./internal/edge/edgetest/
+	go test -count=1 -timeout=17m -tags edgeupgrade -run '^TestEdgeUpgrade$$' -v ./internal/edge/edgetest/
 
 # The shell scripts in scripts/ have hermetic tests of their own: every
 # external command they call is stubbed, so nothing here touches the network,
@@ -243,6 +243,7 @@ test-native-hooks:
 
 vet:
 	go vet ./...
+	go vet -tags edgeupgrade ./internal/edge/edgetest/
 
 # golangci-lint cannot decode export data produced by a Go newer than the one
 # that built it, so on a host whose default Go is ahead of go.mod's toolchain
@@ -260,6 +261,7 @@ lint:
 	$(GOLANGCI_LINT) config verify \
 		--schema "file://$$(go env GOMODCACHE)/$(GOLANGCI_LINT_MODULE)/jsonschema/golangci.next.jsonschema.json"
 	$(GOLANGCI_LINT) run
+	$(GOLANGCI_LINT) run --build-tags edgeupgrade ./internal/edge/edgetest/
 
 lint-workflows:
 	@command -v shellcheck >/dev/null 2>&1 || { \
