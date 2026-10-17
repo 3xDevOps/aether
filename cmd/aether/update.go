@@ -327,7 +327,7 @@ func updateCommand() string {
 }
 
 func updateCommandIn(dir string) string {
-	if selfupdate.CheckWritable(dir) != nil {
+	if errors.Is(selfupdate.CheckWritable(dir), os.ErrPermission) {
 		return "sudo aether update"
 	}
 	return "aether update"
