@@ -55,6 +55,10 @@ type Manifest struct {
 	// applies.
 	StoreSchema int              `json:"store_schema"`
 	Assets      map[string]Asset `json:"assets"`
+	// Images maps each container image the release publishes, by name
+	// (aether-edge), to its index digest.
+	Images map[string]string `json:"images,omitempty"`
+	Edge   *Edge             `json:"edge,omitempty"`
 
 	baseURL string
 }
@@ -66,6 +70,100 @@ type Asset struct {
 }
 
 var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// Edge is what a host updating a container edge needs to know about the
+// release, beyond the image itself.
+type Edge struct {
+	Image       string `json:"image"`
+	ImageDigest string `json:"image_digest"`
+	// StoreSchema is the highest edge store migration the release applies;
+	// StoreCompatFloor is the oldest schema a binary must support to open a
+	// database this release has migrated.
+	StoreSchema      int          `json:"store_schema"`
+	StoreCompatFloor int          `json:"store_compat_floor"`
+	Protocol         EdgeProtocol `json:"protocol"`
+	// MinUpgradeFrom is the oldest release that may upgrade straight to
+	// this one.
+	MinUpgradeFrom string       `json:"min_upgrade_from"`
+	ManualSteps    []ManualStep `json:"manual_steps"`
+}
+
+// EdgeProtocol is the range of edge protocol versions the release speaks.
+type EdgeProtocol struct {
+	Version    int `json:"version"`
+	MinVersion int `json:"min_version"`
+}
+
+// ManualStep is an operator action an upgrade across Since needs. A
+// blocking step holds an automatic update until the operator has done it.
+type ManualStep struct {
+	ID       string `json:"id"`
+	Since    string `json:"since"`
+	Summary  string `json:"summary"`
+	DocURL   string `json:"doc_url"`
+	Blocking bool   `json:"blocking"`
+}
+
+// ImageRelease is the image half of a manifest: what release-manifest
+// reads from the file its -images flag names.
+type ImageRelease struct {
+	Images map[string]string `json:"images"`
+	Edge   Edge              `json:"edge"`
+}
+
+// ImageNames are the images every release publishes.
+var ImageNames = []string{"aether-browser", "aether-edge", "aether-standard"}
+
+// Validate checks r names exactly ImageNames, each by digest, and that its
+// edge section describes tag and the aether-edge image.
+func (r ImageRelease) Validate(tag string) error {
+	if len(r.Images) != len(ImageNames) {
+		return fmt.Errorf("images: want exactly %s, got %d", strings.Join(ImageNames, ", "), len(r.Images))
+	}
+	for _, name := range ImageNames {
+		if !ValidImageDigest(r.Images[name]) {
+			return fmt.Errorf("images: %s has digest %q, not sha256:<64 hex>", name, r.Images[name])
+		}
+	}
+	if r.Edge.ImageDigest != r.Images["aether-edge"] {
+		return fmt.Errorf("edge: image digest %s is not the aether-edge image %s", r.Edge.ImageDigest, r.Images["aether-edge"])
+	}
+	return r.Edge.Validate(tag)
+}
+
+var imageDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// ValidImageDigest reports whether d is an OCI sha256 digest.
+func ValidImageDigest(d string) bool { return imageDigest.MatchString(d) }
+
+// Validate checks e describes release tag completely.
+func (e Edge) Validate(tag string) error {
+	switch {
+	case e.Image == "":
+		return errors.New("edge: no image")
+	case !ValidImageDigest(e.ImageDigest):
+		return fmt.Errorf("edge: image digest %q is not sha256:<64 hex>", e.ImageDigest)
+	case e.StoreSchema < 1 || e.StoreCompatFloor < 1 || e.StoreCompatFloor > e.StoreSchema:
+		return fmt.Errorf("edge: store schema %d with compat floor %d", e.StoreSchema, e.StoreCompatFloor)
+	case e.Protocol.MinVersion < 1 || e.Protocol.Version < e.Protocol.MinVersion:
+		return fmt.Errorf("edge: protocol versions %d to %d", e.Protocol.MinVersion, e.Protocol.Version)
+	case !ValidTag(e.MinUpgradeFrom) || Behind(tag, e.MinUpgradeFrom):
+		return fmt.Errorf("edge: min_upgrade_from %q is not a release tag at or below %s", e.MinUpgradeFrom, tag)
+	}
+	ids := map[string]bool{}
+	for _, s := range e.ManualSteps {
+		switch {
+		case s.ID == "" || ids[s.ID]:
+			return fmt.Errorf("edge: manual step id %q is empty or repeated", s.ID)
+		case !ValidTag(s.Since):
+			return fmt.Errorf("edge: manual step %s: since %q is not a release tag", s.ID, s.Since)
+		case s.Summary == "" || !strings.HasPrefix(s.DocURL, "https://"):
+			return fmt.Errorf("edge: manual step %s needs a summary and an https doc_url", s.ID)
+		}
+		ids[s.ID] = true
+	}
+	return nil
+}
 
 // AssetURL is where the release publishes the asset name.
 func (m Manifest) AssetURL(name string) string {

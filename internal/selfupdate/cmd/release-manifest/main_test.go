@@ -6,14 +6,46 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
+
+func digest(c string) string { return "sha256:" + strings.Repeat(c, 64) }
+
+func testImages() selfupdate.ImageRelease {
+	return selfupdate.ImageRelease{
+		Images: map[string]string{"aether-browser": digest("b"), "aether-edge": digest("e"), "aether-standard": digest("5")},
+		Edge: selfupdate.Edge{
+			Image: "ghcr.io/3xdevops/aether-edge", ImageDigest: digest("e"),
+			StoreSchema: 3, StoreCompatFloor: 2, Protocol: selfupdate.EdgeProtocol{Version: 2, MinVersion: 1},
+			MinUpgradeFrom: "v1.0.0",
+			ManualSteps: []selfupdate.ManualStep{{
+				ID: "env-rename", Since: "v1.2.0", Summary: "rename a variable",
+				DocURL: "https://example.com/edge", Blocking: true,
+			}},
+		},
+	}
+}
+
+func writeImages(t *testing.T, dir string, img selfupdate.ImageRelease) string {
+	t.Helper()
+	data, err := json.Marshal(img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "images.json")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 func TestGeneratedManifestVerifiesWithTheTrustedKey(t *testing.T) {
 	seed := bytes.Repeat([]byte{3}, ed25519.SeedSize)
@@ -25,8 +57,9 @@ func TestGeneratedManifestVerifiesWithTheTrustedKey(t *testing.T) {
 	if err := os.WriteFile(cli, []byte("cli"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	images := writeImages(t, t.TempDir(), testImages())
 	t.Setenv(keyEnv, base64.StdEncoding.EncodeToString(seed))
-	if err := run([]string{"-version", "v1.3.0", "-commit", "abc", "-store-schema", "71", "-out", dir, cli}); err != nil {
+	if err := run([]string{"-version", "v1.3.0", "-commit", "abc", "-store-schema", "71", "-images", images, "-out", dir, cli}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -51,6 +84,19 @@ func TestGeneratedManifestVerifiesWithTheTrustedKey(t *testing.T) {
 		m.NotesURL != "https://github.com/3xDevOps/Aether/releases/tag/v1.3.0" {
 		t.Fatalf("manifest = %+v", m)
 	}
+	if m.Edge == nil || !reflect.DeepEqual(selfupdate.ImageRelease{Images: m.Images, Edge: *m.Edge}, testImages()) {
+		t.Fatalf("images = %v, edge = %+v", m.Images, m.Edge)
+	}
+}
+
+func TestGenerateRefusesImagesThatDisagree(t *testing.T) {
+	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{3}, ed25519.SeedSize))
+	img := testImages()
+	img.Edge.ImageDigest = digest("f")
+	_, _, err := generate("v1.3.0", "abc", 71, img, nil, key, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "is not the aether-edge image") {
+		t.Fatalf("err = %v, want the mismatched edge digest refused", err)
+	}
 }
 
 func TestGenerateRefusesASeedThisBuildDoesNotTrust(t *testing.T) {
@@ -59,7 +105,7 @@ func TestGenerateRefusesASeedThisBuildDoesNotTrust(t *testing.T) {
 	if err := os.WriteFile(asset, []byte("cli"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := generate("v1.3.0", "abc", 71, []string{asset}, key, time.Now())
+	_, _, err := generate("v1.3.0", "abc", 71, testImages(), []string{asset}, key, time.Now())
 	if err == nil || !strings.Contains(err.Error(), "not signed by a trusted release key") {
 		t.Fatalf("err = %v, want the untrusted key refused", err)
 	}
@@ -67,7 +113,7 @@ func TestGenerateRefusesASeedThisBuildDoesNotTrust(t *testing.T) {
 
 func TestRunRefusesAMissingKey(t *testing.T) {
 	t.Setenv(keyEnv, "")
-	err := run([]string{"-version", "v1.3.0", "-commit", "abc", "-store-schema", "71", "-out", t.TempDir(), "x"})
+	err := run([]string{"-version", "v1.3.0", "-commit", "abc", "-store-schema", "71", "-images", writeImages(t, t.TempDir(), testImages()), "-out", t.TempDir(), "x"})
 	if err == nil || !strings.Contains(err.Error(), keyEnv+" is not set") {
 		t.Fatalf("err = %v, want the missing key named", err)
 	}

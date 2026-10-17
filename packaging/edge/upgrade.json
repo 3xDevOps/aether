@@ -1,0 +1,14 @@
+{
+  "store_schema": 1,
+  "store_compat_floor": 1,
+  "protocol": {
+    "version": 1,
+    "min_version": 1
+  },
+  "files": {
+    "packaging/edge/aether-edge.env.example": "e26f9d56b36b1c94c9b52c816f8448172461b23fcaf7de621d81477c4ac12980",
+    "packaging/systemd/aether-edge.service": "b52874c3db752d911ca613deff45200a28165c1b86331fe00dee457605c8e20e"
+  },
+  "min_upgrade_from": "v0.5.2-alpha.4",
+  "manual_steps": []
+}
