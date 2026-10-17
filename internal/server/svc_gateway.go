@@ -1,9 +1,5 @@
 package server
 
-import (
-	"github.com/3xDevOps/Aether/internal/disk"
-)
-
 // The gateway read seams: run.patch and server.disk are control-channel
 // methods with no background service of their own, so this builder only
 // attaches what they read - the git engine's patch renderer and a cached
@@ -15,7 +11,7 @@ func init() {
 			d.SSH.Services.Files = d.Git
 		}
 		if d.DataDir != "" {
-			d.SSH.Services.Disk = disk.NewCache(d.DataDir, 0, storageEnricher(d))
+			d.SSH.Services.Disk = newStorageGauge(d)
 		}
 		return nil, nil
 	})

@@ -25,10 +25,10 @@ type RunPatcher interface {
 	RunPatch(ctx context.Context, run domain.RunID, req gitengine.PatchRequest) (gitengine.Patch, error)
 }
 
-// DiskReader reads the data directory's disk usage. disk.Cache implements
-// it.
+// DiskReader reads the data directory's disk usage. It must not make the
+// caller wait on a walk of the data directory.
 type DiskReader interface {
-	Usage() (disk.Usage, error)
+	Usage(ctx context.Context) (disk.Usage, error)
 }
 
 func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -81,7 +81,10 @@ func (s *Server) serverDisk(ctx context.Context, member domain.MemberID, _ json.
 	if reader == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "server.disk: the server was not told where the data directory is"}
 	}
-	usage, err := reader.Usage()
+	usage, err := reader.Usage(ctx)
+	if errors.Is(err, disk.ErrMeasuring) {
+		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "server.disk: " + err.Error()}
+	}
 	if err != nil {
 		// The wrapped error names the data-directory path, so it is not
 		// echoed to the client.

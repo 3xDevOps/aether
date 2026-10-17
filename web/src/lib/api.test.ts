@@ -62,6 +62,23 @@ describe('token bootstrap', () => {
   })
 })
 
+describe('disk usage', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('passes the caller\'s abort signal to the request', async () => {
+    const fetchSpy = fakeFetch({ used_bytes: 1, total_bytes: 2 })
+    vi.stubGlobal('fetch', fetchSpy)
+    const abort = new AbortController()
+
+    await api.disk(abort.signal)
+
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/v1/disk')
+    expect(fetchSpy.mock.calls[0][1]?.signal).toBe(abort.signal)
+  })
+})
+
 describe('environment terminal methods', () => {
   beforeEach(() => {
     window.sessionStorage.setItem('aether.token', 'tok_terminal')

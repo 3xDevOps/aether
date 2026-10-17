@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/3xDevOps/Aether/internal/disk"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -633,14 +634,23 @@ func (e *pressureEnv) branchHeadMessage(t *testing.T, branch string) string {
 }
 
 // disk reads the server's gauge over the SSH control channel, which is
-// the only place it is served.
+// the only place it is served. It waits out the first walk of the data
+// directory, which a server process starts on its first reading, as the
+// dashboard's next poll would.
 func (e *pressureEnv) disk(t *testing.T) protocol.ServerDiskResult {
 	t.Helper()
-	var got protocol.ServerDiskResult
-	if err := e.ctrl.Call(protocol.MethodServerDisk, nil, &got); err != nil {
-		t.Fatalf("server.disk: %v", err)
+	measuring := "server.disk: " + disk.ErrMeasuring.Error()
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		var got protocol.ServerDiskResult
+		err := e.ctrl.Call(protocol.MethodServerDisk, nil, &got)
+		if err == nil {
+			return got
+		}
+		var perr *protocol.Error
+		if !errors.As(err, &perr) || perr.Message != measuring || time.Now().After(deadline) {
+			t.Fatalf("server.disk: %v", err)
+		}
 	}
-	return got
 }
 
 func (e *pressureEnv) waitStatus(t *testing.T, runID string, want domain.RunStatus) {

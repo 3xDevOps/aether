@@ -262,7 +262,7 @@ func (r sizedRuntime) ContainerSizes(context.Context) (map[string]uint64, error)
 }
 
 func TestServerDiskAttributesContainerSizes(t *testing.T) {
-	s, _, admin, workspace := newWorkspaceDeletionServer(t)
+	s, root, admin, workspace := newWorkspaceDeletionServer(t)
 	run := &domain.Run{WorkspaceID: workspace.ID, MemberID: admin.ID, Task: "scratch in /tmp", Harness: "fake", Mode: domain.LaunchTUI, Status: domain.RunRunning}
 	if err := s.db.CreateRun(t.Context(), run); err != nil {
 		t.Fatal(err)
@@ -273,11 +273,17 @@ func TestServerDiskAttributesContainerSizes(t *testing.T) {
 		string(run.ID):                       47 << 30,
 		"harness-update-" + string(admin.ID): 5,
 	}}
-	enrich := storageEnricher(Deps{Store: s.db, Runtime: rt})
+	gauge := newStorageGauge(Deps{Store: s.db, Runtime: rt, DataDir: root})
+	read := func() disk.Usage {
+		t.Helper()
+		u, err := gauge.Usage(t.Context())
+		if err != nil {
+			t.Fatalf("Usage: %v", err)
+		}
+		return u
+	}
 	for range 2 {
-		var waiting disk.Usage
-		enrich(&waiting)
-		if waiting.ContainersAt != nil || len(waiting.Containers) != 0 {
+		if waiting := read(); waiting.ContainersAt != nil || len(waiting.Containers) != 0 {
 			t.Fatalf("a reading waited for the measurement: %+v", waiting)
 		}
 	}
@@ -287,8 +293,7 @@ func TestServerDiskAttributesContainerSizes(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("container sizes were never reported")
 		}
-		u = disk.Usage{}
-		enrich(&u)
+		u = read()
 	}
 	want := []disk.Container{
 		{OwnerKind: "run", OwnerID: string(run.ID), MemberID: string(admin.ID), Bytes: 47 << 30},
@@ -305,8 +310,8 @@ func TestServerDiskAttributesContainerSizes(t *testing.T) {
 	if err := s.db.TransferRun(t.Context(), run.ID, heir.ID); err != nil {
 		t.Fatal(err)
 	}
-	u = disk.Usage{}
-	enrich(&u)
+	// Within the walk's TTL: the handoff still shows on the next reading.
+	u = read()
 	if len(u.Containers) != 2 || u.Containers[0].MemberID != string(heir.ID) {
 		t.Fatalf("handed-off run kept its previous owner: %+v", u.Containers)
 	}

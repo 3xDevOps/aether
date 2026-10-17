@@ -70,8 +70,34 @@ func (c *containerSizes) measure(rt containerSizer) {
 	c.sizes, c.at, c.err = sizes, &now, ""
 }
 
+// storageGauge answers server.disk: the cached walk of the data directory,
+// plus container sizes whose owners are resolved per reading.
+type storageGauge struct {
+	walks      *disk.Cache
+	store      store.Store
+	runtime    containerSizer
+	containers containerSizes
+}
+
+func newStorageGauge(d Deps) *storageGauge {
+	g := &storageGauge{walks: disk.NewCache(d.DataDir, 0, storageEnricher(d)), store: d.Store}
+	g.runtime, _ = d.Runtime.(containerSizer)
+	return g
+}
+
+func (g *storageGauge) Usage(ctx context.Context) (disk.Usage, error) {
+	u, err := g.walks.Usage(ctx)
+	if err != nil || g.runtime == nil {
+		return u, err
+	}
+	sizes, at, failure := g.containers.read(g.runtime)
+	owned, lookup := attributeContainers(ctx, g.store, sizes)
+	u.Containers, u.ContainersAt = owned, at
+	u.ContainersError = strings.Join(nonemptyStorageErrors(failure, lookup), "; ")
+	return u, nil
+}
+
 func storageEnricher(d Deps) func(*disk.Usage) {
-	var containers containerSizes
 	return func(u *disk.Usage) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -80,12 +106,6 @@ func storageEnricher(d Deps) func(*disk.Usage) {
 			u.Truncated = true
 		}
 		attributeStorage(ctx, d, u, time.Now().UTC())
-		if rt, ok := d.Runtime.(containerSizer); ok {
-			sizes, at, failure := containers.read(rt)
-			owned, lookup := attributeContainers(ctx, d.Store, sizes)
-			u.Containers, u.ContainersAt = owned, at
-			u.ContainersError = strings.Join(nonemptyStorageErrors(failure, lookup), "; ")
-		}
 		if rt, ok := d.Runtime.(storageRuntime); ok {
 			usage := rt.StorageUsage(ctx, d.DataDir)
 			u.Docker = &usage
