@@ -1039,12 +1039,13 @@ These measures do not confer publisher trust. Releases remain unsigned;
 Defender or SmartScreen may still flag a new binary.
 
 Release publication is gated on a Defender scan of the exact final x64 and
-ARM64 release binaries, downloaded from the build artifact without rebuilding.
-The gate records SHA-256 hashes and definition/protection evidence, checks
-effective real-time/cloud/sample-submission settings, and rejects missing or
-changed files, scan errors, or new detections (including remediated ones).
-That verdict covers those bytes and scan conditions, not signing, reputation,
-the locally built desktop, or a guarantee of warning-free execution on a
+ARM64 CLI binaries and desktop zips, downloaded from the build artifacts
+without rebuilding. Each zip is scanned whole and extracted. The gate records
+SHA-256 hashes and definition/protection evidence, checks effective
+real-time/cloud/sample-submission settings, and rejects missing or changed
+files, scan errors, or new detections (including remediated ones). That
+verdict covers those bytes and scan conditions, not signing, reputation, a
+desktop built from source, or a guarantee of warning-free execution on a
 different machine.
 
 ## The Windows client
@@ -2320,6 +2321,17 @@ checks out the authorized SHA and runs independently:
   each macOS or Windows lane builds only its CLI. They call
   `make release-binaries VERSION="$GITHUB_REF_NAME"` with platform overrides
   and upload `binaries-go-<goos>-<goarch>`.
+- `desktop-windows` packages the desktop app on native amd64
+  (`windows-latest`) and arm64 (`windows-11-arm`) runners with
+  [`.github/actions/desktop-windows-zip`](../.github/actions/desktop-windows-zip/action.yml):
+  it stamps the tag into `desktop/package.json`, runs `npm ci` and
+  `electron-builder --dir --win`, checks the stamp inside `app.asar`, and
+  zips the unpacked app at the archive root with sorted entries and fixed
+  timestamps, so the same commit yields the same zip. It launches the app
+  without a CLI, requires its `aether CLI not found` dialog, and uploads
+  `binaries-desktop-windows-<arch>`.
+- `windows-defender` scans both Windows CLIs and both desktop zips
+  ([Windows Defender and SmartScreen](#windows-defender-and-smartscreen)).
 - `android` separately builds and verifies the signed APK and AAB with
   `make android VERSION="$GITHUB_REF_NAME"`, then uploads `binaries-android`.
   It is the only job that receives the Android signing secrets.
@@ -2344,18 +2356,20 @@ an early-exiting reader such as `awk '... { print; exit }'`: closing Docker's
 stdout pipe can fail the release with exit code 255 even when the digest is
 correct.
 
-The final `release` job requires all six Go lanes, signed Android and all three
-verified image manifests. It downloads artifacts from this workflow run only,
-never promotes unsigned CI builds, and requires exactly these twelve nonempty,
-regular, non-symlink files in `dist/`:
+The final `release` job requires all six Go lanes, both desktop zips, the
+Defender scan, signed Android and all three verified image manifests. It
+downloads artifacts from this workflow run only, never promotes unsigned CI
+builds, and requires exactly these fourteen nonempty, regular, non-symlink
+files in `dist/`:
 
 ```text
-aether-server-linux-amd64  aether-server-linux-arm64
-aether-edge-linux-amd64    aether-edge-linux-arm64
-aether-linux-amd64         aether-linux-arm64
-aether-darwin-amd64        aether-darwin-arm64
-aether-windows-amd64.exe   aether-windows-arm64.exe
-aether-android.apk        aether-android.aab
+aether-server-linux-amd64         aether-server-linux-arm64
+aether-edge-linux-amd64           aether-edge-linux-arm64
+aether-linux-amd64                aether-linux-arm64
+aether-darwin-amd64               aether-darwin-arm64
+aether-windows-amd64.exe          aether-windows-arm64.exe
+aether-desktop-windows-amd64.zip  aether-desktop-windows-arm64.zip
+aether-android.apk                aether-android.aab
 ```
 
 Missing or unexpected files, including unsigned Android names, stop the upload.

@@ -433,14 +433,77 @@ jobs:
           overwrite: true
           retention-days: 7
 
+  # Each architecture packages and launches on a native Windows runner.
+  desktop-windows:
+    needs: release-policy
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.release-policy.outputs.sha }}
+          persist-credentials: false
+      - id: desktop
+        uses: ./.github/actions/desktop-windows-zip
+        with:
+          version: ${{ github.ref_name }}
+          arch: ${{ matrix.arch }}
+      # Without a CLI the shell's first act is its "aether CLI not found"
+      # dialog, so seeing that text proves the packaged runtime and main.js
+      # start on this architecture.
+      - name: Launch the unpacked app
+        shell: pwsh
+        env:
+          APP: ${{ steps.desktop.outputs.app }}
+        run: |
+          Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+          $env:AETHER_BIN = Join-Path $env:RUNNER_TEMP 'no-aether-here.exe'
+          $app = Start-Process -FilePath (Join-Path $env:APP 'aether-desktop.exe') -ArgumentList "--user-data-dir=`"$env:RUNNER_TEMP\desktop-profile`"" -PassThru
+          try {
+            $deadline = [DateTime]::UtcNow.AddSeconds(60)
+            $text = ''
+            do {
+              $app.Refresh()
+              if ($app.HasExited) { throw "aether-desktop.exe exited with code $($app.ExitCode) before it opened a window." }
+              if ($app.MainWindowHandle -ne [IntPtr]::Zero) {
+                $window = [Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+                $text = ($window.FindAll([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.Condition]::TrueCondition) |
+                  ForEach-Object { $_.Current.Name }) -join ' | '
+                if ($text -like '*aether CLI not found*') { break }
+              }
+              if ([DateTime]::UtcNow -gt $deadline) { throw "aether-desktop.exe did not report the missing CLI. Window '$($app.MainWindowTitle)': $text" }
+              Start-Sleep -Milliseconds 250
+            } while ($true)
+            Write-Host "Window '$($app.MainWindowTitle)': $text"
+          } finally {
+            & "$env:SystemRoot\System32\taskkill.exe" /PID $app.Id /T /F | Out-Null
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binaries-desktop-windows-${{ matrix.arch }}
+          path: ${{ steps.desktop.outputs.zip }}
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
   # Scan the exact bytes produced for this tag, not the differently versioned
   # main-CI build. Both architectures are required before release publication.
   windows-defender:
-    needs: [release-policy, release-binaries]
+    needs: [release-policy, release-binaries, desktop-windows]
     permissions:
       contents: read
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -455,9 +518,17 @@ jobs:
           pattern: binaries-go-windows-*
           merge-multiple: true
           path: dist
-      - name: Scan both final Windows clients
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: binaries-desktop-windows-*
+          merge-multiple: true
+          path: dist
+      - name: Scan both final Windows clients and desktop apps
         shell: powershell
-        run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist
+        run: >-
+          ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist -Artifacts
+          aether-windows-amd64.exe, aether-windows-arm64.exe,
+          aether-desktop-windows-amd64.zip, aether-desktop-windows-arm64.zip
 
   android:
     needs: release-policy
@@ -646,7 +717,7 @@ jobs:
   # published only after the draft is downloaded back and matches the
   # signed manifest, so installers never see a release without its assets.
   release:
-    needs: [release-policy, release-binaries, windows-defender, android, browser-manifest, edge-manifest, standard-manifest]
+    needs: [release-policy, release-binaries, desktop-windows, windows-defender, android, browser-manifest, edge-manifest, standard-manifest]
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -670,11 +741,16 @@ jobs:
         with:
           name: binaries-android
           path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: binaries-desktop-windows-*
+          merge-multiple: true
+          path: dist
       # Runs without the signing key, so the signer never links the store.
       - name: Read the store schema the release migrates to
         id: store
         run: echo "schema=$(go run ./internal/store/cmd/schema-version)" >> "$GITHUB_OUTPUT"
-      - name: Require all twelve release assets, write checksums and sign the manifest
+      - name: Require all fourteen release assets, write checksums and sign the manifest
         working-directory: dist
         env:
           AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
@@ -687,6 +763,7 @@ jobs:
             aether-linux-amd64 aether-linux-arm64
             aether-darwin-amd64 aether-darwin-arm64
             aether-windows-amd64.exe aether-windows-arm64.exe
+            aether-desktop-windows-amd64.zip aether-desktop-windows-arm64.zip
             aether-android.apk aether-android.aab
           )
           # Reject unsigned Android names, unexpected files/directories and
