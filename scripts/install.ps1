@@ -46,8 +46,8 @@ function Write-AetherStep {
 }
 
 function Write-AetherDetail {
-    param([Parameter(Mandatory = $true)][AllowEmptyString()][string] $Message, [switch] $NoNewline)
-    Write-Host ('      ' + $Message) -NoNewline:$NoNewline
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string] $Message)
+    Write-Host ('      ' + $Message)
 }
 
 function Write-AetherStatus {
@@ -861,7 +861,6 @@ function Invoke-AetherGuiBuild {
     $rerun = "& '{0}' gui build" -f $CliPath.Replace("'", "''")
     try {
         [Environment]::SetEnvironmentVariable('AETHER_BIN', $CliPath, 'Process')
-        $global:LASTEXITCODE = -1
         # npm and electron-builder write progress to stderr; under Windows
         # PowerShell 5.1 that must not become an installer error.
         $ErrorActionPreference = 'Continue'
@@ -869,7 +868,7 @@ function Invoke-AetherGuiBuild {
         $exitCode = [int]$global:LASTEXITCODE
     }
     catch {
-        throw ("aether gui build failed: {0}. The CLI is installed; rerun: {1}" -f $_.Exception.Message, $rerun)
+        throw ("aether gui build failed: {0}. The CLI is installed; rerun: {1}" -f $_.Exception.Message.TrimEnd('.'), $rerun)
     }
     finally {
         $ErrorActionPreference = $oldEap
@@ -885,9 +884,6 @@ function Invoke-AetherGuiBuild {
         else {
             Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
         }
-    }
-    if ($exitCode -eq -1) {
-        throw ("aether gui build could not start. The CLI is installed; rerun: {0}" -f $rerun)
     }
     if ($exitCode -ne 0) {
         throw ("aether gui build exited with code {0}. The CLI is installed; rerun: {1}" -f $exitCode, $rerun)
@@ -1186,11 +1182,10 @@ try {
 }
 catch {
     [Console]::Error.WriteLine(("aether install: error: {0}" -f $_.Exception.Message))
-    # Run directly (-File, or & at a prompt), exit ends only this script,
-    # sets $LASTEXITCODE and prints no second error record. Called from another
-    # script, dot-sourced, or run by Invoke-Expression, rethrow so the caller's
-    # catch sees the failure and an interactive host stays alive.
-    if (-not [string]::IsNullOrEmpty($PSCommandPath) -and [string]::IsNullOrEmpty($MyInvocation.PSCommandPath) -and $MyInvocation.InvocationName -ne '.') {
+    # Run with -File or from a prompt, exit sets $LASTEXITCODE without a
+    # second error record. From another script, rethrow so its catch runs;
+    # under Invoke-Expression, exit would close the user's session.
+    if (-not [string]::IsNullOrEmpty($PSCommandPath) -and [string]::IsNullOrEmpty($MyInvocation.PSCommandPath)) {
         exit 1
     }
     throw

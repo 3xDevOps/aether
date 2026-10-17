@@ -235,30 +235,37 @@ without running it. The output is a numbered list of steps:
 ```
 aether install: windows/amd64, CLI and desktop app
 [1/3] downloading the newest complete release
-      latest release: v0.7.0-alpha.12
-      https://github.com/3xDevOps/Aether/releases/download/v0.7.0-alpha.12/
+      latest release: v0.7.0-alpha.13
+      https://github.com/3xDevOps/Aether/releases/download/v0.7.0-alpha.13/
       checksums.txt                         1.0 KB  0.3s
       aether-release.json                   2.0 KB  0.3s
       aether-release.json.sig                 89 B  0.3s
       aether-windows-amd64.exe             30.3 MB  0.5s
       verified aether-windows-amd64.exe SHA-256 and size against checksums.txt and aether-release.json; aether-release.json.sig is not checked (PowerShell has no ed25519 verifier)
-[2/3] installing the CLI: v0.7.0-alpha.11 -> v0.7.0-alpha.12
+[2/3] installing the CLI: v0.7.0-alpha.12 -> v0.7.0-alpha.13
       C:\Users\<you>\AppData\Local\Programs\Aether\aether.exe
 [3/3] installing the desktop app (the build output follows)
-      ...the output of aether gui build...
+downloading https://github.com/3xDevOps/Aether/releases/download/v0.7.0-alpha.13/aether-desktop-windows-amd64.zip (99 MB)
+  42 of 99 MB (42%)
+  verified against the signed aether-release.json
+installing the app
+installed C:\Users\<you>\AppData\Local\Programs\Aether Desktop
+launcher C:\Users\<you>\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Aether.lnk
+open it from the Start Menu as Aether
       installed C:\Users\<you>\AppData\Local\Programs\Aether Desktop\aether-desktop.exe
 next:
   open Aether from the Start menu, or link from a new terminal:
   aether link <server-host>:2222
-done: Aether v0.7.0-alpha.12 installed in 24.4s
+done: Aether v0.7.0-alpha.13 installed in 24.4s
 ```
 
 Step 3 runs `aether gui build` with its output unchanged, so its download
-progress, npm and electron-builder messages appear as they happen. An error
-is printed once on stderr. Run with `-File` or `&` at a prompt, the script
-then exits 1 and sets `$LASTEXITCODE`. Called from another script, dot-sourced,
-or run through `Invoke-Expression`, it throws instead, so a caller's `catch`
-sees the failure and an interactive session stays open.
+progress, and on a source build its npm and electron-builder messages, appear
+as they happen. An error is printed once on stderr. Run with `-File`, or with
+`&` or `.` at a prompt, the script then exits 1 and sets `$LASTEXITCODE`.
+Called from another script or through `Invoke-Expression`, it throws instead,
+so a caller's `catch` sees the failure and an interactive session stays
+open.
 
 Only the current user's `PATH` is updated, without duplicating the install
 directory or removing other entries. Expandable entries such as `%SystemRoot%`
