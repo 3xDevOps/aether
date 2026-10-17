@@ -124,6 +124,9 @@ type Config struct {
 type Service struct {
 	cfg  Config
 	self string
+	// started is the file at self when the service was built, which is
+	// the image this process runs.
+	started os.FileInfo
 	// core is the release the running build descends from; downgrades
 	// are measured against it.
 	core string
@@ -197,6 +200,9 @@ func New(cfg Config) (*Service, error) {
 		return s.disabled(fmt.Sprintf("resolving %s failed: %v", self, err)), nil
 	}
 	s.self = resolved
+	if info, err := os.Stat(resolved); err == nil {
+		s.started = info
+	}
 	return s, nil
 }
 
@@ -220,10 +226,34 @@ func (s *Service) incapableReason() string {
 	if s.incapable != "" {
 		return s.incapable
 	}
+	s.mu.Lock()
+	applying := s.applying
+	s.mu.Unlock()
+	// This process's own swap replaces the file and restarts onto it, so
+	// status ignores the replacement while one is in flight.
+	if reason := s.replacedOnDisk(); reason != "" && !applying {
+		return reason
+	}
 	if err := selfupdate.CheckWritable(filepath.Dir(s.self)); err != nil {
 		return notWritable
 	}
 	return ""
+}
+
+// replacedOnDisk is why this process must restart before it can update,
+// empty when the file at self is still the one it started from. A file
+// replaced behind its back, as by `sudo aether update` without a restart,
+// would be kept as the rollback target of a swap.
+func (s *Service) replacedOnDisk() string {
+	if s.started == nil {
+		return ""
+	}
+	now, err := os.Stat(s.self)
+	if err != nil || os.SameFile(s.started, now) {
+		return ""
+	}
+	return fmt.Sprintf("%s was replaced on disk but this process still runs %s; restart onto it: sudo systemctl restart aether-server",
+		s.self, version.Version)
 }
 
 // Status reports the server's own update state. The release fields come

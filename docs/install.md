@@ -557,6 +557,12 @@ A release that fails is refused, naming the asset and its URL:
 aether: rpc error -32002: release preflight failed: aether-android.apk (https://github.com/3xDevOps/Aether/releases/download/v0.9.0/aether-android.apk): HEAD answered 404 Not Found
 ```
 
+**Replaced binary.** If `aether-server` on disk is no longer the file the
+running process started from, as after `sudo aether update` without a
+restart, the server refuses to update and reports `capable: false` with the
+reason `restart onto it: sudo systemctl restart aether-server`. Updating then
+would keep the already-new file as `.prev`.
+
 **Downgrades.** A tag older than the running release is refused unless
 `--allow-downgrade` is passed, which only works with `--when now`; the tag
 the server already runs is always refused. Without `--version` the server

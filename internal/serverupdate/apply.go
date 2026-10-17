@@ -123,6 +123,9 @@ func (s *Service) apply(ctx context.Context, pending store.PendingServerUpdate, 
 	if err != nil {
 		return nil, s.failOrRetry(ctx, pending, scheduled, err)
 	}
+	if reason := s.replacedOnDisk(); reason != "" {
+		return nil, s.failOrRetry(ctx, pending, scheduled, fmt.Errorf("%w: %s", ErrIncapable, reason))
+	}
 	s.setPhase(protocol.ServerUpdatePhaseApplying)
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdateApplying, pending.Version, "")
 	rec, err := s.swap(ctx, pending, m)
