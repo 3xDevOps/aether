@@ -102,20 +102,20 @@ instead, preserving the interrupted command's exit status.
 This script covers Linux and macOS. Windows uses the
 [PowerShell installer](#windows-install-script) below.
 
-A checksum mismatch aborts the install. The script needs `curl` or `wget`, and
-`sha256sum` or `shasum`.
+The script needs `curl`, and `sha256sum` or `shasum`. With OpenSSL 3 on
+`PATH` it also checks the release signature.
 
 Options, as flags or environment variables:
 
 | Flag | Variable | Effect |
 | --- | --- | --- |
-| `--version <tag>` | `AETHER_VERSION` | Install a specific release instead of the latest. |
+| `--version <tag>` | `AETHER_VERSION` | Install exactly this release, or fail if it is not complete. |
 | `--bin-dir <dir>` | `AETHER_BIN_DIR` | Install somewhere else, whichever role is chosen. |
 | `--client` | `AETHER_COMPONENTS=client` | CLI only. |
 | `--server` | `AETHER_COMPONENTS=server` | Server only. |
 | `--role <role>` | `AETHER_ROLE` | Answer the role question up front: `server`, `client`, or `none` to skip it. |
 | | `AETHER_REPO` | Pull from a fork. |
-| | `AETHER_BASE_URL` | Pull from a mirror of the release assets. |
+| | `AETHER_BASE_URL` | Pull release assets from an HTTPS mirror; `latest` and the API still come from GitHub. |
 
 Passing flags through a pipe needs `sh -s --`:
 
@@ -123,6 +123,57 @@ Passing flags through a pipe needs `sh -s --`:
 curl -fsSL .../install.sh | sh -s -- --client --bin-dir ~/bin
 curl -fsSL .../install.sh | sh -s -- --role server
 ```
+
+### Which release it installs
+
+A release is complete for this install when it publishes `checksums.txt`,
+every binary this OS, CPU and component choice needs, and a `checksums.txt`
+line for each, plus `aether-release.json` and `aether-release.json.sig`.
+Releases before `v0.7.0-alpha.12` predate signing and are complete without
+those two files; from that tag on, a release missing either one is still
+uploading, failed, or was tampered with.
+
+Without `--version`, the script follows `github.com/<repo>/releases/latest`.
+GitHub can list a release there while its assets are still uploading, or
+after its build failed. When that tag is not complete, the script asks
+`api.github.com/repos/<repo>/releases`, ignores drafts and prereleases, and
+installs the highest semver release that is older than the latest tag,
+signed and complete, saying why:
+
+```
+aether install: v0.7.0-alpha.12 is not fully published yet (no checksums.txt); installing v0.7.0-alpha.11, the newest complete release, for linux/amd64
+```
+
+`--version <tag>` installs exactly that tag, prereleases included, or stops:
+
+```
+aether install: v0.7.0-alpha.12 has no published aether-linux-amd64; it may still be building or may have failed - not installing a different version
+```
+
+Every file comes from the one chosen tag. When the release has a manifest,
+the script verifies `aether-release.json.sig` against the release keys built
+into it (the same keys as `internal/selfupdate/keys.go`), requires the
+manifest's `version` to be the tag, and checks each binary's SHA-256 and
+size against both the manifest and `checksums.txt`. Without OpenSSL 3 -
+macOS ships LibreSSL - it says the signature was not verified and checks
+the rest. A release from before signing is checked against `checksums.txt`
+only, and the script prints that.
+
+A checksum or size mismatch, a bad signature, a manifest that lists a
+binary `checksums.txt` omits, a cut-off download or any network error stops
+the install; none of them makes the script try another release. Every binary is downloaded and verified before any installed one is
+replaced, so those failures leave the previous install as it was. Each
+binary is then renamed into place from a copy in the same directory,
+`aether-server` before `aether`; if a rename fails, the script names which
+binaries are new and which are still the previous version. Rerunning is
+safe. Only HTTPS is used. An unreachable GitHub is reported with curl's
+error, and an API rate limit with its status:
+
+```
+aether install: GitHub API rate limit exceeded (HTTP 403 from https://api.github.com/repos/3xDevOps/Aether/releases?per_page=100, x-ratelimit-remaining: 0, x-ratelimit-reset: 1792209652); pass --version <tag> to install a specific release
+```
+
+The API is only asked when the latest release is not complete.
 
 ## Windows install script
 
@@ -157,11 +208,18 @@ Older releases are refused before downloading or replacing the CLI.
 
 | Parameter | Variable | Effect |
 | --- | --- | --- |
-| `-Version <tag>` | `AETHER_VERSION` | Select a release; otherwise resolve the latest published release. |
+| `-Version <tag>` | `AETHER_VERSION` | Install exactly this release, or fail if it is not complete; otherwise install the newest complete release. |
 | `-BinDir <dir>` | `AETHER_BIN_DIR` | Choose the CLI directory, never the desktop app's managed directory. |
 | `-Role client\|none` | `AETHER_ROLE` | `client` installs the CLI and desktop; `none` stops after the CLI. The default is `client`, including unattended runs. |
 | | `AETHER_REPO` | Download from a GitHub fork. |
 | | `AETHER_BASE_URL` | Download from a release-asset mirror. |
+
+The release is chosen as the [install script](#which-release-it-installs)
+chooses it, for `aether-windows-<arch>.exe`, with one difference: PowerShell
+has no ed25519 verifier, so the script does not check
+`aether-release.json.sig`. It says so, and checks the binary's SHA-256 and
+size against `checksums.txt` and `aether-release.json`. It refuses an
+`AETHER_BASE_URL` that is not `https`.
 
 Only the current user's `PATH` is updated, without duplicating the install
 directory or removing other entries. Expandable entries such as `%SystemRoot%`

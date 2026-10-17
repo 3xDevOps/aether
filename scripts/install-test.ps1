@@ -5,7 +5,8 @@
 .DESCRIPTION
   This suite has no Pester or external test-framework dependency.  It compiles
   one tiny Go fixture (the fixture is never executed by the test harness
-  itself), serves controlled release files from a local .NET HttpListener, and
+  itself), serves controlled releases, a latest-release redirect, and a GitHub
+  releases API response from a local .NET HttpListener, and
   launches the real installer in a separate PowerShell process.  It snapshots
   and restores the current user's PATH and process environment in finally.
 
@@ -84,7 +85,7 @@ function Invoke-AetherPowerShellFile {
     $start.CreateNoWindow = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
-    foreach ($name in @('AETHER_VERSION', 'AETHER_BIN_DIR', 'AETHER_ROLE', 'AETHER_REPO', 'AETHER_BASE_URL', 'AETHER_BIN', 'AETHER_FIXTURE_LOG', 'AETHER_DESKTOP_TARGET', 'AETHER_GUI_FAIL', 'PROCESSOR_ARCHITEW6432', 'PROCESSOR_ARCHITECTURE', 'LOCALAPPDATA')) {
+    foreach ($name in @('AETHER_VERSION', 'AETHER_BIN_DIR', 'AETHER_ROLE', 'AETHER_REPO', 'AETHER_BASE_URL', 'AETHER_LATEST_URL', 'AETHER_API_URL', 'AETHER_BIN', 'AETHER_FIXTURE_LOG', 'AETHER_DESKTOP_TARGET', 'AETHER_GUI_FAIL', 'PROCESSOR_ARCHITEW6432', 'PROCESSOR_ARCHITECTURE', 'LOCALAPPDATA')) {
         $start.EnvironmentVariables.Remove($name)
     }
     foreach ($name in $Environment.Keys) {
@@ -142,16 +143,37 @@ function Start-AetherFixtureServer {
                 $context = $pending.Result
                 $relative = $context.Request.Url.AbsolutePath.Trim('/')
                 Add-Content -LiteralPath $RequestLog -Value $relative
-                $name = [IO.Path]::GetFileName($relative)
-                $file = Join-Path $Root $name
-                if ((Test-Path -LiteralPath $file -PathType Leaf) -and ($name -eq 'checksums.txt' -or $name -match '^aether-windows-(amd64|arm64)\.exe$')) {
-                    $body = [IO.File]::ReadAllBytes($file)
-                    $context.Response.StatusCode = 200
-                    $context.Response.ContentLength64 = $body.Length
-                    $context.Response.OutputStream.Write($body, 0, $body.Length)
+                $response = $context.Response
+                $response.StatusCode = 404
+                $body = $null
+                $latestFile = Join-Path $Root 'latest.txt'
+                if ($relative -eq 'latest' -and (Test-Path -LiteralPath $latestFile -PathType Leaf)) {
+                    $response.StatusCode = 302
+                    $response.RedirectLocation = ('http://127.0.0.1:{0}/tag/{1}' -f $Port, [IO.File]::ReadAllText($latestFile).Trim())
                 }
-                else {
-                    $context.Response.StatusCode = 404
+                elseif ($relative.StartsWith('tag/')) {
+                    $response.StatusCode = 200
+                    $body = [Text.Encoding]::UTF8.GetBytes('release page')
+                }
+                elseif ($relative -eq 'api') {
+                    $response.StatusCode = [int][IO.File]::ReadAllText((Join-Path $Root 'api-status.txt'))
+                    $rateLimitFile = Join-Path $Root 'api-ratelimit.txt'
+                    if (Test-Path -LiteralPath $rateLimitFile -PathType Leaf) {
+                        $response.AddHeader('X-RateLimit-Remaining', [IO.File]::ReadAllText($rateLimitFile).Trim())
+                    }
+                    $response.ContentType = 'application/json'
+                    $body = [IO.File]::ReadAllBytes((Join-Path $Root 'api.json'))
+                }
+                elseif ($relative -match '^[0-9A-Za-z][0-9A-Za-z.+-]*/[0-9A-Za-z][0-9A-Za-z.+-]*$') {
+                    $file = Join-Path $Root $relative
+                    if (Test-Path -LiteralPath $file -PathType Leaf) {
+                        $response.StatusCode = 200
+                        $body = [IO.File]::ReadAllBytes($file)
+                    }
+                }
+                if ($null -ne $body) {
+                    $response.ContentLength64 = $body.Length
+                    $response.OutputStream.Write($body, 0, $body.Length)
                 }
                 $context.Response.Close()
             }
@@ -182,26 +204,87 @@ function Stop-AetherFixtureServer {
     try { Remove-Job -Job $Server.Job -Force -ErrorAction SilentlyContinue } catch {}
 }
 
+function Write-AetherPayload {
+    param([Parameter(Mandatory = $true)][string] $Path, [Parameter(Mandatory = $true)][string] $Payload)
+    if (Test-Path -LiteralPath $Payload -PathType Leaf) {
+        Copy-Item -LiteralPath $Payload -Destination $Path -Force
+    }
+    else {
+        [IO.File]::WriteAllText($Path, $Payload)
+    }
+}
+
 function Write-AetherRelease {
     param(
         [Parameter(Mandatory = $true)][string] $ReleaseRoot,
-        [Parameter(Mandatory = $true)][string] $Fixture,
+        [Parameter(Mandatory = $true)][string] $Tag,
+        [Parameter(Mandatory = $true)][string] $AmdPayload,
         [Parameter(Mandatory = $true)][string] $ArmPayload,
-        [bool] $BadAmdChecksum = $false
+        [bool] $BadAmdChecksum = $false,
+        [string] $ManifestVersion = $Tag,
+        [string[]] $Omit = @()
     )
-    Copy-Item -LiteralPath $Fixture -Destination (Join-Path $ReleaseRoot 'aether-windows-amd64.exe') -Force
-    if (Test-Path -LiteralPath $ArmPayload -PathType Leaf) {
-        Copy-Item -LiteralPath $ArmPayload -Destination (Join-Path $ReleaseRoot 'aether-windows-arm64.exe') -Force
-    }
-    else {
-        [IO.File]::WriteAllText((Join-Path $ReleaseRoot 'aether-windows-arm64.exe'), $ArmPayload)
-    }
-    $amdHash = (Get-FileHash -LiteralPath (Join-Path $ReleaseRoot 'aether-windows-amd64.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-    $armHash = (Get-FileHash -LiteralPath (Join-Path $ReleaseRoot 'aether-windows-arm64.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $dir = Join-Path $ReleaseRoot $Tag
+    if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $amdPath = Join-Path $dir 'aether-windows-amd64.exe'
+    $armPath = Join-Path $dir 'aether-windows-arm64.exe'
+    Write-AetherPayload $amdPath $AmdPayload
+    Write-AetherPayload $armPath $ArmPayload
+    $amdHash = (Get-FileHash -LiteralPath $amdPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $armHash = (Get-FileHash -LiteralPath $armPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($BadAmdChecksum) { $amdHash = ('0' * 64) }
     $lines = @(('{0}  aether-windows-amd64.exe' -f $amdHash))
     $lines += ('{0}  aether-windows-arm64.exe' -f $armHash)
-    [IO.File]::WriteAllText((Join-Path $ReleaseRoot 'checksums.txt'), (($lines -join "`r`n") + "`r`n"))
+    [IO.File]::WriteAllText((Join-Path $dir 'checksums.txt'), (($lines -join "`r`n") + "`r`n"))
+    $manifest = [ordered]@{
+        schema = 1
+        version = $ManifestVersion
+        commit = '0000000000000000000000000000000000000000'
+        published_at = '2026-01-01T00:00:00Z'
+        notes_url = 'https://example.invalid/notes'
+        store_schema = 1
+        assets = [ordered]@{
+            'aether-windows-amd64.exe' = [ordered]@{ sha256 = $amdHash; size = (Get-Item -LiteralPath $amdPath).Length }
+            'aether-windows-arm64.exe' = [ordered]@{ sha256 = $armHash; size = (Get-Item -LiteralPath $armPath).Length }
+        }
+    }
+    [IO.File]::WriteAllText((Join-Path $dir 'aether-release.json'), (ConvertTo-Json -InputObject $manifest -Depth 5))
+    [IO.File]::WriteAllText((Join-Path $dir 'aether-release.json.sig'), 'dW52ZXJpZmllZA==')
+    foreach ($name in $Omit) {
+        Remove-Item -LiteralPath (Join-Path $dir $name) -Force
+    }
+}
+
+function Write-AetherApi {
+    param(
+        [Parameter(Mandatory = $true)][string] $ReleaseRoot,
+        [string[]] $Tags = @(),
+        [string[]] $Drafts = @(),
+        [string[]] $Prereleases = @(),
+        [int] $Status = 200,
+        [string] $RateLimitRemaining,
+        [string] $Message = 'API rate limit exceeded'
+    )
+    $entries = @()
+    foreach ($tag in $Tags) {
+        $dir = Join-Path $ReleaseRoot $tag
+        $assets = @()
+        if (Test-Path -LiteralPath $dir) {
+            $assets = @(Get-ChildItem -LiteralPath $dir -File | ForEach-Object { [ordered]@{ name = $_.Name } })
+        }
+        $entries += [ordered]@{ tag_name = $tag; draft = ($Drafts -contains $tag); prerelease = ($Prereleases -contains $tag); assets = $assets }
+    }
+    $body = if ($Status -eq 200) { ConvertTo-Json -InputObject @($entries) -Depth 5 } else { ConvertTo-Json -Compress -InputObject ([ordered]@{ message = $Message }) }
+    [IO.File]::WriteAllText((Join-Path $ReleaseRoot 'api.json'), $body)
+    [IO.File]::WriteAllText((Join-Path $ReleaseRoot 'api-status.txt'), [string]$Status)
+    $rateLimitFile = Join-Path $ReleaseRoot 'api-ratelimit.txt'
+    if ([string]::IsNullOrEmpty($RateLimitRemaining)) {
+        Remove-Item -LiteralPath $rateLimitFile -Force -ErrorAction SilentlyContinue
+    }
+    else {
+        [IO.File]::WriteAllText($rateLimitFile, $RateLimitRemaining)
+    }
 }
 
 function Set-AetherUserPath {
@@ -327,7 +410,7 @@ func main() {
     [IO.File]::WriteAllText($oldCli, 'old checksum-case CLI')
     $beforePath = '%SystemRoot%\System32;C:\unrelated-tools'
     Set-AetherUserPath $beforePath
-    Write-AetherRelease $releaseRoot $fixture $fixture -BadAmdChecksum $true
+    Write-AetherRelease $releaseRoot $version $fixture $fixture -BadAmdChecksum $true
     $checksumLog = Join-Path $checksumCase 'fixture.log'
     $result = Invoke-AetherPowerShellFile $installer @('-Version', $version, '-Role', 'none', '-BinDir', $checksumBin) @{
         AETHER_BASE_URL = $baseUrl
@@ -337,8 +420,8 @@ func main() {
     Assert-AetherEqual 'old checksum-case CLI' ([IO.File]::ReadAllText($oldCli)) 'bad checksum replaced the existing CLI'
     Assert-AetherEqual $beforePath (Get-AetherTestUserPath) 'bad checksum changed user PATH'
     Assert-AetherTest (-not (Test-Path -LiteralPath $checksumLog)) 'bad checksum executed the fixture'
-    Write-AetherRelease $releaseRoot $fixture $fixture
-    $checksumPath = Join-Path $releaseRoot 'checksums.txt'
+    Write-AetherRelease $releaseRoot $version $fixture $fixture
+    $checksumPath = Join-Path (Join-Path $releaseRoot $version) 'checksums.txt'
     $validManifest = [IO.File]::ReadAllText($checksumPath)
     foreach ($manifest in @($validManifest + $validManifest, 'invalid checksum', (('0' * 64) + '  another.exe'))) {
         [IO.File]::WriteAllText($checksumPath, $manifest)
@@ -350,7 +433,7 @@ func main() {
         Assert-AetherEqual $beforePath (Get-AetherTestUserPath) 'invalid manifest changed user PATH'
     }
 
-    Write-AetherRelease $releaseRoot $fixture $fixture
+    Write-AetherRelease $releaseRoot $version $fixture $fixture
     $lockedFile = [IO.File]::Open($oldCli, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     try {
         $result = Invoke-AetherPowerShellFile $installer @('-Version', $version, '-Role', 'none', '-BinDir', $checksumBin) @{
@@ -370,7 +453,7 @@ func main() {
     $freshLog = Join-Path $root 'fresh.log'
     $freshUserPath = '%SystemRoot%\System32;;C:\unrelated-tools;'
     Set-AetherUserPath $freshUserPath
-    Write-AetherRelease $releaseRoot $fixture $fixture
+    Write-AetherRelease $releaseRoot $version $fixture $fixture
     $result = Invoke-AetherPowerShellFile $installer @('-Version', $version) @{
         AETHER_BASE_URL = $baseUrl
         LOCALAPPDATA = $freshLocal
@@ -394,7 +477,7 @@ func main() {
     $tokenPath = '%SystemRoot%\System32;' + $freshBin.ToUpperInvariant() + '\'
     Set-AetherUserPath $tokenPath
     $reinstallLog = Join-Path $root 'reinstall.log'
-    Write-AetherRelease $releaseRoot $fixture $fixture
+    Write-AetherRelease $releaseRoot $version $fixture $fixture
     $result = Invoke-AetherPowerShellFile $installer @('-Version', $version, '-Role', 'none', '-BinDir', ($freshBin + '\')) @{
         AETHER_BASE_URL = $baseUrl
         AETHER_FIXTURE_LOG = $reinstallLog
@@ -416,7 +499,7 @@ func main() {
     $noneBin = Join-Path $root 'none-bin'
     $noneLog = Join-Path $root 'none.log'
     New-Item -ItemType Directory -Path $noneBin -Force | Out-Null
-    Write-AetherRelease $releaseRoot $fixture $fixture
+    Write-AetherRelease $releaseRoot 'v0.4.0-alpha.6' $fixture $fixture
     $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.4.0-alpha.6', '-Role', 'none', '-BinDir', $noneBin) @{
         AETHER_BASE_URL = $baseUrl
         AETHER_FIXTURE_LOG = $noneLog
@@ -449,7 +532,7 @@ catch {
 [IO.File]::WriteAllText('$restoreLiteral', [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process'))
 "@
     [IO.File]::WriteAllText($wrapper, $wrapperSource)
-    Write-AetherRelease $releaseRoot $fixture $fixture
+    Write-AetherRelease $releaseRoot $version $fixture $fixture
     $result = Invoke-AetherPowerShellFile $wrapper @() @{
         AETHER_BASE_URL = $baseUrl
         AETHER_FIXTURE_LOG = $failureLog
@@ -487,6 +570,7 @@ catch {
         $supportedBin = Join-Path $root $supportedVersion
         $supportedLog = Join-Path $supportedBin 'build.log'
         New-Item -ItemType Directory -Path $supportedBin -Force | Out-Null
+        Write-AetherRelease $releaseRoot $supportedVersion $fixture $fixture
         $result = Invoke-AetherPowerShellFile $installer @('-Version', $supportedVersion, '-Role', 'client', '-BinDir', $supportedBin) @{
             AETHER_BASE_URL = $baseUrl
             AETHER_FIXTURE_LOG = $supportedLog
@@ -502,10 +586,7 @@ catch {
     New-Item -ItemType Directory -Path $archBin -Force | Out-Null
     $archLog = Join-Path $root 'architecture.log'
     [IO.File]::WriteAllText($requestLog, '')
-    [IO.File]::WriteAllText((Join-Path $releaseRoot 'aether-windows-arm64.exe'), 'arm-native-payload')
-    $armHash = (Get-FileHash -LiteralPath (Join-Path $releaseRoot 'aether-windows-arm64.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-    $amdHash = (Get-FileHash -LiteralPath (Join-Path $releaseRoot 'aether-windows-amd64.exe') -Algorithm SHA256).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText((Join-Path $releaseRoot 'checksums.txt'), ("{0}  aether-windows-amd64.exe`r`n{1}  aether-windows-arm64.exe`r`n" -f $amdHash, $armHash))
+    Write-AetherRelease $releaseRoot $version $fixture 'arm-native-payload'
     $result = Invoke-AetherPowerShellFile $installer @('-Version', $version, '-Role', 'none', '-BinDir', $archBin) @{
         AETHER_BASE_URL = $baseUrl
         AETHER_FIXTURE_LOG = $archLog
@@ -517,6 +598,174 @@ catch {
     $requests = [IO.File]::ReadAllText($requestLog)
     Assert-AetherTest ($requests.Contains('aether-windows-arm64.exe')) 'architecture test did not request arm64 asset'
     Assert-AetherTest (-not $requests.Contains('aether-windows-amd64.exe')) 'architecture test requested the emulated x86 asset'
+
+    # Release selection.  Payloads are text because -Role none never runs them,
+    # which lets each assertion name the exact release that was installed.
+    $selectBin = Join-Path $root 'select-bin'
+    New-Item -ItemType Directory -Path $selectBin -Force | Out-Null
+    $selectCli = Join-Path $selectBin 'aether.exe'
+    $selectEnv = @{
+        AETHER_BASE_URL = $baseUrl
+        AETHER_LATEST_URL = ($baseUrl + '/latest')
+        AETHER_API_URL = ($baseUrl + '/api')
+    }
+    foreach ($tag in @('v0.6.0', 'v0.7.0-alpha.8', 'v0.7.0-alpha.9', 'v0.7.0-alpha.10', 'v0.7.0-alpha.11', 'v0.7.0-alpha.13', 'v0.7.0-alpha.14', 'v0.7.0-alpha.15', 'v0.7.0-alpha.16', 'v0.7.0-alpha.17', 'v0.7.0-alpha.18', 'nightly')) {
+        $omit = @()
+        $badChecksum = $false
+        $manifestVersion = $tag
+        switch ($tag) {
+            'v0.6.0' { $omit = @('aether-release.json', 'aether-release.json.sig') }
+            'v0.7.0-alpha.8' { $omit = @('aether-release.json.sig') }
+            'v0.7.0-alpha.10' { $omit = @('aether-windows-amd64.exe') }
+            'v0.7.0-alpha.11' { $omit = @('aether-release.json.sig') }
+            'v0.7.0-alpha.17' { $omit = @('aether-release.json') }
+            'v0.7.0-alpha.18' { $omit = @('aether-release.json', 'aether-release.json.sig') }
+            'v0.7.0-alpha.15' { $badChecksum = $true }
+            'v0.7.0-alpha.16' { $manifestVersion = 'v0.7.0-alpha.9' }
+        }
+        Write-AetherRelease $releaseRoot $tag ('cli ' + $tag) ('arm ' + $tag) -BadAmdChecksum $badChecksum -ManifestVersion $manifestVersion -Omit $omit
+    }
+    $allTags = @('nightly', 'v0.7.0-alpha.18', 'v0.7.0-alpha.17', 'v0.7.0-alpha.14', 'v0.7.0-alpha.13', 'v0.7.0-alpha.12', 'v0.7.0-alpha.11', 'v0.7.0-alpha.10', 'v0.7.0-alpha.9', 'v0.7.0-alpha.8', 'v0.6.0')
+    Write-AetherApi $releaseRoot -Tags $allTags -Drafts @('v0.7.0-alpha.13') -Prereleases @('v0.7.0-alpha.14')
+
+    $fallbackCases = @(
+        @{ Latest = 'v0.7.0-alpha.12'; Reason = 'no checksums.txt' },
+        @{ Latest = 'v0.7.0-alpha.11'; Reason = 'no aether-release.json.sig' },
+        @{ Latest = 'v0.7.0-alpha.17'; Reason = 'no aether-release.json' },
+        @{ Latest = 'v0.7.0-alpha.18'; Reason = 'no aether-release.json' },
+        @{ Latest = 'v0.7.0-alpha.10'; Reason = 'no aether-windows-amd64.exe' }
+    )
+    foreach ($case in $fallbackCases) {
+        [IO.File]::WriteAllText($selectCli, 'old select CLI')
+        [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), $case.Latest)
+        [IO.File]::WriteAllText($requestLog, '')
+        $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $selectEnv
+        Assert-AetherEqual 0 $result.ExitCode ("fallback from {0} failed: {1}" -f $case.Latest, $result.Output)
+        Assert-AetherEqual 'cli v0.7.0-alpha.9' ([IO.File]::ReadAllText($selectCli)) ("fallback from {0} installed the wrong release" -f $case.Latest)
+        $expected = 'aether install: {0} is not fully published yet ({1}); installing v0.7.0-alpha.9, the newest complete release' -f $case.Latest, $case.Reason
+        Assert-AetherTest ($result.Stdout.Contains($expected)) ("fallback did not explain itself; expected [{0}] in: {1}" -f $expected, $result.Output)
+        Assert-AetherTest ($result.Stdout.Contains('aether install: installing v0.7.0-alpha.9 for windows/amd64')) ("fallback did not name the installed version: " + $result.Output)
+        Assert-AetherTest ($result.Stdout.Contains('aether install: aether-release.json.sig not verified (PowerShell has no ed25519 verifier); verified aether-windows-amd64.exe SHA-256 and size against checksums.txt and aether-release.json')) ("fallback did not report the unverified signature: " + $result.Output)
+        Assert-AetherTest (-not $result.Stdout.Contains('skipping')) ("fallback reported unprobed releases: " + $result.Output)
+        $requests = @([IO.File]::ReadAllLines($requestLog))
+        foreach ($ignored in @('v0.7.0-alpha.18/', 'v0.7.0-alpha.17/', 'v0.7.0-alpha.14/', 'v0.7.0-alpha.13/', 'v0.7.0-alpha.11/', 'v0.7.0-alpha.10/', 'nightly/', 'v0.7.0-alpha.8/', 'v0.6.0/')) {
+            if ($ignored -eq ($case.Latest + '/')) { continue }
+            Assert-AetherTest (@($requests | Where-Object { $_.StartsWith($ignored) }).Count -eq 0) ("fallback requested {0} assets: {1}" -f $ignored, ($requests -join ', '))
+        }
+    }
+
+    # A pinned complete release installs without consulting latest or the API.
+    [IO.File]::WriteAllText($requestLog, '')
+    $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.7.0-alpha.9', '-Role', 'none', '-BinDir', $selectBin) $selectEnv
+    Assert-AetherEqual 0 $result.ExitCode ("pinned complete release failed: " + $result.Output)
+    Assert-AetherEqual 'cli v0.7.0-alpha.9' ([IO.File]::ReadAllText($selectCli)) 'pinned complete release installed the wrong CLI'
+    $requests = @([IO.File]::ReadAllLines($requestLog))
+    Assert-AetherTest (@($requests | Where-Object { -not $_.StartsWith('v0.7.0-alpha.9/') }).Count -eq 0) ("pinned release requested other paths: " + ($requests -join ', '))
+
+    # A release from before v0.7.0-alpha.12 has neither manifest file; pinned
+    # or latest, it installs on checksums.txt alone and says so.
+    [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.6.0')
+    foreach ($arguments in @(@('-Version', 'v0.6.0'), @())) {
+        [IO.File]::WriteAllText($selectCli, 'old select CLI')
+        [IO.File]::WriteAllText($requestLog, '')
+        $result = Invoke-AetherPowerShellFile $installer ($arguments + @('-Role', 'none', '-BinDir', $selectBin)) $selectEnv
+        Assert-AetherEqual 0 $result.ExitCode ("unsigned release failed: " + $result.Output)
+        Assert-AetherEqual 'cli v0.6.0' ([IO.File]::ReadAllText($selectCli)) 'unsigned release installed the wrong CLI'
+        Assert-AetherTest ($result.Stdout.Contains('aether install: v0.6.0 has no signed aether-release.json (it predates release signing); verifying SHA-256 against checksums.txt only')) ("unsigned release did not report checksum-only verification: " + $result.Output)
+        Assert-AetherTest (-not ([IO.File]::ReadAllLines($requestLog) -contains 'api')) 'unsigned release consulted the API'
+    }
+
+    # Every failure below leaves the existing CLI in place.
+    $failureCases = @(
+        @{ Args = @('-Version', 'v0.7.0-alpha.12'); Message = 'v0.7.0-alpha.12 has no published checksums.txt; it may still be building or may have failed - not installing a different version'; Only = 'v0.7.0-alpha.12/' },
+        @{ Args = @('-Version', 'v0.7.0-alpha.10'); Message = 'v0.7.0-alpha.10 has no published aether-windows-amd64.exe; it may still be building or may have failed - not installing a different version'; Only = 'v0.7.0-alpha.10/' },
+        @{ Args = @('-Version', 'v0.7.0-alpha.8'); Message = 'v0.7.0-alpha.8 has no published aether-release.json.sig; it may still be building or may have failed - not installing a different version'; Only = 'v0.7.0-alpha.8/' },
+        @{ Args = @('-Version', 'v0.7.0-alpha.17'); Message = 'v0.7.0-alpha.17 has no published aether-release.json; it may still be building or may have failed - not installing a different version'; Only = 'v0.7.0-alpha.17/' },
+        @{ Args = @('-Version', 'v0.7.0-alpha.18'); Message = 'v0.7.0-alpha.18 has no published aether-release.json; it may still be building or may have failed - not installing a different version'; Only = 'v0.7.0-alpha.18/' },
+        @{ Args = @(); Latest = 'v0.7.0-alpha.15'; Message = 'checksum mismatch for aether-windows-amd64.exe of v0.7.0-alpha.15'; NoApi = $true },
+        @{ Args = @(); Latest = 'v0.7.0-alpha.16'; Message = "aether-release.json of v0.7.0-alpha.16 names version 'v0.7.0-alpha.9'"; NoApi = $true }
+    )
+    foreach ($case in $failureCases) {
+        [IO.File]::WriteAllText($selectCli, 'old select CLI')
+        if ($case.ContainsKey('Latest')) {
+            [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), $case.Latest)
+        }
+        [IO.File]::WriteAllText($requestLog, '')
+        $result = Invoke-AetherPowerShellFile $installer ($case.Args + @('-Role', 'none', '-BinDir', $selectBin)) $selectEnv
+        Assert-AetherTest ($result.ExitCode -ne 0) ("expected failure succeeded: " + $case.Message)
+        Assert-AetherTest ($result.Stderr.Contains($case.Message)) ("expected [{0}] in: {1}" -f $case.Message, $result.Output)
+        Assert-AetherEqual 'old select CLI' ([IO.File]::ReadAllText($selectCli)) ("failure replaced the CLI: " + $case.Message)
+        $requests = @([IO.File]::ReadAllLines($requestLog))
+        if ($case.ContainsKey('Only')) {
+            Assert-AetherTest (@($requests | Where-Object { -not $_.StartsWith($case.Only) }).Count -eq 0) ("pinned failure fell back: " + ($requests -join ', '))
+        }
+        if ($case.ContainsKey('NoApi')) {
+            Assert-AetherTest (-not ($requests -contains 'api')) ("integrity failure fell back: " + ($requests -join ', '))
+        }
+    }
+
+    [IO.File]::WriteAllText($selectCli, 'old select CLI')
+    [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.7.0-alpha.12')
+    Write-AetherApi $releaseRoot -Tags @('v0.7.0-alpha.12', 'v0.7.0-alpha.11')
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $selectEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'an all-incomplete release list succeeded'
+    Assert-AetherTest ($result.Stderr.Contains('no complete release for windows/amd64 among the newest 2 releases of 3xDevOps/Aether; pass -Version <tag>')) ("no-candidate failure was not explained: " + $result.Output)
+    Assert-AetherTest ($result.Stdout.Contains('aether install: skipping v0.7.0-alpha.12: not fully published (no checksums.txt)')) ("no-candidate failure did not name the probed release: " + $result.Output)
+    Assert-AetherEqual 'old select CLI' ([IO.File]::ReadAllText($selectCli)) 'no-candidate failure replaced the CLI'
+
+    Write-AetherApi $releaseRoot -Status 403 -RateLimitRemaining '0'
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $selectEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'a rate-limited API succeeded'
+    Assert-AetherTest ($result.Stderr.Contains('GitHub API rate limit exceeded (HTTP 403, X-RateLimit-Remaining 0); pass -Version <tag> to install a specific release')) ("rate limit was not reported: " + $result.Output)
+    Assert-AetherEqual 'old select CLI' ([IO.File]::ReadAllText($selectCli)) 'rate-limit failure replaced the CLI'
+
+    $closed = New-Object System.Net.Sockets.TcpListener -ArgumentList @([Net.IPAddress]::Loopback, 0)
+    $closed.Start()
+    $closedUrl = 'http://127.0.0.1:{0}/latest' -f ([Net.IPEndPoint]$closed.LocalEndpoint).Port
+    $closed.Stop()
+    $unreachableEnv = $selectEnv.Clone()
+    $unreachableEnv.AETHER_LATEST_URL = $closedUrl
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $unreachableEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'an unreachable GitHub succeeded'
+    Assert-AetherTest ($result.Stderr.Contains('cannot resolve the latest release from ' + $closedUrl + ': ')) ("unreachable host did not name the URL: " + $result.Output)
+    Assert-AetherTest (-not $result.Output.Contains('no complete release')) ("unreachable host was reported as no release: " + $result.Output)
+    Assert-AetherEqual 'old select CLI' ([IO.File]::ReadAllText($selectCli)) 'unreachable host replaced the CLI'
+
+    # Any other API error shows the body's message, not just the status line.
+    [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.7.0-alpha.12')
+    Write-AetherApi $releaseRoot -Status 500 -Message 'Server Error: try again'
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $selectEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'a failing API succeeded'
+    Assert-AetherTest ($result.Stderr.Contains('returned HTTP 500: ') -and $result.Stderr.Contains('Server Error: try again')) ("API error body was not shown: " + $result.Output)
+
+    # The fallback only takes a signed release older than latest: an
+    # unsigned one (v0.6.0) is never chosen in its place.
+    [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.7.0-alpha.8')
+    Write-AetherApi $releaseRoot -Tags @('v0.7.0-alpha.8', 'v0.6.0')
+    [IO.File]::WriteAllText($requestLog, '')
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $selectEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'fallback installed an unsigned release'
+    Assert-AetherTest ($result.Stderr.Contains('no complete release for windows/amd64')) ("unsigned fallback was not refused: " + $result.Output)
+    Assert-AetherTest (@([IO.File]::ReadAllLines($requestLog) | Where-Object { $_.StartsWith('v0.6.0/') }).Count -eq 0) 'fallback probed an unsigned release'
+    Assert-AetherEqual 'old select CLI' ([IO.File]::ReadAllText($selectCli)) 'unsigned fallback replaced the CLI'
+
+    # A candidate too old for desktop setup is skipped, not fatal.
+    Write-AetherRelease $releaseRoot 'v0.5.0' 'cli v0.5.0' 'arm v0.5.0'
+    [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.7.0-alpha.12')
+    Write-AetherApi $releaseRoot -Tags @('v0.7.0-alpha.12', 'v0.5.0')
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'client', '-BinDir', $selectBin) $selectEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'a too-old fallback succeeded'
+    Assert-AetherTest ($result.Stderr.Contains('no complete release for windows/amd64')) ("too-old fallback was not skipped: " + $result.Output)
+    Assert-AetherTest (-not $result.Output.Contains('too old')) ("too-old fallback threw instead of skipping: " + $result.Output)
+
+    # Only https, except the loopback fixture server, is accepted.
+    $insecureEnv = $selectEnv.Clone()
+    $insecureEnv.AETHER_BASE_URL = 'http://example.invalid/releases/download'
+    [IO.File]::WriteAllText($requestLog, '')
+    $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.7.0-alpha.9', '-Role', 'none', '-BinDir', $selectBin) $insecureEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'an http mirror was accepted'
+    Assert-AetherTest ($result.Stderr.Contains('refusing http://example.invalid/releases/download: releases are downloaded over https only')) ("http mirror was not refused: " + $result.Output)
+    Assert-AetherEqual 'old select CLI' ([IO.File]::ReadAllText($selectCli)) 'http mirror replaced the CLI'
     Write-Output 'install-test: ok'
 }
 finally {
