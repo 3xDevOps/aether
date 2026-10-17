@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -97,14 +98,23 @@ func backupCmd(args []string, getenv func(string) string, out, errOut io.Writer)
 		}
 		return backupToStdout(db, filepath.Join(*dataDir, edgestore.BackupDir), out, errOut)
 	}
-	dst := target
-	if info, err := os.Stat(target); err == nil && info.IsDir() {
+	var key []byte
+	var fp string
+	if *withKey {
+		if key, fp, err = readKey(filepath.Join(*dataDir, keyFile)); err != nil {
+			return err
+		}
+	}
+	dst, dir := target, filepath.Dir(target)
+	if info, err := os.Stat(target); (err == nil && info.IsDir()) || strings.HasSuffix(target, string(os.PathSeparator)) {
 		s, err := edgestore.ReadSchema(db)
 		if err != nil {
 			return err
 		}
 		dst = filepath.Join(target, fmt.Sprintf("edge-v%d-%s.db", s.Version, time.Now().UTC().Format(edgestore.StampLayout)))
-	} else if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		dir = target
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	s, err := edgestore.Backup(db, dst)
@@ -116,10 +126,6 @@ func backupCmd(args []string, getenv func(string) string, out, errOut io.Writer)
 	}
 	if !*withKey {
 		return nil
-	}
-	key, fp, err := readKey(filepath.Join(*dataDir, keyFile))
-	if err != nil {
-		return err
 	}
 	if err = writeNew(dst+".key", key); err != nil {
 		return err

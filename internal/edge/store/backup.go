@@ -129,14 +129,13 @@ func ReadSchema(path string) (Schema, error) {
 // which must not exist, through a read-only connection, so a running edge
 // keeps writing. It returns the copy's schema.
 func Backup(src, dst string) (Schema, error) {
+	if _, err := os.Lstat(dst); !errors.Is(err, fs.ErrNotExist) {
+		return Schema{}, fmt.Errorf("edgestore: %s exists; name a new file", dst)
+	}
 	tmp := dst + ".tmp"
 	s, err := snapshot(src, tmp)
 	if err != nil {
 		return Schema{}, err
-	}
-	if _, err := os.Lstat(dst); !errors.Is(err, fs.ErrNotExist) {
-		os.Remove(tmp) //nolint:errcheck // the refusal takes precedence
-		return Schema{}, fmt.Errorf("edgestore: %s exists; name a new file", dst)
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		os.Remove(tmp) //nolint:errcheck // the rename error takes precedence

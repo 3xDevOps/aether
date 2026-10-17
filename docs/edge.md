@@ -1293,15 +1293,18 @@ ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
 
 `/var/lib/aether-edge` holds `edge.db`, the database of accounts, device
 tokens, owners and owed deletions; `edge_key`, the edge signing key every
-enrolled server pins; and, when the edge obtains its own certificates, the
-ACME cache in `acme/` ([Backup and recovery](#backup-and-recovery)). It
-must outlive every container. Mount a named volume, which takes the image's
+enrolled server pins; `backups/`, the database copies the edge takes before
+it migrates; `edge.lock`, held by the running edge; and, when the edge
+obtains its own certificates, the ACME cache in `acme/`
+([Backup and recovery](#backup-and-recovery)). It must outlive every
+container. Mount a named volume, which takes the image's
 ownership; a directory owned by uid 65532 (`chown -R 65532:65532 <dir> &&
 chmod 0700 <dir>`); or a directory the edge's uid writes through its group,
 such as `root:<gid>` mode `2770` on a platform that runs the container with
 that supplementary group. The edge refuses a directory its uid cannot
-write, one that others can enter, and an `edge_key` or `edge.db` another
-uid owns, since it creates both 0600:
+write, one that others can enter, and an `edge_key`, `edge.db`,
+`edge.lock` or `backups/` another uid owns, since it creates them 0600 and
+0700:
 
 ```
 aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is not writable by uid 65532, the user aether-edge runs as: permission denied; give that user write access as the directory's owner or through its group, or name another with --data or AETHER_EDGE_DATA
@@ -1320,12 +1323,10 @@ accept, so whoever holds it can act as the edge
 ([What an attacker can do](#what-an-attacker-can-do)). Encrypt backups and
 store them where only the edge's operators can read them.
 
-The image has no `sqlite3`: back up by copying the volume while the
-container is stopped, or run `sqlite3 edge.db ".backup <file>"` as uid 65532
-from another container that mounts the volume. The fingerprint servers pin
+Back up and restore with the image's own `aether-edge backup` and
+`aether-edge restore`; both work on a read-only root filesystem
+([Backup and recovery](#backup-and-recovery)). The fingerprint servers pin
 is in `GET /v1/edge` ([First start and checks](#first-start-and-checks)).
-To upgrade, back up, then start the new tag's container with the same
-volume.
 
 #### The client secret
 
@@ -1597,6 +1598,8 @@ The data directory, `/var/lib/aether-edge`:
 | --- | --- |
 | `edge.db` (with `edge.db-wal`, `edge.db-shm`) | Accounts, edge sessions, devices, claimed servers with owners, kinds, announced policies and directories, which servers each account was admitted to, deletions owed to servers, egress counters, blocked server ids and accounts. Bearer secrets are stored only as SHA-256 hashes |
 | `edge_key` | The Ed25519 key grants are signed with, OpenSSH format, 0600. The edge refuses to start if group or others can read it: `edge: signing key <path> has mode 0644; run chmod 600 <path>` |
+| `backups/` | 0700. `edge-v<from>-v<to>-<UTC time>.db`, taken before each migration, newest 5 kept; `edge-before-restore-<UTC time>.db`, the database a restore replaced, never removed |
+| `edge.lock` | Locked by the running edge, so a second edge on the same directory exits. `flock` does not lock across NFS: keep the directory on a local filesystem |
 | `acme/` | Without a proxy: the two names' certificates, their keys and the ACME account key |
 
 Keep:
@@ -1605,14 +1608,18 @@ Keep:
   changes. If it is lost, the edge makes a new one and every server refuses
   the edge with `edge key changed` until its operator runs `sudo
   aether-server edge trust`. Clients need no action.
-- **`edge.db`, daily.** `.backup` copies a consistent snapshot while the
-  edge runs (needs the `sqlite3` package):
+- **`edge.db`, daily.** `aether-edge backup` copies a consistent snapshot
+  while the edge runs, through a read-only connection, and checks the copy
+  with `PRAGMA integrity_check`. It never migrates. Name a file, a
+  directory (the copy is `edge-v<schema>-<UTC time>.db` in it), or `-` for
+  standard output; `--with-key` copies `edge_key` to `<file>.key` too:
 
   ```sh
-  sudo -u aether-edge sqlite3 /var/lib/aether-edge/edge.db ".backup /var/lib/aether-edge/edge-backup.db"
+  sudo -u aether-edge aether-edge backup /var/lib/aether-edge/backups/daily.db
+  docker exec aether-edge aether-edge backup - > edge-backup.db
   ```
 
-  Copy `edge-backup.db` off the machine. A lost `edge.db` forgets every
+  Copy the file off the machine. A lost `edge.db` forgets every
   account, device token and owner: each client runs `aether login` again,
   and each server drops its owner when it reconnects and logs
   ``edge: the edge does not know this server's owner; claim it again with a code from `aether-server edge claim-code` ``.
@@ -1623,23 +1630,73 @@ Keep:
   nginx, `/etc/letsencrypt/` and `/etc/nginx/conf.d/aether-edge.conf`, or
   the steps to recreate them.
 
+To restore, stop the edge and run `aether-edge restore` as its user with
+the data directory mounted. It checks the copy's integrity, refuses a copy
+this binary cannot run on, saves the current `edge.db` to
+`backups/edge-before-restore-<UTC time>.db`, and replaces `edge.db`,
+removing its `-wal` and `-shm` files. `--key <file>` restores `edge_key`
+too and prints its fingerprint:
+
+```sh
+sudo systemctl stop aether-edge
+sudo -u aether-edge aether-edge restore /var/lib/aether-edge/backups/daily.db
+sudo systemctl start aether-edge
+
+docker compose stop edge
+docker compose run --rm --no-deps edge restore /var/lib/aether-edge/backups/daily.db
+docker compose start edge
+```
+
+With the edge running, a restore is refused:
+
+```
+aether-edge: another aether-edge process holds the data directory's lock: /var/lib/aether-edge/edge.lock; an edge is running on /var/lib/aether-edge: stop it first (docker compose stop, or sudo systemctl stop aether-edge), then restore
+```
+
+`aether-edge schema --json` prints the database's schema version, its
+compat floor and the schema this binary supports, read-only:
+`{"schema":1,"compat_floor":1,"supported":1}`.
+
 ### Upgrades
 
 ```sh
-sudo -u aether-edge sqlite3 /var/lib/aether-edge/edge.db ".backup /var/lib/aether-edge/edge-pre-<release-tag>.db"
+sudo -u aether-edge aether-edge backup /var/lib/aether-edge/backups/pre-<release-tag>.db
 # download and check the new binary as in Installing, then:
 sudo install -m 0755 aether-edge-linux-<arch> /usr/local/bin/aether-edge
 sudo systemctl restart aether-edge
 ```
 
+In a container, back up with `docker exec <container> aether-edge backup
+/var/lib/aether-edge/backups/pre-<release-tag>.db`, then start the new
+tag's container with the same volume.
+
 Fetch the unit and the environment example of the new release too, and
 compare them with yours. On `SIGTERM` the edge sends `drain` to every
 server, then closes within 10 seconds. Every relayed connection drops;
 servers reconnect with backoff, clients redial, and runs are unaffected.
-The database schema migrates forward on start. An older binary refuses a
-migrated database with `edgestore: database schema version <n> is newer
-than this binary supports (<m>)`; to roll back, restore the backup taken
-before the upgrade.
+
+The database schema migrates forward on start. Before it migrates, the
+edge copies `edge.db` to `backups/edge-v<from>-v<to>-<UTC time>.db` and
+checks the copy; without a good copy it does not migrate and exits:
+
+```
+aether-edge: edgestore: back up /var/lib/aether-edge/edge.db to /var/lib/aether-edge/backups/edge-v1-v2-20261017T051604Z.db before migrating schema 1 to 2: edgestore: copy /var/lib/aether-edge/edge.db to /var/lib/aether-edge/backups/edge-v1-v2-20261017T051604Z.db.tmp: database or disk is full (13); the edge does not migrate without a verified backup: make /var/lib/aether-edge/backups writable by uid 65532 with room for a copy of the database, then start the edge again
+```
+
+Each migration records a compat floor: the lowest schema a binary must
+support to run on the database. A migration that only adds a table, an
+index, or a nullable or defaulted column keeps the previous floor, so the
+older binary still runs on it, logging
+`edgestore: the database was migrated by a newer binary; running on it unmigrated, as its compat floor allows`.
+After any other migration the older binary refuses the database and names
+the backup to restore:
+
+```
+aether-edge: edgestore: database schema version 2 is newer than this binary supports (1); run a binary that supports schema 2 or later, or stop the edge and restore the backup taken before the upgrade: aether-edge restore /var/lib/aether-edge/backups/edge-v1-v2-20261017T050000Z.db
+```
+
+To roll back, stop the edge, restore that backup with the older binary or
+image, and start it. Writes made since the upgrade are lost.
 
 An edge, servers and clients built from the `v0.5.2-alpha.3` tag must all
 be replaced by this release together; a mix of that build and this one
@@ -1657,6 +1714,21 @@ Run them as the edge's user. They refuse any other user than the owner of
 opens the database, and a root-owned one would lock the edge out. `--data`
 (default `AETHER_EDGE_DATA`, else `/var/lib/aether-edge`) goes before the
 argument.
+
+While an edge runs, it holds `edge.lock`, and the commands never migrate:
+they refuse a database at another schema than their binary's, so run them
+with the running edge's binary or image, as `docker exec <container>
+aether-edge servers list` does:
+
+```
+aether-edge: edgestore: /var/lib/aether-edge/edge.db is at schema version 2 and this binary supports 1; an edge is running on /var/lib/aether-edge, so run this command with the same image or binary as the running edge, as in docker exec <container> aether-edge servers list
+```
+
+With no edge running, they take the lock themselves and migrate as a start
+does, backup first. `aether-edge version --json` prints the binary's
+version, commit, store schema, compat floor and protocol versions.
+`backup`, `restore` and `schema` are in
+[Backup and recovery](#backup-and-recovery).
 
 The commands list, remove, block and delete. None grants anything: no
 command approves a device, records an owner or admits an account to a
