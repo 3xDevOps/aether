@@ -187,7 +187,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("find this executable to watch for updates: %w", err)
 	}
-	image, err := os.Stat(exe)
+	// On Windows a Stat by path reads the file's identity only when
+	// SameFile first asks, from whatever the path names by then; a Stat of
+	// an open file reads it now.
+	f, err := os.Open(exe)
+	if err != nil {
+		return fmt.Errorf("open this executable to watch for updates: %w", err)
+	}
+	image, err := f.Stat()
+	_ = f.Close()
 	if err != nil {
 		return fmt.Errorf("stat this executable to watch for updates: %w", err)
 	}

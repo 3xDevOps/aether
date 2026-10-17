@@ -3,8 +3,11 @@ package edgeproto
 import (
 	"bytes"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -47,6 +50,7 @@ func validMessages(t *testing.T) []Message {
 		AccountDeletionApplied{Provider: ProviderGitHub, Subject: "1001"},
 		Unenroll{},
 		Drain{},
+		Drain{RetryAfterMS: 3000, JitterMS: 5000},
 		Ping{},
 		Pong{},
 	}
@@ -91,6 +95,10 @@ func TestControlEnvelope(t *testing.T) {
 	}
 	if string(data) != `{"type":"device_revoked","device_id":"dev-fake-1"}` {
 		t.Fatalf("EncodeControl(DeviceRevoked) = %s", data)
+	}
+	// A drain without a hint is the message edges sent before the hint.
+	if data, err = EncodeControl(Drain{}); err != nil || string(data) != `{"type":"drain"}` {
+		t.Fatalf("EncodeControl(Drain) = %s, %v", data, err)
 	}
 }
 
@@ -201,4 +209,76 @@ func TestHelloWithoutPolicy(t *testing.T) {
 func b64(b []byte) string {
 	data, _ := json.Marshal(b)
 	return strings.Trim(string(data), `"`)
+}
+
+// TestDecodesVersion1Fixtures decodes control messages as builds speaking
+// protocol version 1 send them. Every later build must keep decoding them
+// to the same values: an edge accepts the servers of the previous version,
+// and a server the edges of the previous version. A fixture may carry a
+// member this build does not know, which it ignores; unknown_type is a
+// message type it does not know, which a reader skips.
+func TestDecodesVersion1Fixtures(t *testing.T) {
+	const conn = "84535b44d88d7b5ddcfbe645e6053415"
+	account := func(subject string) Principal {
+		return Principal{Type: PrincipalAccount, Provider: ProviderGitHub, Subject: subject}
+	}
+	hello := Hello{Version: 1, HostKey: unb64(t, "AAAAC3NzaC1lZDI1NTE5AAAAIM7MFQfcHd1ylZUcKQiI8JWtuQRNG3PWlubfBl1oO9T8"),
+		Signature:    unb64(t, "AAAAC3NzaC1lZDI1NTE5AAAAQAr+l1EewoxI2CWsih4ooJYBCv6geC+TUnQv7ztyto9FL/JTiIUc6J9ik4XCjDkVueYu9iV2IrOKJfC6n/Y4tAc="),
+		AgentVersion: "v0.0.0-test", Name: "devbox"}
+	want := map[string]Message{
+		"account_deleted":          AccountDeleted{Provider: ProviderGitHub, Subject: "1001"},
+		"account_deletion_applied": AccountDeletionApplied{Provider: ProviderGitHub, Subject: "1001"},
+		"challenge":                Challenge{Version: 1, Nonce: bytes.Repeat([]byte{1}, 32), Origin: "https://edge.example"},
+		"claimed":                  Claimed{ConnID: conn, Owner: account("1001")},
+		"device_revoked":           DeviceRevoked{DeviceID: "dev-fake-1"},
+		"directory": Directory{Entries: []DirectoryEntry{
+			{Kind: "member", Provider: ProviderGitHub, Subject: "1001", Role: "admin"},
+			{Kind: "invitation", Email: "new@example.com", Role: "viewer", ExpiresAt: time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)},
+		}},
+		"drain":                 Drain{},
+		"drain_hint":            Drain{RetryAfterMS: 3000, JitterMS: 5000},
+		"drain_unknown_fields":  Drain{RetryAfterMS: 3000, JitterMS: 5000},
+		"drain_out_of_range":    Drain{RetryAfterMS: -1, JitterMS: 99999999999999},
+		"hello":                 hello,
+		"hello_unknown_fields":  hello,
+		"open":                  Open{ConnID: conn, Ticket: "S2-Wb5bWULbHSO81DjrP99AnnrLlBv2KKS_-qolTRqI", Kind: "ssh", Grant: "payload.sig", ClientAddr: "192.0.2.1:5555"},
+		"open_result":           OpenResult{ConnID: conn},
+		"owner_transfer_result": OwnerTransferResult{ID: conn, Owner: account("1002")},
+		"owner_transferred":     OwnerTransferred{ID: conn, Owner: account("1002")},
+		"ownerless":             Ownerless{},
+		"ping":                  Ping{},
+		"pong":                  Pong{},
+		"ready":                 Ready{ServerID: "7ozstx3hvprfzhna3cakjwhdnw", State: StateUnclaimed, EdgeKey: unb64(t, "zswVB9wd3XKVlRwpCIjwla25BE0bc9aW5t8GXWg71Pw=")},
+		"unenroll":              Unenroll{},
+	}
+	files, err := filepath.Glob("testdata/v1/*.json")
+	if err != nil || len(files) != len(want)+1 {
+		t.Fatalf("fixtures %v, %v: want one per message in the table plus unknown_type", files, err)
+	}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := strings.TrimSuffix(filepath.Base(f), ".json")
+		got, err := DecodeControl(bytes.TrimSpace(data))
+		if name == "unknown_type" {
+			if !errors.Is(err, ErrUnknownMessage) {
+				t.Errorf("%s: DecodeControl = %v, want ErrUnknownMessage", f, err)
+			}
+			continue
+		}
+		if err != nil || !reflect.DeepEqual(got, want[name]) {
+			t.Errorf("%s: DecodeControl = %#v, %v, want %#v", f, got, err, want[name])
+		}
+	}
+}
+
+func unb64(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

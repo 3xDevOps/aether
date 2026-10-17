@@ -99,7 +99,7 @@ start() {
 		-p 127.0.0.1::8443 \
 		"$image" >/dev/null
 	i=0
-	until rt exec "$1" /usr/local/bin/aether-edge healthcheck >"$work/health" 2>&1; do
+	until rt exec "$1" /usr/local/bin/aether-edge healthcheck --ready >"$work/health" 2>&1; do
 		i=$((i + 1))
 		if [ "$i" -ge 30 ] || [ "$(rt inspect --format '{{.State.Running}}' "$1")" != true ]; then
 			fail "$1 is not healthy: $(cat "$work/health")

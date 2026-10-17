@@ -188,7 +188,15 @@ func (a *Agent) Run(ctx context.Context) {
 		// The window is never empty, so servers an edge restart dropped
 		// together do not redial together.
 		wait := a.minBackoff + rand.N(backoff)
-		slog.Warn("edge: control connection ended; reconnecting", "edge", a.origin, "error", err, "retry_in", wait.Round(time.Millisecond))
+		var drain drained
+		if errors.As(err, &drain) {
+			// The hint only lengthens the wait: an edge that drains on
+			// every exit of a restart loop still meets a growing backoff.
+			wait = max(wait, drain.wait(a.maxBackoff))
+			slog.Warn("edge: edge is restarting (drain); reconnecting in "+wait.Round(time.Millisecond).String(), "edge", a.origin)
+		} else {
+			slog.Warn("edge: control connection ended; reconnecting", "edge", a.origin, "error", err, "retry_in", wait.Round(time.Millisecond))
+		}
 		select {
 		case <-ctx.Done():
 			return

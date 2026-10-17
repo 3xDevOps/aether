@@ -18,6 +18,7 @@ export function AgentList({
   label: listLabel = 'Agents',
   onSetUp,
   onRun,
+  onRemove,
   extra,
   returnFocusTo,
   primary,
@@ -26,6 +27,7 @@ export function AgentList({
   label?: string
   onSetUp?: (agent: AgentInfo) => void
   onRun?: (agent: AgentInfo) => void
+  onRemove?: (agent: AgentInfo) => void
   extra?: (agent: AgentInfo) => ReactNode
   returnFocusTo?: string
   primary?: string
@@ -41,6 +43,7 @@ export function AgentList({
       {agents.map((agent) => {
         const name = label(agent)
         const runnable = ready(agent) && onRun
+        const removable = onRemove && (agent.source === 'member' || agent.installed === true)
         const action = runnable ? 'Run' : agent.installed === true ? 'Log in' : 'Set up'
         return (
           <li key={agent.name} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
@@ -67,7 +70,7 @@ export function AgentList({
                   {action}
                 </Button>
               )}
-              {runnable && onSetUp && (
+              {((runnable && onSetUp) || removable) && (
                 <Menu>
                   <MenuTrigger asChild>
                     <Button size="icon" variant="ghost" label={`More for ${name}`}>
@@ -75,7 +78,8 @@ export function AgentList({
                     </Button>
                   </MenuTrigger>
                   <MenuContent align="end">
-                    <MenuItem onSelect={() => onSetUp(agent)}>Set up again</MenuItem>
+                    {runnable && onSetUp && <MenuItem onSelect={() => onSetUp(agent)}>Set up again</MenuItem>}
+                    {removable && <MenuItem onSelect={() => onRemove(agent)}>Remove…</MenuItem>}
                   </MenuContent>
                 </Menu>
               )}

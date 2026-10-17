@@ -115,6 +115,15 @@ func (s *Store) HasIdentities(ctx context.Context) (bool, error) {
 	return has, nil
 }
 
+// Ping checks that the database answers a read.
+func (s *Store) Ping(ctx context.Context) error {
+	var v int
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&v); err != nil {
+		return fmt.Errorf("edgestore: ping: %w", err)
+	}
+	return nil
+}
+
 // Close closes the database.
 func (s *Store) Close() error {
 	if err := s.db.Close(); err != nil {

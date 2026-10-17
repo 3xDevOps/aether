@@ -162,9 +162,15 @@ type AccountDeletionApplied struct {
 // The receiver forgets the enrollment and the control channel closes.
 type Unenroll struct{}
 
-// Drain (edge to server) announces a clean edge stop; the server
-// reconnects with backoff.
-type Drain struct{}
+// Drain (edge to server) announces a clean edge stop. The server
+// reconnects after its backoff or, when longer, RetryAfterMS plus a random
+// part of JitterMS, in milliseconds. Both fields were added within protocol version 1: a server that does not
+// know them ignores them, and one that does clamps them to [0,
+// ReconnectMaxBackoff].
+type Drain struct {
+	RetryAfterMS int64 `json:"retry_after_ms,omitempty"`
+	JitterMS     int64 `json:"jitter_ms,omitempty"`
+}
 
 // Ping and Pong keep the control channel alive: see PingInterval and
 // ControlIdleTimeout.

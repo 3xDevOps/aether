@@ -1,13 +1,15 @@
 #!/bin/sh
 # Aether installer: downloads released binaries from GitHub and puts them on
 # PATH. Portable POSIX sh - no bash, no package manager, no dependencies
-# beyond curl (or wget) and a sha256 tool.
+# beyond curl and a sha256 tool; OpenSSL 3, when present, checks the
+# release signature.
 #
 #   curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client
 #
 # Flags (or the matching environment variables):
-#   --version <tag>   AETHER_VERSION      release tag; default: latest
+#   --version <tag>   AETHER_VERSION      release tag; default: the newest
+#                                         complete release
 #   --bin-dir <dir>   AETHER_BIN_DIR      install directory; default: /usr/local/bin,
 #                                         or ~/.local/bin for the client role
 #   --client          AETHER_COMPONENTS=client   CLI only
@@ -90,7 +92,8 @@ while [ $# -gt 0 ]; do
 usage: install.sh [--version <tag>] [--bin-dir <dir>] [--client | --server]
                   [--role server|client|none]
 
-  --version   release tag to install (default: the latest release)
+  --version   release tag to install, exactly that or nothing (default: the
+              newest release with every asset this install needs published)
   --bin-dir   where to put the binaries (default: /usr/local/bin, or
               ~/.local/bin when the role is client)
   --client    install the aether CLI only
@@ -120,20 +123,7 @@ case "$ROLE" in
 *) die "unknown role ${ROLE} (use server, client, or none)" ;;
 esac
 
-# --- fetch helpers -----------------------------------------------------
-
-if command -v curl >/dev/null 2>&1; then
-	fetch() { curl -fsSL "$1" -o "$2"; }
-	fetch_effective_url() { curl -fsSL -o /dev/null -w '%{url_effective}' "$1"; }
-elif command -v wget >/dev/null 2>&1; then
-	fetch() { wget -qO "$2" "$1"; }
-	fetch_effective_url() {
-		# wget prints every redirect it follows; the last one is the target.
-		wget -qS --spider -O /dev/null "$1" 2>&1 | awk '/^ *Location:/ { print $2 }' | tail -1
-	}
-else
-	die "need curl or wget"
-fi
+command -v curl >/dev/null 2>&1 || die "need curl"
 
 if command -v sha256sum >/dev/null 2>&1; then
 	sha256_of() { sha256sum "$1" | cut -d' ' -f1; }
@@ -166,19 +156,6 @@ fi
 if [ "$COMPONENTS" != "client" ] && [ "$os" != "linux" ]; then
 	die "aether-server runs on Linux only; re-run with --client"
 fi
-
-# --- version -----------------------------------------------------------
-
-if [ -z "$VERSION" ]; then
-	say "resolving latest release"
-	latest="$(fetch_effective_url "https://github.com/${REPO}/releases/latest")" ||
-		die "cannot reach github.com/${REPO}/releases/latest"
-	VERSION="${latest##*/}"
-	case "$VERSION" in
-	"" | *releases*) die "no published release found; pass --version <tag>" ;;
-	esac
-fi
-say "installing ${VERSION} for ${os}/${arch}"
 
 # --- which role does this machine play? --------------------------------
 
@@ -311,42 +288,421 @@ $sudo mkdir -p "$BIN_DIR" || die "cannot create ${BIN_DIR}"
 
 # --- download and verify -----------------------------------------------
 
+# The ed25519 keys a release manifest may be signed with. Keep this list
+# identical to releaseKeys in internal/selfupdate/keys.go; install-test.sh
+# fails when they differ.
+RELEASE_KEYS="J+AIq6GUVbRtEQ1ORqKJe3uh9JhvZkEQJQtYpxKbxD8="
+
+# Every release from this tag on is signed. Two missing manifest files say
+# nothing about a release's age: a release being published, or one whose
+# manifest was deleted, looks the same. Only an older tag may install on
+# checksums.txt alone.
+SIGNED_SINCE="v0.7.0-alpha.12"
+
+API_URL="https://api.github.com/repos/${REPO}/releases?per_page=100"
+
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-trap 'rm -rf "$tmp"; exit 130' INT
-trap 'rm -rf "$tmp"; exit 143' TERM
-
-fetch "${BASE_URL}/${VERSION}/checksums.txt" "$tmp/checksums.txt" ||
-	die "cannot download checksums.txt for ${VERSION}"
-
-install_one() {
-	name="$1"
-	asset="${name}-${os}-${arch}"
-	say "downloading ${asset}"
-	fetch "${BASE_URL}/${VERSION}/${asset}" "$tmp/$asset" ||
-		die "cannot download ${asset}"
-	want="$(awk -v a="$asset" '$2 == a || $2 == "*" a { print $1 }' "$tmp/checksums.txt" | head -1)"
-	[ -n "$want" ] || die "${asset} is not listed in checksums.txt"
-	got="$(sha256_of "$tmp/$asset")"
-	[ "$want" = "$got" ] || die "checksum mismatch for ${asset}: expected ${want}, got ${got}"
-	chmod 0755 "$tmp/$asset"
-	$sudo mv "$tmp/$asset" "${BIN_DIR}/${name}" || die "cannot install into ${BIN_DIR}"
-	# mv carries the invoking user's ownership into the destination, which
-	# would leave a root-executed binary writable by that user.
-	[ -z "$sudo" ] || $sudo chown 0:0 "${BIN_DIR}/${name}" ||
-		die "cannot set root ownership on ${BIN_DIR}/${name}"
-	say "installed ${BIN_DIR}/${name}"
+staged=no
+replacing=no replaced="" pending=""
+cleanup() {
+	rm -rf "$tmp"
+	if [ "$staged" = yes ]; then
+		for name in $names; do $sudo rm -f "${BIN_DIR}/.${name}.install.$$"; done
+	fi
+	if [ "$replacing" = yes ]; then
+		echo "aether install: stopped while replacing binaries; now ${VERSION}: ${replaced:-none}; still the previous version: ${pending}" >&2
+	fi
 }
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
 
 case "$COMPONENTS" in
-client) install_one aether ;;
-server) install_one aether-server ;;
-both)
-	install_one aether
-	install_one aether-server
-	;;
+client) names="aether" ;;
+server) names="aether-server" ;;
+both) names="aether aether-server" ;;
 *) die "unknown component set ${COMPONENTS}" ;;
 esac
+assets=""
+for name in $names; do assets="${assets:+$assets }${name}-${os}-${arch}"; done
+
+curl_get() {
+	curl -sS --fail -L --proto =https --proto-redir =https --connect-timeout 20 --retry 3 "$@"
+}
+
+# get URL FILE saves URL to FILE. It returns 1 only for a 404, an asset that
+# is not published; any other failure is fatal, never a reason to fall back.
+get() {
+	http_status="$(curl_get -o "$2" -w '%{http_code}' "$1" 2>"$tmp/curl.err")" && return 0
+	rc=$?
+	[ "$rc" = 22 ] && [ "$http_status" = 404 ] && return 1
+	cat "$tmp/curl.err" >&2
+	if [ "$rc" = 22 ]; then
+		die "cannot download $1: HTTP ${http_status}"
+	fi
+	die "cannot download $1 (curl exit ${rc})"
+}
+
+# A binary checksums.txt already lists can 404 for a few seconds while the
+# release CDN catches up.
+get_binary() {
+	tries=0
+	until get "$1" "$2"; do
+		tries=$((tries + 1))
+		[ "$tries" -le 3 ] || return 1
+		sleep 2
+	done
+}
+
+checksum_of() {
+	awk -v a="$2" '$2 == a || $2 == "*" a { print $1 }' "$1"
+}
+
+# manifest_field FILE ASSET FIELD reads one field of one asset entry. The
+# manifest is json.MarshalIndent output, one key per line; anything else
+# reads as empty and fails the cross-check below.
+manifest_field() {
+	awk -v key="\"$2\":" -v field="\"$3\":" '
+		index($0, key) == match($0, /[^ \t]/) && index($0, key) { inside = 1; next }
+		inside && /}/ { exit }
+		inside && index($0, field) {
+			v = $0
+			sub(/^[^:]*:[ \t]*/, "", v)
+			gsub(/[", \t\r]/, "", v)
+			print v
+			exit
+		}
+	' "$1"
+}
+
+manifest_top() {
+	sed -n "s/^  \"$2\": \"*\([^\",]*\)\"*,*\$/\1/p" "$1" | head -1
+}
+
+openssl_major() {
+	command -v openssl >/dev/null 2>&1 || return 1
+	openssl version 2>/dev/null | awk '$1 == "OpenSSL" { split($2, v, "."); print v[1] + 0; exit }'
+}
+
+# verify_signature DIR TAG checks DIR/aether-release.json.sig against
+# RELEASE_KEYS. It returns 1, having said why, when this machine has no
+# OpenSSL 3 to check it with; a signature that does not verify is fatal.
+verify_signature() {
+	major="$(openssl_major)" || major=""
+	if [ -z "$major" ] || [ "$major" -lt 3 ]; then
+		found="no openssl"
+		command -v openssl >/dev/null 2>&1 && found="$(openssl version 2>&1 | head -1)"
+		say "warning: aether-release.json.sig not verified: that needs OpenSSL 3 (found: ${found}); checking downloads against checksums.txt and aether-release.json only"
+		return 1
+	fi
+	if ! openssl base64 -d -A -in "$1/aether-release.json.sig" -out "$1/sig.bin" 2>/dev/null ||
+		[ "$(wc -c <"$1/sig.bin")" -ne 64 ]; then
+		die "aether-release.json.sig for $2 is not a base64 ed25519 signature; not installing it"
+	fi
+	for key in $RELEASE_KEYS; do
+		printf -- '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA%s\n-----END PUBLIC KEY-----\n' "$key" >"$1/key.pem"
+		if err="$(openssl pkeyutl -verify -pubin -inkey "$1/key.pem" -rawin \
+			-in "$1/aether-release.json" -sigfile "$1/sig.bin" 2>&1)"; then
+			say "verified aether-release.json.sig for $2 against release key ${key}"
+			return 0
+		fi
+		case "$err" in
+		*"Signature Verification Failure"*) ;;
+		*) die "cannot check aether-release.json.sig for $2 with $(openssl version): ${err}" ;;
+		esac
+	done
+	die "aether-release.json for $2 is not signed by a trusted release key; not installing it"
+}
+
+# prepare TAG downloads and verifies every asset this install needs from TAG
+# into $tmp/TAG. It returns 1, with the absent file in $missing and a reason
+# in $why, when TAG is not fully published. Integrity failures are fatal.
+prepare() {
+	tag="$1"
+	dir="$tmp/$1"
+	url="${BASE_URL}/$1"
+	missing="" why=""
+	mkdir -p "$dir" || die "cannot create ${dir}"
+	if ! get "$url/checksums.txt" "$dir/checksums.txt"; then
+		missing="checksums.txt" why="no checksums.txt"
+		return 1
+	fi
+	signed=no
+	get "$url/aether-release.json" "$dir/aether-release.json" && signed=manifest
+	if get "$url/aether-release.json.sig" "$dir/aether-release.json.sig"; then
+		[ "$signed" = manifest ] || { missing="aether-release.json" why="no aether-release.json"; return 1; }
+		signed=yes
+	elif [ "$signed" = manifest ]; then
+		missing="aether-release.json.sig" why="no aether-release.json.sig"
+		return 1
+	elif signing_required "$tag"; then
+		missing="aether-release.json" why="no aether-release.json"
+		return 1
+	fi
+	if [ "$signed" = yes ]; then
+		[ "$(manifest_top "$dir/aether-release.json" schema)" = 1 ] ||
+			die "aether-release.json for ${tag} is not schema 1; this installer reads schema 1"
+		[ "$(manifest_top "$dir/aether-release.json" version)" = "$tag" ] ||
+			die "aether-release.json fetched for ${tag} describes $(manifest_top "$dir/aether-release.json" version); not installing it"
+		if verify_signature "$dir" "$tag"; then
+			verified="the signed aether-release.json and checksums.txt"
+		else
+			verified="aether-release.json and checksums.txt, without a signature check"
+		fi
+	else
+		say "${tag} has no signed aether-release.json (it predates release signing); verifying SHA-256 against checksums.txt only"
+		verified="checksums.txt only"
+	fi
+	for asset in $assets; do
+		[ -z "$(checksum_of "$dir/checksums.txt" "$asset")" ] || continue
+		if [ "$signed" = yes ] && [ -n "$(manifest_field "$dir/aether-release.json" "$asset" sha256)" ]; then
+			die "aether-release.json for ${tag} lists ${asset} but checksums.txt does not; not installing it"
+		fi
+		missing="$asset" why="checksums.txt does not list $asset"
+		return 1
+	done
+	for asset in $assets; do
+		want="$(checksum_of "$dir/checksums.txt" "$asset")"
+		[ "$(printf '%s\n' "$want" | wc -l)" -eq 1 ] ||
+			die "checksums.txt for ${tag} lists ${asset} more than once"
+		case "$want" in
+		*[!0-9a-f]*) die "checksums.txt for ${tag} has a malformed entry for ${asset}" ;;
+		esac
+		[ "${#want}" -eq 64 ] || die "checksums.txt for ${tag} has a malformed entry for ${asset}"
+		size=""
+		if [ "$signed" = yes ]; then
+			[ "$(manifest_field "$dir/aether-release.json" "$asset" sha256)" = "$want" ] ||
+				die "aether-release.json and checksums.txt for ${tag} disagree about ${asset}; not installing it"
+			size="$(manifest_field "$dir/aether-release.json" "$asset" size)"
+		fi
+		say "downloading ${asset} ${tag}"
+		if ! get_binary "$url/$asset" "$dir/$asset"; then
+			missing="$asset" why="no $asset"
+			return 1
+		fi
+		if [ -n "$size" ]; then
+			got="$(wc -c <"$dir/$asset" | tr -d ' ')"
+			[ "$got" = "$size" ] ||
+				die "size mismatch for ${asset} ${tag}: expected ${size} bytes, got ${got} (truncated download?)"
+		fi
+		got="$(sha256_of "$dir/$asset")"
+		[ "$want" = "$got" ] || die "checksum mismatch for ${asset} ${tag}: expected ${want}, got ${got}"
+	done
+	say "verified $(echo "$assets" | sed 's/ /, /g') against ${verified}"
+}
+
+valid_tag() {
+	case "$1" in
+	"" | [!A-Za-z0-9]* | *[!A-Za-z0-9._+-]*) return 1 ;;
+	esac
+}
+
+resolve_latest() {
+	latest="$(curl_get -o /dev/null -w '%{url_effective}' \
+		"https://github.com/${REPO}/releases/latest" 2>"$tmp/curl.err")" || {
+		cat "$tmp/curl.err" >&2
+		die "cannot reach https://github.com/${REPO}/releases/latest"
+	}
+	latest="${latest##*/}"
+	case "$latest" in
+	"" | releases | latest) die "no published release found for ${REPO}; pass --version <tag>" ;;
+	esac
+	valid_tag "$latest" || die "the latest release redirect named an invalid tag: ${latest}"
+}
+
+SEMVER_AWK='
+	function semver(t) {
+		return t ~ /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/
+	}
+	function cmpid(a, b) {
+		if (a ~ /^[0-9]+$/ && b ~ /^[0-9]+$/) return (a + 0 < b + 0) ? -1 : (a + 0 > b + 0)
+		if (a ~ /^[0-9]+$/) return -1
+		if (b ~ /^[0-9]+$/) return 1
+		return (a < b) ? -1 : (a > b)
+	}
+	function cmp(a, b,    pa, pb, na, nb, i, c, ma, mb) {
+		sub(/^v/, "", a); sub(/^v/, "", b); sub(/\+.*/, "", a); sub(/\+.*/, "", b)
+		pa = index(a, "-") ? substr(a, index(a, "-") + 1) : ""
+		pb = index(b, "-") ? substr(b, index(b, "-") + 1) : ""
+		if (index(a, "-")) a = substr(a, 1, index(a, "-") - 1)
+		if (index(b, "-")) b = substr(b, 1, index(b, "-") - 1)
+		split(a, ma, "."); split(b, mb, ".")
+		for (i = 1; i <= 3; i++) if ((c = cmpid(ma[i], mb[i])) != 0) return c
+		if (pa == "" || pb == "") return (pa == pb) ? 0 : (pa == "" ? 1 : -1)
+		na = split(pa, ma, "."); nb = split(pb, mb, ".")
+		for (i = 1; i <= na && i <= nb; i++) if ((c = cmpid(ma[i], mb[i])) != 0) return c
+		return (na < nb) ? -1 : (na > nb)
+	}
+'
+
+# signing_required TAG is true for a tag at or after SIGNED_SINCE, and for
+# any tag that is not semver.
+signing_required() {
+	LC_ALL=C awk -v t="$1" -v s="$SIGNED_SINCE" "$SEMVER_AWK"'
+		BEGIN { exit !(!semver(t) || cmp(t, s) >= 0) }'
+}
+
+semver_lt() {
+	LC_ALL=C awk -v a="$1" -v b="$2" "$SEMVER_AWK"'
+		BEGIN { exit !(semver(a) && semver(b) && cmp(a, b) < 0) }'
+}
+
+# Prints "tag asset asset ..." for every published, non-prerelease release
+# with a semver tag in the GitHub API's JSON, newest version first. A
+# tokenizer rather than a line match: it holds for compact and indented JSON
+# and for release notes that contain anything at all.
+parse_releases() {
+	LC_ALL=C awk "$SEMVER_AWK"'
+		BEGIN { RS = "\001" }
+		{ doc = doc $0 }
+		function scalar(v) {
+			if (depth == 2) {
+				if (key[2] == "tag_name") tag = v
+				else if (key[2] == "draft") draft = v
+				else if (key[2] == "prerelease") pre = v
+			} else if (depth == 4 && key[2] == "assets" && key[4] == "name") {
+				names = names " " v
+			}
+		}
+		function open_(t) {
+			depth++; type[depth] = t; key[depth] = ""
+			if (depth == 2) { tag = ""; draft = ""; pre = ""; names = "" }
+		}
+		function close_() {
+			if (depth == 2 && type[1] == "a" && draft == "false" && pre == "false" && semver(tag))
+				rel[++n] = tag names
+			depth--
+		}
+		END {
+			# BWK awk, the macOS one, also splits on newlines below.
+			gsub(/\n/, " ", doc)
+			gsub(/\\\\/, "", doc)
+			gsub(/\\"/, "", doc)
+			parts = split(doc, piece, "\"")
+			for (p = 1; p <= parts; p++) {
+				if (p % 2 == 0) {
+					rest = piece[p + 1]
+					sub(/^[ \t\r\n]*/, "", rest)
+					if (type[depth] == "o" && substr(rest, 1, 1) == ":") key[depth] = piece[p]
+					else scalar(piece[p])
+					continue
+				}
+				s = piece[p]
+				while (s != "") {
+					c = substr(s, 1, 1)
+					if (c == "{") open_("o")
+					else if (c == "[") open_("a")
+					else if (c == "}" || c == "]") close_()
+					else if (c ~ /[a-z0-9-]/) {
+						match(s, /^[a-z0-9.eE+-]+/)
+						scalar(substr(s, 1, RLENGTH))
+						s = substr(s, RLENGTH + 1)
+						continue
+					}
+					s = substr(s, 2)
+				}
+			}
+			for (i = 2; i <= n; i++)
+				for (j = i; j > 1; j--) {
+					split(rel[j], x, " "); split(rel[j - 1], y, " ")
+					if (cmp(x[1], y[1]) <= 0) break
+					t = rel[j]; rel[j] = rel[j - 1]; rel[j - 1] = t
+				}
+			for (i = 1; i <= n; i++) print rel[i]
+		}
+	' "$1"
+}
+
+list_releases() {
+	api_status="$(curl -sS -L --proto =https --proto-redir =https --connect-timeout 20 --retry 3 \
+		-H 'Accept: application/vnd.github+json' -D "$tmp/api.headers" -o "$tmp/api.json" \
+		-w '%{http_code}' "$API_URL" 2>"$tmp/curl.err")" || {
+		cat "$tmp/curl.err" >&2
+		die "cannot reach ${API_URL}"
+	}
+	[ "$api_status" = 200 ] && return 0
+	if [ "$api_status" = 403 ] || [ "$api_status" = 429 ]; then
+		remaining="$(tr -d '\r' <"$tmp/api.headers" | awk -F': *' 'tolower($1) == "x-ratelimit-remaining" { v = $2 } END { print v }')"
+		if [ "$remaining" = 0 ]; then
+			reset="$(tr -d '\r' <"$tmp/api.headers" | awk -F': *' 'tolower($1) == "x-ratelimit-reset" { v = $2 } END { print v }')"
+			die "GitHub API rate limit exceeded (HTTP ${api_status} from ${API_URL}, x-ratelimit-remaining: 0, x-ratelimit-reset: ${reset}); pass --version <tag> to install a specific release"
+		fi
+	fi
+	message="$(sed -n 's/.*"message": *"\([^"]*\)".*/\1/p' "$tmp/api.json" | head -1)"
+	die "GET ${API_URL}: HTTP ${api_status}${message:+: $message}"
+}
+
+if [ -n "$VERSION" ]; then
+	valid_tag "$VERSION" || die "invalid release tag ${VERSION}"
+	say "installing ${VERSION} for ${os}/${arch}"
+	if ! prepare "$VERSION"; then
+		detail=""
+		case "$why" in "checksums.txt does not list"*) detail=" (checksums.txt does not list it)" ;; esac
+		die "${VERSION} has no published ${missing}${detail}; it may still be building or may have failed - not installing a different version"
+	fi
+else
+	say "resolving the latest release"
+	resolve_latest
+	say "the latest release is ${latest}"
+	if prepare "$latest"; then
+		VERSION="$latest"
+		say "installing ${VERSION} for ${os}/${arch}"
+	else
+		latest_why="$why"
+		say "${latest} is not fully published yet (${latest_why}); looking for the newest complete release"
+		list_releases
+		listed() { case " $release_assets " in *" $1 "*) ;; *) return 1 ;; esac; }
+		parse_releases "$tmp/api.json" >"$tmp/releases"
+		while read -r tag release_assets; do
+			[ "$tag" != "$latest" ] || continue
+			valid_tag "$tag" || continue
+			ready=yes
+			for file in checksums.txt $assets; do listed "$file" || ready=no; done
+			signed=no sig=no
+			! listed aether-release.json || signed=yes
+			! listed aether-release.json.sig || sig=yes
+			# A fallback is always older than latest and always signed, so
+			# neither a newer tag nor a 404 on every signature can pick it.
+			if [ "$ready" = no ] || [ "$signed" = no ] || [ "$sig" = no ] ||
+				! semver_lt "$tag" "$latest"; then
+				continue
+			fi
+			if prepare "$tag"; then
+				VERSION="$tag"
+				break
+			fi
+			say "skipping ${tag}: not fully published (${why})"
+		done <"$tmp/releases"
+		[ -n "$VERSION" ] ||
+			die "no complete release for ${os}/${arch} among the newest 100 releases of ${REPO}; pass --version <tag>"
+		say "${latest} is not fully published yet (${latest_why}); installing ${VERSION}, the newest complete release, for ${os}/${arch}"
+	fi
+fi
+
+# Every binary is staged beside its destination, on the same filesystem, so
+# each replacement is a rename and a failure leaves the old install whole.
+for name in $names; do
+	stage="${BIN_DIR}/.${name}.install.$$"
+	staged=yes
+	$sudo cp "$tmp/$VERSION/${name}-${os}-${arch}" "$stage" || die "cannot write into ${BIN_DIR}"
+	$sudo chmod 0755 "$stage" || die "cannot set the mode of ${stage}"
+done
+# The server goes first: a new CLI next to an old server is refused by it,
+# while an old CLI next to a new server still updates itself.
+order=""
+for name in aether-server aether; do
+	case " $names " in *" $name "*) order="${order:+$order }$name" ;; esac
+done
+pending="$order"
+replacing=yes
+for name in $order; do
+	$sudo mv -f "${BIN_DIR}/.${name}.install.$$" "${BIN_DIR}/${name}" || die "cannot install ${BIN_DIR}/${name}"
+	replaced="${replaced:+$replaced }${BIN_DIR}/${name}"
+	pending="${pending#"$name"}"
+	pending="${pending# }"
+	say "installed ${BIN_DIR}/${name} ${VERSION}"
+done
+replacing=no staged=no
 
 # --- finish that role's setup ------------------------------------------
 

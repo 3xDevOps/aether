@@ -6,6 +6,7 @@ import type {
   AgentDefinition,
   AgentInstallResult,
   AgentModelsResult,
+  AgentRemoveResult,
   AgentInfo,
   Approval,
   BudgetReport,
@@ -982,6 +983,7 @@ export const api = {
     call<unknown>('agent.register', { definition }),
   agentInstall: (name: string, enhanced: boolean) =>
     call<AgentInstallResult>('agent.install', { name, ...(enhanced ? { enhanced } : {}) }),
+  agentRemove: (name: string) => call<AgentRemoveResult>('agent.remove', { name }),
   runProtect: (runID: string, protect: boolean) =>
     call<unknown>('run.protect', { run_id: runID, protected: protect }),
   runArchive: (runID: string, archived: boolean) =>

@@ -102,20 +102,20 @@ instead, preserving the interrupted command's exit status.
 This script covers Linux and macOS. Windows uses the
 [PowerShell installer](#windows-install-script) below.
 
-A checksum mismatch aborts the install. The script needs `curl` or `wget`, and
-`sha256sum` or `shasum`.
+The script needs `curl`, and `sha256sum` or `shasum`. With OpenSSL 3 on
+`PATH` it also checks the release signature.
 
 Options, as flags or environment variables:
 
 | Flag | Variable | Effect |
 | --- | --- | --- |
-| `--version <tag>` | `AETHER_VERSION` | Install a specific release instead of the latest. |
+| `--version <tag>` | `AETHER_VERSION` | Install exactly this release, or fail if it is not complete. |
 | `--bin-dir <dir>` | `AETHER_BIN_DIR` | Install somewhere else, whichever role is chosen. |
 | `--client` | `AETHER_COMPONENTS=client` | CLI only. |
 | `--server` | `AETHER_COMPONENTS=server` | Server only. |
 | `--role <role>` | `AETHER_ROLE` | Answer the role question up front: `server`, `client`, or `none` to skip it. |
 | | `AETHER_REPO` | Pull from a fork. |
-| | `AETHER_BASE_URL` | Pull from a mirror of the release assets. |
+| | `AETHER_BASE_URL` | Pull release assets from an HTTPS mirror; `latest` and the API still come from GitHub. |
 
 Passing flags through a pipe needs `sh -s --`:
 
@@ -123,6 +123,57 @@ Passing flags through a pipe needs `sh -s --`:
 curl -fsSL .../install.sh | sh -s -- --client --bin-dir ~/bin
 curl -fsSL .../install.sh | sh -s -- --role server
 ```
+
+### Which release it installs
+
+A release is complete for this install when it publishes `checksums.txt`,
+every binary this OS, CPU and component choice needs, and a `checksums.txt`
+line for each, plus `aether-release.json` and `aether-release.json.sig`.
+Releases before `v0.7.0-alpha.12` predate signing and are complete without
+those two files; from that tag on, a release missing either one is still
+uploading, failed, or was tampered with.
+
+Without `--version`, the script follows `github.com/<repo>/releases/latest`.
+GitHub can list a release there while its assets are still uploading, or
+after its build failed. When that tag is not complete, the script asks
+`api.github.com/repos/<repo>/releases`, ignores drafts and prereleases, and
+installs the highest semver release that is older than the latest tag,
+signed and complete, saying why:
+
+```
+aether install: v0.7.0-alpha.12 is not fully published yet (no checksums.txt); installing v0.7.0-alpha.11, the newest complete release, for linux/amd64
+```
+
+`--version <tag>` installs exactly that tag, prereleases included, or stops:
+
+```
+aether install: v0.7.0-alpha.12 has no published aether-linux-amd64; it may still be building or may have failed - not installing a different version
+```
+
+Every file comes from the one chosen tag. When the release has a manifest,
+the script verifies `aether-release.json.sig` against the release keys built
+into it (the same keys as `internal/selfupdate/keys.go`), requires the
+manifest's `version` to be the tag, and checks each binary's SHA-256 and
+size against both the manifest and `checksums.txt`. Without OpenSSL 3 -
+macOS ships LibreSSL - it says the signature was not verified and checks
+the rest. A release from before signing is checked against `checksums.txt`
+only, and the script prints that.
+
+A checksum or size mismatch, a bad signature, a manifest that lists a
+binary `checksums.txt` omits, a cut-off download or any network error stops
+the install; none of them makes the script try another release. Every binary is downloaded and verified before any installed one is
+replaced, so those failures leave the previous install as it was. Each
+binary is then renamed into place from a copy in the same directory,
+`aether-server` before `aether`; if a rename fails, the script names which
+binaries are new and which are still the previous version. Rerunning is
+safe. Only HTTPS is used. An unreachable GitHub is reported with curl's
+error, and an API rate limit with its status:
+
+```
+aether install: GitHub API rate limit exceeded (HTTP 403 from https://api.github.com/repos/3xDevOps/Aether/releases?per_page=100, x-ratelimit-remaining: 0, x-ratelimit-reset: 1792209652); pass --version <tag> to install a specific release
+```
+
+The API is only asked when the latest release is not complete.
 
 ## Windows install script
 
@@ -157,11 +208,18 @@ Older releases are refused before downloading or replacing the CLI.
 
 | Parameter | Variable | Effect |
 | --- | --- | --- |
-| `-Version <tag>` | `AETHER_VERSION` | Select a release; otherwise resolve the latest published release. |
+| `-Version <tag>` | `AETHER_VERSION` | Install exactly this release, or fail if it is not complete; otherwise install the newest complete release. |
 | `-BinDir <dir>` | `AETHER_BIN_DIR` | Choose the CLI directory, never the desktop app's managed directory. |
 | `-Role client\|none` | `AETHER_ROLE` | `client` installs the CLI and desktop; `none` stops after the CLI. The default is `client`, including unattended runs. |
 | | `AETHER_REPO` | Download from a GitHub fork. |
 | | `AETHER_BASE_URL` | Download from a release-asset mirror. |
+
+The release is chosen as the [install script](#which-release-it-installs)
+chooses it, for `aether-windows-<arch>.exe`, with one difference: PowerShell
+has no ed25519 verifier, so the script does not check
+`aether-release.json.sig`. It says so, and checks the binary's SHA-256 and
+size against `checksums.txt` and `aether-release.json`. It refuses an
+`AETHER_BASE_URL` that is not `https`.
 
 Only the current user's `PATH` is updated, without duplicating the install
 directory or removing other entries. Expandable entries such as `%SystemRoot%`
@@ -337,8 +395,9 @@ aether-daemon` (macOS: `launchctl kickstart -k gui/$(id -u)/com.aether.daemon`).
 Each release since signing began publishes `aether-release.json`, listing
 every asset's SHA-256 and size, and `aether-release.json.sig`, a base64
 ed25519 signature over the file's exact bytes. The release workflow uploads
-these two last, after downloading every other asset back anonymously and
-matching it against the manifest. An updater - `aether update`, the
+them with every other asset to a draft release and publishes it only after
+downloading every asset back and matching it against the manifest
+([Releases](#releases)). An updater - `aether update`, the
 dashboard's **Update now**, `aether server update` - installs a release only
 when:
 
@@ -2108,26 +2167,46 @@ paused. Delete them once you have salvaged what you want.
 
 Choose a tag whose exact commit has passed the full `CI` workflow on a push to
 `main` in this repository. From a trusted `main` checkout, with `gh`
-authenticated and `jq` installed, check an existing local tag before pushing
-it and publishing an ordinary, non-draft GitHub release. Alpha versions use
-the same procedure, for example `v0.4.0-alpha.1`:
+authenticated and `jq` installed, check the local tag, then push it. Alpha
+versions use the same procedure, for example `v0.4.0-alpha.1`:
 
 ```sh
 sh scripts/release-ci-check.sh 3xDevOps/aether "$(git rev-parse 'v0.4.0-alpha.1^{commit}')" &&
-git push origin v0.4.0-alpha.1 &&
-gh release create v0.4.0-alpha.1 --title v0.4.0-alpha.1 --generate-notes
+git push origin v0.4.0-alpha.1
 ```
 
-Publish alpha tags as normal releases, not GitHub prereleases, because
-`scripts/install.sh` and `internal/selfupdate` resolve GitHub's
-`/releases/latest` endpoint. Do not add `--prerelease` or `--draft`.
+Do not create the GitHub release yourself. Pushing a `v*` tag runs
+[`.github/workflows/release.yml`](../.github/workflows/release.yml), which
+takes the release through these states:
 
-Publishing the release runs
-[`.github/workflows/release.yml`](../.github/workflows/release.yml). Only an
-admin publisher passes `publisher-policy`; other publishers and failed
-permission lookups skip the downstream jobs. `release-policy` checks out
-trusted `refs/heads/main`, validates the tag syntax, resolves the tag's full
-commit SHA and requires it to match the release event's SHA. It runs the
+1. Build and test every asset and image from the tag's commit.
+2. Create the release as a draft with generated notes that start at the
+   highest published release below the tag. Drafts are invisible to
+   `/releases/latest`, `scripts/install.sh` and update checks.
+3. Upload every asset to the draft, delete any asset the draft should not
+   have, download all of it back through the API, and check it against the
+   signed manifest.
+4. Check that the tag still names the commit `release-policy` authorized,
+   then publish the draft as a normal release without making it Latest. A tag moved since then
+   fails the run and leaves the draft unpublished.
+5. Download every asset anonymously, as clients do, and check it again.
+6. Mark Latest: the highest version among published, non-prerelease
+   releases that carry `aether-release.json`, read from a fresh release
+   listing. Every run does this after its own publish and lists again after
+   each change until the listing agrees, so Latest ends on the highest
+   version even when an older tag finishes after a newer one.
+
+The release is published as a normal release, not a GitHub prerelease,
+because `scripts/install.sh` and `internal/selfupdate` resolve GitHub's
+`/releases/latest` endpoint, which skips prereleases.
+
+`publisher-policy` passes only when both the tag's pusher and whoever
+started the run attempt, including a re-run, are repository admins; anyone
+else and failed permission lookups skip the downstream jobs. The workflow
+runs from the tagged commit, so also add a tag ruleset that lets only admins
+create, update or delete `v*` tags. `release-policy` checks
+out trusted `refs/heads/main`, validates the tag syntax, resolves the tag's
+full commit SHA and requires it to match the pushed commit. It runs the
 checker from that trusted checkout, not from the tag's code.
 
 [`scripts/release-ci-check.sh`](../scripts/release-ci-check.sh) accepts only
@@ -2138,7 +2217,7 @@ Missing, pending or failed CI, malformed or incomplete API results and lookup
 errors fail closed. A PR run, another commit's green run or an older successful
 attempt cannot authorize a release. The accepted run URL and SHA appear in the
 release job summary. If CI is still running, wait for it to finish successfully
-and rerun the release workflow.
+and rerun the release workflow run for the tag.
 
 The release workflow reuses that full main CI result instead of rerunning Go
 vet and unit tests. After policy succeeds, every source-building producer
@@ -2204,21 +2283,23 @@ not link the store. The generator reads the ed25519 seed from the
 output against the keys the tag's code trusts, so a seed that does not match
 fails here. `release-policy` fails the whole release before any build when
 that secret is not set. [`scripts/publish-release.sh`](../scripts/publish-release.sh)
-then uploads the twelve assets and `checksums.txt`, downloads each asset
-anonymously from
-`https://github.com/<repository>/releases/download/<tag>/<name>`, compares
-its SHA-256 and size with the manifest, and only then uploads
-`aether-release.json.sig`, then `aether-release.json`. Updaters treat a
-release missing either file as unsigned, so a run that fails between the two
-can be rerun; it replaces the lone signature. It refuses a release that
-already has `aether-release.json` rather than replace assets that manifest
-signed; publish a new tag instead. Only after that succeeds do `standard-latest`
-and `edge-latest` move their respective `latest` tags to the verified images;
-each checks that `latest` carries the expected architecture digests. Releases
-share one workflow-wide concurrency group. The GitHub release itself is
-already published when the workflow starts, so a failed run can still leave
-`/releases/latest` pointing at a release without a manifest. Updaters treat
-that as no update. Image `latest` is not moved by a failed pre-upload run.
+then runs steps 2 to 5 above. It compares each asset's SHA-256 and size with
+the manifest, requires `checksums.txt` to match, and compares
+`checksums.txt`, `aether-release.json` and `aether-release.json.sig`
+byte for byte with what it signed. `standard-latest` and `edge-latest` run
+after the release job and move their `latest` tags to the verified images
+only if `gh api repos/<owner>/<repo>/releases/latest` names this tag when
+they run; otherwise they leave `latest` alone and say why in the job summary.
+Each checks that `latest` carries the expected architecture digests, then
+that GitHub's Latest still names this tag. If a parallel release took Latest
+in between, the job fails with `GitHub's Latest moved to <tag>`; re-run the
+latest jobs of that release.
+
+Push release tags one at a time: GitHub starts no workflow for any tag when
+more than three are pushed at once. Each tag has its own concurrency group,
+`release-refs/tags/<tag>`, so releases of different tags run in parallel and
+one tag never cancels another's run; a second run for the same tag waits for
+the first.
 
 The workflow also publishes the [edge](edge.md#in-a-container) image
 `ghcr.io/3xdevops/aether-edge` for linux/amd64 and linux/arm64, built from
@@ -2236,8 +2317,8 @@ binaries. Nothing reaches a tag before it is tested:
    digest, and lists the digests in the job summary. The release job waits
    for it, so a failed edge image uploads no assets.
 3. `edge-latest` moves `latest` to that digest only after the release job
-   has uploaded the assets. A release that fails earlier leaves `latest` on
-   the previous release.
+   has published the release. A release that fails earlier leaves `latest`
+   on the previous release.
 
 A new GHCR package starts private. For **edge only**, the workflow does not fail
 on that, by design: the image is published and pullable with credentials, and
@@ -2323,10 +2404,30 @@ store listing and Android prints it in the phone's app info, where `v0.4.0`
 reads as part of the number. `v0.4.0-alpha.6` ships as versionName
 `0.4.0-alpha.6` and versionCode 400106.
 
-If the release workflow fails, rerun it for the published release after fixing
-the cause. The publisher uploads missing assets to the existing release and
-replaces same-named assets with `gh release upload --clobber`, without changing
-its release notes. Producer artifact uploads also allow replacement on rerun.
+A release that fails before publication leaves at most a draft: no
+published release, no moved image `latest` tag, nothing installers or update
+checks can see. A failure after publication, in the anonymous check or a
+`latest` job, leaves the release published and complete: it was verified
+through the API first. Fix the cause, then open the failed run under the repository's **Actions** tab and
+choose **Re-run failed jobs**, or run
+`gh run rerun <run-id> --failed`. The publisher reuses the draft: it uploads
+every asset again with `gh release upload --clobber`, removes strays and
+verifies again, without changing the release notes. Producer artifact uploads
+also allow replacement on rerun. A rerun after the release is published
+requires the published `aether-release.json` to name the same commit and
+version as the run's build, fails with `tag <tag> was published from commit
+<sha>; this run built <sha>` when it does not, verifies every published asset
+against that manifest and sets Latest again. Assets signed by a published
+manifest are never replaced, so a bad published release needs a new tag. A published release without
+`aether-release.json`, left by the old workflow or created by hand, is
+incomplete: the publisher returns it to a draft, which takes it off
+`/releases/latest`, then completes it like any other draft.
+
+Enable [immutable releases](https://docs.github.com/en/code-security/supply-chain-security/understanding-your-software-supply-chain/immutable-releases)
+in the repository settings. The workflow adds every asset while the release
+is a draft, so immutability, which applies from publication on, changes
+nothing for it and stops anyone from replacing a published asset or moving
+its tag. It does not apply to releases published before it is enabled.
 
 Every version-bearing release producer uses the release tag explicitly: Go
 uses `make release-binaries VERSION="$GITHUB_REF_NAME"` (including Windows

@@ -160,6 +160,14 @@ func TestParseAgentAdd(t *testing.T) {
 	}
 }
 
+func TestAgentRemoveUsage(t *testing.T) {
+	for _, args := range [][]string{nil, {"remove"}, {"remove", "a", "b"}} {
+		if err := runAgent(args); err == nil || !strings.Contains(err.Error(), "usage: aether agent ") {
+			t.Fatalf("runAgent(%v) error = %v, want usage", args, err)
+		}
+	}
+}
+
 func TestParseAgentAddLoginUnderLocalHome(t *testing.T) {
 	t.Setenv("HOME", "/home/alice")
 	t.Setenv("USERPROFILE", "/home/alice")

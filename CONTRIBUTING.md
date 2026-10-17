@@ -72,6 +72,9 @@ embedded shell commands are checked locally too. `make test-scripts`
 includes `sh scripts/release-ci-check-test.sh`: it checks exact-commit main
 CI authorization and fail-closed rejection using API fixtures, without
 publishing a release or contacting GitHub.
+It also runs `sh scripts/install-test.sh`, which signs its fixture releases
+with OpenSSL 3. macOS ships LibreSSL; `brew install openssl@3` and put its
+`bin` first on `PATH`.
 
 The integration suite uses real Docker and git:
 
