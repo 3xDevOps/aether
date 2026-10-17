@@ -49,8 +49,12 @@ func (s *sessionStream) Read(p []byte) (int, error) {
 
 func (s *sessionStream) Write(p []byte) (int, error) { return s.stdin.Write(p) }
 func (s *sessionStream) CloseWrite() error           { return s.stdin.Close() }
+
+// Close sends no EOF first: x/crypto's CloseWrite sets a flag that a
+// concurrent Write reads without a lock, and an abandoned call closes its
+// channel while its writer may still run. The close alone ends the peer's
+// reads.
 func (s *sessionStream) Close() error {
-	_ = s.CloseWrite()
 	if s.closeCh == nil {
 		return nil
 	}

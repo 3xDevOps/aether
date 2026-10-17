@@ -27,12 +27,13 @@ export type Outcome<T> =
     }
 
 /** A JSON-RPC error the server sent. The local gateway answers a dead hop with
- * -32004 "server unreachable: ..." or "network unreachable: ...", which says
- * nothing about whether the server committed; its `data.refusal` marks only
- * the edge-path refusals among them, so the prefix stays the test. */
+ * -32004 "server unreachable: ..." or "network unreachable: ...", and a call
+ * the server did not answer in time with "server did not answer <method>
+ * within <bound>". Neither says whether the server committed; `data.refusal`
+ * marks only the edge-path refusals among them, so the text stays the test. */
 export function refusedByServer(cause: unknown): boolean {
   return cause instanceof ApiError && cause.code !== undefined && !cause.data?.refusal &&
-    !/(server|network) unreachable: /.test(cause.message)
+    !/(server|network) unreachable: |server did not answer /.test(cause.message)
 }
 
 /** Each mutation's first answered result; once one attempt is answered, no attempt of it reverts. */
