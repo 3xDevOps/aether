@@ -149,7 +149,7 @@ required:
 
 ```sh
 cd desktop
-npm install
+npm ci
 npm run dist   # installer for this OS into desktop/dist/
 ```
 

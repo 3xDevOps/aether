@@ -37,7 +37,7 @@ func TestInstallDesktopLinuxRegistersLauncher(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	app, err := InstallDesktop("linux", home, built, []byte("png"))
+	app, err := InstallDesktop("linux", home, DesktopFrom(built), "/opt/aether/aether", []byte("png"))
 	if err != nil {
 		t.Fatalf("InstallDesktop: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestInstallDesktopWindowsPreservesCLI(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(built, "aether-desktop.exe"), []byte(version), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		app, err := InstallDesktop("windows", home, built, nil)
+		app, err := InstallDesktop("windows", home, DesktopFrom(built), cli, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,7 +210,7 @@ func TestInstallDesktopWindowsProgramsLookupFailurePreservesInstall(t *testing.T
 	if err := os.WriteFile(filepath.Join(built, "aether-desktop.exe"), []byte("replacement"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := InstallDesktop("windows", home, built, nil); !errors.Is(err, lookupErr) {
+	if _, err := InstallDesktop("windows", home, DesktopFrom(built), "/opt/aether/aether", nil); !errors.Is(err, lookupErr) {
 		t.Fatalf("install error = %v, want Programs lookup failure", err)
 	}
 	for path, want := range files {
@@ -302,7 +302,7 @@ func TestInstallDesktopDarwinReplacesTheHomeCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	app, err := InstallDesktop("darwin", home, builtBundle(t), nil)
+	app, err := InstallDesktop("darwin", home, DesktopFrom(builtBundle(t)), "/opt/aether/aether", nil)
 	if err != nil {
 		t.Fatalf("InstallDesktop: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestInstallDesktopDarwinReportsAnUnremovableSystemCopy(t *testing.T) {
 	setMacSystemApplications(t, system)
 	home := t.TempDir()
 
-	_, err := InstallDesktop("darwin", home, builtBundle(t), nil)
+	_, err := InstallDesktop("darwin", home, DesktopFrom(builtBundle(t)), "/opt/aether/aether", nil)
 	if err == nil {
 		t.Fatal("a surviving second Aether.app was not reported")
 	}
@@ -497,22 +497,22 @@ func TestLockDesktopBuildSerializesAndUnlocks(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "desktop-build")
 	ctx, cancel := context.WithCancel(t.Context())
 
-	unlock, err := lockDesktopBuild(ctx, dir)
+	unlock, err := LockDesktopBuild(ctx, dir)
 	if err != nil {
-		t.Fatalf("lockDesktopBuild: %v", err)
+		t.Fatalf("LockDesktopBuild: %v", err)
 	}
 	cancel()
 	// A held lock makes a second builder fail through the canceled
 	// context instead of racing the first one's node_modules.
-	if _, err := lockDesktopBuild(ctx, dir); err == nil {
-		t.Fatal("second lockDesktopBuild succeeded while the first is held")
+	if _, err := LockDesktopBuild(ctx, dir); err == nil {
+		t.Fatal("second LockDesktopBuild succeeded while the first is held")
 	}
 	unlock()
 	if _, err := os.Stat(filepath.Join(dir, ".build-lock")); err != nil {
 		t.Fatalf("lock file after unlock: %v", err)
 	}
-	if _, err := lockDesktopBuild(t.Context(), dir); err != nil {
-		t.Fatalf("lockDesktopBuild after unlock: %v", err)
+	if _, err := LockDesktopBuild(t.Context(), dir); err != nil {
+		t.Fatalf("LockDesktopBuild after unlock: %v", err)
 	}
 	unlock()
 }

@@ -64,7 +64,7 @@ jobs:
             -file-version 0.5.1.0 -product-version 0.5.1.0 `
             -o cmd/aether/resource_windows_amd64.syso packaging/windows/versioninfo.json
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go build -trimpath -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=v0.5.1-alpha.4 -X github.com/3xDevOps/Aether/internal/version.Commit=$env:GITHUB_SHA" -o "$env:RUNNER_TEMP/aether.exe" ./cmd/aether
+          go build -trimpath -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=dev -X github.com/3xDevOps/Aether/internal/version.Commit=$env:GITHUB_SHA" -o "$env:RUNNER_TEMP/aether.exe" ./cmd/aether
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # CI's native Windows job owns module-cache writes and the localops
       # unit regressions. Only this lane writes the installer's compiler

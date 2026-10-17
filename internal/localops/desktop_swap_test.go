@@ -31,7 +31,7 @@ func TestInstallDesktopSwapsUnderARunningApp(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", "")
 
-	first, err := InstallDesktop("linux", home, unpacked(t, "old"), []byte("png"))
+	first, err := InstallDesktop("linux", home, DesktopFrom(unpacked(t, "old")), "/opt/aether/aether", []byte("png"))
 	if err != nil {
 		t.Fatalf("InstallDesktop: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestInstallDesktopSwapsUnderARunningApp(t *testing.T) {
 	}
 	defer func() { _ = running.Close() }()
 
-	second, err := InstallDesktop("linux", home, unpacked(t, "new"), []byte("png"))
+	second, err := InstallDesktop("linux", home, DesktopFrom(unpacked(t, "new")), "/opt/aether/aether", []byte("png"))
 	if err != nil {
 		t.Fatalf("second InstallDesktop: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestInstallDesktopSweepsEarlierLeftovers(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(parent, installOldPrefix+"stale", "desktop"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	app, err := InstallDesktop("linux", home, unpacked(t, "new"), []byte("png"))
+	app, err := InstallDesktop("linux", home, DesktopFrom(unpacked(t, "new")), "/opt/aether/aether", []byte("png"))
 	if err != nil {
 		t.Fatalf("InstallDesktop: %v", err)
 	}

@@ -24,8 +24,10 @@ import (
 const Repo = "3xDevOps/Aether"
 
 // httpClient downloads manifests and assets. GitHub release asset URLs
-// redirect to a CDN, so redirects are followed, but never off https.
-var httpClient = &http.Client{Timeout: 5 * time.Minute, CheckRedirect: HTTPSOnly}
+// redirect to a CDN, so redirects are followed, but never off https. The
+// timeout covers a whole transfer, the largest being the desktop app zip of
+// around 100 MB.
+var httpClient = &http.Client{Timeout: 15 * time.Minute, CheckRedirect: HTTPSOnly}
 
 // LatestTag resolves the newest release tag from a GitHub /releases/latest
 // URL, which redirects - possibly through more than one hop - to
@@ -120,19 +122,17 @@ func Stage(ctx context.Context, m Manifest, asset, dst string) (*Staged, error) 
 // own directory when it is writable, a private directory of the user's
 // when root has to make the copy.
 func stageIn(ctx context.Context, m Manifest, asset, dst, dir string) (*Staged, error) {
-	want, ok := m.Assets[asset]
-	if !ok {
-		return nil, fmt.Errorf("release %s does not publish %s", m.Version, asset)
-	}
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dst)+".update-*")
 	if err != nil {
 		return nil, fmt.Errorf("stage update in %s: %w", dir, err)
 	}
-	staged := &Staged{dst: dst, tmp: tmp.Name(), sum: want.SHA256}
-	if err := download(ctx, m.AssetURL(asset), tmp, want); err != nil {
+	staged := &Staged{dst: dst, tmp: tmp.Name()}
+	want, err := m.Download(ctx, asset, tmp)
+	if err != nil {
 		staged.close(tmp)
-		return nil, fmt.Errorf("download %s: %w", asset, err)
+		return nil, err
 	}
+	staged.sum = want.SHA256
 	if err := tmp.Chmod(0o755); err != nil {
 		staged.close(tmp)
 		return nil, fmt.Errorf("chmod staged binary: %w", err)

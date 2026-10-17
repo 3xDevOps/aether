@@ -14,6 +14,7 @@ import { useCapability } from '@/store/hooks'
 import { applyClientUpdate, clientTarget, installTarget, manualCommand } from '@/store/updates'
 
 const buildStep: Record<string, string> = {
+  downloading: 'Downloading the desktop app…',
   unpacking: 'Unpacking the desktop app…',
   'fetching node': 'Fetching Node for the desktop app (first time only)…',
   'installing dependencies': 'Installing the desktop app dependencies…',

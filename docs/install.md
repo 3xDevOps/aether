@@ -55,7 +55,7 @@ afterwards.
 | Answer | What is installed, and where | What it runs next |
 | --- | --- | --- |
 | `server` | On Linux both `aether` and `aether-server`, into `/usr/local/bin`, root-owned, using `sudo` when it has to; on a machine with no `sudo` at all it falls back to `~/.local/bin`. | `sudo aether-server setup` - the interactive server install below: listen address, data directory, tailnet policy, the dashboard port on a tailnet host, then the systemd activation line. |
-| `client` | `aether` alone, into `~/.local/bin`, created if it is missing. No `sudo`, and the files stay yours. | `aether gui build` - packages and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
+| `client` | `aether` alone, into `~/.local/bin`, created if it is missing. No `sudo`, and the files stay yours. | `aether gui build` - builds and installs the desktop app. Nothing has to be installed first: the CLI downloads its own Node.js when the machine has none. |
 | `none` | The same as `server`, `sudo` fallback included. | Nothing further. The binaries are installed and the script stops. |
 
 A client gets `~/.local/bin` because the dashboard's **Update now** button
@@ -189,9 +189,9 @@ Windows is a client platform, so there is no server/client question. By
 default the script downloads the native x64 or ARM64 CLI, verifies its SHA-256
 against the release's `checksums.txt`, installs it at
 `%LOCALAPPDATA%\Programs\Aether\aether.exe`, and runs that binary's
-`gui build`. The result is the desktop app in the Start Menu as **Aether**.
-The CLI supplies Node.js when needed; neither Node nor Go needs installing
-first.
+`gui build`, which downloads the release's prebuilt desktop app
+([Desktop app](#desktop-app)). The result is the desktop app in the Start Menu
+as **Aether**. Neither Node nor Go needs installing first.
 
 Desktop setup requires `v0.5.1-alpha.4` or newer: the supported path needs the
 separate desktop directory, direct-Node build, native shortcut creation, and
@@ -1107,9 +1107,10 @@ and deep links: `aether://run/<id>` opens a run, and an edge invitation's
 step to join or claim ([edge.md](edge.md#the-dashboard)). The notification shows only while the app
 is open; a phone gets one through the server-hosted dashboard
 ([networking.md](networking.md#notifications)). It is the same SPA
-with the same full SSH authority, just without a browser tab to lose. No
-release publishes it; the CLI builds it for you, and needs nothing installed
-first. The Windows installer builds it by default; on Linux and macOS,
+with the same full SSH authority, just without a browser tab to lose. On
+Windows the CLI downloads the prebuilt app its release publishes; on Linux and
+macOS it builds the app on your machine. Neither needs anything installed
+first. The Windows installer installs it by default; on Linux and macOS,
 answering `client` to the install script's question does the same.
 This is the command by hand. The window opens at 1280 by 840 and stops
 at 960 by 600, the smallest size the dashboard's own layout holds.
@@ -1121,12 +1122,39 @@ aether gui build
 On Linux and macOS, cancelling the build with SIGINT exits 130; SIGTERM exits
 143. Ordinary build failures exit 1 and print the build's original error.
 
-The CLI carries the shell sources, unpacks them into your cache directory
+On Windows, a release CLI fetches its release's signed `aether-release.json`,
+downloads `aether-desktop-windows-amd64.zip` (or `-arm64`) into
+`%LOCALAPPDATA%\aether\desktop-build` (`--build-dir` overrides), checks its
+size and SHA-256 against the manifest, and extracts it into the install
+location below. Nothing is built, and nothing but the app's own files is
+written. The download is about 100 MB and is deleted after the install. If
+the manifest cannot be fetched or the zip fails its check, the command fails
+with that error and names `aether gui build --source`. Three cases build from
+source instead:
+
+- `aether gui build --source`, for a machine that should build its own app.
+- A development build of the CLI (`aether version` prints `dev` or a `git
+  describe` version), which has no release to download from.
+- A release that publishes no desktop zip. The CLI prints
+  `release <tag> does not publish aether-desktop-windows-<arch>.zip; building
+  the desktop app from source` and carries on.
+
+`aether gui build --zip <path>` installs a desktop zip you already have, for
+an offline machine or a CI smoke test. No signed manifest vouches for a local
+zip, so the CLI checks only that it is a Windows desktop app
+(`aether-desktop.exe` at its root); verify the zip against the release's
+`checksums.txt` first.
+
+### Building the desktop app from source
+
+On Linux and macOS, and on Windows in the cases above, the CLI unpacks the
+shell sources it carries into your cache directory
 (`~/.cache/aether/desktop-build` on Linux,
 `~/Library/Caches/aether/desktop-build` on macOS,
 `%LOCALAPPDATA%\aether\desktop-build` on Windows; `--build-dir` overrides), runs
-`npm install` and electron-builder there, and installs the result where your
-desktop lists applications:
+`npm install` there to install exactly the Electron and electron-builder
+versions `desktop/package-lock.json` pins, runs electron-builder, and installs
+the result. Either way the app lands where your desktop lists applications:
 
 | OS | App | Launcher |
 | --- | --- | --- |
@@ -1163,7 +1191,11 @@ The first build downloads the Electron runtime (about 100 MB) into
 electron-builder's own cache (`~/.cache/electron` and
 `~/.cache/electron-builder` on Linux, `~/Library/Caches/electron` and
 `~/Library/Caches/electron-builder` on macOS, `%LOCALAPPDATA%\electron\Cache`
-and `%LOCALAPPDATA%\electron-builder` on Windows), so rebuilding is quick.
+and `%LOCALAPPDATA%\electron-builder` on Windows), and `node_modules` stays
+in the build directory, so rebuilding is quick.
+
+### Managing the installed app
+
 Run `aether gui build` again to replace an installed app; on macOS it also
 removes an older copy from the other Applications folder. The new app is
 staged beside the installed one and swapped in with a rename, so an app that
@@ -1171,11 +1203,12 @@ is running while you rebuild it keeps working until you restart it - deleting
 its files under it would take the window down. Windows still holds a running
 program's files open, so close the Aether window there first. To remove
 everything, delete the two paths in the table, the `aether` cache directory
-(the build directory and the private Node copy), and those caches.
+(the build directory and the private Node copy), and, after a source build,
+those caches.
 
 `aether gui build --json` prints one JSON line per phase on stdout and leaves
 the build's own output on stderr, which is how the dashboard follows a rebuild
-it started:
+it started. A build from source reports:
 
 ```json
 {"phase":"unpacking"}
@@ -1186,6 +1219,10 @@ it started:
 {"phase":"done","path":"/home/you/.local/share/aether/desktop"}
 ```
 
+A Windows install of the prebuilt app reports `downloading`, then
+`installing` and `done`; `--zip` reports `installing` and `done`. A release
+without the zip reports `downloading` and then the source build's phases.
+
 A failure ends with `{"phase":"error","error":"..."}` carrying the build's own
 message, and the command still exits non-zero.
 
@@ -1193,13 +1230,15 @@ The app requires the `aether` CLI installed first; it does not bundle the
 binary. As a build-time check, `aether gui build` requires an installed CLI
 discoverable through `AETHER_BIN`, then `PATH`, then the installer defaults:
 `%LOCALAPPDATA%\Programs\Aether` on Windows, `/usr/local/bin` and
-`~/.local/bin` on Linux and macOS. The new shell records the path of the CLI
-that built it. At launch, `AETHER_BIN` overrides that path; otherwise the
+`~/.local/bin` on Linux and macOS. The install records the path of the CLI
+that ran it in the app's `resources/aether-cli.json` (on macOS, which keeps
+the bundle untouched after signing, in the app's `package.json` at build
+time). At launch, `AETHER_BIN` overrides that path; otherwise the
 shell starts the recorded executable, not another copy on the desktop
 session's `PATH`. If that executable is gone or cannot run, the error names
 its exact path: restore it, set `AETHER_BIN` to a working CLI, or rerun that
-installed CLI's `gui build` command. Older shells without a recorded path
-still search `PATH` and the installer defaults. This CLI selection is
+installed CLI's `gui build` command. Shells without a recorded path search
+`PATH` and the installer defaults. This CLI selection is
 the launcher's job alone: once the app is running, the dashboard's agent
 detection and scans widen `PATH` from your login shell each time they look,
 so coding agents installed through a shell profile are found from the
@@ -2147,7 +2186,8 @@ what is actually there.
 
 The `aether` cache directory - `~/.cache/aether` above, and its macOS and
 Windows equivalents below - holds the desktop build directory and the private
-Node copy `aether gui build` downloads on a machine without Node 22+.
+Node copy a source build of the desktop app downloads on a machine without
+Node 22+.
 
 On macOS the desktop state is `~/Library/Application Support/aether-desktop`,
 the app is `/Applications/Aether.app` (or `~/Applications/Aether.app` for a

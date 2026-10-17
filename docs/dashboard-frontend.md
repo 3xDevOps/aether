@@ -5648,8 +5648,9 @@ that runs a newer release than a client refuses that client
   the dialog and runs a check.
 - **The desktop shell has a prompt of its own.** The SPA ships inside the
   CLI, but the Electron shell around it is whatever `aether gui build`
-  last produced. That build records the complete CLI version and its
-  executable path beside the shell's npm-valid `package.json` version.
+  last installed. The shell's `package.json` carries the complete CLI
+  version beside its npm-valid version, and the install records the CLI's
+  executable path in `resources/aether-cli.json`.
   `desktop/main.js` starts the recorded binary ahead of `PATH` (unless
   `AETHER_BIN` overrides it) and hands the build version to the renderer.
   `desktop/preload.js` exposes it as `window.aetherDesktop.shellVersion`.

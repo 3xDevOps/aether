@@ -5,8 +5,8 @@ package desktop
 import "embed"
 
 // Source is everything electron-builder needs: the shell scripts, the
-// package manifest and builder config, and the icon set. node_modules and
-// dist are build outputs and never ship.
+// package manifest, lockfile and builder config, and the icon set.
+// node_modules and dist are build outputs and never ship.
 //
-//go:embed main.js notify.js preload.js package.json electron-builder.yml build/icon.ico build/icons
+//go:embed main.js cli-binding.js notify.js preload.js package.json package-lock.json electron-builder.yml build/icon.ico build/icons
 var Source embed.FS

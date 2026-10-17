@@ -2,7 +2,6 @@ package localops
 
 import (
 	"archive/tar"
-	"archive/zip"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -14,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -393,7 +391,7 @@ func extractNode(archive, dir string, zipped bool) error {
 	}
 	defer func() { _ = root.Close() }()
 	if zipped {
-		return extractNodeZip(archive, root)
+		return extractZip(archive, root, maxNodeTree)
 	}
 	f, err := os.Open(archive)
 	if err != nil {
@@ -410,7 +408,7 @@ func extractNodeTarGz(r io.Reader, root *os.Root) error {
 	}
 	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
-	budget := int64(maxNodeTree)
+	budget := &sizeBudget{left: maxNodeTree, limit: maxNodeTree}
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -427,7 +425,7 @@ func extractNodeTarGz(r io.Reader, root *os.Root) error {
 		case tar.TypeDir:
 			err = root.MkdirAll(name, 0o755)
 		case tar.TypeReg:
-			err = writeArchiveFile(root, name, tr, fs.FileMode(hdr.Mode).Perm(), &budget)
+			err = writeArchiveFile(root, name, tr, fs.FileMode(hdr.Mode).Perm(), budget)
 		case tar.TypeSymlink:
 			if err = parentDir(root, name); err == nil {
 				err = root.Symlink(hdr.Linkname, name)
@@ -441,91 +439,4 @@ func extractNodeTarGz(r io.Reader, root *os.Root) error {
 			return fmt.Errorf("%s: %w", hdr.Name, err)
 		}
 	}
-}
-
-func extractNodeZip(archive string, root *os.Root) error {
-	zr, err := zip.OpenReader(archive)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = zr.Close() }()
-	budget := int64(maxNodeTree)
-	for _, entry := range zr.File {
-		name, err := archiveEntry(entry.Name)
-		if err != nil {
-			return err
-		}
-		if entry.FileInfo().IsDir() {
-			if err = root.MkdirAll(name, 0o755); err != nil {
-				return fmt.Errorf("%s: %w", entry.Name, err)
-			}
-			continue
-		}
-		if !entry.Mode().IsRegular() {
-			// The Windows zips are files and directories only.
-			return fmt.Errorf("%s: unexpected entry mode %s", entry.Name, entry.Mode())
-		}
-		src, err := entry.Open()
-		if err != nil {
-			return fmt.Errorf("%s: %w", entry.Name, err)
-		}
-		err = writeArchiveFile(root, name, src, entry.Mode().Perm(), &budget)
-		_ = src.Close()
-		if err != nil {
-			return fmt.Errorf("%s: %w", entry.Name, err)
-		}
-	}
-	return nil
-}
-
-// writeArchiveFile copies one entry into the confined tree, drawing its
-// size from the shared budget so a compressed archive cannot expand into
-// an unbounded write.
-func writeArchiveFile(root *os.Root, name string, src io.Reader, mode fs.FileMode, budget *int64) error {
-	if err := parentDir(root, name); err != nil {
-		return err
-	}
-	if mode == 0 {
-		mode = 0o644
-	}
-	f, err := root.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	written, err := io.Copy(f, io.LimitReader(src, *budget+1))
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	if written > *budget {
-		return fmt.Errorf("the archive expands past %d bytes", maxNodeTree)
-	}
-	*budget -= written
-	return nil
-}
-
-// parentDir creates the directories an entry needs. Archives are not
-// required to list a directory before the files inside it.
-func parentDir(root *os.Root, name string) error {
-	if dir := path.Dir(name); dir != "." {
-		return root.MkdirAll(dir, 0o755)
-	}
-	return nil
-}
-
-// archiveEntry cleans an archive entry name and rejects the ones that
-// would land outside the tree. os.Root refuses these as well; checking
-// here is what turns a kernel-level "path escapes from parent" into a
-// message naming the archive that carried the entry.
-func archiveEntry(name string) (string, error) {
-	clean := path.Clean(strings.ReplaceAll(name, `\`, "/"))
-	if clean == "." {
-		return "", errors.New("empty entry name")
-	}
-	if path.IsAbs(clean) || filepath.IsAbs(name) || clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", fmt.Errorf("entry %q would extract outside the cache directory", name)
-	}
-	return clean, nil
 }
