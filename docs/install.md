@@ -204,11 +204,17 @@ Older releases are refused before downloading or replacing the CLI.
 
 | Parameter | Variable | Effect |
 | --- | --- | --- |
-| `-Version <tag>` | `AETHER_VERSION` | Select a release; otherwise resolve the latest published release. |
+| `-Version <tag>` | `AETHER_VERSION` | Install exactly this release, or fail if it is not complete; otherwise install the newest complete release. |
 | `-BinDir <dir>` | `AETHER_BIN_DIR` | Choose the CLI directory, never the desktop app's managed directory. |
 | `-Role client\|none` | `AETHER_ROLE` | `client` installs the CLI and desktop; `none` stops after the CLI. The default is `client`, including unattended runs. |
 | | `AETHER_REPO` | Download from a GitHub fork. |
 | | `AETHER_BASE_URL` | Download from a release-asset mirror. |
+
+The release is chosen as the [install script](#which-release-it-installs)
+chooses it, for `aether-windows-<arch>.exe`, with one difference: PowerShell
+has no ed25519 verifier, so the script does not check
+`aether-release.json.sig`. It says so, and checks the binary's SHA-256 and
+size against `checksums.txt` and `aether-release.json`.
 
 Only the current user's `PATH` is updated, without duplicating the install
 directory or removing other entries. Expandable entries such as `%SystemRoot%`
