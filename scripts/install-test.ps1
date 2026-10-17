@@ -608,7 +608,7 @@ catch {
         AETHER_LATEST_URL = ($baseUrl + '/latest')
         AETHER_API_URL = ($baseUrl + '/api')
     }
-    foreach ($tag in @('v0.6.0', 'v0.7.0-alpha.8', 'v0.7.0-alpha.9', 'v0.7.0-alpha.10', 'v0.7.0-alpha.11', 'v0.7.0-alpha.13', 'v0.7.0-alpha.14', 'v0.7.0-alpha.15', 'v0.7.0-alpha.16', 'v0.7.0-alpha.17', 'nightly')) {
+    foreach ($tag in @('v0.6.0', 'v0.7.0-alpha.8', 'v0.7.0-alpha.9', 'v0.7.0-alpha.10', 'v0.7.0-alpha.11', 'v0.7.0-alpha.13', 'v0.7.0-alpha.14', 'v0.7.0-alpha.15', 'v0.7.0-alpha.16', 'v0.7.0-alpha.17', 'v0.7.0-alpha.18', 'nightly')) {
         $omit = @()
         $badChecksum = $false
         $manifestVersion = $tag
@@ -618,18 +618,20 @@ catch {
             'v0.7.0-alpha.10' { $omit = @('aether-windows-amd64.exe') }
             'v0.7.0-alpha.11' { $omit = @('aether-release.json.sig') }
             'v0.7.0-alpha.17' { $omit = @('aether-release.json') }
+            'v0.7.0-alpha.18' { $omit = @('aether-release.json', 'aether-release.json.sig') }
             'v0.7.0-alpha.15' { $badChecksum = $true }
             'v0.7.0-alpha.16' { $manifestVersion = 'v0.7.0-alpha.9' }
         }
         Write-AetherRelease $releaseRoot $tag ('cli ' + $tag) ('arm ' + $tag) -BadAmdChecksum $badChecksum -ManifestVersion $manifestVersion -Omit $omit
     }
-    $allTags = @('nightly', 'v0.7.0-alpha.17', 'v0.7.0-alpha.14', 'v0.7.0-alpha.13', 'v0.7.0-alpha.12', 'v0.7.0-alpha.11', 'v0.7.0-alpha.10', 'v0.7.0-alpha.9', 'v0.7.0-alpha.8', 'v0.6.0')
+    $allTags = @('nightly', 'v0.7.0-alpha.18', 'v0.7.0-alpha.17', 'v0.7.0-alpha.14', 'v0.7.0-alpha.13', 'v0.7.0-alpha.12', 'v0.7.0-alpha.11', 'v0.7.0-alpha.10', 'v0.7.0-alpha.9', 'v0.7.0-alpha.8', 'v0.6.0')
     Write-AetherApi $releaseRoot -Tags $allTags -Drafts @('v0.7.0-alpha.13') -Prereleases @('v0.7.0-alpha.14')
 
     $fallbackCases = @(
         @{ Latest = 'v0.7.0-alpha.12'; Reason = 'no checksums.txt' },
         @{ Latest = 'v0.7.0-alpha.11'; Reason = 'no aether-release.json.sig' },
         @{ Latest = 'v0.7.0-alpha.17'; Reason = 'no aether-release.json' },
+        @{ Latest = 'v0.7.0-alpha.18'; Reason = 'no aether-release.json' },
         @{ Latest = 'v0.7.0-alpha.10'; Reason = 'no aether-windows-amd64.exe' }
     )
     foreach ($case in $fallbackCases) {
@@ -645,7 +647,7 @@ catch {
         Assert-AetherTest ($result.Stdout.Contains('aether install: aether-release.json.sig not verified (PowerShell has no ed25519 verifier); verified aether-windows-amd64.exe SHA-256 and size against checksums.txt and aether-release.json')) ("fallback did not report the unverified signature: " + $result.Output)
         Assert-AetherTest (-not $result.Stdout.Contains('skipping')) ("fallback reported unprobed releases: " + $result.Output)
         $requests = @([IO.File]::ReadAllLines($requestLog))
-        foreach ($ignored in @('v0.7.0-alpha.17/', 'v0.7.0-alpha.14/', 'v0.7.0-alpha.13/', 'v0.7.0-alpha.11/', 'v0.7.0-alpha.10/', 'nightly/', 'v0.7.0-alpha.8/', 'v0.6.0/')) {
+        foreach ($ignored in @('v0.7.0-alpha.18/', 'v0.7.0-alpha.17/', 'v0.7.0-alpha.14/', 'v0.7.0-alpha.13/', 'v0.7.0-alpha.11/', 'v0.7.0-alpha.10/', 'nightly/', 'v0.7.0-alpha.8/', 'v0.6.0/')) {
             if ($ignored -eq ($case.Latest + '/')) { continue }
             Assert-AetherTest (@($requests | Where-Object { $_.StartsWith($ignored) }).Count -eq 0) ("fallback requested {0} assets: {1}" -f $ignored, ($requests -join ', '))
         }
@@ -659,8 +661,8 @@ catch {
     $requests = @([IO.File]::ReadAllLines($requestLog))
     Assert-AetherTest (@($requests | Where-Object { -not $_.StartsWith('v0.7.0-alpha.9/') }).Count -eq 0) ("pinned release requested other paths: " + ($requests -join ', '))
 
-    # A release published before signing has neither manifest file; pinned or
-    # latest, it installs on checksums.txt alone and says so.
+    # A release from before v0.7.0-alpha.12 has neither manifest file; pinned
+    # or latest, it installs on checksums.txt alone and says so.
     [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.6.0')
     foreach ($arguments in @(@('-Version', 'v0.6.0'), @())) {
         [IO.File]::WriteAllText($selectCli, 'old select CLI')
@@ -678,6 +680,7 @@ catch {
         @{ Args = @('-Version', 'v0.7.0-alpha.10'); Message = 'v0.7.0-alpha.10 has no published aether-windows-amd64.exe; it may still be building or may have failed - not installing a different version'; Only = 'v0.7.0-alpha.10/' },
         @{ Args = @('-Version', 'v0.7.0-alpha.8'); Message = 'v0.7.0-alpha.8 has no published aether-release.json.sig; it may still be building or may have failed - not installing a different version'; Only = 'v0.7.0-alpha.8/' },
         @{ Args = @('-Version', 'v0.7.0-alpha.17'); Message = 'v0.7.0-alpha.17 has no published aether-release.json; it may still be building or may have failed - not installing a different version'; Only = 'v0.7.0-alpha.17/' },
+        @{ Args = @('-Version', 'v0.7.0-alpha.18'); Message = 'v0.7.0-alpha.18 has no published aether-release.json; it may still be building or may have failed - not installing a different version'; Only = 'v0.7.0-alpha.18/' },
         @{ Args = @(); Latest = 'v0.7.0-alpha.15'; Message = 'checksum mismatch for aether-windows-amd64.exe of v0.7.0-alpha.15'; NoApi = $true },
         @{ Args = @(); Latest = 'v0.7.0-alpha.16'; Message = "aether-release.json of v0.7.0-alpha.16 names version 'v0.7.0-alpha.9'"; NoApi = $true }
     )

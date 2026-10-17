@@ -128,9 +128,10 @@ curl -fsSL .../install.sh | sh -s -- --role server
 
 A release is complete for this install when it publishes `checksums.txt`,
 every binary this OS, CPU and component choice needs, and a `checksums.txt`
-line for each. A release from before signing has neither
-`aether-release.json` nor `aether-release.json.sig`; one with only one of
-them is still uploading, or its upload failed, so it is not complete.
+line for each, plus `aether-release.json` and `aether-release.json.sig`.
+Releases before `v0.7.0-alpha.12` predate signing and are complete without
+those two files; from that tag on, a release missing either one is still
+uploading, failed, or was tampered with.
 
 Without `--version`, the script follows `github.com/<repo>/releases/latest`.
 GitHub can list a release there while its assets are still uploading, or
@@ -160,9 +161,9 @@ only, and the script prints that.
 A checksum or size mismatch, a bad signature, a cut-off download or any
 network error stops the install; none of them makes the script try another
 release. Every binary is downloaded and verified before any installed one is
-replaced, then each is renamed into place from a copy in the same
-directory, so a failure leaves the previous install as it was and rerunning
-is safe. Only HTTPS is used. An unreachable GitHub is reported with curl's
+replaced, so those failures leave the previous install as it was. Each
+binary is then renamed into place from a copy in the same directory;
+rerunning is safe. Only HTTPS is used. An unreachable GitHub is reported with curl's
 error, and an API rate limit with its status:
 
 ```

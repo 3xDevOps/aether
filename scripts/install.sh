@@ -286,21 +286,28 @@ else
 fi
 $sudo mkdir -p "$BIN_DIR" || die "cannot create ${BIN_DIR}"
 
-# --- choose a complete release, download and verify ---------------------
+# --- download and verify -----------------------------------------------
 
 # The ed25519 keys a release manifest may be signed with. Keep this list
 # identical to releaseKeys in internal/selfupdate/keys.go; install-test.sh
 # fails when they differ.
 RELEASE_KEYS="J+AIq6GUVbRtEQ1ORqKJe3uh9JhvZkEQJQtYpxKbxD8="
 
+# Every release from this tag on is signed. Two missing manifest files say
+# nothing about a release's age: a release being published, or one whose
+# manifest was deleted, looks the same. Only an older tag may install on
+# checksums.txt alone.
+SIGNED_SINCE="v0.7.0-alpha.12"
+
 API_URL="https://api.github.com/repos/${REPO}/releases?per_page=100"
 
 tmp="$(mktemp -d)"
-staged=""
+staged=no
 cleanup() {
 	rm -rf "$tmp"
-	# shellcheck disable=SC2086
-	[ -z "$staged" ] || $sudo rm -f $staged
+	if [ "$staged" = yes ]; then
+		for name in $names; do $sudo rm -f "${BIN_DIR}/.${name}.install.$$"; done
+	fi
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
@@ -390,20 +397,22 @@ verify_signature() {
 	fi
 	for key in $RELEASE_KEYS; do
 		printf -- '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA%s\n-----END PUBLIC KEY-----\n' "$key" >"$1/key.pem"
-		if openssl pkeyutl -verify -pubin -inkey "$1/key.pem" -rawin \
-			-in "$1/aether-release.json" -sigfile "$1/sig.bin" >/dev/null 2>&1; then
+		if err="$(openssl pkeyutl -verify -pubin -inkey "$1/key.pem" -rawin \
+			-in "$1/aether-release.json" -sigfile "$1/sig.bin" 2>&1)"; then
 			say "verified aether-release.json.sig for $2 against release key ${key}"
 			return 0
 		fi
+		case "$err" in
+		*"Signature Verification Failure"*) ;;
+		*) die "cannot check aether-release.json.sig for $2 with $(openssl version): ${err}" ;;
+		esac
 	done
 	die "aether-release.json for $2 is not signed by a trusted release key; not installing it"
 }
 
 # prepare TAG downloads and verifies every asset this install needs from TAG
 # into $tmp/TAG. It returns 1, with the absent file in $missing and a reason
-# in $why, when TAG is not fully published. Integrity failures are fatal. A
-# release from before signing has neither manifest file; one with only one of
-# them is still uploading, or its upload failed.
+# in $why, when TAG is not fully published. Integrity failures are fatal.
 prepare() {
 	tag="$1"
 	dir="$tmp/$1"
@@ -422,6 +431,9 @@ prepare() {
 	elif [ "$signed" = manifest ]; then
 		missing="aether-release.json.sig" why="no aether-release.json.sig"
 		return 1
+	elif signing_required "$tag"; then
+		missing="aether-release.json" why="no aether-release.json"
+		return 1
 	fi
 	for asset in $assets; do
 		if [ -z "$(checksum_of "$dir/checksums.txt" "$asset")" ]; then
@@ -430,6 +442,8 @@ prepare() {
 		fi
 	done
 	if [ "$signed" = yes ]; then
+		[ "$(manifest_top "$dir/aether-release.json" schema)" = 1 ] ||
+			die "aether-release.json for ${tag} is not schema 1; this installer reads schema 1"
 		[ "$(manifest_top "$dir/aether-release.json" version)" = "$tag" ] ||
 			die "aether-release.json fetched for ${tag} describes $(manifest_top "$dir/aether-release.json" version); not installing it"
 		if verify_signature "$dir" "$tag"; then
@@ -490,35 +504,46 @@ resolve_latest() {
 	valid_tag "$latest" || die "the latest release redirect named an invalid tag: ${latest}"
 }
 
+SEMVER_AWK='
+	function semver(t) {
+		return t ~ /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/
+	}
+	function cmpid(a, b) {
+		if (a ~ /^[0-9]+$/ && b ~ /^[0-9]+$/) return (a + 0 < b + 0) ? -1 : (a + 0 > b + 0)
+		if (a ~ /^[0-9]+$/) return -1
+		if (b ~ /^[0-9]+$/) return 1
+		return (a < b) ? -1 : (a > b)
+	}
+	function cmp(a, b,    pa, pb, na, nb, i, c, ma, mb) {
+		sub(/^v/, "", a); sub(/^v/, "", b); sub(/\+.*/, "", a); sub(/\+.*/, "", b)
+		pa = index(a, "-") ? substr(a, index(a, "-") + 1) : ""
+		pb = index(b, "-") ? substr(b, index(b, "-") + 1) : ""
+		if (index(a, "-")) a = substr(a, 1, index(a, "-") - 1)
+		if (index(b, "-")) b = substr(b, 1, index(b, "-") - 1)
+		split(a, ma, "."); split(b, mb, ".")
+		for (i = 1; i <= 3; i++) if ((c = cmpid(ma[i], mb[i])) != 0) return c
+		if (pa == "" || pb == "") return (pa == pb) ? 0 : (pa == "" ? 1 : -1)
+		na = split(pa, ma, "."); nb = split(pb, mb, ".")
+		for (i = 1; i <= na && i <= nb; i++) if ((c = cmpid(ma[i], mb[i])) != 0) return c
+		return (na < nb) ? -1 : (na > nb)
+	}
+'
+
+# signing_required TAG is true for a tag at or after SIGNED_SINCE, and for
+# any tag that is not semver.
+signing_required() {
+	LC_ALL=C awk -v t="$1" -v s="$SIGNED_SINCE" "$SEMVER_AWK"'
+		BEGIN { exit !(!semver(t) || cmp(t, s) >= 0) }'
+}
+
 # Prints "tag asset asset ..." for every published, non-prerelease release
 # with a semver tag in the GitHub API's JSON, newest version first. A
 # tokenizer rather than a line match: it holds for compact and indented JSON
 # and for release notes that contain anything at all.
 parse_releases() {
-	LC_ALL=C awk '
-		{ doc = doc $0 "\n" }
-		function semver(t) {
-			return t ~ /^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/
-		}
-		function cmpid(a, b) {
-			if (a ~ /^[0-9]+$/ && b ~ /^[0-9]+$/) return (a + 0 < b + 0) ? -1 : (a + 0 > b + 0)
-			if (a ~ /^[0-9]+$/) return -1
-			if (b ~ /^[0-9]+$/) return 1
-			return (a < b) ? -1 : (a > b)
-		}
-		function cmp(a, b,    pa, pb, na, nb, i, c, ma, mb) {
-			sub(/^v/, "", a); sub(/^v/, "", b); sub(/\+.*/, "", a); sub(/\+.*/, "", b)
-			pa = index(a, "-") ? substr(a, index(a, "-") + 1) : ""
-			pb = index(b, "-") ? substr(b, index(b, "-") + 1) : ""
-			if (index(a, "-")) a = substr(a, 1, index(a, "-") - 1)
-			if (index(b, "-")) b = substr(b, 1, index(b, "-") - 1)
-			split(a, ma, "."); split(b, mb, ".")
-			for (i = 1; i <= 3; i++) if ((c = cmpid(ma[i], mb[i])) != 0) return c
-			if (pa == "" || pb == "") return (pa == pb) ? 0 : (pa == "" ? 1 : -1)
-			na = split(pa, ma, "."); nb = split(pb, mb, ".")
-			for (i = 1; i <= na && i <= nb; i++) if ((c = cmpid(ma[i], mb[i])) != 0) return c
-			return (na < nb) ? -1 : (na > nb)
-		}
+	LC_ALL=C awk "$SEMVER_AWK"'
+		BEGIN { RS = "\001" }
+		{ doc = doc $0 }
 		function scalar(v) {
 			if (depth == 2) {
 				if (key[2] == "tag_name") tag = v
@@ -576,7 +601,7 @@ parse_releases() {
 }
 
 list_releases() {
-	api_status="$(curl -sS --proto =https --proto-redir =https --connect-timeout 20 --retry 3 \
+	api_status="$(curl -sS -L --proto =https --proto-redir =https --connect-timeout 20 --retry 3 \
 		-H 'Accept: application/vnd.github+json' -D "$tmp/api.headers" -o "$tmp/api.json" \
 		-w '%{http_code}' "$API_URL" 2>"$tmp/curl.err")" || {
 		cat "$tmp/curl.err" >&2
@@ -620,9 +645,11 @@ else
 			valid_tag "$tag" || continue
 			ready=yes
 			for file in checksums.txt $assets; do listed "$file" || ready=no; done
-			listed aether-release.json && signed=yes || signed=no
-			listed aether-release.json.sig && sig=yes || sig=no
+			signed=no sig=no
+			! listed aether-release.json || signed=yes
+			! listed aether-release.json.sig || sig=yes
 			[ "$ready" = yes ] && [ "$signed" = "$sig" ] || continue
+			[ "$signed" = yes ] || ! signing_required "$tag" || continue
 			if prepare "$tag"; then
 				VERSION="$tag"
 				break
@@ -639,7 +666,7 @@ fi
 # each replacement is a rename and a failure leaves the old install whole.
 for name in $names; do
 	stage="${BIN_DIR}/.${name}.install.$$"
-	staged="${staged:+$staged }$stage"
+	staged=yes
 	$sudo cp "$tmp/$VERSION/${name}-${os}-${arch}" "$stage" || die "cannot write into ${BIN_DIR}"
 	$sudo chmod 0755 "$stage" || die "cannot set the mode of ${stage}"
 done
@@ -647,7 +674,7 @@ for name in $names; do
 	$sudo mv -f "${BIN_DIR}/.${name}.install.$$" "${BIN_DIR}/${name}" || die "cannot install into ${BIN_DIR}"
 	say "installed ${BIN_DIR}/${name} ${VERSION}"
 done
-staged=""
+staged=no
 
 # --- finish that role's setup ------------------------------------------
 

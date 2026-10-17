@@ -304,6 +304,17 @@ function Get-AetherChecksum {
     return $checksumMatches[0]
 }
 
+function Test-AetherSigningRequired {
+    param([Parameter(Mandatory = $true)][string] $Tag)
+    # Every release from v0.7.0-alpha.12 on is signed. Two missing manifest
+    # files say nothing about age: a release being published, or one whose
+    # manifest was deleted, looks the same. Only an older tag installs on
+    # checksums.txt alone.
+    $semver = Get-AetherSemVer $Tag
+    if ($null -eq $semver) { return $true }
+    return (Compare-AetherSemVer $semver (Get-AetherSemVer 'v0.7.0-alpha.12')) -ge 0
+}
+
 function Get-AetherHttpStatus {
     param([Parameter(Mandatory = $true)] $Exception)
     # Windows PowerShell raises WebException (HttpWebResponse) and PowerShell 7
@@ -432,6 +443,11 @@ function Read-AetherRelease {
         $Release.Reason = 'no ' + $Release.Missing
         return
     }
+    if (-not $signed -and (Test-AetherSigningRequired $Tag)) {
+        $Release.Missing = 'aether-release.json'
+        $Release.Reason = 'no aether-release.json'
+        return
+    }
     $expected = Get-AetherChecksum (Join-Path $Directory 'checksums.txt') $Asset
     if ($null -eq $expected) {
         $Release.Reason = 'checksums.txt does not list ' + $Asset
@@ -519,7 +535,8 @@ function Find-AetherCompleteRelease {
     foreach ($candidate in $candidates) {
         $assets = $candidate.Assets
         if ($assets -cnotcontains 'checksums.txt' -or $assets -cnotcontains $Asset -or
-            (($assets -ccontains 'aether-release.json') -ne ($assets -ccontains 'aether-release.json.sig'))) {
+            (($assets -ccontains 'aether-release.json') -ne ($assets -ccontains 'aether-release.json.sig')) -or
+            (($assets -cnotcontains 'aether-release.json') -and (Test-AetherSigningRequired $candidate.Tag))) {
             continue
         }
         Assert-AetherTag $candidate.Tag $Role

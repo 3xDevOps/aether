@@ -63,8 +63,6 @@ fi
 echo "systemctl daemon-reload && systemctl enable --now aether-server"
 EOF
 
-# --- the fake release host ------------------------------------------------
-#
 # $fixtures/releases/<tag>/ holds what each tag publishes, $fixtures/latest
 # names the tag github.com/.../releases/latest redirects to, and
 # $fixtures/api.json (with api.status and api.headers) is the releases API
@@ -72,7 +70,7 @@ EOF
 # test is a copy of install.sh that trusts that key instead of the real one.
 
 openssl genpkey -algorithm ed25519 -out "$tmp/test-key.pem" 2>/dev/null ||
-	{ echo "install-test: needs OpenSSL 3 (ed25519) to sign fixture releases" >&2; exit 1; }
+	{ echo "install-test: needs OpenSSL 3 to sign fixture releases (macOS ships LibreSSL: brew install openssl@3 and put its bin first on PATH)" >&2; exit 1; }
 test_pub="$(openssl pkey -in "$tmp/test-key.pem" -pubout -outform DER | tail -c 32 | openssl base64 -A)"
 script="$tmp/install.sh"
 sed "s|^RELEASE_KEYS=.*|RELEASE_KEYS=\"$test_pub\"|" "$script_dir/install.sh" >"$script"
@@ -744,8 +742,6 @@ sh "$script" --role client --bin-dir "$sysbin/" >"$out" 2>&1 || fail "installer 
 [ -x "$sysbin/aether" ] || fail "--bin-dir with a trailing slash installed nothing"
 not_printed "would shadow"
 
-# --- choosing a complete release -----------------------------------------
-#
 # These drop AETHER_VERSION, so the installer resolves releases/latest and,
 # when that tag is incomplete, the releases API. Each starts from an empty
 # fake host and an existing install it must either replace or leave alone.
@@ -840,6 +836,21 @@ printed "verified aether-linux-amd64, aether-server-linux-amd64 against checksum
 installed_from v0.7.0-alpha.11 linux-amd64
 not_requested "https://api.github.com/"
 
+# A tag at or after the first signed release with neither manifest file is
+# mid-publish or has been stripped, not old.
+host "a release that must be signed, with both manifest files gone: fall back"
+make_release v0.7.0-alpha.11
+make_release v0.7.0-alpha.13
+rm "$fixtures/releases/v0.7.0-alpha.13/aether-release.json" "$fixtures/releases/v0.7.0-alpha.13/aether-release.json.sig"
+make_release v0.7.0-alpha.12
+rm "$fixtures/releases/v0.7.0-alpha.12/aether-release.json" "$fixtures/releases/v0.7.0-alpha.12/aether-release.json.sig"
+set_latest v0.7.0-alpha.13
+api v0.7.0-alpha.13: v0.7.0-alpha.12: v0.7.0-alpha.11:
+latest_install || fail "installer exited non-zero"
+printed "v0.7.0-alpha.13 is not fully published yet (no aether-release.json); installing v0.7.0-alpha.11, $complete"
+not_requested "/v0.7.0-alpha.12/"
+installed_from v0.7.0-alpha.11 linux-amd64
+
 host "latest is missing this platform's binary: fall back after the CDN retries"
 make_release v0.7.0-alpha.11
 make_release v0.7.0-alpha.12
@@ -898,8 +909,6 @@ api v0.7.0-alpha.12:
 if latest_install; then fail "installed with no complete release"; fi
 printed "no complete release for linux/amd64 among the newest 100 releases of 3xDevOps/Aether; pass --version <tag>"
 untouched
-
-# --- integrity failures never fall back ----------------------------------
 
 host "checksum mismatch on latest fails without falling back"
 make_release v0.7.0-alpha.11
@@ -997,7 +1006,34 @@ printed "warning: aether-release.json.sig not verified: that needs OpenSSL 3 (fo
 printed "verified aether-linux-amd64, aether-server-linux-amd64 against aether-release.json and checksums.txt, without a signature check"
 installed_from v0.7.0-alpha.12 linux-amd64
 
-# --- --version installs exactly that tag or nothing ----------------------
+host "an OpenSSL 3 that cannot check ed25519 shows its own error"
+make_release v0.7.0-alpha.12
+set_latest v0.7.0-alpha.12
+mkdir -p "$tmp/no-ed25519"
+cat >"$tmp/no-ed25519/openssl" <<EOF
+#!/bin/sh
+case "\$1" in
+version) echo "OpenSSL 3.0.13 30 Jan 2024" ;;
+pkeyutl) echo "pkeyutl: Error initializing context: unsupported algorithm ED25519" >&2 && exit 1 ;;
+*) exec "$(command -v openssl)" "\$@" ;;
+esac
+EOF
+chmod 0755 "$tmp/no-ed25519/openssl"
+if PATH="$tmp/no-ed25519:$PATH" latest_install; then fail "installed without checking the signature"; fi
+printed "cannot check aether-release.json.sig for v0.7.0-alpha.12 with OpenSSL 3.0.13 30 Jan 2024: pkeyutl: Error initializing context: unsupported algorithm ED25519"
+not_printed "not signed by a trusted release key"
+untouched
+
+reset "a bin dir with a space in it"
+make_release v0.7.0-alpha.12
+set_latest v0.7.0-alpha.12
+mkdir -p "$tmp/with space"
+(
+	unset AETHER_VERSION
+	sh "$script" --role none --bin-dir "$tmp/with space"
+) >"$out" 2>&1 || fail "installer exited non-zero"
+grep -Fq "# release v0.7.0-alpha.12" "$tmp/with space/aether" || fail "the CLI did not land in the spaced directory"
+for f in "$tmp/with space"/.*.install.*; do [ ! -e "$f" ] || fail "left $f behind"; done
 
 host "pinned complete release installs without asking for latest"
 make_release v0.7.0-alpha.11
@@ -1040,6 +1076,13 @@ sh "$script" --role none --version v0.7.0-alpha.11 >"$out" 2>&1 || fail "install
 printed "v0.7.0-alpha.11 has no signed aether-release.json (it predates release signing); verifying SHA-256 against checksums.txt only"
 installed_from v0.7.0-alpha.11 linux-amd64
 
+host "pinned release that must be signed, with both manifest files gone, fails"
+make_release v0.7.0-alpha.12
+rm "$fixtures/releases/v0.7.0-alpha.12/aether-release.json" "$fixtures/releases/v0.7.0-alpha.12/aether-release.json.sig"
+if sh "$script" --role none --version v0.7.0-alpha.12 >"$out" 2>&1; then fail "an unsigned new release installed"; fi
+printed "v0.7.0-alpha.12 has no published aether-release.json; it may still be building or may have failed - not installing a different version"
+untouched
+
 host "pinned release with a checksum mismatch fails"
 make_release v0.7.0-alpha.11
 rm "$fixtures/releases/v0.7.0-alpha.11/aether-release.json" "$fixtures/releases/v0.7.0-alpha.11/aether-release.json.sig"
@@ -1062,8 +1105,6 @@ if sh "$script" --role none --version ../v1 >"$out" 2>&1; then fail "a path inst
 printed "invalid release tag ../v1"
 [ ! -s "$reqs" ] || fail "an invalid tag was requested"
 untouched
-
-# --- the real error, not "no release" ------------------------------------
 
 host "API rate limit"
 mkdir -p "$fixtures/releases/v0.7.0-alpha.12"
@@ -1104,8 +1145,6 @@ printed "curl: (6) Could not resolve host: api.github.com"
 printed "cannot reach https://api.github.com/repos/3xDevOps/Aether/releases?per_page=100"
 untouched
 
-# --- asset selection per platform ----------------------------------------
-
 host "darwin/arm64 gets aether-darwin-arm64 and nothing else"
 make_release v0.7.0-alpha.12
 set_latest v0.7.0-alpha.12
@@ -1130,8 +1169,6 @@ set_latest v0.7.0-alpha.12
 STUB_ARCH=aarch64 latest_install || fail "installer exited non-zero"
 installed_from v0.7.0-alpha.12 linux-arm64 aether
 installed_from v0.7.0-alpha.12 linux-arm64 aether-server
-
-# --- the installer trusts the same keys as aether update -----------------
 
 case_name="release keys"
 go_keys="$(grep -o '"[A-Za-z0-9+/]\{43\}="' "$script_dir/../internal/selfupdate/keys.go" | tr -d '"' | sort | tr '\n' ' ')"
