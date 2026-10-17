@@ -75,7 +75,7 @@ else
 fi
 EOF
 chmod 0755 "$bin/gh" "$bin/curl"
-export GH_LOG="$log" DIST="$dist" PUBLIC="$dist" GITHUB_REPOSITORY=3xDevOps/Aether
+export GH_LOG="$log" DIST="$dist" PUBLIC="$dist" GITHUB_REPOSITORY=3xDevOps/Aether GITHUB_OUTPUT="$tmp/output"
 export PATH="$bin:$PATH"
 
 tag="v0.2.0"
@@ -86,6 +86,7 @@ expected="$tmp/expected.log"
 
 run() {
 	: >"$log"
+	: >"$GITHUB_OUTPUT"
 	sh "$script_dir/publish-release.sh" "$tag" "$dist" >/dev/null 2>"$tmp/err"
 }
 
@@ -109,6 +110,7 @@ run
 	publish_lines true
 } >"$expected"
 diff -u "$expected" "$log"
+echo latest=true | diff -u - "$GITHUB_OUTPUT"
 
 # A retry finds the draft a partial upload left and completes it.
 export GH_STATE=draft GH_ASSETS="aether-linux-amd64"
@@ -150,6 +152,7 @@ run
 	publish_lines false
 } >"$expected"
 diff -u "$expected" "$log"
+echo latest=false | diff -u - "$GITHUB_OUTPUT"
 
 # A rerun after publication verifies the public assets against the
 # published manifest and uploads nothing.
@@ -162,6 +165,8 @@ printf '%s\n' "$view" \
 	"curl $url/checksums.txt" \
 	>"$expected"
 diff -u "$expected" "$log"
+# ... and the image latest tags stay on the newer release.
+echo latest=false | diff -u - "$GITHUB_OUTPUT"
 
 # A published release whose assets no longer match its manifest fails.
 if PUBLIC="$published" CURL_TAMPER=aether-linux-amd64 run; then

@@ -649,6 +649,8 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      latest: ${{ steps.publish.outputs.latest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -701,15 +703,18 @@ jobs:
           diff -u <(printf '%s\n' "${assets[@]}" checksums.txt aether-release.json aether-release.json.sig | sort) \
             <(find . -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
       - name: Publish the GitHub release
+        id: publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: sh scripts/publish-release.sh "$GITHUB_REF_NAME" dist
 
   # latest moves only after the release is published, to the index
   # edge-manifest already pushed, so a release that fails earlier leaves it
-  # where it was and nothing is rebuilt.
+  # where it was and nothing is rebuilt. An older tag than the newest
+  # published release never moves it.
   edge-latest:
     needs: [edge-manifest, release]
+    if: ${{ needs.release.outputs.latest == 'true' }}
     permissions:
       packages: write
     runs-on: ubuntu-latest
@@ -746,6 +751,7 @@ jobs:
 
   standard-latest:
     needs: [standard-manifest, release]
+    if: ${{ needs.release.outputs.latest == 'true' }}
     permissions:
       packages: write
     runs-on: ubuntu-latest

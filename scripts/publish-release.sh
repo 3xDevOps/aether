@@ -1,14 +1,4 @@
 #!/bin/sh
-# Publishes dist/ as the GitHub release for <tag>, resuming whatever state an
-# earlier run left:
-#
-#   no release            create a draft, then continue as for a draft
-#   draft                 upload everything, drop stray assets, download it
-#                         all back and verify it, then publish
-#   published, signed     verify the public downloads; never re-upload
-#   published, unsigned   incomplete: return it to a draft and continue as
-#                         for a draft
-#
 # The release workflow's concurrency group runs one release at a time.
 set -eu
 
@@ -90,6 +80,27 @@ case $(wc -l <"$tmp/release" | tr -d ' ') in
 esac
 printf '%s\n' "${names:-}" | tr ',' '\n' | sed '/^$/d' >"$tmp/names"
 
+# Latest, on GitHub and for the image latest tags, goes to the highest
+# version, so an older tag that finishes after a newer one does not take it.
+# Release notes start at the release below.
+ours=$(sh "$script_dir/android-version-code.sh" "$tag")
+latest=true
+previous=
+previous_code=0
+while read -r other draft prerelease _; do
+	[ "$draft $prerelease" = "false false" ] || continue
+	code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null </dev/null) || continue
+	if [ "$code" -gt "$ours" ]; then
+		latest=false
+	elif [ "$code" -lt "$ours" ] && [ "$code" -gt "$previous_code" ]; then
+		previous=$other
+		previous_code=$code
+	fi
+done <"$tmp/releases"
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+	echo "latest=$latest" >>"$GITHUB_OUTPUT"
+fi
+
 if [ "$state" = false ]; then
 	if grep -qx 'aether-release\.json' "$tmp/names"; then
 		# Assets signed by a published manifest are never replaced.
@@ -108,23 +119,6 @@ if [ "$state" = false ]; then
 	gh release edit "$tag" --draft=true
 	state=true
 fi
-
-# Latest goes to the highest version, so an older tag that finishes after a
-# newer one does not take it; release notes start at the release below.
-ours=$(sh "$script_dir/android-version-code.sh" "$tag")
-latest=true
-previous=
-previous_code=0
-while read -r other draft prerelease _; do
-	[ "$draft $prerelease" = "false false" ] || continue
-	code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null </dev/null) || continue
-	if [ "$code" -gt "$ours" ]; then
-		latest=false
-	elif [ "$code" -lt "$ours" ] && [ "$code" -gt "$previous_code" ]; then
-		previous=$other
-		previous_code=$code
-	fi
-done <"$tmp/releases"
 
 if [ "$state" = none ]; then
 	gh release create "$tag" --draft --verify-tag --title "$tag" --generate-notes \

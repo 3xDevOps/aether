@@ -2187,8 +2187,9 @@ the manifest, requires `checksums.txt` to match, and compares
 `checksums.txt`, `aether-release.json` and `aether-release.json.sig`
 byte for byte with what it signed. Only after the release is published and
 verified do `standard-latest` and `edge-latest` move their respective
-`latest` tags to the verified images; each checks that `latest` carries the
-expected architecture digests.
+`latest` tags to the verified images, and only when no published release has
+a higher version; each checks that `latest` carries the expected
+architecture digests.
 
 Push release tags one at a time: GitHub starts no workflow for any tag when
 more than three are pushed at once. Releases share one workflow-wide
@@ -2299,9 +2300,11 @@ store listing and Android prints it in the phone's app info, where `v0.4.0`
 reads as part of the number. `v0.4.0-alpha.6` ships as versionName
 `0.4.0-alpha.6` and versionCode 400106.
 
-A failed release leaves at most a draft: no published release, no moved
-image `latest` tag, nothing installers or update checks can see. Fix the
-cause, then open the failed run under the repository's **Actions** tab and
+A release that fails before publication leaves at most a draft: no
+published release, no moved image `latest` tag, nothing installers or update
+checks can see. A failure after publication, in the anonymous check or a
+`latest` job, leaves the release published and complete: it was verified
+through the API first. Fix the cause, then open the failed run under the repository's **Actions** tab and
 choose **Re-run failed jobs**, or run
 `gh run rerun <run-id> --failed`. The publisher reuses the draft: it uploads
 every asset again with `gh release upload --clobber`, removes strays and
