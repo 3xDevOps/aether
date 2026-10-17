@@ -16,6 +16,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -94,8 +96,29 @@ type Daemon struct {
 	gitEnv []string
 }
 
+// ValidateServerAddr checks that addr is a host:port with a host that
+// cannot be mistaken for a flag and a numeric port.
+func ValidateServerAddr(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("syncd: server address %q is not host:port: %w", addr, err)
+	}
+	if host == "" || strings.HasPrefix(host, "-") {
+		return fmt.Errorf("syncd: server address %q has no usable host", addr)
+	}
+	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+		return fmt.Errorf("syncd: server address %q has a non-numeric port", addr)
+	}
+	return nil
+}
+
 // New validates cfg, fills defaults, and returns a Daemon.
 func New(cfg Config) (*Daemon, error) {
+	if cfg.Server != "" {
+		if err := ValidateServerAddr(cfg.Server); err != nil {
+			return nil, err
+		}
+	}
 	if cfg.Server == "" && cfg.ServerID == "" {
 		return nil, errors.New("syncd: server address required")
 	}

@@ -56,6 +56,7 @@ After=network-online.target
 [Service]
 ExecStart=` + strings.Join(words, " ") + `
 Restart=on-failure
+RestartPreventExitStatus=2
 RestartSec=5
 
 [Install]

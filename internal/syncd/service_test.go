@@ -17,7 +17,7 @@ func TestServiceUnitLinux(t *testing.T) {
 	if want := `ExecStart=/usr/local/bin/aether daemon run --server host:2222 --repo "/home/dev/my repo"`; !strings.Contains(f.Content, want) {
 		t.Errorf("unit missing %q:\n%s", want, f.Content)
 	}
-	for _, want := range []string{"[Unit]", "[Service]", "[Install]", "Restart=on-failure", "WantedBy=default.target"} {
+	for _, want := range []string{"[Unit]", "[Service]", "[Install]", "Restart=on-failure", "RestartPreventExitStatus=2", "WantedBy=default.target"} {
 		if !strings.Contains(f.Content, want) {
 			t.Errorf("unit missing %q", want)
 		}
