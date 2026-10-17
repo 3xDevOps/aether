@@ -70,8 +70,8 @@ func TestDownloadDesktopChecksTheSignedManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DownloadDesktop: %v", err)
 	}
-	if got, err := os.ReadFile(archive); err != nil || string(got) != string(app) {
-		t.Fatalf("downloaded %d bytes (%v), want the %d the release published", len(got), err, len(app))
+	if got, readErr := os.ReadFile(archive); readErr != nil || string(got) != string(app) {
+		t.Fatalf("downloaded %d bytes (%v), want the %d the release published", len(got), readErr, len(app))
 	}
 	_ = os.Remove(archive)
 
@@ -116,8 +116,8 @@ func TestInstallDesktopFromZipRecordsTheCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InstallDesktop: %v", err)
 	}
-	if got, err := os.ReadFile(filepath.Join(app.App, "resources", "app.asar")); err != nil || string(got) != "asar" {
-		t.Fatalf("resources/app.asar = %q, %v", got, err)
+	if got, readErr := os.ReadFile(filepath.Join(app.App, "resources", "app.asar")); readErr != nil || string(got) != "asar" {
+		t.Fatalf("resources/app.asar = %q, %v", got, readErr)
 	}
 	raw, err := os.ReadFile(filepath.Join(app.App, "resources", "aether-cli.json"))
 	if err != nil {

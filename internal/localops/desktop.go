@@ -401,7 +401,6 @@ func InstallDesktop(goos, home string, src DesktopSource, cliPath string, icon [
 	return app, nil
 }
 
-// writeCLIBinding records cliPath in the staged app's cliBindingFile.
 func writeCLIBinding(staged, cliPath string) error {
 	data, err := json.Marshal(struct {
 		Path string `json:"path"`

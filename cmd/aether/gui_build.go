@@ -135,9 +135,9 @@ func buildAndInstall(buildDir, zipPath string, source bool, notes io.Writer, emi
 	}
 	if src == nil {
 		_, _ = fmt.Fprintf(notes, "building the desktop app in %s\n", buildDir)
-		built, err := localops.BuildDesktop(ctx, desktop.Source, buildDir, version.Version, cliPath, notes, os.Stderr, phase)
-		if err != nil {
-			return desktopBuildError(stopSignals(), err)
+		built, buildErr := localops.BuildDesktop(ctx, desktop.Source, buildDir, version.Version, cliPath, notes, os.Stderr, phase)
+		if buildErr != nil {
+			return desktopBuildError(stopSignals(), buildErr)
 		}
 		src = localops.DesktopFrom(built)
 	}
