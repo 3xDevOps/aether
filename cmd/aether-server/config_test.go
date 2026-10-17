@@ -175,7 +175,7 @@ func TestBrowserImageConfigRoundTripAndPrecedence(t *testing.T) {
 	}
 }
 
-func TestWriteAndReportPrintsActivationWithoutRunningIt(t *testing.T) {
+func TestWriteAndReportWritesTheUnitAndConfig(t *testing.T) {
 	dir := t.TempDir()
 	unitPath := filepath.Join(dir, "aether-server.service")
 	configPath := filepath.Join(dir, "server.conf")
@@ -184,7 +184,7 @@ func TestWriteAndReportPrintsActivationWithoutRunningIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{unitPath, configPath, serversetup.ActivateCommand, "config set"} {
+	for _, want := range []string{unitPath, configPath, "config set"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%s", want, got)
 		}

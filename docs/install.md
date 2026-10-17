@@ -95,9 +95,12 @@ itself, so the question and the command it launches read your terminal
 provisioning script - nothing is asked and nothing extra runs, the same as
 `--role none`. It never blocks waiting for an answer that cannot come.
 
-The script ends by naming the next command for the role you picked and linking
-the quickstart. Cancelling setup or the desktop build stops the installer
-instead, preserving the interrupted command's exit status.
+The script links the quickstart and ends on `next:`, the commands to run for
+the role you picked, in bold orange on a terminal (`NO_COLOR` turns the color
+off). When `aether-server setup` writes the service, setup's own `next:` ends
+the run instead, followed only by the quickstart link, so the command that
+starts the service appears once. Cancelling setup or the desktop build stops
+the installer instead, preserving the interrupted command's exit status.
 
 This script covers Linux and macOS. Windows uses the
 [PowerShell installer](#windows-install-script) below.
@@ -1771,9 +1774,9 @@ post-commit index boundary are explained in
 
 `aether-server setup` walks you through the install: it asks for the listen
 address, data directory, and tailnet policy (Enter accepts each default),
-writes the systemd unit and the config file, and prints the command that
-starts the service. On a host that already runs tailscaled, and where tailnet
-connections are not required to carry a key, it asks one more question -
+and writes the systemd unit and the config file. On a host that already runs
+tailscaled, and where tailnet connections are not required to carry a key, it
+asks one more question -
 `Dashboard HTTPS port on the tailnet (0 = off)`, defaulting to `443` on a
 fresh config - which is how a phone on the tailnet reaches the dashboard
 ([networking.md](networking.md#the-dashboard)). Without tailscaled it turns
@@ -1785,15 +1788,24 @@ it asks who may reach the server through it, `1` (account access) or `2`
 (approved devices), and repeats the question until answered
 ([edge.md](edge.md#access-policies)). Setup is the only thing that turns
 the edge on: `edge-url` is empty unless the config file or a flag names an
-edge, so an upgrade never enrolls an existing server. With the edge on,
-setup ends by printing the server id and a claim link for the Aether
-app, with the claim code inside it for `aether link --claim <code>`.
-Last, unless Docker already has Sysbox, setup asks `Let agents use Docker
+edge, so an upgrade never enrolls an existing server.
+The last question, unless Docker already has Sysbox, is `Let agents use Docker
 inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)`,
-defaulting to yes, and installs it after writing the files. On a host that
+defaulting to yes; setup installs it after writing the files. On a host that
 cannot run Sysbox it prints `Docker inside runs is unavailable on this host:
 <reason>`; if the install fails it prints the error and
-`sudo aether-server sysbox install`. Either way setup completes.
+`sudo aether-server sysbox install`. Ctrl-C stops only the wait: under
+systemd the installer keeps running as the `aether-sysbox-install` unit,
+because stopping apt or dpkg midway can leave packages half-configured, and
+setup says so. Either way setup completes.
+With the edge on, setup then prints the server id and a claim link for the
+Aether app, with the claim code inside it for `aether link --claim <code>`.
+Setup ends on `next:`, after everything else: the command that starts the
+service, then how to reach the server from your computer - the claim link or
+`aether link --claim <code>` while the edge is on and the server has no owner,
+otherwise `aether link <this-host>:2222` with the port from `addr`. On a
+terminal these are bold orange; with `NO_COLOR` set, or output that is not a
+terminal, they are plain text.
 Answering `server` to the install script's question runs it for you; this
 is the same command by hand.
 
@@ -1813,7 +1825,9 @@ sudo aether-server install --addr :2222 --tailnet-auto-join
 
 `install` also installs Sysbox, as setup does without the question, unless
 you pass `--sysbox=false`. The flag is not a serve option and is not written
-to the config file.
+to the config file. It ends on the same `next:` as setup but issues no claim
+code: with the edge on and no owner, step 2 is
+`sudo aether-server edge claim-code`, which prints the claim link.
 
 To install or check Sysbox on its own, on the server host:
 
@@ -1832,13 +1846,15 @@ restarts only when no container is running.
 `aether update` prints the install command after replacing `aether-server`
 on a Debian or Ubuntu host whose Docker lacks Sysbox. It never runs it.
 
-Neither command starts anything; both print the activation line so an install
-never restarts a live server behind your back:
+Neither command starts anything; both end on `next:`, whose first command
+starts the service, so an install never restarts a live server behind your
+back. Run through `sudo`, they put `sudo` before each `systemctl`; from a root
+shell they print it bare. To start the service and follow its log:
 
 ```sh
-systemctl daemon-reload && systemctl enable --now aether-server
-systemctl status aether-server
-journalctl -u aether-server -f
+sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
+sudo systemctl status aether-server
+sudo journalctl -u aether-server -f
 ```
 
 The unit runs the server as root and creates `/var/lib/aether` through

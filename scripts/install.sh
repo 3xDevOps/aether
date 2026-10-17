@@ -707,10 +707,12 @@ replacing=no staged=no
 # --- finish that role's setup ------------------------------------------
 
 setup_ran=no
+setup_wrote=no
 gui_built=no
 
-# `aether-server setup` asks its own questions and prints the systemd
-# activation line, so this script must not repeat any of that.
+# Once `aether-server setup` writes the unit it ends on the commands that
+# start the service, so this script must print nothing after them that
+# could bury them.
 run_server_setup() {
 	if [ ! -x "${BIN_DIR}/aether-server" ]; then
 		say "aether-server was not installed here, so there is nothing to set up"
@@ -727,14 +729,17 @@ run_server_setup() {
 	fi
 	echo
 	say "running aether-server setup"
+	: >"$tmp/setup-started"
 	run_interactive $setup_sudo "${BIN_DIR}/aether-server" setup || return 1
 	# Declining setup's summary is a clean exit that writes nothing, so the
-	# exit status alone cannot say whether there is a service to activate.
-	# The systemd unit can: setup rewrites it whenever it writes anything,
-	# and if one is already there the activation line is the right next
-	# command regardless. The config file is the wrong signal, because
-	# `aether-server config set` creates one without a unit.
-	[ -f "$UNIT_PATH" ]
+	# exit status alone cannot say whether setup printed its next steps. The
+	# systemd unit can: setup rewrites it whenever it writes anything, so it
+	# is not older than the marker, while a unit from an earlier install is.
+	# Equal times count as written. The config file is the wrong signal,
+	# because `aether-server config set` creates one without a unit.
+	if [ -f "$UNIT_PATH" ] && ! [ "$UNIT_PATH" -ot "$tmp/setup-started" ]; then
+		setup_wrote=yes
+	fi
 }
 
 # The CLI is for agents to steer Aether; people should get the desktop app.
@@ -750,11 +755,6 @@ run_gui_build() {
 	say "building the desktop app - this downloads Electron and takes a few minutes"
 	run_interactive "${BIN_DIR}/aether" gui build || return 1
 }
-
-case "$ROLE" in
-server) run_server_setup && setup_ran=yes || true ;;
-client) run_gui_build && gui_built=yes || true ;;
-esac
 
 # --- PATH, and an older CLI that would shadow this one -----------------
 
@@ -780,72 +780,114 @@ path_line() {
 	esac
 }
 
-warned=no
-case ":${PATH}:" in
-*":${BIN_DIR}:"*) ;;
-*)
-	echo
-	warned=yes
-	say "warning: ${BIN_DIR} is not on your PATH. Add it, then open a new shell:"
-	echo "  $(path_line)"
-	if [ "$BIN_DIR" = "$USER_BIN_DIR" ]; then
-		say "the desktop app looks in ~/.local/bin itself, so it starts either way."
-	fi
-	;;
-esac
+check_path() {
+	warned=no
+	case ":${PATH}:" in
+	*":${BIN_DIR}:"*) ;;
+	*)
+		echo
+		warned=yes
+		say "warning: ${BIN_DIR} is not on your PATH. Add it, then open a new shell:"
+		echo "  $(path_line)"
+		if [ "$BIN_DIR" = "$USER_BIN_DIR" ]; then
+			say "the desktop app looks in ~/.local/bin itself, so it starts either way."
+		fi
+		;;
+	esac
 
-# An older CLI in /usr/local/bin comes first on most PATHs, so it would run
-# instead of the one just installed.
-if [ "$BIN_DIR" != "$SYSTEM_BIN_DIR" ] && [ "$COMPONENTS" != server ] &&
-	[ -e "${SYSTEM_BIN_DIR}/aether" ]; then
-	[ "$warned" = yes ] || echo
-	say "warning: an older ${SYSTEM_BIN_DIR}/aether would shadow ${BIN_DIR}/aether. Remove it:"
-	echo "  sudo rm -f ${SYSTEM_BIN_DIR}/aether"
-fi
+	# An older CLI in /usr/local/bin comes first on most PATHs, so it would run
+	# instead of the one just installed.
+	if [ "$BIN_DIR" != "$SYSTEM_BIN_DIR" ] && [ "$COMPONENTS" != server ] &&
+		[ -e "${SYSTEM_BIN_DIR}/aether" ]; then
+		[ "$warned" = yes ] || echo
+		say "warning: an older ${SYSTEM_BIN_DIR}/aether would shadow ${BIN_DIR}/aether. Remove it:"
+		echo "  sudo rm -f ${SYSTEM_BIN_DIR}/aether"
+	fi
+}
+
+# The PATH warnings go before setup, which must end the run, and after the
+# desktop build, whose output would bury them.
+case "$ROLE" in
+server)
+	check_path
+	run_server_setup && setup_ran=yes || true
+	;;
+client)
+	run_gui_build && gui_built=yes || true
+	check_path
+	;;
+*) check_path ;;
+esac
 
 # --- what happened, what is next, and the guide ------------------------
 
+quickstart="https://github.com/${REPO}/blob/main/docs/quickstart.md"
+
+if [ "$setup_wrote" = yes ]; then
+	echo
+	echo "Read the quickstart before going further: ${quickstart}"
+	exit 0
+fi
+
+# NO_COLOR: https://no-color.org
+hi="" lo=""
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+	hi="$(printf '\033[1m\033[38;2;245;130;49m')"
+	lo="$(printf '\033[0m')"
+fi
+
+next_step() {
+	if [ $# -eq 1 ]; then
+		printf '  %s%s%s\n' "$hi" "$1" "$lo"
+	else
+		printf '  %s%-30s%s # %s\n' "$hi" "$1" "$lo" "$2"
+	fi
+}
+
 echo
 case "$ROLE" in
-server)
-	echo "This machine is your Aether server: agents run here."
-	echo
-	echo "next:"
-	if [ "$setup_ran" = yes ]; then
-		echo "  systemctl daemon-reload && systemctl enable --now aether-server"
-		echo "  aether link <this-host>:2222    # from your own machine; the first link becomes admin"
-	else
-		echo "  sudo aether-server setup       # config, systemd unit, and how to start it"
-		echo "  aether link <this-host>:2222   # from your own machine; the first link becomes admin"
-	fi
-	;;
+server) echo "This machine is your Aether server: agents run here." ;;
 client)
 	echo "This machine is a client: you work here and connect to a server."
 	if [ "$gui_built" != yes ]; then
 		echo "The desktop app was not built; the message above says why."
 	fi
-	echo
-	echo "next:"
-	echo "  aether link <server-host>:2222  # the first link on a fresh server becomes admin"
-	if [ "$gui_built" != yes ]; then
-		echo "  aether gui build               # the desktop app, or run \`aether gui\` for a browser tab"
-	fi
 	;;
-*)
-	echo "The binaries are installed. Nothing else was set up on this machine."
-	echo
-	echo "next:"
-	if [ "$COMPONENTS" != "client" ]; then
-		echo "  sudo aether-server setup       # on the server box: config, systemd unit, activation line"
-	fi
-	echo "  aether link <server>:2222      # from a client; the first link becomes admin"
-	;;
+*) echo "The binaries are installed. Nothing else was set up on this machine." ;;
 esac
-
 echo
 echo "Read the quickstart before going further. It is ten minutes to a finished agent"
 echo "run, and skipping it is how people end up stuck."
 echo
-echo "  https://github.com/${REPO}/blob/main/docs/quickstart.md"
+echo "  ${quickstart}"
 echo
 echo "Install reference: https://github.com/${REPO}/blob/main/docs/install.md"
+echo
+echo "${hi}next:${lo}"
+case "$ROLE" in
+server)
+	if [ "$setup_ran" = yes ] && [ -f "$UNIT_PATH" ]; then
+		# Whoever piped this to `sudo sh` is not root either, as setup decides.
+		as_root=""
+		if [ -n "$setup_sudo" ] || [ -n "${SUDO_USER:-}" ]; then
+			as_root="sudo "
+		fi
+		next_step "${as_root}systemctl daemon-reload && ${as_root}systemctl enable --now aether-server"
+	else
+		next_step "sudo aether-server setup" "config, systemd unit, and how to start it"
+	fi
+	next_step "aether link <this-host>:2222" "from your own machine; the first link becomes admin"
+	;;
+client)
+	next_step "aether link <server-host>:2222" "the first link on a fresh server becomes admin"
+	if [ "$gui_built" != yes ]; then
+		next_step "aether gui build" "the desktop app, or run \`aether gui\` for a browser tab"
+	fi
+	;;
+*)
+	if [ "$COMPONENTS" != "client" ]; then
+		next_step "sudo aether-server setup" "on the server box: config, systemd unit, activation line"
+	fi
+	next_step "aether link <server>:2222" "from a client; the first link becomes admin"
+	;;
+esac

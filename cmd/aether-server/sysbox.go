@@ -30,12 +30,19 @@ func sysboxOn() bool {
 
 // installSysbox runs the installer for setup and install. Docker inside
 // runs is optional, so neither an unsupported host nor a failure fails the
-// command that called it.
+// command that called it, and Ctrl-C stops only the wait for the installer:
+// the files are written by then, and the caller still prints how to start
+// them.
 func installSysbox(w io.Writer) {
-	err := sysboxInstall(context.Background(), w)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	err := sysboxInstall(ctx, w)
 	var unsupported *sysbox.UnsupportedError
+	var detached *sysbox.DetachedError
 	switch {
 	case err == nil:
+	case errors.As(err, &detached):
+		_, _ = fmt.Fprintf(w, "Stopped waiting for Sysbox: %v\nOnce it has, check Docker inside runs with: aether-server sysbox status\n", err)
 	case errors.As(err, &unsupported):
 		_, _ = fmt.Fprintf(w, "Docker inside runs is unavailable on this host: %s\n", unsupported.Reason)
 	default:

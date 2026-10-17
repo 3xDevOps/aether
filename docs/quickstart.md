@@ -78,8 +78,8 @@ rather than bypassing protection.
 
 Answering **server** in step 1 already ran the command below on the server
 box. It writes the config and the systemd unit but deliberately starts
-nothing, so the activation line it printed is still yours to run. Run setup by
-hand if you skipped the question:
+nothing, so the commands it ends on are still yours to run. Run setup by hand
+if you skipped the question:
 
 ```sh
 sudo aether-server setup
@@ -91,11 +91,7 @@ and whether to use the edge (Enter accepts each default) - and, with the edge
 on, who may reach the server through it, a question with no default. It also
 offers to install Sysbox on Ubuntu and Debian, which lets agents run Docker
 inside their runs ([environments.md](environments.md#docker-inside-runs)).
-Then it prints:
-
-```sh
-systemctl daemon-reload && systemctl enable --now aether-server
-```
+It then writes the files and, if you said yes, runs the Sysbox installer.
 
 On a host without tailscaled, setup turns on the **edge**: a relay the Aether
 project runs at `https://edge.onaether.dev` that the server and your machine
@@ -104,10 +100,15 @@ prints what the edge can see and `aether-server config set edge-url ""`,
 which turns it off. It then asks for the **access policy**: `1` (account
 access) lets people you invite in by signing in with GitHub; `2`
 (approved devices) makes each new device wait until a person approves it.
-[edge.md](edge.md#access-policies) compares them. Setup then prints the
-server's id and a **claim link**, which makes whoever uses it first the
-server's admin. The claim code inside it, `<server id>-<secret>`, is what
-`aether link --claim` takes:
+[edge.md](edge.md#access-policies) compares them. After the Sysbox installer,
+setup prints the server's id and a **claim link**, which makes whoever uses it
+first the server's admin. The claim code inside it, `<server id>-<secret>`, is
+what `aether link --claim` takes.
+
+Once it writes the files, setup ends on `next:`, the commands left for you, in
+bold orange on a terminal (`NO_COLOR` turns the color off). Run through
+`sudo`, it puts `sudo` before each `systemctl`. With the edge on, the end of
+the output is:
 
 ```
 edge: https://edge.onaether.dev
@@ -115,11 +116,19 @@ edge access: approved-devices
 server id: <server id>
 edge key: pinned when the server first connects; `aether-server edge status` shows it
 claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid until 3:04PM, 5 attempts)
-open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:
-  aether link --claim <server id>-<secret>
+
+next:
+  1. start the server on this machine:
+       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
+  2. on your computer, open the claim link above with the Aether app, or paste it
+     into the app's Connect page; in a terminal:
+       aether link --claim <server id>-<secret>
 ```
 
-Run the activation line and the server is live on `:2222`. The SSH port is
+Without the edge, or once the server is claimed, step 2 is
+`aether link <this-host>:2222`, with the port from `addr`.
+
+Run step 1 and the server is live on `:2222`. The SSH port is
 the only thing it listens on unless you answered the dashboard question; the
 edge connection is outbound. The claim code lasts 30 minutes;
 `sudo aether-server edge claim-code` prints a new link until someone has
