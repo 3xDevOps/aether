@@ -145,7 +145,7 @@ func nudgeUpdate(c *selfupdate.Checker) {
 	if err != nil || !check.UpdateAvailable {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "update available: %s (running %s); run: aether update\n", check.Latest, check.Version)
+	fmt.Fprintf(os.Stderr, "update available: %s (running %s); run: %s\n", check.Latest, check.Version, updateCommand())
 }
 
 // waitForExit blocks until the process is told to stop. The caller's
