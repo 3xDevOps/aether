@@ -155,7 +155,7 @@ func TestCompatFloor(t *testing.T) {
 	closeStore(t, openSteps(t, path, breaking))
 	_, err := open(path, breaking[:1])
 	want := "edgestore: database schema version 2 is newer than this binary supports (1); run a binary that supports schema 2 or later, " +
-		"or stop the edge and restore the backup taken before the upgrade: aether-edge restore " + filepath.Join(dir, BackupDir, backupsIn(t, dir)[0])
+		"or stop the edge and restore the backup taken before the upgrade: aether-edge restore --data " + dir + " " + filepath.Join(dir, BackupDir, backupsIn(t, dir)[0])
 	if err == nil || err.Error() != want {
 		t.Fatalf("open = %v\nwant %s", err, want)
 	}

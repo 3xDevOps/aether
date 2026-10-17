@@ -132,8 +132,8 @@ func restoreHint(path string, supported, floor int) string {
 	files, _ := migrationBackups(dir) // the hint is best effort; the refusal stands
 	for _, f := range files {
 		if f.from <= supported {
-			return fmt.Sprintf("run a binary that supports schema %d or later, or stop the edge and restore the backup taken before the upgrade: aether-edge restore %s",
-				floor, filepath.Join(dir, f.name))
+			return fmt.Sprintf("run a binary that supports schema %d or later, or stop the edge and restore the backup taken before the upgrade: aether-edge restore --data %s %s",
+				floor, filepath.Dir(path), filepath.Join(dir, f.name))
 		}
 	}
 	return fmt.Sprintf("run a binary that supports schema %d or later; %s holds no backup taken at schema %d or older", floor, dir, supported)

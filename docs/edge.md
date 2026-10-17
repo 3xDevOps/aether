@@ -1719,7 +1719,7 @@ After any other migration the older binary refuses the database and names
 the backup to restore:
 
 ```
-aether-edge: edgestore: database schema version 2 is newer than this binary supports (1); run a binary that supports schema 2 or later, or stop the edge and restore the backup taken before the upgrade: aether-edge restore /var/lib/aether-edge/backups/edge-v1-v2-20261017T050000.000000Z.db
+aether-edge: edgestore: database schema version 2 is newer than this binary supports (1); run a binary that supports schema 2 or later, or stop the edge and restore the backup taken before the upgrade: aether-edge restore --data /var/lib/aether-edge /var/lib/aether-edge/backups/edge-v1-v2-20261017T050000.000000Z.db
 ```
 
 To roll back, stop the edge, restore that backup with the new binary or

@@ -144,6 +144,9 @@ func backupCmd(args []string, getenv func(string) string, out, errOut io.Writer)
 		if err = writeNew(dst+".key", key); err != nil {
 			return err
 		}
+		if err = edgestore.SyncDir(dir); err != nil {
+			return err
+		}
 		msg += fmt.Sprintf("backed up the edge key %s to %s.key\n", fp, dst)
 	}
 	_, err = io.WriteString(out, msg)
