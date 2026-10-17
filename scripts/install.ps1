@@ -857,7 +857,8 @@ function Invoke-AetherGuiBuild {
     try {
         [Environment]::SetEnvironmentVariable('AETHER_BIN', $CliPath, 'Process')
         New-Item -ItemType Directory -Path (Split-Path -Parent $LogPath) -Force -ErrorAction Stop | Out-Null
-        $log = [System.IO.File]::Create($LogPath)
+        # Concurrent installs share the log; the CLI's own build lock orders them.
+        $log = [System.IO.File]::Open($LogPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
         $start = New-Object System.Diagnostics.ProcessStartInfo
         $start.FileName = $CliPath
         $start.Arguments = 'gui build --json'
@@ -879,7 +880,15 @@ function Invoke-AetherGuiBuild {
         $prebuilt = $false
         $failure = $null
         $installed = $null
-        while ($null -ne ($line = $process.StandardOutput.ReadLine())) {
+        while ($true) {
+            # A failed log write stops draining stderr, and a build blocked on
+            # that full pipe would never close stdout.
+            $read = $process.StandardOutput.ReadLineAsync()
+            while (-not $read.Wait(200)) {
+                if ($copy.IsFaulted -and -not $process.HasExited) { $process.Kill() }
+            }
+            $line = $read.Result
+            if ($null -eq $line) { break }
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             $record = $null
             try { $record = ConvertFrom-Json -InputObject $line -ErrorAction Stop } catch { }
@@ -903,12 +912,15 @@ function Invoke-AetherGuiBuild {
             }
         }
         $process.WaitForExit()
-        $copy.Wait()
-        $log.Dispose()
-        $log = $null
         if ($null -ne $phase) {
             Write-Host ('stopped after ' + (Format-AetherSeconds $watch))
         }
+        if ($copy.IsFaulted) {
+            throw ("cannot write {0}: {1}. The CLI is installed; rerun: {2}" -f $LogPath, $copy.Exception.GetBaseException().Message, $rerun)
+        }
+        $copy.Wait()
+        $log.Dispose()
+        $log = $null
         if ($process.ExitCode -ne 0 -or $null -ne $failure) {
             if ([string]::IsNullOrEmpty($failure)) {
                 $failure = 'aether gui build exited with code {0}' -f $process.ExitCode
