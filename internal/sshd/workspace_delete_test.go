@@ -229,7 +229,7 @@ type blockedDeletionDisk struct {
 	release chan struct{}
 }
 
-func (d *blockedDeletionDisk) Usage() (disk.Usage, error) {
+func (d *blockedDeletionDisk) Usage(context.Context) (disk.Usage, error) {
 	close(d.started)
 	<-d.release
 	return disk.Usage{TotalBytes: 100, UsedBytes: 25}, nil

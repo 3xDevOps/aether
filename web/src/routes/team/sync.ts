@@ -14,6 +14,11 @@ import type { FeedFilters } from '@/store/timeline'
 const heartbeatMs = 15_000
 /** A wake within this long of the last full read does not read again. */
 const minGapMs = 2500
+/**
+ * Both gateways speak HTTP/1.1, so an unanswered disk read holds one of the
+ * browser's six connections to the host. A current server answers within 5 s.
+ */
+const diskTimeoutMs = 10_000
 /** How far back from the log head the feed opens, in event sequence. */
 const feedWindow = 500
 const feedPage = 200
@@ -39,7 +44,7 @@ export function focusedWorkspace(state: RootState): string {
 export async function refreshTeam(store: RootStore, client: Api = api): Promise<void> {
   await Promise.all([
     client.presenceRoster().then(store.getState().setPresence).catch(ignore),
-    client.disk().then(rememberDisk).catch(rememberDiskError),
+    readDisk(client),
     refreshInbox(store, client),
     ...Object.keys(store.getState().workspaces).map((id) =>
       client.budgetGet(id).then(store.getState().setBudget).catch(ignore),
@@ -76,6 +81,24 @@ export async function heartbeat(store: RootStore, client: Api = api): Promise<vo
   await client.presenceHeartbeat(workspaceID).catch(ignore)
 }
 
+let diskRead: Promise<void> | undefined
+
+/** One read at a time: a reconnect or wake joins the heartbeat's read instead of adding one. */
+function readDisk(client: Api): Promise<void> {
+  if (diskRead) return diskRead
+  const abort = new AbortController()
+  const deadline = setTimeout(() => abort.abort(new Error('Disk usage request timed out after 10 seconds')), diskTimeoutMs)
+  diskRead = client
+    .disk(abort.signal)
+    .then(rememberDisk)
+    .catch(rememberDiskError)
+    .finally(() => {
+      clearTimeout(deadline)
+      diskRead = undefined
+    })
+  return diskRead
+}
+
 /** Writes only a real change, so a quiet server does not re-render the shell every refresh. */
 function rememberDisk(disk: DiskUsage): void {
   const s = useStore.getState()
@@ -110,7 +133,7 @@ export function useTeamRefresh(client: Api = api): void {
     const timer = setInterval(() => {
       void heartbeat(useStore, client)
       // Disk usage has no event; the heartbeat's pace is plenty for a gauge.
-      void client.disk().then(rememberDisk).catch(rememberDiskError)
+      void readDisk(client)
     }, heartbeatMs)
     return () => clearInterval(timer)
   }, [route, client])

@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 // Bytes each seeded tree holds on disk. The shared pack is one inode with
@@ -108,56 +107,5 @@ func TestMeasureToleratesMissingDirectories(t *testing.T) {
 	}
 	if got.TotalBytes == 0 {
 		t.Error("filesystem total is zero on an empty data dir")
-	}
-}
-
-// The dashboard refreshes the gauge every couple of seconds, so the walk is
-// reused for the TTL while the filesystem headroom stays fresh.
-func TestCacheReusesTheWalkUntilTheTTLExpires(t *testing.T) {
-	dir := seedDataDir(t)
-	clock := time.Now()
-	c := NewCache(dir, time.Minute, nil)
-	c.now = func() time.Time { return clock }
-
-	first, err := c.Usage()
-	if err != nil {
-		t.Fatalf("Usage: %v", err)
-	}
-	if first.WorktreeBytes != seededWorktreeBytes {
-		t.Fatalf("worktree bytes = %d, want %d", first.WorktreeBytes, seededWorktreeBytes)
-	}
-	if first.RepoBytes != seededRepoBytes {
-		t.Fatalf("repo bytes = %d, want %d", first.RepoBytes, seededRepoBytes)
-	}
-
-	if werr := os.WriteFile(filepath.Join(dir, checkoutsDir, "run_1", "big"), make([]byte, 1000), 0o644); werr != nil {
-		t.Fatalf("grow the checkout: %v", werr)
-	}
-	if werr := os.WriteFile(filepath.Join(dir, reposDir, "ws_1.git", "objects", "pack", "pack-2.pack"), make([]byte, 250), 0o644); werr != nil {
-		t.Fatalf("grow the bare repo: %v", werr)
-	}
-	within, err := c.Usage()
-	if err != nil {
-		t.Fatalf("Usage within the TTL: %v", err)
-	}
-	if within.WorktreeBytes != seededWorktreeBytes {
-		t.Errorf("worktree bytes within the TTL = %d, want the cached %d",
-			within.WorktreeBytes, seededWorktreeBytes)
-	}
-	if within.RepoBytes != seededRepoBytes {
-		t.Errorf("repo bytes within the TTL = %d, want the cached %d",
-			within.RepoBytes, seededRepoBytes)
-	}
-
-	clock = clock.Add(time.Minute)
-	after, err := c.Usage()
-	if err != nil {
-		t.Fatalf("Usage after the TTL: %v", err)
-	}
-	if want := uint64(seededWorktreeBytes + 1000); after.WorktreeBytes != want {
-		t.Errorf("worktree bytes after the TTL = %d, want the re-walked %d", after.WorktreeBytes, want)
-	}
-	if want := uint64(seededRepoBytes + 250); after.RepoBytes != want {
-		t.Errorf("repo bytes after the TTL = %d, want the re-walked %d", after.RepoBytes, want)
 	}
 }

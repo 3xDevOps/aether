@@ -34,7 +34,7 @@ type fakeDisk struct {
 	err   error
 }
 
-func (f *fakeDisk) Usage() (disk.Usage, error) { return f.usage, f.err }
+func (f *fakeDisk) Usage(context.Context) (disk.Usage, error) { return f.usage, f.err }
 
 func wireErrOf(t *testing.T, err error) *protocol.Error {
 	t.Helper()
@@ -170,6 +170,17 @@ func TestServerDiskFilesystemFailureHidesPrivatePath(t *testing.T) {
 	}
 	if pe.Message != "server.disk: the data directory's filesystem could not be read" {
 		t.Errorf("read failure message = %q, must not echo server paths", pe.Message)
+	}
+}
+
+func TestServerDiskSaysWhenTheFirstWalkIsRunning(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(c *Config) { c.Services.Disk = &fakeDisk{err: disk.ErrMeasuring} })
+	c := controlClient(t, e)
+
+	pe := wireErrOf(t, c.Call(protocol.MethodServerDisk, nil, nil))
+	if want := "server.disk: " + disk.ErrMeasuring.Error(); pe.Code != protocol.CodeUnavailable || pe.Message != want {
+		t.Errorf("first walk running = %d %q, want %d %q", pe.Code, pe.Message, protocol.CodeUnavailable, want)
 	}
 }
 

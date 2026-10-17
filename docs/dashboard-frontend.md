@@ -3991,7 +3991,10 @@ questions and queued messages stay contextual to their run, in its Details
   fills from live PTY attaches - the browser's attaches included.
 - The full read and the heartbeat interval read `GET /api/v1/disk` and write
   it onto the stored `server.info`, which is what fills the disk gauge in
-  Settings > Server.
+  Settings > Server. One read runs at a time, so a reconnect or wake joins
+  the heartbeat's read, and a read unanswered after 10 seconds is aborted and
+  shown as the gauge's error: both gateways speak HTTP/1.1, so a stuck read
+  holds one of the browser's six connections to the host.
 
 ## Insights
 

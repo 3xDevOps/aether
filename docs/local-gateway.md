@@ -1465,13 +1465,22 @@ Unknown reclaimability is omitted. Inventory does not expose private
 filenames or credentials; non-admin members receive aggregate accounting
 without owner details.
 
+Headroom (`used_bytes`, `total_bytes`, `free_bytes`) is read on every call.
+The categories, `entries`, `warnings` and `docker` come from the last
+finished walk of the data directory. A call that finds that walk more than
+5 minutes old starts the next walk in the background and still answers from
+the old one; one walk runs at a time. Until the first walk after a server
+start finishes, a call waits up to 5 seconds for it, then answers `503` with
+`-32004`: `server.disk: disk usage is still being measured: the server's
+first scan of its data directory has not finished`.
+
 `protocol.ServerInfoResult` is shared with the CLI and frozen, and the number
 is of no use to a terminal client, so it is read here instead of being added
 to `server.info`. Any member may read the aggregate deployment capacity.
 Owner details are admin-only. `503` with `-32004` when the
-server was not told where the data directory is, or the platform has no
+server was not told where the data directory is, the platform has no
 `statfs` (the server ships for linux; the read refuses rather than reporting
-zero anywhere else).
+zero anywhere else), or the first walk is still running.
 
 
 
@@ -1513,8 +1522,9 @@ exceeds the 64 MiB limit`.
   served: `run.patch` when diff rendering is not enabled (no git engine
   wired), when the run has no checkout left to diff, or when a requested tree
   is gone (`run.patch: retained snapshot history has expired or is unavailable`),
-  `server.disk` when the server was not told where the data directory is or
-  the filesystem holding it could not be read, and `files.tree`,
+  `server.disk` when the server was not told where the data directory is,
+  the filesystem holding it could not be read, or its first walk of the data
+  directory is still running, and `files.tree`,
   `files.read`, or `files.diff` when their checkout or repository is
   unavailable. All three files methods also answer `-32602` for a rejected
   path. The underlying errors name server-side paths,

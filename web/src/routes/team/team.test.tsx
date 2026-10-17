@@ -329,6 +329,31 @@ describe('team refresh and summary', () => {
     expect(screen.queryByText(failure.message)).toBeNull()
   })
 
+  // Stuck reads would fill the browser's six HTTP/1.1 connections to the gateway.
+  it('keeps one disk read in flight and gives up on it after 10 s', async () => {
+    const disk = vi.fn<Api['disk']>((signal) => new Promise((_, reject) => {
+      signal?.addEventListener('abort', () => reject(signal.reason))
+    }))
+    const client = fakeApi({ disk })
+    seed({ info: { ...serverInfo, disk: undefined } })
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const reads = Promise.all([refreshTeam(useStore, client), refreshTeam(useStore, client)])
+      expect(disk).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(10_000)
+      await reads
+      expect(useStore.getState().info?.diskError).toBe('Disk usage request timed out after 10 seconds')
+
+      disk.mockResolvedValueOnce(serverInfo.disk!)
+      await refreshTeam(useStore, client)
+      expect(disk).toHaveBeenCalledTimes(2)
+      expect(useStore.getState().info?.disk).toEqual(serverInfo.disk)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('lists what each container holds outside its mounted folders', () => {
     seed({ info: { ...serverInfo, disk: { ...serverInfo.disk!, containers: undefined } } })
     const { unmount } = render(<ServerSection />)

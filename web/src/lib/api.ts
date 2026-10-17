@@ -386,8 +386,8 @@ async function getResponse(path: string, signal?: AbortSignal): Promise<Response
   return res
 }
 
-async function get<T>(path: string): Promise<T> {
-  return (await (await getResponse(path)).json()) as T
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return (await (await getResponse(path, signal)).json()) as T
 }
 
 async function downloadArtifact(params: DevArtifactDownloadRequest, signal?: AbortSignal): Promise<Blob> {
@@ -1026,7 +1026,7 @@ export const api = {
     call<{ content_base64: string; size: number }>('home.download', { path }),
   filesDiff: (runID: string, path: string) =>
     call<FileDiff>('files.diff', { run_id: runID, path }),
-  disk: () => get<DiskUsage>('/disk'),
+  disk: (signal?: AbortSignal) => get<DiskUsage>('/disk', signal),
   capabilities: () => get<GatewayCapabilities>('/capabilities'),
   localLinkStatus: () => local<LinkStatus>('link.status'),
   localWorkspaceSelection: (workspaceID?: string) =>
