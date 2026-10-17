@@ -58,7 +58,6 @@ func (g *registration) send(m edgeproto.Message) error {
 	return g.sendWithin(context.Background(), m)
 }
 
-// sendWithin is send, bounded by ctx too.
 func (g *registration) sendWithin(ctx context.Context, m edgeproto.Message) error {
 	select {
 	case <-g.ready:

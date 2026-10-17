@@ -61,7 +61,6 @@ func (l *listenerState) check() string {
 	return checkOK
 }
 
-// serve serves srv on ln and records when it stops.
 func (l *listenerState) serve(name string, srv *http.Server, ln net.Listener) error {
 	err := serveHTTP(name, srv, ln)
 	reason := "closed"
