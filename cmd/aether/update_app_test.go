@@ -8,8 +8,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,5 +104,63 @@ func TestRebuildDesktopAppReportsAFailedBuild(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "restart the Aether app") {
 		t.Fatalf("output = %q, want no restart line after a failed build", out.String())
+	}
+}
+
+func TestHandOffToServerUpdate(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("server hosts are Linux")
+	}
+	self, err := executablePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := filepath.Join(filepath.Dir(self), "aether-server")
+	if err = os.WriteFile(server, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(server) })
+	stubRebuild(t, "unused", func() bool { return false })
+	rebuildAppArgv = func(bin string, _ localops.RealUser, _ bool) []string {
+		return []string{"sudo", "-u", "ada", "-H", bin, "gui", "build"}
+	}
+	var execed []string
+	oldUnit, oldExec := systemctlShowServer, execProcess
+	t.Cleanup(func() { systemctlShowServer, execProcess = oldUnit, oldExec })
+	execProcess = func(_ string, argv []string, _ []string) error {
+		execed = argv
+		return nil
+	}
+
+	show := func(v string) {
+		systemctlShowServer = func(context.Context) ([]byte, error) { return []byte(v), nil }
+	}
+	var out bytes.Buffer
+	show("LoadState=loaded\nUser=ada\n")
+	handed, err := handOffToServerUpdate(context.Background(), "v1", &out)
+	if handed || err != nil || execed != nil {
+		t.Fatalf("non-root unit: handed=%v err=%v execed=%v, want the old path", handed, err, execed)
+	}
+	show("LoadState=not-found\nUser=\n")
+	handed, err = handOffToServerUpdate(context.Background(), "v1", &out)
+	if handed || err != nil || execed != nil || out.Len() > 0 {
+		t.Fatalf("no unit: handed=%v err=%v execed=%v out=%q, want nothing done", handed, err, execed, out.String())
+	}
+
+	show("LoadState=loaded\nUser=\n")
+	handed, err = handOffToServerUpdate(context.Background(), "v1", &out)
+	if !handed || err != nil {
+		t.Fatalf("unit: handed=%v err=%v", handed, err)
+	}
+	if want := []string{server, "update", "--version", "v1"}; !slices.Equal(execed, want) {
+		t.Errorf("argv = %v, want %v", execed, want)
+	}
+	for _, want := range []string{
+		"the desktop app at /home/u/.local/share/aether/desktop is not rebuilt on a server host; rebuild it with: sudo -u ada -H " + self + " gui build",
+		"this is a server host; handing off to: sudo " + server + " update --version v1",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output %q lacks %q", out.String(), want)
+		}
 	}
 }

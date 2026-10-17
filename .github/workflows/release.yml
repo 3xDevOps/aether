@@ -532,10 +532,43 @@ jobs:
           overwrite: true
           retention-days: 7
 
+  # Each architecture packages and launches on a native Windows runner.
+  desktop-windows:
+    needs: release-policy
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.release-policy.outputs.sha }}
+          persist-credentials: false
+      - id: desktop
+        uses: ./.github/actions/desktop-windows-zip
+        with:
+          version: ${{ github.ref_name }}
+          arch: ${{ matrix.arch }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: binaries-desktop-windows-${{ matrix.arch }}
+          path: ${{ steps.desktop.outputs.zip }}
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
   # Scan the exact bytes produced for this tag, not the differently versioned
   # main-CI build. Both architectures are required before release publication.
   windows-defender:
-    needs: [release-policy, release-binaries]
+    needs: [release-policy, release-binaries, desktop-windows]
     permissions:
       contents: read
     runs-on: windows-latest
@@ -554,9 +587,17 @@ jobs:
           pattern: binaries-go-windows-*
           merge-multiple: true
           path: dist
-      - name: Scan both final Windows clients
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: binaries-desktop-windows-*
+          merge-multiple: true
+          path: dist
+      - name: Scan both final Windows clients and desktop apps
         shell: powershell
-        run: ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist
+        run: >-
+          ./scripts/windows-defender.ps1 -Mode Scan -ArtifactDirectory dist -Artifacts
+          aether-windows-amd64.exe, aether-windows-arm64.exe,
+          aether-desktop-windows-amd64.zip, aether-desktop-windows-arm64.zip
 
   android:
     needs: release-policy
@@ -787,7 +828,7 @@ jobs:
   # published only after the draft is downloaded back and matches the
   # signed manifest, so installers never see a release without its assets.
   release:
-    needs: [release-policy, release-binaries, windows-defender, android, browser-manifest, edge-manifest, standard-manifest]
+    needs: [release-policy, release-binaries, desktop-windows, windows-defender, android, browser-manifest, edge-manifest, standard-manifest]
     environment: release
     permissions:
       contents: write
@@ -812,6 +853,11 @@ jobs:
         with:
           name: binaries-android
           path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: binaries-desktop-windows-*
+          merge-multiple: true
+          path: dist
       # Runs without the signing key, so the signer never links the store.
       - name: Read the store schema the release migrates to
         id: store
@@ -827,7 +873,7 @@ jobs:
           go run ./internal/edge/cmd/release-edge -tag "$GITHUB_REF_NAME" \
             -image "aether-browser=$BROWSER" -image "aether-edge=$EDGE" -image "aether-standard=$STANDARD" \
             > "$RUNNER_TEMP/images.json"
-      - name: Require all twelve release assets, write checksums and sign the manifest
+      - name: Require all fourteen release assets, write checksums and sign the manifest
         working-directory: dist
         env:
           AETHER_RELEASE_SIGNING_KEY: ${{ secrets.AETHER_RELEASE_SIGNING_KEY }}
@@ -840,6 +886,7 @@ jobs:
             aether-linux-amd64 aether-linux-arm64
             aether-darwin-amd64 aether-darwin-arm64
             aether-windows-amd64.exe aether-windows-arm64.exe
+            aether-desktop-windows-amd64.zip aether-desktop-windows-arm64.zip
             aether-android.apk aether-android.aab
           )
           # Reject unsigned Android names, unexpected files/directories and

@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$Cli,
+    # Install the desktop from this prebuilt zip instead of building it.
+    [string]$DesktopZip,
     [switch]$WithoutNode
 )
 
@@ -72,6 +74,26 @@ function Wait-DesktopSidecar([Diagnostics.Process]$Process) {
         if ([DateTime]::UtcNow -ge $deadline) { throw 'The installed desktop did not open a main window with its CLI sidecar.' }
         Start-Sleep -Milliseconds 200
     } while ($true)
+}
+
+# Times every phase `aether gui build --json` reports, from one phase line
+# to the next.
+function Invoke-GuiBuild([string]$Label, [string[]]$Arguments) {
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $script:buildEvent = $null
+    $script:phaseStart = 0
+    & $installed gui build @Arguments --json | ForEach-Object {
+        Write-Host $_
+        $now = $clock.Elapsed.TotalSeconds
+        if ($script:buildEvent) { Write-Host ('Timing: {0}: {1}: {2:N1}s' -f $Label, $script:buildEvent.phase, ($now - $script:phaseStart)) }
+        $script:buildEvent = $_ | ConvertFrom-Json
+        $script:phaseStart = $now
+    }
+    $code = $LASTEXITCODE
+    Write-Host ('Timing: {0}: {1:N1}s' -f $Label, $clock.Elapsed.TotalSeconds)
+    if ($code -ne 0 -or -not $script:buildEvent -or $script:buildEvent.phase -ne 'done') {
+        throw "aether gui build $Arguments exited with code $code; last event: $($script:buildEvent | ConvertTo-Json -Compress)"
+    }
 }
 
 function Write-ShellDiagnostics {
@@ -162,9 +184,18 @@ server.listen(0, '127.0.0.1', () => console.log(server.address().port))
     $installed = Join-Path $cliDir 'aether.exe'
     $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
 
-    foreach ($round in 1..2) {
-        & $installer -Version 'v0.5.1-alpha.4'
-        if (-not $?) { throw "Automatic install $round failed." }
+    # The CLI is a development build, so install.ps1's own gui build builds
+    # the desktop from source. The third round installs over that desktop
+    # with gui build itself.
+    foreach ($round in 1..3) {
+        if ($round -le 2) {
+            & $installer -Version 'v0.5.1-alpha.4'
+            if (-not $?) { throw "Automatic install $round failed." }
+        } elseif ($DesktopZip) {
+            Invoke-GuiBuild 'gui build --zip' @('--zip', $DesktopZip)
+        } else {
+            Invoke-GuiBuild 'gui build --source' @('--source')
+        }
         if ((Get-FileHash -Algorithm SHA256 -LiteralPath $installed).Hash -ne $hash) {
             throw 'Desktop installation changed the CLI.'
         }

@@ -105,6 +105,16 @@ Layers, per the design spec's testing strategy:
   gh workflow run edge-image.yml --ref main -f ref=refs/pull/<n>/head   # a pull request from a fork
   ```
 
+  The `desktop-windows` job runs
+  [`.github/actions/desktop-windows-zip`](../.github/actions/desktop-windows-zip/action.yml)
+  on `windows-latest` and `windows-11-arm`, the steps `release.yml` runs for
+  each tag: it packages the desktop with `electron-builder --dir`, checks
+  the version stamped into `app.asar`, zips it and launches it. A pull request runs it only when
+  `scripts/ci-classify-desktop.sh`, also from the base revision, says a
+  changed path is under `desktop/`, the action, the classifier or
+  `ci.yml`; a push to `main`, the merge queue and a failed classification
+  always run it.
+
   These jobs are the merge gate the E2E suite owns.
   The runtime capacity scenario starts its own Docker and containerd daemons
   with private sockets, storage roots, and network/mount namespaces; it never
@@ -235,13 +245,20 @@ downloads Defender definitions in the background. It then runs
 `-Mode Prepare`, which removes the hosted runner's inherited exclusions,
 enables Defender realtime, script, archive, and first-seen cloud scanning,
 and waits for that update before running `scripts/install-smoke.ps1`.
-A local release mirror labels the checkout build `v0.5.1-alpha.4` and serves
-its exact bytes and checksum; it does not download or claim to test the
-historical published release with that tag.
+A local release mirror serves the checkout build, a development build, under
+the tag `v0.5.1-alpha.4` with its exact bytes and checksum; it does not
+download or claim to test the historical published release with that tag.
+Because the CLI is a development build, `install.ps1`'s own `aether gui build`
+builds the desktop from source.
 The smoke refuses to run unless both `GITHUB_ACTIONS=true` and
 `RUNNER_ENVIRONMENT=github-hosted`, before changing files or registry state.
-It installs and reinstalls into an isolated app/config tree and verifies the
-unchanged CLI. It retains the real hosted user's `USERPROFILE`, `HOME`, and
+It installs and reinstalls into an isolated app/config tree, then installs
+the desktop a third time over the existing one: the Windows PowerShell 5.1
+lane, with Node on `PATH`, runs `aether gui build --zip` on a zip packaged
+by [`.github/actions/desktop-windows-zip`](../.github/actions/desktop-windows-zip/action.yml),
+and the PowerShell 7 lane, with no Node on `PATH`, runs
+`aether gui build --source`. That third build prints a `Timing:` line for
+each phase `--json` reports. Every round verifies the unchanged CLI. It retains the real hosted user's `USERPROFILE`, `HOME`, and
 `APPDATA` so child-process Known Folder expansion matches the shell.
 `LOCALAPPDATA` is redirected only through installation and the private-Node
 check, then restored before creating `Shell.Application`, querying AppsFolder,

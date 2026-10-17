@@ -27,8 +27,9 @@ var (
 // the Electron shell around it does not, so an update that stopped at the
 // binaries would leave the app on the old shell.
 //
-// A machine with no app installed - every server box - builds nothing and
-// downloads nothing. newBin is the updated binary: building with the
+// A machine with no app installed builds nothing and downloads nothing. A
+// server host with a systemd unit never gets here: runUpdate hands it to
+// aether-server update. newBin is the updated binary: building with the
 // running process would install the shell sources it is being replaced for.
 //
 // The build gets its own context rather than the download's: a first build

@@ -283,21 +283,25 @@ migrated it), starts it, and exits non-zero with the `systemctl start` error.
 With no `aether-server` systemd unit on the host, or with a unit that runs as
 a non-root `User=` (the unprivileged setup in the unit's comment), it refuses
 before changing anything: use `sudo aether update` and restart the server
-yourself. It also refuses when the unit's `ExecStart` runs another
-`aether-server` binary or `--data-dir` than the command reads from its own
-flags and `--config`, and names the one to use. It reads the database's
-schema without opening or migrating it. When the host already has the latest
-release on disk but the unit still runs an earlier file, as after
-`aether update`, it just restarts the unit onto the installed binary (a
-stopped unit is started) and waits up to two minutes for the server to
-accept connections on its `--addr`. A server that exits or restarts again
+yourself. It takes the data directory and listen address from the unit's
+`ExecStart` and the `--config` file it names, and refuses when that
+`ExecStart` runs another `aether-server` binary, naming the one to use. It
+reads the database's schema without opening or migrating it. When the host
+already has the latest release on disk but the unit still runs an earlier
+file, as after `aether update`, it just restarts the unit onto the installed
+binary (a stopped unit is started) and waits up to two minutes for the server
+to accept connections on its `--addr`. A server that exits or restarts again
 in that time fails the command with the unit's state.
 
 **On a client**, `aether update` replaces the running CLI with the latest release only if it
 is newer (or installs `--version <tag>`), verifying it against the release's
 signed manifest ([Verified releases](#verified-releases)). On Linux, an
-`aether-server` beside the CLI is updated too, but not restarted: use
-`sudo aether-server update` on a server host. The command never asks
+`aether-server` beside the CLI is updated too, but not restarted; restart it
+yourself (`sudo systemctl restart aether-server` under a unit). On a host
+where the `aether-server` systemd unit runs as root, `sudo aether update`
+instead runs `sudo aether-server update [--version <tag>]`, which swaps,
+restarts and rolls back the server; `--no-app` and `--force` do not apply
+there. The command never asks
 for privileges: a binary in a directory you cannot write, `/usr/local/bin` on
 a stock install, is refused before anything is downloaded. The refusal names
 the probe file it could not create (the number varies) and ends with the
@@ -581,8 +585,9 @@ when you deliberately choose another binary. If the recorded CLI is moved or
 deleted, set `AETHER_BIN` or rebuild the app with the installed CLI instead of
 silently falling back to a different copy.
 
-A machine with no app installed builds nothing and downloads nothing, so a
-server box never sees this step. If the app is running when the rebuild
+A machine with no app installed builds nothing and downloads nothing. A
+server host with a systemd unit skips this step: `aether update` prints the
+rebuild command instead. If the app is running when the rebuild
 finishes, the command says to restart it. A rebuild that fails prints the
 build's own error and the command to rerun, and exits non-zero - but the CLI
 update itself already succeeded, and the message says so.
@@ -867,19 +872,23 @@ upgrade, so a Claude Code login refreshed there reaches recipients' runs:
 
 ## Manual install
 
-Every release publishes bare binaries plus `checksums.txt`:
+Every release publishes bare binaries, the Windows desktop app, and
+`checksums.txt`:
 
 ```
-aether-server-linux-amd64   aether-server-linux-arm64
-aether-edge-linux-amd64     aether-edge-linux-arm64
-aether-linux-amd64          aether-linux-arm64
-aether-darwin-amd64         aether-darwin-arm64
-aether-windows-amd64.exe    aether-windows-arm64.exe
+aether-server-linux-amd64          aether-server-linux-arm64
+aether-edge-linux-amd64            aether-edge-linux-arm64
+aether-linux-amd64                 aether-linux-arm64
+aether-darwin-amd64                aether-darwin-arm64
+aether-windows-amd64.exe           aether-windows-arm64.exe
+aether-desktop-windows-amd64.zip   aether-desktop-windows-arm64.zip
 ```
 
 `aether-server` and `aether-edge` are Linux-only. The Windows and macOS assets
-are the client. `aether-edge` is only for running your own edge
-([edge.md](edge.md)); servers and clients do not need it. It also ships as
+are the client. The `aether-desktop-windows` zips hold the unpacked Windows
+desktop app that `aether gui build` installs ([Desktop app](#desktop-app)).
+`aether-edge` is only for running your own edge ([edge.md](edge.md)); servers
+and clients do not need it. It also ships as
 the image `ghcr.io/3xdevops/aether-edge:<release-tag>`
 ([edge.md](edge.md#in-a-container)).
 
@@ -910,6 +919,15 @@ repair the desktop, use `v0.5.1-alpha.4` or newer and run
 records this CLI rather than a different `aether` on `PATH`.
 To upgrade, rerun the PowerShell installer or replace the CLI manually;
 there is no `aether update` on Windows.
+
+To install the desktop app from a zip you downloaded, verify it the same way,
+then hand it to the CLI. `gui build` itself checks only the zip's layout, not
+its origin:
+
+```powershell
+Get-FileHash -Algorithm SHA256 .\aether-desktop-windows-amd64.zip
+& "$dir\aether.exe" gui build --zip .\aether-desktop-windows-amd64.zip
+```
 
 ### Recovering commands after a Windows desktop build
 
@@ -1034,12 +1052,13 @@ These measures do not confer publisher trust. Releases remain unsigned;
 Defender or SmartScreen may still flag a new binary.
 
 Release publication is gated on a Defender scan of the exact final x64 and
-ARM64 release binaries, downloaded from the build artifact without rebuilding.
-The gate records SHA-256 hashes and definition/protection evidence, checks
-effective real-time/cloud/sample-submission settings, and rejects missing or
-changed files, scan errors, or new detections (including remediated ones).
-That verdict covers those bytes and scan conditions, not signing, reputation,
-the locally built desktop, or a guarantee of warning-free execution on a
+ARM64 CLI binaries and desktop zips, downloaded from the build artifacts
+without rebuilding. Each zip is scanned whole and extracted. The gate records
+SHA-256 hashes and definition/protection evidence, checks effective
+real-time/cloud/sample-submission settings, and rejects missing or changed
+files, scan errors, or new detections (including remediated ones). That
+verdict covers those bytes and scan conditions, not signing, reputation, a
+desktop built from source, or a guarantee of warning-free execution on a
 different machine.
 
 ## The Windows client
@@ -2315,6 +2334,16 @@ checks out the authorized SHA and runs independently:
   each macOS or Windows lane builds only its CLI. They call
   `make release-binaries VERSION="$GITHUB_REF_NAME"` with platform overrides
   and upload `binaries-go-<goos>-<goarch>`.
+- `desktop-windows` packages the desktop app on native amd64
+  (`windows-latest`) and arm64 (`windows-11-arm`) runners with
+  [`.github/actions/desktop-windows-zip`](../.github/actions/desktop-windows-zip/action.yml):
+  it stamps the tag into `desktop/package.json`, runs `npm ci` and
+  `electron-builder --dir --win`, checks the stamp inside `app.asar`, and
+  zips the unpacked app at the archive root with sorted entries and fixed
+  timestamps. It launches the app without a CLI, requires its
+  `aether CLI not found` dialog, and uploads `binaries-desktop-windows-<arch>`.
+- `windows-defender` scans both Windows CLIs and both desktop zips
+  ([Windows Defender and SmartScreen](#windows-defender-and-smartscreen)).
 - `android` separately builds and verifies the signed APK and AAB with
   `make android VERSION="$GITHUB_REF_NAME"`, then uploads `binaries-android`.
   It is the only job that receives the Android signing secrets.
@@ -2349,18 +2378,20 @@ an early-exiting reader such as `awk '... { print; exit }'`: closing Docker's
 stdout pipe can fail the release with exit code 255 even when the digest is
 correct.
 
-The final `release` job requires all six Go lanes, signed Android and all three
-verified image manifests. It downloads artifacts from this workflow run only,
-never promotes unsigned CI builds, and requires exactly these twelve nonempty,
-regular, non-symlink files in `dist/`:
+The final `release` job requires all six Go lanes, both desktop zips, the
+Defender scan, signed Android and all three verified image manifests. It
+downloads artifacts from this workflow run only, never promotes unsigned CI
+builds, and requires exactly these fourteen nonempty, regular, non-symlink
+files in `dist/`:
 
 ```text
-aether-server-linux-amd64  aether-server-linux-arm64
-aether-edge-linux-amd64    aether-edge-linux-arm64
-aether-linux-amd64         aether-linux-arm64
-aether-darwin-amd64        aether-darwin-arm64
-aether-windows-amd64.exe   aether-windows-arm64.exe
-aether-android.apk        aether-android.aab
+aether-server-linux-amd64         aether-server-linux-arm64
+aether-edge-linux-amd64           aether-edge-linux-arm64
+aether-linux-amd64                aether-linux-arm64
+aether-darwin-amd64               aether-darwin-arm64
+aether-windows-amd64.exe          aether-windows-arm64.exe
+aether-desktop-windows-amd64.zip  aether-desktop-windows-arm64.zip
+aether-android.apk                aether-android.aab
 ```
 
 Missing or unexpected files, including unsigned Android names, stop the upload.
