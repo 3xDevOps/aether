@@ -13,9 +13,10 @@ import (
 	edge "github.com/3xDevOps/Aether/internal/edge/service"
 )
 
-// TestReadiness follows /readyz and healthcheck --ready through a stop:
-// ready, draining once shutdown starts, and the database's own error once
-// it is closed.
+// TestReadiness follows /readyz and healthcheck --ready through a life:
+// starting while a check fails before the edge was ready, ready, unready
+// when a check fails after, draining once shutdown starts, and the
+// database's own error once it is closed.
 func TestReadiness(t *testing.T) {
 	svc, err := edge.New(edge.Config{
 		DataDir: t.TempDir(), SigninOrigin: "http://localhost:8080", RelayOrigin: "http://127.0.0.1:8080",
@@ -48,10 +49,23 @@ func TestReadiness(t *testing.T) {
 		return rep, resp.StatusCode, healthcheck([]string{"--ready", "--metrics-listen", addr}, func(string) string { return "" }, &out)
 	}
 
+	reason := "accept tcp: use of closed network connection"
+	listener.stopped.Store(&reason)
 	rep, code, err := check()
+	if code != http.StatusServiceUnavailable || rep.Status != statusStarting || rep.Checks.Listener != reason ||
+		err == nil || !strings.Contains(err.Error(), "edge is not ready (starting): listener: "+reason) {
+		t.Fatalf("edge never ready: %d %+v, healthcheck --ready: %v", code, rep, err)
+	}
+	listener.stopped.Store(nil)
+	rep, code, err = check()
 	if code != http.StatusOK || rep.Status != statusReady || rep.Checks.DB != checkOK || rep.Protocol.Version == 0 || err != nil {
 		t.Fatalf("running edge: %d %+v, healthcheck --ready: %v", code, rep, err)
 	}
+	listener.stopped.Store(&reason)
+	if rep, code, _ = check(); code != http.StatusServiceUnavailable || rep.Status != statusUnready {
+		t.Fatalf("listener stopped after the edge was ready: %d %+v", code, rep)
+	}
+	listener.stopped.Store(nil)
 	var out bytes.Buffer
 	if err = healthcheck([]string{"--json", "--metrics-listen", addr}, func(string) string { return "" }, &out); err != nil || !strings.Contains(out.String(), `"status":"ready"`) {
 		t.Fatalf("healthcheck --json: %v\n%s", err, out.String())

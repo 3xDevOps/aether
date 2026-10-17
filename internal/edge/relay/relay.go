@@ -375,7 +375,7 @@ func (r *Relay) closeConns(match func(*relayConn) bool, cause error) []*registra
 }
 
 // Shutdown refuses new control channels and connections, sends drain to
-// every server, gives relayed connections spliceGrace to finish, closes
+// every server while relayed connections get spliceGrace to finish, closes
 // every control channel and connection, and saves the egress counter. A
 // drain still unsent when ctx ends is abandoned.
 func (r *Relay) Shutdown(ctx context.Context) error {
@@ -389,6 +389,7 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 
 	drain := edgeproto.Drain{RetryAfterMS: drainRetryAfter.Milliseconds(), JitterMS: drainJitter.Milliseconds()}
 	var wg sync.WaitGroup
+	wg.Go(func() { r.closeSplices(ctx) })
 	for _, reg := range regs {
 		wg.Go(func() {
 			if err := reg.sendWithin(ctx, drain); err != nil {
@@ -398,7 +399,6 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 		})
 	}
 	wg.Wait()
-	r.closeSplices(ctx)
 	r.stop(errDraining)
 	<-r.flushed
 	return r.flushEgress(ctx, time.Now())

@@ -25,14 +25,17 @@ import (
 // aether-edge healthcheck --ready.
 func metricsHandler(svc *edge.Service, rl *relay.Relay, listener *listenerState) http.Handler {
 	mux := http.NewServeMux()
+	var wasReady atomic.Bool
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, "ok\n")
 	})
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-		rep := readiness(r.Context(), svc, rl.Metrics(), listener.check())
+		rep := readiness(r.Context(), svc, rl.Metrics(), listener.check(), wasReady.Load())
 		code := http.StatusOK
-		if rep.Status != statusReady {
+		if rep.Status == statusReady {
+			wasReady.Store(true)
+		} else {
 			code = http.StatusServiceUnavailable
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -73,6 +76,7 @@ const (
 	checkOK        = "ok"
 	statusReady    = "ready"
 	statusStarting = "starting"
+	statusUnready  = "unready"
 	statusDraining = "draining"
 	// dbCheckTimeout bounds the database check of one /readyz.
 	dbCheckTimeout = time.Second
@@ -98,7 +102,9 @@ type readyReport struct {
 	} `json:"servers"`
 }
 
-func readiness(ctx context.Context, svc *edge.Service, m relay.Metrics, listener string) readyReport {
+// readiness reports a failing check as starting until the edge was first
+// ready, and as unready after.
+func readiness(ctx context.Context, svc *edge.Service, m relay.Metrics, listener string, wasReady bool) readyReport {
 	var rep readyReport
 	rep.Version = version.Version
 	rep.Protocol.Version, rep.Protocol.MinVersion = edgeproto.Version, edgeproto.MinVersion
@@ -114,6 +120,8 @@ func readiness(ctx context.Context, svc *edge.Service, m relay.Metrics, listener
 		rep.Status = statusDraining
 	case rep.Checks.DB == checkOK && rep.Checks.Listener == checkOK:
 		rep.Status = statusReady
+	case wasReady:
+		rep.Status = statusUnready
 	default:
 		rep.Status = statusStarting
 	}

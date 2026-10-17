@@ -25,15 +25,16 @@ type drained struct{ edgeproto.Drain }
 
 func (drained) Error() string { return "edge is restarting (drain)" }
 
-// wait is how long to wait before reconnecting: the drain's hint, or
-// fallback from an edge that sent none.
-func (d drained) wait(fallback time.Duration) time.Duration {
-	if d.RetryAfterMS == 0 && d.JitterMS == 0 {
-		return fallback
+// wait is the drain's hint: RetryAfterMS plus a random part of JitterMS,
+// each clamped to [0, limit] so a hint out of range neither fails the
+// message nor parks the server.
+func (d drained) wait(limit time.Duration) time.Duration {
+	clamp := func(ms int64) time.Duration {
+		return time.Duration(min(max(ms, 0), limit.Milliseconds())) * time.Millisecond
 	}
-	wait := time.Duration(d.RetryAfterMS) * time.Millisecond
-	if d.JitterMS > 0 {
-		wait += rand.N(time.Duration(d.JitterMS) * time.Millisecond)
+	wait := clamp(d.RetryAfterMS)
+	if jitter := clamp(d.JitterMS); jitter > 0 {
+		wait += rand.N(jitter)
 	}
 	return wait
 }

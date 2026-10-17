@@ -169,6 +169,8 @@ func serve(args []string) (err error) {
 		err = nil
 	case err = <-errc:
 	}
+	// A second signal during the drain kills the edge.
+	stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	// Drain first: /readyz answers draining from here on, and servers hear

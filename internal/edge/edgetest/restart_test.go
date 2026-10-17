@@ -78,6 +78,7 @@ func TestEdgeRestartAndDirectFallback(t *testing.T) {
 	// The server enrolls again once the edge is back, still claimed,
 	// within the drain's hint: not before the edge could be back, and not
 	// after a backoff grown by failed dials.
+	restarted := time.Now()
 	h.startEdge()
 	eventually(t, "server back on the restarted edge", func() error {
 		if !h.relay().Online(a.id) {
@@ -86,9 +87,13 @@ func TestEdgeRestartAndDirectFallback(t *testing.T) {
 		return nil
 	})
 	retryAfter := time.Duration(drain.RetryAfterMS) * time.Millisecond
-	latest := retryAfter + time.Duration(drain.JitterMS)*time.Millisecond + 3*time.Second
-	if took := time.Since(start); took < retryAfter || took > latest {
-		t.Fatalf("server back %s after the drain, want within [%s, %s]", took, retryAfter, latest)
+	// A dial that found the edge still down adds one backoff step.
+	latest := retryAfter + time.Duration(drain.JitterMS)*time.Millisecond + 3*edgeproto.ReconnectMinBackoff + 2*time.Second
+	if took := time.Since(start); took < retryAfter {
+		t.Fatalf("server back %s after the drain, before its %s hint", took, retryAfter)
+	}
+	if took := time.Since(restarted); took > latest {
+		t.Fatalf("server back %s after the edge restarted, want within %s", took, latest)
 	}
 	h.mustDial(al, a)
 	sc, err = h.dial(al, deadDirect)

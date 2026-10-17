@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"io"
 	"maps"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -594,18 +595,36 @@ func TestReconnectsAfterEdgeDropsAndOnDrain(t *testing.T) {
 	edge.nextControl(t)
 }
 
-// A drain's hint replaces the backoff: below the shortest backoff here,
-// so a redial within the hint shows it was used.
+// A drain's hint lengthens the wait past the backoff.
 func TestDrainHintSetsTheRedial(t *testing.T) {
 	edge := newFakeEdge(t)
 	a := newAgent(t, edge.srv.URL, t.TempDir(), newFakeSSH())
-	a.minBackoff = 2 * time.Second
+	a.maxBackoff = time.Minute
 	run(t, a)
 	edge.nextControl(t).send(edgeproto.Drain{RetryAfterMS: 300, JitterMS: 100})
 	sent := time.Now()
 	edge.nextControl(t)
-	if took := time.Since(sent); took < 300*time.Millisecond || took >= a.minBackoff {
+	if took := time.Since(sent); took < 300*time.Millisecond || took >= time.Second {
 		t.Fatalf("redialed %s after a drain asking for 300ms plus up to 100ms", took)
+	}
+}
+
+// A hint never shortens the wait below the shortest backoff, and one out
+// of range is clamped to the longest instead of failing the message or
+// parking the server.
+func TestDrainHintIsBounded(t *testing.T) {
+	edge := newFakeEdge(t)
+	a := newAgent(t, edge.srv.URL, t.TempDir(), newFakeSSH())
+	a.minBackoff, a.maxBackoff = 300*time.Millisecond, 600*time.Millisecond
+	run(t, a)
+	for _, d := range []edgeproto.Drain{{JitterMS: 1}, {RetryAfterMS: math.MaxInt64, JitterMS: -1}} {
+		edge.nextControl(t).send(d)
+		sent := time.Now()
+		ec := edge.nextControl(t)
+		if took := time.Since(sent); took < a.minBackoff || took >= a.maxBackoff+a.minBackoff+500*time.Millisecond {
+			t.Fatalf("redialed %s after %+v, want within [%s, %s]", took, d, a.minBackoff, a.maxBackoff+a.minBackoff)
+		}
+		_ = ec.c.CloseNow()
 	}
 }
 

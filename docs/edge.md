@@ -1283,7 +1283,7 @@ ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
 | Data directory | `/var/lib/aether-edge`, declared as a volume ([What the data directory holds](#what-the-data-directory-holds)) |
 | Client secret | A file, named by `AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE` ([The client secret](#the-client-secret)) |
 | Listening | Behind a reverse proxy on a container network, or with the edge's own certificates on a published port ([Listening](#listening)) |
-| Health | The image's `HEALTHCHECK` runs `aether-edge healthcheck`, the liveness check, every second during a 30-second start period and every 30 seconds after, and marks the container unhealthy after 3 failures. A reverse proxy that routes on Docker health, such as Traefik, routes to a restarted edge about a second after it listens. `aether-edge healthcheck --ready` is the readiness check ([Monitoring](#monitoring)); keep it out of `HEALTHCHECK`: a proxy that routes on Docker health would stop routing new connections whenever the database answers slowly. On a runtime that ignores `HEALTHCHECK`, use the same commands as the probes. They read `AETHER_EDGE_METRICS_LISTEN`, so change the metrics address with that variable, not with a `--metrics-listen` flag on `serve` |
+| Health | The image's `HEALTHCHECK` runs `aether-edge healthcheck`, the liveness check, every second during a 30-second start period and every 30 seconds after, and marks the container unhealthy after 3 failures. A reverse proxy that routes on Docker health, such as Traefik, routes to a restarted edge about a second after it listens. The one-second start interval needs Docker Engine 25 or later; an older engine probes every 30 seconds from the start, so a restart costs up to 30 seconds without routing. `aether-edge healthcheck --ready` is the readiness check ([Monitoring](#monitoring)); keep it out of `HEALTHCHECK`: a proxy that routes on Docker health would stop routing new connections whenever the database answers slowly. On a runtime that ignores `HEALTHCHECK`, use the same commands as the probes. They read `AETHER_EDGE_METRICS_LISTEN`, so change the metrics address with that variable, not with a `--metrics-listen` flag on `serve` |
 | Stop | `SIGTERM`: readiness turns `draining`, the edge sends `drain` to every server, gives relayed connections 2 seconds to finish, and exits 0 within 20 seconds, or exits 1 if shutdown takes longer. Docker's default grace period is 10 seconds, so give it more: `--stop-timeout 30`, or `stop_grace_period: 30s` in Compose |
 | Metrics | Loopback only, inside the container: scrape them from a container that shares its network namespace (`--network container:aether-edge`) ([Monitoring](#monitoring)) |
 | Root filesystem | May be read-only (`--read-only`): the edge writes only to the data directory, and SQLite keeps its temporary tables in memory |
@@ -1400,7 +1400,7 @@ is the whole configuration. Replace every `<...>` in it.
 | `--trusted-proxies` | `AETHER_EDGE_TRUSTED_PROXIES` | none: the proxy is on loopback ([A proxy that is not on this host](#a-proxy-that-is-not-on-this-host)) |
 | `--listen` | `AETHER_EDGE_LISTEN` | `:443`, with the edge's own certificates; unused with `--proxy-listen` |
 | `--data` | `AETHER_EDGE_DATA` | `/var/lib/aether-edge` |
-| `--metrics-listen` | `AETHER_EDGE_METRICS_LISTEN` | `127.0.0.1:9464`, loopback only; serves `/metrics` and `/healthz` |
+| `--metrics-listen` | `AETHER_EDGE_METRICS_LISTEN` | `127.0.0.1:9464`, loopback only; serves `/metrics`, `/healthz` and `/readyz` |
 | `--acme-email` | `AETHER_EDGE_ACME_EMAIL` | none |
 | `--acme-directory` | `AETHER_EDGE_ACME_DIRECTORY` | `https://acme-v02.api.letsencrypt.org/directory` |
 | `--egress-budget` | `AETHER_EDGE_EGRESS_BUDGET` | `0`: bytes per UTC month, a plain integer; 0 = none |
@@ -1559,8 +1559,9 @@ aether-edge: healthcheck: edge is not ready (draining): draining: the edge is st
 ```
 
 `/readyz` answers JSON; `aether-edge healthcheck --json` prints it and
-implies `--ready`. `status` is `ready`, `draining` once a stop began, or
-`starting` while a check fails; a failing check holds its error instead of
+implies `--ready`. `status` is `ready`, `draining` once a stop began,
+`starting` while a check fails before the edge was first ready, or
+`unready` while one fails after; a failing check holds its error instead of
 `ok`:
 
 ```json
@@ -1684,7 +1685,8 @@ it does not know and ignores fields it does not know. A change the other
 side must understand raises the version, and the edge keeps accepting the
 previous version for at least one release after, so servers can be
 upgraded after the edge. `drain` gained its reconnect hint this way: a
-server that predates it reconnects with backoff.
+server that predates it reconnects with backoff, and one that knows it
+clamps a hint outside 0 to 60 seconds instead of refusing the message.
 
 ### Operator commands
 
@@ -1784,7 +1786,7 @@ legitimate.
 | Failure | Behaviour |
 | --- | --- |
 | Edge down | [During an edge outage](#during-an-edge-outage) |
-| Edge restart | `/readyz` answers `draining`; the edge sends `drain` and relayed connections drop. Servers log `edge is restarting (drain); reconnecting in <wait>` and reconnect 3 to 8 seconds later; clients redial; runs are unaffected. A server that does not read `drain` within the stop's 20 seconds is dropped without it and reconnects with backoff |
+| Edge restart | `/readyz` answers `draining`; the edge sends `drain`, and relayed connections get 2 seconds to finish before they drop. Servers log `edge is restarting (drain); reconnecting in <wait>` and reconnect 3 to 8 seconds later, or after their longer backoff when the previous connection lasted under a minute, so an edge in a restart loop is not redialed every few seconds; clients redial; runs are unaffected. A server whose `drain` write does not complete within 10 seconds is dropped without it and reconnects with backoff |
 | Server offline | `503 server is not connected to the edge`. The edge drops a control connection when its socket closes, when a write to it fails, or after 60 seconds without a message from the server |
 | Server reconnecting while a client connects | The edge sends the connection to the server's new control connection, once |
 | Claim recorded, not yet applied to the live control connection | `409 server is connected to the edge but not claimed`; retry |

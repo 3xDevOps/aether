@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # The aether-edge image: docs/edge.md, "In a container". Build it from the
 # repository root:
 #

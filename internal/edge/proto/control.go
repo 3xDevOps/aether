@@ -163,10 +163,10 @@ type AccountDeletionApplied struct {
 type Unenroll struct{}
 
 // Drain (edge to server) announces a clean edge stop. The server
-// reconnects after RetryAfterMS plus a random part of JitterMS, in
-// milliseconds; when an edge sends neither, it reconnects with backoff.
-// Both fields were added within protocol version 1: a server that does not
-// know them ignores them.
+// reconnects after its backoff or, when longer, RetryAfterMS plus a random
+// part of JitterMS, in milliseconds. Both fields were added within protocol version 1: a server that does not
+// know them ignores them, and one that does clamps them to [0,
+// ReconnectMaxBackoff].
 type Drain struct {
 	RetryAfterMS int64 `json:"retry_after_ms,omitempty"`
 	JitterMS     int64 `json:"jitter_ms,omitempty"`
@@ -316,16 +316,9 @@ func (m AccountDeletionApplied) validate() error {
 
 func (Ownerless) validate() error { return nil }
 func (Unenroll) validate() error  { return nil }
+func (Drain) validate() error     { return nil }
 func (Ping) validate() error      { return nil }
 func (Pong) validate() error      { return nil }
-
-func (m Drain) validate() error {
-	limit := ReconnectMaxBackoff.Milliseconds()
-	if m.RetryAfterMS < 0 || m.JitterMS < 0 || m.RetryAfterMS > limit || m.JitterMS > limit {
-		return fmt.Errorf("retry after %dms and jitter %dms must each lie in [0, %dms]", m.RetryAfterMS, m.JitterMS, limit)
-	}
-	return nil
-}
 
 func validateReply(id, errText string) error {
 	if !ValidConnID(id) {
