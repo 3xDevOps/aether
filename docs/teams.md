@@ -11,7 +11,10 @@ person the admin. See [quickstart.md](quickstart.md).
 
 ### Over a tailnet (primary)
 
-The teammate joins your tailnet, then:
+This needs tailnet sign-in on the server. On a host with tailscaled,
+`aether-server setup` leaves it on only when you answer yes to its tailnet
+question ([install.md](install.md#first-boot)). The teammate joins your
+tailnet, then:
 
 ```sh
 aether link my-server

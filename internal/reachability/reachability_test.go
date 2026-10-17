@@ -105,6 +105,22 @@ func TestTailscaleDiscover(t *testing.T) {
 	}
 }
 
+// Self names the tailnet by the name tailscaled reports, or by its MagicDNS
+// suffix where tailscaled reports none.
+func TestTailscaleSelfNamesTheTailnet(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for body, want := range map[string]string{
+		`{"Self":{"DNSName":"box.tail1234.ts.net."},"MagicDNSSuffix":"tail1234.ts.net","CurrentTailnet":{"Name":"alice@example.com"}}`: "alice@example.com",
+		`{"Self":{"DNSName":"box.tail1234.ts.net."},"MagicDNSSuffix":"tail1234.ts.net","CurrentTailnet":null}`:                         "tail1234.ts.net",
+	} {
+		node, err := NewTailscale(startStatusServer(t, body, http.StatusOK)).Self(ctx)
+		if err != nil || node.Tailnet != want {
+			t.Errorf("Self(%s) = %q, %v; want tailnet %q", body, node.Tailnet, err, want)
+		}
+	}
+}
+
 // Any LocalAPI failure means "not present": missing socket, HTTP error
 // status, empty DNS name.
 func TestTailscaleDiscoverFailures(t *testing.T) {

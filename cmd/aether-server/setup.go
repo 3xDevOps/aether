@@ -164,7 +164,7 @@ func reportEdge(w io.Writer, options *flag.FlagSet) (string, error) {
 // server install actually chooses, seeding each default from the existing
 // config file so re-running setup is not destructive. tailscaled is the
 // LocalAPI client when tailscaled is on this host, which is what makes the
-// dashboard port worth offering, and nil otherwise. It returns a nil map
+// tailnet questions worth asking, and nil otherwise. It returns a nil map
 // when the operator declines the summary.
 func askServerOptions(p *prompter, configPath string, tailscaled *reachability.Tailscale) (map[string]string, error) {
 	w := p.w
@@ -190,37 +190,58 @@ func askServerOptions(p *prompter, configPath string, tailscaled *reachability.T
 	values["addr"] = p.ask("addr", "SSH listen address", def("addr"))
 	values["data-dir"] = p.ask("data-dir", "Data directory", def("data-dir"))
 
-	_, _ = fmt.Fprintln(w, "\nWith tailnet auto-join on, anyone already on your tailnet becomes an")
-	_, _ = fmt.Fprintln(w, "approved member on first connect, with no admin approving them.")
-	values["tailnet-auto-join"] = p.ask("tailnet-auto-join",
-		"Auto-approve tailnet identities (true/false)", def("tailnet-auto-join"))
+	// Each config a yes writes has the edge off, a web-port or auto-join on,
+	// except one requiring a key with the edge on, which is what a no writes.
+	_, webPort := current["web-port"]
+	autoJoin, _ := strconv.ParseBool(current["tailnet-auto-join"])
+	wasTailnet := len(current) > 0 && (current["edge-url"] == "" || webPort || autoJoin)
+	tailnet := tailscaled != nil && askTailnet(p, tailscaled, wasTailnet)
+	switch {
+	case tailnet:
+		_, _ = fmt.Fprintln(w, "\nWith tailnet auto-join on, anyone already on your tailnet becomes an")
+		_, _ = fmt.Fprintln(w, "approved member on first connect, with no admin approving them.")
+		values["tailnet-auto-join"] = p.ask("tailnet-auto-join",
+			"Auto-approve tailnet identities (true/false)", def("tailnet-auto-join"))
 
-	_, _ = fmt.Fprintln(w, "\nRequiring a pubkey on top of tailnet identity means a member must have")
-	_, _ = fmt.Fprintln(w, "linked a key before their tailnet identity is trusted.")
-	values["tailnet-require-key"] = p.ask("tailnet-require-key",
-		"Also require pubkey verification on tailnet connections (true/false)", def("tailnet-require-key"))
+		_, _ = fmt.Fprintln(w, "\nRequiring a pubkey on top of tailnet identity means a member must have")
+		_, _ = fmt.Fprintln(w, "linked a key before their tailnet identity is trusted.")
+		// A keyed tailnet server's config can match what a no writes, so a
+		// saved key requirement is offered back: Enter never drops it.
+		values["tailnet-require-key"] = p.ask("tailnet-require-key",
+			"Also require pubkey verification on tailnet connections (true/false)", def("tailnet-require-key"))
 
-	// The dashboard cannot present a key, so it is only offered where it
-	// could start: tailscaled on this host and no key requirement. Only a
-	// first run probes for the default: on a live server the dashboard
-	// itself holds the port.
-	if tailscaled != nil && values["tailnet-require-key"] != "true" {
-		_, _ = fmt.Fprintln(w, "\nThe server can host the dashboard over HTTPS on its tailnet address, so a")
-		_, _ = fmt.Fprintln(w, "phone or any tailnet device opens https://<this host's MagicDNS name>/ with")
-		_, _ = fmt.Fprintln(w, "no token. The tailnet needs MagicDNS and HTTPS certificates enabled; 0 keeps")
-		_, _ = fmt.Fprintln(w, "the server SSH-only.")
-		webDefault := def("web-port")
-		if _, ok := current["web-port"]; !ok {
-			webDefault = strconv.Itoa(dashboardPort)
-			if err := dashboardBlocked(tailscaled, dashboardPort); err != nil {
-				webDefault = "0"
-				_, _ = fmt.Fprintf(w, "Defaulting to 0: %v, then run: sudo aether-server config set web-port %d\n", err, dashboardPort)
+		// The dashboard cannot present a key, so it is only offered where it
+		// could start: tailscaled on this host and no key requirement. Only a
+		// first run probes for the default: on a live server the dashboard
+		// itself holds the port.
+		if required, _ := strconv.ParseBool(values["tailnet-require-key"]); !required {
+			_, _ = fmt.Fprintln(w, "\nThe server can host the dashboard over HTTPS on its tailnet address, so a")
+			_, _ = fmt.Fprintln(w, "phone or any tailnet device opens https://<this host's MagicDNS name>/ with")
+			_, _ = fmt.Fprintln(w, "no token. The tailnet needs MagicDNS and HTTPS certificates enabled; 0 keeps")
+			_, _ = fmt.Fprintln(w, "the server SSH-only.")
+			webDefault := def("web-port")
+			if _, ok := current["web-port"]; !ok {
+				webDefault = strconv.Itoa(dashboardPort)
+				if err := dashboardBlocked(tailscaled, dashboardPort); err != nil {
+					webDefault = "0"
+					_, _ = fmt.Fprintf(w, "Defaulting to 0: %v, then run: sudo aether-server config set web-port %d\n", err, dashboardPort)
+				}
 			}
+			values["web-port"] = p.ask("web-port", "Dashboard HTTPS port on the tailnet (0 = off)", webDefault)
 		}
-		values["web-port"] = p.ask("web-port", "Dashboard HTTPS port on the tailnet (0 = off)", webDefault)
+	case tailscaled != nil:
+		values["tailnet-auto-join"] = "false"
+		// Without a key requirement a tailnet login still registers, and the
+		// first one on a fresh server becomes its admin.
+		values["tailnet-require-key"] = "true"
+	default:
+		values["tailnet-auto-join"] = "false"
+		if v, ok := current["tailnet-require-key"]; ok {
+			values["tailnet-require-key"] = v
+		}
 	}
 
-	askEdge(p, current, tailscaled != nil, values)
+	askEdge(p, current, tailscaled != nil, tailnet, values)
 	if values["edge-url"] != "" {
 		askEdgeAccess(p, values)
 	}
@@ -233,6 +254,24 @@ func askServerOptions(p *prompter, configPath string, tailscaled *reachability.T
 		return nil, p.err
 	}
 	return values, nil
+}
+
+// askTailnet asks whether people reach this server over the tailnet
+// tailscaled is on, with def as the answer Enter gives.
+func askTailnet(p *prompter, tailscaled *reachability.Tailscale, def bool) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tailnet := "this host's tailnet"
+	if node, err := tailscaled.Self(ctx); err != nil {
+		_, _ = fmt.Fprintf(p.w, "\ntailscaled is installed, but setup cannot read which tailnet it is on: %v\n", err)
+	} else {
+		tailnet = "the tailnet " + node.Tailnet
+		_, _ = fmt.Fprintf(p.w, "\nThis host is on %s.\n", tailnet)
+	}
+	_, _ = fmt.Fprintln(p.w, "On a tailnet, the server signs people in by their tailnet login, with no key.")
+	_, _ = fmt.Fprintln(p.w, "Answer no if Tailscale is here for something else: setup then turns tailnet")
+	_, _ = fmt.Fprintln(p.w, "sign-in off and the edge on.")
+	return p.confirm("Will people reach this server over "+tailnet, def)
 }
 
 // dashboardPort is the port that makes the dashboard https://<MagicDNS name>/.
@@ -275,14 +314,16 @@ func dashboardBlocked(tailscaled *reachability.Tailscale, port int) error {
 	return nil
 }
 
-// askEdge sets edge-url, the one place the edge is turned on. Without
-// tailscaled the edge is the only route a laptop or phone has to the
-// server, so it is on and setup says what that discloses; with tailscaled
-// it is offered, off unless the config already has it on. An edge-url the
-// operator already set is kept or offered as the answer.
-func askEdge(p *prompter, current map[string]string, tailnet bool, values map[string]string) {
+// askEdge sets edge-url, the one place the edge is turned on. Without a
+// tailnet - no tailscaled, or a no to askTailnet - the edge is the only
+// route a laptop or phone has to the server, so it is on and setup says
+// what that discloses; on a tailnet it is offered, off unless the config
+// already has it on. An edge-url the operator already set is kept or
+// offered as the answer. An empty one is kept only without tailscaled:
+// with tailscaled it is what declining the offer wrote.
+func askEdge(p *prompter, current map[string]string, tailscaled, tailnet bool, values map[string]string) {
 	configured, set := current["edge-url"]
-	if set && configured == "" && !tailnet {
+	if set && configured == "" && !tailscaled {
 		_, _ = fmt.Fprintf(p.w, "\nThe edge is off (edge-url is empty) and Tailscale is not installed, so members\nreach this server only by SSH to %s.\n", values["addr"])
 		values["edge-url"] = ""
 		return
@@ -295,9 +336,12 @@ func askEdge(p *prompter, current map[string]string, tailnet bool, values map[st
 	if edgeURL == edgeagent.DefaultURL {
 		operator = ", run by the Aether project"
 	}
-	if tailnet {
+	switch {
+	case tailnet:
 		_, _ = fmt.Fprintf(p.w, "\nDevices that are not on your tailnet can reach this server through the edge at\n%s%s.\n", edgeURL, operator)
-	} else {
+	case tailscaled:
+		_, _ = fmt.Fprintf(p.w, "\nTailnet sign-in is off, so setup turns on the edge at %s%s.\n", edgeURL, operator)
+	default:
 		_, _ = fmt.Fprintf(p.w, "\nTailscale is not installed, so setup turns on the edge at %s%s.\n", edgeURL, operator)
 	}
 	_, _ = fmt.Fprintln(p.w, "The edge is a relay: this server and your devices both dial out to it, so")
