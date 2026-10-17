@@ -1303,8 +1303,14 @@ It verifies the manifest with the release keys built into the binary and
 exits 0 when the upgrade may go ahead, 3 with each reason on stderr
 (`aether-edge: hold: ...`) when it must wait: a blocking manual step, a
 `--from` below the release's `min_upgrade_from`, or a `--from` newer than
-the release. `--json` prints the report, including the edge section and
-the applicable steps, as one JSON object.
+the release. `--from` is required. `--json` prints the report, including
+the edge section and the applicable steps, as one JSON object.
+
+It does not decide whether you can roll back. The report shows the new
+release's `store_compat_floor`, but whether the old binary opens the
+database after the new one migrated it is answered by the old image:
+`docker run --rm -v <data>:/var/lib/aether-edge <old image> schema --json`
+reports `supported`.
 
 Every image index and each of its platform images also carries a GitHub
 artifact attestation: SLSA build provenance signed through Sigstore,
@@ -1328,6 +1334,32 @@ cosign verify-attestation --new-bundle-format \
   --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/release.yml@refs/tags/<release-tag> \
   ghcr.io/3xdevops/aether-edge@sha256:<digest>
 ```
+
+A digest `stable` names also carries a promotion attestation from
+`promote-edge.yml` on `main`, with the predicate
+`{"channel":"stable","tag":"<release-tag>","digest":"sha256:<digest>"}`.
+A host that follows `stable` requires it, since repository write access
+alone can move a tag:
+
+```sh
+gh attestation verify oci://ghcr.io/3xdevops/aether-edge@sha256:<digest> \
+  --repo 3xDevOps/aether \
+  --signer-workflow 3xDevOps/aether/.github/workflows/promote-edge.yml \
+  --source-ref refs/heads/main --deny-self-hosted-runners \
+  --predicate-type https://github.com/3xDevOps/aether/edge-promotion/v1 \
+  --format json --jq '.[].verificationResult.statement.predicate'
+```
+
+```sh
+cosign verify-attestation --new-bundle-format \
+  --type https://github.com/3xDevOps/aether/edge-promotion/v1 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main \
+  ghcr.io/3xdevops/aether-edge@sha256:<digest>
+```
+
+Check that the printed predicate names `stable`, the digest and the tag
+`release-check` verified.
 
 | What | How |
 | --- | --- |

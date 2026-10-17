@@ -2388,11 +2388,12 @@ protocol from the tag's code and the rest from
 record. The generator refuses an `images.json` that lacks an image or whose
 edge digest is not the `aether-edge` digest, and after signing checks that
 the manifest carries exactly what it was given. The generator reads the ed25519 seed from the
-`AETHER_RELEASE_SIGNING_KEY` repository secret, records `<n>` as
-`store_schema`, and checks its own
-output against the keys the tag's code trusts, so a seed that does not match
-fails here. `release-policy` fails the whole release before any build when
-that secret is not set. [`scripts/publish-release.sh`](../scripts/publish-release.sh)
+`AETHER_RELEASE_SIGNING_KEY` secret ([Protecting the signing
+key](#protecting-the-signing-key)), records `<n>` as `store_schema`, and
+checks its own output against the keys the tag's code trusts, so a seed
+that does not match fails here. The `signing-key` job, in the `release`
+environment, fails the whole release before any build or push when that
+secret is not set. [`scripts/publish-release.sh`](../scripts/publish-release.sh)
 then runs steps 2 to 5 above. It compares each asset's SHA-256 and size with
 the manifest, requires `checksums.txt` to match, and compares
 `checksums.txt`, `aether-release.json` and `aether-release.json.sig`
@@ -2588,7 +2589,7 @@ only a person can decide about upgrading an edge to the next release:
 | `min_upgrade_from` | Oldest release that may upgrade straight to this one. Raise it when a migration or protocol change needs an intermediate release |
 | `manual_steps` | Every operator action an upgrade needs, kept across releases: `id`, `since` (the first release that needs it), `summary`, `doc_url` (https) and `blocking`. A blocking step holds an automatic update from any release below `since` until the operator does it |
 | `store_schema`, `store_compat_floor`, `protocol` | The edge store schema, its compat floor and the protocol range the code has now |
-| `files` | SHA-256 of `packaging/edge/aether-edge.env.example` and `packaging/systemd/aether-edge.service`, the files an operator copies onto the host |
+| `files` | SHA-256 of `images/edge/Dockerfile`, `packaging/edge/aether-edge.env.example` and `packaging/systemd/aether-edge.service`, the files that shape what an edge host runs |
 
 The last two rows are not decisions but a tripwire. `go test
 ./internal/edge/cmd/release-edge` fails, naming each value, when they
@@ -2598,8 +2599,11 @@ disagree with the code or the files, and so does the release:
 release-edge: packaging/edge/upgrade.json is out of date: store_schema is 2, packaging/edge/upgrade.json records 1; ...
 ```
 
-A pull request that adds a migration, a protocol version, an environment
-variable or a unit change therefore edits this file. Decide then whether
+`go test ./cmd/aether-edge` also fails when the edge reads an
+`AETHER_EDGE_*` variable that `packaging/edge/aether-edge.env.example`
+does not list, so a new variable changes that file's hash. A pull request
+that adds a migration, a protocol version, an environment variable, or a
+change to the image or the unit therefore edits this file. Decide then whether
 the upgrade needs a manual step or a higher `min_upgrade_from`, and record
 the new values. Never remove a step: an edge several releases behind still
 needs it.
@@ -2653,15 +2657,25 @@ never builds, and refuses unless:
 Blocking manual steps do not stop a promotion: each host's updater holds
 on them until its operator acts.
 
-The admin check covers the workflow as it is on `main`. `workflow_dispatch`
-runs the file from the dispatched ref, so anyone who can push a branch can
-run an edited copy with the same `packages: write` token; limit write
-access to the repository accordingly.
-
 It then copies the index's exact bytes to `stable` with `crane tag`,
 checks that `stable` resolves to the digest anonymously and that its
 attestation verifies, and writes the tag, digest, previous `stable`,
 actor, qualification evidence and override reason to the job summary.
+Last, also when `stable` already named the digest, it attests the
+promotion: predicate type
+`https://github.com/3xDevOps/aether/edge-promotion/v1`, predicate
+`{"channel":"stable","tag":"<tag>","digest":"<digest>"}`, pushed to the
+registry, and verifies it as a host does
+([Verifying an image](edge.md#verifying-an-image)).
+
+The admin check and the refusal to run from any ref but `main` cover the
+workflow as it is on `main`. `workflow_dispatch` runs the file from the
+dispatched ref, so anyone who can push a branch can run an edited copy
+with a `packages: write` token and move `stable`. Such a run cannot
+produce the promotion attestation hosts require: its certificate names
+the branch, not `refs/heads/main`. The `edge-promotion` environment
+([Protecting the signing key](#protecting-the-signing-key)) keeps it from
+even starting.
 Promotions share one concurrency group, `promote-edge`; GitHub keeps one
 pending run per group, so dispatch the next only after the previous ends.
 
@@ -2670,3 +2684,29 @@ restore the database backup taken before the upgrade if its schema moved.
 Do not move `stable` back: the workflow refuses an older release, and
 other hosts following `stable` would downgrade into a schema they cannot
 open.
+
+### Protecting the signing key
+
+The `signing-key` and release jobs run in the GitHub environment `release` and
+`promote-edge.yml`'s promotion job in `edge-promotion`; a job that names an
+environment creates it on its first run. A repository secret is readable by
+any workflow on any branch, so a branch that edits a workflow could read
+`AETHER_RELEASE_SIGNING_KEY` and sign a manifest every updater trusts. An
+admin closes that in **Settings > Environments**:
+
+1. In `release`, add the secret `AETHER_RELEASE_SIGNING_KEY` with the seed,
+   then delete the repository secret of that name. Only jobs that name
+   `release` can then read it. Until the repository secret is deleted, it
+   still works: GitHub resolves an environment secret first and falls back
+   to the repository secret of the same name.
+2. In `release`, set **Deployment branches and tags** to **Selected
+   branches and tags** with the tag rule `v*`. A workflow edited on a
+   branch can name the environment, but GitHub refuses to run that job
+   outside a `v*` tag, so the key is read only by a release, whose tags
+   only admins may push.
+3. In `edge-promotion`, allow only the branch `main`. A promotion from an
+   edited copy on another branch then never starts.
+4. Optionally, add required reviewers to either environment: each
+   promotion then waits for one approval, and each release for two, at
+   `signing-key` before any build and at the release job before
+   publishing.

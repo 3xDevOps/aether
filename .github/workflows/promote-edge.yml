@@ -54,6 +54,12 @@ jobs:
         # this attempt must be an admin too.
         run: |
           allowed=true
+          # Hosts trust only a promotion attestation whose source ref is
+          # main, so a run from any other ref could not move a host anyway.
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            allowed=false
+            echo "::error::promote-edge runs only from refs/heads/main, not $GITHUB_REF"
+          fi
           for user in "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"; do
             permission=$(gh api \
               "repos/${GITHUB_REPOSITORY}/collaborators/${user}/permission" \
@@ -70,10 +76,13 @@ jobs:
   promote:
     needs: publisher-policy
     if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
+    environment: edge-promotion
     permissions:
       contents: read
       actions: read
-      attestations: read
+      attestations: write
+      id-token: write
+      artifact-metadata: write
       packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -258,3 +267,34 @@ jobs:
             echo "| Qualification | $EVIDENCE |"
             echo "| Soak override | ${REASON:-none} |"
           } >> "$GITHUB_STEP_SUMMARY"
+      # Also after a no-op, so a stable promoted before this step existed
+      # gains the attestation hosts require.
+      - name: Write the promotion predicate
+        run: |
+          jq -n --arg tag "$TAG" --arg digest "$DIGEST" '{channel: "stable", tag: $tag, digest: $digest}' \
+            > "$RUNNER_TEMP/promotion.json"
+      - name: Attest the promotion
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ inputs.digest }}
+          predicate-type: https://github.com/3xDevOps/aether/edge-promotion/v1
+          predicate-path: ${{ runner.temp }}/promotion.json
+          push-to-registry: true
+      - name: Verify the promotion attestation
+        # The attestation API can answer a moment after the upload.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if gh attestation verify "oci://$IMAGE@$DIGEST" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/promote-edge.yml" \
+              --source-ref refs/heads/main --deny-self-hosted-runners \
+              --predicate-type https://github.com/3xDevOps/aether/edge-promotion/v1 \
+              --format json > "$RUNNER_TEMP/verified.json"; then
+              jq -e --slurpfile want "$RUNNER_TEMP/promotion.json" \
+                'any(.[]; .verificationResult.statement.predicate == $want[0])' "$RUNNER_TEMP/verified.json" >/dev/null
+              echo "Promotion attestation: \`$IMAGE@$DIGEST\` as stable $TAG" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            [ "$attempt" = 5 ] || sleep 5
+          done
+          exit 1

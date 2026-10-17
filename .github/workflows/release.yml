@@ -48,10 +48,31 @@ jobs:
           done
           echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
 
+  # Fails before anything is built or pushed. Only a job in the release
+  # environment sees its secrets; environment secrets resolve before
+  # repository secrets, so the key may live in either. docs/install.md,
+  # Protecting the signing key.
+  signing-key:
+    needs: publisher-policy
+    if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
+    environment: release
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the release signing key
+        env:
+          KEY_SET: ${{ secrets.AETHER_RELEASE_SIGNING_KEY != '' }}
+        run: |
+          if [ "$KEY_SET" != true ]; then
+            echo "::error::the release manifest cannot be signed; AETHER_RELEASE_SIGNING_KEY is set neither in the release environment nor as a repository secret. Set it (see Release signing in docs/security.md), then rerun this release."
+            exit 1
+          fi
+
   # This is the only validation reuse boundary. The tag is resolved once and
   # every producer checks out that commit, never an unsigned CI artifact.
   release-policy:
-    needs: publisher-policy
+    needs: [publisher-policy, signing-key]
     if: ${{ needs.publisher-policy.outputs.allowed == 'true' }}
     permissions:
       contents: read
@@ -68,15 +89,6 @@ jobs:
           ref: refs/heads/main
           persist-credentials: false
           fetch-depth: 0
-      # Fails before anything is built; only the release job reads the key.
-      - name: Require the release signing key
-        env:
-          KEY_SET: ${{ secrets.AETHER_RELEASE_SIGNING_KEY != '' }}
-        run: |
-          if [ "$KEY_SET" != true ]; then
-            echo "::error::the release manifest cannot be signed; the AETHER_RELEASE_SIGNING_KEY repository secret is not set. Set it (see Release signing in docs/security.md), then rerun this release."
-            exit 1
-          fi
       - name: Validate the release tag and exact main CI commit
         id: authorize
         env:
@@ -776,6 +788,7 @@ jobs:
   # signed manifest, so installers never see a release without its assets.
   release:
     needs: [release-policy, release-binaries, windows-defender, android, browser-manifest, edge-manifest, standard-manifest]
+    environment: release
     permissions:
       contents: write
     runs-on: ubuntu-latest
