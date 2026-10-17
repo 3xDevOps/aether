@@ -64,13 +64,24 @@ func TestBackupAndRestoreCommands(t *testing.T) {
 		t.Fatalf("backup printed:\n%s", out.String())
 	}
 
-	dst, _ := newEdge(t, "other")
+	dst, oldFP := newEdge(t, "other")
 	out.Reset()
 	if err := restoreCmd([]string{"--data", dst, "--key", file + ".key", file}, envOf(nil), &out); err != nil {
 		t.Fatalf("restore: %v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "restored the edge key "+fp) || !strings.Contains(out.String(), "the database it replaced is "+filepath.Join(dst, "backups", "edge-before-restore-")) {
+	if !strings.Contains(out.String(), "restored the edge key "+fp) ||
+		!strings.Contains(out.String(), "saved the files it replaced: "+filepath.Join(dst, "backups", "edge-before-restore-")) {
 		t.Fatalf("restore printed:\n%s", out.String())
+	}
+	savedKeys, _ := filepath.Glob(filepath.Join(dst, "backups", "edge_key-before-restore-*"))
+	if len(savedKeys) != 1 {
+		t.Fatalf("saved keys: %v", savedKeys)
+	}
+	if info, err := os.Stat(savedKeys[0]); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("saved key: %v %v", info, err)
+	}
+	if _, got, err := readKey(savedKeys[0]); err != nil || got != oldFP {
+		t.Fatalf("saved key fingerprint %s, %v; want %s", got, err, oldFP)
 	}
 	if info, err := os.Stat(filepath.Join(dst, keyFile)); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("restored key: %v %v", info, err)
@@ -88,6 +99,35 @@ func TestBackupAndRestoreCommands(t *testing.T) {
 	}
 	if s, err := edgestore.ReadSchema(saved[0]); err != nil || s.Version != edgestore.SchemaVersion() {
 		t.Fatalf("saved database schema %+v, %v", s, err)
+	}
+}
+
+// Without --key, a restore needs the key the database's servers pin.
+func TestRestoreNeedsAKey(t *testing.T) {
+	src, _ := newEdge(t, "octo")
+	dst, _ := newEdge(t, "other")
+	if err := os.Remove(filepath.Join(dst, keyFile)); err != nil {
+		t.Fatal(err)
+	}
+	err := restoreCmd([]string{"--data", dst, filepath.Join(src, "edge.db")}, envOf(nil), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "restore it too with --key <file>") {
+		t.Fatalf("restore without a key: %v", err)
+	}
+}
+
+type brokenWriter struct{}
+
+func (brokenWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+// A failing output cannot cut a backup short: the key is written first.
+func TestBackupWritesTheKeyBeforeReporting(t *testing.T) {
+	dir, _ := newEdge(t, "octo")
+	file := filepath.Join(t.TempDir(), "edge.db")
+	if err := backupCmd([]string{"--data", dir, "--with-key", file}, envOf(nil), brokenWriter{}, brokenWriter{}); err == nil {
+		t.Fatal("backup to a broken output succeeded")
+	}
+	if _, err := os.Stat(file + ".key"); err != nil {
+		t.Fatalf("the key was not backed up: %v", err)
 	}
 }
 
@@ -113,15 +153,15 @@ func TestBackupToStdout(t *testing.T) {
 }
 
 // A second edge, and a restore, are refused while an edge holds the lock;
-// operator commands then run only at the running edge's schema.
+// operator commands then run only on a schema this binary can run on, and
+// never during a restore.
 func TestDataLock(t *testing.T) {
 	dir, _ := newEdge(t, "octo")
-	unlock, err := lockData(dir)
+	unlock, err := lockPath(filepath.Join(dir, lockFile), exclusive)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer unlock()
-	if _, err = lockData(dir); !errors.Is(err, errLocked) {
+	if _, err = lockPath(filepath.Join(dir, lockFile), exclusive); !errors.Is(err, errLocked) {
 		t.Fatalf("second lock: %v, want errLocked", err)
 	}
 	err = restoreCmd([]string{"--data", dir, filepath.Join(dir, "edge.db")}, envOf(nil), &bytes.Buffer{})
@@ -132,18 +172,44 @@ func TestDataLock(t *testing.T) {
 		t.Fatalf("accounts list beside a running edge:\n%s%v", out, listErr)
 	}
 
+	// A restore holds both locks.
+	unlockDB, err := lockPath(filepath.Join(dir, dbLockFile), exclusive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(t, dir, "accounts", "list"); err == nil || !strings.Contains(err.Error(), "a restore is replacing") {
+		t.Fatalf("accounts list during a restore: %v", err)
+	}
+	unlockDB()
+	unlock()
+
+	// An operator command beside a running edge holds the database's lock.
+	unlockDB, err = lockPath(filepath.Join(dir, dbLockFile), shared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = restoreCmd([]string{"--data", dir, filepath.Join(dir, "edge.db")}, envOf(nil), &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "another aether-edge command has "+filepath.Join(dir, "edge.db")+" open") {
+		t.Fatalf("restore beside an operator command: %v", err)
+	}
+	unlockDB()
+
 	db, err := sql.Open("sqlite", filepath.Join(dir, "edge.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(`INSERT INTO schema_migrations (version, applied_at, compat_floor) VALUES (99, 0, 1)`); err != nil {
+	if _, err = db.Exec(`INSERT INTO schema_migrations (version, applied_at, compat_floor) VALUES (99, 0, 99)`); err != nil {
 		t.Fatal(err)
 	}
 	if err = db.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if unlock, err = lockPath(filepath.Join(dir, lockFile), exclusive); err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
 	_, err = run(t, dir, "accounts", "list")
-	if err == nil || !strings.Contains(err.Error(), "is at schema version 99 and this binary supports 1; an edge is running on "+dir+
+	if err == nil || !strings.Contains(err.Error(), "is at schema version 99 with compat floor 99, and this binary supports 1; an edge is running on "+dir+
 		", so run this command with the same image or binary as the running edge") {
 		t.Fatalf("accounts list at another schema: %v", err)
 	}

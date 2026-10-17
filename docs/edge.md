@@ -1294,7 +1294,7 @@ ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
 `/var/lib/aether-edge` holds `edge.db`, the database of accounts, device
 tokens, owners and owed deletions; `edge_key`, the edge signing key every
 enrolled server pins; `backups/`, the database copies the edge takes before
-it migrates; `edge.lock`, held by the running edge; and, when the edge
+it migrates; `edge.lock` and `edge.db.lock`, held by the running edge; and, when the edge
 obtains its own certificates, the ACME cache in `acme/`
 ([Backup and recovery](#backup-and-recovery)). It must outlive every
 container. Mount a named volume, which takes the image's
@@ -1303,8 +1303,8 @@ chmod 0700 <dir>`); or a directory the edge's uid writes through its group,
 such as `root:<gid>` mode `2770` on a platform that runs the container with
 that supplementary group. The edge refuses a directory its uid cannot
 write, one that others can enter, and an `edge_key`, `edge.db`,
-`edge.lock` or `backups/` another uid owns, since it creates them 0600 and
-0700:
+`edge.lock`, `edge.db.lock` or `backups/` another uid owns, since it
+creates them 0600 and 0700:
 
 ```
 aether-edge: data directory /var/lib/aether-edge (uid 0, gid 0, mode 0755) is not writable by uid 65532, the user aether-edge runs as: permission denied; give that user write access as the directory's owner or through its group, or name another with --data or AETHER_EDGE_DATA
@@ -1598,25 +1598,33 @@ The data directory, `/var/lib/aether-edge`:
 | --- | --- |
 | `edge.db` (with `edge.db-wal`, `edge.db-shm`) | Accounts, edge sessions, devices, claimed servers with owners, kinds, announced policies and directories, which servers each account was admitted to, deletions owed to servers, egress counters, blocked server ids and accounts. Bearer secrets are stored only as SHA-256 hashes |
 | `edge_key` | The Ed25519 key grants are signed with, OpenSSH format, 0600. The edge refuses to start if group or others can read it: `edge: signing key <path> has mode 0644; run chmod 600 <path>` |
-| `backups/` | 0700. `edge-v<from>-v<to>-<UTC time>.db`, taken before each migration, newest 5 kept; `edge-before-restore-<UTC time>.db`, the database a restore replaced, never removed |
-| `edge.lock` | Locked by the running edge, so a second edge on the same directory exits. `flock` does not lock across NFS: keep the directory on a local filesystem |
+| `backups/` | 0700. `edge-v<from>-v<to>-<UTC time>.db`, taken before each migration: the newest 5 are kept, and the newest from each schema version. `edge-before-restore-<UTC time>.db` (with its `-wal`) and `edge_key-before-restore-<UTC time>`, the files a restore replaced, are never removed |
+| `edge.lock`, `edge.db.lock` | Locked by the running edge, so a second edge on the same directory exits, and by `restore` and the operator commands. `flock` does not lock across NFS: keep the directory on a local filesystem |
 | `acme/` | Without a proxy: the two names' certificates, their keys and the ACME account key |
 
 Keep:
 
 - **`edge_key`, once, offline**, right after the first start. It never
-  changes. If it is lost, the edge makes a new one and every server refuses
-  the edge with `edge key changed` until its operator runs `sudo
-  aether-server edge trust`. Clients need no action.
+  changes. If it is lost while `edge.db` holds accounts or servers, the
+  edge does not start:
+
+  ```
+  aether-edge: edge: signing key /var/lib/aether-edge/edge_key is missing, and edge.db holds accounts or servers that pin it, so the edge does not make a new one: put the key back with aether-edge restore --key <key file> <database backup>, or copy it to /var/lib/aether-edge/edge_key with mode 0600
+  ```
+
+  Without the key, start over with a new data directory: the edge makes a
+  new key, and every server refuses the edge with `edge key changed` until
+  its operator runs `sudo aether-server edge trust`.
 - **`edge.db`, daily.** `aether-edge backup` copies a consistent snapshot
   while the edge runs, through a read-only connection, and checks the copy
-  with `PRAGMA integrity_check`. It never migrates. Name a file, a
-  directory (the copy is `edge-v<schema>-<UTC time>.db` in it), or `-` for
-  standard output; `--with-key` copies `edge_key` to `<file>.key` too:
+  with `PRAGMA integrity_check`. It never migrates. Name a directory (the
+  copy is `edge-v<schema>-<UTC time>.db` in it), a new file (an existing
+  one is never overwritten), or `-` for standard output; `--with-key`
+  copies `edge_key` to `<file>.key` too:
 
   ```sh
-  sudo -u aether-edge aether-edge backup /var/lib/aether-edge/backups/daily.db
-  docker exec aether-edge aether-edge backup - > edge-backup.db
+  sudo -u aether-edge aether-edge backup /var/lib/aether-edge/backups/
+  docker exec aether-edge aether-edge backup - > edge-$(date -u +%Y%m%d).db
   ```
 
   Copy the file off the machine. A lost `edge.db` forgets every
@@ -1631,23 +1639,27 @@ Keep:
   the steps to recreate them.
 
 To restore, stop the edge and run `aether-edge restore` as its user with
-the data directory mounted. It checks the copy's integrity, refuses a copy
-this binary cannot run on, saves the current `edge.db` to
-`backups/edge-before-restore-<UTC time>.db`, and replaces `edge.db`,
-removing its `-wal` and `-shm` files. `--key <file>` restores `edge_key`
-too and prints its fingerprint:
+the data directory mounted. It checks the copy's integrity and refuses a
+copy this binary cannot run on. It saves the current `edge.db` and its WAL
+byte for byte to `backups/edge-before-restore-<UTC time>.db`, folds the
+WAL into `edge.db`, removes the `-wal` and `-shm` files and renames the
+copy into place. `--key <file>` restores `edge_key` too, after saving the
+current one to `backups/edge_key-before-restore-<UTC time>`, and prints
+its fingerprint. Without `--key`, `edge_key` must already be in the data
+directory:
 
 ```sh
 sudo systemctl stop aether-edge
-sudo -u aether-edge aether-edge restore /var/lib/aether-edge/backups/daily.db
+sudo -u aether-edge aether-edge restore /var/lib/aether-edge/backups/<backup>.db
 sudo systemctl start aether-edge
 
 docker compose stop edge
-docker compose run --rm --no-deps edge restore /var/lib/aether-edge/backups/daily.db
+docker compose run --rm --no-deps edge restore /var/lib/aether-edge/backups/<backup>.db
 docker compose start edge
 ```
 
-With the edge running, a restore is refused:
+With the edge running, a restore is refused; so is one while an operator
+command has the database open:
 
 ```
 aether-edge: another aether-edge process holds the data directory's lock: /var/lib/aether-edge/edge.lock; an edge is running on /var/lib/aether-edge: stop it first (docker compose stop, or sudo systemctl stop aether-edge), then restore
@@ -1660,15 +1672,15 @@ compat floor and the schema this binary supports, read-only:
 ### Upgrades
 
 ```sh
-sudo -u aether-edge aether-edge backup /var/lib/aether-edge/backups/pre-<release-tag>.db
+sudo -u aether-edge aether-edge backup /var/lib/aether-edge/backups/
 # download and check the new binary as in Installing, then:
 sudo install -m 0755 aether-edge-linux-<arch> /usr/local/bin/aether-edge
 sudo systemctl restart aether-edge
 ```
 
 In a container, back up with `docker exec <container> aether-edge backup
-/var/lib/aether-edge/backups/pre-<release-tag>.db`, then start the new
-tag's container with the same volume.
+/var/lib/aether-edge/backups/`, then start the new tag's container with
+the same volume.
 
 Fetch the unit and the environment example of the new release too, and
 compare them with yours. On `SIGTERM` the edge sends `drain` to every
@@ -1677,22 +1689,28 @@ servers reconnect with backoff, clients redial, and runs are unaffected.
 
 The database schema migrates forward on start. Before it migrates, the
 edge copies `edge.db` to `backups/edge-v<from>-v<to>-<UTC time>.db` and
-checks the copy; without a good copy it does not migrate and exits:
+checks the copy; without a good copy it does not migrate and exits. The
+first start of a release that records compat floors (below) also takes
+one, `edge-v1-v1-<UTC time>.db`, before it adds the column that holds
+them.
 
 ```
-aether-edge: edgestore: back up /var/lib/aether-edge/edge.db to /var/lib/aether-edge/backups/edge-v1-v2-20261017T051604Z.db before migrating schema 1 to 2: edgestore: copy /var/lib/aether-edge/edge.db to /var/lib/aether-edge/backups/edge-v1-v2-20261017T051604Z.db.tmp: database or disk is full (13); the edge does not migrate without a verified backup: make /var/lib/aether-edge/backups writable by uid 65532 with room for a copy of the database, then start the edge again
+aether-edge: edgestore: back up /var/lib/aether-edge/edge.db to /var/lib/aether-edge/backups/edge-v1-v2-20261017T051604.402617Z.db before migrating schema 1 to 2: edgestore: copy /var/lib/aether-edge/edge.db to /var/lib/aether-edge/backups/edge-v1-v2-20261017T051604.402617Z.db.3829104755.tmp: database or disk is full (13); the edge does not migrate without a verified backup: make /var/lib/aether-edge/backups writable by uid 65532 with room for a copy of the database, then start the edge again
 ```
 
 Each migration records a compat floor: the lowest schema a binary must
-support to run on the database. A migration that only adds a table, an
-index, or a nullable or defaulted column keeps the previous floor, so the
-older binary still runs on it, logging
+support to run correctly on the database. A migration keeps the previous
+floor only when it adds a table, an index, or a nullable or defaulted
+column that an older binary can ignore and stay correct. One that an
+older binary must read or maintain, such as a new revocation or block,
+raises the floor to its own version. On a database whose floor it meets,
+the older binary runs unmigrated, logging
 `edgestore: the database was migrated by a newer binary; running on it unmigrated, as its compat floor allows`.
 After any other migration the older binary refuses the database and names
 the backup to restore:
 
 ```
-aether-edge: edgestore: database schema version 2 is newer than this binary supports (1); run a binary that supports schema 2 or later, or stop the edge and restore the backup taken before the upgrade: aether-edge restore /var/lib/aether-edge/backups/edge-v1-v2-20261017T050000Z.db
+aether-edge: edgestore: database schema version 2 is newer than this binary supports (1); run a binary that supports schema 2 or later, or stop the edge and restore the backup taken before the upgrade: aether-edge restore /var/lib/aether-edge/backups/edge-v1-v2-20261017T050000.000000Z.db
 ```
 
 To roll back, stop the edge, restore that backup with the older binary or
@@ -1716,13 +1734,16 @@ opens the database, and a root-owned one would lock the edge out. `--data`
 argument.
 
 While an edge runs, it holds `edge.lock`, and the commands never migrate:
-they refuse a database at another schema than their binary's, so run them
-with the running edge's binary or image, as `docker exec <container>
+they refuse a database their binary would migrate or cannot run on, so run
+them with the running edge's binary or image, as `docker exec <container>
 aether-edge servers list` does:
 
 ```
-aether-edge: edgestore: /var/lib/aether-edge/edge.db is at schema version 2 and this binary supports 1; an edge is running on /var/lib/aether-edge, so run this command with the same image or binary as the running edge, as in docker exec <container> aether-edge servers list
+aether-edge: edgestore: /var/lib/aether-edge/edge.db is at schema version 2 with compat floor 2, and this binary supports 1; an edge is running on /var/lib/aether-edge, so run this command with the same image or binary as the running edge, as in docker exec <container> aether-edge servers list
 ```
+
+During a restore they are refused with `a restore is replacing
+/var/lib/aether-edge/edge.db: run the command again once it finishes`.
 
 With no edge running, they take the lock themselves and migrate as a start
 does, backup first. `aether-edge version --json` prints the binary's

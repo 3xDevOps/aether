@@ -16,6 +16,7 @@ import (
 	"time"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
 )
 
 func TestAdmissionMatrix(t *testing.T) {
@@ -376,7 +377,12 @@ func TestRemoveServer(t *testing.T) {
 func TestEdgeKeyPersists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, keyFile)
-	first, err := loadOrCreateKey(path)
+	store, err := edgestore.Open(filepath.Join(dir, "edge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close() //nolint:errcheck // test cleanup
+	first, err := loadKey(dir, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,15 +393,29 @@ func TestEdgeKeyPersists(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("key file mode = %04o, want 0600", info.Mode().Perm())
 	}
-	second, err := loadOrCreateKey(path)
+	second, err := loadKey(dir, store)
 	if err != nil || !first.Equal(second) {
 		t.Fatalf("reloaded key differs: %v", err)
 	}
 	if err := os.Chmod(path, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadOrCreateKey(path); err == nil || !strings.Contains(err.Error(), "chmod 600") {
+	if _, err := loadKey(dir, store); err == nil || !strings.Contains(err.Error(), "chmod 600") {
 		t.Errorf("world-readable key loaded: %v", err)
+	}
+
+	// A lost key is not replaced while accounts pin it.
+	if _, err := store.SignIn(context.Background(), edgeproto.Account{Provider: edgeproto.ProviderGitHub, Subject: "1"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadKey(dir, store); err == nil || !strings.Contains(err.Error(), "aether-edge restore --key") {
+		t.Errorf("a missing key beside accounts: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("a new key was made: %v", err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -57,7 +58,7 @@ func TestBackupBeforeMigrating(t *testing.T) {
 
 	closeStore(t, openSteps(t, path, testSteps))
 	names := backupsIn(t, dir)
-	if len(names) != 1 || !regexp.MustCompile(`^edge-v1-v2-\d{8}T\d{6}Z\.db$`).MatchString(names[0]) {
+	if len(names) != 1 || !regexp.MustCompile(`^edge-v1-v2-\d{8}T\d{6}\.\d{6}Z\.db$`).MatchString(names[0]) {
 		t.Fatalf("backups = %v, want one edge-v1-v2-<stamp>.db", names)
 	}
 	if entries, err := os.ReadDir(filepath.Join(dir, BackupDir)); err != nil || len(entries) != 1 {
@@ -107,8 +108,12 @@ func TestMigrationBackupRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := []string{
-		"edge-v1-v2-20200101T000000Z.db", "edge-v1-v2-20200102T000000Z.db", "edge-v1-v2-20200103T000000Z.db",
-		"edge-v1-v2-20200104T000000Z.db", "edge-v1-v2-20200105T000000Z.db", "stale.tmp", "edge-before-restore-20200101T000000Z.db",
+		"edge-v1-v2-20200101T000000.000000Z.db", "edge-v1-v2-20200102T000000.000000Z.db", "edge-v1-v2-20200103T000000.000000Z.db",
+		"edge-v1-v2-20200104T000000.000000Z.db", "edge-v1-v2-20200105T000000.000000Z.db",
+		// The only backup from schema 9 is kept however old.
+		"edge-v9-v10-20190101T000000.000000Z.db",
+		"edge-before-restore-20200101T000000.000000Z.db", "stdout-1-20200101T000000.000000Z.db.42.tmp",
+		"edge-v1-v2-20200106T000000.000000Z.db.42.tmp",
 	}
 	for _, name := range old {
 		if err := os.WriteFile(filepath.Join(backups, name), nil, 0o600); err != nil {
@@ -117,16 +122,14 @@ func TestMigrationBackupRetention(t *testing.T) {
 	}
 	closeStore(t, openSteps(t, path, testSteps))
 	names := backupsIn(t, dir)
-	if len(names) != keepMigrationBackups || names[keepMigrationBackups-1] != old[1] || !strings.HasPrefix(names[0], "edge-v1-v2-20") || names[0] == old[4] {
-		t.Fatalf("backups = %v, want the new one and the four newest old ones", names)
+	if len(names) != keepMigrationBackups+1 || names[keepMigrationBackups-1] != old[1] || names[keepMigrationBackups] != old[5] ||
+		names[0] == old[4] {
+		t.Fatalf("backups = %v, want the new one, the four newest old ones and the one from schema 9", names)
 	}
-	for _, name := range []string{"stale.tmp", old[0]} {
-		if _, err := os.Stat(filepath.Join(backups, name)); !os.IsNotExist(err) {
-			t.Fatalf("%s survived: %v", name, err)
+	for name, want := range map[string]bool{old[0]: false, old[6]: true, old[7]: true, old[8]: false} {
+		if _, err := os.Stat(filepath.Join(backups, name)); (err == nil) != want {
+			t.Errorf("%s: %v, want kept = %v", name, err, want)
 		}
-	}
-	if _, err := os.Stat(filepath.Join(backups, old[6])); err != nil {
-		t.Fatalf("the restore backup was removed: %v", err)
 	}
 }
 
@@ -172,6 +175,9 @@ func TestFloorColumnAdded(t *testing.T) {
 	closeStore(t, openSteps(t, path, testSteps))
 	if s, err := ReadSchema(path); err != nil || s != (Schema{Version: 2, CompatFloor: 2}) {
 		t.Fatalf("schema with the column = %+v, %v", s, err)
+	}
+	if names := backupsIn(t, filepath.Dir(path)); len(names) != 1 || !strings.HasPrefix(names[0], "edge-v2-v2-") {
+		t.Fatalf("backups = %v, want one taken before adding the column", names)
 	}
 }
 
@@ -246,8 +252,12 @@ func TestBackupAndRestore(t *testing.T) {
 	if err := os.WriteFile(target+"-wal", []byte("stale"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := Restore(backup, target); err != nil || got.Version != 2 {
-		t.Fatalf("Restore = %+v, %v", got, err)
+	staged, got, err := StageRestore(backup, target)
+	if err != nil || got.Version != 2 {
+		t.Fatalf("StageRestore = %+v, %v", got, err)
+	}
+	if err = FinishRestore(staged, target); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := os.Stat(target + "-wal"); !os.IsNotExist(err) {
 		t.Fatalf("the old WAL survived the restore: %v", err)
@@ -266,12 +276,69 @@ func TestRestoreRefusesTooNewFloor(t *testing.T) {
 	steps := append(append([]migration{}, migrations...), migration{floor: len(migrations) + 1, sql: `CREATE TABLE later (a TEXT)`})
 	closeStore(t, openSteps(t, src, steps))
 	dst := filepath.Join(dir, "edge.db")
-	_, err := Restore(src, dst)
+	_, _, err := StageRestore(src, dst)
 	want := fmt.Sprintf("needs a binary that supports schema %d or later; this binary supports %d", SchemaVersion()+1, SchemaVersion())
 	if err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("Restore = %v", err)
+		t.Fatalf("StageRestore = %v", err)
 	}
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
 		t.Fatalf("the refused restore wrote %s: %v", dst, err)
+	}
+}
+
+// A restore that fails keeps the writes only the old database's WAL held.
+func TestFailedRestoreKeepsWAL(t *testing.T) {
+	live := filepath.Join(t.TempDir(), "edge.db")
+	s := openSteps(t, live, testSteps)
+	defer closeStore(t, s)
+	if _, err := s.db.Exec(`PRAGMA wal_autocheckpoint = 0; INSERT INTO notes VALUES ('in the wal')`); err != nil {
+		t.Fatal(err)
+	}
+	// A copy taken while the store is open is what an unclean stop leaves.
+	crashed := filepath.Join(t.TempDir(), "edge.db")
+	for _, suffix := range []string{"", "-wal"} {
+		data, err := os.ReadFile(live + suffix)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(crashed+suffix, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := FinishRestore(filepath.Join(t.TempDir(), "missing.db"), crashed); err == nil {
+		t.Fatal("FinishRestore of a missing file succeeded")
+	}
+	db, err := openRO(crashed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close() //nolint:errcheck // read-only
+	var body string
+	if err := db.QueryRow(`SELECT body FROM notes`).Scan(&body); err != nil || body != "in the wal" {
+		t.Fatalf("row after the failed restore = %q, %v", body, err)
+	}
+}
+
+// Beside a running edge, a database opens unmigrated when this binary is
+// its schema, or a newer one whose floor allows it.
+func TestOpenCurrent(t *testing.T) {
+	v := SchemaVersion()
+	for _, tt := range []struct {
+		steps []migration
+		ok    bool
+	}{
+		{migrations, true},
+		{append(slices.Clone(migrations), migration{floor: CompatFloor(), sql: `CREATE TABLE later (a TEXT)`}), true},
+		{append(slices.Clone(migrations), migration{floor: v + 1, sql: `CREATE TABLE later (a TEXT)`}), false},
+	} {
+		path := filepath.Join(t.TempDir(), "edge.db")
+		closeStore(t, openSteps(t, path, tt.steps))
+		s, err := OpenCurrent(path)
+		if (err == nil) != tt.ok {
+			t.Errorf("schema %d, floor %d: OpenCurrent = %v, want ok = %v", len(tt.steps), tt.steps[len(tt.steps)-1].floor, err, tt.ok)
+		}
+		if err == nil {
+			closeStore(t, s)
+		}
 	}
 }

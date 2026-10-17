@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -118,32 +119,45 @@ func admin(group, usage string, args []string, getenv func(string) string, out i
 }
 
 // openStore opens the database of an existing edge, and returns it with
-// the release of the data directory's lock. Beside a running edge, which
-// holds the lock, it does not migrate, and refuses a database at another
-// schema than this binary's.
+// the release of its locks. Beside a running edge, which holds edge.lock,
+// it does not migrate, and refuses a database this binary would migrate or
+// cannot run on. It refuses while a restore replaces the database.
 func openStore(dataDir string) (*edgestore.Store, func(), error) {
 	path, err := edgeDB(dataDir)
 	if err != nil {
 		return nil, nil, err
 	}
-	unlock, err := lockData(dataDir)
-	if errors.Is(err, errLocked) {
-		s, openErr := edgestore.OpenCurrent(path)
-		if openErr != nil {
-			return nil, nil, fmt.Errorf("%w; an edge is running on %s, so run this command with the same image or binary as the running edge, as in docker exec <container> aether-edge servers list",
-				openErr, dataDir)
-		}
-		return s, func() {}, nil
-	}
-	if err != nil {
+	unlock, err := lockPath(filepath.Join(dataDir, lockFile), exclusive)
+	beside := errors.Is(err, errLocked)
+	switch {
+	case beside:
+		unlock = func() {}
+	case err != nil:
 		return nil, nil, err
 	}
-	s, err := edgestore.Open(path)
+	unlockDB, err := lockPath(filepath.Join(dataDir, dbLockFile), shared)
+	if errors.Is(err, errLocked) {
+		err = fmt.Errorf("%w; a restore is replacing %s: run the command again once it finishes", err, path)
+	}
 	if err != nil {
 		unlock()
 		return nil, nil, err
 	}
-	return s, unlock, nil
+	release := func() { unlockDB(); unlock() }
+	open := edgestore.Open
+	if beside {
+		open = edgestore.OpenCurrent
+	}
+	s, err := open(path)
+	if err != nil {
+		release()
+		if beside {
+			err = fmt.Errorf("%w; an edge is running on %s, so run this command with the same image or binary as the running edge, as in docker exec <container> aether-edge servers list",
+				err, dataDir)
+		}
+		return nil, nil, err
+	}
+	return s, release, nil
 }
 
 func checkServerID(id string) error {

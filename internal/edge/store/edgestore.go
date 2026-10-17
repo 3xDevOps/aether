@@ -6,6 +6,7 @@
 package edgestore
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -65,7 +66,7 @@ func open(path string, steps []migration) (*Store, error) {
 }
 
 // OpenCurrent opens the existing database at path without migrating it,
-// and refuses one whose schema is not exactly this binary's: the operator
+// and refuses one this binary would migrate or cannot run on: the operator
 // commands use it beside a running edge, which owns the schema.
 func OpenCurrent(path string) (*Store, error) {
 	db, err := openRW(path)
@@ -73,8 +74,9 @@ func OpenCurrent(path string) (*Store, error) {
 		return nil, err
 	}
 	s, err := readSchema(db)
-	if err == nil && s.Version != SchemaVersion() {
-		err = fmt.Errorf("edgestore: %s is at schema version %d and this binary supports %d", path, s.Version, SchemaVersion())
+	if err == nil && (s.Version < SchemaVersion() || s.CompatFloor > SchemaVersion()) {
+		err = fmt.Errorf("edgestore: %s is at schema version %d with compat floor %d, and this binary supports %d",
+			path, s.Version, s.CompatFloor, SchemaVersion())
 	}
 	if err != nil {
 		db.Close() //nolint:errcheck // the schema error takes precedence
@@ -103,6 +105,16 @@ func openRW(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// HasIdentities reports whether the database holds an account or a
+// claimed server, which the edge's signing key vouches for.
+func (s *Store) HasIdentities(ctx context.Context) (bool, error) {
+	var has bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM accounts) OR EXISTS (SELECT 1 FROM servers)`).Scan(&has); err != nil {
+		return false, fmt.Errorf("edgestore: read accounts and servers: %w", err)
+	}
+	return has, nil
+}
+
 // Close closes the database.
 func (s *Store) Close() error {
 	if err := s.db.Close(); err != nil {
@@ -113,9 +125,12 @@ func (s *Store) Close() error {
 
 // migration is one step of the schema history, applied in its own
 // transaction. floor is the lowest schema version a binary must support to
-// run correctly on the database after this step: an additive step (a new
-// table, a nullable or defaulted column, an index) keeps the previous
-// step's floor, any other step sets its own version.
+// run correctly on the database after this step. A step keeps the previous
+// step's floor only when it is additive (a new table, a nullable or
+// defaulted column, an index) and an older binary stays correct without
+// reading or maintaining what it adds; any step an older binary must know
+// about, such as a new revocation or block, sets the floor to its own
+// version.
 type migration struct {
 	floor int
 	sql   string
@@ -258,20 +273,28 @@ func prepare(db *sql.DB, path string, steps []migration) error {
 	case s.Version > supported:
 		return fmt.Errorf("edgestore: database schema version %d is newer than this binary supports (%d); %s",
 			s.Version, supported, restoreHint(path, supported, s.CompatFloor))
-	case s.Version > 0 && s.Version < supported:
-		if err := backupBeforeMigrating(path, s.Version, supported); err != nil {
-			return err
-		}
 	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		version      INTEGER PRIMARY KEY,
 		applied_at   INTEGER NOT NULL,
 		compat_floor INTEGER
 	)`); err != nil {
 		return fmt.Errorf("edgestore: create schema_migrations: %w", err)
 	}
-	if err := addFloorColumn(db); err != nil {
+	hasFloor, err := hasFloorColumn(db)
+	if err != nil {
 		return err
+	}
+	if s.Version > 0 && (s.Version < supported || !hasFloor) {
+		if err := backupBeforeMigrating(path, s.Version, supported); err != nil {
+			return err
+		}
+	}
+	if !hasFloor {
+		if _, err := db.Exec(`ALTER TABLE schema_migrations ADD COLUMN compat_floor INTEGER;
+			UPDATE schema_migrations SET compat_floor = version`); err != nil {
+			return fmt.Errorf("edgestore: add schema_migrations.compat_floor: %w", err)
+		}
 	}
 	for v := s.Version + 1; v <= supported; v++ {
 		tx, err := db.Begin()
@@ -294,20 +317,9 @@ func prepare(db *sql.DB, path string, steps []migration) error {
 	return nil
 }
 
-// addFloorColumn records compat floors in a schema_migrations table made
-// before they existed. Each step recorded then sets its own version.
-func addFloorColumn(db *sql.DB) error {
-	has, err := hasFloorColumn(db)
-	if err != nil || has {
-		return err
-	}
-	if _, err := db.Exec(`ALTER TABLE schema_migrations ADD COLUMN compat_floor INTEGER;
-		UPDATE schema_migrations SET compat_floor = version`); err != nil {
-		return fmt.Errorf("edgestore: add schema_migrations.compat_floor: %w", err)
-	}
-	return nil
-}
-
+// hasFloorColumn reports whether schema_migrations records compat floors.
+// In one made before they existed, each recorded step counts as its own
+// version's floor.
 func hasFloorColumn(db *sql.DB) (bool, error) {
 	var n int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('schema_migrations') WHERE name = 'compat_floor'`).Scan(&n); err != nil {

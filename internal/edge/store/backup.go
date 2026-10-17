@@ -19,21 +19,25 @@ import (
 // taken before migrations and restores.
 const BackupDir = "backups"
 
-// keepMigrationBackups is how many pre-migration backups are kept.
+// keepMigrationBackups is how many pre-migration backups are kept, besides
+// the newest from each schema version.
 const keepMigrationBackups = 5
 
-// StampLayout is the UTC timestamp in backup file names.
-const StampLayout = "20060102T150405Z"
+// StampLayout is the UTC timestamp in backup file names. Microseconds keep
+// two backups taken in one second, as a restart loop does, apart.
+const StampLayout = "20060102T150405.000000Z"
 
-var migrationBackup = regexp.MustCompile(`^edge-v([0-9]+)-v([0-9]+)-([0-9]{8}T[0-9]{6}Z)\.db$`)
+// Stamp is the timestamp of a backup taken now.
+func Stamp() string { return time.Now().UTC().Format(StampLayout) }
+
+var migrationBackup = regexp.MustCompile(`^edge-v([0-9]+)-v([0-9]+)-([0-9]{8}T[0-9]{6}\.[0-9]{6}Z)\.db$`)
 
 // backupBeforeMigrating takes a verified copy of the database at path,
-// at schema version from, into the backups directory, then keeps only the
-// newest keepMigrationBackups of them. Without the copy there is no
-// migration.
+// at schema version from, into the backups directory, then prunes the
+// pre-migration backups. Without the copy there is no migration.
 func backupBeforeMigrating(path string, from, to int) error {
 	dir := filepath.Join(filepath.Dir(path), BackupDir)
-	dst := filepath.Join(dir, fmt.Sprintf("edge-v%d-v%d-%s.db", from, to, time.Now().UTC().Format(StampLayout)))
+	dst := filepath.Join(dir, fmt.Sprintf("edge-v%d-v%d-%s.db", from, to, Stamp()))
 	fail := func(err error) error {
 		return fmt.Errorf("edgestore: back up %s to %s before migrating schema %d to %d: %w; "+
 			"the edge does not migrate without a verified backup: make %s writable by uid %d with room for a copy of the database, then start the edge again",
@@ -42,7 +46,9 @@ func backupBeforeMigrating(path string, from, to int) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fail(err)
 	}
-	stale, err := filepath.Glob(filepath.Join(dir, "*.tmp"))
+	// Only a migration writes these, under the data directory's lock, so
+	// any found now is abandoned.
+	stale, err := filepath.Glob(filepath.Join(dir, "edge-v*-v*-*.db.*.tmp"))
 	if err != nil {
 		return fail(err)
 	}
@@ -58,13 +64,28 @@ func backupBeforeMigrating(path string, from, to int) error {
 	if s.Version != from {
 		return fail(fmt.Errorf("the copy is at schema version %d, want %d", s.Version, from))
 	}
-	old, err := migrationBackups(dir)
-	if err != nil {
+	if err = pruneMigrationBackups(dir); err != nil {
 		return fail(err)
 	}
-	for _, b := range old[min(len(old), keepMigrationBackups):] {
-		if err := os.Remove(filepath.Join(dir, b.name)); err != nil {
-			return fail(fmt.Errorf("remove an old backup: %w", err))
+	return nil
+}
+
+// pruneMigrationBackups keeps the newest keepMigrationBackups pre-migration
+// backups and the newest from each schema version, so a migration that
+// fails on every restart cannot prune the only copy an older binary runs on.
+func pruneMigrationBackups(dir string) error {
+	files, err := migrationBackups(dir)
+	if err != nil {
+		return err
+	}
+	seen := map[int]bool{}
+	for i, f := range files {
+		if i < keepMigrationBackups || !seen[f.from] {
+			seen[f.from] = true
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, f.name)); err != nil {
+			return fmt.Errorf("remove an old backup: %w", err)
 		}
 	}
 	return nil
@@ -125,96 +146,126 @@ func ReadSchema(path string) (Schema, error) {
 	return readSchema(db)
 }
 
-// Backup writes a consistent, verified copy of the database at src to dst,
-// which must not exist, through a read-only connection, so a running edge
-// keeps writing. It returns the copy's schema.
+// Backup writes a consistent, verified copy of the database at src to dst
+// through a read-only connection, so a running edge keeps writing. It
+// never replaces an existing dst. It returns the copy's schema.
 func Backup(src, dst string) (Schema, error) {
-	if _, err := os.Lstat(dst); !errors.Is(err, fs.ErrNotExist) {
-		return Schema{}, fmt.Errorf("edgestore: %s exists; name a new file", dst)
-	}
-	tmp := dst + ".tmp"
-	s, err := snapshot(src, tmp)
+	tmp, s, err := snapshot(src, dst)
 	if err != nil {
 		return Schema{}, err
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp) //nolint:errcheck // the rename error takes precedence
+	defer os.Remove(tmp) //nolint:errcheck // once linked, the copy lives on as dst
+	// A link, unlike a rename, fails on an existing dst.
+	if err := os.Link(tmp, dst); errors.Is(err, fs.ErrExist) {
+		return Schema{}, fmt.Errorf("edgestore: %s exists; name a new file or a directory", dst)
+	} else if err != nil {
 		return Schema{}, fmt.Errorf("edgestore: %w", err)
 	}
-	return s, syncDir(filepath.Dir(dst))
+	return s, SyncDir(filepath.Dir(dst))
 }
 
-// Restore replaces the database at dst with a verified copy of src, which
-// must be a database this binary can run on. Nothing may have dst open:
-// its -wal and -shm files belong to the replaced database and are removed.
-func Restore(src, dst string) (Schema, error) {
+// StageRestore writes a verified copy of src beside dst, for
+// FinishRestore to put in place, and returns its path and schema. src must
+// be a database this binary can run on.
+func StageRestore(src, dst string) (string, Schema, error) {
 	s, err := ReadSchema(src)
 	if err != nil {
-		return Schema{}, err
+		return "", Schema{}, err
 	}
 	if s.Version == 0 {
-		return Schema{}, fmt.Errorf("edgestore: %s is not an edge database: it has no schema_migrations", src)
+		return "", Schema{}, fmt.Errorf("edgestore: %s is not an edge database: it has no schema_migrations", src)
 	}
 	if s.CompatFloor > SchemaVersion() {
-		return Schema{}, fmt.Errorf("edgestore: %s is at schema version %d and needs a binary that supports schema %d or later; this binary supports %d: restore it with the image that wrote it",
+		return "", Schema{}, fmt.Errorf("edgestore: %s is at schema version %d and needs a binary that supports schema %d or later; this binary supports %d: restore it with the image that wrote it",
 			src, s.Version, s.CompatFloor, SchemaVersion())
 	}
-	tmp := dst + ".restore.tmp"
-	if err = os.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return Schema{}, fmt.Errorf("edgestore: %w", err)
-	}
-	if s, err = snapshot(src, tmp); err != nil {
-		return Schema{}, err
+	return snapshot(src, dst)
+}
+
+// FinishRestore replaces the database at dst with staged. Nothing else may
+// have dst open. dst's WAL is checkpointed first, so its committed writes
+// stay in dst should the replacement fail; then its -wal and -shm files,
+// which belong to it, are removed.
+func FinishRestore(staged, dst string) error {
+	_, err := os.Stat(dst)
+	switch {
+	case err == nil:
+		if err = checkpoint(dst); err != nil {
+			return err
+		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return fmt.Errorf("edgestore: %w", err)
 	}
 	for _, side := range []string{dst + "-wal", dst + "-shm"} {
 		if err := os.Remove(side); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return Schema{}, fmt.Errorf("edgestore: %w", err)
+			return fmt.Errorf("edgestore: %w", err)
 		}
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		return Schema{}, fmt.Errorf("edgestore: %w", err)
+	if err := os.Rename(staged, dst); err != nil {
+		return fmt.Errorf("edgestore: %w", err)
 	}
-	return s, syncDir(filepath.Dir(dst))
+	return SyncDir(filepath.Dir(dst))
 }
 
-// snapshot copies the database at src into the new file dst with VACUUM
-// INTO, syncs it and checks the copy's integrity. dst is created 0600
-// first, because VACUUM INTO would create it with the umask's mode.
-func snapshot(src, dst string) (s Schema, err error) {
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+func checkpoint(path string) error {
+	db, err := openRW(path)
 	if err != nil {
-		return Schema{}, fmt.Errorf("edgestore: %w", err)
+		return err
 	}
-	if err = f.Close(); err != nil {
-		return Schema{}, fmt.Errorf("edgestore: %w", err)
+	defer db.Close() //nolint:errcheck // the checkpoint result is what counts
+	var busy, frames, done int
+	if err := db.QueryRow(`PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &frames, &done); err != nil {
+		return fmt.Errorf("edgestore: checkpoint %s: %w", path, err)
 	}
+	if busy != 0 {
+		return fmt.Errorf("edgestore: checkpoint %s: the database is in use", path)
+	}
+	return nil
+}
+
+// snapshot copies the database at src into a new file beside dst with
+// VACUUM INTO, syncs it, checks the copy's integrity, and returns its path
+// and schema. The file is created 0600 first, because VACUUM INTO would
+// create it with the umask's mode.
+func snapshot(src, dst string) (tmp string, s Schema, err error) {
+	f, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".*.tmp")
+	if err != nil {
+		return "", Schema{}, fmt.Errorf("edgestore: %w", err)
+	}
+	tmp = f.Name()
 	defer func() {
 		if err != nil {
-			os.Remove(dst) //nolint:errcheck // the copy error takes precedence
+			os.Remove(tmp) //nolint:errcheck // the copy error takes precedence
 		}
 	}()
+	if err = f.Close(); err != nil {
+		return "", Schema{}, fmt.Errorf("edgestore: %w", err)
+	}
 	db, err := openRO(src)
 	if err != nil {
-		return Schema{}, err
+		return "", Schema{}, err
 	}
-	_, err = db.Exec(`VACUUM INTO ?`, dst)
+	_, err = db.Exec(`VACUUM INTO ?`, tmp)
 	if closeErr := db.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
-		return Schema{}, fmt.Errorf("edgestore: copy %s to %s: %w", src, dst, err)
+		return "", Schema{}, fmt.Errorf("edgestore: copy %s to %s: %w", src, tmp, err)
 	}
-	if f, err = os.OpenFile(dst, os.O_RDWR, 0); err != nil {
-		return Schema{}, fmt.Errorf("edgestore: %w", err)
+	if f, err = os.OpenFile(tmp, os.O_RDWR, 0); err != nil {
+		return "", Schema{}, fmt.Errorf("edgestore: %w", err)
 	}
 	err = f.Sync()
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}
 	if err != nil {
-		return Schema{}, fmt.Errorf("edgestore: sync %s: %w", dst, err)
+		return "", Schema{}, fmt.Errorf("edgestore: sync %s: %w", tmp, err)
 	}
-	return verify(dst)
+	if s, err = verify(tmp); err != nil {
+		return "", Schema{}, err
+	}
+	return tmp, s, nil
 }
 
 // verify runs PRAGMA integrity_check on the database at path and returns
@@ -258,7 +309,8 @@ func openRO(path string) (*sql.DB, error) {
 	return db, nil
 }
 
-func syncDir(dir string) error {
+// SyncDir makes the renames and links in dir durable.
+func SyncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
 		return fmt.Errorf("edgestore: %w", err)

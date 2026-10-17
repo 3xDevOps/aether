@@ -52,7 +52,7 @@ func checkDataDir(dir string) error {
 		return fmt.Errorf("data directory %s has mode %04o, which lets every user on this machine into the directory of the edge's signing key; run chmod o-rwx %s",
 			dir, perm, dir)
 	}
-	for _, name := range []string{keyFile, "edge.db", lockFile, edgestore.BackupDir} {
+	for _, name := range []string{keyFile, "edge.db", lockFile, dbLockFile, edgestore.BackupDir} {
 		path := filepath.Join(dir, name)
 		info, err := os.Lstat(path)
 		if errors.Is(err, fs.ErrNotExist) {

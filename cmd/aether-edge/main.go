@@ -92,14 +92,19 @@ func serve(args []string) (err error) {
 	if err = checkDataDir(o.dataDir); err != nil {
 		return err
 	}
-	unlock, err := lockData(o.dataDir)
+	unlock, err := lockPath(filepath.Join(o.dataDir, lockFile), exclusive)
 	if errors.Is(err, errLocked) {
-		return fmt.Errorf("%w; an edge already serves %s, or an operator command runs on it: one edge per data directory", err, o.dataDir)
+		return fmt.Errorf("%w; an edge already serves %s, or a restore or an operator command runs on it: one edge per data directory", err, o.dataDir)
 	}
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	unlockDB, err := lockPath(filepath.Join(o.dataDir, dbLockFile), shared)
+	if err != nil {
+		return err
+	}
+	defer unlockDB()
 
 	svc, err := edge.New(edge.Config{
 		DataDir: o.dataDir, SigninOrigin: o.signinOrigin, RelayOrigin: o.relayOrigin,

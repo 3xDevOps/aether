@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
@@ -9,9 +10,10 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
-	"time"
+	"syscall"
 
 	"golang.org/x/crypto/ssh"
 
@@ -20,14 +22,18 @@ import (
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
+// The data directory's locks. The edge and every command that may migrate
+// or replace edge.db hold edge.lock exclusively. Everything with edge.db
+// open holds edge.db.lock shared, and a restore holds it exclusively, so
+// an operator command beside a running edge never meets a restore.
 const (
-	lockFile = "edge.lock"
-	keyFile  = "edge_key"
+	lockFile   = "edge.lock"
+	dbLockFile = "edge.db.lock"
+	keyFile    = "edge_key"
 )
 
-// errLocked reports a data directory whose edge.lock another process
-// holds: an edge serving it, or an operator command.
-var errLocked = errors.New("another aether-edge process holds the data directory's lock")
+// errLocked reports a lock another process holds.
+var errLocked = errors.New("another aether-edge process holds the lock")
 
 func versionCmd(args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("aether-edge version", flag.ContinueOnError)
@@ -111,7 +117,7 @@ func backupCmd(args []string, getenv func(string) string, out, errOut io.Writer)
 		if readErr != nil {
 			return readErr
 		}
-		dst = filepath.Join(target, fmt.Sprintf("edge-v%d-%s.db", cur.Version, time.Now().UTC().Format(edgestore.StampLayout)))
+		dst = filepath.Join(target, fmt.Sprintf("edge-v%d-%s.db", cur.Version, edgestore.Stamp()))
 		dir = target
 	}
 	if err = os.MkdirAll(dir, 0o700); err != nil {
@@ -121,31 +127,32 @@ func backupCmd(args []string, getenv func(string) string, out, errOut io.Writer)
 	if err != nil {
 		return err
 	}
-	if _, err = fmt.Fprintf(out, "backed up %s (schema %d) to %s\n", db, s.Version, dst); err != nil {
-		return err
+	msg := fmt.Sprintf("backed up %s (schema %d) to %s\n", db, s.Version, dst)
+	if *withKey {
+		if err = writeNew(dst+".key", key); err != nil {
+			return err
+		}
+		msg += fmt.Sprintf("backed up the edge key %s to %s.key\n", fp, dst)
 	}
-	if !*withKey {
-		return nil
-	}
-	if err = writeNew(dst+".key", key); err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(out, "backed up the edge key %s to %s.key\n", fp, dst)
+	_, err = io.WriteString(out, msg)
 	return err
 }
 
 // backupToStdout copies the database through a file in dir, which is on
 // the data volume, so it needs no writable root or /tmp.
 func backupToStdout(db, dir string, out, errOut io.Writer) error {
+	// A closed pipe then fails the write instead of killing the process
+	// before it removes the file.
+	signal.Ignore(syscall.SIGPIPE)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	tmp := filepath.Join(dir, fmt.Sprintf("stdout-%d.tmp", os.Getpid()))
-	defer os.Remove(tmp) //nolint:errcheck // a leftover is removed with the next migration backup
+	tmp := filepath.Join(dir, fmt.Sprintf("stdout-%d-%s.db", os.Getpid(), edgestore.Stamp()))
 	s, err := edgestore.Backup(db, tmp)
 	if err != nil {
 		return err
 	}
+	defer os.Remove(tmp) //nolint:errcheck // best effort; the name is unique
 	f, err := os.Open(tmp)
 	if err != nil {
 		return err
@@ -165,85 +172,139 @@ func restoreCmd(args []string, getenv func(string) string, out io.Writer) error 
 	if err := parseFlags(flags, args, 1); err != nil {
 		return err
 	}
-	src := flags.Arg(0)
-	if err := checkDataDir(*dataDir); err != nil {
+	src, data := flags.Arg(0), *dataDir
+	if err := checkDataDir(data); err != nil {
 		return err
 	}
-	unlock, err := lockData(*dataDir)
+	unlock, err := lockPath(filepath.Join(data, lockFile), exclusive)
 	if errors.Is(err, errLocked) {
-		return fmt.Errorf("%w; an edge is running on %s: stop it first (docker compose stop, or sudo systemctl stop aether-edge), then restore",
-			err, *dataDir)
+		err = fmt.Errorf("%w; an edge is running on %s: stop it first (docker compose stop, or sudo systemctl stop aether-edge), then restore", err, data)
 	}
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	unlockDB, err := lockPath(filepath.Join(data, dbLockFile), exclusive)
+	if errors.Is(err, errLocked) {
+		err = fmt.Errorf("%w; another aether-edge command has %s open: wait for it to finish, then restore", err, filepath.Join(data, "edge.db"))
+	}
+	if err != nil {
+		return err
+	}
+	defer unlockDB()
+
+	keyDst := filepath.Join(data, keyFile)
 	var key []byte
 	var fp string
 	if *keyPath != "" {
 		if key, fp, err = readKey(*keyPath); err != nil {
 			return err
 		}
+	} else if _, err = os.Stat(keyDst); err != nil {
+		return fmt.Errorf("edge key: %w; restore it too with --key <file>: the edge does not make a new key beside a database that holds accounts or servers", err)
 	}
-	db := filepath.Join(*dataDir, "edge.db")
-	saved := filepath.Join(*dataDir, edgestore.BackupDir, "edge-before-restore-"+time.Now().UTC().Format(edgestore.StampLayout)+".db")
-	_, err = os.Stat(db)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		saved = ""
-	case err != nil:
-		return err
-	default:
-		if err = saveDatabase(db, saved); err != nil {
-			return err
-		}
-	}
-	s, err := edgestore.Restore(src, db)
+	db := filepath.Join(data, "edge.db")
+	staged, s, err := edgestore.StageRestore(src, db)
 	if err != nil {
 		return err
 	}
-	msg := fmt.Sprintf("restored %s from %s (schema %d)", db, src, s.Version)
-	if saved != "" {
-		msg += "; the database it replaced is " + saved
+	defer os.Remove(staged) //nolint:errcheck // gone once in place
+	var stagedKey string
+	if key != nil {
+		f, tmpErr := os.CreateTemp(data, keyFile+".*.tmp")
+		if tmpErr != nil {
+			return tmpErr
+		}
+		stagedKey = f.Name()
+		defer os.Remove(stagedKey) //nolint:errcheck // gone once in place
+		if err = writeFile(f, bytes.NewReader(key)); err != nil {
+			return err
+		}
 	}
-	if _, err = fmt.Fprintln(out, msg); err != nil {
+
+	backups := filepath.Join(data, edgestore.BackupDir)
+	if err = os.MkdirAll(backups, 0o700); err != nil {
 		return err
 	}
-	if key == nil {
-		return nil
+	stamp := edgestore.Stamp()
+	var saved []string
+	for _, f := range []struct {
+		src, dst string
+		want     bool
+	}{
+		{db, "edge-before-restore-" + stamp + ".db", true},
+		{db + "-wal", "edge-before-restore-" + stamp + ".db-wal", true},
+		{keyDst, "edge_key-before-restore-" + stamp, key != nil},
+	} {
+		if !f.want {
+			continue
+		}
+		dst := filepath.Join(backups, f.dst)
+		if err = copyNew(f.src, dst); errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return fmt.Errorf("save the current %s: %w", f.src, err)
+		}
+		saved = append(saved, dst)
 	}
-	dst := filepath.Join(*dataDir, keyFile)
-	tmp := dst + ".tmp"
-	if err = os.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+
+	if err = edgestore.FinishRestore(staged, db); err != nil {
+		return fmt.Errorf("%w; %s was not replaced", err, db)
 	}
-	if err = writeNew(tmp, key); err != nil {
-		return err
+	msg := fmt.Sprintf("restored %s from %s (schema %d)\n", db, src, s.Version)
+	if stagedKey != "" {
+		if err = os.Rename(stagedKey, keyDst); err != nil {
+			return fmt.Errorf("%s is restored, but not the edge key: %w", db, err)
+		}
+		if err = edgestore.SyncDir(data); err != nil {
+			return err
+		}
+		msg += fmt.Sprintf("restored the edge key %s from %s to %s\n", fp, *keyPath, keyDst)
 	}
-	if err = os.Rename(tmp, dst); err != nil {
-		return err
+	if len(saved) > 0 {
+		msg += "saved the files it replaced: " + strings.Join(saved, ", ") + "\n"
 	}
-	_, err = fmt.Fprintf(out, "restored the edge key %s from %s to %s\n", fp, *keyPath, dst)
+	_, err = io.WriteString(out, msg)
 	return err
 }
 
-// saveDatabase copies the database and its WAL, byte for byte, so a
-// database too damaged to read is kept too.
-func saveDatabase(db, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+// copyNew copies the file at src, byte for byte, so a database too damaged
+// to read is kept too, to a new 0600 file.
+func copyNew(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
 		return err
 	}
-	for _, suffix := range []string{"-wal", ""} {
-		data, err := os.ReadFile(db + suffix)
-		if errors.Is(err, fs.ErrNotExist) && suffix != "" {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("save the current database: %w", err)
-		}
-		if err := writeNew(dst+suffix, data); err != nil {
-			return fmt.Errorf("save the current database: %w", err)
-		}
+	defer in.Close() //nolint:errcheck // read-only
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	return writeFile(f, in)
+}
+
+// writeNew writes data to a new 0600 file.
+func writeNew(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	return writeFile(f, bytes.NewReader(data))
+}
+
+// writeFile fills the new file f from r, syncs and closes it, and removes
+// it if that fails.
+func writeFile(f *os.File, r io.Reader) error {
+	_, err := io.Copy(f, r)
+	if err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(f.Name()) //nolint:errcheck // the write error takes precedence
+		return fmt.Errorf("write %s: %w", f.Name(), err)
 	}
 	return nil
 }
@@ -265,26 +326,6 @@ func readKey(path string) ([]byte, string, error) {
 	return data, edgeproto.EdgeKeyFingerprint(key.Public().(ed25519.PublicKey)), nil
 }
 
-// writeNew writes data to a new 0600 file and syncs it.
-func writeNew(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	_, err = f.Write(data)
-	if err == nil {
-		err = f.Sync()
-	}
-	if closeErr := f.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		os.Remove(path) //nolint:errcheck // the write error takes precedence
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
-}
-
 // edgeDB is the path of the data directory's existing database. It
 // refuses any other user than the database's owner: SQLite creates its
 // -wal and -shm files as whoever opens the database first, and a
@@ -297,7 +338,6 @@ func edgeDB(dataDir string) (string, error) {
 	}
 	return path, checkOwner(path, info)
 }
-
 func parseFlags(flags *flag.FlagSet, args []string, want int) error {
 	if err := flags.Parse(args); err != nil {
 		return err

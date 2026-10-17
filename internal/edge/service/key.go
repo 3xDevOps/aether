@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -9,10 +10,12 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 
 	"golang.org/x/crypto/ssh"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
 )
 
 // keyFile holds the edge signing key in OpenSSH format, so that
@@ -21,9 +24,21 @@ const keyFile = "edge_key"
 
 const maxKeyFileSize = 16 << 10
 
-func loadOrCreateKey(path string) (ed25519.PrivateKey, error) {
+// loadKey loads the data directory's signing key. It makes a new one only
+// for a database that holds no account or server, since every server
+// enrolled at this edge pins the key that signed its grants.
+func loadKey(dataDir string, store *edgestore.Store) (ed25519.PrivateKey, error) {
+	path := filepath.Join(dataDir, keyFile)
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
+		has, hasErr := store.HasIdentities(context.Background())
+		if hasErr != nil {
+			return nil, hasErr
+		}
+		if has {
+			return nil, fmt.Errorf("edge: signing key %s is missing, and edge.db holds accounts or servers that pin it, so the edge does not make a new one: "+
+				"put the key back with aether-edge restore --key <key file> <database backup>, or copy it to %s with mode 0600", path, path)
+		}
 		return createKey(path)
 	}
 	if err != nil {
