@@ -1646,7 +1646,11 @@ on failure ([Automatic updates](#automatic-updates)). By hand, in the
 directory of the Compose file:
 
 ```sh
-docker pull ghcr.io/3xdevops/aether-edge:<release-tag>        # prints Digest: sha256:<digest>
+docker pull ghcr.io/3xdevops/aether-edge:stable               # prints Digest: sha256:<digest>
+cosign verify-attestation --type https://github.com/3xDevOps/aether/edge-promotion/v1 \
+  --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/3xdevops/aether-edge@sha256:<digest> >/dev/null
 docker run --rm ghcr.io/3xdevops/aether-edge@<running-digest> \
   release-check --tag <release-tag> --digest sha256:<digest> --from <running-version>
 docker exec aether-edge aether-edge backup /var/lib/aether-edge/backups/pre-update-<release-tag>.db
@@ -1654,8 +1658,12 @@ sed -i 's/^AETHER_EDGE_DIGEST=.*/AETHER_EDGE_DIGEST=sha256:<digest>/' .env
 docker compose up -d --wait --wait-timeout 180 aether-edge
 ```
 
-`release-check` runs from the image you already trust. It exits 0 when
-the release's signed `aether-release.json` names that digest, 3 when the
+`cosign` checks that `promote-edge.yml` on `main` promoted that digest to
+`stable` ([Automatic updates](#automatic-updates), step 4);
+`<release-tag>` is the version `docker image inspect --format '{{index
+.Config.Labels "org.opencontainers.image.version"}}'` prints for it.
+`release-check` runs from the image you already trust. It exits 0 when the
+release's signed `aether-release.json` names that digest, 3 when the
 upgrade needs a manual step first (it prints the step), and 1 otherwise.
 To go back, stop the edge and ask the old image whether it can run the
 database:
@@ -1696,25 +1704,33 @@ timer runs it once a day. Each run:
    its `org.opencontainers.image.version` label. The running digest: exits
    0. A digest in the `failed` list: logs `skipping <digest>, which failed
    before` and exits 0. A version not newer than the running one: exits 1.
-4. Runs `aether-edge release-check` from the running image. It verifies
+4. Verifies with `cosign verify-attestation` that the digest carries a
+   promotion attestation, type
+   `https://github.com/3xDevOps/aether/edge-promotion/v1`, signed by
+   `promote-edge.yml` running from `refs/heads/main`, whose predicate
+   names this channel, version and digest. The workflow run from any other
+   branch signs with another identity and is refused, so write access to
+   the repository is not enough to move `stable`. A failure exits 1.
+   `latest` is not a promoted channel and skips this step.
+5. Runs `aether-edge release-check` from the running image. It verifies
    the release's signed `aether-release.json` with the release keys built
    into that image and requires it to name this digest. An error exits 1.
    A hold, a manual step the upgrade needs first, records the `held` state
    and exits 3. Nothing has changed yet.
-5. Records the fingerprint `<relay>/v1/edge` serves and the claimed-server
+6. Records the fingerprint `<relay>/v1/edge` serves and the claimed-server
    count from `aether-edge healthcheck --ready --json`, then backs up the
    database with `aether-edge backup` to
    `/var/lib/aether-edge/backups/pre-update-<version>-<UTC time>.db` in the
    data directory. If any of these fails, the run exits 1 before any
    change.
-6. Writes the new digest to `.env` and runs `docker compose up -d --wait
+7. Writes the new digest to `.env` and runs `docker compose up -d --wait
    --wait-timeout 180 aether-edge`.
-7. Checks the new edge: it reports the new version; `healthcheck --ready`
+8. Checks the new edge: it reports the new version; `healthcheck --ready`
    passes; `<relay>/v1/edge`, fetched through the proxy, serves the same
    fingerprint, which fails when the edge lost `edge_key` or its data
    mount; and the claimed servers return to the count before, less a
    tolerance, within a time limit.
-8. When step 6 or 7 fails, rolls back. The new digest goes into `failed`.
+9. When step 7 or 8 fails, rolls back. The new digest goes into `failed`.
    It runs `aether-edge schema --json` from the old image against the data
    directory. Only when the old release cannot run the database
    (`supported` below `compat_floor`), or `schema` cannot read it, does it
@@ -1730,8 +1746,10 @@ name. Logs go to standard error, which the unit sends to the journal:
 
 #### Installing the updater
 
-The updater needs Docker with the Compose plugin, `curl` and `flock`
-(util-linux) on the host, and the edge running from
+The updater needs Docker with the Compose plugin, `curl`, `flock`
+(util-linux) and [cosign](https://github.com/sigstore/cosign) 3 on the
+host, outbound HTTPS to `ghcr.io`, `github.com` and
+`tuf-repo-cdn.sigstore.dev`, and the edge running from
 [`packaging/edge/compose.yaml`](../packaging/edge/compose.yaml) in
 `/opt/aether-edge`. That file runs the image pinned by digest, with
 `pull_policy: never` so that neither a reboot nor `docker compose up` moves
@@ -1744,6 +1762,20 @@ a fixed address on that network and put it in
 `X-Forwarded-For` unless its entry point trusts that client's address
 (`forwardedHeaders.trustedIPs` or `forwardedHeaders.insecure`); keep both
 unset on the entry point the edge uses.
+
+cosign verifies anonymously; `gh attestation verify` would need a GitHub
+token on the host. Install it from its release, `<arch>` being `amd64` or
+`arm64`:
+
+```sh
+v=v3.1.3
+curl -fLO "https://github.com/sigstore/cosign/releases/download/$v/cosign-linux-<arch>"
+curl -fLO "https://github.com/sigstore/cosign/releases/download/$v/cosign_checksums.txt"
+sha256sum --check --ignore-missing cosign_checksums.txt
+sudo install -m 0755 cosign-linux-<arch> /usr/local/bin/cosign
+```
+
+Then the edge and the updater:
 
 ```sh
 src=https://raw.githubusercontent.com/3xDevOps/Aether/<release-tag>
@@ -1775,6 +1807,7 @@ systemctl list-timers aether-edge-update.timer
 
 `--check` resolves and verifies the channel's release, prints `would
 update <version> (<digest>) to <version> (<digest>)`, and changes nothing.
+Without cosign it fails with `cosign not found`.
 `.env` holds `AETHER_EDGE_DIGEST` and is rewritten by the updater; other
 lines in it are kept.
 
@@ -1809,7 +1842,7 @@ same settings as the timer
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `AETHER_EDGE_UPDATE_RELAY_URL` | required | The relay origin, such as `https://edge.example.com` |
-| `AETHER_EDGE_UPDATE_CHANNEL` | `stable` | The image tag to follow; `--channel <tag>` overrides it for one run. `latest` takes every release, pre-releases included |
+| `AETHER_EDGE_UPDATE_CHANNEL` | `stable` | The image tag to follow; `--channel <tag>` overrides it for one run. `latest` takes every release, pre-releases included, with no promotion check |
 | `AETHER_EDGE_UPDATE_COMPOSE_DIR` | `/opt/aether-edge` | The directory of `compose.yaml` |
 | `AETHER_EDGE_UPDATE_DIGEST_FILE` | `<compose dir>/.env` | The file holding `AETHER_EDGE_DIGEST` |
 | `AETHER_EDGE_UPDATE_STATE` | `/var/lib/aether-edge-update` | The state directory, mode 0700 |

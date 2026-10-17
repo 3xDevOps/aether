@@ -139,6 +139,23 @@ fp="$(cat "$WORLD/fingerprint/$running" 2>/dev/null || echo SHA256:good)"
 printf '{"signin_origin":"https://auth.example.com","key":"k","fingerprint":"%s","version":1,"min_version":1}\n' "$fp"
 EOF
 
+# Answers with one attestation whose predicate promotes the digest on
+# stable as its version, or as $WORLD/promotion/<digest> says ("<channel>
+# <tag>", or "none" for no attestation).
+cat >"$bin/cosign" <<'EOF'
+#!/bin/sh
+set -eu
+printf 'cosign %s\n' "$*" >>"$CMD_LOG"
+for ref; do :; done
+d="${ref#*@}"
+promotion="$(cat "$WORLD/promotion/$d" 2>/dev/null || echo "stable $(cat "$WORLD/version/$d")")"
+[ "$promotion" != none ] || { echo "Error: no matching attestations:" >&2; exit 1; }
+channel="${promotion% *}"
+tag="${promotion#* }"
+statement="$(printf '{"_type":"https://in-toto.io/Statement/v1","subject":[{"name":"ghcr.io/3xdevops/aether-edge","digest":{"sha256":"%s"}}],"predicateType":"https://github.com/3xDevOps/aether/edge-promotion/v1","predicate":{"channel":"%s","tag":"%s","digest":"%s"}}' "${d#sha256:}" "$channel" "$tag" "$d")"
+printf '{"payloadType":"application/vnd.in-toto+json","payload":"%s","signatures":[{"sig":"x"}]}\n' "$(printf '%s' "$statement" | base64 -w0)"
+EOF
+
 cat >"$bin/flock" <<'EOF'
 #!/bin/sh
 printf 'flock %s\n' "$*" >>"$CMD_LOG"
@@ -150,7 +167,7 @@ cat >"$bin/sleep" <<'EOF'
 exit 0
 EOF
 
-chmod 0755 "$bin/docker" "$bin/curl" "$bin/flock" "$bin/sleep"
+chmod 0755 "$bin/docker" "$bin/cosign" "$bin/curl" "$bin/flock" "$bin/sleep"
 
 state="$tmp/state"
 compose_dir="$tmp/compose"
@@ -209,7 +226,7 @@ assert_denied() {
 # and holds "old".
 reset() {
 	rm -rf "$world" "$state" "$compose_dir"
-	for d in version label reports supports floor up-fails unready claimed slow fingerprint backups; do
+	for d in version label promotion reports supports floor up-fails unready claimed slow fingerprint backups; do
 		mkdir -p "$world/$d"
 	done
 	mkdir -p "$compose_dir"
@@ -249,6 +266,8 @@ assert "docker pull --quiet $image:stable"
 assert "docker run --rm $image@$A release-check --tag v1.1.0 --digest $B --from v1.0.0 --json"
 assert_before "docker exec aether-edge aether-edge backup /var/lib/aether-edge/backups/pre-update-v1.1.0-" "up -d --wait --wait-timeout 180 aether-edge"
 assert_before "release-check" "aether-edge backup"
+assert "cosign verify-attestation --type https://github.com/3xDevOps/aether/edge-promotion/v1 --certificate-identity https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-github-workflow-ref refs/heads/main $image@$B"
+assert_before "cosign verify-attestation" "release-check"
 refute "restore"
 refute " stop aether-edge"
 assert_digest "$B"
@@ -349,10 +368,46 @@ refute "aether-edge backup"
 refute "compose"
 assert_digest "$A"
 
+# --- a digest stable was not promoted to: nothing changes -----------------
+
+for promotion in none "stable v1.0.5" "latest v1.1.0"; do
+	reset
+	echo "$promotion" >"$world/promotion/$B"
+	run 1
+	assert_out "has no valid promotion attestation"
+	refute "release-check"
+	refute "compose"
+	assert_digest "$A"
+done
+
+# --- latest is not promoted: no attestation needed --------------------------
+
+reset
+echo none >"$world/promotion/$B"
+run 0 --channel latest
+refute "cosign"
+assert_digest "$B"
+
+# --- cosign is a prerequisite ---------------------------------------------
+
+reset
+mkdir -p "$tmp/nocosign"
+for f in "$bin"/*; do
+	[ "$(basename "$f")" = cosign ] || ln -sf "$f" "$tmp/nocosign/"
+done
+set +e
+PATH="$tmp/nocosign:/usr/bin:/bin" sh "$script" --check >"$tmp/out" 2>&1
+got=$?
+set -e
+[ "$got" = 1 ] || fail "--check without cosign exited $got"
+assert_out "cosign not found"
+refute "docker"
+
 # --- a label that disagrees with the image is refused ----------------------
 
 reset
 echo v1.1.1 >"$world/label/$B"
+echo "stable v1.1.1" >"$world/promotion/$B"
 run 1
 assert_out "reports version v1.1.0 but is labelled v1.1.1"
 refute "compose"

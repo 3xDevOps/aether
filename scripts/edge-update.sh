@@ -17,6 +17,8 @@ set -eu
 image=ghcr.io/3xdevops/aether-edge
 service=aether-edge
 backups=/var/lib/aether-edge/backups
+promotion_type=https://github.com/3xDevOps/aether/edge-promotion/v1
+promoter=https://github.com/3xDevOps/aether/.github/workflows/promote-edge.yml@refs/heads/main
 
 say() {
 	echo "edge-update: $*" >&2
@@ -154,6 +156,31 @@ write_digest() {
 		[ -z "$others" ] || printf '%s\n' "$others"
 		echo "AETHER_EDGE_DIGEST=$1"
 	} >"$digest_file.tmp" && mv "$digest_file.tmp" "$digest_file"
+}
+
+# Exits 0 when promote-edge.yml on main attested digest $1 as release $2
+# on the channel. The workflow file run from any other ref signs with
+# another identity, which cosign refuses.
+verify_promotion() {
+	atts="$(cosign verify-attestation --type "$promotion_type" \
+		--certificate-identity "$promoter" \
+		--certificate-oidc-issuer https://token.actions.githubusercontent.com \
+		--certificate-github-workflow-ref refs/heads/main \
+		"$image@$1")" || return 1
+	printf '%s\n' "$atts" | while IFS= read -r line; do
+		printf '%s\n' "$line" | sed -n 's/.*"payload":"\([^"]*\)".*/\1/p' | base64 -d |
+			sed -n 's/.*"predicate":{\([^}]*\)}.*/{\1}/p'
+		echo
+	done | {
+		while IFS= read -r predicate; do
+			[ "$(printf '%s\n' "$predicate" | json_get channel)" = "$channel" ] &&
+				[ "$(printf '%s\n' "$predicate" | json_get tag)" = "$2" ] &&
+				[ "$(printf '%s\n' "$predicate" | json_get digest)" = "$1" ] &&
+				exit 0
+		done
+		say "no promotion attestation of $1 names channel $channel and release $2"
+		exit 1
+	}
 }
 
 image_version() {
@@ -346,6 +373,10 @@ record_pre_state() {
 }
 
 update() {
+	if [ "$channel" != latest ]; then
+		command -v cosign >/dev/null ||
+			die "cosign not found; install it to verify that $channel was promoted (docs/edge.md, \"Installing the updater\")"
+	fi
 	cur="$(current_digest)"
 	docker pull --quiet "$image:$channel" >/dev/null || die "docker pull $image:$channel failed"
 	new="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image:$channel" | sed -n "s|^$image@||p")"
@@ -364,6 +395,12 @@ update() {
 	cur_version="$(image_version "$cur")" || die "aether-edge version --json failed in $image@$cur"
 	version_lt "$cur_version" "$new_version" ||
 		die "refusing $new_version ($new) on $channel: not newer than the running $cur_version"
+	if [ "$channel" = latest ]; then
+		say "latest is not a promoted channel; trusting the release signature alone"
+	else
+		verify_promotion "$new" "$new_version" ||
+			die "$new_version ($new) on $channel has no valid promotion attestation from promote-edge.yml on main; nothing changed"
+	fi
 
 	if docker run --rm "$image@$cur" release-check --tag "$new_version" --digest "$new" --from "$cur_version" --json >/dev/null; then
 		:
