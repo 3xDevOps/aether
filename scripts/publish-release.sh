@@ -85,24 +85,29 @@ require_tag_commit() {
 }
 
 # Latest goes to the highest version among complete published releases.
-# Every run recomputes it after its own publish from a fresh listing, so the
-# run that publishes last sees every release and leaves Latest correct
-# however parallel releases interleave.
+# Every run recomputes it after its own publish and lists again after each
+# change until the listing agrees, so a run that read a listing before a
+# parallel release was published corrects its own write.
 reconcile_latest() {
-	list_releases
-	best=
-	best_code=0
-	while read -r other draft prerelease others; do
-		[ "$draft $prerelease" = "false false" ] || continue
-		case ",$others," in *,aether-release.json,*) ;; *) continue ;; esac
-		code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null </dev/null) || continue
-		if [ "$code" -gt "$best_code" ]; then
-			best=$other
-			best_code=$code
-		fi
-	done <"$tmp/releases"
-	[ -n "$best" ] || fail "no published release carries aether-release.json to mark Latest"
-	gh release edit "$best" --latest=true
+	marked=
+	while :; do
+		list_releases
+		best=
+		best_code=0
+		while read -r other draft prerelease others; do
+			[ "$draft $prerelease" = "false false" ] || continue
+			case ",$others," in *,aether-release.json,*) ;; *) continue ;; esac
+			code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null </dev/null) || continue
+			if [ "$code" -gt "$best_code" ]; then
+				best=$other
+				best_code=$code
+			fi
+		done <"$tmp/releases"
+		[ -n "$best" ] || fail "no published release carries aether-release.json to mark Latest"
+		[ "$best" != "$marked" ] || break
+		gh release edit "$best" --latest=true
+		marked=$best
+	done
 	echo "Latest is $best"
 }
 
@@ -177,7 +182,7 @@ for name in checksums.txt aether-release.json aether-release.json.sig; do
 done
 
 require_tag_commit
-gh release edit "$tag" --draft=false --latest=false
+gh release edit "$tag" --draft=false --prerelease=false --latest=false
 verify_public "$manifest"
 fetch aether-release.json aether-release.json.sig
 for name in aether-release.json aether-release.json.sig; do

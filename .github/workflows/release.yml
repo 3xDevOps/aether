@@ -744,6 +744,7 @@ jobs:
       - name: Move latest to the published edge image
         if: steps.latest.outputs.move == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ needs.edge-manifest.outputs.digest }}
         run: |
           image=ghcr.io/3xdevops/aether-edge
@@ -760,6 +761,13 @@ jobs:
           published=$(carried "$image@$DIGEST")
           if [ "$moved" != "$published" ]; then
             echo "::error::$image:latest does not carry the images of the published $DIGEST"
+            exit 1
+          fi
+          # A parallel release can take Latest after the check above; the
+          # move may then have overwritten its image.
+          now=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          if [ "$now" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::GitHub's Latest moved to $now while $image:latest moved to $GITHUB_REF_NAME; re-run the latest jobs of the $now release"
             exit 1
           fi
           echo "$image:latest is $GITHUB_REF_NAME, \`$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"
@@ -794,6 +802,7 @@ jobs:
       - name: Move latest to the published standard image
         if: steps.latest.outputs.move == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           DIGEST: ${{ needs.standard-manifest.outputs.digest }}
         run: |
           image=ghcr.io/3xdevops/aether-standard
@@ -808,6 +817,13 @@ jobs:
           published=$(carried "$image@$DIGEST")
           if [ "$moved" != "$published" ]; then
             echo "::error::$image:latest does not carry the images of the published $DIGEST"
+            exit 1
+          fi
+          # A parallel release can take Latest after the check above; the
+          # move may then have overwritten its image.
+          now=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          if [ "$now" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::GitHub's Latest moved to $now while $image:latest moved to $GITHUB_REF_NAME; re-run the latest jobs of the $now release"
             exit 1
           fi
           echo "$image:latest is $GITHUB_REF_NAME, \`$DIGEST\`" >> "$GITHUB_STEP_SUMMARY"

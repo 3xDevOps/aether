@@ -32,8 +32,9 @@ manifest "$moved" earlier "$rebuilt"
 # The stub keeps the v0.2.0 release in $GH_STATE_DIR: state is none, draft,
 # published, duplicate or error, and assets lists its assets. GH_PUBLISHED
 # names other complete published releases, GH_LEGACY published releases
-# without a manifest, GH_TAG_SHA the commit the tag resolves to and
-# GH_DRAFT_BODY a replacement for the draft's binary. API answers are JSON
+# without a manifest, GH_TAG_SHA the commit the tag resolves to,
+# GH_DRAFT_BODY a replacement for the draft's binary and GH_RACE a release
+# another run publishes just before this run's first Latest change. API answers are JSON
 # filtered by the script's own --jq, as gh does.
 cat >"$bin/gh" <<'EOF'
 #!/bin/sh
@@ -73,7 +74,7 @@ if [ "$1" = api ]; then
 			duplicate) release v0.2.0 true false "" && release v0.2.0 true false "" ;;
 			esac
 			release v9.0.0 false true "$complete"
-			for other in ${GH_PUBLISHED:-}; do
+			for other in ${GH_PUBLISHED:-} $(cat "$state_dir/raced" 2>/dev/null); do
 				release "$other" false false "$complete"
 			done
 			for other in ${GH_LEGACY:-}; do
@@ -91,6 +92,9 @@ case "$1 $2" in
 "release download") printf 'release download %s\n' "$3" >>"$GH_LOG" ;;
 *) printf '%s\n' "$*" >>"$GH_LOG" ;;
 esac
+if [ -n "${GH_RACE:-}" ] && [ "$1 $2 ${4:-}" = "release edit --latest=true" ]; then
+	echo "$GH_RACE" >"$state_dir/raced"
+fi
 case "$1 $2 $3" in
 "release create v0.2.0")
 	echo draft >"$state_dir/state"
@@ -156,19 +160,20 @@ expected="$tmp/expected.log"
 run() {
 	: >"$log"
 	echo "$GH_STATE" >"$tmp/state/state"
+	rm -f "$tmp/state/raced"
 	printf '%s\n' "${GH_ASSETS:-}" | tr ' ' '\n' >"$tmp/state/assets"
 	sh "$script_dir/publish-release.sh" "$tag" "$dist" >/dev/null 2>"$tmp/err"
 }
 
 reconcile_lines() {
-	printf '%s\n' "$view" "release edit $1 --latest=true"
+	printf '%s\n' "$view" "release edit $1 --latest=true" "$view"
 }
 
 publish_lines() {
 	printf '%s\n' \
 		"release download $tag" \
 		"$resolve" \
-		"release edit $tag --draft=false --latest=false" \
+		"release edit $tag --draft=false --prerelease=false --latest=false" \
 		"curl $url/aether-linux-amd64" \
 		"curl $url/checksums.txt" \
 		"curl $url/aether-release.json" \
@@ -247,6 +252,15 @@ run
 } >"$expected"
 diff -u "$expected" "$log"
 export GH_LEGACY=
+
+# A newer release published while this run marks Latest takes it back.
+GH_STATE=draft GH_ASSETS="$complete" GH_PUBLISHED="v0.1.0" GH_RACE=v0.3.0 run
+{
+	printf '%s\n' "$view" "$upload_all"
+	publish_lines "$tag"
+	printf '%s\n' "release edit v0.3.0 --latest=true" "$view"
+} >"$expected"
+diff -u "$expected" "$log"
 
 # A rerun after publication verifies the public assets against the
 # published manifest, uploads nothing and settles Latest again.

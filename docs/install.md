@@ -2092,14 +2092,14 @@ takes the release through these states:
    have, download all of it back through the API, and check it against the
    signed manifest.
 4. Check that the tag still names the commit `release-policy` authorized,
-   then publish the draft without making it Latest. A tag moved since then
+   then publish the draft as a normal release without making it Latest. A tag moved since then
    fails the run and leaves the draft unpublished.
 5. Download every asset anonymously, as clients do, and check it again.
 6. Mark Latest: the highest version among published, non-prerelease
    releases that carry `aether-release.json`, read from a fresh release
-   listing. Every run does this after its own publish, so whichever run
-   publishes last leaves Latest on the highest version, even when an older
-   tag finishes after a newer one.
+   listing. Every run does this after its own publish and lists again after
+   each change until the listing agrees, so Latest ends on the highest
+   version even when an older tag finishes after a newer one.
 
 The release is published as a normal release, not a GitHub prerelease,
 because `scripts/install.sh` and `internal/selfupdate` resolve GitHub's
@@ -2195,7 +2195,10 @@ byte for byte with what it signed. `standard-latest` and `edge-latest` run
 after the release job and move their `latest` tags to the verified images
 only if `gh api repos/<owner>/<repo>/releases/latest` names this tag when
 they run; otherwise they leave `latest` alone and say why in the job summary.
-Each checks that `latest` carries the expected architecture digests.
+Each checks that `latest` carries the expected architecture digests, then
+that GitHub's Latest still names this tag. If a parallel release took Latest
+in between, the job fails with `GitHub's Latest moved to <tag>`; re-run the
+latest jobs of that release.
 
 Push release tags one at a time: GitHub starts no workflow for any tag when
 more than three are pushed at once. Each tag has its own concurrency group,
