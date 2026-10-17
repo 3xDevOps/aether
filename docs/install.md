@@ -215,17 +215,61 @@ Older releases are refused before downloading or replacing the CLI.
 | | `AETHER_BASE_URL` | Download from a release-asset mirror. |
 
 The release is chosen as the [install script](#which-release-it-installs)
-chooses it, for `aether-windows-<arch>.exe`, with one difference: PowerShell
+chooses it, for `aether-windows-<arch>.exe`, with these differences. PowerShell
 has no ed25519 verifier, so the script does not check
 `aether-release.json.sig`. It says so, and checks the binary's SHA-256 and
 size against `checksums.txt` and `aether-release.json`. It refuses an
-`AETHER_BASE_URL` that is not `https`.
+`AETHER_BASE_URL` that is not `https`. And once a release
+ships any prebuilt `aether-desktop-windows-<arch>.zip`, a client install also
+needs this architecture's zip listed there; `-Role none` does not.
+
+Downloads use `%SystemRoot%\System32\curl.exe` (Windows 10 1803 and later)
+and fall back to `Invoke-WebRequest` when it is missing or gets no HTTP
+answer, for example behind a proxy only Windows' own settings name. If the
+installed CLI already has the release's SHA-256, it is neither downloaded
+nor replaced. The output is a numbered list of steps:
+
+```
+aether install: windows/amd64, CLI and desktop app
+[1/3] downloading the newest complete release
+      latest release: v0.7.0-alpha.12
+      https://github.com/3xDevOps/Aether/releases/download/v0.7.0-alpha.12/
+      checksums.txt                         1.0 KB  0.3s
+      aether-release.json                   2.0 KB  0.3s
+      aether-release.json.sig                 89 B  0.3s
+      aether-windows-amd64.exe             30.3 MB  0.5s
+      verified aether-windows-amd64.exe SHA-256 and size against checksums.txt and aether-release.json; aether-release.json.sig is not checked (PowerShell has no ed25519 verifier)
+[2/3] installing the CLI: v0.7.0-alpha.11 -> v0.7.0-alpha.12
+      C:\Users\<you>\AppData\Local\Programs\Aether\aether.exe
+[3/3] desktop app (log: C:\Users\<you>\AppData\Local\aether\install-desktop.log)
+      unpacking                  0.0s
+      fetching node              0.1s
+      installing dependencies    11.9s
+      packaging                  8.5s
+      installing                 0.4s
+      built and installed C:\Users\<you>\AppData\Local\Programs\Aether Desktop
+next:
+  open Aether from the Start menu, or link from a new terminal:
+  aether link <server-host>:2222
+done: Aether v0.7.0-alpha.12 installed in 24.4s
+```
+
+Step 3 prints one line per phase of `aether gui build --json` with its
+duration. A CLI that installs the prebuilt desktop app shows `downloading`
+and `installing`, and the last line says `installed` rather than
+`built and installed`. The build's own output goes to
+`%LOCALAPPDATA%\aether\install-desktop.log`; if the step fails, the
+installer prints the log's last 20 lines and the `gui build` command to
+rerun. An error is printed once on stderr and the script exits 1; when the
+script is dot-sourced, the error is thrown to the caller instead. When Smart
+App Control is on, a warning line says it may block the unsigned binaries.
 
 Only the current user's `PATH` is updated, without duplicating the install
 directory or removing other entries. Expandable entries such as `%SystemRoot%`
 keep their registry type. The current PowerShell process also gets the
-directory; existing applications keep their old environment. Sign out and
-back in if another terminal still cannot find the CLI. An older CLI,
+directory, and the change is broadcast, so terminals opened from Explorer or
+the Start menu afterwards find `aether`. Terminals that were already open
+keep their old `PATH`. An older CLI,
 alias, or function can still shadow `aether`: `Get-Command aether -All`
 shows which command runs. The installer never deletes a shadowing copy.
 The desktop built by the installer records the CLI it just installed, so an
@@ -242,9 +286,12 @@ to inspect the actual registration.
 For a fresh desktop installation, run the default command above. To reinstall
 or upgrade, close Aether and rerun it, retaining `-BinDir` if you selected a
 custom CLI location. Downloads and checksum failures leave the installed
-binary alone; a locked binary reports the Windows error rather than deleting
-it first. A desktop-build failure keeps the installed CLI, returns failure,
-and prints the explicit command to retry. Configuration and SSH files are untouched.
+binary alone. If `aether.exe` or `aether-desktop.exe` is running from the
+install directories, the installer lists each process with its pid, prints
+the `Stop-Process -Id <pids>` and rerun commands, and changes nothing; any
+other refusal to replace the CLI reports the Windows error the same way. A
+desktop-step failure keeps the installed CLI and returns failure.
+Configuration and SSH files are untouched.
 
 The installer does not request administrator access, change execution policy,
 disable Defender, add exclusions, or unblock quarantined files. If policy
