@@ -128,7 +128,7 @@ jobs:
       - name: Verify the signed manifest names this edge image
         id: manifest
         run: |
-          report=$(go run ./cmd/aether-edge release-check --tag "$TAG" --digest "$DIGEST" --json)
+          report=$(go run ./cmd/aether-edge release-check --tag "$TAG" --digest "$DIGEST" --from "$TAG" --json)
           echo "commit=$(printf '%s' "$report" | jq -er .commit)" >> "$GITHUB_OUTPUT"
           echo "min_upgrade_from=$(printf '%s' "$report" | jq -er .edge.min_upgrade_from)" >> "$GITHUB_OUTPUT"
       - name: Require the release run to have qualified the edge
@@ -293,6 +293,24 @@ jobs:
               jq -e --slurpfile want "$RUNNER_TEMP/promotion.json" \
                 'any(.[]; .verificationResult.statement.predicate == $want[0])' "$RUNNER_TEMP/verified.json" >/dev/null
               echo "Promotion attestation: \`$IMAGE@$DIGEST\` as stable $TAG" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            [ "$attempt" = 5 ] || sleep 5
+          done
+          exit 1
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      # The check hosts run (scripts/edge-update.sh), which finds the bundle
+      # through the registry's referrers rather than GitHub's API.
+      - name: Verify the promotion attestation as hosts do
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if atts=$(cosign verify-attestation --new-bundle-format \
+              --type https://github.com/3xDevOps/aether/edge-promotion/v1 \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/promote-edge.yml@refs/heads/main" \
+              "$IMAGE@$DIGEST"); then
+              printf '%s\n' "$atts" | jq -e --arg t "$TAG" --arg d "$DIGEST" \
+                '.payload | @base64d | fromjson | .predicate | select(.channel == "stable" and .tag == $t and .digest == $d)' >/dev/null
               exit 0
             fi
             [ "$attempt" = 5 ] || sleep 5
