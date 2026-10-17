@@ -303,10 +303,14 @@ API_URL="https://api.github.com/repos/${REPO}/releases?per_page=100"
 
 tmp="$(mktemp -d)"
 staged=no
+replacing=no replaced="" pending=""
 cleanup() {
 	rm -rf "$tmp"
 	if [ "$staged" = yes ]; then
 		for name in $names; do $sudo rm -f "${BIN_DIR}/.${name}.install.$$"; done
+	fi
+	if [ "$replacing" = yes ]; then
+		echo "aether install: stopped while replacing binaries; now ${VERSION}: ${replaced:-none}; still the previous version: ${pending}" >&2
 	fi
 }
 trap cleanup EXIT
@@ -435,12 +439,6 @@ prepare() {
 		missing="aether-release.json" why="no aether-release.json"
 		return 1
 	fi
-	for asset in $assets; do
-		if [ -z "$(checksum_of "$dir/checksums.txt" "$asset")" ]; then
-			missing="$asset" why="checksums.txt does not list $asset"
-			return 1
-		fi
-	done
 	if [ "$signed" = yes ]; then
 		[ "$(manifest_top "$dir/aether-release.json" schema)" = 1 ] ||
 			die "aether-release.json for ${tag} is not schema 1; this installer reads schema 1"
@@ -455,6 +453,14 @@ prepare() {
 		say "${tag} has no signed aether-release.json (it predates release signing); verifying SHA-256 against checksums.txt only"
 		verified="checksums.txt only"
 	fi
+	for asset in $assets; do
+		[ -z "$(checksum_of "$dir/checksums.txt" "$asset")" ] || continue
+		if [ "$signed" = yes ] && [ -n "$(manifest_field "$dir/aether-release.json" "$asset" sha256)" ]; then
+			die "aether-release.json for ${tag} lists ${asset} but checksums.txt does not; not installing it"
+		fi
+		missing="$asset" why="checksums.txt does not list $asset"
+		return 1
+	done
 	for asset in $assets; do
 		want="$(checksum_of "$dir/checksums.txt" "$asset")"
 		[ "$(printf '%s\n' "$want" | wc -l)" -eq 1 ] ||
@@ -536,6 +542,11 @@ signing_required() {
 		BEGIN { exit !(!semver(t) || cmp(t, s) >= 0) }'
 }
 
+semver_lt() {
+	LC_ALL=C awk -v a="$1" -v b="$2" "$SEMVER_AWK"'
+		BEGIN { exit !(semver(a) && semver(b) && cmp(a, b) < 0) }'
+}
+
 # Prints "tag asset asset ..." for every published, non-prerelease release
 # with a semver tag in the GitHub API's JSON, newest version first. A
 # tokenizer rather than a line match: it holds for compact and indented JSON
@@ -563,6 +574,8 @@ parse_releases() {
 			depth--
 		}
 		END {
+			# BWK awk, the macOS one, also splits on newlines below.
+			gsub(/\n/, " ", doc)
 			gsub(/\\\\/, "", doc)
 			gsub(/\\"/, "", doc)
 			parts = split(doc, piece, "\"")
@@ -615,7 +628,7 @@ list_releases() {
 			die "GitHub API rate limit exceeded (HTTP ${api_status} from ${API_URL}, x-ratelimit-remaining: 0, x-ratelimit-reset: ${reset}); pass --version <tag> to install a specific release"
 		fi
 	fi
-	message="$(sed -n 's/^ *"message": *"\([^"]*\)".*/\1/p' "$tmp/api.json" | head -1)"
+	message="$(sed -n 's/.*"message": *"\([^"]*\)".*/\1/p' "$tmp/api.json" | head -1)"
 	die "GET ${API_URL}: HTTP ${api_status}${message:+: $message}"
 }
 
@@ -648,8 +661,12 @@ else
 			signed=no sig=no
 			! listed aether-release.json || signed=yes
 			! listed aether-release.json.sig || sig=yes
-			[ "$ready" = yes ] && [ "$signed" = "$sig" ] || continue
-			[ "$signed" = yes ] || ! signing_required "$tag" || continue
+			# A fallback is always older than latest and always signed, so
+			# neither a newer tag nor a 404 on every signature can pick it.
+			if [ "$ready" = no ] || [ "$signed" = no ] || [ "$sig" = no ] ||
+				! semver_lt "$tag" "$latest"; then
+				continue
+			fi
 			if prepare "$tag"; then
 				VERSION="$tag"
 				break
@@ -670,11 +687,22 @@ for name in $names; do
 	$sudo cp "$tmp/$VERSION/${name}-${os}-${arch}" "$stage" || die "cannot write into ${BIN_DIR}"
 	$sudo chmod 0755 "$stage" || die "cannot set the mode of ${stage}"
 done
-for name in $names; do
-	$sudo mv -f "${BIN_DIR}/.${name}.install.$$" "${BIN_DIR}/${name}" || die "cannot install into ${BIN_DIR}"
+# The server goes first: a new CLI next to an old server is refused by it,
+# while an old CLI next to a new server still updates itself.
+order=""
+for name in aether-server aether; do
+	case " $names " in *" $name "*) order="${order:+$order }$name" ;; esac
+done
+pending="$order"
+replacing=yes
+for name in $order; do
+	$sudo mv -f "${BIN_DIR}/.${name}.install.$$" "${BIN_DIR}/${name}" || die "cannot install ${BIN_DIR}/${name}"
+	replaced="${replaced:+$replaced }${BIN_DIR}/${name}"
+	pending="${pending#"$name"}"
+	pending="${pending# }"
 	say "installed ${BIN_DIR}/${name} ${VERSION}"
 done
-staged=no
+replacing=no staged=no
 
 # --- finish that role's setup ------------------------------------------
 

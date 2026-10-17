@@ -137,7 +137,8 @@ Without `--version`, the script follows `github.com/<repo>/releases/latest`.
 GitHub can list a release there while its assets are still uploading, or
 after its build failed. When that tag is not complete, the script asks
 `api.github.com/repos/<repo>/releases`, ignores drafts and prereleases, and
-installs the highest semver release that is complete, saying why:
+installs the highest semver release that is older than the latest tag,
+signed and complete, saying why:
 
 ```
 aether install: v0.7.0-alpha.12 is not fully published yet (no checksums.txt); installing v0.7.0-alpha.11, the newest complete release, for linux/amd64
@@ -158,12 +159,14 @@ macOS ships LibreSSL - it says the signature was not verified and checks
 the rest. A release from before signing is checked against `checksums.txt`
 only, and the script prints that.
 
-A checksum or size mismatch, a bad signature, a cut-off download or any
-network error stops the install; none of them makes the script try another
-release. Every binary is downloaded and verified before any installed one is
+A checksum or size mismatch, a bad signature, a manifest that lists a
+binary `checksums.txt` omits, a cut-off download or any network error stops
+the install; none of them makes the script try another release. Every binary is downloaded and verified before any installed one is
 replaced, so those failures leave the previous install as it was. Each
-binary is then renamed into place from a copy in the same directory;
-rerunning is safe. Only HTTPS is used. An unreachable GitHub is reported with curl's
+binary is then renamed into place from a copy in the same directory,
+`aether-server` before `aether`; if a rename fails, the script names which
+binaries are new and which are still the previous version. Rerunning is
+safe. Only HTTPS is used. An unreachable GitHub is reported with curl's
 error, and an API rate limit with its status:
 
 ```
@@ -215,7 +218,8 @@ The release is chosen as the [install script](#which-release-it-installs)
 chooses it, for `aether-windows-<arch>.exe`, with one difference: PowerShell
 has no ed25519 verifier, so the script does not check
 `aether-release.json.sig`. It says so, and checks the binary's SHA-256 and
-size against `checksums.txt` and `aether-release.json`.
+size against `checksums.txt` and `aether-release.json`. It refuses an
+`AETHER_BASE_URL` that is not `https`.
 
 Only the current user's `PATH` is updated, without duplicating the install
 directory or removing other entries. Expandable entries such as `%SystemRoot%`

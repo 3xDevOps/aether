@@ -255,6 +255,7 @@ function Resolve-AetherLatestVersion {
         if ([string]::IsNullOrWhiteSpace($effective)) {
             throw 'the response did not expose its final release URL'
         }
+        Assert-AetherHttpsUri $effective
         $tag = [System.Uri]$effective
         $segments = $tag.Segments
         if ($segments.Count -lt 1) { throw 'the response URL had no release tag' }
@@ -266,6 +267,19 @@ function Resolve-AetherLatestVersion {
     }
     catch {
         throw ("cannot resolve the latest release from {0}: {1}" -f $Uri, $_.Exception.Message)
+    }
+}
+
+function Assert-AetherHttpsUri {
+    param([Parameter(Mandatory = $true)][string] $Uri)
+    $parsed = $null
+    if (-not [Uri]::TryCreate($Uri, [UriKind]::Absolute, [ref]$parsed)) {
+        throw ("not an absolute URL: {0}" -f $Uri)
+    }
+    # Plain http is accepted only on loopback, where install-test.ps1 serves
+    # its fixture releases.
+    if ($parsed.Scheme -ne 'https' -and -not ($parsed.Scheme -eq 'http' -and $parsed.IsLoopback)) {
+        throw ("refusing {0}: releases are downloaded over https only" -f $Uri)
     }
 }
 
@@ -338,11 +352,15 @@ function Test-AetherRateLimited {
 }
 
 function Format-AetherRequestError {
-    param([Parameter(Mandatory = $true)][string] $Uri, [Parameter(Mandatory = $true)] $Exception, $Status)
+    param([Parameter(Mandatory = $true)][string] $Uri, [Parameter(Mandatory = $true)] $ErrorRecord, $Status)
     if ($null -eq $Status) {
-        return ("cannot reach {0}: {1}" -f $Uri, $Exception.Message)
+        return ("cannot reach {0}: {1}" -f $Uri, $ErrorRecord.Exception.Message)
     }
-    return ("{0} returned HTTP {1}: {2}" -f $Uri, $Status, $Exception.Message)
+    $message = $ErrorRecord.Exception.Message
+    if ($null -ne $ErrorRecord.ErrorDetails -and -not [string]::IsNullOrWhiteSpace($ErrorRecord.ErrorDetails.Message)) {
+        $message = $ErrorRecord.ErrorDetails.Message
+    }
+    return ("{0} returned HTTP {1}: {2}" -f $Uri, $Status, $message)
 }
 
 function Receive-AetherFile {
@@ -365,7 +383,7 @@ function Receive-AetherFile {
                 $retryable = $null -eq $status -or $status -eq 408 -or $status -ge 500 -or
                     ($status -eq 429 -and -not (Test-AetherRateLimited $_.Exception $status))
                 if (-not $retryable -or $attempt -ge 3) {
-                    throw (Format-AetherRequestError $Uri $_.Exception $status)
+                    throw (Format-AetherRequestError $Uri $_ $status)
                 }
             }
         }
@@ -450,6 +468,12 @@ function Read-AetherRelease {
     }
     $expected = Get-AetherChecksum (Join-Path $Directory 'checksums.txt') $Asset
     if ($null -eq $expected) {
+        if ($signed) {
+            $manifest = [System.IO.File]::ReadAllText((Join-Path $Directory 'aether-release.json')) | ConvertFrom-Json -ErrorAction Stop
+            if ($null -ne $manifest.assets -and $null -ne $manifest.assets.PSObject.Properties[$Asset]) {
+                throw ("aether-release.json of {0} lists {1} but checksums.txt does not; not installing it" -f $Tag, $Asset)
+            }
+        }
         $Release.Reason = 'checksums.txt does not list ' + $Asset
         return
     }
@@ -488,7 +512,7 @@ function Get-AetherReleaseList {
         if (Test-AetherRateLimited $_.Exception $status) {
             throw ("GitHub API rate limit exceeded (HTTP {0}, X-RateLimit-Remaining 0); pass -Version <tag> to install a specific release" -f $status)
         }
-        throw ("cannot list releases: {0}" -f (Format-AetherRequestError $Uri $_.Exception $status))
+        throw ("cannot list releases: {0}" -f (Format-AetherRequestError $Uri $_ $status))
     }
     # Windows PowerShell returns a JSON array as one object; foreach unrolls it.
     foreach ($release in $response) { $release }
@@ -513,6 +537,7 @@ function Find-AetherCompleteRelease {
     Read-AetherRelease $BaseUrl $latest $Asset (Join-Path $TempRoot $latest) $Release
     if ($Release.Ready) { return }
     $latestReason = $Release.Reason
+    $latestSemVer = Get-AetherSemVer $latest
 
     $releases = @(Get-AetherReleaseList $ApiUrl)
     $candidates = @()
@@ -534,12 +559,19 @@ function Find-AetherCompleteRelease {
     }
     foreach ($candidate in $candidates) {
         $assets = $candidate.Assets
-        if ($assets -cnotcontains 'checksums.txt' -or $assets -cnotcontains $Asset -or
-            (($assets -ccontains 'aether-release.json') -ne ($assets -ccontains 'aether-release.json.sig')) -or
-            (($assets -cnotcontains 'aether-release.json') -and (Test-AetherSigningRequired $candidate.Tag))) {
+        # A fallback is always older than latest and always signed, so neither
+        # a newer tag nor a 404 on every signature can pick it.
+        if ($null -eq $latestSemVer -or (Compare-AetherSemVer $candidate.SemVer $latestSemVer) -ge 0 -or
+            $assets -cnotcontains 'checksums.txt' -or $assets -cnotcontains $Asset -or
+            $assets -cnotcontains 'aether-release.json' -or $assets -cnotcontains 'aether-release.json.sig') {
             continue
         }
-        Assert-AetherTag $candidate.Tag $Role
+        try {
+            Assert-AetherTag $candidate.Tag $Role
+        }
+        catch {
+            continue
+        }
         Read-AetherRelease $BaseUrl $candidate.Tag $Asset (Join-Path $TempRoot $candidate.Tag) $Release
         if ($Release.Ready) {
             Write-AetherMessage ("{0} is not fully published yet ({1}); installing {2}, the newest complete release" -f $latest, $latestReason, $candidate.Tag)
@@ -769,6 +801,7 @@ function Invoke-AetherInstall {
     if ([string]::IsNullOrWhiteSpace($latestUrl)) { $latestUrl = 'https://github.com/{0}/releases/latest' -f $repo }
     $apiUrl = [Environment]::GetEnvironmentVariable('AETHER_API_URL', 'Process')
     if ([string]::IsNullOrWhiteSpace($apiUrl)) { $apiUrl = 'https://api.github.com/repos/{0}/releases?per_page=100' -f $repo }
+    foreach ($uri in @($baseUrl, $latestUrl, $apiUrl)) { Assert-AetherHttpsUri $uri }
 
     $role = $RequestedRole
     if ([string]::IsNullOrWhiteSpace($role)) {

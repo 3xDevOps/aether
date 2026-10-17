@@ -263,7 +263,8 @@ function Write-AetherApi {
         [string[]] $Drafts = @(),
         [string[]] $Prereleases = @(),
         [int] $Status = 200,
-        [string] $RateLimitRemaining
+        [string] $RateLimitRemaining,
+        [string] $Message = 'API rate limit exceeded'
     )
     $entries = @()
     foreach ($tag in $Tags) {
@@ -274,7 +275,7 @@ function Write-AetherApi {
         }
         $entries += [ordered]@{ tag_name = $tag; draft = ($Drafts -contains $tag); prerelease = ($Prereleases -contains $tag); assets = $assets }
     }
-    $body = if ($Status -eq 200) { ConvertTo-Json -InputObject @($entries) -Depth 5 } else { '{"message":"API rate limit exceeded"}' }
+    $body = if ($Status -eq 200) { ConvertTo-Json -InputObject @($entries) -Depth 5 } else { ConvertTo-Json -Compress -InputObject ([ordered]@{ message = $Message }) }
     [IO.File]::WriteAllText((Join-Path $ReleaseRoot 'api.json'), $body)
     [IO.File]::WriteAllText((Join-Path $ReleaseRoot 'api-status.txt'), [string]$Status)
     $rateLimitFile = Join-Path $ReleaseRoot 'api-ratelimit.txt'
@@ -729,6 +730,42 @@ catch {
     Assert-AetherTest ($result.Stderr.Contains('cannot resolve the latest release from ' + $closedUrl + ': ')) ("unreachable host did not name the URL: " + $result.Output)
     Assert-AetherTest (-not $result.Output.Contains('no complete release')) ("unreachable host was reported as no release: " + $result.Output)
     Assert-AetherEqual 'old select CLI' ([IO.File]::ReadAllText($selectCli)) 'unreachable host replaced the CLI'
+
+    # Any other API error shows the body's message, not just the status line.
+    [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.7.0-alpha.12')
+    Write-AetherApi $releaseRoot -Status 500 -Message 'Server Error: try again'
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $selectEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'a failing API succeeded'
+    Assert-AetherTest ($result.Stderr.Contains('returned HTTP 500: ') -and $result.Stderr.Contains('Server Error: try again')) ("API error body was not shown: " + $result.Output)
+
+    # The fallback only takes a signed release older than latest: an
+    # unsigned one (v0.6.0) is never chosen in its place.
+    [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.7.0-alpha.8')
+    Write-AetherApi $releaseRoot -Tags @('v0.7.0-alpha.8', 'v0.6.0')
+    [IO.File]::WriteAllText($requestLog, '')
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'none', '-BinDir', $selectBin) $selectEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'fallback installed an unsigned release'
+    Assert-AetherTest ($result.Stderr.Contains('no complete release for windows/amd64')) ("unsigned fallback was not refused: " + $result.Output)
+    Assert-AetherTest (@([IO.File]::ReadAllLines($requestLog) | Where-Object { $_.StartsWith('v0.6.0/') }).Count -eq 0) 'fallback probed an unsigned release'
+    Assert-AetherEqual 'old select CLI' ([IO.File]::ReadAllText($selectCli)) 'unsigned fallback replaced the CLI'
+
+    # A candidate too old for desktop setup is skipped, not fatal.
+    Write-AetherRelease $releaseRoot 'v0.5.0' 'cli v0.5.0' 'arm v0.5.0'
+    [IO.File]::WriteAllText((Join-Path $releaseRoot 'latest.txt'), 'v0.7.0-alpha.12')
+    Write-AetherApi $releaseRoot -Tags @('v0.7.0-alpha.12', 'v0.5.0')
+    $result = Invoke-AetherPowerShellFile $installer @('-Role', 'client', '-BinDir', $selectBin) $selectEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'a too-old fallback succeeded'
+    Assert-AetherTest ($result.Stderr.Contains('no complete release for windows/amd64')) ("too-old fallback was not skipped: " + $result.Output)
+    Assert-AetherTest (-not $result.Output.Contains('too old')) ("too-old fallback threw instead of skipping: " + $result.Output)
+
+    # Only https, except the loopback fixture server, is accepted.
+    $insecureEnv = $selectEnv.Clone()
+    $insecureEnv.AETHER_BASE_URL = 'http://example.invalid/releases/download'
+    [IO.File]::WriteAllText($requestLog, '')
+    $result = Invoke-AetherPowerShellFile $installer @('-Version', 'v0.7.0-alpha.9', '-Role', 'none', '-BinDir', $selectBin) $insecureEnv
+    Assert-AetherTest ($result.ExitCode -ne 0) 'an http mirror was accepted'
+    Assert-AetherTest ($result.Stderr.Contains('refusing http://example.invalid/releases/download: releases are downloaded over https only')) ("http mirror was not refused: " + $result.Output)
+    Assert-AetherEqual 'old select CLI' ([IO.File]::ReadAllText($selectCli)) 'http mirror replaced the CLI'
     Write-Output 'install-test: ok'
 }
 finally {

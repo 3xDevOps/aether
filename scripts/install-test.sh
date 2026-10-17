@@ -165,7 +165,9 @@ api v0.0.0-test:
 # prints the status or the final URL. STUB_OFFLINE fakes an unreachable
 # GitHub, STUB_OFFLINE_API one that only drops the API, STUB_CUT a download
 # cut off mid-transfer (exit 18), STUB_SHORT one that ends early without an
-# error, and STUB_404_ONCE an asset the CDN serves on the second try.
+# error, STUB_404_ONCE an asset the CDN serves on the second try, and
+# STUB_GONE (tag/file) one that the API lists but never serves, and
+# STUB_NO_SIG a mirror that serves no signature at all.
 cat >"$bin/curl" <<'EOF'
 #!/bin/sh
 set -eu
@@ -206,6 +208,8 @@ https://github.com/*/releases/download/*)
 	rest="${url#*/releases/download/}"
 	tag="${rest%%/*}" file="${rest#*/}"
 	src="$FIXTURES/releases/$tag/$file"
+	[ "${STUB_GONE:-}" != "$tag/$file" ] || src=""
+	case "$file" in *.sig) [ -z "${STUB_NO_SIG:-}" ] || src="" ;; esac
 	if [ "${STUB_404_ONCE:-}" = "$file" ] && [ ! -e "$FIXTURES/404-once" ]; then
 		: >"$FIXTURES/404-once"
 		src=""
@@ -230,6 +234,18 @@ https://github.com/*/releases/download/*)
 esac
 echo "curl stub: unexpected URL $url" >&2
 exit 1
+EOF
+
+# STUB_MV_FAIL=NAME fails the rename onto NAME, the way a busy or read-only
+# destination would.
+cat >"$bin/mv" <<'EOF'
+#!/bin/sh
+for last; do :; done
+if [ -n "${STUB_MV_FAIL:-}" ] && [ "${last##*/}" = "$STUB_MV_FAIL" ]; then
+	echo "mv: cannot move to '$last': Text file busy" >&2
+	exit 1
+fi
+exec /bin/mv "$@"
 EOF
 
 cat >"$bin/sleep" <<'EOF'
@@ -862,11 +878,27 @@ printed "v0.7.0-alpha.12 is not fully published yet (no aether-linux-amd64); ins
 [ "$(grep -c '^sleep' "$log")" = 3 ] || fail "expected three CDN retries"
 installed_from v0.7.0-alpha.11 linux-amd64
 
-host "latest's checksums.txt does not list a needed binary: fall back"
+host "latest's manifest lists a binary checksums.txt omits: fail, do not fall back"
 make_release v0.7.0-alpha.11
 make_release v0.7.0-alpha.12
 grep -v ' aether-server-linux-amd64$' "$fixtures/releases/v0.7.0-alpha.12/checksums.txt" >"$tmp/sums"
 mv "$tmp/sums" "$fixtures/releases/v0.7.0-alpha.12/checksums.txt"
+set_latest v0.7.0-alpha.12
+api v0.7.0-alpha.12: v0.7.0-alpha.11:
+if latest_install; then fail "installed despite the disagreement"; fi
+printed "aether-release.json for v0.7.0-alpha.12 lists aether-server-linux-amd64 but checksums.txt does not; not installing it"
+not_requested "https://api.github.com/"
+untouched
+
+host "a release whose checksums.txt and manifest both omit a binary is incomplete"
+make_release v0.7.0-alpha.11
+make_release v0.7.0-alpha.12
+rm "$fixtures/releases/v0.7.0-alpha.12/aether-server-linux-amd64"
+(cd "$fixtures/releases/v0.7.0-alpha.12" && grep -v ' aether-server-linux-amd64$' checksums.txt >sums && mv sums checksums.txt)
+awk '/"aether-server-linux-amd64": \{/ { skip = 4 } skip { skip--; next } { print }' \
+	"$fixtures/releases/v0.7.0-alpha.12/aether-release.json" >"$tmp/manifest"
+mv "$tmp/manifest" "$fixtures/releases/v0.7.0-alpha.12/aether-release.json"
+sign_release v0.7.0-alpha.12 "$tmp/test-key.pem"
 set_latest v0.7.0-alpha.12
 api v0.7.0-alpha.12: v0.7.0-alpha.11:
 latest_install || fail "installer exited non-zero"
@@ -888,19 +920,42 @@ make_release v0.7.0-alpha.10
 make_release v0.7.0-alpha.10.5
 rm "$fixtures/releases/v0.7.0-alpha.10.5/aether-release.json"
 make_release v0.7.0-alpha.11
-grep -v ' aether-server-linux-amd64$' "$fixtures/releases/v0.7.0-alpha.11/checksums.txt" >"$tmp/sums"
-mv "$tmp/sums" "$fixtures/releases/v0.7.0-alpha.11/checksums.txt"
-mkdir -p "$fixtures/releases/v0.7.0-alpha.12"
-set_latest v0.7.0-alpha.12
-api v0.7.0-alpha.9: v0.8.0-rc.1:p v0.7.0-alpha.10.5: v0.7.0-alpha.12: v0.7.1:d v0.7.0-alpha.11: v0.7.0-alpha.10: not-a-version:
-latest_install || fail "installer exited non-zero"
-printed "skipping v0.7.0-alpha.11: not fully published (checksums.txt does not list aether-server-linux-amd64)"
+mkdir -p "$fixtures/releases/v0.9.0"
+set_latest v0.9.0
+api v0.7.0-alpha.9: v0.8.0-rc.1:p v0.7.0-alpha.10.5: v0.9.0: v0.7.1:d v0.7.0-alpha.11: v0.7.0-alpha.10: not-a-version:
+STUB_GONE=v0.7.0-alpha.11/aether-server-linux-amd64 latest_install || fail "installer exited non-zero"
+printed "skipping v0.7.0-alpha.11: not fully published (no aether-server-linux-amd64)"
 not_requested "/v0.7.0-alpha.10.5/"
-printed "v0.7.0-alpha.12 is not fully published yet (no checksums.txt); installing v0.7.0-alpha.10, $complete"
+printed "v0.9.0 is not fully published yet (no checksums.txt); installing v0.7.0-alpha.10, $complete"
 installed_from v0.7.0-alpha.10 linux-amd64
 not_requested "/v0.8.0-rc.1/"
 not_requested "/v0.7.1/"
 not_requested "/v0.7.0-alpha.9/"
+
+host "a fallback is never newer than latest"
+make_release v0.8.0
+make_release v0.7.0-alpha.11
+mkdir -p "$fixtures/releases/v0.7.0-alpha.12"
+set_latest v0.7.0-alpha.12
+api v0.8.0: v0.7.0-alpha.12: v0.7.0-alpha.11:
+latest_install || fail "installer exited non-zero"
+installed_from v0.7.0-alpha.11 linux-amd64
+not_requested "/v0.8.0/"
+
+# A mirror or an asset editor that 404s every signature must not turn the
+# fallback into an install of an unsigned release.
+host "every signature missing: no fallback to an unsigned release"
+make_release v0.7.0-alpha.11
+rm "$fixtures/releases/v0.7.0-alpha.11/aether-release.json" "$fixtures/releases/v0.7.0-alpha.11/aether-release.json.sig"
+make_release v0.7.0-alpha.12
+make_release v0.7.0-alpha.13
+set_latest v0.7.0-alpha.13
+api v0.7.0-alpha.13: v0.7.0-alpha.12: v0.7.0-alpha.11:
+if STUB_NO_SIG=1 latest_install; then fail "installed with every signature missing"; fi
+printed "skipping v0.7.0-alpha.12: not fully published (no aether-release.json.sig)"
+printed "no complete release for linux/amd64"
+not_requested "/v0.7.0-alpha.11/"
+untouched
 
 host "no complete release at all"
 mkdir -p "$fixtures/releases/v0.7.0-alpha.12"
@@ -983,6 +1038,15 @@ if STUB_SHORT=aether-linux-amd64 latest_install; then fail "a short download ins
 printed "size mismatch for aether-linux-amd64 v0.7.0-alpha.12"
 not_requested "https://api.github.com/"
 untouched
+
+host "a failed rename after the server was replaced says what changed"
+make_release v0.7.0-alpha.12
+set_latest v0.7.0-alpha.12
+if STUB_MV_FAIL=aether latest_install; then fail "a failed rename succeeded"; fi
+installed_from v0.7.0-alpha.12 linux-amd64 aether-server
+[ "$(cat "$bindir/aether")" = "old cli" ] || fail "the CLI was replaced"
+printed "stopped while replacing binaries; now v0.7.0-alpha.12: $bindir/aether-server; still the previous version: aether"
+no_staged
 
 host "a binary the CDN has not caught up with is retried"
 make_release v0.7.0-alpha.12
@@ -1127,6 +1191,16 @@ printf '{\n  "message": "Repository access blocked"\n}\n' >"$fixtures/api.json"
 if latest_install; then fail "installed through an API error"; fi
 printed "GET https://api.github.com/repos/3xDevOps/Aether/releases?per_page=100: HTTP 403: Repository access blocked"
 not_printed "rate limit"
+
+host "a compact API error body still shows its message"
+mkdir -p "$fixtures/releases/v0.7.0-alpha.12"
+set_latest v0.7.0-alpha.12
+api v0.7.0-alpha.12:
+echo 403 >"$fixtures/api.status"
+printf 'x-ratelimit-remaining: 41\r\n' >"$fixtures/api.headers"
+printf '{"message":"You have exceeded a secondary rate limit","documentation_url":"https://docs.github.com/x"}' >"$fixtures/api.json"
+if latest_install; then fail "installed through an API error"; fi
+printed "HTTP 403: You have exceeded a secondary rate limit"
 
 host "GitHub unreachable"
 make_release v0.7.0-alpha.12
