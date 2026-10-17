@@ -46,9 +46,22 @@ func TestEdgeRestartAndDirectFallback(t *testing.T) {
 	both := cli.Config{ServerID: a.id, EdgeURL: h.relayURL, Addr: a.addr}
 	deadDirect := cli.Config{ServerID: a.id, EdgeURL: h.relayURL, Addr: deadAddr(t)}
 
+	from := h.proxy.mark()
 	start := time.Now()
 	h.stopEdge()
 	closedWithin(t, "the edge stopping", relayed, start, waitTimeout)
+	// The server heard drain, not a dropped socket, with when to return.
+	e := h.proxy.await(t, "drain to the server", from, func(e logEntry) bool {
+		_, ok := e.msg.(edgeproto.Drain)
+		return ok && e.fromEdge && e.serverID == a.id
+	})
+	drain := e.msg.(edgeproto.Drain)
+	if drain.RetryAfterMS == 0 || drain.JitterMS == 0 {
+		t.Fatalf("drain without a reconnect hint: %+v", drain)
+	}
+	if st := a.waitStatus("disconnected by the drain", down); !strings.Contains(st.Error, "edge is restarting (drain)") {
+		t.Fatalf("status after the edge stopped: %+v", st)
+	}
 
 	// The server keeps serving its direct address, and a link that has
 	// one uses it while the edge is down.
@@ -62,7 +75,9 @@ func TestEdgeRestartAndDirectFallback(t *testing.T) {
 		t.Fatalf("neither path reachable: %v, want both causes", err)
 	}
 
-	// The server enrolls again once the edge is back, still claimed.
+	// The server enrolls again once the edge is back, still claimed,
+	// within the drain's hint: not before the edge could be back, and not
+	// after a backoff grown by failed dials.
 	h.startEdge()
 	eventually(t, "server back on the restarted edge", func() error {
 		if !h.relay().Online(a.id) {
@@ -70,6 +85,11 @@ func TestEdgeRestartAndDirectFallback(t *testing.T) {
 		}
 		return nil
 	})
+	retryAfter := time.Duration(drain.RetryAfterMS) * time.Millisecond
+	latest := retryAfter + time.Duration(drain.JitterMS)*time.Millisecond + 3*time.Second
+	if took := time.Since(start); took < retryAfter || took > latest {
+		t.Fatalf("server back %s after the drain, want within [%s, %s]", took, retryAfter, latest)
+	}
 	h.mustDial(al, a)
 	sc, err = h.dial(al, deadDirect)
 	if err != nil {

@@ -39,7 +39,7 @@ COPY --from=build /out/aether-edge /usr/local/bin/aether-edge
 COPY --from=build --chown=65532:65532 /out/state/ /var/lib/
 USER 65532:65532
 VOLUME /var/lib/aether-edge
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --start-interval=1s --retries=3 \
     CMD ["/usr/local/bin/aether-edge", "healthcheck"]
 ENTRYPOINT ["/usr/local/bin/aether-edge"]
 CMD ["serve"]

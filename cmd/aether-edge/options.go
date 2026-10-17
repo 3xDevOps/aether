@@ -65,7 +65,7 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 	fs.StringVar(&o.devListen, "dev-listen", env("AETHER_EDGE_DEV_LISTEN", ""),
 		"development mode: serve plain HTTP on this loopback address instead of --listen, without certificates")
 	fs.StringVar(&o.metricsListen, "metrics-listen", metricsListenDefault(getenv),
-		"loopback address that serves /metrics and /healthz")
+		"loopback address that serves /metrics, /healthz and /readyz")
 	fs.StringVar(&o.dataDir, "data", dataDirDefault(getenv),
 		"data directory: edge.db, the signing key edge_key and the ACME cache")
 	fs.StringVar(&o.signinOrigin, "signin-origin", env("AETHER_EDGE_SIGNIN_ORIGIN", ""),

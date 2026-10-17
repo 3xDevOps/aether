@@ -189,6 +189,9 @@ func TestServeAsAContainerRunsIt(t *testing.T) {
 	}
 	metrics, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
+	if !strings.Contains(string(metrics), "\naether_edge_draining 0\n") {
+		t.Errorf("/metrics of a running edge:\n%s", metrics)
+	}
 	keyPath := filepath.Join(volume, "edge_key")
 	key, err := os.ReadFile(keyPath)
 	if err != nil {

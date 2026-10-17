@@ -111,6 +111,14 @@ const (
 	// office behind one NAT address holds: MaxConnsPerDevice SSH streams
 	// per install, plus sign-in pages.
 	maxConnsPerAddress = 1024
+	// drainRetryAfter and drainJitter are the reconnect hint drain gives
+	// servers: long enough for a restarted edge to listen again, and
+	// spread so its servers do not enroll at once.
+	drainRetryAfter = 3 * time.Second
+	drainJitter     = 5 * time.Second
+	// spliceGrace is how long Shutdown lets relayed connections finish
+	// before it closes them.
+	spliceGrace = 2 * time.Second
 )
 
 // Relay is the edge relay. Register its HTTP endpoints on the edge's mux
@@ -239,9 +247,13 @@ func (r *Relay) Online(serverID string) bool {
 // Metrics is a snapshot of the relay's counters.
 type Metrics struct {
 	// Servers counts claimed servers holding a control channel;
-	// UnclaimedServers the unclaimed ones.
-	Servers          int
-	UnclaimedServers int
+	// UnclaimedServers the unclaimed ones; ServersByProtocol all of them
+	// by the protocol version negotiated with each.
+	Servers           int
+	UnclaimedServers  int
+	ServersByProtocol map[int]int
+	// Draining is set once Shutdown started.
+	Draining bool
 	// Splices counts attached connections.
 	Splices int
 	// BytesRelayed counts bytes sent to either side since the relay
@@ -255,9 +267,11 @@ type Metrics struct {
 
 // Metrics returns the relay's counters.
 func (r *Relay) Metrics() Metrics {
-	var m Metrics
+	m := Metrics{ServersByProtocol: map[int]int{}}
 	r.mu.Lock()
+	m.Draining = r.closing
 	for _, reg := range r.servers {
+		m.ServersByProtocol[reg.version]++
 		if reg.claimed {
 			m.Servers++
 		} else {
@@ -360,8 +374,10 @@ func (r *Relay) closeConns(match func(*relayConn) bool, cause error) []*registra
 	return regs
 }
 
-// Shutdown sends drain to every server, closes every control channel and
-// connection, and saves the egress counter.
+// Shutdown refuses new control channels and connections, sends drain to
+// every server, gives relayed connections spliceGrace to finish, closes
+// every control channel and connection, and saves the egress counter. A
+// drain still unsent when ctx ends is abandoned.
 func (r *Relay) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	r.closing = true
@@ -369,22 +385,45 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 	for _, reg := range r.servers {
 		regs = append(regs, reg)
 	}
-	for _, c := range r.conns {
-		c.cancel(edgeproto.RefusalNotConnected)
-	}
 	r.mu.Unlock()
 
+	drain := edgeproto.Drain{RetryAfterMS: drainRetryAfter.Milliseconds(), JitterMS: drainJitter.Milliseconds()}
 	var wg sync.WaitGroup
 	for _, reg := range regs {
 		wg.Go(func() {
-			if err := reg.send(edgeproto.Drain{}); err != nil {
+			if err := reg.sendWithin(ctx, drain); err != nil {
 				slog.Warn("relay: drain not delivered", "server", reg.id, "error", err)
 			}
 			reg.cancel(errDraining)
 		})
 	}
 	wg.Wait()
+	r.closeSplices(ctx)
 	r.stop(errDraining)
 	<-r.flushed
 	return r.flushEgress(ctx, time.Now())
+}
+
+// closeSplices waits up to spliceGrace, or until ctx ends, for relayed
+// connections to end on their own, then closes the rest.
+func (r *Relay) closeSplices(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, spliceGrace)
+	defer cancel()
+	t := time.NewTicker(50 * time.Millisecond)
+	defer t.Stop()
+	for {
+		r.mu.Lock()
+		if len(r.conns) == 0 || ctx.Err() != nil {
+			for _, c := range r.conns {
+				c.cancel(edgeproto.RefusalNotConnected)
+			}
+			r.mu.Unlock()
+			return
+		}
+		r.mu.Unlock()
+		select {
+		case <-ctx.Done():
+		case <-t.C:
+		}
+	}
 }

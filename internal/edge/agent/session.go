@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"slices"
@@ -19,7 +20,23 @@ import (
 	"github.com/coder/websocket"
 )
 
-var errDrain = errors.New("edge is restarting (drain)")
+// drained ends a session whose edge sent drain as it stopped.
+type drained struct{ edgeproto.Drain }
+
+func (drained) Error() string { return "edge is restarting (drain)" }
+
+// wait is how long to wait before reconnecting: the drain's hint, or
+// fallback from an edge that sent none.
+func (d drained) wait(fallback time.Duration) time.Duration {
+	if d.RetryAfterMS == 0 && d.JitterMS == 0 {
+		return fallback
+	}
+	wait := time.Duration(d.RetryAfterMS) * time.Millisecond
+	if d.JitterMS > 0 {
+		wait += rand.N(time.Duration(d.JitterMS) * time.Millisecond)
+	}
+	return wait
+}
 
 // session is one enrolled control connection.
 type session struct {
@@ -425,7 +442,7 @@ func (a *Agent) serve(ctx context.Context, s *session) error {
 			}
 			return errors.New("the owner removed this server at the edge; it stays reachable directly and over the tailnet")
 		case edgeproto.Drain:
-			return errDrain
+			return drained{m}
 		default:
 			return fmt.Errorf("edge sent %T on an enrolled connection", m)
 		}

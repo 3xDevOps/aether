@@ -1,0 +1,1 @@
+{"type":"directory","entries":[{"kind":"member","provider":"github","subject":"1001","role":"admin"},{"kind":"invitation","email":"new@example.com","role":"viewer","expires_at":"2030-01-01T00:00:00Z"}]}

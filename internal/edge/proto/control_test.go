@@ -5,6 +5,8 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -47,6 +49,7 @@ func validMessages(t *testing.T) []Message {
 		AccountDeletionApplied{Provider: ProviderGitHub, Subject: "1001"},
 		Unenroll{},
 		Drain{},
+		Drain{RetryAfterMS: 3000, JitterMS: 5000},
 		Ping{},
 		Pong{},
 	}
@@ -91,6 +94,10 @@ func TestControlEnvelope(t *testing.T) {
 	}
 	if string(data) != `{"type":"device_revoked","device_id":"dev-fake-1"}` {
 		t.Fatalf("EncodeControl(DeviceRevoked) = %s", data)
+	}
+	// A drain without a hint is the message edges sent before the hint.
+	if data, err = EncodeControl(Drain{}); err != nil || string(data) != `{"type":"drain"}` {
+		t.Fatalf("EncodeControl(Drain) = %s, %v", data, err)
 	}
 }
 
@@ -138,6 +145,8 @@ func TestDecodeControlRefusals(t *testing.T) {
 		{"transfer result with escape in error", `{"type":"owner_transfer_result","id":"` + conn + `","owner":{"type":"account","provider":"github","subject":"1"},"error":"\u001b[2J"}`, false},
 		{"directory with bad entry", `{"type":"directory","entries":[{"kind":"member","provider":"github","role":"admin"}]}`, false},
 		{"device revoked without id", `{"type":"device_revoked"}`, false},
+		{"drain with a negative wait", `{"type":"drain","retry_after_ms":-1}`, false},
+		{"drain with a jitter over the longest backoff", `{"type":"drain","jitter_ms":3600000}`, false},
 	}
 	for _, tt := range tests {
 		_, err := DecodeControl([]byte(tt.data))
@@ -201,4 +210,37 @@ func TestHelloWithoutPolicy(t *testing.T) {
 func b64(b []byte) string {
 	data, _ := json.Marshal(b)
 	return strings.Trim(string(data), `"`)
+}
+
+// TestDecodesVersion1Fixtures decodes control messages as builds speaking
+// protocol version 1 send them. Every later build must keep accepting
+// them: an edge accepts the servers of the previous version, and a server
+// the edges of the previous version. A fixture may carry a member this
+// build does not know, which it ignores; unknown_type is a message type
+// it does not know, which a reader skips.
+func TestDecodesVersion1Fixtures(t *testing.T) {
+	files, err := filepath.Glob("testdata/v1/*.json")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("fixtures: %v %v", files, err)
+	}
+	for _, f := range files {
+		data, readErr := os.ReadFile(f)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		_, err = DecodeControl(bytes.TrimSpace(data))
+		if filepath.Base(f) == "unknown_type.json" {
+			if !errors.Is(err, ErrUnknownMessage) {
+				t.Errorf("%s: DecodeControl = %v, want ErrUnknownMessage", f, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: DecodeControl = %v", f, err)
+		}
+	}
+	m, err := DecodeControl([]byte(`{"type":"drain","retry_after_ms":3000,"jitter_ms":5000,"reason":"upgrade"}`))
+	if err != nil || m != (Drain{RetryAfterMS: 3000, JitterMS: 5000}) {
+		t.Fatalf("drain with a hint = %+v, %v", m, err)
+	}
 }

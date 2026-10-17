@@ -741,7 +741,12 @@ func TestShutdownDrains(t *testing.T) {
 	if err := e.r.Shutdown(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	next[edgeproto.Drain](t, a)
+	if d := next[edgeproto.Drain](t, a); d.RetryAfterMS != drainRetryAfter.Milliseconds() || d.JitterMS != drainJitter.Milliseconds() {
+		t.Fatalf("drain = %+v, want the reconnect hint", d)
+	}
+	if !e.r.Metrics().Draining {
+		t.Fatal("metrics do not report draining")
+	}
 	if err := a.closedWith(t); !strings.Contains(err.Error(), errDraining.Error()) {
 		t.Fatalf("closed with %v", err)
 	}

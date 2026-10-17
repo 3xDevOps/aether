@@ -1283,8 +1283,8 @@ ghcr.io/3xdevops/aether-edge:<release-tag>@sha256:<digest>
 | Data directory | `/var/lib/aether-edge`, declared as a volume ([What the data directory holds](#what-the-data-directory-holds)) |
 | Client secret | A file, named by `AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE` ([The client secret](#the-client-secret)) |
 | Listening | Behind a reverse proxy on a container network, or with the edge's own certificates on a published port ([Listening](#listening)) |
-| Health | The image's `HEALTHCHECK` runs `aether-edge healthcheck` every 30 seconds, after a 30-second start period, and marks the container unhealthy after 3 failures. On a runtime that ignores `HEALTHCHECK`, use the same command as the probe. It reads `AETHER_EDGE_METRICS_LISTEN`, so change the metrics address with that variable, not with a `--metrics-listen` flag on `serve` |
-| Stop | `SIGTERM`: the edge sends `drain` to every server and exits 0 within 10 seconds, or exits 1 if shutdown takes longer. Docker's default grace period is also 10 seconds, so give it more: `--stop-timeout 30` |
+| Health | The image's `HEALTHCHECK` runs `aether-edge healthcheck`, the liveness check, every second during a 30-second start period and every 30 seconds after, and marks the container unhealthy after 3 failures. A reverse proxy that routes on Docker health, such as Traefik, routes to a restarted edge about a second after it listens. `aether-edge healthcheck --ready` is the readiness check ([Monitoring](#monitoring)); keep it out of `HEALTHCHECK`: a proxy that routes on Docker health would stop routing new connections whenever the database answers slowly. On a runtime that ignores `HEALTHCHECK`, use the same commands as the probes. They read `AETHER_EDGE_METRICS_LISTEN`, so change the metrics address with that variable, not with a `--metrics-listen` flag on `serve` |
+| Stop | `SIGTERM`: readiness turns `draining`, the edge sends `drain` to every server, gives relayed connections 2 seconds to finish, and exits 0 within 20 seconds, or exits 1 if shutdown takes longer. Docker's default grace period is 10 seconds, so give it more: `--stop-timeout 30`, or `stop_grace_period: 30s` in Compose |
 | Metrics | Loopback only, inside the container: scrape them from a container that shares its network namespace (`--network container:aether-edge`) ([Monitoring](#monitoring)) |
 | Root filesystem | May be read-only (`--read-only`): the edge writes only to the data directory, and SQLite keeps its temporary tables in memory |
 | Operator commands | `docker exec <container> aether-edge servers list`, as the image's user ([Operator commands](#operator-commands)) |
@@ -1536,16 +1536,40 @@ format:
 | `aether_edge_relayed_bytes_total` | Bytes relayed since the edge started |
 | `aether_edge_egress_month_bytes` | Bytes relayed this UTC month, the figure the budget counts |
 | `aether_edge_throttled` | `1` once the monthly egress budget is spent |
+| `aether_edge_draining` | `1` once the edge is stopping |
+| `aether_edge_servers_by_protocol{version="..."}` | Servers holding a control connection, by the protocol version negotiated with each ([Upgrades](#upgrades)) |
+| `aether_edge_github_errors_total` | Calls to GitHub, during sign-in, that failed |
 | `aether_edge_refusals_total{reason="..."}` | Refused connections and enrollments by reason, such as `enrollment refused`, `upgrade required`, `too many connections from one address` or `no forwarded client address` |
 
 Scrape it from the edge host itself or over an SSH tunnel; it is never
-exposed. `aether-edge healthcheck` asks the edge on the same machine for
-`/healthz` on that listener, reading `AETHER_EDGE_METRICS_LISTEN` or
-`--metrics-listen` as `serve` does, and exits 0, or 1 with the reason:
+exposed. The same listener serves two checks:
+
+| Path | Command | Answers 200 when |
+| --- | --- | --- |
+| `/healthz` | `aether-edge healthcheck` | The process serves. The listener answers only once the public listener is open, and checks nothing else: this is liveness |
+| `/readyz` | `aether-edge healthcheck --ready` | The edge database answers a read within a second, the public listener serves, and the edge is not stopping. Otherwise 503 |
+
+Each command asks the edge on the same machine, reading
+`AETHER_EDGE_METRICS_LISTEN` or `--metrics-listen` as `serve` does, and
+exits 0, or 1 with the reason:
 
 ```
 aether-edge: healthcheck: no edge answers on 127.0.0.1:9464: Get "http://127.0.0.1:9464/healthz": dial tcp 127.0.0.1:9464: connect: connection refused; when serve was given --metrics-listen, give this command the same address or set AETHER_EDGE_METRICS_LISTEN for both
+aether-edge: healthcheck: edge is not ready (draining): draining: the edge is stopping
 ```
+
+`/readyz` answers JSON; `aether-edge healthcheck --json` prints it and
+implies `--ready`. `status` is `ready`, `draining` once a stop began, or
+`starting` while a check fails; a failing check holds its error instead of
+`ok`:
+
+```json
+{"status":"ready","version":"<release-tag>","protocol":{"version":1,"min_version":1},"checks":{"db":"ok","listener":"ok","draining":false},"servers":{"claimed":12,"unclaimed":1}}
+```
+
+Neither check asks GitHub or the ACME CA: an edge that cannot reach them
+still relays every enrolled server. Watch
+`aether_edge_github_errors_total` and certificate expiry instead.
 
 Alert on `aether_edge_throttled` equal to 1 and on
 `aether_edge_egress_month_bytes` passing a fraction of the budget; on a fall
@@ -1634,8 +1658,9 @@ sudo systemctl restart aether-edge
 
 Fetch the unit and the environment example of the new release too, and
 compare them with yours. On `SIGTERM` the edge sends `drain` to every
-server, then closes within 10 seconds. Every relayed connection drops;
-servers reconnect with backoff, clients redial, and runs are unaffected.
+server, then closes within 20 seconds. Every relayed connection drops;
+servers reconnect 3 to 8 seconds later, as `drain` asks, clients redial,
+and runs are unaffected.
 The database schema migrates forward on start. An older binary refuses a
 migrated database with `edgestore: database schema version <n> is newer
 than this binary supports (<m>)`; to roll back, restore the backup taken
@@ -1645,10 +1670,21 @@ An edge, servers and clients built from the `v0.5.2-alpha.3` tag must all
 be replaced by this release together; a mix of that build and this one
 does not interoperate.
 
-Every handshake carries a protocol version. The edge accepts any server or
-client at or above its minimum version, including newer ones, which speak
-down. An older one is refused with `upgrade required: <minimum>` (HTTP 426
-for clients). Protocol version 1 is the only version and the minimum.
+Every handshake carries a protocol version. The two sides speak the lower
+of their two versions. The edge accepts any server or client at or above
+its minimum version, including newer ones, which speak down. An older one
+is refused with `upgrade required: <minimum>` (HTTP 426 for clients).
+Protocol version 1 is the only version and the minimum;
+`aether_edge_servers_by_protocol` shows the versions connected servers
+speak.
+
+A change either side can ignore, such as a new optional field or a new
+message type, does not change the version: each side skips message types
+it does not know and ignores fields it does not know. A change the other
+side must understand raises the version, and the edge keeps accepting the
+previous version for at least one release after, so servers can be
+upgraded after the edge. `drain` gained its reconnect hint this way: a
+server that predates it reconnects with backoff.
 
 ### Operator commands
 
@@ -1748,7 +1784,7 @@ legitimate.
 | Failure | Behaviour |
 | --- | --- |
 | Edge down | [During an edge outage](#during-an-edge-outage) |
-| Edge restart | Relayed connections drop; servers and clients reconnect; runs are unaffected |
+| Edge restart | `/readyz` answers `draining`; the edge sends `drain` and relayed connections drop. Servers log `edge is restarting (drain); reconnecting in <wait>` and reconnect 3 to 8 seconds later; clients redial; runs are unaffected. A server that does not read `drain` within the stop's 20 seconds is dropped without it and reconnects with backoff |
 | Server offline | `503 server is not connected to the edge`. The edge drops a control connection when its socket closes, when a write to it fails, or after 60 seconds without a message from the server |
 | Server reconnecting while a client connects | The edge sends the connection to the server's new control connection, once |
 | Claim recorded, not yet applied to the live control connection | `409 server is connected to the edge but not claimed`; retry |

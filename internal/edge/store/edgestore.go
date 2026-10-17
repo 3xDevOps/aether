@@ -6,6 +6,7 @@
 package edgestore
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -67,6 +68,15 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	return &Store{db: db}, nil
+}
+
+// Ping checks that the database answers a read.
+func (s *Store) Ping(ctx context.Context) error {
+	var v int
+	if err := s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&v); err != nil {
+		return fmt.Errorf("edgestore: ping: %w", err)
+	}
+	return nil
 }
 
 // Close closes the database.

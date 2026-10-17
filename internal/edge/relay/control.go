@@ -35,6 +35,8 @@ type registration struct {
 	ws     *websocket.Conn
 	ctx    context.Context
 	cancel context.CancelCauseFunc
+	// version is the protocol version negotiated with the server.
+	version int
 	// turn holds the one throttled read this server's connections may
 	// have waiting.
 	turn chan struct{}
@@ -53,19 +55,30 @@ type registration struct {
 
 // send writes m once Ready is sent, or fails when g ends first.
 func (g *registration) send(m edgeproto.Message) error {
+	return g.sendWithin(context.Background(), m)
+}
+
+// sendWithin is send, bounded by ctx too.
+func (g *registration) sendWithin(ctx context.Context, m edgeproto.Message) error {
 	select {
 	case <-g.ready:
 	case <-g.ctx.Done():
 		return fmt.Errorf("relay: send to server %s: %w", g.id, context.Cause(g.ctx))
+	case <-ctx.Done():
+		return fmt.Errorf("relay: send to server %s: %w", g.id, context.Cause(ctx))
 	}
-	return g.write(m)
+	return g.writeWithin(ctx, m)
 }
 
 // write writes m. The write is not bound to g.ctx: cancelling the context
 // of a write in progress drops the socket without the close frame that
 // gives the server the cause.
 func (g *registration) write(m edgeproto.Message) error {
-	ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
+	return g.writeWithin(context.Background(), m)
+}
+
+func (g *registration) writeWithin(ctx context.Context, m edgeproto.Message) error {
+	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
 	defer cancel()
 	if err := writeControl(ctx, g.ws, m); err != nil {
 		return fmt.Errorf("relay: send to server %s: %w", g.id, err)
@@ -151,7 +164,10 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 	if !ok {
 		return nil, fmt.Errorf("relay: expected hello, got %T", m)
 	}
-	if err = edgeproto.CheckVersion(hello.Version); err != nil {
+	// A newer server speaks the challenge's version; one that names a
+	// higher version still gets this edge's.
+	version := min(hello.Version, edgeproto.Version)
+	if err = edgeproto.CheckVersion(version); err != nil {
 		return nil, err
 	}
 	hostKey, err := hello.PublicKey()
@@ -175,7 +191,7 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 		return nil, fmt.Errorf("relay: claim state of %s: %w", id, err)
 	}
 
-	reg := &registration{id: id, name: hello.Name, policy: policy, addr: addr, ws: ws, claimed: claimed, turn: make(chan struct{}, 1), ready: make(chan struct{})}
+	reg := &registration{id: id, name: hello.Name, policy: policy, version: version, addr: addr, ws: ws, claimed: claimed, turn: make(chan struct{}, 1), ready: make(chan struct{})}
 	reg.ctx, reg.cancel = context.WithCancelCause(r.ctx)
 	r.mu.Lock()
 	if r.closing {
@@ -204,6 +220,7 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 		return nil, err
 	}
 	close(reg.ready)
+	slog.Info("relay: server enrolled", "server", id, "state", state, "protocol", version, "agent_version", hello.AgentVersion)
 	return reg, nil
 }
 

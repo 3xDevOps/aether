@@ -594,6 +594,21 @@ func TestReconnectsAfterEdgeDropsAndOnDrain(t *testing.T) {
 	edge.nextControl(t)
 }
 
+// A drain's hint replaces the backoff: below the shortest backoff here,
+// so a redial within the hint shows it was used.
+func TestDrainHintSetsTheRedial(t *testing.T) {
+	edge := newFakeEdge(t)
+	a := newAgent(t, edge.srv.URL, t.TempDir(), newFakeSSH())
+	a.minBackoff = 2 * time.Second
+	run(t, a)
+	edge.nextControl(t).send(edgeproto.Drain{RetryAfterMS: 300, JitterMS: 100})
+	sent := time.Now()
+	edge.nextControl(t)
+	if took := time.Since(sent); took < 300*time.Millisecond || took >= a.minBackoff {
+		t.Fatalf("redialed %s after a drain asking for 300ms plus up to 100ms", took)
+	}
+}
+
 // Servers an edge restart drops together must not redial in step: even
 // the first wait, before any backoff has grown, is spread.
 func TestFirstRedialIsJittered(t *testing.T) {
