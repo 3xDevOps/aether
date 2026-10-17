@@ -243,27 +243,19 @@ aether install: windows/amd64, CLI and desktop app
       verified aether-windows-amd64.exe SHA-256 and size against checksums.txt and aether-release.json; aether-release.json.sig is not checked (PowerShell has no ed25519 verifier)
 [2/3] installing the CLI: v0.7.0-alpha.11 -> v0.7.0-alpha.12
       C:\Users\<you>\AppData\Local\Programs\Aether\aether.exe
-[3/3] desktop app (log: C:\Users\<you>\AppData\Local\aether\install-desktop.log)
-      unpacking                  0.0s
-      fetching node              0.1s
-      installing dependencies    11.9s
-      packaging                  8.5s
-      installing                 0.4s
-      built and installed C:\Users\<you>\AppData\Local\Programs\Aether Desktop
+[3/3] installing the desktop app (the build output follows)
+      ...the output of aether gui build...
+      installed C:\Users\<you>\AppData\Local\Programs\Aether Desktop\aether-desktop.exe
 next:
   open Aether from the Start menu, or link from a new terminal:
   aether link <server-host>:2222
 done: Aether v0.7.0-alpha.12 installed in 24.4s
 ```
 
-Step 3 prints one line per phase of `aether gui build --json` with its
-duration. A CLI that installs the prebuilt desktop app shows `downloading`
-and `installing`, and the last line says `installed` rather than
-`built and installed`. The build's own output goes to
-`%LOCALAPPDATA%\aether\install-desktop.log`; if the step fails, the
-installer prints the log's last 20 lines and the `gui build` command to
-rerun. An error is printed once on stderr and the script exits 1, whether it
-is run with `-File`, `&` or dot-sourced; the calling shell keeps running and
+Step 3 runs `aether gui build` with its output unchanged, so its download
+progress, npm and electron-builder messages appear as they happen. An error
+is printed once on stderr and the script exits 1, whether it is run with
+`-File`, `&` or dot-sourced; the calling shell keeps running and
 `$LASTEXITCODE` is 1. Content run through `Invoke-Expression` has no script
 to exit, so there the error is thrown to the caller.
 
@@ -298,7 +290,7 @@ the task restarts a daemon killed by `Stop-Process` within a minute. The
 daemon starts again at the next sign-in, or at once with
 `schtasks /Run /TN aether-daemon`. Any other failure to replace the CLI
 reports the Windows error alone. A desktop-step failure keeps the installed
-CLI and returns failure.
+CLI, returns failure, and prints the `gui build` command to rerun.
 Configuration and SSH files are untouched.
 
 The installer does not request administrator access, change execution policy,

@@ -8,8 +8,8 @@
   curl.exe when present, otherwise Invoke-WebRequest; they are written to a
   temporary directory, checked against checksums.txt and aether-release.json,
   then copied beside and atomically swapped into the installed CLI path.  The
-  desktop app is installed by the new CLI's `gui build`, whose output goes to
-  %LOCALAPPDATA%\aether\install-desktop.log.
+  desktop app is installed by the new CLI's `gui build`, whose output is shown
+  as it runs.
 
 .EXAMPLE
   powershell -NoProfile -File .\scripts\install.ps1
@@ -849,107 +849,44 @@ function Get-AetherInstalledVersion {
 }
 
 function Invoke-AetherGuiBuild {
-    param([Parameter(Mandatory = $true)][string] $CliPath, [Parameter(Mandatory = $true)][string] $LogPath)
+    param([Parameter(Mandatory = $true)][string] $CliPath)
     $hadAetherBin = Test-Path -LiteralPath 'Env:AETHER_BIN'
     $oldAetherBin = [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process')
+    $previousExit = Get-Variable LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
+    $oldEap = $ErrorActionPreference
     $rerun = "& '{0}' gui build" -f $CliPath.Replace("'", "''")
-    $log = $null
     try {
         [Environment]::SetEnvironmentVariable('AETHER_BIN', $CliPath, 'Process')
-        New-Item -ItemType Directory -Path (Split-Path -Parent $LogPath) -Force -ErrorAction Stop | Out-Null
-        # Concurrent installs share the log; the CLI's own build lock orders them.
-        $log = [System.IO.File]::Open($LogPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
-        $start = New-Object System.Diagnostics.ProcessStartInfo
-        $start.FileName = $CliPath
-        $start.Arguments = 'gui build --json'
-        $start.UseShellExecute = $false
-        $start.RedirectStandardOutput = $true
-        $start.RedirectStandardError = $true
-        $start.StandardOutputEncoding = New-Object System.Text.UTF8Encoding $false
-        try {
-            $process = [System.Diagnostics.Process]::Start($start)
-        }
-        catch {
-            throw ("aether gui build could not start: {0}. The CLI is installed; rerun: {1}" -f $_.Exception.Message, $rerun)
-        }
-        # The build's own output (npm, electron-builder, notes) is stderr; it
-        # goes to the log so the console shows only the --json phases.
-        $copy = $process.StandardError.BaseStream.CopyToAsync($log)
-        $phase = $null
-        $watch = $null
-        $prebuilt = $false
-        $failure = $null
-        $installed = $null
-        while ($true) {
-            # A failed log write stops draining stderr, and a build blocked on
-            # that full pipe would never close stdout.
-            $read = $process.StandardOutput.ReadLineAsync()
-            while (-not $read.Wait(200)) {
-                if ($copy.IsFaulted -and -not $process.HasExited) { $process.Kill() }
-            }
-            $line = $read.Result
-            if ($null -eq $line) { break }
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            $record = $null
-            try { $record = ConvertFrom-Json -InputObject $line -ErrorAction Stop } catch { }
-            $name = if ($null -ne $record -and $null -ne $record.phase) { [string]$record.phase } else { $line }
-            if ($null -ne $phase) {
-                $outcome = if ($name -eq 'error') { 'failed after ' } else { '' }
-                Write-Host ($outcome + (Format-AetherSeconds $watch))
-                $phase = $null
-            }
-            if ($name -eq 'done') {
-                $installed = [string]$record.path
-            }
-            elseif ($name -eq 'error') {
-                $failure = [string]$record.error
-            }
-            else {
-                if ($name -eq 'downloading') { $prebuilt = $true }
-                Write-AetherDetail ('{0,-26} ' -f $name) -NoNewline
-                $phase = $name
-                $watch = [System.Diagnostics.Stopwatch]::StartNew()
-            }
-        }
-        $process.WaitForExit()
-        if ($null -ne $phase) {
-            Write-Host ('stopped after ' + (Format-AetherSeconds $watch))
-        }
-        if ($copy.IsFaulted) {
-            throw ("cannot write {0}: {1}. The CLI is installed; rerun: {2}" -f $LogPath, $copy.Exception.GetBaseException().Message, $rerun)
-        }
-        $copy.Wait()
-        $log.Dispose()
-        $log = $null
-        if ($process.ExitCode -ne 0 -or $null -ne $failure) {
-            if ([string]::IsNullOrEmpty($failure)) {
-                $failure = 'aether gui build exited with code {0}' -f $process.ExitCode
-            }
-            $tail = @(Get-Content -LiteralPath $LogPath -Tail 20 -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object { '  ' + $_ })
-            $lines = @(('the desktop app was not installed: {0}' -f $failure))
-            if ($tail.Count -gt 0) {
-                $lines += ('last {0} lines of {1}:' -f $tail.Count, $LogPath)
-                $lines += $tail
-            }
-            $lines += ('The CLI is installed; rerun: {0}' -f $rerun)
-            throw ($lines -join [Environment]::NewLine)
-        }
-        $verb = if ($prebuilt) { 'installed' } else { 'built and installed' }
-        if ([string]::IsNullOrEmpty($installed)) {
-            Write-AetherDetail ('{0} the desktop app' -f $verb)
-        }
-        else {
-            Write-AetherDetail ('{0} {1}' -f $verb, $installed)
-        }
+        $global:LASTEXITCODE = -1
+        # npm and electron-builder write progress to stderr; under Windows
+        # PowerShell 5.1 that must not become an installer error.
+        $ErrorActionPreference = 'Continue'
+        & $CliPath gui build
+        $exitCode = [int]$global:LASTEXITCODE
+    }
+    catch {
+        throw ("aether gui build failed: {0}. The CLI is installed; rerun: {1}" -f $_.Exception.Message, $rerun)
     }
     finally {
-        if ($null -ne $log) { $log.Dispose() }
+        $ErrorActionPreference = $oldEap
         if ($hadAetherBin) {
             [Environment]::SetEnvironmentVariable('AETHER_BIN', $oldAetherBin, 'Process')
         }
         else {
             Remove-Item -LiteralPath 'Env:AETHER_BIN' -Force -ErrorAction SilentlyContinue
         }
+        if ($null -ne $previousExit) {
+            $global:LASTEXITCODE = $previousExit
+        }
+        else {
+            Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
+        }
+    }
+    if ($exitCode -eq -1) {
+        throw ("aether gui build could not start. The CLI is installed; rerun: {0}" -f $rerun)
+    }
+    if ($exitCode -ne 0) {
+        throw ("aether gui build exited with code {0}. The CLI is installed; rerun: {1}" -f $exitCode, $rerun)
     }
 }
 
@@ -1211,9 +1148,9 @@ function Invoke-AetherInstall {
         Warn-AetherShadowing $binDir $destination
 
         if ($role -eq 'client') {
-            $logPath = Join-Path $localAppData 'aether\install-desktop.log'
-            Write-AetherStep ('desktop app (log: {0})' -f $logPath)
-            Invoke-AetherGuiBuild $destination $logPath
+            Write-AetherStep 'installing the desktop app (the build output follows)'
+            Invoke-AetherGuiBuild $destination
+            Write-AetherDetail ('installed {0}' -f $desktopPath)
         }
         Write-Host 'next:'
         if ($role -eq 'client') {

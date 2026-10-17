@@ -365,26 +365,21 @@ func main() {
     if logPath != "" {
         _ = os.WriteFile(logPath, []byte("invoked"), 0644)
     }
-    if strings.Join(os.Args[1:], " ") != "gui build --json" {
+    if strings.Join(os.Args[1:], " ") != "gui build" {
         fmt.Fprintln(os.Stderr, "unsupported fixture command")
         os.Exit(64)
     }
-    for i := 1; i <= 25; i++ {
-        fmt.Fprintf(os.Stderr, "fixture build output %d\n", i)
-    }
-    fmt.Println(`{"phase":"downloading"}`)
+    fmt.Println("fixture stdout progress")
+    fmt.Fprintln(os.Stderr, "fixture stderr progress")
     if os.Getenv("AETHER_GUI_FAIL") != "" {
-        fmt.Println(`{"phase":"error","error":"fixture desktop failure"}`)
+        fmt.Fprintln(os.Stderr, "fixture desktop failure")
         os.Exit(23)
     }
-    fmt.Println(`{"phase":"verifying signature"}`)
     target := os.Getenv("AETHER_DESKTOP_TARGET")
     if target != "" {
         _ = os.MkdirAll(filepath.Dir(target), 0755)
         _ = os.WriteFile(target, []byte("desktop fixture"), 0644)
     }
-    fmt.Printf(`{"phase":"installing"}` + "\n")
-    fmt.Printf(`{"phase":"done","path":%q}` + "\n", target)
 }
 '@
     [IO.File]::WriteAllText($source, $fixtureSource)
@@ -509,18 +504,16 @@ func main() {
     Assert-AetherEqual 0 $result.ExitCode ("fresh default install failed: " + $result.Output)
     Assert-AetherTest (Get-AetherTestBytesEqual $fixture $freshCli) 'fresh install did not retain the CLI executable'
     Assert-AetherTest (Test-Path -LiteralPath $freshDesktop -PathType Leaf) 'GUI build did not create the sibling desktop executable'
-    $freshDesktopLog = Join-Path $freshLocal 'aether\install-desktop.log'
     foreach ($expected in @(
-            ('[3/3] desktop app (log: {0})' -f $freshDesktopLog),
-            '      downloading ',
-            '      verifying signature ',
+            '[3/3] installing the desktop app (the build output follows)',
+            'fixture stdout progress',
             ('      installed {0}' -f $freshDesktop),
             'aether link <server-host>:2222',
             ('done: Aether {0} installed in ' -f $version))) {
         Assert-AetherTest ($result.Stdout.Contains($expected)) ("fresh install output lacks [{0}]: {1}" -f $expected, $result.Output)
     }
-    Assert-AetherTest (-not $result.Stdout.Contains('fixture build output')) ("desktop build output reached the console: " + $result.Output)
-    Assert-AetherTest ([IO.File]::ReadAllText($freshDesktopLog).Contains('fixture build output 25')) 'desktop build output did not reach the log'
+    Assert-AetherTest ($result.Stderr.Contains('fixture stderr progress')) ("desktop build stderr did not reach the console: " + $result.Output)
+    Assert-AetherTest (-not $result.Stderr.Contains('NativeCommandError')) ("desktop build stderr became an error record: " + $result.Stderr)
     Assert-AetherTest ((Get-AetherTestUserPath).StartsWith($freshUserPath)) 'fresh install altered unrelated PATH entries'
     Assert-AetherTest ([Environment]::GetEnvironmentVariable('Path', 'User').StartsWith([Environment]::ExpandEnvironmentVariables($freshUserPath))) 'fresh install stopped expanding PATH tokens'
 
@@ -596,10 +589,9 @@ exit `$LASTEXITCODE
         }
         Assert-AetherEqual 1 $result.ExitCode ("desktop failure under {0} did not exit 1: {1}" -f $operator, $result.Output)
         Assert-AetherTest ($result.Stdout.Contains('caller continued: 1')) ("installer under {0} did not return to its caller: {1}" -f $operator, $result.Output)
-        Assert-AetherTest ($result.Stderr.Contains('aether install: error: the desktop app was not installed: fixture desktop failure')) ("desktop failure was not reported: " + $result.Output)
-        Assert-AetherEqual 1 ([regex]::Matches($result.Stderr, 'fixture desktop failure').Count) ("desktop failure under {0} printed the error more than once: {1}" -f $operator, $result.Stderr)
-        $failureDesktopLog = Join-Path $env:LOCALAPPDATA 'aether\install-desktop.log'
-        Assert-AetherTest ($result.Stderr.Contains(('last 20 lines of {0}:' -f $failureDesktopLog)) -and $result.Stderr.Contains('  fixture build output 25') -and -not $result.Stderr.Contains('fixture build output 5' + [Environment]::NewLine)) ("desktop failure did not print the log tail: " + $result.Output)
+        Assert-AetherTest ($result.Stderr.Contains('aether install: error: aether gui build exited with code 23')) ("desktop failure was not reported: " + $result.Output)
+        Assert-AetherTest ($result.Stderr.Contains('fixture desktop failure')) ("desktop failure output did not reach the console: " + $result.Output)
+        Assert-AetherEqual 1 ([regex]::Matches($result.Stderr, 'exited with code 23').Count) ("desktop failure under {0} printed the error more than once: {1}" -f $operator, $result.Stderr)
         Assert-AetherTest (Test-Path -LiteralPath (Join-Path $failureBin 'aether.exe') -PathType Leaf) 'desktop failure lost the installed CLI'
         Assert-AetherEqual 'caller-sentinel' ([IO.File]::ReadAllText($restoreResult)) ("installer under {0} did not restore AETHER_BIN" -f $operator)
     }
