@@ -1,0 +1,1 @@
+{"type":"hello","version":1,"host_key":"AAAAC3NzaC1lZDI1NTE5AAAAIM7MFQfcHd1ylZUcKQiI8JWtuQRNG3PWlubfBl1oO9T8","signature":"AAAAC3NzaC1lZDI1NTE5AAAAQAr+l1EewoxI2CWsih4ooJYBCv6geC+TUnQv7ztyto9FL/JTiIUc6J9ik4XCjDkVueYu9iV2IrOKJfC6n/Y4tAc=","agent_version":"v0.0.0-test","name":"devbox","access_policy":"","capabilities":["future"],"region":"eu"}

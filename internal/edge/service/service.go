@@ -7,6 +7,7 @@
 package edge
 
 import (
+	"context"
 	"crypto/ed25519"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -90,6 +92,8 @@ type Service struct {
 	githubAPI  string
 	pages      *template.Template
 	client     *http.Client
+	// githubErrors counts calls to GitHub that failed.
+	githubErrors atomic.Uint64
 
 	signinLimit *limiter[netip.Prefix]
 	startLimit  *limiter[netip.Prefix]
@@ -172,6 +176,12 @@ func (s *Service) SetLink(l ServerLink) { s.link = l }
 
 // Close closes the store.
 func (s *Service) Close() error { return s.store.Close() }
+
+// Ping checks that the edge database answers a read.
+func (s *Service) Ping(ctx context.Context) error { return s.store.Ping(ctx) }
+
+// GitHubErrors counts calls to GitHub that failed since the edge started.
+func (s *Service) GitHubErrors() uint64 { return s.githubErrors.Load() }
 
 // hostname is origin's host name, lowercase, without a port.
 func hostname(origin string) string {

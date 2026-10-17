@@ -125,6 +125,7 @@ func (s *Service) signinCallback(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	tok, err := s.oauth.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(st.Verifier))
 	if err != nil {
+		s.githubErrors.Add(1)
 		s.fail(w, r, nil, pageErr(http.StatusBadGateway, "GitHub sign-in: exchange code: %v", err))
 		return
 	}
@@ -232,7 +233,12 @@ func (s *Service) githubAccount(ctx context.Context, accessToken string) (edgepr
 	return a, nil
 }
 
-func (s *Service) getJSON(ctx context.Context, rawURL, accessToken string, v any) error {
+func (s *Service) getJSON(ctx context.Context, rawURL, accessToken string, v any) (err error) {
+	defer func() {
+		if err != nil {
+			s.githubErrors.Add(1)
+		}
+	}()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
