@@ -1,13 +1,15 @@
 <#
 .SYNOPSIS
-  Installs the Aether Windows client and, by default, builds its desktop app.
+  Installs the Aether Windows client and, by default, its desktop app.
 
 .DESCRIPTION
-  PowerShell 5.1 and PowerShell 7 are supported.  The installer deliberately
-  uses only PowerShell/.NET facilities: there is no elevation, execution-policy
-  change, Defender setting, or hidden child process.  Downloads are written to
-  a temporary directory, checked against checksums.txt and aether-release.json,
-  then copied beside and atomically swapped into the installed CLI path.
+  PowerShell 5.1 and PowerShell 7 are supported.  There is no elevation,
+  execution-policy change, or Defender setting.  Downloads use the Windows
+  curl.exe when present, otherwise Invoke-WebRequest; they are written to a
+  temporary directory, checked against checksums.txt and aether-release.json,
+  then copied beside and atomically swapped into the installed CLI path.  The
+  desktop app is installed by the new CLI's `gui build`, whose output goes to
+  %LOCALAPPDATA%\aether\install-desktop.log.
 
 .EXAMPLE
   powershell -NoProfile -File .\scripts\install.ps1
@@ -25,8 +27,8 @@
   %LOCALAPPDATA%\Programs\Aether is used.
 
 .PARAMETER Role
-  client (the default) installs the CLI and builds the desktop app.  none
-  installs only the CLI.  AETHER_ROLE supplies the default.
+  client (the default) installs the CLI and the desktop app.  none installs
+  only the CLI.  AETHER_ROLE supplies the default.
 #>
 [CmdletBinding()]
 param(
@@ -35,9 +37,44 @@ param(
     [string] $Role
 )
 
-function Write-AetherMessage {
-    param([string] $Message)
-    Write-Output ("aether install: " + $Message)
+$script:AetherColor = [string]::IsNullOrEmpty($env:NO_COLOR) -and -not [Console]::IsOutputRedirected
+
+function Write-AetherStep {
+    param([Parameter(Mandatory = $true)][string] $Message)
+    $script:AetherStep++
+    Write-Host ("[{0}/{1}] {2}" -f $script:AetherStep, $script:AetherSteps, $Message)
+}
+
+function Write-AetherDetail {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string] $Message, [switch] $NoNewline)
+    Write-Host ('      ' + $Message) -NoNewline:$NoNewline
+}
+
+function Write-AetherStatus {
+    param(
+        [Parameter(Mandatory = $true)][string] $Word,
+        [Parameter(Mandatory = $true)][ConsoleColor] $Color,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string] $Message
+    )
+    if ($script:AetherColor) {
+        Write-Host $Word -ForegroundColor $Color -NoNewline
+    }
+    else {
+        Write-Host $Word -NoNewline
+    }
+    Write-Host (' ' + $Message)
+}
+
+function Format-AetherSize {
+    param([Parameter(Mandatory = $true)][int64] $Bytes)
+    if ($Bytes -ge 1MB) { return ('{0:0.0} MB' -f ($Bytes / 1MB)) }
+    if ($Bytes -ge 1KB) { return ('{0:0.0} KB' -f ($Bytes / 1KB)) }
+    return ('{0} B' -f $Bytes)
+}
+
+function Format-AetherSeconds {
+    param([Parameter(Mandatory = $true)][System.Diagnostics.Stopwatch] $Watch)
+    return ('{0:0.0}s' -f $Watch.Elapsed.TotalSeconds)
 }
 
 function Get-AetherAbsolutePath {
@@ -243,14 +280,51 @@ function Assert-AetherTag {
     }
 }
 
+function Invoke-AetherCurl {
+    param([Parameter(Mandatory = $true)][string] $Uri, [Parameter(Mandatory = $true)][string[]] $Arguments)
+    # Never follow a redirect from https down to http; Assert-AetherHttpsUri
+    # admits http only for loopback.
+    $protocols = if ($Uri.StartsWith('https:', [System.StringComparison]::OrdinalIgnoreCase)) { '=https' } else { '=http,https' }
+    $Arguments = @('--proto-redir', $protocols) + $Arguments + @($Uri)
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(& $script:AetherCurl @Arguments 2>&1)
+        $code = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $oldEap
+    }
+    $stdout = @($output | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
+    $stderr = @($output | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.Exception.Message }) -join ' '
+    return [pscustomobject]@{ ExitCode = $code; Stdout = $stdout.Trim(); Stderr = $stderr.Trim() }
+}
+
 function Resolve-AetherLatestVersion {
     param([Parameter(Mandatory = $true)][string] $Uri)
     try {
-        $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -MaximumRedirection 20 -ErrorAction Stop
-        $effective = if ($PSVersionTable.PSEdition -eq 'Desktop') {
-            $response.BaseResponse.ResponseUri.AbsoluteUri
-        } else {
-            $response.BaseResponse.RequestMessage.RequestUri.AbsoluteUri
+        $effective = $null
+        if ($null -ne $script:AetherCurl) {
+            # HEAD requests only: the final redirect target names the tag.
+            $result = Invoke-AetherCurl $Uri @('-fsSIL', '--ssl-revoke-best-effort', '-o', 'NUL', '-w', '%{url_effective}')
+            if ($result.ExitCode -eq 22) {
+                throw $result.Stderr
+            }
+            if ($result.ExitCode -eq 0) {
+                $effective = $result.Stdout
+            }
+            else {
+                $script:AetherCurl = $null
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($effective)) {
+            $ProgressPreference = 'SilentlyContinue'
+            $response = Invoke-WebRequest -Uri $Uri -Method Head -UseBasicParsing -MaximumRedirection 20 -ErrorAction Stop
+            $effective = if ($PSVersionTable.PSEdition -eq 'Desktop') {
+                $response.BaseResponse.ResponseUri.AbsoluteUri
+            } else {
+                $response.BaseResponse.RequestMessage.RequestUri.AbsoluteUri
+            }
         }
         if ([string]::IsNullOrWhiteSpace($effective)) {
             throw 'the response did not expose its final release URL'
@@ -363,12 +437,11 @@ function Format-AetherRequestError {
     return ("{0} returned HTTP {1}: {2}" -f $Uri, $Status, $message)
 }
 
-function Receive-AetherFile {
-    param(
-        [Parameter(Mandatory = $true)][string] $Uri,
-        [Parameter(Mandatory = $true)][string] $Path,
-        [int] $NotFoundAttempts = 1
-    )
+function Receive-AetherWebFile {
+    param([Parameter(Mandatory = $true)][string] $Uri, [Parameter(Mandatory = $true)][string] $Path)
+    # Windows PowerShell's progress bar slows Invoke-WebRequest by an order
+    # of magnitude; this local preference ends with the function.
+    $ProgressPreference = 'SilentlyContinue'
     for ($attempt = 1; ; $attempt++) {
         try {
             Invoke-WebRequest -Uri $Uri -UseBasicParsing -MaximumRedirection 20 -OutFile $Path -ErrorAction Stop
@@ -376,17 +449,55 @@ function Receive-AetherFile {
         }
         catch {
             $status = Get-AetherHttpStatus $_.Exception
-            if ($status -eq 404) {
-                if ($attempt -ge $NotFoundAttempts) { return $false }
-            }
-            else {
-                $retryable = $null -eq $status -or $status -eq 408 -or $status -ge 500 -or
-                    ($status -eq 429 -and -not (Test-AetherRateLimited $_.Exception $status))
-                if (-not $retryable -or $attempt -ge 3) {
-                    throw (Format-AetherRequestError $Uri $_ $status)
-                }
+            if ($status -eq 404) { return $false }
+            $retryable = $null -eq $status -or $status -eq 408 -or $status -ge 500 -or
+                ($status -eq 429 -and -not (Test-AetherRateLimited $_.Exception $status))
+            if (-not $retryable -or $attempt -ge 3) {
+                throw (Format-AetherRequestError $Uri $_ $status)
             }
         }
+        Start-Sleep -Seconds 2
+    }
+}
+
+function Receive-AetherFileOnce {
+    param([Parameter(Mandatory = $true)][string] $Uri, [Parameter(Mandatory = $true)][string] $Path)
+    if ($null -eq $script:AetherCurl) {
+        return Receive-AetherWebFile $Uri $Path
+    }
+    $result = Invoke-AetherCurl $Uri @('-fsSL', '--retry', '3', '--ssl-revoke-best-effort', '-o', $Path, '-w', '%{http_code}')
+    if ($result.ExitCode -eq 0) { return $true }
+    if ($result.ExitCode -eq 22) {
+        if ($result.Stdout -eq '404') { return $false }
+        throw ("{0} returned HTTP {1}: {2}" -f $Uri, $result.Stdout, $result.Stderr)
+    }
+    # No HTTP answer: a system proxy curl.exe does not read, or a curl.exe
+    # older than --ssl-revoke-best-effort. Invoke-WebRequest handles both.
+    $curlError = 'curl.exe exited {0}: {1}' -f $result.ExitCode, $result.Stderr
+    $script:AetherCurl = $null
+    try {
+        return Receive-AetherWebFile $Uri $Path
+    }
+    catch {
+        throw ("{0} (before that, {1})" -f $_.Exception.Message, $curlError)
+    }
+}
+
+function Receive-AetherFile {
+    param(
+        [Parameter(Mandatory = $true)][string] $Uri,
+        [Parameter(Mandatory = $true)][string] $Path,
+        [int] $NotFoundAttempts = 1
+    )
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
+    for ($attempt = 1; ; $attempt++) {
+        if (Receive-AetherFileOnce $Uri $Path) {
+            $size = (Get-Item -LiteralPath $Path -ErrorAction Stop).Length
+            Write-AetherDetail ('{0,-34} {1,9}  {2}' -f [IO.Path]::GetFileName($Path), (Format-AetherSize $size), (Format-AetherSeconds $watch))
+            return $true
+        }
+        Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        if ($attempt -ge $NotFoundAttempts) { return $false }
         Start-Sleep -Seconds 2
     }
 }
@@ -427,31 +538,79 @@ function Assert-AetherManifest {
     }
 }
 
+function Test-AetherDesktopAssetName {
+    param([AllowEmptyString()][string] $Name)
+    return $Name -cmatch '^aether-desktop-windows-[0-9a-z]+\.zip$'
+}
+
+function Get-AetherDesktopReason {
+    param(
+        [Parameter(Mandatory = $true)][string] $Directory,
+        [Parameter(Mandatory = $true)][string] $Tag,
+        [Parameter(Mandatory = $true)][string] $DesktopAsset,
+        [bool] $Signed
+    )
+    # A release ships the prebuilt desktop app once any architecture's zip
+    # is listed; older releases have none and their CLI builds the app.
+    $listed = @()
+    foreach ($line in [System.IO.File]::ReadAllLines((Join-Path $Directory 'checksums.txt'))) {
+        if ($line -match '^\s*[0-9A-Fa-f]{64}\s+\*?([^\s]+)\s*$' -and (Test-AetherDesktopAssetName $Matches[1])) {
+            $listed += 'checksums.txt'
+            break
+        }
+    }
+    $manifestAssets = @()
+    if ($Signed) {
+        try {
+            $manifest = [System.IO.File]::ReadAllText((Join-Path $Directory 'aether-release.json')) | ConvertFrom-Json -ErrorAction Stop
+            if ($null -ne $manifest.assets) {
+                $manifestAssets = @($manifest.assets.PSObject.Properties | ForEach-Object { $_.Name })
+            }
+        }
+        catch {
+            # Assert-AetherManifest reports an unreadable manifest.
+        }
+    }
+    if (@($manifestAssets | Where-Object { Test-AetherDesktopAssetName $_ }).Count -gt 0) {
+        $listed += 'aether-release.json'
+    }
+    if ($listed.Count -eq 0) { return $null }
+    if ($null -eq (Get-AetherChecksum (Join-Path $Directory 'checksums.txt') $DesktopAsset)) {
+        if ($manifestAssets -ccontains $DesktopAsset) {
+            throw ("aether-release.json of {0} lists {1} but checksums.txt does not; not installing it" -f $Tag, $DesktopAsset)
+        }
+        return 'checksums.txt does not list ' + $DesktopAsset
+    }
+    if ($Signed -and $manifestAssets -cnotcontains $DesktopAsset) {
+        return 'aether-release.json does not list ' + $DesktopAsset
+    }
+    return $null
+}
+
 function Read-AetherRelease {
     param(
         [Parameter(Mandatory = $true)][string] $BaseUrl,
         [Parameter(Mandatory = $true)][string] $Tag,
-        [Parameter(Mandatory = $true)][string] $Asset,
+        [Parameter(Mandatory = $true)][hashtable] $Wanted,
         [Parameter(Mandatory = $true)][string] $Directory,
         [Parameter(Mandatory = $true)][hashtable] $Release
     )
+    $asset = $Wanted.Cli
     $Release.Tag = $Tag
     $Release.Ready = $false
     $Release.Missing = $null
     $Release.Reason = $null
+    $Release.Unchanged = $false
     New-Item -ItemType Directory -Path $Directory -Force -ErrorAction Stop | Out-Null
-    $uri = '{0}/{1}/checksums.txt' -f $BaseUrl, $Tag
-    Write-AetherMessage ("downloading {0}" -f $uri)
-    if (-not (Receive-AetherFile $uri (Join-Path $Directory 'checksums.txt'))) {
+    Write-AetherDetail ('{0}/{1}/' -f $BaseUrl, $Tag)
+    if (-not (Receive-AetherFile ('{0}/{1}/checksums.txt' -f $BaseUrl, $Tag) (Join-Path $Directory 'checksums.txt'))) {
         $Release.Missing = 'checksums.txt'
         $Release.Reason = 'no checksums.txt'
         return
     }
     $present = @{}
     foreach ($name in @('aether-release.json', 'aether-release.json.sig')) {
-        $uri = '{0}/{1}/{2}' -f $BaseUrl, $Tag, $name
-        Write-AetherMessage ("downloading {0}" -f $uri)
-        $present[$name] = Receive-AetherFile $uri (Join-Path $Directory $name)
+        $present[$name] = Receive-AetherFile ('{0}/{1}/{2}' -f $BaseUrl, $Tag, $name) (Join-Path $Directory $name)
     }
     $signed = $present['aether-release.json']
     # Releases that predate signing have neither file; exactly one means the
@@ -466,36 +625,47 @@ function Read-AetherRelease {
         $Release.Reason = 'no aether-release.json'
         return
     }
-    $expected = Get-AetherChecksum (Join-Path $Directory 'checksums.txt') $Asset
+    $expected = Get-AetherChecksum (Join-Path $Directory 'checksums.txt') $asset
     if ($null -eq $expected) {
         if ($signed) {
             $manifest = [System.IO.File]::ReadAllText((Join-Path $Directory 'aether-release.json')) | ConvertFrom-Json -ErrorAction Stop
-            if ($null -ne $manifest.assets -and $null -ne $manifest.assets.PSObject.Properties[$Asset]) {
-                throw ("aether-release.json of {0} lists {1} but checksums.txt does not; not installing it" -f $Tag, $Asset)
+            if ($null -ne $manifest.assets -and $null -ne $manifest.assets.PSObject.Properties[$asset]) {
+                throw ("aether-release.json of {0} lists {1} but checksums.txt does not; not installing it" -f $Tag, $asset)
             }
         }
-        $Release.Reason = 'checksums.txt does not list ' + $Asset
+        $Release.Reason = 'checksums.txt does not list ' + $asset
         return
     }
-    $binaryPath = Join-Path $Directory $Asset
-    $uri = '{0}/{1}/{2}' -f $BaseUrl, $Tag, $Asset
-    Write-AetherMessage ("downloading {0}" -f $uri)
+    if ($null -ne $Wanted.Desktop) {
+        $Release.Reason = Get-AetherDesktopReason $Directory $Tag $Wanted.Desktop $signed
+        if ($null -ne $Release.Reason) { return }
+    }
+    $binaryPath = Join-Path $Directory $asset
+    if ((Test-Path -LiteralPath $Wanted.Installed -PathType Leaf) -and
+        (Get-FileHash -LiteralPath $Wanted.Installed -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() -ceq $expected) {
+        $binaryPath = $Wanted.Installed
+        $Release.Unchanged = $true
+        Write-AetherDetail ('{0}  not downloaded: {1} has the same SHA-256' -f $asset, $Wanted.Installed)
+    }
     # checksums.txt already lists the binary, so a 404 may be CDN propagation.
-    if (-not (Receive-AetherFile $uri $binaryPath 3)) {
-        $Release.Missing = $Asset
-        $Release.Reason = 'no ' + $Asset
+    elseif (-not (Receive-AetherFile ('{0}/{1}/{2}' -f $BaseUrl, $Tag, $asset) $binaryPath 3)) {
+        $Release.Missing = $asset
+        $Release.Reason = 'no ' + $asset
         return
-    }
-    $actual = (Get-FileHash -LiteralPath $binaryPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
-    if ($actual -cne $expected) {
-        throw ("checksum mismatch for {0} of {1}: expected {2}, got {3}" -f $Asset, $Tag, $expected, $actual)
-    }
-    if ($signed) {
-        Assert-AetherManifest (Join-Path $Directory 'aether-release.json') $Tag $Asset $expected $binaryPath
-        Write-AetherMessage ("aether-release.json.sig not verified (PowerShell has no ed25519 verifier); verified {0} SHA-256 and size against checksums.txt and aether-release.json" -f $Asset)
     }
     else {
-        Write-AetherMessage ("{0} has no signed aether-release.json (it predates release signing); verifying SHA-256 against checksums.txt only" -f $Tag)
+        $actual = (Get-FileHash -LiteralPath $binaryPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        if ($actual -cne $expected) {
+            Remove-Item -LiteralPath $binaryPath -Force -ErrorAction SilentlyContinue
+            throw ("checksum mismatch for {0} of {1}: checksums.txt lists {2}, the download has {3}. The download was deleted and nothing was installed. Rerun the installer; if it fails again, something between you and {4} (a proxy or mirror) is changing the file - report it at https://github.com/3xDevOps/Aether/issues" -f $asset, $Tag, $expected, $actual, $BaseUrl)
+        }
+    }
+    if ($signed) {
+        Assert-AetherManifest (Join-Path $Directory 'aether-release.json') $Tag $asset $expected $binaryPath
+        Write-AetherDetail ('verified {0} SHA-256 and size against checksums.txt and aether-release.json; aether-release.json.sig is not checked (PowerShell has no ed25519 verifier)' -f $asset)
+    }
+    else {
+        Write-AetherDetail ('verified {0} SHA-256 against checksums.txt only: {1} predates release signing and has no aether-release.json' -f $asset, $Tag)
     }
     $Release.Path = $binaryPath
     $Release.Expected = $expected
@@ -524,17 +694,17 @@ function Find-AetherCompleteRelease {
         [Parameter(Mandatory = $true)][string] $ApiUrl,
         [Parameter(Mandatory = $true)][string] $Repo,
         [Parameter(Mandatory = $true)][string] $BaseUrl,
-        [Parameter(Mandatory = $true)][string] $Asset,
+        [Parameter(Mandatory = $true)][hashtable] $Wanted,
         [Parameter(Mandatory = $true)][string] $Architecture,
         [Parameter(Mandatory = $true)][string] $Role,
         [Parameter(Mandatory = $true)][string] $TempRoot,
         [Parameter(Mandatory = $true)][hashtable] $Release
     )
-    Write-AetherMessage 'resolving latest release'
     $latest = Resolve-AetherLatestVersion $LatestUrl
     Assert-AetherReleaseTagForUri $latest
     Assert-AetherTag $latest $Role
-    Read-AetherRelease $BaseUrl $latest $Asset (Join-Path $TempRoot $latest) $Release
+    Write-AetherDetail ('latest release: {0}' -f $latest)
+    Read-AetherRelease $BaseUrl $latest $Wanted (Join-Path $TempRoot $latest) $Release
     if ($Release.Ready) { return }
     $latestReason = $Release.Reason
     $latestSemVer = Get-AetherSemVer $latest
@@ -557,13 +727,16 @@ function Find-AetherCompleteRelease {
         }
         $candidates[$j + 1] = $current
     }
+    Write-AetherDetail ('{0} is not fully published yet ({1}); looking for the newest complete release' -f $latest, $latestReason)
     foreach ($candidate in $candidates) {
         $assets = $candidate.Assets
         # A fallback is always older than latest and always signed, so neither
         # a newer tag nor a 404 on every signature can pick it.
         if ($null -eq $latestSemVer -or (Compare-AetherSemVer $candidate.SemVer $latestSemVer) -ge 0 -or
-            $assets -cnotcontains 'checksums.txt' -or $assets -cnotcontains $Asset -or
-            $assets -cnotcontains 'aether-release.json' -or $assets -cnotcontains 'aether-release.json.sig') {
+            $assets -cnotcontains 'checksums.txt' -or $assets -cnotcontains $Wanted.Cli -or
+            $assets -cnotcontains 'aether-release.json' -or $assets -cnotcontains 'aether-release.json.sig' -or
+            ($null -ne $Wanted.Desktop -and $assets -cnotcontains $Wanted.Desktop -and
+                @($assets | Where-Object { Test-AetherDesktopAssetName $_ }).Count -gt 0)) {
             continue
         }
         try {
@@ -572,22 +745,56 @@ function Find-AetherCompleteRelease {
         catch {
             continue
         }
-        Read-AetherRelease $BaseUrl $candidate.Tag $Asset (Join-Path $TempRoot $candidate.Tag) $Release
+        Read-AetherRelease $BaseUrl $candidate.Tag $Wanted (Join-Path $TempRoot $candidate.Tag) $Release
         if ($Release.Ready) {
-            Write-AetherMessage ("{0} is not fully published yet ({1}); installing {2}, the newest complete release" -f $latest, $latestReason, $candidate.Tag)
+            Write-AetherDetail ('installing {0}, the newest complete release' -f $candidate.Tag)
             return
         }
-        Write-AetherMessage ("skipping {0}: not fully published ({1})" -f $candidate.Tag, $Release.Reason)
+        Write-AetherDetail ('skipping {0}: not fully published ({1})' -f $candidate.Tag, $Release.Reason)
     }
-    Write-AetherMessage ("skipping {0}: not fully published ({1})" -f $latest, $latestReason)
     throw ("no complete release for windows/{0} among the newest {1} releases of {2}; pass -Version <tag>" -f $Architecture, $releases.Count, $Repo)
+}
+
+function Get-AetherRunningProcess {
+    param([Parameter(Mandatory = $true)][string[]] $Paths)
+    foreach ($process in Get-Process -ErrorAction SilentlyContinue) {
+        $path = $null
+        try { $path = $process.Path } catch { continue }
+        if ([string]::IsNullOrEmpty($path)) { continue }
+        foreach ($wanted in $Paths) {
+            if ([System.StringComparer]::OrdinalIgnoreCase.Equals($path, $wanted)) {
+                $process
+                break
+            }
+        }
+    }
+}
+
+function Format-AetherRunningMessage {
+    param([Parameter(Mandatory = $true)][string] $Problem, [AllowEmptyCollection()] $Processes)
+    $lines = @($Problem)
+    $Processes = @($Processes)
+    if ($Processes.Count -gt 0) {
+        $lines += 'Aether is running from the install directories:'
+        foreach ($process in $Processes) {
+            $lines += ('  {0} (pid {1}) {2}' -f $process.ProcessName, $process.Id, $process.Path)
+        }
+    }
+    $lines += 'Nothing was changed.'
+    if ($Processes.Count -gt 0) {
+        $lines += 'Close Aether, or stop it with:'
+        $lines += ('  Stop-Process -Id {0}' -f (($Processes | ForEach-Object { $_.Id }) -join ','))
+    }
+    $lines += ('Then rerun: {0}' -f $script:AetherRerun)
+    return ($lines -join [Environment]::NewLine)
 }
 
 function Install-AetherCli {
     param(
         [Parameter(Mandatory = $true)][string] $DownloadedPath,
         [Parameter(Mandatory = $true)][string] $Directory,
-        [Parameter(Mandatory = $true)][string] $ExpectedHash
+        [Parameter(Mandatory = $true)][string] $ExpectedHash,
+        [Parameter(Mandatory = $true)][string[]] $RunningPaths
     )
     $destination = Join-Path $Directory 'aether.exe'
     if (Test-Path -LiteralPath $destination -PathType Container) {
@@ -617,7 +824,8 @@ function Install-AetherCli {
         }
     }
     catch {
-        throw ("cannot atomically install {0}: {1}" -f $destination, $_.Exception.Message)
+        $problem = 'cannot replace {0}: {1}' -f $destination, $_.Exception.Message
+        throw (Format-AetherRunningMessage $problem @(Get-AetherRunningProcess $RunningPaths))
     }
     finally {
         if (Test-Path -LiteralPath $stage) {
@@ -627,48 +835,134 @@ function Install-AetherCli {
     return $destination
 }
 
-function Invoke-AetherGuiBuild {
+function Get-AetherInstalledVersion {
     param([Parameter(Mandatory = $true)][string] $CliPath)
-    $hadAetherBin = Test-Path -LiteralPath 'Env:AETHER_BIN'
-    $oldAetherBin = [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process')
-    $previousExit = Get-Variable LASTEXITCODE -Scope Global -ValueOnly -ErrorAction SilentlyContinue
-    $rerun = "& '{0}' gui build" -f $CliPath.Replace("'", "''")
-    $oldGuiEap = $ErrorActionPreference
+    if (-not (Test-Path -LiteralPath $CliPath -PathType Leaf)) { return $null }
     try {
-        [Environment]::SetEnvironmentVariable('AETHER_BIN', $CliPath, 'Process')
-        $global:LASTEXITCODE = -1
-        # npm/electron-builder normally use stderr for progress and warnings;
-        # stream it without turning an otherwise successful build into an
-        # installer error under Windows PowerShell 5.1.
-        $ErrorActionPreference = 'Continue'
-        & $CliPath gui build
-        $exitCode = [int]$global:LASTEXITCODE
-        if ($exitCode -eq -1) {
-            throw ("aether gui build could not start. The CLI is installed; rerun: {0}" -f $rerun)
+        $start = New-Object System.Diagnostics.ProcessStartInfo
+        $start.FileName = $CliPath
+        $start.Arguments = 'version'
+        $start.UseShellExecute = $false
+        $start.CreateNoWindow = $true
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $process = [System.Diagnostics.Process]::Start($start)
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $null = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(10000)) {
+            $process.Kill()
+            return $null
         }
-        if ($exitCode -ne 0) {
-            throw ("aether gui build exited with code {0}. The CLI is installed; rerun: {1}" -f $exitCode, $rerun)
+        if ($process.ExitCode -eq 0 -and $stdout.Result -match '^aether (\S+)') {
+            return $Matches[1]
         }
     }
     catch {
-        if ($_.Exception.Message -like 'aether gui build exited with code*') {
-            throw
+        # An unreadable or foreign aether.exe is replaced all the same.
+    }
+    return $null
+}
+
+function Invoke-AetherGuiBuild {
+    param([Parameter(Mandatory = $true)][string] $CliPath, [Parameter(Mandatory = $true)][string] $LogPath)
+    $hadAetherBin = Test-Path -LiteralPath 'Env:AETHER_BIN'
+    $oldAetherBin = [Environment]::GetEnvironmentVariable('AETHER_BIN', 'Process')
+    $rerun = "& '{0}' gui build" -f $CliPath.Replace("'", "''")
+    $log = $null
+    try {
+        [Environment]::SetEnvironmentVariable('AETHER_BIN', $CliPath, 'Process')
+        New-Item -ItemType Directory -Path (Split-Path -Parent $LogPath) -Force -ErrorAction Stop | Out-Null
+        $log = [System.IO.File]::Create($LogPath)
+        $start = New-Object System.Diagnostics.ProcessStartInfo
+        $start.FileName = $CliPath
+        $start.Arguments = 'gui build --json'
+        $start.UseShellExecute = $false
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $start.StandardOutputEncoding = New-Object System.Text.UTF8Encoding $false
+        try {
+            $process = [System.Diagnostics.Process]::Start($start)
         }
-        throw ("aether gui build failed: {0}. The CLI is installed; rerun: {1}" -f $_.Exception.Message, $rerun)
+        catch {
+            throw ("aether gui build could not start: {0}. The CLI is installed; rerun: {1}" -f $_.Exception.Message, $rerun)
+        }
+        # The build's own output (npm, electron-builder, notes) is stderr; it
+        # goes to the log so the console shows only the --json phases.
+        $copy = $process.StandardError.BaseStream.CopyToAsync($log)
+        $phase = $null
+        $watch = $null
+        $prebuilt = $false
+        $failure = $null
+        $installed = $null
+        while ($null -ne ($line = $process.StandardOutput.ReadLine())) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            $record = $null
+            try { $record = ConvertFrom-Json -InputObject $line -ErrorAction Stop } catch { }
+            $name = if ($null -ne $record -and $null -ne $record.phase) { [string]$record.phase } else { $line }
+            if ($null -ne $phase) {
+                $outcome = if ($name -eq 'error') { 'failed after ' } else { '' }
+                Write-Host ($outcome + (Format-AetherSeconds $watch))
+                $phase = $null
+            }
+            if ($name -eq 'done') {
+                $installed = [string]$record.path
+            }
+            elseif ($name -eq 'error') {
+                $failure = [string]$record.error
+            }
+            else {
+                if ($name -eq 'downloading') { $prebuilt = $true }
+                Write-AetherDetail ('{0,-26} ' -f $name) -NoNewline
+                $phase = $name
+                $watch = [System.Diagnostics.Stopwatch]::StartNew()
+            }
+        }
+        $process.WaitForExit()
+        $copy.Wait()
+        $log.Dispose()
+        $log = $null
+        if ($null -ne $phase) {
+            Write-Host ('stopped after ' + (Format-AetherSeconds $watch))
+        }
+        if ($process.ExitCode -ne 0 -or $null -ne $failure) {
+            if ([string]::IsNullOrEmpty($failure)) {
+                $failure = 'aether gui build exited with code {0}' -f $process.ExitCode
+            }
+            $tail = @(Get-Content -LiteralPath $LogPath -Tail 20 -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object { '  ' + $_ })
+            $lines = @(('the desktop app was not installed: {0}' -f $failure))
+            if ($tail.Count -gt 0) {
+                $lines += ('last {0} lines of {1}:' -f $tail.Count, $LogPath)
+                $lines += $tail
+            }
+            $lines += ('The CLI is installed; rerun: {0}' -f $rerun)
+            throw ($lines -join [Environment]::NewLine)
+        }
+        $verb = if ($prebuilt) { 'installed' } else { 'built and installed' }
+        if ([string]::IsNullOrEmpty($installed)) {
+            Write-AetherDetail ('{0} the desktop app' -f $verb)
+        }
+        else {
+            Write-AetherDetail ('{0} {1}' -f $verb, $installed)
+        }
     }
     finally {
-        $ErrorActionPreference = $oldGuiEap
+        if ($null -ne $log) { $log.Dispose() }
         if ($hadAetherBin) {
             [Environment]::SetEnvironmentVariable('AETHER_BIN', $oldAetherBin, 'Process')
         }
         else {
             Remove-Item -LiteralPath 'Env:AETHER_BIN' -Force -ErrorAction SilentlyContinue
         }
-        if ($null -ne $previousExit) {
-            $global:LASTEXITCODE = $previousExit
-        } else {
-            Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue
-        }
+    }
+}
+
+function Test-AetherSmartAppControl {
+    try {
+        $policy = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -Name 'VerifiedAndReputablePolicyState' -ErrorAction Stop
+        return $policy.VerifiedAndReputablePolicyState -eq 1
+    }
+    catch {
+        return $false
     }
 }
 
@@ -720,7 +1014,8 @@ function Update-AetherPath {
             $newUserPath = $newUserPath + ';' + $Directory
         }
     }
-    if ($newUserPath -cne $userPath) {
+    $changed = $newUserPath -cne $userPath
+    if ($changed) {
         $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
         try {
             $kind = if ($key.GetValueNames() -contains 'Path') {
@@ -732,6 +1027,11 @@ function Update-AetherPath {
         } finally {
             $key.Dispose()
         }
+        # Explorer rereads the environment only on WM_SETTINGCHANGE. .NET
+        # broadcasts it (SendMessageTimeout, HWND_BROADCAST, "Environment")
+        # after any user-scope change; deleting an unset name changes nothing
+        # else and leaves the Path value kind written above intact.
+        [Environment]::SetEnvironmentVariable('AETHER_INSTALL_UNSET', $null, 'User')
     }
 
     $processPath = [Environment]::GetEnvironmentVariable('Path', 'Process')
@@ -759,6 +1059,7 @@ function Update-AetherPath {
         [Environment]::SetEnvironmentVariable('Path', $processPath, 'Process')
         $env:Path = $processPath
     }
+    return $changed
 }
 
 function Warn-AetherShadowing {
@@ -788,9 +1089,16 @@ function Invoke-AetherInstall {
         [AllowNull()][string] $RequestedRole
     )
     $ErrorActionPreference = 'Stop'
+    $total = [System.Diagnostics.Stopwatch]::StartNew()
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
         throw 'this installer supports Windows only'
     }
+    if ($PSVersionTable.PSEdition -eq 'Desktop') {
+        # .NET Framework may default to TLS 1.0, which GitHub refuses.
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    }
+    $script:AetherCurl = Join-Path ([Environment]::GetEnvironmentVariable('SystemRoot', 'Process')) 'System32\curl.exe'
+    if (-not (Test-Path -LiteralPath $script:AetherCurl -PathType Leaf)) { $script:AetherCurl = $null }
     $architecture = Get-AetherNativeArchitecture
     $repo = [Environment]::GetEnvironmentVariable('AETHER_REPO', 'Process')
     if ([string]::IsNullOrWhiteSpace($repo)) { $repo = '3xDevOps/Aether' }
@@ -852,16 +1160,31 @@ function Invoke-AetherInstall {
         }
     }
 
-    $asset = 'aether-windows-{0}.exe' -f $architecture
-    $destination = Join-Path $binDir 'aether.exe'
+    $wanted = @{
+        Cli = 'aether-windows-{0}.exe' -f $architecture
+        Desktop = $null
+        Installed = Join-Path $binDir 'aether.exe'
+    }
+    if ($role -eq 'client') {
+        $wanted.Desktop = 'aether-desktop-windows-{0}.zip' -f $architecture
+    }
+    $destination = $wanted.Installed
     $desktopPath = Join-Path $desktopDir 'aether-desktop.exe'
+    $script:AetherStep = 0
+    $script:AetherSteps = if ($role -eq 'client') { 3 } else { 2 }
+    $scope = if ($role -eq 'client') { 'CLI and desktop app' } else { 'CLI only' }
+    Write-Host ('aether install: windows/{0}, {1}' -f $architecture, $scope)
+    if (Test-AetherSmartAppControl) {
+        Write-AetherStatus 'warning:' Yellow 'Smart App Control is on and may block Aether, whose binaries are unsigned; see https://github.com/3xDevOps/Aether/blob/main/docs/install.md#windows-defender-and-smartscreen'
+    }
     $tempRoot = $null
     try {
         $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('.aether-install-{0}' -f ([Guid]::NewGuid().ToString('N')))
         New-Item -ItemType Directory -Path $tempRoot -Force -ErrorAction Stop | Out-Null
         $release = @{}
         if ($pinned) {
-            Read-AetherRelease $baseUrl $version $asset (Join-Path $tempRoot $version) $release
+            Write-AetherStep ('downloading {0}' -f $version)
+            Read-AetherRelease $baseUrl $version $wanted (Join-Path $tempRoot $version) $release
             if ($null -ne $release.Missing) {
                 throw ("{0} has no published {1}; it may still be building or may have failed - not installing a different version" -f $version, $release.Missing)
             }
@@ -870,26 +1193,54 @@ function Invoke-AetherInstall {
             }
         }
         else {
-            Find-AetherCompleteRelease $latestUrl $apiUrl $repo $baseUrl $asset $architecture $role $tempRoot $release
+            Write-AetherStep 'downloading the newest complete release'
+            Find-AetherCompleteRelease $latestUrl $apiUrl $repo $baseUrl $wanted $architecture $role $tempRoot $release
         }
-        Write-AetherMessage ("installing {0} for windows/{1}" -f $release.Tag, $architecture)
-        $destination = Install-AetherCli $release.Path $binDir $release.Expected
-        Write-AetherMessage ("installed CLI at {0}" -f $destination)
 
+        $runningPaths = @()
+        if (-not $release.Unchanged) { $runningPaths += $destination }
+        if ($role -eq 'client') { $runningPaths += $desktopPath }
+        if ($runningPaths.Count -gt 0) {
+            $running = @(Get-AetherRunningProcess $runningPaths)
+            if ($running.Count -gt 0) {
+                throw (Format-AetherRunningMessage 'Aether must be closed to replace it.' $running)
+            }
+        }
+        if ($release.Unchanged) {
+            Write-AetherStep ('CLI {0} is already installed' -f $release.Tag)
+        }
+        else {
+            $previous = Get-AetherInstalledVersion $destination
+            if ($null -ne $previous) {
+                Write-AetherStep ('installing the CLI: {0} -> {1}' -f $previous, $release.Tag)
+            }
+            else {
+                Write-AetherStep ('installing the CLI {0}' -f $release.Tag)
+            }
+            $destination = Install-AetherCli $release.Path $binDir $release.Expected @($destination, $desktopPath)
+        }
+        Write-AetherDetail $destination
         try {
-            Update-AetherPath $binDir
+            $pathChanged = Update-AetherPath $binDir
         } catch {
             throw ("CLI installed at {0}, but could not update the user PATH: {1}" -f $destination, $_.Exception.Message)
         }
-        Warn-AetherShadowing $binDir $destination
-        Write-AetherMessage 'PATH is updated for this PowerShell session and future logins. Existing applications keep their previous PATH.'
-        if ($role -eq 'client') {
-            Write-AetherMessage 'building the desktop app; output follows'
-            Invoke-AetherGuiBuild $destination
-            Write-AetherMessage ("installed desktop at {0}; open Aether from the Start Menu" -f $desktopPath)
-        } else {
-            Write-AetherMessage ("CLI installed; next: & '{0}' version" -f $destination.Replace("'", "''"))
+        if ($pathChanged) {
+            Write-AetherDetail ('added {0} to the user PATH; terminals opened from now on find aether' -f $binDir)
         }
+        Warn-AetherShadowing $binDir $destination
+
+        if ($role -eq 'client') {
+            $logPath = Join-Path $localAppData 'aether\install-desktop.log'
+            Write-AetherStep ('desktop app (log: {0})' -f $logPath)
+            Invoke-AetherGuiBuild $destination $logPath
+        }
+        Write-Host 'next:'
+        if ($role -eq 'client') {
+            Write-Host '  open Aether from the Start menu, or link from a new terminal:'
+        }
+        Write-Host '  aether link <server-host>:2222'
+        Write-AetherStatus 'done:' Green ('Aether {0} installed in {1}' -f $release.Tag, (Format-AetherSeconds $total))
     }
     finally {
         if ($null -ne $tempRoot -and (Test-Path -LiteralPath $tempRoot)) {
@@ -898,13 +1249,42 @@ function Invoke-AetherInstall {
     }
 }
 
+function Test-AetherFileEntryPoint {
+    if ([string]::IsNullOrEmpty($PSCommandPath)) { return $false }
+    foreach ($argument in [Environment]::GetCommandLineArgs()) {
+        try {
+            if ([System.StringComparer]::OrdinalIgnoreCase.Equals([IO.Path]::GetFullPath($argument), $PSCommandPath)) {
+                return $true
+            }
+        }
+        catch {
+            # Not a path.
+        }
+    }
+    return $false
+}
+
+$script:AetherRerun = 'the install command you ran'
+if (-not [string]::IsNullOrEmpty($PSCommandPath)) {
+    $parts = @("& '{0}'" -f $PSCommandPath.Replace("'", "''"))
+    foreach ($name in @('Version', 'BinDir', 'Role')) {
+        if ($PSBoundParameters.ContainsKey($name)) {
+            $parts += ("-{0} '{1}'" -f $name, ([string]$PSBoundParameters[$name]).Replace("'", "''"))
+        }
+    }
+    $script:AetherRerun = $parts -join ' '
+}
+
 try {
     Invoke-AetherInstall $Version $BinDir $Role
 }
 catch {
-    [Console]::Error.WriteLine(("aether install: {0}" -f $_.Exception.Message))
-    # Throwing, rather than exit, leaves an interactive host alive when this
-    # script is dot-sourced or invoked as a scriptblock. -File still returns a
-    # nonzero process status for the real failure.
+    [Console]::Error.WriteLine(("aether install: error: {0}" -f $_.Exception.Message))
+    # Under -File, exit keeps PowerShell from printing the same error again as
+    # an error record. Dot-sourced or run as a scriptblock, exit would close
+    # the caller's host, so the error is rethrown for the caller to handle.
+    if (Test-AetherFileEntryPoint) {
+        exit 1
+    }
     throw
 }
