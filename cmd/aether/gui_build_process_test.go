@@ -24,10 +24,9 @@ import (
 // download is part of the cancellation check.
 func TestGUIBuildCLIExitStatuses(t *testing.T) {
 	if os.Getenv("AETHER_GUI_BUILD_HELPER") == "1" {
-		os.Args = []string{
-			os.Args[0],
-			"gui", "build", "--json",
-			"--build-dir", os.Getenv("AETHER_GUI_BUILD_DIR"),
+		os.Args = []string{os.Args[0], "gui", "build", "--build-dir", os.Getenv("AETHER_GUI_BUILD_DIR")}
+		if os.Getenv("AETHER_GUI_BUILD_TEXT") != "1" {
+			os.Args = append(os.Args, "--json")
 		}
 		main()
 		return
@@ -38,11 +37,13 @@ func TestGUIBuildCLIExitStatuses(t *testing.T) {
 		mode   string
 		signal syscall.Signal
 		want   int
+		text   bool
 	}{
 		{name: "SIGINT", mode: "wait", signal: syscall.SIGINT, want: 130},
 		{name: "SIGTERM", mode: "wait", signal: syscall.SIGTERM, want: 143},
 		{name: "child-reported SIGINT", mode: "child-int", want: 130},
 		{name: "ordinary failure", mode: "fail", want: 1},
+		{name: "ordinary failure without --json", mode: "fail", want: 1, text: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -70,6 +71,7 @@ func TestGUIBuildCLIExitStatuses(t *testing.T) {
 				"AETHER_GUI_BUILD_HELPER=1",
 				"AETHER_GUI_BUILD_DIR="+buildDir,
 				"AETHER_FAKE_NPM_MODE="+tc.mode,
+				"AETHER_GUI_BUILD_TEXT="+map[bool]string{true: "1"}[tc.text],
 				"AETHER_FAKE_NPM_MARKER="+marker,
 				"AETHER_FAKE_NPM_PID="+pidFile,
 				"AETHER_BIN="+aether,
@@ -139,6 +141,17 @@ func TestGUIBuildCLIExitStatuses(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 			}
 
+			if tc.mode == "fail" && !strings.Contains(stderr.String(), "controlled npm failure (exit 23)") {
+				t.Fatalf("stderr lost the npm error: %q", stderr.String())
+			}
+			if tc.text {
+				for _, phase := range []string{localops.PhaseUnpacking, localops.PhaseFetchingNode, localops.PhaseDependencies} {
+					if !strings.Contains(stdout.String(), phaseNotes[phase]+"\n") {
+						t.Fatalf("stdout = %q, want the %s step line", stdout.String(), phase)
+					}
+				}
+				return
+			}
 			var errorEvent bool
 			for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
 				var event buildEvent
@@ -157,9 +170,6 @@ func TestGUIBuildCLIExitStatuses(t *testing.T) {
 			}
 			if !errorEvent {
 				t.Fatalf("events = %q, want an error event", stdout.String())
-			}
-			if tc.mode == "fail" && !strings.Contains(stderr.String(), "controlled npm failure (exit 23)") {
-				t.Fatalf("stderr lost the npm error: %q", stderr.String())
 			}
 		})
 	}
