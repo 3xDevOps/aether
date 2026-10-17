@@ -308,7 +308,9 @@ the edge before it reports the refusal, because that is local git config.
 A sync daemon (`aether daemon run`) checks every 30 seconds whether its
 executable on disk changed. Once `aether update` replaces it, the daemon
 exits 1 and its systemd, launchd or Windows task service starts the new
-binary, so a daemon restarts itself within about 30 seconds of any update.
+binary. About 30 seconds is how long the daemon takes to notice and exit;
+the new binary then starts within seconds under systemd and launchd, and
+after one minute under the Windows task.
 A refused daemon logs the refusal and waits; its service is not restarted
 into the same refusal. Every 5 minutes it reconnects, so a server that
 rolled back its update or was downgraded gets its sync back without a

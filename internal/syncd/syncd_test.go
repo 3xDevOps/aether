@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -350,19 +351,32 @@ func TestRunExitsWhenExecutableIsReplaced(t *testing.T) {
 	if err := os.WriteFile(path, []byte("v1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	d, _, _ := newTestDaemon(t, "")
-	d.cfg.Server = "127.0.0.1:1" // nothing listens here, so Run backs off
-	d.executable = func() (string, error) { return path, nil }
-	d.updatePoll = 5 * time.Millisecond
-	done := make(chan error, 1)
-	go func() { done <- d.Run(context.Background()) }()
-
-	time.Sleep(50 * time.Millisecond)
-	select {
-	case err := <-done:
-		t.Fatalf("Run returned %v before the executable changed", err)
-	default:
+	// A server that accepts and never speaks SSH stalls the handshake.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer func() { _ = ln.Close() }()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer func() { _ = c.Close() }()
+		}
+	}()
+	d, _, _ := newTestDaemon(t, "")
+	d.cfg.Server = ln.Addr().String()
+	recorded := make(chan struct{})
+	d.executable = func() (string, error) { close(recorded); return path, nil }
+	d.updatePoll = 5 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx) }()
+
+	<-recorded
 	next := path + ".new"
 	if err := os.WriteFile(next, []byte("v2"), 0o755); err != nil {
 		t.Fatal(err)

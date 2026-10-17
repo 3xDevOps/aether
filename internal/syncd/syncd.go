@@ -256,13 +256,13 @@ func backoffDelay(attempt int, jitter float64) time.Duration {
 // connectOnce runs one full connect-subscribe-follow cycle; it returns
 // whether the subscription was acknowledged.
 func (d *Daemon) connectOnce(ctx context.Context) (subscribed bool, err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	client, stream, err := d.connect(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = client.Close() }()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	go keepalive(ctx, client)
 	return d.runSession(ctx, stream)
 }
@@ -288,6 +288,9 @@ func (d *Daemon) connect(ctx context.Context) (*ssh.Client, io.ReadWriteCloser, 
 	if err != nil {
 		return nil, nil, err
 	}
+	// NewSession and RequestSubsystem wait on the server and ignore ctx;
+	// closing the client on ctx ends makes them return.
+	context.AfterFunc(ctx, func() { _ = client.Close() })
 	sess, err := client.NewSession()
 	if err != nil {
 		_ = client.Close()
@@ -334,7 +337,10 @@ func (d *Daemon) dial(ctx context.Context) (*ssh.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", d.cfg.Server, err)
 	}
+	// ssh.NewClientConn ignores ctx; closing the conn makes it return.
+	stop := context.AfterFunc(ctx, func() { _ = nc.Close() })
 	cc, chans, reqs, err := ssh.NewClientConn(nc, d.cfg.Server, conf)
+	stop()
 	if err != nil {
 		_ = nc.Close()
 		return nil, auth.Explain(fmt.Errorf("ssh handshake with %s: %w", d.cfg.Server, err))
