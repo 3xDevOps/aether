@@ -1113,9 +1113,9 @@ shell sources it carries into your cache directory
 (`~/.cache/aether/desktop-build` on Linux,
 `~/Library/Caches/aether/desktop-build` on macOS,
 `%LOCALAPPDATA%\aether\desktop-build` on Windows; `--build-dir` overrides), runs
-`npm ci` there to install exactly the Electron and electron-builder versions
-`desktop/package-lock.json` pins, runs electron-builder, and installs the
-result. Either way the app lands where your desktop lists applications:
+`npm install` there to install exactly the Electron and electron-builder
+versions `desktop/package-lock.json` pins, runs electron-builder, and installs
+the result. Either way the app lands where your desktop lists applications:
 
 | OS | App | Launcher |
 | --- | --- | --- |
@@ -1139,7 +1139,7 @@ verifies it against that release's `SHASUMS256.txt`, and unpacks it in a
 directory named for that version beside the build directory
 (`~/.cache/aether/node/` on Linux, `~/Library/Caches/aether/node/` on macOS,
 `%LOCALAPPDATA%\aether\node\` on Windows). That copy is on `PATH` for this
-build's `npm ci` and electron-builder only; nothing else on the machine
+build's `npm install` and electron-builder only; nothing else on the machine
 changes and no shell profile is edited. So the first build needs network
 access, and later builds reuse the cached copy; a build that fetches a newer
 pinned version deletes the old one. A failed download or a checksum mismatch
@@ -1152,7 +1152,8 @@ The first build downloads the Electron runtime (about 100 MB) into
 electron-builder's own cache (`~/.cache/electron` and
 `~/.cache/electron-builder` on Linux, `~/Library/Caches/electron` and
 `~/Library/Caches/electron-builder` on macOS, `%LOCALAPPDATA%\electron\Cache`
-and `%LOCALAPPDATA%\electron-builder` on Windows), so rebuilding is quick.
+and `%LOCALAPPDATA%\electron-builder` on Windows), and `node_modules` stays
+in the build directory, so rebuilding is quick.
 
 ### Managing the installed app
 

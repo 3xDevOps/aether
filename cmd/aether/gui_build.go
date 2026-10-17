@@ -128,8 +128,8 @@ func buildAndInstall(buildDir, zipPath string, source bool, notes io.Writer, emi
 	defer stopSignals()
 
 	phase := func(name string) { emit(buildEvent{Phase: name}) }
-	src, removeDownload, err := prebuiltDesktop(ctx, runtime.GOOS, version.Version, zipPath, source, buildDir, notes, phase)
-	defer removeDownload()
+	src, release, err := prebuiltDesktop(ctx, runtime.GOOS, version.Version, zipPath, source, buildDir, notes, phase)
+	defer release()
 	if err != nil {
 		return desktopBuildError(stopSignals(), err)
 	}
@@ -194,29 +194,38 @@ var desktopReleases = "https://github.com/" + selfupdate.Repo
 // zip at zipPath, or on a Windows release build the prebuilt app the
 // release's signed manifest lists. A nil source means build from source,
 // which is what every other platform, a development build, --source and a
-// release without the prebuilt app get. remove deletes the download and is
-// never nil.
-func prebuiltDesktop(ctx context.Context, goos, tag, zipPath string, source bool, buildDir string, notes io.Writer, phase func(string)) (src localops.DesktopSource, remove func(), err error) {
-	remove = func() {}
+// release without the prebuilt app get. A prebuilt app holds the build
+// directory's lock from download to install, as BuildDesktop does for its
+// own build, so two runs cannot swap the app at once; release deletes the
+// download, drops the lock, and is never nil.
+func prebuiltDesktop(ctx context.Context, goos, tag, zipPath string, source bool, buildDir string, notes io.Writer, phase func(string)) (src localops.DesktopSource, release func(), err error) {
+	release = func() {}
 	switch {
-	case zipPath != "":
-		return localops.DesktopFromZip(zipPath), remove, nil
-	case source || goos != "windows":
-		return nil, remove, nil
-	case !selfupdate.ValidTag(tag):
+	case zipPath == "" && (source || goos != "windows"):
+		return nil, release, nil
+	case zipPath == "" && !selfupdate.ValidTag(tag):
 		_, _ = fmt.Fprintf(notes, "this aether is a development build (%s) with no release to download the desktop app from; building it from source\n", tag)
-		return nil, remove, nil
+		return nil, release, nil
+	}
+	unlock, err := localops.LockDesktopBuild(ctx, buildDir)
+	if err != nil {
+		return nil, release, err
+	}
+	if zipPath != "" {
+		return localops.DesktopFromZip(zipPath), unlock, nil
 	}
 	phase(localops.PhaseDownloading)
 	archive, err := localops.DownloadDesktop(ctx, desktopReleases, tag, runtime.GOARCH, buildDir, notes)
 	switch {
 	case errors.Is(err, localops.ErrNoPrebuiltDesktop):
-		_, _ = fmt.Fprintf(notes, "%v; building the desktop app from source\n", err)
-		return nil, remove, nil
+		unlock()
+		_, _ = fmt.Fprintf(notes, "release %s does not publish %s; building the desktop app from source\n", tag, selfupdate.DesktopAssetName(runtime.GOARCH))
+		return nil, release, nil
 	case err != nil:
-		return nil, remove, fmt.Errorf("%w; aether gui build --source builds the app on this machine instead", err)
+		unlock()
+		return nil, release, fmt.Errorf("%w; aether gui build --source builds the app on this machine instead", err)
 	}
-	return localops.DesktopFromZip(archive), func() { _ = os.Remove(archive) }, nil
+	return localops.DesktopFromZip(archive), func() { _ = os.Remove(archive); unlock() }, nil
 }
 
 func desktopBuildError(sig os.Signal, err error) error {

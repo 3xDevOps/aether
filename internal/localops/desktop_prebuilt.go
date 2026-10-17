@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
@@ -22,10 +23,15 @@ const maxDesktopTree = 1 << 30
 // named by electron-builder.yml's win.executableName.
 const desktopExe = "aether-desktop.exe"
 
+// desktopDownloadPattern names a desktop app download in the build
+// directory.
+const desktopDownloadPattern = ".aether-desktop-*.zip"
+
 // DownloadDesktop fetches tag's signed manifest from baseURL and downloads
 // the prebuilt Windows desktop app for goarch into dir, verified against
-// the size and sha256 the manifest lists. The caller removes the returned
-// zip. A release whose manifest lists no such app is ErrNoPrebuiltDesktop.
+// the size and sha256 the manifest lists. The caller holds
+// LockDesktopBuild on dir and removes the returned zip. A release whose
+// manifest lists no such app is ErrNoPrebuiltDesktop.
 func DownloadDesktop(ctx context.Context, baseURL, tag, goarch, dir string, out io.Writer) (string, error) {
 	m, err := selfupdate.FetchManifestFrom(ctx, baseURL, tag)
 	if err != nil {
@@ -36,15 +42,20 @@ func DownloadDesktop(ctx context.Context, baseURL, tag, goarch, dir string, out 
 	if !ok {
 		return "", fmt.Errorf("%w: release %s does not publish %s", ErrNoPrebuiltDesktop, tag, name)
 	}
-	if err = os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("localops: create %s: %w", dir, err)
+	// A build killed mid-download never ran its cleanup. Under the lock no
+	// other download is in flight, so every such zip is a leftover.
+	stale, _ := filepath.Glob(filepath.Join(dir, desktopDownloadPattern))
+	for _, old := range stale {
+		if err = os.Remove(old); err != nil {
+			return "", fmt.Errorf("localops: remove an interrupted download: %w", err)
+		}
 	}
-	f, err := os.CreateTemp(dir, ".aether-desktop-*.zip")
+	f, err := os.CreateTemp(dir, desktopDownloadPattern)
 	if err != nil {
 		return "", fmt.Errorf("localops: stage the desktop app download in %s: %w", dir, err)
 	}
 	_, _ = fmt.Fprintf(out, "downloading %s%s\n", m.AssetURL(name), megabytes(want.Size))
-	err = m.Download(ctx, name, f)
+	_, err = m.Download(ctx, name, f)
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}

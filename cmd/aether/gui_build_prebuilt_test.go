@@ -6,8 +6,10 @@ import (
 	"crypto/ed25519"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/selfupdate"
@@ -88,8 +90,9 @@ func TestPrebuiltDesktopFallsBackWhenTheReleaseHasNoApp(t *testing.T) {
 	if err != nil || src != nil {
 		t.Fatalf("prebuiltDesktop = %v, %v; want a source build", src != nil, err)
 	}
-	if want := "does not publish aether-desktop-windows-"; !strings.Contains(notes.String(), want) || !strings.Contains(notes.String(), "building the desktop app from source") {
-		t.Fatalf("notes = %q, want the reason and the fallback", notes.String())
+	// docs/install.md quotes this line.
+	if want := "release v1.2.3 does not publish aether-desktop-windows-" + runtime.GOARCH + ".zip; building the desktop app from source\n"; notes.String() != want {
+		t.Fatalf("notes = %q, want %q", notes.String(), want)
 	}
 	if len(phases) != 1 || phases[0] != localops.PhaseDownloading {
 		t.Fatalf("phases = %q, want only %q", phases, localops.PhaseDownloading)
@@ -105,4 +108,26 @@ func TestPrebuiltDesktopReportsAnUnreachableRelease(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "404") || !strings.Contains(err.Error(), "aether gui build --source") {
 		t.Fatalf("err = %v, want the 404 and the --source hint", err)
 	}
+}
+
+// A prebuilt install holds the build directory's lock until it is
+// released, so a concurrent `gui build` cannot swap the app under it.
+func TestPrebuiltDesktopHoldsTheBuildLock(t *testing.T) {
+	dir := t.TempDir()
+	_, release, err := prebuiltDesktop(context.Background(), "windows", "dev", "app.zip", false, dir, &bytes.Buffer{}, func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if unlock, lockErr := localops.LockDesktopBuild(ctx, dir); lockErr == nil {
+		unlock()
+		t.Fatal("the build directory was not locked during the install")
+	}
+	release()
+	unlock, err := localops.LockDesktopBuild(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("the lock outlived release: %v", err)
+	}
+	unlock()
 }

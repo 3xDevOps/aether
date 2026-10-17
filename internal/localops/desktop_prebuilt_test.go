@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -65,10 +66,17 @@ func TestDownloadDesktopChecksTheSignedManifest(t *testing.T) {
 	served := app
 	base := releaseServer(t, tag, map[string][]byte{name: app}, func(string) []byte { return served })
 	dir := t.TempDir()
+	interrupted := filepath.Join(dir, ".aether-desktop-killed.zip")
+	if err := os.WriteFile(interrupted, []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	archive, err := DownloadDesktop(context.Background(), base, tag, "arm64", dir, io.Discard)
 	if err != nil {
 		t.Fatalf("DownloadDesktop: %v", err)
+	}
+	if _, statErr := os.Stat(interrupted); !os.IsNotExist(statErr) {
+		t.Fatalf("an interrupted download was left behind: %v", statErr)
 	}
 	if got, readErr := os.ReadFile(archive); readErr != nil || string(got) != string(app) {
 		t.Fatalf("downloaded %d bytes (%v), want the %d the release published", len(got), readErr, len(app))
@@ -151,7 +159,7 @@ func TestDesktopFromZipRefusesWhatIsNotTheApp(t *testing.T) {
 	}
 }
 
-func TestExtractZipStopsAtItsSizeLimit(t *testing.T) {
+func TestExtractZipStopsAtItsLimits(t *testing.T) {
 	root, err := os.OpenRoot(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -163,5 +171,17 @@ func TestExtractZipStopsAtItsSizeLimit(t *testing.T) {
 	}), "big.zip")
 	if err := extractZip(archive, root, 8); err == nil || !strings.Contains(err.Error(), "expands past 8 bytes") {
 		t.Fatalf("err = %v, want the size limit", err)
+	}
+
+	many := make([]archiveFile, maxZipEntries+1)
+	for i := range many {
+		many[i] = archiveFile{name: fmt.Sprintf("f%d", i)}
+	}
+	archive = writeArchive(t, zipped(t, many), "many.zip")
+	if err := extractZip(archive, root, 1<<20); err == nil || !strings.Contains(err.Error(), "entries") {
+		t.Fatalf("err = %v, want the entry limit", err)
+	}
+	if _, err := root.Stat("f0"); !os.IsNotExist(err) {
+		t.Fatalf("entries were extracted from an archive over the entry limit: %v", err)
 	}
 }

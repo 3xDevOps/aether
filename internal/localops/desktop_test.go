@@ -497,22 +497,22 @@ func TestLockDesktopBuildSerializesAndUnlocks(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "desktop-build")
 	ctx, cancel := context.WithCancel(t.Context())
 
-	unlock, err := lockDesktopBuild(ctx, dir)
+	unlock, err := LockDesktopBuild(ctx, dir)
 	if err != nil {
-		t.Fatalf("lockDesktopBuild: %v", err)
+		t.Fatalf("LockDesktopBuild: %v", err)
 	}
 	cancel()
 	// A held lock makes a second builder fail through the canceled
 	// context instead of racing the first one's node_modules.
-	if _, err := lockDesktopBuild(ctx, dir); err == nil {
-		t.Fatal("second lockDesktopBuild succeeded while the first is held")
+	if _, err := LockDesktopBuild(ctx, dir); err == nil {
+		t.Fatal("second LockDesktopBuild succeeded while the first is held")
 	}
 	unlock()
 	if _, err := os.Stat(filepath.Join(dir, ".build-lock")); err != nil {
 		t.Fatalf("lock file after unlock: %v", err)
 	}
-	if _, err := lockDesktopBuild(t.Context(), dir); err != nil {
-		t.Fatalf("lockDesktopBuild after unlock: %v", err)
+	if _, err := LockDesktopBuild(t.Context(), dir); err != nil {
+		t.Fatalf("LockDesktopBuild after unlock: %v", err)
 	}
 	unlock()
 }

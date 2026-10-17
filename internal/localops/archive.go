@@ -19,16 +19,24 @@ type sizeBudget struct {
 	left, limit int64
 }
 
+// maxZipEntries bounds how many entries extractZip creates, so a zip of
+// empty files cannot exhaust the disk's inodes inside the byte budget.
+// Node's Windows release, the larger of the two, has about 2,000.
+const maxZipEntries = 20000
+
 // extractZip unpacks the zip at archive into root, writing at most limit
-// bytes. Only files and directories are accepted: the zips extracted here,
-// Node's Windows release and the prebuilt Windows desktop app, carry
-// nothing else.
+// bytes and maxZipEntries entries. Only files and directories are
+// accepted: the zips extracted here, Node's Windows release and the
+// prebuilt Windows desktop app, carry nothing else.
 func extractZip(archive string, root *os.Root, limit int64) error {
 	zr, err := zip.OpenReader(archive)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = zr.Close() }()
+	if len(zr.File) > maxZipEntries {
+		return fmt.Errorf("the archive has %d entries, more than %d", len(zr.File), maxZipEntries)
+	}
 	budget := &sizeBudget{left: limit, limit: limit}
 	for _, entry := range zr.File {
 		name, err := archiveEntry(entry.Name)

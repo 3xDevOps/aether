@@ -83,17 +83,17 @@ func DesktopAssetName(goarch string) string {
 	return "aether-desktop-windows-" + goarch + ".zip"
 }
 
-// Download streams the asset name into f and checks it against the size
-// and sha256 m lists for it.
-func (m Manifest) Download(ctx context.Context, name string, f *os.File) error {
+// Download streams the asset name into f, checks it against the size and
+// sha256 m lists for it, and returns that entry.
+func (m Manifest) Download(ctx context.Context, name string, f *os.File) (Asset, error) {
 	want, ok := m.Assets[name]
 	if !ok {
-		return fmt.Errorf("release %s does not publish %s", m.Version, name)
+		return Asset{}, fmt.Errorf("release %s does not publish %s", m.Version, name)
 	}
 	if err := download(ctx, m.AssetURL(name), f, want); err != nil {
-		return fmt.Errorf("download %s: %w", name, err)
+		return Asset{}, fmt.Errorf("download %s: %w", name, err)
 	}
-	return nil
+	return want, nil
 }
 
 // FetchManifest downloads tag's manifest and signature and verifies them.

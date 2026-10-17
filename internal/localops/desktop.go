@@ -62,7 +62,7 @@ func DesktopBuildDir() (string, error) {
 	return filepath.Join(cache, "aether", "desktop-build"), nil
 }
 
-// lockDesktopBuild serializes builds over one build directory. The lock is
+// LockDesktopBuild serializes builds over one build directory. The lock is
 // an exclusive advisory lock on a lock file in the directory, held by the
 // kernel for the build's lifetime: a holder that crashes releases it
 // without any staleness guessing, and no two builders can hold it at
@@ -70,7 +70,7 @@ func DesktopBuildDir() (string, error) {
 // range and closes the handle; the empty lock file remains as the stable
 // inode that waiting builders share. The returned unlock is safe to call
 // more than once.
-func lockDesktopBuild(ctx context.Context, buildDir string) (func(), error) {
+func LockDesktopBuild(ctx context.Context, buildDir string) (func(), error) {
 	if err := os.MkdirAll(buildDir, 0o755); err != nil {
 		return nil, fmt.Errorf("localops: create desktop build dir: %w", err)
 	}
@@ -130,7 +130,7 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion, cliPath 
 	// sharing the cache - several runner accounts on one machine, or two
 	// terminals - would otherwise race npm install in the same
 	// node_modules and corrupt it.
-	unlock, err := lockDesktopBuild(ctx, buildDir)
+	unlock, err := LockDesktopBuild(ctx, buildDir)
 	if err != nil {
 		return "", err
 	}
@@ -180,12 +180,12 @@ func BuildDesktop(ctx context.Context, src fs.FS, buildDir, cliVersion, cliPath 
 	}
 	phase(PhaseDependencies)
 	npm := tools.npm
-	npmArgs := make([]string, 0, 4)
+	npmArgs := make([]string, 0, 5)
 	if runtime.GOOS == "windows" {
 		npm = tools.node
 		npmArgs = append(npmArgs, tools.npm)
 	}
-	npmArgs = append(npmArgs, "ci", "--no-audit", "--no-fund")
+	npmArgs = append(npmArgs, "install", "--no-audit", "--no-fund", "--prefer-offline")
 	if err := run(npm, npmArgs...); err != nil {
 		return "", err
 	}
