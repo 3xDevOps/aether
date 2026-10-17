@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
+	"strings"
 	"syscall"
 )
 
@@ -27,6 +29,11 @@ type Host struct {
 	// UnderSystemd reports whether this process was started by a systemd
 	// unit, which is the only case where Restart is worth trying.
 	UnderSystemd func() bool
+	// RestartsOnExit75 reports whether a systemd unit will start this
+	// process again after it exits with status 75. When it does, a restart
+	// for an update exits instead of re-executing, so systemd sees it. Nil
+	// means no: the process re-executes in place.
+	RestartsOnExit75 func() bool
 }
 
 // complete reports whether every hook is set. A partially filled Host is
@@ -47,7 +54,40 @@ func HostProcess() Host {
 		Exec:         syscall.Exec,
 		Restart:      systemctlRestart,
 		UnderSystemd: func() bool { return os.Getenv("INVOCATION_ID") != "" },
+
+		RestartsOnExit75: unitRestartsOnExit75,
 	}
+}
+
+// unitRestartsOnExit75 asks systemd how the unit restarts. Any failure to
+// find out reads as no, which keeps the in-place re-exec.
+func unitRestartsOnExit75() bool {
+	if os.Getenv("INVOCATION_ID") == "" {
+		return false
+	}
+	out, err := exec.Command("systemctl", "show", "aether-server",
+		"--property=Restart,RestartForceExitStatus,RestartPreventExitStatus,SuccessExitStatus").Output()
+	return err == nil && restartsOnExit75(string(out))
+}
+
+// restartsOnExit75 reads `systemctl show` output. Exit status 75 is
+// EX_TEMPFAIL. Restart=on-failure counts it as a failure unless
+// SuccessExitStatus= lists it.
+func restartsOnExit75(show string) bool {
+	props := map[string][]string{}
+	for line := range strings.SplitSeq(show, "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok {
+			props[k] = strings.Fields(v)
+		}
+	}
+	lists75 := func(k string) bool {
+		return slices.Contains(props[k], "75") || slices.Contains(props[k], "TEMPFAIL")
+	}
+	if lists75("RestartPreventExitStatus") {
+		return false
+	}
+	return slices.Equal(props["Restart"], []string{"always"}) || lists75("RestartForceExitStatus") ||
+		slices.Equal(props["Restart"], []string{"on-failure"}) && !lists75("SuccessExitStatus")
 }
 
 // systemctlRestart is the fallback restart when re-exec fails under a

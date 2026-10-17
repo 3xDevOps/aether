@@ -284,13 +284,12 @@ func (s *Service) release() {
 	s.applying, s.phase, s.target = false, "", ""
 }
 
-// restart re-executes the new binary in place. syscall.Exec keeps the PID,
-// which is what the shipped `Restart=on-failure` unit needs - a clean exit
-// would not be restarted - and is also what makes a foreground
-// `aether-server serve` come back. Runs survive because the scheduler
+// restart re-executes the new binary in place. syscall.Exec keeps the PID
+// and is what makes a foreground `aether-server serve` come back. Runs survive because the scheduler
 // reattaches to live containers on boot; attached terminals and live syncs
-// drop and reconnect. With Config.Drain the exec happens in
-// cmd/aether-server once the server has closed.
+// drop and reconnect. With Config.Drain the restart happens in
+// cmd/aether-server once the server has closed, and under systemd it exits
+// 75 instead of exec'ing.
 func (s *Service) restart(ctx context.Context, pending store.PendingServerUpdate, rec *swapRecord) {
 	s.setPhase(protocol.ServerUpdatePhaseRestarting)
 	s.publish(ctx, pending.RequestedBy, events.ServerUpdateRestarting, pending.Version, "")

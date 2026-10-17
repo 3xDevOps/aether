@@ -37,6 +37,8 @@ StateDirectory=aether
 StateDirectoryMode=0700
 
 Restart=on-failure
+RestartForceExitStatus=75
+SuccessExitStatus=75
 RestartSec=5s
 # Shutdown stops the live containers before the process exits; give it room.
 KillSignal=SIGTERM
