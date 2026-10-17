@@ -50,12 +50,10 @@ web/tsconfig.tsbuildinfo
 web/test-results/
 web/playwright-report/
 
-# Desktop shell. Dependencies and installers stay out of git; the Electron
-# build is reproducible from desktop/package.json. No npm lockfile is
-# committed either - the repo toolchain is Bun, which cannot write one.
+# Desktop shell. Dependencies and installers stay out of git; the build
+# installs exactly what desktop/package-lock.json pins.
 desktop/node_modules/
 desktop/dist/
-desktop/package-lock.json
 
 # Android shell. Gradle's outputs and caches stay out of git; the wrapper, its
 # distribution checksum and the generated launcher icons are committed.

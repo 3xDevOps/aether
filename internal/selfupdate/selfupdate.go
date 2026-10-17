@@ -24,8 +24,10 @@ import (
 const Repo = "3xDevOps/Aether"
 
 // httpClient downloads manifests and assets. GitHub release asset URLs
-// redirect to a CDN, so redirects are followed, but never off https.
-var httpClient = &http.Client{Timeout: 5 * time.Minute, CheckRedirect: HTTPSOnly}
+// redirect to a CDN, so redirects are followed, but never off https. The
+// timeout covers a whole transfer, the largest being the desktop app zip of
+// around 100 MB.
+var httpClient = &http.Client{Timeout: 15 * time.Minute, CheckRedirect: HTTPSOnly}
 
 // LatestTag resolves the newest release tag from a GitHub /releases/latest
 // URL, which redirects - possibly through more than one hop - to

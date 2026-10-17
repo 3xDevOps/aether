@@ -2081,8 +2081,9 @@ the server snapshot from loading.
   app directory on its own.
 - `update.status` reports that rebuild: `phase` is `idle` before any
   rebuild has run in this process, then the `gui build --json` phases
-  (`unpacking`, `fetching node`, `installing dependencies`, `packaging`,
-  `installing`), then `done` or `error`. `lines_tail` carries the last 20
+  (`downloading` for the prebuilt Windows app; `unpacking`, `fetching
+  node`, `installing dependencies`, `packaging` for a build from source;
+  then `installing`), then `done` or `error`. `lines_tail` carries the last 20
   lines of the build's own output, and `error` the build's own message. A
   gateway that comes up after a rebuild answers `idle`: the build belonged
   to the process that exited.

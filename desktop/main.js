@@ -4,8 +4,8 @@
 // per-process gateway token. This process only spawns it, reads the one
 // JSON line it prints ({"url": ..., "addr": ...}), and points a sandboxed
 // BrowserWindow at the tokened loopback URL. The aether binary is NOT
-// bundled; it is discovered via AETHER_BIN, PATH, or the install script's
-// default locations.
+// bundled; it is discovered via AETHER_BIN, the CLI that installed this app,
+// PATH, or the install script's default locations.
 
 'use strict'
 
@@ -15,6 +15,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const readline = require('node:readline')
 
+const { boundCli } = require('./cli-binding')
 const notify = require('./notify')
 
 // The full CLI build identity is separate from package.json's npm-valid
@@ -22,7 +23,7 @@ const notify = require('./notify')
 // Older shells only carried the package version.
 const manifest = require('./package.json')
 const shellVersion = manifest.aetherCliVersion || manifest.version
-const builtBy = manifest.aetherCliPath
+const installedBy = boundCli(process.resourcesPath, manifest)
 
 // The exit status `aether gui --json` uses to say it replaced this app on
 // disk: relaunch the shell, do not respawn the sidecar (localgw.ExitRelaunch).
@@ -95,14 +96,14 @@ function main() {
         return '' // an explicit path that does not work is an error, not a fallback
       }
     }
-    // A freshly built shell must launch the executable that supplied its
-    // sources and identity, not an older copy earlier on the desktop PATH.
+    // A freshly installed shell must launch the executable that installed
+    // it, not an older copy earlier on the desktop PATH.
     // Keep AETHER_BIN as an intentional override; an unavailable pinned
     // binary is an error rather than permission to silently run another.
-    if (builtBy) {
+    if (installedBy) {
       try {
-        fs.accessSync(builtBy, fs.constants.X_OK)
-        if (fs.statSync(builtBy).isFile()) return builtBy
+        fs.accessSync(installedBy, fs.constants.X_OK)
+        if (fs.statSync(installedBy).isFile()) return installedBy
       } catch {
         // The pinned binary no longer exists or cannot be run.
       }
@@ -133,8 +134,8 @@ function main() {
     if (!bin) {
       fatal(
         'aether CLI not found',
-        builtBy && !process.env.AETHER_BIN
-          ? `The CLI that built this app is no longer executable at ${builtBy}.\n\n` +
+        installedBy && !process.env.AETHER_BIN
+          ? `The CLI that installed this app is no longer executable at ${installedBy}.\n\n` +
             'Restore it or set AETHER_BIN to the intended binary.'
           : 'The desktop app needs the aether CLI installed.\n\n' +
             'Install it (see docs/install.md), or set AETHER_BIN to the binary.',

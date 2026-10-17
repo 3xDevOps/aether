@@ -16,6 +16,7 @@ import (
 
 	"github.com/3xDevOps/Aether/desktop"
 	"github.com/3xDevOps/Aether/internal/localops"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -30,9 +31,10 @@ type buildEvent struct {
 	Error string `json:"error,omitempty"`
 }
 
-// guiBuild packages the embedded Electron shell for this machine and
-// installs it where the desktop lists applications, so the dashboard opens
-// as a native window without a source checkout.
+// guiBuild installs the desktop app where the desktop lists applications,
+// so the dashboard opens as a native window without a source checkout. On
+// Windows it downloads the release's prebuilt app; elsewhere it packages
+// the embedded Electron shell on this machine.
 func guiBuild(args []string) error {
 	return guiBuildTo(args, os.Stdout)
 }
@@ -41,13 +43,21 @@ func guiBuild(args []string) error {
 // read the phase lines without taking over the process's stdout.
 func guiBuildTo(args []string, events io.Writer) error {
 	fs := flag.NewFlagSet("gui build", flag.ExitOnError)
-	buildDir := fs.String("build-dir", "", "where to unpack the shell sources and run npm (default: the user cache directory)")
+	buildDir := fs.String("build-dir", "", "where to download the app, or unpack the shell sources and run npm (default: the user cache directory)")
 	jsonOut := fs.Bool("json", false, "print one JSON line per build phase on stdout; the build's own output goes to stderr")
+	source := fs.Bool("source", false, "build the app on this machine instead of downloading the release's prebuilt Windows app")
+	zipPath := fs.String("zip", "", "install the Windows desktop app from this local zip instead of downloading it; no signed manifest vouches for a local zip, so only its layout is checked")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	if *zipPath != "" && *source {
+		return errors.New("--zip and --source are mutually exclusive")
+	}
+	if *zipPath != "" && runtime.GOOS != "windows" {
+		return fmt.Errorf("--zip installs the prebuilt Windows desktop app; on %s, run aether gui build without it", runtime.GOOS)
 	}
 	// With --json stdout carries the phase lines and nothing else, so the
 	// build's own output and every note move to stderr.
@@ -70,7 +80,7 @@ func guiBuildTo(args []string, events io.Writer) error {
 			_ = f.Sync()
 		}
 	}
-	err := buildAndInstall(*buildDir, notes, emit)
+	err := buildAndInstall(*buildDir, *zipPath, *source, notes, emit)
 	if err != nil {
 		emit(buildEvent{Phase: localops.PhaseError, Error: err.Error()})
 	}
@@ -79,7 +89,7 @@ func guiBuildTo(args []string, events io.Writer) error {
 
 // buildAndInstall is guiBuild's work, split out so every failure reaches
 // the one place that reports it as an error event.
-func buildAndInstall(buildDir string, notes io.Writer, emit func(buildEvent)) error {
+func buildAndInstall(buildDir, zipPath string, source bool, notes io.Writer, emit func(buildEvent)) error {
 	if buildDir == "" {
 		dir, err := localops.DesktopBuildDir()
 		if err != nil {
@@ -92,7 +102,7 @@ func buildAndInstall(buildDir string, notes io.Writer, emit func(buildEvent)) er
 		return err
 	}
 	// Require an installed CLI before building: a transient go-run binary
-	// may disappear from the path stamped into the desktop shell.
+	// may disappear from the path recorded in the desktop app.
 	installDirs := "/usr/local/bin or ~/.local/bin"
 	if runtime.GOOS == "windows" {
 		installDirs = `%LOCALAPPDATA%\Programs\Aether`
@@ -104,17 +114,32 @@ func buildAndInstall(buildDir string, notes io.Writer, emit func(buildEvent)) er
 		}
 		return fmt.Errorf("aether CLI is required to build the desktop app but was not found (PATH or %s); install the CLI first (see docs/install.md)", installDirs)
 	}
+	cliPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate the CLI for the desktop app: %w", err)
+	}
+	if cliPath, err = filepath.EvalSymlinks(cliPath); err != nil {
+		return fmt.Errorf("resolve the CLI for the desktop app: %w", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stopSignals := cancelOnSignal(cancel)
 	defer stopSignals()
 
-	_, _ = fmt.Fprintf(notes, "building the desktop app in %s\n", buildDir)
 	phase := func(name string) { emit(buildEvent{Phase: name}) }
-	built, err := localops.BuildDesktop(ctx, desktop.Source, buildDir, version.Version, notes, os.Stderr, phase)
+	src, removeDownload, err := prebuiltDesktop(ctx, runtime.GOOS, version.Version, zipPath, source, buildDir, notes, phase)
+	defer removeDownload()
 	if err != nil {
 		return desktopBuildError(stopSignals(), err)
+	}
+	if src == nil {
+		_, _ = fmt.Fprintf(notes, "building the desktop app in %s\n", buildDir)
+		built, err := localops.BuildDesktop(ctx, desktop.Source, buildDir, version.Version, cliPath, notes, os.Stderr, phase)
+		if err != nil {
+			return desktopBuildError(stopSignals(), err)
+		}
+		src = localops.DesktopFrom(built)
 	}
 	if ctx.Err() != nil {
 		return desktopBuildError(stopSignals(), ctx.Err())
@@ -127,7 +152,7 @@ func buildAndInstall(buildDir string, notes io.Writer, emit func(buildEvent)) er
 		return desktopBuildError(stopSignals(), ctx.Err())
 	}
 	phase(localops.PhaseInstalling)
-	app, err := localops.InstallDesktop(runtime.GOOS, home, built, icon)
+	app, err := localops.InstallDesktop(runtime.GOOS, home, src, cliPath, icon)
 	if err != nil {
 		return desktopBuildError(stopSignals(), err)
 	}
@@ -159,6 +184,39 @@ func buildAndInstall(buildDir string, notes io.Writer, emit func(buildEvent)) er
 		_, _ = fmt.Fprintf(notes, "launcher %s\nopen it from your application menu as Aether\n", app.Launcher)
 	}
 	return nil
+}
+
+// desktopReleases is the repository `gui build` downloads the prebuilt app
+// from; tests serve their own.
+var desktopReleases = "https://github.com/" + selfupdate.Repo
+
+// prebuiltDesktop picks the app `gui build` installs as it is: the local
+// zip at zipPath, or on a Windows release build the prebuilt app the
+// release's signed manifest lists. A nil source means build from source,
+// which is what every other platform, a development build, --source and a
+// release without the prebuilt app get. remove deletes the download and is
+// never nil.
+func prebuiltDesktop(ctx context.Context, goos, tag, zipPath string, source bool, buildDir string, notes io.Writer, phase func(string)) (src localops.DesktopSource, remove func(), err error) {
+	remove = func() {}
+	switch {
+	case zipPath != "":
+		return localops.DesktopFromZip(zipPath), remove, nil
+	case source || goos != "windows":
+		return nil, remove, nil
+	case !selfupdate.ValidTag(tag):
+		_, _ = fmt.Fprintf(notes, "this aether is a development build (%s) with no release to download the desktop app from; building it from source\n", tag)
+		return nil, remove, nil
+	}
+	phase(localops.PhaseDownloading)
+	archive, err := localops.DownloadDesktop(ctx, desktopReleases, tag, runtime.GOARCH, buildDir, notes)
+	switch {
+	case errors.Is(err, localops.ErrNoPrebuiltDesktop):
+		_, _ = fmt.Fprintf(notes, "%v; building the desktop app from source\n", err)
+		return nil, remove, nil
+	case err != nil:
+		return nil, remove, fmt.Errorf("%w; aether gui build --source builds the app on this machine instead", err)
+	}
+	return localops.DesktopFromZip(archive), func() { _ = os.Remove(archive) }, nil
 }
 
 func desktopBuildError(sig os.Signal, err error) error {

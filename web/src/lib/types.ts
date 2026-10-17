@@ -1805,6 +1805,7 @@ export interface UpdateApplyResult {
 export interface UpdateBuildStatus {
   phase:
     | 'idle'
+    | 'downloading'
     | 'unpacking'
     | 'fetching node'
     | 'installing dependencies'

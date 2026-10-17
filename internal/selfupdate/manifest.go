@@ -76,6 +76,26 @@ func (m Manifest) AssetURL(name string) string {
 	return base + "/releases/download/" + m.Version + "/" + name
 }
 
+// DesktopAssetName names the prebuilt Windows desktop app for goarch:
+// electron-builder's win-unpacked directory, zipped with its contents at the
+// root.
+func DesktopAssetName(goarch string) string {
+	return "aether-desktop-windows-" + goarch + ".zip"
+}
+
+// Download streams the asset name into f and checks it against the size
+// and sha256 m lists for it.
+func (m Manifest) Download(ctx context.Context, name string, f *os.File) error {
+	want, ok := m.Assets[name]
+	if !ok {
+		return fmt.Errorf("release %s does not publish %s", m.Version, name)
+	}
+	if err := download(ctx, m.AssetURL(name), f, want); err != nil {
+		return fmt.Errorf("download %s: %w", name, err)
+	}
+	return nil
+}
+
 // FetchManifest downloads tag's manifest and signature and verifies them.
 func FetchManifest(ctx context.Context, tag string) (Manifest, error) {
 	return FetchManifestFrom(ctx, defaultBaseURL, tag)
