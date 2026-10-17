@@ -78,16 +78,17 @@ verify_public() {
 	echo "verified $public"
 }
 
-if view=$(gh release view "$tag" --json isDraft,assets --jq '.isDraft, .assets[].name' 2>"$tmp/err"); then
-	state=$(printf '%s\n' "$view" | head -n 1)
-	printf '%s\n' "$view" | tail -n +2 >"$tmp/names"
-elif [ "$(cat "$tmp/err")" = "release not found" ]; then
-	state=none
-	: >"$tmp/names"
-else
-	cat "$tmp/err" >&2
-	fail "cannot read the release for $tag"
-fi
+# One listing, not `gh release view`: gh looks drafts and published releases
+# up separately and can report a failed lookup as a missing release.
+gh api --paginate "repos/$repo/releases?per_page=100" \
+	--jq '.[] | "\(.tag_name) \(.draft) \(.prerelease) \([.assets[].name] | join(","))"' >"$tmp/releases"
+awk -v tag="$tag" '$1 == tag' "$tmp/releases" >"$tmp/release"
+case $(wc -l <"$tmp/release" | tr -d ' ') in
+0) state=none ;;
+1) read -r _ state _ names <"$tmp/release" ;;
+*) fail "$tag has more than one release; delete the extra drafts" ;;
+esac
+printf '%s\n' "${names:-}" | tr ',' '\n' | sed '/^$/d' >"$tmp/names"
 
 if [ "$state" = false ]; then
 	if grep -qx 'aether-release\.json' "$tmp/names"; then
@@ -125,16 +126,16 @@ ours=$(sh "$script_dir/android-version-code.sh" "$tag")
 latest=true
 previous=
 previous_code=0
-published=$(gh release list --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq '.[].tagName')
-for other in $published; do
-	code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null) || continue
+while read -r other draft prerelease _; do
+	[ "$draft $prerelease" = "false false" ] || continue
+	code=$(sh "$script_dir/android-version-code.sh" "$other" 2>/dev/null </dev/null) || continue
 	if [ "$code" -gt "$ours" ]; then
 		latest=false
 	elif [ "$code" -lt "$ours" ] && [ "$code" -gt "$previous_code" ]; then
 		previous=$other
 		previous_code=$code
 	fi
-done
+done <"$tmp/releases"
 
 if [ "$state" = none ]; then
 	gh release create "$tag" --draft --verify-tag --title "$tag" --generate-notes \

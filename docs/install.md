@@ -2099,8 +2099,11 @@ The release is published as a normal release, not a GitHub prerelease,
 because `scripts/install.sh` and `internal/selfupdate` resolve GitHub's
 `/releases/latest` endpoint, which skips prereleases.
 
-Only an admin who pushes the tag passes `publisher-policy`; other pushers and
-failed permission lookups skip the downstream jobs. `release-policy` checks
+`publisher-policy` passes only when both the tag's pusher and whoever
+started the run attempt, including a re-run, are repository admins; anyone
+else and failed permission lookups skip the downstream jobs. The workflow
+runs from the tagged commit, so also add a tag ruleset that lets only admins
+create, update or delete `v*` tags. `release-policy` checks
 out trusted `refs/heads/main`, validates the tag syntax, resolves the tag's
 full commit SHA and requires it to match the pushed commit. It runs the
 checker from that trusted checkout, not from the tag's code.
@@ -2187,10 +2190,11 @@ verified do `standard-latest` and `edge-latest` move their respective
 `latest` tags to the verified images; each checks that `latest` carries the
 expected architecture digests.
 
-Releases share one workflow-wide concurrency group, so one release runs at a
-time. GitHub keeps one pending run per group and cancels an older pending
-one, so after pushing several tags at once, rerun any release run that shows
-as cancelled.
+Push release tags one at a time: GitHub starts no workflow for any tag when
+more than three are pushed at once. Releases share one workflow-wide
+concurrency group, so one release runs at a time; GitHub keeps one pending
+run per group and cancels an older pending one, so rerun any release run that
+shows as cancelled.
 
 The workflow also publishes the [edge](edge.md#in-a-container) image
 `ghcr.io/3xdevops/aether-edge` for linux/amd64 and linux/arm64, built from

@@ -22,27 +22,31 @@ cp "$dist"/* "$published"/
 printf '{"schema":1,"version":"v0.2.0","published":"earlier","assets":{"aether-linux-amd64":{"sha256":"%s","size":7}}}\n' "$sum" \
 	>"$published/aether-release.json"
 
-# GH_STATE is none, draft, published or error; GH_ASSETS are the release's
-# assets, GH_PUBLISHED the published release tags and GH_DRAFT_BODY a
-# replacement for the draft's binary.
+# GH_STATE is the state of the v0.2.0 release - none, draft, published,
+# duplicate or error - GH_ASSETS its assets, GH_PUBLISHED the other published
+# release tags and GH_DRAFT_BODY a replacement for the draft's binary.
 cat >"$bin/gh" <<'EOF'
 #!/bin/sh
 set -eu
 case "$1 $2" in
+"api --paginate") printf 'api %s\n' "$3" >>"$GH_LOG" ;;
 "release download") printf 'release download %s\n' "$3" >>"$GH_LOG" ;;
 *) printf '%s\n' "$*" >>"$GH_LOG" ;;
 esac
 case "$1 $2" in
-"release view")
+"api --paginate")
+	assets=$(printf '%s' "${GH_ASSETS:-}" | tr ' ' ',')
 	case $GH_STATE in
-	none) echo "release not found" >&2 && exit 1 ;;
 	error) echo "HTTP 502: Bad Gateway (https://api.github.com/repos/3xDevOps/Aether/releases)" >&2 && exit 1 ;;
-	draft) echo true ;;
-	published) echo false ;;
+	draft) echo "v0.2.0 true false $assets" ;;
+	published) echo "v0.2.0 false false $assets" ;;
+	duplicate) printf '%s\n' "v0.2.0 true false" "v0.2.0 true false" ;;
 	esac
-	printf '%s\n' ${GH_ASSETS:-}
+	echo "v9.0.0 false true aether-linux-amd64"
+	for other in ${GH_PUBLISHED:-}; do
+		echo "$other false false"
+	done
 	;;
-"release list") printf '%s\n' ${GH_PUBLISHED:-} ;;
 "release download")
 	mkdir -p "$5"
 	cp "$DIST"/* "$5"/
@@ -76,8 +80,7 @@ export PATH="$bin:$PATH"
 
 tag="v0.2.0"
 url="https://github.com/3xDevOps/Aether/releases/download/$tag"
-view="release view $tag --json isDraft,assets --jq .isDraft, .assets[].name"
-list="release list --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq .[].tagName"
+view="api repos/3xDevOps/Aether/releases?per_page=100"
 upload_all="release upload $tag --clobber $dist/aether-linux-amd64 $dist/aether-release.json $dist/aether-release.json.sig $dist/checksums.txt"
 expected="$tmp/expected.log"
 
@@ -100,7 +103,7 @@ publish_lines() {
 export GH_STATE=none GH_PUBLISHED="v0.1.0 v0.2.0-alpha.3"
 run
 {
-	printf '%s\n' "$view" "$list" \
+	printf '%s\n' "$view" \
 		"release create $tag --draft --verify-tag --title $tag --generate-notes --notes-start-tag=v0.2.0-alpha.3" \
 		"$upload_all"
 	publish_lines true
@@ -111,7 +114,7 @@ diff -u "$expected" "$log"
 export GH_STATE=draft GH_ASSETS="aether-linux-amd64"
 run
 {
-	printf '%s\n' "$view" "$list" "$upload_all"
+	printf '%s\n' "$view" "$upload_all"
 	publish_lines true
 } >"$expected"
 diff -u "$expected" "$log"
@@ -120,7 +123,7 @@ diff -u "$expected" "$log"
 export GH_ASSETS="aether-linux-amd64 aether-linux-amd64.old"
 run
 {
-	printf '%s\n' "$view" "$list" "$upload_all" \
+	printf '%s\n' "$view" "$upload_all" \
 		"release delete-asset $tag aether-linux-amd64.old --yes"
 	publish_lines true
 } >"$expected"
@@ -141,7 +144,7 @@ fi
 export GH_STATE=none GH_PUBLISHED="v0.3.0 v0.1.0 nightly"
 run
 {
-	printf '%s\n' "$view" "$list" \
+	printf '%s\n' "$view" \
 		"release create $tag --draft --verify-tag --title $tag --generate-notes --notes-start-tag=v0.1.0" \
 		"$upload_all"
 	publish_lines false
@@ -204,6 +207,14 @@ fi
 grep -q "HTTP 502: Bad Gateway" "$tmp/err"
 printf '%s\n' "$view" >"$expected"
 diff -u "$expected" "$log"
+
+# Two releases for one tag are not guessed between.
+export GH_STATE=duplicate
+if run; then
+	echo "publish-release chose between two releases for one tag" >&2
+	exit 1
+fi
+grep -q "$tag has more than one release" "$tmp/err"
 
 # No signature, no release.
 rm "$dist/aether-release.json.sig"

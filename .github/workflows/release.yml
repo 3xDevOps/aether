@@ -31,16 +31,20 @@ jobs:
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
+        # A re-run keeps the pusher as GITHUB_ACTOR, so whoever started this
+        # attempt must be an admin too.
         run: |
-          permission=$(gh api \
-            "repos/${GITHUB_REPOSITORY}/collaborators/${GITHUB_ACTOR}/permission" \
-            --jq '.permission' 2>/dev/null || true)
-          # A failed lookup deliberately disables the release.
-          if [ "$permission" = admin ]; then
-            echo "allowed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "allowed=false" >> "$GITHUB_OUTPUT"
-          fi
+          allowed=true
+          for user in "$GITHUB_ACTOR" "$GITHUB_TRIGGERING_ACTOR"; do
+            permission=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/collaborators/${user}/permission" \
+              --jq '.permission' 2>/dev/null || true)
+            # A failed lookup deliberately disables the release.
+            if [ "$permission" != admin ]; then
+              allowed=false
+            fi
+          done
+          echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
 
   # This is the only validation reuse boundary. The tag is resolved once and
   # every producer checks out that commit, never an unsigned CI artifact.
