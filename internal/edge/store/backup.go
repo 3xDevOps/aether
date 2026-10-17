@@ -47,7 +47,7 @@ func backupBeforeMigrating(path string, from, to int) error {
 		return fail(err)
 	}
 	for _, f := range stale {
-		if err := os.Remove(f); err != nil {
+		if err = os.Remove(f); err != nil {
 			return fail(err)
 		}
 	}
@@ -160,7 +160,7 @@ func Restore(src, dst string) (Schema, error) {
 			src, s.Version, s.CompatFloor, SchemaVersion())
 	}
 	tmp := dst + ".restore.tmp"
-	if err := os.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err = os.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return Schema{}, fmt.Errorf("edgestore: %w", err)
 	}
 	if s, err = snapshot(src, tmp); err != nil {

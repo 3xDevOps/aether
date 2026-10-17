@@ -128,10 +128,10 @@ func openStore(dataDir string) (*edgestore.Store, func(), error) {
 	}
 	unlock, err := lockData(dataDir)
 	if errors.Is(err, errLocked) {
-		s, err := edgestore.OpenCurrent(path)
-		if err != nil {
+		s, openErr := edgestore.OpenCurrent(path)
+		if openErr != nil {
 			return nil, nil, fmt.Errorf("%w; an edge is running on %s, so run this command with the same image or binary as the running edge, as in docker exec <container> aether-edge servers list",
-				err, dataDir)
+				openErr, dataDir)
 		}
 		return s, func() {}, nil
 	}

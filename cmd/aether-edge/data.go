@@ -80,7 +80,7 @@ func schemaCmd(args []string, getenv func(string) string, out io.Writer) error {
 	return err
 }
 
-func backupCmd(args []string, getenv func(string) string, out, errOut io.Writer) (err error) {
+func backupCmd(args []string, getenv func(string) string, out, errOut io.Writer) error {
 	flags := flag.NewFlagSet("aether-edge backup", flag.ContinueOnError)
 	dataDir := flags.String("data", dataDirDefault(getenv), "data directory of the edge")
 	withKey := flags.Bool("with-key", false, "copy the signing key edge_key to <file>.key too")
@@ -106,15 +106,15 @@ func backupCmd(args []string, getenv func(string) string, out, errOut io.Writer)
 		}
 	}
 	dst, dir := target, filepath.Dir(target)
-	if info, err := os.Stat(target); (err == nil && info.IsDir()) || strings.HasSuffix(target, string(os.PathSeparator)) {
-		s, err := edgestore.ReadSchema(db)
-		if err != nil {
-			return err
+	if info, statErr := os.Stat(target); (statErr == nil && info.IsDir()) || strings.HasSuffix(target, string(os.PathSeparator)) {
+		cur, readErr := edgestore.ReadSchema(db)
+		if readErr != nil {
+			return readErr
 		}
-		dst = filepath.Join(target, fmt.Sprintf("edge-v%d-%s.db", s.Version, time.Now().UTC().Format(edgestore.StampLayout)))
+		dst = filepath.Join(target, fmt.Sprintf("edge-v%d-%s.db", cur.Version, time.Now().UTC().Format(edgestore.StampLayout)))
 		dir = target
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	s, err := edgestore.Backup(db, dst)
@@ -187,13 +187,14 @@ func restoreCmd(args []string, getenv func(string) string, out io.Writer) error 
 	}
 	db := filepath.Join(*dataDir, "edge.db")
 	saved := filepath.Join(*dataDir, edgestore.BackupDir, "edge-before-restore-"+time.Now().UTC().Format(edgestore.StampLayout)+".db")
-	switch _, err := os.Stat(db); {
+	_, err = os.Stat(db)
+	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		saved = ""
 	case err != nil:
 		return err
 	default:
-		if err := saveDatabase(db, saved); err != nil {
+		if err = saveDatabase(db, saved); err != nil {
 			return err
 		}
 	}
@@ -213,13 +214,13 @@ func restoreCmd(args []string, getenv func(string) string, out io.Writer) error 
 	}
 	dst := filepath.Join(*dataDir, keyFile)
 	tmp := dst + ".tmp"
-	if err := os.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err = os.Remove(tmp); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	if err := writeNew(tmp, key); err != nil {
+	if err = writeNew(tmp, key); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, dst); err != nil {
+	if err = os.Rename(tmp, dst); err != nil {
 		return err
 	}
 	_, err = fmt.Fprintf(out, "restored the edge key %s from %s to %s\n", fp, *keyPath, dst)

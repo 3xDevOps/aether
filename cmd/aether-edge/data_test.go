@@ -121,15 +121,15 @@ func TestDataLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer unlock()
-	if _, err := lockData(dir); !errors.Is(err, errLocked) {
+	if _, err = lockData(dir); !errors.Is(err, errLocked) {
 		t.Fatalf("second lock: %v, want errLocked", err)
 	}
 	err = restoreCmd([]string{"--data", dir, filepath.Join(dir, "edge.db")}, envOf(nil), &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "an edge is running on "+dir+": stop it first") {
 		t.Fatalf("restore beside a running edge: %v", err)
 	}
-	if out, err := run(t, dir, "accounts", "list"); err != nil || !strings.Contains(out, "octo") {
-		t.Fatalf("accounts list beside a running edge:\n%s%v", out, err)
+	if out, listErr := run(t, dir, "accounts", "list"); listErr != nil || !strings.Contains(out, "octo") {
+		t.Fatalf("accounts list beside a running edge:\n%s%v", out, listErr)
 	}
 
 	db, err := sql.Open("sqlite", filepath.Join(dir, "edge.db"))
