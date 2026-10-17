@@ -536,6 +536,14 @@ sha256sum aether-linux-amd64
 `openssl` prints `Signature Verified Successfully`, and the two digests must
 match. On macOS use `shasum -a 256` in place of `sha256sum`.
 
+The manifest also signs the release's images. `images` maps
+`aether-browser`, `aether-edge` and `aether-standard` to the index digest
+each published, and `edge` carries what a host updating a container edge
+checks: `image`, `image_digest`, `store_schema` and `store_compat_floor` of
+the edge database, the `protocol` range, `min_upgrade_from` and
+`manual_steps`. `aether-edge release-check` reads them
+([Verifying an image](edge.md#verifying-an-image)).
+
 ### Settings an update does not rewrite
 
 `aether update` replaces binaries only. The systemd unit and the Sysbox
@@ -2414,6 +2422,16 @@ Browser publishes `ghcr.io/3xdevops/aether-browser:<tag>`; standard publishes
 pulls of the tested architecture digests. Edge's private-package exception is
 described below.
 
+Each manifest job then attests the index digest and both platform digests
+with `actions/attest`: SLSA build provenance, signed through Sigstore and
+pushed to the registry next to the image. It verifies each attestation
+with `gh attestation verify oci://<image>@<digest> --repo <owner>/<repo>
+--signer-workflow <owner>/<repo>/.github/workflows/release.yml --source-ref
+refs/tags/<tag> --deny-self-hosted-runners` before the release job may
+start. The per-architecture builds set `provenance: false` and `sbom:
+false`, so the pushed images carry no attestation manifests of their own
+and each index lists exactly linux/amd64 and linux/arm64.
+
 Manifest digest lookups use `docker buildx imagetools inspect <image>
 --format '{{.Manifest.Digest}}'`. Do not pipe the inspection output through
 an early-exiting reader such as `awk '... { print; exit }'`: closing Docker's
@@ -2442,17 +2460,31 @@ release manifest ([Verified releases](#verified-releases)) with
 
 ```sh
 go run ./internal/selfupdate/cmd/release-manifest \
-  -version <tag> -commit <full-sha> -store-schema <n> -out dist dist/<asset>...
+  -version <tag> -commit <full-sha> -store-schema <n> -images images.json \
+  -out dist dist/<asset>...
 ```
 
-An earlier step, run without the secret, prints `<n>` with
-`go run ./internal/store/cmd/schema-version`, so the signing process does
-not link the store. The generator reads the ed25519 seed from the
-`AETHER_RELEASE_SIGNING_KEY` repository secret, records `<n>` as
-`store_schema`, and checks its own
-output against the keys the tag's code trusts, so a seed that does not match
-fails here. `release-policy` fails the whole release before any build when
-that secret is not set. [`scripts/publish-release.sh`](../scripts/publish-release.sh)
+Earlier steps, run without the secret, print `<n>` with
+`go run ./internal/store/cmd/schema-version` and write `images.json` with
+
+```sh
+go run ./internal/edge/cmd/release-edge -tag <tag> -image aether-browser=<digest> \
+  -image aether-edge=<digest> -image aether-standard=<digest> > images.json
+```
+
+from the three manifest jobs' digests, so the signing process links
+neither store. `release-edge` takes the edge store schema, compat floor and
+protocol from the tag's code and the rest from
+[`packaging/edge/upgrade.json`](#edge-upgrade-record), and refuses a stale
+record. The generator refuses an `images.json` that lacks an image or whose
+edge digest is not the `aether-edge` digest, and after signing checks that
+the manifest carries exactly what it was given. The generator reads the ed25519 seed from the
+`AETHER_RELEASE_SIGNING_KEY` secret ([Protecting the signing
+key](#protecting-the-signing-key)), records `<n>` as `store_schema`, and
+checks its own output against the keys the tag's code trusts, so a seed
+that does not match fails here. The `signing-key` job, in the `release`
+environment, fails the whole release before any build or push when that
+secret is not set. [`scripts/publish-release.sh`](../scripts/publish-release.sh)
 then runs steps 2 to 5 above. It compares each asset's SHA-256 and size with
 the manifest, requires `checksums.txt` to match, and compares
 `checksums.txt`, `aether-release.json` and `aether-release.json.sig`
@@ -2460,8 +2492,10 @@ byte for byte with what it signed. `standard-latest` and `edge-latest` run
 after the release job and move their `latest` tags to the verified images
 only if `gh api repos/<owner>/<repo>/releases/latest` names this tag when
 they run; otherwise they leave `latest` alone and say why in the job summary.
-Each checks that `latest` carries the expected architecture digests, then
-that GitHub's Latest still names this tag. If a parallel release took Latest
+Each copies the published index's exact bytes to `latest` with `crane tag
+<image>@<digest> latest` (crane is downloaded at a pinned version and
+SHA-256), so `latest` has the signed and attested digest, checks that
+`latest` resolves to it, then that GitHub's Latest still names this tag. If a parallel release took Latest
 in between, the job fails with `GitHub's Latest moved to <tag>`; re-run the
 latest jobs of that release.
 
@@ -2484,11 +2518,15 @@ binaries. Nothing reaches a tag before it is tested:
    tag, the full commit SHA and `sha-<short-sha>`. It checks that every tag
    names one index digest and that the index carries the two tested images,
    resolves the tags at the registry, pulls each architecture by its own
-   digest, and lists the digests in the job summary. The release job waits
-   for it, so a failed edge image uploads no assets.
+   digest, lists the digests in the job summary, and attests and verifies
+   the three digests. The release job waits for it, so a failed edge image
+   uploads no assets, and signs its digest into the manifest's `edge`
+   section.
 3. `edge-latest` moves `latest` to that digest only after the release job
    has published the release. A release that fails earlier leaves `latest`
    on the previous release.
+4. `stable` moves only when an admin promotes the release
+   ([Promoting an edge release to stable](#promoting-an-edge-release-to-stable)).
 
 A new GHCR package starts private. For **edge only**, the workflow does not fail
 on that, by design: the image is published and pullable with credentials, and
@@ -2631,3 +2669,135 @@ it builds all ten Go binaries, then Android APK and AAB with the existing
 signing environment (unsigned when none is configured). It still needs
 Docker for Android. Without an explicit `VERSION`, local builds continue to
 use `git describe`; full history also keeps short commit stamping consistent.
+
+### Edge upgrade record
+
+[`packaging/edge/upgrade.json`](../packaging/edge/upgrade.json) holds what
+only a person can decide about upgrading an edge to the next release:
+
+| Field | Meaning |
+| --- | --- |
+| `min_upgrade_from` | Oldest release that may upgrade straight to this one. Raise it when a migration or protocol change needs an intermediate release |
+| `manual_steps` | Every operator action an upgrade needs, kept across releases: `id`, `since` (the first release that needs it), `summary`, `doc_url` (https) and `blocking`. A blocking step holds an automatic update from any release below `since` until the operator does it |
+| `store_schema`, `store_compat_floor`, `protocol` | The edge store schema, its compat floor and the protocol range the code has now |
+| `files` | SHA-256 of `images/edge/Dockerfile`, `packaging/edge/aether-edge.env.example` and `packaging/systemd/aether-edge.service`, the files that shape what an edge host runs |
+
+The last two rows are not decisions but a tripwire. `go test
+./internal/edge/cmd/release-edge` fails, naming each value, when they
+disagree with the code or the files, and so does the release:
+
+```
+release-edge: packaging/edge/upgrade.json is out of date: store_schema is 2, packaging/edge/upgrade.json records 1; ...
+```
+
+`go test ./cmd/aether-edge` also fails when the edge reads an
+`AETHER_EDGE_*` variable that `packaging/edge/aether-edge.env.example`
+does not list, so a new variable changes that file's hash. A pull request
+that adds a migration, a protocol version, an environment variable, or a
+change to the image or the unit therefore edits this file. Decide then whether
+the upgrade needs a manual step or a higher `min_upgrade_from`, and record
+the new values. Never remove a step: an edge several releases behind still
+needs it.
+
+### Promoting an edge release to stable
+
+`ghcr.io/3xdevops/aether-edge:stable` is the production channel
+([In a container](edge.md#in-a-container)). Nothing moves it but
+[`.github/workflows/promote-edge.yml`](../.github/workflows/promote-edge.yml),
+run by hand. It is manual because a production edge is one instance with
+no fleet to report a bad release, and its database migrations do not run
+backwards: a person decides that a release has proved itself.
+
+1. Wait 24 hours after the release is published, and look for problems
+   reported against it.
+2. Read the release's digest: `docker buildx imagetools inspect
+   ghcr.io/3xdevops/aether-edge:<tag>` prints it as `Digest:`.
+3. Run the workflow:
+
+   ```sh
+   gh workflow run promote-edge.yml -f tag=<tag> -f digest=sha256:<digest>
+   ```
+
+   Add `-f soak_override_reason='<why>'` to promote before 24 hours; the
+   reason goes into the job summary.
+
+The workflow runs only when both the user who dispatched it and the user
+who started the attempt are repository admins. It checks out `main`,
+never builds, and refuses unless:
+
+- the release is published, not a draft;
+- `aether-edge release-check`, built from `main` with its embedded release
+  keys, verifies the release's `aether-release.json` and finds the input
+  digest as `edge.image_digest`;
+- the release workflow run that built the tag's commit passed its
+  `edge-qualify` job, the edge upgrade qualification, or, in a run that
+  has no such job, succeeded as a whole;
+- the release was published at least 24 hours ago, or
+  `soak_override_reason` is set;
+- `ghcr.io/3xdevops/aether-edge:<tag>` resolves to the input digest, the
+  index and both platform images carry attestations from this
+  repository's release workflow for `refs/tags/<tag>`, and all three read
+  anonymously;
+- the release is not older than the one `stable` carries, by
+  `scripts/android-version-code.sh` order of the image's
+  `org.opencontainers.image.version` label. The same release is a no-op;
+- the release `stable` carries is at or above the new release's
+  `min_upgrade_from`, so hosts following `stable` never land on a release
+  they cannot upgrade from. Promote an intermediate release first.
+
+Blocking manual steps do not stop a promotion: each host's updater holds
+on them until its operator acts.
+
+It then copies the index's exact bytes to `stable` with `crane tag`,
+checks that `stable` resolves to the digest anonymously and that its
+attestation verifies, and writes the tag, digest, previous `stable`,
+actor, qualification evidence and override reason to the job summary.
+Last, also when `stable` already named the digest, it attests the
+promotion: predicate type
+`https://github.com/3xDevOps/aether/edge-promotion/v1`, predicate
+`{"channel":"stable","tag":"<tag>","digest":"<digest>"}`, pushed to the
+registry, and verifies it as a host does
+([Verifying an image](edge.md#verifying-an-image)).
+
+The admin check and the refusal to run from any ref but `main` cover the
+workflow as it is on `main`. `workflow_dispatch` runs the file from the
+dispatched ref, so anyone who can push a branch can run an edited copy
+with a `packages: write` token and move `stable`. Such a run cannot
+produce the promotion attestation hosts require: its certificate names
+the branch, not `refs/heads/main`. The `edge-promotion` environment
+([Protecting the signing key](#protecting-the-signing-key)) keeps it from
+even starting.
+Promotions share one concurrency group, `promote-edge`; GitHub keeps one
+pending run per group, so dispatch the next only after the previous ends.
+
+To roll back a production edge, pin the previous digest on the host and
+restore the database backup taken before the upgrade if its schema moved.
+Do not move `stable` back: the workflow refuses an older release, and
+other hosts following `stable` would downgrade into a schema they cannot
+open.
+
+### Protecting the signing key
+
+The `signing-key` and release jobs run in the GitHub environment `release` and
+`promote-edge.yml`'s promotion job in `edge-promotion`; a job that names an
+environment creates it on its first run. A repository secret is readable by
+any workflow on any branch, so a branch that edits a workflow could read
+`AETHER_RELEASE_SIGNING_KEY` and sign a manifest every updater trusts. An
+admin closes that in **Settings > Environments**:
+
+1. In `release`, add the secret `AETHER_RELEASE_SIGNING_KEY` with the seed,
+   then delete the repository secret of that name. Only jobs that name
+   `release` can then read it. Until the repository secret is deleted, it
+   still works: GitHub resolves an environment secret first and falls back
+   to the repository secret of the same name.
+2. In `release`, set **Deployment branches and tags** to **Selected
+   branches and tags** with the tag rule `v*`. A workflow edited on a
+   branch can name the environment, but GitHub refuses to run that job
+   outside a `v*` tag, so the key is read only by a release, whose tags
+   only admins may push.
+3. In `edge-promotion`, allow only the branch `main`. A promotion from an
+   edited copy on another branch then never starts.
+4. Optionally, add required reviewers to either environment: each
+   promotion then waits for one approval, and each release for two, at
+   `signing-key` before any build and at the release job before
+   publishing.

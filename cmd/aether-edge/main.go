@@ -24,6 +24,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/edge/relay"
 	edge "github.com/3xDevOps/Aether/internal/edge/service"
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 )
 
 // shutdownTimeout bounds a clean stop: drain to every server, then the
@@ -41,6 +42,9 @@ var commands = map[string]func(args []string) error{
 	"schema":      func(args []string) error { return schemaCmd(args, os.Getenv, os.Stdout) },
 	"backup":      func(args []string) error { return backupCmd(args, os.Getenv, os.Stdout, os.Stderr) },
 	"restore":     func(args []string) error { return restoreCmd(args, os.Getenv, os.Stdout) },
+	"release-check": func(args []string) error {
+		return releaseCheck(args, selfupdate.FetchManifest, os.Stdout)
+	},
 }
 
 func main() {
@@ -58,7 +62,13 @@ func main() {
 }
 
 func exit(err error) {
+	var hold *holdError
 	switch {
+	case errors.As(err, &hold):
+		for _, reason := range hold.reasons {
+			_, _ = fmt.Fprintln(os.Stderr, "aether-edge: hold:", reason)
+		}
+		os.Exit(3)
 	case err == nil, errors.Is(err, flag.ErrHelp):
 	case errors.Is(err, errUsage):
 		os.Exit(2)
@@ -72,14 +82,15 @@ func usage() {
 	_, _ = fmt.Fprint(os.Stderr, `usage: aether-edge <command>
 
 commands:
-  serve        run the edge (aether-edge serve -h lists its options)
-  healthcheck  exit 0 when the edge on this machine answers (--ready: is ready), 1 with the reason
-  servers      list, remove, block and unblock servers
-  accounts     list, block, unblock and delete accounts
-  schema       print the database's schema version and compat floor [--json]
-  backup       copy the database while the edge runs: backup [--with-key] <file|dir|->
-  restore      replace the database of a stopped edge: restore [--key <file>] <file>
-  version      print the version [--json]
+  serve          run the edge (aether-edge serve -h lists its options)
+  healthcheck    exit 0 when the edge on this machine answers (--ready: is ready), 1 with the reason
+  servers        list, remove, block and unblock servers
+  accounts       list, block, unblock and delete accounts
+  schema         print the database's schema version and compat floor [--json]
+  backup         copy the database while the edge runs: backup [--with-key] <file|dir|->
+  restore        replace the database of a stopped edge: restore [--key <file>] <file>
+  release-check  verify a release's signed edge image; exit 3 when its upgrade must hold
+  version        print the version [--json]
 `)
 }
 

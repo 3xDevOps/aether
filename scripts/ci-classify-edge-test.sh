@@ -39,6 +39,10 @@ expect true .github/workflows/ci.yml
 expect true .github/workflows/edge-image.yml
 expect true .github/workflows/release.yml
 expect true packaging/edge/aether-edge.env.example
+expect true packaging/edge/upgrade.json
+expect true packaging/systemd/aether-edge.service
+expect true internal/selfupdate/manifest.go
+expect true .github/workflows/promote-edge.yml
 expect true images/other/Dockerfile
 expect true scripts/new-tool.sh
 expect true tools/gen/main.go

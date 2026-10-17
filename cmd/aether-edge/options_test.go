@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -212,5 +213,34 @@ func TestSecretFileErrorsSayWhatToDo(t *testing.T) {
 	_, err = parseOptions(append(base, "--github-client-secret-file", unreadable), envOf(nil))
 	if err == nil || !strings.Contains(err.Error(), "permission denied; make it readable by uid") {
 		t.Errorf("unreadable secret file: %v", err)
+	}
+}
+
+// TestEnvExampleListsEveryVariable keeps packaging/edge/aether-edge.env.example,
+// which packaging/edge/upgrade.json records, complete: a new variable then
+// changes that file and so trips the upgrade record.
+func TestEnvExampleListsEveryVariable(t *testing.T) {
+	example, err := os.ReadFile("../../packaging/edge/aether-edge.env.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	variable := regexp.MustCompile(`"(AETHER_EDGE_[A-Z0-9_]+)"`)
+	for _, name := range sources {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range variable.FindAllSubmatch(src, -1) {
+			if !regexp.MustCompile(`(?m)^#?` + string(m[1]) + `=`).Match(example) {
+				t.Errorf("%s reads %s, which packaging/edge/aether-edge.env.example does not list", name, m[1])
+			}
+		}
 	}
 }
