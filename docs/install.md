@@ -283,14 +283,14 @@ migrated it), starts it, and exits non-zero with the `systemctl start` error.
 With no `aether-server` systemd unit on the host, or with a unit that runs as
 a non-root `User=` (the unprivileged setup in the unit's comment), it refuses
 before changing anything: use `sudo aether update` and restart the server
-yourself. It also refuses when the unit's `ExecStart` runs another
-`aether-server` binary or `--data-dir` than the command reads from its own
-flags and `--config`, and names the one to use. It reads the database's
-schema without opening or migrating it. When the host already has the latest
-release on disk but the unit still runs an earlier file, as after
-`aether update`, it just restarts the unit onto the installed binary (a
-stopped unit is started) and waits up to two minutes for the server to
-accept connections on its `--addr`. A server that exits or restarts again
+yourself. It takes the data directory and listen address from the unit's
+`ExecStart` and the `--config` file it names, and refuses when that
+`ExecStart` runs another `aether-server` binary, naming the one to use. It
+reads the database's schema without opening or migrating it. When the host
+already has the latest release on disk but the unit still runs an earlier
+file, as after `aether update`, it just restarts the unit onto the installed
+binary (a stopped unit is started) and waits up to two minutes for the server
+to accept connections on its `--addr`. A server that exits or restarts again
 in that time fails the command with the unit's state.
 
 **On a client**, `aether update` replaces the running CLI with the latest release only if it

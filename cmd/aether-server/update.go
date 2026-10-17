@@ -34,15 +34,13 @@ func updateCmd(args []string) error {
 	if os.Geteuid() != 0 {
 		return errors.New("run it as root: sudo aether-server update")
 	}
-	var tag *string
-	o, _, rest, err := loadOptions("update", args, func(fs *flag.FlagSet) {
-		tag = fs.String("version", "", "release tag to install (default: the latest release)")
-	})
-	if err != nil {
+	fs := flag.NewFlagSet("update", flag.ExitOnError)
+	tag := fs.String("version", "", "release tag to install (default: the latest release)")
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if len(rest) != 0 {
-		return errors.New("usage: aether-server update [--version <tag>] [--config <file>]")
+	if fs.NArg() != 0 {
+		return errors.New("usage: aether-server update [--version <tag>]")
 	}
 	// Before Lock, so a refused host gets nothing created under its data
 	// directory with root's ownership.
@@ -62,16 +60,14 @@ func updateCmd(args []string) error {
 		return fmt.Errorf("resolve this binary: %w", err)
 	}
 	// The trial runs in the process the unit starts, which reads the swap
-	// record under its own data directory and runs its own binary.
-	unitExe, unitOpts, err := unitServe()
+	// record under its own data directory and runs its own binary, so the
+	// update takes both from the unit.
+	unitExe, o, err := unitServe()
 	if err != nil {
 		return err
 	}
 	if resolved, rerr := filepath.EvalSymlinks(unitExe); rerr != nil || resolved != self {
 		return fmt.Errorf("the %s unit runs %s, not this binary (%s): run `sudo %s update`", updateUnit, unitExe, self, unitExe)
-	}
-	if *unitOpts.dataDir != *o.dataDir {
-		return fmt.Errorf("the %s unit serves --data-dir %s, and this command read --data-dir %s: pass the --config or --data-dir its ExecStart passes", updateUnit, *unitOpts.dataDir, *o.dataDir)
 	}
 	stateDir, database := server.UpdateStateDir(*o.dataDir), server.StorePath(*o.dataDir)
 	unlock, err := serverupdate.Lock(stateDir)
@@ -86,7 +82,7 @@ func updateCmd(args []string) error {
 		return err
 	}
 	if target == version.Version {
-		return restartIfStale(self, *unitOpts.addr)
+		return restartIfStale(self, *o.addr)
 	}
 	fmt.Printf("aether-server %s -> %s\n%s/releases/tag/%s\n", version.Version, target, baseURL, target)
 
