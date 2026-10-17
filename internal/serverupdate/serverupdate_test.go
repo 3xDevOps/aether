@@ -889,3 +889,31 @@ func TestAnUncommittedTrialRefusesANewUpdate(t *testing.T) {
 		t.Fatalf("swap record = %+v, %v; want the trial's own", rec, err)
 	}
 }
+
+func TestServerRunningAReplacedBinaryAsksForARestart(t *testing.T) {
+	e := newEnv(t, false)
+	next := e.self + ".next"
+	if err := os.WriteFile(next, []byte("the release `aether update` installed"), 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.Rename(next, e.self); err != nil {
+		t.Fatalf("replace the binary: %v", err)
+	}
+
+	_, _, err := e.svc.Update(t.Context(), "mem_a",
+		protocol.ServerUpdateParams{Version: "v0.2.0", When: protocol.ServerUpdateNow})
+	if !errors.Is(err, ErrIncapable) || !strings.Contains(err.Error(), "sudo systemctl restart aether-server") {
+		t.Fatalf("Update error = %v, want ErrIncapable naming the restart", err)
+	}
+	got, err := e.svc.Status(t.Context(), protocol.ServerUpdateStatusParams{})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got.Capable || !strings.Contains(got.Incapable, "was replaced on disk") {
+		t.Fatalf("status = capable %v, incapable %q", got.Capable, got.Incapable)
+	}
+	data, err := os.ReadFile(e.self + ".prev")
+	if err == nil {
+		t.Fatalf("a refused update must not keep %s as .prev", data)
+	}
+}

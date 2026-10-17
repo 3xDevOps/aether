@@ -124,6 +124,9 @@ type Config struct {
 type Service struct {
 	cfg  Config
 	self string
+	// started is the file at self when the service was built, which is
+	// the image this process runs.
+	started os.FileInfo
 	// core is the release the running build descends from; downgrades
 	// are measured against it.
 	core string
@@ -197,6 +200,9 @@ func New(cfg Config) (*Service, error) {
 		return s.disabled(fmt.Sprintf("resolving %s failed: %v", self, err)), nil
 	}
 	s.self = resolved
+	if info, err := os.Stat(resolved); err == nil {
+		s.started = info
+	}
 	return s, nil
 }
 
@@ -220,10 +226,29 @@ func (s *Service) incapableReason() string {
 	if s.incapable != "" {
 		return s.incapable
 	}
+	if s.replacedOnDisk() {
+		return fmt.Sprintf("%s was replaced on disk but this process still runs %s; restart onto it: sudo systemctl restart aether-server",
+			s.self, version.Version)
+	}
 	if err := selfupdate.CheckWritable(filepath.Dir(s.self)); err != nil {
 		return notWritable
 	}
 	return ""
+}
+
+// replacedOnDisk reports whether the file at self is no longer the one this
+// process started from, as after `sudo aether update` without a restart. A
+// swap would then keep the new release as the rollback target. This
+// process's own swap is exempt: it replaces the file and restarts onto it.
+func (s *Service) replacedOnDisk() bool {
+	s.mu.Lock()
+	applying := s.applying
+	s.mu.Unlock()
+	if applying || s.started == nil {
+		return false
+	}
+	now, err := os.Stat(s.self)
+	return err == nil && !os.SameFile(s.started, now)
 }
 
 // Status reports the server's own update state. The release fields come
