@@ -3,6 +3,7 @@ package localops
 import (
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -42,6 +43,10 @@ func StartDesktopHandoff(bin string, pids []int) error {
 		list[i] = strconv.Itoa(pid)
 	}
 	cmd := exec.Command(bin, "gui", "build", "--staged", "--after-exit", strings.Join(list, ","))
+	// The gateway's directory is the installed app's when the Start Menu
+	// shortcut launched it, and the helper must not hold that open while
+	// the swap renames it.
+	cmd.Dir = os.TempDir()
 	detach(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("localops: start the desktop update helper: %w", err)

@@ -275,7 +275,10 @@ exit 1
     $listener.Start()
     $debugPort = $listener.LocalEndpoint.Port
     $listener.Stop()
-    $app = Start-Process -FilePath $desktop -PassThru -ArgumentList "--remote-debugging-port=$debugPort", ('--user-data-dir="' + (Join-Path $root 'Electron') + '"')
+    # The Start Menu shortcut starts the app in its own directory, and the
+    # gateway and the update helper inherit it; a directory they hold open
+    # cannot be renamed.
+    $app = Start-Process -FilePath $desktop -WorkingDirectory $appDir -PassThru -ArgumentList "--remote-debugging-port=$debugPort", ('--user-data-dir="' + (Join-Path $root 'Electron') + '"')
     $appId = $app.Id
     $sidecarId = Wait-DesktopSidecar $app $installed
     Write-Host "The old desktop (pid $appId) runs its sidecar (pid $sidecarId) from the old CLI."
