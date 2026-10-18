@@ -718,6 +718,18 @@ build, so the window you end up in is the new one. In a browser tab the
 gateway never exits (it is your terminal's process, not the app's): the app is
 still rebuilt, and the prompt tells you to restart it.
 
+**On Windows the app quits and comes back.** Windows cannot rename the
+directory of a running app, and the gateway doing the rebuild is a child of
+that app. The dashboard first downloads the new app into
+`%LOCALAPPDATA%\aether\desktop-build\staged-app` while the old one keeps
+running, then starts a detached `aether gui build --staged` helper and exits
+the gateway with status **76**, which tells the shell to quit without
+relaunching. The helper waits (at most a minute) for the app to exit, ends the
+`aether-daemon` Scheduled Task if you have one, swaps the app in, and starts
+it. Start the daemon again with `schtasks /Run /TN aether-daemon`, or at your
+next sign-in. If the swap fails, the helper starts the old app and the next
+dashboard shows the error, as for any failed rebuild.
+
 A rebuild that fails does not cost you the CLI update. The gateway records the
 build's error, the desktop app comes back on the new CLI in the old shell, and
 the "desktop app is out of date" prompt then shows that error above the
@@ -1298,7 +1310,8 @@ removes an older copy from the other Applications folder. The new app is
 staged beside the installed one and swapped in with a rename, so an app that
 is running while you rebuild it keeps working until you restart it - deleting
 its files under it would take the window down. Windows still holds a running
-program's files open, so close the Aether window there first. To remove
+program's files open, so close the Aether window there first; the dashboard's
+**Update now** does that for you with a staged swap. To remove
 everything, delete the two paths in the table, the `aether` cache directory
 (the build directory and the private Node copy), and, after a source build,
 those caches.

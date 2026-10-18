@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"io"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -19,6 +20,13 @@ import (
 // from sysexits.h; no other path out of `aether gui` uses it.
 const ExitRelaunch = 75
 
+// ExitUpdaterRestarts is the exit status a supervised gateway uses on
+// Windows to tell the desktop shell to quit and stay quit: a detached
+// helper swaps the app directory once the shell is gone and starts the app
+// again, so the shell neither respawns the sidecar nor relaunches itself
+// into a half-swapped directory. 76 is EX_PROTOCOL from sysexits.h.
+const ExitUpdaterRestarts = 76
+
 // rebuildTailLines is how much of the build's own output update.status
 // carries. Enough to show the failing npm or electron-builder line, small
 // enough to poll once a second without thought.
@@ -30,6 +38,8 @@ var (
 	rebuildArgv         = localops.RebuildAppArgv
 	installedDesktopApp = localops.InstalledDesktopApp
 	lookupRealUser      = localops.LookupRealUser
+	startHandoff        = localops.StartDesktopHandoff
+	handoffOS           = runtime.GOOS
 )
 
 // rebuildState tracks the desktop-app build update.apply started, for the
@@ -170,12 +180,23 @@ func (g *Gateway) startAppRebuild(bin, tag string) rebuildOutcome {
 		return rebuildBusy
 	}
 	argv := rebuildArgv(bin, who, true)
+	handoff := g.cfg.Supervised && handoffOS == "windows"
+	if handoff {
+		// Windows cannot rename the app's directory while the shell runs,
+		// and this gateway dies with the shell: build everything now,
+		// install from a detached helper once the shell has quit.
+		argv = append(argv, "--stage")
+	}
 	g.builds.Add(1)
 	go func() {
 		defer g.builds.Done()
 		defer g.rebuild.release()
 		err := g.runRebuild(argv)
-		g.finishRebuild(err)
+		if err == nil && handoff {
+			// The shell is this process's parent.
+			err = startHandoff(bin, []int{os.Getppid(), os.Getpid()})
+		}
+		g.finishRebuild(err, handoff)
 	}()
 	return rebuildStarted
 }
@@ -286,13 +307,17 @@ func (e errRebuild) Error() string { return string(e) }
 
 // finishRebuild records the outcome and, on a supervised gateway, ends the
 // process the way the desktop shell needs: exit 75 says the app on disk is
-// new, so relaunch the shell; a plain exit 0 leaves the shell respawning
+// new, so relaunch the shell, and 76 says a helper is installing the staged
+// app and restarting it, so just quit; a plain exit 0 leaves the shell respawning
 // the sidecar, which is right after a failure because the CLI half of the
 // update did land.
-func (g *Gateway) finishRebuild(err error) {
+func (g *Gateway) finishRebuild(err error, handoff bool) {
 	if err == nil {
 		g.rebuild.setPhase(localops.PhaseDone)
-		if g.cfg.Supervised {
+		switch {
+		case handoff:
+			g.requestExit(ExitUpdaterRestarts)
+		case g.cfg.Supervised:
 			g.requestExit(ExitRelaunch)
 		}
 		return

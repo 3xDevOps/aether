@@ -56,11 +56,30 @@ func guiBuildTo(args []string, events io.Writer) error {
 	jsonOut := fs.Bool("json", false, "print one JSON line per build phase on stdout; the build's own output goes to stderr")
 	source := fs.Bool("source", false, "build the app on this machine instead of downloading the release's prebuilt Windows app")
 	zipPath := fs.String("zip", "", "install the Windows desktop app from this local zip instead of downloading it; no signed manifest vouches for a local zip, so only its layout is checked")
+	stage := fs.Bool("stage", false, "download or build the app into the build directory without installing it; update.apply uses this while the app still runs (Windows)")
+	staged := fs.Bool("staged", false, "install the app --stage left in the build directory once the --after-exit processes have exited, then start the app; update.apply starts this detached (Windows)")
+	afterExit := fs.String("after-exit", "", "with --staged: comma-separated process ids to wait for before the swap")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	pids, pidErr := localops.ParseExitPIDs(*afterExit)
+	if pidErr != nil {
+		return pidErr
+	}
+	switch {
+	case *stage && *staged:
+		return errors.New("--stage and --staged are mutually exclusive")
+	case (*stage || *staged) && *zipPath != "":
+		return errors.New("--zip installs at once; it cannot be staged")
+	case *staged && *source:
+		return errors.New("--staged installs what --stage built; --source does not apply")
+	case (*stage || *staged) && runtime.GOOS != "windows":
+		return fmt.Errorf("--stage and --staged are for the Windows app swap; on %s the app is replaced while it runs", runtime.GOOS)
+	case len(pids) > 0 && !*staged:
+		return errors.New("--after-exit needs --staged")
 	}
 	if *zipPath != "" && *source {
 		return errors.New("--zip and --source are mutually exclusive")
@@ -92,16 +111,25 @@ func guiBuildTo(args []string, events io.Writer) error {
 			_ = f.Sync()
 		}
 	}
-	err := buildAndInstall(*buildDir, *zipPath, *source, notes, emit)
+	err := buildAndInstall(*buildDir, *zipPath, *source, buildMode{stage: *stage, staged: *staged, pids: pids}, notes, emit)
 	if err != nil {
 		emit(buildEvent{Phase: localops.PhaseError, Error: err.Error()})
 	}
 	return err
 }
 
+// buildMode selects the two halves of the Windows app swap, which cannot
+// rename the app's directory while it runs: stage does the downloading and
+// building and installs nothing, staged installs that result after the
+// processes in pids have exited.
+type buildMode struct {
+	stage, staged bool
+	pids          []int
+}
+
 // buildAndInstall is guiBuild's work, split out so every failure reaches
 // the one place that reports it as an error event.
-func buildAndInstall(buildDir, zipPath string, source bool, notes io.Writer, emit func(buildEvent)) error {
+func buildAndInstall(buildDir, zipPath string, source bool, mode buildMode, notes io.Writer, emit func(buildEvent)) error {
 	if buildDir == "" {
 		dir, err := localops.DesktopBuildDir()
 		if err != nil {
@@ -140,7 +168,13 @@ func buildAndInstall(buildDir, zipPath string, source bool, notes io.Writer, emi
 	defer stopSignals()
 
 	phase := func(name string) { emit(buildEvent{Phase: name}) }
-	src, release, err := prebuiltDesktop(ctx, runtime.GOOS, version.Version, zipPath, source, buildDir, notes, phase)
+	var src localops.DesktopSource
+	var release func()
+	if mode.staged {
+		src, release, err = stagedDesktop(ctx, buildDir)
+	} else {
+		src, release, err = prebuiltDesktop(ctx, runtime.GOOS, version.Version, zipPath, source, buildDir, notes, phase)
+	}
 	defer release()
 	if err != nil {
 		return desktopBuildError(stopSignals(), err)
@@ -156,6 +190,17 @@ func buildAndInstall(buildDir, zipPath string, source bool, notes io.Writer, emi
 	if ctx.Err() != nil {
 		return desktopBuildError(stopSignals(), ctx.Err())
 	}
+	if mode.stage {
+		staged := filepath.Join(buildDir, localops.StagedAppDir)
+		if err = os.RemoveAll(staged); err == nil {
+			err = src(staged)
+		}
+		if err != nil {
+			return desktopBuildError(stopSignals(), err)
+		}
+		emit(buildEvent{Phase: localops.PhaseDone, Path: staged})
+		return nil
+	}
 	icon, err := desktop.Source.ReadFile("build/icons/256x256.png")
 	if err != nil {
 		return desktopBuildError(stopSignals(), err)
@@ -164,7 +209,15 @@ func buildAndInstall(buildDir, zipPath string, source bool, notes io.Writer, emi
 		return desktopBuildError(stopSignals(), ctx.Err())
 	}
 	phase(localops.PhaseInstalling)
-	app, err := localops.InstallDesktop(runtime.GOOS, home, src, cliPath, icon)
+	install := func() (localops.DesktopApp, error) {
+		return localops.InstallDesktop(runtime.GOOS, home, src, cliPath, icon)
+	}
+	var app localops.DesktopApp
+	if mode.staged {
+		app, err = finishStaged(home, mode.pids, install)
+	} else {
+		app, err = install()
+	}
 	if err != nil {
 		return desktopBuildError(stopSignals(), err)
 	}
@@ -238,6 +291,37 @@ func prebuiltDesktop(ctx context.Context, goos, tag, zipPath string, source bool
 		return nil, release, fmt.Errorf("%w; aether gui build --source builds the app on this machine instead", err)
 	}
 	return localops.DesktopFromZip(archive), func() { _ = os.Remove(archive); unlock() }, nil
+}
+
+// stagedDesktop is the app `--stage` left in buildDir. The build directory's
+// lock is held until release, which also deletes the staged copy.
+func stagedDesktop(ctx context.Context, buildDir string) (src localops.DesktopSource, release func(), err error) {
+	unlock, err := localops.LockDesktopBuild(ctx, buildDir)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	staged := filepath.Join(buildDir, localops.StagedAppDir)
+	if _, err = os.Stat(staged); err != nil {
+		unlock()
+		return nil, func() {}, fmt.Errorf("no staged desktop app: %w", err)
+	}
+	return localops.DesktopFrom(staged), func() { _ = os.RemoveAll(staged); unlock() }, nil
+}
+
+// finishStaged is localops.FinishDesktopUpdate for the app installed for
+// this account. install runs once pids have exited; whichever app is on
+// disk afterwards is started.
+func finishStaged(home string, pids []int, install func() (localops.DesktopApp, error)) (localops.DesktopApp, error) {
+	current, ok := localops.InstalledDesktopApp(runtime.GOOS, localops.RealUser{Home: home})
+	if !ok {
+		return localops.DesktopApp{}, errors.New("no desktop app is installed to update")
+	}
+	var app localops.DesktopApp
+	err := localops.FinishDesktopUpdate(current, pids, func() (err error) {
+		app, err = install()
+		return err
+	})
+	return app, err
 }
 
 func desktopBuildError(sig os.Signal, err error) error {

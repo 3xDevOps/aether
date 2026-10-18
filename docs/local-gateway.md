@@ -177,6 +177,12 @@ other exit keeps the shell's respawn-with-backoff behavior, which is what a
 failed rebuild wants - the CLI half of the update did land, and the shell
 should come back on the new binary.
 
+On Windows the shell cannot be relaunched that way: it runs from the app
+directory the update has to rename, and Windows refuses to rename a running
+app's directory. There the gateway exits **76**, meaning "quit; an updater
+restarts you". The shell calls `app.exit(0)` without relaunching or
+respawning (`desktop/sidecar-exit.js` maps every exit status to its action).
+
 ## Design
 
 Both transports use `internal/webgate` for HTTP and WebSocket dispatch. The
@@ -2102,7 +2108,21 @@ the server snapshot from loading.
   to the process that exited.
 - A supervised gateway exits only once the rebuild ends: **75** on success,
   so the shell relaunches onto the new app, and **0** on failure, so the
-  shell respawns the sidecar on the new CLI. A failed build is also written
+  shell respawns the sidecar on the new CLI. On Windows the rebuild only
+  *stages* the app (`aether gui build --json --stage` downloads or builds it
+  into `<user cache>/aether/desktop-build/staged-app` and installs nothing),
+  because the app directory cannot be renamed while the shell runs and the
+  gateway dies with the shell. The gateway then starts the updated CLI as a
+  detached helper, `aether gui build --staged --after-exit <shell pid>,<gateway pid>`
+  (`DETACHED_PROCESS`, no `powershell.exe` or `cmd.exe`), and exits **76**.
+  The helper waits for both processes by handle, for at most a minute; ends
+  the `aether-daemon` Scheduled Task if it exists (it starts again at the next
+  sign-in, or with `schtasks /Run /TN aether-daemon`); swaps the app in with
+  the same rename-and-roll-back install as `aether gui build`; and starts the
+  app. If a step fails, the helper leaves the old app in place, starts it,
+  and writes the error to `last-error.txt`, so the next dashboard shows it as
+  `shell_build_error`. If the helper itself cannot start, the gateway
+  records that and exits **0**, leaving the old app running. A failed build is also written
   to `<user cache>/aether/desktop-build/last-error.txt`, which the next
   gateway's `update.check` returns as `shell_build_error` so the dashboard
   can show what went wrong; the next successful `aether gui build` removes
