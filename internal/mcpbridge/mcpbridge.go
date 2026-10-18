@@ -64,7 +64,9 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: version.String()}, opts)
 	if cfg.Assistant {
-		registerAssistantTools(srv, cfg.Socket)
+		registerAssistantTools(srv, func(ctx context.Context, method string, params, out any) error {
+			return coordtransport.Call(ctx, cfg.Socket, method, params, out)
+		})
 	} else if err := registerTools(srv, cfg.Socket, g); err != nil {
 		return err
 	}

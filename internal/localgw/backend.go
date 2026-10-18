@@ -378,6 +378,8 @@ var noReplay = map[string]bool{
 	protocol.MethodMemberMergeStart:       true,
 	protocol.MethodMemberMergePropose:     true,
 	protocol.MethodMemberMergeAccept:      true,
+	protocol.MethodConnectorCode:          true,
+	protocol.MethodConnectorRevoke:        true,
 
 	protocol.MethodServerUpdate:        true,
 	protocol.MethodServerOwnerTransfer: true,

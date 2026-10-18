@@ -355,6 +355,7 @@ func TestPrivilegedMethodsRefuseAnUnapprovedDevice(t *testing.T) {
 		protocol.MethodMemberMergePropose:     protocol.MemberMergeProposeParams{Code: "AAAA-BBBB-CCCC-DDDD"},
 		protocol.MethodMemberMergePending:     struct{}{},
 		protocol.MethodMemberMergeAccept:      protocol.MemberMergeAcceptParams{ProposalID: "mrp-x"},
+		protocol.MethodConnectorCode:          struct{}{},
 	}
 	for method, params := range calls {
 		raw, _ := json.Marshal(params)

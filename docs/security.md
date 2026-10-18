@@ -1356,7 +1356,8 @@ can do under each policy, with the tests that show it; the reasons follow.
 - **SSH is end to end.** The relay splices bytes between two outbound
   WebSockets and never holds a key that could decrypt them. Clients check
   the host key against the server id on every path, so an edge cannot pose
-  as a server.
+  as a server. [Connector](#chatgpt-and-claude-connectors) traffic is the
+  exception: it is HTTPS that ends at the edge.
 - **Grants are checked by the server.** Each relayed connection carries a
   grant signed by the edge key the server pinned at enrollment. The server
   checks the signature, its own id, the connection id and a 60-second
@@ -1536,6 +1537,50 @@ can do under each policy, with the tests that show it; the reasons follow.
 What the edge operator does see: server ids and host names, account
 identities, device labels, client addresses, timing and byte counts
 ([privacy.md](privacy.md#what-an-edge-stores)).
+
+## ChatGPT and Claude connectors
+
+A [connector](connectors.md) is an OAuth client, run by OpenAI or Anthropic,
+that holds tokens acting as one member through 8 tools: five reads, launch,
+message and stop. The server is the authorization server and the resource;
+the edge forwards HTTPS to it and holds no credential that acts as a member.
+
+- **The edge reads connector traffic.** ChatGPT and Claude need a public
+  certificate, so TLS ends at the edge. A live, compromised edge sees every
+  tool call, result and token it relays, and can act as the member through a
+  token until it expires, the next refresh rotates it, or the connector is
+  revoked. It cannot mint a pairing code, an authorization code or a token:
+  the codes and the token hashes are on the server.
+- **Authorizing takes a code from a device the member already uses.**
+  `connector.code` answers under the same rule as other credential-issuing
+  methods: under `approved-devices` an approved device, a member SSH key or a
+  tailnet connection; under `account` also a registered device. The code is
+  40 bits, single use, 10 minutes, one per member, held as a hash in memory.
+  The consent page checks at most 10 wrong codes a minute per server, so
+  guessing a live code is out of reach.
+- **Tokens are bearer credentials.** An access token lasts an hour. A refresh
+  token rotates on every use and lapses after 30 days unused. The server
+  stores SHA-256 hashes only, and remembers each rotated refresh token until
+  it would have lapsed: presenting one again deletes the connector, so a
+  stolen refresh token dies the first time both holders use it.
+- **Every request re-checks the binding.** The member must still exist, and
+  the device that minted the code, if any, must still admit a connection
+  under the current `edge-access` policy: revoked never, unapproved not under
+  `approved-devices`. Revoking a device, removing a member or tightening the
+  policy covers their connectors.
+- **The surface is closed.** Calls go through `sshd.Local` with the member's
+  own role checks, and the tool table offers no terminal, file, git,
+  settings, membership or other control method. Run history in results is
+  untrusted text other agents wrote; ChatGPT and Claude ask the person before
+  each write tool, and Aether adds no confirmation of its own.
+- **Only ChatGPT and Claude can connect.** A `client_id` must be an `https`
+  URL on `chatgpt.com` or `claude.ai`; the server fetches that client
+  metadata document on each authorization, without following redirects, and
+  sends the authorization code only to an `https` redirect on the same host
+  that the document lists. There is no dynamic client registration.
+- **Tokens are bound to the connector URL.** A token is good only for the
+  URL it was minted for, and the MCP endpoint refuses requests a browser
+  sends from another origin.
 
 ## Conflict coordination
 
