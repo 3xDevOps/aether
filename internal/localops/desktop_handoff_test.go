@@ -16,7 +16,7 @@ func (tr *handoffTrace) ops(waitErr error, installErrs ...error) handoffOps {
 			return waitErr
 		},
 		endDaemon:   func() bool { tr.steps = append(tr.steps, "daemon"); return true },
-		startDaemon: func() { tr.steps = append(tr.steps, "daemon-run") },
+		startDaemon: func() error { tr.steps = append(tr.steps, "daemon-run"); return nil },
 		install: func() error {
 			tr.steps = append(tr.steps, "install")
 			if len(installErrs) == 0 {
@@ -88,5 +88,41 @@ func TestFinishDesktopUpdateDoesNotSwapAnAppThatNeverExited(t *testing.T) {
 	}
 	if got := LastDesktopBuildError(); !strings.Contains(got, "still running") {
 		t.Fatalf("recorded = %q", got)
+	}
+}
+
+func TestFinishDesktopUpdateRecordsAFailedDaemonRestartAndStillLaunches(t *testing.T) {
+	cacheHome(t)
+	var tr handoffTrace
+	ops := tr.ops(nil)
+	ops.startDaemon = func() error {
+		tr.steps = append(tr.steps, "daemon-run")
+		return errors.New("ERROR: The system cannot find the file specified.")
+	}
+	err := finishDesktopUpdate(ops, []int{10}, time.Second, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "cannot find the file") {
+		t.Fatalf("err = %v, want the restart's own error", err)
+	}
+	if want := "wait daemon install daemon-run launch"; tr.got() != want {
+		t.Fatalf("steps = %q, want %q", tr.got(), want)
+	}
+	if got := LastDesktopBuildError(); !strings.Contains(got, "cannot find the file") {
+		t.Fatalf("recorded = %q, want the restart error for the next dashboard", got)
+	}
+}
+
+func TestFinishDesktopUpdateLeavesATaskThatWasNotRunning(t *testing.T) {
+	cacheHome(t)
+	var tr handoffTrace
+	ops := tr.ops(nil)
+	ops.endDaemon = func() bool { tr.steps = append(tr.steps, "daemon"); return false }
+	if err := finishDesktopUpdate(ops, []int{10}, time.Second, time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if want := "wait daemon install launch"; tr.got() != want {
+		t.Fatalf("steps = %q, want %q", tr.got(), want)
+	}
+	if got := LastDesktopBuildError(); got != "" {
+		t.Fatalf("recorded %q for a task that was not running", got)
 	}
 }

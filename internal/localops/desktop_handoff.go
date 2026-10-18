@@ -75,7 +75,7 @@ func ParseExitPIDs(list string) ([]int, error) {
 type handoffOps struct {
 	waitExit    func(pid int, timeout time.Duration) error
 	endDaemon   func() bool
-	startDaemon func()
+	startDaemon func() error
 	install     func() error
 	launch      func() error
 }
@@ -115,7 +115,9 @@ func finishDesktopUpdate(ops handoffOps, pids []int, timeout, retry time.Duratio
 			break
 		}
 	}
-	if err == nil {
+	if err != nil {
+		err = fmt.Errorf("localops: the desktop app was not updated: %w", err)
+	} else {
 		daemonWasRunning := ops.endDaemon()
 		for {
 			if err = ops.install(); err == nil || time.Until(deadline) < retry {
@@ -123,12 +125,16 @@ func finishDesktopUpdate(ops handoffOps, pids []int, timeout, retry time.Duratio
 			}
 			time.Sleep(retry)
 		}
+		if err != nil {
+			err = fmt.Errorf("localops: the desktop app was not updated: %w", err)
+		}
 		if daemonWasRunning {
-			ops.startDaemon()
+			if startErr := ops.startDaemon(); startErr != nil {
+				err = errors.Join(err, startErr)
+			}
 		}
 	}
 	if err != nil {
-		err = fmt.Errorf("localops: the desktop app was not updated: %w", err)
 		if recordErr := RecordDesktopBuildError(err.Error()); recordErr != nil {
 			err = errors.Join(err, recordErr)
 		}
@@ -148,6 +154,9 @@ func endDaemonTask() bool {
 }
 
 // startDaemonTask starts the task endDaemonTask ended, now on the new CLI.
-func startDaemonTask() {
-	_ = exec.Command("schtasks", "/Run", "/TN", daemonTask).Run()
+func startDaemonTask() error {
+	if out, err := exec.Command("schtasks", "/Run", "/TN", daemonTask).CombinedOutput(); err != nil {
+		return fmt.Errorf("localops: start the %s task again: %w: %s", daemonTask, err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
