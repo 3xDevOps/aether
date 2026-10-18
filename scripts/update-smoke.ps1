@@ -683,6 +683,7 @@ exit 1
     Write-Host 'Defender real-time protection stayed on with no exclusions through every update.'
 } catch {
     Write-Host $_.ScriptStackTrace
+    & "$PSScriptRoot/defender-diagnostics.ps1"
     throw
 } finally {
     $ErrorActionPreference = 'Continue'

@@ -245,6 +245,10 @@ downloads Defender definitions in the background. It then runs
 `-Mode Prepare`, which removes the hosted runner's inherited exclusions,
 enables Defender realtime, script, archive, and first-seen cloud scanning,
 and waits for that update before running `scripts/install-smoke.ps1`.
+When `install-smoke.ps1` or `update-smoke.ps1` fails, `scripts/defender-diagnostics.ps1`
+prints Defender's detections, threats (`ThreatName`, `Resources`,
+`InitialDetectionTime`), and operational log events 1116 and 1117, so a
+flagged binary names its threat in the job log.
 A local release mirror serves the checkout build, a development build, under
 the tag `v0.5.1-alpha.4` with its exact bytes and checksum; it does not
 download or claim to test the historical published release with that tag.
