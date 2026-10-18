@@ -157,6 +157,7 @@ See [per-agent setup and limits](docs/harnesses.md) and
 | [Dashboard SPA](docs/dashboard-frontend.md) | The web client's structure. |
 | [Coordination](docs/coordination.md) | How overlapping runs warn and message each other. |
 | [MCP bridge](docs/mcp-bridge.md) | The in-container half of coordination. |
+| [Connectors](docs/connectors.md) | Adding your server to ChatGPT or Claude as a custom connector, to run agents from their phone apps. |
 | [Failure handling](docs/failure-handling.md) | Reboots, disk pressure, stalls, dropped connections - and the knobs. |
 | [Testing](docs/testing.md) | The E2E scenario suite and its failure-table coverage. |
 | [Contributing](CONTRIBUTING.md) | Build, test, and change the thing. |

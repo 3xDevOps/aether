@@ -2,6 +2,7 @@ package mcpbridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
@@ -190,8 +191,12 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 // would take the session down with it.
 func failed(err error) *mcp.CallToolResult {
 	res := &mcp.CallToolResult{}
-	res.SetError(err)
 	code := coordtransport.ErrorCode(err)
+	var perr *protocol.Error
+	if errors.As(err, &perr) {
+		err, code = errors.New(perr.Message), perr.Code
+	}
+	res.SetError(err)
 	if code == 0 {
 		code = protocol.CodeInternal
 	}

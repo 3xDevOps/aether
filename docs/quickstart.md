@@ -135,10 +135,14 @@ next:
   2. on your computer, open the claim link above with the Aether app, or paste it
      into the app's Connect page; in a terminal:
        aether link --claim <server id>-<secret>
+  3. to run agents from ChatGPT or Claude, on that computer:
+       aether mcp
 ```
 
 Without the edge, or once the server is claimed, step 2 is
-`aether link <this-host>:2222`, with the port from `addr`.
+`aether link <this-host>:2222`, with the port from `addr`. Step 3, shown
+only with the edge on, adds the server to ChatGPT or Claude as a custom
+connector ([connectors.md](connectors.md)).
 
 Run step 1 and the server is live on `:2222`. The SSH port is
 the only thing it listens on unless you answered the dashboard question; the

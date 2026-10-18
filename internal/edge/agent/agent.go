@@ -1,7 +1,7 @@
 // Package edgeagent keeps an Aether server's control connection to an edge:
-// it enrolls with the host key, pins the edge's grant key, relays the SSH
-// and claim connections the edge opens, pushes the server's directory and
-// reports its owner. docs/edge.md describes the edge.
+// it enrolls with the host key, pins the edge's grant key, relays the SSH,
+// claim and MCP connector connections the edge opens, pushes the server's
+// directory and reports its owner. docs/edge.md describes the edge.
 package edgeagent
 
 import (
@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -55,6 +56,12 @@ type Config struct {
 	// SSH receives relayed connections and the edge's notices. Leave
 	// needs none.
 	SSH SSH
+	// HTTP serves the MCP connector requests the edge relays over
+	// edgeproto.KindHTTP connections, with their path and query as the
+	// client sent them. The edge authenticates none of them. A request's
+	// RemoteAddr is not the client's: edgeproto.HeaderClientAddr carries
+	// the address the edge saw. Nil refuses those connections.
+	HTTP http.Handler
 	// AccessPolicy is the server's edge-access setting, which the agent
 	// announces in its hello for display at the edge. Empty is
 	// PolicyApprovedDevices. The server enforces it; the edge's copy is
@@ -88,8 +95,10 @@ type Agent struct {
 	attachDeadline            time.Duration
 	directoryRefresh          time.Duration
 
-	// slots holds one entry per relayed connection.
-	slots chan struct{}
+	// slots holds one entry per relayed SSH or claim connection, and
+	// httpSlots one per http connection.
+	slots     chan struct{}
+	httpSlots chan struct{}
 
 	mu     sync.Mutex
 	runCtx context.Context
@@ -151,6 +160,7 @@ func New(cfg Config) (*Agent, error) {
 		attachDeadline:   edgeproto.AttachDeadline,
 		directoryRefresh: directoryRefresh,
 		slots:            make(chan struct{}, edgeproto.MaxSSHConnsPerServer),
+		httpSlots:        make(chan struct{}, edgeproto.MaxHTTPConnsPerServer),
 		conns:            make(map[*relayConn]struct{}),
 		seen:             make(map[string]time.Time),
 		edgeState:        edgeState,

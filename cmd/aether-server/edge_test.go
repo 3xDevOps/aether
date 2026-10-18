@@ -68,6 +68,7 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{id, edgeproto.EdgeKeyFingerprint(pub), "5 attempts left", "edge access  approved-devices",
+		"connector    https://edge.onaether.dev/mcp/" + id + "  (add it to ChatGPT or Claude; get a code: aether mcp)\n",
 		"connection   never connected: no server using " + dir + " has recorded an attempt to reach the edge\n",
 		"why          the service is not running, is still starting, exits during startup, or started before edge-url was set and needs a restart\n",
 		"next         sudo systemctl status aether-server; sudo journalctl -u aether-server -n 50 --no-pager"} {

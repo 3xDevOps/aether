@@ -35,8 +35,10 @@ type registration struct {
 	ws     *websocket.Conn
 	ctx    context.Context
 	cancel context.CancelCauseFunc
-	// version is the protocol version negotiated with the server.
-	version int
+	// version is the protocol version negotiated with the server, and
+	// agentVersion the release its hello named.
+	version      int
+	agentVersion string
 	// turn holds the one throttled read this server's connections may
 	// have waiting.
 	turn chan struct{}
@@ -190,7 +192,8 @@ func (r *Relay) enroll(ws *websocket.Conn, addr netip.Prefix) (*registration, er
 		return nil, fmt.Errorf("relay: claim state of %s: %w", id, err)
 	}
 
-	reg := &registration{id: id, name: hello.Name, policy: policy, version: version, addr: addr, ws: ws, claimed: claimed, turn: make(chan struct{}, 1), ready: make(chan struct{})}
+	reg := &registration{id: id, name: hello.Name, policy: policy, version: version, agentVersion: hello.AgentVersion, addr: addr, ws: ws,
+		claimed: claimed, turn: make(chan struct{}, 1), ready: make(chan struct{})}
 	reg.ctx, reg.cancel = context.WithCancelCause(r.ctx)
 	r.mu.Lock()
 	if r.closing {
@@ -543,9 +546,10 @@ func (r *Relay) storeDirectory(reg *registration, entries []edgeproto.DirectoryE
 	}
 	now := time.Now()
 	// A claim connection is admitted by the server's claim code, not by
-	// the directory, which may predate the claim it makes.
+	// the directory, which may predate the claim it makes; an http
+	// connection by nothing the edge holds.
 	r.closeConns(func(c *relayConn) bool {
-		if c.serverID != reg.id || c.kind == edgeproto.KindClaim {
+		if c.serverID != reg.id || c.kind != edgeproto.KindSSH {
 			return false
 		}
 		for _, e := range entries {

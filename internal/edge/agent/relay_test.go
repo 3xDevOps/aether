@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -41,9 +42,16 @@ func sshGrant(t *testing.T, a *Agent, connID string) edgeproto.Grant {
 
 func enrolled(t *testing.T) (*fakeEdge, *fakeSSH, *Agent, *edgeControl) {
 	t.Helper()
+	return enrolledWith(t, nil)
+}
+
+// enrolledWith is enrolled by an agent serving MCP connector requests
+// with mcp.
+func enrolledWith(t *testing.T, mcp http.Handler) (*fakeEdge, *fakeSSH, *Agent, *edgeControl) {
+	t.Helper()
 	edge := newFakeEdge(t)
 	sshd := newFakeSSH()
-	a := newAgent(t, edge.srv.URL, t.TempDir(), sshd)
+	a := newAgentWith(t, Config{EdgeURL: edge.srv.URL, DataDir: t.TempDir(), SSH: sshd, HTTP: mcp})
 	run(t, a)
 	ec := edge.nextControl(t)
 	expect[edgeproto.Directory](t, ec)

@@ -9,14 +9,22 @@ import (
 // terminal is legitimate.
 const (
 	// MaxSSHConnsPerServer stays below sshd's relayed handshake budget.
-	MaxSSHConnsPerServer   = 48
+	MaxSSHConnsPerServer = 48
+	// MaxHTTPConnsPerServer bounds a server's KindHTTP connections, apart
+	// from its SSH connections. Each carries one request at a time.
+	MaxHTTPConnsPerServer  = 8
 	MaxConnsPerDevice      = 16
 	MaxUnclaimedPerAddress = 3
 	// UnclaimedTTL is how long an unclaimed registration is kept.
 	UnclaimedTTL = 30 * time.Minute
 	// AttachDeadline is how long the edge waits for a data socket after
 	// sending open.
-	AttachDeadline      = 10 * time.Second
+	AttachDeadline = 10 * time.Second
+	// HTTPIdleTimeout is how long the edge keeps an idle KindHTTP
+	// connection for the next request. A server keeps one open longer,
+	// so it is the edge that closes an idle one, never a request in
+	// flight that meets the server's close.
+	HTTPIdleTimeout     = 30 * time.Second
 	PingInterval        = 20 * time.Second
 	ControlIdleTimeout  = 60 * time.Second
 	ReconnectMinBackoff = 1 * time.Second
