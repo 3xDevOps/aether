@@ -290,13 +290,16 @@ trusted only in `LocalMachine\Root` for the run, and serves signed releases.
   `aether.exe.old` gone after the next start, and that a second update succeeds
   while the first old image still runs;
 - installs the desktop zip, starts the app with a stand-in `aether-daemon`
-  Scheduled Task, posts `update.apply` to its gateway through the app's debugging
+  Scheduled Task and the app's own directory as its working directory (as the Start
+Menu shortcut does), posts `update.apply` to its gateway through the app's debugging
   port, and checks that the sidecar exits, the detached helper swaps in the new
   app (the new zip adds a marker file), ends the task, and starts the new app
   with the new CLI;
 - fails on any new `Get-MpThreatDetection` entry or changed exclusion.
 
-Not covered: clicking **Update now** (the call is `update.apply` itself), a
+Not covered: clicking **Update now** (the call is `update.apply` itself), an
+older desktop shell that does not set `AETHER_SHELL_QUITS_ON_76` (a unit test
+in `internal/localgw` covers the gateway's refusal), a
 Windows ARM64 runner, and Defender cloud verdicts on real release binaries.
 
 For each install, the smoke inspects the real shortcut's executable target and

@@ -182,6 +182,12 @@ directory the update has to rename, and Windows refuses to rename a running
 app's directory. There the gateway exits **76**, meaning "quit; an updater
 restarts you". The shell calls `app.exit(0)` without relaunching or
 respawning (`desktop/sidecar-exit.js` maps every exit status to its action).
+A shell says it understands 76 by setting `AETHER_SHELL_QUITS_ON_76=1` in
+the sidecar's environment. An older shell respawns on 76 and never quits, so
+without that variable a supervised Windows gateway starts no helper: it
+records "this desktop app is too old to update itself on Windows: quit it
+and run `aether gui build`, or reinstall the desktop app" as the build
+error, exits **0**, and the older shell respawns on the new CLI.
 
 ## Design
 
@@ -2077,7 +2083,8 @@ the server snapshot from loading.
   root-owned copy by root, on the installed file by the user. Linux and
   Windows are unchanged in kind; the only Linux-visible change is that the
   banner shows `sudo aether update` before the click instead of a button
-  that fails.
+  that fails. On Windows the banner shows `aether update` with "run it from an
+  elevated terminal (Run as administrator), or reinstall"; there is no sudo.
 - The call waits on the request context only: there is no dialog timeout,
   because a native authorization dialog has none, and a request that closed
   under the user would leave the dialog on screen with the password
@@ -2114,7 +2121,9 @@ the server snapshot from loading.
   because the app directory cannot be renamed while the shell runs and the
   gateway dies with the shell. The gateway then starts the updated CLI as a
   detached helper, `aether gui build --staged --after-exit <shell pid>,<gateway pid>`
-  (`DETACHED_PROCESS`, no `powershell.exe` or `cmd.exe`), and exits **76**.
+  (`DETACHED_PROCESS`, no `powershell.exe` or `cmd.exe`, working directory
+the temp directory so it never holds the app directory open), and exits
+**76**.
   The helper waits for both processes by handle, for at most a minute; ends
   the `aether-daemon` Scheduled Task if it exists (it starts again at the next
   sign-in, or with `schtasks /Run /TN aether-daemon`); swaps the app in with

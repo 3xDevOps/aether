@@ -27,6 +27,11 @@ const ExitRelaunch = 75
 // into a half-swapped directory. 76 is EX_PROTOCOL from sysexits.h.
 const ExitUpdaterRestarts = 76
 
+// ShellQuitsEnv is set by a desktop shell that quits on ExitUpdaterRestarts.
+// An older shell respawns the sidecar on any status but 75, and would leave
+// the helper waiting for a shell that never exits.
+const ShellQuitsEnv = "AETHER_SHELL_QUITS_ON_76"
+
 // rebuildTailLines is how much of the build's own output update.status
 // carries. Enough to show the failing npm or electron-builder line, small
 // enough to poll once a second without thought.
@@ -151,6 +156,16 @@ const (
 	rebuildStale
 )
 
+// recordRebuildFailure reports a rebuild that never began. Nothing will poll
+// update.status for it, so the reason has to go where the next gateway reads
+// it - or the user gets a stale-app banner with no explanation at all.
+func (g *Gateway) recordRebuildFailure(msg string) {
+	g.rebuild.fail(msg)
+	if writeErr := localops.RecordDesktopBuildError(msg); writeErr != nil {
+		g.rebuild.addLine("could not record the build failure: " + writeErr.Error())
+	}
+}
+
 // startAppRebuild rebuilds an installed desktop app with the CLI that
 // update.apply just installed at bin, in the background.
 //
@@ -160,17 +175,15 @@ const (
 func (g *Gateway) startAppRebuild(bin, tag string) rebuildOutcome {
 	who, err := lookupRealUser()
 	if err != nil {
-		msg := "find the account to build for: " + err.Error()
-		g.rebuild.fail(msg)
-		// Nothing will poll update.status for a rebuild that never began,
-		// so the reason has to go where the next gateway reads it - or the
-		// user gets a stale-app banner with no explanation at all.
-		if writeErr := localops.RecordDesktopBuildError(msg); writeErr != nil {
-			g.rebuild.addLine("could not record the build failure: " + writeErr.Error())
-		}
+		g.recordRebuildFailure("find the account to build for: " + err.Error())
 		return rebuildNone
 	}
 	if _, ok := installedDesktopApp(runtime.GOOS, who); !ok {
+		return rebuildNone
+	}
+	if g.cfg.Supervised && handoffOS == "windows" && !g.cfg.ShellQuitsOnHandoff {
+		g.recordRebuildFailure("this desktop app is too old to update itself on Windows: " +
+			"quit it and run `aether gui build`, or reinstall the desktop app")
 		return rebuildNone
 	}
 	if running, ok := g.rebuild.claim(tag); !ok {

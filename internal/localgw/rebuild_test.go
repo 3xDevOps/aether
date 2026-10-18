@@ -463,6 +463,7 @@ func stubHandoff(t *testing.T, start func(bin string, pids []int) error) {
 func TestUpdateApplyOnWindowsStagesThenHandsOffToTheHelper(t *testing.T) {
 	pinVersion(t)
 	g := updateGateway(t, &verbStubBackend{}, true)
+	g.cfg.ShellQuitsOnHandoff = true
 	args := filepath.Join(t.TempDir(), "args")
 	stubRebuild(t, scriptBuild(t,
 		`printf '%s\n' "$@" > `+shellQuote(args)+"\n"+
@@ -492,6 +493,7 @@ func TestUpdateApplyOnWindowsStagesThenHandsOffToTheHelper(t *testing.T) {
 func TestUpdateApplyOnWindowsRespawnsWhenTheHelperCannotStart(t *testing.T) {
 	pinVersion(t)
 	g := updateGateway(t, &verbStubBackend{}, true)
+	g.cfg.ShellQuitsOnHandoff = true
 	stubRebuild(t, fakeBuild(t, `{"phase":"done","path":"staged"}`+"\n", "", 0), true)
 	stubHandoff(t, func(string, []int) error {
 		return errors.New("localops: start the desktop update helper: access is denied")
@@ -504,5 +506,32 @@ func TestUpdateApplyOnWindowsRespawnsWhenTheHelperCannotStart(t *testing.T) {
 	}
 	if got := localops.LastDesktopBuildError(); !strings.Contains(got, "access is denied") {
 		t.Fatalf("recorded = %q, want the real error", got)
+	}
+}
+
+// An older shell respawns the sidecar on exit 76 and never quits, so the
+// helper would wait a minute for it and skip the install.
+func TestUpdateApplyOnWindowsLeavesAnOlderShellAlone(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, true)
+	stubRebuild(t, fakeBuild(t, "", "", 0), true)
+	rebuildArgv = func(string, localops.RealUser, bool) []string {
+		t.Fatal("a shell that does not quit on 76 cannot be handed off; nothing may be built")
+		return nil
+	}
+	stubHandoff(t, func(string, []int) error {
+		t.Fatal("no helper may start for a shell that does not quit on 76")
+		return nil
+	})
+
+	if got := applyForRebuild(t, g); got.Rebuilding {
+		t.Fatalf("apply = %+v, want no rebuild", got)
+	}
+	waitForExit(t, g)
+	if g.ExitCode() != 0 {
+		t.Fatalf("exit code = %d, want 0 so the older shell respawns on the new CLI", g.ExitCode())
+	}
+	if got := localops.LastDesktopBuildError(); !strings.Contains(got, "aether gui build") {
+		t.Fatalf("recorded = %q, want the way to update the app", got)
 	}
 }

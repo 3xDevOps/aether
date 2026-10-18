@@ -89,6 +89,8 @@ func runGUI(args []string) error {
 		// The desktop shell spawns `aether gui --json` and restarts it,
 		// so an update applied from the dashboard can exit the process.
 		Supervised: *jsonOut,
+		// The desktop shell sets it when it quits on exit 76.
+		ShellQuitsOnHandoff: os.Getenv(localgw.ShellQuitsEnv) != "",
 	})
 	if err != nil {
 		return err

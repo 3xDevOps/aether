@@ -157,6 +157,8 @@ function main() {
 
     child = spawn(bin, ['gui', '--json', '--port', '0'], {
       stdio: ['ignore', 'pipe', 'inherit'],
+      // Tells the gateway this shell quits on exit 76 (localgw.ShellQuitsEnv).
+      env: { ...process.env, AETHER_SHELL_QUITS_ON_76: '1' },
     })
 
     // The sidecar prints exactly one JSON line on stdout, then serves.
