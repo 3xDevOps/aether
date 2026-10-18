@@ -175,6 +175,9 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 	}
 
 	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
+	if runtime.GOOS == "windows" {
+		suffix += ".exe"
+	}
 	targets := []struct{ asset, dst string }{{primary + suffix, self}}
 	for _, name := range companions {
 		path := filepath.Join(dir, name)
