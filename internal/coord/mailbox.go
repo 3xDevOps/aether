@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -149,18 +150,13 @@ func appendCapability(capabilities []string, capability string) []string {
 }
 
 func isCoordinationCapability(method string) bool {
-	for _, capability := range coordinationCapabilities {
-		if capability == method {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(coordinationCapabilities, method)
 }
 
 // boundStatusFiles caps one peer's overlapping files for coord.status and
 // reports the uncapped total and whether the cap dropped any.
 func boundStatusFiles(all []string) ([]string, int, bool) {
-	files := make([]string, 0, minStatusLen(len(all), protocol.CoordMaxStatusFiles))
+	files := make([]string, 0, min(len(all), protocol.CoordMaxStatusFiles))
 	for _, file := range all {
 		if len(files) == protocol.CoordMaxStatusFiles {
 			break
@@ -237,13 +233,6 @@ func boundStatusText(value string) (string, int, bool) {
 		bounded = bounded[:len(bounded)-1]
 	}
 	return cleanCoordText(bounded, max), total, true
-}
-
-func minStatusLen(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // Send answers coord.send from run. The sender is the connected socket, not

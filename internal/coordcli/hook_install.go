@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -273,7 +274,7 @@ func inspectHookInstallation(plan hookInstallPlan) (hookInstallResult, error) {
 		if c.Features.CodexHooks != nil {
 			controls.Features.CodexHooks = c.Features.CodexHooks
 		}
-		if c.AllowManagedOnly || containsHookSetting(c.HooksConfig.Disabled, "aether-inbox") || containsHookSetting(c.DisabledExtensions, "extension-module:aether") {
+		if c.AllowManagedOnly || slices.Contains(c.HooksConfig.Disabled, "aether-inbox") || slices.Contains(c.DisabledExtensions, "extension-module:aether") {
 			disabled = true
 			result.details = append(result.details, "disable/policy entry in "+shellquote.Quote(path))
 		}
@@ -415,15 +416,6 @@ func inspectHookInstallation(plan hookInstallPlan) (hookInstallResult, error) {
 		result.state = "disabled"
 	}
 	return result, nil
-}
-
-func containsHookSetting(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 // Match complete registrations, never an arbitrary mention in a comment or command.
