@@ -1,6 +1,7 @@
 package edgeagent
 
 import (
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -12,31 +13,44 @@ import (
 	"github.com/coder/websocket"
 )
 
+// errNoHTTP refuses an http open when Config.HTTP is nil.
+var errNoHTTP = errors.New("this server does not serve MCP connectors")
+
 // open answers one open: it verifies the grant, takes a connection slot,
 // and attaches the data socket in the background. The grant must be of
 // the open's kind, so a claim grant never opens a member connection and
-// an ssh grant never presents a claim code. Every open gets an
-// open_result.
+// an ssh grant never presents a claim code. An http open carries no
+// grant, and takes a slot of its own. Every open gets an open_result.
 func (a *Agent) open(s *session, m edgeproto.Open) {
-	now := time.Now()
-	grant, err := edgeproto.VerifyGrant(s.edgeKey, m.Grant,
-		edgeproto.GrantScope{Issuer: a.origin, ServerID: a.serverID, ConnID: m.ConnID, Kind: m.Kind}, now)
-	if err == nil {
-		err = a.firstUse(m.ConnID, now)
+	var grant edgeproto.Grant
+	var err error
+	slots := a.slots
+	if m.Kind == edgeproto.KindHTTP {
+		slots = a.httpSlots
+		if a.cfg.HTTP == nil {
+			err = errNoHTTP
+		}
+	} else {
+		now := time.Now()
+		grant, err = edgeproto.VerifyGrant(s.edgeKey, m.Grant,
+			edgeproto.GrantScope{Issuer: a.origin, ServerID: a.serverID, ConnID: m.ConnID, Kind: m.Kind}, now)
+		if err == nil {
+			err = a.firstUse(m.ConnID, now)
+		}
 	}
 	if err != nil {
-		slog.Warn("edge: refused relayed connection", "conn", m.ConnID, "client", m.ClientAddr, "error", err)
+		slog.Warn("edge: refused relayed connection", "conn", m.ConnID, "kind", m.Kind, "client", m.ClientAddr, "error", err)
 		a.reply(s, edgeproto.OpenResult{ConnID: m.ConnID, Error: replyText(err)})
 		return
 	}
 	select {
-	case a.slots <- struct{}{}:
+	case slots <- struct{}{}:
 	default:
 		a.reply(s, edgeproto.OpenResult{ConnID: m.ConnID, Error: string(edgeproto.RefusalConnLimit)})
 		return
 	}
 	a.reply(s, edgeproto.OpenResult{ConnID: m.ConnID})
-	go a.attach(m, grant)
+	go a.attach(m, grant, slots)
 }
 
 func (a *Agent) reply(s *session, m edgeproto.Message) {
@@ -46,15 +60,16 @@ func (a *Agent) reply(s *session, m edgeproto.Message) {
 }
 
 // attach dials the data socket of one open and hands the connection to
-// sshd. It holds the slot open took until the connection closes.
-func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant) {
+// sshd, or for an http open to Config.HTTP. It holds the slot open took
+// from slots until the connection closes.
+func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant, slots chan struct{}) {
 	a.mu.Lock()
 	ctx := a.runCtx
 	a.mu.Unlock()
 	header := http.Header{"Authorization": {"Bearer " + m.Ticket}}
 	c, cancel, err := dial(ctx, a.origin+edgeproto.DataPath(m.ConnID), header, a.attachDeadline)
 	if err != nil {
-		<-a.slots
+		<-slots
 		slog.Warn("edge: attach data socket", "conn", m.ConnID, "error", err)
 		return
 	}
@@ -68,7 +83,7 @@ func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant) {
 		a.mu.Lock()
 		delete(a.conns, rc)
 		a.mu.Unlock()
-		<-a.slots
+		<-slots
 	}
 	a.mu.Lock()
 	a.conns[rc] = struct{}{}
@@ -79,11 +94,14 @@ func (a *Agent) attach(m edgeproto.Open, grant edgeproto.Grant) {
 		_ = rc.Close()
 		return
 	}
-	slog.Info("edge: relayed connection", "conn", m.ConnID, "kind", grant.Kind, "client", m.ClientAddr,
+	slog.Info("edge: relayed connection", "conn", m.ConnID, "kind", m.Kind, "client", m.ClientAddr,
 		"provider", grant.Account.Provider, "subject", grant.Account.Subject, "device", grant.DeviceID)
-	if grant.Kind == edgeproto.KindClaim {
+	switch m.Kind {
+	case edgeproto.KindHTTP:
+		a.serveHTTP(ctx, rc)
+	case edgeproto.KindClaim:
 		a.cfg.SSH.ServeEdgeClaim(ctx, rc, grant, a.claimAttempt(grant))
-	} else {
+	default:
 		a.cfg.SSH.ServeEdgeConn(ctx, rc, grant)
 	}
 	_ = rc.Close()

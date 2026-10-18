@@ -662,12 +662,14 @@ func (noRuns) WithStoppedTerminal(_ context.Context, _ domain.MemberID, afterSto
 }
 
 // serverNode is one Aether server: sshd over a real store, and the edge
-// agent enrolled with the harness's edge, under an access policy.
+// agent enrolled with the harness's edge, under an access policy. mcp,
+// when set, serves the MCP connector requests the edge relays.
 type serverNode struct {
 	h      *harness
 	id     string
 	dir    string
 	policy edgeproto.AccessPolicy
+	mcp    http.Handler
 	addr   string
 	db     *store.DB
 	ssh    *sshd.Server
@@ -677,7 +679,13 @@ type serverNode struct {
 
 func (h *harness) newServer(policy edgeproto.AccessPolicy) *serverNode {
 	h.t.Helper()
-	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, addr: "127.0.0.1:0"}
+	return h.newMCPServer(policy, nil)
+}
+
+// newMCPServer is newServer with mcp serving its MCP connector requests.
+func (h *harness) newMCPServer(policy edgeproto.AccessPolicy, mcp http.Handler) *serverNode {
+	h.t.Helper()
+	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, mcp: mcp, addr: "127.0.0.1:0"}
 	s.start()
 	h.t.Cleanup(func() { s.stop() })
 	return s
@@ -710,7 +718,8 @@ func (s *serverNode) start() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: s.h.relayURL, DataDir: s.dir, HostKey: hostKey, SSH: srv, AccessPolicy: s.policy})
+	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: s.h.relayURL, DataDir: s.dir, HostKey: hostKey, SSH: srv,
+		AccessPolicy: s.policy, HTTP: s.mcp})
 	if err != nil {
 		t.Fatal(err)
 	}

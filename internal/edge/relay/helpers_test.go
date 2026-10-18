@@ -94,6 +94,15 @@ func (d *fakeDir) Admit(_ context.Context, serverID string, a edgeproto.Account)
 	return edgeproto.RefusalNotMember
 }
 
+func (d *fakeDir) Known(_ context.Context, serverID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.owners[serverID] {
+		return edgeproto.RefusalUnknownServer
+	}
+	return nil
+}
+
 func (d *fakeDir) AdmitClaim(_ context.Context, serverID string, _ edgeproto.Account, addr netip.Addr) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -376,9 +385,17 @@ func helloFor(t *testing.T, signer ssh.Signer, origin string, nonce []byte) edge
 // enroll connects a server with signer and waits for ready.
 func enroll(t *testing.T, e *env, signer ssh.Signer) *agent {
 	t.Helper()
+	return enrollAt(t, e, signer, edgeproto.Version)
+}
+
+// enrollAt is enroll by a server speaking protocol version.
+func enrollAt(t *testing.T, e *env, signer ssh.Signer, version int) *agent {
+	t.Helper()
 	ws := dialControl(t, e)
 	c := challenge(t, ws)
-	send(t, ws, helloFor(t, signer, e.origin, c.Nonce))
+	hello := helloFor(t, signer, e.origin, c.Nonce)
+	hello.Version = version
+	send(t, ws, hello)
 	m, err := recv(t.Context(), ws)
 	if err != nil {
 		t.Fatal(err)
