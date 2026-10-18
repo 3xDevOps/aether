@@ -17,6 +17,7 @@ const readline = require('node:readline')
 
 const { boundCli } = require('./cli-binding')
 const notify = require('./notify')
+const { sidecarExitAction } = require('./sidecar-exit')
 
 // The full CLI build identity is separate from package.json's npm-valid
 // version: git-describe and dev builds cannot use their identities there.
@@ -32,10 +33,6 @@ try {
 } catch (err) {
   bindingError = err
 }
-
-// The exit status `aether gui --json` uses to say it replaced this app on
-// disk: relaunch the shell, do not respawn the sidecar (localgw.ExitRelaunch).
-const RELAUNCH_EXIT = 75
 
 // --- single instance ----------------------------------------------------
 
@@ -160,6 +157,8 @@ function main() {
 
     child = spawn(bin, ['gui', '--json', '--port', '0'], {
       stdio: ['ignore', 'pipe', 'inherit'],
+      // Tells the gateway this shell quits on exit 76 (localgw.ShellQuitsEnv).
+      env: { ...process.env, AETHER_SHELL_QUITS_ON_76: '1' },
     })
 
     // The sidecar prints exactly one JSON line on stdout, then serves.
@@ -207,12 +206,15 @@ function main() {
       child = null
       notify.stop()
       if (quitting) return
-      // The gateway rebuilt this app on disk (`update.apply`) and asked for
-      // a relaunch: respawning the sidecar would leave the user in the old
-      // shell around a new CLI. Everything else keeps the respawn path.
-      if (code === RELAUNCH_EXIT) {
+      // The gateway replaced this app on disk (`update.apply`). Respawning
+      // the sidecar would leave the user in the old shell around a new CLI;
+      // on Windows a detached helper swaps the app directory once this
+      // process is gone, so relaunching here would start into a half-swapped
+      // one. Everything else keeps the respawn path.
+      const action = sidecarExitAction(code)
+      if (action !== 'respawn') {
         quitting = true
-        app.relaunch()
+        if (action === 'relaunch') app.relaunch()
         app.exit(0)
         return
       }

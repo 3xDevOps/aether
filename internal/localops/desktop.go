@@ -336,6 +336,7 @@ func InstallDesktop(goos, home string, src DesktopSource, cliPath string, icon [
 	if err = os.MkdirAll(parent, 0o755); err != nil {
 		return DesktopApp{}, err
 	}
+	restoreSetAside(app.App)
 	// Leftovers from an earlier swap whose removal the running app blocked.
 	// It may have exited since; if it has not, the next install tries again.
 	sweepInstallLeftovers(parent)
@@ -450,6 +451,24 @@ func swapInstalled(goos, staged, target string) error {
 		_ = os.RemoveAll(filepath.Dir(old))
 	}
 	return nil
+}
+
+// restoreSetAside puts back the app a swap killed between its two renames
+// left only in a set-aside directory, so the sweep that follows does not
+// delete the one working copy. An app that is in place keeps its name.
+func restoreSetAside(target string) {
+	if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	aside, err := filepath.Glob(filepath.Join(filepath.Dir(target), installOldPrefix+"*", filepath.Base(target)))
+	if err != nil {
+		return
+	}
+	for _, old := range aside {
+		if os.Rename(old, target) == nil {
+			return
+		}
+	}
 }
 
 // sweepInstallLeftovers deletes the staging and set-aside directories an

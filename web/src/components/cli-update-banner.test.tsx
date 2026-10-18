@@ -47,8 +47,8 @@ test('shows the CLI banner to a collaborator when the CLI is behind', async () =
   expect(client.localUpdateCheck).toHaveBeenCalledTimes(1)
 })
 
-// Windows cannot replace a running binary, so the button and `aether
-// update` would only ever fail: the banner names the installer instead.
+// Where update.apply cannot replace the binary, the banner links the
+// release page instead of offering a button.
 test('offers no button or command where the CLI cannot update itself', async () => {
   const status = updateStatus()
   const client = fakeApi({
@@ -63,7 +63,7 @@ test('offers no button or command where the CLI cannot update itself', async () 
   render(<UpdateHost client={client} />)
 
   expect(
-    await screen.findByText(/Self-update is not supported on Windows\. Close Aether, then rerun install\.ps1 to install v1\.3\.0\./),
+    await screen.findByText(/This aether cannot update itself\. Install v1\.3\.0 from its release page\./),
   ).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Release v1.3.0' }).getAttribute('href')).toBe(
     'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
@@ -335,6 +335,26 @@ test('a binary the gateway cannot write gets the sudo command and no button', as
   expect(screen.getByRole('button', { name: 'Copy sudo aether update' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
   expect(screen.queryByText(/Updating replaces the aether binary/)).toBeNull()
+})
+
+test('a Windows binary the gateway cannot write gets no sudo, only an elevated terminal', async () => {
+  const base = updateStatus()
+  const client = fakeApi({
+    localUpdateCheck: vi.fn(async () =>
+      updateStatus({
+        cli: { ...base.cli, asset: 'aether-windows-amd64.exe' },
+        cli_path: 'C:\\Program Files\\Aether\\aether.exe',
+        install_method: 'manual',
+      }),
+    ),
+  })
+  seed()
+  render(<UpdateHost client={client} />)
+
+  expect(await screen.findByText(/Run as administrator/)).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Copy aether update' })).toBeTruthy()
+  expect(screen.queryByText(/sudo/)).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
 })
 
 // Dismissing records the version, not a flag: the next release is a new

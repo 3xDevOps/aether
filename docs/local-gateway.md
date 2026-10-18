@@ -177,6 +177,18 @@ other exit keeps the shell's respawn-with-backoff behavior, which is what a
 failed rebuild wants - the CLI half of the update did land, and the shell
 should come back on the new binary.
 
+On Windows the shell cannot be relaunched that way: it runs from the app
+directory the update has to rename, and Windows refuses to rename a running
+app's directory. There the gateway exits **76**, meaning "quit; an updater
+restarts you". The shell calls `app.exit(0)` without relaunching or
+respawning (`desktop/sidecar-exit.js` maps every exit status to its action).
+A shell says it understands 76 by setting `AETHER_SHELL_QUITS_ON_76=1` in
+the sidecar's environment. An older shell respawns on 76 and never quits, so
+without that variable a supervised Windows gateway starts no helper: it
+records "this desktop app is too old to update itself on Windows: quit it
+and run `aether gui build`, or reinstall the desktop app" as the build
+error, exits **0**, and the older shell respawns on the new CLI.
+
 ## Design
 
 Both transports use `internal/webgate` for HTTP and WebSocket dispatch. The
@@ -1965,8 +1977,7 @@ the server snapshot from loading.
   is a release tag newer than this CLI, otherwise `latest` when that is
   newer, otherwise empty. It is empty too for a dev build and with
   `AETHER_NO_UPDATE_CHECK` set. `can_self_update` is true when
-  `update.apply` can install it here; it is false for a dev build, on
-  Windows, and with `AETHER_PACKAGED` set, where `target_version` is still
+  `update.apply` can install it here; it is false for a dev build and with `AETHER_PACKAGED` set, where `target_version` is still
   reported so the client can link its release page. `server_first` is true
   when the linked server runs a release older than the target, this member
   is an admin, and `server.update_status` reports the server `capable` of
@@ -2072,7 +2083,8 @@ the server snapshot from loading.
   root-owned copy by root, on the installed file by the user. Linux and
   Windows are unchanged in kind; the only Linux-visible change is that the
   banner shows `sudo aether update` before the click instead of a button
-  that fails.
+  that fails. On Windows the banner shows `aether update` with "run it from an
+  elevated terminal (Run as administrator), or reinstall"; there is no sudo.
 - The call waits on the request context only: there is no dialog timeout,
   because a native authorization dialog has none, and a request that closed
   under the user would leave the dialog on screen with the password
@@ -2103,7 +2115,23 @@ the server snapshot from loading.
   to the process that exited.
 - A supervised gateway exits only once the rebuild ends: **75** on success,
   so the shell relaunches onto the new app, and **0** on failure, so the
-  shell respawns the sidecar on the new CLI. A failed build is also written
+  shell respawns the sidecar on the new CLI. On Windows the rebuild only
+  *stages* the app (`aether gui build --json --stage` downloads or builds it
+  into `<user cache>/aether/desktop-build/staged-app` and installs nothing),
+  because the app directory cannot be renamed while the shell runs and the
+  gateway dies with the shell. The gateway then starts the updated CLI as a
+  detached helper, `aether gui build --staged --after-exit <shell pid>,<gateway pid>`
+  (`DETACHED_PROCESS`, no `powershell.exe` or `cmd.exe`, working directory
+the temp directory so it never holds the app directory open), and exits
+**76**.
+  The helper waits for both processes by handle, for at most a minute; ends
+  the `aether-daemon` Scheduled Task if it is running (`schtasks /End` does not
+  trigger the task's restart-on-failure); swaps the app in with the same
+  rename-and-roll-back install as `aether gui build`; starts the task again
+  with `schtasks /Run`; and starts the app. If a step fails, the helper leaves the old app in place, starts it,
+  and writes the error to `last-error.txt`, so the next dashboard shows it as
+  `shell_build_error`. If the helper itself cannot start, the gateway
+  records that and exits **0**, leaving the old app running. A failed build is also written
   to `<user cache>/aether/desktop-build/last-error.txt`, which the next
   gateway's `update.check` returns as `shell_build_error` so the dashboard
   can show what went wrong; the next successful `aether gui build` removes

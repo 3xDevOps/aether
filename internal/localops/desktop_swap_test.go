@@ -9,6 +9,7 @@
 package localops
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -87,6 +88,30 @@ func TestInstallDesktopSweepsEarlierLeftovers(t *testing.T) {
 		t.Fatalf("InstallDesktop: %v", err)
 	}
 	leftovers(t, filepath.Dir(app.App))
+}
+
+// A helper killed between the swap's two renames leaves the working app
+// only in a set-aside directory. The next install restores it first, so the
+// sweep never deletes the only copy, and then installs over it.
+func TestInstallDesktopRestoresTheAppASwapKilledMidwayLeftAside(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", "")
+	parent := filepath.Join(home, ".local", "share", "aether")
+	aside := filepath.Join(parent, installOldPrefix+"killed", "desktop")
+	if err := os.MkdirAll(aside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(aside, "aether-desktop"), []byte("working"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	failing := func(string) error { return errors.New("download failed") }
+	if _, err := InstallDesktop("linux", home, failing, "/opt/aether/aether", []byte("png")); err == nil {
+		t.Fatal("InstallDesktop reported success for a source that failed")
+	}
+	if got, err := os.ReadFile(filepath.Join(parent, "desktop", "aether-desktop")); err != nil || string(got) != "working" {
+		t.Fatalf("app after a failed install = %q, %v; want the set-aside copy restored, not swept", got, err)
+	}
+	leftovers(t, parent)
 }
 
 // leftovers fails when a swap left a staging or set-aside directory behind.

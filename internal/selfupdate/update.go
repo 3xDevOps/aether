@@ -16,13 +16,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/macinstall"
 )
 
-// ErrWindows refuses the in-place swap on Windows. Windows locks a running
-// image against being written or deleted, but it does allow that image to be
-// renamed out of the way, which is how an in-place swap is done there. That
-// is implementable and not yet implemented; until it is, the one documented
-// path is a manual download.
-var ErrWindows = errors.New("self-update is not supported on Windows; download the release from https://github.com/" + Repo + "/releases")
-
 // adminInstaller installs one staged file through the platform's
 // administrator dialog. It is the one step that runs with privileges, and
 // it runs outside this process.
@@ -157,9 +150,6 @@ func UpdateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 }
 
 func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, companions []string, admin adminInstaller) ([]string, error) {
-	if runtime.GOOS == "windows" {
-		return nil, ErrWindows
-	}
 	self, err := filepath.EvalSymlinks(self)
 	if err != nil {
 		return nil, fmt.Errorf("resolve this binary: %w", err)
@@ -185,6 +175,9 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 	}
 
 	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
+	if runtime.GOOS == "windows" {
+		suffix += ".exe"
+	}
 	targets := []struct{ asset, dst string }{{primary + suffix, self}}
 	for _, name := range companions {
 		path := filepath.Join(dir, name)
@@ -218,7 +211,7 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 		if authorize {
 			cerr = s.installWithAuthorization(ctx, admin, tag)
 		} else {
-			cerr = s.Commit()
+			cerr = s.commitChecked()
 		}
 		if cerr != nil {
 			if len(replaced) == 0 {
@@ -341,7 +334,11 @@ func CheckWritable(dir string) error {
 		if errors.Is(err, os.ErrPermission) {
 			// The wrapped error comes first so the command to copy ends
 			// the sentence instead of running into a second colon.
-			return fmt.Errorf("%w: %s is not writable by this user; re-run as `sudo aether update`", err, dir)
+			rerun := "re-run as `sudo aether update`"
+			if runtime.GOOS == "windows" {
+				rerun = "re-run `aether update` from an elevated terminal"
+			}
+			return fmt.Errorf("%w: %s is not writable by this user; %s", err, dir, rerun)
 		}
 		return fmt.Errorf("stage an update in %s: %w", dir, err)
 	}

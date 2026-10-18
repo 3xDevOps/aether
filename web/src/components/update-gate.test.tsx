@@ -108,7 +108,7 @@ test('a binary this account cannot write gets sudo and no button', () => {
   expect(screen.getByText('sudo aether update')).toBeTruthy()
 })
 
-test('Windows names the release and the installer, never aether update', () => {
+test('names the release and its page, never aether update, where the CLI cannot update itself', () => {
   useStore.setState({
     update: updateStatus({
       client_update_required: true,
@@ -118,7 +118,7 @@ test('Windows names the release and the installer, never aether update', () => {
     }),
   })
   render(<UpdateGate client={fakeApi()} />)
-  expect(screen.getByText(/Self-update is not supported on Windows\. Close Aether, then rerun install\.ps1 to install v1\.3\.0\./, { ignore: 'pre' })).toBeTruthy()
+  expect(screen.getByText(/This aether cannot update itself\. Install v1\.3\.0 from its release page\./, { ignore: 'pre' })).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Release v1.3.0' }).getAttribute('href')).toBe(
     'https://github.com/3xDevOps/Aether/releases/tag/v1.3.0',
   )

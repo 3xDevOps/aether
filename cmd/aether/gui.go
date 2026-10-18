@@ -89,6 +89,8 @@ func runGUI(args []string) error {
 		// The desktop shell spawns `aether gui --json` and restarts it,
 		// so an update applied from the dashboard can exit the process.
 		Supervised: *jsonOut,
+		// The desktop shell sets it when it quits on exit 76.
+		ShellQuitsOnHandoff: os.Getenv(localgw.ShellQuitsEnv) != "",
 	})
 	if err != nil {
 		return err
@@ -125,7 +127,9 @@ func runGUI(args []string) error {
 	if code := gw.ExitCode(); code != 0 {
 		// localgw.ExitRelaunch: update.apply rebuilt the desktop app, so
 		// the shell has to relaunch itself instead of respawning this
-		// sidecar into the window running the old app. The deferred Close
+		// sidecar into the window running the old app.
+		// localgw.ExitUpdaterRestarts: a detached helper installs the app
+		// and restarts it, so the shell only quits. The deferred Close
 		// does not run past os.Exit, so drain the gateway first.
 		_ = gw.Close()
 		os.Exit(code)

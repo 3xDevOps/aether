@@ -2,7 +2,7 @@
 
 // The desktop-app rebuild update.apply starts. The fixtures are shell
 // scripts standing in for `aether gui build --json`, so this file is unix
-// only; update.apply itself refuses on Windows before it gets here.
+// only.
 
 package localgw
 
@@ -446,5 +446,92 @@ func TestUpdateApplyRecordsARebuildThatCannotStart(t *testing.T) {
 	}
 	if recorded := localops.LastDesktopBuildError(); !strings.Contains(recorded, "ghost") {
 		t.Fatalf("recorded error = %q, want the lookup failure", recorded)
+	}
+}
+
+// On Windows the shell's directory cannot be swapped while it runs: the
+// build only stages, a detached helper installs, and the shell is told to
+// quit rather than relaunch.
+func stubHandoff(t *testing.T, start func(bin string, pids []int) error) {
+	t.Helper()
+	oldStart, oldOS := startHandoff, handoffOS
+	t.Cleanup(func() { startHandoff, handoffOS = oldStart, oldOS })
+	handoffOS = "windows"
+	startHandoff = start
+}
+
+func TestUpdateApplyOnWindowsStagesThenHandsOffToTheHelper(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, true)
+	g.cfg.ShellQuitsOnHandoff = true
+	args := filepath.Join(t.TempDir(), "args")
+	stubRebuild(t, scriptBuild(t,
+		`printf '%s\n' "$@" > `+shellQuote(args)+"\n"+
+			`printf '{"phase":"done","path":"staged"}\n'`+"\n"), true)
+	var started []int
+	stubHandoff(t, func(bin string, pids []int) error {
+		if bin != "/usr/local/bin/aether" {
+			t.Errorf("helper binary = %q, want the updated CLI", bin)
+		}
+		started = pids
+		return nil
+	})
+
+	applyForRebuild(t, g)
+	waitForExit(t, g)
+	if g.ExitCode() != ExitUpdaterRestarts {
+		t.Fatalf("exit code = %d, want %d so the shell quits and the helper restarts it", g.ExitCode(), ExitUpdaterRestarts)
+	}
+	if len(started) != 2 || started[0] != os.Getppid() || started[1] != os.Getpid() {
+		t.Fatalf("helper waits for %v, want the shell (%d) and this gateway (%d)", started, os.Getppid(), os.Getpid())
+	}
+	if got, _ := os.ReadFile(args); strings.TrimSpace(string(got)) != "--stage" {
+		t.Fatalf("build arguments = %q, want --stage", got)
+	}
+}
+
+func TestUpdateApplyOnWindowsRespawnsWhenTheHelperCannotStart(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, true)
+	g.cfg.ShellQuitsOnHandoff = true
+	stubRebuild(t, fakeBuild(t, `{"phase":"done","path":"staged"}`+"\n", "", 0), true)
+	stubHandoff(t, func(string, []int) error {
+		return errors.New("localops: start the desktop update helper: access is denied")
+	})
+
+	applyForRebuild(t, g)
+	waitForExit(t, g)
+	if g.ExitCode() != 0 {
+		t.Fatalf("exit code = %d, want 0: the app was not touched, so the shell respawns", g.ExitCode())
+	}
+	if got := localops.LastDesktopBuildError(); !strings.Contains(got, "access is denied") {
+		t.Fatalf("recorded = %q, want the real error", got)
+	}
+}
+
+// An older shell respawns the sidecar on exit 76 and never quits, so the
+// helper would wait a minute for it and skip the install.
+func TestUpdateApplyOnWindowsLeavesAnOlderShellAlone(t *testing.T) {
+	pinVersion(t)
+	g := updateGateway(t, &verbStubBackend{}, true)
+	stubRebuild(t, fakeBuild(t, "", "", 0), true)
+	rebuildArgv = func(string, localops.RealUser, bool) []string {
+		t.Fatal("a shell that does not quit on 76 cannot be handed off; nothing may be built")
+		return nil
+	}
+	stubHandoff(t, func(string, []int) error {
+		t.Fatal("no helper may start for a shell that does not quit on 76")
+		return nil
+	})
+
+	if got := applyForRebuild(t, g); got.Rebuilding {
+		t.Fatalf("apply = %+v, want no rebuild", got)
+	}
+	waitForExit(t, g)
+	if g.ExitCode() != 0 {
+		t.Fatalf("exit code = %d, want 0 so the older shell respawns on the new CLI", g.ExitCode())
+	}
+	if got := localops.LastDesktopBuildError(); !strings.Contains(got, "aether gui build") {
+		t.Fatalf("recorded = %q, want the way to update the app", got)
 	}
 }

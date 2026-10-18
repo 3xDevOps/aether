@@ -34,6 +34,7 @@ var trust sync.Once
 type Release struct {
 	*httptest.Server
 
+	baseURL     string
 	mu          sync.Mutex
 	latest      string
 	assets      map[string][]byte
@@ -47,17 +48,35 @@ type Release struct {
 // assets under every tag. It is closed when the test ends.
 func Serve(t testing.TB, latest string, assets map[string][]byte) *Release {
 	t.Helper()
-	trust.Do(func() { selfupdate.TrustKeysForTest(Key.Public().(ed25519.PublicKey)) })
-	r := &Release{
+	trust.Do(func() { selfupdate.TrustKeysForTest(PublicKey()) })
+	r := newRelease(latest, assets)
+	r.Server = httptest.NewServer(http.HandlerFunc(r.serveHTTP))
+	r.baseURL = r.URL
+	t.Cleanup(r.Close)
+	return r
+}
+
+// Handler is Serve for a command outside a test: it answers as the release
+// host at baseURL and trusts nothing, so the binary that talks to it must
+// be built to trust PublicKey.
+func Handler(baseURL, latest string, assets map[string][]byte) http.Handler {
+	r := newRelease(latest, assets)
+	r.baseURL = baseURL
+	return http.HandlerFunc(r.serveHTTP)
+}
+
+// PublicKey is the key whose signature a client must trust to accept a
+// release this package serves.
+func PublicKey() ed25519.PublicKey { return Key.Public().(ed25519.PublicKey) }
+
+func newRelease(latest string, assets map[string][]byte) *Release {
+	return &Release{
 		latest:      latest,
 		assets:      assets,
 		served:      map[string][]byte{},
 		storeSchema: store.SchemaVersion(),
 		requests:    map[string]int{},
 	}
-	r.Server = httptest.NewServer(http.HandlerFunc(r.serveHTTP))
-	t.Cleanup(r.Close)
-	return r
 }
 
 // SetLatest publishes tag as the latest release; the empty string makes
@@ -112,7 +131,7 @@ func (r *Release) manifest(tag string) selfupdate.Manifest {
 		Version:     tag,
 		Commit:      "0123456789abcdef0123456789abcdef01234567",
 		PublishedAt: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC),
-		NotesURL:    r.URL + "/releases/tag/" + tag,
+		NotesURL:    r.baseURL + "/releases/tag/" + tag,
 		StoreSchema: r.storeSchema,
 		Assets:      map[string]selfupdate.Asset{},
 	}

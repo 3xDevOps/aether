@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
 // Method is how the running binary can be replaced from a GUI session.
@@ -20,8 +19,7 @@ const (
 	// UpdateWithAuthorization installs through the administrator dialog.
 	MethodAdminPrompt Method = "admin-prompt"
 	// MethodManual: the binary cannot be replaced from here, and the
-	// user runs the documented command - `sudo aether update` on Linux,
-	// a download on Windows.
+	// user runs the documented command - `sudo aether update` on Linux.
 	MethodManual Method = "manual"
 )
 
@@ -56,9 +54,6 @@ func Probe() (Access, error) {
 // access classifies one resolved binary path.
 func access(self string) (Access, error) {
 	out := Access{Path: self, Method: MethodManual}
-	if runtime.GOOS == "windows" {
-		return out, nil
-	}
 	err := CheckWritable(filepath.Dir(self))
 	switch {
 	case err == nil:

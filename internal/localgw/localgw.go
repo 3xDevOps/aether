@@ -53,6 +53,10 @@ type Config struct {
 	// Supervised marks a gateway the desktop shell spawned: update.apply
 	// exits the process because the shell restarts it.
 	Supervised bool
+	// ShellQuitsOnHandoff says the shell quits on ExitUpdaterRestarts. A
+	// shell that does not say so respawns on that status, so the Windows
+	// handoff must not be started for it.
+	ShellQuitsOnHandoff bool
 	// Packaged names the app that installs this binary's updates, such as
 	// "Android app". Such a gateway runs without a git checkout, a service
 	// manager or local coding agents, so it omits the verbs that need them.

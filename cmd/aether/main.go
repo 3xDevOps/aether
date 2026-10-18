@@ -12,10 +12,12 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/3xDevOps/Aether/internal/selfupdate"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
 func main() {
+	selfupdate.RemoveOld()
 	useResolvConfEnv()
 	if err := dispatch(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "aether:", err)

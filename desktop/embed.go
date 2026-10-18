@@ -8,5 +8,5 @@ import "embed"
 // package manifest, lockfile and builder config, and the icon set.
 // node_modules and dist are build outputs and never ship.
 //
-//go:embed main.js cli-binding.js notify.js preload.js package.json package-lock.json electron-builder.yml build/icon.ico build/icons
+//go:embed main.js cli-binding.js notify.js sidecar-exit.js preload.js package.json package-lock.json electron-builder.yml build/icon.ico build/icons
 var Source embed.FS

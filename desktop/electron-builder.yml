@@ -19,6 +19,7 @@ files:
   - main.js
   - cli-binding.js
   - notify.js
+  - sidecar-exit.js
   - preload.js
   - package.json
 

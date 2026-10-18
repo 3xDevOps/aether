@@ -102,3 +102,138 @@ jobs:
           path: ${{ runner.temp }}/windows-desktop.png
           if-no-files-found: ignore
           retention-days: 7
+
+  # The dashboard every update leg embeds, built once: the arm64 runner has
+  # no native Bun.
+  dashboard:
+    name: dashboard (embedded by the update legs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/.bun-version
+          no-cache: true
+      - working-directory: web
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
+
+  # What Linux cannot show: replacing aether.exe while it runs, and the
+  # desktop app's helper swapping the app directory the running app holds,
+  # under real-time Defender. docs/testing.md has the details.
+  update:
+    name: update (${{ matrix.arch }}, running aether.exe and desktop)
+    needs: dashboard
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: windows-latest
+          - arch: arm64
+            runner: windows-11-arm
+    defaults:
+      run:
+        shell: powershell
+    env:
+      OLD_VERSION: v0.5.1-alpha.4
+      NEW_VERSION: v0.5.1-alpha.5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Start the Defender signature update in the background
+        run: ./scripts/windows-defender.ps1 -Mode StartUpdate
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+          variant: windows-install
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      # The script drives the running app over its debugging port; the
+      # package alone is enough, with no browser download.
+      - name: Install Playwright's CDP client
+        run: |
+          npm install --prefix "$env:RUNNER_TEMP\pw" --no-audit --no-fund playwright-core@1.63.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # Both clients trust the fake release's key instead of the release
+      # key. The overlay swaps one file at build time; no source changes.
+      # They are built the way release.yml builds the Windows CLI: the
+      # goversioninfo resource and manifest, -trimpath, and release ldflags.
+      - name: Build the old and new clients and the fake release
+        run: |
+          go build -o "$env:RUNNER_TEMP/fake-release.exe" ./internal/selfupdate/releasetest/cmd/fake-release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $public = & "$env:RUNNER_TEMP/fake-release.exe" -pubkey
+          $keys = Join-Path $PWD 'internal/selfupdate/keys.go'
+          $source = [IO.File]::ReadAllText($keys)
+          $patched = [regex]::Replace($source, '"[A-Za-z0-9+/]{43}="', ('"' + $public + '"'))
+          if ($patched -eq $source) { throw 'keys.go has no release key to replace.' }
+          $trusting = Join-Path $env:RUNNER_TEMP 'keys.go'
+          [IO.File]::WriteAllText($trusting, $patched, (New-Object Text.UTF8Encoding($false)))
+          $overlay = Join-Path $env:RUNNER_TEMP 'overlay.json'
+          [IO.File]::WriteAllText($overlay, (@{ Replace = @{ $keys = $trusting } } | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
+          $versionInfo = @('-64', '-icon', 'desktop/build/icon.ico', '-manifest', 'packaging/windows/aether.manifest',
+            '-ver-major', '0', '-ver-minor', '5', '-ver-patch', '1', '-ver-build', '0',
+            '-product-ver-major', '0', '-product-ver-minor', '5', '-product-ver-patch', '1', '-product-ver-build', '0',
+            '-file-version', '0.5.1.0', '-product-version', '0.5.1.0')
+          if ('${{ matrix.arch }}' -eq 'arm64') { $versionInfo += '-arm' }
+          go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 @versionInfo `
+            -o "cmd/aether/resource_windows_${{ matrix.arch }}.syso" packaging/windows/versioninfo.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:CGO_ENABLED = '0'
+          foreach ($pair in @(@('old', $env:OLD_VERSION), @('new', $env:NEW_VERSION))) {
+            go build -trimpath -overlay $overlay -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=$($pair[1]) -X github.com/3xDevOps/Aether/internal/version.Commit=$env:GITHUB_SHA" -o "$env:RUNNER_TEMP/aether-$($pair[0]).exe" ./cmd/aether
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - id: desktop
+        uses: ./.github/actions/desktop-windows-zip
+        with:
+          version: ${{ env.OLD_VERSION }}
+          arch: ${{ matrix.arch }}
+      # What users have today: the newest published release's CLI, not built
+      # from this checkout.
+      - name: Download the latest published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'published'
+          gh release download --repo $env:GITHUB_REPOSITORY --dir $dir --pattern 'aether-windows-${{ matrix.arch }}.exe'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $tag = gh release view --repo $env:GITHUB_REPOSITORY --json tagName --jq .tagName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "PUBLISHED_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "PUBLISHED_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Enable Defender realtime and cloud protection
+        run: ./scripts/windows-defender.ps1 -Mode Prepare
+      - name: Update a running aether.exe and desktop app under Defender
+        env:
+          DESKTOP_ZIP: ${{ steps.desktop.outputs.zip }}
+        run: |
+          ./scripts/update-smoke.ps1 `
+            -OldCli "$env:RUNNER_TEMP/aether-old.exe" -NewCli "$env:RUNNER_TEMP/aether-new.exe" `
+            -FakeRelease "$env:RUNNER_TEMP/fake-release.exe" -DesktopZip $env:DESKTOP_ZIP `
+            -OldVersion $env:OLD_VERSION -NewVersion $env:NEW_VERSION -Arch ${{ matrix.arch }} `
+            -Playwright "$env:RUNNER_TEMP\pw\node_modules\playwright-core" `
+            -PublishedCli "$env:PUBLISHED_DIR\aether-windows-${{ matrix.arch }}.exe" `
+            -PublishedTag $env:PUBLISHED_TAG

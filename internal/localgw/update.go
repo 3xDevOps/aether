@@ -80,7 +80,7 @@ func (g *Gateway) localUpdateCheck(r *http.Request, body []byte) (any, *protocol
 		// until `aether server update` has run.
 		ServerFirst bool `json:"server_first"`
 		// CanSelfUpdate reports that update.apply can install a release
-		// here: false for a dev build, on Windows, and in a packaged app.
+		// here: false for a dev build and in a packaged app.
 		CanSelfUpdate bool `json:"can_self_update"`
 	}{
 		CLI: check, Supervised: g.cfg.Supervised, ShellBuildError: localops.LastDesktopBuildError(),
@@ -194,8 +194,6 @@ func (g *Gateway) localUpdateApply(r *http.Request, _ []byte) (any, *protocol.Er
 	case check.Disabled:
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
 			Message: "release checks are off: " + selfupdate.OptOutEnv + " is set in this process's environment"}
-	case !check.CanSelfUpdate:
-		return nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: selfupdate.ErrWindows.Error()}
 	case g.serverFirst(r, info, target):
 		return nil, &protocol.Error{Code: protocol.CodeInvalidState,
 			Message: "update the server first: aether server update (the server runs " + info.ServerVersion + " and this installs " + target + ")"}

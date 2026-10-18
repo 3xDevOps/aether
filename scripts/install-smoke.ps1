@@ -386,6 +386,7 @@ const { chromium } = require(process.argv[2])
     Write-Host 'Defender scan of the installer downloads, CLI, Node, and desktop is clean.'
 } catch {
     Write-Host $_.ScriptStackTrace
+    & "$PSScriptRoot/defender-diagnostics.ps1"
     throw
 } finally {
     try {

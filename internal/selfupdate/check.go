@@ -58,8 +58,8 @@ type Check struct {
 	// Packaged is the app that installs this binary's updates, empty when
 	// the binary updates itself. Asset is empty when it is set.
 	Packaged string `json:"packaged,omitempty"`
-	// CanSelfUpdate is false on Windows, which cannot rename over a
-	// running executable.
+	// CanSelfUpdate is false in a packaged app, which installs its own
+	// updates.
 	CanSelfUpdate bool `json:"can_self_update"`
 	// CheckedAt is when this answer was produced, cached answers included.
 	CheckedAt time.Time `json:"checked_at"`
@@ -279,7 +279,7 @@ func (c *Checker) CheckFresh(ctx context.Context) (Check, error) {
 	out := Check{
 		Version:       version.Version,
 		Commit:        version.Commit,
-		CanSelfUpdate: runtime.GOOS != "windows",
+		CanSelfUpdate: true,
 		CheckedAt:     c.now(),
 	}
 	if packaged := os.Getenv(PackagedEnv); packaged != "" {

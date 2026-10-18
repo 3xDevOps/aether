@@ -355,7 +355,22 @@ in that time fails the command with the unit's state.
 is newer (or installs `--version <tag>`), verifying it against the release's
 signed manifest ([Verified releases](#verified-releases)). On Linux, an
 `aether-server` beside the CLI is updated too, but not restarted; restart it
-yourself (`sudo systemctl restart aether-server` under a unit). On a host
+yourself (`sudo systemctl restart aether-server` under a unit). On Windows,
+which has no `aether-server`, Windows refuses to overwrite a running
+`aether.exe` but allows renaming it, so the update renames it to
+`aether.exe.old`, puts the new binary at `aether.exe` and restores the
+original if that fails. When a process still runs from the previous
+`aether.exe.old`, the update moves the current binary to `aether.exe.old.<n>`
+instead. The next `aether` command deletes every `aether.exe.old*` that nothing
+runs from. The update then starts the new `aether.exe` (`aether version`); if
+Windows refuses it (Smart App Control, AppLocker or antivirus blocking the
+image), the update moves `aether.exe.old` back and fails with
+`replace <path>: the new build does not start, so the previous build was
+restored: <Windows error>`. An update killed mid-download leaves its
+`.aether.exe.update-*` file beside the CLI and changes nothing else; delete it.
+An update killed between the two renames leaves no `aether.exe`; restore it with
+`Move-Item -Force "$env:LOCALAPPDATA\Programs\Aether\aether.exe.old" "$env:LOCALAPPDATA\Programs\Aether\aether.exe"`
+(adjust the directory for a custom `-BinDir`). On a host
 where the `aether-server` systemd unit runs as root, `sudo aether update`
 instead runs `sudo aether-server update [--version <tag>]`, which swaps,
 restarts and rolls back the server; `--no-app` and `--force` do not apply
@@ -428,9 +443,9 @@ Put local changes in a drop-in (`sudo systemctl edit aether-server`), not in
 the unit file, or the warning repeats.
 
 Re-running either installer upgrades the client without changing its data.
-On Windows, close Aether first and rerun `install.ps1`; the default also
-rebuilds the desktop app. `aether update` still refuses on Windows.
-Replacing the release binary manually remains an option below.
+On Windows, `aether update` replaces the CLI too, or rerun `install.ps1` to
+rebuild the desktop app as well. Replacing the release binary manually
+remains an option below.
 
 The server's default standard image follows the server build, so a server
 update brings that release's environment image with it - though not into a
@@ -600,7 +615,7 @@ this CLI, as `aether update` does: the version in the prompt is re-read
 first, so it names the release the install is about to write. It runs the same swap from the
 `aether gui` process, which runs as you. A CLI in
 a directory you own - `~/.local/bin`, a Homebrew prefix - is replaced without
-a question on macOS and Linux (Windows has no self-update). A CLI in a
+a question on macOS, Linux and Windows. A CLI in a
 directory this account cannot write, such as `/usr/local/bin`, splits by
 platform, and the prompt says which case you are in before you click:
 
@@ -712,6 +727,19 @@ ends the update there with nothing changed.
 build, so the window you end up in is the new one. In a browser tab the
 gateway never exits (it is your terminal's process, not the app's): the app is
 still rebuilt, and the prompt tells you to restart it.
+
+**On Windows the app quits and comes back.** Windows cannot rename the
+directory of a running app, and the gateway doing the rebuild is a child of
+that app. The dashboard first downloads the new app into
+`%LOCALAPPDATA%\aether\desktop-build\staged-app` while the old one keeps
+running, then starts a detached `aether gui build --staged` helper and exits
+the gateway with status **76**, which tells the shell to quit without
+relaunching. The helper waits (at most a minute) for the app to exit, ends the
+`aether-daemon` Scheduled Task if you have one, swaps the app in, and starts
+it, then starts the task again if it was running. If the swap fails, the helper starts the old app and the next
+dashboard shows the error, as for any failed rebuild. A helper killed between the swap's two
+renames leaves the app only in a `.aether-old-*` directory beside `Aether Desktop`; the
+next `aether gui build` moves it back before installing.
 
 A rebuild that fails does not cost you the CLI update. The gateway records the
 build's error, the desktop app comes back on the new CLI in the old shell, and
@@ -977,8 +1005,8 @@ Use `aether-windows-arm64.exe` on an Arm device. Confirm the installed CLI with
 repair the desktop, use `v0.5.1-alpha.4` or newer and run
 `& "$dir\aether.exe" gui build`. The explicit path ensures that the desktop
 records this CLI rather than a different `aether` on `PATH`.
-To upgrade, rerun the PowerShell installer or replace the CLI manually;
-there is no `aether update` on Windows.
+To upgrade, run `aether update`, rerun the PowerShell installer or replace
+the CLI manually.
 
 To install the desktop app from a zip you downloaded, verify it the same way,
 then hand it to the CLI. `gui build` itself checks only the zip's layout, not
@@ -1293,7 +1321,8 @@ removes an older copy from the other Applications folder. The new app is
 staged beside the installed one and swapped in with a rename, so an app that
 is running while you rebuild it keeps working until you restart it - deleting
 its files under it would take the window down. Windows still holds a running
-program's files open, so close the Aether window there first. To remove
+program's files open, so close the Aether window there first; the dashboard's
+**Update now** does that for you with a staged swap. To remove
 everything, delete the two paths in the table, the `aether` cache directory
 (the build directory and the private Node copy), and, after a source build,
 those caches.

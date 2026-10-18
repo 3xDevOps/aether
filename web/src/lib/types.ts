@@ -1747,7 +1747,7 @@ export interface UpdateCheck {
   release_url?: string
   dev: boolean
   disabled: boolean
-  /** False on Windows, where the binary cannot replace itself. */
+  /** False for a packaged or development build, which cannot replace itself. */
   can_self_update: boolean
   /** The app that installs and updates this CLI, e.g. "Android app". The
    * release is still reported, with no asset and no self-update. */
