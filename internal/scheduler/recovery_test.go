@@ -1281,9 +1281,10 @@ func TestNegativeRetentionDestroysAndRejectsRelaunch(t *testing.T) {
 	if _, err := s2.Relaunch(ctx, boot.ID, e.member.ID); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("negative boot Relaunch error = %v, want ErrInvalidTransition", err)
 	}
-	if _, err := os.Stat(s2.sidecarPath(boot.ID)); !os.IsNotExist(err) {
-		t.Fatalf("negative boot sidecar still exists: %v", err)
-	}
+	waitFor(t, "negative boot sidecar removed", func() bool {
+		_, err := os.Stat(s2.sidecarPath(boot.ID))
+		return os.IsNotExist(err)
+	})
 }
 
 type destroyRetryRuntime struct {
