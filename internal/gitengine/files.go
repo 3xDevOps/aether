@@ -2,6 +2,7 @@ package gitengine
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -12,7 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -220,7 +221,7 @@ func sortedTreeEntries(entries map[string]TreeEntry) []TreeEntry {
 	for _, entry := range entries {
 		out = append(out, entry)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b TreeEntry) int { return cmp.Compare(a.Name, b.Name) })
 	return out
 }
 

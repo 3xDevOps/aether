@@ -14,7 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -1240,7 +1240,7 @@ func (h *Host) ActiveSessions(prefix string) []SessionKey {
 			keys = append(keys, entry.key)
 		}
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	slices.Sort(keys)
 	return keys
 }
 

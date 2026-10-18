@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	xterm "github.com/gitpod-io/xterm-go"
 )
@@ -74,10 +75,8 @@ func (s *session) enableProtocolResponder() {
 }
 
 func (s *terminalScreen) markUnsupportedGraphics(kind string) {
-	for _, existing := range s.unsupportedGraphics {
-		if existing == kind {
-			return
-		}
+	if slices.Contains(s.unsupportedGraphics, kind) {
+		return
 	}
 	s.unsupportedGraphics = append(s.unsupportedGraphics, kind)
 }
