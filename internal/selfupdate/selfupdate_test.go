@@ -180,6 +180,9 @@ func TestUpdateRefusesAReleaseWithoutAManifest(t *testing.T) {
 // checked against it, and swapped in.
 func TestUpdateBinariesStagesEveryAssetFromTheManifest(t *testing.T) {
 	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
+	if runtime.GOOS == "windows" {
+		suffix += ".exe"
+	}
 	_, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{
 		"aether" + suffix:        []byte("new cli"),
 		"aether-server" + suffix: []byte("new server"),

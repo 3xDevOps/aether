@@ -222,6 +222,11 @@ exit 1
     Assert (Test-Holder $holder) 'the old process survived the failed update'
     New-Item -ItemType File -Path $release | Out-Null
     $null = $lockProcess.WaitForExit(30000)
+    # Discard cannot remove a file another process held open, so the held
+    # download outlives the failed attempt; clear it for the next checks.
+    $held = @(Get-ChildItem -LiteralPath $cliDir -Force | Where-Object { $_.Name -like '.aether.exe.update-*' })
+    Write-Host "Staged downloads left by the held-open attempt: $($held.Count)"
+    $held | Remove-Item -Force
     Assert ((Get-Content -LiteralPath $sentinel) -eq 'preserve this file') 'an unrelated file in the install directory is untouched'
 
     $updated = Invoke-Native $installed @('update')
