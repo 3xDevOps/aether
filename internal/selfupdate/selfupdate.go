@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -104,6 +105,9 @@ type Staged struct {
 	// staged file was verified against. An authorized install checks the
 	// copy root makes against it a second time.
 	sum string
+	// aside is where Commit left the binary it replaced on Windows, empty
+	// when there was none.
+	aside string
 	// committed stops Discard from removing a file that is now the
 	// destination.
 	committed bool
@@ -163,32 +167,76 @@ func oldPath(dst string) string { return dst + ".old" }
 // executable but allows renaming it: dst moves to dst.old, tmp takes its
 // name, and the first move is undone if the second fails. A dst.old a
 // process still runs from cannot be deleted, so dst moves to a name of its
-// own beside it instead.
-func swapAside(tmp, dst string) error {
+// own beside it instead. It returns where dst went, empty if it did not
+// exist.
+func swapAside(tmp, dst string) (string, error) {
 	old := oldPath(dst)
 	if err := os.Remove(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		old = fmt.Sprintf("%s.%d", old, time.Now().UnixNano())
 	}
 	if err := os.Rename(dst, old); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			return err
+			return "", err
 		}
-		return os.Rename(tmp, dst)
+		return "", os.Rename(tmp, dst)
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		if rerr := os.Rename(old, dst); rerr != nil {
-			return errors.Join(err, fmt.Errorf("restore %s: %w", dst, rerr))
+			return "", errors.Join(err, fmt.Errorf("restore %s: %w", dst, rerr))
 		}
-		return err
+		return "", err
+	}
+	return old, nil
+}
+
+// keepOldEnv makes RemoveOld keep the previous build: the start check runs
+// the new binary while the rollback copy is all that stands between the
+// user and a broken CLI.
+const keepOldEnv = "AETHER_KEEP_OLD"
+
+// startCheck runs the binary a Windows update just put in place. A variable
+// so tests with stand-in binaries can skip it.
+var startCheck = func(path string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "version")
+	cmd.Env = append(os.Environ(), keepOldEnv+"=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// commitChecked is Commit, and on Windows it then starts the new binary:
+// Smart App Control, AppLocker, or antivirus can refuse an image the hash
+// check passed, and a CLI that cannot start cannot update itself back. A
+// binary that does not start is replaced by the one it displaced.
+func (s *Staged) commitChecked() error {
+	if err := s.Commit(); err != nil || runtime.GOOS != "windows" {
+		return err
+	}
+	cause := startCheck(s.dst)
+	if cause == nil {
+		return nil
+	}
+	restore := func() error {
+		if s.aside == "" {
+			return os.Remove(s.dst)
+		}
+		return os.Rename(s.aside, s.dst)
+	}
+	if err := restore(); err != nil {
+		return fmt.Errorf("replace %s: the new build does not start (%w) and the previous build could not be restored (%v); move %s back over %s", s.dst, cause, err, s.aside, s.dst)
+	}
+	s.committed = false
+	return fmt.Errorf("replace %s: the new build does not start, so the previous build was restored: %w", s.dst, cause)
 }
 
 // RemoveOld deletes the binaries previous Windows updates left beside the
 // running one. It is best-effort: a file stays while a process still runs
 // from it, and the next start tries again.
 func RemoveOld() {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != "windows" || os.Getenv(keepOldEnv) != "" {
 		return
 	}
 	self, err := os.Executable()
@@ -206,17 +254,18 @@ func RemoveOld() {
 // destination aside instead (see swapAside) and cannot sync a directory
 // handle.
 func (s *Staged) Commit() error {
-	replace := os.Rename
 	if runtime.GOOS == "windows" {
-		replace = swapAside
+		aside, err := swapAside(s.tmp, s.dst)
+		if err != nil {
+			return fmt.Errorf("replace %s: %w", s.dst, err)
+		}
+		s.aside, s.committed = aside, true
+		return nil
 	}
-	if err := replace(s.tmp, s.dst); err != nil {
+	if err := os.Rename(s.tmp, s.dst); err != nil {
 		return fmt.Errorf("replace %s: %w", s.dst, err)
 	}
 	s.committed = true
-	if runtime.GOOS == "windows" {
-		return nil
-	}
 	dir, err := os.Open(filepath.Dir(s.dst))
 	if err == nil {
 		err = dir.Sync()

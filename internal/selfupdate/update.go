@@ -211,7 +211,7 @@ func updateBinaries(ctx context.Context, baseURL, tag, self, primary string, com
 		if authorize {
 			cerr = s.installWithAuthorization(ctx, admin, tag)
 		} else {
-			cerr = s.Commit()
+			cerr = s.commitChecked()
 		}
 		if cerr != nil {
 			if len(replaced) == 0 {

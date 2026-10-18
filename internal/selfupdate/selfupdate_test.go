@@ -183,6 +183,9 @@ func TestUpdateBinariesStagesEveryAssetFromTheManifest(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		suffix += ".exe"
 	}
+	realCheck := startCheck
+	startCheck = func(string) error { return nil }
+	t.Cleanup(func() { startCheck = realCheck })
 	_, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{
 		"aether" + suffix:        []byte("new cli"),
 		"aether-server" + suffix: []byte("new server"),
@@ -234,7 +237,7 @@ func TestSwapAsideKeepsTheOldBinaryBesideTheNewOne(t *testing.T) {
 		}
 	}
 
-	if err := swapAside(tmp, dst); err != nil {
+	if _, err := swapAside(tmp, dst); err != nil {
 		t.Fatal(err)
 	}
 	for path, want := range map[string]string{dst: "new", dst + ".old": "old"} {
@@ -253,7 +256,7 @@ func TestSwapAsideInstallsWhereNothingExists(t *testing.T) {
 	if err := os.WriteFile(tmp, []byte("new"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := swapAside(tmp, dst); err != nil {
+	if _, err := swapAside(tmp, dst); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := os.ReadFile(dst); err != nil || string(got) != "new" {
@@ -268,7 +271,7 @@ func TestSwapAsideRestoresTheBinaryWhenTheStagedFileIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := swapAside(filepath.Join(dir, "missing"), dst); err == nil {
+	if _, err := swapAside(filepath.Join(dir, "missing"), dst); err == nil {
 		t.Fatal("swap succeeded without a staged file")
 	}
 	if got, err := os.ReadFile(dst); err != nil || string(got) != "old" {
