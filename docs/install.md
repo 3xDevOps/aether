@@ -355,7 +355,12 @@ in that time fails the command with the unit's state.
 is newer (or installs `--version <tag>`), verifying it against the release's
 signed manifest ([Verified releases](#verified-releases)). On Linux, an
 `aether-server` beside the CLI is updated too, but not restarted; restart it
-yourself (`sudo systemctl restart aether-server` under a unit). On a host
+yourself (`sudo systemctl restart aether-server` under a unit). On Windows,
+which has no `aether-server`, Windows refuses to overwrite a running
+`aether.exe` but allows renaming it, so the update renames it to
+`aether.exe.old`, puts the new binary at `aether.exe` and restores the
+original if that fails. The next `aether` command deletes `aether.exe.old`
+once nothing runs from it. On a host
 where the `aether-server` systemd unit runs as root, `sudo aether update`
 instead runs `sudo aether-server update [--version <tag>]`, which swaps,
 restarts and rolls back the server; `--no-app` and `--force` do not apply
@@ -428,9 +433,9 @@ Put local changes in a drop-in (`sudo systemctl edit aether-server`), not in
 the unit file, or the warning repeats.
 
 Re-running either installer upgrades the client without changing its data.
-On Windows, close Aether first and rerun `install.ps1`; the default also
-rebuilds the desktop app. `aether update` still refuses on Windows.
-Replacing the release binary manually remains an option below.
+On Windows, `aether update` replaces the CLI too, or rerun `install.ps1` to
+rebuild the desktop app as well. Replacing the release binary manually
+remains an option below.
 
 The server's default standard image follows the server build, so a server
 update brings that release's environment image with it - though not into a
@@ -600,7 +605,7 @@ this CLI, as `aether update` does: the version in the prompt is re-read
 first, so it names the release the install is about to write. It runs the same swap from the
 `aether gui` process, which runs as you. A CLI in
 a directory you own - `~/.local/bin`, a Homebrew prefix - is replaced without
-a question on macOS and Linux (Windows has no self-update). A CLI in a
+a question on macOS, Linux and Windows. A CLI in a
 directory this account cannot write, such as `/usr/local/bin`, splits by
 platform, and the prompt says which case you are in before you click:
 
@@ -977,8 +982,8 @@ Use `aether-windows-arm64.exe` on an Arm device. Confirm the installed CLI with
 repair the desktop, use `v0.5.1-alpha.4` or newer and run
 `& "$dir\aether.exe" gui build`. The explicit path ensures that the desktop
 records this CLI rather than a different `aether` on `PATH`.
-To upgrade, rerun the PowerShell installer or replace the CLI manually;
-there is no `aether update` on Windows.
+To upgrade, run `aether update`, rerun the PowerShell installer or replace
+the CLI manually.
 
 To install the desktop app from a zip you downloaded, verify it the same way,
 then hand it to the CLI. `gui build` itself checks only the zip's layout, not

@@ -5547,11 +5547,10 @@ that runs a newer release than a client refuses that client
   - *manual*: no button. The row shows `sudo aether update` with a copy
     button.
 
-  When `update.check`'s top-level `can_self_update` is not `true` (Windows,
-  a packaged or a development build), there is no button and no
-  `aether update`. One line names `target_version` and the platform's way
-  to install it, such as *Self-update is not supported on Windows. Close
-  Aether, then rerun install.ps1 to install vX.*, followed by a link to
+  When `update.check`'s top-level `can_self_update` is not `true` (a packaged or a
+  development build), there is no button and no
+  `aether update`. One line names `target_version`, such as *This aether cannot
+  update itself. Install vX from its release page.*, followed by a link to
   that tag's GitHub release page. The link appears only when the tag has
   the `vMAJOR.MINOR.PATCH[-PRERELEASE]` form.
 

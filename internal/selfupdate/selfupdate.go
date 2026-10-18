@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -154,11 +155,55 @@ func (s *Staged) close(f *os.File) {
 	s.Discard()
 }
 
+// oldPath is where Windows moves a running binary while its replacement
+// takes its name.
+func oldPath(dst string) string { return dst + ".old" }
+
+// swapAside replaces dst on Windows, which refuses to overwrite a running
+// executable but allows renaming it: dst moves to dst.old, tmp takes its
+// name, and the first move is undone if the second fails.
+func swapAside(tmp, dst string) error {
+	old := oldPath(dst)
+	if err := os.Remove(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(dst, old); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return os.Rename(tmp, dst)
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		if rerr := os.Rename(old, dst); rerr != nil {
+			return errors.Join(err, fmt.Errorf("restore %s: %w", dst, rerr))
+		}
+		return err
+	}
+	return nil
+}
+
+// RemoveOld deletes the binary a previous Windows update left beside the
+// running one. It is best-effort: the file stays while a process still runs
+// from it, and the next start tries again.
+func RemoveOld() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	if self, err := os.Executable(); err == nil {
+		_ = os.Remove(oldPath(self))
+	}
+}
+
 // Commit renames the staged file over its destination and syncs the
-// directory so a crash cannot undo the rename. Windows cannot sync a
-// directory handle.
+// directory so a crash cannot undo the rename. Windows moves the running
+// destination aside instead (see swapAside) and cannot sync a directory
+// handle.
 func (s *Staged) Commit() error {
-	if err := os.Rename(s.tmp, s.dst); err != nil {
+	replace := os.Rename
+	if runtime.GOOS == "windows" {
+		replace = swapAside
+	}
+	if err := replace(s.tmp, s.dst); err != nil {
 		return fmt.Errorf("replace %s: %w", s.dst, err)
 	}
 	s.committed = true

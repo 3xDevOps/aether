@@ -68,11 +68,6 @@ func runUpdate(args []string) error {
 		return fmt.Errorf("this aether is part of the %s, which installs its updates; update the %s instead", app, app)
 	}
 
-	if runtime.GOOS == "windows" {
-		// Refuse before the network: selfupdate.Update refuses too, but
-		// there is no reason to resolve a tag that cannot be installed.
-		return selfupdate.ErrWindows
-	}
 	if handed, err := handOffToServerUpdate(ctx, *tag, os.Stdout); handed || err != nil {
 		return err
 	}

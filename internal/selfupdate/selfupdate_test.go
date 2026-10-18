@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -160,9 +161,6 @@ func TestStageRejectsMissingAsset(t *testing.T) {
 }
 
 func TestUpdateRefusesAReleaseWithoutAManifest(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("UpdateBinaries refuses on Windows before it reaches the release")
-	}
 	f, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{"aether-" + runtime.GOOS + "-" + runtime.GOARCH: []byte("new")})
 	f.unsigned = true
 	self := filepath.Join(t.TempDir(), "aether")
@@ -181,9 +179,6 @@ func TestUpdateRefusesAReleaseWithoutAManifest(t *testing.T) {
 // the manifest is fetched and verified, then every binary is streamed,
 // checked against it, and swapped in.
 func TestUpdateBinariesStagesEveryAssetFromTheManifest(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("UpdateBinaries refuses on Windows")
-	}
 	suffix := "-" + runtime.GOOS + "-" + runtime.GOARCH
 	_, srv := newFakeRelease(t, "v1.3.0", map[string][]byte{
 		"aether" + suffix:        []byte("new cli"),
@@ -224,5 +219,59 @@ func TestChecksumForHandlesBinaryModeMarker(t *testing.T) {
 	}
 	if got != "bbbb" {
 		t.Fatalf("checksum = %q, want bbbb", got)
+	}
+}
+
+func TestSwapAsideKeepsTheOldBinaryBesideTheNewOne(t *testing.T) {
+	dir := t.TempDir()
+	dst, tmp := filepath.Join(dir, "aether.exe"), filepath.Join(dir, "staged")
+	for path, body := range map[string]string{dst: "old", tmp: "new", dst + ".old": "older"} {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := swapAside(tmp, dst); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{dst: "new", dst + ".old": "old"} {
+		if got, err := os.ReadFile(path); err != nil || string(got) != want {
+			t.Fatalf("%s = %q, %v; want %q", path, got, err, want)
+		}
+	}
+	if _, err := os.Stat(tmp); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staged file still exists: %v", err)
+	}
+}
+
+func TestSwapAsideInstallsWhereNothingExists(t *testing.T) {
+	dir := t.TempDir()
+	dst, tmp := filepath.Join(dir, "aether.exe"), filepath.Join(dir, "staged")
+	if err := os.WriteFile(tmp, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := swapAside(tmp, dst); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "new" {
+		t.Fatalf("%s = %q, %v; want new", dst, got, err)
+	}
+}
+
+func TestSwapAsideRestoresTheBinaryWhenTheStagedFileIsGone(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "aether.exe")
+	if err := os.WriteFile(dst, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := swapAside(filepath.Join(dir, "missing"), dst); err == nil {
+		t.Fatal("swap succeeded without a staged file")
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "old" {
+		t.Fatalf("%s = %q, %v; want the old binary back", dst, got, err)
+	}
+	if _, err := os.Stat(dst + ".old"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("%s.old left behind: %v", dst, err)
 	}
 }

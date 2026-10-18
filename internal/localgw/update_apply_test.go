@@ -1,9 +1,7 @@
 //go:build !windows
 
-// The apply path past the platform gate. `update.apply` refuses outright on
-// Windows, which cannot rename over a running executable, so these tests
-// would only ever see that refusal there. The refusal itself is covered in
-// update_apply_windows_test.go.
+// The apply path on Unix: these tests stub the rebuild with a shell script
+// and use Unix paths. Windows is covered in update_apply_windows_test.go.
 
 package localgw
 

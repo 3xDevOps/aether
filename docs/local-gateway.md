@@ -1965,8 +1965,7 @@ the server snapshot from loading.
   is a release tag newer than this CLI, otherwise `latest` when that is
   newer, otherwise empty. It is empty too for a dev build and with
   `AETHER_NO_UPDATE_CHECK` set. `can_self_update` is true when
-  `update.apply` can install it here; it is false for a dev build, on
-  Windows, and with `AETHER_PACKAGED` set, where `target_version` is still
+  `update.apply` can install it here; it is false for a dev build and with `AETHER_PACKAGED` set, where `target_version` is still
   reported so the client can link its release page. `server_first` is true
   when the linked server runs a release older than the target, this member
   is an admin, and `server.update_status` reports the server `capable` of

@@ -2,7 +2,7 @@
 
 // The desktop-app rebuild update.apply starts. The fixtures are shell
 // scripts standing in for `aether gui build --json`, so this file is unix
-// only; update.apply itself refuses on Windows before it gets here.
+// only.
 
 package localgw
 

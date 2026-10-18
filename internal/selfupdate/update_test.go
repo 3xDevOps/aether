@@ -11,7 +11,7 @@ import (
 
 func TestUpdateRefusesUnwritableDirectory(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("Update refuses on Windows before it reaches the preflight")
+		t.Skip("directory modes are not enforced on Windows")
 	}
 	if os.Geteuid() == 0 {
 		t.Skip("root writes into a read-only directory")

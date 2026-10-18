@@ -143,8 +143,8 @@ func TestCheckReportsUpdate(t *testing.T) {
 	if got.Dev || got.Disabled {
 		t.Errorf("dev/disabled set on a release build: %+v", got)
 	}
-	if got.CanSelfUpdate != (runtime.GOOS != "windows") {
-		t.Errorf("can_self_update = %v on %s", got.CanSelfUpdate, runtime.GOOS)
+	if !got.CanSelfUpdate {
+		t.Error("can_self_update = false on a release build")
 	}
 
 	// A second call inside the ttl must answer from the cache.

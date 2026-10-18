@@ -93,9 +93,6 @@ export function manualInstallLine(update: UpdateStatus, target: string): string 
   const release = target || 'the new release'
   if (update.cli.packaged) return packagedLine(update.cli.packaged, target)
   if (update.cli.dev) return `A development build cannot update itself. Install ${release} from its release page.`
-  if (!update.cli.can_self_update) {
-    return `Self-update is not supported on Windows. Close Aether, then rerun install.ps1 to install ${release}.`
-  }
   return `This aether cannot update itself. Install ${release} from its release page.`
 }
 
