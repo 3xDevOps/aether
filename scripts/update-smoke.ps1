@@ -622,11 +622,11 @@ exit 1
     Assert (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop'))) 'aether update installed no desktop app'
     Assert (-not (Get-LastError)) 'no desktop build error was recorded'
 
-    Write-Host '=== the $OldShellTag desktop shell with the new CLI ==='
+    Write-Host "=== the $OldShellTag desktop shell with the new CLI ==="
     $oldShellDir = Join-Path $root 'old-shell'
-    & gh release download $OldShellTag --repo $env:GITHUB_REPOSITORY --dir $oldShellDir --pattern "aether-desktop-windows-$Arch.zip"
-    if ($LASTEXITCODE -ne 0) { throw "gh release download $OldShellTag failed with exit code $LASTEXITCODE." }
+    New-Item -ItemType Directory -Path $oldShellDir -Force | Out-Null
     $oldShellZip = Join-Path $oldShellDir "aether-desktop-windows-$Arch.zip"
+    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$OldShellTag/aether-desktop-windows-$Arch.zip" -OutFile $oldShellZip
     $installed = New-Sandbox 'oldshell'
     $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
     $appDir = Split-Path -Parent $desktop

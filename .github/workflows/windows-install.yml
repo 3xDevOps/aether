@@ -88,7 +88,6 @@ jobs:
       - name: Install, rebuild, and launch the desktop under Defender
         env:
           DESKTOP_ZIP: ${{ steps.desktop.outputs.zip }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           if ($env:DESKTOP_ZIP) {
             ./scripts/install-smoke.ps1 -Cli "$env:RUNNER_TEMP/aether.exe" -DesktopZip $env:DESKTOP_ZIP
@@ -230,7 +229,6 @@ jobs:
       - name: Update a running aether.exe and desktop app under Defender
         env:
           DESKTOP_ZIP: ${{ steps.desktop.outputs.zip }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           ./scripts/update-smoke.ps1 `
             -OldCli "$env:RUNNER_TEMP/aether-old.exe" -NewCli "$env:RUNNER_TEMP/aether-new.exe" `
