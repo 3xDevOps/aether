@@ -362,7 +362,15 @@ which has no `aether-server`, Windows refuses to overwrite a running
 original if that fails. When a process still runs from the previous
 `aether.exe.old`, the update moves the current binary to `aether.exe.old.<n>`
 instead. The next `aether` command deletes every `aether.exe.old*` that nothing
-runs from. On a host
+runs from. The update then starts the new `aether.exe` (`aether version`); if
+Windows refuses it (Smart App Control, AppLocker or antivirus blocking the
+image), the update moves `aether.exe.old` back and fails with
+`replace <path>: the new build does not start, so the previous build was
+restored: <Windows error>`. An update killed mid-download leaves its
+`.aether.exe.update-*` file beside the CLI and changes nothing else; delete it.
+An update killed between the two renames leaves no `aether.exe`; restore it with
+`Move-Item -Force "$env:LOCALAPPDATA\Programs\Aether\aether.exe.old" "$env:LOCALAPPDATA\Programs\Aether\aether.exe"`
+(adjust the directory for a custom `-BinDir`). On a host
 where the `aether-server` systemd unit runs as root, `sudo aether update`
 instead runs `sudo aether-server update [--version <tag>]`, which swaps,
 restarts and rolls back the server; `--no-app` and `--force` do not apply
@@ -728,9 +736,10 @@ running, then starts a detached `aether gui build --staged` helper and exits
 the gateway with status **76**, which tells the shell to quit without
 relaunching. The helper waits (at most a minute) for the app to exit, ends the
 `aether-daemon` Scheduled Task if you have one, swaps the app in, and starts
-it. Start the daemon again with `schtasks /Run /TN aether-daemon`, or at your
-next sign-in. If the swap fails, the helper starts the old app and the next
-dashboard shows the error, as for any failed rebuild.
+it, then starts the task again if it was running. If the swap fails, the helper starts the old app and the next
+dashboard shows the error, as for any failed rebuild. A helper killed between the swap's two
+renames leaves the app only in a `.aether-old-*` directory beside `Aether Desktop`; the
+next `aether gui build` moves it back before installing.
 
 A rebuild that fails does not cost you the CLI update. The gateway records the
 build's error, the desktop app comes back on the new CLI in the old shell, and

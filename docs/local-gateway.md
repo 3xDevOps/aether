@@ -2125,10 +2125,10 @@ the server snapshot from loading.
 the temp directory so it never holds the app directory open), and exits
 **76**.
   The helper waits for both processes by handle, for at most a minute; ends
-  the `aether-daemon` Scheduled Task if it exists (it starts again at the next
-  sign-in, or with `schtasks /Run /TN aether-daemon`); swaps the app in with
-  the same rename-and-roll-back install as `aether gui build`; and starts the
-  app. If a step fails, the helper leaves the old app in place, starts it,
+  the `aether-daemon` Scheduled Task if it is running (`schtasks /End` does not
+  trigger the task's restart-on-failure); swaps the app in with the same
+  rename-and-roll-back install as `aether gui build`; starts the task again
+  with `schtasks /Run`; and starts the app. If a step fails, the helper leaves the old app in place, starts it,
   and writes the error to `last-error.txt`, so the next dashboard shows it as
   `shell_build_error`. If the helper itself cannot start, the gateway
   records that and exits **0**, leaving the old app running. A failed build is also written
