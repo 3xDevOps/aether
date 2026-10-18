@@ -337,6 +337,26 @@ test('a binary the gateway cannot write gets the sudo command and no button', as
   expect(screen.queryByText(/Updating replaces the aether binary/)).toBeNull()
 })
 
+test('a Windows binary the gateway cannot write gets no sudo, only an elevated terminal', async () => {
+  const base = updateStatus()
+  const client = fakeApi({
+    localUpdateCheck: vi.fn(async () =>
+      updateStatus({
+        cli: { ...base.cli, asset: 'aether-windows-amd64.exe' },
+        cli_path: 'C:\\Program Files\\Aether\\aether.exe',
+        install_method: 'manual',
+      }),
+    ),
+  })
+  seed()
+  render(<UpdateHost client={client} />)
+
+  expect(await screen.findByText(/Run as administrator/)).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Copy aether update' })).toBeTruthy()
+  expect(screen.queryByText(/sudo/)).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull()
+})
+
 // Dismissing records the version, not a flag: the next release is a new
 // prompt, and silencing v1.3.0 must not silence v1.3.1.
 test('a dismissal hides that version and a newer release comes back', async () => {

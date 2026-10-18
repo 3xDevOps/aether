@@ -110,12 +110,17 @@ function HowItInstalls({ update }: { update: UpdateStatus }) {
     return <ManualInstall update={update} target={installTarget(update, false)} />
   }
   if (method === 'manual') {
+    // Windows has no sudo; its release asset is the only one ending in .exe.
+    const windows = update.cli.asset?.endsWith('.exe') === true
     return (
       <div className="space-y-1.5">
         <p className="text-ui-sm leading-5 text-muted">
-          {path} is not writable by this account. Update it from a terminal:
+          {path} is not writable by this account.{' '}
+          {windows
+            ? 'Run this from an elevated terminal (Run as administrator), or reinstall:'
+            : 'Update it from a terminal:'}
         </p>
-        <CopyableCommand command="sudo aether update" />
+        <CopyableCommand command={windows ? 'aether update' : 'sudo aether update'} />
       </div>
     )
   }

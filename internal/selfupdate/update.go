@@ -334,7 +334,11 @@ func CheckWritable(dir string) error {
 		if errors.Is(err, os.ErrPermission) {
 			// The wrapped error comes first so the command to copy ends
 			// the sentence instead of running into a second colon.
-			return fmt.Errorf("%w: %s is not writable by this user; re-run as `sudo aether update`", err, dir)
+			rerun := "re-run as `sudo aether update`"
+			if runtime.GOOS == "windows" {
+				rerun = "re-run `aether update` from an elevated terminal"
+			}
+			return fmt.Errorf("%w: %s is not writable by this user; %s", err, dir, rerun)
 		}
 		return fmt.Errorf("stage an update in %s: %w", dir, err)
 	}
