@@ -359,8 +359,10 @@ yourself (`sudo systemctl restart aether-server` under a unit). On Windows,
 which has no `aether-server`, Windows refuses to overwrite a running
 `aether.exe` but allows renaming it, so the update renames it to
 `aether.exe.old`, puts the new binary at `aether.exe` and restores the
-original if that fails. The next `aether` command deletes `aether.exe.old`
-once nothing runs from it. On a host
+original if that fails. When a process still runs from the previous
+`aether.exe.old`, the update moves the current binary to `aether.exe.old.<n>`
+instead. The next `aether` command deletes every `aether.exe.old*` that nothing
+runs from. On a host
 where the `aether-server` systemd unit runs as root, `sudo aether update`
 instead runs `sudo aether-server update [--version <tag>]`, which swaps,
 restarts and rolls back the server; `--no-app` and `--force` do not apply

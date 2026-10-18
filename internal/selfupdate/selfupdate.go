@@ -161,11 +161,13 @@ func oldPath(dst string) string { return dst + ".old" }
 
 // swapAside replaces dst on Windows, which refuses to overwrite a running
 // executable but allows renaming it: dst moves to dst.old, tmp takes its
-// name, and the first move is undone if the second fails.
+// name, and the first move is undone if the second fails. A dst.old a
+// process still runs from cannot be deleted, so dst moves to a name of its
+// own beside it instead.
 func swapAside(tmp, dst string) error {
 	old := oldPath(dst)
 	if err := os.Remove(old); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+		old = fmt.Sprintf("%s.%d", old, time.Now().UnixNano())
 	}
 	if err := os.Rename(dst, old); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
@@ -182,15 +184,20 @@ func swapAside(tmp, dst string) error {
 	return nil
 }
 
-// RemoveOld deletes the binary a previous Windows update left beside the
-// running one. It is best-effort: the file stays while a process still runs
+// RemoveOld deletes the binaries previous Windows updates left beside the
+// running one. It is best-effort: a file stays while a process still runs
 // from it, and the next start tries again.
 func RemoveOld() {
 	if runtime.GOOS != "windows" {
 		return
 	}
-	if self, err := os.Executable(); err == nil {
-		_ = os.Remove(oldPath(self))
+	self, err := os.Executable()
+	if err != nil {
+		return
+	}
+	left, _ := filepath.Glob(strings.NewReplacer("[", "[[]", "*", "[*]", "?", "[?]").Replace(oldPath(self)) + "*")
+	for _, path := range left {
+		_ = os.Remove(path)
 	}
 }
 

@@ -250,7 +250,7 @@ exit 1
     $holder.Process.Kill()
     $null = $holder.Process.WaitForExit(15000)
     $null = Invoke-Native $installed @('version')
-    Assert (-not (Test-Path -LiteralPath $old)) 'the next start removed aether.exe.old'
+    Assert (@(Get-ChildItem -LiteralPath $cliDir -Force -Filter 'aether.exe.old*').Count -eq 0) 'the next start removed every aether.exe.old'
     Assert ((Get-Hash $installed) -ne $oldHash) 'aether.exe is still the new build after the cleanup'
     Assert-NoNewDetections 'after the CLI update'
 
