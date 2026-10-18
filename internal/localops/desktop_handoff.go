@@ -73,14 +73,16 @@ func ParseExitPIDs(list string) ([]int, error) {
 // handoffOps is what the helper does to the machine, injected so the order
 // and the failure paths run in a test.
 type handoffOps struct {
-	waitExit  func(pid int, timeout time.Duration) error
-	endDaemon func()
-	install   func() error
-	launch    func() error
+	waitExit    func(pid int, timeout time.Duration) error
+	endDaemon   func() bool
+	startDaemon func()
+	install     func() error
+	launch      func() error
 }
 
 // FinishDesktopUpdate waits for pids to exit, ends the sync daemon's
-// Scheduled Task, runs install, and starts the app at appDir. When any step
+// Scheduled Task, runs install, starts the task again if it was running, and
+// starts the app at appDir. When any step
 // before the swap fails, or the swap does, the app still on disk is started
 // instead and the reason is recorded for the next dashboard
 // (RecordDesktopBuildError). install replaces the app with rollback, as
@@ -88,9 +90,10 @@ type handoffOps struct {
 func FinishDesktopUpdate(appDir string, pids []int, install func() error) error {
 	exe := filepath.Join(appDir, desktopExe)
 	return finishDesktopUpdate(handoffOps{
-		waitExit:  waitForExit,
-		endDaemon: endDaemonTask,
-		install:   install,
+		waitExit:    waitForExit,
+		endDaemon:   endDaemonTask,
+		startDaemon: startDaemonTask,
+		install:     install,
 		launch: func() error {
 			cmd := exec.Command(exe)
 			cmd.Dir = appDir
@@ -113,12 +116,15 @@ func finishDesktopUpdate(ops handoffOps, pids []int, timeout, retry time.Duratio
 		}
 	}
 	if err == nil {
-		ops.endDaemon()
+		daemonWasRunning := ops.endDaemon()
 		for {
 			if err = ops.install(); err == nil || time.Until(deadline) < retry {
 				break
 			}
 			time.Sleep(retry)
+		}
+		if daemonWasRunning {
+			ops.startDaemon()
 		}
 	}
 	if err != nil {
@@ -133,13 +139,15 @@ func finishDesktopUpdate(ops handoffOps, pids []int, timeout, retry time.Duratio
 	return err
 }
 
-// endDaemonTask ends the sync daemon's Scheduled Task, as scripts/install.ps1
-// asks the user to: the task restarts a stopped daemon within a minute, and
-// the daemon runs the CLI that was just replaced. A task that does not
-// exist or is not running makes schtasks fail, which leaves nothing to end.
-func endDaemonTask() {
-	if exec.Command("schtasks", "/Query", "/TN", daemonTask).Run() != nil {
-		return
-	}
-	_ = exec.Command("schtasks", "/End", "/TN", daemonTask).Run()
+// endDaemonTask ends the sync daemon's Scheduled Task and reports whether
+// it was running: schtasks /End fails when the task does not exist or has
+// no running instance. The daemon runs the CLI that was just replaced, and
+// the task's RestartOnFailure does not restart a task that was ended.
+func endDaemonTask() bool {
+	return exec.Command("schtasks", "/End", "/TN", daemonTask).Run() == nil
+}
+
+// startDaemonTask starts the task endDaemonTask ended, now on the new CLI.
+func startDaemonTask() {
+	_ = exec.Command("schtasks", "/Run", "/TN", daemonTask).Run()
 }

@@ -15,7 +15,8 @@ func (tr *handoffTrace) ops(waitErr error, installErrs ...error) handoffOps {
 			tr.steps = append(tr.steps, "wait")
 			return waitErr
 		},
-		endDaemon: func() { tr.steps = append(tr.steps, "daemon") },
+		endDaemon:   func() bool { tr.steps = append(tr.steps, "daemon"); return true },
+		startDaemon: func() { tr.steps = append(tr.steps, "daemon-run") },
 		install: func() error {
 			tr.steps = append(tr.steps, "install")
 			if len(installErrs) == 0 {
@@ -37,7 +38,7 @@ func TestFinishDesktopUpdateSwapsThenLaunches(t *testing.T) {
 	if err := finishDesktopUpdate(tr.ops(nil), []int{10, 20}, time.Second, time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	if want := "wait wait daemon install launch"; tr.got() != want {
+	if want := "wait wait daemon install daemon-run launch"; tr.got() != want {
 		t.Fatalf("steps = %q, want %q", tr.got(), want)
 	}
 	if got := LastDesktopBuildError(); got != "" {
@@ -52,7 +53,7 @@ func TestFinishDesktopUpdateRetriesASwapAnExitingChildBlocked(t *testing.T) {
 	if err := finishDesktopUpdate(tr.ops(nil, busy, busy), []int{10}, time.Second, time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	if want := "wait daemon install install install launch"; tr.got() != want {
+	if want := "wait daemon install install install daemon-run launch"; tr.got() != want {
 		t.Fatalf("steps = %q, want %q", tr.got(), want)
 	}
 }
@@ -67,7 +68,7 @@ func TestFinishDesktopUpdateRecordsAFailedSwapAndStartsTheOldApp(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Access is denied") {
 		t.Fatalf("err = %v, want the swap's own error", err)
 	}
-	if !strings.HasSuffix(tr.got(), "install launch") {
+	if !strings.HasSuffix(tr.got(), "install daemon-run launch") {
 		t.Fatalf("steps = %q, want the old app started after the failed swap", tr.got())
 	}
 	if got := LastDesktopBuildError(); !strings.Contains(got, "Access is denied") {
