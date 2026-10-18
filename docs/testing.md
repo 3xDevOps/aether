@@ -270,6 +270,35 @@ Programs Known Folder through `Environment.SpecialFolder.Programs`, backs up any
 existing `Aether.lnk`, and restores it in `finally` before deleting the temporary
 app. It never redirects permanent shell-folder registry settings.
 
+The workflow's `update` job proves what Linux cannot: replacing a running
+`aether.exe`, and the desktop helper swapping an app directory the running app
+holds, under Defender realtime with no exclusions. It builds an old
+(`v0.5.1-alpha.4`) and a new (`v0.5.1-alpha.5`) client from the checkout, both
+trusting the key of `internal/selfupdate/releasetest` through a `go build
+-overlay` of `keys.go`. The client pins `https://github.com`, so
+`internal/selfupdate/releasetest/cmd/fake-release` is an HTTPS proxy that answers
+`CONNECT github.com:443` (`HTTPS_PROXY`) with a certificate from a throwaway CA,
+trusted only in `LocalMachine\Root` for the run, and serves signed releases.
+`scripts/update-smoke.ps1` then:
+
+- keeps the old `aether.exe` running (`aether gui --url`) and, with the staged
+  download held open by another process, checks that `aether update` fails on the
+  second rename, restores `aether.exe`, leaves no `.old`, and leaves the process
+  running;
+- runs `aether update` for real and checks the new bytes at `aether.exe`, the old
+  at `aether.exe.old`, the old process unchanged and still serving, and
+  `aether.exe.old` gone after the next start, and that a second update succeeds
+  while the first old image still runs;
+- installs the desktop zip, starts the app with a stand-in `aether-daemon`
+  Scheduled Task, posts `update.apply` to its gateway through the app's debugging
+  port, and checks that the sidecar exits, the detached helper swaps in the new
+  app (the new zip adds a marker file), ends the task, and starts the new app
+  with the new CLI;
+- fails on any new `Get-MpThreatDetection` entry or changed exclusion.
+
+Not covered: clicking **Update now** (the call is `update.apply` itself), a
+Windows ARM64 runner, and Defender cloud verdicts on real release binaries.
+
 For each install, the smoke inspects the real shortcut's executable target and
 working directory. It then waits up to 90 seconds for `Shell.Application`'s
 `shell:AppsFolder` catalogue to enumerate Aether with the installed executable

@@ -346,6 +346,7 @@ const { chromium } = require(process.argv[2])
     Write-Host $_.ScriptStackTrace
     throw
 } finally {
+    $ErrorActionPreference = 'Continue'
     try {
         foreach ($process in @(Get-Process -Name 'aether-desktop', 'aether' -ErrorAction SilentlyContinue |
                 Where-Object { $_.Path -and $_.Path -like "$root*" })) {
