@@ -7,7 +7,12 @@ param(
     [Parameter(Mandatory = $true)][string]$DesktopZip,
     [Parameter(Mandatory = $true)][string]$OldVersion,
     [Parameter(Mandatory = $true)][string]$NewVersion,
-    [Parameter(Mandatory = $true)][string]$Playwright
+    [Parameter(Mandatory = $true)][string]$Playwright,
+    # The latest published GitHub release's CLI and desktop zip, not built from this checkout.
+    [Parameter(Mandatory = $true)][string]$PublishedCli,
+    [Parameter(Mandatory = $true)][string]$PublishedZip,
+    [Parameter(Mandatory = $true)][string]$PublishedTag,
+    [ValidateSet('amd64', 'arm64')][string]$Arch = 'amd64'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,7 +20,7 @@ Set-StrictMode -Version Latest
 $PSNativeCommandUseErrorActionPreference = $false
 if ($env:OS -ne 'Windows_NT') { throw 'This scenario requires Windows.' }
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') {
-    throw 'This scenario changes machine certificates and requires a disposable GitHub-hosted runner.'
+    throw 'This scenario changes machine certificates, the user PATH and the Start Menu, and requires a disposable GitHub-hosted runner.'
 }
 $initialPreferences = Get-MpPreference
 if ((Get-MpComputerStatus).RealTimeProtectionEnabled -ne $true) {
@@ -31,15 +36,22 @@ if ($initialPreferences.ExclusionPath -or $initialPreferences.ExclusionProcess -
 }
 $knownDetections = @(Get-MpThreatDetection | ForEach-Object { $_.DetectionID })
 $node = (Get-Command node.exe -CommandType Application | Select-Object -First 1).Source
+$installer = Join-Path $PSScriptRoot 'install.ps1'
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('Aether update ' + [guid]::NewGuid().ToString('N'))
 $saved = @{}
-foreach ($name in @('LOCALAPPDATA', 'AETHER_CONFIG_DIR', 'HTTPS_PROXY', 'AETHER_NO_UPDATE_CHECK', 'AETHER_BIN')) {
+foreach ($name in @('LOCALAPPDATA', 'AETHER_CONFIG_DIR', 'HTTPS_PROXY', 'AETHER_NO_UPDATE_CHECK', 'AETHER_BIN',
+        'AETHER_BASE_URL', 'AETHER_VERSION', 'AETHER_ROLE', 'AETHER_BIN_DIR')) {
     $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
-$fake = $null
-$caSubject = 'Aether update smoke CA'
+$releases = @()
+$mirror = $null
 $taskName = 'aether-daemon'
+$exeAsset = "aether-windows-$Arch.exe"
+$zipAsset = "aether-desktop-windows-$Arch.zip"
+$programs = [Environment]::GetFolderPath([Environment+SpecialFolder]::Programs, [Environment+SpecialFolderOption]::DoNotVerify)
+$shortcut = Join-Path $programs 'Aether.lnk'
+$proxy = $null
 
 function Invoke-Native([string]$Exe, [string[]]$Arguments, [int]$TimeoutSec = 300) {
     $stem = Join-Path $root ([guid]::NewGuid().ToString('N'))
@@ -69,12 +81,24 @@ function Assert([bool]$Condition, [string]$Message) {
 
 function Get-Hash([string]$Path) { (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash }
 
-function New-Sandbox([string]$Name) {
+function Get-FreePort {
+    $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    $port = $listener.LocalEndpoint.Port
+    $listener.Stop()
+    return $port
+}
+
+# A sandbox is a LOCALAPPDATA and config directory of its own, with the old
+# CLI at the installer's default path unless $Empty.
+function New-Sandbox([string]$Name, [switch]$Empty) {
     $local = Join-Path $root "$Name\Local"
     $env:LOCALAPPDATA = $local
     $env:AETHER_CONFIG_DIR = Join-Path $root "$Name\config"
+    New-Item -ItemType Directory -Path $local, $env:AETHER_CONFIG_DIR | Out-Null
     $dir = Join-Path $local 'Programs\Aether'
-    New-Item -ItemType Directory -Path $dir, $env:AETHER_CONFIG_DIR | Out-Null
+    if ($Empty) { return Join-Path $dir 'aether.exe' }
+    New-Item -ItemType Directory -Path $dir | Out-Null
     Copy-Item -LiteralPath $OldCli -Destination (Join-Path $dir 'aether.exe')
     return Join-Path $dir 'aether.exe'
 }
@@ -115,28 +139,217 @@ function Assert-NoNewDetections([string]$When) {
     Write-Host "ok: Get-MpThreatDetection has no new detection $When"
 }
 
-function Wait-DesktopSidecar([Diagnostics.Process]$Process, [string]$Cli) {
-    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+# The updater pins https://github.com. A fake-release instance answers
+# CONNECT github.com:443 for it (HTTPS_PROXY) with a certificate from a
+# throwaway CA, which only this machine trusts, in LocalMachine\Root.
+function Start-Release([string]$Name, [string]$Assets, [string]$Latest) {
+    $log = Join-Path $root "$Name-release.out"
+    $ca = Join-Path $root "$Name-ca.pem"
+    $p = Start-Process -FilePath $FakeRelease -PassThru -WindowStyle Hidden `
+        -ArgumentList '-assets', ('"' + $Assets + '"'), '-latest', $Latest, '-ca-out', ('"' + $ca + '"') `
+        -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+    $script:releases += $p
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        if ($p.HasExited) { throw "fake-release exited: $(Get-Content -Raw -LiteralPath "$log.err")" }
+        $address = Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($address) { break }
+        if ([DateTime]::UtcNow -gt $deadline) { throw 'fake-release did not start.' }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+    & certutil.exe -addstore -f Root $ca | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Could not trust the fake release CA.' }
+    return [pscustomobject]@{ Address = $address }
+}
+
+function Use-Release($Release) {
+    $env:HTTPS_PROXY = "http://$($Release.Address)"
+    $script:proxy = $Release.Address
+}
+
+function Get-DaemonState {
+    $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    if ($task) { return [string]$task.State }
+    return ''
+}
+
+function Wait-DaemonState([string]$State, [int]$TimeoutSec) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    do {
+        if ((Get-DaemonState) -eq $State) { return $true }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    return $false
+}
+
+# The Scheduled Task aether daemon install registers: syncd.scheduledTask's
+# settings, with a stand-in for the daemon's command.
+function New-DaemonTask {
+    $xml = Join-Path $root 'aether-daemon.xml'
+    @'
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Aether git sync daemon</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Settings>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>10</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>cmd.exe</Command>
+      <Arguments>/c ping -n 3000 127.0.0.1 &gt; nul</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+'@ | Set-Content -LiteralPath $xml -Encoding Unicode
+    & schtasks.exe /Create /TN $taskName /XML $xml /F
+    if ($LASTEXITCODE -ne 0) { throw 'Could not register the stand-in aether-daemon task from the daemon''s task XML.' }
+    & schtasks.exe /Run /TN $taskName
+    if ($LASTEXITCODE -ne 0 -or -not (Wait-DaemonState 'Running' 30)) { throw 'The stand-in aether-daemon task did not start.' }
+}
+
+function Start-App([string]$Target, [string]$Desktop, [string]$Profile, [int]$Port) {
+    $known = @(Get-Process -Name 'aether-desktop' -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+    $arguments = @("--remote-debugging-port=$Port", ('--user-data-dir="' + $Profile + '"'))
+    if ($Target -like '*.lnk') {
+        $null = Start-Process -FilePath $Target -ArgumentList $arguments
+    } else {
+        # The Start Menu shortcut starts the app in its own directory, and the
+        # gateway and the update helper inherit it.
+        $null = Start-Process -FilePath $Target -WorkingDirectory (Split-Path -Parent $Desktop) -ArgumentList $arguments
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(90)
+    do {
+        $main = @(Get-ProcessAt 'aether-desktop' $Desktop | Where-Object { $_.Id -notin $known -and $_.MainWindowHandle -ne [IntPtr]::Zero })
+        if ($main.Count -gt 0) { return $main[0] }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "$Target did not open a desktop window."
+}
+
+# The sidecar is the app's child running $Cli, or $Cli renamed beside itself.
+function Wait-Sidecar([Diagnostics.Process]$Process, [string]$Cli, [int]$NotPid = 0) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(90)
     do {
         $Process.Refresh()
-        if ($Process.HasExited) { throw "The desktop exited before opening its main window (code $($Process.ExitCode))." }
-        if ($Process.MainWindowHandle -ne [IntPtr]::Zero) {
-            $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Process.Id) AND Name = 'aether.exe'" |
-                Where-Object { $_.ExecutablePath -ieq $Cli })
-            if ($children.Count -eq 1) { return $children[0].ProcessId }
-        }
+        if ($Process.HasExited) { throw "The desktop exited before it had a CLI sidecar (code $($Process.ExitCode))." }
+        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($Process.Id)" |
+            Where-Object { $_.ProcessId -ne $NotPid -and $_.ExecutablePath -and $_.ExecutablePath -like "$Cli*" })
+        if ($children.Count -eq 1) { return $children[0].ProcessId }
         Start-Sleep -Milliseconds 200
     } while ([DateTime]::UtcNow -lt $deadline)
-    throw 'The desktop did not open a main window with its CLI sidecar.'
+    throw "The desktop (pid $($Process.Id)) has no sidecar running $Cli."
+}
+
+function Stop-App([Diagnostics.Process]$Process) {
+    if ($Process.HasExited) { return }
+    $null = $Process.CloseMainWindow()
+    if (-not $Process.WaitForExit(20000)) {
+        & "$env:SystemRoot\System32\taskkill.exe" /PID $Process.Id /T /F | Out-Null
+        $null = $Process.WaitForExit(15000)
+    }
+}
+
+function Wait-Relaunch([string]$Desktop, [int]$OldId, [int]$TimeoutSec = 240) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSec)
+    do {
+        $relaunched = @(Get-ProcessAt 'aether-desktop' $Desktop | Where-Object { $_.Id -ne $OldId -and $_.MainWindowHandle -ne [IntPtr]::Zero })
+        if ($relaunched.Count -gt 0) { return $relaunched[0] }
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Get-ChildItem -Recurse -Force -LiteralPath $env:LOCALAPPDATA -Filter last-error.txt -ErrorAction SilentlyContinue |
+        ForEach-Object { Write-Host "$($_.FullName): $(Get-Content -Raw -LiteralPath $_.FullName)" }
+    Get-Process -Name 'aether', 'aether-desktop' -ErrorAction SilentlyContinue | Format-Table Id, Path -AutoSize | Out-String | Write-Host
+    throw "The updated desktop app was not started within ${TimeoutSec}s."
+}
+
+function Get-LastError {
+    $files = @(Get-ChildItem -Recurse -Force -LiteralPath $env:LOCALAPPDATA -Filter last-error.txt -ErrorAction SilentlyContinue)
+    return ($files | ForEach-Object { Get-Content -Raw -LiteralPath $_.FullName }) -join "`n"
+}
+
+# Reads what the running desktop's dashboard shows through the CDP port:
+# 'probe' proves the gateway answers, 'click' drives the footer's Update
+# link and the Updates dialog's Update now button.
+$appScript = Join-Path $PSScriptRoot 'update-smoke-app.cjs'
+function Invoke-App([string]$Mode, [int]$Port, [int]$TimeoutSec = 180) {
+    Invoke-Native $node @(('"' + $appScript + '"'), ('"' + $Playwright + '"'), $Mode, "http://127.0.0.1:$Port") $TimeoutSec
+}
+
+function Assert-ReleaseResources([string]$Path, [string]$What) {
+    $info = (Get-Item -LiteralPath $Path).VersionInfo
+    Assert ($info.ProductName -eq 'Aether' -and $info.CompanyName -eq '3xDevOps' -and $info.FileVersion -eq '0.5.1.0') "$What carries the release VERSIONINFO ($($info.CompanyName) / $($info.ProductName) / $($info.FileVersion))"
+    $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Path))
+    Assert ($text.Contains('requestedExecutionLevel') -and $text.Contains('io.aether.client')) "$What carries the release application manifest"
+}
+
+function Start-Mirror {
+    $dir = Join-Path $root 'mirror'
+    New-Item -ItemType Directory -Path $dir | Out-Null
+    Copy-Item -LiteralPath $OldCli -Destination (Join-Path $dir $exeAsset)
+    [IO.File]::WriteAllText((Join-Path $dir 'checksums.txt'), "$(Get-Hash $OldCli)  $exeAsset`n")
+    $script = Join-Path $root 'mirror.cjs'
+    @'
+const http = require('node:http')
+const fs = require('node:fs')
+const path = require('node:path')
+const [root, tag, ...names] = process.argv.slice(2)
+const files = new Set(names)
+const server = http.createServer((req, res) => {
+  const name = req.url.replace('/' + tag + '/', '')
+  if (!files.has(name)) { res.writeHead(404); res.end(); return }
+  const file = path.join(root, name)
+  res.writeHead(200, { 'Content-Length': fs.statSync(file).size })
+  fs.createReadStream(file).pipe(res)
+})
+server.listen(0, '127.0.0.1', () => console.log(server.address().port))
+'@ | Set-Content -LiteralPath $script -Encoding UTF8
+    $log = Join-Path $root 'mirror.log'
+    $p = Start-Process -FilePath $node -PassThru -ArgumentList @(('"' + $script + '"'), ('"' + $dir + '"'), $OldVersion, $exeAsset, 'checksums.txt') `
+        -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+    $script:mirror = $p
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    do {
+        if ($p.HasExited) { throw 'The release mirror exited.' }
+        $port = Get-Content -LiteralPath $log -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($port) { return $port }
+        if ([DateTime]::UtcNow -gt $deadline) { throw 'The release mirror did not start.' }
+        Start-Sleep -Milliseconds 100
+    } while ($true)
+}
+
+# scripts/install.ps1 as a user runs it, into the default directories.
+function Invoke-Installer([string]$Port, [hashtable]$Extra) {
+    $env:AETHER_BASE_URL = "http://127.0.0.1:$Port"
+    $env:AETHER_NO_UPDATE_CHECK = '1'
+    foreach ($name in @('AETHER_BIN', 'AETHER_VERSION', 'AETHER_ROLE', 'AETHER_BIN_DIR')) {
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+    }
+    & $installer -Version $OldVersion @Extra
+    if (-not $?) { throw 'scripts/install.ps1 failed.' }
+    [Environment]::SetEnvironmentVariable('AETHER_BASE_URL', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('AETHER_NO_UPDATE_CHECK', $null, 'Process')
 }
 
 try {
     New-Item -ItemType Directory -Path $root | Out-Null
+    foreach ($dir in @('assets', 'old-assets', 'bad-assets')) { New-Item -ItemType Directory -Path (Join-Path $root $dir) | Out-Null }
     $assets = Join-Path $root 'assets'
-    New-Item -ItemType Directory -Path $assets | Out-Null
-    $newAsset = Join-Path $assets 'aether-windows-amd64.exe'
+    $newAsset = Join-Path $assets $exeAsset
     Copy-Item -LiteralPath $NewCli -Destination $newAsset
-    $newZip = Join-Path $assets 'aether-desktop-windows-amd64.zip'
+    $newZip = Join-Path $assets $zipAsset
     Copy-Item -LiteralPath $DesktopZip -Destination $newZip
     Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::Open($newZip, 'Update')
@@ -146,28 +359,22 @@ try {
         $writer.Write($NewVersion)
         $writer.Dispose()
     } finally { $archive.Dispose() }
+    # The old release the real installer installs from: the old desktop, no marker.
+    Copy-Item -LiteralPath $OldCli -Destination (Join-Path $root "old-assets\$exeAsset")
+    Copy-Item -LiteralPath $DesktopZip -Destination (Join-Path $root "old-assets\$zipAsset")
+    # A release whose CLI asset the system cannot start: signed and listed in
+    # the manifest, but not a PE file.
+    [IO.File]::WriteAllText((Join-Path $root "bad-assets\$exeAsset"), 'MZ this is not a portable executable')
     $oldHash = Get-Hash $OldCli
     $newHash = Get-Hash $NewCli
     Assert ($oldHash -ne $newHash) 'the old and new builds differ'
+    Assert-ReleaseResources $OldCli 'the old CLI'
+    Assert-ReleaseResources $NewCli 'the new CLI'
 
-    # The updater pins https://github.com. fake-release answers CONNECT
-    # github.com:443 for it (HTTPS_PROXY) with a certificate from a throwaway
-    # CA, which only this machine trusts, in LocalMachine\Root.
-    $fakeLog = Join-Path $root 'fake-release.out'
-    $fake = Start-Process -FilePath $FakeRelease -PassThru -WindowStyle Hidden `
-        -ArgumentList '-assets', ('"' + $assets + '"'), '-latest', $NewVersion, '-ca-out', ('"' + (Join-Path $root 'ca.pem') + '"') `
-        -RedirectStandardOutput $fakeLog -RedirectStandardError "$fakeLog.err"
-    $deadline = [DateTime]::UtcNow.AddSeconds(30)
-    do {
-        if ($fake.HasExited) { throw "fake-release exited: $(Get-Content -Raw -LiteralPath "$fakeLog.err")" }
-        $proxy = Get-Content -LiteralPath $fakeLog -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($proxy) { break }
-        if ([DateTime]::UtcNow -gt $deadline) { throw 'fake-release did not start.' }
-        Start-Sleep -Milliseconds 100
-    } while ($true)
-    & certutil.exe -addstore -f Root (Join-Path $root 'ca.pem')
-    if ($LASTEXITCODE -ne 0) { throw 'Could not trust the fake release CA.' }
-    $env:HTTPS_PROXY = "http://$proxy"
+    $newRelease = Start-Release 'new' $assets $NewVersion
+    $oldRelease = Start-Release 'old' (Join-Path $root 'old-assets') $OldVersion
+    $badRelease = Start-Release 'bad' (Join-Path $root 'bad-assets') $NewVersion
+    Use-Release $newRelease
     [Environment]::SetEnvironmentVariable('AETHER_NO_UPDATE_CHECK', $null, 'Process')
     [Environment]::SetEnvironmentVariable('AETHER_BIN', $null, 'Process')
 
@@ -184,6 +391,29 @@ try {
 
     $holder = Start-Holder $installed
     Assert (Test-Holder $holder) 'the old aether.exe is running and serving its gateway'
+
+    # An update killed while it downloads: the staged file stays, nothing
+    # else changes, and the next start runs the build that was installed.
+    Set-Slow '120s'
+    $killed = Start-Process -FilePath $installed -ArgumentList 'update' -PassThru -WindowStyle Hidden
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    do {
+        $staged = @(Get-ChildItem -LiteralPath $cliDir -Force | Where-Object { $_.Name -like '.aether.exe.update-*' })
+        if ($staged.Count -gt 0 -or $killed.HasExited) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    & "$env:SystemRoot\System32\taskkill.exe" /PID $killed.Id /T /F | Out-Null
+    Set-Slow '0s'
+    $null = $killed.WaitForExit(15000)
+    Assert ($staged.Count -gt 0) 'the update had begun staging its download when it was killed'
+    Assert ((Get-Hash $installed) -eq $oldHash) 'the update killed mid-download left aether.exe the old build'
+    Assert (-not (Test-Path -LiteralPath $old)) 'the update killed mid-download made no aether.exe.old'
+    $version = Invoke-Native $installed @('version')
+    Assert ($version.Code -eq 0 -and $version.Out -match [regex]::Escape($OldVersion)) 'the next start after the killed update runs the old build'
+    $leftStaged = @(Get-ChildItem -LiteralPath $cliDir -Force | Where-Object { $_.Name -like '.aether.exe.update-*' })
+    Write-Host "A killed download leaves its staged file beside aether.exe: $($leftStaged.Count) file(s), $(($leftStaged | ForEach-Object { '{0} ({1} bytes)' -f $_.Name, $_.Length }) -join ', ')"
+    $leftStaged | Remove-Item -Force
+    Assert (Test-Holder $holder) 'the old process survived the killed update'
 
     # A staged download another process holds open makes the second rename
     # fail: the first rename (aether.exe -> aether.exe.old) has already
@@ -232,6 +462,7 @@ exit 1
     $updated = Invoke-Native $installed @('update')
     Assert ($updated.Code -eq 0) 'aether update succeeds against the fake release'
     Assert ((Get-Hash $installed) -eq $newHash) 'aether.exe is the new build'
+    Assert-ReleaseResources $installed 'the swapped-in aether.exe'
     Assert (Test-Path -LiteralPath $old) 'the running old image was renamed to aether.exe.old'
     Assert ((Get-Hash $old) -eq $oldHash) 'aether.exe.old is the old build'
     Assert (Test-Holder $holder) 'the old process was undisturbed: same process, same start time, gateway still answering'
@@ -252,92 +483,192 @@ exit 1
     $null = Invoke-Native $installed @('version')
     Assert (@(Get-ChildItem -LiteralPath $cliDir -Force -Filter 'aether.exe.old*').Count -eq 0) 'the next start removed every aether.exe.old'
     Assert ((Get-Hash $installed) -ne $oldHash) 'aether.exe is still the new build after the cleanup'
+
+    # A release whose binary Windows will not start (here: not a PE file;
+    # on a user's machine Smart App Control, AppLocker or antivirus) must
+    # not replace the working CLI.
+    $working = Get-Hash $installed
+    Use-Release $badRelease
+    $blocked = Invoke-Native $installed @('update', '--version', 'v9.9.8')
+    Use-Release $newRelease
+    Assert ($blocked.Code -ne 0) 'aether update fails when the new aether.exe does not start'
+    Assert (($blocked.Err + $blocked.Out) -match 'does not start, so the previous build was restored') 'the failure says the new build does not start and the previous one was restored'
+    Assert ((Get-Hash $installed) -eq $working) 'the blocked update left the working aether.exe in place'
+    Assert (@(Get-ChildItem -LiteralPath $cliDir -Force | Where-Object { $_.Name -like 'aether.exe.*' -or $_.Name -like '.aether.exe.update-*' }).Count -eq 0) 'the blocked update left no aether.exe.old or staged file'
+    $version = Invoke-Native $installed @('version')
+    Assert ($version.Code -eq 0) 'aether still runs after the blocked update'
+
+    # A process killed between swapAside's two renames leaves no aether.exe
+    # and the running build as aether.exe.old: the state is made here, the
+    # window being too short to hit.
+    Move-Item -LiteralPath $installed -Destination $old
+    Assert (-not (Test-Path -LiteralPath $installed)) 'aether.exe is missing after a swap killed between its renames'
+    $threw = $false
+    try { & $installed version } catch { $threw = $true; Write-Host "The shell's answer: $($_.Exception.Message)" }
+    Assert $threw 'running aether.exe fails until aether.exe.old is moved back'
+    Move-Item -LiteralPath $old -Destination $installed -Force
+    $version = Invoke-Native $installed @('version')
+    Assert ($version.Code -eq 0) 'Move-Item of aether.exe.old over aether.exe restores the CLI'
     Assert-NoNewDetections 'after the CLI update'
 
-    Write-Host '=== desktop update through the running app ==='
-    $installed = New-Sandbox 'desktop'
+    Write-Host '=== real installer, Update now button, daemon task and Start Menu shortcut ==='
+    $mirrorPort = Start-Mirror
+    $installed = New-Sandbox 'real' -Empty
+    $cliDir = Split-Path -Parent $installed
     $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
-    $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $DesktopZip + '"')) 600
-    Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) 'the old desktop app is installed'
     $appDir = Split-Path -Parent $desktop
+    Use-Release $oldRelease
+    Invoke-Installer $mirrorPort @{}
+    Use-Release $newRelease
+    Assert ((Get-Hash $installed) -eq $oldHash) 'scripts/install.ps1 installed the old CLI at the default path'
+    Assert (Test-Path -LiteralPath $desktop) 'scripts/install.ps1 installed the old desktop app at the default path'
     Assert (-not (Test-Path -LiteralPath (Join-Path $appDir 'new-release-marker.txt'))) 'the installed app is the old one'
+    Assert ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' -contains $cliDir) 'the installer put the CLI directory on the user PATH'
+    Assert (Test-Path -LiteralPath $shortcut -PathType Leaf) 'the installer created the Start Menu shortcut'
+    $shell = New-Object -ComObject WScript.Shell
+    $link = $shell.CreateShortcut($shortcut)
+    Assert ($link.TargetPath -ieq $desktop -and $link.WorkingDirectory -ieq $appDir) 'the shortcut targets the installed app and starts it in its directory'
 
-    & schtasks.exe /Create /TN $taskName /TR 'cmd.exe /c ping -n 600 127.0.0.1' /SC ONCE /ST 23:59 /F
-    $taskReady = $LASTEXITCODE -eq 0
-    if ($taskReady) { & schtasks.exe /Run /TN $taskName; $taskReady = $LASTEXITCODE -eq 0 }
-    if ($taskReady) {
-        Start-Sleep -Seconds 3
-        $taskReady = ((& schtasks.exe /Query /TN $taskName /FO LIST) -join "`n") -match 'Status:\s+Running'
-    }
-    Write-Host "The stand-in aether-daemon task is running: $taskReady"
+    # Does the task come back on its own after the helper's schtasks /End?
+    New-DaemonTask
+    & schtasks.exe /End /TN $taskName
+    Write-Host 'Waiting 75s to see whether the aether-daemon task restarts by itself after schtasks /End...'
+    Start-Sleep -Seconds 75
+    $selfRestart = Get-DaemonState
+    Write-Host "75s after schtasks /End the aether-daemon task is: $selfRestart (RestartOnFailure=PT1M x10)"
+    & schtasks.exe /Run /TN $taskName
+    Assert (Wait-DaemonState 'Running' 30) 'the stand-in aether-daemon task is running before the update'
 
-    $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
-    $listener.Start()
-    $debugPort = $listener.LocalEndpoint.Port
-    $listener.Stop()
-    # The Start Menu shortcut starts the app in its own directory, and the
-    # gateway and the update helper inherit it; a directory they hold open
-    # cannot be renamed.
-    $app = Start-Process -FilePath $desktop -WorkingDirectory $appDir -PassThru -ArgumentList "--remote-debugging-port=$debugPort", ('--user-data-dir="' + (Join-Path $root 'Electron') + '"')
+    $electron = Join-Path $root 'Electron'
+    $port = Get-FreePort
+    $app = Start-App $shortcut $desktop $electron $port
     $appId = $app.Id
-    $sidecarId = Wait-DesktopSidecar $app $installed
+    $sidecarId = Wait-Sidecar $app $installed
     Write-Host "The old desktop (pid $appId) runs its sidecar (pid $sidecarId) from the old CLI."
+    $probe = Invoke-App 'probe' $port
+    Assert ($probe.Code -eq 0) 'the old dashboard answers through the running app'
 
-    $apply = Join-Path $root 'apply.cjs'
-    @'
-const { chromium } = require(process.argv[2])
-;(async () => {
-  const browser = await chromium.connectOverCDP(process.argv[3])
-  const context = browser.contexts()[0]
-  const page = context.pages()[0] || await context.waitForEvent('page')
-  await page.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\//, { timeout: 45000 })
-  await page.waitForFunction(() => window.sessionStorage.getItem('aether.token'), null, { timeout: 45000 })
-  const answer = await page.evaluate(async () => {
-    const response = await fetch('/local/v1/update.apply', {
-      method: 'POST',
-      headers: { authorization: 'Bearer ' + window.sessionStorage.getItem('aether.token'), 'content-type': 'application/json' },
-      body: '{}',
-    })
-    return { status: response.status, body: await response.text() }
-  })
-  console.log(JSON.stringify(answer))
-  if (answer.status !== 200) process.exitCode = 1
-  await browser.close().catch(() => {})
-})().catch(error => { console.error(error); process.exitCode = 1 })
-'@ | Set-Content -LiteralPath $apply -Encoding UTF8
-    $applied = Invoke-Native $node @(('"' + $apply + '"'), ('"' + $Playwright + '"'), "http://127.0.0.1:$debugPort") 300
-    Assert ($applied.Code -eq 0) 'update.apply answered 200 through the running app'
+    $clicked = Invoke-App 'click' $port 300
+    Assert ($clicked.Out -match 'clicked Update now') 'the Update now button in the running app was clicked'
 
-    $deadline = [DateTime]::UtcNow.AddSeconds(240)
-    $relaunched = $null
-    do {
-        $relaunched = @(Get-ProcessAt 'aether-desktop' $desktop | Where-Object { $_.Id -ne $appId -and $_.MainWindowHandle -ne [IntPtr]::Zero })
-        if ($relaunched.Count -gt 0) { break }
-        Start-Sleep -Milliseconds 500
-    } while ([DateTime]::UtcNow -lt $deadline)
-    if ($relaunched.Count -eq 0) {
-        Get-ChildItem -Recurse -Force -LiteralPath $env:LOCALAPPDATA -Filter last-error.txt -ErrorAction SilentlyContinue |
-            ForEach-Object { Write-Host "$($_.FullName): $(Get-Content -Raw -LiteralPath $_.FullName)" }
-        Get-Process -Name 'aether', 'aether-desktop' -ErrorAction SilentlyContinue | Format-Table Id, Path -AutoSize | Out-String | Write-Host
-        throw 'The updated desktop app was not started within 240s.'
-    }
-    Write-Host "ok: a new desktop process (pid $($relaunched[0].Id)) was started from the app directory"
+    $relaunched = Wait-Relaunch $desktop $appId
+    Write-Host "ok: a new desktop process (pid $($relaunched.Id)) was started from the app directory"
     Assert ((Get-Process -Id $appId -ErrorAction SilentlyContinue) -eq $null) 'the old desktop process exited'
     Assert ((Get-Process -Id $sidecarId -ErrorAction SilentlyContinue) -eq $null) 'the old sidecar exited'
     Assert ((Get-Content -Raw -LiteralPath (Join-Path $appDir 'new-release-marker.txt')).Trim() -eq $NewVersion) 'the app directory holds the new release'
     Assert ((Get-Hash $installed) -eq $newHash) 'the CLI the app runs is the new build'
-    $errors = @(Get-ChildItem -Recurse -Force -LiteralPath $env:LOCALAPPDATA -Filter last-error.txt -ErrorAction SilentlyContinue)
-    Assert ($errors.Count -eq 0) 'no desktop build error was recorded'
+    Assert (-not (Get-LastError)) 'no desktop build error was recorded'
     Assert (-not (Get-ChildItem -Recurse -Force -LiteralPath $env:LOCALAPPDATA -Directory -Filter staged-app -ErrorAction SilentlyContinue)) 'the staged app was consumed'
-    $newSidecar = Wait-DesktopSidecar $relaunched[0] $installed
+    $newSidecar = Wait-Sidecar $relaunched $installed
     Write-Host "ok: the relaunched desktop runs a new sidecar (pid $newSidecar)"
-    if ($taskReady) {
-        $status = (& schtasks.exe /Query /TN $taskName /FO LIST) -join "`n"
-        Assert ($status -notmatch 'Status:\s+Running') 'the helper ended the aether-daemon task'
-    } else {
-        Write-Host 'NOT VERIFIED: the aether-daemon stand-in task could not be started on this runner.'
-    }
+    Assert (Wait-DaemonState 'Running' 60) 'the helper started the aether-daemon task again after the swap'
+    $link = $shell.CreateShortcut($shortcut)
+    Assert ($link.TargetPath -ieq $desktop) 'the Start Menu shortcut still targets the app directory'
+
+    Stop-App $relaunched
+    $fromShortcut = Start-App $shortcut $desktop $electron (Get-FreePort)
+    $shortcutSidecar = Wait-Sidecar $fromShortcut $installed
+    Assert (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $fromShortcut.Path) 'new-release-marker.txt')) 'the Start Menu shortcut launches the new app'
+    Write-Host "ok: the shortcut's app (pid $($fromShortcut.Id)) runs sidecar pid $shortcutSidecar from the new CLI"
+    Stop-App $fromShortcut
+    & schtasks.exe /End /TN $taskName | Out-Null
     Assert-NoNewDetections 'after the desktop update'
+
+    Write-Host '=== aether update from a terminal while the desktop app runs ==='
+    $installed = New-Sandbox 'terminal'
+    $cliDir = Split-Path -Parent $installed
+    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
+    $appDir = Split-Path -Parent $desktop
+    $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $DesktopZip + '"')) 600
+    Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) 'the old desktop app is installed'
+    $port = Get-FreePort
+    $app = Start-App $desktop $desktop $electron $port
+    $sidecarId = Wait-Sidecar $app $installed
+    $terminal = Invoke-Native $installed @('update') 600
+    Assert ((Get-Hash $installed) -eq $newHash) 'the terminal update replaced aether.exe while the app ran from it'
+    Assert (Test-Path -LiteralPath "$installed.old") 'the running sidecar image was renamed to aether.exe.old'
+    Assert ($terminal.Code -ne 0 -and ($terminal.Err + $terminal.Out) -match 'aether is updated, but the desktop app was not rebuilt') 'the terminal update says the CLI is updated but the running app was not rebuilt'
+    Write-Host "The terminal update's message about the running app: $(($terminal.Err + $terminal.Out).Trim())"
+    $app.Refresh()
+    Assert (-not $app.HasExited -and (Get-Process -Id $sidecarId -ErrorAction SilentlyContinue)) 'the app and its old sidecar kept running'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $appDir 'new-release-marker.txt'))) 'the running app directory was not touched'
+    $probe = Invoke-App 'probe' $port
+    Assert ($probe.Code -eq 0) 'the old sidecar still serves the dashboard from aether.exe.old'
+    Stop-App $app
+    Assert ((Get-Process -Id $sidecarId -ErrorAction SilentlyContinue) -eq $null) 'the old sidecar exited with the app'
+    $rebuild = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $newZip + '"')) 600
+    Assert ($rebuild.Code -eq 0 -and (Test-Path -LiteralPath (Join-Path $appDir 'new-release-marker.txt'))) 'the rebuild the message names installs the new app once the app is closed'
+    $app = Start-App $desktop $desktop $electron (Get-FreePort)
+    $null = Wait-Sidecar $app $installed
+    Stop-App $app
+    $null = Invoke-Native $installed @('version')
+    Assert (@(Get-ChildItem -LiteralPath $cliDir -Force -Filter 'aether.exe.old*').Count -eq 0) 'the next start removed aether.exe.old once the old sidecar was gone'
+
+    Write-Host '=== CLI-only install (role none), no desktop app ==='
+    $installed = New-Sandbox 'clionly' -Empty
+    $cliDir = Split-Path -Parent $installed
+    Use-Release $oldRelease
+    Invoke-Installer $mirrorPort @{ Role = 'none' }
+    Use-Release $newRelease
+    Assert ((Get-Hash $installed) -eq $oldHash) 'scripts/install.ps1 -Role none installed the old CLI at the default path'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop'))) 'no desktop app is installed'
+    $only = Invoke-Native $installed @('update') 600
+    Assert ($only.Code -eq 0) 'aether update succeeds on a CLI-only install'
+    Assert ((Get-Hash $installed) -eq $newHash) 'the CLI-only install is the new build'
+    Assert (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop'))) 'aether update installed no desktop app'
+    Assert (-not (Get-LastError)) 'no desktop build error was recorded'
+
+    Write-Host '=== the latest published desktop shell with the new CLI ==='
+    Write-Host "The published release is $PublishedTag."
+    $installed = New-Sandbox 'oldshell'
+    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
+    $appDir = Split-Path -Parent $desktop
+    $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $PublishedZip + '"')) 600
+    Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) "the $PublishedTag desktop app is installed"
+    $port = Get-FreePort
+    $app = Start-App $desktop $desktop $electron $port
+    $appId = $app.Id
+    $sidecarId = Wait-Sidecar $app $installed
+    $probe = Invoke-App 'probe' $port
+    Assert ($probe.Code -eq 0) "the $PublishedTag shell shows the dashboard of the CLI it runs"
+    $clicked = Invoke-App 'click' $port 300
+    Assert ($clicked.Out -match 'clicked Update now') "Update now was clicked in the $PublishedTag shell"
+    $deadline = [DateTime]::UtcNow.AddSeconds(240)
+    while ((Get-Hash $installed) -ne $newHash -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    Assert ((Get-Hash $installed) -eq $newHash) "the CLI was updated from the $PublishedTag shell"
+    $deadline = [DateTime]::UtcNow.AddSeconds(120)
+    while (-not (Get-LastError) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
+    $recorded = Get-LastError
+    Write-Host "Recorded build error: $recorded"
+    Assert ($recorded -match 'too old to update itself on Windows' -and $recorded -match 'aether gui build') 'the documented error names the old shell and the command to run'
+    $app.Refresh()
+    Assert (-not $app.HasExited) "the $PublishedTag app is still running"
+    Assert (-not (Test-Path -LiteralPath (Join-Path $appDir 'new-release-marker.txt'))) 'the old app directory was left alone'
+    $respawned = Wait-Sidecar $app $installed $sidecarId
+    Write-Host "ok: the old shell respawned its sidecar (pid $respawned) on the new CLI"
+    $probe = Invoke-App 'probe' $port
+    Assert ($probe.Code -eq 0) "the $PublishedTag shell still shows the dashboard on the new CLI"
+    Stop-App $app
+    $app = Start-App $desktop $desktop $electron (Get-FreePort)
+    $null = Wait-Sidecar $app $installed
+    Write-Host "ok: the $PublishedTag app launches again on the new CLI"
+    Stop-App $app
+
+    Write-Host '=== the new desktop shell with the latest published CLI ==='
+    $installed = New-Sandbox 'newshell'
+    $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
+    $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $newZip + '"')) 600
+    Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) 'the new desktop app is installed'
+    Copy-Item -LiteralPath $PublishedCli -Destination $installed -Force
+    $version = Invoke-Native $installed @('version')
+    Assert ($version.Out -match [regex]::Escape($PublishedTag)) "the CLI beside the new app is the published $PublishedTag"
+    $port = Get-FreePort
+    $app = Start-App $desktop $desktop $electron $port
+    $null = Wait-Sidecar $app $installed
+    $probe = Invoke-App 'probe' $port
+    Assert ($probe.Code -eq 0) "the new shell shows the dashboard of the published $PublishedTag CLI"
+    Stop-App $app
+    Assert-NoNewDetections 'after the shell and CLI pairings'
 
     $preferences = Get-MpPreference
     if ((Get-MpComputerStatus).RealTimeProtectionEnabled -ne $true) { throw 'Defender realtime protection was turned off during the scenario.' }
@@ -360,9 +691,12 @@ const { chromium } = require(process.argv[2])
                 Where-Object { $_.Path -and $_.Path -like "$root*" })) {
             & "$env:SystemRoot\System32\taskkill.exe" /PID $process.Id /T /F | Out-Null
         }
-        if ($fake -and -not $fake.HasExited) { $fake.Kill() }
+        foreach ($process in $releases + @($mirror)) {
+            if ($process -and -not $process.HasExited) { $process.Kill() }
+        }
+        & schtasks.exe /End /TN $taskName 2>&1 | Out-Null
         & schtasks.exe /Delete /TN $taskName /F 2>&1 | Out-Null
-        & certutil.exe -delstore Root $caSubject 2>&1 | Out-Null
+        & certutil.exe -delstore Root 'Aether update smoke CA' 2>&1 | Out-Null
         foreach ($name in $saved.Keys) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
     } catch {
         Write-Host "cleanup: $($_.Exception.Message)"

@@ -8,7 +8,7 @@
 //	fake-release -assets <dir> -latest v0.5.1 -ca-out ca.pem -pubkey
 //
 // It prints the proxy's address on one line. GET /slow?d=5s on the proxy
-// port itself delays every aether-windows-amd64.exe download by d.
+// port itself delays every aether-windows-<arch>.exe download by d.
 package main
 
 import (
@@ -188,7 +188,7 @@ func (p *proxy) connect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *proxy) serveRelease(w http.ResponseWriter, r *http.Request) {
-	if d := time.Duration(p.slow.Load()); d > 0 && strings.HasSuffix(r.URL.Path, "/aether-windows-amd64.exe") {
+	if d := time.Duration(p.slow.Load()); d > 0 && strings.Contains(r.URL.Path, "/aether-windows-") && strings.HasSuffix(r.URL.Path, ".exe") {
 		time.Sleep(d)
 	}
 	r.URL.Path = strings.TrimPrefix(r.URL.Path, "/"+selfupdate.Repo)

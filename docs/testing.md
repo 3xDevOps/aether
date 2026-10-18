@@ -270,37 +270,54 @@ Programs Known Folder through `Environment.SpecialFolder.Programs`, backs up any
 existing `Aether.lnk`, and restores it in `finally` before deleting the temporary
 app. It never redirects permanent shell-folder registry settings.
 
-The workflow's `update` job proves what Linux cannot: replacing a running
-`aether.exe`, and the desktop helper swapping an app directory the running app
-holds, under Defender realtime with no exclusions. It builds an old
-(`v0.5.1-alpha.4`) and a new (`v0.5.1-alpha.5`) client from the checkout, both
+The workflow's `update` job (amd64 on `windows-latest`, arm64 on `windows-11-arm`)
+proves what Linux cannot: replacing a running `aether.exe`, and the desktop
+helper swapping an app directory the running app holds, under Defender realtime
+with no exclusions. It builds an old (`v0.5.1-alpha.4`) and a new
+(`v0.5.1-alpha.5`) client from the checkout the way `release.yml` does (the
+`goversioninfo` resource and manifest, `-trimpath`, release ldflags), both
 trusting the key of `internal/selfupdate/releasetest` through a `go build
 -overlay` of `keys.go`. The client pins `https://github.com`, so
 `internal/selfupdate/releasetest/cmd/fake-release` is an HTTPS proxy that answers
 `CONNECT github.com:443` (`HTTPS_PROXY`) with a certificate from a throwaway CA,
-trusted only in `LocalMachine\Root` for the run, and serves signed releases.
-`scripts/update-smoke.ps1` then:
+trusted only in `LocalMachine\Root` for the run, and serves signed releases:
+the new one, an old one for the installer, and one whose `aether.exe` is not a
+PE file. `scripts/update-smoke.ps1` then:
 
-- keeps the old `aether.exe` running (`aether gui --url`) and, with the staged
-  download held open by another process, checks that `aether update` fails on the
-  second rename, restores `aether.exe`, leaves no `.old`, and leaves the process
-  running;
-- runs `aether update` for real and checks the new bytes at `aether.exe`, the old
-  at `aether.exe.old`, the old process unchanged and still serving, and
-  `aether.exe.old` gone after the next start, and that a second update succeeds
-  while the first old image still runs;
-- installs the desktop zip, starts the app with a stand-in `aether-daemon`
-  Scheduled Task and the app's own directory as its working directory (as the Start
-Menu shortcut does), posts `update.apply` to its gateway through the app's debugging
-  port, and checks that the sidecar exits, the detached helper swaps in the new
-  app (the new zip adds a marker file), ends the task, and starts the new app
-  with the new CLI;
+- keeps the old `aether.exe` running (`aether gui --url`), kills an
+  `aether update` mid-download (the staged `.aether.exe.update-*` file stays, the
+  installed CLI is untouched), and, with the staged download held open by another
+  process, checks that `aether update` fails on the second rename, restores
+  `aether.exe`, leaves no `.old`, and leaves the process running;
+- runs `aether update` for real and checks the new bytes (with the release
+  VERSIONINFO and manifest) at `aether.exe`, the old at `aether.exe.old`, the old
+  process unchanged and still serving, and `aether.exe.old` gone after the next
+  start, and that a second update succeeds while the first old image still runs;
+- updates to a release whose `aether.exe` does not start and checks the update
+  fails with "does not start, so the previous build was restored", the working
+  CLI stays and no `.old` is left; moves `aether.exe.old` back over a missing
+  `aether.exe`, the state a swap killed between its renames leaves (the window
+  is too short to hit);
+- installs the old release with the real `scripts/install.ps1` (default
+  directories, user `PATH`, Start Menu shortcut), registers a stand-in
+  `aether-daemon` Scheduled Task with the daemon's own task settings, starts the
+  app through the shortcut, clicks **Update now** in the running app's dashboard
+  over its debugging port, and checks that the sidecar exits, the detached helper
+  swaps in the new app (the new zip adds a marker file), starts the task again,
+  and starts the new app with the new CLI, and that the shortcut launches it;
+- runs `aether update` from a terminal while the app runs (the CLI is replaced,
+  the old sidecar keeps serving from `aether.exe.old`, the app directory is left
+  alone and the command says to rerun `aether gui build`), and on a
+  `-Role none` install with no app;
+- pairs the desktop zip and CLI of the latest published release with this
+  checkout's: the published shell with the new CLI (the CLI updates, the
+  documented "too old to update itself" error is recorded, the shell respawns on
+  the new CLI) and the new shell with the published CLI (the dashboard loads);
 - fails on any new `Get-MpThreatDetection` entry or changed exclusion.
 
-Not covered: clicking **Update now** (the call is `update.apply` itself), an
-older desktop shell that does not set `AETHER_SHELL_QUITS_ON_76` (a unit test
-in `internal/localgw` covers the gateway's refusal), a
-Windows ARM64 runner, and Defender cloud verdicts on real release binaries.
+Not covered: Smart App Control (it cannot be enabled on a hosted runner, so the
+unstartable image is a non-PE file instead), a swap killed exactly between two
+renames, and Defender cloud verdicts on real release binaries.
 
 For each install, the smoke inspects the real shortcut's executable target and
 working directory. It then waits up to 90 seconds for `Shell.Application`'s
