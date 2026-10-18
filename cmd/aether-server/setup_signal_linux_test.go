@@ -23,6 +23,7 @@ func TestSetupCommandStopsAtConfirmationWithoutWriting(t *testing.T) {
 			"--config", os.Getenv("AETHER_SERVER_SETUP_CONFIG"),
 			"--unit", os.Getenv("AETHER_SERVER_SETUP_UNIT"),
 		}
+		dockerCheck = func(context.Context) error { return nil }
 		main()
 		return
 	}
@@ -127,7 +128,7 @@ func TestSetupEndsOnNextStepsWhenSysboxIsInterrupted(t *testing.T) {
 	dir := t.TempDir()
 	var out bytes.Buffer
 	if err := writeSetup(&out, filepath.Join(dir, "aether-server.service"), filepath.Join(dir, "server.conf"),
-		map[string]string{"data-dir": filepath.Join(dir, "data")}, false, true); err != nil {
+		map[string]string{"data-dir": filepath.Join(dir, "data")}, false, true, true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "Docker inside runs is not installed: context canceled\n") ||

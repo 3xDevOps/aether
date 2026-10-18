@@ -1590,7 +1590,8 @@ Building the APK from a checkout is in
 ## Server prerequisites
 
 - **Linux.** Windows and macOS are client platforms.
-- **Docker**, running, with the server's user able to reach its socket. Every
+- **Docker**, running, with the server's user able to reach its socket
+  ([install Docker Engine](https://docs.docker.com/engine/install/)). Every
   member environment and run is a container. Agent installation happens in
   the member's environment. Runs on a shared agent account
   ([teams.md](teams.md#agent-accounts)), and every container that mounts a
@@ -1777,6 +1778,20 @@ address and data directory (Enter accepts each default, and a re-run takes
 each default from the existing config), and writes the systemd unit and the
 config file.
 
+Before the first question, setup asks the Docker daemon for its API
+version. When Docker does not answer, setup prints the error, says that runs
+fail until Docker answers, links
+[Docker's install page](https://docs.docker.com/engine/install/), and asks
+`Continue without Docker`, defaulting to no. No exits with
+`nothing written; install or start Docker, then run setup again`. Yes skips
+the Sysbox question and puts installing or starting Docker first in `next:`.
+Docker older than Engine 26.0 (API 1.45) counts as answering: setup prints
+the error and continues. On that Docker, once someone shares their agent
+account, that person's containers and every run on the account fail
+([prerequisites](#server-prerequisites)). When `DOCKER_API_VERSION` pins the
+client below API 1.45 instead, setup says to unset or raise it; upgrading
+Docker does not change it.
+
 On a host that runs tailscaled, setup names the tailnet the host is on and
 asks `Will people reach this server over the tailnet <name>`. On a tailnet the
 server signs people in by their tailnet login, with no key, and tailscaled is
@@ -1821,8 +1836,8 @@ repeats the question until answered ([edge.md](edge.md#access-policies)).
 Setup is the only thing that turns the edge on: `edge-url` is empty unless
 the config file or a flag names an edge, so an upgrade never enrolls an
 existing server.
-The last question, unless Docker already has Sysbox, is `Let agents use Docker
-inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)`,
+The last question, unless Docker already has Sysbox or does not answer, is
+`Let agents use Docker inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)`,
 defaulting to yes; setup installs it after writing the files. On a host that
 cannot run Sysbox it prints `Docker inside runs is unavailable on this host:
 <reason>`; if the install fails it prints the error and
@@ -1832,10 +1847,14 @@ because stopping apt or dpkg midway can leave packages half-configured, and
 setup says so. Either way setup completes.
 With the edge on, setup then prints the server id and a claim link for the
 Aether app, with the claim code inside it for `aether link --claim <code>`.
-Setup ends on `next:`, after everything else: the command that starts the
-service, then how to reach the server from your computer - the claim link or
-`aether link --claim <code>` while the edge is on and the server has no owner,
-otherwise `aether link <this-host>:2222` with the port from `addr`. On a
+After `Continue without Docker` it issues no claim code, which would expire
+before the server can start.
+Setup ends on `next:`, after everything else: Docker's install page if you
+continued without Docker, the command that starts the service, then how to
+reach the server from your computer - while the edge is on and the server
+has no owner, the claim link or `aether link --claim <code>`, or
+`sudo aether-server edge claim-code` when setup issued no code; otherwise
+`aether link <this-host>:2222` with the port from `addr`. On a
 terminal these are bold orange; with `NO_COLOR` set, or output that is not a
 terminal, they are plain text.
 Answering `server` to the install script's question runs it for you; this
@@ -1861,8 +1880,13 @@ sudo aether-server install --addr :2222 --tailnet-auto-join
 `install` also installs Sysbox, as setup does without the question, unless
 you pass `--sysbox=false`. The flag is not a serve option and is not written
 to the config file. It ends on the same `next:` as setup but issues no claim
-code: with the edge on and no owner, step 2 is
-`sudo aether-server edge claim-code`, which prints the claim link.
+code: with the edge on and no owner, the last step is
+`sudo aether-server edge claim-code`, which prints the claim link. When
+Docker does not answer, `install` prints setup's warning and writes the files
+anyway, so automation can install Docker afterwards; it skips Sysbox with
+`Skipping Docker inside runs (Sysbox), which needs Docker; once Docker
+answers: sudo aether-server sysbox install`, and `next:` starts with
+installing or starting Docker.
 
 To install or check Sysbox on its own, on the server host:
 

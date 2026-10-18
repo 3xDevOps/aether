@@ -649,7 +649,7 @@ func TestAskSysboxDefaultsToYes(t *testing.T) {
 	fakeSysbox(t, false, nil)
 	for answer, want := range map[string]bool{"": true, "yes": true, "n": false, "no": false} {
 		var out bytes.Buffer
-		if got := askSysbox(newPrompter(&out, answers(answer))); got != want {
+		if got := askSysbox(newPrompter(&out, answers(answer)), true); got != want {
 			t.Errorf("answer %q = %v, want %v", answer, got, want)
 		}
 		if !strings.Contains(out.String(), "Let agents use Docker inside their runs? This installs the Sysbox runtime (Ubuntu/Debian)") {
@@ -661,8 +661,51 @@ func TestAskSysboxDefaultsToYes(t *testing.T) {
 func TestAskSysboxIsSilentWhenSysboxIsOn(t *testing.T) {
 	fakeSysbox(t, true, nil)
 	var out bytes.Buffer
-	if askSysbox(newPrompter(&out, answers("yes"))) || out.Len() != 0 {
+	if askSysbox(newPrompter(&out, answers("yes")), true) || out.Len() != 0 {
 		t.Errorf("askSysbox with Sysbox on = prompt %q, want no question", out.String())
+	}
+}
+
+func TestAskSysboxIsSkippedWithoutDocker(t *testing.T) {
+	fakeSysbox(t, false, nil)
+	var out bytes.Buffer
+	if askSysbox(newPrompter(&out, answers("yes")), false) || out.String() != "\nSkipping Docker inside runs (Sysbox), which needs Docker; once Docker answers: sudo aether-server sysbox install\n" {
+		t.Errorf("askSysbox without Docker = output %q, want the skip line and no question", out.String())
+	}
+}
+
+// Enter, like no, stops setup before the first option is asked.
+func TestAskWithoutDockerDefaultsToStopping(t *testing.T) {
+	for answer, stop := range map[string]bool{"": true, "no": true, "yes": false} {
+		var out bytes.Buffer
+		err := askWithoutDocker(newPrompter(&out, answers(answer)))
+		stopped := err != nil && err.Error() == "nothing written; install or start Docker, then run setup again"
+		if stopped != stop || (!stop && err != nil) || out.String() != "Continue without Docker (yes/no) [no]: " {
+			t.Errorf("answer %q = %v, prompt %q; want stop %v", answer, err, out.String(), stop)
+		}
+	}
+}
+
+// A server set up without Docker cannot start, so setup issues no claim
+// code to expire meanwhile, and next: starts on Docker.
+func TestWriteSetupWithoutDockerStartsNextOnDocker(t *testing.T) {
+	t.Setenv("SUDO_USER", "ubuntu")
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	values := map[string]string{"data-dir": dataDir, "edge-url": edgeagent.DefaultURL, "edge-access": string(edgeproto.PolicyApprovedDevices)}
+	configPath := filepath.Join(dir, "server.conf")
+	var out bytes.Buffer
+	if err := writeSetup(&out, filepath.Join(dir, "aether-server.service"), configPath, values, false, false, false); err != nil {
+		t.Fatal(err)
+	}
+	want := "  1. install or start Docker on this machine:\n       https://docs.docker.com/engine/install/\n" +
+		"  2. start the server on this machine:\n       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server\n" +
+		"  3. on this machine, print a claim link to open on your computer:\n       sudo aether-server edge claim-code --config '" + configPath + "'\n"
+	if got := nextSteps(t, out.String()); got != want {
+		t.Errorf("next steps:\n%s\nwant:\n%s", got, want)
+	}
+	if _, ok, err := edgeagent.OpenState(dataDir).ClaimCode(); err != nil || ok || strings.Contains(out.String(), "claim link: ") {
+		t.Errorf("claim code issued = %v (%v), want none:\n%s", ok, err, out.String())
 	}
 }
 
@@ -701,7 +744,7 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 	dataDir := filepath.Join(dir, "data")
 	values := map[string]string{"data-dir": dataDir, "edge-url": edgeagent.DefaultURL, "edge-access": string(edgeproto.PolicyApprovedDevices)}
 	var out bytes.Buffer
-	if err := writeSetup(&out, filepath.Join(dir, "aether-server.service"), filepath.Join(dir, "server.conf"), values, false, true); err != nil {
+	if err := writeSetup(&out, filepath.Join(dir, "aether-server.service"), filepath.Join(dir, "server.conf"), values, false, true, true); err != nil {
 		t.Fatal(err)
 	}
 	got := out.String()
@@ -748,7 +791,7 @@ func TestPrintNextStepsPrefixesSudoForASudoUser(t *testing.T) {
 	} {
 		t.Setenv("SUDO_USER", sudoUser)
 		var out bytes.Buffer
-		if err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": ":2300"}), ""); err != nil {
+		if err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": ":2300"}), "", true); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(out.String(), want) || !strings.HasSuffix(out.String(), "\n       aether link <this-host>:2300\n") {
@@ -763,7 +806,7 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 	t.Setenv("SUDO_USER", "ubuntu")
 	var out bytes.Buffer
 	o := optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": edgeagent.DefaultURL})
-	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, ""); err != nil {
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasSuffix(out.String(), "\n       sudo aether-server edge claim-code\n") {
@@ -771,7 +814,7 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 	}
 
 	out.Reset()
-	if err := printNextSteps(&out, "/srv/it's here/server.conf", o, ""); err != nil {
+	if err := printNextSteps(&out, "/srv/it's here/server.conf", o, "", true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasSuffix(out.String(), `sudo aether-server edge claim-code --config '/srv/it'\''s here/server.conf'`+"\n") {
@@ -783,7 +826,7 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 // through it.
 func TestPrintNextStepsRefusesAnAddrWithoutAPortBeforePrinting(t *testing.T) {
 	var out bytes.Buffer
-	err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": "2222"}), "")
+	err := printNextSteps(&out, serversetup.DefaultConfigPath, optionsOf(t, map[string]string{"addr": "2222"}), "", true)
 	if err == nil || !strings.Contains(err.Error(), `addr "2222"`) || out.Len() != 0 {
 		t.Errorf("err = %v, output %q; want the addr error and nothing printed", err, out.String())
 	}

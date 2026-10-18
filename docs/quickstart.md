@@ -85,7 +85,15 @@ if you skipped the question:
 sudo aether-server setup
 ```
 
-It asks for the listen address and data directory (Enter accepts each
+Setup first checks that Docker answers, since every agent runs in a Docker
+container. If it does not, setup prints the error and
+[Docker's install page](https://docs.docker.com/engine/install/) and asks
+whether to continue without Docker: Enter stops with nothing written. Yes
+skips Sysbox and the claim link, since the server cannot start yet; the
+`next:` block below then starts with installing or starting Docker, and
+`sudo aether-server edge claim-code` prints the link later.
+
+Then it asks for the listen address and data directory (Enter accepts each
 default). On a host that already runs tailscaled, it names the tailnet and
 asks whether people will reach the server over it. On a first run Enter means
 no, because tailscaled may be there for something else: setup turns tailnet

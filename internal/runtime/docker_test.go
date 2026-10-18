@@ -779,7 +779,7 @@ func TestCreateSubpathMountNeedsAPI145(t *testing.T) {
 			creates, bodies := slices.Clone(api.creates), slices.Clone(api.bodies)
 			api.mu.Unlock()
 			if tc.refused != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.refused) {
+				if !errors.Is(err, ErrSubpathAPI) || !strings.Contains(err.Error(), tc.refused) {
 					t.Fatalf("Create = %q, %v; want refusal %q", id, err, tc.refused)
 				}
 				if len(creates) != 0 {

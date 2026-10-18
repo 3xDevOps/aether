@@ -21,6 +21,8 @@ var (
 
 const sysboxManual = "sudo aether-server sysbox install"
 
+const sysboxNeedsDocker = "Skipping Docker inside runs (Sysbox), which needs Docker; once Docker answers: " + sysboxManual
+
 // sysboxOn reports whether Docker already has Sysbox. A Docker that cannot
 // be asked counts as off so the installer reports the real problem.
 func sysboxOn() bool {
