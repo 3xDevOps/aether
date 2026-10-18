@@ -88,6 +88,7 @@ jobs:
       - name: Install, rebuild, and launch the desktop under Defender
         env:
           DESKTOP_ZIP: ${{ steps.desktop.outputs.zip }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ($env:DESKTOP_ZIP) {
             ./scripts/install-smoke.ps1 -Cli "$env:RUNNER_TEMP/aether.exe" -DesktopZip $env:DESKTOP_ZIP
@@ -211,14 +212,14 @@ jobs:
         with:
           version: ${{ env.OLD_VERSION }}
           arch: ${{ matrix.arch }}
-      # What users have today: the newest published release's CLI and desktop
-      # app, not built from this checkout.
+      # What users have today: the newest published release's CLI, not built
+      # from this checkout.
       - name: Download the latest published release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $dir = Join-Path $env:RUNNER_TEMP 'published'
-          gh release download --repo $env:GITHUB_REPOSITORY --dir $dir --pattern 'aether-windows-${{ matrix.arch }}.exe' --pattern 'aether-desktop-windows-${{ matrix.arch }}.zip'
+          gh release download --repo $env:GITHUB_REPOSITORY --dir $dir --pattern 'aether-windows-${{ matrix.arch }}.exe'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $tag = gh release view --repo $env:GITHUB_REPOSITORY --json tagName --jq .tagName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -229,6 +230,7 @@ jobs:
       - name: Update a running aether.exe and desktop app under Defender
         env:
           DESKTOP_ZIP: ${{ steps.desktop.outputs.zip }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           ./scripts/update-smoke.ps1 `
             -OldCli "$env:RUNNER_TEMP/aether-old.exe" -NewCli "$env:RUNNER_TEMP/aether-new.exe" `
@@ -236,5 +238,4 @@ jobs:
             -OldVersion $env:OLD_VERSION -NewVersion $env:NEW_VERSION -Arch ${{ matrix.arch }} `
             -Playwright "$env:RUNNER_TEMP\pw\node_modules\playwright-core" `
             -PublishedCli "$env:PUBLISHED_DIR\aether-windows-${{ matrix.arch }}.exe" `
-            -PublishedZip "$env:PUBLISHED_DIR\aether-desktop-windows-${{ matrix.arch }}.zip" `
             -PublishedTag $env:PUBLISHED_TAG

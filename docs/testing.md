@@ -313,10 +313,11 @@ PE file. `scripts/update-smoke.ps1` then:
   the old sidecar keeps serving from `aether.exe.old`, the app directory is left
   alone and the command says to rerun `aether gui build`), and on a
   `-Role none` install with no app;
-- pairs the desktop zip and CLI of the latest published release with this
-  checkout's: the published shell with the new CLI (the CLI updates, the
-  documented "too old to update itself" error is recorded, the shell respawns on
-  the new CLI) and the new shell with the published CLI (the dashboard loads);
+- pairs published releases with this checkout's: the desktop shell of the pinned
+  `$OldShellTag` in `scripts/update-smoke.ps1` (the newest release without
+  `AETHER_SHELL_QUITS_ON_76`) with the new CLI (the CLI updates, the documented
+  "too old to update itself" error is recorded, the shell respawns on the new
+  CLI) and the new shell with the latest published CLI (the dashboard loads);
 - fails on any new `Get-MpThreatDetection` entry or changed exclusion.
 
 Not covered: Smart App Control (it cannot be enabled on a hosted runner, so the

@@ -8,12 +8,16 @@ param(
     [Parameter(Mandatory = $true)][string]$OldVersion,
     [Parameter(Mandatory = $true)][string]$NewVersion,
     [Parameter(Mandatory = $true)][string]$Playwright,
-    # The latest published GitHub release's CLI and desktop zip, not built from this checkout.
+    # The latest published GitHub release's CLI, not built from this checkout.
     [Parameter(Mandatory = $true)][string]$PublishedCli,
-    [Parameter(Mandatory = $true)][string]$PublishedZip,
     [Parameter(Mandatory = $true)][string]$PublishedTag,
     [ValidateSet('amd64', 'arm64')][string]$Arch = 'amd64'
 )
+
+# The newest release whose desktop shell lacks AETHER_SHELL_QUITS_ON_76 (desktop/main.js), so it
+# cannot update itself on Windows. Releases that include the feature behave differently, so
+# do not move this to a newer tag.
+$OldShellTag = 'v0.7.0-alpha.16'
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -618,40 +622,43 @@ exit 1
     Assert (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop'))) 'aether update installed no desktop app'
     Assert (-not (Get-LastError)) 'no desktop build error was recorded'
 
-    Write-Host '=== the latest published desktop shell with the new CLI ==='
-    Write-Host "The published release is $PublishedTag."
+    Write-Host '=== the $OldShellTag desktop shell with the new CLI ==='
+    $oldShellDir = Join-Path $root 'old-shell'
+    & gh release download $OldShellTag --repo $env:GITHUB_REPOSITORY --dir $oldShellDir --pattern "aether-desktop-windows-$Arch.zip"
+    if ($LASTEXITCODE -ne 0) { throw "gh release download $OldShellTag failed with exit code $LASTEXITCODE." }
+    $oldShellZip = Join-Path $oldShellDir "aether-desktop-windows-$Arch.zip"
     $installed = New-Sandbox 'oldshell'
     $desktop = Join-Path $env:LOCALAPPDATA 'Programs\Aether Desktop\aether-desktop.exe'
     $appDir = Split-Path -Parent $desktop
-    $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $PublishedZip + '"')) 600
-    Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) "the $PublishedTag desktop app is installed"
+    $install = Invoke-Native $installed @('gui', 'build', '--zip', ('"' + $oldShellZip + '"')) 600
+    Assert ($install.Code -eq 0 -and (Test-Path -LiteralPath $desktop)) "the $OldShellTag desktop app is installed"
     $port = Get-FreePort
     $app = Start-App $desktop $desktop $electron $port
     $appId = $app.Id
     $sidecarId = Wait-Sidecar $app $installed
     $probe = Invoke-App 'probe' $port
-    Assert ($probe.Code -eq 0) "the $PublishedTag shell shows the dashboard of the CLI it runs"
+    Assert ($probe.Code -eq 0) "the $OldShellTag shell shows the dashboard of the CLI it runs"
     $clicked = Invoke-App 'click' $port 300
-    Assert ($clicked.Out -match 'clicked Update now') "Update now was clicked in the $PublishedTag shell"
+    Assert ($clicked.Out -match 'clicked Update now') "Update now was clicked in the $OldShellTag shell"
     $deadline = [DateTime]::UtcNow.AddSeconds(240)
     while ((Get-Hash $installed) -ne $newHash -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
-    Assert ((Get-Hash $installed) -eq $newHash) "the CLI was updated from the $PublishedTag shell"
+    Assert ((Get-Hash $installed) -eq $newHash) "the CLI was updated from the $OldShellTag shell"
     $deadline = [DateTime]::UtcNow.AddSeconds(120)
     while (-not (Get-LastError) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 500 }
     $recorded = Get-LastError
     Write-Host "Recorded build error: $recorded"
     Assert ($recorded -match 'too old to update itself on Windows' -and $recorded -match 'aether gui build') 'the documented error names the old shell and the command to run'
     $app.Refresh()
-    Assert (-not $app.HasExited) "the $PublishedTag app is still running"
+    Assert (-not $app.HasExited) "the $OldShellTag app is still running"
     Assert (-not (Test-Path -LiteralPath (Join-Path $appDir 'new-release-marker.txt'))) 'the old app directory was left alone'
     $respawned = Wait-Sidecar $app $installed $sidecarId
     Write-Host "ok: the old shell respawned its sidecar (pid $respawned) on the new CLI"
     $probe = Invoke-App 'probe' $port
-    Assert ($probe.Code -eq 0) "the $PublishedTag shell still shows the dashboard on the new CLI"
+    Assert ($probe.Code -eq 0) "the $OldShellTag shell still shows the dashboard on the new CLI"
     Stop-App $app
     $app = Start-App $desktop $desktop $electron (Get-FreePort)
     $null = Wait-Sidecar $app $installed
-    Write-Host "ok: the $PublishedTag app launches again on the new CLI"
+    Write-Host "ok: the $OldShellTag app launches again on the new CLI"
     Stop-App $app
 
     Write-Host '=== the new desktop shell with the latest published CLI ==='
