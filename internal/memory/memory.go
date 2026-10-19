@@ -280,6 +280,11 @@ func (s *Service) Search(ctx context.Context, p protocol.MemorySearchParams) (pr
 		return protocol.MemorySearchResult{}, invalid(method,
 			fmt.Sprintf("kind must be decision, convention, gotcha, preference or outcome; got %q", p.Kind))
 	}
+	switch p.Source {
+	case "", protocol.MemorySourceAgent, protocol.MemorySourceMember, protocol.MemorySourceReport, protocol.MemorySourceAnswer:
+	default:
+		return protocol.MemorySearchResult{}, invalid(method, fmt.Sprintf("source must be agent, member, report or answer; got %q", p.Source))
+	}
 	if p.Limit == 0 {
 		p.Limit = protocol.MemorySearchLimit
 	}
@@ -288,7 +293,8 @@ func (s *Service) Search(ctx context.Context, p protocol.MemorySearchParams) (pr
 			fmt.Sprintf("limit must be between 1 and %d; got %d", protocol.MemorySearchMaxLimit, p.Limit))
 	}
 	notes, err := s.cfg.Store.SearchMemory(ctx, store.MemoryQuery{Workspace: domain.WorkspaceID(p.WorkspaceID),
-		Words: p.Words, Kind: store.MemoryKind(p.Kind), File: strings.TrimSpace(p.File), All: p.All, Pinned: p.Pinned, Limit: p.Limit})
+		Words: p.Words, Kind: store.MemoryKind(p.Kind), Source: store.MemorySource(p.Source), File: strings.TrimSpace(p.File),
+		All: p.All, Replaced: p.Replaced, Pinned: p.Pinned, Limit: p.Limit})
 	if err != nil {
 		return protocol.MemorySearchResult{}, fail(method, err)
 	}

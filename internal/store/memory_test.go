@@ -136,6 +136,37 @@ func TestMemorySearchPinned(t *testing.T) {
 	}
 }
 
+// Source and Replaced filter in the query, so an older match is found
+// however many newer notes of other kinds bury it.
+func TestMemorySearchSourceAndReplaced(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	agent := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "Take the lease before reattaching."})
+	old := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "Skip the lease when reattaching."})
+	if _, _, err := db.SupersedeMemory(ctx, old.ID, &Memory{WorkspaceID: w.ID, Kind: MemoryGotcha, Source: MemoryFromMember,
+		Body: "Hold the lease while reattaching."}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Source: MemoryFromMember, Body: fmt.Sprintf("Newer member note %d.", i)})
+	}
+	for _, c := range []struct {
+		q    MemoryQuery
+		want []string
+	}{
+		{MemoryQuery{Workspace: w.ID, Source: MemoryFromAgent, Limit: 1}, []string{agent.ID}},
+		{MemoryQuery{Workspace: w.ID, Replaced: true, Limit: 1}, []string{old.ID}},
+		{MemoryQuery{Workspace: w.ID, Replaced: true, All: true, Words: "lease"}, []string{old.ID}},
+		{MemoryQuery{Workspace: w.ID, Source: MemoryFromAgent, All: true}, []string{old.ID, agent.ID}},
+		{MemoryQuery{Workspace: w.ID, Source: MemoryFromAnswer}, []string{}},
+	} {
+		if got := noteIDs(t, db, c.q); !slices.Equal(got, c.want) {
+			t.Errorf("search %+v = %v, want %v", c.q, got, c.want)
+		}
+	}
+}
+
 // A replaced note leaves search unless All, and show walks the chain both
 // ways.
 func TestMemorySupersede(t *testing.T) {

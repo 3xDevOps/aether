@@ -660,3 +660,33 @@ func TestBriefFrameFitsItsShare(t *testing.T) {
 		t.Fatalf("frame is %d bytes, over 512:\n%s%s", size, head, tail)
 	}
 }
+
+func TestSearchFiltersSourceAndReplaced(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	run := f.run(f.dana, "claude", "work")
+	agentNote, err := f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "Use npm in web/."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.memberAdd(f.dana, protocol.MemoryAddParams{Kind: protocol.MemoryKindConvention, Text: "Use bun in web/.", Supersedes: agentNote.Item.ID})
+	ws := string(f.ws.ID)
+	for _, c := range []struct {
+		p    protocol.MemorySearchParams
+		want []string
+	}{
+		{protocol.MemorySearchParams{WorkspaceID: ws, Source: protocol.MemorySourceAgent}, nil},
+		{protocol.MemorySearchParams{WorkspaceID: ws, Source: protocol.MemorySourceAgent, Replaced: true}, []string{agentNote.Item.ID}},
+	} {
+		found, err := f.svc.Search(ctx, c.p)
+		var got []string
+		for _, item := range found.Items {
+			got = append(got, item.ID)
+		}
+		if err != nil || !slices.Equal(got, c.want) {
+			t.Errorf("search %+v = %v, %v; want %v", c.p, got, err, c.want)
+		}
+	}
+	_, err = f.svc.Search(ctx, protocol.MemorySearchParams{WorkspaceID: ws, Source: "lore"})
+	wantError(t, err, protocol.CodeInvalidParams, `memory.search: source must be agent, member, report or answer; got "lore"`)
+}

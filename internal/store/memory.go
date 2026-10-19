@@ -316,13 +316,16 @@ func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory) (bool, error) {
 
 // MemoryQuery selects notes. Words match any word in titles, bodies and
 // files, titles weighing most; File keeps notes citing that path. Without
-// either the newest notes come first. All includes replaced notes.
+// either the newest notes come first. All includes replaced notes, and
+// Replaced keeps only them.
 type MemoryQuery struct {
 	Workspace domain.WorkspaceID
 	Words     string
 	Kind      MemoryKind
+	Source    MemorySource
 	File      string
 	All       bool
+	Replaced  bool
 	Pinned    bool
 	Limit     int
 }
@@ -338,7 +341,14 @@ func (d *DB) SearchMemory(ctx context.Context, q MemoryQuery) ([]*Memory, error)
 		where += " AND m.kind = ?"
 		args = append(args, q.Kind)
 	}
-	if !q.All {
+	if q.Source != "" {
+		where += " AND m.source = ?"
+		args = append(args, q.Source)
+	}
+	switch {
+	case q.Replaced:
+		where += " AND NOT (" + memoryLive + ")"
+	case !q.All:
 		where += " AND " + memoryLive
 	}
 	if q.Pinned {
