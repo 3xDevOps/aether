@@ -383,14 +383,3 @@ func RoomMessagePageFromStore(page *store.RoomMessagePage) RoomMessageListResult
 	}
 	return out
 }
-
-func EvidencePacketPageFromStore(page *store.EvidencePacketPage) EvidencePacketListResult {
-	if page == nil {
-		return EvidencePacketListResult{}
-	}
-	out := EvidencePacketListResult{Packets: make([]EvidencePacket, len(page.Items)), NextBefore: page.NextBefore}
-	for i, p := range page.Items {
-		out.Packets[i] = EvidencePacketFromStore(p)
-	}
-	return out
-}
