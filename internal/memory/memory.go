@@ -26,7 +26,7 @@ type Store interface {
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	InsertMemory(ctx context.Context, m *store.Memory) (bool, error)
-	SupersedeMemory(ctx context.Context, old string, m *store.Memory, vet func(old *store.Memory) error) (bool, error)
+	SupersedeMemory(ctx context.Context, old string, m *store.Memory, vet func(old *store.Memory) error) (duplicate, movedPin bool, err error)
 	SearchMemory(ctx context.Context, q store.MemoryQuery) ([]*store.Memory, error)
 	GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string) (*store.Memory, []*store.Memory, error)
 	PinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, by domain.MemberID, scope store.MemoryScope) (*store.Memory, error)
@@ -119,15 +119,15 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		note.Source, note.RunID, note.Harness, note.Commit = store.MemoryFromAgent, run.ID, run.Harness, head
 	}
 	var (
-		duplicate bool
-		err       error
+		duplicate, movedPin bool
+		err                 error
 	)
 	if p.Supersedes != "" {
 		var vet func(*store.Memory) error
 		if run != nil {
 			vet = agentMayReplace
 		}
-		duplicate, err = s.cfg.Store.SupersedeMemory(ctx, p.Supersedes, note, vet)
+		duplicate, movedPin, err = s.cfg.Store.SupersedeMemory(ctx, p.Supersedes, note, vet)
 	} else {
 		duplicate, err = s.cfg.Store.InsertMemory(ctx, note)
 	}
@@ -147,7 +147,7 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		if err = s.changed(ctx, workspace, runID, member, events.MemoryActionSupersede, p.Supersedes); err != nil {
 			return protocol.MemoryAddResult{}, fail(method, err)
 		}
-		if note.PinnedAt != nil && !p.Pin {
+		if movedPin && !p.Pin {
 			if err = s.changed(ctx, workspace, runID, member, events.MemoryActionPin, note.ID); err != nil {
 				return protocol.MemoryAddResult{}, fail(method, err)
 			}

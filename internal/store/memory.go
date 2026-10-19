@@ -206,62 +206,62 @@ func (d *DB) InsertMemory(ctx context.Context, m *Memory) (bool, error) {
 // may repeat its text; when m duplicates another live note, old points at
 // that note. A pin on old moves to the replacement, pinned in old's scope
 // by the author m arrived with, even when the replacement is someone
-// else's duplicate, and must fit that scope's budget without old.
-func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, vet func(old *Memory) error) (bool, error) {
+// else's duplicate, and must fit that scope's budget without old. It
+// reports whether m duplicated a live note and whether old's pin moved.
+func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, vet func(old *Memory) error) (duplicate, movedPin bool, err error) {
 	if m == nil {
-		return false, errors.New("store: supersede memory: note is required")
+		return false, false, errors.New("store: supersede memory: note is required")
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, fmt.Errorf("store: supersede memory: begin: %w", err)
+		return false, false, fmt.Errorf("store: supersede memory: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	prior, err := readMemory(ctx, tx, m.WorkspaceID, old)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if !prior.Live() {
-		return false, fmt.Errorf("%w: memory note %s is already replaced", ErrConflict, old)
+		return false, false, fmt.Errorf("%w: memory note %s is already replaced", ErrConflict, old)
 	}
 	if vet != nil {
 		if err = vet(prior); err != nil {
-			return false, err
+			return false, false, err
 		}
 	}
 	now, err := encodeTime(time.Now().UTC())
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE memory SET invalid_at = ?, pinned_by = '', pinned_at = NULL, updated_at = ? WHERE id = ?`,
 		now, now, old); err != nil {
-		return false, fmt.Errorf("store: supersede memory %s: %w", old, err)
+		return false, false, fmt.Errorf("store: supersede memory %s: %w", old, err)
 	}
 	by := m.AuthorID
-	duplicate, err := insertMemory(ctx, tx, m)
-	if err != nil {
-		return false, err
+	if duplicate, err = insertMemory(ctx, tx, m); err != nil {
+		return false, false, err
 	}
 	if duplicate && vet != nil {
-		return false, fmt.Errorf("%w: memory note %s already holds this text; ask a member to replace %s with it (aether memory add --supersedes %s)",
+		return false, false, fmt.Errorf("%w: memory note %s already holds this text; ask a member to replace %s with it (aether memory add --supersedes %s)",
 			ErrConflict, m.ID, old, old)
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE memory SET superseded_by = ? WHERE id = ?`, m.ID, old); err != nil {
-		return false, fmt.Errorf("store: supersede memory %s: %w", old, err)
+		return false, false, fmt.Errorf("store: supersede memory %s: %w", old, err)
 	}
 	if prior.PinnedAt != nil {
 		if err = pinMemory(ctx, tx, m, by, prior.Scope); err != nil {
-			return false, fmt.Errorf("move the pin on %s to its replacement: %w", old, err)
+			return false, false, fmt.Errorf("move the pin on %s to its replacement: %w", old, err)
 		}
 		var pinned *Memory
 		if pinned, err = readMemory(ctx, tx, m.WorkspaceID, m.ID); err != nil {
-			return false, err
+			return false, false, err
 		}
 		*m = *pinned
 	}
-	if err := tx.Commit(); err != nil {
-		return false, fmt.Errorf("store: supersede memory: commit: %w", err)
+	if err = tx.Commit(); err != nil {
+		return false, false, fmt.Errorf("store: supersede memory: commit: %w", err)
 	}
-	return duplicate, nil
+	return duplicate, prior.PinnedAt != nil, nil
 }
 
 func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory) (bool, error) {

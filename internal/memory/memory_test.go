@@ -375,6 +375,29 @@ func TestAgentSupersedeOntoDuplicateIsRefused(t *testing.T) {
 	}
 }
 
+// Replacing an unpinned note with the text of a pinned one moves no pin,
+// so the activity feed gets no pin event.
+func TestSupersedeOntoPinnedDuplicateMovesNoPin(t *testing.T) {
+	f := newFixture(t)
+	bob := f.member("Bob", domain.RoleCollaborator)
+	pinned := f.memberAdd(bob, protocol.MemoryAddParams{Kind: protocol.MemoryKindConvention, Text: "Use bun in web/; never npm.", Pin: true})
+	loose := f.memberAdd(f.dana, protocol.MemoryAddParams{Kind: protocol.MemoryKindConvention, Text: "Use npm in web/."})
+	before := len(f.changes())
+	replaced := f.memberAdd(f.dana, protocol.MemoryAddParams{Kind: protocol.MemoryKindConvention,
+		Text: "use bun in web/;  never npm.", Supersedes: loose.Item.ID})
+	if !replaced.Duplicate || replaced.Item.ID != pinned.Item.ID || replaced.Item.PinnedBy != string(bob.ID) {
+		t.Fatalf("replacement = %+v, want Bob's pinned %s", replaced, pinned.Item.ID)
+	}
+	var got []events.MemoryChangePayload
+	for _, e := range f.changes()[before:] {
+		got = append(got, e.Payload.(events.MemoryChangePayload))
+	}
+	want := []events.MemoryChangePayload{{Action: events.MemoryActionSupersede, NoteID: loose.Item.ID, ActorID: f.dana.ID}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("memory.change = %+v, want %+v", got, want)
+	}
+}
+
 func TestMembersPinUnpinAndRemove(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

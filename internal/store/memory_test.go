@@ -144,8 +144,8 @@ func TestMemorySupersede(t *testing.T) {
 	w := mustCreateWorkspace(t, db)
 	old := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Body: "Use npm in web/."})
 	replacement := &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, Body: "Use bun in web/; never npm."}
-	if duplicate, err := db.SupersedeMemory(ctx, old.ID, replacement, nil); err != nil || duplicate {
-		t.Fatalf("SupersedeMemory = %v, %v", duplicate, err)
+	if duplicate, moved, err := db.SupersedeMemory(ctx, old.ID, replacement, nil); err != nil || duplicate || moved {
+		t.Fatalf("SupersedeMemory = %v, %v, %v", duplicate, moved, err)
 	}
 	if got := noteIDs(t, db, MemoryQuery{Workspace: w.ID, Words: "npm"}); !slices.Equal(got, []string{replacement.ID}) {
 		t.Fatalf("search = %v, want only the replacement %s", got, replacement.ID)
@@ -161,7 +161,7 @@ func TestMemorySupersede(t *testing.T) {
 		t.Fatalf("show replacement chain = %v, %v; want %s", chain, err, old.ID)
 	}
 	again := &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromAgent, Body: "Use pnpm."}
-	if _, err := db.SupersedeMemory(ctx, old.ID, again, nil); !errors.Is(err, ErrConflict) {
+	if _, _, err := db.SupersedeMemory(ctx, old.ID, again, nil); !errors.Is(err, ErrConflict) {
 		t.Fatalf("superseding a replaced note = %v, want ErrConflict", err)
 	}
 	if _, _, err := db.GetMemory(ctx, "other-workspace", old.ID); !errors.Is(err, ErrNotFound) {
@@ -196,7 +196,7 @@ func TestMemorySupersedeMovesPin(t *testing.T) {
 	pin(note(100, "e", ada), "")
 	old := pin(note(10, "old", ada), "")
 
-	_, err := db.SupersedeMemory(ctx, old.ID, note(120, "too long", bob), nil)
+	_, _, err := db.SupersedeMemory(ctx, old.ID, note(120, "too long", bob), nil)
 	if err == nil || err.Error() != "move the pin on "+old.ID+
 		" to its replacement: pinned workspace notes use 900 of 1024 bytes; this note needs 184; unpin one first" {
 		t.Fatalf("replacement past the budget = %v", err)
@@ -206,8 +206,9 @@ func TestMemorySupersedeMovesPin(t *testing.T) {
 	}
 	// 114 bytes fit only once the old note's 74 are freed.
 	replacement := note(50, "new", bob)
-	if _, err = db.SupersedeMemory(ctx, old.ID, replacement, nil); err != nil {
-		t.Fatal(err)
+	_, moved, err := db.SupersedeMemory(ctx, old.ID, replacement, nil)
+	if err != nil || !moved {
+		t.Fatalf("SupersedeMemory moved the pin %v, %v", moved, err)
 	}
 	if replacement.PinnedAt == nil || replacement.PinnedBy != bob.ID || replacement.Scope != MemoryScopeWorkspace {
 		t.Fatalf("replacement = %+v, want it pinned by Bob for the workspace", replacement)
@@ -218,7 +219,7 @@ func TestMemorySupersedeMovesPin(t *testing.T) {
 
 	mine := pin(note(20, "mine", ada), MemoryScopeMember)
 	theirs := note(20, "theirs", bob)
-	if _, err = db.SupersedeMemory(ctx, mine.ID, theirs, nil); err != nil {
+	if _, _, err = db.SupersedeMemory(ctx, mine.ID, theirs, nil); err != nil {
 		t.Fatal(err)
 	}
 	if theirs.PinnedAt == nil || theirs.PinnedBy != bob.ID || theirs.Scope != MemoryScopeMember {
@@ -239,8 +240,8 @@ func TestMemorySupersedeOntoDuplicatePinsAsReplacer(t *testing.T) {
 		t.Fatal(err)
 	}
 	replacement := &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, AuthorID: dana.ID, Body: "use PNPM"}
-	if duplicate, err := db.SupersedeMemory(ctx, danas.ID, replacement, nil); err != nil || !duplicate || replacement.ID != agents.ID {
-		t.Fatalf("SupersedeMemory = %s duplicate %v, %v; want %s", replacement.ID, duplicate, err, agents.ID)
+	if duplicate, moved, err := db.SupersedeMemory(ctx, danas.ID, replacement, nil); err != nil || !duplicate || !moved || replacement.ID != agents.ID {
+		t.Fatalf("SupersedeMemory = %s duplicate %v moved %v, %v; want %s", replacement.ID, duplicate, moved, err, agents.ID)
 	}
 	if replacement.PinnedBy != dana.ID || replacement.Scope != MemoryScopeMember {
 		t.Fatalf("pinned duplicate = %+v, want it pinned for Dana only", replacement)
@@ -413,7 +414,7 @@ func TestMemoryReportRewriteClearsPin(t *testing.T) {
 
 	replacement := &Memory{WorkspaceID: w.ID, Kind: MemoryDecision, Source: MemoryFromMember, AuthorID: member.ID,
 		Body: "Take the lease before reading container state."}
-	if _, err := db.SupersedeMemory(ctx, note.ID, replacement, nil); err != nil {
+	if _, _, err := db.SupersedeMemory(ctx, note.ID, replacement, nil); err != nil {
 		t.Fatal(err)
 	}
 	later := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeFailure,
