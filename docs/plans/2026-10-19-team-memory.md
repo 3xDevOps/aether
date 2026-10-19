@@ -50,7 +50,7 @@ with an account on the server.
    before the write's transaction, over the text and cited files. An agent
    or member note with a hit is refused, naming the rule and line:col; a
    captured report or answer is stored with its body
-   `(withheld: gitleaks rule <rule> at <loc>)`.
+   `(withheld: gitleaks rule <rule> at <loc>)` and no files.
 8. **Agents write; members curate.** Agents add decisions, conventions,
    gotchas and preferences, at most 20 per run, and the server fills in
    author, run, harness and commit. An agent may replace only an unpinned

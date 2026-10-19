@@ -597,6 +597,33 @@ func TestMemoryWithholdsSecretInReport(t *testing.T) {
 	}
 }
 
+// A changed path is scanned with the report, so a secret in a filename
+// withholds the body and stores no files.
+func TestMemoryWithholdsSecretInChangedFile(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, w.ID, member.ID, domain.RunRunning)
+	const secret = "QmFzZTY0c2VjcmV0LWFldGhlci10ZXN0LTQy"
+	appendRunDiff(t, db, run, 1, "c0ffee1", "README.md", "config/token="+secret+".env")
+	if err := db.AppendCoordReport(ctx, &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeSuccess,
+		Summary: "Configured the client", IdempotencyKey: "success-1"}); err != nil {
+		t.Fatal(err)
+	}
+	notes := outcomeNotes(t, db, run.ID)
+	if len(notes) != 1 {
+		t.Fatalf("outcome notes = %d, want 1", len(notes))
+	}
+	if n := notes[0]; !strings.HasPrefix(n.Body, "(withheld: gitleaks rule generic-api-key at ") || len(n.Files) != 0 ||
+		strings.Contains(n.Title+n.Body, secret) {
+		t.Fatalf("withheld note = title %q body %q files %q", n.Title, n.Body, n.Files)
+	}
+	if got := noteIDs(t, db, MemoryQuery{Workspace: w.ID, Words: "token"}); len(got) != 0 {
+		t.Fatalf("search the filename = %v, want none", got)
+	}
+}
+
 func TestMemoryCapturesQuestionAnswer(t *testing.T) {
 	db, mission, member := planningFixture(t)
 	ctx := context.Background()

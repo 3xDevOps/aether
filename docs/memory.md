@@ -134,8 +134,9 @@ Two notes are written without an agent spending tokens:
   note `Q: <question> A: <answer>`, attributed to that member and the asking
   run.
 
-Both are scanned with gitleaks first; one with a secret is stored with its
-text replaced by `(withheld: gitleaks rule <rule> at <line:col>)`. Captured
+Both are scanned with gitleaks first, an outcome note's text together with
+its files; one with a secret is stored with its text replaced by
+`(withheld: gitleaks rule <rule> at <line:col>)` and no files. Captured
 notes are only searchable until a member pins one.
 
 Team memory never reads transcripts, terminal recordings, messages between

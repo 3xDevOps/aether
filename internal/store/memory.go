@@ -690,14 +690,15 @@ func (d *DB) ReadMemoryBrief(ctx context.Context, q MemoryBriefQuery) (*MemoryBr
 	return &brief, nil
 }
 
-// withholdSecret replaces text that holds a secret with the rule that
-// caught it, so a captured note never stores one.
-func withholdSecret(text string) string {
-	hits := secretscan.Scan("", []byte(text))
+// withholdSecret scans text and the files it cites together, as memory.add
+// does. On a hit it returns the rule that caught it as the text and no
+// files, so a captured note never stores a secret.
+func withholdSecret(text string, files []string) (string, []string) {
+	hits := secretscan.Scan("", []byte(strings.Join(append([]string{text}, files...), "\n")))
 	if len(hits) == 0 {
-		return text
+		return text, files
 	}
-	return fmt.Sprintf("(withheld: gitleaks rule %s at %s)", hits[0].Kind, hits[0].Location)
+	return fmt.Sprintf("(withheld: gitleaks rule %s at %s)", hits[0].Kind, hits[0].Location), nil
 }
 
 // latestRunDiff reads the files and HEAD of the run's newest run.diff
@@ -740,11 +741,11 @@ func (d *DB) reportMemory(ctx context.Context, report *CoordReport) (*Memory, er
 	if report.NextAction != "" {
 		body += "\n\nNext action: " + report.NextAction
 	}
-	body = withholdSecret(body)
 	files, head, err := d.latestRunDiff(ctx, report.WorkspaceID, report.RunID)
 	if err != nil {
 		return nil, err
 	}
+	body, files = withholdSecret(body, files)
 	return &Memory{
 		WorkspaceID: report.WorkspaceID, Kind: MemoryOutcome, Scope: MemoryScopeWorkspace,
 		Source: MemoryFromReport, SourceRef: report.ID, Title: memoryTitle(string(report.Outcome) + ": " + memoryTitle(body)),
@@ -793,7 +794,7 @@ func (d *DB) answerMemory(ctx context.Context, questionID domain.MissionQuestion
 	if err != nil {
 		return nil, err
 	}
-	body := withholdSecret("Q: " + q.Body + " A: " + answer)
+	body, _ := withholdSecret("Q: "+q.Body+" A: "+answer, nil)
 	return &Memory{
 		Kind: MemoryDecision, Scope: MemoryScopeWorkspace, Source: MemoryFromAnswer, SourceRef: string(questionID),
 		Body: body, AuthorID: member, RunID: q.AskedByRunID,
