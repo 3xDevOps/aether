@@ -55,6 +55,20 @@ func TestMemoryRmRunListsWhatItRemoved(t *testing.T) {
 	}
 }
 
+// A pin without --me keeps the note's own scope, so a member-scope note
+// stays out of other members' briefs, and the receipt says where it went.
+func TestMemoryPinKeepsTheNoteScope(t *testing.T) {
+	c, reply := memoryControl(t, protocol.MethodMemoryPin, protocol.MemoryPinResult{Item: protocol.MemoryItem{
+		ID: "note-mine000001", Scope: protocol.MemoryScopeMember,
+	}})
+	if got, want := runMemoryCall(t, c, "pin", "note-mine000001"), "pinned note-mine000001: your new runs' briefs list it\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+	if want := `{"workspace_id":"ws-api","id":"note-mine000001"}`; string(reply.got) != want {
+		t.Fatalf("params = %s, want %s", reply.got, want)
+	}
+}
+
 func TestMemoryAddSendsEveryFlag(t *testing.T) {
 	pinned := "2026-10-19T02:00:00Z"
 	c, reply := memoryControl(t, protocol.MethodMemoryAdd, protocol.MemoryAddResult{Item: protocol.MemoryItem{

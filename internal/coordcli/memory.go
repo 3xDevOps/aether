@@ -35,10 +35,11 @@ nonzero exit, as for the other commands.
 Record one note of at most 1024 bytes; its first line is its title. --file
 cites a repository path (repeatable, at most 20). --supersedes replaces a
 note; an agent may replace only an unpinned note an agent wrote. --scope me
-keeps a pin on the note out of other members' briefs. The server records
-your member, run, harness and commit, and refuses text holding a secret.
-The note is searchable at once and reaches new runs only after a member
-pins it. Put -- before text that starts with a dash.
+makes it a member-scope note: a pin on it enters only the pinning member's
+briefs. The server records your member, run, harness and commit, and
+refuses text holding a secret. The note is searchable at once and reaches
+new runs only after a member pins it. Put -- before text that starts with a
+dash.
 `,
 	"memory search": `usage: aether-internal memory search [--kind <kind>] [--file <path>] [--all] [<words>]
 
@@ -149,7 +150,7 @@ func memoryAdd(ctx context.Context, socket string, args []string) (string, error
 		return nil
 	})
 	supersedes := fs.String("supersedes", "", "ID of the note this one replaces")
-	scope := fs.String("scope", "", `"me" keeps a pin on the note out of other members' briefs`)
+	scope := fs.String("scope", "", `"me": a pin on the note enters only the pinning member's briefs`)
 	words, err := memoryArgs(fs, args)
 	if err != nil {
 		return "", err

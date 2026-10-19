@@ -26,7 +26,8 @@ commands:
   show    ID                                               print a note, its provenance and supersede chain
   add     --kind K [--pin] [--me] [--file P]... [--supersedes ID] TEXT
                                                            add a decision, convention, gotcha or preference
-  pin     [--me] ID                                        put a note in every new run's brief, or with --me in yours
+  pin     [--me] ID                                        put a note in every new run's brief; --me, or a member-scope
+                                                           note, puts it in yours only
   unpin   ID                                               take a note out of briefs
   rm      ID | --run RUN                                   delete a note, or every note a run wrote
   brief   [--member M]                                     print the brief a new run gets, byte for byte`
@@ -150,22 +151,28 @@ func parseMemory(args []string) (memoryCall, error) {
 			return printMemoryAdded(w, p, res, time.Now())
 		}, nil
 	case "pin":
-		me := fs.Bool("me", false, "pin into your own runs' briefs only")
+		me := fs.Bool("me", false, "pin into your own runs' briefs only (default: the note's own scope)")
 		id, err := memoryID(fs, args[1:])
 		if err != nil {
 			return nil, usage(err)
 		}
-		scope, done := protocol.MemoryScopeWorkspace, "every new run's brief lists it"
+		p := protocol.MemoryPinParams{ID: id}
 		if *me {
-			scope, done = protocol.MemoryScopeMember, "your new runs' briefs list it"
+			p.Scope = protocol.MemoryScopeMember
 		}
 		return func(c *protocol.Client, w io.Writer) error {
 			ws, err := resolveWorkspace(c, *workspace)
 			if err != nil {
 				return err
 			}
-			if err = c.Call(protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: ws, ID: id, Scope: scope}, nil); err != nil {
+			p.WorkspaceID = ws
+			var res protocol.MemoryPinResult
+			if err = c.Call(protocol.MethodMemoryPin, p, &res); err != nil {
 				return err
+			}
+			done := "every new run's brief lists it"
+			if res.Item.Scope == protocol.MemoryScopeMember {
+				done = "your new runs' briefs list it"
 			}
 			_, err = fmt.Fprintf(w, "pinned %s: %s\n", id, done)
 			return err

@@ -35,7 +35,7 @@ type memoryAddInput struct {
 	Text       string   `json:"text" jsonschema:"the note, at most 1024 bytes; its first line is its title"`
 	Files      []string `json:"files,omitempty" jsonschema:"repository paths the note cites, at most 20"`
 	Supersedes string   `json:"supersedes,omitempty" jsonschema:"id of an unpinned agent note this one replaces"`
-	Scope      string   `json:"scope,omitempty" jsonschema:"member keeps a pin on this note out of other members' briefs; omit for workspace"`
+	Scope      string   `json:"scope,omitempty" jsonschema:"member: a pin on this note enters only the pinning member's briefs; omit for workspace"`
 }
 
 func memorySchema[T any](tool string, enums map[string][]any) (*jsonschema.Schema, error) {
