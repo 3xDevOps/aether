@@ -9,7 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -390,7 +390,7 @@ func candidateConflicts(ctx context.Context, e *Engine, checkout string) ([]stri
 			paths = append(paths, string(raw))
 		}
 	}
-	sort.Strings(paths)
+	slices.Sort(paths)
 	return paths, nil
 }
 
