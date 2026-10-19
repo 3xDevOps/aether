@@ -275,7 +275,7 @@ func ptrTime(t time.Time) *time.Time { return &t }
 // the collapse migration rehomes it onto the workspace.
 func TestPermissionsMigrationUpgradesV3(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
+	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
 	}

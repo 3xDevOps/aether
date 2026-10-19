@@ -86,7 +86,7 @@ func TestMissionChangeListsAWorkerEndOnlyWhenTheIntegratorDidNotCancelIt(t *test
 func TestMissionChangeMigrationStartsExistingSwarmsAtZero(t *testing.T) {
 	const changeVersion = 53
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
+	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
 	}
