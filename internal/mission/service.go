@@ -93,18 +93,6 @@ func (o MissionRunObservation) Settled() bool {
 	return (o.State == MissionRunStopped || o.State == MissionRunRetained) && o.RetentionSettled
 }
 
-func (o MissionRunObservation) HoldsExecution() bool {
-	if o.Settled() {
-		return false
-	}
-	switch o.State {
-	case MissionRunActive, MissionRunPending, MissionRunDestroyPending, MissionRunRetained, MissionRunUnknown:
-		return true
-	default:
-		return false
-	}
-}
-
 type Config struct {
 	Store               store.Store
 	Missions            store.MissionStore

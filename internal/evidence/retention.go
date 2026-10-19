@@ -190,10 +190,10 @@ func (s *Service) ReadTranscript(ctx context.Context, workspace domain.Workspace
 		return nil, false, err
 	}
 	defer func() { _ = reader.Close() }()
-	out := make([]byte, 0, minInt(maxBytes, 64*1024))
+	out := make([]byte, 0, min(maxBytes, 64*1024))
 	buf := make([]byte, 32*1024)
 	for len(out) < maxBytes {
-		want := minInt(len(buf), maxBytes-len(out))
+		want := min(len(buf), maxBytes-len(out))
 		n, readErr := reader.Read(buf[:want])
 		if n > 0 {
 			out = append(out, buf[:n]...)
@@ -437,12 +437,6 @@ func boundedPatchSize(limit int) int {
 	}
 	return limit
 }
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 func expired(raw *string, now time.Time) bool {
 	if raw == nil || *raw == "" {
 		return false
@@ -495,7 +489,7 @@ func safeReason(err error) string {
 	return cleanText(err.Error(), MaxFactBytes)
 }
 func boundedFacts(in []string) []string {
-	out := make([]string, 0, minInt(len(in), MaxUnresolvedFacts))
+	out := make([]string, 0, min(len(in), MaxUnresolvedFacts))
 	for _, fact := range in {
 		fact = cleanText(fact, MaxFactBytes)
 		if fact == "" {
@@ -521,7 +515,7 @@ func appendFacts(dst []string, facts ...string) []string {
 	return dst
 }
 func boundedIDs(in []string) []string {
-	out := make([]string, 0, minInt(len(in), MaxRelatedMessages))
+	out := make([]string, 0, min(len(in), MaxRelatedMessages))
 	for _, id := range in {
 		id = cleanText(id, 128)
 		if id == "" {

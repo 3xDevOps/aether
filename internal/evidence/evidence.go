@@ -501,7 +501,7 @@ func (s *Service) captureLocked(ctx context.Context, req Request) (protocol.Evid
 		changedFilesSource.Truncated = true
 		changedFilesSource.Reason = "changed-file metadata truncated"
 	}
-	sources := make([]store.EvidenceSourceFact, 0, minInt(MaxSourceFacts, 4+len(req.SourceFacts)))
+	sources := make([]store.EvidenceSourceFact, 0, min(MaxSourceFacts, 4+len(req.SourceFacts)))
 	sources = appendSourceFacts(sources, store.EvidenceSourceFact{Name: "git", Available: true})
 	sources = appendSourceFacts(sources, changedFilesSource)
 	sources = appendSourceFacts(sources, req.SourceFacts...)
@@ -739,7 +739,7 @@ func (s *Service) artifactPath(id string) (string, error) {
 }
 
 func changedFacts(files []events.FileDiffStat) []store.ChangedFileFact {
-	limit := minInt(len(files), MaxChangedFiles)
+	limit := min(len(files), MaxChangedFiles)
 	out := make([]store.ChangedFileFact, 0, limit)
 	for _, file := range files[:limit] {
 		out = append(out, store.ChangedFileFact{

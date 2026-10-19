@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -274,7 +274,7 @@ func (s *Service) Peers(ctx context.Context, run domain.RunID) ([]protocol.Coord
 			ordered = append(ordered, id)
 		}
 	}
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+	slices.Sort(ordered)
 	out := make([]protocol.CoordPeer, 0, len(ordered))
 	for _, id := range ordered {
 		r, runErr := s.cfg.Store.GetRun(ctx, id)
