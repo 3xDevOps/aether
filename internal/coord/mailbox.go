@@ -622,12 +622,8 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		if err != nil {
 			return protocol.CoordReportResult{}, internalError(method, err)
 		}
-		if report.UnpinnedNote != "" {
-			if _, err = s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: self.WorkspaceID, RunID: run, ActorID: self.MemberID,
-				Payload: events.MemoryChangePayload{Action: events.MemoryActionUnpin, NoteID: report.UnpinnedNote, ActorID: self.MemberID}}); err != nil {
-				return protocol.CoordReportResult{}, internalError(method, fmt.Errorf(
-					"report %s cleared the pin on outcome note %s, but its memory.change event was not published: %w", report.ID, report.UnpinnedNote, err))
-			}
+		if err = s.publishOutcomeNote(ctx, self, report.OutcomeNote); err != nil {
+			return protocol.CoordReportResult{}, internalError(method, err)
 		}
 	}
 	if report.State != store.CoordReportFinalized {
@@ -656,6 +652,29 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	}
 	return coordReportResult(report), nil
 }
+
+// publishOutcomeNote records the outcome note a finalized report wrote or
+// rewrote, and the pin a rewrite cleared, as changes by the run's owner.
+func (s *Service) publishOutcomeNote(ctx context.Context, self *domain.Run, note store.OutcomeNote) error {
+	if note.ID == "" {
+		return nil
+	}
+	changes := []events.MemoryAction{events.MemoryActionAdd}
+	if note.Rewritten {
+		changes[0] = events.MemoryActionRewrite
+	}
+	if note.Unpinned {
+		changes = append(changes, events.MemoryActionUnpin)
+	}
+	for _, action := range changes {
+		if _, err := s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: self.WorkspaceID, RunID: self.ID, ActorID: self.MemberID,
+			Payload: events.MemoryChangePayload{Action: action, NoteID: note.ID, ActorID: self.MemberID}}); err != nil {
+			return fmt.Errorf("outcome note %s is written, but its memory.change %s event was not published: %w", note.ID, action, err)
+		}
+	}
+	return nil
+}
+
 func coordReportResult(report *store.CoordReport) protocol.CoordReportResult {
 	if report == nil {
 		return protocol.CoordReportResult{}

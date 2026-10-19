@@ -755,36 +755,41 @@ func (d *DB) reportMemory(ctx context.Context, report *CoordReport) (*Memory, er
 
 // upsertReportMemory writes the run's outcome note, attributed to the run's
 // owner and harness, or rewrites the live one an earlier report wrote. A
-// rewrite clears the note's pin, since no member has read the new text, and
-// returns the note's ID when it was pinned.
-func upsertReportMemory(ctx context.Context, tx *sql.Tx, m *Memory) (string, error) {
-	var unpinned string
-	err := tx.QueryRowContext(ctx, `SELECT id FROM memory
-		WHERE run_id = ? AND source = 'report' AND invalid_at IS NULL AND pinned_at IS NOT NULL`, m.RunID).Scan(&unpinned)
+// rewrite clears the note's pin, since no member has read the new text.
+func upsertReportMemory(ctx context.Context, tx *sql.Tx, m *Memory) (OutcomeNote, error) {
+	var (
+		live   string
+		pinned bool
+	)
+	err := tx.QueryRowContext(ctx, `SELECT id, pinned_at IS NOT NULL FROM memory
+		WHERE run_id = ? AND source = 'report' AND invalid_at IS NULL`, m.RunID).Scan(&live, &pinned)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("store: record run %s outcome in memory: %w", m.RunID, err)
+		return OutcomeNote{}, fmt.Errorf("store: record run %s outcome in memory: %w", m.RunID, err)
 	}
 	id, ts, err := prepareCreate("note", time.Time{})
 	if err != nil {
-		return "", err
+		return OutcomeNote{}, err
 	}
 	now, err := encodeTime(ts)
 	if err != nil {
-		return "", err
+		return OutcomeNote{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO memory (id, workspace_id, kind, scope, source, source_ref, title, body, files,
+	var note string
+	if err = tx.QueryRowContext(ctx, `INSERT INTO memory (id, workspace_id, kind, scope, source, source_ref, title, body, files,
 			author_member_id, run_id, harness, commit_sha, hash, created_at, updated_at)
 		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, r.member_id, r.id, r.harness, ?, ?, ?, ? FROM runs r WHERE r.id = ?
 		ON CONFLICT (run_id) WHERE source = 'report' AND invalid_at IS NULL DO UPDATE SET
 			source_ref = excluded.source_ref, title = excluded.title, body = excluded.body, files = excluded.files,
 			author_member_id = excluded.author_member_id, harness = excluded.harness,
 			commit_sha = excluded.commit_sha, hash = excluded.hash, pinned_by = '', pinned_at = NULL,
-			updated_at = excluded.updated_at`,
+			updated_at = excluded.updated_at
+		RETURNING id`,
 		id, m.WorkspaceID, m.Kind, m.Scope, m.Source, m.SourceRef, m.Title, m.Body, strings.Join(m.Files, "\n"),
-		m.Commit, memoryHash(m.Body), now, now, m.RunID); err != nil {
-		return "", fmt.Errorf("store: record run %s outcome in memory: %w", m.RunID, err)
+		m.Commit, memoryHash(m.Body), now, now, m.RunID).Scan(&note); err != nil {
+		return OutcomeNote{}, fmt.Errorf("store: record run %s outcome in memory: %w", m.RunID, err)
 	}
-	return unpinned, nil
+	rewritten := note == live
+	return OutcomeNote{ID: note, Rewritten: rewritten, Unpinned: rewritten && pinned}, nil
 }
 
 // answerMemory prepares the decision note an answer to a mission question

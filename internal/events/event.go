@@ -88,8 +88,9 @@ const (
 	// TypeEvidencePacket signals a durable evidence packet mutation. Its
 	// payload contains counts and identifiers, never transcript or diff text.
 	TypeEvidencePacket Type = "workspace.evidence_packet"
-	// TypeMemoryChange records a team-memory note being added, superseded,
-	// pinned, unpinned or removed. Its payload never carries the note text.
+	// TypeMemoryChange records a team-memory note being added, rewritten,
+	// superseded, pinned, unpinned or removed. Its payload never carries
+	// the note text.
 	TypeMemoryChange Type = "memory.change"
 )
 
@@ -531,6 +532,8 @@ type MemoryAction string
 
 const (
 	MemoryActionAdd       MemoryAction = "add"
+	MemoryActionRewrite   MemoryAction = "rewrite"
+	MemoryActionAnswer    MemoryAction = "answer"
 	MemoryActionSupersede MemoryAction = "supersede"
 	MemoryActionPin       MemoryAction = "pin"
 	MemoryActionUnpin     MemoryAction = "unpin"
@@ -538,7 +541,9 @@ const (
 )
 
 // MemoryChangePayload names the note and the member who acted; an agent's
-// write names the run's owner here and the run in the envelope's RunID.
+// write, and a report's outcome note, name the run's owner here and the run
+// in the envelope's RunID. An answer names the member who answered and the
+// run that asked.
 type MemoryChangePayload struct {
 	Action  MemoryAction    `json:"action"`
 	NoteID  string          `json:"note_id"`

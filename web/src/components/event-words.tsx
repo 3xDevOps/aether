@@ -249,6 +249,8 @@ function retentionLine(p: Payload): ReactNode {
 
 const memoryWords: Record<string, string> = {
   add: 'added a team memory note',
+  rewrite: 'rewrote a team memory note',
+  answer: 'recorded a swarm answer in team memory',
   supersede: 'replaced a team memory note',
   pin: 'pinned a team memory note',
   unpin: 'unpinned a team memory note',
@@ -256,9 +258,11 @@ const memoryWords: Record<string, string> = {
 }
 
 // An agent's write names the run's owner as the actor and carries the run.
+// An answer carries the run that asked, but a member wrote it.
 function memoryLine(p: Payload, event: Event): ReactNode {
-  const words = memoryWords[text(p.action)] ?? 'changed team memory'
-  return event.run_id ? `The agent ${words}` : <><Who id={p.actor_id ?? event.actor_id} /> {words}</>
+  const action = text(p.action)
+  const words = memoryWords[action] ?? 'changed team memory'
+  return event.run_id && action !== 'answer' ? `The agent ${words}` : <><Who id={p.actor_id ?? event.actor_id} /> {words}</>
 }
 
 const tokens = new Intl.NumberFormat()

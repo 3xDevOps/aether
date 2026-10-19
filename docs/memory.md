@@ -127,12 +127,13 @@ Two notes are written without an agent spending tokens:
   summary and next action as the text, and the files and HEAD commit of the
   run's latest diff snapshot (its newest `run.diff` event). A later report
   rewrites it and clears its pin, so the new text reaches briefs only once
-  a member pins it again; the `memory.change` unpin names the run's owner
-  and the run. A note a member wrote to replace it stays as it is, and the
-  next report writes a new outcome note.
+  a member pins it again. Each write is a `memory.change` `add` or
+  `rewrite`, followed by `unpin` when it cleared a pin, naming the run's
+  owner and the run. A note a member wrote to replace it stays as it is,
+  and the next report writes a new outcome note.
 - When a member answers a swarm's question, the server writes a `decision`
   note `Q: <question> A: <answer>`, attributed to that member and the asking
-  run.
+  run, and publishes a `memory.change` `answer` naming both.
 
 Both are scanned with gitleaks first, an outcome note's text together with
 its files; one with a secret is stored with its text replaced by
@@ -225,9 +226,9 @@ note-h151ddhqzh  convention  member  Dana  -    0m   for the workspace  Use bun 
 terminal it adds a final newline. The built-in [assistant](assistant.md) can
 search notes with `aether_memory_search`, and the dashboard calls the same
 `memory.*` methods ([local-gateway.md](local-gateway.md#team-memory-methods)).
-Each add, replacement, pin, unpin and removal appears in **Activity** and in
-`aether timeline --type memory.change`, naming the member who acted and, for
-an agent's note, its run.
+Each add, captured note, replacement, pin, unpin and removal appears in
+**Activity** and in `aether timeline --type memory.change`, naming the
+member who acted and, for an agent's note or a captured one, its run.
 
 ## Limits and their errors
 

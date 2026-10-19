@@ -1100,10 +1100,10 @@ Every note is attributed. A member's note names that member. An agent's note
 names the run's owner when it was written, with the run, harness and commit;
 a handoff does not move notes already written. An outcome note names the
 run's owner, and a swarm answer the member who answered. A pin records who
-pinned it. Each add, replacement, pin, unpin and removal is a
-`memory.change` event in **Activity** and `aether timeline --type
-memory.change`, naming the member who acted and, for an agent's note, its
-run.
+pinned it. Each add, captured note, replacement, pin, unpin and removal
+is a `memory.change` event in **Activity** and `aether timeline --type
+memory.change`, naming the member who acted and, for an agent's note or a
+captured one, its run.
 
 ### Conflict radar
 

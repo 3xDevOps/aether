@@ -68,7 +68,7 @@ type MissionStore interface {
 	AckMissionControlChange(context.Context, domain.MissionID, uint64) error
 	AbandonTask(context.Context, domain.TaskID, int, uint64, string) error
 	InsertMissionQuestion(context.Context, domain.MissionID, domain.RunID, string, string) (*domain.MissionQuestion, error)
-	AnswerMissionQuestion(context.Context, domain.MissionQuestionID, domain.MemberID, string, string) (*domain.MissionQuestion, error)
+	AnswerMissionQuestion(context.Context, domain.MissionQuestionID, domain.MemberID, string, string) (*domain.MissionQuestion, string, error)
 	GetMissionQuestion(context.Context, domain.MissionQuestionID) (*domain.MissionQuestion, error)
 	ListMissionQuestions(context.Context, domain.MissionID) ([]*domain.MissionQuestion, error)
 	StartMission(context.Context, domain.MissionID, domain.RunID, string) (*domain.Mission, error)

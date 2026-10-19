@@ -93,7 +93,7 @@ func newWakeServerFixture(t *testing.T, worker bool) *wakeServerFixture {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, member.ID, "worker scope", "wake-answer"); answerErr != nil {
+		if _, _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, member.ID, "worker scope", "wake-answer"); answerErr != nil {
 			t.Fatal(answerErr)
 		}
 		m, err = db.StartMission(ctx, m.ID, m.CurrentIntegratorRunID, "wake-start")

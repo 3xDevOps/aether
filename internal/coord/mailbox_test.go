@@ -761,9 +761,14 @@ func TestCoordReportStopsBeforeEvidenceCaptureWhenReservationFails(t *testing.T)
 	}
 }
 
+// coordConflictBus holds another event under every ID a publisher sets, so
+// only an event with a stable ID conflicts.
 type coordConflictBus struct{}
 
-func (coordConflictBus) Publish(context.Context, events.Event) (events.Event, error) {
+func (coordConflictBus) Publish(_ context.Context, e events.Event) (events.Event, error) {
+	if e.ID == "" {
+		return e, nil
+	}
 	return events.Event{}, events.ErrEventIDConflict
 }
 

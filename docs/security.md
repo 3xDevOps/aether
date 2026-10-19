@@ -1737,9 +1737,10 @@ is an attributed claim that can be stale or wrong, never an instruction.
 - **Removal is human and every change is recorded.** `aether memory rm ID`
   deletes a note and `aether memory rm --run RUN` every note that run wrote.
   Deleting a run or a swarm deletes its unpinned notes; deleting the
-  workspace deletes all of them. Each add, supersede, pin, unpin and removal
-  is a `memory.change` event naming the member, and the run for an agent's
-  write, in the activity feed.
+  workspace deletes all of them. Each add, captured outcome or answer,
+  supersede, pin, unpin and removal is a `memory.change` event naming the
+  member, and the run for an agent's write or a captured note, in the
+  activity feed.
 
 ## Sysbox install
 

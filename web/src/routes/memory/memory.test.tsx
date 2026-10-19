@@ -337,5 +337,7 @@ describe('memory.change in the activity feed', () => {
     expect(words({ action: 'pin', note_id: 'note-a', actor_id: bob.id })).toBe('Bob pinned a team memory note')
     expect(words({ action: 'rm', note_id: 'note-a', actor_id: alice.id })).toBe('You removed a team memory note')
     expect(words({ action: 'add', note_id: 'note-a', actor_id: alice.id }, 'run_1')).toBe('The agent added a team memory note')
+    expect(words({ action: 'rewrite', note_id: 'note-a', actor_id: alice.id }, 'run_1')).toBe('The agent rewrote a team memory note')
+    expect(words({ action: 'answer', note_id: 'note-a', actor_id: bob.id }, 'run_1')).toBe('Bob recorded a swarm answer in team memory')
   })
 })

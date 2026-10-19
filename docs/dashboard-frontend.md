@@ -4120,8 +4120,9 @@ this note needs 120; unpin one first`. A pin refused after an add
 (`memory.add: <id> is stored but not pinned: …`) also re-reads the list,
 because the note was stored. A viewer sees no write controls. A server
 without `memory.search` gets a neutral line asking for an update. Activity
-words `memory.change` as "Dana pinned a team memory note", or "The agent
-added a team memory note" for a run's write.
+words `memory.change` as "Dana pinned a team memory note", "The agent
+added a team memory note" for a run's write or outcome, and "Dana recorded
+a swarm answer in team memory" for an answer.
 
 ## Files
 

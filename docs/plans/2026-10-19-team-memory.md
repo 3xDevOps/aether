@@ -93,8 +93,8 @@ with an account on the server.
     tools, `aether_memory_search` and `aether_memory_add`. Members use all
     seven over SSH (reads need view, writes need push), as `aether memory`,
     a dashboard Memory page, and a read-tier assistant tool. Every add,
-    supersede, pin, unpin and removal emits a `memory.change` event naming
-    the actor.
+    captured outcome (`add` or `rewrite`) or answer (`answer`), supersede,
+    pin, unpin and removal emits a `memory.change` event naming the actor.
 
 ## 2. Cut
 
