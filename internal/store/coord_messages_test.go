@@ -290,7 +290,7 @@ func TestListRunMessagesFiltersAndJoinsReports(t *testing.T) {
 func TestMessageHistoryMigrationKeepsMailAndTypesTheOutbox(t *testing.T) {
 	const historyVersion = 50
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
+	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
 	}

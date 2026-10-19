@@ -236,7 +236,7 @@ func TestWorkspaceBudgetRoundTrip(t *testing.T) {
 // upgrade must add the cost tables without disturbing what is there.
 func TestCostMigrationUpgradesExistingDatabase(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
+	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
 	}

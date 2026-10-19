@@ -369,7 +369,7 @@ func TestCoordReportSupersedeRetiresAPendingReservation(t *testing.T) {
 func TestCoordReportSlotMigrationKeepsReportsAndPublications(t *testing.T) {
 	const slotVersion = 47
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
+	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
 	}
@@ -431,7 +431,7 @@ func TestCoordReportSlotMigrationKeepsReportsAndPublications(t *testing.T) {
 // written before the restart must still bind its batch after it.
 func TestCoordMigrationUpgradesPreviousVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
+	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
 	}

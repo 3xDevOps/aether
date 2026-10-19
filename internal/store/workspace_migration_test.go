@@ -16,7 +16,7 @@ import (
 // then let Open run the migration under test.
 func openLegacy(t *testing.T, path string, n int) *sql.DB {
 	t.Helper()
-	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)")
+	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?_pragma=foreign_keys(1)&_pragma=synchronous(OFF)")
 	if err != nil {
 		t.Fatalf("open raw: %v", err)
 	}
