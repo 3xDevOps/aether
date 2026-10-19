@@ -108,6 +108,14 @@ type DevelopmentService interface {
 	HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
 }
 
+// MemoryService answers the run-scoped team memory methods. The transport
+// binds identity and applies its allowlist; the service fills the
+// workspace, author, harness and commit from the run.
+type MemoryService interface {
+	Capabilities(context.Context, domain.RunID) ([]string, error)
+	HandleAgent(context.Context, domain.RunID, string, json.RawMessage) (any, error)
+}
+
 // Peers is the conflict radar's read side. Mission authorization, when
 // configured, is evaluated by MissionService before radar fallback.
 type Peers interface {
@@ -139,6 +147,10 @@ type Config struct {
 	// Development is independent of conflict and mission policy. Nil advertises
 	// no development methods and leaves their dispatch unavailable.
 	Development DevelopmentService
+	// Memory is team memory, independent of conflict policy like
+	// Development. Nil advertises no memory methods and leaves them
+	// unavailable.
+	Memory MemoryService
 	// WakeAdmission orders the final native wake frame with human control.
 	// An absent seam disables native dispatch without affecting legacy hooks.
 	WakeAdmission WakeAdmission

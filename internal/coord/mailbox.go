@@ -80,6 +80,9 @@ func (s *Service) Status(ctx context.Context, run domain.RunID) (protocol.CoordS
 			}
 		}
 	}
+	if capabilities, rpcErr = s.memoryCapabilities(ctx, self, capabilities); rpcErr != nil {
+		return protocol.CoordStatusResult{}, rpcErr
+	}
 	if s.cfg.Disabled {
 		task, taskBytes, taskTruncated := boundStatusText(self.Task)
 		return protocol.CoordStatusResult{
