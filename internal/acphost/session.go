@@ -553,6 +553,9 @@ func (s *Session) validatePromptImages(blocks []acp.ContentBlock) error {
 }
 
 func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(error)) *turnAck {
+	// Before the turn is recorded: Cancel does not take mu, and a cancel
+	// sent after the turn shows in the log must wait for its prompt.
+	sent := s.conn.w.sendingPrompt()
 	ack := &turnAck{done: make(chan struct{}), delivered: delivered}
 	s.starting = ack
 	s.turn++
@@ -564,7 +567,7 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(erro
 	if s.cfg.TitleLookup > 0 && s.proj.title == "" && s.conn.Info().List {
 		time.AfterFunc(s.cfg.TitleLookup, s.lookupTitle)
 	}
-	go s.runTurn(blocks, ack, s.conn.w.sendingPrompt())
+	go s.runTurn(blocks, ack, sent)
 	return ack
 }
 
