@@ -75,6 +75,9 @@ type Config struct {
 	// callers may omit it to use StateDir.
 	DataDir string
 	Homes   *memberhome.Manager
+	// Memory supplies the brief that follows the run instructions; nil
+	// launches without one.
+	Memory TeamMemory
 	// RemoveAll deletes a directory container processes wrote into; nil
 	// uses os.RemoveAll.
 	RemoveAll                   func(ctx context.Context, path string) error
@@ -782,10 +785,10 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 	return nil
 }
 
-// command resolves argv and profile for one launch by member on account's
-// shared account, with the profile from launchProfile. An acp launch has no
-// argv: the task travels over the protocol.
-func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, assigned bool, task, model string) (argv []string, profile harness.Profile, acp bool, err error) {
+// command resolves argv and profile for one launch by member in workspace on
+// account's shared account, with the profile from launchProfile. An acp
+// launch has no argv: the task travels over the protocol.
+func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, assigned bool, task, model string) (argv []string, profile harness.Profile, acp bool, err error) {
 	if err = domain.ValidModel(model); err != nil {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", err)
 	}
@@ -814,8 +817,12 @@ func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID
 	if model != "" && len(profile.ModelArgs) == 0 {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harnessName)
 	}
-	if !profile.CarriesInstructions() {
-		task = withInstructions(task, s.runInstructions(s.runGuide(ctx, "", assigned, mode == domain.LaunchHeadless, false)))
+	if task != "" && !profile.CarriesInstructions() {
+		instructions, ierr := s.briefedInstructions(ctx, s.runGuide(ctx, "", assigned, mode == domain.LaunchHeadless, false), workspace, member)
+		if ierr != nil {
+			return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", ierr)
+		}
+		task = withInstructions(task, instructions)
 	}
 	return harness.Argv(argv, task, profile.ModelLaunchArgs(model)), profile, false, nil
 }

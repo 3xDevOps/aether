@@ -374,9 +374,10 @@ it and when. Notes reach the store three ways:
   and answer as one decision note.
 
 Every member of the server, viewers included, can read every note, and
-every run in the workspace can search them. Pinned notes also go into the brief
-each new run in the workspace receives at launch; a note a member pinned for
-themselves goes only into their own runs' briefs.
+every run in the workspace can search them. The first line of each pinned
+note also goes into the brief each new run in the workspace receives at
+launch; a note a member pinned for themselves goes only into their own runs'
+briefs.
 
 Team memory never reads transcripts, terminal recordings, messages between
 runs, run-room chat, the files in a checkout, or an agent's own memory

@@ -332,15 +332,25 @@ func TestMemoryPinBudgets(t *testing.T) {
 	ctx := context.Background()
 	w := mustCreateWorkspace(t, db)
 	ada, bob := mustCreateMember(t, db), mustCreateTeammate(t, db)
-	note := func(size int, tag string) *Memory {
-		return mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Body: tag + strings.Repeat(".", size-len(tag))})
+	// A pin costs its brief line: its title, cut to 120 bytes, plus 64.
+	note := func(title int, tag string) *Memory {
+		return mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention,
+			Body: tag + strings.Repeat(".", title-len(tag)) + "\nThe body past the title is not counted."})
 	}
-	big, extra := note(900, "big"), note(200, "extra")
-	if _, err := db.PinMemory(ctx, w.ID, big.ID, ada.ID, ""); err != nil {
-		t.Fatalf("pin 900 bytes: %v", err)
+	pin := func(m *Memory, scope MemoryScope) {
+		t.Helper()
+		if _, err := db.PinMemory(ctx, w.ID, m.ID, ada.ID, scope); err != nil {
+			t.Fatalf("pin %s: %v", m.Body, err)
+		}
 	}
+	big := note(120, "big")
+	for _, tag := range []string{"a", "b", "c", "d"} {
+		pin(note(120, tag), "")
+	}
+	pin(big, "")
+	extra := note(50, "extra")
 	_, err := db.PinMemory(ctx, w.ID, extra.ID, ada.ID, "")
-	if err == nil || err.Error() != "memory.pin: pinned workspace notes use 900 of 1024 bytes; this note needs 200; unpin one first" {
+	if err == nil || err.Error() != "memory.pin: pinned workspace notes use 920 of 1024 bytes; this note needs 114; unpin one first" {
 		t.Fatalf("over the workspace budget = %v", err)
 	}
 	var budget *MemoryPinBudgetError
@@ -348,12 +358,11 @@ func TestMemoryPinBudgets(t *testing.T) {
 		t.Fatalf("budget error %T is not a MemoryPinBudgetError", err)
 	}
 
-	mine, more := note(400, "mine"), note(200, "more")
-	if _, err = db.PinMemory(ctx, w.ID, mine.ID, ada.ID, MemoryScopeMember); err != nil {
-		t.Fatalf("pin 400 bytes for ada: %v", err)
-	}
+	pin(note(120, "mine"), MemoryScopeMember)
+	pin(note(120, "also mine"), MemoryScopeMember)
+	more := note(90, "more")
 	if _, err = db.PinMemory(ctx, w.ID, more.ID, ada.ID, MemoryScopeMember); err == nil ||
-		err.Error() != "memory.pin: your pinned member notes use 400 of 512 bytes; this note needs 200; unpin one first" {
+		err.Error() != "memory.pin: your pinned member notes use 368 of 512 bytes; this note needs 154; unpin one first" {
 		t.Fatalf("over ada's budget = %v", err)
 	}
 	pinned, err := db.PinMemory(ctx, w.ID, more.ID, bob.ID, MemoryScopeMember)

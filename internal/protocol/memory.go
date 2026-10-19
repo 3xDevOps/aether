@@ -44,9 +44,10 @@ const (
 	MemoryMaxSimilar          = 3
 	MemoryPinWorkspaceBytes   = store.MemoryPinWorkspaceBytes
 	MemoryPinMemberBytes      = store.MemoryPinMemberBytes
+	MemoryPinLineOverhead     = store.MemoryPinLineOverhead
 	MemorySearchLimit         = 10
 	MemorySearchMaxLimit      = 100
-	MemoryBriefMaxBytes       = 2 << 10
+	MemoryBriefMaxBytes       = 3 << 10
 	MemoryBriefMaxRuns        = 5
 	MemoryBriefTaskBytes      = 80
 	MemoryBriefWindow         = 48 * time.Hour

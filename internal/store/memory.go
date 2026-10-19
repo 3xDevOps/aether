@@ -45,11 +45,17 @@ const (
 	MemoryFromAnswer MemorySource = "answer"
 )
 
+// A pin costs its brief line: its title plus MemoryPinLineOverhead, which
+// covers "- note-xxxxxxxxxx preference (<name>): " with the name cut to
+// MemoryPinNameBytes, and the newline. Pins within their budgets therefore
+// always fit in the brief.
 const (
 	MemoryMaxTitleBytes     = 120
 	MemoryMaxFiles          = 20
 	MemoryPinWorkspaceBytes = 1 << 10
 	MemoryPinMemberBytes    = 512
+	MemoryPinNameBytes      = 24
+	MemoryPinLineOverhead   = 64
 )
 
 // Memory is one team-memory note. AuthorName, PinnedByName and the PR
@@ -370,8 +376,8 @@ func (d *DB) GetMemory(ctx context.Context, workspace domain.WorkspaceID, id str
 
 // PinMemory pins a live note into the briefs its scope selects; an empty
 // scope keeps the note's own. Workspace pins share
-// MemoryPinWorkspaceBytes of note text, and each member's member-scope pins
-// MemoryPinMemberBytes.
+// MemoryPinWorkspaceBytes of brief lines, and each member's member-scope
+// pins MemoryPinMemberBytes.
 func (d *DB) PinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, by domain.MemberID, scope MemoryScope) (*Memory, error) {
 	if by == "" {
 		return nil, errors.New("store: pin memory: member is required")
@@ -391,16 +397,16 @@ func (d *DB) PinMemory(ctx context.Context, workspace domain.WorkspaceID, id str
 	if scope == "" {
 		scope = m.Scope
 	}
-	budget := &MemoryPinBudgetError{Scope: scope, Limit: MemoryPinWorkspaceBytes, Need: len(m.Body)}
+	budget := &MemoryPinBudgetError{Scope: scope, Limit: MemoryPinWorkspaceBytes, Need: len(m.Title) + MemoryPinLineOverhead}
 	pinned, args := `m.scope = 'workspace'`, []any{workspace, id}
 	if scope == MemoryScopeMember {
 		budget.Limit = MemoryPinMemberBytes
 		pinned = `m.scope = 'member' AND m.pinned_by = ?`
 		args = append(args, by)
 	}
-	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(length(CAST(m.body AS BLOB))), 0) FROM memory m
+	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(length(CAST(m.title AS BLOB)) + ?), 0) FROM memory m
 		WHERE m.workspace_id = ? AND m.id <> ? AND m.pinned_at IS NOT NULL AND `+memoryLive+` AND `+pinned,
-		args...).Scan(&budget.Used); err != nil {
+		append([]any{MemoryPinLineOverhead}, args...)...).Scan(&budget.Used); err != nil {
 		return nil, fmt.Errorf("store: pin memory: measure pins: %w", err)
 	}
 	if budget.Used+budget.Need > budget.Limit {
