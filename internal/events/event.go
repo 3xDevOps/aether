@@ -88,6 +88,9 @@ const (
 	// TypeEvidencePacket signals a durable evidence packet mutation. Its
 	// payload contains counts and identifiers, never transcript or diff text.
 	TypeEvidencePacket Type = "workspace.evidence_packet"
+	// TypeMemoryChange records a team-memory note being added, superseded,
+	// pinned, unpinned or removed. Its payload never carries the note text.
+	TypeMemoryChange Type = "memory.change"
 )
 
 // Payload is the typed body of an event. Implementations are plain structs;
@@ -523,6 +526,27 @@ type EvidencePacketPayload struct {
 
 func (EvidencePacketPayload) EventType() Type { return TypeEvidencePacket }
 
+// MemoryAction is a memory.change payload action.
+type MemoryAction string
+
+const (
+	MemoryActionAdd       MemoryAction = "add"
+	MemoryActionSupersede MemoryAction = "supersede"
+	MemoryActionPin       MemoryAction = "pin"
+	MemoryActionUnpin     MemoryAction = "unpin"
+	MemoryActionRm        MemoryAction = "rm"
+)
+
+// MemoryChangePayload names the note and the member who acted; an agent's
+// write names the run's owner here and the run in the envelope's RunID.
+type MemoryChangePayload struct {
+	Action  MemoryAction    `json:"action"`
+	NoteID  string          `json:"note_id"`
+	ActorID domain.MemberID `json:"actor_id"`
+}
+
+func (MemoryChangePayload) EventType() Type { return TypeMemoryChange }
+
 func decodeAs[P Payload](data []byte) (Payload, error) {
 	var p P
 	if err := json.Unmarshal(data, &p); err != nil {
@@ -547,6 +571,7 @@ var payloadCodecs = map[Type]func([]byte) (Payload, error){
 	TypeSyncConflict:   decodeAs[SyncConflictPayload],
 	TypeRoomMessage:    decodeAs[RoomMessagePayload],
 	TypeEvidencePacket: decodeAs[EvidencePacketPayload],
+	TypeMemoryChange:   decodeAs[MemoryChangePayload],
 }
 
 // registerPayload registers the decoder for a payload type declared
