@@ -3660,11 +3660,12 @@ The header's title is the objective's first line cut to 80 characters; its
 state line reads the phase or reason, the integrator ("Claude Code ·
 Standard") and the creation time. On a phone the top bar keeps `Swarms`, so
 the body repeats the title and state line, with the actions beside the
-title and **Open integrator** drawn secondary. One primary action: **Answer**
-(focuses the first open question's field) while a question waits on the
-viewer, else **Open integrator**. On a phone the header **Answer** is left
-out: the open question's own **Answer** is the screen's filled button, and
-the top bar's **New run** shrinks to an icon. **More swarm actions** holds
+title. One primary action: **Answer** (focuses the first open question's
+field) while a question waits on the viewer, else **Open integrator**, which
+sits directly under the Integration heading (visible while it is collapsed),
+not in the header or beside the phone title. On a phone the header
+**Answer** is left out: the open question's own **Answer** is the screen's
+filled button, and the top bar's **New run** shrinks to an icon. **More swarm actions** holds
 **Replace integrator…**, **Archive swarm…** (completed or cancelled, not
 archived), **Unarchive swarm** (archived), **Cancel swarm…**, and **Delete
 swarm…** (cancelled or archived). An archived swarm's state line adds

@@ -187,7 +187,8 @@ describe('swarm detail', () => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('coordinate checkout work')
     expect(screen.getByText('Workers run. The integrator accepts their work, verifies and delivers the result, then reports success.')).toBeDefined()
     expect(screen.getByText('Answered by Bob')).toBeDefined()
-    expect(screen.getByRole('button', { name: 'Open integrator' })).toBeDefined()
+    expect(within(screen.getByRole('region', { name: 'Integration' })).getByRole('button', { name: 'Open integrator' })).toBeDefined()
+    expect(screen.getAllByRole('button', { name: 'Open integrator' })).toHaveLength(1)
     expect(screen.queryByText('mission_1')).toBeNull()
 
     await userEvent.click(screen.getByRole('button', { name: 'Integration' }))
