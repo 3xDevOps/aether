@@ -2,12 +2,16 @@ import { useState, type CSSProperties } from 'react'
 import { Button } from '@/components/ui/button'
 import type { InsightsResult } from '@/lib/types'
 import { cn } from '@/lib/utils'
-import { chartDays, chartMax, dayLabel, dayWords, outcomeKeys, plural, type Day, type OutcomeKey, type Slice, type Unit } from '@/routes/insights/model'
+import { chartDays, chartMax, dayLabel, dayWords, memberTags, outcomeKeys, plural, type Day, type OutcomeKey, type Unit } from '@/routes/insights/model'
 
-const outcomes: Record<OutcomeKey, { label: string; fill: string }> = {
-  done: { label: 'Done', fill: 'bg-state-done' },
-  failed: { label: 'Failed', fill: 'bg-state-failed' },
-  abandoned: { label: 'Abandoned', fill: 'bg-state-paused' },
+const stripes = 'repeating-linear-gradient(45deg, color-mix(in srgb, var(--canvas) 55%, transparent) 0 2px, transparent 2px 5px)'
+const dots = 'radial-gradient(color-mix(in srgb, var(--canvas) 70%, transparent) 1px, transparent 1.6px)'
+
+/** Each outcome has a letter and a texture besides its color, so a member's red cannot be taken for failed. */
+const outcomes: Record<OutcomeKey, { label: string; letter: string; fill: string; texture: CSSProperties }> = {
+  done: { label: 'Done', letter: 'D', fill: 'bg-state-done', texture: {} },
+  failed: { label: 'Failed', letter: 'F', fill: 'bg-state-failed', texture: { backgroundImage: stripes } },
+  abandoned: { label: 'Abandoned', letter: 'A', fill: 'bg-state-paused', texture: { backgroundImage: dots, backgroundSize: '4px 4px' } },
 }
 
 const units: { value: Unit; label: string }[] = [
@@ -27,19 +31,30 @@ function Dot({ className, style }: { className?: string; style?: CSSProperties }
   return <span aria-hidden className={cn('size-2.5 shrink-0 rounded-[3px]', className)} style={style} />
 }
 
-const memberColor = (slice: Slice): CSSProperties => ({ backgroundColor: slice.color || 'var(--icon-faint)' })
+const memberColor = (color: string): CSSProperties => ({ backgroundColor: color || 'var(--icon-faint)' })
+
+function Member({ name, tag, color }: { name: string; tag: string; color: string }) {
+  return (
+    <>
+      <Dot className="ring-1 ring-text/40" style={memberColor(color)} />
+      <span className="font-medium tabular-nums text-text">{tag}</span>
+      <span className="min-w-0 truncate">{name}</span>
+    </>
+  )
+}
 
 function Bar({ day, outcome, max }: { day: Day; outcome: OutcomeKey; max: number }) {
+  const texture = outcomes[outcome].texture
   const count = day.counts[outcome]
   const slices = day.members[outcome]
   return (
     <div className="relative flex h-full min-w-0 max-w-6 flex-1 flex-col justify-end">
       <div className="flex flex-col-reverse overflow-hidden rounded-t-[3px]" style={{ height: `${(count / max) * 100}%` }}>
         {slices.length === 0 ? (
-          <div className={cn('size-full', outcomes[outcome].fill)} />
+          <div className={cn('size-full', outcomes[outcome].fill)} style={texture} />
         ) : (
           slices.map((slice) => (
-            <div key={slice.id} className="border-t border-canvas first:border-t-0" style={{ ...memberColor(slice), height: `${(slice.count / count) * 100}%` }} />
+            <div key={slice.id} data-member={slice.id} className="border-t border-canvas first:border-t-0" style={{ ...texture, ...memberColor(slice.color), height: `${(slice.count / count) * 100}%` }} />
           ))
         )}
       </div>
@@ -52,7 +67,7 @@ function Bar({ day, outcome, max }: { day: Day; outcome: OutcomeKey; max: number
   )
 }
 
-function Tooltip({ day, index, count }: { day: Day; index: number; count: number }) {
+function Tooltip({ day, index, count, tags }: { day: Day; index: number; count: number; tags: Record<string, string> }) {
   const edge = index < 2 ? 'translate-x-[-0.5rem]' : index > count - 3 ? '-translate-x-[calc(100%-0.5rem)]' : '-translate-x-1/2'
   return (
     <div
@@ -65,14 +80,13 @@ function Tooltip({ day, index, count }: { day: Day; index: number; count: number
         {outcomeKeys.map((key) => (
           <li key={key} className="flex flex-col">
             <span className="flex items-center gap-1.5 text-text">
-              <Dot className={outcomes[key].fill} />
+              <Dot className={outcomes[key].fill} style={outcomes[key].texture} />
               {outcomes[key].label}
               <span className="ml-auto pl-3 tabular-nums">{day.counts[key]}</span>
             </span>
             {day.members[key].map((slice) => (
               <span key={slice.id} className="flex items-center gap-1.5 pl-4 text-muted">
-                <Dot style={memberColor(slice)} />
-                <span className="min-w-0 truncate">{slice.name}</span>
+                <Member name={slice.name} tag={tags[slice.id]} color={slice.color} />
                 <span className="ml-auto pl-3 tabular-nums">{slice.count}</span>
               </span>
             ))}
@@ -85,11 +99,14 @@ function Tooltip({ day, index, count }: { day: Day; index: number; count: number
 
 export function ActivityChart({ result, team }: { result: InsightsResult; team: boolean }) {
   const [unit, setUnit] = useState<Unit>('runs')
-  const [active, setActive] = useState<number | null>(null)
+  const [hovered, setHovered] = useState<number | null>(null)
+  const [focused, setFocused] = useState<number | null>(null)
+  const active = hovered ?? focused
   const days = chartDays(result, unit)
   const max = chartMax(days)
   const total = days.reduce((sum, d) => sum + outcomeKeys.reduce((n, key) => n + d.counts[key], 0), 0)
   const members = result.outcomes.members
+  const tags = memberTags(members)
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -108,8 +125,8 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
           <span>{max}</span>
           <span>0</span>
         </div>
-        <div className="relative min-w-0 flex-1" onMouseLeave={() => setActive(null)}>
-          {active !== null && <Tooltip day={days[active]} index={active} count={days.length} />}
+        <div className="relative min-w-0 flex-1" onMouseLeave={() => setHovered(null)}>
+          {active !== null && <Tooltip day={days[active]} index={active} count={days.length} tags={tags} />}
           <div
             role="group"
             aria-label={`${unit === 'runs' ? 'Runs' : 'Swarms'} per day, ${team ? 'everyone' : 'yours'}, by how they ended`}
@@ -121,9 +138,9 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
                 role="img"
                 tabIndex={0}
                 aria-label={dayWords(day, unit)}
-                onMouseEnter={() => setActive(i)}
-                onFocus={() => setActive(i)}
-                onBlur={() => setActive(null)}
+                onMouseEnter={() => setHovered(i)}
+                onFocus={() => setFocused(i)}
+                onBlur={() => setFocused(null)}
                 data-active={active === i || undefined}
                 data-dimmed={active !== null && active !== i || undefined}
                 className="flex min-w-0 flex-1 items-stretch justify-center gap-0.5 rounded-control px-0.5 outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-accent data-active:bg-hover data-dimmed:opacity-40 motion-reduce:transition-none"
@@ -136,7 +153,7 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
             {days.map((day, i) => (
               <div key={day.start} className={cn('flex min-w-0 flex-1 flex-col items-center gap-0.5 px-0.5 text-ui-xs tabular-nums text-muted transition-opacity motion-reduce:transition-none', active !== null && active !== i && 'opacity-40')}>
                 <div className="flex w-full justify-center gap-0.5">
-                  {outcomeKeys.map((key) => <span key={key} className={cn('h-1 min-w-0 max-w-6 flex-1 rounded-full', outcomes[key].fill)} />)}
+                  {outcomeKeys.map((key) => <span key={key} className="min-w-0 max-w-6 flex-1 text-center">{outcomes[key].letter}</span>)}
                 </div>
                 <span className="text-text">{dayLabel(day.start, { weekday: 'short' })}</span>
                 <span className="max-w-full truncate">{dayLabel(day.start)}</span>
@@ -151,15 +168,14 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
       <ul aria-label="Legend" className="ml-8 flex flex-wrap gap-x-4 gap-y-1 text-ui-sm text-muted">
         <li className="text-muted">Bars, left to right:</li>
         {outcomeKeys.map((key) => (
-          <li key={key} className="flex items-center gap-1.5"><Dot className={outcomes[key].fill} />{outcomes[key].label}</li>
+          <li key={key} className="flex items-center gap-1.5"><Dot className={outcomes[key].fill} style={outcomes[key].texture} />{outcomes[key].letter} {outcomes[key].label}</li>
         ))}
       </ul>
       {team && (
         <ul aria-label="Members" className="ml-8 flex flex-wrap gap-x-4 gap-y-1 text-ui-sm text-muted">
           {members.map((m) => (
             <li key={m.member_id} className="flex min-w-0 items-center gap-1.5">
-              <Dot style={{ backgroundColor: m.color || 'var(--icon-faint)' }} />
-              <span className="truncate">{m.display_name}</span>
+              <Member name={m.display_name} tag={tags[m.member_id]} color={m.color} />
             </li>
           ))}
         </ul>

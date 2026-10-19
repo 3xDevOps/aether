@@ -11,7 +11,7 @@ import { useConnectionProblem } from '@/components/shell/connection'
 import type { InsightsParams, InsightsResult } from '@/lib/types'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { Heatmap } from '@/routes/insights/heatmap'
-import { plural, rfc3339, weekRange, type SectionLoad } from '@/routes/insights/model'
+import { hasOutcomes, plural, rfc3339, weekRange, type SectionLoad } from '@/routes/insights/model'
 import { Breakdown, FinishedList, Section, StatsSection, Time, Usage } from '@/routes/insights/sections'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
@@ -37,12 +37,13 @@ function WorkspaceSelect({ workspace, onWorkspace }: { workspace: string; onWork
 }
 
 /** Reads one scope of the last seven days. Answers to an older request are dropped. */
-function useScope(client: Api, scope: InsightsParams['scope'], workspace: string, timeZone: string, connection: string) {
+function useScope(client: Api, scope: InsightsParams['scope'], workspace: string, timeZone: string, connection: string, onPRChange?: () => void) {
   const caps = useCapability()
   const [load, setLoad] = useState<SectionLoad>({ kind: 'loading' })
   const [prErrors, setPRErrors] = useState<Record<string, string>>({})
   const [rereadError, setRereadError] = useState('')
   const requestID = useRef(0)
+  const lastParams = useRef<InsightsParams | null>(null)
 
   // A finished run's pull request stays open in the record until run.pr.status reads it again from GitHub.
   const refreshPRs = useCallback(async (id: number, result: InsightsResult, params: InsightsParams) => {
@@ -58,9 +59,23 @@ function useScope(client: Api, scope: InsightsParams['scope'], workspace: string
       }
     }
     if (!changed || id !== requestID.current) return
+    onPRChange?.()
     try {
       const fresh = await client.insightsGet(params)
-      if (id === requestID.current) setLoad({ kind: 'ready', result: fresh })
+      if (id === requestID.current && hasOutcomes(fresh)) setLoad({ kind: 'ready', result: fresh })
+    } catch (error) {
+      if (id === requestID.current) setRereadError(message(error))
+    }
+  }, [client, onPRChange])
+
+  // Reads again without clearing what is shown; the team's success rate moves when a pull request merges.
+  const reread = useCallback(async () => {
+    const params = lastParams.current
+    if (!params) return
+    const id = ++requestID.current
+    try {
+      const fresh = await client.insightsGet(params)
+      if (id === requestID.current && hasOutcomes(fresh)) setLoad({ kind: 'ready', result: fresh })
     } catch (error) {
       if (id === requestID.current) setRereadError(message(error))
     }
@@ -73,9 +88,14 @@ function useScope(client: Api, scope: InsightsParams['scope'], workspace: string
     setPRErrors({})
     setRereadError('')
     const params = { workspace_id: workspace, scope, from: rfc3339(from), to: rfc3339(to), time_zone: timeZone }
+    lastParams.current = params
     try {
       const result = await client.insightsGet(params)
       if (id !== requestID.current) return
+      if (!hasOutcomes(result)) {
+        setLoad({ kind: 'unsupported' })
+        return
+      }
       setLoad({ kind: 'ready', result })
       if (scope === 'mine' && caps.hasMethod('run.pr.status')) void refreshPRs(id, result, params)
     } catch (error) {
@@ -88,7 +108,7 @@ function useScope(client: Api, scope: InsightsParams['scope'], workspace: string
     if (connection === 'live') void read()
   }, [connection, read])
 
-  return { load, read, prErrors, rereadError }
+  return { load, read, reread, prErrors, rereadError }
 }
 
 export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
@@ -104,8 +124,11 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
   const timeZone = resolvedZone && resolvedZone !== 'Etc/Unknown' ? resolvedZone : ''
   const problem = useConnectionProblem()
   const navigate = useStore((s) => s.navigate)
-  const mine = useScope(client, 'mine', workspace, timeZone, connection)
+  const teamReread = useRef<() => void>(() => {})
+  const rereadTeam = useCallback(() => teamReread.current(), [])
+  const mine = useScope(client, 'mine', workspace, timeZone, connection, rereadTeam)
   const team = useScope(client, 'everyone', workspace, timeZone, connection)
+  teamReread.current = () => void team.reread()
   const waiting = mine.load.kind === 'loading' && connection !== 'live'
   const controls = <WorkspaceSelect workspace={workspace} onWorkspace={setWorkspace} />
 

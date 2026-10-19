@@ -4190,27 +4190,33 @@ section loads, fails and retries on its own.
 - **My statistics** and **Team statistics.** Two sections with the same
   layout, mine first. Each has four boxes and one chart:
   - *Runs / swarms completed*: `outcomes.runs.done` and
-    `outcomes.swarms.done` as "7 runs / 1 swarm", with runs and swarms
-    launched below.
+    `outcomes.swarms.done` as "7 runs / 1 swarm", with the failed and
+    abandoned counts of each below. Every number is from `outcomes`, work
+    that finished in the window, so the box and the chart agree.
   - *Success rate*: runs and swarms that ended with a merged pull request
     over all that finished, `success.runs` plus `success.swarms`, rounded
-    down so 100% means all succeeded; a dash when none finished. Each
+    down in integers so 100% means exactly all succeeded; a dash when none finished. Each
     fraction is written out below.
-  - *Tasks completed*: `swarms.tasks_accepted`, with "N agents, M tasks
-    accepted".
+  - *Swarm tasks accepted*: `swarms.tasks_accepted`, with the agents in
+    those swarms. Unlike the other boxes, `swarms.*` counts swarms started
+    in the window, which the box says; the page never shows swarms launched
+    beside swarms completed.
   - *Total tokens used*: `cost.total_tokens` as "100K tokens", with the
-    harness at the head of `cost.by_agent` and its share ("Claude Code used
-    56% of the 100K tokens") and how many runs reported no tokens.
+    harness at the head of `cost.by_agent` and its share, rounded down
+    ("Claude Code used 56% of the 100K tokens") and how many runs reported no tokens.
 - **Outcome chart.** One chart per section: seven day groups, each three
   bars side by side, Done, Failed and Abandoned, from `outcomes.series`. A
   **Runs** / **Swarms** toggle switches the unit. Every bar carries its
-  count; a rail under each group repeats the outcome colors, and the legend
-  names the order, so no outcome is told by color alone. Hovering or
-  focusing a day highlights its group, dims the other six and opens a
-  tooltip with the counts. Each day is one tab stop labelled with its
+  count; the letters D, F and A under each group name its bars, and Failed is
+  striped and Abandoned dotted, so no outcome is told by color alone, not
+  even when a member's color is red. Hovering or focusing a day highlights
+  its group, dims the other six and opens a tooltip with the counts; a day
+  stays active while the pointer is on it, whichever day loses focus. Each day is one tab stop labelled with its
   counts. The team chart stacks every bar by member, using the member's
-  profile color from `outcomes.members` and a legend of members; its
-  tooltip and labels give each member's count. The chart always draws its
+  profile color from `outcomes.members` and a legend of members. A color
+  repeats after eight members, so each member also has a two-letter tag
+  (numbered when two collide) in the legend and tooltip, and a ringed
+  swatch; labels give each member's count. The chart always draws its
   axes and says so when nothing ended. The y axis tops out at the busiest
   bar.
 The sections below cover only the member's own runs in the same window.
@@ -4240,8 +4246,9 @@ The sections below cover only the member's own runs in the same window.
   subscription quota. Cost never stops a run.
 
 A failed read shows the server's error with **Retry** in the section that
-failed; a server without `insights.get` gets one neutral line asking for an
-update. Until the event stream is live the page names the connection
+failed; a server without `insights.get`, or one whose answer lacks
+`outcomes`, `success` or `cost.by_agent`, gets one neutral line asking for
+an update. Until the event stream is live the page names the connection
 problem instead of loading. With nothing in the window the boxes read zero
 and the chart says nothing ended.
 

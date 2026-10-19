@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { FailureCallout } from '@/components/ui/failure-callout'
@@ -44,19 +45,19 @@ export function Tiles({ result, agentNames }: { result: InsightsResult; agentNam
   return (
     <div className="grid grid-cols-1 gap-2 min-[30rem]:grid-cols-2 lg:grid-cols-4">
       <Tile label="Runs / swarms completed" value={`${plural(outcomes.runs.done, 'run')} / ${plural(outcomes.swarms.done, 'swarm')}`}>
-        <span>{plural(result.totals.launched, 'run')} launched</span>
-        <span>{plural(swarms.launched, 'swarm')} launched</span>
+        <span>{plural(outcomes.runs.failed, 'run')} failed, {plural(outcomes.runs.abandoned, 'run')} abandoned</span>
+        <span>{plural(outcomes.swarms.failed, 'swarm')} failed, {plural(outcomes.swarms.abandoned, 'swarm')} abandoned</span>
       </Tile>
       <Tile label="Success rate" value={rate === null ? '—' : `${rate}%`}>
         <span>Runs: {fraction(success.runs, 'run')}</span>
         <span>Swarms: {fraction(success.swarms, 'swarm')}</span>
       </Tile>
-      <Tile label="Tasks completed" value={swarms.tasks_accepted.toLocaleString()}>
-        <span>{plural(swarms.agents, 'agent')}, {plural(swarms.tasks_accepted, 'task')} accepted</span>
+      <Tile label="Swarm tasks accepted" value={swarms.tasks_accepted.toLocaleString()}>
+        <span>{plural(swarms.agents, 'agent')} in swarms started in the last 7 days</span>
       </Tile>
       <Tile label="Total tokens used" value={tokens(cost.total_tokens)}>
         {top && cost.total_tokens > 0 ? (
-          <span>{agentNames[top.harness] ?? top.harness} used {Math.round((top.total_tokens / cost.total_tokens) * 100)}% of the {tokens(cost.total_tokens)}</span>
+          <span>{agentNames[top.harness] ?? top.harness} used {percent(top.total_tokens, cost.total_tokens)}% of the {tokens(cost.total_tokens)}</span>
         ) : (
           <span>{cost.unmetered_runs > 0 ? 'No tokens reported' : 'No runs ended'}</span>
         )}
@@ -90,6 +91,7 @@ export function StatsSection({
           <Skeleton className="h-52" />
         </div>
       )}
+      {load.kind === 'unsupported' && <Callout tone="neutral" role="status">This server does not report insights. Update the server to see them.</Callout>}
       {load.kind === 'failed' && <FailureCallout error={load.message} onRetry={onRetry} />}
       {load.kind === 'ready' && (
         <>

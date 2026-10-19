@@ -1,4 +1,4 @@
-import { chartDays, chartMax, dayWords, duration, percent, tokens, weekRange } from '@/routes/insights/model'
+import { chartDays, memberTags, chartMax, dayWords, duration, percent, tokens, weekRange } from '@/routes/insights/model'
 import { teamInsights } from '@/test/fixtures'
 
 describe('insights model', () => {
@@ -6,9 +6,16 @@ describe('insights model', () => {
     expect(weekRange(new Date(2026, 9, 16, 15, 30))).toEqual({ from: new Date(2026, 9, 10), to: new Date(2026, 9, 17) })
   })
 
+  test('a window opened at exactly local midnight still ends at the next one', () => {
+    expect(weekRange(new Date(2026, 9, 16, 0, 0, 0))).toEqual({ from: new Date(2026, 9, 10), to: new Date(2026, 9, 17) })
+    expect(weekRange(new Date(2026, 9, 16, 23, 59, 59))).toEqual({ from: new Date(2026, 9, 10), to: new Date(2026, 9, 17) })
+  })
+
   test('100% means every finished run or swarm succeeded', () => {
     expect(percent(199, 200)).toBe(99)
     expect(percent(2, 2)).toBe(100)
+    expect(percent(99_999, 100_000)).toBe(99)
+    expect(percent(29, 100)).toBe(29)
     expect(percent(0, 0)).toBeNull()
   })
 
@@ -28,6 +35,14 @@ describe('insights model', () => {
     expect(chartMax(days)).toBe(7)
     expect(dayWords(days[5], 'runs')).toBe('Wed, Oct 14: runs 7 done (Alice 5, Bob 2), 2 failed (Alice 1, Bob 1), 0 abandoned')
     expect(chartDays(teamInsights(), 'swarms')[6].counts).toEqual({ done: 1, failed: 0, abandoned: 1 })
+  })
+
+  test('members get two-letter tags, numbered when they collide', () => {
+    expect(memberTags([
+      { member_id: 'a', display_name: 'Alice' },
+      { member_id: 'b', display_name: 'Alan Turing' },
+      { member_id: 'c', display_name: 'Al' },
+    ])).toEqual({ a: 'AL', b: 'AT', c: 'AL2' })
   })
 
   test('an empty week still has a scale', () => {

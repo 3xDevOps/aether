@@ -57,9 +57,26 @@ export function tokens(n: number): string {
   return `${compact.format(n)} ${n === 1 ? 'token' : 'tokens'}`
 }
 
-/** Rounded down, so 100% means every finished run or swarm succeeded. */
-export function percent(succeeded: number, finished: number): number | null {
-  return finished === 0 ? null : Math.floor((succeeded / finished) * 100)
+/** Rounded down in integers, so 100% means exactly all of them. */
+export function percent(part: number, whole: number): number | null {
+  return whole <= 0 ? null : Math.min(100, Math.floor((part * 100) / whole))
+}
+
+/** Servers that predate outcomes, success or per-agent tokens answer insights.get without them. */
+export function hasOutcomes(result: InsightsResult): boolean {
+  return Array.isArray(result.outcomes?.series) && Array.isArray(result.outcomes.members) && result.outcomes.runs != null && result.outcomes.swarms != null &&
+    result.success?.runs != null && result.success.swarms != null && Array.isArray(result.cost?.by_agent)
+}
+
+/** Two letters per member for the legend and tooltip, numbered when two members share them. */
+export function memberTags(members: { member_id: string; display_name: string }[]): Record<string, string> {
+  const seen: Record<string, number> = {}
+  return Object.fromEntries(members.map((m) => {
+    const words = m.display_name.trim().split(/\s+/).filter(Boolean)
+    const base = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? '?').slice(0, 2)).toUpperCase()
+    seen[base] = (seen[base] ?? 0) + 1
+    return [m.member_id, seen[base] > 1 ? `${base}${seen[base]}` : base]
+  }))
 }
 
 export type Unit = 'runs' | 'swarms'

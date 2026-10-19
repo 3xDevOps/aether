@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { Api } from '@/lib/api'
 import type { InsightsParams } from '@/lib/types'
@@ -52,23 +52,23 @@ describe('insights page', () => {
     const mine = await screen.findByRole('region', { name: sections.mine })
     const completed = within(mine).getByRole('article', { name: 'Runs / swarms completed' })
     expect(within(completed).getByText('7 runs / 1 swarm')).toBeDefined()
-    expect(within(completed).getByText('10 runs launched')).toBeDefined()
+    expect(completed.textContent).toBe('Runs / swarms completed7 runs / 1 swarm1 run failed, 1 run abandoned0 swarms failed, 0 swarms abandoned')
+    expect(completed.textContent).not.toContain('launched')
     const rate = within(mine).getByRole('article', { name: 'Success rate' })
-    expect(within(rate).getByText('40%')).toBeDefined()
+    expect(rate.textContent).toBe('Success rate40%Runs: 3 of 9 runs merged a pull requestSwarms: 1 of 1 swarm merged a pull request')
     expect(within(rate).getByText('Runs: 3 of 9 runs merged a pull request')).toBeDefined()
     expect(within(rate).getByText('Swarms: 1 of 1 swarm merged a pull request')).toBeDefined()
-    const tasks = within(mine).getByRole('article', { name: 'Tasks completed' })
-    expect(within(tasks).getByText('4')).toBeDefined()
-    expect(within(tasks).getByText('5 agents, 4 tasks accepted')).toBeDefined()
+    const tasks = within(mine).getByRole('article', { name: 'Swarm tasks accepted' })
+    expect(tasks.textContent).toBe('Swarm tasks accepted45 agents in swarms started in the last 7 days')
     const used = within(mine).getByRole('article', { name: 'Total tokens used' })
     expect(within(used).getByText('129K tokens')).toBeDefined()
-    expect(within(used).getByText('Claude Code used 78% of the 129K tokens')).toBeDefined()
+    expect(within(used).getByText('Claude Code used 77% of the 129K tokens')).toBeDefined()
     expect(within(used).getByText('6 runs did not report tokens')).toBeDefined()
 
     const team = screen.getByRole('region', { name: sections.everyone })
     expect(within(within(team).getByRole('article', { name: 'Runs / swarms completed' })).getByText('10 runs / 1 swarm')).toBeDefined()
     expect(within(within(team).getByRole('article', { name: 'Success rate' })).getByText('40%')).toBeDefined()
-    expect(within(within(team).getByRole('article', { name: 'Tasks completed' })).getByText('6')).toBeDefined()
+    expect(within(within(team).getByRole('article', { name: 'Swarm tasks accepted' })).getByText('6')).toBeDefined()
   })
 
   it('draws seven days, dims the others on hover and switches to swarms', async () => {
@@ -95,12 +95,87 @@ describe('insights page', () => {
     renderPage()
     const team = await screen.findByRole('region', { name: sections.everyone })
     const legend = within(team).getByRole('list', { name: 'Members' })
-    expect(within(legend).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Alice', 'Bob'])
+    expect(within(legend).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['ALAlice', 'BOBob'])
 
     const wed = within(team).getByRole('img', { name: 'Wed, Oct 14: runs 7 done (Alice 5, Bob 2), 2 failed (Alice 1, Bob 1), 0 abandoned' })
     fireEvent.focus(wed)
-    expect(within(within(team).getByRole('tooltip')).getAllByText('Bob')).toHaveLength(2)
+    const tip = within(team).getByRole('tooltip')
+    expect(within(tip).getAllByText('Bob')).toHaveLength(2)
+    expect(within(tip).getAllByText('BO')).toHaveLength(2)
+  })
 
+  it('stacks each outcome bar by member color and share of its height', async () => {
+    renderPage()
+    const team = await screen.findByRole('region', { name: sections.everyone })
+    const wed = within(team).getByRole('img', { name: /^Wed, Oct 14/ })
+    const bars = Array.from(wed.children) as HTMLElement[]
+    expect(bars).toHaveLength(3)
+    const heights = bars.map((bar) => (bar.firstElementChild as HTMLElement).style.height)
+    expect(heights.map(parseFloat)).toEqual([100, (2 / 7) * 100, 0])
+    const done = Array.from(bars[0].firstElementChild!.children) as HTMLElement[]
+    expect(done.map((d) => [d.dataset.member, d.style.backgroundColor, parseFloat(d.style.height)])).toEqual([
+      [alice.id, 'rgb(230, 25, 75)', (5 / 7) * 100],
+      ['mem_bob', 'rgb(60, 180, 75)', (2 / 7) * 100],
+    ])
+    const failed = Array.from(bars[1].firstElementChild!.children) as HTMLElement[]
+    expect(failed.map((d) => [d.style.backgroundColor, parseFloat(d.style.height)])).toEqual([['rgb(230, 25, 75)', 50], ['rgb(60, 180, 75)', 50]])
+    expect(failed.every((d) => d.style.backgroundImage.includes('repeating-linear-gradient'))).toBe(true)
+  })
+
+  it('tells outcomes by letter under the bars when members are colored', async () => {
+    renderPage()
+    const team = await screen.findByRole('region', { name: sections.everyone })
+    const rail = team.querySelector('[aria-hidden].mt-1') as HTMLElement
+    expect(Array.from(rail.children[0].querySelectorAll('span')).slice(0, 3).map((l) => l.textContent)).toEqual(['D', 'F', 'A'])
+    expect(within(within(team).getByRole('list', { name: 'Legend' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Bars, left to right:', 'D Done', 'F Failed', 'A Abandoned'])
+  })
+
+  it('keeps a hovered day active when another day loses focus', async () => {
+    renderPage()
+    const mine = await screen.findByRole('region', { name: sections.mine })
+    const [first, second] = within(mine).getAllByRole('img')
+    fireEvent.focus(first)
+    fireEvent.mouseEnter(second)
+    fireEvent.blur(first)
+    expect(second.hasAttribute('data-active')).toBe(true)
+    expect(within(mine).getByRole('tooltip')).toBeDefined()
+    fireEvent.mouseLeave(second.parentElement!.parentElement!)
+    expect(within(mine).queryByRole('tooltip')).toBeNull()
+    fireEvent.focus(first)
+    expect(first.hasAttribute('data-active')).toBe(true)
+    fireEvent.blur(first)
+    expect(within(mine).queryByRole('tooltip')).toBeNull()
+  })
+
+  it('never shows 100% for a token share that is not exactly all of it', async () => {
+    const base = insights()
+    const almost = insights({ cost: { ...base.cost, total_tokens: 100_000, by_agent: [{ ...base.cost.by_agent[0], total_tokens: 99_999 }] } })
+    renderPage({ insightsGet: vi.fn(async () => almost) })
+    const mine = await screen.findByRole('region', { name: sections.mine })
+    expect(within(mine).getByText('Claude Code used 99% of the 100K tokens')).toBeDefined()
+  })
+
+  it('shows the unsupported notice instead of throwing when the server lacks the new fields', async () => {
+    seed()
+    const old = { ...insights(), outcomes: undefined, success: undefined, cost: { metered_runs: 0, unmetered_runs: 0, cost_usd: 0, input_tokens: 0, output_tokens: 0 } } as unknown as ReturnType<typeof insights>
+    render(<InsightsRoute params={{}} client={fakeApi({ insightsGet: vi.fn(async () => old) })} />)
+    expect((await screen.findByRole('status')).textContent).toBe('This server does not report insights. Update the server to see them.')
+    expect(screen.queryByRole('region', { name: sections.mine })).toBeNull()
+  })
+
+  it('sends a window that starts at the local midnight seven days back', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 9, 16, 0, 0, 0) })
+    try {
+      const insightsGet = vi.fn(async (params: InsightsParams) => byScope(params))
+      renderPage({ insightsGet })
+      await screen.findByRole('region', { name: 'Finished work' })
+      for (const [call] of insightsGet.mock.calls) {
+        expect(Date.parse(call.from)).toBe(new Date(2026, 9, 10).getTime())
+        expect(Date.parse(call.to)).toBe(new Date(2026, 9, 17).getTime())
+      }
+    } finally {
+      vi.useRealTimers()
+    }
     const mine = screen.getByRole('region', { name: sections.mine })
     expect(within(mine).queryByRole('list', { name: 'Members' })).toBeNull()
   })
@@ -232,7 +307,7 @@ describe('insights page', () => {
 
     expect(await screen.findByRole('link', { name: 'PR #7 (merged)' })).toBeDefined()
     expect(runPRStatus.mock.calls.map(([p]) => p)).toEqual([{ run_id: 'run_a' }, { run_id: 'run_b' }])
-    expect(insightsGet).toHaveBeenCalledTimes(3)
+    await waitFor(() => expect(insightsGet.mock.calls.map(([p]) => p.scope).sort()).toEqual(['everyone', 'everyone', 'mine', 'mine']))
     expect(screen.getByRole('link', { name: 'PR #8 (open)' }).getAttribute('title')).toBe('Could not refresh this pull request: run.pr.status: github: 401 Bad credentials')
   })
 })

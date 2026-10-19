@@ -138,10 +138,29 @@ test('Insights dims the other days while one is hovered, for me and for the team
     await expect(section.getByText('1 swarm ended in the last 7 days')).toBeVisible()
     await section.getByRole('button', { name: 'Runs' }).click()
   }
-  await expect(team.getByRole('list', { name: 'Members' })).toContainText('bob')
+  await expect(team.getByRole('list', { name: 'Members' })).toContainText('BObob')
+  await expect(team.getByRole('list', { name: 'Legend' })).toContainText('F Failed')
+  await expect(team.getByText('F', { exact: true })).toHaveCount(7)
   await page.mouse.move(0, 0)
   await expect(page.locator('[data-dimmed]')).toHaveCount(0)
   await page.screenshot({ path: test.info().outputPath('insights.png'), fullPage: true })
+})
+
+test('Insights shows the update notice when the server answers without outcomes', async ({ page, aether }) => {
+  const alice = await aether.member('alice')
+  await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('project'))
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.route('**/api/v1/insights.get', (route) => {
+    const { outcomes, success, ...old } = week(route.request().postDataJSON().scope)
+    void outcomes
+    void success
+    return route.fulfill({ json: old })
+  })
+  await page.goto(`${alice.url}${alice.url.includes('?') ? '&' : '?'}page=insights`)
+  await expect(page.getByRole('main').getByRole('status')).toContainText('This server does not report insights. Update the server to see them.', { timeout: 30_000 })
+  await expect(page.getByRole('region', { name: 'My statistics' })).toHaveCount(0)
+  expect(errors).toEqual([])
 })
 
 test.describe('on a phone in the dark', () => {
