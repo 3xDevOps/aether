@@ -514,13 +514,14 @@ func TestNotificationWaitsWhileTheOwnerUsesADashboard(t *testing.T) {
 			h.svc.Active(h.ada.ID)
 		}
 	}()
+	stop := sync.OnceFunc(func() { close(leave); <-left })
+	t.Cleanup(stop)
 	h.status(stopped, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need a key")
 	h.status(answered, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need a key")
 	phone.expectNone(t, testQuiet)
 	// Cleared before the owner went quiet: never sent.
 	h.status(answered, domain.RunRunning, domain.ActivityWorking, "agent resumed")
-	close(leave)
-	<-left
+	stop()
 
 	phone.expect(t, notification{Title: "Stopped by hand", Body: "Blocked: need a key", Run: string(stopped.ID)})
 	phone.expectNone(t, testQuiet)
