@@ -83,7 +83,13 @@ function Assert([bool]$Condition, [string]$Message) {
     Write-Host "ok: $Message"
 }
 
-function Get-Hash([string]$Path) { (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash }
+# Get-FileHash opens without FileShare.Delete, so an update renaming
+# aether.exe aside while it is read fails with a sharing violation.
+function Get-Hash([string]$Path) {
+    $stream = [IO.File]::Open($Path, 'Open', 'Read', 'ReadWrite, Delete')
+    try { [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($stream)) -replace '-' }
+    finally { $stream.Dispose() }
+}
 
 function Get-FreePort {
     $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
