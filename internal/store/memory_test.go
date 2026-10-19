@@ -308,6 +308,100 @@ func TestMemoryDeleteRunKeepsPinnedNotes(t *testing.T) {
 	}
 }
 
+// Deleting a note gives the notes it replaced its place in the chain: the
+// next surviving note replaces them, or they are live again, unless a live
+// note already holds their text or their run has a newer outcome note.
+func TestMemoryDeleteRestoresWhatItReplaced(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	good, bad, gone := mustCreateRun(t, db, w.ID, member.ID, domain.RunCompleted),
+		mustCreateRun(t, db, w.ID, member.ID, domain.RunCompleted), mustCreateRun(t, db, w.ID, member.ID, domain.RunCompleted)
+	add := func(run *domain.Run, body string) *Memory {
+		return mustAddNote(t, db, &Memory{WorkspaceID: w.ID, RunID: run.ID, AuthorID: member.ID, Body: body})
+	}
+	supersede := func(old *Memory, m *Memory) *Memory {
+		t.Helper()
+		m.WorkspaceID, m.Kind, m.AuthorID = w.ID, MemoryGotcha, member.ID
+		if m.Source == "" {
+			m.Source = MemoryFromAgent
+		}
+		if _, _, err := db.SupersedeMemory(ctx, old.ID, m, nil); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	state := func(n *Memory) (bool, string) {
+		t.Helper()
+		got, _, err := db.GetMemory(ctx, w.ID, n.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Live(), got.SupersededBy
+	}
+
+	revived := add(good, "Take the lease before reattaching.")
+	supersede(revived, &Memory{RunID: bad.ID, Body: "Skip the lease when reattaching."})
+	chained := add(good, "Run make lint before pushing.")
+	middle := supersede(chained, &Memory{RunID: bad.ID, Body: "Never run make lint."})
+	fixed := supersede(middle, &Memory{Source: MemoryFromMember, Body: "Run make lint and make vet before pushing."})
+	retyped := add(good, "Use bun in web/.")
+	supersede(retyped, &Memory{RunID: bad.ID, Body: "Use npm in web/."})
+	add(good, "use BUN in web/.")
+	if _, err := db.DeleteMemoryByRun(ctx, w.ID, bad.ID); err != nil {
+		t.Fatalf("DeleteMemoryByRun: %v", err)
+	}
+	if live, by := state(revived); !live {
+		t.Fatalf("note the removed run replaced: live %v, replaced by %q; want live", live, by)
+	}
+	if _, err := db.PinMemory(ctx, w.ID, revived.ID, member.ID, ""); err != nil {
+		t.Fatalf("pin the restored note: %v", err)
+	}
+	if live, by := state(chained); live || by != fixed.ID {
+		t.Fatalf("note under a member's later fix: live %v, replaced by %q; want replaced by %s", live, by, fixed.ID)
+	}
+	if live, _ := state(retyped); live {
+		t.Fatal("a note whose text a live note holds came back")
+	}
+
+	single := add(good, "Retry a lost lease once.")
+	replacement := supersede(single, &Memory{Source: MemoryFromMember, Body: "Retry a lost lease twice."})
+	if err := db.DeleteMemory(ctx, w.ID, replacement.ID); err != nil {
+		t.Fatalf("DeleteMemory: %v", err)
+	}
+	if live, _ := state(single); !live {
+		t.Fatal("DeleteMemory left the note it replaced hidden")
+	}
+
+	byGone := add(good, "Read the container state after the lease.")
+	supersede(byGone, &Memory{RunID: gone.ID, Body: "Read the container state first."})
+	if err := db.DeleteRun(ctx, gone.ID); err != nil {
+		t.Fatalf("DeleteRun: %v", err)
+	}
+	if live, _ := state(byGone); !live {
+		t.Fatal("DeleteRun left the note its run replaced hidden")
+	}
+
+	reporter := mustCreateRun(t, db, w.ID, member.ID, domain.RunRunning)
+	if err := db.AppendCoordReport(ctx, &CoordReport{WorkspaceID: w.ID, RunID: reporter.ID, Outcome: CoordOutcomeSuccess,
+		Summary: "Fixed the lease race", IdempotencyKey: "success-1"}); err != nil {
+		t.Fatal(err)
+	}
+	outcome := outcomeNotes(t, db, reporter.ID)[0]
+	correction := supersede(outcome, &Memory{Source: MemoryFromMember, Body: "The lease race is only fixed for TUI runs."})
+	if err := db.AppendCoordReport(ctx, &CoordReport{WorkspaceID: w.ID, RunID: reporter.ID, Outcome: CoordOutcomeSuccess,
+		Summary: "Fixed the lease race for ACP runs too", IdempotencyKey: "success-2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteMemory(ctx, w.ID, correction.ID); err != nil {
+		t.Fatalf("DeleteMemory beside a newer outcome note: %v", err)
+	}
+	if live, _ := state(outcome); live {
+		t.Fatal("an outcome note came back beside its run's newer one")
+	}
+}
+
 func TestMemoryWorkspaceDeleteClearsIndex(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()

@@ -84,6 +84,9 @@ with an account on the server.
 12. **Removal is human.** `aether memory rm <id>` deletes a note;
     `rm --run <run>` every note attributed to that run. Deleting a run or a
     swarm deletes its unpinned notes; deleting the workspace deletes all.
+    A removed note's place in a supersede chain passes to the next
+    surviving note, so the notes it replaced come back unless something
+    later replaced them too.
 13. **Surfaces.** Methods `memory.add`, `memory.search`, `memory.show`,
     `memory.brief`, `memory.pin`, `memory.unpin`, `memory.rm`. The run
     socket serves the first four, as `aether-internal memory` and two MCP

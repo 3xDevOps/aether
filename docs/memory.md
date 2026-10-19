@@ -268,6 +268,12 @@ activity feed keeps a `memory.change` event per note with who removed it.
 Deleting a run or a swarm deletes its runs' unpinned notes, and deleting the
 workspace deletes all of its notes.
 
+`rm` and `rm --run`, and deleting a run or a swarm, restore what the removed
+notes replaced: a note a bad run replaced with `--supersedes` is live and
+searchable again, unpinned, or stays replaced by the note a member wrote
+over the bad one. A restored note stays hidden when a live note already
+holds its text, or, for an outcome note, when its run has a newer one.
+
 ## Promoting notes into AGENTS.md or CLAUDE.md
 
 Team memory never edits the repository. When a convention has held long

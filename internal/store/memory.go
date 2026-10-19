@@ -483,14 +483,20 @@ func (d *DB) UnpinMemory(ctx context.Context, workspace domain.WorkspaceID, id s
 }
 
 func (d *DB) DeleteMemory(ctx context.Context, workspace domain.WorkspaceID, id string) error {
-	res, err := d.db.ExecContext(ctx, `DELETE FROM memory WHERE workspace_id = ? AND id = ?`, workspace, id)
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: delete memory %s: begin: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	ids, err := deleteMemory(ctx, tx, `workspace_id = ? AND id = ?`, workspace, id)
 	if err != nil {
 		return fmt.Errorf("store: delete memory %s: %w", id, err)
 	}
-	if n, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("store: delete memory %s: %w", id, err)
-	} else if n == 0 {
+	if len(ids) == 0 {
 		return fmt.Errorf("%w: memory note %s", ErrNotFound, id)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("store: delete memory %s: commit: %w", id, err)
 	}
 	return nil
 }
@@ -498,24 +504,63 @@ func (d *DB) DeleteMemory(ctx context.Context, workspace domain.WorkspaceID, id 
 // DeleteMemoryByRun deletes every note attributed to run, pinned or not,
 // and returns their IDs in order.
 func (d *DB) DeleteMemoryByRun(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx,
-		`DELETE FROM memory WHERE workspace_id = ? AND run_id = ? AND run_id <> '' RETURNING id`, workspace, run)
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("store: delete memory of run %s: begin: %w", run, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	ids, err := deleteMemory(ctx, tx, `workspace_id = ? AND run_id = ? AND run_id <> ''`, workspace, run)
 	if err != nil {
 		return nil, fmt.Errorf("store: delete memory of run %s: %w", run, err)
 	}
-	defer rows.Close() //nolint:errcheck // read-only iteration
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("store: delete memory of run %s: %w", run, err)
-		}
-		ids = append(ids, id)
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("store: delete memory of run %s: commit: %w", run, err)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: delete memory of run %s: %w", run, err)
+	return ids, nil
+}
+
+// deleteMemory deletes the notes where selects and returns their IDs in
+// order. A note one of them replaced takes its place in the supersede
+// chain: the next surviving note replaces it, or with none it is live
+// again. OR IGNORE leaves it replaced when a live note already holds its
+// text or, for an outcome note, its run has a newer one.
+func deleteMemory(ctx context.Context, tx *sql.Tx, where string, args ...any) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `DELETE FROM memory WHERE `+where+` RETURNING id, superseded_by`, args...)
+	if err != nil {
+		return nil, err
+	}
+	type deleted struct{ id, replacedBy string }
+	notes, err := collect(rows, func(row interface{ Scan(...any) error }) (*deleted, error) {
+		var n deleted
+		return &n, row.Scan(&n.id, &n.replacedBy)
+	})
+	if err != nil {
+		return nil, err
+	}
+	replacedBy := make(map[string]string, len(notes))
+	ids := make([]string, 0, len(notes))
+	for _, n := range notes {
+		replacedBy[n.id] = n.replacedBy
+		ids = append(ids, n.id)
 	}
 	slices.Sort(ids)
+	now, err := encodeTime(time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		next := replacedBy[id]
+		for later, gone := replacedBy[next]; gone; later, gone = replacedBy[next] {
+			next = later
+		}
+		restore, restoreArgs := `UPDATE OR IGNORE memory SET invalid_at = NULL, superseded_by = '', updated_at = ? WHERE superseded_by = ?`, []any{now, id}
+		if next != "" {
+			restore, restoreArgs = `UPDATE memory SET superseded_by = ?, updated_at = ? WHERE superseded_by = ?`, []any{next, now, id}
+		}
+		if _, err = tx.ExecContext(ctx, restore, restoreArgs...); err != nil {
+			return nil, fmt.Errorf("restore the notes %s replaced: %w", id, err)
+		}
+	}
 	return ids, nil
 }
 
