@@ -256,6 +256,7 @@ func requireTruncatedTranscript(t *testing.T, submission protocol.Submission) {
 func TestCappedTranscriptCaptureReportAndAcceptance(t *testing.T) {
 	for _, historical := range []bool{false, true} {
 		t.Run(fmt.Sprintf("historical=%t", historical), func(t *testing.T) {
+			t.Parallel()
 			f := newRetainedSubmissionFixture(t, []domain.EvidenceRequirement{{Kind: "transcript"}}, submissionTranscript{size: evidence.MaxTranscriptBytes + 4096})
 			f.capture(t, nil)
 			var submission *domain.Submission
@@ -339,6 +340,7 @@ func TestCappedTranscriptCaptureReportAndAcceptance(t *testing.T) {
 func TestSubmissionAcceptanceRejectsDamagedCappedTranscript(t *testing.T) {
 	for _, size := range []int64{0, 4096, evidence.MaxTranscriptBytes - 1, evidence.MaxTranscriptBytes + 1} {
 		t.Run(fmt.Sprintf("retained-bytes=%d", size), func(t *testing.T) {
+			t.Parallel()
 			f := newRetainedSubmissionFixture(t, []domain.EvidenceRequirement{{Kind: "transcript"}}, submissionTranscript{size: evidence.MaxTranscriptBytes + 4096})
 			f.capture(t, nil)
 			submission := f.reportSubmission(t)
@@ -363,6 +365,7 @@ func TestSubmissionAcceptanceRejectsDamagedCappedTranscript(t *testing.T) {
 func TestSubmissionAcceptanceRefusesUnavailableRetainedTranscript(t *testing.T) {
 	for _, scenario := range []string{"absent-fact", "unavailable-at-capture", "missing-packet", "missing-after-capture", "open-error", "read-error", "expired", "wrong-revision", "wrong-run", "wrong-origin", "wrong-workspace"} {
 		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
 			exporter := submissionTranscript{size: 4096}
 			if scenario == "unavailable-at-capture" {
 				exporter.err = errors.New("capture source unavailable")
@@ -452,6 +455,7 @@ func TestSubmissionAcceptanceDoesNotRequireOptionalTranscript(t *testing.T) {
 func TestSubmissionAcceptanceRetainsAuthorityAndAcceptedSetFences(t *testing.T) {
 	for _, scenario := range []string{"worker", "generation", "accepted-set", "replaced-integrator", "revoked-account"} {
 		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
 			f := newRetainedSubmissionFixture(t, []domain.EvidenceRequirement{{Kind: "transcript"}}, submissionTranscript{size: 1024})
 			f.capture(t, nil)
 			submission := f.reportSubmission(t)
@@ -494,6 +498,7 @@ func TestSubmissionAcceptanceRetainsAuthorityAndAcceptedSetFences(t *testing.T) 
 func TestSubmissionInputRefsCannotLaunderSourceKinds(t *testing.T) {
 	for _, scenario := range []string{"input-is-not-transcript", "forged-transcript-kind", "required-input", "missing-input", "expired-input"} {
 		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
 			required := "transcript"
 			if scenario == "required-input" || scenario == "missing-input" || scenario == "expired-input" {
 				required = "input"
