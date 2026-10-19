@@ -104,13 +104,13 @@ describe('memory page', () => {
 
     fireEvent.click(within(show).getByRole('button', { name: 'Pinned' }))
     expect(within(show).getByRole('button', { name: 'Pinned' }).getAttribute('aria-pressed')).toBe('true')
-    expect(titles()).toEqual([workspacePin.title, myPin.title])
+    await waitFor(() => expect(titles()).toEqual([workspacePin.title, myPin.title]))
 
     fireEvent.click(within(show).getByRole('button', { name: 'Agent notes' }))
-    expect(titles()).toEqual([agentNote.title])
+    await waitFor(() => expect(titles()).toEqual([agentNote.title]))
 
     fireEvent.click(within(show).getByRole('button', { name: 'Answers' }))
-    expect(titles()).toEqual([answer.title])
+    await waitFor(() => expect(titles()).toEqual([answer.title]))
 
     fireEvent.click(within(show).getByRole('button', { name: 'Outcomes' }))
     await waitFor(() => expect(titles()).toEqual([outcome.title]))
@@ -174,11 +174,13 @@ describe('memory page', () => {
 
   it('opens a note with its provenance and supersede chain', async () => {
     seed()
-    const replacement = memoryItem({ id: 'note-newer00001', title: 'Use bun in web/ and docs/.', created_at: '2026-10-18T13:00:00Z' })
-    const shown = { ...agentNote, superseded_by: replacement.id, invalid_at: '2026-10-18T13:00:00Z' }
+    // Written in the same second as the note it replaces: only the server's order tells them apart.
+    const replacement = memoryItem({ id: 'note-newer00001', title: 'Use bun in web/ and docs/.', created_at: agentNote.created_at })
+    const shown = { ...agentNote, superseded_by: replacement.id, invalid_at: agentNote.created_at }
+    const older = { ...replaced, superseded_by: shown.id }
     const memoryShow = vi.fn<Api['memoryShow']>(async (_, id) => (id === shown.id
-      ? { item: shown, chain: [replacement, replaced] }
-      : { item: replacement, chain: [replaced, shown] }))
+      ? { item: shown, chain: [older, replacement] }
+      : { item: replacement, chain: [older, shown] }))
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [agentNote] })), memoryShow })} />)
     fireEvent.click(await screen.findByRole('button', { name: agentNote.title }))
 
@@ -193,7 +195,7 @@ describe('memory page', () => {
 
     const chain = within(within(dialog).getByRole('region', { name: 'Supersede chain' }))
     expect(chain.getAllByRole('listitem').map((li) => li.lastElementChild?.textContent)).toEqual([
-      replaced.title, `${agentNote.title} (this note)`, replacement.title,
+      older.title, `${agentNote.title} (this note)`, replacement.title,
     ])
     fireEvent.click(chain.getByRole('button', { name: replacement.title }))
     expect(await screen.findByRole('dialog', { name: replacement.title })).toBeDefined()
@@ -274,6 +276,14 @@ describe('memory page', () => {
     seed()
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => { throw new ApiError(404, 'memory.search: not found') }) })} />)
     expect((await screen.findByRole('status')).textContent).toBe('This server does not keep team memory. Update the server to use it.')
+  })
+
+  it("shows the server's not-found answer instead of calling the server old", async () => {
+    seed()
+    const missing = 'memory.search: store: not found: workspace ws-gone'
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => { throw new ApiError(404, missing, -32000) }) })} />)
+    expect(await screen.findByText(missing)).toBeDefined()
+    expect(screen.queryByText('This server does not keep team memory. Update the server to use it.')).toBeNull()
   })
 
   it('is in navigation only where the server serves memory.search', () => {

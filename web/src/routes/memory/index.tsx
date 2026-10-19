@@ -23,7 +23,7 @@ import { allowed } from '@/lib/permissions'
 import type { MemoryAddResult, MemoryItem } from '@/lib/types'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { AddNote } from '@/routes/memory/add-note'
-import { briefMaxBytes, byteLength, filters, kindLabel, listed, listLimit, reads, sourceLabel, superseded, type Filter } from '@/routes/memory/model'
+import { briefMaxBytes, filters, kindLabel, listed, listLimit, reads, sourceLabel, superseded, type Filter } from '@/routes/memory/model'
 import { Byline, NoteDialog, PinBadge, PRLink, RunLink } from '@/routes/memory/note'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
@@ -34,16 +34,11 @@ const searchDelay = 250
 
 type Load =
   | { kind: 'loading' }
-  | { kind: 'ready'; items: MemoryItem[]; full: boolean }
+  | { kind: 'ready'; items: MemoryItem[]; full: boolean; words: string; filter: Filter }
   | { kind: 'failed'; message: string }
   | { kind: 'unsupported' }
 
 type Brief = { kind: 'loading' } | { kind: 'ready'; text: string } | { kind: 'failed'; message: string }
-
-function files(list: string[] | undefined): string {
-  if (!list?.length) return ''
-  return list.length === 1 ? list[0] : `${list[0]} +${list.length - 1} more`
-}
 
 function NoteRow({ item, agents, onOpen }: { item: MemoryItem; agents: Record<string, string>; onOpen: () => void }) {
   return (
@@ -61,14 +56,14 @@ function NoteRow({ item, agents, onOpen }: { item: MemoryItem; agents: Record<st
         <span><Byline item={item} agents={agents} /></span>
         {item.run_id && <CardControls><RunLink id={item.run_id} /></CardControls>}
         {item.pr_url && <CardControls><PRLink item={item} /></CardControls>}
-        {item.files?.length ? <span className="min-w-0 truncate font-code" title={item.files.join('\n')}>{files(item.files)}</span> : null}
+        {item.files?.length ? <span className="min-w-0 truncate font-code" title={item.files.join('\n')}>{item.files.length === 1 ? item.files[0] : `${item.files[0]} +${item.files.length - 1} more`}</span> : null}
       </div>
     </Card>
   )
 }
 
 function BriefPanel({ brief, onRetry }: { brief: Brief; onRetry: () => void }) {
-  const size = brief.kind === 'ready' ? byteLength(brief.text) : 0
+  const size = brief.kind === 'ready' ? new TextEncoder().encode(brief.text).length : 0
   return (
     <Collapsible>
       <CollapsibleTrigger>
@@ -123,10 +118,13 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
     try {
       const results = await Promise.all(reads(workspaceID, words, filter).map((params) => client.memorySearch(params)))
       const items = results.flatMap((result) => result.items)
-      if (id === listRequest.current) setLoad({ kind: 'ready', items, full: results.length > 1 && results[1].items.length >= listLimit })
+      const full = filter !== 'pinned' && results[results.length - 1].items.length >= listLimit
+      if (id === listRequest.current) setLoad({ kind: 'ready', items, full, words, filter })
     } catch (error) {
       if (id !== listRequest.current) return
-      setLoad(error instanceof ApiError && (error.status === 404 || error.code === METHOD_NOT_FOUND) ? { kind: 'unsupported' } : { kind: 'failed', message: message(error) })
+      // A 404 with a code is the server's own answer, such as an unknown workspace.
+      const unsupported = error instanceof ApiError && (error.code === METHOD_NOT_FOUND || (error.status === 404 && error.code === undefined))
+      setLoad(unsupported ? { kind: 'unsupported' } : { kind: 'failed', message: message(error) })
     }
   }, [client, workspaceID, words, filter])
 
@@ -167,8 +165,7 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
 
   const waiting = load.kind === 'loading' && connection !== 'live'
   const skeleton = useDelayed(load.kind === 'loading' && !waiting)
-  const items = load.kind === 'ready' ? listed(load.items, filter) : []
-  const empty = filters.find((f) => f.value === filter)!.empty
+  const items = load.kind === 'ready' ? listed(load.items, load.filter) : []
 
   const controls = (
     <>
@@ -226,8 +223,8 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
               )}
               {load.kind === 'failed' && <FailureCallout error={load.message} onRetry={() => void readList()} />}
               {load.kind === 'ready' && items.length === 0 && (
-                words || filter !== 'all'
-                  ? <p className="text-ui text-muted">{empty}{words ? <> match “{words}”</> : null}.</p>
+                load.words || load.filter !== 'all'
+                  ? <p className="text-ui text-muted">{filters.find((f) => f.value === load.filter)!.empty}{load.words ? <> match “{load.words}”</> : null}.</p>
                   : (
                     <EmptyState title="No notes yet." action={canWrite && <Button variant="secondary" onClick={() => setAdding(true)}>Add note</Button>}>
                       Runs add decisions, conventions and gotchas with <Code>aether-internal memory add</Code>, and each run that reports success or failure records its outcome here.
@@ -244,7 +241,7 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
                 </ul>
               )}
               {load.kind === 'ready' && load.full && (
-                <p className="text-ui-sm text-muted">{words ? `Every pinned match, then the ${listLimit} best matches.` : `Every pinned note, then the ${listLimit} newest notes. Search to find older ones.`}</p>
+                <p className="text-ui-sm text-muted">{load.words ? `Every pinned match, then the ${listLimit} best matches.` : `Every pinned note, then the ${listLimit} newest notes. Search to find older ones.`}</p>
               )}
             </>
           )}

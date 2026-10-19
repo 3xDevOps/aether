@@ -38,8 +38,9 @@ export function superseded(item: MemoryItem): boolean {
 }
 
 /** The reads behind a filter: every pinned note, then the newest or best
- * of all. memory.search filters by kind, liveness and pin, so Agent notes
- * and Answers narrow what it returns. */
+ * of all, last. memory.search filters by kind, liveness and pin, so Agent
+ * notes and Answers narrow what it returns. A replaced note is never
+ * pinned, so Superseded skips the pinned read. */
 export function reads(workspaceID: string, words: string, filter: Filter): MemorySearchParams[] {
   const all: MemorySearchParams = {
     workspace_id: workspaceID,
@@ -49,7 +50,8 @@ export function reads(workspaceID: string, words: string, filter: Filter): Memor
     ...(filter === 'superseded' ? { all: true } : {}),
   }
   const pinned = { ...all, pinned: true }
-  return filter === 'pinned' ? [pinned] : [pinned, all]
+  if (filter === 'pinned') return [pinned]
+  return filter === 'superseded' ? [all] : [pinned, all]
 }
 
 const keeps: Record<Filter, (item: MemoryItem) => boolean> = {
@@ -66,8 +68,4 @@ export function listed(items: MemoryItem[], filter: Filter): MemoryItem[] {
   const seen = new Set<string>()
   const kept = items.filter((item) => !seen.has(item.id) && seen.add(item.id) && keeps[filter](item))
   return [...kept.filter((item) => item.pinned_at), ...kept.filter((item) => !item.pinned_at)]
-}
-
-export function byteLength(text: string): number {
-  return new TextEncoder().encode(text).length
 }

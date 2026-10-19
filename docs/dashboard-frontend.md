@@ -4085,15 +4085,17 @@ answers to an older request.
   reads returned.
 - **List.** Two reads with the same words and filter: every pinned note
   (`pinned: true`), and the 100 newest notes or best matches, which
-  **Pinned** skips. Each note is listed once, pinned first, each group in
-  the server's order, so a pin older than the newest 100 still leads the
-  list. A row shows the title, a pin badge
+  **Pinned** skips. **Superseded** makes only the second read, since a
+  replaced note is never pinned. Each note is listed once, pinned first,
+  each group in the server's order, so a pin older than the newest 100
+  still leads the list. A row shows the title, a pin badge
   ("Pinned by Dana", or "Pinned for you" on a pin for one member's briefs),
   **Superseded**, the kind, the source (Agent note, Member note, Run report,
   Swarm answer), the author with the agent's display name, the run as a link,
   the pull request, the first cited file and how many more, and the age.
-  When the second read is full the page says it shows every pinned note,
-  then the 100 newest notes or best matches.
+  When the 100-note read is full the page says it shows every pinned note,
+  then the 100 newest notes or best matches. While a new search or filter
+  is read, the previous list stays on screen as it was.
 - **Detail.** A row opens `memory.show`: the note's text, its provenance
   (author, run and its ID, commit, pull request, files, the report or
   question it came from, when it was written and pinned, what replaced it)

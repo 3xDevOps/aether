@@ -47,7 +47,6 @@ export function RunLink({ id }: { id: string }) {
 }
 
 export function PRLink({ item }: { item: MemoryItem }) {
-  if (!item.pr_url) return null
   return (
     <a href={item.pr_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
       {item.pr_number ? `PR #${item.pr_number}` : 'Pull request'}{item.pr_state && ` (${item.pr_state})`}
@@ -158,9 +157,10 @@ export function NoteDialog({
   }
 
   const item = load.kind === 'ready' ? load.result.item : undefined
-  const chain = load.kind === 'ready'
-    ? [...(load.result.chain ?? []), load.result.item].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
-    : []
+  // The server orders the chain oldest first; this note follows the last note it replaced.
+  const others = load.kind === 'ready' ? load.result.chain ?? [] : []
+  const at = others.reduce((last, note, i) => (note.superseded_by === item?.id ? i + 1 : last), 0)
+  const chain = item ? [...others.slice(0, at), item, ...others.slice(at)] : []
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
