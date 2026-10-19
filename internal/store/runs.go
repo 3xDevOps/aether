@@ -746,6 +746,7 @@ func deleteRunRows(ctx context.Context, tx *sql.Tx, id domain.RunID) error {
 		{`DELETE FROM run_costs WHERE run_id = ?`, []any{id}},
 		{`DELETE FROM run_messages WHERE from_run = ? OR to_run = ?`, []any{id, id}},
 		{`DELETE FROM run_steerers WHERE run_id = ?`, []any{id}},
+		{`DELETE FROM memory WHERE run_id = ? AND pinned_at IS NULL`, []any{id}},
 		{`DELETE FROM events WHERE run_id = ? AND seq < (SELECT MAX(seq) FROM events)`, []any{id}},
 	}
 	for _, deletion := range deletes {

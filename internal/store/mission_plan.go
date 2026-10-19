@@ -151,6 +151,10 @@ func (d *DB) AnswerMissionQuestion(ctx context.Context, questionID domain.Missio
 	if err != nil {
 		return nil, err
 	}
+	note, err := d.answerMemory(ctx, questionID, memberID, answer)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: answer mission question: begin: %w", err)
@@ -189,6 +193,10 @@ func (d *DB) AnswerMissionQuestion(ctx context.Context, questionID domain.Missio
 	}
 	if affected, _ := res.RowsAffected(); affected != 1 {
 		return nil, fmt.Errorf("%w: mission question %s is already answered", ErrConflict, questionID)
+	}
+	note.WorkspaceID = m.WorkspaceID
+	if _, noteErr := insertMemory(ctx, tx, note); noteErr != nil {
+		return nil, noteErr
 	}
 	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.question.answer", key, payload, string(questionID), 0, n); receiptErr != nil {
 		return nil, receiptErr
