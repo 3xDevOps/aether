@@ -1,6 +1,10 @@
 package protocol
 
-import "time"
+import (
+	"time"
+
+	"github.com/3xDevOps/Aether/internal/store"
+)
 
 // Team memory methods. See docs/plans/2026-10-19-team-memory.md. The run
 // socket serves add, search, show and brief; pin, unpin and rm are for
@@ -33,13 +37,13 @@ const (
 )
 
 const (
-	MemoryMaxTitleBytes       = 120
+	MemoryMaxTitleBytes       = store.MemoryMaxTitleBytes
 	MemoryMaxBodyBytes        = 1 << 10
-	MemoryMaxFiles            = 20
+	MemoryMaxFiles            = store.MemoryMaxFiles
 	MemoryMaxAgentNotesPerRun = 20
 	MemoryMaxSimilar          = 3
-	MemoryPinWorkspaceBytes   = 1 << 10
-	MemoryPinMemberBytes      = 512
+	MemoryPinWorkspaceBytes   = store.MemoryPinWorkspaceBytes
+	MemoryPinMemberBytes      = store.MemoryPinMemberBytes
 	MemorySearchLimit         = 10
 	MemorySearchMaxLimit      = 100
 	MemoryBriefMaxBytes       = 2 << 10
@@ -72,12 +76,25 @@ type MemoryItem struct {
 	PRState      string   `json:"pr_state,omitempty"`
 	PRURL        string   `json:"pr_url,omitempty"`
 	SupersededBy string   `json:"superseded_by,omitempty"`
-	InvalidAt    string   `json:"invalid_at,omitempty"`
+	InvalidAt    *string  `json:"invalid_at,omitempty"`
 	PinnedBy     string   `json:"pinned_by,omitempty"`
 	PinnedByName string   `json:"pinned_by_name,omitempty"`
-	PinnedAt     string   `json:"pinned_at,omitempty"`
+	PinnedAt     *string  `json:"pinned_at,omitempty"`
 	CreatedAt    string   `json:"created_at"`
 	UpdatedAt    string   `json:"updated_at"`
+}
+
+func MemoryItemFromStore(m *store.Memory) MemoryItem {
+	return MemoryItem{
+		ID: m.ID, WorkspaceID: string(m.WorkspaceID), Kind: string(m.Kind), Scope: string(m.Scope),
+		Source: string(m.Source), SourceRef: m.SourceRef, Title: m.Title, Body: m.Body,
+		Files: append([]string(nil), m.Files...), AuthorID: string(m.AuthorID), AuthorName: m.AuthorName,
+		RunID: string(m.RunID), Harness: m.Harness, Commit: m.Commit,
+		PRNumber: m.PRNumber, PRState: m.PRState, PRURL: m.PRURL,
+		SupersededBy: m.SupersededBy, InvalidAt: rfc3339Ptr(m.InvalidAt),
+		PinnedBy: string(m.PinnedBy), PinnedByName: m.PinnedByName, PinnedAt: rfc3339Ptr(m.PinnedAt),
+		CreatedAt: rfc3339(m.CreatedAt), UpdatedAt: rfc3339(m.UpdatedAt),
+	}
 }
 
 // MemoryAddParams writes one note. On the run socket the server fills the

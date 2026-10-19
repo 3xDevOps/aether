@@ -858,6 +858,10 @@ func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool
 	if err != nil {
 		return false, fmt.Errorf("store: finalize coord report evidence refs: %w", err)
 	}
+	note, err := d.reportMemory(ctx, report)
+	if err != nil {
+		return false, fmt.Errorf("store: finalize coord report: %w", err)
+	}
 	ts := time.Now().UTC()
 	finalizedAt, err := encodeTime(ts)
 	if err != nil {
@@ -892,6 +896,11 @@ func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool
 			report.ID, eventID, CoordReportPublicationPending, finalizedAt,
 		); err != nil {
 			return false, fmt.Errorf("store: finalize coord report: outbox: %w", err)
+		}
+		if note != nil {
+			if err := upsertReportMemory(ctx, tx, note); err != nil {
+				return false, err
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			return false, fmt.Errorf("store: finalize coord report: commit: %w", err)
