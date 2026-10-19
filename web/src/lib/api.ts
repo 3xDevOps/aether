@@ -46,6 +46,15 @@ import type {
   MemberIdentities,
   MemberList,
   MemberMerge,
+  MemoryAddParams,
+  MemoryAddResult,
+  MemoryBriefResult,
+  MemoryItem,
+  MemoryRmResult,
+  MemoryScope,
+  MemorySearchParams,
+  MemorySearchResult,
+  MemoryShowResult,
   MergeCode,
   MergePlan,
   MergeProposal,
@@ -494,6 +503,17 @@ export const api = {
   accountUsage: (params: { account_member_id?: string; refresh?: boolean } = {}) =>
     call<UsageResult>('account.usage', params),
   insightsGet: (params: InsightsParams) => call<InsightsResult>('insights.get', params),
+  memorySearch: (params: MemorySearchParams) => call<MemorySearchResult>('memory.search', params),
+  memoryShow: (workspaceID: string, id: string) =>
+    call<MemoryShowResult>('memory.show', { workspace_id: workspaceID, id }),
+  /** The caller's brief, byte for byte as a new run of theirs gets it. */
+  memoryBrief: (workspaceID: string) => call<MemoryBriefResult>('memory.brief', { workspace_id: workspaceID }),
+  memoryAdd: (params: MemoryAddParams) => call<MemoryAddResult>('memory.add', params),
+  memoryPin: (workspaceID: string, id: string, scope: MemoryScope) =>
+    call<{ item: MemoryItem }>('memory.pin', { workspace_id: workspaceID, id, scope }),
+  memoryUnpin: (workspaceID: string, id: string) =>
+    call<{ item: MemoryItem }>('memory.unpin', { workspace_id: workspaceID, id }),
+  memoryRm: (workspaceID: string, id: string) => call<MemoryRmResult>('memory.rm', { workspace_id: workspaceID, id }),
   accountShare: (memberID: string) =>
     call<unknown>('account.share', { member_id: memberID }),
   accountRevoke: (memberID: string) =>

@@ -247,6 +247,20 @@ function retentionLine(p: Payload): ReactNode {
   )
 }
 
+const memoryWords: Record<string, string> = {
+  add: 'added a team memory note',
+  supersede: 'replaced a team memory note',
+  pin: 'pinned a team memory note',
+  unpin: 'unpinned a team memory note',
+  rm: 'removed a team memory note',
+}
+
+// An agent's write names the run's owner as the actor and carries the run.
+function memoryLine(p: Payload, event: Event): ReactNode {
+  const words = memoryWords[text(p.action)] ?? 'changed team memory'
+  return event.run_id ? `The agent ${words}` : <><Who id={p.actor_id ?? event.actor_id} /> {words}</>
+}
+
 const tokens = new Intl.NumberFormat()
 
 // Keyed by `EventType` so a type without words is a compile error.
@@ -302,6 +316,7 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   'member.merged': (p) => <>Merged a member into <Who id={p.survivor_id} object /></>,
   'member.device': (p) => deviceWords[text(p.status)] ?? 'A device changed',
   'profile.change': (p, e) => <><Who id={p.member ?? e.actor_id} /> {profileWords[text(p.action)] ?? 'changed'} the {text(p.harness) || 'agent'} profile</>,
+  'memory.change': memoryLine,
 }
 
 const messageKinds: Record<string, string> = {

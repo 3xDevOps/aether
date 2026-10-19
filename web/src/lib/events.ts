@@ -38,6 +38,7 @@ export const eventLabel = {
   'member.device': 'Devices',
   'member.merged': 'Member merges',
   'profile.change': 'Agent profiles',
+  'memory.change': 'Team memory',
 } satisfies Record<string, string>
 
 export type EventType = keyof typeof eventLabel
