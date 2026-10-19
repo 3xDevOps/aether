@@ -124,7 +124,10 @@ type InsightsCost struct {
 	MeteredRuns, UnmeteredRuns int
 	CostUSD                    float64
 	InputTokens, OutputTokens  int64
-	ByAgent                    []*InsightsCostAgent
+	// SwarmTokens are the tokens of finished swarm worker and integrator
+	// runs, kept out of the fields above.
+	SwarmTokens int64
+	ByAgent     []*InsightsCostAgent
 }
 
 // InsightsCostAgent is InsightsCost for the runs of one harness.
@@ -133,6 +136,7 @@ type InsightsCostAgent struct {
 	MeteredRuns, UnmeteredRuns int
 	CostUSD                    float64
 	InputTokens, OutputTokens  int64
+	SwarmTokens                int64
 }
 
 // InsightsOutcome is how runs or swarms ended: Done is completed or merged
@@ -519,11 +523,39 @@ func insightsFinishedRuns(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("store: insights: finished runs: %w", err)
 	}
+	swarm, swarmErr := tx.QueryContext(ctx, `
+		SELECT r.harness, COALESCE(SUM(c.input_tokens + c.output_tokens), 0)
+		FROM runs r JOIN run_costs c ON c.run_id = r.id AND c.metered = 1
+		WHERE r.swarm_run = 1 AND `+q.ownerScope()+` AND `+insightsFinishedIn+`
+		GROUP BY r.harness`, args...)
+	if swarmErr != nil {
+		return fmt.Errorf("store: insights: swarm tokens: %w", swarmErr)
+	}
+	defer swarm.Close() //nolint:errcheck // read-only iteration
+	for swarm.Next() {
+		var (
+			harness string
+			tokens  int64
+		)
+		if err := swarm.Scan(&harness, &tokens); err != nil {
+			return fmt.Errorf("store: insights: swarm tokens: %w", err)
+		}
+		agent := agents[harness]
+		if agent == nil {
+			agent = &InsightsCostAgent{Harness: harness}
+			agents[harness] = agent
+		}
+		agent.SwarmTokens = tokens
+		out.Cost.SwarmTokens += tokens
+	}
+	if err := swarm.Err(); err != nil {
+		return fmt.Errorf("store: insights: swarm tokens: %w", err)
+	}
 	for _, agent := range agents {
 		out.Cost.ByAgent = append(out.Cost.ByAgent, agent)
 	}
 	slices.SortFunc(out.Cost.ByAgent, func(a, b *InsightsCostAgent) int {
-		return cmp.Or(cmp.Compare(b.InputTokens+b.OutputTokens, a.InputTokens+a.OutputTokens), cmp.Compare(a.Harness, b.Harness))
+		return cmp.Or(cmp.Compare(b.InputTokens+b.OutputTokens+b.SwarmTokens, a.InputTokens+a.OutputTokens+a.SwarmTokens), cmp.Compare(a.Harness, b.Harness))
 	})
 	out.Durations.RunsMeasured = len(durations)
 	out.Durations.MedianRun = percentile(durations, 0.5)
@@ -732,7 +764,7 @@ func insightsPullRequests(ctx context.Context, tx *sql.Tx, q InsightsQuery, args
 
 // insightsSuccess counts the runs and swarms that finished in the range and
 // those with a merged pull request. A swarm finishes when it is completed or
-// cancelled, at its last update.
+// cancelled, at the time it did.
 func insightsSuccess(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
 	err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*), COUNT(*) FILTER (WHERE r.status = 'merged' OR EXISTS (
@@ -757,7 +789,7 @@ func insightsSuccess(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []an
 
 // swarmFinished selects swarms that finished in [from, to).
 func (q InsightsQuery) swarmFinished() string {
-	where := "phase IN ('completed', 'cancelled') AND updated_at >= :from AND updated_at < :to"
+	where := "phase IN ('completed', 'cancelled') AND finished_at >= :from AND finished_at < :to"
 	if q.Member != "" {
 		where += " AND accountable_human_id = :member"
 	}
@@ -808,7 +840,7 @@ func insightsMemberOutcomes(ctx context.Context, tx *sql.Tx, q InsightsQuery, ar
 			SELECT m.accountable_human_id, b.i,
 				COUNT(*) FILTER (WHERE m.phase = 'completed'), 0,
 				COUNT(*) FILTER (WHERE m.phase = 'cancelled')
-			FROM missions m JOIN b ON m.updated_at >= b.lo AND m.updated_at < b.hi
+			FROM missions m JOIN b ON m.finished_at >= b.lo AND m.finished_at < b.hi
 			WHERE ` + q.swarmFinished() + `
 			GROUP BY m.accountable_human_id, b.i`,
 			func(m *InsightsMemberOutcomes) []InsightsOutcome { return m.Swarms }},

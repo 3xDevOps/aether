@@ -124,7 +124,7 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 		Cost: protocol.InsightsCost{
 			MeteredRuns: got.Cost.MeteredRuns, UnmeteredRuns: got.Cost.UnmeteredRuns, CostUSD: got.Cost.CostUSD,
 			InputTokens: got.Cost.InputTokens, OutputTokens: got.Cost.OutputTokens,
-			TotalTokens: got.Cost.InputTokens + got.Cost.OutputTokens,
+			TotalTokens: got.Cost.InputTokens + got.Cost.OutputTokens + got.Cost.SwarmTokens,
 			ByAgent:     make([]protocol.InsightsCostAgent, 0, len(got.Cost.ByAgent)),
 		},
 		PullRequests: protocol.InsightsPullRequests(got.PullRequests),
@@ -152,7 +152,7 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 	for _, a := range got.Cost.ByAgent {
 		out.Cost.ByAgent = append(out.Cost.ByAgent, protocol.InsightsCostAgent{
 			Harness: a.Harness, MeteredRuns: a.MeteredRuns, UnmeteredRuns: a.UnmeteredRuns, CostUSD: a.CostUSD,
-			InputTokens: a.InputTokens, OutputTokens: a.OutputTokens, TotalTokens: a.InputTokens + a.OutputTokens,
+			InputTokens: a.InputTokens, OutputTokens: a.OutputTokens, TotalTokens: a.InputTokens + a.OutputTokens + a.SwarmTokens,
 		})
 	}
 	swarms := make([]store.InsightsOutcome, len(got.Series))

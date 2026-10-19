@@ -38,11 +38,11 @@ shape. The rest of this guide says what each number means.
 ## Which runs count
 
 Run counts, the series, the heatmap, `by_workspace`, `by_agent`,
-`durations`, `cost`, `success.runs`, `outcomes.runs` and `recent` count only *top-level* runs: runs that are
+`durations`, `cost` (except `total_tokens`), `success.runs`, `outcomes.runs` and `recent` count only *top-level* runs: runs that are
 not a swarm worker and not a swarm integrator of any generation. A swarm's
 runs are counted once, under `swarms`, so a worker retry or a replaced
 integrator never adds a run of its own. `needs_you` and `pull_requests`
-count swarm runs as well.
+count swarm runs as well, and so does `total_tokens`; see [Cost](#cost).
 
 Whether a run belongs to a swarm is stored on the run (`runs.swarm_run`)
 when the run is created, so deleting the swarm does not turn its runs into
@@ -78,9 +78,10 @@ dashboard stacks: `done`, `failed` and `abandoned`.
 | Swarm | phase `completed` | always `0`: a swarm has no failed phase | phase `cancelled` |
 
 Runs follow the top-level rule above and count on the day they finished.
-A swarm counts on the day of its last update while it is `completed` or
-`cancelled`, which is when it moved to that phase unless it was reopened
-and finished again, and belongs to its accountable member.
+A swarm counts on the day it became `completed` or `cancelled`, a time
+that later changes to the swarm do not move, and belongs to its accountable
+member. Swarms that finished before the server recorded this time count on
+their last update.
 
 - `outcomes.runs`, `outcomes.swarms`: the counts over the whole range.
   `outcomes.runs` equals `totals.finished`, `totals.failed` and
@@ -155,11 +156,16 @@ runs are metered; any other run is counted in `unmetered_runs`. An unmetered
 run's cost is unknown, not zero, so `cost_usd` and the token counts are a
 floor.
 
-`total_tokens` is `input_tokens` + `output_tokens`. `by_agent` splits
-`metered_runs`, `unmetered_runs`, `cost_usd`, the token counts and
-`total_tokens` per `harness`, largest `total_tokens` first, so a harness's
-share is its `total_tokens` over `cost.total_tokens`. A harness with only
-unmetered runs is listed with zero tokens.
+`total_tokens` is every token the scope used in the range: `input_tokens`
++ `output_tokens` of top-level runs, plus the metered tokens of swarm worker
+and integrator runs that finished in the range. `metered_runs`,
+`unmetered_runs`, `cost_usd`, `input_tokens` and `output_tokens` stay
+top-level only, so `total_tokens` can exceed `input_tokens` +
+`output_tokens`; a team that mostly runs swarms reads near zero in those
+fields. `by_agent` splits the same fields and `total_tokens` per `harness`,
+largest `total_tokens` first, so a harness's share is its `total_tokens`
+over `cost.total_tokens`. A harness with only unmetered runs is listed with
+zero tokens; one with only swarm runs is listed with zero run counts.
 
 ## Pull requests
 

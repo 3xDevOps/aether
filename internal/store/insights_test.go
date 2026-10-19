@@ -49,6 +49,33 @@ func TestInsightsMigrationMarksSwarmRuns(t *testing.T) {
 	}
 }
 
+func TestSwarmFinishedMigrationBackfillsFinishedSwarms(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, len(migrations)-1)
+	if _, err := raw.Exec(`
+		INSERT INTO members (id, display_name, public_key, color, role, created_at) VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1);
+		INSERT INTO workspaces (id, name, created_at) VALUES ('w1', 'proj', 1);
+		INSERT INTO missions (id, workspace_id, objective, accountable_human_id, idempotency_key, created_at, updated_at, phase)
+		VALUES ('done', 'w1', 'o', 'm1', 'k1', 1, 10, 'completed'), ('cut', 'w1', 'o', 'm1', 'k2', 1, 20, 'cancelled'),
+		       ('live', 'w1', 'o', 'm1', 'k3', 1, 30, 'active');`, testKey(t, "")); err != nil {
+		t.Fatalf("seed missions: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	for id, want := range map[string]any{"done": int64(10), "cut": int64(20), "live": nil} {
+		var got any
+		if err := db.db.QueryRowContext(context.Background(), `SELECT finished_at FROM missions WHERE id = ?`, id).Scan(&got); err != nil || got != want {
+			t.Errorf("mission %s finished_at = %v, %v; want %v", id, got, err, want)
+		}
+	}
+}
+
 func TestRunActivityChangeRecordsTransition(t *testing.T) {
 	ctx := context.Background()
 	db := openTestDB(t)
@@ -111,16 +138,10 @@ func TestInsightsOutcomes(t *testing.T) {
 	}
 	adaMember, bobMember := mustCreateMember(t, db), mustCreateTeammate(t, db)
 	ada, bob := adaMember.ID, bobMember.ID
-	member := func(name, key string) domain.MemberID {
-		t.Helper()
-		m := &domain.Member{DisplayName: name, PublicKey: testKey(t, key), Color: "#911eb4", Role: domain.RoleCollaborator}
-		if err := db.CreateMember(ctx, m); err != nil {
-			t.Fatal(err)
-		}
-		return m.ID
+	cyMember := &domain.Member{DisplayName: "Cy", PublicKey: testKey(t, "cy@laptop"), Color: "#3cb44b", Role: domain.RoleCollaborator}
+	if err := db.CreateMember(ctx, cyMember); err != nil {
+		t.Fatal(err)
 	}
-	_ = member("Cy", "cy@laptop")
-	dan := member("Dan", "dan@laptop")
 	workspace := func(name string) domain.WorkspaceID {
 		t.Helper()
 		w := &domain.Workspace{Name: name, BaseBranch: "main"}
@@ -152,15 +173,12 @@ func TestInsightsOutcomes(t *testing.T) {
 	run("r6", ada, one, "claude", domain.RunCompleted, "2026-03-10T00:00:00-07:00")
 	run("swarm-worker", ada, one, "claude", domain.RunCompleted, "2026-03-08T12:00:00-07:00")
 	exec(`UPDATE runs SET swarm_run = 1 WHERE id = 'swarm-worker'`)
+	run("swarm-integrator", bob, two, "codex", domain.RunCompleted, "2026-03-09T14:00:00-07:00")
+	exec(`UPDATE runs SET swarm_run = 1 WHERE id = 'swarm-integrator'`)
+	run("swarm-running", ada, one, "claude", domain.RunRunning, "")
+	exec(`UPDATE runs SET swarm_run = 1 WHERE id = 'swarm-running'`)
 	run("r7", bob, two, "claude", domain.RunAbandoned, "2026-03-09T12:00:00-07:00")
 	run("r8", bob, two, "codex", domain.RunCompleted, "2026-03-09T13:00:00-07:00")
-	run("gone", dan, one, "claude", domain.RunCompleted, "2026-03-08T12:00:00-07:00")
-	if err := db.DeleteRun(ctx, "gone"); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.DeleteMember(ctx, dan); err != nil {
-		t.Fatal(err)
-	}
 
 	for id, in := range map[string][2]int64{"r1": {100, 50}, "r2": {10, 5}} {
 		if err := db.PutRunCost(ctx, &RunCost{RunID: domain.RunID(id), WorkspaceID: one, MemberID: ada, InputTokens: in[0], OutputTokens: in[1], Metered: true}); err != nil {
@@ -169,6 +187,15 @@ func TestInsightsOutcomes(t *testing.T) {
 	}
 	if err := db.PutRunCost(ctx, &RunCost{RunID: "r8", WorkspaceID: two, MemberID: bob}); err != nil {
 		t.Fatal(err)
+	}
+	for _, c := range []*RunCost{
+		{RunID: "swarm-worker", WorkspaceID: one, MemberID: ada, InputTokens: 7, OutputTokens: 3, Metered: true},
+		{RunID: "swarm-integrator", WorkspaceID: two, MemberID: bob, InputTokens: 20, OutputTokens: 20, Metered: true},
+		{RunID: "swarm-running", WorkspaceID: one, MemberID: ada, InputTokens: 1000, OutputTokens: 1000, Metered: true},
+	} {
+		if err := db.PutRunCost(ctx, c); err != nil {
+			t.Fatal(err)
+		}
 	}
 	mergedPR := func(runID string, number int) {
 		t.Helper()
@@ -183,14 +210,18 @@ func TestInsightsOutcomes(t *testing.T) {
 
 	mission := func(id string, owner domain.MemberID, ws domain.WorkspaceID, phase, updated string) {
 		t.Helper()
-		exec(`INSERT INTO missions (id, workspace_id, objective, accountable_human_id, idempotency_key, created_at, updated_at, phase)
-			VALUES (?, ?, 'o', ?, ?, ?, ?, ?)`, id, ws, owner, id, at("2026-03-01T00:00:00Z").UnixNano(), at(updated).UnixNano(), phase)
+		exec(`INSERT INTO missions (id, workspace_id, objective, accountable_human_id, idempotency_key, created_at, updated_at, phase, finished_at)
+			VALUES (?, ?, 'o', ?, ?, ?, ?, ?, CASE WHEN ? IN ('completed', 'cancelled') THEN ? END)`,
+			id, ws, owner, id, at("2026-03-01T00:00:00Z").UnixNano(), at(updated).UnixNano(), phase, phase, at(updated).UnixNano())
 	}
 	mission("m1", ada, one, "completed", "2026-03-07T12:00:00-08:00")
 	mission("m2", ada, one, "cancelled", "2026-03-09T09:00:00-07:00")
 	mission("m3", bob, two, "completed", "2026-03-09T10:00:00-07:00")
 	mission("m4", ada, one, "active", "2026-03-08T10:00:00-07:00")
 	mission("m5", ada, one, "completed", "2026-03-10T00:00:00-07:00")
+	// Later updates to a finished swarm, such as replacing its integrator or
+	// changing its accepted tasks, must not move it to another day.
+	exec(`UPDATE missions SET updated_at = ? WHERE phase IN ('completed', 'cancelled')`, at("2026-03-11T12:00:00Z").UnixNano())
 	exec(`INSERT INTO mission_create_receipts (workspace_id, idempotency_key, mission_id, objective, accountable_human_id,
 		integrator_account_member_id, integrator_harness, integrator_mode, execution_choices, created_at, initial_run_id)
 		VALUES (?, 'm1', 'm1', 'o', ?, ?, 'claude', 'headless', '[]', 0, 'swarm-worker')`, one, ada, ada)
@@ -270,10 +301,11 @@ func TestInsightsOutcomes(t *testing.T) {
 	check("everyone totals vs days", sum(all.runs), o(everyone.Totals.Completed+everyone.Totals.Merged, everyone.Totals.Failed, everyone.Totals.Abandoned+everyone.Totals.Interrupted))
 	check("everyone success", everyone.Success, InsightsSuccess{RunsSucceeded: 2, RunsFinished: 6, SwarmsSucceeded: 1, SwarmsFinished: 3})
 	check("everyone cost by agent", everyone.Cost.ByAgent, []*InsightsCostAgent{
-		{Harness: "claude", MeteredRuns: 2, UnmeteredRuns: 3, InputTokens: 110, OutputTokens: 55},
-		{Harness: "codex", UnmeteredRuns: 1},
+		{Harness: "claude", MeteredRuns: 2, UnmeteredRuns: 3, InputTokens: 110, OutputTokens: 55, SwarmTokens: 10},
+		{Harness: "codex", UnmeteredRuns: 1, SwarmTokens: 40},
 	})
 	check("everyone cost totals", []any{everyone.Cost.MeteredRuns, everyone.Cost.UnmeteredRuns, everyone.Cost.InputTokens, everyone.Cost.OutputTokens}, []any{2, 4, int64(110), int64(55)})
+	check("everyone swarm tokens", everyone.Cost.SwarmTokens, int64(50))
 
 	mine := query(la, from, to, func(q *InsightsQuery) { q.Member = ada })
 	_, byMember, names = days(mine)
@@ -281,7 +313,7 @@ func TestInsightsOutcomes(t *testing.T) {
 	check("mine run days", mine.Members[0].Runs, []InsightsOutcome{o(1, 0, 0), o(1, 1, 0), o(0, 0, 1)})
 	check("mine swarm days", byMember.swarms, []InsightsOutcome{o(1, 0, 0), o(0, 0, 0), o(0, 0, 1)})
 	check("mine success", mine.Success, InsightsSuccess{RunsSucceeded: 2, RunsFinished: 4, SwarmsSucceeded: 1, SwarmsFinished: 2})
-	check("mine cost by agent", mine.Cost.ByAgent, []*InsightsCostAgent{{Harness: "claude", MeteredRuns: 2, UnmeteredRuns: 2, InputTokens: 110, OutputTokens: 55}})
+	check("mine cost by agent", mine.Cost.ByAgent, []*InsightsCostAgent{{Harness: "claude", MeteredRuns: 2, UnmeteredRuns: 2, InputTokens: 110, OutputTokens: 55, SwarmTokens: 10}})
 
 	scoped := query(la, from, to, func(q *InsightsQuery) { q.Workspace = two })
 	all, byMember, _ = days(scoped)
@@ -290,7 +322,7 @@ func TestInsightsOutcomes(t *testing.T) {
 	check("workspace swarm days", byMember.swarms, []InsightsOutcome{o(0, 0, 0), o(0, 0, 0), o(1, 0, 0)})
 	check("workspace success", scoped.Success, InsightsSuccess{RunsFinished: 2, SwarmsFinished: 1})
 	check("workspace cost by agent", scoped.Cost.ByAgent, []*InsightsCostAgent{
-		{Harness: "claude", UnmeteredRuns: 1}, {Harness: "codex", UnmeteredRuns: 1},
+		{Harness: "codex", UnmeteredRuns: 1, SwarmTokens: 40}, {Harness: "claude", UnmeteredRuns: 1},
 	})
 
 	utc := query(time.UTC, "2026-03-08T00:00:00Z", "2026-03-10T00:00:00Z", func(*InsightsQuery) {})
