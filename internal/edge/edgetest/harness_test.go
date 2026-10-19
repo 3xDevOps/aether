@@ -27,6 +27,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/connector"
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
@@ -662,12 +663,17 @@ func (noRuns) WithStoppedTerminal(_ context.Context, _ domain.MemberID, afterSto
 }
 
 // serverNode is one Aether server: sshd over a real store, and the edge
-// agent enrolled with the harness's edge, under an access policy.
+// agent enrolled with the harness's edge, under an access policy. mcp,
+// when set, serves the MCP connector requests the edge relays; client,
+// when set, has the real connector handler serve them instead, trusting
+// that client's metadata document, and run launches recorded in the store.
 type serverNode struct {
 	h      *harness
 	id     string
 	dir    string
 	policy edgeproto.AccessPolicy
+	mcp    http.Handler
+	client *connectorClient
 	addr   string
 	db     *store.DB
 	ssh    *sshd.Server
@@ -677,7 +683,13 @@ type serverNode struct {
 
 func (h *harness) newServer(policy edgeproto.AccessPolicy) *serverNode {
 	h.t.Helper()
-	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, addr: "127.0.0.1:0"}
+	return h.newMCPServer(policy, nil)
+}
+
+// newMCPServer is newServer with mcp serving its MCP connector requests.
+func (h *harness) newMCPServer(policy edgeproto.AccessPolicy, mcp http.Handler) *serverNode {
+	h.t.Helper()
+	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, mcp: mcp, addr: "127.0.0.1:0"}
 	s.start()
 	h.t.Cleanup(func() { s.stop() })
 	return s
@@ -698,9 +710,13 @@ func (s *serverNode) start() {
 		t.Fatal(err)
 	}
 	hostKeyPath := filepath.Join(s.dir, "ssh", "host_ed25519_key")
+	runs := sshd.RunController(noRuns{})
+	if s.client != nil {
+		runs = launcher{db: db}
+	}
 	srv, err := sshd.New(sshd.Config{
 		Addr: s.addr, HostKeyPath: hostKeyPath, Store: db, Bus: bus,
-		Git: noGit{}, PTY: noPTY{}, Runs: noRuns{},
+		Git: noGit{}, PTY: noPTY{}, Runs: runs,
 		InvitesDir: filepath.Join(s.dir, "invites"), EdgeAccess: s.policy,
 	})
 	if err != nil {
@@ -710,7 +726,19 @@ func (s *serverNode) start() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: s.h.relayURL, DataDir: s.dir, HostKey: hostKey, SSH: srv, AccessPolicy: s.policy})
+	mcp := s.mcp
+	if s.client != nil {
+		mcp, err = connector.New(connector.Config{
+			BaseURL: s.h.relayURL + edgeproto.MCPPath(edgeproto.ServerID(hostKey.PublicKey())),
+			Store:   db, SSH: srv, KeyPath: filepath.Join(s.dir, "connector", "hmac.key"),
+			ClientHosts: []string{s.client.host}, Transport: s.client.srv.Client().Transport,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	agent, err := edgeagent.New(edgeagent.Config{EdgeURL: s.h.relayURL, DataDir: s.dir, HostKey: hostKey, SSH: srv,
+		AccessPolicy: s.policy, HTTP: mcp})
 	if err != nil {
 		t.Fatal(err)
 	}

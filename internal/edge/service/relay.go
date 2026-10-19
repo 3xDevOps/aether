@@ -2,10 +2,12 @@ package edge
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/edge/relay"
+	edgestore "github.com/3xDevOps/Aether/internal/edge/store"
 )
 
 // RelayConfig is the configuration of the relay that serves beside s: the
@@ -37,6 +39,14 @@ func (d relayDirectory) Admit(ctx context.Context, serverID string, account edge
 		return err
 	}
 	return d.s.store.RecordReach(ctx, serverID, account)
+}
+
+func (d relayDirectory) Known(ctx context.Context, serverID string) error {
+	_, err := d.s.store.Server(ctx, serverID)
+	if errors.Is(err, edgestore.ErrNotFound) {
+		return edgeproto.RefusalUnknownServer
+	}
+	return err
 }
 
 func (d relayDirectory) AdmitClaim(ctx context.Context, serverID string, account edgeproto.Account, addr netip.Addr) error {

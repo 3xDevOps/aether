@@ -355,6 +355,7 @@ func TestPrivilegedMethodsRefuseAnUnapprovedDevice(t *testing.T) {
 		protocol.MethodMemberMergePropose:     protocol.MemberMergeProposeParams{Code: "AAAA-BBBB-CCCC-DDDD"},
 		protocol.MethodMemberMergePending:     struct{}{},
 		protocol.MethodMemberMergeAccept:      protocol.MemberMergeAcceptParams{ProposalID: "mrp-x"},
+		protocol.MethodConnectorCode:          struct{}{},
 	}
 	for method, params := range calls {
 		raw, _ := json.Marshal(params)
@@ -469,6 +470,7 @@ func (f *fakeEdgeOwner) IssueClaimCode(admin domain.MemberID) (string, time.Time
 func (f *fakeEdgeOwner) Owner() (*edgeproto.Account, error) { return f.owner, nil }
 func (f *fakeEdgeOwner) Origin() string                     { return "https://edge.example" }
 func (f *fakeEdgeOwner) Connected() bool                    { return true }
+func (f *fakeEdgeOwner) EdgeVersion() int                   { return edgeproto.Version }
 func (f *fakeEdgeOwner) EdgeState() string                  { return f.state }
 
 func (f *fakeEdgeOwner) TransferOwner(owner edgeproto.Account) error {

@@ -169,7 +169,12 @@ func (r *Relay) open(ctx context.Context, kind, serverID string, account edgepro
 		if err != nil {
 			return nil, nil, err
 		}
-		server, err := r.attachDevice(ctx, c, msg, token)
+		var server net.Conn
+		if kind == edgeproto.KindHTTP {
+			server, err = r.attach(ctx, c, msg)
+		} else {
+			server, err = r.attachDevice(ctx, c, msg, token)
+		}
 		switch {
 		case err == nil:
 			return c, server, nil
@@ -207,7 +212,8 @@ func (sc *spliceConn) Close() error {
 }
 
 // register admits one connection of kind from the client at addr to
-// serverID and returns it with the open to send.
+// serverID and returns it with the open to send. An http connection has
+// no account, device, address or grant.
 func (r *Relay) register(kind, serverID string, account edgeproto.Account, device edgeproto.Device,
 	addr netip.AddrPort) (*relayConn, edgeproto.Open, error) {
 	c := &relayConn{
@@ -222,22 +228,25 @@ func (r *Relay) register(kind, serverID string, account edgeproto.Account, devic
 	ticket := edgeproto.NewToken()
 	c.ticketHash = edgeproto.HashToken(ticket)
 	now := time.Now()
-	grant, err := edgeproto.SignGrant(r.key, edgeproto.Grant{
-		Issuer:      r.origin,
-		ServerID:    serverID,
-		ConnID:      c.id,
-		Kind:        kind,
-		Account:     account,
-		DeviceID:    device.ID,
-		DeviceKey:   device.Key,
-		DeviceLabel: device.Label,
-		IssuedAt:    now,
-		ExpiresAt:   now.Add(edgeproto.GrantTTL),
-	})
-	if err != nil {
-		return nil, edgeproto.Open{}, err
+	msg := edgeproto.Open{ConnID: c.id, Ticket: ticket, Kind: kind}
+	if kind != edgeproto.KindHTTP {
+		grant, err := edgeproto.SignGrant(r.key, edgeproto.Grant{
+			Issuer:      r.origin,
+			ServerID:    serverID,
+			ConnID:      c.id,
+			Kind:        kind,
+			Account:     account,
+			DeviceID:    device.ID,
+			DeviceKey:   device.Key,
+			DeviceLabel: device.Label,
+			IssuedAt:    now,
+			ExpiresAt:   now.Add(edgeproto.GrantTTL),
+		})
+		if err != nil {
+			return nil, edgeproto.Open{}, err
+		}
+		msg.Grant = grant
 	}
-	msg := edgeproto.Open{ConnID: c.id, Ticket: ticket, Kind: kind, Grant: grant}
 	if addr.IsValid() {
 		msg.ClientAddr = addr.String()
 	}
@@ -303,9 +312,15 @@ func (r *Relay) admitLocked(c *relayConn) (*registration, error) {
 	if !reg.claimed && c.kind != edgeproto.KindClaim {
 		return nil, edgeproto.RefusalNotClaimed
 	}
+	if c.kind == edgeproto.KindHTTP {
+		if err := r.admitHTTPLocked(reg); err != nil {
+			return nil, err
+		}
+		return reg, nil
+	}
 	perServer, perDevice := 0, 0
 	for _, o := range r.conns {
-		if o.serverID == c.serverID {
+		if o.serverID == c.serverID && o.kind != edgeproto.KindHTTP {
 			perServer++
 		}
 		if o.deviceID == c.deviceID {

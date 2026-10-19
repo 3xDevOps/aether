@@ -18,6 +18,7 @@ import (
 var memberRefs = map[string]bool{
 	"account_shares.owner_member_id":                       true,
 	"account_shares.grantee_member_id":                     true,
+	"connectors.member_id":                                 true,
 	"member_devices.member_id":                             true,
 	"member_identities.member_id":                          true,
 	"member_merges.survivor_id":                            true,
@@ -111,6 +112,7 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"schedules", `UPDATE schedules SET member_id = ?2 WHERE member_id = ?1`},
 		{"swarm owners", `UPDATE missions SET accountable_human_id = ?2 WHERE accountable_human_id = ?1`},
 		{"push subscriptions", `UPDATE push_subscriptions SET member_id = ?2 WHERE member_id = ?1`},
+		{"connectors", `UPDATE connectors SET member_id = ?2 WHERE member_id = ?1`},
 		{"merge records", `UPDATE member_merges SET survivor_id = ?2 WHERE survivor_id = ?1`},
 		{"tombstones", `UPDATE members SET merged_into = ?2 WHERE merged_into = ?1`},
 		{"tombstone", `UPDATE members SET merged_into = ?2, public_key = '', tailnet_login = '' WHERE id = ?1`},
