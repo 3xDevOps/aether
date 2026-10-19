@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -28,18 +29,9 @@ func TestParseMessageOthers(t *testing.T) {
 func TestDescribeMessageOthersRoundTrips(t *testing.T) {
 	for _, wire := range []string{"", domain.SteerOthersAdminsOnly} {
 		desc := describeMessageOthers(wire)
-		word := desc[:len(desc)-len(" (")-len(desc[indexOf(desc, " (")+2:])]
+		word := desc[:len(desc)-len(" (")-len(desc[strings.Index(desc, " (")+2:])]
 		if got, err := parseMessageOthers(word); err != nil || got != wire {
 			t.Errorf("describe(%q) = %q; parse(%q) = (%q, %v), want %q", wire, desc, word, got, err, wire)
 		}
 	}
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }

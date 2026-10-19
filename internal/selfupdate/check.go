@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"math/rand/v2"
@@ -138,7 +139,7 @@ func parseVersion(tag string) (semver, bool) {
 func compareVersions(a, b semver) int {
 	for i := range a.nums {
 		if a.nums[i] != b.nums[i] {
-			return sign(a.nums[i], b.nums[i])
+			return cmp.Compare(a.nums[i], b.nums[i])
 		}
 	}
 	switch {
@@ -154,7 +155,7 @@ func compareVersions(a, b semver) int {
 			return c
 		}
 	}
-	if c := sign(len(a.pre), len(b.pre)); c != 0 {
+	if c := cmp.Compare(len(a.pre), len(b.pre)); c != 0 {
 		return c
 	}
 	return sameTagOrder(a, b)
@@ -181,7 +182,7 @@ func comparePrerelease(a, b string) int {
 	bn, bErr := strconv.Atoi(b)
 	switch {
 	case aErr == nil && bErr == nil:
-		return sign(an, bn)
+		return cmp.Compare(an, bn)
 	case aErr == nil:
 		return -1
 	case bErr == nil:
@@ -192,17 +193,6 @@ func comparePrerelease(a, b string) int {
 		return -1
 	default:
 		return 1
-	}
-}
-
-func sign(a, b int) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	default:
-		return 0
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -285,7 +286,7 @@ func assertLifecycle(t *testing.T, seen []events.Event, run domain.RunID, actor 
 			t.Fatalf("run.status transitions = %v, want %v", statuses, want)
 		}
 	}
-	if !slicesContains(presences, events.PresenceWatching) || !slicesContains(presences, events.PresenceOnline) {
+	if !slices.Contains(presences, events.PresenceWatching) || !slices.Contains(presences, events.PresenceOnline) {
 		t.Errorf("presence states = %v, want watching then online", presences)
 	}
 	if !steer {
@@ -294,15 +295,6 @@ func assertLifecycle(t *testing.T, seen []events.Event, run domain.RunID, actor 
 	if !banner {
 		t.Error("no git.branch event observed")
 	}
-}
-
-func slicesContains(states []events.PresenceState, want events.PresenceState) bool {
-	for _, s := range states {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
 
 // pickRuntime prefers the real Docker daemon, falling back to the
