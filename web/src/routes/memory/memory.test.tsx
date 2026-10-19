@@ -6,7 +6,8 @@ import type { Event, MemoryItem, MemorySearchParams } from '@/lib/types'
 import { MemoryRoute } from '@/routes/memory'
 import { useStore } from '@/store'
 import { capability } from '@/store/hooks'
-import { alice, bob, fakeApi, memoryItem, run, serverInfo, vera, workspace } from '@/test/fixtures'
+import { applyEvent } from '@/store/sync'
+import { alice, bob, fakeApi, memoryItem, otherWorkspace, run, serverInfo, vera, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
 
 function seed(member = alice) {
@@ -269,6 +270,34 @@ describe('memory page', () => {
     const dialog = await screen.findByRole('dialog', { name: agentNote.title })
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Pin' }))
     expect((await within(dialog).findByRole('alert')).textContent).toBe(refusal)
+  })
+
+  it('re-reads the list and the brief when a memory.change arrives for its workspace', async () => {
+    seed()
+    let notes = [agentNote]
+    let text = ''
+    const memorySearch = vi.fn(async (params: MemorySearchParams) => ({ items: params.pinned ? [] : notes }))
+    const memoryBrief = vi.fn(async () => ({ text }))
+    const client = fakeApi({ memorySearch, memoryBrief })
+    render(<MemoryRoute params={{}} client={client} />)
+    await waitFor(() => expect(titles()).toEqual([agentNote.title]))
+    const searches = memorySearch.mock.calls.length
+    const change = (seq: number, workspaceID: string): Event => ({
+      id: `evt_${seq}`, seq, time: '2026-10-18T13:00:00Z', workspace_id: workspaceID, run_id: '', actor_id: bob.id,
+      type: 'memory.change', payload: { action: 'pin', note_id: outcome.id, actor_id: bob.id },
+    })
+
+    await applyEvent(useStore, change(1, otherWorkspace.id), client)
+    expect(memorySearch).toHaveBeenCalledTimes(searches)
+    expect(memoryBrief).toHaveBeenCalledTimes(1)
+
+    notes = [outcome, agentNote]
+    text = '<team-memory workspace="main-repo">\nPinned:\n- note-outcome001 outcome (Bob): success: Fixed the reattach race\n</team-memory>'
+    await applyEvent(useStore, change(2, workspace.id), client)
+    await waitFor(() => expect(titles()).toEqual([outcome.title, agentNote.title]))
+    expect(memoryBrief).toHaveBeenCalledTimes(2)
+    fireEvent.click(await screen.findByRole('button', { name: `Brief · ${new TextEncoder().encode(text).length} of 3072 bytes` }))
+    expect(screen.getByRole('region', { name: 'Brief' }).querySelector('pre')?.textContent).toBe(text)
   })
 
   it('shows the brief byte for byte', async () => {

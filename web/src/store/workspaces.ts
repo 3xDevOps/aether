@@ -6,9 +6,12 @@ export interface WorkspacesSlice {
   workspaces: Record<string, Workspace>
   /** Globally unique IDs: retained across reconnects/identity changes, not reloads. */
   deletedWorkspaceIDs: ReadonlySet<string>
+  /** Per workspace, how many memory.change events this tab has applied. */
+  memoryChanges: Record<string, number>
   setWorkspaces: (workspaces: Workspace[]) => void
   upsertWorkspace: (workspace: Workspace) => void
   removeWorkspace: (workspaceID: string) => void
+  noteMemoryChange: (workspaceID: string) => void
 }
 
 function workspaceSnapshot(s: RootState, workspaces: Workspace[]) {
@@ -37,6 +40,7 @@ function workspaceSnapshot(s: RootState, workspaces: Workspace[]) {
 export const createWorkspacesSlice: SliceCreator<WorkspacesSlice> = (set, get) => ({
   workspaces: {},
   deletedWorkspaceIDs: new Set(),
+  memoryChanges: {},
   setWorkspaces: (workspaces) => set((s) => workspaceSnapshot(s, workspaces)),
   upsertWorkspace: (workspace) =>
     set((s) => s.deletedWorkspaceIDs.has(workspace.id)
@@ -55,6 +59,8 @@ export const createWorkspacesSlice: SliceCreator<WorkspacesSlice> = (set, get) =
       if (run.workspace_id === workspaceID) s.removeRun(run.id)
     }
   },
+  noteMemoryChange: (workspaceID) =>
+    set((s) => ({ memoryChanges: { ...s.memoryChanges, [workspaceID]: (s.memoryChanges[workspaceID] ?? 0) + 1 } })),
 })
 
 /**

@@ -157,6 +157,10 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
     void readBrief()
   }, [readList, readBrief])
 
+  useEffect(() => useStore.subscribe((s, previous) => {
+    if (s.memoryChanges[workspaceID] !== previous.memoryChanges[workspaceID]) changed()
+  }), [workspaceID, changed])
+
   const added = (result: MemoryAddResult) => {
     setAdding(false)
     toast.success(result.duplicate ? `Team memory already holds this note as ${result.item.id}` : `Added ${result.item.id}`)

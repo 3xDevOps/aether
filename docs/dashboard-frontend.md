@@ -4073,8 +4073,8 @@ write, and the brief a new run starts with. It is in the header navigation
 after **Insights** when the gateway offers `memory.search`. It reads
 `memory.search`, `memory.show` and `memory.brief`, writes with `memory.add`,
 `memory.pin`, `memory.unpin` and `memory.rm`, and re-reads the list and the
-brief after each write and when the event stream comes back live, dropping
-answers to an older request.
+brief after each write, on each `memory.change` event for the workspace, and
+when the event stream comes back live, dropping answers to an older request.
 
 - **Controls.** **Workspace** (shown with more than one, opening on
   `activeWorkspace` or the first; notes belong to one workspace, so there is
