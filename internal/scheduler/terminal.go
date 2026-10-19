@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -698,12 +698,7 @@ func terminalContainerMetadata(info runtime.ContainerInfo) (string, string, erro
 }
 func (s *Scheduler) hasTerminalSession(member domain.MemberID, tab string) bool {
 	key := ptyhost.TerminalSession(member, tab)
-	for _, active := range s.cfg.PTY.ActiveSessions(terminalPrefix(member)) {
-		if active == key {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.cfg.PTY.ActiveSessions(terminalPrefix(member)), key)
 }
 
 func (s *Scheduler) attachTerminalSession(ctx context.Context, member domain.MemberID, cid runtime.ID) error {
@@ -883,7 +878,7 @@ func terminalTabs(keys []ptyhost.SessionKey, member domain.MemberID) []string {
 			tabs = append(tabs, name)
 		}
 	}
-	sort.Strings(tabs)
+	slices.Sort(tabs)
 	return tabs
 }
 
