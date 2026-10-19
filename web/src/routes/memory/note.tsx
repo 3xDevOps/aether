@@ -193,7 +193,7 @@ export function NoteDialog({
             ) : !superseded(item) && (
               <>
                 <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryPin(workspaceID, item.id, 'member'))}>Pin for me only</Button>
-                <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryPin(workspaceID, item.id, 'workspace'))}>Pin</Button>
+                {item.scope === 'workspace' && <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryPin(workspaceID, item.id))}>Pin</Button>}
               </>
             )}
           </DialogFooter>

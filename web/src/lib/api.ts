@@ -509,7 +509,8 @@ export const api = {
   /** The caller's brief, byte for byte as a new run of theirs gets it. */
   memoryBrief: (workspaceID: string) => call<MemoryBriefResult>('memory.brief', { workspace_id: workspaceID }),
   memoryAdd: (params: MemoryAddParams) => call<MemoryAddResult>('memory.add', params),
-  memoryPin: (workspaceID: string, id: string, scope: MemoryScope) =>
+  /** Without a scope the note keeps its own, as `aether memory pin` does. */
+  memoryPin: (workspaceID: string, id: string, scope?: MemoryScope) =>
     call<{ item: MemoryItem }>('memory.pin', { workspace_id: workspaceID, id, scope }),
   memoryUnpin: (workspaceID: string, id: string) =>
     call<{ item: MemoryItem }>('memory.unpin', { workspace_id: workspaceID, id }),

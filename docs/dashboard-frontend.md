@@ -4101,9 +4101,11 @@ answers to an older request.
   (author, run and its ID, commit, pull request, files, the report or
   question it came from, when it was written and pinned, what replaced it)
   and the supersede chain oldest first, each other note a link. A member who
-  may push gets **Pin** (every brief in the workspace), **Pin for me only**,
-  **Unpin** and **Remove…**, which asks before `memory.rm`; a replaced note
-  offers no pin.
+  may push gets **Pin for me only** (`scope: member`, as
+  `aether memory pin --me`), **Pin** on a workspace-scope note (no `scope`,
+  so the note keeps its own, as `aether memory pin`), **Unpin** and
+  **Remove…**, which asks before `memory.rm`; a replaced note offers no
+  pin.
 - **Add note.** Kind (decision, convention, gotcha or preference), the text,
   **Only me** (`scope: member`) and **Pin**. A duplicate answers with the
   live note already holding the text and says so.

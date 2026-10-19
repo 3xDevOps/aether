@@ -215,7 +215,7 @@ describe('memory page', () => {
 
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Pin' }))
     expect(await within(dialog).findByText('Pinned by you')).toBeDefined()
-    expect(memoryPin).toHaveBeenCalledWith(workspace.id, agentNote.id, 'workspace')
+    expect(memoryPin).toHaveBeenCalledWith(workspace.id, agentNote.id)
     fireEvent.click(within(dialog).getByRole('button', { name: 'Unpin' }))
     expect(await within(dialog).findByRole('button', { name: 'Pin for me only' })).toBeDefined()
     expect(memoryUnpin).toHaveBeenCalledWith(workspace.id, agentNote.id)
@@ -228,6 +228,20 @@ describe('memory page', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: agentNote.title })).toBeNull())
     expect(memoryRm).toHaveBeenCalledWith(workspace.id, agentNote.id)
     expect(memorySearch.mock.calls.length).toBeGreaterThan(reads)
+  })
+
+  it('pins a member-scope note for the pinning member only, as aether memory pin does', async () => {
+    seed()
+    const mine = { ...myPin, pinned_by: undefined, pinned_by_name: undefined, pinned_at: undefined }
+    const memoryPin = vi.fn<Api['memoryPin']>(async () => ({ item: myPin }))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [mine] })), memoryShow: vi.fn(async () => ({ item: mine })), memoryPin })} />)
+    fireEvent.click(await screen.findByRole('button', { name: mine.title }))
+    const dialog = await screen.findByRole('dialog', { name: mine.title })
+    const only = await within(dialog).findByRole('button', { name: 'Pin for me only' })
+    expect(within(dialog).queryByRole('button', { name: 'Pin' })).toBeNull()
+    fireEvent.click(only)
+    expect(await within(dialog).findByText('Pinned for you')).toBeDefined()
+    expect(memoryPin).toHaveBeenCalledWith(workspace.id, mine.id, 'member')
   })
 
   it("shows a refused pin as the server's text", async () => {
