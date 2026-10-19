@@ -471,6 +471,7 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 			task string
 		}{{domain.LaunchTUI, ""}, {domain.LaunchTUI, "fix the login"}, {domain.LaunchHeadless, "fix the login"}} {
 			t.Run(name+"/"+string(tc.mode)+"/"+map[bool]string{false: "taskless", true: "task"}[tc.task != ""], func(t *testing.T) {
+				t.Parallel()
 				e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "role card cli")))
 				root := t.TempDir()
 				coord := &recordingCoordinator{

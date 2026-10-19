@@ -290,6 +290,7 @@ func (s cacheConfigReadFailure) ListWorkspaces(context.Context) ([]*domain.Works
 func TestLegacyCacheExplicitChoicesSurviveInactiveSweep(t *testing.T) {
 	for _, source := range []string{"image", "idle workspace edit", "idle workspace secret", "profile plan"} {
 		t.Run(source, func(t *testing.T) {
+			t.Parallel()
 			e := newTestEnv(t, nil)
 			rt := &cacheImageRuntime{fakeRuntime: e.rt, user: "1000:1000"}
 			e.sched.cfg.Runtime = rt
@@ -356,6 +357,7 @@ func TestLegacyCacheExplicitChoicesSurviveInactiveSweep(t *testing.T) {
 func TestLegacyCacheConfigurationFailurePreservesHomeOnly(t *testing.T) {
 	for _, failure := range []string{"store", "image", "unsupported inspection"} {
 		t.Run(failure, func(t *testing.T) {
+			t.Parallel()
 			e := newTestEnv(t, nil)
 			rt := &cacheImageRuntime{fakeRuntime: e.rt}
 			e.sched.cfg.Runtime = rt
@@ -571,6 +573,7 @@ func TestLegacyCacheExplicitPathBoundaries(t *testing.T) {
 		{name: "relative unknown", value: ".cache/uv", uv: true, pip: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			e := newTestEnv(t, nil)
 			e.sched.cfg.Runtime = &cacheImageRuntime{fakeRuntime: e.rt, env: map[string]string{"UV_CACHE_DIR": tc.value}}
 			home, err := e.sched.cfg.Homes.Path(e.member.ID)
