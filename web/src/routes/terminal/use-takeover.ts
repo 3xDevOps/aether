@@ -34,7 +34,7 @@ export function useTakeover({ state, error, control, enabled, occupied, request 
     ? visible.decision_deadline ?? visible.server_now : visible.hold_deadline) : 0
   const remaining = visible
     ? Math.max(0, deadline - Date.parse(visible.server_now) - Math.max(0, now - visible.receivedAt)) : 0
-  const duration = visible ? Date.parse(visible.hold_deadline) - Date.parse(visible.hold_started_at) : 5000
+  const duration = visible ? Date.parse(visible.hold_deadline) - Date.parse(visible.hold_started_at) : 3000
   const progress = visible ? visible.phase === 'review' ? 1 : Math.min(1, Math.max(0, 1 - remaining / duration)) : undefined
 
   const cancel = useCallback(() => {

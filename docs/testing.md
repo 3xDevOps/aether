@@ -888,7 +888,7 @@ stream, answers a permission with the digit key, expands a work entry's
 diff, opens the edited file from the changes bar, checks the bar again after
 a reload and interrupts a turn. Its two-member scenario checks shared notes,
 moderated instructions, occupied-click refusal, early hold cancellation,
-holder denial, automatic transfer after the five-second hold and seven-second
+holder denial, automatic transfer after the three-second hold and seven-second
 review, explicit release without reacquisition, controls across view switches
 and a narrow-screen layout:
 

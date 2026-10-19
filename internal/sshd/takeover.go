@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	takeoverHold   = 5 * time.Second
+	takeoverHold   = 3 * time.Second
 	takeoverReview = 7 * time.Second
 )
 

@@ -113,8 +113,8 @@ func TestTakeoverStateAndLegacyForceRoundTrip(t *testing.T) {
 			ID: "3c108774-c2e6-40e0-af51-2825ca226135", Phase: "review",
 			RequesterMemberID: "member", RequesterSessionID: "requester",
 			HolderSessionID: "holder", HolderGeneration: 9,
-			HoldStartedAt: "2026-10-03T00:00:00Z", HoldDeadline: "2026-10-03T00:00:05Z",
-			DecisionDeadline: "2026-10-03T00:00:12Z", ServerNow: "2026-10-03T00:00:05Z",
+			HoldStartedAt: "2026-10-03T00:00:00Z", HoldDeadline: "2026-10-03T00:00:03Z",
+			DecisionDeadline: "2026-10-03T00:00:10Z", ServerNow: "2026-10-03T00:00:03Z",
 		}},
 	} {
 		payload, err := MarshalTerminalControl(want)
