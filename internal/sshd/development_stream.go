@@ -179,10 +179,7 @@ func (s *Server) serveDevelopmentArtifact(ctx context.Context, member domain.Mem
 			finish(attachExitForError(err))
 			return
 		}
-		limit := int64(len(buf))
-		if remaining < limit {
-			limit = remaining
-		}
+		limit := min(int64(len(buf)), remaining)
 		n, err := io.ReadFull(source, buf[:limit])
 		if err != nil && !errors.Is(err, io.EOF) {
 			finish(1)

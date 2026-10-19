@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -141,7 +142,7 @@ func TestOpenCodeConfigUsesNativeHomeAndPreservesAuth(t *testing.T) {
 			break
 		}
 	}
-	if root.Path != "~/.config/opencode" || !containsString(root.CredentialNames, "auth.json") {
+	if root.Path != "~/.config/opencode" || !slices.Contains(root.CredentialNames, "auth.json") {
 		t.Fatalf("OpenCode destination/credential policy = %+v", root)
 	}
 	const settings = "{\"model\":\"example/initial\"}\n"
@@ -394,8 +395,8 @@ func TestConfigRootRuntimeIgnoresMatchImportExclusions(t *testing.T) {
 			t.Fatalf("config.roots omitted %q: %+v", name, roots)
 		}
 	}
-	if !containsString(byHarness["claude"].RuntimeIgnores, "projects/") ||
-		containsString(byHarness["omp"].RuntimeIgnores, "projects/") ||
+	if !slices.Contains(byHarness["claude"].RuntimeIgnores, "projects/") ||
+		slices.Contains(byHarness["omp"].RuntimeIgnores, "projects/") ||
 		len(byHarness["mybot"].RuntimeIgnores) != 0 {
 		t.Fatalf("runtime policies are not harness-specific: claude=%v omp=%v mybot=%v",
 			byHarness["claude"].RuntimeIgnores, byHarness["omp"].RuntimeIgnores,
@@ -500,15 +501,6 @@ func TestConfigRootRuntimeIgnoresMatchImportExclusions(t *testing.T) {
 			}
 		})
 	}
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 func TestDecodeConfigImportFilesAcceptsFileAboveOneMiB(t *testing.T) {

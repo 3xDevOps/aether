@@ -238,10 +238,7 @@ func writeTerminalReplay(w io.Writer, replay io.Reader, bytes int, framed bool) 
 	buf := make([]byte, 32<<10)
 	remaining := bytes
 	for remaining > 0 {
-		read := len(buf)
-		if read > remaining {
-			read = remaining
-		}
+		read := min(len(buf), remaining)
 		if _, err := io.ReadFull(replay, buf[:read]); err != nil {
 			return err
 		}
