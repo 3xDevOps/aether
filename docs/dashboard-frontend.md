@@ -4089,7 +4089,8 @@ answers to an older request.
   replaced note is never pinned. Each note is listed once, pinned first,
   each group in the server's order, so a pin older than the newest 100
   still leads the list. A row shows the title, a pin badge
-  ("Pinned by Dana", or "Pinned for you" on a pin for one member's briefs),
+  ("Pinned by Dana", or "Pinned for you" or "Pinned for Dana" on a pin for
+  one member's briefs),
   **Superseded**, the kind, the source (Agent note, Member note, Run report,
   Swarm answer), the author with the agent's display name, the run as a link,
   the pull request, the first cited file and how many more, and the age.
@@ -4101,7 +4102,8 @@ answers to an older request.
   question it came from, when it was written and pinned, what replaced it)
   and the supersede chain oldest first, each other note a link. A member who
   may push gets **Pin** (every brief in the workspace), **Pin for me only**,
-  **Unpin** and **Remove…**, which asks before `memory.rm`.
+  **Unpin** and **Remove…**, which asks before `memory.rm`; a replaced note
+  offers no pin.
 - **Add note.** Kind (decision, convention, gotcha or preference), the text,
   **Only me** (`scope: member`) and **Pin**. A duplicate answers with the
   live note already holding the text and says so.
