@@ -35,7 +35,7 @@ func TestAssistantTools(t *testing.T) {
 		}
 		names = append(names, tool.Name)
 	}
-	if len(names) != 16 || slices.Contains(names, toolSend) || !slices.Contains(names, "aether_stop_run") {
+	if len(names) != 17 || slices.Contains(names, toolSend) || !slices.Contains(names, "aether_stop_run") {
 		t.Fatalf("tools: %v", names)
 	}
 
@@ -48,6 +48,7 @@ func TestAssistantTools(t *testing.T) {
 	}
 	callTool(t, cs, "aether_run_history", map[string]any{"run_id": "run-1"}, nil)
 	callTool(t, cs, "aether_message_run", map[string]any{"run_id": "run-1", "message": "hi"}, nil)
+	callTool(t, cs, "aether_memory_search", map[string]any{"workspace_id": "ws-1", "words": "bun web"}, nil)
 
 	reqs := coord.requests
 	var hist protocol.RunACPHistoryParams
@@ -57,5 +58,8 @@ func TestAssistantTools(t *testing.T) {
 	var inj protocol.RunInjectParams
 	if err := json.Unmarshal(reqs[2].Params, &inj); err != nil || inj.IdempotencyKey == "" {
 		t.Fatalf("inject params: %s %v", reqs[2].Params, err)
+	}
+	if reqs[3].Method != protocol.MethodMemorySearch || string(reqs[3].Params) != `{"workspace_id":"ws-1","words":"bun web"}` {
+		t.Fatalf("memory search request: %s %s", reqs[3].Method, reqs[3].Params)
 	}
 }
