@@ -124,7 +124,10 @@ Two notes are written without an agent spending tokens:
   note for it: the outcome and the summary's first line as the title, the
   summary and next action as the text, and the files and HEAD commit of the
   run's latest diff snapshot (its newest `run.diff` event). A later report
-  replaces it.
+  rewrites it and clears its pin, so the new text reaches briefs only once
+  a member pins it again; the `memory.change` unpin names the run's owner
+  and the run. A note a member wrote to replace it stays as it is, and the
+  next report writes a new outcome note.
 - When a member answers a swarm's question, the server writes a `decision`
   note `Q: <question> A: <answer>`, attributed to that member and the asking
   run.

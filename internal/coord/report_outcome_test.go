@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -353,6 +354,40 @@ func TestInteractiveReportOutboxSkipsOlderTaskOutcome(t *testing.T) {
 	pub, err := h.db.GetCoordReportPublication(ctx, first.ReportID)
 	if err != nil || pub.State != store.CoordReportPublicationPublished {
 		t.Fatalf("older report publication = %+v, %v; want published without its outcome", pub, err)
+	}
+}
+
+// A later report that rewrites a pinned outcome note publishes the unpin,
+// attributed to the run's owner and the run.
+func TestInteractiveReportUnpinsItsRewrittenOutcomeNote(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = &coordReportEvidenceCapture{id: "ev_outcome"}
+		c.Outcomes = &recordingOutcomes{}
+	})
+	owner := h.runs[0]
+	report(t, h, owner.ID, protocol.CoordOutcomeSuccess, "Fixed lease race", "task-1")
+	notes, err := h.db.SearchMemory(ctx, store.MemoryQuery{Workspace: h.workspace, Kind: store.MemoryOutcome, Limit: 1})
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("outcome notes = %v, %v", notes, err)
+	}
+	if _, err = h.db.PinMemory(ctx, h.workspace, notes[0].ID, owner.MemberID, ""); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := h.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeMemoryChange}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close() //nolint:errcheck // test cleanup
+	report(t, h, owner.ID, protocol.CoordOutcomeSuccess, "Rewritten summary", "task-2")
+	select {
+	case ev := <-sub.Events():
+		want := events.MemoryChangePayload{Action: events.MemoryActionUnpin, NoteID: notes[0].ID, ActorID: owner.MemberID}
+		if ev.RunID != owner.ID || ev.ActorID != owner.MemberID || ev.Payload != want {
+			t.Fatalf("memory.change = %+v, want %+v on run %s", ev, want, owner.ID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no memory.change event for the cleared pin")
 	}
 }
 

@@ -41,9 +41,11 @@ with an account on the server.
 6. **Runs write outcomes without spending tokens.** A success or failure
    report writes one `outcome` note per run: outcome and first summary line
    as title, summary and next action as body, files and HEAD from the run's
-   latest `run.diff` event. A later report replaces it. Answering a swarm
-   question writes a `decision` note `Q: <question> A: <answer>` attributed
-   to the answering member and the asking run.
+   latest `run.diff` event. A later report rewrites it and clears its
+   pin; once a member replaces it, the next report writes a new one.
+   Answering a swarm question writes a `decision` note
+   `Q: <question> A: <answer>` attributed to the answering member and the
+   asking run.
 7. **Secrets never reach a note.** gitleaks (`internal/secretscan`) runs
    before the write's transaction. An agent or member note with a hit is
    refused, naming the rule and line:col; a captured report or answer is

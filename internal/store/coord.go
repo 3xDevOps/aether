@@ -130,6 +130,9 @@ type CoordReport struct {
 	FinalizedAt       *time.Time
 	PublishedAt       *time.Time
 	SupersededAt      *time.Time
+	// UnpinnedNote is not stored: FinalizeCoordReport sets it to the run's
+	// outcome note when the report rewrote it and cleared a member's pin.
+	UnpinnedNote string
 }
 
 // CoordReportPublication is the durable outbox row for a finalized report.
@@ -897,14 +900,16 @@ func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool
 		); err != nil {
 			return false, fmt.Errorf("store: finalize coord report: outbox: %w", err)
 		}
+		var unpinned string
 		if note != nil {
-			if err := upsertReportMemory(ctx, tx, note); err != nil {
+			if unpinned, err = upsertReportMemory(ctx, tx, note); err != nil {
 				return false, err
 			}
 		}
 		if err := tx.Commit(); err != nil {
 			return false, fmt.Errorf("store: finalize coord report: commit: %w", err)
 		}
+		report.UnpinnedNote = unpinned
 		report.State = CoordReportFinalized
 		report.FinalizedAt = &ts
 		report.PublishedAt = nil

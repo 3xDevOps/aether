@@ -622,6 +622,13 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		if err != nil {
 			return protocol.CoordReportResult{}, internalError(method, err)
 		}
+		if report.UnpinnedNote != "" {
+			if _, err = s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: self.WorkspaceID, RunID: run, ActorID: self.MemberID,
+				Payload: events.MemoryChangePayload{Action: events.MemoryActionUnpin, NoteID: report.UnpinnedNote, ActorID: self.MemberID}}); err != nil {
+				return protocol.CoordReportResult{}, internalError(method, fmt.Errorf(
+					"report %s cleared the pin on outcome note %s, but its memory.change event was not published: %w", report.ID, report.UnpinnedNote, err))
+			}
+		}
 	}
 	if report.State != store.CoordReportFinalized {
 		return protocol.CoordReportResult{}, internalError(method, errors.New("coord report did not finalize"))

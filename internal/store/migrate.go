@@ -1806,9 +1806,10 @@ CREATE INDEX idx_events_run ON events (run_id);
 	// harness, commit and files it came from; run_id has no foreign key so
 	// a pinned note outlives its run. A live note has invalid_at NULL; a
 	// replaced one also names its replacement in superseded_by. Two live
-	// agent or member notes never share a body hash, a run has one outcome
-	// note and a mission question one answer note. memory_fts indexes the
-	// notes through the triggers, which also fire on the workspace cascade.
+	// agent or member notes never share a body hash, a run has one live
+	// outcome note and a mission question one answer note. memory_fts
+	// indexes the notes through the triggers, which also fire on the
+	// workspace cascade.
 	`
 CREATE TABLE memory (
 	rowid            INTEGER PRIMARY KEY,
@@ -1835,7 +1836,7 @@ CREATE TABLE memory (
 );
 CREATE UNIQUE INDEX idx_memory_hash ON memory(workspace_id, hash)
 	WHERE invalid_at IS NULL AND source IN ('agent', 'member');
-CREATE UNIQUE INDEX idx_memory_report ON memory(run_id) WHERE source = 'report';
+CREATE UNIQUE INDEX idx_memory_report ON memory(run_id) WHERE source = 'report' AND invalid_at IS NULL;
 CREATE UNIQUE INDEX idx_memory_answer ON memory(source_ref) WHERE source = 'answer';
 CREATE INDEX idx_memory_pinned ON memory(workspace_id, pinned_at);
 CREATE INDEX idx_memory_created ON memory(workspace_id, created_at);

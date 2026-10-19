@@ -369,7 +369,7 @@ it and when. Notes reach the store three ways:
 - When a run's agent reports success or failure, the server writes one
   outcome note for that run: the report's summary and next action, with the
   files and HEAD commit of the run's latest snapshot. A later report
-  replaces it.
+  rewrites it and clears its pin.
 - When a member answers a swarm's question, the server writes the question
   and answer as one decision note.
 
