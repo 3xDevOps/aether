@@ -500,11 +500,27 @@ func TestNotificationWaitsWhileTheOwnerUsesADashboard(t *testing.T) {
 	answered := h.run(h.ada, "Answered straight away", domain.LaunchTUI)
 
 	h.svc.Active(h.ada.ID)
+	// The dashboard reports the owner's use until they leave it, so the
+	// quiet window starts after the clear however slowly the test runs.
+	leave, left := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(left)
+		for using := true; using; {
+			select {
+			case <-leave:
+				using = false
+			case <-time.After(testQuiet / 10):
+			}
+			h.svc.Active(h.ada.ID)
+		}
+	}()
 	h.status(stopped, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need a key")
 	h.status(answered, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need a key")
-	phone.expectNone(t, testQuiet/2)
+	phone.expectNone(t, testQuiet)
 	// Cleared before the owner went quiet: never sent.
 	h.status(answered, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	close(leave)
+	<-left
 
 	phone.expect(t, notification{Title: "Stopped by hand", Body: "Blocked: need a key", Run: string(stopped.ID)})
 	phone.expectNone(t, testQuiet)
