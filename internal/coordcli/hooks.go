@@ -164,7 +164,11 @@ func hook(ctx context.Context, cfg Config, args []string) (int, error) {
 	}
 	text := hookContext(status, notices, stopping)
 	if starting && os.Getenv(coordtransport.RoleCardEnv) != "1" {
-		text = strings.TrimSuffix(coordhooks.RoleCard(coordhooks.StatusGuide(status))+"\n"+text, "\n")
+		card := coordhooks.RoleCard(coordhooks.StatusGuide(status))
+		if brief := sessionMemoryBrief(ctx, cfg.Socket, status); brief != "" {
+			card += "\n" + brief
+		}
+		text = strings.TrimSuffix(card+"\n"+text, "\n")
 	}
 	if text == "" {
 		return ExitOK, nil
