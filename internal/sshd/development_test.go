@@ -439,6 +439,7 @@ func (s *developmentObservedSource) Close() error {
 func TestRetainedArtifactStalledSSHTransportReleasesSource(t *testing.T) {
 	for _, cause := range []string{"membership during data", "expiry during data", "write deadline", "membership during status"} {
 		t.Run(cause, func(t *testing.T) {
+			t.Parallel()
 			e := newTestEnv(t, nil)
 			key, viewer := addMember(t, e, "stalled evidence viewer", domain.RoleViewer, false)
 			packet := handlerPacket("stalled-capture", e.ws.ID, e.run.ID, e.member.ID)
