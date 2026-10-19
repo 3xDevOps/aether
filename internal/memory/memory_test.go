@@ -306,14 +306,18 @@ func TestAgentSupersedesOnlyUnpinnedAgentNotes(t *testing.T) {
 	}
 	byMember := f.memberAdd(f.dana, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha,
 		Text: "Run go test with -race -count=1.", Supersedes: pinnedNote.Item.ID})
-	if byMember.Item.Source != protocol.MemorySourceMember {
-		t.Fatalf("member replacement = %+v", byMember.Item)
+	if byMember.Item.Source != protocol.MemorySourceMember || byMember.Item.PinnedAt == nil || byMember.Item.PinnedBy != string(f.dana.ID) {
+		t.Fatalf("member replacement = %+v, want it to carry the pin", byMember.Item)
+	}
+	shown, err = f.svc.Show(context.Background(), protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: pinnedNote.Item.ID})
+	if err != nil || shown.Item.PinnedAt != nil || shown.Item.SupersededBy != byMember.Item.ID {
+		t.Fatalf("replaced pinned note = %+v, %v; want it unpinned and replaced", shown.Item, err)
 	}
 	var actions []events.MemoryAction
 	for _, e := range f.changes() {
 		actions = append(actions, e.Payload.(events.MemoryChangePayload).Action)
 	}
-	want := []events.MemoryAction{"add", "add", "pin", "add", "add", "supersede", "add", "supersede"}
+	want := []events.MemoryAction{"add", "add", "pin", "add", "add", "supersede", "add", "supersede", "pin"}
 	if !slices.Equal(actions, want) {
 		t.Fatalf("memory.change actions = %v, want %v", actions, want)
 	}

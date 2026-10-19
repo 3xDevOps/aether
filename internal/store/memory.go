@@ -105,7 +105,7 @@ func (e *MemoryPinBudgetError) Error() string {
 	if e.Scope == MemoryScopeMember {
 		whose = "your pinned member notes"
 	}
-	return fmt.Sprintf("memory.pin: %s use %d of %d bytes; this note needs %d; unpin one first", whose, e.Used, e.Limit, e.Need)
+	return fmt.Sprintf("%s use %d of %d bytes; this note needs %d; unpin one first", whose, e.Used, e.Limit, e.Need)
 }
 
 const memoryCols = `m.id, m.workspace_id, m.kind, m.scope, m.source, m.source_ref, m.title, m.body, m.files,
@@ -199,9 +199,12 @@ func (d *DB) InsertMemory(ctx context.Context, m *Memory) (bool, error) {
 }
 
 // SupersedeMemory stores m as the replacement for the live note old in one
-// transaction. old is invalidated before the insert, so m may repeat its
-// text; when m duplicates another live note, old points at that note.
-func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory) (bool, error) {
+// transaction. vet, when set, may refuse old as the transaction reads it.
+// old is invalidated before the insert, so m may repeat its text; when m
+// duplicates another live note, old points at that note. A pin on old moves
+// to the replacement, pinned by m's author in old's scope, and must fit that
+// scope's budget without old.
+func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, vet func(old *Memory) error) (bool, error) {
 	if m == nil {
 		return false, errors.New("store: supersede memory: note is required")
 	}
@@ -217,11 +220,17 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory) (bool, 
 	if !prior.Live() {
 		return false, fmt.Errorf("%w: memory note %s is already replaced", ErrConflict, old)
 	}
+	if vet != nil {
+		if err = vet(prior); err != nil {
+			return false, err
+		}
+	}
 	now, err := encodeTime(time.Now().UTC())
 	if err != nil {
 		return false, err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE memory SET invalid_at = ?, updated_at = ? WHERE id = ?`, now, now, old); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE memory SET invalid_at = ?, pinned_by = '', pinned_at = NULL, updated_at = ? WHERE id = ?`,
+		now, now, old); err != nil {
 		return false, fmt.Errorf("store: supersede memory %s: %w", old, err)
 	}
 	duplicate, err := insertMemory(ctx, tx, m)
@@ -230,6 +239,16 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory) (bool, 
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE memory SET superseded_by = ? WHERE id = ?`, m.ID, old); err != nil {
 		return false, fmt.Errorf("store: supersede memory %s: %w", old, err)
+	}
+	if prior.PinnedAt != nil {
+		if err = pinMemory(ctx, tx, m, m.AuthorID, prior.Scope); err != nil {
+			return false, fmt.Errorf("move the pin on %s to its replacement: %w", old, err)
+		}
+		var pinned *Memory
+		if pinned, err = readMemory(ctx, tx, m.WorkspaceID, m.ID); err != nil {
+			return false, err
+		}
+		*m = *pinned
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("store: supersede memory: commit: %w", err)
@@ -401,28 +420,8 @@ func (d *DB) PinMemory(ctx context.Context, workspace domain.WorkspaceID, id str
 	if scope == "" {
 		scope = m.Scope
 	}
-	budget := &MemoryPinBudgetError{Scope: scope, Limit: MemoryPinWorkspaceBytes, Need: len(m.Title) + MemoryPinLineOverhead}
-	pinned, args := `m.scope = 'workspace'`, []any{workspace, id}
-	if scope == MemoryScopeMember {
-		budget.Limit = MemoryPinMemberBytes
-		pinned = `m.scope = 'member' AND m.pinned_by = ?`
-		args = append(args, by)
-	}
-	if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(length(CAST(m.title AS BLOB)) + ?), 0) FROM memory m
-		WHERE m.workspace_id = ? AND m.id <> ? AND m.pinned_at IS NOT NULL AND `+memoryLive+` AND `+pinned,
-		append([]any{MemoryPinLineOverhead}, args...)...).Scan(&budget.Used); err != nil {
-		return nil, fmt.Errorf("store: pin memory: measure pins: %w", err)
-	}
-	if budget.Used+budget.Need > budget.Limit {
-		return nil, budget
-	}
-	now, err := encodeTime(time.Now().UTC())
-	if err != nil {
+	if err = pinMemory(ctx, tx, m, by, scope); err != nil {
 		return nil, err
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE memory SET scope = ?, pinned_by = ?, pinned_at = ?, updated_at = ? WHERE id = ?`,
-		scope, by, now, now, id); err != nil {
-		return nil, fmt.Errorf("store: pin memory %s: %w", id, err)
 	}
 	if m, err = readMemory(ctx, tx, workspace, id); err != nil {
 		return nil, err
@@ -431,6 +430,35 @@ func (d *DB) PinMemory(ctx context.Context, workspace domain.WorkspaceID, id str
 		return nil, fmt.Errorf("store: pin memory: commit: %w", err)
 	}
 	return m, nil
+}
+
+// pinMemory pins m by member by in scope, refusing a pin the other live
+// pins of that scope leave no room for.
+func pinMemory(ctx context.Context, tx *sql.Tx, m *Memory, by domain.MemberID, scope MemoryScope) error {
+	budget := &MemoryPinBudgetError{Scope: scope, Limit: MemoryPinWorkspaceBytes, Need: len(m.Title) + MemoryPinLineOverhead}
+	pinned, args := `m.scope = 'workspace'`, []any{m.WorkspaceID, m.ID}
+	if scope == MemoryScopeMember {
+		budget.Limit = MemoryPinMemberBytes
+		pinned = `m.scope = 'member' AND m.pinned_by = ?`
+		args = append(args, by)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(length(CAST(m.title AS BLOB)) + ?), 0) FROM memory m
+		WHERE m.workspace_id = ? AND m.id <> ? AND m.pinned_at IS NOT NULL AND `+memoryLive+` AND `+pinned,
+		append([]any{MemoryPinLineOverhead}, args...)...).Scan(&budget.Used); err != nil {
+		return fmt.Errorf("store: pin memory: measure pins: %w", err)
+	}
+	if budget.Used+budget.Need > budget.Limit {
+		return budget
+	}
+	now, err := encodeTime(time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE memory SET scope = ?, pinned_by = ?, pinned_at = ?, updated_at = ? WHERE id = ?`,
+		scope, by, now, now, m.ID); err != nil {
+		return fmt.Errorf("store: pin memory %s: %w", m.ID, err)
+	}
+	return nil
 }
 
 func (d *DB) UnpinMemory(ctx context.Context, workspace domain.WorkspaceID, id string) (*Memory, error) {

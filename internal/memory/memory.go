@@ -26,7 +26,7 @@ type Store interface {
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	InsertMemory(ctx context.Context, m *store.Memory) (bool, error)
-	SupersedeMemory(ctx context.Context, old string, m *store.Memory) (bool, error)
+	SupersedeMemory(ctx context.Context, old string, m *store.Memory, vet func(old *store.Memory) error) (bool, error)
 	SearchMemory(ctx context.Context, q store.MemoryQuery) ([]*store.Memory, error)
 	GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string) (*store.Memory, []*store.Memory, error)
 	PinMemory(ctx context.Context, workspace domain.WorkspaceID, id string, by domain.MemberID, scope store.MemoryScope) (*store.Memory, error)
@@ -123,16 +123,11 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		err       error
 	)
 	if p.Supersedes != "" {
-		old, _, getErr := s.cfg.Store.GetMemory(ctx, workspace, p.Supersedes)
-		if getErr != nil {
-			return protocol.MemoryAddResult{}, fail(method, getErr)
-		}
+		var vet func(*store.Memory) error
 		if run != nil {
-			if refusal := agentMayReplace(old); refusal != nil {
-				return protocol.MemoryAddResult{}, refusal
-			}
+			vet = agentMayReplace
 		}
-		duplicate, err = s.cfg.Store.SupersedeMemory(ctx, old.ID, note)
+		duplicate, err = s.cfg.Store.SupersedeMemory(ctx, p.Supersedes, note, vet)
 	} else {
 		duplicate, err = s.cfg.Store.InsertMemory(ctx, note)
 	}
@@ -151,6 +146,11 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 	if p.Supersedes != "" {
 		if err = s.changed(ctx, workspace, runID, member, events.MemoryActionSupersede, p.Supersedes); err != nil {
 			return protocol.MemoryAddResult{}, fail(method, err)
+		}
+		if note.PinnedAt != nil && !p.Pin {
+			if err = s.changed(ctx, workspace, runID, member, events.MemoryActionPin, note.ID); err != nil {
+				return protocol.MemoryAddResult{}, fail(method, err)
+			}
 		}
 	}
 	item := protocol.MemoryItemFromStore(note)
@@ -203,7 +203,7 @@ func checkNote(kind, scope, text string, files []string) error {
 
 // agentMayReplace lets an agent replace only another agent's unpinned
 // note; anything a member wrote, answered or pinned stays theirs to change.
-func agentMayReplace(old *store.Memory) *protocol.Error {
+func agentMayReplace(old *store.Memory) error {
 	var standing string
 	switch {
 	case old.PinnedAt != nil:
@@ -419,16 +419,13 @@ func fail(method string, err error) *protocol.Error {
 		return rpcErr
 	}
 	var budget *store.MemoryPinBudgetError
-	if errors.As(err, &budget) {
-		return &protocol.Error{Code: protocol.CodeConflict, Message: budget.Error()}
-	}
 	code := protocol.CodeInternal
 	switch {
 	case errors.Is(err, permissions.ErrDenied):
 		code = protocol.CodeDenied
 	case errors.Is(err, store.ErrNotFound):
 		code = protocol.CodeNotFound
-	case errors.Is(err, store.ErrConflict):
+	case errors.Is(err, store.ErrConflict), errors.As(err, &budget):
 		code = protocol.CodeConflict
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
