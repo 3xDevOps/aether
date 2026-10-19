@@ -38,16 +38,6 @@ func (e WorkspaceEnvironment) Valid() bool {
 	return true
 }
 
-// WorkspaceSelector addresses a workspace by exactly one of ID or Name.
-type WorkspaceSelector struct {
-	ID   WorkspaceID
-	Name string
-}
-
-func (s WorkspaceSelector) Valid() bool {
-	return (s.ID != "") != (strings.TrimSpace(s.Name) != "")
-}
-
 // RunStatus is the lifecycle state of a Run:
 //
 //	queued -> provisioning -> running <-> needs-attention -> completed -> (merged | abandoned)
