@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -41,7 +41,7 @@ func (s *Service) WithSubmissionSources(ctx context.Context, workspace domain.Wo
 	}
 	// Input packets can belong to other runs. A stable order prevents two
 	// acceptances with overlapping input sets from deadlocking.
-	sort.Slice(runs, func(i, j int) bool { return runs[i] < runs[j] })
+	slices.Sort(runs)
 	for _, run := range runs {
 		lock := s.runLock(run)
 		lock.Lock()

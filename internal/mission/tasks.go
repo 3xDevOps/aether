@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -375,7 +376,7 @@ func (s *Service) withSubmissionEvidence(ctx context.Context, mission *domain.Mi
 	// primary ID; the distinct input IDs below authorize packet presence only.
 	ids := []string{submission.Ref.EvidenceRef}
 	for _, fact := range submission.Evidence {
-		if fact.Kind == "input" && fact.Ref != "" && !containsString(ids, fact.Ref) {
+		if fact.Kind == "input" && fact.Ref != "" && !slices.Contains(ids, fact.Ref) {
 			ids = append(ids, fact.Ref)
 		}
 	}

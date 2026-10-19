@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -265,6 +265,6 @@ func cleanPaths(in []string) []string {
 	for p := range set {
 		out = append(out, p)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }

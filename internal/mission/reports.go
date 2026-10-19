@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -98,7 +99,7 @@ func (s *Service) ReconcileReport(ctx context.Context, run domain.RunID, report 
 	if packet.ID == "" || packet.RunID != string(run) || packet.WorkspaceID != string(m.WorkspaceID) {
 		return fmt.Errorf("mission: evidence packet identity does not match worker assignment")
 	}
-	if !containsString(report.EvidenceRefs, packet.ID) {
+	if !slices.Contains(report.EvidenceRefs, packet.ID) {
 		return fmt.Errorf("mission: report does not retain evidence packet %s", packet.ID)
 	}
 	if packet.Origin.ID != string(run) {
@@ -225,7 +226,7 @@ func (s *Service) reconcileStaleFailedReport(ctx context.Context, run domain.Run
 	if packet.ID == "" || packet.RunID != string(run) || packet.WorkspaceID != string(m.WorkspaceID) {
 		return fmt.Errorf("mission: evidence packet identity does not match worker assignment")
 	}
-	if !containsString(report.EvidenceRefs, packet.ID) {
+	if !slices.Contains(report.EvidenceRefs, packet.ID) {
 		return fmt.Errorf("mission: report does not retain evidence packet %s", packet.ID)
 	}
 	return s.failAssignedWorker(ctx, m, attempt, report.Summary)
@@ -334,15 +335,6 @@ func packetEvidenceState(now func() time.Time, packet protocol.EvidencePacket) (
 		return false, "retained revision is unavailable"
 	}
 	return true, ""
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 func submissionWire(s *domain.Submission) protocol.Submission {
