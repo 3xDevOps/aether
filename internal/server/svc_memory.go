@@ -15,3 +15,10 @@ func newMemory(d Deps) (*memory.Service, error) {
 	}
 	return memory.New(memory.Config{Store: notes, Bus: d.Bus, Log: d.Events})
 }
+
+func init() {
+	registerService("memory", func(d Deps) (Service, error) {
+		d.SSH.Services.Memory = d.Memory
+		return nil, nil
+	})
+}
