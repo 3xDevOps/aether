@@ -80,6 +80,9 @@ while you sleep.**
   remotely in **Files**; changes are immediately visible, including to active
   runs. Vendor logins stay on the remote you own, through each vendor's own
   authentication flow, and are never extracted or proxied.
+- **Team memory every agent shares.** Runs of any agent CLI search and add
+  short, attributed notes per workspace; members pin the ones every new run
+  should start with. See [docs/memory.md](docs/memory.md).
 - **An assistant that acts as you.** Ask in plain language from the dashboard; it
   runs on your own agent login and asks before it stops a run or saves your
   environment. See [docs/assistant.md](docs/assistant.md).
@@ -156,6 +159,7 @@ See [per-agent setup and limits](docs/harnesses.md) and
 | [Local gateway](docs/local-gateway.md) | The HTTP/WS surface `aether gui` serves. |
 | [Dashboard SPA](docs/dashboard-frontend.md) | The web client's structure. |
 | [Coordination](docs/coordination.md) | How overlapping runs warn and message each other. |
+| [Team memory](docs/memory.md) | The notes every run searches and writes, pinning, and the launch brief. |
 | [MCP bridge](docs/mcp-bridge.md) | The in-container half of coordination. |
 | [Connectors](docs/connectors.md) | Adding your server to ChatGPT or Claude as a custom connector, to run agents from their phone apps. |
 | [Failure handling](docs/failure-handling.md) | Reboots, disk pressure, stalls, dropped connections - and the knobs. |

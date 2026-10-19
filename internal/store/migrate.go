@@ -1835,6 +1835,58 @@ CREATE TABLE connector_rotated_tokens (
 );
 CREATE INDEX idx_connector_rotated_tokens_connector ON connector_rotated_tokens(connector_id);
 `,
+	// v75: team memory. A note is attributed to a member, and to the run,
+	// harness, commit and files it came from; run_id has no foreign key so
+	// a pinned note outlives its run. A live note has invalid_at NULL; a
+	// replaced one also names its replacement in superseded_by. Two live
+	// agent or member notes never share a body hash, a run has one live
+	// outcome note and a mission question one answer note. memory_fts
+	// indexes the notes through the triggers, which also fire on the
+	// workspace cascade.
+	`
+CREATE TABLE memory (
+	rowid            INTEGER PRIMARY KEY,
+	id               TEXT NOT NULL UNIQUE,
+	workspace_id     TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	kind             TEXT NOT NULL CHECK (kind IN ('decision', 'convention', 'gotcha', 'preference', 'outcome')),
+	scope            TEXT NOT NULL DEFAULT 'workspace' CHECK (scope IN ('workspace', 'member')),
+	source           TEXT NOT NULL CHECK (source IN ('agent', 'member', 'report', 'answer')),
+	source_ref       TEXT NOT NULL DEFAULT '',
+	title            TEXT NOT NULL,
+	body             TEXT NOT NULL,
+	files            TEXT NOT NULL DEFAULT '',
+	author_member_id TEXT NOT NULL DEFAULT '',
+	run_id           TEXT NOT NULL DEFAULT '',
+	harness          TEXT NOT NULL DEFAULT '',
+	commit_sha       TEXT NOT NULL DEFAULT '',
+	hash             TEXT NOT NULL,
+	superseded_by    TEXT NOT NULL DEFAULT '',
+	invalid_at       INTEGER,
+	pinned_by        TEXT NOT NULL DEFAULT '',
+	pinned_at        INTEGER,
+	created_at       INTEGER NOT NULL,
+	updated_at       INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX idx_memory_hash ON memory(workspace_id, hash)
+	WHERE invalid_at IS NULL AND source IN ('agent', 'member');
+CREATE UNIQUE INDEX idx_memory_report ON memory(run_id) WHERE source = 'report' AND invalid_at IS NULL;
+CREATE UNIQUE INDEX idx_memory_answer ON memory(source_ref) WHERE source = 'answer';
+CREATE INDEX idx_memory_pinned ON memory(workspace_id, pinned_at);
+CREATE INDEX idx_memory_created ON memory(workspace_id, created_at);
+CREATE INDEX idx_memory_run ON memory(run_id);
+CREATE VIRTUAL TABLE memory_fts USING fts5(
+	title, body, files, content = 'memory', content_rowid = 'rowid', tokenize = 'porter unicode61');
+CREATE TRIGGER memory_fts_insert AFTER INSERT ON memory BEGIN
+	INSERT INTO memory_fts (rowid, title, body, files) VALUES (new.rowid, new.title, new.body, new.files);
+END;
+CREATE TRIGGER memory_fts_update AFTER UPDATE OF title, body, files ON memory BEGIN
+	INSERT INTO memory_fts (memory_fts, rowid, title, body, files) VALUES ('delete', old.rowid, old.title, old.body, old.files);
+	INSERT INTO memory_fts (rowid, title, body, files) VALUES (new.rowid, new.title, new.body, new.files);
+END;
+CREATE TRIGGER memory_fts_delete AFTER DELETE ON memory BEGIN
+	INSERT INTO memory_fts (memory_fts, rowid, title, body, files) VALUES ('delete', old.rowid, old.title, old.body, old.files);
+END;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

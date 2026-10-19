@@ -75,6 +75,9 @@ type Config struct {
 	// callers may omit it to use StateDir.
 	DataDir string
 	Homes   *memberhome.Manager
+	// Memory supplies the brief that follows the run instructions; nil
+	// launches without one.
+	Memory TeamMemory
 	// RemoveAll deletes a directory container processes wrote into; nil
 	// uses os.RemoveAll.
 	RemoveAll                   func(ctx context.Context, path string) error
@@ -780,44 +783,6 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 		return fmt.Errorf("scheduler: harness %q has invalid registry entry", name)
 	}
 	return nil
-}
-
-// command resolves argv and profile for one launch by member on account's
-// shared account, with the profile from launchProfile. An acp launch has no
-// argv: the task travels over the protocol.
-func (s *Scheduler) command(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, assigned bool, task, model string) (argv []string, profile harness.Profile, acp bool, err error) {
-	if err = domain.ValidModel(model); err != nil {
-		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", err)
-	}
-	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
-	if err != nil {
-		return nil, harness.Profile{}, false, err
-	}
-	if !mode.Valid() {
-		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: invalid launch mode %q", mode)
-	}
-	acp = mode == domain.LaunchACP ||
-		(mode == domain.LaunchHeadless && s.backgroundACP(member, account, profile, argvs))
-	argv = argvs[mode]
-	if acp {
-		argv = argvs[domain.LaunchACP]
-	}
-	if harnessName == "fake" && len(argv) == 0 && !acp {
-		argv = strings.Fields(os.Getenv(fakeAgentEnv))
-	}
-	if len(argv) == 0 {
-		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
-	}
-	if acp {
-		return nil, profile, true, nil
-	}
-	if model != "" && len(profile.ModelArgs) == 0 {
-		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harnessName)
-	}
-	if !profile.CarriesInstructions() {
-		task = withInstructions(task, s.runInstructions(s.runGuide(ctx, "", assigned, mode == domain.LaunchHeadless, false)))
-	}
-	return harness.Argv(argv, task, profile.ModelLaunchArgs(model)), profile, false, nil
 }
 
 func (s *Scheduler) backgroundACP(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) bool {

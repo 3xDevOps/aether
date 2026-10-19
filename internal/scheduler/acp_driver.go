@@ -425,6 +425,10 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			mode = recorded
 		}
 	}
+	instructions, err := d.s.briefedInstructions(ctx, d.s.runGuide(ctx, entry.runID, entry.missionAssigned, oneShot, true), run.WorkspaceID, run.MemberID)
+	if err != nil {
+		return err
+	}
 	exec, err := managed.StartExecPipe(ctx, cid, runtime.ExecSpec{
 		Argv: adapter, WorkingDir: d.s.cfg.WorktreeMount, CreationKey: "acp-" + rand.Text(),
 		// A container started for a Standard run lacks both.
@@ -444,7 +448,6 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		titleLookup = acpTitleLookupDelay
 	}
 	runID := entry.runID
-	instructions := d.s.runInstructions(d.s.runGuide(ctx, runID, entry.missionAssigned, oneShot, true))
 	prompt, systemPrompt := task, instructions
 	if !profile.ACPSystemPrompt {
 		prompt, systemPrompt = withInstructions(task, instructions), ""

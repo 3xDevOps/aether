@@ -130,6 +130,16 @@ type CoordReport struct {
 	FinalizedAt       *time.Time
 	PublishedAt       *time.Time
 	SupersededAt      *time.Time
+	// OutcomeNote is not stored: FinalizeCoordReport sets it to the outcome
+	// note the report wrote.
+	OutcomeNote OutcomeNote
+}
+
+// OutcomeNote is the outcome note a report wrote, whether it rewrote the
+// run's live one in place, and whether that cleared a member's pin.
+type OutcomeNote struct {
+	ID                  string
+	Rewritten, Unpinned bool
 }
 
 // CoordReportPublication is the durable outbox row for a finalized report.
@@ -858,6 +868,10 @@ func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool
 	if err != nil {
 		return false, fmt.Errorf("store: finalize coord report evidence refs: %w", err)
 	}
+	note, err := d.reportMemory(ctx, report)
+	if err != nil {
+		return false, fmt.Errorf("store: finalize coord report: %w", err)
+	}
 	ts := time.Now().UTC()
 	finalizedAt, err := encodeTime(ts)
 	if err != nil {
@@ -884,7 +898,7 @@ func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool
 	}
 	if updated == 1 {
 		eventID := CoordReportEventID(report.ID)
-		if _, err := tx.ExecContext(ctx,
+		if _, err = tx.ExecContext(ctx,
 			`INSERT INTO coord_report_publications
 			 (report_id, event_id, publication_state, created_at, published_at)
 			 VALUES (?, ?, ?, ?, NULL)
@@ -893,9 +907,16 @@ func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool
 		); err != nil {
 			return false, fmt.Errorf("store: finalize coord report: outbox: %w", err)
 		}
+		var outcome OutcomeNote
+		if note != nil {
+			if outcome, err = upsertReportMemory(ctx, tx, note); err != nil {
+				return false, err
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return false, fmt.Errorf("store: finalize coord report: commit: %w", err)
 		}
+		report.OutcomeNote = outcome
 		report.State = CoordReportFinalized
 		report.FinalizedAt = &ts
 		report.PublishedAt = nil

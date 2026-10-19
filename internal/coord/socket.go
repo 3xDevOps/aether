@@ -570,7 +570,9 @@ func (s *Service) handleParsed(ctx context.Context, run domain.RunID, req protoc
 		}
 		result, rpcErr = s.Report(ctx, run, p)
 	default:
-		if isDevelopmentMethod(req.Method) {
+		if isMemoryMethod(req.Method) {
+			result, rpcErr = s.handleMemory(ctx, run, req.Method, req.Params)
+		} else if isDevelopmentMethod(req.Method) {
 			result, rpcErr = s.handleDevelopment(ctx, run, req.Method, req.Params)
 		} else if isMissionMethod(req.Method) {
 			if s.cfg.Disabled {

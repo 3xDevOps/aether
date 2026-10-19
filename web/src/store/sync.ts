@@ -782,6 +782,9 @@ export async function applyEvent(
       refreshUnacked(store, client, p.to_run_id)
       break
     }
+    case 'memory.change':
+      if (ev.workspace_id) store.getState().noteMemoryChange(ev.workspace_id)
+      break
     case 'workspace.evidence_packet': {
       // Only lists already loaded; a run whose Captures were never opened stays lazy.
       const runID = ev.run_id

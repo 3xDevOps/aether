@@ -137,11 +137,13 @@ func (d *DB) InsertMissionQuestion(ctx context.Context, missionID domain.Mission
 	return &domain.MissionQuestion{ID: domain.MissionQuestionID(id), MissionID: missionID, Seq: seq, Body: body, AskedByRunID: askedBy, AskedAt: ts}, nil
 }
 
-// AnswerMissionQuestion records the accountable human's answer. The answering
-// member is the authenticated caller, resolved by the service layer.
-func (d *DB) AnswerMissionQuestion(ctx context.Context, questionID domain.MissionQuestionID, memberID domain.MemberID, answer, key string) (*domain.MissionQuestion, error) {
+// AnswerMissionQuestion records the accountable human's answer and the
+// decision note it writes, whose ID it returns, empty on a replay. The
+// answering member is the authenticated caller, resolved by the service
+// layer.
+func (d *DB) AnswerMissionQuestion(ctx context.Context, questionID domain.MissionQuestionID, memberID domain.MemberID, answer, key string) (*domain.MissionQuestion, string, error) {
 	if questionID == "" || memberID == "" || strings.TrimSpace(answer) == "" || !validMutationKey(key) {
-		return nil, errors.New("store: mission question answer requires question_id, member, a non-empty answer, and idempotency_key")
+		return nil, "", errors.New("store: mission question answer requires question_id, member, a non-empty answer, and idempotency_key")
 	}
 	payload, err := mutationPayload(struct {
 		QuestionID domain.MissionQuestionID
@@ -149,64 +151,72 @@ func (d *DB) AnswerMissionQuestion(ctx context.Context, questionID domain.Missio
 		MemberID   domain.MemberID
 	}{questionID, answer, memberID})
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	note, err := d.answerMemory(ctx, questionID, memberID, answer)
+	if err != nil {
+		return nil, "", err
 	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("store: answer mission question: begin: %w", err)
+		return nil, "", fmt.Errorf("store: answer mission question: begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	m, err := lockMissionRowBy(ctx, tx, `(SELECT mission_id FROM mission_questions WHERE id = ?)`, questionID, "mission for question "+string(questionID))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if phaseErr := requireMissionPhase(m, "mission.question.answer", domain.MissionPhasePlanning); phaseErr != nil {
-		return nil, phaseErr
+		return nil, "", phaseErr
 	}
 	missionID := m.ID
 	resultID, _, replayed, err := mutationReceipt(tx, ctx, missionID, "mission.question.answer", key, payload)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if replayed {
 		q, scanErr := scanMissionQuestion(tx.QueryRowContext(ctx, `SELECT `+missionQuestionColumns+` FROM mission_questions WHERE id=?`, resultID))
 		if scanErr != nil {
-			return nil, fmt.Errorf("store: replay mission question answer %s: %w", resultID, scanErr)
+			return nil, "", fmt.Errorf("store: replay mission question answer %s: %w", resultID, scanErr)
 		}
 		if commitErr := tx.Commit(); commitErr != nil {
-			return nil, commitErr
+			return nil, "", commitErr
 		}
-		return q, nil
+		return q, "", nil
 	}
 	now := missionNow(time.Time{})
 	n, err := encodeTime(now)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE mission_questions SET answer=?, answered_by_member_id=?, answered_at=? WHERE id=? AND answered_at IS NULL`, answer, memberID, n, questionID)
 	if err != nil {
-		return nil, fmt.Errorf("store: answer mission question %s: %w", questionID, err)
+		return nil, "", fmt.Errorf("store: answer mission question %s: %w", questionID, err)
 	}
 	if affected, _ := res.RowsAffected(); affected != 1 {
-		return nil, fmt.Errorf("%w: mission question %s is already answered", ErrConflict, questionID)
+		return nil, "", fmt.Errorf("%w: mission question %s is already answered", ErrConflict, questionID)
+	}
+	note.WorkspaceID = m.WorkspaceID
+	if _, noteErr := insertMemory(ctx, tx, note); noteErr != nil {
+		return nil, "", noteErr
 	}
 	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.question.answer", key, payload, string(questionID), 0, n); receiptErr != nil {
-		return nil, receiptErr
+		return nil, "", receiptErr
 	}
 	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
-		return nil, fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
+		return nil, "", fmt.Errorf("store: enqueue mission change: %w", enqueueErr)
 	}
 	if changeErr := recordMissionChange(ctx, tx, missionID, domain.MissionQuestionAnswered, ""); changeErr != nil {
-		return nil, changeErr
+		return nil, "", changeErr
 	}
 	q, err := scanMissionQuestion(tx.QueryRowContext(ctx, `SELECT `+missionQuestionColumns+` FROM mission_questions WHERE id=?`, questionID))
 	if err != nil {
-		return nil, fmt.Errorf("store: read answered mission question %s: %w", questionID, err)
+		return nil, "", fmt.Errorf("store: read answered mission question %s: %w", questionID, err)
 	}
 	if commitErr := tx.Commit(); commitErr != nil {
-		return nil, fmt.Errorf("store: answer mission question: commit: %w", commitErr)
+		return nil, "", fmt.Errorf("store: answer mission question: commit: %w", commitErr)
 	}
-	return q, nil
+	return q, note.ID, nil
 }
 
 // GetMissionQuestion reads one question by id. The service layer needs the

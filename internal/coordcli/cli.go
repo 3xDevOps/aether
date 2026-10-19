@@ -136,6 +136,8 @@ func Run(ctx context.Context, args []string, cfg Config) (int, error) {
 		result, err = integrationCommand(ctx, cfg.Socket, args[1], args[2:], cfg.In)
 	case "terminal", "browser", "control", "artifact":
 		result, err = developmentCommand(ctx, cfg.Socket, args[0], args[1:], cfg.In)
+	case "memory":
+		return memoryCommand(ctx, cfg, args[1:])
 	default:
 		return fail(cfg.Out, protocol.CodeMethodNotFound, "unknown command: "+args[0])
 	}
@@ -164,6 +166,7 @@ Commands:
   worker    inspect and manage mission worker attempts
   integration run the five integrator candidate operations
   report    record your state: an outcome, a question, or what you wait on
+  memory    search and add team memory notes
   terminal  run, observe and interact with development PTYs
   browser   operate the isolated headless browser companion
   control   inspect, acquire and release development surface control
@@ -376,6 +379,9 @@ not a patch, so a revision without depends_on drops earlier dependencies.
 
 func writeHelp(out io.Writer, command string) (int, error) {
 	text, ok := commandUsages[command]
+	if !ok {
+		text, ok = memoryUsages[command]
+	}
 	if !ok {
 		text, ok = developmentHelp(command)
 	}
@@ -604,6 +610,9 @@ func writeSkill(out io.Writer, status *protocol.CoordStatusResult) (int, error) 
 	}
 	if err := writeDevelopmentEntrypoints(out, status); err != nil {
 		return ExitFailure, fmt.Errorf("write development entrypoints: %w", err)
+	}
+	if err := writeMemorySkill(out, status); err != nil {
+		return ExitFailure, fmt.Errorf("write memory skill: %w", err)
 	}
 	if hasSkillCapability(status, protocol.MethodCoordInbox) || status.Assignment != nil {
 		var guide string

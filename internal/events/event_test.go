@@ -48,6 +48,7 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		BudgetPayload{State: BudgetExceeded, SpendUSD: 12.5, LimitUSD: 10, WarnUSD: 8,
 			UnmeteredRuns: 2, Reason: "new run refused"},
 		ServerUpdatePayload{Phase: ServerUpdateApplying, Version: "v0.2.0", ActorID: "mem_1"},
+		MemoryChangePayload{Action: MemoryActionSupersede, NoteID: "note-ab12", ActorID: "mem_1"},
 	}
 	for _, p := range payloads {
 		body, err := json.Marshal(p)

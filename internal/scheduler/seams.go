@@ -23,6 +23,12 @@ type EvidencePurger interface {
 	PurgeRun(context.Context, domain.WorkspaceID, domain.RunID, func(context.Context) error) error
 }
 
+// TeamMemory builds the team memory brief a run launched in workspace by
+// member carries, leaving run out of it; empty when there is nothing to say.
+type TeamMemory interface {
+	Brief(ctx context.Context, workspace domain.WorkspaceID, member domain.MemberID, run domain.RunID) (string, error)
+}
+
 type GitEngine interface {
 	CreateRunCheckoutAt(ctx context.Context, ws domain.WorkspaceID, run domain.RunID, baseCommit, baseBranch, task, origin string) (checkoutPath, branch string, err error)
 	WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceID, branch string) (bool, error)

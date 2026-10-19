@@ -12,6 +12,7 @@ import type {
   InsightsResult,
   InsightsRun,
   Member,
+  MemoryItem,
   Mission,
   MissionQuestion,
   MissionTask,
@@ -356,6 +357,23 @@ export function evidencePacket(over: Partial<EvidencePacket> = {}): EvidencePack
 }
 
 
+export function memoryItem(over: Partial<MemoryItem> = {}): MemoryItem {
+  return {
+    id: 'note-a1b2c3d4e5',
+    workspace_id: workspace.id,
+    kind: 'convention',
+    scope: 'workspace',
+    source: 'member',
+    title: 'Use bun in web/; never npm.',
+    body: 'Use bun in web/; never npm.',
+    author_id: alice.id,
+    author_name: alice.display_name,
+    created_at: '2026-10-18T09:00:00Z',
+    updated_at: '2026-10-18T09:00:00Z',
+    ...over,
+  }
+}
+
 export function insightsRun(over: Partial<InsightsRun> = {}): InsightsRun {
   return {
     run_id: 'run_1',
@@ -477,6 +495,13 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     accountList: vi.fn(async () => ({ accounts: [alice], shared_with: [] })),
     insightsGet: vi.fn(async () => insights()),
+    memorySearch: vi.fn<Api['memorySearch']>(async () => ({ items: [] })),
+    memoryShow: vi.fn<Api['memoryShow']>(async () => needsOverride('memoryShow')),
+    memoryBrief: vi.fn<Api['memoryBrief']>(async () => ({ text: '' })),
+    memoryAdd: vi.fn<Api['memoryAdd']>(async () => needsOverride('memoryAdd')),
+    memoryPin: vi.fn<Api['memoryPin']>(async () => needsOverride('memoryPin')),
+    memoryUnpin: vi.fn<Api['memoryUnpin']>(async () => needsOverride('memoryUnpin')),
+    memoryRm: vi.fn<Api['memoryRm']>(async () => needsOverride('memoryRm')),
     accountShare: vi.fn(async () => ({})),
     accountRevoke: vi.fn(async () => ({})),
     runList: vi.fn(async () => [run()]),

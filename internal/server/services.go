@@ -9,6 +9,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/gitengine"
+	"github.com/3xDevOps/Aether/internal/memory"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -47,6 +48,8 @@ type Deps struct {
 	Evidence   *evidence.Service
 	Workspaces *workspaceDeletion
 	Assistant  *assistant.Service
+	// Memory is team memory, built before the scheduler.
+	Memory *memory.Service
 }
 
 type serviceBuilder struct {

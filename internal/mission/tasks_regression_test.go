@@ -108,7 +108,7 @@ func regressionStartMission(t *testing.T, db *store.DB, m *domain.Mission) *doma
 	if err != nil {
 		t.Fatalf("ask plan question: %v", err)
 	}
-	if _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, m.AccountableHumanID, "this flow", "plan-answer-1"); answerErr != nil {
+	if _, _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, m.AccountableHumanID, "this flow", "plan-answer-1"); answerErr != nil {
 		t.Fatalf("answer plan question: %v", answerErr)
 	}
 	started, err := db.StartMission(ctx, m.ID, m.CurrentIntegratorRunID, "plan-start-1")

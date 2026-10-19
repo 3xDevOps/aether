@@ -882,6 +882,7 @@ commit captured at launch.
 | `aether close <run> --outcome merged\|abandoned` | Record the finish outcome and clear a finished run off **Needs you** after its automatic evidence capture. |
 | `aether inbox` | The shared approval queue; `aether inbox approve\|deny <request-id>` decides, and any member with **steer** on the run can. `--all` includes decided requests. |
 | `aether timeline` | The workspace's whole history; filter with `--run`, `--member`, `--type`, `--limit`, export with `--jsonl`. |
+| `aether memory ls\|search\|show\|add\|pin\|unpin\|rm\|brief` | Read and curate the workspace's [team memory](memory.md): the notes runs search and the brief each new run gets. See [Team memory](#team-memory). |
 | `aether cost --runs` | Token spend per member and per run. |
 | `aether budget` | The workspace's spend cap and what has been used. |
 | `aether sync --live <local-dir> <run>` | Live-overlay a local directory onto a run's worktree. Local edits that collide are preserved as `*.aether-conflict` files. |
@@ -1071,6 +1072,38 @@ they own a live run is credited on that run's remaining agent commits under
 the new address, because the container is still authoring under the old one.
 The commits carry both addresses rather than losing the change, which is the
 useful answer.
+
+### Team memory
+
+[Team memory](memory.md) is the workspace's shared notes: decisions,
+conventions, gotchas and preferences that runs and members write, plus an
+outcome note for each run that reports success or failure. Who may do what:
+
+| Who | Read: `ls`, `search`, `show`, `brief` | Add | Pin, unpin | Remove |
+| --- | --- | --- | --- | --- |
+| viewer | yes | no | no | no |
+| collaborator, admin | yes | yes | any note | any note, or every note of a run |
+| a run's agent | search, show, its own brief | while its owner may push, 20 per run | no | no |
+
+The role is re-read on every call, so a demotion stops the next write. A
+viewer gets `memory.add: permission denied: pushing to a workspace requires
+the collaborator role`, and so does a viewer-owned run. An agent may replace
+only another agent's unpinned note; a member may replace any note with
+`aether memory add --supersedes <id>`, and the replacement takes over its
+pin.
+
+A pin decides which briefs a note enters, never who can read it: a note you
+pin with `--me` goes only into your own runs' briefs, but every member,
+viewers included, and every run in the workspace can still search it.
+
+Every note is attributed. A member's note names that member. An agent's note
+names the run's owner when it was written, with the run, harness and commit;
+a handoff does not move notes already written. An outcome note names the
+run's owner, and a swarm answer the member who answered. A pin records who
+pinned it. Each add, captured note, replacement, pin, unpin and removal
+is a `memory.change` event in **Activity** and `aether timeline --type
+memory.change`, naming the member who acted and, for an agent's note or a
+captured one, its run.
 
 ### Conflict radar
 

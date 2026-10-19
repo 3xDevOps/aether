@@ -58,4 +58,6 @@ type Services struct {
 	Assistant AssistantService
 	// Push notifies a run's owner on their subscribed devices.
 	Push PushService
+	// Memory is team memory: notes, pins and the launch brief.
+	Memory MemoryService
 }

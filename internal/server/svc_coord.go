@@ -35,6 +35,7 @@ func init() {
 			Reports:     d.Runs,
 			Outcomes:    d.Runs,
 			Development: d.Runs,
+			Memory:      d.Memory,
 			// coord.report captures evidence before accepting the durable
 			// outcome; the coordination service publishes its evidence event
 			// only after finalization.

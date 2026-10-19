@@ -537,3 +537,58 @@ func TestHookWarnsOfOverlapsTheRunMayNotMessage(t *testing.T) {
 		})
 	}
 }
+
+// A launch that does not carry the role card gets it at sessionStart with
+// the team memory brief; a failed brief keeps the card and shows the error.
+func TestSessionStartAppendsTheMemoryBrief(t *testing.T) {
+	outsideEnhancedRun(t)
+	t.Setenv("TMPDIR", t.TempDir())
+	const brief = "<team-memory workspace=\"api\">\nPinned:\n- note-ab12 convention (dana): Use bun in web/; never npm.\n</team-memory>"
+	var briefErr atomic.Pointer[protocol.Error]
+	var briefs atomic.Int32
+	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
+		switch req.Method {
+		case protocol.MethodCoordHookStatus:
+			return memoryResult(t, protocol.CoordStatusResult{RunID: "run-1", Capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport, protocol.MethodMemoryBrief}})
+		case protocol.MethodMemoryBrief:
+			briefs.Add(1)
+			if err := briefErr.Load(); err != nil {
+				return protocol.Response{Error: err}
+			}
+			return memoryResult(t, protocol.MemoryBriefResult{Text: brief})
+		}
+		t.Errorf("hook called %s", req.Method)
+		return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
+	})
+	start := func() string {
+		t.Helper()
+		var out bytes.Buffer
+		code, err := Run(t.Context(), []string{"hook", "cursor", "sessionStart"}, Config{Socket: s.path, In: strings.NewReader(`{"hook_event_name":"sessionStart"}`), Out: &out})
+		if err != nil || code != ExitOK {
+			t.Fatalf("hook = %d, %v", code, err)
+		}
+		if out.Len() == 0 {
+			return ""
+		}
+		var response struct {
+			Context string `json:"additional_context"`
+		}
+		if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+			t.Fatalf("decode %q: %v", out.String(), err)
+		}
+		return response.Context
+	}
+	t.Setenv(coordtransport.RoleCardEnv, "")
+	if got := start(); !strings.HasPrefix(got, "You are Aether run run-1") || !strings.HasSuffix(got, "\n"+brief) {
+		t.Fatalf("sessionStart must carry the role card, then the brief: %q", got)
+	}
+	briefErr.Store(&protocol.Error{Code: protocol.CodeInternal, Message: "memory.brief: database is locked"})
+	if got := start(); !strings.HasPrefix(got, "You are Aether run run-1") || !strings.HasSuffix(got, "\nTeam memory brief unavailable: memory.brief: database is locked [aether error -32603]") {
+		t.Fatalf("a failed brief must keep the role card and show the error: %q", got)
+	}
+	t.Setenv(coordtransport.RoleCardEnv, "1")
+	called := briefs.Load()
+	if got := start(); got != "" || briefs.Load() != called {
+		t.Fatalf("a launch carrying the card must get neither card nor brief: %q, %d brief calls", got, briefs.Load()-called)
+	}
+}

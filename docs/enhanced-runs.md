@@ -468,7 +468,7 @@ Limits:
 Every run whose container has the run socket gets the
 [agent instructions](coordination.md#agent-instructions): its role card,
 with report lines while coordination reporting is enabled, and the
-co-author rule.
+co-author rule, followed by the [team memory brief](harnesses.md#team-memory-brief).
 
 Claude's adapter takes the rules as `_meta.systemPrompt.append` on
 `session/new`, `session/resume` and `session/load`, so a run with no task

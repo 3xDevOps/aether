@@ -48,6 +48,24 @@ func (s *Scheduler) runInstructions(g coordhooks.Guide) string {
 	return coordhooks.RoleCard(g) + "\n\n" + coAuthorInstruction
 }
 
+// briefedInstructions are the run instructions followed by the team memory
+// brief of the run's workspace and owner. Only a launch that carries
+// instructions carries the brief.
+func (s *Scheduler) briefedInstructions(ctx context.Context, g coordhooks.Guide, workspace domain.WorkspaceID, owner domain.MemberID) (string, error) {
+	text := s.runInstructions(g)
+	if text == "" || s.cfg.Memory == nil {
+		return text, nil
+	}
+	brief, err := s.cfg.Memory.Brief(ctx, workspace, owner, domain.RunID(g.RunID))
+	if err != nil {
+		return "", fmt.Errorf("build the team memory brief: %w", err)
+	}
+	if brief == "" {
+		return text, nil
+	}
+	return text + "\n\n" + brief, nil
+}
+
 // runGuide is what a run's role card depends on: its mission role when the
 // store records one, else what the launch knows. assigned marks a mission
 // worker or integrator, background a headless run and wake a launch that
@@ -78,7 +96,10 @@ func (s *Scheduler) launchInstructions(ctx context.Context, run *domain.Run, pro
 	if !profile.CarriesInstructions() {
 		return "", nil
 	}
-	text := s.runInstructions(s.runGuide(ctx, run.ID, assigned, run.Mode == domain.LaunchHeadless, native.IdleWake))
+	text, err := s.briefedInstructions(ctx, s.runGuide(ctx, run.ID, assigned, run.Mode == domain.LaunchHeadless, native.IdleWake), run.WorkspaceID, run.MemberID)
+	if err != nil {
+		return "", err
+	}
 	if text == "" || profile.InstructionsConfig == "" || s.cfg.Homes == nil {
 		return text, nil
 	}
