@@ -65,9 +65,9 @@ function receiveTakeover(session: ScriptedSession, phase: TakeoverState['phase']
     holder_generation: 4,
     phase,
     hold_started_at: '2026-10-08T12:00:00Z',
-    hold_deadline: '2026-10-08T12:00:05Z',
-    decision_deadline: '2026-10-08T12:00:12Z',
-    server_now: phase === 'holding' ? '2026-10-08T12:00:00Z' : '2026-10-08T12:00:05Z',
+    hold_deadline: '2026-10-08T12:00:03Z',
+    decision_deadline: '2026-10-08T12:00:10Z',
+    server_now: phase === 'holding' ? '2026-10-08T12:00:00Z' : '2026-10-08T12:00:03Z',
     ...over,
   }
   session.send({ type: 'takeover', ok: true, takeover })
@@ -811,7 +811,7 @@ describe('Enhanced multiplayer controls', () => {
       const request = { id: start.takeover_id, requester_member_id: alice.id, requester_session_id: String(session.header().control_session_id), holder_session_id: 'holder-session' }
       receiveTakeover(session, 'holding', request)
       session.items(say(1, 'assistant', 'Still working during the hold'))
-      await act(async () => { await vi.advanceTimersByTimeAsync(4999) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(2999) })
       expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'confirm' }))
       expect(session.socket.frames()).not.toContainEqual(expect.objectContaining({ action: 'cancel' }))
       expect(screen.queryByRole('button', { name: 'Release' })).toBeNull()

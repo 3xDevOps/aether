@@ -2071,7 +2071,7 @@ the agent's session, and the page has a lease of its own
 and saving a file uses no lease. With the Browser docked beside Session,
 Terminal or Changes the strip is back, above both. It shows the controller and every watcher
 with their member name and `Avatar`, protection and the existing
-`ControlButton`: take a free lease, release it, or hold for five seconds to
+`ControlButton`: take a free lease, release it, or hold for three seconds to
 request an occupied lease. A local lease acknowledgement takes precedence
 over polled controller metadata; the controller's name remains visible
 beside **You control** or **You control in another tab**.
@@ -2449,7 +2449,7 @@ agent's auth methods.
 the selected shell under one toolbar, a 32px strip (44px on touch): the
 terminal tabs (**Agent**, then each shell; one menu under 768px), **+ Shell**,
 the **Tools** menu, and on the right the presence summary with
-`ControlButton` (click to take a free lease, hold five seconds to request an
+`ControlButton` (click to take a free lease, hold three seconds to request an
 occupied one; **Release** has the accent fill) and the connection word only
 while a live run's attach is not live. A finished run reads "Container
 removed · read-only" in muted text there.

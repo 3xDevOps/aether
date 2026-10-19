@@ -12,7 +12,7 @@ export interface ControlButtonProps {
 }
 
 // A brief click remains an ordinary acquisition. Only a deliberate continuous
-// press starts the server's five-second hold; never synthesize a click after it.
+// press starts the server's three-second hold; never synthesize a click after it.
 const holdIntentMs = 180
 
 export function ControlButton({ ownsControl, unavailable, onTakeControl, onReleaseControl, takeover }: ControlButtonProps) {
@@ -76,7 +76,7 @@ export function ControlButton({ ownsControl, unavailable, onTakeControl, onRelea
     <Button
       hint={ownsControl ? 'Release run control' : takeover?.phase === 'review'
         ? `Waiting for the controller's decision · ${takeover.seconds}s`
-        : 'Click to take free control. Hold for 5 seconds to request an occupied run. Release early or press Escape to cancel.'}
+        : 'Click to take free control. Hold for 3 seconds to request an occupied run. Release early or press Escape to cancel.'}
       type="button"
       size="sm"
       variant={ownsControl ? 'primary' : 'secondary'}

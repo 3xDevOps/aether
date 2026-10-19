@@ -162,7 +162,7 @@ beside the roster: longer rosters scroll
 horizontally without opening Details, and narrow screens show watchers as
 avatars.
 Select **Multiplayer** for shared notes and run details.
-Hold **Take control** for five seconds to
+Hold **Take control** for three seconds to
 request an occupied run; the holder has seven seconds to accept or deny
 before control transfers. See [Run control](terminal.md#run-control) for
 cancellation, permissions and reconnect behavior.
