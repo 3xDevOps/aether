@@ -891,7 +891,7 @@ func (d *DB) FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool
 	}
 	if updated == 1 {
 		eventID := CoordReportEventID(report.ID)
-		if _, err := tx.ExecContext(ctx,
+		if _, err = tx.ExecContext(ctx,
 			`INSERT INTO coord_report_publications
 			 (report_id, event_id, publication_state, created_at, published_at)
 			 VALUES (?, ?, ?, ?, NULL)

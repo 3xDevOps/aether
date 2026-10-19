@@ -286,7 +286,8 @@ func TestAddScansAndCapsCitedFiles(t *testing.T) {
 	_, err = f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "short note",
 		Files: []string{"web/package.json", strings.Repeat("x", protocol.MemoryMaxFileBytes+1)}})
 	wantError(t, err, protocol.CodeInvalidParams, "memory.add: file 2 is 513 bytes; a cited path holds at most 512")
-	if found, err := f.svc.Search(context.Background(), protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID)}); err != nil || len(found.Items) != 0 {
+	found, err := f.svc.Search(context.Background(), protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID)})
+	if err != nil || len(found.Items) != 0 {
 		t.Fatalf("notes after refused adds = %+v, %v; want none", found.Items, err)
 	}
 	if _, err = f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "short note",
@@ -678,13 +679,13 @@ func TestSearchFiltersSourceAndReplaced(t *testing.T) {
 		{protocol.MemorySearchParams{WorkspaceID: ws, Source: protocol.MemorySourceAgent}, nil},
 		{protocol.MemorySearchParams{WorkspaceID: ws, Source: protocol.MemorySourceAgent, Replaced: true}, []string{agentNote.Item.ID}},
 	} {
-		found, err := f.svc.Search(ctx, c.p)
+		found, searchErr := f.svc.Search(ctx, c.p)
 		var got []string
 		for _, item := range found.Items {
 			got = append(got, item.ID)
 		}
-		if err != nil || !slices.Equal(got, c.want) {
-			t.Errorf("search %+v = %v, %v; want %v", c.p, got, err, c.want)
+		if searchErr != nil || !slices.Equal(got, c.want) {
+			t.Errorf("search %+v = %v, %v; want %v", c.p, got, searchErr, c.want)
 		}
 	}
 	_, err = f.svc.Search(ctx, protocol.MemorySearchParams{WorkspaceID: ws, Source: "lore"})

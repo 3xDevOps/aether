@@ -539,12 +539,12 @@ func TestMemoryReportRewriteClearsPin(t *testing.T) {
 
 	replacement := &Memory{WorkspaceID: w.ID, Kind: MemoryDecision, Source: MemoryFromMember, AuthorID: member.ID,
 		Body: "Take the lease before reading container state."}
-	if _, _, err := db.SupersedeMemory(ctx, note.ID, replacement, nil); err != nil {
+	if _, _, err = db.SupersedeMemory(ctx, note.ID, replacement, nil); err != nil {
 		t.Fatal(err)
 	}
 	later := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeFailure,
 		Summary: "Lease race came back", IdempotencyKey: "failure-3"}
-	if err := db.AppendCoordReport(ctx, later); err != nil {
+	if err = db.AppendCoordReport(ctx, later); err != nil {
 		t.Fatal(err)
 	}
 	if later.UnpinnedNote != "" {
