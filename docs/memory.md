@@ -68,7 +68,9 @@ The brief is at most 3072 bytes. Older run lines are dropped first, and
 pins within their budgets always fit. With nothing pinned, no recent run and
 no notes, there is no brief at all. Unpinned notes of every kind, report
 prose and run titles never reach the brief; an agent sees them only when it
-searches.
+searches. Control characters in a pinned title, a name or a task become
+spaces, so the brief never carries a terminal escape sequence or a NUL into
+a launch.
 
 ## Pinning and scopes
 
@@ -234,6 +236,7 @@ The CLI prints the server's message as `aether: rpc error <code>: <message>`;
 | Writing needs the collaborator or admin role, re-checked on every call | `-32001` | `memory.add: permission denied: pushing to a workspace requires the collaborator role` (also `memory.pin`, `memory.unpin`, `memory.rm`) |
 | Kind | `-32602` | `memory.add: kind must be decision, convention, gotcha or preference; got "lore"` |
 | 1024 bytes of text | `-32602` | `memory.add: text is 1100 bytes; a note holds at most 1024` |
+| No NUL byte | `-32602` | `memory.add: text contains a NUL byte; a note cannot hold one` |
 | 20 cited files | `-32602` | `memory.add: 21 files cited; a note cites at most 20` |
 | 512 bytes per cited file | `-32602` | `memory.add: file 2 is 600 bytes; a cited path holds at most 512` |
 | No secrets | `-32001` | `memory.add: rejected, gitleaks rule github-pat at 0:22; remove the secret and retry` (the text and cited files are scanned together, each file a line after the text; line and column as gitleaks counts them: lines from 0, columns from 1) |

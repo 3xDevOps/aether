@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
@@ -149,9 +150,17 @@ func count(n int, noun string) string {
 	return strconv.Itoa(n) + " " + noun + "s"
 }
 
-// inline puts text on one line, defuses the brief's tag and, when maxBytes
-// is positive, cuts it to that many bytes on a rune boundary.
+// inline puts text on one line without control characters, which would
+// reach a member's terminal and the launch argv, defuses the brief's tag
+// and, when maxBytes is positive, cuts it to that many bytes on a rune
+// boundary.
 func inline(text string, maxBytes int) string {
+	text = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, text)
 	text = frameTag.ReplaceAllStringFunc(strings.Join(strings.Fields(text), " "), func(tag string) string {
 		return strings.Replace(tag, "-", " ", 1)
 	})

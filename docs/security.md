@@ -1641,7 +1641,9 @@ is an attributed claim that can be stale or wrong, never an instruction.
   lines the server builds for runs that finished in the last 48 hours (member, harness,
   outcome, branch, pull request, age, and the first 80 bytes of the task a
   member typed or of the swarm's objective). It never holds an unpinned
-  agent note, report prose, a run title or transcript text. Until a
+  agent note, report prose, a run title or transcript text, and its
+  control characters become spaces, so a pinned title cannot send escape
+  sequences to a member's terminal or a NUL into a launch's argv. Until a
   member pins one, agent notes, outcome notes captured from reports and
   decisions captured from swarm answers reach an agent only when it
   searches: `aether-internal memory search` or `show`, or the

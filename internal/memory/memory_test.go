@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -577,6 +578,36 @@ func TestBriefFitsFullPinBudgets(t *testing.T) {
 	}
 	if strings.Contains(text, "did not fit") || strings.Contains(text, "CANARY") {
 		t.Fatalf("brief dropped a pin, or carries a pinned body, unpinned agent text, report prose, a run title or its own run:\n%s", text)
+	}
+}
+
+// A brief reaches terminals and launch argv, so a pinned title's control
+// characters (C0, DEL and C1) become spaces.
+func TestBriefStripsControlCharacters(t *testing.T) {
+	f := newFixture(t)
+	pinned := f.memberAdd(f.dana, protocol.MemoryAddParams{Kind: protocol.MemoryKindConvention,
+		Text: "\x1b]0;owned\x07\x1b[2J Use bun\x7f\u009b in web/\tnever npm", Pin: true})
+	text, err := f.svc.Brief(context.Background(), f.ws.ID, f.dana.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "\n- "+pinned.Item.ID+" convention (Dana): ]0;owned [2J Use bun in web/ never npm\n") {
+		t.Fatalf("brief lacks the cleaned pin line:\n%q", text)
+	}
+	if strings.ContainsFunc(text, func(r rune) bool { return r != '\n' && unicode.IsControl(r) }) {
+		t.Fatalf("brief carries a control character:\n%q", text)
+	}
+}
+
+// A NUL is refused before the insert, so no note holds one and the
+// similar-notes search cannot fail after the note is stored.
+func TestAddRefusesNUL(t *testing.T) {
+	f := newFixture(t)
+	run := f.run(f.dana, "claude", "work")
+	_, err := f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "Run make db\x00"})
+	wantError(t, err, protocol.CodeInvalidParams, "memory.add: text contains a NUL byte; a note cannot hold one")
+	if found, err := f.svc.Search(context.Background(), protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID)}); err != nil || len(found.Items) != 0 {
+		t.Fatalf("notes after a refused NUL = %+v, %v; want none", found.Items, err)
 	}
 }
 

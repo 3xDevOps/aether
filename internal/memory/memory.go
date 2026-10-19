@@ -190,6 +190,9 @@ func checkNote(kind, scope, text string, files []string) error {
 	if len(text) > protocol.MemoryMaxBodyBytes {
 		return invalid(method, fmt.Sprintf("text is %d bytes; a note holds at most %d", len(text), protocol.MemoryMaxBodyBytes))
 	}
+	if strings.ContainsRune(text, 0) {
+		return invalid(method, "text contains a NUL byte; a note cannot hold one")
+	}
 	if len(files) > protocol.MemoryMaxFiles {
 		return invalid(method, fmt.Sprintf("%d files cited; a note cites at most %d", len(files), protocol.MemoryMaxFiles))
 	}
