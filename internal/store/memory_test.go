@@ -226,6 +226,36 @@ func TestMemorySupersedeMovesPin(t *testing.T) {
 	}
 }
 
+// A replacement whose text another live note holds moves the pin to that
+// note, pinned by the member who replaced, not by that note's author.
+func TestMemorySupersedeOntoDuplicatePinsAsReplacer(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	alice, dana := mustCreateMember(t, db), mustCreateTeammate(t, db)
+	agents := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, AuthorID: alice.ID, Body: "Use pnpm"})
+	danas := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, AuthorID: dana.ID, Body: "Use npm"})
+	if _, err := db.PinMemory(ctx, w.ID, danas.ID, dana.ID, MemoryScopeMember); err != nil {
+		t.Fatal(err)
+	}
+	replacement := &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, AuthorID: dana.ID, Body: "use PNPM"}
+	if duplicate, err := db.SupersedeMemory(ctx, danas.ID, replacement, nil); err != nil || !duplicate || replacement.ID != agents.ID {
+		t.Fatalf("SupersedeMemory = %s duplicate %v, %v; want %s", replacement.ID, duplicate, err, agents.ID)
+	}
+	if replacement.PinnedBy != dana.ID || replacement.Scope != MemoryScopeMember {
+		t.Fatalf("pinned duplicate = %+v, want it pinned for Dana only", replacement)
+	}
+	for _, who := range []struct {
+		member *domain.Member
+		pins   int
+	}{{alice, 0}, {dana, 1}} {
+		brief, err := db.ReadMemoryBrief(ctx, MemoryBriefQuery{Workspace: w.ID, Member: who.member.ID, Since: time.Now(), Runs: 5})
+		if err != nil || len(brief.Pinned) != who.pins {
+			t.Fatalf("%s's brief pins = %+v, %v; want %d", who.member.DisplayName, brief, err, who.pins)
+		}
+	}
+}
+
 func TestMemoryDuplicateAddKeepsOneRow(t *testing.T) {
 	db := openTestDB(t)
 	w := mustCreateWorkspace(t, db)

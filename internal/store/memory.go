@@ -202,7 +202,8 @@ func (d *DB) InsertMemory(ctx context.Context, m *Memory) (bool, error) {
 // transaction. vet, when set, may refuse old as the transaction reads it.
 // old is invalidated before the insert, so m may repeat its text; when m
 // duplicates another live note, old points at that note. A pin on old moves
-// to the replacement, pinned by m's author in old's scope, and must fit that
+// to the replacement, pinned in old's scope by the author m arrived with,
+// even when the replacement is someone else's duplicate, and must fit that
 // scope's budget without old.
 func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, vet func(old *Memory) error) (bool, error) {
 	if m == nil {
@@ -233,6 +234,7 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, vet fun
 		now, now, old); err != nil {
 		return false, fmt.Errorf("store: supersede memory %s: %w", old, err)
 	}
+	by := m.AuthorID
 	duplicate, err := insertMemory(ctx, tx, m)
 	if err != nil {
 		return false, err
@@ -241,7 +243,7 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, vet fun
 		return false, fmt.Errorf("store: supersede memory %s: %w", old, err)
 	}
 	if prior.PinnedAt != nil {
-		if err = pinMemory(ctx, tx, m, m.AuthorID, prior.Scope); err != nil {
+		if err = pinMemory(ctx, tx, m, by, prior.Scope); err != nil {
 			return false, fmt.Errorf("move the pin on %s to its replacement: %w", old, err)
 		}
 		var pinned *Memory
