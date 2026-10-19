@@ -48,7 +48,7 @@ type Deps struct {
 	Evidence   *evidence.Service
 	Workspaces *workspaceDeletion
 	Assistant  *assistant.Service
-	// Memory is team memory, built before the service builders run.
+	// Memory is team memory, built before the scheduler.
 	Memory *memory.Service
 }
 
@@ -83,11 +83,6 @@ type namedService struct {
 }
 
 func (s *Server) buildServices(d Deps) error {
-	mem, memErr := newMemory(d)
-	if memErr != nil {
-		return fmt.Errorf("server: build team memory: %w", memErr)
-	}
-	d.Memory = mem
 	for _, b := range serviceBuilders {
 		svc, err := b.build(d)
 		if err != nil {

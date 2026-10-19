@@ -358,6 +358,10 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}
 	s.control = control.New(control.Config{OnHolderChange: s.publishController})
 	secrets := secretstore.New(filepath.Join(cfg.DataDir, "workspace-secrets"))
+	mem, err := newMemory(Deps{Store: s.db, Bus: s.bus, Events: s.log})
+	if err != nil {
+		return nil, fmt.Errorf("server: build team memory: %w", err)
+	}
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:         s.db,
 		Runtime:       s.rt,
@@ -368,6 +372,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		StateDir:      filepath.Join(cfg.DataDir, "scheduler"),
 		DataDir:       cfg.DataDir,
 		Homes:         homes,
+		Memory:        mem,
 		RemoveAll:     removeAgentFiles,
 		Secrets:       secrets,
 		ReposDir:      filepath.Join(cfg.DataDir, "repos"),
@@ -477,6 +482,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Evidence:   s.evidence,
 		Workspaces: workspaces,
 		Assistant:  s.assistant,
+		Memory:     mem,
 	}); err != nil {
 		return nil, err
 	}

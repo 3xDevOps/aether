@@ -115,6 +115,14 @@ except `Stop`, automatically through
 `--settings /run/aether/claude-settings.json`; see
 [Claude Code inbox integration](harnesses.md#claude-code-inbox-integration).
 
+The workspace's [team memory brief](harnesses.md#team-memory-brief) follows
+the co-author rule wherever the instructions go: the system prompt of
+`claude`, `pi`, `omp`, `codex`, `opencode` and `copilot`, the task prompt of
+`gemini`, `cursor`, `antigravity` and a custom definition, and the ACP
+session of an Enhanced run. A taskless launch of a custom definition gets
+neither the role card nor the brief; have the agent's own startup mechanism
+run `aether-internal memory brief`, as it runs `aether-internal skill`.
+
 Integrator swarm-refresh guidance can appear even with an empty inbox. It
 asks an integrator to read durable plan decisions and worker attempts; it
 does not itself schedule an OMP turn. An OMP todo reminder or native retry

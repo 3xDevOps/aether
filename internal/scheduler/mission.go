@@ -206,9 +206,10 @@ func (s *Scheduler) LaunchMission(ctx context.Context, spec MissionLaunchSpec) (
 
 // ValidateMissionLaunch reports whether member's launch of harnessName on
 // account has a command for mode, resolving it exactly as a launch would, so
-// a mission never records an integrator the scheduler cannot start.
+// a mission never records an integrator the scheduler cannot start. The task
+// shapes only the prompt, so validation passes none and reads no brief.
 func (s *Scheduler) ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, model string) error {
-	_, _, _, err := s.command(ctx, member, account, harnessName, mode, true, "task", model)
+	_, _, _, err := s.command(ctx, "", member, account, harnessName, mode, true, "", model)
 	return err
 }
 
