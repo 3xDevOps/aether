@@ -165,7 +165,7 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
 
   const waiting = load.kind === 'loading' && connection !== 'live'
   const skeleton = useDelayed(load.kind === 'loading' && !waiting)
-  const items = load.kind === 'ready' ? listed(load.items, load.filter) : []
+  const items = load.kind === 'ready' ? listed(load.items) : []
 
   const controls = (
     <>

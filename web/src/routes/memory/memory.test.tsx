@@ -49,8 +49,9 @@ const replaced = memoryItem({ id: 'note-old0000001', title: 'Use npm in web/.', 
 const live = [agentNote, outcome, workspacePin, answer, myPin]
 
 function search(params: MemorySearchParams): { items: MemoryItem[] } {
-  const items = params.kind === 'outcome' ? [outcome] : params.all ? [...live, replaced] : live
-  return { items: params.pinned ? items.filter((item) => item.pinned_at) : items }
+  const items = (params.replaced ? [replaced] : params.all ? [...live, replaced] : live)
+    .filter((item) => (!params.kind || item.kind === params.kind) && (!params.source || item.source === params.source) && (!params.pinned || item.pinned_at))
+  return { items }
 }
 
 function titles(): string[] {
@@ -108,9 +109,11 @@ describe('memory page', () => {
 
     fireEvent.click(within(show).getByRole('button', { name: 'Agent notes' }))
     await waitFor(() => expect(titles()).toEqual([agentNote.title]))
+    expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, source: 'agent' })
 
     fireEvent.click(within(show).getByRole('button', { name: 'Answers' }))
     await waitFor(() => expect(titles()).toEqual([answer.title]))
+    expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, source: 'answer' })
 
     fireEvent.click(within(show).getByRole('button', { name: 'Outcomes' }))
     await waitFor(() => expect(titles()).toEqual([outcome.title]))
@@ -118,13 +121,26 @@ describe('memory page', () => {
 
     fireEvent.click(within(show).getByRole('button', { name: 'Superseded' }))
     await waitFor(() => expect(titles()).toEqual([replaced.title]))
-    expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, all: true })
+    expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, replaced: true })
     expect(within(screen.getByRole('list', { name: 'Notes' })).getByText('Superseded')).toBeDefined()
 
     memorySearch.mockResolvedValue({ items: [] })
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search notes' }), { target: { value: '  lease  ' } })
-    await waitFor(() => expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, words: 'lease', all: true }))
+    await waitFor(() => expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, words: 'lease', replaced: true }))
     expect(await screen.findByText('No superseded notes match “lease”.')).toBeDefined()
+  })
+
+  it('lists agent notes, answers and superseded notes older than the newest 100 notes', async () => {
+    seed()
+    const outcomes = Array.from({ length: 100 }, (_, i) => memoryItem({ id: `note-out${String(i).padStart(7, '0')}`, kind: 'outcome', source: 'report', title: `success: run ${i}` }))
+    const memorySearch = vi.fn(async (params: MemorySearchParams) => ({ items: params.pinned ? [] : params.source || params.replaced ? search(params).items : outcomes }))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
+    await screen.findByRole('list', { name: 'Notes' })
+    const show = screen.getByRole('group', { name: 'Show' })
+    for (const [filter, note] of [['Agent notes', agentNote], ['Answers', answer], ['Superseded', replaced]] as const) {
+      fireEvent.click(within(show).getByRole('button', { name: filter }))
+      await waitFor(() => expect(titles()).toEqual([note.title]))
+    }
   })
 
   it("shows the server's refusal word for word and keeps the note to fix", async () => {

@@ -37,35 +37,26 @@ export function superseded(item: MemoryItem): boolean {
   return Boolean(item.superseded_by || item.invalid_at)
 }
 
-/** The reads behind a filter: every pinned note, then the newest or best
- * of all, last. memory.search filters by kind, liveness and pin, so Agent
- * notes and Answers narrow what it returns. A replaced note is never
- * pinned, so Superseded skips the pinned read. */
-export function reads(workspaceID: string, words: string, filter: Filter): MemorySearchParams[] {
-  const all: MemorySearchParams = {
-    workspace_id: workspaceID,
-    limit: listLimit,
-    ...(words ? { words } : {}),
-    ...(filter === 'outcomes' ? { kind: 'outcome' as const } : {}),
-    ...(filter === 'superseded' ? { all: true } : {}),
-  }
-  const pinned = { ...all, pinned: true }
-  if (filter === 'pinned') return [pinned]
-  return filter === 'superseded' ? [all] : [pinned, all]
+const narrows: Record<Filter, Partial<MemorySearchParams>> = {
+  all: {},
+  pinned: { pinned: true },
+  agent: { source: 'agent' },
+  outcomes: { kind: 'outcome' },
+  answers: { source: 'answer' },
+  superseded: { replaced: true },
 }
 
-const keeps: Record<Filter, (item: MemoryItem) => boolean> = {
-  all: () => true,
-  pinned: (item) => Boolean(item.pinned_at),
-  agent: (item) => item.source === 'agent',
-  outcomes: (item) => item.kind === 'outcome',
-  answers: (item) => item.source === 'answer',
-  superseded,
+/** The reads behind a filter, which memory.search applies: every pinned
+ * match, then the newest or best matches. Pinned needs only the first, and
+ * Superseded only the second, since a replaced note is never pinned. */
+export function reads(workspaceID: string, words: string, filter: Filter): MemorySearchParams[] {
+  const read: MemorySearchParams = { workspace_id: workspaceID, limit: listLimit, ...(words ? { words } : {}), ...narrows[filter] }
+  return filter === 'pinned' || filter === 'superseded' ? [read] : [{ ...read, pinned: true }, read]
 }
 
 /** Each note once, pinned first; each group keeps the server's order, best match or newest. */
-export function listed(items: MemoryItem[], filter: Filter): MemoryItem[] {
+export function listed(items: MemoryItem[]): MemoryItem[] {
   const seen = new Set<string>()
-  const kept = items.filter((item) => !seen.has(item.id) && seen.add(item.id) && keeps[filter](item))
+  const kept = items.filter((item) => !seen.has(item.id) && seen.add(item.id))
   return [...kept.filter((item) => item.pinned_at), ...kept.filter((item) => !item.pinned_at)]
 }

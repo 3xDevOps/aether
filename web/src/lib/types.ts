@@ -584,8 +584,10 @@ export interface MemorySearchParams {
   workspace_id: string
   words?: string
   kind?: MemoryKind
+  source?: MemorySource
   file?: string
   all?: boolean
+  replaced?: boolean
   pinned?: boolean
   limit?: number
 }

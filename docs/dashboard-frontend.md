@@ -4079,10 +4079,10 @@ answers to an older request.
   `activeWorkspace` or the first; notes belong to one workspace, so there is
   no "all") and **Add note**. A search box sends its words to
   `memory.search` 250 ms after typing stops. **Show** picks one of **All**,
-  **Pinned**, **Agent notes**, **Outcomes**, **Answers** and **Superseded**.
-  Outcomes asks the server for `kind: outcome` and Superseded for `all: true`
-  then keeps the replaced notes; Agent notes and Answers narrow what the
-  reads returned.
+  **Pinned**, **Agent notes**, **Outcomes**, **Answers** and **Superseded**,
+  which `memory.search` applies as `pinned: true`, `source: agent`,
+  `kind: outcome`, `source: answer` and `replaced: true`, so a match older
+  than the newest 100 notes is still listed.
 - **List.** Two reads with the same words and filter: every pinned note
   (`pinned: true`), and the 100 newest notes or best matches, which
   **Pinned** skips. **Superseded** makes only the second read, since a
