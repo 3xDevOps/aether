@@ -60,7 +60,8 @@ with an account on the server.
    the numbers: `memory.pin: pinned workspace notes use 980 of 1024 bytes;
    this note needs 120; unpin one first`. Scope selects whose briefs a pin
    enters, not who can search the note. A member merge moves pins to the
-   surviving member.
+   surviving member, and a member's replacement takes over the pin of the
+   note it replaces.
 10. **The brief is pushed once.** At launch, with the role card, a run gets
     at most 3072 bytes: the titles of the workspace's pins and its member's
     own pins, up to 5 runs finished in the last 48 hours (member, harness,

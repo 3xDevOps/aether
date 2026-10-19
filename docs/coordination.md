@@ -1009,9 +1009,15 @@ message and code on stderr and exits with the status in the table above; a
 usage error also prints the subcommand's usage. For example:
 
 ```
-memory.add: rejected, gitleaks rule generic-api-key at 1:12; remove the secret and retry [aether error -32001]
+memory.add: rejected, gitleaks rule generic-api-key at 0:21; remove the secret and retry [aether error -32001]
 memory.add: note-ab12cd34ef is pinned by dana; ask a member to replace it (aether memory add --supersedes note-ab12cd34ef) [aether error -32001]
 ```
+
+The secret's location is gitleaks' `line:col`, lines from 0 and columns
+from 1. A missing push permission, a secret, a `<team-memory` tag and a
+note an agent may not replace are `-32001`; the 20-note limit is `-32003`;
+a bad kind or a cap is `-32602`; an unknown note is `-32000`.
+[memory.md](memory.md#limits-and-their-errors) lists every message.
 
 `search` matches any of the words against titles, bodies and cited files,
 best first, ranked by bm25 and weighted toward newer notes; with no words

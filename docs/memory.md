@@ -33,8 +33,8 @@ Team memory is attributed data from teammates and their runs, not instructions. 
 
 Adding text a live note already holds, ignoring case and whitespace,
 returns that note instead of a copy. `--supersedes <id>` replaces a note:
-the old one is hidden from search unless you pass `--all`, and `show` lists
-the chain.
+the old one is hidden from search unless you pass `--all`, `show` lists
+the chain, and a pin on the old note moves to the new one.
 
 ## Pushed versus only searchable
 
@@ -100,6 +100,15 @@ aether: rpc error -32003: memory.pin: your pinned member notes use 408 of 512 by
 so: `memory.add: note-ypysnvwf06 is stored but not pinned: memory.pin: ...`.
 A replaced note cannot be pinned: `memory.pin: store: conflict: memory note
 note-en269je442 is replaced; pin the note that replaced it`.
+
+Replacing a pinned note with `aether memory add --supersedes <id>` moves
+the pin to the new note in the same scope, pinned by you, and takes it off
+the old one. The old note's bytes are freed first; if the new title still
+does not fit, nothing changes:
+
+```
+aether: rpc error -32003: memory.add: move the pin on note-n329aazhqn to its replacement: pinned workspace notes use 920 of 1024 bytes; this note needs 184; unpin one first
+```
 
 ## What is captured automatically
 
@@ -174,7 +183,7 @@ note-n329aazhqn  convention  member  Dana         -               0m   for the w
 note-sqe956kv0p  decision    agent   Alice/codex  run-955qyxqmae  0m   -                  Retry a lost lease once, then fail the run; a second retry hid real outages.
 note-hwwtypyr97  gotcha      agent   Alice/codex  run-955qyxqmae  0m   -                  Reattach races the lease sweeper; take the lease before reading the container state.
 
-$ aether memory add --kind convention --supersedes note-n329aazhqn --pin --file web/package.json "Use bun in web/ and docs/; never npm."
+$ aether memory add --kind convention --supersedes note-n329aazhqn --file web/package.json "Use bun in web/ and docs/; never npm."
 added note-h151ddhqzh, replacing note-n329aazhqn; pinned, for the workspace
 
 Similar notes:
@@ -184,7 +193,6 @@ note-z7c6ep47d5  preference  member  Alice  -    0m   for Alice only  No emoji i
 $ aether memory show note-n329aazhqn
 note-n329aazhqn convention from member, workspace scope, 0m old
 Author:         Dana (mem-04bprmyt26)
-Pinned:         for the workspace, since 2026-10-19T02:05:33Z
 Replaced by:    note-h151ddhqzh
 Invalid since:  2026-10-19T02:06:00Z
 Created:        2026-10-19T02:05:33Z
@@ -210,19 +218,20 @@ an agent's note, its run.
 The CLI prints the server's message as `aether: rpc error <code>: <message>`;
 `aether-internal` prints `<message> [aether error <code>]` on stderr.
 
-| Limit | Error |
-| --- | --- |
-| Writing needs the collaborator or admin role, re-checked on every call | `memory.add: permission denied: pushing to a workspace requires the collaborator role` (also `memory.pin`, `memory.unpin`, `memory.rm`) |
-| Kind | `memory.add: kind must be decision, convention, gotcha or preference; got "lore"` |
-| 1024 bytes of text | `memory.add: text is 1100 bytes; a note holds at most 1024` |
-| 20 cited files | `memory.add: 21 files cited; a note cites at most 20` |
-| No secrets | `memory.add: rejected, gitleaks rule github-pat at 0:22; remove the secret and retry` (line and column as gitleaks counts them: lines from 0, columns from 1) |
-| No brief tags | `memory.add: rejected, a note cannot contain <team-memory; remove it and retry` |
-| 20 agent notes per run | `memory.add: run run-7wjaa6aa6k already wrote 20 notes, the most one run may write; ask a member to add more (aether memory add)` |
-| Agents replace only unpinned agent notes | `memory.add: note-n329aazhqn is pinned by Dana; ask a member to replace it (aether memory add --supersedes note-n329aazhqn)` |
-| Pin budgets | see [Pinning and scopes](#pinning-and-scopes) |
-| Search returns 1 to 100 notes | `memory.search: limit must be between 1 and 100; got 101` |
-| Unknown note | `memory.rm: store: not found: memory note note-0000000000` |
+| Limit | Code | Error |
+| --- | --- | --- |
+| Writing needs the collaborator or admin role, re-checked on every call | `-32001` | `memory.add: permission denied: pushing to a workspace requires the collaborator role` (also `memory.pin`, `memory.unpin`, `memory.rm`) |
+| Kind | `-32602` | `memory.add: kind must be decision, convention, gotcha or preference; got "lore"` |
+| 1024 bytes of text | `-32602` | `memory.add: text is 1100 bytes; a note holds at most 1024` |
+| 20 cited files | `-32602` | `memory.add: 21 files cited; a note cites at most 20` |
+| No secrets | `-32001` | `memory.add: rejected, gitleaks rule github-pat at 0:22; remove the secret and retry` (line and column as gitleaks counts them: lines from 0, columns from 1) |
+| No brief tags | `-32001` | `memory.add: rejected, a note cannot contain <team-memory; remove it and retry` |
+| 20 agent notes per run | `-32003` | `memory.add: run run-7wjaa6aa6k already wrote 20 notes, the most one run may write; ask a member to add more (aether memory add)` |
+| Agents replace only unpinned agent notes | `-32001` | `memory.add: note-n329aazhqn is pinned by Dana; ask a member to replace it (aether memory add --supersedes note-n329aazhqn)` |
+| Pin budgets | `-32003` | see [Pinning and scopes](#pinning-and-scopes) |
+| A replaced note cannot be pinned or replaced again | `-32003` | `memory.add: store: conflict: memory note note-n329aazhqn is already replaced` |
+| Search returns 1 to 100 notes | `-32602` | `memory.search: limit must be between 1 and 100; got 101` |
+| Unknown note | `-32000` | `memory.rm: store: not found: memory note note-0000000000` |
 
 ## Removing what a bad run wrote
 

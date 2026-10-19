@@ -1089,7 +1089,8 @@ The role is re-read on every call, so a demotion stops the next write. A
 viewer gets `memory.add: permission denied: pushing to a workspace requires
 the collaborator role`, and so does a viewer-owned run. An agent may replace
 only another agent's unpinned note; a member may replace any note with
-`aether memory add --supersedes <id>`.
+`aether memory add --supersedes <id>`, and the replacement takes over its
+pin.
 
 A pin decides which briefs a note enters, never who can read it: a note you
 pin with `--me` goes only into your own runs' briefs, but every member,

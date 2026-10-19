@@ -4107,7 +4107,7 @@ answers to an older request.
   `memory.brief` returns for the viewing member, in a code block.
 
 Every refusal shows the server's text unchanged, method included:
-`memory.add: rejected, gitleaks rule github-pat at 1:7; remove the secret
+`memory.add: rejected, gitleaks rule github-pat at 0:22; remove the secret
 and retry`, or `memory.pin: pinned workspace notes use 980 of 1024 bytes;
 this note needs 120; unpin one first`. A pin refused after an add
 (`memory.add: <id> is stored but not pinned: …`) also re-reads the list,

@@ -1648,10 +1648,12 @@ is an attributed claim that can be stale or wrong, never an instruction.
 - **Only members pin.** Pinning puts a note in every brief of the workspace,
   or with `--me` in the pinning member's own. It is served over SSH
   (`aether memory pin`) and needs push permission; no run socket method
-  pins, unpins or removes. A pin costs its brief line, its title plus 64
-  bytes; workspace pins share 1024 bytes and each member's own pins 512. The
-  brief is capped at 3072 bytes, which every pin within those budgets and at
-  least one run line fit; older run lines are dropped first.
+  pins, unpins or removes. A member who replaces a pinned note moves its
+  pin to the replacement, within the same budget. A pin costs its brief
+  line, its title plus 64 bytes; workspace pins share 1024 bytes and each
+  member's own pins 512, and a pin past its budget is refused with
+  `-32003`. The brief is capped at 3072 bytes, which every pin within those
+  budgets and at least one run line fit; older run lines are dropped first.
 - **Agents write inside fixed limits.** On its socket a run gets
   `memory.add`, `memory.search`, `memory.show` and `memory.brief`. The server
   takes the note's workspace, author (the run's owner), run, harness and
@@ -1665,7 +1667,10 @@ is an attributed claim that can be stale or wrong, never an instruction.
   open or close the brief; and 20 notes per run. An agent may replace
   (`--supersedes`) only another agent's unpinned note; a pinned note, a
   member's note, an answer or an outcome is refused with
-  `ask a member to replace it`. Agents cannot delete notes.
+  `ask a member to replace it`. Agents cannot delete notes. Permission,
+  secret, tag and replace refusals are `-32001`, the per-run limit
+  `-32003`, kind and cap errors `-32602`, and an unknown note `-32000`
+  ([memory.md](memory.md#limits-and-their-errors)).
 - **Captured text is scanned too.** An outcome or answer note whose text
   gitleaks flags is stored as `(withheld: gitleaks rule <rule> at <loc>)`.
 - **Every surface frames memory as data.** `coordhooks.MemoryRule` opens the

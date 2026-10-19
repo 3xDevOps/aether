@@ -129,7 +129,7 @@ describe('memory page', () => {
 
   it("shows the server's refusal word for word and keeps the note to fix", async () => {
     seed()
-    const refusal = 'memory.add: rejected, gitleaks rule github-pat at 1:7; remove the secret and retry'
+    const refusal = 'memory.add: rejected, gitleaks rule github-pat at 0:22; remove the secret and retry'
     const answers: Record<string, unknown> = { 'memory.search': { items: live }, 'memory.brief': { text: '' }, 'agent.list': { agents: [] } }
     vi.stubGlobal('fetch', vi.fn(async (input: string) => {
       const method = input.split('/api/v1/')[1]
