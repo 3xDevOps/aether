@@ -36,6 +36,8 @@ type InsightsResult struct {
 	Durations    InsightsDurations     `json:"durations"`
 	Cost         InsightsCost          `json:"cost"`
 	PullRequests InsightsPullRequests  `json:"pull_requests"`
+	Success      InsightsSuccess       `json:"success"`
+	Outcomes     InsightsOutcomes      `json:"outcomes"`
 	Recent       []InsightsRecentRun   `json:"recent"`
 	NeedsYou     int                   `json:"needs_you"`
 	Coverage     InsightsCoverage      `json:"coverage"`
@@ -107,11 +109,73 @@ type InsightsDurations struct {
 
 // InsightsCost is a floor: an unmetered run's cost is unknown, not zero.
 type InsightsCost struct {
+	MeteredRuns   int                 `json:"metered_runs"`
+	UnmeteredRuns int                 `json:"unmetered_runs"`
+	CostUSD       float64             `json:"cost_usd"`
+	InputTokens   int64               `json:"input_tokens"`
+	OutputTokens  int64               `json:"output_tokens"`
+	TotalTokens   int64               `json:"total_tokens"`
+	ByAgent       []InsightsCostAgent `json:"by_agent"`
+}
+
+// InsightsCostAgent is InsightsCost for one harness, largest TotalTokens
+// first. A harness whose runs are all unmetered is listed with zero tokens.
+type InsightsCostAgent struct {
+	Harness       string  `json:"harness"`
 	MeteredRuns   int     `json:"metered_runs"`
 	UnmeteredRuns int     `json:"unmetered_runs"`
 	CostUSD       float64 `json:"cost_usd"`
 	InputTokens   int64   `json:"input_tokens"`
 	OutputTokens  int64   `json:"output_tokens"`
+	TotalTokens   int64   `json:"total_tokens"`
+}
+
+// InsightsOutcome is how runs or swarms finished. See docs/insights.md for
+// which statuses count as which.
+type InsightsOutcome struct {
+	Done      int `json:"done"`
+	Failed    int `json:"failed"`
+	Abandoned int `json:"abandoned"`
+}
+
+// InsightsOutcomes is the outcome totals and the outcomes per Series bucket,
+// in the same order. Members lists every member for scope "everyone" and is
+// empty for "mine".
+type InsightsOutcomes struct {
+	Runs    InsightsOutcome         `json:"runs"`
+	Swarms  InsightsOutcome         `json:"swarms"`
+	Series  []InsightsOutcomeBucket `json:"series"`
+	Members []InsightsMemberOutcome `json:"members"`
+}
+
+type InsightsOutcomeBucket struct {
+	Start  string          `json:"start"`
+	Runs   InsightsOutcome `json:"runs"`
+	Swarms InsightsOutcome `json:"swarms"`
+}
+
+// InsightsMemberOutcome is one member's share of InsightsOutcomes. Color is
+// the member's profile color; MemberID never changes and is the key to
+// assign chart colors by.
+type InsightsMemberOutcome struct {
+	MemberID    string                  `json:"member_id"`
+	DisplayName string                  `json:"display_name"`
+	Color       string                  `json:"color"`
+	Runs        InsightsOutcome         `json:"runs"`
+	Swarms      InsightsOutcome         `json:"swarms"`
+	Series      []InsightsOutcomeBucket `json:"series"`
+}
+
+// InsightsSuccess counts what finished in the range and how much of it ended
+// with a merged pull request.
+type InsightsSuccess struct {
+	Runs   InsightsSuccessCount `json:"runs"`
+	Swarms InsightsSuccessCount `json:"swarms"`
+}
+
+type InsightsSuccessCount struct {
+	Succeeded int `json:"succeeded"`
+	Finished  int `json:"finished"`
 }
 
 type InsightsPullRequests struct {
