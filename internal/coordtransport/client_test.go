@@ -45,6 +45,7 @@ func transportSocket(t *testing.T, serve func(net.Conn)) string {
 // past the old 30-second client ceiling must still be consumed. Subtests share
 // no state and run concurrently rather than serializing long waits.
 func TestCallConsumesMaximumWaitResult(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, method string
 		params       any
@@ -92,6 +93,7 @@ func TestCallConsumesMaximumWaitResult(t *testing.T) {
 }
 
 func TestCallBoundsInvalidPollWait(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, method string
 		params       any
