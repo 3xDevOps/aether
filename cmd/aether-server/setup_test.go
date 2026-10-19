@@ -700,7 +700,8 @@ func TestWriteSetupWithoutDockerStartsNextOnDocker(t *testing.T) {
 	}
 	want := "  1. install or start Docker on this machine:\n       https://docs.docker.com/engine/install/\n" +
 		"  2. start the server on this machine:\n       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server\n" +
-		"  3. on this machine, print a claim link to open on your computer:\n       sudo aether-server edge claim-code --config '" + configPath + "'\n"
+		"  3. on this machine, print a claim link to open on your computer:\n       sudo aether-server edge claim-code --config '" + configPath + "'\n" +
+		mcpStep(4)
 	if got := nextSteps(t, out.String()); got != want {
 		t.Errorf("next steps:\n%s\nwant:\n%s", got, want)
 	}
@@ -749,9 +750,9 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 	}
 	got := out.String()
 	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-	code := strings.TrimPrefix(lines[len(lines)-1], "       aether link --claim ")
+	code := strings.TrimPrefix(lines[len(lines)-3], "       aether link --claim ")
 	if claim, ok, err := edgeagent.OpenState(dataDir).ClaimCode(); err != nil || !ok || claim.Hash != edgeproto.HashToken(code) {
-		t.Fatalf("last line %q does not carry the issued claim code (%v, %v):\n%s", lines[len(lines)-1], ok, err, got)
+		t.Fatalf("line %q does not carry the issued claim code (%v, %v):\n%s", lines[len(lines)-3], ok, err, got)
 	}
 	sysboxAt, claimAt, nextAt := strings.Index(got, "sysbox installer output"), strings.Index(got, "claim link: "), strings.Index(got, "\nnext:\n")
 	if sysboxAt < 0 || claimAt < sysboxAt || nextAt < claimAt {
@@ -760,8 +761,8 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 	if !strings.HasSuffix(got, "\n       "+serversetup.ActivateCommand+"\n"+
 		"  2. on your computer, open the claim link above with the Aether app, or paste it\n"+
 		"     into the app's Connect page; in a terminal:\n"+
-		"       aether link --claim "+code+"\n") {
-		t.Errorf("output does not end on starting the server and claiming it:\n%s", got)
+		"       aether link --claim "+code+"\n"+mcpStep(3)) {
+		t.Errorf("output does not end on starting the server, claiming it and adding it to ChatGPT or Claude:\n%s", got)
 	}
 	if n := strings.Count(got, "systemctl daemon-reload"); n != 1 {
 		t.Errorf("activation line printed %d times, want once:\n%s", n, got)
@@ -769,6 +770,12 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 	if strings.Contains(got, "\x1b") {
 		t.Errorf("escape codes written to a non-terminal:\n%q", got)
 	}
+}
+
+// mcpStep is the next step, numbered n, that a server with the edge on
+// ends with.
+func mcpStep(n int) string {
+	return fmt.Sprintf("  %d. to run agents from ChatGPT or Claude, on that computer:\n       aether mcp\n", n)
 }
 
 // optionsOf is the serve options with values set, as configuredOptions
@@ -809,7 +816,7 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out.String(), "\n       sudo aether-server edge claim-code\n") {
+	if !strings.HasSuffix(out.String(), "\n       sudo aether-server edge claim-code\n"+mcpStep(3)) {
 		t.Errorf("want step 2 to issue a claim code:\n%s", out.String())
 	}
 
@@ -817,7 +824,7 @@ func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 	if err := printNextSteps(&out, "/srv/it's here/server.conf", o, "", true); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out.String(), `sudo aether-server edge claim-code --config '/srv/it'\''s here/server.conf'`+"\n") {
+	if !strings.HasSuffix(out.String(), `sudo aether-server edge claim-code --config '/srv/it'\''s here/server.conf'`+"\n"+mcpStep(3)) {
 		t.Errorf("want the claim command to name the config install wrote, shell-quoted:\n%s", out.String())
 	}
 }

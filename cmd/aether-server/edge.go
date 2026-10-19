@@ -145,6 +145,10 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	if err != nil {
 		return err
 	}
+	origin, err := edgeproto.Origin(edgeURL)
+	if err != nil {
+		return err
+	}
 	state := edgeagent.OpenState(dataDir)
 	pinned, err := state.PinnedKey()
 	if err != nil {
@@ -167,6 +171,7 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	_, _ = fmt.Fprintf(tw, "edge\t%s\n", edgeURL)
 	_, _ = fmt.Fprintf(tw, "edge access\t%s\n", policy)
 	_, _ = fmt.Fprintf(tw, "server id\t%s\n", id)
+	_, _ = fmt.Fprintf(tw, "connector\t%s  (add it to ChatGPT or Claude; get a code: aether mcp)\n", origin+edgeproto.MCPPath(id))
 	if pinned != nil {
 		_, _ = fmt.Fprintf(tw, "edge key\t%s\n", edgeproto.EdgeKeyFingerprint(pinned))
 	} else {

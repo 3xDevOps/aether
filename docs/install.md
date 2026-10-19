@@ -2224,6 +2224,7 @@ automatic.
 | `ssh/` | The server's SSH host key. It derives the server id at an edge; a new key is a new server there. |
 | `push/` | The key that signs [push notifications](networking.md#notifications). Without it every device has to turn notifications off and on again. |
 | `edge/` | Edge enrollment: the pinned edge key, the owner per edge key under `keys/`, the claim code's hash and the connection status ([edge.md](edge.md#files)). |
+| `connector/` | `hmac.key`, which signs the [connector](connectors.md) consent form. Losing it fails only consent pages open at the time; connectors keep working. |
 | `repos/` | One bare git repo per workspace. |
 | `mirrors/` | Per-workspace source-mirror metadata and deploy-key material. Private keys are server-side files, not database columns or member homes. |
 | `workspace-secrets/` | One `<workspace-id>.json` per workspace that has secret variables: their values in plain text, mode `0600` in a mode-`0700` directory ([security.md](security.md#workspace-secrets)). |

@@ -18,7 +18,9 @@ import (
 // the device token for client paths, the open's ticket for
 // PathServerData. PathServerControl authenticates by the enrollment
 // signature, and PathEdgeInfo, PathDeviceStart and PathDeviceToken need
-// no token. The patterns with a {name} segment are http.ServeMux
+// no token. The edge authenticates nothing on the MCP paths: it relays
+// each request, of any method, to the server the path names, which
+// authenticates it. The patterns with a {name} segment are http.ServeMux
 // patterns; build concrete paths with the functions below.
 
 // Paths served on the relay origin.
@@ -30,6 +32,12 @@ const (
 	// PathClaimConnect opens a connection of KindClaim. The edge refuses
 	// it with RefusalClaimed for a server that has an owner.
 	PathClaimConnect = "/v1/connect/{server_id}/claim"
+	// PathMCP, every path below it, and the OAuth metadata paths for it
+	// (RFC 9728 and RFC 8414) reach the server's MCP connector endpoint
+	// over KindHTTP connections, with the path and query unchanged.
+	PathMCP                   = "/mcp/{server_id}"
+	PathMCPResourceMetadata   = "/.well-known/oauth-protected-resource/mcp/{server_id}"
+	PathMCPAuthServerMetadata = "/.well-known/oauth-authorization-server/mcp/{server_id}"
 )
 
 // Paths served on the sign-in origin.
@@ -53,12 +61,25 @@ func ConnectPath(serverID string) string { return "/v1/connect/" + serverID }
 // ClaimConnectPath is the path a client dials to claim serverID.
 func ClaimConnectPath(serverID string) string { return "/v1/connect/" + serverID + "/claim" }
 
+// MCPPath is the URL path of serverID's MCP connector endpoint.
+func MCPPath(serverID string) string { return "/mcp/" + serverID }
+
 // HeaderVersion carries the sender's protocol Version on client requests
 // and on edge responses.
 const HeaderVersion = "Aether-Edge-Version"
 
+// HeaderClientAddr carries, on each request the edge relays over a
+// KindHTTP connection, the client address as Open.ClientAddr does:
+// edge-asserted, for logs and rate limits only, never for
+// authentication. A client cannot set it: the edge replaces any it sends.
+const HeaderClientAddr = "Aether-Edge-Client-Addr"
+
 // MaxRequestBodySize bounds the JSON body of any edge API request.
 const MaxRequestBodySize = 64 << 10
+
+// MaxHTTPBodySize bounds the body of a request the edge relays over a
+// KindHTTP connection; a larger one is refused with 413.
+const MaxHTTPBodySize = 1 << 20
 
 // ErrorBody is the JSON body of every refused edge API request.
 type ErrorBody struct {
