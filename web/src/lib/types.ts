@@ -493,6 +493,58 @@ export interface InsightsRun {
   pr_state: string
 }
 
+export interface InsightsCostAgent {
+  harness: string
+  metered_runs: number
+  unmetered_runs: number
+  cost_usd: number
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+}
+
+export interface InsightsCost extends Omit<InsightsCostAgent, 'harness'> {
+  /** Largest total_tokens first. */
+  by_agent: InsightsCostAgent[]
+}
+
+/** Finished work with a merged pull request, out of all that finished. */
+export interface InsightsSuccessCount {
+  succeeded: number
+  finished: number
+}
+
+export interface InsightsOutcome {
+  done: number
+  failed: number
+  abandoned: number
+}
+
+export interface InsightsOutcomeBucket {
+  /** A local date, YYYY-MM-DD, as in the series. */
+  start: string
+  runs: InsightsOutcome
+  swarms: InsightsOutcome
+}
+
+export interface InsightsMemberOutcome {
+  member_id: string
+  display_name: string
+  /** The member's profile color. */
+  color: string
+  runs: InsightsOutcome
+  swarms: InsightsOutcome
+  series: InsightsOutcomeBucket[]
+}
+
+export interface InsightsOutcomes {
+  runs: InsightsOutcome
+  swarms: InsightsOutcome
+  series: InsightsOutcomeBucket[]
+  /** Filled for scope "everyone" only. */
+  members: InsightsMemberOutcome[]
+}
+
 export interface InsightsResult {
   generated_at: string
   from: string
@@ -516,8 +568,10 @@ export interface InsightsResult {
     median_waiting_seconds: number
     median_response_seconds: number
   }
-  cost: { metered_runs: number; unmetered_runs: number; cost_usd: number; input_tokens: number; output_tokens: number }
+  cost: InsightsCost
   pull_requests: { opened: number; merged: number }
+  success: { runs: InsightsSuccessCount; swarms: InsightsSuccessCount }
+  outcomes: InsightsOutcomes
   recent: InsightsRun[]
   needs_you: number
   /** "" until Aether has recorded one. */

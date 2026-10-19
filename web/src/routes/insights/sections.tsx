@@ -6,10 +6,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { FailureCallout } from '@/components/ui/failure-callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
+import { Skeleton } from '@/components/ui/skeleton'
 import { money } from '@/lib/format'
-import type { InsightsResult, InsightsRun } from '@/lib/types'
+import { useDelayed } from '@/lib/hooks'
+import type { InsightsResult, InsightsRun, InsightsSuccessCount } from '@/lib/types'
 import { useStore } from '@/store'
-import { agentLabel, duration, type BucketRuns, outcome, plural, sinceLabel, successRate, versus } from '@/routes/insights/model'
+import { ActivityChart } from '@/routes/insights/activity-chart'
+import { agentLabel, duration, outcome, percent, plural, sinceLabel, tokens, type SectionLoad } from '@/routes/insights/model'
 
 export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -30,35 +33,71 @@ function Tile({ label, value, children }: { label: string; value: string; childr
   )
 }
 
-export function Tiles({ result, before }: { result: InsightsResult; before: string }) {
-  const { totals, previous, swarms, pull_requests: prs, coverage } = result
-  const rate = successRate(totals)
-  const was = successRate(previous)
+function fraction(count: InsightsSuccessCount, unit: string): string {
+  return count.finished === 0 ? `No ${unit}s finished` : `${count.succeeded} of ${plural(count.finished, unit)} merged a pull request`
+}
+
+export function Tiles({ result, agentNames }: { result: InsightsResult; agentNames: Record<string, string> }) {
+  const { swarms, success, outcomes, cost } = result
+  const rate = percent(success.runs.succeeded + success.swarms.succeeded, success.runs.finished + success.swarms.finished)
+  const top = cost.by_agent[0]
   return (
     <div className="grid grid-cols-1 gap-2 min-[30rem]:grid-cols-2 lg:grid-cols-4">
-      <Tile label="Runs finished" value={totals.finished.toLocaleString()}>
-        <span>{versus(totals.finished, previous.finished, before)}</span>
-        <span>{plural(totals.launched, 'run')} launched</span>
-      </Tile>
-      <Tile label="Success rate" value={rate.percent === null ? '—' : `${rate.percent}%`}>
-        <span>{rate.percent === null ? 'No runs ended' : `${rate.finished} finished of ${plural(rate.ended, 'ended run')}`}</span>
-        <span>{was.percent === null ? `No runs ended ${before}` : `${was.percent}% (${was.finished} of ${was.ended}) ${before}`}</span>
-      </Tile>
-      <Tile label="Swarms completed" value={swarms.completed.toLocaleString()}>
+      <Tile label="Runs / swarms completed" value={`${plural(outcomes.runs.done, 'run')} / ${plural(outcomes.swarms.done, 'swarm')}`}>
+        <span>{plural(result.totals.launched, 'run')} launched</span>
         <span>{plural(swarms.launched, 'swarm')} launched</span>
+      </Tile>
+      <Tile label="Success rate" value={rate === null ? '—' : `${rate}%`}>
+        <span>Runs: {fraction(success.runs, 'run')}</span>
+        <span>Swarms: {fraction(success.swarms, 'swarm')}</span>
+      </Tile>
+      <Tile label="Tasks completed" value={swarms.tasks_accepted.toLocaleString()}>
         <span>{plural(swarms.agents, 'agent')}, {plural(swarms.tasks_accepted, 'task')} accepted</span>
       </Tile>
-      <Tile label="Pull requests opened" value={coverage.pull_requests_since ? prs.opened.toLocaleString() : '—'}>
-        {coverage.pull_requests_since ? (
-          <>
-            <span>{prs.merged.toLocaleString()} merged</span>
-            <span>Through Aether, recorded since {sinceLabel(coverage.pull_requests_since)}</span>
-          </>
+      <Tile label="Total tokens used" value={tokens(cost.total_tokens)}>
+        {top && cost.total_tokens > 0 ? (
+          <span>{agentNames[top.harness] ?? top.harness} used {Math.round((top.total_tokens / cost.total_tokens) * 100)}% of the {tokens(cost.total_tokens)}</span>
         ) : (
-          <span>Aether counts the pull requests its runs open from the first one on. None recorded yet.</span>
+          <span>{cost.unmetered_runs > 0 ? 'No tokens reported' : 'No runs ended'}</span>
         )}
+        {cost.unmetered_runs > 0 && <span>{plural(cost.unmetered_runs, 'run')} did not report tokens</span>}
       </Tile>
     </div>
+  )
+}
+
+export function StatsSection({
+  title,
+  load,
+  onRetry,
+  team,
+  agentNames,
+}: {
+  title: string
+  load: SectionLoad
+  onRetry: () => void
+  team: boolean
+  agentNames: Record<string, string>
+}) {
+  const skeleton = useDelayed(load.kind === 'loading')
+  return (
+    <Section title={title}>
+      {load.kind === 'loading' && skeleton && (
+        <div aria-hidden className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24" />)}
+          </div>
+          <Skeleton className="h-52" />
+        </div>
+      )}
+      {load.kind === 'failed' && <FailureCallout error={load.message} onRetry={onRetry} />}
+      {load.kind === 'ready' && (
+        <>
+          <Tiles result={load.result} agentNames={agentNames} />
+          <ActivityChart result={load.result} team={team} />
+        </>
+      )}
+    </Section>
   )
 }
 
@@ -93,38 +132,21 @@ function FinishedRow({ run, workspace, agent, prError }: { run: InsightsRun; wor
 }
 
 export function FinishedList({
-  list,
-  filter,
-  onClear,
-  onRetry,
+  runs,
   workspaceOf,
   agentNames,
   prErrors,
 }: {
-  list: BucketRuns
-  filter: string | null
-  onClear: () => void
-  onRetry: () => void
+  runs: InsightsRun[]
   workspaceOf: (id: string) => string
   agentNames: Record<string, string>
   prErrors: Record<string, string>
 }) {
   const [all, setAll] = useState(false)
-  const runs = list.kind === 'ready' ? list.runs : []
   const shown = all ? runs : runs.slice(0, 10)
   return (
     <Section title="Finished work">
-      {filter && (
-        <p role="status" className="flex flex-wrap items-center gap-2 text-ui-sm text-muted">
-          <span>Showing runs that ended {filter.startsWith('the week') ? 'in' : 'on'} {filter}.</span>
-          <Button variant="link" onClick={onClear}>Show every day</Button>
-        </p>
-      )}
-      {list.kind === 'loading' && <p className="text-ui text-muted">Reading the runs that ended then…</p>}
-      {list.kind === 'failed' && <FailureCallout error={list.message} onRetry={onRetry} />}
-      {list.kind === 'ready' && runs.length === 0 && (
-        <p className="text-ui text-muted">{filter ? 'No runs ended then.' : 'No runs ended in this period.'}</p>
-      )}
+      {runs.length === 0 && <p className="text-ui text-muted">No runs ended in the last 7 days.</p>}
       {runs.length > 0 && (
         <ul className="flex min-w-0 flex-col gap-2">
           {shown.map((run) => (
@@ -137,7 +159,7 @@ export function FinishedList({
       {shown.length < runs.length && (
         <Button variant="secondary" className="self-start" onClick={() => setAll(true)}>Show all {runs.length}</Button>
       )}
-      {runs.length >= 50 && <p className="text-ui-sm text-muted">The 50 most recent runs that ended {filter ? 'then' : 'in this period'}.</p>}
+      {runs.length >= 50 && <p className="text-ui-sm text-muted">The 50 most recent runs that ended in the last 7 days.</p>}
     </Section>
   )
 }
