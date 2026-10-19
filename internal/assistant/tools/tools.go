@@ -188,7 +188,7 @@ func (s *Server) dispatch(ctx context.Context, req protocol.Request) (json.RawMe
 }
 
 func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (json.RawMessage, *protocol.Error) {
-	params, err := s.prepare(req)
+	params, err := Prepare(s.Member, req.Method, req.Params)
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": " + err.Error()}
 	}
@@ -362,24 +362,25 @@ func truncate(text string) string {
 	return text
 }
 
-// prepare checks req's params. The socket is bound to one member, so the wire
-// never names one, except that run.list takes member_id as a read filter, and
-// "mine" there selects the socket's own member.
-func (s *Server) prepare(req protocol.Request) (json.RawMessage, error) {
-	if len(req.Params) == 0 || string(req.Params) == "null" {
-		return req.Params, nil
+// Prepare checks the params of a call made for member, by the assistant's
+// socket or a connector. Either is bound to one member, so the wire never
+// names one, except that run.list takes member_id as a read filter, and
+// "mine" there selects member.
+func Prepare(member, method string, params json.RawMessage) (json.RawMessage, error) {
+	if len(params) == 0 || string(params) == "null" {
+		return params, nil
 	}
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(req.Params, &fields); err != nil {
+	if err := json.Unmarshal(params, &fields); err != nil {
 		return nil, errors.New("params must be an object")
 	}
 	for name := range fields {
-		if strings.Contains(strings.ToLower(name), "member_id") && (req.Method != protocol.MethodRunList || name != "member_id") {
+		if strings.Contains(strings.ToLower(name), "member_id") && (method != protocol.MethodRunList || name != "member_id") {
 			return nil, fmt.Errorf("%s is not accepted: calls act as the member this socket belongs to", name)
 		}
 	}
-	if req.Method != protocol.MethodRunList {
-		return req.Params, nil
+	if method != protocol.MethodRunList {
+		return params, nil
 	}
 	var mine bool
 	if raw, ok := fields["mine"]; ok {
@@ -389,7 +390,7 @@ func (s *Server) prepare(req protocol.Request) (json.RawMessage, error) {
 		delete(fields, "mine")
 	}
 	if mine {
-		id, _ := json.Marshal(s.Member)
+		id, _ := json.Marshal(member)
 		fields["member_id"] = id
 	}
 	return json.Marshal(fields)

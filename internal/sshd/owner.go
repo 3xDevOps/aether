@@ -31,6 +31,10 @@ type EdgeOwner interface {
 	Origin() string
 	// Connected reports whether the control connection to the edge is up.
 	Connected() bool
+	// EdgeVersion is the protocol version of the control connection, 0
+	// while there is none. Below edgeproto.VersionHTTP the edge forwards
+	// no connector requests.
+	EdgeVersion() int
 	// EdgeState is the edge's last reported state for this server,
 	// edgeproto.StateClaimed or StateUnclaimed, empty until it answers.
 	EdgeState() string

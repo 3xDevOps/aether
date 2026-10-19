@@ -1802,7 +1802,40 @@ ALTER TABLE runs ADD COLUMN review_changed_at INTEGER;
 	`
 CREATE INDEX idx_events_run ON events (run_id);
 `,
-	// v74: team memory. A note is attributed to a member, and to the run,
+	// v74: the ChatGPT and Claude connectors members authorized. Tokens
+	// are kept as SHA-256 hashes and are good only for resource, the
+	// connector URL they were minted for. device_id is the edge device the
+	// pairing code was minted on, NULL over a member SSH key or a tailnet.
+	// connector_rotated_tokens remembers each refresh token a connector
+	// rotated away, and when, until it would have lapsed, so presenting
+	// one again revokes the connector.
+	`
+CREATE TABLE connectors (
+	id                 TEXT PRIMARY KEY,
+	member_id          TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	device_id          TEXT REFERENCES member_devices(id) ON DELETE CASCADE,
+	client_id          TEXT NOT NULL,
+	client_name        TEXT NOT NULL,
+	redirect_host      TEXT NOT NULL,
+	resource           TEXT NOT NULL,
+	created_at         INTEGER NOT NULL,
+	last_used_at       INTEGER,
+	access_hash        TEXT NOT NULL UNIQUE,
+	access_expires_at  INTEGER NOT NULL,
+	refresh_hash       TEXT NOT NULL UNIQUE,
+	refresh_expires_at INTEGER NOT NULL
+);
+CREATE INDEX idx_connectors_member ON connectors(member_id);
+CREATE INDEX idx_connectors_device ON connectors(device_id);
+CREATE TABLE connector_rotated_tokens (
+	refresh_hash TEXT PRIMARY KEY,
+	connector_id TEXT NOT NULL REFERENCES connectors(id) ON DELETE CASCADE,
+	rotated_at   INTEGER NOT NULL,
+	expires_at   INTEGER NOT NULL
+);
+CREATE INDEX idx_connector_rotated_tokens_connector ON connector_rotated_tokens(connector_id);
+`,
+	// v75: team memory. A note is attributed to a member, and to the run,
 	// harness, commit and files it came from; run_id has no foreign key so
 	// a pinned note outlives its run. A live note has invalid_at NULL; a
 	// replaced one also names its replacement in superseded_by. Two live

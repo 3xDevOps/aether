@@ -210,7 +210,7 @@ test('two members share notes, moderated messages, and explicit control transfer
     await expect(bobPresence.getByRole('button', { name: 'Release', exact: true })).toBeHidden()
     await expect(alicePresence.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
 
-    // Hold through the server's five-second threshold; only the holder decides.
+    // Hold through the server's three-second threshold; only the holder decides.
     await takeControl.focus()
     await bobPage.keyboard.down('Space')
     const takeover = page.getByRole('alertdialog', { name: 'Run control requested' })

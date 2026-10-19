@@ -176,12 +176,13 @@ control** in the Terminal toolbar or the Enhanced run's Multiplayer strip
 acquires an unoccupied run. An occupied click reports
 `run control is held by another session` and leaves the controller in place.
 
-To request an occupied run, hold **Take control** for five seconds with
+To request an occupied run, hold **Take control** for three seconds with
 the pointer, touch, Space, or Enter. A red fill with a forward-slash leading
 edge advances across the button; covered and uncovered text retain separate
 contrast. The holder sees the same fill on **Release**. A Standard run also
 traces red over its terminal's teal border from the side midpoints toward
 the top and bottom centers.
+The fill decelerates (logarithmic) while the countdown stays linear.
 Releasing early, moving off the button, pressing Escape, or leaving the tab
 cancels the hold.
 
@@ -218,7 +219,7 @@ acquires control only if the run is still unoccupied.
 **Control changes are acknowledged on the existing attach WebSocket.** A
 dashboard terminal sends a text frame such as
 `{"type":"control","request_id":17,"write":true}`. Occupied takeovers use the
-five-second hold and seven-second review exchange described in the
+three-second hold and seven-second review exchange described in the
 [attach protocol](local-gateway.md#get-wsattachrun_id). The server answers on
 that same stream with
 `{"type":"control","request_id":17,"ok":true,"has_control":true,

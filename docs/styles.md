@@ -386,10 +386,10 @@ end, under **Take control** and **Release**, is the light's source:
 acquisition pours it leftward across the edge and voluntary release drains
 it back to the right, each over 720ms and decelerating toward the endpoint.
 A control-lost takeover turns the light red over 540ms and drains it to the
-right over 1440ms. An occupied five-second hold fills **Take control** and
+right over 1440ms. An occupied three-second hold fills **Take control** and
 the holder's **Release** diagonally in red and spreads red light leftward
 from the right end of the holder's edge, replacing the teal it reaches; text
-on either side of the fill edge keeps its own contrast. A seven-second holder
+on either side of the fill edge keeps its own contrast. The fill decelerates (logarithmic) while the countdown stays linear. A seven-second holder
 decision follows. Under `prefers-reduced-motion: reduce`, ownership changes
 are instant, the settled light holds at half without breathing, and takeover
 fills and light become static red indicators with countdowns; labels keep the state meaning. Loading spinners and delayed skeletons remain functional

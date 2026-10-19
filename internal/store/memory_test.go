@@ -736,8 +736,8 @@ func TestMemoryBriefInputs(t *testing.T) {
 	}
 }
 
-// v74 applies to a database the previous release left at v73.
-func TestMemoryMigrationFromV73(t *testing.T) {
+// v75 applies to a database the previous release left at v74.
+func TestMemoryMigrationFromV74(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "aether.db")
 	raw := openLegacy(t, path, len(migrations)-1)

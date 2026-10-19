@@ -2073,7 +2073,7 @@ the agent's session, and the page has a lease of its own
 and saving a file uses no lease. With the Browser docked beside Session,
 Terminal or Changes the strip is back, above both. It shows the controller and every watcher
 with their member name and `Avatar`, protection and the existing
-`ControlButton`: take a free lease, release it, or hold for five seconds to
+`ControlButton`: take a free lease, release it, or hold for three seconds to
 request an occupied lease. A local lease acknowledgement takes precedence
 over polled controller metadata; the controller's name remains visible
 beside **You control** or **You control in another tab**.
@@ -2451,7 +2451,7 @@ agent's auth methods.
 the selected shell under one toolbar, a 32px strip (44px on touch): the
 terminal tabs (**Agent**, then each shell; one menu under 768px), **+ Shell**,
 the **Tools** menu, and on the right the presence summary with
-`ControlButton` (click to take a free lease, hold five seconds to request an
+`ControlButton` (click to take a free lease, hold three seconds to request an
 occupied one; **Release** has the accent fill) and the connection word only
 while a live run's attach is not live. A finished run reads "Container
 removed · read-only" in muted text there.
@@ -3662,11 +3662,12 @@ The header's title is the objective's first line cut to 80 characters; its
 state line reads the phase or reason, the integrator ("Claude Code ·
 Standard") and the creation time. On a phone the top bar keeps `Swarms`, so
 the body repeats the title and state line, with the actions beside the
-title and **Open integrator** drawn secondary. One primary action: **Answer**
-(focuses the first open question's field) while a question waits on the
-viewer, else **Open integrator**. On a phone the header **Answer** is left
-out: the open question's own **Answer** is the screen's filled button, and
-the top bar's **New run** shrinks to an icon. **More swarm actions** holds
+title. One primary action: **Answer** (focuses the first open question's
+field) while a question waits on the viewer, else **Open integrator**, which
+sits directly under the Integration heading (visible while it is collapsed),
+not in the header or beside the phone title. On a phone the header
+**Answer** is left out: the open question's own **Answer** is the screen's
+filled button, and the top bar's **New run** shrinks to an icon. **More swarm actions** holds
 **Replace integrator…**, **Archive swarm…** (completed or cancelled, not
 archived), **Unarchive swarm** (archived), **Cancel swarm…**, and **Delete
 swarm…** (cancelled or archived). An archived swarm's state line adds

@@ -202,15 +202,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
 
   const actions = (
     <>
-      {openQuestion ? (
-        !mobile && <Button size="sm" onClick={answer}>Answer</Button>
-      ) : (
-        integratorRunID && !missing && (
-          <Button size="sm" variant={final || mobile ? 'secondary' : 'primary'} onClick={() => navigate('run', { runId: integratorRunID })}>
-            Open integrator
-          </Button>
-        )
-      )}
+      {openQuestion && !mobile && <Button size="sm" onClick={answer}>Answer</Button>}
       {(canReplace || canCancel || canArchive || canUnarchive || canDelete) && (
         <Menu>
           <MenuTrigger asChild>
@@ -275,7 +267,16 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
           />
           <SwarmTasks detail={detail} agents={agents} canRelease={canRelease} client={client} onChanged={onChanged} />
           <AgentMessages detail={detail} client={client} />
-          <SwarmIntegration detail={detail} agents={agents} client={client} />
+          <SwarmIntegration
+            detail={detail}
+            agents={agents}
+            client={client}
+            action={!openQuestion && integratorRunID && !missing && (
+              <Button size="sm" variant={final ? 'secondary' : 'primary'} onClick={() => navigate('run', { runId: integratorRunID })}>
+                Open integrator
+              </Button>
+            )}
+          />
         </div>
       </div>
       {dialog === 'replace' && (

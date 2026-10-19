@@ -16,10 +16,13 @@ import (
 // Grant and open kinds. An ssh grant authorizes one relayed SSH connection
 // by a member; a claim grant one relayed SSH connection, to a server
 // without an owner, that presents a claim code in its SSH user name (see
-// ClaimUser).
+// ClaimUser). An http open carries no grant and names no account: it
+// relays HTTP requests on PathMCP and its metadata paths, and the server
+// authenticates each request itself.
 const (
 	KindSSH   = "ssh"
 	KindClaim = "claim"
+	KindHTTP  = "http"
 )
 
 // GrantTTL is the longest lifetime of a grant. ClockSkew is the tolerance

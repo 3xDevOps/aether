@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"errors"
@@ -32,16 +33,32 @@ const approvalContext = "aether-device-approval-v1\x00"
 // that names more than one waiting device approves none of them.
 func ApprovalCode(credential string) string {
 	sum := sha256.Sum256([]byte(approvalContext + credential))
-	var b [approvalCodeLength]byte
-	for i := range b {
-		b[i] = approvalAlphabet[int(sum[i])%len(approvalAlphabet)]
-	}
-	return string(b[:4]) + "-" + string(b[4:])
+	return approvalCodeOf(sum[:])
 }
 
-// normalizeApprovalCode returns code in its stored form, or "" when it
-// cannot be one.
-func normalizeApprovalCode(code string) string {
+// RandomApprovalCode returns 40 random bits spelled as an approval code,
+// for a one-use code a person carries from one screen to another.
+func RandomApprovalCode() (string, error) {
+	var b [approvalCodeLength]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("store: generate code: %w", err)
+	}
+	return approvalCodeOf(b[:]), nil
+}
+
+// approvalCodeOf spells the first approvalCodeLength bytes of b as
+// XXXX-XXXX.
+func approvalCodeOf(b []byte) string {
+	var code [approvalCodeLength]byte
+	for i := range code {
+		code[i] = approvalAlphabet[int(b[i])%len(approvalAlphabet)]
+	}
+	return string(code[:4]) + "-" + string(code[4:])
+}
+
+// NormalizeApprovalCode returns code, as a person typed it, in its stored
+// form, or "" when it cannot be one.
+func NormalizeApprovalCode(code string) string {
 	code = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(code), "-", ""))
 	if len(code) != approvalCodeLength {
 		return ""
@@ -58,7 +75,7 @@ func normalizeApprovalCode(code string) string {
 // alphabet in either case, dash optional. Device ids never do: older rows
 // carry 26-character ids without the dev- prefix.
 func IsApprovalCode(s string) bool {
-	return normalizeApprovalCode(s) != ""
+	return NormalizeApprovalCode(s) != ""
 }
 
 const deviceCols = `id, member_id, invitation_id, provider, subject, email, login, name, credential, label, status,
@@ -294,7 +311,7 @@ func (d *DB) GetDeviceByCredential(ctx context.Context, credential string) (*dom
 }
 
 func (d *DB) GetDeviceByApprovalCode(ctx context.Context, code string) (*domain.Device, error) {
-	code = normalizeApprovalCode(code)
+	code = NormalizeApprovalCode(code)
 	if code == "" {
 		return nil, ErrNotFound
 	}

@@ -2431,7 +2431,7 @@ resize, control, geometry, and acknowledgements.
    targets, concurrent requests, and requesters without current Steer authority.
    Disconnected holders and interactive holders still awaiting their control
    acknowledgement are also refused.
-   After a continuous five-second hold, the exact requesting attachment sends
+   After a continuous three-second hold, the exact requesting attachment sends
    `confirm` with the same ID. Early or foreign confirms are refused. Nothing
    is granted without confirmation, even if the hold deadline has passed.
    Early release sends `cancel`; release after confirmation does not. Escape,
@@ -2458,9 +2458,9 @@ resize, control, geometry, and acknowledgements.
        "requester_member_id":"member-2","requester_session_id":"tab-8",
        "holder_session_id":"tab-7","holder_generation":8,
        "phase":"review","hold_started_at":"2026-10-03T12:00:00Z",
-       "hold_deadline":"2026-10-03T12:00:05Z",
-       "decision_deadline":"2026-10-03T12:00:12Z",
-       "server_now":"2026-10-03T12:00:05Z"
+       "hold_deadline":"2026-10-03T12:00:03Z",
+       "decision_deadline":"2026-10-03T12:00:10Z",
+       "server_now":"2026-10-03T12:00:03Z"
      }
    }
    ```

@@ -109,8 +109,9 @@ func TestProtocolVersions(t *testing.T) {
 	if _, err = h.enrollRaw(edgeproto.Version + 1); err != nil {
 		t.Fatalf("agent at version %d: %v", edgeproto.Version+1, err)
 	}
-	if got := h.relay().Metrics().ServersByProtocol; got[edgeproto.Version] != 2 || len(got) != 1 {
-		t.Fatalf("servers by protocol = %v, want both at version %d", got, edgeproto.Version)
+	// The newer agent speaks the edge's version.
+	if got := h.relay().Metrics().ServersByProtocol; got[edgeproto.MinVersion] != 1 || got[edgeproto.Version] != 1 || len(got) != 2 {
+		t.Fatalf("servers by protocol = %v, want one at version %d and one at %d", got, edgeproto.MinVersion, edgeproto.Version)
 	}
 
 	_, err = h.enrollRaw(edgeproto.MinVersion - 1)

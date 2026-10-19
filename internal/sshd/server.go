@@ -196,6 +196,11 @@ type Server struct {
 	// workspace.environment.get.
 	environmentMu sync.Mutex
 
+	// connectorCodes holds the live connector pairing codes by hash.
+	// Guarded by connectorMu.
+	connectorMu    sync.Mutex
+	connectorCodes map[string]connectorCode
+
 	mu    sync.Mutex
 	ln    net.Listener
 	conns map[net.Conn]struct{}

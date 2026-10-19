@@ -73,7 +73,7 @@ function TechnicalDetails({ detail, agents }: { detail: MissionDetail; agents: A
   )
 }
 
-export function SwarmIntegration({ detail, agents, client }: { detail: MissionDetail; agents: AgentInfo[] | null; client: Api }) {
+export function SwarmIntegration({ detail, agents, client, action }: { detail: MissionDetail; agents: AgentInfo[] | null; client: Api; action?: ReactNode }) {
   const { mission } = detail
   return (
     <section aria-label="Integration" className="flex flex-col gap-1">
@@ -81,6 +81,7 @@ export function SwarmIntegration({ detail, agents, client }: { detail: MissionDe
         <SectionLabel as="h2">
           <CollapsibleTrigger>Integration</CollapsibleTrigger>
         </SectionLabel>
+        {action && <div className="flex pl-5">{action}</div>}
         <CollapsibleContent>
           <div className="flex flex-col gap-2 pl-5">
             <p className="text-ui-sm text-muted">The integrator prepares, verifies and delivers the result on its own. This view is read-only.</p>

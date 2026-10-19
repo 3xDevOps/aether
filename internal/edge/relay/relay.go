@@ -1,7 +1,8 @@
 // Package relay is the edge's relay. It enrolls servers over their control
 // channel and splices client SSH connections to them without decrypting
-// them. docs/edge.md describes the edge; internal/edge/proto holds the wire
-// contract.
+// them, and forwards MCP connector requests to them over pooled http
+// connections. docs/edge.md describes the edge; internal/edge/proto holds
+// the wire contract.
 package relay
 
 import (
@@ -31,6 +32,9 @@ type Directory interface {
 	// serverID, edgeproto.RefusalUnknownServer when serverID is not
 	// claimed, and edgeproto.RefusalNotMember otherwise.
 	Admit(ctx context.Context, serverID string, account edgeproto.Account) error
+	// Known returns nil when serverID is claimed at this edge, and
+	// edgeproto.RefusalUnknownServer otherwise.
+	Known(ctx context.Context, serverID string) error
 	// AdmitClaim returns nil when account, connecting from addr, may open
 	// a claim connection to serverID: edgeproto.RefusalTooMany past a
 	// limit per account, per address or per server, and
@@ -158,6 +162,10 @@ type Relay struct {
 	addrMu    sync.Mutex
 	addrConns map[netip.Prefix]int
 
+	// http pools the http connections of every server, keyed by server
+	// id as the host of the request URL.
+	http *http.Transport
+
 	pace pacer
 
 	flushMu sync.Mutex // serializes saves and month changes
@@ -213,14 +221,20 @@ func New(ctx context.Context, cfg Config) (*Relay, error) {
 		addrConns:          map[netip.Prefix]int{},
 		refusalsMap:        map[string]uint64{},
 	}
+	r.http = &http.Transport{
+		DialContext:         r.dialHTTP,
+		MaxIdleConnsPerHost: edgeproto.MaxHTTPConnsPerServer,
+		IdleConnTimeout:     edgeproto.HTTPIdleTimeout,
+		DisableCompression:  true,
+	}
 	r.egress.month, r.egress.used = month, used
 	r.ctx, r.stop = context.WithCancelCause(context.Background())
 	go r.flushLoop()
 	return r, nil
 }
 
-// Register adds the control, data, connect and claim endpoints to mux,
-// which serves the relay origin.
+// Register adds the control, data, connect, claim and MCP endpoints to
+// mux, which serves the relay origin.
 func (r *Relay) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+edgeproto.PathServerControl, r.serveControl)
 	mux.HandleFunc("GET "+edgeproto.PathServerData, r.serveData)
@@ -230,6 +244,9 @@ func (r *Relay) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET "+edgeproto.PathClaimConnect, func(w http.ResponseWriter, req *http.Request) {
 		r.serveConnect(w, req, edgeproto.KindClaim)
 	})
+	for _, p := range []string{edgeproto.PathMCP, edgeproto.PathMCP + "/", edgeproto.PathMCPResourceMetadata, edgeproto.PathMCPAuthServerMetadata} {
+		mux.HandleFunc(p, r.serveHTTP)
+	}
 }
 
 // Compression is off: the streams are already encrypted end to end, and
@@ -374,10 +391,11 @@ func (r *Relay) closeConns(match func(*relayConn) bool, cause error) []*registra
 	return regs
 }
 
-// Shutdown refuses new control channels and connections, sends drain to
-// every server while relayed connections get spliceGrace to finish, closes
-// every control channel and connection, and saves the egress counter. A
-// drain still unsent when ctx ends is abandoned.
+// Shutdown refuses new control channels and connections, closes idle http
+// connections, sends drain to every server while relayed connections get
+// spliceGrace to finish, closes every control channel and connection, and
+// saves the egress counter. A drain still unsent when ctx ends is
+// abandoned.
 func (r *Relay) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	r.closing = true
@@ -387,6 +405,7 @@ func (r *Relay) Shutdown(ctx context.Context) error {
 	}
 	r.mu.Unlock()
 
+	r.http.CloseIdleConnections()
 	drain := edgeproto.Drain{RetryAfterMS: drainRetryAfter.Milliseconds(), JitterMS: drainJitter.Milliseconds()}
 	var wg sync.WaitGroup
 	wg.Go(func() { r.closeSplices(ctx) })

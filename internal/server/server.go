@@ -19,6 +19,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/assistant"
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/collab"
+	"github.com/3xDevOps/Aether/internal/connector"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
@@ -508,7 +509,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		return nil, err
 	}
 	if cfg.EdgeURL != "" {
-		if s.edge, err = newEdgeAgent(cfg, s.ssh); err != nil {
+		if s.edge, err = newEdgeAgent(cfg, s.db, s.ssh); err != nil {
 			return nil, err
 		}
 		s.ssh.SetEdgeOwner(s.edge)
@@ -588,13 +589,26 @@ func HostKeyPath(dataDir string) string {
 	return filepath.Join(dataDir, "ssh", "host_ed25519_key")
 }
 
-func newEdgeAgent(cfg Config, sshSrv *sshd.Server) (*edgeagent.Agent, error) {
+func newEdgeAgent(cfg Config, db *store.DB, sshSrv *sshd.Server) (*edgeagent.Agent, error) {
 	hostKey, err := sshd.LoadOrCreateHostKey(HostKeyPath(cfg.DataDir))
 	if err != nil {
 		return nil, err
 	}
+	origin, err := edgeproto.Origin(cfg.EdgeURL)
+	if err != nil {
+		return nil, fmt.Errorf("server: edge-url: %w", err)
+	}
+	mcp, err := connector.New(connector.Config{
+		BaseURL: origin + edgeproto.MCPPath(edgeproto.ServerID(hostKey.PublicKey())),
+		Store:   db,
+		SSH:     sshSrv,
+		KeyPath: filepath.Join(cfg.DataDir, "connector", "hmac.key"),
+	})
+	if err != nil {
+		return nil, err
+	}
 	return edgeagent.New(edgeagent.Config{EdgeURL: cfg.EdgeURL, DataDir: cfg.DataDir, HostKey: hostKey, SSH: sshSrv,
-		AccessPolicy: cfg.EdgeAccess})
+		HTTP: mcp, AccessPolicy: cfg.EdgeAccess})
 }
 
 // Store is the server's persistence layer.

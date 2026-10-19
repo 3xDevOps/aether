@@ -168,6 +168,9 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 	if !docker {
 		steps = slices.Insert(steps, 0, "install or start Docker on this machine:\n       "+show(dockerInstall))
 	}
+	if edgeOn {
+		steps = append(steps, "to run agents from ChatGPT or Claude, on that computer:\n       "+show("aether mcp"))
+	}
 	_, _ = fmt.Fprintf(w, "\n%s\n", show("next:"))
 	for i, step := range steps {
 		_, _ = fmt.Fprintf(w, "  %d. %s\n", i+1, step)

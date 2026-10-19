@@ -16,7 +16,7 @@ with an account on the server.
 
 ## 1. Decisions
 
-1. **One table in `aether.db`.** Notes live in `memory` (migration v74)
+1. **One table in `aether.db`.** Notes live in `memory` (migration v75)
    with an FTS5 external-content index `memory_fts` over title, body and
    files (`porter unicode61`), kept in sync by insert, update and delete
    triggers. No graph database, embeddings, model calls, sidecar or new Go

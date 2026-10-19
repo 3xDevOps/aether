@@ -11,10 +11,13 @@ import (
 )
 
 // Version is the protocol version this build speaks. MinVersion is the
-// oldest version it still accepts.
+// oldest version it still accepts. VersionHTTP is the first version whose
+// servers take KindHTTP opens: a server at an earlier version refuses an
+// open of a kind it does not know by dropping its control channel.
 const (
-	Version    = 1
-	MinVersion = 1
+	Version     = 2
+	MinVersion  = 1
+	VersionHTTP = 2
 )
 
 // CheckVersion refuses a peer older than MinVersion with

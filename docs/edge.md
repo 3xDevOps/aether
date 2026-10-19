@@ -38,6 +38,8 @@ Terms used below:
 
 The relay never decrypts SSH. It splices two outbound WebSocket
 connections, and SSH runs end to end between your client and the server.
+[MCP connector](#mcp-connectors) requests, from ChatGPT or Claude, are the
+exception: they are HTTPS to the edge, which reads them.
 The server believes the edge about who signed in; under `account` that is
 enough for a member's device, under `approved-devices` it is not. Role,
 membership and device status are always the server's own decision.
@@ -49,7 +51,7 @@ An edge answers on two origins, served by one process:
 | Origin | Project's edge | Serves |
 | --- | --- | --- |
 | Sign-in | `https://auth.onaether.dev` | Sign-in pages, OAuth callbacks, the edge's session cookie, the Devices, Servers and Account pages, and the client API: device sign-in, logout, server list, account deletion |
-| Relay | `https://edge.onaether.dev` | Server enrollment and control connections, client connections, the edge's metadata, `GET /v1/edge`, and the [join page](#join-page) |
+| Relay | `https://edge.onaether.dev` | Server enrollment and control connections, client connections, the edge's metadata, `GET /v1/edge`, the [join page](#join-page), and servers' [MCP connector](#mcp-connectors) paths |
 
 Clients and servers are configured with the relay origin. A client reads
 the sign-in origin from the metadata when you run `aether login`. A path
@@ -126,6 +128,10 @@ connection.
   address once that device is approved, like a member SSH key; through the
   edge it also needs the device's token or the edge. A stolen device token
   alone authenticates nothing: the server also requires the device key.
+- **MCP connectors, under both:** connector traffic is not end to end. A
+  compromised edge that runs while a member's connector is in use reads
+  its tokens and acts through it, with that member's role, and no approval
+  stands in the way ([MCP connectors](#mcp-connectors)).
 
 | Case | `account` | `approved-devices` |
 | --- | --- | --- |
@@ -151,6 +157,7 @@ With a member's GitHub account, the edge honest:
 | Get a device approved | Not needed | Only by an admin's, or the member's own, click on its Needs you card, which shows the device label, account, key fingerprint, and the member and role it admits as. Its code reaches the device only when it admits as the only admin, who has no approved device; the machine's administrator who types it is shown the same before answering `y` (`TestApprovalCodeOnlyWithoutAnInAppApprover` in `internal/sshd`). The code is 40 bits, and a code naming two waiting devices approves neither (`GetDeviceByApprovalCode` in `internal/store`) |
 | Merge the member with another | No: every merge step needs an approved device, member SSH key or tailnet connection, and a registered device has none. On a server where the member has an approved device, a merge needs a code minted on one member's sign-in, shown only there, a proposal from the other member's, and acceptance on the first: two sign-ins it would both have to hold. The merged member takes the lower role; only the admin side keeps it admin (`TestMergeTailnetMemberWithEdgeMember`, `TestMergeLastAdminNeedsKeepAdmin` in `internal/sshd`). `aether member merges` lists every merge | Nothing: a pending device completes no handshake (`TestPrivilegedMethodsRefuseAnUnapprovedDevice` in `internal/sshd`) |
 | Bind the account to a member through a link | Only by opening that member's link, which waits for that member's approval under either policy after telling the device whose member it would act as (`TestSelfLinkByNonAdmin` in `internal/sshd`) | The same |
+| Add an MCP connector | Yes: on its registered device, `aether mcp` mints the pairing code, and the connector is bound to that device ([connectors.md](connectors.md)) | No: a pending device completes no handshake, so it mints no code (`TestConnectorThroughTheEdge`) |
 | Disrupt | Revoke the member's device tokens; delete the account, which removes its identity and edge devices on every server | The same |
 | Be noticed | The device is listed with the account it signed in as in `aether device list`, `aether member identities <id>`, the dashboard's Members > Devices tab and `sudo aether-server device review`, and on the edge's Devices page | The same, as pending |
 
@@ -169,6 +176,7 @@ With the edge, or its signing key:
 | Merge two members | No: a forged grant yields a registered device, which takes no merge step | No: forged grants yield pending devices |
 | Send a forged account deletion | Removes that identity and its edge devices on the server, including approved device keys used on the direct path: access lost, none gained. The member restores it with `aether member link` | The same (`TestMaliciousEdgeApprovedDevices`) |
 | Read or alter an SSH session | No: SSH is end to end | No |
+| Read or alter MCP connector traffic | Yes, while it runs: TLS ends at the edge, so it reads every connector request and answer, including tokens and the pairing code typed on the consent page, and with a token acts as that connector's member ([MCP connectors](#mcp-connectors)) | The same |
 | Impersonate a server to a linked client | No: the host key must derive the linked id (`TestEnrollmentSignatureIsNotAHostSignature`) | No |
 | Send a client that is linking for the first time to another server | Yes, by listing a false id, unless the person links by a join or claim link, or by an id from the server's admin ([First link](#first-link-and-server-identity)) | The same |
 | Take a claim | No: the code travels inside SSH, and the server refuses a claim whose grant names another account than the client's (`TestClaim`, `TestMaliciousEdgeSubstitutesTheClaimingAccount`). An edge that also lied to the client at sign-in about which account it is could claim for its own account; `aether login`, `aether link --claim` and the dashboard's claim form show the account the edge reported before the code is sent | The same |
@@ -326,6 +334,8 @@ next:
   2. on your computer, open the claim link above with the Aether app, or paste it
      into the app's Connect page; in a terminal:
        aether link --claim <server id>-<secret>
+  3. to run agents from ChatGPT or Claude, on that computer:
+       aether mcp
 ```
 
 The claim link carries the **claim code**, `<server id>-<secret>`. Open
@@ -410,7 +420,7 @@ state](#transfer-and-the-ownerless-state)).
 
 | Command | Does |
 | --- | --- |
-| `sudo aether-server edge status` | Edge, access policy, server id, pinned edge key, owner or claim code state, state of the server's control connection to the edge |
+| `sudo aether-server edge status` | Edge, access policy, server id, [connector URL](#mcp-connectors), pinned edge key, owner or claim code state, state of the server's control connection to the edge |
 | `sudo aether-server edge claim-code [--admin <member id>]` | Issue a new claim code, replacing the old one. Refused while the server has an owner, and without `--admin` while it has members. `--admin` names an existing admin the claim binds the claiming account to ([Console recovery](#console-recovery)) |
 | `sudo aether-server edge trust` | Fetch the edge's signing key from `GET <edge>/v1/edge`, show both fingerprints, and pin it after you type `yes` |
 | `sudo aether-server edge leave` | Unenroll at the edge, forget the owner and the claim code, set `edge-url ""` |
@@ -424,6 +434,7 @@ state](#transfer-and-the-ownerless-state)).
 edge         https://edge.onaether.dev
 edge access  approved-devices
 server id    <server id>
+connector    https://edge.onaether.dev/mcp/<server id>  (add it to ChatGPT or Claude; get a code: aether mcp)
 edge key     SHA256:<fingerprint>
 owner        github <login> (subject <user id>)
 connection   connected since <time>; the edge last answered 12s ago
@@ -972,7 +983,7 @@ of admins: `--admin: no member <id>; the admins are: <member id> (<name>)`.
 | Runs the workspace | Its owner | Aether |
 | Runs the edge | Aether, or the owner | Aether |
 | Who can read the workspace | The owner's machine administrators | Aether's operators |
-| What separating edge and server protects against | A compromised edge, under `approved-devices` | Nothing against Aether: one party runs both |
+| What separating edge and server protects against | A compromised edge, under `approved-devices`, except for MCP connector traffic | Nothing against Aether: one party runs both |
 | What `approved-devices` protects against | A taken-over GitHub account, and a compromised edge | A taken-over GitHub account only |
 | Server id | Derived from a host key the owner holds | Derived from a host key Aether would hold |
 
@@ -1049,6 +1060,70 @@ local gateway's `edge.join` or claims with `edge.claim`. The Android app in
 Tailscale mode opens only `aether://run/<id>`: its dashboard is served by the
 server the phone points at, which must not read a secret meant for another
 server ([dashboard-frontend.md](dashboard-frontend.md#onboarding-wizard)).
+
+## MCP connectors
+
+A server's **MCP connector** endpoint lets ChatGPT or Claude list, launch,
+message and stop runs as a member. The server hosts the endpoint and its
+OAuth authorization server; setting one up, pairing codes, tokens and tools
+are in [connectors.md](connectors.md). The edge only forwards the
+requests, on the relay origin:
+
+| Path | Reaches |
+| --- | --- |
+| `/mcp/<server id>` and every path below it | The server's MCP endpoint and its OAuth pages |
+| `/.well-known/oauth-protected-resource/mcp/<server id>` | Its protected resource metadata (RFC 9728) |
+| `/.well-known/oauth-authorization-server/mcp/<server id>` | Its authorization server metadata (RFC 8414) |
+
+The connector URL is `https://<relay host>/mcp/<server id>`, such as
+`https://edge.onaether.dev/mcp/<server id>`; `aether mcp` and
+`sudo aether-server edge status` print it. On the sign-in host these paths
+get `421 Misdirected Request`, like every relay path.
+
+Requests travel over `http` connections, a relayed connection kind that
+opens with no grant and names no account: the edge vouches for nothing,
+and the server authenticates every request itself. The edge holds up to 8
+of them per server and reuses each for the next request. The path and
+query reach the server unchanged, and the answer streams back as the
+server writes it.
+
+- Request headers pass, unknown `Mcp-*` ones included, except hop-by-hop
+  headers, `Cookie`, `Accept-Encoding`, `Host`, which names the server id
+  instead, and any `Forwarded` or `X-Forwarded-*` the client sent. The edge
+  adds `Aether-Edge-Client-Addr`, the client address it saw, for logs and
+  rate limits only; a client cannot set it.
+- Response headers pass only from this list: `Content-Type`,
+  `Content-Length`, `Cache-Control`, `Location`, `WWW-Authenticate` and
+  `X-Accel-Buffering`. `Set-Cookie`, `Service-Worker-Allowed`, every other
+  header, 1xx answers and trailers are dropped.
+
+Every answer carries
+`Content-Security-Policy: sandbox allow-forms; default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'`.
+Any server's operator decides what its paths answer, on the host that also
+serves the [join page](#join-page), whose script reads an invitation's
+secret from the link's fragment. The sandbox gives a page a server serves
+there, such as its consent page, an opaque origin and no script, so it
+cannot read that secret, and no other page can frame it. Its forms still
+post, and arrive with `Origin: null` and `Sec-Fetch-Site: cross-site`.
+
+TLS ends at the edge, as it must: ChatGPT and Claude connect only to a
+host with a public certificate. Connector traffic is therefore not end to
+end. A compromised edge, while it runs, reads and can alter every
+connector request and answer, including access and refresh tokens and the
+pairing code typed on the consent page.
+
+The edge opens an `http` connection only to a server at protocol version 2
+or later ([Upgrades](#upgrades)). Refusals are plain text:
+
+| Case | Answer |
+| --- | --- |
+| An id of the wrong shape, or no server claimed under it | `404 unknown server` |
+| Server offline | `503 server is not connected to the edge` |
+| Server connected but not claimed | `409 server is connected to the edge but not claimed` |
+| Server at protocol version 1 | `501 server <name> (<id>) runs aether-server <version>, which has no MCP endpoint; upgrade it: sudo aether-server update`. The server is sent no `http` open, and its control and SSH connections are relayed as before (`TestConnectorAtEdgeProtocol1`) |
+| Server that serves no connector | `403 this server does not serve MCP connectors` |
+| 8 requests to the server in progress | `503 this server already has 8 MCP connector requests in progress through the edge; retry shortly` |
+| A body over 1 MiB | `413 request body is over the edge's limit of 1048576 bytes` |
 
 ## Running an edge
 
@@ -1602,7 +1677,7 @@ Then check, from another machine:
 2. `curl -sS https://<relay-host>/signin` prints
    `{"error":"/signin is served on https://<signin-host>, not on this host"}`.
 3. `curl -sS -H 'Aether-Edge-Version: 1' https://<relay-host>/v1/edge`
-   prints `{"signin_origin":"https://<signin-host>","key":"...","fingerprint":"SHA256:...","version":1,"min_version":1}`.
+   prints `{"signin_origin":"https://<signin-host>","key":"...","fingerprint":"SHA256:...","version":2,"min_version":1}`.
    On the edge, `sudo ssh-keygen -lf /var/lib/aether-edge/edge_key` prints
    the same fingerprint. That is the key servers pin: publish it where
    server operators compare it during `aether-server edge trust`, and back
@@ -1637,7 +1712,7 @@ format:
 | Metric | Meaning |
 | --- | --- |
 | `aether_edge_servers{state="claimed"}`, `{state="unclaimed"}` | Servers holding a control connection |
-| `aether_edge_splices` | Relayed connections with both ends attached |
+| `aether_edge_splices` | Relayed connections with both ends attached, MCP connector connections included |
 | `aether_edge_relayed_bytes_total` | Bytes relayed since the edge started |
 | `aether_edge_egress_month_bytes` | Bytes relayed this UTC month, the figure the budget counts |
 | `aether_edge_throttled` | `1` once the monthly egress budget is spent |
@@ -1670,7 +1745,7 @@ implies `--ready`. `status` is `ready`, `draining` once a stop began,
 `ok`:
 
 ```json
-{"status":"ready","version":"<release-tag>","protocol":{"version":1,"min_version":1},"checks":{"db":"ok","listener":"ok","draining":false},"servers":{"claimed":12,"unclaimed":1}}
+{"status":"ready","version":"<release-tag>","protocol":{"version":2,"min_version":1},"checks":{"db":"ok","listener":"ok","draining":false},"servers":{"claimed":12,"unclaimed":1}}
 ```
 
 Neither check asks GitHub or the ACME CA: an edge that cannot reach them
@@ -1915,9 +1990,12 @@ Every handshake carries a protocol version. The two sides speak the lower
 of their two versions. The edge accepts any server or client at or above
 its minimum version, including newer ones, which speak down. An older one
 is refused with `upgrade required: <minimum>` (HTTP 426 for clients).
-Protocol version 1 is the only version and the minimum;
-`aether_edge_servers_by_protocol` shows the versions connected servers
-speak.
+Version 2 added the `http` connections that carry
+[MCP connectors](#mcp-connectors); 1 is still the minimum. A version-1
+server drops its control connection at an open of a kind it does not
+know, so the edge sends it none: its connector requests get `501`, and its
+SSH connections are relayed as before. `aether_edge_servers_by_protocol`
+shows the versions connected servers speak.
 
 A change either side can ignore, such as a new optional field or a new
 message type, does not change the version: each side skips message types
@@ -2326,13 +2404,17 @@ the next month; nothing is cut off. Servers take turns one read of at most
 after the budget is spent, and a crash loses up to one minute of counting.
 For a provider ceiling of C bytes a month, set the budget below C minus
 700 GiB (751619276800 bytes), with margin for framing. The count survives
-restarts.
+restarts. MCP connector requests and answers count too, and past the
+budget their answers are paced with the rest.
 
 ## Limits
 
 | Limit | Value |
 | --- | --- |
 | Concurrent SSH connections per server | 48 |
+| Concurrent MCP connector connections per server | 8, apart from the SSH connections; each carries one request at a time |
+| MCP connector request body | 1 MiB |
+| Idle MCP connector connection | Closed by the edge after 30 seconds; the server closes one after 60 |
 | Connections per device | 16 |
 | Unclaimed servers per client address | 3, each dropped after 30 minutes; for IPv6, 3 per /64, 12 per /56 and 48 per /48 |
 | Unclaimed servers per edge | 10000 |

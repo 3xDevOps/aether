@@ -80,8 +80,11 @@ type Ready struct {
 
 // Open (edge to server) asks the server to attach a data socket for one
 // client connection, with Ticket as the bearer token of the data socket
-// dial, and a grant of the same Kind. ClientAddr is edge-asserted, for
-// logs and rate limits only, never for authentication.
+// dial, and a grant of the same Kind; a KindHTTP open has no grant, and
+// is sent only to a server at VersionHTTP or later. ClientAddr is
+// edge-asserted, for logs and rate limits only, never for
+// authentication; an http open, which carries requests of many clients,
+// has none.
 type Open struct {
 	ConnID     string `json:"conn_id"`
 	Ticket     string `json:"ticket"`
@@ -243,6 +246,10 @@ func (m Open) validate() error {
 		return fmt.Errorf("invalid conn id %q", m.ConnID)
 	case !ValidToken(m.Ticket):
 		return errors.New("invalid ticket")
+	case m.Kind == KindHTTP:
+		if m.Grant != "" {
+			return errors.New("an http open carries no grant")
+		}
 	case m.Kind != KindSSH && m.Kind != KindClaim:
 		return fmt.Errorf("unknown open kind %q", m.Kind)
 	case m.Grant == "" || len(m.Grant) > MaxGrantSize:

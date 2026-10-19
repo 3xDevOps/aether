@@ -251,7 +251,7 @@ member id and the server rejects any param containing `member_id`, except the `r
 
 | Tier | Tools |
 | --- | --- |
-| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_list_workspaces`, `aether_get_workspace`, `aether_list_agents`, `aether_usage`, `aether_environment_status`, `aether_docs` |
+| Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_list_workspaces`, `aether_get_workspace`, `aether_list_agents`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_memory_search` |
 | Reversible | `aether_pause_run`, `aether_resume_run` |
 | Confirmed | `aether_launch_run`, `aether_message_run`, `aether_stop_run`, `aether_save_environment` |
 
@@ -262,3 +262,19 @@ of another member's run always waits for a click. A decline, timeout or closed
 session fails the call with the reason. `aether_docs`
 reads the guides in `docs/`, which the server binary embeds. Without
 `--assistant` the bridge serves the coordination tools above, unchanged.
+
+The tool definitions are one table, in `internal/mcpbridge/assistant.go`,
+that takes a call function rather than a socket. The assistant's call dials
+the socket. A [ChatGPT or Claude connector](connectors.md) calls the server
+in process as its member, and serves 8 of the tools: the read tools
+`aether_list_workspaces`, `aether_list_agents`, `aether_list_runs`,
+`aether_get_run` and `aether_run_history`, and `aether_launch_run`,
+`aether_message_run` and `aether_stop_run`. Its descriptions leave out the
+tier wording, because ChatGPT and Claude ask before each write themselves,
+and each tool has a title. The read tools carry `readOnlyHint` and a false
+`openWorldHint`; launch and message carry a false `destructiveHint` and a
+true `openWorldHint`; stop carries `destructiveHint` and `idempotentHint`
+and a false `openWorldHint`. The parameter shaping is the same on both
+paths: `mine`, the default history page of 20, and a fresh idempotency key
+on each message. A failed connector call returns the server's error message
+unchanged.
