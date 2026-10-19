@@ -18,6 +18,7 @@ import (
 )
 
 func TestCastRotationPreservesHistoryBeyondFormerLimits(t *testing.T) {
+	t.Parallel()
 	h, dir := newTestHost(t)
 	run := domain.RunID("rolling-cast")
 	key := RunSession(run)
@@ -274,6 +275,7 @@ func TestCastAgeDoesNotDeleteHistoryAndExplicitDeletionStopsReplay(t *testing.T)
 }
 
 func TestCastExistingFrontierPreservesPositionAndRemainingHistory(t *testing.T) {
+	t.Parallel()
 	for _, removed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("prefix-removed-%t", removed), func(t *testing.T) {
 			h, dir := newTestHost(t)
@@ -436,6 +438,7 @@ func TestCastRotationCrashRecoversAbsoluteCheckpointSuffix(t *testing.T) {
 }
 
 func TestCastOldRecordingKindsSurviveReopen(t *testing.T) {
+	t.Parallel()
 	for _, key := range []SessionKey{RunSession("cold-run"), TerminalSession("member", "tab"), RunShellSession("cold-run", "shell")} {
 		t.Run(string(key), func(t *testing.T) {
 			h, dir := newTestHost(t)

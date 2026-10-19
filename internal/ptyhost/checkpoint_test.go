@@ -386,6 +386,7 @@ func TestReplayUsesCheckpointByteMetadata(t *testing.T) {
 }
 
 func TestCheckpointLongLineageRemainsWritable(t *testing.T) {
+	t.Parallel()
 	h, dir := newTestHost(t)
 	run := domain.RunID(strings.Repeat("l", 128))
 	path := filepath.Join(dir, string(run)+".cast")

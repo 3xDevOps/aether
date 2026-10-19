@@ -258,7 +258,9 @@ func TestPromptIdleWaitsOutTheOwedFollowUp(t *testing.T) {
 }
 
 func TestPromptIdleReportsDelivery(t *testing.T) {
+	t.Parallel()
 	t.Run("accepted", func(t *testing.T) {
+		t.Parallel()
 		m := newMockAgent(t, loadFixture(t, "claude"))
 		s, rec := startMock(t, m, Config{})
 		delivered := make(chan error, 2)
@@ -277,6 +279,7 @@ func TestPromptIdleReportsDelivery(t *testing.T) {
 	})
 
 	t.Run("refused", func(t *testing.T) {
+		t.Parallel()
 		m := newMockAgent(t, loadFixture(t, "claude"))
 		m.onPrompt = func(*mockAgent, promptCall) (any, *acp.RequestError) {
 			time.Sleep(promptAcceptGrace + 200*time.Millisecond)
@@ -295,6 +298,7 @@ func TestPromptIdleReportsDelivery(t *testing.T) {
 }
 
 func TestSubagentOutputDoesNotAcceptAPrompt(t *testing.T) {
+	t.Parallel()
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	release := make(chan struct{})
 	m.onPrompt = func(*mockAgent, promptCall) (any, *acp.RequestError) {
@@ -377,6 +381,7 @@ func TestFollowUpTurnStartingDropsTheOwedFollowUpFromTheLog(t *testing.T) {
 }
 
 func TestQueuedPromptsAnsweredAtOnceAllRun(t *testing.T) {
+	t.Parallel()
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	release := make(chan struct{})
 	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
