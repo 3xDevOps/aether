@@ -550,6 +550,7 @@ func TestRestartSeedsReplayModesFromTranscriptHistory(t *testing.T) {
 }
 
 func TestTranscriptWrittenIncrementally(t *testing.T) {
+	t.Parallel()
 	h, dir := newTestHost(t)
 	att := newFakeAtt()
 	run := domain.RunID("run-flush")

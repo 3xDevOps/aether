@@ -38,6 +38,7 @@ func (d deliveries) none(t *testing.T) {
 }
 
 func TestQueuedPromptReportsDeliveryOrRefusal(t *testing.T) {
+	t.Parallel()
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	release := make(chan struct{})
 	m.onPrompt = func(m *mockAgent, call promptCall) (any, *acp.RequestError) {

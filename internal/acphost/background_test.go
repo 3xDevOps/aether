@@ -424,6 +424,7 @@ func TestCancelledPromptDismissesTheTasksItLaunched(t *testing.T) {
 }
 
 func TestFailedPromptWithTasksPendingWaitsForTheFollowUp(t *testing.T) {
+	t.Parallel()
 	m := newMockAgent(t, loadFixture(t, "claude"))
 	m.onPrompt = func(m *mockAgent, _ promptCall) (any, *acp.RequestError) {
 		m.liveTasks([2]string{"wf-1", "local_workflow"})

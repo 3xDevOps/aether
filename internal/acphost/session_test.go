@@ -153,8 +153,10 @@ func TestImagePromptCapabilityAndMetadata(t *testing.T) {
 }
 
 func TestUnsupportedImagesNeverStartQueueOrSteer(t *testing.T) {
+	t.Parallel()
 	for _, capability := range []string{"", "false"} {
 		t.Run("image="+capability, func(t *testing.T) {
+			t.Parallel()
 			m := newMockAgent(t, imagePromptFixture(t, capability))
 			release := make(chan struct{})
 			m.onPrompt = func(_ *mockAgent, _ promptCall) (any, *acp.RequestError) {
@@ -879,6 +881,7 @@ func TestUnknownUpdateKindsAreKeptRaw(t *testing.T) {
 // Codex answers a second session/prompt sent during a turn by folding it
 // into the running turn and never answering the first request.
 func TestPromptsAreSerialized(t *testing.T) {
+	t.Parallel()
 	m := newMockAgent(t, loadFixture(t, "codex"))
 	release := make(chan struct{})
 	var prompts int
@@ -940,6 +943,7 @@ func TestPromptsAreSerialized(t *testing.T) {
 }
 
 func TestUnknownSteerOutcomeIsAnError(t *testing.T) {
+	t.Parallel()
 	m := newMockAgent(t, loadFixture(t, "codex"))
 	release := make(chan struct{})
 	m.onPrompt = func(*mockAgent, promptCall) (any, *acp.RequestError) {
@@ -968,6 +972,7 @@ func TestUnknownSteerOutcomeIsAnError(t *testing.T) {
 // send it again, and must stop that turn: it cannot see it end, and its next
 // session/prompt would reach a busy agent.
 func TestSteerStartingAnAgentTurnIsCancelled(t *testing.T) {
+	t.Parallel()
 	m := newMockAgent(t, loadFixture(t, "codex"))
 	release := make(chan struct{})
 	var prompts int
