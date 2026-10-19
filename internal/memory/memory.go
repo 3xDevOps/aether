@@ -88,7 +88,7 @@ func (s *Service) add(ctx context.Context, member domain.MemberID, run *domain.R
 		return protocol.MemoryAddResult{}, &protocol.Error{Code: protocol.CodeDenied,
 			Message: "memory.add: agents cannot pin notes; ask a member to pin it (aether memory pin ID)"}
 	}
-	if hits := secretscan.Scan("", []byte(text)); len(hits) > 0 {
+	if hits := secretscan.Scan("", []byte(strings.Join(append([]string{text}, p.Files...), "\n"))); len(hits) > 0 {
 		return protocol.MemoryAddResult{}, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
 			"memory.add: rejected, gitleaks rule %s at %s; remove the secret and retry", hits[0].Kind, hits[0].Location)}
 	}
@@ -193,7 +193,10 @@ func checkNote(kind, scope, text string, files []string) error {
 	if len(files) > protocol.MemoryMaxFiles {
 		return invalid(method, fmt.Sprintf("%d files cited; a note cites at most %d", len(files), protocol.MemoryMaxFiles))
 	}
-	for _, file := range files {
+	for i, file := range files {
+		if len(file) > protocol.MemoryMaxFileBytes {
+			return invalid(method, fmt.Sprintf("file %d is %d bytes; a cited path holds at most %d", i+1, len(file), protocol.MemoryMaxFileBytes))
+		}
 		if strings.TrimSpace(file) == "" || strings.ContainsAny(file, "\r\n") {
 			return invalid(method, fmt.Sprintf("file %q must be one non-empty line", file))
 		}

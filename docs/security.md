@@ -1663,8 +1663,8 @@ is an attributed claim that can be stale or wrong, never an instruction.
   push permission, re-read on each call, so a viewer-owned run reads but
   never writes; the kind (`decision`, `convention`, `gotcha` or
   `preference`; `outcome` notes come only from reports) and the caps (1024
-  bytes, 20 cited files); gitleaks, which refuses the note naming the rule
-  and line:col; any `<team-memory` or `</team-memory` tag, so a note cannot
+  bytes, 20 cited files of 512 bytes each); gitleaks over the text and
+  cited files, which refuses the note naming the rule and line:col; any `<team-memory` or `</team-memory` tag, so a note cannot
   open or close the brief; and 20 notes per run. An agent may replace
   (`--supersedes`) only another agent's unpinned note; a pinned note, a
   member's note, an answer or an outcome is refused with

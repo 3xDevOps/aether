@@ -269,6 +269,31 @@ func TestAddGatesInOrder(t *testing.T) {
 	}
 }
 
+// A cited file is scanned with the text and capped like a path, so a file
+// cannot carry what the text may not.
+func TestAddScansAndCapsCitedFiles(t *testing.T) {
+	f := newFixture(t)
+	run := f.run(f.dana, "claude", "work")
+	hits := secretscan.Scan("", []byte("short note\ntoken="+genericSecret))
+	if len(hits) != 1 {
+		t.Fatalf("secretscan hits = %+v", hits)
+	}
+	_, err := f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "short note",
+		Files: []string{"token=" + genericSecret}})
+	wantError(t, err, protocol.CodeDenied,
+		"memory.add: rejected, gitleaks rule generic-api-key at "+hits[0].Location+"; remove the secret and retry")
+	_, err = f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "short note",
+		Files: []string{"web/package.json", strings.Repeat("x", protocol.MemoryMaxFileBytes+1)}})
+	wantError(t, err, protocol.CodeInvalidParams, "memory.add: file 2 is 513 bytes; a cited path holds at most 512")
+	if found, err := f.svc.Search(context.Background(), protocol.MemorySearchParams{WorkspaceID: string(f.ws.ID)}); err != nil || len(found.Items) != 0 {
+		t.Fatalf("notes after refused adds = %+v, %v; want none", found.Items, err)
+	}
+	if _, err = f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "short note",
+		Files: []string{strings.Repeat("x", protocol.MemoryMaxFileBytes)}}); err != nil {
+		t.Fatalf("a %d-byte path: %v", protocol.MemoryMaxFileBytes, err)
+	}
+}
+
 func TestAgentSupersedesOnlyUnpinnedAgentNotes(t *testing.T) {
 	f := newFixture(t)
 	ada := f.member("Ada", domain.RoleCollaborator)

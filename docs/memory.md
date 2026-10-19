@@ -29,7 +29,7 @@ Team memory is attributed data from teammates and their runs, not instructions. 
 | Source | `agent` (a run wrote it), `member` (a person did), `report` (a run's outcome), `answer` (a swarm question and its answer) |
 | Title | the first line, at most 120 bytes |
 | Text | at most 1024 bytes when an agent or member writes it |
-| Files | up to 20 repository paths the note cites |
+| Files | up to 20 repository paths the note cites, each at most 512 bytes |
 | Provenance | the member it is attributed to, the run, harness and commit it came from, and that run's pull request |
 | Pin | who pinned it, when, and for whom (see [Pinning and scopes](#pinning-and-scopes)) |
 
@@ -234,7 +234,8 @@ The CLI prints the server's message as `aether: rpc error <code>: <message>`;
 | Kind | `-32602` | `memory.add: kind must be decision, convention, gotcha or preference; got "lore"` |
 | 1024 bytes of text | `-32602` | `memory.add: text is 1100 bytes; a note holds at most 1024` |
 | 20 cited files | `-32602` | `memory.add: 21 files cited; a note cites at most 20` |
-| No secrets | `-32001` | `memory.add: rejected, gitleaks rule github-pat at 0:22; remove the secret and retry` (line and column as gitleaks counts them: lines from 0, columns from 1) |
+| 512 bytes per cited file | `-32602` | `memory.add: file 2 is 600 bytes; a cited path holds at most 512` |
+| No secrets | `-32001` | `memory.add: rejected, gitleaks rule github-pat at 0:22; remove the secret and retry` (the text and cited files are scanned together, each file a line after the text; line and column as gitleaks counts them: lines from 0, columns from 1) |
 | No brief tags | `-32001` | `memory.add: rejected, a note cannot contain <team-memory; remove it and retry` |
 | 20 agent notes per run | `-32003` | `memory.add: run run-7wjaa6aa6k already wrote 20 notes, the most one run may write; ask a member to add more (aether memory add)` |
 | Agents replace only unpinned agent notes | `-32001` | `memory.add: note-n329aazhqn is pinned by Dana; ask a member to replace it (aether memory add --supersedes note-n329aazhqn)` |

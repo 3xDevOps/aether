@@ -40,6 +40,7 @@ const (
 	MemoryMaxTitleBytes       = store.MemoryMaxTitleBytes
 	MemoryMaxBodyBytes        = 1 << 10
 	MemoryMaxFiles            = store.MemoryMaxFiles
+	MemoryMaxFileBytes        = 512
 	MemoryMaxAgentNotesPerRun = 20
 	MemoryMaxSimilar          = 3
 	MemoryPinWorkspaceBytes   = store.MemoryPinWorkspaceBytes

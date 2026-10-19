@@ -26,7 +26,7 @@ with an account on the server.
    or `outcome`, which only the server writes), a scope, a source (`agent`,
    `member`, `report`, `answer`), a title (its first line, at most 120
    bytes), a body (at most 1024 bytes when an agent or member writes it), up
-   to 20 cited file paths, and who pinned it.
+   to 20 cited file paths of at most 512 bytes each, and who pinned it.
 3. **Provenance is the graph.** Columns join a note to IDs Aether already
    owns: author member, run (its pull request from `run_pull_requests`),
    harness, commit, the `coord_reports` or `mission_questions` row it came
@@ -47,9 +47,10 @@ with an account on the server.
    `Q: <question> A: <answer>` attributed to the answering member and the
    asking run.
 7. **Secrets never reach a note.** gitleaks (`internal/secretscan`) runs
-   before the write's transaction. An agent or member note with a hit is
-   refused, naming the rule and line:col; a captured report or answer is
-   stored with its body `(withheld: gitleaks rule <rule> at <loc>)`.
+   before the write's transaction, over the text and cited files. An agent
+   or member note with a hit is refused, naming the rule and line:col; a
+   captured report or answer is stored with its body
+   `(withheld: gitleaks rule <rule> at <loc>)`.
 8. **Agents write; members curate.** Agents add decisions, conventions,
    gotchas and preferences, at most 20 per run, and the server fills in
    author, run, harness and commit. An agent may replace only an unpinned

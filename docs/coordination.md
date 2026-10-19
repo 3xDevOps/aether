@@ -1041,7 +1041,8 @@ supersede chain, oldest first.
 
 `add` takes `--kind decision|convention|gotcha|preference` and the text, at
 most 1024 bytes; its first line is the title. `--file` cites a repository
-path and repeats up to 20 times. `--supersedes <id>` replaces a note; an
+path of at most 512 bytes and repeats up to 20 times; gitleaks scans the
+files with the text. `--supersedes <id>` replaces a note; an
 agent may replace only an unpinned note an agent wrote. `--scope me` makes
 it a member-scope note: a member who pins it with `aether memory pin <id>`
 gets it in their own runs' briefs only. Flags may come before or
