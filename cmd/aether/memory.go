@@ -18,6 +18,8 @@ import (
 
 const memoryUsage = `usage: aether memory <command> [--workspace <name-or-id>] [options]
 
+Put -- before text that starts with a dash. Guide: docs/memory.md
+
 commands:
   ls      [--kind K] [--file P] [--all] [--limit N]        list the newest notes, 100 by default
   search  [--kind K] [--file P] [--all] [--limit N] WORDS  list notes matching any word, best 10 first
@@ -27,9 +29,7 @@ commands:
   pin     [--me] ID                                        put a note in every new run's brief, or with --me in yours
   unpin   ID                                               take a note out of briefs
   rm      ID | --run RUN                                   delete a note, or every note a run wrote
-  brief   [--member M]                                     print the brief a new run gets, byte for byte
-
-Put -- before text that starts with a dash. See docs/memory.md.`
+  brief   [--member M]                                     print the brief a new run gets, byte for byte`
 
 // memoryCall is a parsed memory command, run once connected.
 type memoryCall func(c *protocol.Client, w io.Writer) error
@@ -164,7 +164,7 @@ func parseMemory(args []string) (memoryCall, error) {
 			if err != nil {
 				return err
 			}
-			if err := c.Call(protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: ws, ID: id, Scope: scope}, nil); err != nil {
+			if err = c.Call(protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: ws, ID: id, Scope: scope}, nil); err != nil {
 				return err
 			}
 			_, err = fmt.Fprintf(w, "pinned %s: %s\n", id, done)
@@ -180,7 +180,7 @@ func parseMemory(args []string) (memoryCall, error) {
 			if err != nil {
 				return err
 			}
-			if err := c.Call(protocol.MethodMemoryUnpin, protocol.MemoryUnpinParams{WorkspaceID: ws, ID: id}, nil); err != nil {
+			if err = c.Call(protocol.MethodMemoryUnpin, protocol.MemoryUnpinParams{WorkspaceID: ws, ID: id}, nil); err != nil {
 				return err
 			}
 			_, err = fmt.Fprintf(w, "unpinned %s: it stays searchable\n", id)
@@ -206,7 +206,7 @@ func parseMemory(args []string) (memoryCall, error) {
 			}
 			p.WorkspaceID = ws
 			var res protocol.MemoryRmResult
-			if err := c.Call(protocol.MethodMemoryRm, p, &res); err != nil {
+			if err = c.Call(protocol.MethodMemoryRm, p, &res); err != nil {
 				return err
 			}
 			if len(res.IDs) == 0 {
@@ -232,21 +232,21 @@ func parseMemory(args []string) (memoryCall, error) {
 			}
 			p := protocol.MemoryBriefParams{WorkspaceID: ws}
 			if *member != "" {
-				m, err := resolveMember(c, *member)
-				if err != nil {
-					return err
+				m, merr := resolveMember(c, *member)
+				if merr != nil {
+					return merr
 				}
 				p.MemberID = m.ID
 			}
 			var res protocol.MemoryBriefResult
-			if err := c.Call(protocol.MethodMemoryBrief, p, &res); err != nil {
+			if err = c.Call(protocol.MethodMemoryBrief, p, &res); err != nil {
 				return err
 			}
 			if res.Text == "" {
-				_, err := fmt.Fprintln(os.Stderr, "no brief: the workspace has no notes and no run finished in the last 48h")
+				_, err = fmt.Fprintln(os.Stderr, "no brief: the workspace has no notes and no run finished in the last 48h")
 				return err
 			}
-			if _, err := io.WriteString(w, res.Text); err != nil {
+			if _, err = io.WriteString(w, res.Text); err != nil {
 				return err
 			}
 			// The brief ends without a newline; add one only for a person
