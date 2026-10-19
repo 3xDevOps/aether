@@ -237,7 +237,7 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, vet fun
 	if err != nil {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE memory SET superseded_by = ? WHERE id = ?`, m.ID, old); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE memory SET superseded_by = ? WHERE id = ?`, m.ID, old); err != nil {
 		return false, fmt.Errorf("store: supersede memory %s: %w", old, err)
 	}
 	if prior.PinnedAt != nil {
