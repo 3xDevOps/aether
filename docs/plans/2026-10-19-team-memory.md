@@ -54,7 +54,7 @@ with an account on the server.
 8. **Agents write; members curate.** Agents add decisions, conventions,
    gotchas and preferences, at most 20 per run, and the server fills in
    author, run, harness and commit. An agent may replace only an unpinned
-   agent note. Only members pin, unpin and remove. Each add is checked in
+   agent note, with text no other live note holds. Only members pin, unpin and remove. Each add is checked in
    order: push permission, kind and caps, secret scan, no `<team-memory`
    text, the per-run limit. The result lists up to 3 similar live notes.
 9. **Pins are budgeted by their brief line.** A pin costs its title plus 64

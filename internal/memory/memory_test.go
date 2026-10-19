@@ -348,6 +348,33 @@ func TestAgentSupersedesOnlyUnpinnedAgentNotes(t *testing.T) {
 	}
 }
 
+// An agent's replacement that another live note already holds would hide a
+// note without writing one the run's limit counts, so it is refused.
+func TestAgentSupersedeOntoDuplicateIsRefused(t *testing.T) {
+	f := newFixture(t)
+	writer, bad := f.run(f.dana, "claude", "first"), f.run(f.dana, "codex", "second")
+	kept, err := f.agentAdd(bad, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "Use npm in web/."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := f.agentAdd(writer, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "Run go test with -race."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.agentAdd(bad, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "use NPM in web/.", Supersedes: target.Item.ID})
+	wantError(t, err, protocol.CodeConflict, fmt.Sprintf(
+		"memory.add: store: conflict: memory note %s already holds this text; ask a member to replace %s with it (aether memory add --supersedes %s)",
+		kept.Item.ID, target.Item.ID, target.Item.ID))
+	shown, err := f.svc.Show(context.Background(), protocol.MemoryShowParams{WorkspaceID: string(f.ws.ID), ID: target.Item.ID})
+	if err != nil || shown.Item.InvalidAt != nil || shown.Item.SupersededBy != "" {
+		t.Fatalf("target after a refused replacement = %+v, %v; want it live", shown.Item, err)
+	}
+	byMember := f.memberAdd(f.dana, protocol.MemoryAddParams{Kind: protocol.MemoryKindGotcha, Text: "use NPM in web/.", Supersedes: target.Item.ID})
+	if !byMember.Duplicate || byMember.Item.ID != kept.Item.ID {
+		t.Fatalf("member replacement = %+v, want the live duplicate %s", byMember, kept.Item.ID)
+	}
+}
+
 func TestMembersPinUnpinAndRemove(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()

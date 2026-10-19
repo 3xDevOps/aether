@@ -199,12 +199,14 @@ func (d *DB) InsertMemory(ctx context.Context, m *Memory) (bool, error) {
 }
 
 // SupersedeMemory stores m as the replacement for the live note old in one
-// transaction. vet, when set, may refuse old as the transaction reads it.
-// old is invalidated before the insert, so m may repeat its text; when m
-// duplicates another live note, old points at that note. A pin on old moves
-// to the replacement, pinned in old's scope by the author m arrived with,
-// even when the replacement is someone else's duplicate, and must fit that
-// scope's budget without old.
+// transaction. vet, when set, marks an agent's replacement: it may refuse
+// old as the transaction reads it, and a replacement whose text another
+// live note holds is refused, since it would hide old without writing a
+// note the run's limit counts. old is invalidated before the insert, so m
+// may repeat its text; when m duplicates another live note, old points at
+// that note. A pin on old moves to the replacement, pinned in old's scope
+// by the author m arrived with, even when the replacement is someone
+// else's duplicate, and must fit that scope's budget without old.
 func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, vet func(old *Memory) error) (bool, error) {
 	if m == nil {
 		return false, errors.New("store: supersede memory: note is required")
@@ -238,6 +240,10 @@ func (d *DB) SupersedeMemory(ctx context.Context, old string, m *Memory, vet fun
 	duplicate, err := insertMemory(ctx, tx, m)
 	if err != nil {
 		return false, err
+	}
+	if duplicate && vet != nil {
+		return false, fmt.Errorf("%w: memory note %s already holds this text; ask a member to replace %s with it (aether memory add --supersedes %s)",
+			ErrConflict, m.ID, old, old)
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE memory SET superseded_by = ? WHERE id = ?`, m.ID, old); err != nil {
 		return false, fmt.Errorf("store: supersede memory %s: %w", old, err)

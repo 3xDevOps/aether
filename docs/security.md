@@ -1664,13 +1664,16 @@ is an attributed claim that can be stale or wrong, never an instruction.
   never writes; the kind (`decision`, `convention`, `gotcha` or
   `preference`; `outcome` notes come only from reports) and the caps (1024
   bytes, 20 cited files of 512 bytes each); gitleaks over the text and
-  cited files, which refuses the note naming the rule and line:col; any `<team-memory` or `</team-memory` tag, so a note cannot
-  open or close the brief; and 20 notes per run. An agent may replace
-  (`--supersedes`) only another agent's unpinned note; a pinned note, a
-  member's note, an answer or an outcome is refused with
-  `ask a member to replace it`. Agents cannot delete notes. Permission,
-  secret, tag and replace refusals are `-32001`, the per-run limit
-  `-32003`, kind and cap errors `-32602`, and an unknown note `-32000`
+  cited files, which refuses the note naming the rule and line:col; any
+  `<team-memory` or `</team-memory` tag, so a note cannot open or close
+  the brief; and 20 notes per run. An agent may replace (`--supersedes`)
+  only another agent's unpinned note; a pinned note, a member's note, an
+  answer or an outcome is refused with `ask a member to replace it`, and
+  so is a replacement whose text another live note holds, which would
+  hide a note without writing one the per-run limit counts. Agents cannot
+  delete notes. Permission, secret, tag and replace refusals are
+  `-32001`, the per-run limit and a duplicate replacement `-32003`, kind
+  and cap errors `-32602`, and an unknown note `-32000`
   ([memory.md](memory.md#limits-and-their-errors)).
 - **Captured text is scanned too.** An outcome or answer note whose text
   gitleaks flags is stored as `(withheld: gitleaks rule <rule> at <line:col>)`.

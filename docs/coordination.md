@@ -1017,7 +1017,8 @@ memory.add: note-ab12cd34ef is pinned by dana; ask a member to replace it (aethe
 
 The secret's location is gitleaks' `line:col`, lines from 0 and columns
 from 1. A missing push permission, a secret, a `<team-memory` tag and a
-note an agent may not replace are `-32001`; the 20-note limit is `-32003`;
+note an agent may not replace are `-32001`; the 20-note limit and a
+replacement another live note already holds are `-32003`;
 a bad kind or a cap is `-32602`; an unknown note is `-32000`.
 [memory.md](memory.md#limits-and-their-errors) lists every message.
 
@@ -1043,7 +1044,8 @@ supersede chain, oldest first.
 most 1024 bytes; its first line is the title. `--file` cites a repository
 path of at most 512 bytes and repeats up to 20 times; gitleaks scans the
 files with the text. `--supersedes <id>` replaces a note; an
-agent may replace only an unpinned note an agent wrote. `--scope me` makes
+agent may replace only an unpinned note an agent wrote, with text no
+other live note holds. `--scope me` makes
 it a member-scope note: a member who pins it with `aether memory pin <id>`
 gets it in their own runs' briefs only. Flags may come before or
 after the text; put `--` before text that starts with a dash. The server

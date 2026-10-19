@@ -150,7 +150,8 @@ same through `aether_memory_search` and `aether_memory_add`
 `gotcha` and `preference` notes, at most 20 per run, and only while the run's
 owner may push. The server fills in the member, run, harness and commit. An
 agent cannot pin, unpin or remove notes, and may replace only another
-agent's unpinned note. The full reference is in
+agent's unpinned note, with text no other live note holds. The full
+reference is in
 [coordination.md](coordination.md#team-memory).
 
 ```
@@ -239,6 +240,7 @@ The CLI prints the server's message as `aether: rpc error <code>: <message>`;
 | No brief tags | `-32001` | `memory.add: rejected, a note cannot contain <team-memory; remove it and retry` |
 | 20 agent notes per run | `-32003` | `memory.add: run run-7wjaa6aa6k already wrote 20 notes, the most one run may write; ask a member to add more (aether memory add)` |
 | Agents replace only unpinned agent notes | `-32001` | `memory.add: note-n329aazhqn is pinned by Dana; ask a member to replace it (aether memory add --supersedes note-n329aazhqn)` |
+| An agent's replacement is new text | `-32003` | `memory.add: store: conflict: memory note note-sqe956kv0p already holds this text; ask a member to replace note-hwwtypyr97 with it (aether memory add --supersedes note-hwwtypyr97)` |
 | Pin budgets | `-32003` | see [Pinning and scopes](#pinning-and-scopes) |
 | A replaced note cannot be pinned or replaced again | `-32003` | `memory.add: store: conflict: memory note note-n329aazhqn is already replaced` |
 | Search returns 1 to 100 notes | `-32602` | `memory.search: limit must be between 1 and 100; got 101` |
