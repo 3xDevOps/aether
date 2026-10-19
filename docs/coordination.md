@@ -1731,4 +1731,5 @@ still receive their identity socket and agent instructions without report
 lines.
 `coord.status` reports the live method allow-list; conflict and swarm
 operations remain disabled rather than inheriting authority from the socket.
+Team memory commands and the launch brief keep working.
 The conflict radar itself remains active.

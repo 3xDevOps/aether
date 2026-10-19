@@ -154,7 +154,9 @@ owner may push. The server fills in the member, run, harness and commit. An
 agent cannot pin, unpin or remove notes, and may replace only another
 agent's unpinned note, with text no other live note holds. The full
 reference is in
-[coordination.md](coordination.md#team-memory).
+[coordination.md](coordination.md#team-memory). Memory commands and the
+launch brief keep working when the server runs with
+`--conflict-coordination=false`.
 
 ```
 $ aether-internal memory add --kind gotcha --file internal/scheduler/reattach.go "Reattach races the lease sweeper; take the lease before reading the container state."

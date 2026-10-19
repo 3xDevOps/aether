@@ -419,8 +419,9 @@ func (e *coordEnv) assertUnregistered(t *testing.T, run protocol.Run) {
 	}
 }
 
-// assertDevelopmentDiscovery checks the authenticated identity and independent
-// development authority, including when conflict coordination is disabled.
+// assertDevelopmentDiscovery checks the authenticated identity and the
+// development and team memory authority that stay on when conflict
+// coordination is disabled.
 func assertDevelopmentDiscovery(t *testing.T, status protocol.CoordStatusResult, run protocol.Run, disabled bool, development ...string) {
 	t.Helper()
 	if status.RunID != run.ID || status.WorkspaceID != run.WorkspaceID || status.MemberID != run.MemberID {
@@ -436,7 +437,7 @@ func assertDevelopmentDiscovery(t *testing.T, status protocol.CoordStatusResult,
 			t.Errorf("disabled coordination exposed peer or mission state: %+v", status)
 		}
 		for _, method := range status.Capabilities {
-			if method != protocol.MethodCoordStatus && !strings.HasPrefix(method, "dev.") {
+			if method != protocol.MethodCoordStatus && !strings.HasPrefix(method, "dev.") && !strings.HasPrefix(method, "memory.") {
 				t.Errorf("disabled coordination advertised %s", method)
 			}
 		}
