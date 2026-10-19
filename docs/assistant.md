@@ -99,6 +99,7 @@ documentation of the server you run.
 | Read | `aether_environment_status` | `terminal.status` | Your environment's state and saved image |
 | Read | `aether_docs` | `assistant.docs` | Aether's own guides |
 | Read | `aether_view_context` | `assistant.view_context` | What your dashboard shows now; see [What it sees](#what-it-sees) |
+| Read | `aether_memory_search` | `memory.search` | A workspace's [team memory](memory.md) notes, best first; the assistant cannot add, pin or remove them |
 | Reversible | `aether_pause_run` | `run.pause` | Pauses a run |
 | Reversible | `aether_resume_run` | `run.resume` | Resumes a run |
 | Confirmed | `aether_launch_run` | `run.launch` | Starts a run, naming the agent, workspace and task |

@@ -282,7 +282,7 @@ func (s *Service) Search(ctx context.Context, p protocol.MemorySearchParams) (pr
 			fmt.Sprintf("limit must be between 1 and %d; got %d", protocol.MemorySearchMaxLimit, p.Limit))
 	}
 	notes, err := s.cfg.Store.SearchMemory(ctx, store.MemoryQuery{Workspace: domain.WorkspaceID(p.WorkspaceID),
-		Words: p.Words, Kind: store.MemoryKind(p.Kind), File: strings.TrimSpace(p.File), All: p.All, Limit: p.Limit})
+		Words: p.Words, Kind: store.MemoryKind(p.Kind), File: strings.TrimSpace(p.File), All: p.All, Pinned: p.Pinned, Limit: p.Limit})
 	if err != nil {
 		return protocol.MemorySearchResult{}, fail(method, err)
 	}

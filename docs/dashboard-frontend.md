@@ -462,7 +462,7 @@ that omit the fields get a flat list.
 
 `top-bar.tsx` is a `banner` at every window width, padded by `--safe-top`.
 Its first row shows the Aether mark and lowercase `aether` wordmark on the left, then **Board**,
-**Swarms**, **Activity**, **Insights**, **Files**, **Environment**, **Agents** and
+**Swarms**, **Activity**, **Insights**, **Memory**, **Files**, **Environment**, **Agents** and
 **Templates** in `nav` "Main navigation". These use the sidebar's `ListRow`
 styling and current-page selection. A `ResizeObserver` measures the row and
 its buttons, including font and text-size changes. Destinations that do not
@@ -1083,7 +1083,9 @@ or roles but can grant or revoke access to their own agent account.
 
 Every request goes through `src/lib/api.ts` - the only module that knows route
 shapes, gateway authentication and error decoding. It carries exactly the
-methods the views call. Control calls use `POST /api/v1/<method>`. The diff
+methods the views call. Control calls use `POST /api/v1/<method>`. A refusal's
+`ApiError` message is `<method>: <server message>`, or the server's message
+alone when it already starts with that method. The diff
 patch, disk gauge and capabilities descriptor are read through `GET`;
 development and retained capture bytes also use an authenticated binary `GET`,
 not base64 in control JSON. The shared browser's observation-only WebSocket is
@@ -4061,6 +4063,58 @@ A failed read shows the server's error with **Retry**; a server without
 stream is live the page names the connection problem instead of loading. An
 empty period offers **New run**, the last 12 months, and everyone's runs
 from **Mine**.
+
+## Memory
+
+`src/routes/memory/` is **Memory** (`?page=memory`), the active workspace's
+[team memory](memory.md): short attributed notes every run can search and
+write, and the brief a new run starts with. It is in the header navigation
+after **Insights** when the gateway offers `memory.search`. It reads
+`memory.search`, `memory.show` and `memory.brief`, writes with `memory.add`,
+`memory.pin`, `memory.unpin` and `memory.rm`, and re-reads the list and the
+brief after each write and when the event stream comes back live, dropping
+answers to an older request.
+
+- **Controls.** **Workspace** (shown with more than one, opening on
+  `activeWorkspace` or the first; notes belong to one workspace, so there is
+  no "all") and **Add note**. A search box sends its words to
+  `memory.search` 250 ms after typing stops. **Show** picks one of **All**,
+  **Pinned**, **Agent notes**, **Outcomes**, **Answers** and **Superseded**.
+  Outcomes asks the server for `kind: outcome` and Superseded for `all: true`
+  then keeps the replaced notes; Agent notes and Answers narrow what the
+  reads returned.
+- **List.** Two reads with the same words and filter: every pinned note
+  (`pinned: true`), and the 100 newest notes or best matches, which
+  **Pinned** skips. Each note is listed once, pinned first, each group in
+  the server's order, so a pin older than the newest 100 still leads the
+  list. A row shows the title, a pin badge
+  ("Pinned by Dana", or "Pinned for you" on a pin for one member's briefs),
+  **Superseded**, the kind, the source (Agent note, Member note, Run report,
+  Swarm answer), the author with the agent's display name, the run as a link,
+  the pull request, the first cited file and how many more, and the age.
+  When the second read is full the page says it shows every pinned note,
+  then the 100 newest notes or best matches.
+- **Detail.** A row opens `memory.show`: the note's text, its provenance
+  (author, run and its ID, commit, pull request, files, the report or
+  question it came from, when it was written and pinned, what replaced it)
+  and the supersede chain oldest first, each other note a link. A member who
+  may push gets **Pin** (every brief in the workspace), **Pin for me only**,
+  **Unpin** and **Remove…**, which asks before `memory.rm`.
+- **Add note.** Kind (decision, convention, gotcha or preference), the text,
+  **Only me** (`scope: member`) and **Pin**. A duplicate answers with the
+  live note already holding the text and says so.
+- **Brief**, collapsed, with its size against the 3072-byte cap: the bytes
+  `memory.brief` returns for the viewing member, in a code block.
+
+Every refusal shows the server's text unchanged, method included:
+`memory.add: rejected, gitleaks rule github-pat at 1:7; remove the secret
+and retry`, or `memory.pin: pinned workspace notes use 980 of 1024 bytes;
+this note needs 120; unpin one first`. A pin refused after an add
+(`memory.add: <id> is stored but not pinned: …`) also re-reads the list,
+because the note was stored. A viewer sees no write controls. A server
+without `memory.search` gets a neutral line asking for an update. Activity
+words `memory.change` as "Dana pinned a team memory note", or "The agent
+added a team memory note" for a run's write.
 
 ## Files
 

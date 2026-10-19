@@ -1022,6 +1022,33 @@ Keep the workspace, read fresh status, and explicitly review that candidate befo
 submitting its generation and commit again. Never fetch a new SHA automatically
 while submitting or replay a failed adoption with a substituted SHA.
 
+### Team memory methods
+
+These read and curate a workspace's [team memory](memory.md). Every one
+takes `workspace_id`. Reads need view; `memory.add`, `memory.pin`,
+`memory.unpin` and `memory.rm` need push (the collaborator or admin role),
+re-checked on every call. A `MemoryItem` is
+`{"id":"note-...","workspace_id":"...","kind":"gotcha","scope":"workspace"|"member","source":"agent"|"member"|"report"|"answer","source_ref":"...","title":"...","body":"...","files":["..."],"author_id":"...","author_name":"...","run_id":"...","harness":"codex","commit":"...","pr_number":312,"pr_state":"merged","pr_url":"...","superseded_by":"...","invalid_at":"...","pinned_by":"...","pinned_by_name":"...","pinned_at":"...","created_at":"...","updated_at":"..."}`,
+empty fields omitted.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `memory.search` | `{"workspace_id":"...","words":"lease reattach","kind":"gotcha","file":"web/bun.lock","all":false,"pinned":false,"limit":10}` (all but `workspace_id` optional; without `words` the newest come first; `pinned` keeps pinned notes; `limit` is 1 to 100, default 10) | `{"items":[MemoryItem]}`, best first |
+| `memory.show` | `{"workspace_id":"...","id":"note-..."}` | `{"item":MemoryItem,"chain":[MemoryItem]}`; `chain` holds the notes it replaced and was replaced by, oldest first |
+| `memory.brief` | `{"workspace_id":"...","member_id":"..."}` (`member_id` optional, default the caller) | `{"text":"<team-memory workspace=..."}`: the brief a new run of that member gets now, `""` when there is nothing to brief |
+| `memory.add` | `{"workspace_id":"...","kind":"decision"\|"convention"\|"gotcha"\|"preference","text":"...","files":["..."],"supersedes":"note-...","scope":"workspace"\|"member","pin":false}` (only `workspace_id`, `kind` and `text` required) | `{"item":MemoryItem,"duplicate":false,"similar":[MemoryItem]}`; with `duplicate` the item is the live note that already holds the text; up to 3 `similar` live notes |
+| `memory.pin` | `{"workspace_id":"...","id":"note-...","scope":"workspace"\|"member"}` (`scope` optional, default the note's own) | `{"item":MemoryItem}` |
+| `memory.unpin` | `{"workspace_id":"...","id":"note-..."}` | `{"item":MemoryItem}` |
+| `memory.rm` | `{"workspace_id":"...","id":"note-..."}` or `{"workspace_id":"...","run_id":"run-..."}` | `{"ids":["note-..."]}`, the notes deleted, sorted |
+
+A refusal for the role, a secret, a brief tag or a supersede is `-32001`;
+a pin past its budget and the 20-notes-per-run cap are `-32003`; a bad kind,
+scope, size or limit is `-32602`; an unknown note is `-32000`. The exact
+messages are in [memory.md](memory.md#limits-and-their-errors). Each write
+publishes a `memory.change` event,
+`{"action":"add"|"supersede"|"pin"|"unpin"|"rm","note_id":"...","actor_id":"..."}`,
+which `/ws/events` streams with `"types":["memory.change"]`.
+
 ### Administrator GitHub connection and import
 
 Both gateways expose the same administrator flow; it needs no local clone or
