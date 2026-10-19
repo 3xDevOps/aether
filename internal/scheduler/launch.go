@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -596,4 +598,46 @@ func (s *Scheduler) freshen(ctx context.Context, run *domain.Run) *domain.Run {
 		return fresh
 	}
 	return run
+}
+
+// command resolves argv and profile for one launch by member in workspace on
+// account's shared account, with the profile from launchProfile. An acp
+// launch has no argv: the task travels over the protocol.
+func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, assigned bool, task, model string) (argv []string, profile harness.Profile, acp bool, err error) {
+	if err = domain.ValidModel(model); err != nil {
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", err)
+	}
+	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
+	if err != nil {
+		return nil, harness.Profile{}, false, err
+	}
+	if !mode.Valid() {
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: invalid launch mode %q", mode)
+	}
+	acp = mode == domain.LaunchACP ||
+		(mode == domain.LaunchHeadless && s.backgroundACP(member, account, profile, argvs))
+	argv = argvs[mode]
+	if acp {
+		argv = argvs[domain.LaunchACP]
+	}
+	if harnessName == "fake" && len(argv) == 0 && !acp {
+		argv = strings.Fields(os.Getenv(fakeAgentEnv))
+	}
+	if len(argv) == 0 {
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: harness %q has no command for mode %q", harnessName, mode)
+	}
+	if acp {
+		return nil, profile, true, nil
+	}
+	if model != "" && len(profile.ModelArgs) == 0 {
+		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harnessName)
+	}
+	if task != "" && !profile.CarriesInstructions() {
+		instructions, ierr := s.briefedInstructions(ctx, s.runGuide(ctx, "", assigned, mode == domain.LaunchHeadless, false), workspace, member)
+		if ierr != nil {
+			return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", ierr)
+		}
+		task = withInstructions(task, instructions)
+	}
+	return harness.Argv(argv, task, profile.ModelLaunchArgs(model)), profile, false, nil
 }
