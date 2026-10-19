@@ -1154,7 +1154,7 @@ never a borrowed run identity.
 ### Team memory brief
 
 **Team memory** is the workspace's store of short, attributed notes that
-runs and members search and write ([security.md](security.md#team-memory)).
+runs and members search and write ([memory.md](memory.md)).
 The brief is the part Aether pushes into a run:
 
 ```
@@ -1182,7 +1182,9 @@ fails the launch with its error.
 
 A launch that carries no instructions carries no brief: a taskless
 `gemini`, `cursor`, `antigravity`, custom, `fake` or argv-overridden launch
-gets neither, so its agent must run `aether-internal memory brief` itself.
+gets neither. Installed SessionStart hooks add both when the session
+starts; without them the agent must run `aether-internal memory brief`
+itself.
 `--conflict-coordination=false` cuts the role card to its first line; the
 brief still follows it.
 

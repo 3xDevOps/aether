@@ -391,10 +391,10 @@ report or answer with a secret is still recorded, with its text replaced by
 secrets it has rules for, so keep credentials out of reports and answers.
 
 Notes do not expire. A collaborator or admin deletes one with
-`aether memory rm <id>`, or every note a run wrote with
-`aether memory rm --run <run>`. Deleting a run or a swarm deletes the
-unpinned notes of its runs; pinned notes stay until removed. Deleting the
-workspace deletes all of its notes. A replaced note stays, hidden from
+`aether memory rm <id>`, or every note attributed to a run, its swarm
+answers included, with `aether memory rm --run <run>`. Deleting a run or a
+swarm deletes the unpinned notes of its runs; pinned notes stay until
+removed. Deleting the workspace deletes all of its notes. A replaced note stays, hidden from
 search unless asked for with `--all`, until it is removed. Removing a member
 keeps the notes attributed to them.
 

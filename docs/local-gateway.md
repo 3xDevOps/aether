@@ -1041,9 +1041,9 @@ empty fields omitted.
 | `memory.unpin` | `{"workspace_id":"...","id":"note-..."}` | `{"item":MemoryItem}` |
 | `memory.rm` | `{"workspace_id":"...","id":"note-..."}` or `{"workspace_id":"...","run_id":"run-..."}` | `{"ids":["note-..."]}`, the notes deleted, sorted |
 
-A refusal for the role, a secret, a brief tag or a supersede is `-32001`;
-a pin past its budget and the 20-notes-per-run cap are `-32003`; a bad kind,
-scope, size or limit is `-32602`; an unknown note is `-32000`. The exact
+A refusal for the role, a secret or a brief tag is `-32001`; a pin past
+its budget and pinning or replacing a replaced note are `-32003`; a bad
+kind, scope, size or limit is `-32602`; an unknown note is `-32000`. The exact
 messages are in [memory.md](memory.md#limits-and-their-errors). Each write
 publishes a `memory.change` event,
 `{"action":"add"|"supersede"|"pin"|"unpin"|"rm","note_id":"...","actor_id":"..."}`,
