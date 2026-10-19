@@ -182,6 +182,7 @@ edge advances across the button; covered and uncovered text retain separate
 contrast. The holder sees the same fill on **Release**. A Standard run also
 traces red over its terminal's teal border from the side midpoints toward
 the top and bottom centers.
+The fill decelerates (logarithmic) while the countdown stays linear.
 Releasing early, moving off the button, pressing Escape, or leaving the tab
 cancels the hold.
 
