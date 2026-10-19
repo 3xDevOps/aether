@@ -121,13 +121,15 @@ type MemoryAddResult struct {
 
 // MemorySearchParams matches Words against titles, bodies and files, best
 // first; no words lists the newest notes. File keeps notes citing that path.
-// All includes superseded and invalidated notes.
+// All includes superseded and invalidated notes. Pinned keeps only pinned
+// notes.
 type MemorySearchParams struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Words       string `json:"words,omitempty"`
 	Kind        string `json:"kind,omitempty"`
 	File        string `json:"file,omitempty"`
 	All         bool   `json:"all,omitempty"`
+	Pinned      bool   `json:"pinned,omitempty"`
 	Limit       int    `json:"limit,omitempty"`
 }
 

@@ -296,6 +296,7 @@ type MemoryQuery struct {
 	Kind      MemoryKind
 	File      string
 	All       bool
+	Pinned    bool
 	Limit     int
 }
 
@@ -312,6 +313,9 @@ func (d *DB) SearchMemory(ctx context.Context, q MemoryQuery) ([]*Memory, error)
 	}
 	if !q.All {
 		where += " AND " + memoryLive
+	}
+	if q.Pinned {
+		where += " AND m.pinned_at IS NOT NULL"
 	}
 	var match []string
 	if q.File != "" {

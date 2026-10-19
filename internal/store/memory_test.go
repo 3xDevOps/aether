@@ -112,6 +112,30 @@ func TestMemorySearchMatchesFiles(t *testing.T) {
 	}
 }
 
+// Pinned finds a pin however many newer notes bury it.
+func TestMemorySearchPinned(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	ada := mustCreateMember(t, db)
+	pinned := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "Take the lease before reattaching."})
+	if _, err := db.PinMemory(ctx, w.ID, pinned.ID, ada.ID, ""); err != nil {
+		t.Fatalf("PinMemory: %v", err)
+	}
+	newer := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "Reattach after a restart reads the lease."})
+	if got := noteIDs(t, db, MemoryQuery{Workspace: w.ID, Limit: 1}); !slices.Equal(got, []string{newer.ID}) {
+		t.Fatalf("newest = %v, want %s", got, newer.ID)
+	}
+	for _, q := range []MemoryQuery{
+		{Workspace: w.ID, Pinned: true, Limit: 1},
+		{Workspace: w.ID, Pinned: true, Words: "lease"},
+	} {
+		if got := noteIDs(t, db, q); !slices.Equal(got, []string{pinned.ID}) {
+			t.Errorf("search %+v = %v, want only the pinned %s", q, got, pinned.ID)
+		}
+	}
+}
+
 // A replaced note leaves search unless All, and show walks the chain both
 // ways.
 func TestMemorySupersede(t *testing.T) {

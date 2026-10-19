@@ -1033,7 +1033,7 @@ empty fields omitted.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `memory.search` | `{"workspace_id":"...","words":"lease reattach","kind":"gotcha","file":"web/bun.lock","all":false,"limit":10}` (all but `workspace_id` optional; without `words` the newest come first; `limit` is 1 to 100, default 10) | `{"items":[MemoryItem]}`, best first |
+| `memory.search` | `{"workspace_id":"...","words":"lease reattach","kind":"gotcha","file":"web/bun.lock","all":false,"pinned":false,"limit":10}` (all but `workspace_id` optional; without `words` the newest come first; `pinned` keeps pinned notes; `limit` is 1 to 100, default 10) | `{"items":[MemoryItem]}`, best first |
 | `memory.show` | `{"workspace_id":"...","id":"note-..."}` | `{"item":MemoryItem,"chain":[MemoryItem]}`; `chain` holds the notes it replaced and was replaced by, oldest first |
 | `memory.brief` | `{"workspace_id":"...","member_id":"..."}` (`member_id` optional, default the caller) | `{"text":"<team-memory workspace=..."}`: the brief a new run of that member gets now, `""` when there is nothing to brief |
 | `memory.add` | `{"workspace_id":"...","kind":"decision"\|"convention"\|"gotcha"\|"preference","text":"...","files":["..."],"supersedes":"note-...","scope":"workspace"\|"member","pin":false}` (only `workspace_id`, `kind` and `text` required) | `{"item":MemoryItem,"duplicate":false,"similar":[MemoryItem]}`; with `duplicate` the item is the live note that already holds the text; up to 3 `similar` live notes |
