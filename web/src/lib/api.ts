@@ -325,7 +325,9 @@ export function onUpgradeRequired(listener: (required: UpgradeRequired) => void)
 
 async function refusal(res: Response, label: string): Promise<ApiError> {
   const err = await failure(res)
-  const refused = new ApiError(res.status, `${label}: ${err.message}`, err.code, err.data)
+  // Server errors mostly open with their method already; a second label would misquote them.
+  const text = err.message.startsWith(`${label}: `) ? err.message : `${label}: ${err.message}`
+  const refused = new ApiError(res.status, text, err.code, err.data)
   const required = upgradeRequired(refused)
   if (required) upgradeListener(required)
   return refused

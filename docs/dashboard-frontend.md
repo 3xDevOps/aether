@@ -1083,7 +1083,9 @@ or roles but can grant or revoke access to their own agent account.
 
 Every request goes through `src/lib/api.ts` - the only module that knows route
 shapes, gateway authentication and error decoding. It carries exactly the
-methods the views call. Control calls use `POST /api/v1/<method>`. The diff
+methods the views call. Control calls use `POST /api/v1/<method>`. A refusal's
+`ApiError` message is `<method>: <server message>`, or the server's message
+alone when it already starts with that method. The diff
 patch, disk gauge and capabilities descriptor are read through `GET`;
 development and retained capture bytes also use an authenticated binary `GET`,
 not base64 in control JSON. The shared browser's observation-only WebSocket is
