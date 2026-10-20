@@ -87,6 +87,7 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
   const [acting, setActing] = useState<ActionKind | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [sent, setSent] = useState<RoomMessage | null>(null)
+  const [queued, setQueued] = useState(false)
   const delivered = useStore((s) => (sent ? s.roomMessages[run.id]?.find((entry) => entry.id === sent.id) : undefined))
 
   const log = logged.log && !logged.log.error ? logged.log : undefined
@@ -114,7 +115,8 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
   const status =
     acting === 'merge' ? `Merging #${pr?.number} into ${base}…`
       : acting === 'resolve' ? `Sending the conflict list to ${agentName}…`
-        : said?.text ?? (logged.reading && !log ? 'Reading the branch…' : summary || (live ? 'Not checked yet' : 'The run is not live; its branch is not read.'))
+        : queued && pr?.state === 'open' ? `GitHub accepted the merge; #${pr.number} is not merged yet.`
+          : said?.text ?? (logged.reading && !log ? 'Reading the branch…' : summary || (live ? 'Not checked yet' : 'The run is not live; its branch is not read.'))
   const announced = useAnnounced(status)
   const errors = [logged.error, logged.log?.error, tracked.error, feedback?.error].filter((entry): entry is string => !!entry)
 
@@ -149,7 +151,8 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
     try {
       const result = await api.runPRMerge({ run_id: run.id, method, repository: pr?.repository, number: pr?.number })
       if (result.error) throw new Error(result.error)
-      if (!result.merged) throw new Error(result.output?.stderr?.trim() || 'GitHub did not merge the pull request.')
+      // A merge queue accepts the request and merges later.
+      if (!result.merged) setQueued(true)
     } catch (cause) {
       setFailure(message(cause))
       throw cause

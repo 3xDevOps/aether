@@ -5,6 +5,7 @@ import { message } from '@/lib/format'
 import type { Run, RunGitExpected, RunPRCheck, RunPRFeedbackResult, RunPRTarget, RunPullRequest } from '@/lib/types'
 import { completeTarget, defaultPRTarget, defaultPushTarget } from '@/routes/diff/publish-target'
 import { useStore } from '@/store'
+import { coalesce } from '@/store/coalesce'
 
 /** The server stores no pull request: every answer here is read from GitHub through the run's own `gh`. */
 export interface TrackedPR {
@@ -69,13 +70,20 @@ const pollMs = 60_000
 
 /** One poll per run however many surfaces watch it; a `run.pr` or integration event reads at once. */
 const polls = new Map<string, { run: Run; watchers: number; timer?: number; stopped: boolean }>()
+const pollListeners = new Set<(runID: string) => void>()
+
+/** Hears each 60s poll of a watched run, for reads that ride on it. */
+export function onPullRequestPoll(listener: (runID: string) => void): () => void {
+  pollListeners.add(listener)
+  return () => pollListeners.delete(listener)
+}
 
 useStore.subscribe((state, previous) => {
   if (state.prSeq === previous.prSeq && state.integrationSeq === previous.integrationSeq) return
   for (const [runID, poll] of polls) {
     const mission = poll.run.mission_id
     if (state.prSeq[runID] !== previous.prSeq[runID] || (mission && state.integrationSeq[mission] !== previous.integrationSeq[mission])) {
-      void refreshPullRequest(poll.run)
+      coalesce(polls, runID, () => refreshPullRequest(poll.run))
     }
   }
 })
@@ -85,7 +93,10 @@ function watchPullRequest(run: Run): () => void {
   if (!poll) {
     const started = { run, watchers: 0, timer: undefined as number | undefined, stopped: false }
     const tick = async () => {
-      if (document.visibilityState === 'visible') await refreshPullRequest(run)
+      if (document.visibilityState === 'visible') {
+        for (const listener of pollListeners) listener(run.id)
+        await refreshPullRequest(run)
+      }
       if (!started.stopped) started.timer = window.setTimeout(() => void tick(), pollMs)
     }
     polls.set(run.id, started)

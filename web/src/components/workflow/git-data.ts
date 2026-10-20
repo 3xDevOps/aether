@@ -3,6 +3,7 @@ import { create } from 'zustand'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { RunGitLogResult } from '@/lib/types'
+import { onPullRequestPoll } from '@/routes/diff/publish-pr'
 import { useStore } from '@/store'
 import { coalesce } from '@/store/coalesce'
 
@@ -20,6 +21,11 @@ const owner = {}
 /** Runs some card shows, with how many cards show each. */
 const watched = new Map<string, number>()
 
+// A fetch moves the base without a git.branch event, so the log also rides the pull request's poll.
+onPullRequestPoll((runID) => {
+  if (watched.has(runID)) refreshGitLog(runID)
+})
+
 useStore.subscribe((state, previous) => {
   if (state.identityKey !== previous.identityKey) useGitLogs.setState({}, true)
   if (state.gitSeq === previous.gitSeq && state.integrationSeq === previous.integrationSeq) return
@@ -34,9 +40,9 @@ useStore.subscribe((state, previous) => {
 export const logLimit = 50
 
 export function refreshGitLog(runID: string, client: Api = api): void {
-  const identity = useStore.getState().identityKey
   useGitLogs.setState((all) => ({ [runID]: { ...all[runID], reading: true } }))
   coalesce(owner, runID, async () => {
+    const identity = useStore.getState().identityKey
     const patch = await client.runGitLog({ run_id: runID, limit: logLimit }).then(
       (log): Partial<TrackedLog> => (log.error && !log.commits && !log.head ? { error: log.error } : { log, error: undefined }),
       (cause): Partial<TrackedLog> => ({ error: message(cause) }),
@@ -46,7 +52,7 @@ export function refreshGitLog(runID: string, client: Api = api): void {
   })
 }
 
-/** Read once when the first card shows the run, then again on each branch or integration event; no timer. */
+/** Read once when the first card shows the run, then on each branch or integration event and each pull request poll. */
 export function useGitLog(runID: string, watch: boolean): TrackedLog {
   const tracked = useGitLogs((all) => all[runID]) ?? none
   useEffect(() => {

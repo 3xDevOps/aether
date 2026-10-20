@@ -1,6 +1,6 @@
 import type { Tone } from '@/components/ui/status-dot'
 import type { GitLogCommit, RunGitLogResult, RunPRCheck, RunPRFeedbackResult, RunPRReview, RunPullRequest } from '@/lib/types'
-import { checkState, countChecks, feedbackLimit } from '@/routes/diff/publish-pr'
+import { checkState, countChecks } from '@/routes/diff/publish-pr'
 
 export const rowHeight = 28
 export const foldAt = 8
@@ -34,13 +34,13 @@ export interface GitGraph {
   lanes: 1 | 2
 }
 
-/** Two newest-first lists interleaved by time, each keeping its own order. */
+/** Two newest-first lists interleaved by time, each keeping its own order. Times carry their author's offset. */
 function interleave(a: GitLogCommit[], b: GitLogCommit[]): { commit: GitLogCommit; own: boolean }[] {
   const out: { commit: GitLogCommit; own: boolean }[] = []
   let i = 0
   let j = 0
   while (i < a.length || j < b.length) {
-    const takeOwn = j >= b.length || (i < a.length && a[i]!.authored_at >= b[j]!.authored_at)
+    const takeOwn = j >= b.length || (i < a.length && Date.parse(a[i]!.authored_at) >= Date.parse(b[j]!.authored_at))
     out.push(takeOwn ? { commit: a[i++]!, own: true } : { commit: b[j++]!, own: false })
   }
   return out
@@ -160,13 +160,13 @@ function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`
 }
 
-/** A partial answer may be missing checks: it can report a failure it saw, never that all passed. */
+/** A partial answer may be missing entries: it can report a failure it saw, never that all passed. */
 function checksItem(feedback: RunPRFeedbackResult | undefined): ReadinessItem {
   if (!feedback?.pull_request) return item('checks', 'unknown')
   const checks = feedback.checks ?? []
   const counts = countChecks(checks)
   if (counts.failing) return item('checks', 'blocked', checkCounts(checks), `${counts.failing} failing`)
-  if (feedback.error || (feedback.truncated && checks.length >= feedbackLimit)) return item('checks', 'unknown', 'Incomplete answer from GitHub', 'checks incomplete')
+  if (feedback.error || feedback.truncated) return item('checks', 'unknown', 'Incomplete answer from GitHub', 'checks incomplete')
   if (counts.running) return item('checks', 'pending', checkCounts(checks), 'checks running', 'working')
   if (!checks.length) return item('checks', 'unknown', 'No check has reported yet', 'no checks yet')
   return item('checks', 'ok', checkCounts(checks), 'checks passed')
@@ -191,25 +191,34 @@ function reviewItem(feedback: RunPRFeedbackResult | undefined): ReadinessItem {
   if (!feedback?.pull_request) return item('review', 'unknown')
   const { approved, changes } = reviewVerdicts(feedback.reviews ?? [])
   if (changes.length) return item('review', 'blocked', `Changes requested by ${changes.join(', ')}`, 'changes requested')
+  if (feedback.error || feedback.truncated) return item('review', 'unknown', 'Incomplete answer from GitHub', 'reviews incomplete')
   if (approved.length) return item('review', 'ok', `Approved by ${approved.join(', ')}`, 'approved')
-  if (feedback.error) return item('review', 'unknown')
   return item('review', 'pending', 'No approving review yet', 'awaiting review')
 }
 
+/** The log compares with origin/<run base>; a pull request into another branch is not what it measured. */
+export function comparedWith(log: RunGitLogResult | undefined, pr: RunPullRequest | null | undefined): RunGitLogResult | undefined {
+  if (!log || log.error) return undefined
+  if (pr && log.base_ref !== pr.base_branch && log.base_ref !== `origin/${pr.base_branch}`) return undefined
+  return log
+}
+
 export function readiness(log: RunGitLogResult | undefined, feedback: RunPRFeedbackResult | undefined): Readiness {
-  const read = log && !log.error ? log : undefined
+  const pr = feedback?.pull_request
+  const read = comparedWith(log, pr)
+  const elsewhere = !read && log && !log.error && pr ? `Compared with ${log.base_ref}, not ${pr.base_branch}` : undefined
   const base = read?.base_ref || 'the base'
   const conflicts = read?.conflicts
   const items = [
     checksItem(feedback),
     !conflicts
-      ? item('conflicts', 'unknown')
+      ? item('conflicts', 'unknown', elsewhere)
       : conflicts.length
         ? item('conflicts', 'blocked', `${plural(conflicts.length, 'file')} ${conflicts.length === 1 ? 'conflicts' : 'conflict'} with ${base}`, plural(conflicts.length, 'conflict'), 'needs-you')
         : item('conflicts', 'ok', `None with ${base}`),
     reviewItem(feedback),
     !read
-      ? item('base', 'unknown')
+      ? item('base', 'unknown', elsewhere)
       : read.behind > 0
         ? item('base', 'pending', `${plural(read.behind, 'commit')} behind ${base}`, `${read.behind} behind`)
         : item('base', 'ok', `Up to date with ${base}`),
@@ -234,7 +243,7 @@ export interface HeadRow {
 }
 
 export function headRow(log: RunGitLogResult | undefined, pr: RunPullRequest | null | undefined, ready: Readiness): HeadRow {
-  const base = log?.base_ref || pr?.base_branch || 'the base'
+  const base = pr?.base_branch || log?.base_ref || 'the base'
   if (pr?.state === 'merged') return { label: `Merged into ${base}`, state: 'merged', tone: 'done' }
   if (pr?.state === 'closed') return { label: 'Closed without merging', state: 'closed', tone: 'closed' }
   const blocker = ready.items.find((entry) => entry.state === 'blocked') ?? ready.items.find((entry) => entry.state !== 'ok')

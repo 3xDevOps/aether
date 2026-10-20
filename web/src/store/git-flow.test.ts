@@ -79,6 +79,14 @@ describe('layoutGraph', () => {
     expect(marked.map((row) => row.kind === 'commit' && [row.key, row.conflicts])).toEqual([['up2', 2]])
   })
 
+  it('orders the lanes by instant, whatever offset each author wrote', () => {
+    const graph = layoutGraph(log({
+      commits: [commit('own2', ['own1'], '2026-10-20T10:00:00+09:00'), commit('own1', ['base0'], '2026-10-20T09:00:00+09:00')],
+      behind: 1, base: 'up1', upstream: [commit('up1', ['base0'], '2026-10-20T03:00:00+00:00')],
+    }))
+    expect(graph.rows.map((row) => row.key).slice(1, 4)).toEqual(['up1', 'own2', 'own1'])
+  })
+
   it('says a truncated log is truncated and leaves its edges dotted', () => {
     const graph = layoutGraph(log({ truncated: true, commits: [commit('own2', ['own1'], '2026-10-20T10:02:00Z')] }))
     expect(graph.rows.map((row) => row.kind)).toEqual(['head', 'commit', 'truncated', 'base'])
@@ -153,6 +161,25 @@ describe('readiness', () => {
     }))[2]).toBe('review:blocked:Changes requested by bob')
     expect(state(log(), feedback({ reviews: [] }))[2]).toBe('review:pending:No approving review yet')
     expect(state(log({ behind: 3 }), feedback())[3]).toBe('base:pending:3 commits behind main')
+  })
+
+  it('keeps a partial answer from turning anything green', () => {
+    const items = readiness(log(), feedback({ truncated: true })).items
+    expect(items.map((entry) => `${entry.key}:${entry.state}`)).toEqual(['checks:unknown', 'conflicts:ok', 'review:unknown', 'base:ok'])
+    expect(readiness(log(), feedback({ error: 'gh: HTTP 502' })).items[2]!.state).toBe('unknown')
+  })
+
+  it('does not judge a pull request into another branch by the run base', () => {
+    const release = feedback({ pull_request: { ...pr, base_branch: 'release' } })
+    const ready = readiness(log({ base_ref: 'origin/main', conflicts: [{ path: 'a.go' }] }), release)
+    expect(ready.items.map((entry) => `${entry.key}:${entry.state}:${entry.text}`)).toEqual([
+      'checks:ok:1 of 1 check passed',
+      'conflicts:unknown:Compared with origin/main, not release',
+      'review:ok:Approved by bob',
+      'base:unknown:Compared with origin/main, not release',
+    ])
+    expect(chooseAction(log({ base_ref: 'origin/main', conflicts: [{ path: 'a.go' }] }), release.pull_request, ready, everyone, true)).toBe('merge')
+    expect(readiness(log({ base_ref: 'origin/main' }), feedback()).ready).toBe(true)
   })
 })
 

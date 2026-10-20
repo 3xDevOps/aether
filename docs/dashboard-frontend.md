@@ -2887,10 +2887,14 @@ both what it renders and the overlap set the conflict chips read.
   change request of each reviewer by name, and the review comments behind a
   disclosure (send them to the agent from the header's dialog). **Merge
   readiness** lists **Checks**, **Conflicts**, **Review** and **Base**, each
-  with its own dot. Anything not yet read, or read from a partial answer, is
-  **Not checked yet**; zero checks is "No check has reported yet"; a
-  review-less pull request is "No approving review yet". The heading reads
-  **Ready to merge** only when all four are grounded.
+  with its own dot. Anything not yet read is **Not checked yet**; checks or
+  reviews from a partial or failed answer are "Incomplete answer from
+  GitHub", though a failure or change request it saw still counts; zero
+  checks is "No check has reported yet"; a review-less pull request is "No
+  approving review yet". The log compares with `origin/<run base>`, so for
+  a pull request into another branch **Conflicts** and **Base** read
+  "Compared with origin/main, not release". The heading reads **Ready to
+  merge** only when all four are grounded.
 - **One primary action, by state.** **Review changes** (outside the Changes
   tab, with nothing to publish yet) opens the Changes tab; **Open pull
   request** opens the Publish dialog, so **Publish…** turns secondary while
@@ -2900,7 +2904,9 @@ both what it renders and the overlap set the conflict chips read.
   `run.pr.merge` with the pull request's repository and number after a
   confirmation that repeats the checklist, and its menu switches to **Create
   a merge commit** or **Rebase and merge**; **Open on GitHub** covers a
-  draft, a blocked, a merged or a closed pull request. Open, merge and
+  draft, a blocked, a merged or a closed pull request. A merge GitHub
+  accepted but has not done, as through a merge queue, reads "GitHub
+  accepted the merge; #128 is not merged yet." Open, merge and
   resolve need a live run and the collaborator role, as Publish does;
   resolve also needs a member who may message the agent. A running action
   disables the button with a spinner and names itself in the status line.
@@ -2909,8 +2915,10 @@ both what it renders and the overlap set the conflict chips read.
 - **The card reads on events, not timers.** The log is read when the first
   card for a run mounts and again on each `git.branch` event for the run or
   `integration.changed` for its swarm (`gitSeq` and `integrationSeq` in
-  `store/workflow-signals.ts`), one read in flight per run
-  (`store/coalesce.ts`). A refetch keeps every row whose commit did not
+  `store/workflow-signals.ts`), and with each 60s pull request poll, since
+  a fetch moves the base without a `git.branch` event. One read is in
+  flight per run (`store/coalesce.ts`), and the same holds for the pull
+  request reads those events start. A refetch keeps every row whose commit did not
   change as the same object, so its memoised row does not re-render. A
   polite screen-reader region repeats the status line once it has held for a
   second.
