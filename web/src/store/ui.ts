@@ -234,7 +234,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   route: initialRoute(),
   runViewMemory: {},
   detailsOpen: true,
-  workflowOpen: true,
+  workflowOpen: false,
   browserBeside: false,
   browserBesideWidth: null,
   browserPresets: {},

@@ -3503,9 +3503,9 @@ depth, a background one included) or `● Waiting for CI · 3 of 9 checks` (pass
 request's checks this tab last read). The chip toggles the panel. While the
 run's row holds 320px for it plus `minReadableWidth`, the panel is a 320px
 `complementary "Workflow"` rail at the right of the frame, remembered per
-device (`workflowOpen`, persisted, open by default). A row too narrow for it
-beside Details or the subagent inspector shows those instead; the chip then
-closes Details to make room.
+device (`workflowOpen`, persisted, closed until the chip first opens it). A
+row too narrow for it beside Details or the subagent inspector shows those
+instead; the chip then closes Details to make room.
 Narrower rows open it as a side sheet and phones as a bottom sheet, a
 `dialog "Workflow"` that returns focus to the chip, and that closes when a
 row opens the subagent inspector or the request. Under the tree, a run
