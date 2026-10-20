@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/status-dot'
 import { GitFlow } from '@/components/workflow/git-flow'
 import { WorkflowTree } from '@/components/workflow/workflow-tree'
-import { runLabel, stateLabel, stateTone } from '@/lib/status'
+import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { countChecks, usePullRequest } from '@/routes/diff/publish-pr'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
@@ -15,12 +15,12 @@ import { useStore } from '@/store'
 import { useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import { noAgents } from '@/store/subagents'
-import { deriveRunWorkflow, runFacts, shareTree, type WorkflowNode } from '@/store/workflow'
+import { deriveRunWorkflow, runFacts, shareTree, workflowLabel, workflowTone, type WorkflowNode } from '@/store/workflow'
 
 export const workflowPanelID = 'run-workflow'
 
 /** The run's workflow tree, rebuilt from the session's subagent index and the run's state. */
-export function useRunWorkflow(run: RunRecord): WorkflowNode {
+function useRunWorkflow(run: RunRecord): WorkflowNode {
   const shown = useRunPresentation(run)
   const agents = useStore((s) => s.acpSessions[run.id]?.agents ?? noAgents)
   const previous = useRef<WorkflowNode | undefined>(undefined)
@@ -35,20 +35,16 @@ function runningAgents(node: WorkflowNode): number {
   return node.children.reduce((sum, child) => sum + (child.agentId && child.state === 'working' ? 1 : 0) + runningAgents(child), 0)
 }
 
-/** What the chip beside the run's views says: the state, then what it is busy with. */
-export function useWorkflowChip(run: RunRecord, tree: WorkflowNode): string {
+/** Beside the run's views: the state, then what it is busy with. */
+export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: boolean; onToggle: (opener: HTMLElement) => void }) {
+  const tree = useRunWorkflow(run)
   const checks = usePullRequest(run, false).feedback?.checks
-  const state = tree.state as keyof typeof stateLabel
+  const { state } = tree
   const running = runningAgents(tree)
-  const parts = [stateLabel[state]]
+  const parts = [workflowLabel[state]]
   if (state === 'waiting-ci' && checks && checks.length > 0) parts.push(`${countChecks(checks).passing} of ${checks.length} checks`)
   else if (running > 0) parts.push(`${running} ${running === 1 ? 'subagent' : 'subagents'}`)
-  return parts.join(' · ')
-}
-
-export function WorkflowChip({ run, tree, open, onToggle }: { run: RunRecord; tree: WorkflowNode; open: boolean; onToggle: (opener: HTMLElement) => void }) {
-  const text = useWorkflowChip(run, tree)
-  const state = tree.state as keyof typeof stateTone
+  const text = parts.join(' · ')
   return (
     <Button
       variant="ghost"
@@ -60,21 +56,21 @@ export function WorkflowChip({ run, tree, open, onToggle }: { run: RunRecord; tr
       className="ml-1 min-w-0 shrink"
       onClick={(event) => onToggle(event.currentTarget)}
     >
-      <StatusDot tone={stateTone[state]} pulse={state === 'working'} />
+      <StatusDot tone={workflowTone[state]} pulse={state === 'working'} />
       <span className="min-w-0 truncate">{text}</span>
     </Button>
   )
 }
 
-export function WorkflowPanel({ run, tree, view, agent, nav, onClose, className }: {
+export function WorkflowPanel({ run, view, agent, nav, onClose, className }: {
   run: RunRecord
-  tree: WorkflowNode
   view: RunView
   agent: AgentTerminal
   nav: RunNavigation
-  onClose?: () => void
+  onClose: () => void
   className?: string
 }) {
+  const tree = useRunWorkflow(run)
   const primary = usePrimaryAction(run, view, agent, nav)
   const select = (node: WorkflowNode) => {
     if (node.agentId) {
@@ -92,11 +88,9 @@ export function WorkflowPanel({ run, tree, view, agent, nav, onClose, className 
     <div className={cn('flex min-h-0 min-w-0 flex-col', className)}>
       <div className="flex h-8 shrink-0 items-center gap-2 border-b border-seam pr-1 pl-3">
         <h2 className="min-w-0 flex-1 truncate text-ui-sm font-medium">Workflow</h2>
-        {onClose && (
-          <Button variant="ghost" size="icon-sm" label="Hide the workflow" onClick={onClose}>
-            <X />
-          </Button>
-        )}
+        <Button variant="ghost" size="icon-sm" label="Hide the workflow" onClick={onClose}>
+          <X />
+        </Button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2">
         <WorkflowTree root={tree} label="Run workflow" onSelect={select} />

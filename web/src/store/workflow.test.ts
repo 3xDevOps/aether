@@ -42,14 +42,14 @@ function byID(node: WorkflowNode, id: string): WorkflowNode | undefined {
 
 describe('run workflow', () => {
   it('nests subagents under their launching agent and groups their tool calls', () => {
-    const agents = agentsOf([launch(1, 'a1'), launch(1, 'a2', 'completed'), launch(1, 'b1', 'in_progress', { parent_id: 'a1' }), read(1, 'b1', 'r1'), read(1, 'b1', 'r2')])
+    const agents = agentsOf([launch(1, 'a1'), launch(1, 'a2', 'completed'), launch(1, 'b1', 'in_progress', { parent_id: 'a1' }), read(1, 'b1', 'r1'), read(1, 'b1', 'r2'), read(1, 'b1', 'r2'), launch(1, 'c1', 'in_progress', { parent_id: 'b1' })])
     const tree = deriveRunWorkflow('run_1', facts({ state: 'waiting-agents', status: 'running' }), agents)
     expect(tree.children.map((child) => child.id)).toEqual(['agent:a1', 'agent:a2'])
     const nested = byID(tree, 'agent:b1')!
     expect(nested).toMatchObject({ parentId: 'agent:a1', kind: 'agent', state: 'working', label: 'Job b1', detail: 'Read 2 files', agentId: 'b1' })
     expect(byID(tree, 'agent:a2')!.state).toBe('completed')
     expect(countsText(tree.counts!)).toBe('1 subagent running')
-    expect(countsText(byID(tree, 'agent:a1')!.counts!)).toBe('1 subagent running')
+    expect(byID(tree, 'agent:a1')!.counts).toBeUndefined()
   })
 
   it('follows the run through working, waiting for agents, needs you, ready for review and completed', () => {

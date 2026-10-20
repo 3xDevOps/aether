@@ -142,7 +142,7 @@ function useCandidates(detail: MissionDetail, client: Api): { candidates: Candid
           const { candidate } = await client.integrationShow({ workspace_id: mission.workspace_id, candidate_id: summary.candidate_id })
           return candidate
         } catch (err) {
-          return { ...summary, error: message(err) }
+          return { ...summary, readError: message(err) }
         }
       }))
       if (live) setState({ candidates: shown })

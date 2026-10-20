@@ -29,7 +29,7 @@ import { useRunRoom } from '@/routes/run/room'
 import { dockedRequestID } from '@/routes/run/session-requests'
 import { SessionView } from '@/routes/run/session-view'
 import { useRunShells } from '@/routes/run/shells'
-import { useRunWorkflow, WorkflowChip, WorkflowPanel, workflowPanelID } from '@/routes/run/workflow-panel'
+import { WorkflowChip, WorkflowPanel, workflowPanelID } from '@/routes/run/workflow-panel'
 import { SubagentInspector } from '@/routes/run/subagent-inspector'
 import { TerminalView } from '@/routes/run/terminal-view'
 import { defaultView, isRunView, runViewLabel, runViews, type RunView } from '@/routes/run/views'
@@ -79,7 +79,6 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const workflowPreference = useStore((s) => s.workflowOpen)
   const setWorkflowPreference = useStore((s) => s.setWorkflowOpen)
   const [overlayWorkflow, setOverlayWorkflow] = useState(false)
-  const workflowTree = useRunWorkflow(run)
   const [composing, setComposing] = useState(false)
   const [dialog, setDialog] = useState<'captures' | 'events' | null>(null)
   const returnTo = useRef<HTMLElement | null>(null)
@@ -131,23 +130,24 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const workflowInline = row.width >= workflowWidth + minReadableWidth
   const besideDetails = row.width >= workflowWidth + detailsWidth + minReadableWidth
   const besideAgent = row.width >= workflowWidth + agentWidth + minReadableWidth
-  const workflowOpen = workflowInline ? workflowPreference && (!agentID || besideAgent) : overlayWorkflow
-  const detailsOpen = inline ? detailsPreference && !agentID && (!workflowOpen || !workflowInline || besideDetails) : overlayDetails
+  const detailsOpen = inline ? detailsPreference && !agentID : overlayDetails
+  const workflowOpen = workflowInline
+    ? workflowPreference && (!agentID || besideAgent) && (!(inline && detailsOpen) || besideDetails)
+    : overlayWorkflow
   const setDetails = useCallback((open: boolean) => {
     if (inline && open && agentID) closeAgent()
-    if (inline && open && workflowInline && !besideDetails) setWorkflowPreference(false)
     if (inline) setDetailsPreference(open)
     else setOverlayDetails(open)
-  }, [inline, setDetailsPreference, agentID, closeAgent, workflowInline, besideDetails, setWorkflowPreference])
+  }, [inline, setDetailsPreference, agentID, closeAgent])
   const setWorkflow = useCallback((open: boolean) => {
     if (!workflowInline) {
       setOverlayWorkflow(open)
       return
     }
     if (open && agentID && !besideAgent) closeAgent()
-    if (open && detailsOpen && !besideDetails) setDetailsPreference(false)
+    if (open && inline && detailsOpen && !besideDetails) setDetailsPreference(false)
     setWorkflowPreference(open)
-  }, [workflowInline, agentID, besideAgent, closeAgent, detailsOpen, besideDetails, setDetailsPreference, setWorkflowPreference])
+  }, [workflowInline, agentID, besideAgent, closeAgent, inline, detailsOpen, besideDetails, setDetailsPreference, setWorkflowPreference])
   useLayoutEffect(() => {
     if (!agentID) return
     agentOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -258,7 +258,6 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           workflow={(
             <WorkflowChip
               run={run}
-              tree={workflowTree}
               open={workflowOpen}
               onToggle={(opener) => {
                 returnTo.current = opener
@@ -320,7 +319,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
       )}
       {workflowInline && workflowOpen && (
         <aside id={workflowPanelID} aria-label="Workflow" className="flex w-80 shrink-0 flex-col border-l border-seam bg-canvas">
-          <WorkflowPanel run={run} tree={workflowTree} view={view} agent={agent} nav={nav} onClose={() => setWorkflow(false)} />
+          <WorkflowPanel run={run} view={view} agent={agent} nav={nav} onClose={() => setWorkflow(false)} />
         </aside>
       )}
       {measured && !workflowInline && (
@@ -337,7 +336,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
             className={mobile ? 'flex max-h-[85dvh] min-h-0 flex-col p-0' : 'flex w-80 flex-col p-0'}
           >
             <DialogTitle className="sr-only">Workflow</DialogTitle>
-            <WorkflowPanel run={run} tree={workflowTree} view={view} agent={agent} nav={nav} onClose={() => setWorkflow(false)} className="flex-1" />
+            <WorkflowPanel run={run} view={view} agent={agent} nav={nav} onClose={() => setWorkflow(false)} className="flex-1" />
           </DialogContent>
         </Dialog>
       )}

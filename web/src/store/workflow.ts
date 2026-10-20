@@ -4,7 +4,7 @@ import type { CandidateState, DeliveryReceipt, DeliveryRequest, VerificationStat
 import type { MissionAttempt, MissionAttemptState, MissionSubmission, MissionTask } from '@/lib/types'
 import { missionTree, taskTitle } from '@/routes/missions/tree'
 import type { MissionDetail } from '@/store/missions'
-import { workSummary } from '@/store/session-rows'
+import { isLaunch, workSummary } from '@/store/session-rows'
 import { agentLabel, agentState, type AgentIndex, type AgentState, type Subagent } from '@/store/subagents'
 
 /** A run's states, plus Not started for work nobody picked up and Not checked yet for a fact nobody read. */
@@ -109,19 +109,20 @@ const agentStates: Record<AgentState, { state: WorkflowState; detail?: string }>
   unknown: { state: 'unknown', detail: 'Its launch is not loaded' },
 }
 
-const agentNodes = new WeakMap<Subagent, Omit<WorkflowNode, 'parentId' | 'children' | 'counts'>>()
+const agentNodes = new WeakMap<Subagent, Omit<WorkflowNode, 'parentId' | 'children'>>()
 
-function agentNode(agent: Subagent): Omit<WorkflowNode, 'parentId' | 'children' | 'counts'> {
+function agentNode(agent: Subagent): Omit<WorkflowNode, 'parentId' | 'children'> {
   let node = agentNodes.get(agent)
   if (!node) {
     const { state, detail } = agentStates[agentState(agent)]
-    const tools = agent.items.flatMap((item) => (item.kind === 'tool_call' && item.tool_call ? [item.tool_call.tool_kind ?? 'other'] : []))
+    const tools = new Map<string, string>()
+    for (const { tool_call: call } of agent.items) if (call && !isLaunch(call)) tools.set(call.id, call.tool_kind ?? 'other')
     node = {
       id: `agent:${agent.id}`,
       kind: agent.workflow ? 'workflow' : 'agent',
       state,
       label: agentLabel(agent),
-      detail: [detail, workSummary(tools)].filter(Boolean).join(' · ') || undefined,
+      detail: [detail, workSummary([...tools.values()])].filter(Boolean).join(' · ') || undefined,
       startedAt: agent.startedAt,
       endedAt: agent.settledAt,
       agentId: agent.id,
@@ -150,7 +151,7 @@ function agentTree(index: AgentIndex, ids: string[], parentId: string, seen: Set
     seen.add(id)
     const base = agentNode(agent)
     const children = agentTree(index, agent.children, base.id, seen)
-    nodes.push({ ...base, parentId, counts: agentCounts(children), children })
+    nodes.push({ ...base, parentId, children })
   }
   return nodes
 }
@@ -189,6 +190,8 @@ export interface CandidateFacts {
   delivery_receipt?: Pick<DeliveryReceipt, 'result' | 'created_at'>
   created_at: string
   error?: string
+  /** Why integration.show could not be read, verbatim. */
+  readError?: string
 }
 
 const attemptStates: Record<MissionAttemptState, WorkflowState> = {
@@ -307,24 +310,24 @@ function candidateNode(candidate: CandidateFacts, parentId: string): WorkflowNod
     startedAt: candidate.created_at,
     children: [],
   }
-  if (candidate.error) return { ...base, state: 'failed', detail: candidate.error }
   const receipt = candidate.delivery_receipt
   if (receipt) return { ...base, state: 'completed', detail: receipt.result === 'proposed' ? 'Delivered as a proposal' : 'Delivered', endedAt: receipt.created_at }
   switch (candidate.state) {
     case 'preparing':
-      return { ...base, state: 'working', detail: 'Preparing' }
+      return candidate.error ? { ...base, state: 'failed', detail: candidate.error } : { ...base, state: 'working', detail: 'Preparing' }
     case 'conflicted': {
       const n = candidate.conflicts?.length ?? 0
       return { ...base, state: 'waiting-agents', detail: n > 0 ? `${n} ${n === 1 ? 'conflict' : 'conflicts'}: ${candidate.conflicts!.join(', ')}` : 'Conflicted' }
     }
     case 'frozen': {
+      if (candidate.readError) return { ...base, state: 'unknown', detail: candidate.readError }
       const request = candidate.delivery_request?.state
       if (request === 'pending' || request === 'approved' || request === 'delivering') return { ...base, state: 'waiting-agents', detail: `Delivery ${request}` }
       if (request === 'denied') return { ...base, state: 'failed', detail: 'Delivery denied' }
       return { ...base, ...verificationState(candidate) }
     }
     default:
-      return { ...base, state: 'closed', detail: candidate.state.charAt(0).toUpperCase() + candidate.state.slice(1) }
+      return { ...base, state: 'closed', detail: candidate.error || candidate.state.charAt(0).toUpperCase() + candidate.state.slice(1) }
   }
 }
 
