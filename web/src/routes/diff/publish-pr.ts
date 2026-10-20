@@ -5,6 +5,7 @@ import { message } from '@/lib/format'
 import type { Run, RunGitExpected, RunPRCheck, RunPRFeedbackResult, RunPRTarget, RunPullRequest } from '@/lib/types'
 import { completeTarget, defaultPRTarget, defaultPushTarget } from '@/routes/diff/publish-target'
 import { useStore } from '@/store'
+import { coalesce } from '@/store/coalesce'
 
 /** The server stores no pull request: every answer here is read from GitHub through the run's own `gh`. */
 export interface TrackedPR {
@@ -67,23 +68,55 @@ export function trackPullRequest(run: Run, target: RunPRTarget, client: Api = ap
 
 const pollMs = 60_000
 
+/** One poll per run however many surfaces watch it; a `run.pr`, `git.branch` or integration event reads at once. */
+const polls = new Map<string, { run: Run; watchers: number; timer?: number; stopped: boolean }>()
+const pollListeners = new Set<(runID: string) => void>()
+
+/** Hears each 60s poll of a watched run, for reads that ride on it. */
+export function onPullRequestPoll(listener: (runID: string) => void): () => void {
+  pollListeners.add(listener)
+  return () => pollListeners.delete(listener)
+}
+
+useStore.subscribe((state, previous) => {
+  if (state.prSeq === previous.prSeq && state.gitSeq === previous.gitSeq && state.integrationSeq === previous.integrationSeq) return
+  for (const [runID, poll] of polls) {
+    const mission = poll.run.mission_id
+    if (state.prSeq[runID] !== previous.prSeq[runID] || state.gitSeq[runID] !== previous.gitSeq[runID] || (mission && state.integrationSeq[mission] !== previous.integrationSeq[mission])) {
+      coalesce(polls, runID, () => refreshPullRequest(poll.run))
+    }
+  }
+})
+
+function watchPullRequest(run: Run): () => void {
+  let poll = polls.get(run.id)
+  if (!poll) {
+    const started = { run, watchers: 0, timer: undefined as number | undefined, stopped: false }
+    const tick = async () => {
+      if (document.visibilityState === 'visible') {
+        for (const listener of pollListeners) listener(run.id)
+        await refreshPullRequest(run)
+      }
+      if (!started.stopped) started.timer = window.setTimeout(() => void tick(), pollMs)
+    }
+    polls.set(run.id, started)
+    void tick()
+    poll = started
+  }
+  poll.watchers++
+  const watching = poll
+  return () => {
+    if (--watching.watchers > 0) return
+    watching.stopped = true
+    clearTimeout(watching.timer)
+    polls.delete(run.id)
+  }
+}
+
 export function usePullRequest(run: Run, watch: boolean): TrackedPR {
   const tracked = usePullRequests((all) => all[run.id]) ?? none
-  useEffect(() => {
-    if (!watch) return
-    let cancelled = false
-    let timer: number | undefined
-    const poll = async () => {
-      if (document.visibilityState === 'visible') await refreshPullRequest(run)
-      if (!cancelled) timer = window.setTimeout(() => void poll(), pollMs)
-    }
-    void poll()
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-    // The run's identity and base never change under one id.
-  }, [run.id, watch])
+  // The run's identity and base never change under one id.
+  useEffect(() => (watch ? watchPullRequest(run) : undefined), [run.id, watch])
   return tracked
 }
 

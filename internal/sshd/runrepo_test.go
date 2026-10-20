@@ -313,7 +313,7 @@ func TestRunPRMergePassesGHStderrAndPublishesState(t *testing.T) {
 	if refused.Merged || refused.Identity != "octo" || refused.Output.Stderr != refusal || !strings.Contains(refused.Error, refusal) || refused.PullRequest == nil || refused.PullRequest.State != "open" {
 		t.Fatalf("refused merge = %+v", refused)
 	}
-	if !reflect.DeepEqual(merges[0], []string{"gh", "pr", "merge", "7", "--repo", "acme/app", "--squash", "--match-head-commit", "0123456789abcdef0123456789abcdef01234567"}) {
+	if !reflect.DeepEqual(merges[0], []string{"gh", "pr", "merge", "7", "--repo", "github.com/acme/app", "--squash", "--match-head-commit", "0123456789abcdef0123456789abcdef01234567"}) {
 		t.Fatalf("merge argv = %v", merges[0])
 	}
 

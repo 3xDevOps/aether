@@ -18,6 +18,7 @@ import { hasFiles } from '@/routes/files/open'
 import { RunFiles } from '@/routes/files/run-files'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { registerRoute, type RouteProps } from '@/routes/registry'
+import { RunAgentContext } from '@/routes/run/agent-context'
 import { useAgentTerminal } from '@/routes/run/agent-terminal'
 import { CapturesDialog } from '@/routes/run/captures'
 import { RawEventsDialog } from '@/routes/run/raw-events'
@@ -236,6 +237,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const holding = !agent.localControl ? agent.takeover.interaction.phase : undefined
 
   return (
+    <RunAgentContext value={{ agent, agentName }}>
     <Tabs value={view} onValueChange={(next) => isRunView(next) && go(next)} asChild>
     <div ref={rowRef} className="flex h-full min-w-0">
       <div className="flex min-w-0 flex-1 flex-col">
@@ -435,6 +437,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
       />
     </div>
     </Tabs>
+    </RunAgentContext>
   )
 }
 

@@ -3,6 +3,8 @@ import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { MissingRun } from '@/components/missing-run'
 import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
+import { useAhead } from '@/components/workflow/git-data'
+import { GitFlow } from '@/components/workflow/git-flow'
 import { api } from '@/lib/api'
 import { clockTime } from '@/lib/format'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
@@ -43,6 +45,7 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
   const run = useStore((s) => s.runs[runID])
   const route = useStore((s) => s.route)
   const state = useStore((s) => s.diffs[runID] ?? initialDiff)
+  const ahead = useAhead(runID)
   const [comparison, setComparison] = useState<Comparison>({ kind: 'all' })
   const [asked, setAsked] = useState<string | null>(null)
   const wrapping = useStore((s) => s.diffWrap)
@@ -127,6 +130,9 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
   return (
     <div className="@container flex h-full min-h-0 min-w-0 flex-col bg-canvas">
       <Land run={run} />
+      <div className="max-h-[45%] shrink-0 overflow-y-auto p-2 empty:hidden">
+        <GitFlow runId={run.id} />
+      </div>
       <SummaryStrip
         run={run}
         files={files}
@@ -142,7 +148,7 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
         }}
         onJump={jump}
         onCollapseAll={(next) => setCollapsed(Object.fromEntries(files.map((file) => [file.path, next])))}
-        publishable={!state.recorded && (comparison.kind !== 'all' || files.length > 0)}
+        publishable={!state.recorded && (comparison.kind !== 'all' || files.length > 0 || ahead > 0)}
       />
       <ReviewBar run={run} agent={agent} agentName={agentName} files={files} scope={scope} />
       {(files.length > 0 || (!loading && !failed)) && <Unplaced runID={runID} files={files} scope={scope} />}

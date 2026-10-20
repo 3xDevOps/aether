@@ -12,6 +12,7 @@ import {
   MenuTrigger,
 } from '@/components/ui/menu'
 import { RelativeTime } from '@/components/ui/relative-time'
+import { useCardPrimary } from '@/components/workflow/git-data'
 import { api } from '@/lib/api'
 import { clockTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -68,6 +69,7 @@ export function SummaryStrip({
   const caps = useCapability()
   const local = useCanReviewLocally(run)
   const commenting = useReviewing(run.id)
+  const cardPrimary = useCardPrimary(run.id)
   const [reviewing, setReviewing] = useState(false)
   const more = useRef<HTMLButtonElement>(null)
   const additions = files.reduce((sum, file) => sum + file.additions, 0)
@@ -152,7 +154,7 @@ export function SummaryStrip({
             )}
           </MenuContent>
         </Menu>
-        {publishable && caps.hasMethod('run.git.status') && <PublishDialog key={run.id} run={run} quiet={commenting} />}
+        {publishable && caps.hasMethod('run.git.status') && <PublishDialog key={run.id} run={run} quiet={commenting || cardPrimary} />}
       </span>
       {local && <ReviewLocallyDialog run={run} open={reviewing} onOpenChange={setReviewing} returnFocus={more} />}
     </div>
