@@ -102,16 +102,33 @@ describe('new run', () => {
     expect(useStore.getState().paletteDialog).toBeNull()
   })
 
-  it('launches the preselected agent in Standard and remembers the choice', async () => {
+  it('launches a never-launched agent in Enhanced when available and remembers the choice', async () => {
     await open()
     expect(agentRow(/^Claude Code/).getAttribute('aria-checked')).toBe('true')
-    expect(modeSegment('Standard').getAttribute('aria-checked')).toBe('true')
+    expect(modeSegment('Enhanced').getAttribute('aria-checked')).toBe('true')
     setTask('fix the flaky test')
     fireEvent.click(launchButton())
 
-    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', task: 'fix the flaky test' }))
-    expect(useStore.getState().launchDefaults.claude.mode).toBe('tui')
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', task: 'fix the flaky test', mode: 'acp' }))
+    expect(useStore.getState().launchDefaults.claude.mode).toBe('acp')
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: run().id } })
+  })
+
+  it('keeps the mode picked for an agent for its next launch', async () => {
+    await open()
+    await userEvent.click(modeSegment('Standard'))
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude' }))
+    expect(useStore.getState().launchDefaults.claude.mode).toBe('tui')
+    cleanup()
+    await open()
+    expect(modeSegment('Standard').getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('defaults to Standard when the agent has no Enhanced available', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([claude({ enhanced_installed: false })])
+    await open()
+    expect(modeSegment('Standard').getAttribute('aria-checked')).toBe('true')
   })
 
   it('sends a model picked from the agent\'s discovered list', async () => {
@@ -121,7 +138,7 @@ describe('new run', () => {
     await pickModel(screen.getByRole('combobox', { name: 'Model' }), /^Opus 4.1/)
     fireEvent.click(launchButton())
 
-    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', model: 'claude-opus-4-1' }))
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', model: 'claude-opus-4-1' }))
   })
 
   it('sends a typed model and preselects it for that agent next time', async () => {
@@ -129,7 +146,7 @@ describe('new run', () => {
     await chooseModel(screen.getByRole('combobox', { name: 'Model' }), 'opus')
     fireEvent.click(launchButton())
 
-    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', model: 'opus' }))
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', model: 'opus' }))
     expect(useStore.getState().launchDefaults.claude.model).toBe('opus')
     cleanup()
     await open()
@@ -287,7 +304,7 @@ describe('new run', () => {
       await userEvent.click(screen.getByRole('checkbox', { name: 'Bob (shared)' }))
       fireEvent.click(launchButton())
 
-      await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', fallback_account_member_ids: ['mem_carol', vera.id] }))
+      await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp', fallback_account_member_ids: ['mem_carol', vera.id] }))
     })
 
     it('gives the server\'s reasons an installed agent cannot launch there', async () => {
@@ -320,6 +337,7 @@ describe('new run', () => {
 describe('swarm', () => {
   beforeEach(() => {
     useStore.setState({
+      launchDefaults: { claude: { mode: 'tui', at: 1 } },
       capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
       route: { name: 'missions', params: {} },
     })
@@ -345,6 +363,16 @@ describe('swarm', () => {
     await waitFor(() => expect(createButton().disabled).toBe(false))
     fireEvent.click(createButton())
   }
+
+  it('starts a never-launched integrator in Enhanced and remembers the swarm choice', async () => {
+    useStore.setState({ launchDefaults: {} })
+    await openSwarm()
+    expect(within(screen.getByRole('radiogroup', { name: 'Integrator mode' })).getByRole('radio', { name: 'Enhanced' }).getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(within(screen.getByRole('radiogroup', { name: 'Integrator mode' })).getByRole('radio', { name: 'Standard' }))
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    expect(useStore.getState().launchDefaults.claude.mode).toBe('tui')
+  })
 
   it('authorizes a Standard integrator and Background workers by default', async () => {
     await openSwarm()
