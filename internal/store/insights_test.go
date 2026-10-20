@@ -142,6 +142,9 @@ func TestInsightsOutcomes(t *testing.T) {
 	if err := db.CreateMember(ctx, cyMember); err != nil {
 		t.Fatal(err)
 	}
+	for i, id := range []domain.MemberID{ada, bob, cyMember.ID} {
+		exec(`UPDATE members SET created_at = ? WHERE id = ?`, i+1, id)
+	}
 	workspace := func(name string) domain.WorkspaceID {
 		t.Helper()
 		w := &domain.Workspace{Name: name, BaseBranch: "main"}
