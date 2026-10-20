@@ -285,8 +285,8 @@ func TestRunPRMergePassesGHStderrAndPublishesState(t *testing.T) {
 			t.Fatal(perr)
 		}
 		var result protocol.RunPRMergeResult
-		if err := json.Unmarshal(value, &result); err != nil {
-			t.Fatal(err)
+		if decodeErr := json.Unmarshal(value, &result); decodeErr != nil {
+			t.Fatal(decodeErr)
 		}
 		return result
 	}
