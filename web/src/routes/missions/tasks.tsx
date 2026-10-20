@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { agentLabel, modeLabel } from '@/components/launch/modes'
 import { Button } from '@/components/ui/button'
@@ -192,7 +192,7 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
     navigate('run', { runId: node.runId })
     return true
   }
-  const extra = (node: WorkflowNode, expanded: boolean) => {
+  const extra = useCallback((node: WorkflowNode, expanded: boolean) => {
     const task = tasks.get(node.id)
     if (!task || !expanded) return null
     return (
@@ -203,7 +203,7 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
         </CollapsibleContent>
       </Collapsible>
     )
-  }
+  }, [tasks, detail, mission.phase])
   return (
     <section aria-label="Tasks" className="flex flex-col gap-1">
       <SectionLabel as="h2">Tasks</SectionLabel>
