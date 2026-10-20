@@ -9,11 +9,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// localLinkReset forgets every server this computer linked to: the gateway
-// drops its connection, forwards and syncs, then the Aether config
-// directory (links, edge device key and tokens, workspace selection) is
-// deleted. The SSH key under ~/.ssh and the linked clone are the user's
-// own and stay.
+// localLinkReset leaves the SSH key under ~/.ssh and the linked clone alone:
+// they are the user's own.
 func (g *Gateway) localLinkReset(*http.Request, []byte) (any, *protocol.Error) {
 	dir, err := cli.Dir()
 	if err != nil {
@@ -21,6 +18,7 @@ func (g *Gateway) localLinkReset(*http.Request, []byte) (any, *protocol.Error) {
 	}
 	g.local.switching.Lock()
 	defer g.local.switching.Unlock()
+	g.local.edge.reset()
 	g.moveTo(cli.Config{}, nil)
 	if err := os.RemoveAll(dir); err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: fmt.Sprintf("delete %s: %v", dir, err)}

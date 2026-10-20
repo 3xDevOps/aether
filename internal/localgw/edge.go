@@ -97,6 +97,18 @@ func (e *edgeLogin) view() *loginView {
 	return &view
 }
 
+// reset stops the sign-in in progress and waits for every poller to finish,
+// so none writes a token after the caller deletes the config directory.
+func (e *edgeLogin) reset() {
+	e.mu.Lock()
+	if e.current != nil {
+		e.current.cancel()
+		e.current = nil
+	}
+	e.mu.Unlock()
+	e.waits.Wait()
+}
+
 // forget drops the sign-in on origin, stopping it if it is still waiting.
 func (e *edgeLogin) forget(origin string) {
 	e.mu.Lock()
@@ -199,6 +211,8 @@ func (g *Gateway) localEdgeLogin(r *http.Request, body []byte) (any, *protocol.E
 	if err != nil {
 		return nil, edgeError(err)
 	}
+	g.local.switching.RLock()
+	defer g.local.switching.RUnlock()
 	return g.local.edge.begin(g.ctx, client, login), nil
 }
 
