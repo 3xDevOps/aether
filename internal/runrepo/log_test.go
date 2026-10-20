@@ -173,6 +173,13 @@ func TestMergePRKeepsGHStderrAndRereadsState(t *testing.T) {
 		t.Fatalf("merge argv = %v", calls[0])
 	}
 
+	calls = nil
+	s = New(fakeGH(func() (int, string) { t.Fatal("merged a retargeted pull request"); return 0, "" }, openPull, &calls))
+	result, err = s.MergePR(t.Context(), run, PRMergeRequest{Repository: "acme/app", Number: 7, Method: "squash", ExpectedHead: "0123456789abcdef0123456789abcdef01234567", ExpectedBase: "release"})
+	if err == nil || !strings.Contains(err.Error(), "pull request #7 now targets main, not release") || result.PullRequest == nil {
+		t.Fatalf("retargeted merge = %+v, %v", result, err)
+	}
+
 	merged := strings.NewReplacer(`"state":"open"`, `"state":"closed"`, `"merged":false`, `"merged":true`, `"merged_at":null`, `"merged_at":"2026-10-20T01:02:03Z"`).Replace(openPull)
 	s = New(fakeGH(func() (int, string) { return 0, "" }, merged, &calls))
 	result, err = s.MergePR(t.Context(), run, PRMergeRequest{Repository: "acme/app", Number: 7, Method: "rebase", ExpectedHead: "0123456789abcdef0123456789abcdef01234567"})

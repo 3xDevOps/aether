@@ -436,7 +436,7 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 		}
 		p.Repository, p.Number = prs[0].Repository, prs[0].Number
 	}
-	merged, err := call.native.MergePR(ctx, call.execution, runrepo.PRMergeRequest{Repository: p.Repository, Number: p.Number, Method: p.Method, ExpectedHead: p.ExpectedHead, ExpectedLogin: p.ExpectedLogin})
+	merged, err := call.native.MergePR(ctx, call.execution, runrepo.PRMergeRequest{Repository: p.Repository, Number: p.Number, Method: p.Method, ExpectedHead: p.ExpectedHead, ExpectedLogin: p.ExpectedLogin, ExpectedBase: p.ExpectedBase})
 	if merged.PullRequest != nil {
 		s.recordPR(ctx, call.run, merged.PullRequest, false)
 	}

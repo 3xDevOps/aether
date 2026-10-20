@@ -349,6 +349,9 @@ type RunPRMergeParams struct {
 	// ExpectedLogin, as on run.pr.create, fails the merge when gh's login
 	// is no longer the one shown.
 	ExpectedLogin string `json:"expected_login,omitempty"`
+	// ExpectedBase fails the merge, before it is attempted, when the pull
+	// request now targets another base branch.
+	ExpectedBase string `json:"expected_base,omitempty"`
 }
 
 // PullRequest is GitHub's state read after the merge attempt, also when

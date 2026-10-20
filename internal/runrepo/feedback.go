@@ -17,7 +17,7 @@ const feedbackProjection = `map({id:(.id|tostring),review_id:((.pull_request_rev
 const checkProjection = `.check_runs | map({name,status,conclusion,url:.html_url})`
 
 // GitHub computes mergeability in the background: a null mergeable is UNKNOWN until it has.
-const mergeabilityProjection = `{mergeable:(if .mergeable == true then "MERGEABLE" elif .mergeable == false then "CONFLICTING" else "UNKNOWN" end),merge_state_status:((.mergeable_state // "unknown")|ascii_upcase)}`
+const mergeabilityProjection = `{head:.head.sha,mergeable:(if .mergeable == true then "MERGEABLE" elif .mergeable == false then "CONFLICTING" else "UNKNOWN" end),merge_state_status:((.mergeable_state // "unknown")|ascii_upcase)}`
 const statusProjection = `map({name:.context,status:(if .state == "pending" then "IN_PROGRESS" else "COMPLETED" end),conclusion:(if .state == "pending" then "" else .state end),url:.target_url})`
 
 // feedbackPages visits bounded REST pages without asking gh to aggregate an
@@ -96,13 +96,18 @@ func (s *Service) PRFeedback(ctx context.Context, run Execution, target PRTarget
 		return result, err
 	}
 	var mergeability struct {
+		Head             string `json:"head"`
 		Mergeable        string `json:"mergeable"`
 		MergeStateStatus string `json:"merge_state_status"`
 	}
 	if err := json.Unmarshal([]byte(text), &mergeability); err != nil {
 		return result, fmt.Errorf("runrepo: decode GitHub mergeability: %w", err)
 	}
-	result.Mergeable, result.MergeStateStatus = mergeability.Mergeable, mergeability.MergeStateStatus
+	// A push between the two reads makes the verdict about another head than the checks.
+	result.Mergeable, result.MergeStateStatus = "UNKNOWN", "UNKNOWN"
+	if mergeability.Head == pr.Head {
+		result.Mergeable, result.MergeStateStatus = mergeability.Mergeable, mergeability.MergeStateStatus
+	}
 	budget := protocol.MaxRunRepoOutputBytes
 	seenStatus := make(map[string]bool)
 	for index, collection := range []struct {

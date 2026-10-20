@@ -121,6 +121,7 @@ type githubFixture struct {
 	login            string
 	mergeable        *bool
 	mergeableState   string
+	movedHead        string
 }
 
 func (f *githubFixture) pull(number int, headRepo string) githubPR {
@@ -206,7 +207,11 @@ func (f *githubFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if state == "" {
 			state = "unknown"
 		}
-		writeJSON(map[string]any{"mergeable": f.mergeable, "mergeable_state": state})
+		head := f.head
+		if f.movedHead != "" {
+			head = f.movedHead
+		}
+		writeJSON(map[string]any{"head": map[string]string{"sha": head}, "mergeable": f.mergeable, "mergeable_state": state})
 	case strings.HasSuffix(path, "/check-runs"):
 		writeJSON(map[string]any{"check_runs": []map[string]string{{"name": "build", "status": "completed", "conclusion": "failure", "html_url": "https://github.com/check/1"}}})
 	case strings.HasSuffix(path, "/statuses"):
@@ -367,6 +372,15 @@ func TestFeedbackIsTypedBoundedAndRetainsEarlierDataOnFailure(t *testing.T) {
 	if result, err = s.PRFeedback(t.Context(), run, f.target, 2); err != nil || result.Mergeable != "CONFLICTING" || result.MergeStateStatus != "DIRTY" {
 		t.Fatalf("mergeability = %q %q err=%v", result.Mergeable, result.MergeStateStatus, err)
 	}
+	f.mu.Lock()
+	f.movedHead = strings.Repeat("f", 40)
+	f.mu.Unlock()
+	if result, err = s.PRFeedback(t.Context(), run, f.target, 2); err != nil || result.Mergeable != "UNKNOWN" || result.MergeStateStatus != "UNKNOWN" {
+		t.Fatalf("mergeability of a moved head = %q %q err=%v", result.Mergeable, result.MergeStateStatus, err)
+	}
+	f.mu.Lock()
+	f.movedHead = ""
+	f.mu.Unlock()
 	f.mu.Lock()
 	f.failReviews = true
 	f.mu.Unlock()

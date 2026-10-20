@@ -316,6 +316,9 @@ type PRMergeRequest struct {
 	ExpectedHead string `json:"expected_head"`
 	// ExpectedLogin is optional, as on PRCreateRequest.
 	ExpectedLogin string `json:"expected_login,omitempty"`
+	// ExpectedBase is optional: the base branch the member reviewed, which a
+	// retarget changes without moving the head --match-head-commit checks.
+	ExpectedBase string `json:"expected_base,omitempty"`
 }
 
 // MergePR runs native `gh pr merge` and then reads the PR back from GitHub,
@@ -341,6 +344,17 @@ func (s *Service) MergePR(ctx context.Context, run Execution, req PRMergeRequest
 		return result, fmt.Errorf("runrepo: GitHub identity changed from %s to %s", req.ExpectedLogin, identity)
 	}
 	number := strconv.Itoa(req.Number)
+	if req.ExpectedBase != "" {
+		pr, out, err := s.readPR(ctx, run, req.Repository, number)
+		if err != nil {
+			result.Output = FailureOutput(out, err)
+			return result, err
+		}
+		if pr.Target.BaseBranch != req.ExpectedBase {
+			result.PullRequest = pr
+			return result, fmt.Errorf("runrepo: pull request #%s now targets %s, not %s; review it again", number, pr.Target.BaseBranch, req.ExpectedBase)
+		}
+	}
 	out, mergeErr := s.command(ctx, run, true, "gh", "pr", "merge", number, "--repo", "github.com/"+req.Repository, "--"+req.Method, "--match-head-commit", req.ExpectedHead)
 	result.Output = out
 	var commandErr *CommandError
