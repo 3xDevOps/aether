@@ -420,7 +420,7 @@ func (e *Engine) PublishRunBranch(ctx context.Context, run domain.RunID) (commit
 		return "", fmt.Errorf("gitengine: published run branch %s resolved to %s, want %s", run, after, head)
 	}
 	if after != before {
-		e.publishBranch(ctx, run, after)
+		e.publishBranch(ctx, run, before, after)
 	}
 	return after, nil
 }

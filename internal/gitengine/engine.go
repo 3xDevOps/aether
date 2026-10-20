@@ -444,11 +444,11 @@ func gitEnv() []string {
 	}
 }
 
-// publishBranch emits git.branch for a run whose branch tip moved, scoped
-// to the workspace recorded in the watch registry or the run metadata
-// sidecar. The callback records the commit metadata even when no event bus
-// is configured.
-func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, commit string) {
+// publishBranch emits git.branch for a run whose branch tip moved from
+// previous (empty for a new branch), scoped to the workspace recorded in the
+// watch registry or the run metadata sidecar. The callback records the commit
+// metadata even when no event bus is configured.
+func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, previous, commit string) {
 	e.mu.Lock()
 	info, ok := e.registry[run]
 	e.mu.Unlock()
@@ -460,6 +460,14 @@ func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, commit str
 		info = runInfo{workspace: meta.Workspace, branch: meta.Branch}
 	}
 	if e.cfg.Bus != nil {
+		forced := false
+		if previous != "" {
+			repo, ancestorErr := e.existingRepoPath(info.workspace)
+			if ancestorErr == nil {
+				_, ancestorErr = e.git(ctx, repo, "merge-base", "--is-ancestor", previous, commit)
+			}
+			forced = ancestorErr != nil
+		}
 		_, err := e.cfg.Bus.Publish(ctx, events.Event{
 			WorkspaceID: info.workspace,
 			RunID:       run,
@@ -467,6 +475,8 @@ func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, commit str
 				WorkspaceID: info.workspace,
 				Branch:      info.branch,
 				Commit:      commit,
+				Previous:    previous,
+				Forced:      forced,
 			},
 		})
 		if err != nil {

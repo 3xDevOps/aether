@@ -304,3 +304,56 @@ func (s *Service) CreatePR(ctx context.Context, run Execution, req PRCreateReque
 	}
 	return result, createErr
 }
+
+type PRMergeRequest struct {
+	Repository string `json:"repository"`
+	Number     int    `json:"number"`
+	Method     string `json:"method"`
+}
+
+// MergePR runs native `gh pr merge` and then reads the PR back from GitHub,
+// also after a failure: a merge queue or auto-merge can accept a PR that is
+// not merged yet. A failed merge keeps gh's own output and error.
+func (s *Service) MergePR(ctx context.Context, run Execution, req PRMergeRequest) (PRResult, error) {
+	result := PRResult{}
+	if req.Method != "squash" && req.Method != "merge" && req.Method != "rebase" {
+		return result, errors.New("runrepo: merge method must be squash, merge or rebase")
+	}
+	if !validRepository(req.Repository) || req.Number <= 0 {
+		return result, errors.New("runrepo: PR repository must be an explicit owner/name identity with a PR number")
+	}
+	number := strconv.Itoa(req.Number)
+	out, mergeErr := s.command(ctx, run, true, "gh", "pr", "merge", number, "--repo", req.Repository, "--"+req.Method)
+	result.Output = out
+	var commandErr *CommandError
+	if mergeErr != nil && !errors.As(mergeErr, &commandErr) {
+		return result, mergeErr
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+	defer cancel()
+	pr, readOut, err := s.readPR(readCtx, run, req.Repository, number)
+	result.PullRequest = pr
+	if err != nil {
+		err = fmt.Errorf("runrepo: read PR after merge: %w", err)
+		if mergeErr == nil {
+			result.Output = FailureOutput(readOut, err)
+		}
+	}
+	return result, errors.Join(mergeErr, err)
+}
+
+func (s *Service) readPR(ctx context.Context, run Execution, repository, number string) (*PullRequest, CommandOutput, error) {
+	out, err := s.gh(ctx, run, false, "repos/"+repository+"/pulls/"+number, "--jq", `{number,html_url,state,title,draft,merged,merged_at,base:{ref:.base.ref,repo:{full_name:.base.repo.full_name}},head:{ref:.head.ref,sha:.head.sha,repo:{full_name:.head.repo.full_name}}}`)
+	text, err := complete(out, err)
+	if err != nil {
+		return nil, out, err
+	}
+	var pr githubPR
+	if err = json.Unmarshal([]byte(text), &pr); err != nil {
+		return nil, out, fmt.Errorf("runrepo: decode PR: %w", err)
+	}
+	if pr.Base.Repo == nil || pr.Head.Repo == nil {
+		return nil, out, errors.New("runrepo: GitHub PR response has no base or head repository")
+	}
+	return pr.public(PRTarget{Repository: pr.Base.Repo.FullName, BaseBranch: pr.Base.Ref, HeadRepository: pr.Head.Repo.FullName, HeadBranch: pr.Head.Ref}), out, nil
+}

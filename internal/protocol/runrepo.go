@@ -1,14 +1,20 @@
 package protocol
 
+import "time"
+
 const (
 	MethodWorkspaceImport   = "workspace.import"
 	MethodRunGitStatus      = "run.git.status"
 	MethodRunGitDiff        = "run.git.diff"
 	MethodRunGitCommit      = "run.git.commit"
 	MethodRunGitPush        = "run.git.push"
+	MethodRunGitLog         = "run.git.log"
 	MethodRunPRStatus       = "run.pr.status"
 	MethodRunPRCreate       = "run.pr.create"
 	MethodRunPRFeedback     = "run.pr.feedback"
+	MethodRunPRMerge        = "run.pr.merge"
+	DefaultRunGitLogLimit   = 50
+	MaxRunGitLogLimit       = 200
 	MaxRunGitPaths          = 256
 	MaxRunGitPathBytes      = 4096
 	MaxRunGitMessageBytes   = 16 << 10
@@ -134,6 +140,44 @@ type RunGitCommitResult struct {
 	Actual   *RunGitExpected      `json:"actual,omitempty"`
 }
 
+type RunGitLogParams struct {
+	RunID string `json:"run_id"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type RunGitCommit struct {
+	SHA        string   `json:"sha"`
+	Short      string   `json:"short"`
+	Subject    string   `json:"subject"`
+	Author     string   `json:"author"`
+	AuthoredAt string   `json:"authored_at"`
+	Parents    []string `json:"parents"`
+}
+
+type RunGitConflict struct {
+	Path string `json:"path"`
+}
+
+// BaseRef is the checkout's origin/<base branch> when it exists; otherwise
+// it is empty and Base is the run's fork point. Commits are MergeBase..Head
+// and Upstream MergeBase..Base, newest first. Conflicts are predicted by
+// merging Head with Base without touching the worktree.
+type RunGitLogResult struct {
+	Branch    string               `json:"branch"`
+	BaseRef   string               `json:"base_ref"`
+	Base      string               `json:"base"`
+	Head      string               `json:"head"`
+	MergeBase string               `json:"merge_base"`
+	Ahead     int                  `json:"ahead"`
+	Behind    int                  `json:"behind"`
+	Commits   []RunGitCommit       `json:"commits"`
+	Upstream  []RunGitCommit       `json:"upstream"`
+	Conflicts []RunGitConflict     `json:"conflicts"`
+	Truncated bool                 `json:"truncated"`
+	Output    RunRepoCommandOutput `json:"output"`
+	Error     string               `json:"error,omitempty"`
+}
+
 // Repository is the explicit push URL of Remote, NOT the source mirror or PR
 // repository. HeadBranch is the exact remote destination; force is unsupported.
 type RunGitPushTarget struct {
@@ -183,16 +227,17 @@ type RunPRCreateParams struct {
 }
 
 type RunPullRequest struct {
-	Number         int    `json:"number"`
-	URL            string `json:"url"`
-	State          string `json:"state"`
-	Title          string `json:"title"`
-	Draft          bool   `json:"draft"`
-	Repository     string `json:"repository"`
-	BaseBranch     string `json:"base_branch"`
-	HeadRepository string `json:"head_repository"`
-	HeadBranch     string `json:"head_branch"`
-	HeadOID        string `json:"head_oid"`
+	Number         int        `json:"number"`
+	URL            string     `json:"url"`
+	State          string     `json:"state"`
+	Title          string     `json:"title"`
+	Draft          bool       `json:"draft"`
+	Repository     string     `json:"repository"`
+	BaseBranch     string     `json:"base_branch"`
+	HeadRepository string     `json:"head_repository"`
+	HeadBranch     string     `json:"head_branch"`
+	HeadOID        string     `json:"head_oid"`
+	MergedAt       *time.Time `json:"merged_at,omitempty"`
 }
 
 // Status always comes from GitHub, including PRs created by native gh.
@@ -278,6 +323,25 @@ type RunPRFeedbackResult struct {
 	AccountMemberID string               `json:"account_member_id"`
 	Actual          *RunGitExpected      `json:"actual,omitempty"`
 	Truncated       bool                 `json:"truncated"`
+	Output          RunRepoCommandOutput `json:"output"`
+	Error           string               `json:"error,omitempty"`
+}
+
+// Without Repository and Number, run.pr.merge merges the pull request the run
+// most recently recorded.
+type RunPRMergeParams struct {
+	RunID      string `json:"run_id"`
+	Method     string `json:"method"`
+	Repository string `json:"repository,omitempty"`
+	Number     int    `json:"number,omitempty"`
+}
+
+// PullRequest is GitHub's state read after the merge attempt, also when
+// it failed; a merge queue can accept a PR without merging it yet.
+type RunPRMergeResult struct {
+	PullRequest     *RunPullRequest      `json:"pull_request"`
+	Merged          bool                 `json:"merged"`
+	AccountMemberID string               `json:"account_member_id"`
 	Output          RunRepoCommandOutput `json:"output"`
 	Error           string               `json:"error,omitempty"`
 }
