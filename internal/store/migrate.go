@@ -1887,6 +1887,13 @@ CREATE TRIGGER memory_fts_delete AFTER DELETE ON memory BEGIN
 	INSERT INTO memory_fts (memory_fts, rowid, title, body, files) VALUES ('delete', old.rowid, old.title, old.body, old.files);
 END;
 `,
+	// v76: when a swarm completed or was cancelled, so insights buckets it
+	// by a time later updated_at bumps cannot move. Finished swarms are
+	// backfilled with their last update, the best time recorded.
+	`
+ALTER TABLE missions ADD COLUMN finished_at INTEGER;
+UPDATE missions SET finished_at = updated_at WHERE phase IN ('completed', 'cancelled');
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

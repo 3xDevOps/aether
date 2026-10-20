@@ -61,8 +61,9 @@ func TestInsightsGet(t *testing.T) {
 		c.Services.RunRepo = goneRunRepo{}
 		c.Services.GitHub = gh
 	})
+	colors := map[string]string{"alice": "#e6194b", "bob": "#3cb44b", "carol": "#4363d8"}
 	member := func(name string) domain.MemberID {
-		m := &domain.Member{DisplayName: name, PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Color: "#e6194b", Role: domain.RoleCollaborator}
+		m := &domain.Member{DisplayName: name, PublicKey: string(ssh.MarshalAuthorizedKey(newSigner(t).PublicKey())), Color: colors[name], Role: domain.RoleCollaborator}
 		if err := db.CreateMember(ctx, m); err != nil {
 			t.Fatal(err)
 		}
@@ -90,8 +91,10 @@ func TestInsightsGet(t *testing.T) {
 	// Swarms reserve their runs' IDs before creating them.
 	nanos := func(s string) int64 { return at(s).UnixNano() }
 	mission := func(id string, owner domain.MemberID, ws domain.WorkspaceID, phase, created string) {
-		exec(`INSERT INTO missions (id, workspace_id, objective, accountable_human_id, idempotency_key, created_at, updated_at, phase)
-			VALUES (?, ?, 'o', ?, ?, ?, ?, ?)`, id, ws, owner, id, nanos(created), nanos(created), phase)
+		exec(`INSERT INTO missions (id, workspace_id, objective, accountable_human_id, idempotency_key, created_at, updated_at, phase, finished_at)
+			VALUES (?, ?, 'o', ?, ?, ?, ?, ?, ?)`, id, ws, owner, id, nanos(created), nanos(created), phase, nanos(created))
+		// Later updates to a finished swarm do not move it to another day.
+		exec(`UPDATE missions SET updated_at = ? WHERE id = ?`, nanos("2026-03-12T00:00:00-07:00"), id)
 	}
 	mission("m1", alice, alpha, "completed", "2026-03-07T11:30:00-08:00")
 	mission("m2", bob, beta, "cancelled", "2026-03-08T12:00:00-07:00")
@@ -273,7 +276,21 @@ func TestInsightsGet(t *testing.T) {
 		{"swarms", mine.Swarms, protocol.InsightsSwarms{Launched: 1, Completed: 1, Agents: 4, TasksAccepted: 1}},
 		{"durations", mine.Durations, protocol.InsightsDurations{RunsMeasured: 3, MedianRunSeconds: 3600, P90RunSeconds: 37 * 3600,
 			StateRunsMeasured: 2, MedianWorkingSeconds: 30 * 60, MedianWaitingSeconds: 300, MedianResponseSeconds: 300}},
-		{"cost", mine.Cost, protocol.InsightsCost{MeteredRuns: 1, UnmeteredRuns: 2, CostUSD: 2, InputTokens: 1500, OutputTokens: 150}},
+		{"cost", mine.Cost, protocol.InsightsCost{MeteredRuns: 1, UnmeteredRuns: 2, CostUSD: 2, InputTokens: 1500, OutputTokens: 150, TotalTokens: 1758,
+			ByAgent: []protocol.InsightsCostAgent{
+				{Harness: "claude", MeteredRuns: 1, UnmeteredRuns: 1, CostUSD: 2, InputTokens: 1500, OutputTokens: 150, TotalTokens: 1758},
+				{Harness: "codex", UnmeteredRuns: 1},
+			}}},
+		{"success", mine.Success, protocol.InsightsSuccess{Runs: protocol.InsightsSuccessCount{Succeeded: 1, Finished: 3}, Swarms: protocol.InsightsSuccessCount{Finished: 1}}},
+		{"outcomes", mine.Outcomes, protocol.InsightsOutcomes{
+			Runs: protocol.InsightsOutcome{Done: 1, Failed: 1, Abandoned: 1}, Swarms: protocol.InsightsOutcome{Done: 1},
+			Series: []protocol.InsightsOutcomeBucket{
+				{Start: "2026-03-07", Runs: protocol.InsightsOutcome{Done: 1}, Swarms: protocol.InsightsOutcome{Done: 1}},
+				{Start: "2026-03-08", Runs: protocol.InsightsOutcome{Abandoned: 1}},
+				{Start: "2026-03-09", Runs: protocol.InsightsOutcome{Failed: 1}},
+			},
+			Members: []protocol.InsightsMemberOutcome{},
+		}},
 		{"pull requests", mine.PullRequests, protocol.InsightsPullRequests{Opened: 2, Merged: 1}},
 		{"recent order", recentIDs(mine.Recent), []string{"top2", "top4", "top1"}},
 		{"untitled recent top2", mine.Recent[0].Title, "fix the parser"},
@@ -285,7 +302,37 @@ func TestInsightsGet(t *testing.T) {
 
 		{"everyone totals", everyone.Totals, protocol.InsightsTotals{Launched: 5, Completed: 2, Failed: 1, Abandoned: 1, Killed: 1, Active: 2, Finished: 2}},
 		{"everyone swarms", everyone.Swarms, protocol.InsightsSwarms{Launched: 2, Completed: 1, Cancelled: 1, Agents: 5, TasksAccepted: 1}},
-		{"everyone cost", everyone.Cost, protocol.InsightsCost{MeteredRuns: 2, UnmeteredRuns: 2, CostUSD: 4, InputTokens: 1510, OutputTokens: 151}},
+		{"everyone cost", everyone.Cost, protocol.InsightsCost{MeteredRuns: 2, UnmeteredRuns: 2, CostUSD: 4, InputTokens: 1510, OutputTokens: 151, TotalTokens: 1769,
+			ByAgent: []protocol.InsightsCostAgent{
+				{Harness: "claude", MeteredRuns: 2, UnmeteredRuns: 1, CostUSD: 4, InputTokens: 1510, OutputTokens: 151, TotalTokens: 1769},
+				{Harness: "codex", UnmeteredRuns: 1},
+			}}},
+		{"everyone success", everyone.Success, protocol.InsightsSuccess{Runs: protocol.InsightsSuccessCount{Succeeded: 1, Finished: 4}, Swarms: protocol.InsightsSuccessCount{Finished: 2}}},
+		{"everyone outcomes", everyone.Outcomes, protocol.InsightsOutcomes{
+			Runs: protocol.InsightsOutcome{Done: 2, Failed: 1, Abandoned: 1}, Swarms: protocol.InsightsOutcome{Done: 1, Abandoned: 1},
+			Series: []protocol.InsightsOutcomeBucket{
+				{Start: "2026-03-07", Runs: protocol.InsightsOutcome{Done: 1}, Swarms: protocol.InsightsOutcome{Done: 1}},
+				{Start: "2026-03-08", Runs: protocol.InsightsOutcome{Done: 1, Abandoned: 1}, Swarms: protocol.InsightsOutcome{Abandoned: 1}},
+				{Start: "2026-03-09", Runs: protocol.InsightsOutcome{Failed: 1}},
+			},
+			Members: []protocol.InsightsMemberOutcome{
+				{MemberID: string(alice), DisplayName: "alice", Color: "#e6194b", Runs: protocol.InsightsOutcome{Done: 1, Failed: 1, Abandoned: 1}, Swarms: protocol.InsightsOutcome{Done: 1},
+					Series: []protocol.InsightsOutcomeBucket{
+						{Start: "2026-03-07", Runs: protocol.InsightsOutcome{Done: 1}, Swarms: protocol.InsightsOutcome{Done: 1}},
+						{Start: "2026-03-08", Runs: protocol.InsightsOutcome{Abandoned: 1}},
+						{Start: "2026-03-09", Runs: protocol.InsightsOutcome{Failed: 1}},
+					}},
+				{MemberID: string(bob), DisplayName: "bob", Color: "#3cb44b", Runs: protocol.InsightsOutcome{Done: 1}, Swarms: protocol.InsightsOutcome{Abandoned: 1},
+					Series: []protocol.InsightsOutcomeBucket{
+						{Start: "2026-03-07"},
+						{Start: "2026-03-08", Runs: protocol.InsightsOutcome{Done: 1}, Swarms: protocol.InsightsOutcome{Abandoned: 1}},
+						{Start: "2026-03-09"},
+					}},
+				{MemberID: string(carol), DisplayName: "carol", Color: "#4363d8", Series: []protocol.InsightsOutcomeBucket{
+					{Start: "2026-03-07"}, {Start: "2026-03-08"}, {Start: "2026-03-09"},
+				}},
+			},
+		}},
 		{"everyone needs you", everyone.NeedsYou, 3},
 		{"everyone recent", recentIDs(everyone.Recent), []string{"top2", "top5", "top4", "top1"}},
 
