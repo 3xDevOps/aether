@@ -119,6 +119,8 @@ type githubFixture struct {
 	failReviews      bool
 	comments         []map[string]any
 	login            string
+	mergeable        *bool
+	mergeableState   string
 }
 
 func (f *githubFixture) pull(number int, headRepo string) githubPR {
@@ -199,6 +201,12 @@ func (f *githubFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSON(f.prs[page-1 : page])
 		}
+	case strings.HasPrefix(path, "/repos/"+f.target.Repository+"/pulls/") && !strings.Contains(strings.TrimPrefix(path, "/repos/"+f.target.Repository+"/pulls/"), "/"):
+		state := f.mergeableState
+		if state == "" {
+			state = "unknown"
+		}
+		writeJSON(map[string]any{"mergeable": f.mergeable, "mergeable_state": state})
 	case strings.HasSuffix(path, "/check-runs"):
 		writeJSON(map[string]any{"check_runs": []map[string]string{{"name": "build", "status": "completed", "conclusion": "failure", "html_url": "https://github.com/check/1"}}})
 	case strings.HasSuffix(path, "/statuses"):
@@ -340,6 +348,9 @@ func TestFeedbackIsTypedBoundedAndRetainsEarlierDataOnFailure(t *testing.T) {
 	if !result.Truncated || len(result.Comments) != 2 || result.Comments[0].ID != "1" || result.Comments[0].Author != "commenter" || len(result.Comments[0].Body) != 1024 {
 		t.Fatalf("bounded comments=%+v", result)
 	}
+	if result.Mergeable != "UNKNOWN" || result.MergeStateStatus != "UNKNOWN" {
+		t.Fatalf("mergeability before GitHub computed it = %q %q", result.Mergeable, result.MergeStateStatus)
+	}
 	if len(result.Checks) != 2 || result.Checks[0].Name != "build" || result.Checks[0].Conclusion != "failure" || result.Checks[1].Conclusion != "failure" {
 		t.Fatalf("current checks=%+v", result.Checks)
 	}
@@ -348,6 +359,13 @@ func TestFeedbackIsTypedBoundedAndRetainsEarlierDataOnFailure(t *testing.T) {
 	}
 	if len(result.ReviewComments) != 1 || result.ReviewComments[0].ReviewID != "71" || result.ReviewComments[0].Line == nil || *result.ReviewComments[0].Line != 3 || result.ReviewComments[0].CommitOID != expected.Head {
 		t.Fatalf("inline comments=%+v", result.ReviewComments)
+	}
+	conflicting := false
+	f.mu.Lock()
+	f.mergeable, f.mergeableState = &conflicting, "dirty"
+	f.mu.Unlock()
+	if result, err = s.PRFeedback(t.Context(), run, f.target, 2); err != nil || result.Mergeable != "CONFLICTING" || result.MergeStateStatus != "DIRTY" {
+		t.Fatalf("mergeability = %q %q err=%v", result.Mergeable, result.MergeStateStatus, err)
 	}
 	f.mu.Lock()
 	f.failReviews = true

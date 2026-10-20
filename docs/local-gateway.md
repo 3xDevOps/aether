@@ -1099,6 +1099,13 @@ auto-merge that accepted it leaves it `open`. GitHub's refusal, such as a
 failing required check, is in `error` and `output.stderr` as `gh` printed
 it.
 
+`run.pr.feedback` also returns GitHub's own verdict on the merge, read from
+`repos/<repository>/pulls/<number>`: `mergeable` is `MERGEABLE`,
+`CONFLICTING` or `UNKNOWN` (GitHub has not computed it yet), and
+`merge_state_status` is its `mergeable_state` upper-cased, such as `CLEAN`,
+`BEHIND`, `DIRTY`, `BLOCKED`, `UNSTABLE` or `UNKNOWN`. Both are absent when
+no pull request was found or that read failed.
+
 ### Administrator GitHub connection and import
 
 Both gateways expose the same administrator flow; it needs no local clone or

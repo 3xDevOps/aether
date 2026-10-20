@@ -15,6 +15,9 @@ import (
 // passed off as complete review evidence.
 const feedbackProjection = `map({id:(.id|tostring),review_id:((.pull_request_review_id // "")|tostring),author:(.user.login // ""),body:((.body // "")[:1024]),url:(.html_url // ""),created_at:(.created_at // ""),submitted_at:(.submitted_at // ""),state:(.state // ""),path:((.path // "")[:1024]),line,original_line,side,start_line,start_side,commit_oid:(.commit_id // ""),in_reply_to_id:((.in_reply_to_id // "")|tostring),diff_hunk:((.diff_hunk // "")[:512]),truncated:(((.body // "")|length)>1024 or ((.diff_hunk // "")|length)>512 or ((.path // "")|length)>1024)})`
 const checkProjection = `.check_runs | map({name,status,conclusion,url:.html_url})`
+
+// GitHub computes mergeability in the background: a null mergeable is UNKNOWN until it has.
+const mergeabilityProjection = `{mergeable:(if .mergeable == true then "MERGEABLE" elif .mergeable == false then "CONFLICTING" else "UNKNOWN" end),merge_state_status:((.mergeable_state // "unknown")|ascii_upcase)}`
 const statusProjection = `map({name:.context,status:(if .state == "pending" then "IN_PROGRESS" else "COMPLETED" end),conclusion:(if .state == "pending" then "" else .state end),url:.target_url})`
 
 // feedbackPages visits bounded REST pages without asking gh to aggregate an
@@ -86,6 +89,20 @@ func (s *Service) PRFeedback(ctx context.Context, run Execution, target PRTarget
 	}
 	prefix := "repos/" + target.Repository
 	pullPath := prefix + "/pulls/" + strconv.Itoa(pr.Number)
+	out, err := s.gh(ctx, run, false, pullPath, "--jq", mergeabilityProjection)
+	text, err := complete(out, err)
+	if err != nil {
+		result.Output = FailureOutput(out, err)
+		return result, err
+	}
+	var mergeability struct {
+		Mergeable        string `json:"mergeable"`
+		MergeStateStatus string `json:"merge_state_status"`
+	}
+	if err := json.Unmarshal([]byte(text), &mergeability); err != nil {
+		return result, fmt.Errorf("runrepo: decode GitHub mergeability: %w", err)
+	}
+	result.Mergeable, result.MergeStateStatus = mergeability.Mergeable, mergeability.MergeStateStatus
 	budget := protocol.MaxRunRepoOutputBytes
 	seenStatus := make(map[string]bool)
 	for index, collection := range []struct {

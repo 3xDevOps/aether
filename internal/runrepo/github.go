@@ -60,8 +60,12 @@ type PRFeedback struct {
 	Comments       []protocol.RunPRComment
 	Reviews        []protocol.RunPRReview
 	ReviewComments []protocol.RunPRReviewComment
-	Truncated      bool
-	Output         CommandOutput
+	// Mergeable is MERGEABLE, CONFLICTING or UNKNOWN; MergeStateStatus is
+	// GitHub's mergeable_state upper-cased, such as CLEAN, BEHIND or DIRTY.
+	Mergeable        string
+	MergeStateStatus string
+	Truncated        bool
+	Output           CommandOutput
 }
 
 type githubPR struct {
