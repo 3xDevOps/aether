@@ -21,6 +21,8 @@ function seed() {
 const empty = { launched: 0, completed: 0, merged: 0, failed: 0, interrupted: 0, abandoned: 0, killed: 0, active: 0, finished: 0 }
 
 describe('insights page', () => {
+  afterEach(() => { vi.useRealTimers() })
+
   it('reads the browser zone and scope, and compares against the period before in raw numbers', async () => {
     seed()
     const client = fakeApi()
@@ -61,6 +63,7 @@ describe('insights page', () => {
   })
 
   it('reads the chosen bar on its own and clears it', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-10-19T12:00:00Z') })
     seed()
     const older = insightsRun({ run_id: 'run_9', title: 'Older run past the newest 50', finished_at: '2026-10-14T03:00:00Z' })
     const insightsGet = vi.fn(async (params: InsightsParams) => params.from === rfc3339(new Date(Date.UTC(2026, 9, 14))) ? insights({ recent: [older] }) : insights())

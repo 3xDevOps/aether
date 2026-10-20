@@ -442,3 +442,47 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 	}
 	return protocol.RunPRMergeResult{Identity: merged.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(merged.PullRequest), Merged: merged.PullRequest != nil && merged.PullRequest.State == "merged", Output: runrepo.FailureOutput(merged.Output, err), Error: repoError(err)}, nil
 }
+
+func (s *Server) runGitLog(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	var p protocol.RunGitLogParams
+	if err := decodeRunRepo(raw, &p); err != nil {
+		return nil, err
+	}
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, false)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	log, err := call.native.Log(ctx, call.execution, runrepo.LogRequest{BaseBranch: call.run.BaseBranch, ForkPoint: call.run.BaseCommit, Limit: p.Limit})
+	log.Output = runrepo.FailureOutput(log.Output, err)
+	log.Error = repoError(err)
+	return log, nil
+}
+
+func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
+	var p protocol.RunPRMergeParams
+	if err := decodeRunRepo(raw, &p); err != nil {
+		return nil, err
+	}
+	if (p.Repository == "") != (p.Number == 0) {
+		return nil, invalidParams("repository and number must be given together")
+	}
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, true)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if p.Repository == "" {
+		prs, listErr := s.cfg.Store.RunPullRequests(ctx, call.run.ID)
+		if listErr != nil {
+			return nil, rpcError(listErr)
+		}
+		if len(prs) == 0 {
+			return nil, invalidParams("run has no recorded pull request; pass repository and number")
+		}
+		p.Repository, p.Number = prs[0].Repository, prs[0].Number
+	}
+	merged, err := call.native.MergePR(ctx, call.execution, runrepo.PRMergeRequest{Repository: p.Repository, Number: p.Number, Method: p.Method, ExpectedHead: p.ExpectedHead, ExpectedLogin: p.ExpectedLogin})
+	if merged.PullRequest != nil {
+		s.recordPR(ctx, call.run, merged.PullRequest, false)
+	}
+	return protocol.RunPRMergeResult{Identity: merged.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(merged.PullRequest), Merged: merged.PullRequest != nil && merged.PullRequest.State == "merged", Output: runrepo.FailureOutput(merged.Output, err), Error: repoError(err)}, nil
+}

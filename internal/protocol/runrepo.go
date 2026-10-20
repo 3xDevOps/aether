@@ -364,3 +364,28 @@ type RunPRMergeResult struct {
 	Output          RunRepoCommandOutput `json:"output"`
 	Error           string               `json:"error,omitempty"`
 }
+
+// Without Repository and Number, run.pr.merge merges the pull request the run
+// most recently recorded. GitHub refuses the merge unless the PR head is
+// still ExpectedHead, the head_oid the member reviewed.
+type RunPRMergeParams struct {
+	RunID        string `json:"run_id"`
+	Method       string `json:"method"`
+	ExpectedHead string `json:"expected_head"`
+	Repository   string `json:"repository,omitempty"`
+	Number       int    `json:"number,omitempty"`
+	// ExpectedLogin, as on run.pr.create, fails the merge when gh's login
+	// is no longer the one shown.
+	ExpectedLogin string `json:"expected_login,omitempty"`
+}
+
+// PullRequest is GitHub's state read after the merge attempt, also when
+// it failed; a merge queue can accept a PR without merging it yet.
+type RunPRMergeResult struct {
+	Identity        string               `json:"identity"`
+	PullRequest     *RunPullRequest      `json:"pull_request"`
+	Merged          bool                 `json:"merged"`
+	AccountMemberID string               `json:"account_member_id"`
+	Output          RunRepoCommandOutput `json:"output"`
+	Error           string               `json:"error,omitempty"`
+}
