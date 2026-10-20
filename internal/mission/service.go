@@ -596,7 +596,7 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 				if stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
 					return stateErr
 				}
-				_ = s.publishMissionChanged(ctx, mission.ID, attemptChange(domain.MissionWorkerEnded, attempt))
+				_ = s.publishMissionChanged(ctx, mission.ID, attemptChange("", attempt))
 				continue
 			}
 			s.dispatchMu.Unlock()
@@ -680,7 +680,7 @@ func (s *Service) reconcileCancellation(ctx context.Context, mission *domain.Mis
 			if updateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCancelled, currentRun.Reason); updateErr != nil {
 				return updateErr
 			}
-			return s.publishMissionChanged(ctx, mission.ID, attemptChange(domain.MissionWorkerEnded, attempt))
+			return s.publishMissionChanged(ctx, mission.ID, attemptChange("", attempt))
 		}
 	}
 	s.cfg.AuthorizationMu.Lock()
@@ -740,7 +740,7 @@ func (s *Service) reconcileSubmitted(ctx context.Context, mission *domain.Missio
 		if updateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCompleted, "retained"); updateErr != nil {
 			return updateErr
 		}
-		return s.publishMissionChanged(ctx, mission.ID, attemptChange(domain.MissionWorkerEnded, attempt))
+		return s.publishMissionChanged(ctx, mission.ID, attemptChange("", attempt))
 	}
 	s.cfg.AuthorizationMu.Lock()
 	defer s.cfg.AuthorizationMu.Unlock()

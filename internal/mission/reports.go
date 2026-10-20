@@ -254,7 +254,7 @@ func (s *Service) failAssignedWorker(ctx context.Context, m *domain.Mission, att
 			return stateErr
 		}
 	}
-	return s.publishMissionChanged(ctx, m.ID, attemptChange(domain.MissionWorkerEnded, attempt))
+	return s.publishMissionChanged(ctx, m.ID, attemptChange("", attempt))
 }
 
 func (s *Service) reportEvidence(ctx context.Context, report *store.CoordReport, packet protocol.EvidencePacket) []domain.SubmissionEvidence {
