@@ -54,6 +54,12 @@ describe('run workflow', () => {
     expect(tree.counts).toMatchObject({ total: 4, running: 3, done: 1 })
   })
 
+  it('keeps an agent whose launch is not loaded', () => {
+    const agents = agentsOf([read(1, 'x1', 'r1')])
+    const tree = deriveRunWorkflow('run_1', facts({ status: 'running', state: 'working' }), agents)
+    expect(tree.children.map((child) => [child.id, child.state])).toEqual([['agent:x1', 'unknown']])
+  })
+
   it('follows the run through working, waiting for agents, needs you, ready for review and completed', () => {
     const seen = [
       facts({ status: 'running', state: 'working' }),
@@ -157,6 +163,8 @@ describe('swarm workflow', () => {
     expect(byID(tree, 'candidate:c1')!.detail).toBe('2 conflicts: a.go, b.go')
     expect(byID(tree, 'candidate:c2')).toMatchObject({ state: 'unknown', detail: 'Verification not checked yet' })
     expect(byID(tree, 'candidate:c3')).toMatchObject({ state: 'completed', detail: 'Delivered' })
+    const unread = swarm({}, {}, [{ candidate_id: 'c4', state: 'conflicted', target_ref: 'main', created_at: '2026-08-14T10:00:00Z', readError: 'integration.show: permission denied' }])
+    expect(byID(unread, 'candidate:c4')).toMatchObject({ state: 'unknown', detail: 'integration.show: permission denied' })
   })
 
   it('surfaces a worker that needs you through its folded task', () => {

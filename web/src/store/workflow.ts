@@ -163,7 +163,14 @@ function agentTree(index: AgentIndex, ids: string[], parentId: string, seen: Set
 
 export function deriveRunWorkflow(runID: string, run: RunFacts, agents: AgentIndex): WorkflowNode {
   const id = `run:${runID}`
-  const children = agentTree(agents, agents.roots, id, new Set())
+  const seen = new Set<string>()
+  const children = agentTree(agents, agents.roots, id, seen)
+  // An agent whose launch the loaded history does not hold is in no list of children.
+  const unplaced = Object.values(agents.agents)
+    .filter((agent) => !seen.has(agent.id) && (!agent.parentID || !agents.agents[agent.parentID]))
+    .sort((a, b) => (a.items[0]?.seq ?? 0) - (b.items[0]?.seq ?? 0))
+    .map((agent) => agent.id)
+  children.push(...agentTree(agents, unplaced, id, seen))
   if (run.needsYou) {
     children.unshift({ id: `request:${runID}`, parentId: id, kind: 'request', state: 'needs-you', label: run.reason, runId: runID, children: [] })
   }
@@ -316,6 +323,7 @@ function candidateNode(candidate: CandidateFacts, parentId: string): WorkflowNod
   }
   const receipt = candidate.delivery_receipt
   if (receipt) return { ...base, state: 'completed', detail: receipt.result === 'proposed' ? 'Delivered as a proposal' : 'Delivered', endedAt: receipt.created_at }
+  if (candidate.readError) return { ...base, state: 'unknown', detail: candidate.readError }
   switch (candidate.state) {
     case 'preparing':
       return candidate.error ? { ...base, state: 'failed', detail: candidate.error } : { ...base, state: 'working', detail: 'Preparing' }
@@ -324,7 +332,6 @@ function candidateNode(candidate: CandidateFacts, parentId: string): WorkflowNod
       return { ...base, state: 'waiting-agents', detail: n > 0 ? `${n} ${n === 1 ? 'conflict' : 'conflicts'}: ${candidate.conflicts!.join(', ')}` : 'Conflicted' }
     }
     case 'frozen': {
-      if (candidate.readError) return { ...base, state: 'unknown', detail: candidate.readError }
       const request = candidate.delivery_request?.state
       if (request === 'pending' || request === 'approved' || request === 'delivering') return { ...base, state: 'waiting-agents', detail: `Delivery ${request}` }
       if (request === 'denied') return { ...base, state: 'failed', detail: 'Delivery denied' }

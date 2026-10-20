@@ -77,6 +77,18 @@ describe('WorkflowTree', () => {
     expect(rows[1]!.getAttribute('aria-level')).toBe('2')
   })
 
+  it('comes back from two nested levels to the row that holds them', async () => {
+    let deep = node('a9', 'working')
+    for (let i = 8; i >= 1; i--) deep = node(`a${i}`, 'working', [deep])
+    render(<WorkflowTree root={node('root', 'working', [deep], { kind: 'run' })} label="Run workflow" />)
+    fireEvent.click(screen.getByRole('treeitem', { name: 'Nested workflow · 6 agents' }))
+    fireEvent.click(screen.getByRole('treeitem', { name: 'Nested workflow · 3 agents' }))
+    expect(items()[0]!.dataset.key).toBe('a6')
+    await userEvent.click(screen.getByRole('button', { name: 'Show the whole workflow' }))
+    expect(items()[0]!.dataset.key).toBe('root')
+    expect(focused()).toBe('nested:a3')
+  })
+
   it('opens a level past the cap in place and comes back', async () => {
     let deep = node('a6', 'working')
     for (let i = 5; i >= 1; i--) deep = node(`a${i}`, 'working', [deep])

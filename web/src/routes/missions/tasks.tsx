@@ -135,9 +135,11 @@ function inFlight(candidate: CandidateFacts): boolean {
   return candidate.state === 'preparing' || request === 'pending' || request === 'approved' || request === 'delivering' || checks.at(-1)?.status === 'running'
 }
 
+const noCandidates: CandidateFacts[] = []
+
 function useCandidates(detail: MissionDetail, client: Api): { candidates: CandidateFacts[]; error?: string } {
   const cap = useCapability()
-  const [state, setState] = useState<{ candidates: CandidateFacts[]; error?: string }>({ candidates: [] })
+  const [state, setState] = useState<{ missionID: string; candidates: CandidateFacts[]; error?: string }>({ missionID: '', candidates: noCandidates })
   const [tick, setTick] = useState(0)
   const { mission } = detail
   const readable = cap.hasMethod('integration.list') && cap.hasMethod('integration.show')
@@ -156,17 +158,21 @@ function useCandidates(detail: MissionDetail, client: Api): { candidates: Candid
           return { ...summary, readError: message(err) }
         }
       }))
-      if (live) setState({ candidates: shown })
+      if (live) setState({ missionID: mission.id, candidates: shown })
       if (live && shown.some(inFlight)) timer = window.setTimeout(() => setTick((n) => n + 1), candidatePollMs)
     }
     let timer: number | undefined
-    load().catch((err) => live && setState((current) => ({ ...current, error: message(err) })))
+    load().catch((err) => live && setState((current) => ({
+      missionID: mission.id,
+      candidates: current.missionID === mission.id ? current.candidates : noCandidates,
+      error: message(err),
+    })))
     return () => {
       live = false
       clearTimeout(timer)
     }
   }, [client, detail, mission.id, mission.workspace_id, readable, tick])
-  return state
+  return state.missionID === mission.id ? state : { candidates: noCandidates }
 }
 
 export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {

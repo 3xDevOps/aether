@@ -3517,7 +3517,8 @@ The tree (`src/components/workflow/workflow-tree.tsx`) is derived by
 `presentRun` state and reason, and the session's subagent index. Its root is
 the run; a run that needs you leads with a Needs you row naming the
 request; under it every subagent and nested workflow nests under the agent
-that launched it, with its label, state and a summary of its tool calls
+that launched it (one whose launch the loaded history lacks sits under the
+run, `Not checked yet`), with its label, state and a summary of its tool calls
 ("Read 3 files and ran 2 commands"), never its prose. Node ids are server
 ids (`run:<id>`, `agent:<tool call id>`), and a re-derivation keeps every
 unchanged subtree's object, so only rows that changed re-render.

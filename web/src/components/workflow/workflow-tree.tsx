@@ -20,6 +20,15 @@ function find(node: WorkflowNode, id: string): WorkflowNode | undefined {
   return undefined
 }
 
+function pathTo(node: WorkflowNode, id: string): string[] | undefined {
+  if (node.id === id) return [node.id]
+  for (const child of node.children) {
+    const path = pathTo(child, id)
+    if (path) return [node.id, ...path]
+  }
+  return undefined
+}
+
 function states(node: WorkflowNode, into = new Map<string, { state: WorkflowState; label: string }>()) {
   into.set(node.id, { state: node.state, label: node.label })
   for (const child of node.children) states(child, into)
@@ -224,10 +233,14 @@ export function WorkflowTree({
           size="sm"
           className="self-start"
           onClick={() => {
-            pending.current = shown.id
-            setActiveKey(shown.id)
+            const opened = isOpen(shown, overrides) ? overrides : new Map(overrides).set(shown.id, true)
+            const path = pathTo(root, shown.id) ?? []
+            const visible = flattenWorkflow(root, opened).filter((row) => path.includes(row.node.id))
+            const target = visible.at(-1)?.key ?? root.id
+            pending.current = target
+            setActiveKey(target)
             setFocusID(null)
-            setOverrides((current) => (isOpen(shown, current) ? current : new Map(current).set(shown.id, true)))
+            setOverrides(opened)
           }}
         >
           <ArrowLeft />
