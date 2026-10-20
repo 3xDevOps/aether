@@ -108,7 +108,9 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
   const graph = compact && !open ? headOnly : full
   const head = headRow(current, pr, ready)
   const conflicted = ready.items.find((entry) => entry.key === 'conflicts' && entry.state === 'blocked')
-  const publish = live && allowed('push', self)
+  const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
+  // The server checks steering as well as push before a merge, as for the agent's own checkout.
+  const publish = live && allowed('push', self) && allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const action = chooseAction(current, pr, ready, {
     publish,
     create: caps.hasMethod('run.git.status') && caps.hasMethod('run.pr.create'),
@@ -166,7 +168,7 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
     try {
       if (!pr) return
       const result = await api.runPRMerge({
-        run_id: run.id, method, repository: pr.repository, number: pr.number, expected_head: pr.head_oid, expected_login: feedback?.identity,
+        run_id: run.id, method, repository: pr.repository, number: pr.number, expected_head: pr.head_oid, expected_login: feedback?.identity, expected_base: pr.base_branch,
       })
       if (result.error) throw new Error(result.error)
       // A merge queue accepts the request and merges later.

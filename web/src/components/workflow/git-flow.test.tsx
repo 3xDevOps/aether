@@ -98,7 +98,7 @@ it('reaches the merge, its method and the confirm by keyboard, and shows GitHub�
   const confirm = within(await screen.findByRole('alertdialog', { name: 'Rebase and merge #128?' }))
   await user.click(confirm.getByRole('button', { name: 'Rebase and merge' }))
   expect(api.runPRMerge).toHaveBeenCalledWith({
-    run_id: record.id, method: 'rebase', repository: 'acme/app', number: 128, expected_head: head, expected_login: 'alice',
+    run_id: record.id, method: 'rebase', repository: 'acme/app', number: 128, expected_head: head, expected_login: 'alice', expected_base: 'main',
   })
   expect((await confirm.findByRole('alert')).textContent).toBe(refusal)
   await waitFor(() => expect(card.getAllByRole('alert').map((entry) => entry.textContent)).toContain(refusal))
@@ -130,6 +130,14 @@ it('offers a viewer no merge and no send, only the pull request on GitHub', asyn
   expect(await card.findByRole('link', { name: 'Open on GitHub' })).toHaveProperty('href', pr.url)
   expect(card.queryByRole('button', { name: 'Squash and merge' })).toBeNull()
   expect(card.queryByRole('button', { name: 'Ask agent to resolve conflicts' })).toBeNull()
+})
+
+it('offers no merge on another member’s protected run', async () => {
+  useStore.setState({ info: { ...serverInfo, member: { ...bob, role: 'collaborator' } } })
+  renderCard({ protected: true })
+  const card = within(await screen.findByRole('region', { name: 'Branch and pull request' }))
+  expect(await card.findByRole('link', { name: 'Open on GitHub' })).toHaveProperty('href', pr.url)
+  expect(card.queryByRole('button', { name: 'Squash and merge' })).toBeNull()
 })
 
 it('shows the server’s error for the branch verbatim', async () => {

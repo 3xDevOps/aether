@@ -312,6 +312,8 @@ export interface RunPRMergeParams {
   repository?: string
   number?: number
   expected_login?: string
+  /** Refuses the merge, before trying it, when the pull request now targets another base. */
+  expected_base?: string
 }
 
 export interface RunPRMergeResult {

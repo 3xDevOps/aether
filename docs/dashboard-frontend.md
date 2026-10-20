@@ -2916,14 +2916,17 @@ both what it renders and the overlap set the conflict chips read.
   when it found none against that base), under the composer's rules, and
   the receipt reads "Sent conflict list to Claude Code."; **Squash and
   merge** calls `run.pr.merge` with the pull request's repository, number,
-  `expected_head` (the head on screen) and `expected_login`, after a
+  `expected_head` (the head on screen), `expected_base` and
+  `expected_login`, after a
   confirmation that repeats the checklist, and its menu switches to **Create
   a merge commit** or **Rebase and merge**; **Open on GitHub** covers a
   draft, a blocked, an unpushed, a merged or a closed pull request. A merge
   GitHub accepted but has not done, as through a merge queue, shows `gh`'s
   output, or "GitHub has not merged #128; it is open.". Open, merge and
-  resolve need a live run and the collaborator role, as Publish does;
-  resolve also needs a member who may message the agent. While the card
+  resolve need a live run, the collaborator role and leave to steer the run
+  (its owner, or anyone the run's protection and the workspace's
+  `steer_others` allow), the rules the server applies; resolve also needs a
+  member who may message the agent now. While the card
   offers an action, **Publish…** turns secondary, so the view keeps one
   filled button. A running action disables its button with a spinner and
   names itself in the status line. Every error, from the log, the feedback,
