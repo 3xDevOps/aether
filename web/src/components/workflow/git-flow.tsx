@@ -253,7 +253,7 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
     <section
       aria-label="Branch and pull request"
       className={cn(
-        '@container/git flex min-h-0 min-w-0 flex-col rounded-panel border border-seam bg-canvas p-3 [&>*:not([data-commits])]:shrink-0',
+        '@container/git flex min-h-0 min-w-0 flex-col overflow-y-auto rounded-panel border border-seam bg-canvas p-3 [&>*:not([data-commits])]:shrink-0',
         compact ? 'gap-1' : 'gap-2',
       )}
     >

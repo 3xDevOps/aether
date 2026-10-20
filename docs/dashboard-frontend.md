@@ -3608,7 +3608,7 @@ row too narrow for it beside Details or the subagent inspector shows those
 instead; the chip then closes Details to make room.
 Narrower rows open it as a side sheet and phones as a bottom sheet, a
 `dialog "Workflow"` that returns focus to the chip, and that closes when a
-row opens the subagent inspector or the request. Under the tree, a run
+row opens the subagent inspector or the request, or the view changes. Under the tree, a run
 with a branch shows the compact git card (`GitFlow` in
 `src/components/workflow/git-flow.tsx`), except on the Changes view, which
 shows the full one.

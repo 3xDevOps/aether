@@ -252,7 +252,10 @@ export function WorkflowTree({
         aria-label={label}
         onKeyDown={onKeyDown}
         onFocus={(event) => {
-          if (event.target.getAttribute('role') === 'treeitem') focused.current = event.target.dataset.key ?? null
+          const key = event.target.closest<HTMLElement>('[role=treeitem]')?.dataset.key
+          if (!key) return
+          focused.current = key
+          setActiveKey(key)
         }}
         onBlur={(event) => {
           if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) focused.current = null

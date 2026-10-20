@@ -124,7 +124,7 @@ function agentNode(agent: Subagent): Omit<WorkflowNode, 'parentId' | 'children'>
       label: agentLabel(agent),
       detail: [detail, workSummary([...tools.values()])].filter(Boolean).join(' · ') || undefined,
       startedAt: agent.startedAt,
-      endedAt: agent.settledAt,
+      endedAt: state === 'working' || state === 'running' ? undefined : agent.settledAt,
       agentId: agent.id,
     }
     agentNodes.set(agent, node)

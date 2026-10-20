@@ -140,6 +140,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
     if (inline) setDetailsPreference(open)
     else setOverlayDetails(open)
   }, [inline, setDetailsPreference, agentID, closeAgent])
+  // A view change from inside the sheet, such as the git card's Review changes, leaves the sheet.
+  useEffect(() => setOverlayWorkflow(false), [view])
   const setWorkflow = useCallback((open: boolean) => {
     if (!workflowInline) {
       setOverlayWorkflow(open)

@@ -54,6 +54,12 @@ describe('run workflow', () => {
     expect(tree.counts).toMatchObject({ total: 4, running: 3, done: 1 })
   })
 
+  it('keeps a background agent that outlives its launch call running', () => {
+    const agents = agentsOf([launch(1, 'w1', 'completed', { tool_name: 'Workflow', subagent: undefined, raw_input: { name: 'audit' } }), read(1, 'w1', 'r1')])
+    const tree = deriveRunWorkflow('run_1', facts({ status: 'running', state: 'working' }), agents)
+    expect(tree.children[0]).toMatchObject({ kind: 'workflow', state: 'working', endedAt: undefined })
+  })
+
   it('keeps an agent whose launch is not loaded', () => {
     const agents = agentsOf([read(1, 'x1', 'r1')])
     const tree = deriveRunWorkflow('run_1', facts({ status: 'running', state: 'working' }), agents)

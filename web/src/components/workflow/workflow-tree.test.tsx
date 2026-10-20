@@ -56,6 +56,12 @@ describe('WorkflowTree', () => {
     expect(items().filter((row) => row.tabIndex === 0).map((row) => row.dataset.key)).toEqual(['root'])
   })
 
+  it('makes the row of a focused inline control the tab stop', () => {
+    render(<WorkflowTree root={tree} label="Run workflow" extra={(picked) => (picked.id === 'c' ? <button type="button">Details</button> : null)} />)
+    act(() => screen.getByRole('button', { name: 'Details' }).focus())
+    expect(items().filter((row) => row.tabIndex === 0).map((row) => row.dataset.key)).toEqual(['c'])
+  })
+
   it('hands Enter to the caller, and folds a parent the caller leaves alone', async () => {
     const onSelect = vi.fn((picked: WorkflowNode) => picked.id === 'c')
     render(<WorkflowTree root={tree} label="Run workflow" onSelect={onSelect} />)
