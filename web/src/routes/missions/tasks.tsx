@@ -197,7 +197,7 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
     if (!task || !expanded) return null
     return (
       <Collapsible>
-        <CollapsibleTrigger>Task details</CollapsibleTrigger>
+        <CollapsibleTrigger className="text-ui-sm text-muted">Task details</CollapsibleTrigger>
         <CollapsibleContent>
           <TaskDetails task={task} detail={detail} showProposalBlocker={mission.phase === 'active'} />
         </CollapsibleContent>

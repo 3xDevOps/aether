@@ -125,7 +125,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   await page.getByRole('main').getByRole('button', { name: missionObjective, exact: false }).click()
   const missionView = page.getByRole('region', { name: 'Tasks' })
   await expect(missionView).toBeVisible()
-  await expect(missionView).toContainText('Working')
+  await expect(missionView.getByRole('treeitem', { name: /^scripted worker candidate, .*You hold control of worker 1/ })).toBeVisible()
   await page.getByRole('button', { name: 'Release control', exact: true }).click()
   await expect(page.getByText('Human control released')).toBeVisible({ timeout: 30_000 })
   const released = await inspectWorker()
@@ -222,7 +222,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   // The task tree follows the same swarm: the accepted submission completes
   // the task, and the candidate follows the tasks.
   const workflow = missionView.getByRole('tree', { name: 'Swarm workflow' })
-  await expect(workflow.getByRole('treeitem').first()).toContainText('1 of 1 tasks done', { timeout: 30_000 })
+  await expect(workflow.getByRole('treeitem').first()).toContainText('1 of 1 task done', { timeout: 30_000 })
   const task = workflow.getByRole('treeitem', { name: /^scripted worker candidate, Completed/ })
   await expect(task).toHaveAttribute('aria-expanded', 'false')
   await task.focus()

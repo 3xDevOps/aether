@@ -327,6 +327,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           <DialogContent
             id={workflowPanelID}
             variant={mobile ? 'bottom' : 'side'}
+            showCloseButton={false}
             aria-describedby={undefined}
             onCloseAutoFocus={(event) => {
               if (!returnTo.current?.isConnected) return

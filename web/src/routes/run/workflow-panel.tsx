@@ -41,10 +41,10 @@ export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: bo
   const checks = usePullRequest(run, false).feedback?.checks
   const { state } = tree
   const running = runningAgents(tree)
-  const parts = [workflowLabel[state]]
-  if (state === 'waiting-ci' && checks && checks.length > 0) parts.push(`${countChecks(checks).passing} of ${checks.length} checks`)
-  else if (running > 0) parts.push(`${running} ${running === 1 ? 'subagent' : 'subagents'}`)
-  const text = parts.join(' · ')
+  const busy = state === 'waiting-ci' && checks && checks.length > 0
+    ? `${countChecks(checks).passing} of ${checks.length} checks`
+    : running > 0 ? `${running} ${running === 1 ? 'subagent' : 'subagents'}` : ''
+  const text = busy ? `${workflowLabel[state]} · ${busy}` : workflowLabel[state]
   return (
     <Button
       variant="ghost"
@@ -53,11 +53,12 @@ export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: bo
       aria-controls={workflowPanelID}
       aria-label={`Workflow: ${text}`}
       hint={open ? 'Hide the workflow' : 'Show the workflow'}
-      className="ml-1 min-w-0 shrink"
+      className="ml-1 shrink-0"
       onClick={(event) => onToggle(event.currentTarget)}
     >
       <StatusDot tone={workflowTone[state]} pulse={state === 'working'} />
-      <span className="min-w-0 truncate">{text}</span>
+      <span>{workflowLabel[state]}</span>
+      {busy && <span className="hidden @min-[480px]/views:inline">· {busy}</span>}
     </Button>
   )
 }

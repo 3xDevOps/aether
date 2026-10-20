@@ -14,15 +14,15 @@ import { countsText, workflowLabel, workflowTone, type WorkflowNode } from '@/st
 const step = 16
 
 function Guides({ row }: { row: WorkflowRow }) {
-  if (row.level === 1) return null
   const own = (row.level - 2) * step + 8
   return (
     <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0">
       {row.guides.slice(1).map((more, j) =>
         more ? <span key={j} className="absolute inset-y-0 border-l border-icon-faint" style={{ left: j * step + 8 }} /> : null,
       )}
-      <span className="absolute top-0 h-(--wire) w-2 border-b border-l border-icon-faint" style={{ left: own }} />
-      {!row.last && <span className="absolute top-(--wire) bottom-0 border-l border-icon-faint" style={{ left: own }} />}
+      {row.level > 1 && <span className="absolute top-0 h-(--wire) w-2 border-b border-l border-icon-faint" style={{ left: own }} />}
+      {row.level > 1 && !row.last && <span className="absolute top-(--wire) bottom-0 border-l border-icon-faint" style={{ left: own }} />}
+      {row.expanded && <span className="absolute bottom-0 border-l border-icon-faint" style={{ left: own + step, top: 'calc(var(--wire) + 7px)' }} />}
     </span>
   )
 }
