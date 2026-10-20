@@ -32,12 +32,13 @@ const (
 // snapshots, adapter activity, mail acknowledgements, swarm refresh hints
 // and presence are detail, not workspace history. Asking for one by type still returns it.
 var detailTypes = map[events.Type]bool{
-	events.TypeRunDiff:           true,
-	events.TypeRunTitle:          true,
-	events.TypeAgentEvent:        true,
-	events.TypeCoordMessageAcked: true,
-	events.TypeMissionChanged:    true,
-	events.TypePresence:          true,
+	events.TypeRunDiff:            true,
+	events.TypeRunTitle:           true,
+	events.TypeAgentEvent:         true,
+	events.TypeCoordMessageAcked:  true,
+	events.TypeMissionChanged:     true,
+	events.TypeIntegrationChanged: true,
+	events.TypePresence:           true,
 }
 
 // Filter narrows a timeline page. Member matches an event's actor - who

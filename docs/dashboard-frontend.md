@@ -916,6 +916,12 @@ Removal also repairs the selection and open route before any refresh awaits.
 - **Server-gateway reconnects also refresh the snapshot** when replay is
   possible: Tailscale may identify the new connection as a different member.
   Only a local gateway's fixed identity can reuse replay without that refresh.
+- **Branch, pull request and swarm hints are counters.** `git.branch` and
+  `run.pr` bump a per-run `gitSeq` and `prSeq`, and `integration.changed`
+  and `mission.changed` a per-swarm `integrationSeq` and `missionSeq`
+  (`src/store/workflow-signals.ts`). A view that shows that state keys its
+  `run.git.log`, `run.pr.feedback` or `integration.show` re-read on the
+  counter (`useStore(gitSeqOf(runID))`) instead of polling.
 - **A failed hydration retries** on the same backoff, and the affected panes
   say the server is unreachable rather than animating skeletons forever. That
   generic copy never overwrites a more precise error already recorded.
@@ -3903,7 +3909,8 @@ questions and queued messages stay contextual to their run, in its Details
   is mounted (`useLiveFeed`), `applyEvent` appends each event the filters
   select by the server reader's own rule (workspace, run or mail to it, actor,
   type; `run.diff`, `run.title`, `run.agent`, `coord.message.acked`,
-  `mission.changed` and `workspace.presence` only when asked for by type),
+  `mission.changed`, `integration.changed` and `workspace.presence` only when
+  asked for by type),
   skipping a sequence already held. The cursor follows only while the window
   is whole - no read in flight, failed or cut short - and a view reads from
   the cursor again when the stream reconnects. A failed or cut-short read is
