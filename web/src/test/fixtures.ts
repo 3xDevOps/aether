@@ -525,6 +525,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runGitDiff: vi.fn<Api['runGitDiff']>(async () => ({
       state: { ...gitState }, output: { exit_code: 0, truncated: false },
     })),
+    runGitLog: vi.fn<Api['runGitLog']>(async () => needsOverride('runGitLog')),
     runGitCommit: vi.fn<Api['runGitCommit']>(async () => needsOverride('runGitCommit')),
     runGitPush: vi.fn<Api['runGitPush']>(async () => needsOverride('runGitPush')),
     runPRStatus: vi.fn<Api['runPRStatus']>(async () => ({
@@ -542,6 +543,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       truncated: false,
       output: { exit_code: 0, truncated: false },
     })),
+    runPRMerge: vi.fn<Api['runPRMerge']>(async () => needsOverride('runPRMerge')),
     workspaceImport: vi.fn<Api['workspaceImport']>(async () => needsOverride('workspaceImport')),
     devTerminalList: vi.fn<Api['devTerminalList']>(async ({ run_id }) => ({
       terminals: Array.from(terminals.get(run_id)?.values() ?? [], (terminal) => ({

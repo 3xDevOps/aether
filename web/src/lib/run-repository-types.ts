@@ -85,6 +85,42 @@ export interface RunRepoCommandOutput {
   truncated: boolean
 }
 
+export interface RunGitLogParams {
+  run_id: string
+  /** The server defaults to 50 and caps at 200. */
+  limit?: number
+}
+
+export interface GitLogCommit {
+  sha: string
+  short: string
+  subject: string
+  author: string
+  authored_at: string
+  parents: string[]
+}
+
+export interface RunGitLogConflict {
+  path: string
+}
+
+/** Both commit lists run newest first: `commits` is merge_base..head, `upstream` is merge_base..base. */
+export interface RunGitLogResult {
+  branch: string
+  base_ref: string
+  base: string
+  head: string
+  merge_base: string
+  ahead: number
+  behind: number
+  commits: GitLogCommit[]
+  upstream: GitLogCommit[]
+  conflicts: RunGitLogConflict[]
+  truncated: boolean
+  output: RunRepoCommandOutput
+  error?: string
+}
+
 export interface RunGitDiffParams {
   run_id: string
   paths?: string[]
@@ -171,6 +207,7 @@ export interface RunPullRequest {
   head_repository: string
   head_branch: string
   head_oid: string
+  merged_at?: string
 }
 
 export interface RunPRStatusResult {
@@ -252,6 +289,24 @@ export interface RunPRFeedbackResult {
   account_member_id: string
   actual?: RunGitExpected
   truncated: boolean
+  output: RunRepoCommandOutput
+  error?: string
+}
+
+export type RunPRMergeMethod = 'squash' | 'merge' | 'rebase'
+
+/** Without repository and number the server merges the run's latest recorded pull request. */
+export interface RunPRMergeParams {
+  run_id: string
+  method: RunPRMergeMethod
+  repository?: string
+  number?: number
+}
+
+export interface RunPRMergeResult {
+  pull_request: RunPullRequest | null
+  merged: boolean
+  account_member_id: string
   output: RunRepoCommandOutput
   error?: string
 }
