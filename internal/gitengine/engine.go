@@ -462,11 +462,11 @@ func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, previous, 
 	if e.cfg.Bus != nil {
 		forced := false
 		if previous != "" {
-			repo, ancestorErr := e.existingRepoPath(info.workspace)
-			if ancestorErr == nil {
-				_, ancestorErr = e.git(ctx, repo, "merge-base", "--is-ancestor", previous, commit)
+			if repo, repoErr := e.existingRepoPath(info.workspace); repoErr == nil {
+				_, ancestorErr := e.git(ctx, repo, "merge-base", "--is-ancestor", previous, commit)
+				var exit *exec.ExitError
+				forced = errors.As(ancestorErr, &exit) && exit.ExitCode() == 1
 			}
-			forced = ancestorErr != nil
 		}
 		_, err := e.cfg.Bus.Publish(ctx, events.Event{
 			WorkspaceID: info.workspace,
