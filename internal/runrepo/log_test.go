@@ -79,6 +79,27 @@ func TestLogTracksBaseMovementAndPredictsConflicts(t *testing.T) {
 		t.Fatalf("conflict prediction touched the worktree: %q", status)
 	}
 
+	gitCmd(t, dir, "checkout", "-q", "-b", "side", "upstream~1")
+	writeFile(t, dir, "unrelated", "side change\n")
+	gitCmd(t, dir, "commit", "-q", "-am", "side conflicting")
+	gitCmd(t, dir, "checkout", "-q", "upstream")
+	gitCmd(t, dir, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+	merge := gitCmd(t, dir, "rev-parse", "HEAD")
+	gitCmd(t, dir, "update-ref", "refs/remotes/origin/main", "upstream")
+	gitCmd(t, dir, "checkout", "-q", "aether/run")
+	if log, err = s.Log(t.Context(), run, request); err != nil {
+		t.Fatal(err)
+	}
+	mergePaths := []string{"missing"}
+	for _, commit := range log.Upstream {
+		if commit.SHA == merge {
+			mergePaths = commit.Paths
+		}
+	}
+	if !reflect.DeepEqual(mergePaths, []string{"unrelated"}) {
+		t.Fatalf("merge commit paths = %v, want the conflicting path it brings in", mergePaths)
+	}
+
 	request.Limit = 1
 	if log, err = s.Log(t.Context(), run, request); err != nil || !log.Truncated || len(log.Commits) != 1 || len(log.Upstream) != 1 {
 		t.Fatalf("limited log = %+v, %v", log, err)
@@ -129,26 +150,26 @@ func TestMergePRKeepsGHStderrAndRereadsState(t *testing.T) {
 	var calls [][]string
 	run := Execution{ContainerID: "test", WorkDir: "/work", Authorize: func(context.Context, bool) error { return nil }}
 	s := New(fakeGH(func() (int, string) { return 1, refusal }, openPull, &calls))
-	result, err := s.MergePR(t.Context(), run, PRMergeRequest{Repository: "acme/app", Number: 7, Method: "squash"})
+	result, err := s.MergePR(t.Context(), run, PRMergeRequest{Repository: "acme/app", Number: 7, Method: "squash", ExpectedHead: "0123456789abcdef0123456789abcdef01234567"})
 	if err == nil || !strings.Contains(err.Error(), refusal) || result.Output.Stderr != refusal || result.Output.ExitCode != 1 {
 		t.Fatalf("merge failure = %+v, %v", result.Output, err)
 	}
 	if result.PullRequest == nil || result.PullRequest.State != "open" || result.PullRequest.Target.HeadBranch != "aether/run" {
 		t.Fatalf("pull request after refusal = %+v", result.PullRequest)
 	}
-	if !reflect.DeepEqual(calls[0], []string{"gh", "pr", "merge", "7", "--repo", "acme/app", "--squash"}) {
+	if !reflect.DeepEqual(calls[0], []string{"gh", "pr", "merge", "7", "--repo", "acme/app", "--squash", "--match-head-commit", "0123456789abcdef0123456789abcdef01234567"}) {
 		t.Fatalf("merge argv = %v", calls[0])
 	}
 
 	merged := strings.NewReplacer(`"state":"open"`, `"state":"closed"`, `"merged":false`, `"merged":true`, `"merged_at":null`, `"merged_at":"2026-10-20T01:02:03Z"`).Replace(openPull)
 	s = New(fakeGH(func() (int, string) { return 0, "" }, merged, &calls))
-	result, err = s.MergePR(t.Context(), run, PRMergeRequest{Repository: "acme/app", Number: 7, Method: "rebase"})
+	result, err = s.MergePR(t.Context(), run, PRMergeRequest{Repository: "acme/app", Number: 7, Method: "rebase", ExpectedHead: "0123456789abcdef0123456789abcdef01234567"})
 	if err != nil || result.PullRequest == nil || result.PullRequest.State != "merged" || result.PullRequest.MergedAt == nil {
 		t.Fatalf("merge = %+v, %v", result.PullRequest, err)
 	}
 
 	calls = nil
-	for _, req := range []PRMergeRequest{{Repository: "acme/app", Number: 7, Method: "auto"}, {Repository: "acme", Number: 7, Method: "merge"}, {Repository: "acme/app", Method: "merge"}} {
+	for _, req := range []PRMergeRequest{{Repository: "acme/app", Number: 7, Method: "auto"}, {Repository: "acme", Number: 7, Method: "merge"}, {Repository: "acme/app", Method: "merge"}, {Repository: "acme/app", Number: 7, Method: "merge", ExpectedHead: "HEAD"}} {
 		if _, err := s.MergePR(t.Context(), run, req); err == nil {
 			t.Fatalf("invalid merge request %+v accepted", req)
 		}

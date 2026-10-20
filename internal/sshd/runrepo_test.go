@@ -280,7 +280,7 @@ func TestRunPRMergePassesGHStderrAndPublishesState(t *testing.T) {
 	})
 	merge := func() protocol.RunPRMergeResult {
 		t.Helper()
-		value, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunPRMerge, repoParams(t, protocol.RunPRMergeParams{RunID: string(e.run.ID), Method: "squash"}))
+		value, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunPRMerge, repoParams(t, protocol.RunPRMergeParams{RunID: string(e.run.ID), Method: "squash", ExpectedHead: "0123456789abcdef0123456789abcdef01234567"}))
 		if perr != nil {
 			t.Fatal(perr)
 		}
@@ -308,7 +308,7 @@ func TestRunPRMergePassesGHStderrAndPublishesState(t *testing.T) {
 	if refused.Merged || refused.Output.Stderr != refusal || !strings.Contains(refused.Error, refusal) || refused.PullRequest == nil || refused.PullRequest.State != "open" {
 		t.Fatalf("refused merge = %+v", refused)
 	}
-	if !reflect.DeepEqual(merges[0], []string{"gh", "pr", "merge", "7", "--repo", "acme/app", "--squash"}) {
+	if !reflect.DeepEqual(merges[0], []string{"gh", "pr", "merge", "7", "--repo", "acme/app", "--squash", "--match-head-commit", "0123456789abcdef0123456789abcdef01234567"}) {
 		t.Fatalf("merge argv = %v", merges[0])
 	}
 	if got := event(); got.Number != 7 || got.State != "open" {

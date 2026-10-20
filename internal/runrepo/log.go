@@ -107,7 +107,7 @@ func (s *Service) Log(ctx context.Context, run Execution, req LogRequest) (LogRe
 // conflictingCommits sets Paths on each of commits that touches one of the
 // conflicting paths.
 func (s *Service) conflictingCommits(ctx context.Context, run Execution, limit int, revisions string, paths []string, commits []protocol.RunGitCommit) error {
-	args := append([]string{"log", "-z", "--name-only", "--no-renames", "--max-count=" + strconv.Itoa(limit), "--format=%x1e%H", revisions, "--"}, paths...)
+	args := append([]string{"log", "-z", "--name-only", "--no-renames", "--diff-merges=first-parent", "--max-count=" + strconv.Itoa(limit), "--format=%x1e%H", revisions, "--"}, paths...)
 	out, err := s.git(ctx, run, false, args...)
 	text, err := complete(out, err)
 	if err != nil {

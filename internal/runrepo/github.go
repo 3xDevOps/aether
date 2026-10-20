@@ -306,9 +306,10 @@ func (s *Service) CreatePR(ctx context.Context, run Execution, req PRCreateReque
 }
 
 type PRMergeRequest struct {
-	Repository string `json:"repository"`
-	Number     int    `json:"number"`
-	Method     string `json:"method"`
+	Repository   string `json:"repository"`
+	Number       int    `json:"number"`
+	Method       string `json:"method"`
+	ExpectedHead string `json:"expected_head"`
 }
 
 // MergePR runs native `gh pr merge` and then reads the PR back from GitHub,
@@ -322,8 +323,11 @@ func (s *Service) MergePR(ctx context.Context, run Execution, req PRMergeRequest
 	if !validRepository(req.Repository) || req.Number <= 0 {
 		return result, errors.New("runrepo: PR repository must be an explicit owner/name identity with a PR number")
 	}
+	if !validOID(req.ExpectedHead) {
+		return result, errors.New("runrepo: expected PR head must be a full object ID")
+	}
 	number := strconv.Itoa(req.Number)
-	out, mergeErr := s.command(ctx, run, true, "gh", "pr", "merge", number, "--repo", req.Repository, "--"+req.Method)
+	out, mergeErr := s.command(ctx, run, true, "gh", "pr", "merge", number, "--repo", req.Repository, "--"+req.Method, "--match-head-commit", req.ExpectedHead)
 	result.Output = out
 	var commandErr *CommandError
 	if mergeErr != nil && !errors.As(mergeErr, &commandErr) {

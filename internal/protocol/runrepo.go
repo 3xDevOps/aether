@@ -330,12 +330,14 @@ type RunPRFeedbackResult struct {
 }
 
 // Without Repository and Number, run.pr.merge merges the pull request the run
-// most recently recorded.
+// most recently recorded. GitHub refuses the merge unless the PR head is
+// still ExpectedHead, the head_oid the member reviewed.
 type RunPRMergeParams struct {
-	RunID      string `json:"run_id"`
-	Method     string `json:"method"`
-	Repository string `json:"repository,omitempty"`
-	Number     int    `json:"number,omitempty"`
+	RunID        string `json:"run_id"`
+	Method       string `json:"method"`
+	ExpectedHead string `json:"expected_head"`
+	Repository   string `json:"repository,omitempty"`
+	Number       int    `json:"number,omitempty"`
 }
 
 // PullRequest is GitHub's state read after the merge attempt, also when

@@ -1066,7 +1066,7 @@ command's `output` (`exit_code`, `stdout`, `stderr`, `truncated`) verbatim.
 | Method | Params | Result |
 | --- | --- | --- |
 | `run.git.log` | `{"run_id":"...","limit":50}` (`limit` optional, 1 to 200, default 50) | `{"branch":"aether/run-...","base_ref":"origin/main","base":"<sha>","head":"<sha>","merge_base":"<sha>","ahead":2,"behind":3,"commits":[Commit],"upstream":[Commit],"conflicts":[{"path":"go.mod"}],"truncated":false,"output":{...},"error":"..."}` |
-| `run.pr.merge` | `{"run_id":"...","method":"squash"\|"merge"\|"rebase","repository":"owner/name","number":128}` (`repository` and `number` optional, together) | `{"pull_request":RunPullRequest,"merged":true,"account_member_id":"...","output":{...},"error":"..."}` |
+| `run.pr.merge` | `{"run_id":"...","method":"squash"\|"merge"\|"rebase","expected_head":"<sha>","repository":"owner/name","number":128}` (`repository` and `number` optional, together) | `{"pull_request":RunPullRequest,"merged":true,"account_member_id":"...","output":{...},"error":"..."}` |
 
 `run.git.log` compares the checkout's `HEAD` with its upstream base: the
 checkout's `origin/<base branch>` (`base_ref`), or the commit the run forked
@@ -1082,7 +1082,9 @@ an `upstream` commit that touches one of them lists those in `paths`;
 the index and worktree are untouched. It needs Git 2.38 or later in the
 run's image.
 
-`run.pr.merge` runs `gh pr merge <number> --repo <repository> --<method>`.
+`run.pr.merge` runs `gh pr merge <number> --repo <repository> --<method>
+--match-head-commit <expected_head>`, so GitHub refuses the merge when the
+pull request's head is no longer the `head_oid` the member reviewed.
 Without `repository` and `number` it merges the pull request the run most
 recently opened through `run.pr.create`, and fails with `-32602` when there
 is none. A pull request an agent opened with native `gh` must be named.

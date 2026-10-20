@@ -301,6 +301,8 @@ export type RunPRMergeMethod = 'squash' | 'merge' | 'rebase'
 export interface RunPRMergeParams {
   run_id: string
   method: RunPRMergeMethod
+  /** The PR's head_oid the member reviewed; GitHub refuses the merge if the head moved. */
+  expected_head: string
   repository?: string
   number?: number
 }
