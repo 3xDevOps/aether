@@ -1962,7 +1962,9 @@ empties the directory from a short-lived root container of the standard image
 (`find /reclaim -mindepth 1 -delete`, the directory mounted at `/reclaim`) and
 then deletes it. If that fails too, the journal logs `cannot remove files a
 root container created` once per directory with both errors, and the directory
-stays under the data directory until you remove it as root.
+stays under the data directory until you remove it as root. The Go build cache
+trim has no such fallback: an unprivileged server leaves Go build cache entries
+that root runs wrote in place.
 
 Browser support also needs permission to assign its private control directory
 to UID/GID `1000:1000`. An unprivileged server that cannot do this cannot launch
@@ -2049,8 +2051,9 @@ that line. In order:
    retained containers and uncaptured evidence keep their checkout.
 3. Stopped environment terminal containers, which discards their unsaved
    environment changes.
-4. Idle cache pools, obsolete saved images and legacy in-home caches. Legacy
-   caches go even while the member has runs open.
+4. Idle cache pools, Go build cache entries unused for a day in pools still
+   in use, obsolete saved images and legacy in-home caches. Legacy caches go
+   even while the member has runs open.
 5. Leftover `/tmp` scratch directories.
 
 `--run-container-ttl` and `--checkout-ttl` stay upper bounds. Each step logs the
@@ -2282,7 +2285,9 @@ Storage rules:
   hourly maintenance and the disk-pressure pass reclaim only inactive,
   proven-owned pools. Soft targets are 4 GiB per pool, 16 GiB total and 7 days
   since last genuine use/release. Active, retained, finalizing and uncertain
-  owners can exceed those targets; these are not live-write quotas. No idle
+  owners can exceed those targets; these are not live-write quotas. A pool with
+  an active, retained or finalizing owner still loses Go build cache entries
+  unused for a day when it is over 4 GiB or the disk is under pressure. No idle
   process is killed to meet them. `home-caches/` need not be backed up; keep the
   credentials and installed tools in `homes/`. Settings > **Server** reports
   cache ownership, deadlines and cleanup failures. Byte accounting de-duplicates

@@ -318,6 +318,78 @@ func (m *Manager) RemoveCache(ctx context.Context, member domain.MemberID, pool 
 	return errors.Join(err, saveCacheMetadata(root, meta))
 }
 
+// TrimGoBuildCache removes the pool's Go build cache entries last used before
+// cutoff from the same 256 shard directories Go's own trim walks, and returns
+// their bytes. The caller keeps cutoff more than an hour before the start of the
+// longest running go command; see goBuildCacheInactiveAge.
+func (m *Manager) TrimGoBuildCache(ctx context.Context, member domain.MemberID, pool string, cutoff time.Time) (uint64, error) {
+	root, err := m.openCachePool(member, pool, false)
+	if err == nil {
+		var cache *os.Root
+		cache, err = rootfs.OpenRoot(root, "data/go-build")
+		_ = root.Close()
+		root = cache
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = root.Close() }()
+	shards, err := cacheDirectoryEntries(root)
+	if err != nil {
+		return 0, err
+	}
+	var freed uint64
+	for _, shard := range shards {
+		if !shard.IsDir() || len(shard.Name()) != 2 {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return freed, err
+		}
+		entries, err := fs.ReadDir(root.FS(), shard.Name())
+		if err != nil {
+			return freed, err
+		}
+		for _, entry := range entries {
+			name := shard.Name() + "/" + entry.Name()
+			if !strings.HasSuffix(name, "-a") && !strings.HasSuffix(name, "-d") {
+				continue
+			}
+			info, err := root.Lstat(name)
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return freed, err
+			}
+			if !info.ModTime().Before(cutoff) {
+				continue
+			}
+			size := uint64(0)
+			if info.Mode().IsRegular() {
+				size = uint64(info.Size())
+			} else if info.IsDir() {
+				_ = fs.WalkDir(root.FS(), name, func(_ string, d fs.DirEntry, err error) error {
+					if err == nil && d.Type().IsRegular() {
+						if file, err := d.Info(); err == nil {
+							size += uint64(file.Size())
+						}
+					}
+					return nil
+				})
+			}
+			if err := root.RemoveAll(name); err != nil {
+				return freed, err
+			}
+			freed += size
+		}
+	}
+	return freed, nil
+}
+
 func (m *Manager) updateCacheMetadata(member domain.MemberID, pool string, create bool, update func(*cacheMetadata) error) error {
 	root, err := m.openCachePool(member, pool, create)
 	if !create && errors.Is(err, fs.ErrNotExist) {
