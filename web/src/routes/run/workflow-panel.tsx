@@ -12,35 +12,31 @@ import { usePrimaryAction, type RunNavigation } from '@/routes/run/header'
 import { openAgent } from '@/routes/run/subagent-cards'
 import type { RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
-import { useRunPresentation } from '@/store/hooks'
+import { useNeedsYouRuns, useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import { noAgents } from '@/store/subagents'
 import { deriveRunWorkflow, runFacts, shareTree, workflowLabel, workflowTone, type WorkflowNode } from '@/store/workflow'
 
 export const workflowPanelID = 'run-workflow'
 
-/** The run's workflow tree, rebuilt from the session's subagent index and the run's state. */
 function useRunWorkflow(run: RunRecord): WorkflowNode {
   const shown = useRunPresentation(run)
+  const ids = useMemo(() => [run.id], [run.id])
+  const asks = useNeedsYouRuns(ids).has(run.id)
   const agents = useStore((s) => s.acpSessions[run.id]?.agents ?? noAgents)
   const previous = useRef<WorkflowNode | undefined>(undefined)
   return useMemo(() => {
-    const next = shareTree(previous.current, deriveRunWorkflow(run.id, runFacts(run, shown, runLabel(run)), agents))
+    const next = shareTree(previous.current, deriveRunWorkflow(run.id, runFacts(run, shown, runLabel(run), asks), agents))
     previous.current = next
     return next
-  }, [run, shown, agents])
+  }, [run, shown, asks, agents])
 }
 
-function runningAgents(node: WorkflowNode): number {
-  return node.children.reduce((sum, child) => sum + (child.agentId && child.state === 'working' ? 1 : 0) + runningAgents(child), 0)
-}
-
-/** Beside the run's views: the state, then what it is busy with. */
 export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: boolean; onToggle: (opener: HTMLElement) => void }) {
   const tree = useRunWorkflow(run)
   const checks = usePullRequest(run, false).feedback?.checks
   const { state } = tree
-  const running = runningAgents(tree)
+  const running = tree.counts?.running ?? 0
   const busy = state === 'waiting-ci' && checks && checks.length > 0
     ? `${countChecks(checks).passing} of ${checks.length} checks`
     : running > 0 ? `${running} ${running === 1 ? 'subagent' : 'subagents'}` : ''
@@ -63,22 +59,26 @@ export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: bo
   )
 }
 
-export function WorkflowPanel({ run, view, agent, nav, onClose, className }: {
+export function WorkflowPanel({ run, view, agent, nav, onClose, onLeave, className }: {
   run: RunRecord
   view: RunView
   agent: AgentTerminal
   nav: RunNavigation
   onClose: () => void
+  /** Set when the panel is a sheet, which would cover the inspector or request it opens. */
+  onLeave?: () => void
   className?: string
 }) {
   const tree = useRunWorkflow(run)
   const primary = usePrimaryAction(run, view, agent, nav)
   const select = (node: WorkflowNode) => {
     if (node.agentId) {
+      onLeave?.()
       openAgent(run.id, node.agentId)
       return true
     }
     if (node.kind === 'request') {
+      onLeave?.()
       if (primary) primary.act()
       else nav.reveal('details-needs-you')
       return true

@@ -270,7 +270,8 @@ describe('swarm detail', () => {
     const tasks = within(screen.getByRole('region', { name: 'Tasks' }))
     const first = tasks.getByRole('treeitem', { name: /^rewrite the guest checkout flow, Working/ })
     expect(first.getAttribute('aria-level')).toBe('2')
-    expect(tasks.getByRole('treeitem', { name: /^add empty cart tests, Not started, No worker yet/ })).toBeDefined()
+    const waiting = tasks.getByRole('treeitem', { name: /^add empty cart tests, Not started, No worker yet/ })
+    expect(within(waiting).getByRole('button', { name: 'Task details' })).toBeDefined()
     expect(tasks.getByText('Alice holds control of this worker')).toBeDefined()
 
     await userEvent.click(tasks.getByRole('treeitem', { name: /^Worker 1 · Claude Code · Background, Working/ }))

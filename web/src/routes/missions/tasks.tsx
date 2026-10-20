@@ -67,8 +67,9 @@ function TaskDetails({ task, detail, showProposalBlocker }: { task: MissionTask;
   )
 }
 
-function ControlHold({ attempt, canRelease, client, onReleased }: {
+function ControlHold({ attempt, worker, canRelease, client, onReleased }: {
   attempt: MissionAttempt
+  worker: string
   canRelease: boolean
   client: Api
   onReleased: () => void
@@ -100,7 +101,7 @@ function ControlHold({ attempt, canRelease, client, onReleased }: {
         </Button>
       )}
     >
-      The integrator cannot steer it until control is released, here or from the worker run.
+      {worker}. The integrator cannot steer it until control is released, here or from the worker run.
       {error && <p className="text-state-failed">{error}</p>}
     </Callout>
   )
@@ -116,18 +117,28 @@ function useSwarmRuns(runIDs: string[]): Record<string, RunFacts> {
     const ctx = stateContextOf(s, now)
     return JSON.stringify(runIDs.flatMap((id) => {
       const run = s.runs[id]
-      return run ? [[id, runFacts(run, presentRun(run, ctx), '')]] : []
+      if (!run) return []
+      const shown = presentRun(run, ctx)
+      return [[id, runFacts(run, shown, '', shown.needsYou !== undefined)]]
     }))
   })
   return useMemo(() => Object.fromEntries(JSON.parse(key) as [string, RunFacts][]), [key])
 }
 
 const candidateDetails = 3
+/** No event marks a verification or delivery finishing, so a candidate in flight is read again. */
+const candidatePollMs = 5_000
 
-/** integration.list for the swarm, with integration.show's verifications for the newest few. */
+function inFlight(candidate: CandidateFacts): boolean {
+  const request = candidate.delivery_request?.state
+  const checks = (candidate.verifications ?? []).filter((item) => item.candidate_revision === candidate.candidate_revision)
+  return candidate.state === 'preparing' || request === 'pending' || request === 'approved' || request === 'delivering' || checks.at(-1)?.status === 'running'
+}
+
 function useCandidates(detail: MissionDetail, client: Api): { candidates: CandidateFacts[]; error?: string } {
   const cap = useCapability()
   const [state, setState] = useState<{ candidates: CandidateFacts[]; error?: string }>({ candidates: [] })
+  const [tick, setTick] = useState(0)
   const { mission } = detail
   const readable = cap.hasMethod('integration.list') && cap.hasMethod('integration.show')
   useEffect(() => {
@@ -146,12 +157,15 @@ function useCandidates(detail: MissionDetail, client: Api): { candidates: Candid
         }
       }))
       if (live) setState({ candidates: shown })
+      if (live && shown.some(inFlight)) timer = window.setTimeout(() => setTick((n) => n + 1), candidatePollMs)
     }
+    let timer: number | undefined
     load().catch((err) => live && setState((current) => ({ ...current, error: message(err) })))
     return () => {
       live = false
+      clearTimeout(timer)
     }
-  }, [client, detail, mission.id, mission.workspace_id, readable])
+  }, [client, detail, mission.id, mission.workspace_id, readable, tick])
   return state
 }
 
@@ -184,17 +198,19 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
   }, [detail, runs, candidates, agents, mission.integrator.harness, mission.integrator.mode])
   const tasks = useMemo(() => new Map(detail.tasks.map((task) => [`task:${task.id}`, task])), [detail.tasks])
   const held = useMemo(() => missionTree(detail).flatMap((node) => {
-    const latest = node.attempts[0]?.attempt
-    return latest && (latest.takeover_active || latest.orchestration_hold) ? [latest] : []
+    const latest = node.attempts[0]
+    return latest && (latest.attempt.takeover_active || latest.attempt.orchestration_hold)
+      ? [{ attempt: latest.attempt, worker: `${latest.name} on ${node.title}` }]
+      : []
   }), [detail])
   const select = (node: WorkflowNode) => {
     if (!node.runId || node.kind === 'task' || node.kind === 'candidate') return false
     navigate('run', { runId: node.runId })
     return true
   }
-  const extra = useCallback((node: WorkflowNode, expanded: boolean) => {
+  const extra = useCallback((node: WorkflowNode, expanded: boolean | undefined) => {
     const task = tasks.get(node.id)
-    if (!task || !expanded) return null
+    if (!task || expanded === false) return null
     return (
       <Collapsible>
         <CollapsibleTrigger className="text-ui-sm text-muted">Task details</CollapsibleTrigger>
@@ -207,8 +223,8 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
   return (
     <section aria-label="Tasks" className="flex flex-col gap-1">
       <SectionLabel as="h2">Tasks</SectionLabel>
-      {held.map((attempt) => (
-        <ControlHold key={attempt.id} attempt={attempt} canRelease={canRelease} client={client} onReleased={onChanged} />
+      {held.map(({ attempt, worker }) => (
+        <ControlHold key={attempt.id} attempt={attempt} worker={worker} canRelease={canRelease} client={client} onReleased={onChanged} />
       ))}
       <WorkflowTree root={tree} label="Swarm workflow" onSelect={select} extra={extra} />
       {detail.tasks.length === 0 && (

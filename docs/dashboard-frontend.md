@@ -3499,7 +3499,7 @@ Any other failed room action shows its error above the sections with
 The Workflow panel (`src/routes/run/workflow-panel.tsx`) shows what the run
 and its agents are doing as a tree. Its chip sits after the view switch and
 mirrors the run's state: `● Working · 2 subagents` (subagents running at any
-depth) or `● Waiting for CI · 3 of 9 checks` (passing checks of the pull
+depth, a background one included) or `● Waiting for CI · 3 of 9 checks` (passing checks of the pull
 request's checks this tab last read). The chip toggles the panel. While the
 run's row holds 320px for it plus `minReadableWidth`, the panel is a 320px
 `complementary "Workflow"` rail at the right of the frame, remembered per
@@ -3507,7 +3507,8 @@ device (`workflowOpen`, persisted, open by default). A row too narrow for it
 beside Details or the subagent inspector shows those instead; the chip then
 closes Details to make room.
 Narrower rows open it as a side sheet and phones as a bottom sheet, a
-`dialog "Workflow"` that returns focus to the chip. Under the tree, a run
+`dialog "Workflow"` that returns focus to the chip, and that closes when a
+row opens the subagent inspector or the request. Under the tree, a run
 with a branch shows the compact git card (`GitFlow` in
 `src/components/workflow/git-flow.tsx`).
 
@@ -3524,7 +3525,8 @@ unchanged subtree's object, so only rows that changed re-render.
 Each 28px row shows a status dot (shape and text, the vocabulary of
 [Run state](#run-state) plus `Not started` and `Not checked yet`), the label,
 the muted reason, and at the right the elapsed time in tabular figures, or
-on the root real counts (`2 subagents running`, `3 of 5 tasks done`).
+on the root real counts (`2 subagents running`, counting every depth, or
+`3 of 5 tasks done`).
 Completed subtrees start folded to their summary row; everything else starts
 open. A folded parent still lists every descendant that needs you under it.
 Rows below the fourth level collapse into one `Nested workflow · N agents`
@@ -3533,14 +3535,19 @@ back. Past 200 visible rows the tree renders only the rows in view.
 Selecting an agent row opens it in the subagent inspector; selecting the
 Needs you row performs the header's action or reveals the request card.
 
-The tree is a `tree` with one tab stop: Up and Down move, Home and End jump,
-Right opens a folded row or moves to its first child, Left folds an open row
-or moves to its parent, and Enter or Space selects. Each `treeitem` carries
-`aria-level`, `aria-posinset`, `aria-setsize` and, on a parent,
-`aria-expanded`. One polite status region announces rows that come to need
-you, fail, become ready for review or complete, gathered over 1.5 seconds of
-quiet. Only Working dots pulse, and rows added after the first render fade
-in over 120ms.
+The tree is a `tree` with one tab stop among its rows: Up and Down move,
+Home and End jump, Right opens a folded row or moves to its first child,
+Left folds an open row or moves to its parent, and Enter or Space selects.
+Links and buttons inside a row, a pull request link or **Task details**, are
+tab stops of their own after it. When the focused row disappears, as when a
+completed subtree folds, focus moves to its nearest remaining ancestor; in a
+virtualized tree the focused row stays mounted while scrolled away. Each
+`treeitem` carries `aria-level`, `aria-posinset`, `aria-setsize` and, on a
+parent, `aria-expanded`. One polite status region announces rows that come
+to need you, fail, become ready for review or complete: transitions are
+gathered for 1.5 seconds from the first, then up to three are read, Needs
+you and Failed first. Only Working dots pulse, and rows added after the first render fade
+in over 120ms; with reduced motion requested, neither animates.
 
 ### Captures and candidate review
 
@@ -3756,7 +3763,8 @@ The body is one column, in this order:
    accepted a submission for its current revision. Under it each task shows
    its state: Not started (`No worker yet`, or `Proposed, not accepted yet`),
    Waiting (`Waiting on <task>` for an unfinished dependency, or `Blocked on
-   <kind>: <action>`), its newest worker's state while that worker runs,
+   <kind>: <action>`), the state of its newest worker for the current
+   revision while that worker runs,
    Waiting for agents once the worker finished or submitted, and Completed.
    Under each task every worker is listed newest first (`Worker <n>` and
    `attempt <m>` from `workerName`, agent and mode) with the attempt state
@@ -3771,10 +3779,12 @@ The body is one column, in this order:
    Preparing, `<n> conflicts: <paths>`, `Verification running`,
    `Verification passed`, `Verification failed: <error or exit code>`,
    `Delivery pending`, `Delivered`, or `Not verified yet`; the newest three
-   are read with `integration.show` for their checks, and a failed read
-   shows its error verbatim. Selecting a worker, submission or the
-   integrator opens that run. An expanded task offers **Task details**,
-   closed by default, with the task's objective, scope, blockers other than
+   are read with `integration.show` for their checks, a failed read shows
+   its error verbatim, and the list is read again every 5 seconds while a
+   candidate is preparing, verifying or delivering, since no event marks
+   those finishing. Selecting a worker, submission or the
+   integrator opens that run. An open task, or one with no worker yet,
+   offers **Task details**, closed by default, with the task's objective, scope, blockers other than
    `proposal` in planning, scope diagnostics with a link to the other run,
    and attempt errors. A worker under a human control hold shows `<name>
    holds control of this worker` above the tree with **Release control**,

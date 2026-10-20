@@ -16,7 +16,7 @@ export interface WorkflowCounts {
   noun: 'task' | 'subagent'
   done: number
   total: number
-  running: number
+  running?: number
 }
 
 export interface WorkflowNode {
@@ -42,7 +42,6 @@ export const workflowTone: Record<WorkflowState, Tone> = { ...stateTone, pending
 
 const settled = new Set<WorkflowState>(['completed', 'merged', 'closed'])
 
-/** Completed subtrees fold to their summary line; everything else starts open. */
 export function startsOpen(node: WorkflowNode): boolean {
   return !settled.has(node.state)
 }
@@ -65,7 +64,7 @@ export function needsYouBelow(node: WorkflowNode): WorkflowNode[] {
 export function countsText(counts: WorkflowCounts): string {
   const noun = (n: number) => `${counts.noun}${n === 1 ? '' : 's'}`
   if (counts.noun === 'task') return `${counts.done} of ${counts.total} ${noun(counts.total)} done`
-  if (counts.running > 0) return `${counts.running} ${noun(counts.running)} running`
+  if (counts.running) return `${counts.running} ${noun(counts.running)} running`
   return `${counts.done} of ${counts.total} ${noun(counts.total)} done`
 }
 
@@ -82,14 +81,15 @@ export interface RunFacts {
 
 export function runFacts(
   run: { task: string; title?: string; branch: string; created_at: string; started_at: string | null; finished_at: string | null },
-  shown: Pick<RunPresentation, 'state' | 'reason' | 'needsYou'>,
+  shown: Pick<RunPresentation, 'state' | 'reason'>,
   label: string,
+  needsYou: boolean,
 ): RunFacts {
   return {
     label,
     state: shown.state,
     reason: shown.reason,
-    needsYou: shown.needsYou !== undefined,
+    needsYou,
     startedAt: run.started_at ?? run.created_at,
     endedAt: run.finished_at ?? undefined,
     branch: run.branch || undefined,
@@ -132,14 +132,19 @@ function agentNode(agent: Subagent): Omit<WorkflowNode, 'parentId' | 'children'>
   return node
 }
 
+function agentsIn(nodes: WorkflowNode[]): WorkflowNode[] {
+  return nodes.flatMap((node) => (node.agentId ? [node, ...agentsIn(node.children)] : []))
+}
+
+/** Every subagent at any depth; a background one still going reads Running. */
 function agentCounts(children: WorkflowNode[]): WorkflowCounts | undefined {
-  const agents = children.filter((child) => child.kind === 'agent' || child.kind === 'workflow')
+  const agents = agentsIn(children)
   if (agents.length === 0) return undefined
   return {
     noun: 'subagent',
     total: agents.length,
-    running: agents.filter((child) => child.state === 'working').length,
-    done: agents.filter((child) => child.state === 'completed').length,
+    running: agents.filter((agent) => agent.state === 'working' || agent.state === 'running').length,
+    done: agents.filter((agent) => agent.state === 'completed').length,
   }
 }
 
@@ -156,7 +161,6 @@ function agentTree(index: AgentIndex, ids: string[], parentId: string, seen: Set
   return nodes
 }
 
-/** A run with its subagents and nested workflows; a Needs you row leads when the run asks the viewer. */
 export function deriveRunWorkflow(runID: string, run: RunFacts, agents: AgentIndex): WorkflowNode {
   const id = `run:${runID}`
   const children = agentTree(agents, agents.roots, id, new Set())
@@ -178,7 +182,6 @@ export function deriveRunWorkflow(runID: string, run: RunFacts, agents: AgentInd
   }
 }
 
-/** The integration facts a candidate row shows: integration.list, with integration.show's verifications when read. */
 export interface CandidateFacts {
   candidate_id: string
   state: CandidateState
@@ -273,6 +276,7 @@ function taskState(task: MissionTask, latest: WorkflowNode | undefined, waitingO
     case 'proposed':
       return { state: 'pending', detail: 'Proposed, not accepted yet' }
     case 'blocked': {
+      if (waitingOn.length > 0) return { state: 'waiting', detail: `Waiting on ${waitingOn.join(', ')}` }
       const blocker = task.blockers?.[0]
       return { state: 'waiting', detail: blocker ? `Blocked on ${blocker.kind}: ${blocker.action}` : 'Blocked' }
     }
@@ -339,7 +343,6 @@ export interface SwarmInput {
   workerLabel?: (attempt: MissionAttempt, name: string) => string
 }
 
-/** The integrator, its tasks, their workers, the workers' submissions, then the integration candidates. */
 export function deriveSwarmWorkflow({ detail, runs, candidates, integratorLabel, workerLabel = (_, name) => name }: SwarmInput): WorkflowNode {
   const { mission } = detail
   const rootID = `integrator:${mission.id}`
@@ -353,7 +356,6 @@ export function deriveSwarmWorkflow({ detail, runs, candidates, integratorLabel,
   )
   const unfinished = new Set(detail.tasks.filter((task) => task.status !== 'done' && !accepted.has(task.id)).map((task) => task.id))
   let done = 0
-  let running = 0
   const tasks = missionTree(detail).map((entry): WorkflowNode => {
     const { task } = entry
     const id = `task:${task.id}`
@@ -361,9 +363,9 @@ export function deriveSwarmWorkflow({ detail, runs, candidates, integratorLabel,
       attemptNode(item.attempt, workerLabel(item.attempt, item.name), item.earlierIntegrator ? 'from a replaced integrator' : undefined, detail.submissions, task, runs[item.attempt.run_id], id),
     )
     const waitingOn = (task.dependencies ?? []).filter((item) => unfinished.has(item.depends_on_task_id)).map((item) => titles.get(item.depends_on_task_id) ?? item.depends_on_task_id)
-    const { state, detail: why } = taskState(task, attempts[0], waitingOn, accepted.has(task.id))
+    const current = attempts[entry.attempts.findIndex((item) => item.attempt.task_revision === task.current_revision)]
+    const { state, detail: why } = taskState(task, current, waitingOn, accepted.has(task.id))
     if (accepted.has(task.id)) done++
-    if (state === 'working') running++
     const depends = entry.dependsOn.length > 0 ? `Depends on ${entry.dependsOn.map(taskTitle).join(', ')}` : undefined
     return {
       id,
@@ -386,7 +388,7 @@ export function deriveSwarmWorkflow({ detail, runs, candidates, integratorLabel,
     state,
     label: integratorLabel,
     detail: integrator ? detailOf(integrator.state, integrator.reason) : runID ? 'Run not loaded' : 'No integrator run',
-    counts: tasks.length > 0 ? { noun: 'task', done, total: tasks.length, running } : undefined,
+    counts: tasks.length > 0 ? { noun: 'task', done, total: tasks.length } : undefined,
     startedAt: integrator?.startedAt,
     endedAt: integrator?.endedAt,
     runId: runID || undefined,

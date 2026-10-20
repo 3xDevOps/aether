@@ -89,19 +89,32 @@ describe('WorkflowTree', () => {
     expect(items()[0]!.dataset.key).toBe('root')
   })
 
-  it('announces a row that comes to need the viewer, once the stream goes quiet', () => {
+  it('announces a row that comes to need the viewer first, even while the stream keeps changing', () => {
     vi.useFakeTimers()
     try {
       const { rerender } = render(<WorkflowTree root={tree} label="Run workflow" />)
       const status = screen.getByRole('status')
-      const next = { ...tree, children: [tree.children[0]!, tree.children[1]!, { ...tree.children[2]!, state: 'needs-you' as const }] }
+      const done = (id: string) => node(id, 'completed')
+      rerender(<WorkflowTree root={{ ...tree, children: [node('a', 'working', [done('a1'), done('a2')]), tree.children[1]!, tree.children[2]!] }} label="Run workflow" />)
+      act(() => vi.advanceTimersByTime(1000))
+      const next = { ...tree, children: [node('a', 'completed', [done('a1'), done('a2')]), tree.children[1]!, node('c', 'needs-you')] }
       rerender(<WorkflowTree root={next} label="Run workflow" />)
       expect(status.textContent).toBe('')
-      act(() => vi.advanceTimersByTime(1500))
-      expect(status.textContent).toBe('c: Needs you')
+      act(() => vi.advanceTimersByTime(500))
+      expect(status.textContent).toBe('c: Needs you. a1: Completed. a: Completed')
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('moves focus to the nearest surviving ancestor when the focused row folds away', () => {
+    const live = node('root', 'working', [node('a', 'working', [node('a1', 'working')])], { kind: 'run' })
+    const { rerender } = render(<WorkflowTree root={live} label="Run workflow" />)
+    act(() => screen.getAllByRole('treeitem')[2]!.focus())
+    expect(focused()).toBe('a1')
+    rerender(<WorkflowTree root={node('root', 'working', [node('a', 'completed', [node('a1', 'completed')])], { kind: 'run' })} label="Run workflow" />)
+    expect(items().map((row) => row.dataset.key)).toEqual(['root', 'a'])
+    expect(focused()).toBe('a')
   })
 })
 

@@ -28,7 +28,8 @@ const agentsOf = (items: SessionItem[]) => indexItems(noAgents, items).index
 
 const facts = (over: Partial<Run> = {}) => {
   const record = toRecord(run(over))
-  return runFacts(record, presentRun(record, stateContext({ runs: { [record.id]: record } })), runLabel(record))
+  const shown = presentRun(record, stateContext({ runs: { [record.id]: record } }))
+  return runFacts(record, shown, runLabel(record), shown.needsYou !== undefined)
 }
 
 function byID(node: WorkflowNode, id: string): WorkflowNode | undefined {
@@ -48,8 +49,9 @@ describe('run workflow', () => {
     const nested = byID(tree, 'agent:b1')!
     expect(nested).toMatchObject({ parentId: 'agent:a1', kind: 'agent', state: 'working', label: 'Job b1', detail: 'Read 2 files', agentId: 'b1' })
     expect(byID(tree, 'agent:a2')!.state).toBe('completed')
-    expect(countsText(tree.counts!)).toBe('1 subagent running')
+    expect(countsText(tree.counts!)).toBe('3 subagents running')
     expect(byID(tree, 'agent:a1')!.counts).toBeUndefined()
+    expect(tree.counts).toMatchObject({ total: 4, running: 3, done: 1 })
   })
 
   it('follows the run through working, waiting for agents, needs you, ready for review and completed', () => {
@@ -135,6 +137,15 @@ describe('swarm workflow', () => {
     const stale = swarm({ tasks: [missionTask({ current_revision: 2 })], submissions: [submission({ state: 'accepted', task_revision: 1 })] })
     expect(stale.counts).toMatchObject({ done: 0, total: 1 })
     expect(stale.children[0]!.children[0]!.children[0]!.label).toBe('Accepted for revision 1')
+  })
+
+  it('reads a task from its current revision and names the prerequisites that block it', () => {
+    const revised = swarm({
+      tasks: [missionTask({ current_revision: 2, status: 'ready' }), { ...tasks[1]!, status: 'blocked', blockers: [{ kind: 'dependency', action: 'wait' }] }],
+      attempts: [attempt({ state: 'completed', task_revision: 1 })],
+    })
+    expect(byID(revised, 'task:task_1')).toMatchObject({ state: 'pending', detail: 'No worker yet' })
+    expect(byID(revised, 'task:task_2')).toMatchObject({ state: 'waiting', detail: 'Waiting on rewrite the guest checkout flow' })
   })
 
   it('shows a conflicted candidate, a candidate never verified and a delivered one', () => {

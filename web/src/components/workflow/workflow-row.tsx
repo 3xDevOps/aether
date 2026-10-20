@@ -4,7 +4,7 @@ import { ChevronRight } from '@/components/icons'
 import { StatusDot } from '@/components/ui/status-dot'
 import { useClock } from '@/lib/clock'
 import type { Run } from '@/lib/types'
-import { cn, focusRingInset } from '@/lib/utils'
+import { cn, focusRing, focusRingInset } from '@/lib/utils'
 import { stateLabel as prStateLabel, usePullRequest } from '@/routes/diff/publish-pr'
 import { elapsed } from '@/routes/missions/tree'
 import type { WorkflowRow } from '@/components/workflow/flatten'
@@ -45,7 +45,7 @@ function TrackedPR({ run }: { run: Run }) {
   const pr = usePullRequest(run, false).feedback?.pull_request
   if (!pr) return null
   return (
-    <a href={pr.url} target="_blank" rel="noreferrer" tabIndex={-1} className="shrink-0 tabular-nums hover:text-text hover:underline">
+    <a href={pr.url} target="_blank" rel="noreferrer" className={cn(focusRing, 'shrink-0 rounded-control tabular-nums hover:text-text hover:underline')}>
       #{pr.number} {prStateLabel(pr)}
     </a>
   )
@@ -62,27 +62,33 @@ function GitLine({ branch, runId }: { branch: string; runId?: string }) {
   )
 }
 
-export const WorkflowRowItem = memo(function WorkflowRowItem({
-  row,
-  active,
-  fresh,
-  onActivate,
-  onToggle,
-  register,
-  extra,
-}: {
+interface RowProps {
   row: WorkflowRow
   active: boolean
   fresh: boolean
   onActivate: (row: WorkflowRow) => void
   onToggle: (row: WorkflowRow) => void
   register: (key: string, element: HTMLElement | null) => void
-  extra?: (node: WorkflowNode, expanded: boolean) => React.ReactNode
-}) {
+  extra?: (node: WorkflowNode, expanded: boolean | undefined) => React.ReactNode
+}
+
+/** Flattening builds fresh row objects on every tree change; a row whose node and place are unchanged skips its render. */
+function sameRow(a: RowProps, b: RowProps): boolean {
+  if (a.active !== b.active || a.fresh !== b.fresh || a.extra !== b.extra || a.onActivate !== b.onActivate || a.onToggle !== b.onToggle || a.register !== b.register) return false
+  const x = a.row
+  const y = b.row
+  return x === y || (
+    x.key === y.key && x.node === y.node && x.level === y.level && x.posinset === y.posinset && x.setsize === y.setsize &&
+    x.expanded === y.expanded && x.surfaced === y.surfaced && x.nested === y.nested && x.last === y.last &&
+    x.parentKey === y.parentKey && x.guides.join() === y.guides.join()
+  )
+}
+
+export const WorkflowRowItem = memo(function WorkflowRowItem({ row, active, fresh, onActivate, onToggle, register, extra }: RowProps) {
   const { node, level, expanded, nested } = row
   const label = nested !== undefined ? `Nested workflow · ${nested} ${nested === 1 ? 'agent' : 'agents'}` : node.label
   const state = workflowLabel[node.state]
-  const more = nested === undefined ? extra?.(node, expanded ?? false) : undefined
+  const more = nested === undefined ? extra?.(node, expanded) : undefined
   return (
     <div
       ref={(element) => register(row.key, element)}
@@ -146,4 +152,4 @@ export const WorkflowRowItem = memo(function WorkflowRowItem({
       {more && <div data-extra style={{ paddingLeft: (level - 1) * step + 22 }}>{more}</div>}
     </div>
   )
-})
+}, sameRow)

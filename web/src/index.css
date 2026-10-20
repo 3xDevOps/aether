@@ -511,7 +511,6 @@
     }
   }
 
-  /* A workflow row that appears after the tree first rendered. */
   .workflow-enter {
     animation: workflow-enter 120ms ease-out;
   }
@@ -531,6 +530,10 @@
       animation: none;
       background: none;
       color: var(--text-muted);
+    }
+
+    .workflow-enter {
+      animation: none;
     }
   }
 

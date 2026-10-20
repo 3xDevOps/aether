@@ -322,7 +322,7 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           <WorkflowPanel run={run} view={view} agent={agent} nav={nav} onClose={() => setWorkflow(false)} />
         </aside>
       )}
-      {measured && !workflowInline && (
+      {!workflowInline && (
         <Dialog open={workflowOpen} onOpenChange={setWorkflow}>
           <DialogContent
             id={workflowPanelID}
@@ -330,14 +330,24 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
             showCloseButton={false}
             aria-describedby={undefined}
             onCloseAutoFocus={(event) => {
-              if (!returnTo.current?.isConnected) return
               event.preventDefault()
-              returnTo.current.focus()
+              if (returnTo.current?.isConnected) returnTo.current.focus()
             }}
             className={mobile ? 'flex max-h-[85dvh] min-h-0 flex-col p-0' : 'flex w-80 flex-col p-0'}
           >
             <DialogTitle className="sr-only">Workflow</DialogTitle>
-            <WorkflowPanel run={run} view={view} agent={agent} nav={nav} onClose={() => setWorkflow(false)} className="flex-1" />
+            <WorkflowPanel
+              run={run}
+              view={view}
+              agent={agent}
+              nav={nav}
+              onClose={() => setWorkflow(false)}
+              onLeave={() => {
+                returnTo.current = null
+                setWorkflow(false)
+              }}
+              className="flex-1"
+            />
           </DialogContent>
         </Dialog>
       )}

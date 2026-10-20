@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type * as React from 'react'
 import { VList, type VListHandle } from 'virtua'
 import { ArrowLeft } from '@/components/icons'
@@ -27,13 +27,17 @@ function states(node: WorkflowNode, into = new Map<string, { state: WorkflowStat
 }
 
 const announced = new Set<WorkflowState>(['needs-you', 'failed', 'ready', 'completed'])
+const urgent = new Set<WorkflowState>(['needs-you', 'failed'])
 const announceDelay = 1500
+const announceAtMost = 3
 
-/** One polite region that reads out only the transitions worth hearing, gathered over a short quiet window. */
+/** A live stream changes the tree constantly, so the window starts at the first transition and is never extended. */
 function useAnnouncement(root: WorkflowNode): string {
   const [text, setText] = useState('')
   const before = useRef<Map<string, { state: WorkflowState; label: string }> | null>(null)
-  const queue = useRef<string[]>([])
+  const queue = useRef<{ text: string; urgent: boolean }[]>([])
+  const timer = useRef<number | undefined>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
   useEffect(() => {
     const now = states(root)
     const previous = before.current
@@ -41,14 +45,15 @@ function useAnnouncement(root: WorkflowNode): string {
     if (!previous) return
     for (const [id, { state, label }] of now) {
       const was = previous.get(id)
-      if (was && was.state !== state && announced.has(state)) queue.current.push(`${label}: ${workflowLabel[state]}`)
+      if (was && was.state !== state && announced.has(state)) queue.current.push({ text: `${label}: ${workflowLabel[state]}`, urgent: urgent.has(state) })
     }
-    if (queue.current.length === 0) return
-    const timer = window.setTimeout(() => {
-      setText(queue.current.slice(-3).join('. '))
+    if (queue.current.length === 0 || timer.current !== undefined) return
+    timer.current = window.setTimeout(() => {
+      timer.current = undefined
+      const ordered = [...queue.current.filter((item) => item.urgent), ...queue.current.filter((item) => !item.urgent)]
+      setText(ordered.slice(0, announceAtMost).map((item) => item.text).join('. '))
       queue.current = []
     }, announceDelay)
-    return () => clearTimeout(timer)
   }, [root])
   return text
 }
@@ -65,7 +70,7 @@ export function WorkflowTree({
   /** Returns true when it handled the row; otherwise selecting a parent folds or unfolds it. */
   onSelect?: (node: WorkflowNode) => boolean
   /** Inline content under a row, such as its actions; it must not repeat the row. */
-  extra?: (node: WorkflowNode, expanded: boolean) => React.ReactNode
+  extra?: (node: WorkflowNode, expanded: boolean | undefined) => React.ReactNode
   className?: string
 }) {
   const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(() => new Map())
@@ -81,14 +86,40 @@ export function WorkflowTree({
   seen.current ??= new Set(rows.map((row) => row.key))
   const announcement = useAnnouncement(root)
   const virtual = rows.length > virtualizeAbove
+  const activeIndex = rows.findIndex((row) => row.key === active)
 
   const latest = useRef({ rows, overrides, onSelect })
   latest.current = { rows, overrides, onSelect }
 
   const register = useCallback((key: string, element: HTMLElement | null) => {
-    if (element) elements.current.set(key, element)
-    else elements.current.delete(key)
+    if (!element) {
+      elements.current.delete(key)
+      return
+    }
+    elements.current.set(key, element)
+    if (pending.current === key) {
+      element.focus()
+      pending.current = null
+    }
   }, [])
+
+  // A row that held focus can vanish on a live update; focus moves to its nearest surviving ancestor.
+  const focused = useRef<string | null>(null)
+  const previousRows = useRef(rows)
+  useLayoutEffect(() => {
+    const before = previousRows.current
+    previousRows.current = rows
+    const key = focused.current
+    const present = new Set(rows.map((row) => row.key))
+    if (!key || present.has(key) || (document.activeElement && document.activeElement !== document.body)) return
+    const parents = new Map(before.map((row) => [row.key, row.parentKey]))
+    let target = parents.get(key)
+    while (target && !present.has(target)) target = parents.get(target)
+    target ??= rows[0]?.key
+    if (!target) return
+    pending.current = target
+    setActiveKey(target)
+  }, [rows])
 
   useEffect(() => {
     const key = pending.current
@@ -203,9 +234,20 @@ export function WorkflowTree({
           Show the whole workflow
         </Button>
       )}
-      <div role="tree" aria-label={label} onKeyDown={onKeyDown} className={cn('min-w-0', virtual && 'h-[min(70vh,40rem)]')}>
+      <div
+        role="tree"
+        aria-label={label}
+        onKeyDown={onKeyDown}
+        onFocus={(event) => {
+          if (event.target.getAttribute('role') === 'treeitem') focused.current = event.target.dataset.key ?? null
+        }}
+        onBlur={(event) => {
+          if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) focused.current = null
+        }}
+        className={cn('min-w-0', virtual && 'h-[min(70vh,40rem)]')}
+      >
         {virtual ? (
-          <VList ref={list} style={{ height: '100%' }}>
+          <VList ref={list} style={{ height: '100%' }} keepMounted={activeIndex === -1 ? undefined : [activeIndex]}>
             {rows.map(item)}
           </VList>
         ) : (
