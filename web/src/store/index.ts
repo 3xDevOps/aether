@@ -27,6 +27,7 @@ import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
 import { createMessagesSlice, type MessagesSlice } from '@/store/messages'
 import { createMissionsSlice, type MissionsSlice } from '@/store/missions'
 import { createViewContextSlice, type ViewContextSlice } from '@/store/view-context'
+import { createWorkflowSignalsSlice, type WorkflowSignalsSlice } from '@/store/workflow-signals'
 import {
   createUiSlice,
   maxSidebarWidth,
@@ -79,6 +80,7 @@ export type RootState = ServerSlice &
   SessionsSlice &
   AssistantSlice &
   ViewContextSlice &
+  WorkflowSignalsSlice &
   UiSlice
 
 /** Only view preferences survive a reload; server data is re-hydrated. */
@@ -147,6 +149,7 @@ export function createRootStore() {
         ...createSessionsSlice(...a),
         ...createAssistantSlice(...a),
         ...createViewContextSlice(...a),
+        ...createWorkflowSignalsSlice(...a),
         ...createUiSlice(...a),
       }),
       {

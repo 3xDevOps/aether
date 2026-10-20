@@ -1169,7 +1169,9 @@ same idempotency key does not advance it again. The kinds are
 `task_proposed` (a task or revision), `task_accepted`, `task_finished`
 (accepted submission or abandoned task), `question_asked`,
 `question_answered`, `worker_ended` (a worker run ended without a report)
-and `phase_changed`. A worker report is not a kind: its inbox message already
+and `phase_changed`. The event's `change` names the kind, with `task_id` and
+`attempt_id` when the change concerns one task or attempt; a write that is
+not one of these kinds leaves `change` out. A worker report is not a kind: its inbox message already
 prompts the integrator. A change by a cancellation the integrator asked for
 counts as its own. The integrator's `coord.status` assignment carries
 `change_seq` and `changes`, the counter of the latest change of each kind it

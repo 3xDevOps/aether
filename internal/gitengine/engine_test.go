@@ -166,7 +166,7 @@ func TestPublishBranchUsesRunMetadataWithoutRegistry(t *testing.T) {
 	e.cfg.OnBranchPublished = func(gotRun domain.RunID, gotCommit string, _ time.Time) {
 		callbackRun, callbackCommit = gotRun, gotCommit
 	}
-	e.publishBranch(t.Context(), run, commit)
+	e.publishBranch(t.Context(), run, "", commit)
 
 	select {
 	case event := <-sub.Events():

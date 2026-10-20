@@ -132,6 +132,7 @@ func (s *Service) Prepare(ctx context.Context, actor Actor, p protocol.Integrati
 		return zero, err
 	}
 	candidate.Version = rec.Version
+	s.publishChanged(ctx, &candidate)
 	return s.resumePrepare(ctx, p, rec, &candidate)
 }
 

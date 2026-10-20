@@ -210,7 +210,7 @@ func (s *Service) setArchived(ctx context.Context, retire RunRetirer, id domain.
 		return protocol.MissionArchiveResult{}, err
 	}
 	if changed {
-		if publishErr := s.publishMissionChanged(ctx, id); publishErr != nil {
+		if publishErr := s.publishMissionChanged(ctx, id, missionChange{}); publishErr != nil {
 			return protocol.MissionArchiveResult{}, publishErr
 		}
 	}

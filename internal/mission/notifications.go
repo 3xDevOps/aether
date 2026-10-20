@@ -9,11 +9,23 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
+// missionChange names what a mission write touched. Kind stays empty for a
+// write the mission does not count as a change.
+type missionChange struct {
+	kind    domain.MissionChange
+	task    domain.TaskID
+	attempt domain.AttemptID
+}
+
+func attemptChange(kind domain.MissionChange, a *domain.Attempt) missionChange {
+	return missionChange{kind: kind, task: a.TaskID, attempt: a.ID}
+}
+
 // publishMissionChanged emits a projection hint only after the caller's
 // durable mutation has committed. Consumers must re-read the mission from the
 // authoritative mission APIs; the payload carries versions for refresh
 // ordering, not a freeform state snapshot.
-func (s *Service) publishMissionChanged(ctx context.Context, missionID domain.MissionID) error {
+func (s *Service) publishMissionChanged(ctx context.Context, missionID domain.MissionID, change missionChange) error {
 	if s.cfg.Bus == nil {
 		return nil
 	}
@@ -31,6 +43,9 @@ func (s *Service) publishMissionChanged(ctx context.Context, missionID domain.Mi
 			IntegratorGeneration: mission.IntegratorGeneration,
 			AcceptedSetVersion:   mission.AcceptedSetVersion,
 			ChangeSeq:            mission.ChangeSeq,
+			Change:               change.kind,
+			TaskID:               change.task,
+			AttemptID:            change.attempt,
 		},
 	}); err != nil {
 		return fmt.Errorf("mission: publish changed event for %q: %w", mission.ID, err)

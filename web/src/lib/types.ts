@@ -929,6 +929,41 @@ export interface GitBranchPayload {
   workspace_id: string
   branch: string
   commit: string
+  /** The commit the branch held before, or "" for a new branch. */
+  previous: string
+  forced: boolean
+}
+
+export interface RunPRPayload {
+  run_id: string
+  number: number
+  url: string
+  state: string
+  merged_at?: string
+}
+
+export interface IntegrationChangedPayload {
+  mission_id: string
+  candidate_id: string
+  state: string
+  version: number
+}
+
+export type MissionChange =
+  | 'task_proposed'
+  | 'task_accepted'
+  | 'task_finished'
+  | 'question_asked'
+  | 'question_answered'
+  | 'worker_ended'
+  | 'phase_changed'
+
+export interface MissionChangedPayload {
+  mission_id: string
+  deleted?: boolean
+  change?: MissionChange
+  task_id?: string
+  attempt_id?: string
 }
 
 export interface RunTitlePayload {
