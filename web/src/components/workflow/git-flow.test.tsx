@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { GitFlow } from '@/components/workflow/git-flow'
 import { api } from '@/lib/api'
 import type { RunGitLogResult, RunGitStatusResult, RunPRFeedbackResult, RunPullRequest } from '@/lib/types'
+import { refreshPullRequest } from '@/routes/diff/publish-pr'
 import { RunAgentContext } from '@/routes/run/agent-context'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useStore } from '@/store'
@@ -96,6 +97,9 @@ it('reaches the merge, its method and the confirm by keyboard, and shows GitHubâ
   card.getByRole('button', { name: 'Rebase and merge' }).focus()
   await user.keyboard('{Enter}')
   const confirm = within(await screen.findByRole('alertdialog', { name: 'Rebase and merge #128?' }))
+  // A poll that moves the pull request while the dialog is open does not change what is merged.
+  vi.mocked(api.runPRFeedback).mockResolvedValue(feedback({ pull_request: { ...pr, head_oid: 'c'.repeat(40) } }))
+  await refreshPullRequest(useStore.getState().runs[record.id]!)
   await user.click(confirm.getByRole('button', { name: 'Rebase and merge' }))
   expect(api.runPRMerge).toHaveBeenCalledWith({
     run_id: record.id, method: 'rebase', repository: 'acme/app', number: 128, expected_head: head, expected_login: 'alice', expected_base: 'main',

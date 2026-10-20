@@ -12,7 +12,7 @@ import { GitGraphView } from '@/components/workflow/git-graph'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
-import type { RoomMessage, RunGitLogResult, RunPRMergeMethod } from '@/lib/types'
+import type { RoomMessage, RunGitLogResult, RunPRMergeMethod, RunPullRequest } from '@/lib/types'
 import { cn, focusRing } from '@/lib/utils'
 import { receipt, refusal, useAgentSend } from '@/routes/diff/agent-send'
 import { openPublish } from '@/routes/diff/publish-dialog'
@@ -22,7 +22,7 @@ import { implicitControlWindowMs, type AgentTerminal } from '@/routes/run/agent-
 import { useStore } from '@/store'
 import {
   checkCounts, chooseAction, headRow, layoutGraph, prTone, prWord, readiness, resolvePrompt,
-  type ActionKind, type GitGraph, type HeadRow,
+  type ActionKind, type GitGraph, type HeadRow, type Readiness,
 } from '@/store/git-flow'
 import { useCapability, useSelf } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -83,7 +83,8 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
   const [expanded, setExpanded] = useState(false)
   const [open, setOpen] = useState(false)
   const [method, setMethod] = useState<RunPRMergeMethod>('squash')
-  const [confirming, setConfirming] = useState(false)
+  // What the member is asked to confirm, kept as it was when the dialog opened however the poll moves the pull request.
+  const [confirming, setConfirming] = useState<{ pr: RunPullRequest; login?: string; ready: Readiness } | null>(null)
   const [acting, setActing] = useState<ActionKind | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [sent, setSent] = useState<RoomMessage | null>(null)
@@ -161,14 +162,13 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
       )
     })
   }
-  const merge = async () => {
+  const merge = async ({ pr, login }: { pr: RunPullRequest; login?: string }) => {
     setActing('merge')
     setFailure(null)
     setQueued('')
     try {
-      if (!pr) return
       const result = await api.runPRMerge({
-        run_id: run.id, method, repository: pr.repository, number: pr.number, expected_head: pr.head_oid, expected_login: feedback?.identity, expected_base: pr.base_branch,
+        run_id: run.id, method, repository: pr.repository, number: pr.number, expected_head: pr.head_oid, expected_login: login, expected_base: pr.base_branch,
       })
       if (result.error) throw new Error(result.error)
       // A merge queue accepts the request and merges later.
@@ -204,7 +204,7 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
       case 'merge':
         return (
           <span className="inline-flex">
-            <Button size="sm" className="rounded-r-none" disabled={acting !== null} onClick={() => setConfirming(true)}>
+            <Button size="sm" className="rounded-r-none" disabled={acting !== null} onClick={() => pr && setConfirming({ pr, login: feedback?.identity, ready })}>
               {spinner('merge')}
               {methodLabel[method]}
             </Button>
@@ -296,17 +296,24 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
         {primary}
       </footer>
       <p aria-live="polite" className="sr-only">{announced}</p>
-      {confirming && pr && (
+      {confirming && (
         <Confirm
-          title={`${methodLabel[method]} #${pr.number}?`}
-          description={<>Merges <span className="font-code">{pr.head_branch}</span> into <span className="font-code">{pr.base_branch}</span> on GitHub through the run's checkout.</>}
+          title={`${methodLabel[method]} #${confirming.pr.number}?`}
+          description={
+            <>
+              Merges <span className="font-code">{confirming.pr.head_branch}</span> at{' '}
+              <span className="font-code">{confirming.pr.head_oid.slice(0, 7)}</span> into{' '}
+              <span className="font-code">{confirming.pr.base_branch}</span> on GitHub through the run's checkout. GitHub refuses it if
+              either has changed.
+            </>
+          }
           action={methodLabel[method]}
           pending="Merging…"
-          onConfirm={merge}
+          onConfirm={() => merge(confirming)}
           onDone={() => {}}
-          onClose={() => setConfirming(false)}
+          onClose={() => setConfirming(null)}
         >
-          <ReadinessList ready={ready} />
+          <ReadinessList ready={confirming.ready} />
         </Confirm>
       )}
     </section>
