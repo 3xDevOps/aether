@@ -239,14 +239,18 @@ func (s *Service) AnswerQuestion(ctx context.Context, actor domain.MemberID, p p
 	if authErr := s.authorizeMissionHuman(ctx, actor, m, "answer a mission question"); authErr != nil {
 		return protocol.MissionQuestionResult{}, authErr
 	}
-	question, err := s.cfg.Missions.AnswerMissionQuestion(ctx, domain.MissionQuestionID(p.QuestionID), actor, p.Answer, p.IdempotencyKey)
+	question, note, err := s.cfg.Missions.AnswerMissionQuestion(ctx, domain.MissionQuestionID(p.QuestionID), actor, p.Answer, p.IdempotencyKey)
 	if err != nil {
 		return protocol.MissionQuestionResult{}, err
 	}
+	result := protocol.MissionQuestionResult{Question: protocol.MissionQuestionFromDomain(question)}
 	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
-		return protocol.MissionQuestionResult{Question: protocol.MissionQuestionFromDomain(question)}, publishErr
+		return result, publishErr
 	}
-	return protocol.MissionQuestionResult{Question: protocol.MissionQuestionFromDomain(question)}, nil
+	if publishErr := s.publishAnswerNote(ctx, m.WorkspaceID, question, note); publishErr != nil {
+		return result, publishErr
+	}
+	return result, nil
 }
 
 // Cancel ends a planning or active mission. It only records the cancelled

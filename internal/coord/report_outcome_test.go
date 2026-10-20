@@ -3,12 +3,14 @@ package coord
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -353,6 +355,55 @@ func TestInteractiveReportOutboxSkipsOlderTaskOutcome(t *testing.T) {
 	pub, err := h.db.GetCoordReportPublication(ctx, first.ReportID)
 	if err != nil || pub.State != store.CoordReportPublicationPublished {
 		t.Fatalf("older report publication = %+v, %v; want published without its outcome", pub, err)
+	}
+}
+
+// Each report that writes or rewrites the run's outcome note publishes the
+// change, and a rewrite of a pinned note also the unpin, attributed to the
+// run's owner and the run. A replayed report publishes nothing.
+func TestInteractiveReportPublishesItsOutcomeNote(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = &coordReportEvidenceCapture{id: "ev_outcome"}
+		c.Outcomes = &recordingOutcomes{}
+	})
+	owner := h.runs[0]
+	sub, err := h.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeMemoryChange}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close() //nolint:errcheck // test cleanup
+	report(t, h, owner.ID, protocol.CoordOutcomeSuccess, "Fixed lease race", "task-1")
+	report(t, h, owner.ID, protocol.CoordOutcomeSuccess, "Fixed lease race", "task-1")
+	notes, err := h.db.SearchMemory(ctx, store.MemoryQuery{Workspace: h.workspace, Kind: store.MemoryOutcome, Limit: 1})
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("outcome notes = %v, %v", notes, err)
+	}
+	if _, err = h.db.PinMemory(ctx, h.workspace, notes[0].ID, owner.MemberID, ""); err != nil {
+		t.Fatal(err)
+	}
+	report(t, h, owner.ID, protocol.CoordOutcomeSuccess, "Rewritten summary", "task-2")
+	report(t, h, owner.ID, protocol.CoordOutcomeFailure, "Lease race came back", "task-3")
+
+	change := func(action events.MemoryAction) events.MemoryChangePayload {
+		return events.MemoryChangePayload{Action: action, NoteID: notes[0].ID, ActorID: owner.MemberID}
+	}
+	want := []events.MemoryChangePayload{change(events.MemoryActionAdd), change(events.MemoryActionRewrite),
+		change(events.MemoryActionUnpin), change(events.MemoryActionRewrite)}
+	var got []events.MemoryChangePayload
+	for range want {
+		select {
+		case ev := <-sub.Events():
+			if ev.RunID != owner.ID || ev.ActorID != owner.MemberID {
+				t.Fatalf("memory.change = %+v, want it on run %s by %s", ev, owner.ID, owner.MemberID)
+			}
+			got = append(got, ev.Payload.(events.MemoryChangePayload))
+		case <-time.After(2 * time.Second):
+			t.Fatalf("memory.change = %+v, want %+v", got, want)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("memory.change = %+v, want %+v", got, want)
 	}
 }
 

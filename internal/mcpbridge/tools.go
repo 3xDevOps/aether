@@ -183,7 +183,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 		}
 		return nil, out, nil
 	})
-	return nil
+	return registerMemoryTools(srv, socket)
 }
 
 // failed reports a coordination failure the way MCP means a tool to report

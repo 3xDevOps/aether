@@ -20,6 +20,7 @@ function want(
   if (role === 'admin') return true
   switch (permission) {
     case 'launch':
+    case 'push':
       return role === 'collaborator'
     case 'handoff':
     case 'protect':
@@ -33,7 +34,7 @@ function want(
 }
 
 const roles: Member['role'][] = ['viewer', 'collaborator', 'admin']
-const permissions: RunPermission[] = ['steer', 'kill', 'launch', 'handoff', 'protect']
+const permissions: RunPermission[] = ['steer', 'kill', 'launch', 'push', 'handoff', 'protect']
 const settings = ['', STEER_OTHERS_ADMINS_ONLY]
 const actor = 'mem_actor'
 const other = 'mem_other'

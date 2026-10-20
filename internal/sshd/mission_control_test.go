@@ -124,7 +124,7 @@ func missionWorkerTestEnv(t *testing.T) (*testEnv, *store.DB, *domain.Mission) {
 		if askErr != nil {
 			t.Fatalf("ask plan question: %v", askErr)
 		}
-		if _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, member.ID, "this flow", "takeover-answer"); answerErr != nil {
+		if _, _, answerErr := db.AnswerMissionQuestion(ctx, question.ID, member.ID, "this flow", "takeover-answer"); answerErr != nil {
 			t.Fatalf("answer plan question: %v", answerErr)
 		}
 		started, startErr := db.StartMission(ctx, mission.ID, mission.CurrentIntegratorRunID, "takeover-start")

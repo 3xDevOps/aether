@@ -346,3 +346,66 @@ func TestInsightsOutcomes(t *testing.T) {
 	check("fall back days", all.runs, []InsightsOutcome{o(0, 0, 0), o(2, 1, 0), o(1, 0, 0)})
 	check("fall back stacked days", byMember.runs, all.runs)
 }
+
+func TestInsightsMembersSkipMergedAccounts(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	now := time.Now().UTC()
+	a := mustCreateMember(t, db)
+	b := &domain.Member{DisplayName: "Ada on GitHub", TailnetLogin: "ada@", Color: "#3cb44b", Role: domain.RoleCollaborator}
+	if err := db.CreateMember(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	c := &domain.Member{DisplayName: "Cy", TailnetLogin: "cy@", Color: "#ffe119", Role: domain.RoleAdmin}
+	if err := db.CreateMember(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	w := mustCreateWorkspace(t, db)
+	for _, owner := range []domain.MemberID{a.ID, b.ID} {
+		finished := now
+		r := &domain.Run{WorkspaceID: w.ID, MemberID: owner, Task: "t", Harness: "claude", Mode: domain.LaunchHeadless,
+			Status: domain.RunCompleted, CreatedAt: now.Add(-time.Minute), FinishedAt: &finished}
+		if err := db.CreateRun(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := db.CreateMergeCode(ctx, a.ID, "code", now, now.Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := db.PlanMerge(ctx, "code", b.ID, "account", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm, err := db.ProposeMerge(ctx, MergeProposal{CodeHash: "code", Proposer: b.ID, Keep: a.ID, Digest: plan.Digest, Policy: "account",
+		Now: now, Expires: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.AcceptMerge(ctx, MergeAccept{ProposalID: pm.ProposalID, Caller: a.ID, Digest: plan.Digest, Policy: "account", Now: now,
+		ConfirmedByKind: "ssh", ConfirmedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	day := Interval{Start: now.Add(-time.Hour).Truncate(time.Hour), End: now.Add(time.Hour)}
+	q := InsightsQuery{From: day.Start, To: day.End, Now: now, Buckets: []Interval{day}, Days: []Interval{day},
+		Previous: Interval{Start: day.Start.Add(-day.End.Sub(day.Start)), End: day.Start}}
+	got, err := db.Insights(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := db.ListMembers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Members) != len(listed) || len(got.Members) != 2 || got.Members[0].ID != a.ID {
+		t.Fatalf("insights members = %d, ListMembers = %d; want the survivor and Cy", len(got.Members), len(listed))
+	}
+	var stacked int
+	for _, m := range got.Members {
+		stacked += m.Runs[0].Done
+	}
+	if total := got.Series[0].Completed; stacked != total || total != 2 {
+		t.Fatalf("members stack %d finished runs, totals say %d; want both 2", stacked, total)
+	}
+}

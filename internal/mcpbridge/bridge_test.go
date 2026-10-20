@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -147,7 +148,7 @@ func TestBridgeSpeaksGoldenWireV3(t *testing.T) {
 			t.Fatalf("%s description does not point to aether_report for asking the user: %s", tool.Name, tool.Description)
 		}
 	}
-	wantTools := []string{toolAsk, toolInbox, toolReply, toolReport, toolSend, toolStatus}
+	wantTools := []string{toolAsk, toolInbox, toolMemoryAdd, toolMemorySearch, toolReply, toolReport, toolSend, toolStatus}
 	if !slices.Equal(names, wantTools) {
 		t.Fatalf("tools = %v, want exactly %v", names, wantTools)
 	}
@@ -553,4 +554,92 @@ func errorCode(t *testing.T, res *mcp.CallToolResult) int {
 		t.Fatalf("%s = %v (%T), want a number", MetaErrorCode, raw, raw)
 	}
 	return int(code)
+}
+
+// The two memory tools carry MemoryRule, map onto memory.search, memory.show
+// and memory.add, and return a refusal as a tool error with its code.
+func TestBridgeMemoryTools(t *testing.T) {
+	note := protocol.MemoryItem{ID: "note-ab12cd34ef", Kind: "gotcha", Source: "agent", Body: "Close the pool first.", CreatedAt: "2026-10-19T00:00:00Z"}
+	coord := newFakeCoord(t, func(req protocol.Request) protocol.Response {
+		var result any
+		switch req.Method {
+		case protocol.MethodCoordStatus:
+			result = protocol.CoordStatusResult{RunID: "run-1"}
+		case protocol.MethodMemorySearch:
+			result = protocol.MemorySearchResult{Items: []protocol.MemoryItem{note}}
+		case protocol.MethodMemoryShow:
+			result = protocol.MemoryShowResult{Item: note, Chain: []protocol.MemoryItem{{ID: "note-old0000000"}}}
+		case protocol.MethodMemoryAdd:
+			if strings.Contains(string(req.Params), "token") {
+				return protocol.Response{Error: &protocol.Error{Code: protocol.CodeDenied, Message: "memory.add: rejected, gitleaks rule generic-api-key at 1:1; remove the secret and retry"}}
+			}
+			result = protocol.MemoryAddResult{Item: note, Similar: []protocol.MemoryItem{{ID: "note-sim0000000"}}}
+		default:
+			t.Errorf("bridge called %q", req.Method)
+			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}
+		}
+		raw, err := json.Marshal(result)
+		if err != nil {
+			t.Errorf("marshal %s result: %v", req.Method, err)
+		}
+		return protocol.Response{Result: raw}
+	})
+	cs := session(t, coord.path, nil)
+	tools, err := cs.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools.Tools {
+		if (tool.Name == toolMemorySearch || tool.Name == toolMemoryAdd) && !strings.HasSuffix(tool.Description, coordhooks.MemoryRule) {
+			t.Errorf("%s description lacks MemoryRule: %q", tool.Name, tool.Description)
+		}
+	}
+	params := func(method string) json.RawMessage {
+		t.Helper()
+		seen := coord.seen()
+		for i := len(seen) - 1; i >= 0; i-- {
+			if seen[i].Method == method {
+				return seen[i].Params
+			}
+		}
+		t.Fatalf("bridge never called %s", method)
+		return nil
+	}
+
+	var found memorySearchOutput
+	callTool(t, cs, toolMemorySearch, map[string]any{"query": "pool", "kind": "gotcha", "file": "db.go", "all": true}, &found)
+	if len(found.Items) != 1 || found.Items[0].ID != note.ID {
+		t.Fatalf("search = %+v", found)
+	}
+	var search protocol.MemorySearchParams
+	if err = json.Unmarshal(params(protocol.MethodMemorySearch), &search); err != nil ||
+		search != (protocol.MemorySearchParams{Words: "pool", Kind: "gotcha", File: "db.go", All: true, Limit: protocol.MemorySearchLimit}) {
+		t.Fatalf("memory.search params = %+v, %v", search, err)
+	}
+	var shown memorySearchOutput
+	callTool(t, cs, toolMemorySearch, map[string]any{"id": note.ID}, &shown)
+	if len(shown.Items) != 1 || shown.Items[0].ID != note.ID || len(shown.Chain) != 1 || shown.Chain[0].ID != "note-old0000000" {
+		t.Fatalf("search by id = %+v", shown)
+	}
+	if string(params(protocol.MethodMemoryShow)) != `{"id":"note-ab12cd34ef"}` {
+		t.Fatalf("memory.show params = %s", params(protocol.MethodMemoryShow))
+	}
+
+	var added protocol.MemoryAddResult
+	callTool(t, cs, toolMemoryAdd, map[string]any{"kind": "gotcha", "text": "Close the pool first.", "files": []string{"db.go"}, "supersedes": "note-old0000000", "scope": "member"}, &added)
+	if added.Item.ID != note.ID || len(added.Similar) != 1 {
+		t.Fatalf("add = %+v", added)
+	}
+	var add protocol.MemoryAddParams
+	if err = json.Unmarshal(params(protocol.MethodMemoryAdd), &add); err != nil || add.Kind != "gotcha" || add.Text != "Close the pool first." ||
+		!slices.Equal(add.Files, []string{"db.go"}) || add.Supersedes != "note-old0000000" || add.Scope != "member" || add.Pin || add.WorkspaceID != "" {
+		t.Fatalf("memory.add params = %+v, %v", add, err)
+	}
+	refused, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: toolMemoryAdd, Arguments: map[string]any{"kind": "gotcha", "text": "token=abc"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := errorCode(t, refused); code != protocol.CodeDenied || !strings.Contains(refused.Content[0].(*mcp.TextContent).Text, "gitleaks rule generic-api-key at 1:1") {
+		t.Fatalf("refused add = %d %+v", code, refused.Content)
+	}
 }

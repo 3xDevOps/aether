@@ -524,6 +524,93 @@ export interface InsightsResult {
   coverage: { state_times_since: string; pull_requests_since: string }
 }
 
+/** Team memory, mirroring internal/protocol/memory.go. `outcome` notes are
+ * written by the server only, from a run's report. */
+export type MemoryKind = 'decision' | 'convention' | 'gotcha' | 'preference' | 'outcome'
+export type MemoryScope = 'workspace' | 'member'
+export type MemorySource = 'agent' | 'member' | 'report' | 'answer'
+
+/** One note with its provenance. `author_id` is the run's owner for agent
+ * and report notes, the answering member for answers; the PR fields are the
+ * run's latest pull request. */
+export interface MemoryItem {
+  id: string
+  workspace_id: string
+  kind: MemoryKind
+  scope: MemoryScope
+  source: MemorySource
+  source_ref?: string
+  title: string
+  body: string
+  files?: string[]
+  author_id?: string
+  author_name?: string
+  run_id?: string
+  harness?: string
+  commit?: string
+  pr_number?: number
+  pr_state?: string
+  pr_url?: string
+  superseded_by?: string
+  invalid_at?: string
+  pinned_by?: string
+  pinned_by_name?: string
+  pinned_at?: string
+  created_at: string
+  updated_at: string
+}
+
+/** Scope `member` keeps a pin on the note out of other members' briefs. */
+export interface MemoryAddParams {
+  workspace_id: string
+  kind: Exclude<MemoryKind, 'outcome'>
+  text: string
+  files?: string[]
+  supersedes?: string
+  scope?: MemoryScope
+  pin?: boolean
+}
+
+/** `item` is the live note with the same text when `duplicate` is set. */
+export interface MemoryAddResult {
+  item: MemoryItem
+  duplicate?: boolean
+  similar?: MemoryItem[]
+}
+
+/** No words lists the newest notes; `all` includes replaced ones; `pinned`
+ * keeps only pinned ones. */
+export interface MemorySearchParams {
+  workspace_id: string
+  words?: string
+  kind?: MemoryKind
+  source?: MemorySource
+  file?: string
+  all?: boolean
+  replaced?: boolean
+  pinned?: boolean
+  limit?: number
+}
+
+export interface MemorySearchResult {
+  items: MemoryItem[]
+}
+
+/** `chain` is every note it replaced or was replaced by, oldest first. */
+export interface MemoryShowResult {
+  item: MemoryItem
+  chain?: MemoryItem[]
+}
+
+/** `text` is empty when there is nothing to brief. */
+export interface MemoryBriefResult {
+  text: string
+}
+
+export interface MemoryRmResult {
+  ids: string[]
+}
+
 export interface ServerInfo {
   server_version: string
   protocol_version: string

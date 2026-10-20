@@ -168,20 +168,20 @@ func TestMissionQuestionsRecordAskAnswerAndBounds(t *testing.T) {
 		t.Fatalf("GetMission open questions = %v, %v, want 1", m, getErr)
 	}
 
-	answered, err := db.AnswerMissionQuestion(ctx, first.ID, member, "the guest flow", "answer-1")
+	answered, _, err := db.AnswerMissionQuestion(ctx, first.ID, member, "the guest flow", "answer-1")
 	if err != nil {
 		t.Fatalf("AnswerMissionQuestion: %v", err)
 	}
 	if answered.Answer != "the guest flow" || answered.AnsweredByMemberID != member || answered.AnsweredAt == nil {
 		t.Fatalf("answered question = %+v, want the answer, the answering member, and a timestamp", answered)
 	}
-	if again, replayErr := db.AnswerMissionQuestion(ctx, first.ID, member, "the guest flow", "answer-1"); replayErr != nil || again.Answer != answered.Answer {
+	if again, _, replayErr := db.AnswerMissionQuestion(ctx, first.ID, member, "the guest flow", "answer-1"); replayErr != nil || again.Answer != answered.Answer {
 		t.Fatalf("replayed answer = %v, %v, want the original row", again, replayErr)
 	}
-	if _, conflictErr := db.AnswerMissionQuestion(ctx, first.ID, member, "no, the express flow", "answer-2"); !errors.Is(conflictErr, ErrConflict) {
+	if _, _, conflictErr := db.AnswerMissionQuestion(ctx, first.ID, member, "no, the express flow", "answer-2"); !errors.Is(conflictErr, ErrConflict) {
 		t.Fatalf("second answer = %v, want ErrConflict", conflictErr)
 	}
-	if _, emptyErr := db.AnswerMissionQuestion(ctx, first.ID, member, "   ", "answer-3"); emptyErr == nil {
+	if _, _, emptyErr := db.AnswerMissionQuestion(ctx, first.ID, member, "   ", "answer-3"); emptyErr == nil {
 		t.Fatal("whitespace answer was accepted, want a rejection before the transaction")
 	}
 
@@ -224,7 +224,7 @@ func TestMissionStartAcceptsEveryProposalAndActivates(t *testing.T) {
 	if !errors.Is(err, ErrMissionPhase) || !strings.Contains(err.Error(), "1 questions are unanswered") {
 		t.Fatalf("start with an open question = %v, want the unanswered-question refusal", err)
 	}
-	if _, answerErr := db.AnswerMissionQuestion(ctx, q.ID, member, "the guest flow", "answer-1"); answerErr != nil {
+	if _, _, answerErr := db.AnswerMissionQuestion(ctx, q.ID, member, "the guest flow", "answer-1"); answerErr != nil {
 		t.Fatalf("AnswerMissionQuestion: %v", answerErr)
 	}
 	started, err := db.StartMission(ctx, mission.ID, mission.CurrentIntegratorRunID, "start-1")
@@ -423,7 +423,7 @@ func TestListMissionsPageReportsOpenQuestionsPerMission(t *testing.T) {
 	if _, askErr := db.InsertMissionQuestion(ctx, first.ID, first.CurrentIntegratorRunID, "which payment provider?", "ask-2"); askErr != nil {
 		t.Fatalf("InsertMissionQuestion: %v", askErr)
 	}
-	if _, answerErr := db.AnswerMissionQuestion(ctx, open.ID, member.ID, "the guest flow", "answer-1"); answerErr != nil {
+	if _, _, answerErr := db.AnswerMissionQuestion(ctx, open.ID, member.ID, "the guest flow", "answer-1"); answerErr != nil {
 		t.Fatalf("AnswerMissionQuestion: %v", answerErr)
 	}
 

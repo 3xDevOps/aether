@@ -802,9 +802,9 @@ func (q InsightsQuery) swarmFinished() string {
 // insightsMemberOutcomes buckets how each member's runs and swarms ended. A
 // scoped query lists only that member.
 func insightsMemberOutcomes(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
-	members := "SELECT id, display_name, color FROM members"
+	members := "SELECT id, display_name, color FROM members WHERE merged_into = ''"
 	if q.Member != "" {
-		members += " WHERE id = :member"
+		members += " AND id = :member"
 	}
 	rows, err := tx.QueryContext(ctx, members+" ORDER BY created_at, id", args...)
 	if err != nil {

@@ -37,3 +37,16 @@ func (s *Service) publishMissionChanged(ctx context.Context, missionID domain.Mi
 	}
 	return nil
 }
+
+// publishAnswerNote records the decision note an answer wrote as a change
+// by the member who answered, on the run that asked. A replay wrote none.
+func (s *Service) publishAnswerNote(ctx context.Context, workspace domain.WorkspaceID, q *domain.MissionQuestion, note string) error {
+	if s.cfg.Bus == nil || note == "" {
+		return nil
+	}
+	if _, err := s.cfg.Bus.Publish(ctx, events.Event{WorkspaceID: workspace, RunID: q.AskedByRunID, ActorID: q.AnsweredByMemberID,
+		Payload: events.MemoryChangePayload{Action: events.MemoryActionAnswer, NoteID: note, ActorID: q.AnsweredByMemberID}}); err != nil {
+		return fmt.Errorf("mission: answer note %s is written, but its memory.change event was not published: %w", note, err)
+	}
+	return nil
+}

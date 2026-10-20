@@ -753,6 +753,9 @@ func deleteRunRows(ctx context.Context, tx *sql.Tx, id domain.RunID) error {
 			return fmt.Errorf("store: delete run: %w", mapConstraint(execErr, ErrInUse))
 		}
 	}
+	if _, err := deleteMemory(ctx, tx, `run_id = ? AND pinned_at IS NULL`, id); err != nil {
+		return fmt.Errorf("store: delete run: memory: %w", err)
+	}
 
 	result, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE id = ?`, id)
 	if err != nil {

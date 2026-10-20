@@ -355,6 +355,54 @@ until the sending or receiving run is deleted. Every member of the workspace
 can read their bodies, the same audience the **Activity** page has. Do not
 ask agents to pass credentials to each other.
 
+## Team memory
+
+Team memory is a store of short notes per workspace, kept in
+`<data-dir>/aether.db` (tables `memory` and its full-text index
+`memory_fts`). A note holds its text, its kind (decision, convention,
+gotcha, preference or outcome), up to 20 file paths it cites, the member it
+is attributed to, the run, agent and commit it came from, and who pinned
+it and when. Notes reach the store three ways:
+
+- An agent writes one with `aether-internal memory add`, or a member with
+  `aether memory add`: at most 1024 bytes of text.
+- When a run's agent reports success or failure, the server writes one
+  outcome note for that run: the report's summary and next action, with the
+  files and HEAD commit of the run's latest snapshot. A later report
+  rewrites it and clears its pin.
+- When a member answers a swarm's question, the server writes the question
+  and answer as one decision note.
+
+Every member of the server, viewers included, can read every note, and
+every run in the workspace can search them. The first line of each pinned
+note also goes into the brief each new run in the workspace receives at
+launch; a note a member pinned for themselves goes only into their own runs'
+briefs.
+
+Team memory never reads transcripts, terminal recordings, messages between
+runs, run-room chat, the files in a checkout, or an agent's own memory
+files such as those under `~/.claude` or `~/.codex`. Nothing leaves your
+server: there is no embedding service and no model call.
+
+Notes are scanned with gitleaks. A note an agent or member writes is refused
+when gitleaks finds a secret, with the rule and the line:col it matched. A
+report or answer with a secret is still recorded, with its text replaced by
+`(withheld: gitleaks rule <rule> at <line:col>)`. gitleaks only finds the
+secrets it has rules for, so keep credentials out of reports and answers.
+
+Notes do not expire. A collaborator or admin deletes one with
+`aether memory rm <id>`, or every note attributed to a run, its swarm
+answers included, with `aether memory rm --run <run>`. Deleting a run or a
+swarm deletes the unpinned notes of its runs; pinned notes stay until
+removed. Deleting the workspace deletes all of its notes. A replaced note stays, hidden from
+search unless asked for with `--all`, until it is removed. Removing a member
+keeps the notes attributed to them.
+
+Before a release migrates the schema, `aether-server update` and **Update
+now** copy the database to `<data-dir>/aether.db.pre-update` and delete
+that copy once the new release has started. A note deleted while the copy
+exists is still in it, and a rollback restores it.
+
 ## Permissions
 
 `INTERNET` lets the app reach your server, or in Edge mode the edge.

@@ -88,7 +88,8 @@ func TestAllowlistAndMemberID(t *testing.T) {
 	if rpcCode(t, err) != protocol.CodeMethodNotFound || !strings.Contains(err.Error(), "run.launch") {
 		t.Fatalf("member.list: %v", err)
 	}
-	for _, method := range []string{protocol.MethodAssistantSettings, protocol.MethodAssistantConfirm} {
+	for _, method := range []string{protocol.MethodAssistantSettings, protocol.MethodAssistantConfirm,
+		protocol.MethodMemoryAdd, protocol.MethodMemoryPin, protocol.MethodMemoryUnpin, protocol.MethodMemoryRm} {
 		err = coordtransport.Call(t.Context(), sock, method, map[string]any{"auto_approve": true, "confirmation_id": "c", "approve": true}, nil)
 		if rpcCode(t, err) != protocol.CodeMethodNotFound {
 			t.Fatalf("%s on the tool socket: %v", method, err)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -268,6 +269,44 @@ func TestQuestionAnswerRefusesANonAccountableCollaborator(t *testing.T) {
 		QuestionID: string(questions[0].ID), Answer: "the guest flow", IdempotencyKey: "answer-admin",
 	}); answerErr != nil {
 		t.Fatalf("admin answer: %v", answerErr)
+	}
+}
+
+// An answer publishes the decision note it wrote as a change by the member
+// who answered, on the run that asked; a replayed answer publishes nothing.
+func TestQuestionAnswerPublishesItsDecisionNote(t *testing.T) {
+	ctx := context.Background()
+	f := newMissionFixture(t)
+	bus := &recordingBus{}
+	f.svc.cfg.Bus = bus
+	f.mustCall(t, protocol.MethodMissionQuestionAsk, protocol.MissionQuestionAskParams{
+		Body: "which checkout flow?", IdempotencyKey: "ask-1",
+	})
+	questions, err := f.db.ListMissionQuestions(ctx, f.mission.ID)
+	if err != nil || len(questions) != 1 {
+		t.Fatalf("list questions = %v (err %v), want one", questions, err)
+	}
+	for range 2 {
+		if _, answerErr := f.svc.AnswerQuestion(ctx, f.member.ID, protocol.MissionQuestionAnswerParams{
+			QuestionID: string(questions[0].ID), Answer: "the guest flow", IdempotencyKey: "answer-1",
+		}); answerErr != nil {
+			t.Fatalf("answer: %v", answerErr)
+		}
+	}
+	notes, err := f.db.SearchMemory(ctx, store.MemoryQuery{Workspace: f.workspace.ID, Source: store.MemoryFromAnswer, Limit: 10})
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("answer notes = %v, %v; want one", notes, err)
+	}
+	var changes []events.Event
+	for _, e := range bus.events {
+		if _, ok := e.Payload.(events.MemoryChangePayload); ok {
+			changes = append(changes, e)
+		}
+	}
+	want := events.MemoryChangePayload{Action: events.MemoryActionAnswer, NoteID: notes[0].ID, ActorID: f.member.ID}
+	if len(changes) != 1 || changes[0].WorkspaceID != f.workspace.ID || changes[0].RunID != f.mission.CurrentIntegratorRunID ||
+		changes[0].ActorID != f.member.ID || changes[0].Payload != want {
+		t.Fatalf("memory.change events = %+v, want one %+v on run %s", changes, want, f.mission.CurrentIntegratorRunID)
 	}
 }
 

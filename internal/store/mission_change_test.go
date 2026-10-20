@@ -36,7 +36,7 @@ func TestMissionChangeCountsEachMutationOnceAndListsOthers(t *testing.T) {
 	}
 	expect(1, map[domain.MissionChange]uint64{})
 	for range 2 {
-		if _, err := db.AnswerMissionQuestion(ctx, question.ID, member.ID, "the SSO one", "answer"); err != nil {
+		if _, _, err := db.AnswerMissionQuestion(ctx, question.ID, member.ID, "the SSO one", "answer"); err != nil {
 			t.Fatal(err)
 		}
 	}
