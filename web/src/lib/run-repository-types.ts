@@ -118,6 +118,8 @@ export interface RunGitLogResult {
   commits: GitLogCommit[]
   upstream: GitLogCommit[]
   conflicts: RunGitLogConflict[]
+  /** Why conflicts could not be predicted; `conflicts` is then unknown, not clean. */
+  conflicts_error?: string
   truncated: boolean
   output: RunRepoCommandOutput
   error?: string
@@ -305,9 +307,11 @@ export interface RunPRMergeParams {
   expected_head: string
   repository?: string
   number?: number
+  expected_login?: string
 }
 
 export interface RunPRMergeResult {
+  identity: string
   pull_request: RunPullRequest | null
   merged: boolean
   account_member_id: string

@@ -1065,8 +1065,8 @@ command's `output` (`exit_code`, `stdout`, `stderr`, `truncated`) verbatim.
 
 | Method | Params | Result |
 | --- | --- | --- |
-| `run.git.log` | `{"run_id":"...","limit":50}` (`limit` optional, 1 to 200, default 50) | `{"branch":"aether/run-...","base_ref":"origin/main","base":"<sha>","head":"<sha>","merge_base":"<sha>","ahead":2,"behind":3,"commits":[Commit],"upstream":[Commit],"conflicts":[{"path":"go.mod"}],"truncated":false,"output":{...},"error":"..."}` |
-| `run.pr.merge` | `{"run_id":"...","method":"squash"\|"merge"\|"rebase","expected_head":"<sha>","repository":"owner/name","number":128}` (`repository` and `number` optional, together) | `{"pull_request":RunPullRequest,"merged":true,"account_member_id":"...","output":{...},"error":"..."}` |
+| `run.git.log` | `{"run_id":"...","limit":50}` (`limit` optional, 1 to 200, default 50) | `{"branch":"aether/run-...","base_ref":"origin/main","base":"<sha>","head":"<sha>","merge_base":"<sha>","ahead":2,"behind":3,"commits":[Commit],"upstream":[Commit],"conflicts":[{"path":"go.mod"}],"conflicts_error":"...","truncated":false,"output":{...},"error":"..."}` |
+| `run.pr.merge` | `{"run_id":"...","method":"squash"\|"merge"\|"rebase","expected_head":"<sha>","repository":"owner/name","number":128,"expected_login":"octocat"}` (`repository` and `number` optional, together; `expected_login` optional) | `{"identity":"octocat","pull_request":RunPullRequest,"merged":true,"account_member_id":"...","output":{...},"error":"..."}` |
 
 `run.git.log` compares the checkout's `HEAD` with its upstream base: the
 checkout's `origin/<base branch>` (`base_ref`), or the commit the run forked
@@ -1079,8 +1079,10 @@ at most `limit`; `truncated` is set when `ahead` or `behind` exceeds it. A
 `conflicts` lists the paths `git merge-tree --write-tree --name-only` of
 `head` and `base` reports as conflicting, empty when they merge cleanly;
 an `upstream` commit that touches one of them lists those in `paths`;
-the index and worktree are untouched. It needs Git 2.38 or later in the
-run's image.
+the index and worktree are untouched. When the prediction fails, for
+example with Git older than 2.38 in the run's image or an upstream with no
+common history, `conflicts_error` carries Git's error, `conflicts` is empty
+and means unknown, and the rest of the answer stands.
 
 `run.pr.merge` runs `gh pr merge <number> --repo <repository> --<method>
 --match-head-commit <expected_head>`, so GitHub refuses the merge when the
@@ -1088,8 +1090,10 @@ pull request's head is no longer the `head_oid` the member reviewed.
 Without `repository` and `number` it merges the pull request the run most
 recently opened through `run.pr.create`, and fails with `-32602` when there
 is none. A pull request an agent opened with native `gh` must be named.
+It first reads the GitHub login `gh` uses (`identity`) and, like
+`run.pr.create`, refuses when it differs from `expected_login`.
 Afterwards the server reads the pull request from GitHub, also when the
-merge failed, records its state and `merged_at`, and publishes `run.pr`.
+merge failed, and records its state and `merged_at`.
 `merged` is true only when GitHub reports it merged: a merge queue or
 auto-merge that accepted it leaves it `open`. GitHub's refusal, such as a
 failing required check, is in `error` and `output.stderr` as `gh` printed
@@ -2336,7 +2340,8 @@ These tell a client what to re-read; none carries the full state.
 - `git.branch`: a run branch moved in the workspace repository, by a
   publish from the run's checkout or a push. `previous` is the tip before
   (empty for a new branch); `forced` is true when `previous` is not an
-  ancestor of `commit`, so the branch was rebased, reset or amended.
+  ancestor of `commit`, so the branch was rebased, reset or amended, and
+  false when Git could not tell.
   Re-read `run.git.log`.
 
   ```json
@@ -2344,9 +2349,11 @@ These tell a client what to re-read; none carries the full state.
    "branch":"aether/run-...","commit":"<sha>","previous":"<sha>","forced":false}}
   ```
 
-- `run.pr`: the server read or changed a run's pull request on GitHub
-  (`run.pr.status`, `run.pr.create`, `run.pr.merge`). `merged_at` is
-  present once GitHub reports the merge. Re-read `run.pr.feedback`.
+- `run.pr`: a pull request recorded for the run was opened through
+  `run.pr.create`, or a `run.pr.status` or `run.pr.merge` read found its
+  state or `merged_at` changed. A read that changes nothing, and a pull
+  request the run has no record of, publish nothing. `merged_at` is present
+  once GitHub reports the merge. Re-read `run.pr.feedback`.
 
   ```json
   {"type":"run.pr","run_id":"run_...","payload":{"run_id":"run_...","number":128,

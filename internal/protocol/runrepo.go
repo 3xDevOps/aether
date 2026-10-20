@@ -165,19 +165,22 @@ type RunGitConflict struct {
 // and Upstream MergeBase..Base, newest first. Conflicts are predicted by
 // merging Head with Base without touching the worktree.
 type RunGitLogResult struct {
-	Branch    string               `json:"branch"`
-	BaseRef   string               `json:"base_ref"`
-	Base      string               `json:"base"`
-	Head      string               `json:"head"`
-	MergeBase string               `json:"merge_base"`
-	Ahead     int                  `json:"ahead"`
-	Behind    int                  `json:"behind"`
-	Commits   []RunGitCommit       `json:"commits"`
-	Upstream  []RunGitCommit       `json:"upstream"`
-	Conflicts []RunGitConflict     `json:"conflicts"`
-	Truncated bool                 `json:"truncated"`
-	Output    RunRepoCommandOutput `json:"output"`
-	Error     string               `json:"error,omitempty"`
+	Branch    string           `json:"branch"`
+	BaseRef   string           `json:"base_ref"`
+	Base      string           `json:"base"`
+	Head      string           `json:"head"`
+	MergeBase string           `json:"merge_base"`
+	Ahead     int              `json:"ahead"`
+	Behind    int              `json:"behind"`
+	Commits   []RunGitCommit   `json:"commits"`
+	Upstream  []RunGitCommit   `json:"upstream"`
+	Conflicts []RunGitConflict `json:"conflicts"`
+	// ConflictsError is why conflicts could not be predicted; Conflicts is
+	// then empty and means unknown, not clean.
+	ConflictsError string               `json:"conflicts_error,omitempty"`
+	Truncated      bool                 `json:"truncated"`
+	Output         RunRepoCommandOutput `json:"output"`
+	Error          string               `json:"error,omitempty"`
 }
 
 // Repository is the explicit push URL of Remote, NOT the source mirror or PR
@@ -338,11 +341,15 @@ type RunPRMergeParams struct {
 	ExpectedHead string `json:"expected_head"`
 	Repository   string `json:"repository,omitempty"`
 	Number       int    `json:"number,omitempty"`
+	// ExpectedLogin, as on run.pr.create, fails the merge when gh's login
+	// is no longer the one shown.
+	ExpectedLogin string `json:"expected_login,omitempty"`
 }
 
 // PullRequest is GitHub's state read after the merge attempt, also when
 // it failed; a merge queue can accept a PR without merging it yet.
 type RunPRMergeResult struct {
+	Identity        string               `json:"identity"`
 	PullRequest     *RunPullRequest      `json:"pull_request"`
 	Merged          bool                 `json:"merged"`
 	AccountMemberID string               `json:"account_member_id"`

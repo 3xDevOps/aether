@@ -276,11 +276,16 @@ func TestRunPRMergePassesGHStderrAndPublishesState(t *testing.T) {
 			merges = append(merges, slices.Clone(native))
 			return mergeCode, "", mergeStderr, nil
 		}
-		return 0, pull, "", nil
+		if slices.Contains(native, "user") {
+			return 0, "octo\n", "", nil
+		}
+		path := strings.Split(native[slices.IndexFunc(native, func(arg string) bool { return strings.HasPrefix(arg, "repos/") })], "/")
+		return 0, strings.NewReplacer("acme/app", path[1]+"/"+path[2], `"number":7`, `"number":`+path[4]).Replace(pull), "", nil
 	})
-	merge := func() protocol.RunPRMergeResult {
+	merge := func(params protocol.RunPRMergeParams) protocol.RunPRMergeResult {
 		t.Helper()
-		value, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunPRMerge, repoParams(t, protocol.RunPRMergeParams{RunID: string(e.run.ID), Method: "squash", ExpectedHead: "0123456789abcdef0123456789abcdef01234567"}))
+		params.RunID, params.Method, params.ExpectedHead = string(e.run.ID), "squash", "0123456789abcdef0123456789abcdef01234567"
+		value, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunPRMerge, repoParams(t, params))
 		if perr != nil {
 			t.Fatal(perr)
 		}
@@ -304,25 +309,25 @@ func TestRunPRMergePassesGHStderrAndPublishesState(t *testing.T) {
 		}
 	}
 
-	refused := merge()
-	if refused.Merged || refused.Output.Stderr != refusal || !strings.Contains(refused.Error, refusal) || refused.PullRequest == nil || refused.PullRequest.State != "open" {
+	refused := merge(protocol.RunPRMergeParams{})
+	if refused.Merged || refused.Identity != "octo" || refused.Output.Stderr != refusal || !strings.Contains(refused.Error, refusal) || refused.PullRequest == nil || refused.PullRequest.State != "open" {
 		t.Fatalf("refused merge = %+v", refused)
 	}
 	if !reflect.DeepEqual(merges[0], []string{"gh", "pr", "merge", "7", "--repo", "acme/app", "--squash", "--match-head-commit", "0123456789abcdef0123456789abcdef01234567"}) {
 		t.Fatalf("merge argv = %v", merges[0])
 	}
-	if got := event(); got.Number != 7 || got.State != "open" {
-		t.Fatalf("run.pr after refusal = %+v", got)
-	}
 
 	mergeCode, mergeStderr = 0, ""
 	pull = strings.NewReplacer(`"merged":false`, `"merged":true`, `"merged_at":null`, `"merged_at":"2026-10-20T01:02:03Z"`).Replace(pull)
-	done := merge()
+	if unrelated := merge(protocol.RunPRMergeParams{Repository: "acme/other", Number: 9}); !unrelated.Merged {
+		t.Fatalf("explicit merge = %+v", unrelated)
+	}
+	done := merge(protocol.RunPRMergeParams{})
 	if !done.Merged || done.Error != "" || done.PullRequest.MergedAt == nil {
 		t.Fatalf("merge = %+v", done)
 	}
-	if got := event(); got.State != "merged" || got.MergedAt == nil {
-		t.Fatalf("run.pr after merge = %+v", got)
+	if got := event(); got.Number != 7 || got.State != "merged" || got.MergedAt == nil {
+		t.Fatalf("run.pr after merge = %+v; an unchanged or unrecorded pull request must publish nothing", got)
 	}
 	prs, err := e.store.RunPullRequests(t.Context(), e.run.ID)
 	if err != nil || len(prs) != 1 || prs[0].State != "merged" || prs[0].MergedAt == nil {

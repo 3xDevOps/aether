@@ -25,7 +25,8 @@ const logFormat = "--format=%H%x1f%h%x1f%an%x1f%aI%x1f%P%x1f%s"
 // Log reads the run branch against its upstream base: the commits on each
 // side of their merge base and the paths a merge of the two would conflict
 // on. merge-tree writes only unreferenced objects; refs, index and worktree
-// are untouched.
+// are untouched. A failed prediction, such as Git before 2.38 or unrelated
+// histories, is reported in ConflictsError without failing the log.
 func (s *Service) Log(ctx context.Context, run Execution, req LogRequest) (LogResult, error) {
 	result := LogResult{Commits: []protocol.RunGitCommit{}, Upstream: []protocol.RunGitCommit{}, Conflicts: []protocol.RunGitConflict{}}
 	if req.Limit < 0 || req.Limit > protocol.MaxRunGitLogLimit {
@@ -81,18 +82,22 @@ func (s *Service) Log(ctx context.Context, run Execution, req LogRequest) (LogRe
 		return result, fmt.Errorf("runrepo: invalid native rev-list count %q: %w", strings.TrimSpace(counts), scanErr)
 	}
 	result.Truncated = result.Ahead > req.Limit || result.Behind > req.Limit
-	if result.Commits, err = s.commits(ctx, run, req.Limit, result.Base+".."+result.Head); err != nil {
+	commits, err := s.commits(ctx, run, req.Limit, result.Base+".."+result.Head)
+	if err != nil {
 		return result, err
 	}
-	if result.Upstream, err = s.commits(ctx, run, req.Limit, result.Head+".."+result.Base); err != nil {
+	upstream, err := s.commits(ctx, run, req.Limit, result.Head+".."+result.Base)
+	if err != nil {
 		return result, err
 	}
+	result.Commits, result.Upstream = commits, upstream
 	out, err = s.git(ctx, run, false, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", result.Head, result.Base)
-	if err != nil && !exitedOne(out, err) {
-		return result, err
+	if err == nil && out.Truncated {
+		err = &CommandError{Operation: "merge-tree", Output: out, Cause: ErrTruncated}
 	}
-	if out.Truncated {
-		return result, &CommandError{Operation: "merge-tree", Output: out, Cause: ErrTruncated}
+	if err != nil && (!exitedOne(out, err) || out.Truncated) {
+		result.ConflictsError = err.Error()
+		return result, nil
 	}
 	if err != nil {
 		paths := strings.Split(strings.TrimSuffix(out.Stdout, "\x00"), "\x00")
@@ -107,7 +112,7 @@ func (s *Service) Log(ctx context.Context, run Execution, req LogRequest) (LogRe
 // conflictingCommits sets Paths on each of commits that touches one of the
 // conflicting paths.
 func (s *Service) conflictingCommits(ctx context.Context, run Execution, limit int, revisions string, paths []string, commits []protocol.RunGitCommit) error {
-	args := append([]string{"log", "-z", "--name-only", "--no-renames", "--diff-merges=first-parent", "--max-count=" + strconv.Itoa(limit), "--format=%x1e%H", revisions, "--"}, paths...)
+	args := append([]string{"log", "-z", "--no-show-signature", "--name-only", "--no-renames", "--diff-merges=first-parent", "--max-count=" + strconv.Itoa(limit), "--format=%x1e%H", revisions, "--"}, paths...)
 	out, err := s.git(ctx, run, false, args...)
 	text, err := complete(out, err)
 	if err != nil {

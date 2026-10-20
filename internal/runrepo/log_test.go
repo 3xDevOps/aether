@@ -117,6 +117,12 @@ func TestLogFallsBackToForkPointAndReportsMissingCheckout(t *testing.T) {
 	if log.BaseRef != "" || log.Base != initial.Head || log.Ahead != 1 || log.Behind != 0 {
 		t.Fatalf("fork-point log = %+v", log)
 	}
+	gitCmd(t, run.WorkDir, "update-ref", "refs/remotes/origin/develop", gitCmd(t, run.WorkDir, "commit-tree", "-m", "unrelated", gitCmd(t, run.WorkDir, "mktree")))
+	log, err = s.Log(t.Context(), run, LogRequest{BaseBranch: "develop"})
+	if err != nil || log.MergeBase != "" || log.Ahead != 2 || log.Behind != 1 || len(log.Conflicts) != 0 || !strings.Contains(log.ConflictsError, "unrelated histories") {
+		t.Fatalf("unrelated base log = %+v, %v", log, err)
+	}
+	gitCmd(t, run.WorkDir, "update-ref", "-d", "refs/remotes/origin/develop")
 	if _, err = s.Log(t.Context(), run, LogRequest{BaseBranch: "develop"}); err == nil || !strings.Contains(err.Error(), "origin/develop is missing") {
 		t.Fatalf("no base error = %v", err)
 	}
@@ -139,6 +145,9 @@ func fakeGH(merge func() (int, string), pull string, calls *[][]string) ExecFunc
 			code, stderr := merge()
 			return code, "", stderr, nil
 		}
+		if slices.Contains(native, "user") {
+			return 0, "octo\n", "", nil
+		}
 		return 0, pull, "", nil
 	}
 }
@@ -157,7 +166,10 @@ func TestMergePRKeepsGHStderrAndRereadsState(t *testing.T) {
 	if result.PullRequest == nil || result.PullRequest.State != "open" || result.PullRequest.Target.HeadBranch != "aether/run" {
 		t.Fatalf("pull request after refusal = %+v", result.PullRequest)
 	}
-	if !reflect.DeepEqual(calls[0], []string{"gh", "pr", "merge", "7", "--repo", "acme/app", "--squash", "--match-head-commit", "0123456789abcdef0123456789abcdef01234567"}) {
+	if result.Identity != "octo" {
+		t.Fatalf("identity = %q", result.Identity)
+	}
+	if !reflect.DeepEqual(calls[1], []string{"gh", "pr", "merge", "7", "--repo", "acme/app", "--squash", "--match-head-commit", "0123456789abcdef0123456789abcdef01234567"}) {
 		t.Fatalf("merge argv = %v", calls[0])
 	}
 
@@ -166,6 +178,11 @@ func TestMergePRKeepsGHStderrAndRereadsState(t *testing.T) {
 	result, err = s.MergePR(t.Context(), run, PRMergeRequest{Repository: "acme/app", Number: 7, Method: "rebase", ExpectedHead: "0123456789abcdef0123456789abcdef01234567"})
 	if err != nil || result.PullRequest == nil || result.PullRequest.State != "merged" || result.PullRequest.MergedAt == nil {
 		t.Fatalf("merge = %+v, %v", result.PullRequest, err)
+	}
+
+	calls = nil
+	if _, err = s.MergePR(t.Context(), run, PRMergeRequest{Repository: "acme/app", Number: 7, Method: "merge", ExpectedHead: "0123456789abcdef0123456789abcdef01234567", ExpectedLogin: "someone-else"}); err == nil || !strings.Contains(err.Error(), "identity changed") || slices.ContainsFunc(calls, func(c []string) bool { return c[1] == "pr" }) {
+		t.Fatalf("merge under a switched login = %v, calls %v", err, calls)
 	}
 
 	calls = nil

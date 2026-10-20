@@ -310,6 +310,8 @@ type PRMergeRequest struct {
 	Number       int    `json:"number"`
 	Method       string `json:"method"`
 	ExpectedHead string `json:"expected_head"`
+	// ExpectedLogin is optional, as on PRCreateRequest.
+	ExpectedLogin string `json:"expected_login,omitempty"`
 }
 
 // MergePR runs native `gh pr merge` and then reads the PR back from GitHub,
@@ -323,8 +325,16 @@ func (s *Service) MergePR(ctx context.Context, run Execution, req PRMergeRequest
 	if !validRepository(req.Repository) || req.Number <= 0 {
 		return result, errors.New("runrepo: PR repository must be an explicit owner/name identity with a PR number")
 	}
-	if !validOID(req.ExpectedHead) {
-		return result, errors.New("runrepo: expected PR head must be a full object ID")
+	if !validOID(req.ExpectedHead) || req.ExpectedLogin != "" && !cleanText(req.ExpectedLogin, 100) {
+		return result, errors.New("runrepo: expected PR head must be a full object ID, with an optional valid expected login")
+	}
+	identity, err := s.Identity(ctx, run)
+	result.Identity = identity
+	if err != nil {
+		return result, err
+	}
+	if req.ExpectedLogin != "" && !strings.EqualFold(req.ExpectedLogin, identity) {
+		return result, fmt.Errorf("runrepo: GitHub identity changed from %s to %s", req.ExpectedLogin, identity)
 	}
 	number := strconv.Itoa(req.Number)
 	out, mergeErr := s.command(ctx, run, true, "gh", "pr", "merge", number, "--repo", req.Repository, "--"+req.Method, "--match-head-commit", req.ExpectedHead)

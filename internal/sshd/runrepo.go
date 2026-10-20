@@ -286,24 +286,46 @@ func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw js
 }
 
 // recordPR keeps the PR a run opened, or the state of one it opened before,
-// for insights. It outlives a cancelled request, since CreatePR can confirm
-// a PR after one. A failure is only logged: the GitHub side already happened
-// and must not be reported as failed.
+// for insights, and publishes run.pr when that is new or changed state. It
+// outlives a cancelled request, since CreatePR can confirm a PR after one. A
+// failure is only logged: the GitHub side already happened and must not be
+// reported as failed.
 func (s *Server) recordPR(ctx context.Context, run domain.Run, pr *runrepo.PullRequest, opened bool) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
+	repository := strings.ToLower(pr.Target.Repository)
+	recorded, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
+	if err != nil {
+		slog.Warn("sshd: read run pull requests", "run", run.ID, "error", err)
+		return
+	}
+	var prior *store.RunPullRequest
+	for _, candidate := range recorded {
+		if candidate.Repository == repository && candidate.Number == pr.Number {
+			prior = candidate
+		}
+	}
 	record := s.cfg.Store.ObserveRunPullRequest
 	if opened {
 		record = s.cfg.Store.RecordRunPullRequest
 	}
-	err := record(ctx, &store.RunPullRequest{
-		RunID: run.ID, Repository: strings.ToLower(pr.Target.Repository), Number: pr.Number,
+	err = record(ctx, &store.RunPullRequest{
+		RunID: run.ID, Repository: repository, Number: pr.Number,
 		URL: pr.URL, State: pr.State, MergedAt: pr.MergedAt, ObservedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		slog.Warn("sshd: record run pull request", "run", run.ID, "error", err)
+		return
 	}
-	s.publishRunPR(ctx, run, pr.Number, pr.URL, pr.State, pr.MergedAt)
+	if opened && prior == nil || prior != nil && prChanged(prior, pr.State, pr.MergedAt) {
+		s.publishRunPR(ctx, run, pr.Number, pr.URL, pr.State, pr.MergedAt)
+	}
+}
+
+// prChanged reports whether an observation changes a recorded pull request,
+// whose merged state is final.
+func prChanged(recorded *store.RunPullRequest, state string, mergedAt *time.Time) bool {
+	return recorded.State != "merged" && recorded.State != state || recorded.MergedAt == nil && mergedAt != nil
 }
 
 // publishRunPR tells clients to re-read a run's pull request. A failure is
@@ -346,14 +368,17 @@ func (s *Server) recordedPRStatus(ctx context.Context, call runRepoCall, p proto
 			continue
 		}
 		result.Identity = identity.Login
+		changed := prChanged(pr, observed.State, observed.MergedAt)
 		pr.URL, pr.State, pr.MergedAt, pr.ObservedAt = observed.URL, observed.State, observed.MergedAt, time.Now().UTC()
 		if err := s.cfg.Store.ObserveRunPullRequest(ctx, pr); err != nil {
 			return nil, rpcError(err)
 		}
-		s.publishRunPR(ctx, call.run, pr.Number, pr.URL, pr.State, pr.MergedAt)
+		if changed {
+			s.publishRunPR(ctx, call.run, pr.Number, pr.URL, pr.State, pr.MergedAt)
+		}
 	}
 	latest := prs[0]
-	result.PullRequest = &protocol.RunPullRequest{Number: latest.Number, URL: latest.URL, State: latest.State, Repository: latest.Repository}
+	result.PullRequest = &protocol.RunPullRequest{Number: latest.Number, URL: latest.URL, State: latest.State, Repository: latest.Repository, MergedAt: latest.MergedAt}
 	return result, nil
 }
 
@@ -411,9 +436,9 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 		}
 		p.Repository, p.Number = prs[0].Repository, prs[0].Number
 	}
-	merged, err := call.native.MergePR(ctx, call.execution, runrepo.PRMergeRequest{Repository: p.Repository, Number: p.Number, Method: p.Method, ExpectedHead: p.ExpectedHead})
+	merged, err := call.native.MergePR(ctx, call.execution, runrepo.PRMergeRequest{Repository: p.Repository, Number: p.Number, Method: p.Method, ExpectedHead: p.ExpectedHead, ExpectedLogin: p.ExpectedLogin})
 	if merged.PullRequest != nil {
 		s.recordPR(ctx, call.run, merged.PullRequest, false)
 	}
-	return protocol.RunPRMergeResult{AccountMemberID: string(call.account), PullRequest: publicPR(merged.PullRequest), Merged: merged.PullRequest != nil && merged.PullRequest.State == "merged", Output: runrepo.FailureOutput(merged.Output, err), Error: repoError(err)}, nil
+	return protocol.RunPRMergeResult{Identity: merged.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(merged.PullRequest), Merged: merged.PullRequest != nil && merged.PullRequest.State == "merged", Output: runrepo.FailureOutput(merged.Output, err), Error: repoError(err)}, nil
 }
