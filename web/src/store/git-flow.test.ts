@@ -178,8 +178,17 @@ describe('readiness', () => {
       'review:ok:Approved by bob',
       'base:unknown:Compared with origin/main, not release',
     ])
-    expect(chooseAction(log({ base_ref: 'origin/main', conflicts: [{ path: 'a.go' }] }), release.pull_request, ready, everyone, true)).toBe('merge')
+    expect(chooseAction(log({ base_ref: 'origin/main', conflicts: [{ path: 'a.go' }] }), release.pull_request, ready, everyone, true)).toBe('github')
     expect(readiness(log({ base_ref: 'origin/main' }), feedback()).ready).toBe(true)
+  })
+
+  it('does not judge a pull request by a checkout that moved past its head', () => {
+    const moved = log({ head: 'own3', commits: [commit('own3', ['own2'], '2026-10-20T10:03:00Z'), ...log().commits] })
+    const ready = readiness(moved, feedback())
+    expect(ready.items[1]!.text).toBe('Checkout at own3 is not the pull request\'s head own2')
+    expect(ready.ready).toBe(false)
+    expect(headRow(moved, pr, ready).state).toBe('not pushed')
+    expect(chooseAction(moved, pr, ready, everyone, true)).toBe('github')
   })
 })
 

@@ -2893,12 +2893,17 @@ both what it renders and the overlap set the conflict chips read.
   checks is "No check has reported yet"; a review-less pull request is "No
   approving review yet". The log compares with `origin/<run base>`, so for
   a pull request into another branch **Conflicts** and **Base** read
-  "Compared with origin/main, not release". The heading reads **Ready to
-  merge** only when all four are grounded.
+  "Compared with origin/main, not release", and for a checkout whose HEAD
+  is not the pull request's head "Checkout at 4f9c2a7 is not the pull
+  request's head 1a2b3c4", with **not pushed** on the head row; neither
+  offers **Merge**. A failed log read keeps the last graph but leaves both
+  unknown. The heading reads **Ready to merge** only when all four are
+  grounded.
 - **One primary action, by state.** **Review changes** (outside the Changes
   tab, with nothing to publish yet) opens the Changes tab; **Open pull
   request** opens the Publish dialog, so **Publish…** turns secondary while
-  the card shows; **Ask agent to resolve conflicts** sends the run, through
+  the card shows and also appears when the branch is ahead of its base with
+  an empty patch; **Ask agent to resolve conflicts** sends the run, through
   `useAgentSend`, one message naming the base, its commit and every
   conflicting file, under the composer's rules; **Squash and merge** calls
   `run.pr.merge` with the pull request's repository and number after a

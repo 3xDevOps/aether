@@ -200,25 +200,33 @@ function reviewItem(feedback: RunPRFeedbackResult | undefined): ReadinessItem {
 export function comparedWith(log: RunGitLogResult | undefined, pr: RunPullRequest | null | undefined): RunGitLogResult | undefined {
   if (!log || log.error) return undefined
   if (pr && log.base_ref !== pr.base_branch && log.base_ref !== `origin/${pr.base_branch}`) return undefined
+  if (pr?.state === 'open' && log.head !== pr.head_oid) return undefined
   return log
+}
+
+/** Why the log says nothing about the pull request, when it does not. */
+function apart(log: RunGitLogResult | undefined, pr: RunPullRequest | null | undefined): { text: string; short: string } | undefined {
+  if (!log || log.error || !pr || comparedWith(log, pr)) return undefined
+  if (log.head !== pr.head_oid) return { text: `Checkout at ${log.head.slice(0, 7)} is not the pull request's head ${pr.head_oid.slice(0, 7)}`, short: 'not pushed' }
+  return { text: `Compared with ${log.base_ref}, not ${pr.base_branch}`, short: notChecked }
 }
 
 export function readiness(log: RunGitLogResult | undefined, feedback: RunPRFeedbackResult | undefined): Readiness {
   const pr = feedback?.pull_request
   const read = comparedWith(log, pr)
-  const elsewhere = !read && log && !log.error && pr ? `Compared with ${log.base_ref}, not ${pr.base_branch}` : undefined
+  const elsewhere = apart(log, pr)
   const base = read?.base_ref || 'the base'
   const conflicts = read?.conflicts
   const items = [
     checksItem(feedback),
     !conflicts
-      ? item('conflicts', 'unknown', elsewhere)
+      ? item('conflicts', 'unknown', elsewhere?.text, elsewhere?.short)
       : conflicts.length
         ? item('conflicts', 'blocked', `${plural(conflicts.length, 'file')} ${conflicts.length === 1 ? 'conflicts' : 'conflict'} with ${base}`, plural(conflicts.length, 'conflict'), 'needs-you')
         : item('conflicts', 'ok', `None with ${base}`),
     reviewItem(feedback),
     !read
-      ? item('base', 'unknown', elsewhere)
+      ? item('base', 'unknown', elsewhere?.text, elsewhere?.short)
       : read.behind > 0
         ? item('base', 'pending', `${plural(read.behind, 'commit')} behind ${base}`, `${read.behind} behind`)
         : item('base', 'ok', `Up to date with ${base}`),
@@ -286,7 +294,7 @@ export function chooseAction(
     if (log && !log.error && log.ahead > 0 && can.publish && can.create && !conflicted) return 'open-pr'
     return onChanges ? null : 'review'
   }
-  if (!pr.draft && !conflicted && can.publish && can.merge && !ready.items.some((entry) => entry.state === 'blocked')) return 'merge'
+  if (!pr.draft && !conflicted && comparedWith(log, pr) && can.publish && can.merge && !ready.items.some((entry) => entry.state === 'blocked')) return 'merge'
   return 'github'
 }
 

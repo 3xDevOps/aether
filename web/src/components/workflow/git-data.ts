@@ -68,3 +68,8 @@ export function useGitLog(runID: string, watch: boolean): TrackedLog {
   }, [runID, watch])
   return tracked
 }
+
+/** Commits the run branch has that its base does not, once read. */
+export function useAhead(runID: string): number {
+  return useGitLogs((all) => all[runID]?.log?.ahead ?? 0)
+}

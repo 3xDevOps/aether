@@ -93,14 +93,16 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
   const log = logged.log && !logged.log.error ? logged.log : undefined
   const feedback = tracked.feedback
   const pr = feedback?.pull_request ?? null
-  const ready = useMemo(() => readiness(log, feedback), [log, feedback])
+  // A failed refresh keeps the last graph, but not as a fact about the branch now.
+  const current = logged.error ? undefined : log
+  const ready = useMemo(() => readiness(current, feedback), [current, feedback])
   const laidOut = useRef<GitGraph | undefined>(undefined)
   const full = useMemo(() => (laidOut.current = log ? layoutGraph(log, expanded, laidOut.current) : headOnly), [log, expanded])
   const graph = compact && !open ? headOnly : full
-  const head = headRow(log, pr, ready)
+  const head = headRow(current, pr, ready)
   const conflicted = ready.items.find((entry) => entry.key === 'conflicts' && entry.state === 'blocked')
   const publish = live && allowed('push', self)
-  const action = chooseAction(log, pr, ready, {
+  const action = chooseAction(current, pr, ready, {
     publish,
     create: caps.hasMethod('run.git.status') && caps.hasMethod('run.pr.create'),
     merge: caps.hasMethod('run.pr.merge'),
