@@ -168,6 +168,10 @@ describe('readiness', () => {
     }))[2]).toBe('review:blocked:Changes requested by bob')
     expect(state(log(), feedback({ reviews: [] }))[2]).toBe('review:pending:No approving review yet')
     expect(state(log({ behind: 3 }), feedback({ merge_state_status: 'BEHIND' }))[3]).toBe('base:pending:Behind main by 3 commits')
+    const blocked = readiness(log(), feedback({ merge_state_status: 'BLOCKED' }))
+    expect(blocked.items[3]).toMatchObject({ state: 'blocked', text: "GitHub blocks the merge until main's branch rules are met" })
+    expect(blocked.ready).toBe(false)
+    expect(chooseAction(log(), pr, blocked, everyone, true)).toBe('github')
   })
 
   it('only predicts from the checkout before there is a pull request', () => {

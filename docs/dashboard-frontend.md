@@ -2894,7 +2894,9 @@ both what it renders and the overlap set the conflict chips read.
   request, **Conflicts** and **Base** are GitHub's `mergeable` and
   `merge_state_status`: `CONFLICTING` is "GitHub reports conflicts with
   main", naming the file count when the run's log measured the same merge;
-  `BEHIND` is "Behind main"; `UNKNOWN`, which GitHub answers while it is
+  `BEHIND` is "Behind main"; `BLOCKED`, a branch rule GitHub still
+  enforces such as a second required approval, blocks the row and offers
+  **Open on GitHub** instead of **Merge**; `UNKNOWN`, which GitHub answers while it is
   still computing, is **Not checked yet**. While the checkout has commits
   the pull request lacks, **Base** reads "Pull request head is behind the
   branch: 2 unpushed commits" and **Merge** is not offered. Before a pull

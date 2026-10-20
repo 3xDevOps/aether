@@ -220,7 +220,7 @@ function predicted(log: RunGitLogResult): [ReadinessItem, ReadinessItem] {
   ]
 }
 
-const current = new Set(['CLEAN', 'UNSTABLE', 'BLOCKED', 'HAS_HOOKS'])
+const current = new Set(['CLEAN', 'UNSTABLE', 'HAS_HOOKS'])
 
 /** GitHub's own verdict on the pull request; the log, when it measured the same merge, names the files. */
 function reported(feedback: RunPRFeedbackResult, pr: RunPullRequest, read: RunGitLogResult | undefined): [ReadinessItem, ReadinessItem] {
@@ -233,11 +233,13 @@ function reported(feedback: RunPRFeedbackResult, pr: RunPullRequest, read: RunGi
         : item('conflicts', 'unknown')
   const status = feedback.merge_state_status ?? ''
   const base =
-    status === 'BEHIND'
-      ? item('base', 'pending', `Behind ${pr.base_branch}${read?.behind ? ` by ${plural(read.behind, 'commit')}` : ''}`, read?.behind ? `${read.behind} behind` : 'behind')
-      : current.has(status)
-        ? item('base', 'ok', `GitHub needs no update from ${pr.base_branch}`)
-        : item('base', 'unknown')
+    status === 'BLOCKED'
+      ? item('base', 'blocked', `GitHub blocks the merge until ${pr.base_branch}'s branch rules are met`, 'blocked by GitHub')
+      : status === 'BEHIND'
+        ? item('base', 'pending', `Behind ${pr.base_branch}${read?.behind ? ` by ${plural(read.behind, 'commit')}` : ''}`, read?.behind ? `${read.behind} behind` : 'behind')
+        : current.has(status)
+          ? item('base', 'ok', `GitHub needs no update from ${pr.base_branch}`)
+          : item('base', 'unknown')
   return [conflicts, base]
 }
 
