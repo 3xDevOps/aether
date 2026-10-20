@@ -62,6 +62,15 @@ describe('WorkflowTree', () => {
     expect(items().filter((row) => row.tabIndex === 0).map((row) => row.dataset.key)).toEqual(['c'])
   })
 
+  it('never takes focus back from outside the tree on a later update', async () => {
+    const { rerender } = render(<><WorkflowTree root={tree} label="Run workflow" /><input aria-label="Composer" /></>)
+    act(() => items()[0]!.focus())
+    await userEvent.keyboard('{End}{End}')
+    act(() => screen.getByRole('textbox', { name: 'Composer' }).focus())
+    rerender(<><WorkflowTree root={{ ...tree, label: 'Renamed' }} label="Run workflow" /><input aria-label="Composer" /></>)
+    expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Composer' }))
+  })
+
   it('hands Enter to the caller, and folds a parent the caller leaves alone', async () => {
     const onSelect = vi.fn((picked: WorkflowNode) => picked.id === 'c')
     render(<WorkflowTree root={tree} label="Run workflow" onSelect={onSelect} />)

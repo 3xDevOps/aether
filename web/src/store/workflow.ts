@@ -372,7 +372,7 @@ export function deriveSwarmWorkflow({ detail, runs, candidates, integratorLabel,
     const waitingOn = (task.dependencies ?? []).filter((item) => unfinished.has(item.depends_on_task_id)).map((item) => titles.get(item.depends_on_task_id) ?? item.depends_on_task_id)
     const current = attempts[entry.attempts.findIndex((item) => item.attempt.task_revision === task.current_revision)]
     const { state, detail: why } = taskState(task, current, waitingOn, accepted.has(task.id))
-    if (accepted.has(task.id)) done++
+    if (state === 'completed') done++
     const depends = entry.dependsOn.length > 0 ? `Depends on ${entry.dependsOn.map(taskTitle).join(', ')}` : undefined
     return {
       id,

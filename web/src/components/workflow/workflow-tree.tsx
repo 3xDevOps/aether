@@ -100,17 +100,23 @@ export function WorkflowTree({
   const latest = useRef({ rows, overrides, onSelect })
   latest.current = { rows, overrides, onSelect }
 
+  const container = useRef<HTMLDivElement>(null)
+  // A pending focus is only applied while focus is still in the tree or nowhere, never taken from elsewhere.
+  const focusPending = useCallback((key: string, element: HTMLElement) => {
+    if (pending.current !== key) return
+    pending.current = null
+    const current = document.activeElement
+    if (!current || current === document.body || container.current?.contains(current)) element.focus()
+  }, [])
+
   const register = useCallback((key: string, element: HTMLElement | null) => {
     if (!element) {
       elements.current.delete(key)
       return
     }
     elements.current.set(key, element)
-    if (pending.current === key) {
-      element.focus()
-      pending.current = null
-    }
-  }, [])
+    focusPending(key, element)
+  }, [focusPending])
 
   // A row that held focus can vanish on a live update; focus moves to its nearest surviving ancestor.
   const focused = useRef<string | null>(null)
@@ -132,12 +138,8 @@ export function WorkflowTree({
 
   useEffect(() => {
     const key = pending.current
-    if (!key) return
-    const element = elements.current.get(key)
-    if (element) {
-      element.focus()
-      pending.current = null
-    }
+    const element = key ? elements.current.get(key) : undefined
+    if (key && element) focusPending(key, element)
   })
 
   useEffect(() => {
@@ -150,8 +152,9 @@ export function WorkflowTree({
     pending.current = row.key
     setActiveKey(row.key)
     if (virtual) list.current?.scrollToIndex(index, { align: 'nearest' })
-    elements.current.get(row.key)?.focus()
-  }, [virtual])
+    const element = elements.current.get(row.key)
+    if (element) focusPending(row.key, element)
+  }, [virtual, focusPending])
 
   const setOpen = useCallback((node: WorkflowNode, open: boolean) => {
     setOverrides((current) => new Map(current).set(node.id, open))
@@ -226,7 +229,7 @@ export function WorkflowTree({
   )
 
   return (
-    <div className={cn('flex min-h-0 min-w-0 flex-col', className)}>
+    <div ref={container} className={cn('flex min-h-0 min-w-0 flex-col', className)}>
       {shown !== root && (
         <Button
           variant="ghost"
@@ -258,7 +261,16 @@ export function WorkflowTree({
           setActiveKey(key)
         }}
         onBlur={(event) => {
-          if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) focused.current = null
+          const tree = event.currentTarget
+          if (event.relatedTarget) {
+            if (!tree.contains(event.relatedTarget)) focused.current = null
+            return
+          }
+          // A removed row blurs with no target and leaves focus on the body, which the restore needs to see.
+          window.setTimeout(() => {
+            const current = document.activeElement
+            if (current && current !== document.body && !tree.contains(current)) focused.current = null
+          })
         }}
         className={cn('min-w-0', virtual && 'h-[min(70vh,40rem)]')}
       >

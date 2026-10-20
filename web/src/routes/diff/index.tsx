@@ -130,7 +130,7 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
   return (
     <div className="@container flex h-full min-h-0 min-w-0 flex-col bg-canvas">
       <Land run={run} />
-      <div className="flex max-h-[55%] min-h-0 shrink-0 flex-col p-2 empty:hidden">
+      <div className="flex max-h-[55%] min-h-0 shrink-0 flex-col overflow-y-auto p-2 empty:hidden">
         <GitFlow runId={run.id} />
       </div>
       <SummaryStrip
