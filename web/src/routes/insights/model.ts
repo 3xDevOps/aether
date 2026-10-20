@@ -1,25 +1,11 @@
 import type { Tone } from '@/components/ui/status-dot'
 import { outcomeState, stateLabel, stateTone } from '@/lib/status'
-import type { InsightsBucket, InsightsResult, InsightsRun, InsightsTotals } from '@/lib/types'
+import type { InsightsOutcome, InsightsResult, InsightsRun } from '@/lib/types'
 
-export type Period = '7d' | '30d' | '90d' | '12m'
-
-export const periods: { value: Period; label: string; previous: string }[] = [
-  { value: '7d', label: 'Last 7 days', previous: 'the 7 days before' },
-  { value: '30d', label: 'Last 30 days', previous: 'the 30 days before' },
-  { value: '90d', label: 'Last 90 days', previous: 'the 90 days before' },
-  { value: '12m', label: 'Last 12 months', previous: 'the 12 months before' },
-]
-
-const days: Record<Exclude<Period, '12m'>, number> = { '7d': 7, '30d': 30, '90d': 90 }
-
-/** The period ends at the next local midnight, so today counts. Twelve months
- * start on a Monday, where the server's weekly buckets start. */
-export function periodRange(period: Period, now: Date): { from: Date; to: Date } {
+/** The last seven local days, ending at the next local midnight so today counts. */
+export function weekRange(now: Date): { from: Date; to: Date } {
   const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-  if (period !== '12m') return { from: new Date(to.getFullYear(), to.getMonth(), to.getDate() - days[period]), to }
-  const year = new Date(to.getFullYear() - 1, to.getMonth(), to.getDate())
-  return { from: new Date(year.getFullYear(), year.getMonth(), year.getDate() - ((year.getDay() + 6) % 7)), to }
+  return { from: new Date(to.getFullYear(), to.getMonth(), to.getDate() - 7), to }
 }
 
 export function rfc3339(date: Date): string {
@@ -28,22 +14,6 @@ export function rfc3339(date: Date): string {
 
 export function plural(n: number, one: string, many = `${one}s`): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`
-}
-
-export function versus(current: number, previous: number, before: string, format: (n: number) => string = (n) => n.toLocaleString()): string {
-  if (current === previous) return `Same as ${before}`
-  return `${current > previous ? 'Up' : 'Down'} from ${format(previous)} ${before}`
-}
-
-export interface Rate {
-  finished: number
-  ended: number
-  percent: number | null
-}
-
-export function successRate(totals: InsightsTotals): Rate {
-  const ended = totals.finished + totals.failed + totals.interrupted + totals.abandoned
-  return { finished: totals.finished, ended, percent: ended === 0 ? null : Math.floor((totals.finished / ended) * 100) }
 }
 
 export function duration(seconds: number): string {
@@ -67,58 +37,6 @@ export function dayLabel(date: string, options: Intl.DateTimeFormatOptions = { m
   return calendarDay(date).toLocaleDateString(undefined, { ...options, timeZone: 'UTC' })
 }
 
-export function addDays(date: string, n: number): string {
-  const day = calendarDay(date)
-  day.setUTCDate(day.getUTCDate() + n)
-  return day.toISOString().slice(0, 10)
-}
-
-export type BucketRuns = { kind: 'loading' } | { kind: 'ready'; runs: InsightsRun[] } | { kind: 'failed'; message: string }
-
-export interface Selection {
-  start: string
-  end: string
-  label: string
-}
-
-export function bucketSelection(start: string, bucket: InsightsResult['bucket']): Selection {
-  if (bucket === 'day') return { start, end: addDays(start, 1), label: dayLabel(start, { weekday: 'short', month: 'short', day: 'numeric' }) }
-  return { start, end: addDays(start, 7), label: `the week of ${dayLabel(start)}` }
-}
-
-/** A selection's instants, held inside the period: a phone's weekly bars can start before it. */
-export function bucketBounds(selection: Selection, result: Pick<InsightsResult, 'from' | 'to' | 'time_zone'>): { from: Date; to: Date } {
-  const utc = result.time_zone === '' || result.time_zone === 'UTC'
-  const midnight = (date: string) => {
-    const [y, m, d] = date.split('-').map(Number)
-    return utc ? new Date(Date.UTC(y, m - 1, d)) : new Date(y, m - 1, d)
-  }
-  return {
-    from: new Date(Math.max(midnight(selection.start).getTime(), Date.parse(result.from))),
-    to: new Date(Math.min(midnight(selection.end).getTime(), Date.parse(result.to))),
-  }
-}
-
-/** On a phone, more than 30 daily bars become weekly ones so each stays a usable target. */
-export function chartSeries(result: InsightsResult, mobile: boolean): { series: InsightsBucket[]; bucket: InsightsResult['bucket'] } {
-  if (!mobile || result.bucket !== 'day' || result.series.length <= 30) return { series: result.series, bucket: result.bucket }
-  const weeks = new Map<string, InsightsBucket>()
-  for (const day of result.series) {
-    const start = addDays(day.start, -((calendarDay(day.start).getUTCDay() + 6) % 7))
-    const week = weeks.get(start) ?? { start, launched: 0, completed: 0, merged: 0, failed: 0, interrupted: 0, abandoned: 0 }
-    weeks.set(start, {
-      start,
-      launched: week.launched + day.launched,
-      completed: week.completed + day.completed,
-      merged: week.merged + day.merged,
-      failed: week.failed + day.failed,
-      interrupted: week.interrupted + day.interrupted,
-      abandoned: week.abandoned + day.abandoned,
-    })
-  }
-  return { series: [...weeks.values()], bucket: 'week' }
-}
-
 export function outcome(run: Pick<InsightsRun, 'status' | 'reason'>): { label: string; tone: Tone } {
   const state = outcomeState(run.status)
   if (!state) return { label: run.status, tone: 'neutral' }
@@ -129,19 +47,84 @@ export function agentLabel(harness: string, model: string, names: Record<string,
   return `${names[harness] ?? harness} · ${model || 'default model'}`
 }
 
-export function headline(result: InsightsResult, period: string, oneWorkspace: boolean): string {
-  const parts = [`${plural(result.totals.finished, 'run')} finished`]
-  if (result.swarms.completed > 0) parts.push(`${plural(result.swarms.completed, 'swarm')} completed`)
-  const workspaces = result.by_workspace.filter((w) => w.launched > 0 || w.finished > 0).length
-  const across = !oneWorkspace && workspaces > 1 ? ` across ${plural(workspaces, 'workspace')}` : ''
-  return `${period}: ${parts.join(' and ')}${across}.`
-}
-
-export function isEmpty(result: InsightsResult): boolean {
-  const t = result.totals
-  return t.launched + t.finished + t.failed + t.interrupted + t.abandoned + t.active === 0 && result.swarms.launched === 0 && result.recent.length === 0
-}
-
 export function sinceLabel(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
+
+const compact = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 })
+
+export function tokens(n: number): string {
+  return `${compact.format(n)} ${n === 1 ? 'token' : 'tokens'}`
+}
+
+/** Rounded down in integers, so 100% means exactly all of them. */
+export function percent(part: number, whole: number): number | null {
+  return whole <= 0 ? null : Math.min(100, Math.floor((part * 100) / whole))
+}
+
+/** Servers that predate outcomes, success or per-agent tokens answer insights.get without them. */
+export function hasOutcomes(result: InsightsResult): boolean {
+  return Array.isArray(result.outcomes?.series) && Array.isArray(result.outcomes.members) && result.outcomes.runs != null && result.outcomes.swarms != null &&
+    result.success?.runs != null && result.success.swarms != null && Array.isArray(result.cost?.by_agent)
+}
+
+/** Two letters per member for the legend and tooltip, numbered when two members share them. */
+export function memberTags(members: { member_id: string; display_name: string }[]): Record<string, string> {
+  const seen: Record<string, number> = {}
+  return Object.fromEntries(members.map((m) => {
+    const words = m.display_name.trim().split(/\s+/).filter(Boolean)
+    const base = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? '?').slice(0, 2)).toUpperCase()
+    seen[base] = (seen[base] ?? 0) + 1
+    return [m.member_id, seen[base] > 1 ? `${base}${seen[base]}` : base]
+  }))
+}
+
+export type Unit = 'runs' | 'swarms'
+
+export const outcomeKeys = ['done', 'failed', 'abandoned'] as const
+export type OutcomeKey = (typeof outcomeKeys)[number]
+
+export interface Slice {
+  id: string
+  name: string
+  color: string
+  count: number
+}
+
+export interface Day {
+  start: string
+  counts: InsightsOutcome
+  /** Members with at least one outcome that day, per outcome, in member order; empty for a personal chart. */
+  members: Record<OutcomeKey, Slice[]>
+}
+
+/** One entry per day of the series: the unit's outcomes, and who they belong to when the result names members. */
+export function chartDays(result: InsightsResult, unit: Unit): Day[] {
+  const { series, members } = result.outcomes
+  return series.map((bucket, i) => {
+    const slices = (key: OutcomeKey): Slice[] =>
+      members.flatMap((m) => {
+        const count = m.series[i]?.[unit][key] ?? 0
+        return count > 0 ? [{ id: m.member_id, name: m.display_name, color: m.color, count }] : []
+      })
+    return { start: bucket.start, counts: bucket[unit], members: { done: slices('done'), failed: slices('failed'), abandoned: slices('abandoned') } }
+  })
+}
+
+export function chartMax(days: Day[]): number {
+  return Math.max(1, ...days.flatMap((d) => outcomeKeys.map((key) => d.counts[key])))
+}
+
+export function dayWords(day: Day, unit: Unit): string {
+  const counts = outcomeKeys.map((key) => {
+    const who = day.members[key].map((m) => `${m.name} ${m.count}`).join(', ')
+    return `${day.counts[key]} ${key}${who && ` (${who})`}`
+  })
+  return `${dayLabel(day.start, { weekday: 'short', month: 'short', day: 'numeric' })}: ${unit} ${counts.join(', ')}`
+}
+
+export type SectionLoad =
+  | { kind: 'loading' }
+  | { kind: 'ready'; result: InsightsResult }
+  | { kind: 'failed'; message: string }
+  | { kind: 'unsupported' }

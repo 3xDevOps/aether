@@ -4171,39 +4171,59 @@ questions and queued messages stay contextual to their run, in its Details
 ## Insights
 
 `src/routes/insights/` is **Insights** (`?page=insights`), what a member's
-agents finished over a period. It is in the header navigation after
-**Activity** when the gateway offers `insights.get`, and reads that one
-method, and the server computes every number. The page re-reads when its
-controls change and
-when the event stream comes back live, dropping answers to an older request.
+agents finished over the last seven local days. It is in the header
+navigation after **Activity** when the gateway offers `insights.get`, and
+reads that one method; the server computes every number
+([insights.md](insights.md)). The page reads twice, `scope: "mine"` and
+`scope: "everyone"`, and re-reads when the workspace changes and when the
+event stream comes back live, dropping answers to an older request. Each
+section loads, fails and retries on its own.
 
-- **Controls.** **Period** (Last 7 days, the default; 30 days; 90 days; 12
-  months), **Workspace** (All workspaces or one; shown with more than one
-  workspace, opening on `activeWorkspace`) and **Mine** / **Everyone**. A
-  period ends at the next local midnight, so today counts; 12 months starts
-  on the Monday on or before, where weekly buckets start. The request
-  carries the browser's IANA time zone for day buckets, or "" (UTC) when the
-  browser reports none, which the page then says. The choices last while the
-  page is open; they are not in the address. On a phone the controls wrap
-  above the content instead of sitting in the header.
-- **Headline.** One sentence: "Last 7 days: 12 runs finished and 1 swarm
-  completed across 3 workspaces." Runs in **Needs you** follow as a link to
-  the Board.
-- **Tiles.** Runs finished, success rate (finished of runs that ended, with
-  both counts, rounded down so 100% means nothing failed), swarms completed
-  (with agents and tasks accepted) and pull requests Aether opened. Runs
-  finished and success rate compare with the period before in raw numbers
-  ("Up from 8 the 7 days before"). Pull requests show a dash and say none
-  are recorded until the server reports `coverage.pull_requests_since`.
-- **Activity chart.** Per day (per week past 92 days): launched runs as the
-  outlined left bar, runs that ended as the right bar stacked Done, Failed
-  (failed and interrupted) and Abandoned, with a text legend. The chart is
-  one tab stop; arrow keys, **Home** and **End** move between bars, and
-  **Enter**, **Space** or a click selects one, and **Finished work** reads
-  `insights.get` again for that bucket alone, since the period's list holds
-  only its newest 50 runs. "Show every day" clears it. On a phone more than
-  30 daily bars fold into weeks, and on a coarse pointer each bar is at
-  least 44px wide, the chart scrolling sideways from the newest end.
+- **Controls.** **Workspace** (All workspaces or one; shown with more than
+  one workspace, opening on `activeWorkspace`). The window is the seven
+  local days ending at the next local midnight, so today counts. The
+  request carries the browser's IANA time zone for day buckets, or "" (UTC)
+  when the browser reports none, which the page then says. The choice lasts
+  while the page is open; it is not in the address. On a phone it wraps
+  above the content instead of sitting in the header. Runs in **Needs you**
+  follow as a link to the Board.
+- **My statistics** and **Team statistics.** Two sections with the same
+  layout, mine first. Each has four boxes and one chart:
+  - *Runs / swarms completed*: `outcomes.runs.done` and
+    `outcomes.swarms.done` as "7 runs / 1 swarm", with the failed and
+    abandoned counts of each below. Every number is from `outcomes`, work
+    that finished in the window, so the box and the chart agree.
+  - *Success rate*: runs and swarms that ended with a merged pull request
+    over all that finished, `success.runs` plus `success.swarms`, rounded
+    down in integers so 100% means exactly all succeeded; a dash when none finished. Each
+    fraction is written out below.
+  - *Swarm tasks accepted*: `swarms.tasks_accepted`, with the agents in
+    those swarms. Unlike the other boxes, `swarms.*` counts swarms started
+    in the window, which the box says; the page never shows swarms launched
+    beside swarms completed.
+  - *Total tokens used*: `cost.total_tokens` as "100K tokens", with the
+    harness at the head of `cost.by_agent` and its share, rounded down
+    ("Claude Code used 56% of the 100K tokens") and how many runs reported no tokens.
+- **Outcome chart.** One chart per section: seven day groups, each three
+  bars side by side, Done, Failed and Abandoned, from `outcomes.series`. A
+  **Runs** / **Swarms** toggle switches the unit. Every bar carries its
+  count; the letters D, F and A under each group name its bars, and Failed is
+  striped and Abandoned dotted, so no outcome is told by color alone, not
+  even when a member's color is red. Hovering or focusing a day highlights
+  its group, dims the other six and opens a tooltip with the counts; a day
+  stays active while the pointer is on it, whichever day loses focus. Each day is one tab stop labelled with its
+  counts. The team chart stacks every bar by member, using the member's
+  profile color from `outcomes.members` and a legend of members. A color
+  repeats after eight members, so each member also has a two-letter tag
+  (numbered when two collide) in the legend and tooltip, and a ringed
+  swatch; labels give each member's count. On the team chart the outcome
+  swatches in the legend and tooltip are neutral gray, keeping their
+  stripes and dots, so they cannot be mistaken for a member's color. The
+  chart always draws its
+  axes and says so when nothing ended. The y axis tops out at the busiest
+  bar.
+The sections below cover only the member's own runs in the same window.
+
 - **Finished work.** The server's 50 most recent runs that ended, ten shown
   until **Show all**: title, outcome badge, workspace, agent and model
   ("default model" when the run used the agent's own), duration, pull
@@ -4211,7 +4231,9 @@ when the event stream comes back live, dropping answers to an older request.
   learns a merge only when `run.pr.status` is called for the run, so after
   each load the page calls `run.pr.status {"run_id":"<run-id>"}` one after
   another for up to ten listed runs whose pull request is recorded `open`,
-  then reads `insights.get` again once if any state changed. A failed call
+  then reads `insights.get` again once if any state changed. The team
+  statistics do the same for their own list, skipping runs already
+  checked, and a change in either rereads both. A failed call
   leaves the row as it was and puts the error in the pull request link's
   tooltip; a failed second read is shown above the page, which keeps the
   first.
@@ -4228,11 +4250,12 @@ when the event stream comes back live, dropping answers to an older request.
   runs reported it, tokens, and a link to **Settings › Usage** for
   subscription quota. Cost never stops a run.
 
-A failed read shows the server's error with **Retry**; a server without
-`insights.get` gets a neutral line asking for an update. Until the event
-stream is live the page names the connection problem instead of loading. An
-empty period offers **New run**, the last 12 months, and everyone's runs
-from **Mine**.
+A failed read shows the server's error with **Retry** in the section that
+failed; a server without `insights.get`, or one whose answer lacks
+`outcomes`, `success` or `cost.by_agent`, gets one neutral line asking for
+an update. Until the event stream is live the page names the connection
+problem instead of loading. With nothing in the window the boxes read zero
+and the chart says nothing ended.
 
 ## Memory
 
