@@ -125,7 +125,7 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   await page.getByRole('main').getByRole('button', { name: missionObjective, exact: false }).click()
   const missionView = page.getByRole('region', { name: 'Tasks' })
   await expect(missionView).toBeVisible()
-  await expect(missionView).toContainText('Working')
+  await expect(missionView.getByRole('treeitem', { name: /^scripted worker candidate, .*You hold control of worker 1/ })).toBeVisible()
   await page.getByRole('button', { name: 'Release control', exact: true }).click()
   await expect(page.getByText('Human control released')).toBeVisible({ timeout: 30_000 })
   const released = await inspectWorker()
@@ -218,6 +218,23 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   for (const name of ['Prepare candidate', 'Run verification', 'Request delivery', 'Approve delivery', 'Deliver candidate']) {
     await expect(candidateReview.getByRole('button', { name, exact: true })).toHaveCount(0)
   }
+
+  // The task tree follows the same swarm: the accepted submission completes
+  // the task, and the candidate follows the tasks.
+  const workflow = missionView.getByRole('tree', { name: 'Swarm workflow' })
+  await expect(workflow.getByRole('treeitem').first()).toContainText('1 of 1 task done', { timeout: 30_000 })
+  const task = workflow.getByRole('treeitem', { name: /^scripted worker candidate, Completed/ })
+  await expect(task).toHaveAttribute('aria-expanded', 'false')
+  await task.focus()
+  await page.keyboard.press('ArrowRight')
+  const worker = workflow.getByRole('treeitem', { name: /^Worker 1 · / })
+  await expect(worker).toHaveAttribute('aria-level', '3')
+  if ((await worker.getAttribute('aria-expanded')) === 'false') {
+    await worker.focus()
+    await page.keyboard.press('ArrowRight')
+  }
+  await expect(workflow.getByRole('treeitem', { name: /^Accepted, Completed/ })).toHaveAttribute('aria-level', '4')
+  await expect(workflow.getByRole('treeitem', { name: /^Candidate for refs\/heads\/main/ })).toHaveAttribute('aria-level', '2', { timeout: 30_000 })
   await testInfo.attach('mission candidate progress surface', {
     body: await page.screenshot({ fullPage: true }),
     contentType: 'image/png',

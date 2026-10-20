@@ -142,6 +142,8 @@ export interface UiSlice {
   /** The view each run was last shown in during this visit; never persisted. */
   runViewMemory: Record<string, RunView>
   detailsOpen: boolean
+  /** Whether a run's Workflow rail is open on a wide window. */
+  workflowOpen: boolean
   /** Whether a run's Browser sits beside its other views on a wide window. */
   browserBeside: boolean
   /** Null until the divider is moved: half the run's frame. */
@@ -190,6 +192,7 @@ export interface UiSlice {
   setShortcutsOpen: (open: boolean) => void
   setProfileOpen: (open: boolean) => void
   setDetailsOpen: (open: boolean) => void
+  setWorkflowOpen: (open: boolean) => void
   setBrowserBeside: (beside: boolean) => void
   setBrowserBesideWidth: (width: number) => void
   setBrowserPreset: (runID: string, preset: string | null) => void
@@ -231,6 +234,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   route: initialRoute(),
   runViewMemory: {},
   detailsOpen: true,
+  workflowOpen: false,
   browserBeside: false,
   browserBesideWidth: null,
   browserPresets: {},
@@ -322,6 +326,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   setProfileOpen: (profileOpen) => set({ profileOpen }),
   setDetailsOpen: (detailsOpen) => set({ detailsOpen }),
+  setWorkflowOpen: (workflowOpen) => set({ workflowOpen }),
   setBrowserBeside: (browserBeside) => set({ browserBeside }),
   setBrowserBesideWidth: (browserBesideWidth) => set({ browserBesideWidth }),
   setBrowserPreset: (runID, preset) => set((s) => ({ browserPresets: withEntry(s.browserPresets, runID, preset) })),

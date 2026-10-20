@@ -511,6 +511,16 @@
     }
   }
 
+  .workflow-enter {
+    animation: workflow-enter 120ms ease-out;
+  }
+
+  @keyframes workflow-enter {
+    from {
+      opacity: 0;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .state-pulse {
       animation: none;
@@ -520,6 +530,10 @@
       animation: none;
       background: none;
       color: var(--text-muted);
+    }
+
+    .workflow-enter {
+      animation: none;
     }
   }
 

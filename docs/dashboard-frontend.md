@@ -2041,8 +2041,9 @@ activation, on its own 32px row under the header at every width. When the
 row is too narrow for every tab, as on a phone whose run has a pull request,
 the tabs scroll sideways (`ViewSwitch`): the shown view's tab is kept in
 sight as the view or the room changes, and the right edge fades while more
-tabs lie past it. On a phone with the composer focused the header keeps only
-the title line.
+tabs lie past it. The [Workflow panel](#workflow-panel)'s chip follows the
+tabs. On a phone with the composer focused the header keeps only the title
+line.
 
 A run with a pull request shows it at the right end of that row
 (`pull-request.tsx`): `#412`, a link to the pull request on GitHub, then the
@@ -2860,9 +2861,14 @@ both what it renders and the overlap set the conflict chips read.
   request, checks and merge readiness in one card that updates in place.
   The header is the pull request's title and `#128` linking to GitHub with
   **Draft**, **Open**, **Merged** or **Closed** and its dot, or the branch
-  name before there is a pull request. The Workflow panel shows it with
-  `compact`: the header, the head row, one line of check counts and the
-  primary action, with **Show N commits** unfolding the graph.
+  name before there is a pull request. Above the strip it takes at most 55%
+  of the view's height; only its commit list gives up room, down to two
+  rows, and scrolls, so
+  the header, the head row, readiness and the primary action stay in sight.
+  The Workflow panel shows it with `compact`: the header, the head row, one
+  line of check counts and the primary action, with **Show N commits**
+  unfolding the graph. The panel leaves it out while the Changes view shows
+  the full card.
 - **The graph is `run.git.log`.** One 28px row per commit under one SVG of
   two lanes: the run branch's commits (`commits`) on the accent lane, the
   base's commits the branch does not have (`upstream`) muted on the second,
@@ -3587,6 +3593,64 @@ whatever opened it. Sections (`details.tsx`):
 Any other failed room action shows its error above the sections with
 **Dismiss**; the composer's own failures stay above the composer.
 
+### Workflow panel
+
+The Workflow panel (`src/routes/run/workflow-panel.tsx`) shows what the run
+and its agents are doing as a tree. Its chip sits after the view switch and
+mirrors the run's state: `● Working · 2 agents running` (subagents and
+workflows running at any depth, a background one included) or
+`● Waiting for CI · 3 of 9 checks` (passing checks of the pull request's
+checks this tab last read). The chip toggles the panel. While the
+run's row holds 320px for it plus `minReadableWidth`, the panel is a 320px
+`complementary "Workflow"` rail at the right of the frame, remembered per
+device (`workflowOpen`, persisted, closed until the chip first opens it). A
+row too narrow for it beside Details or the subagent inspector shows those
+instead; the chip then closes Details to make room.
+Narrower rows open it as a side sheet and phones as a bottom sheet, a
+`dialog "Workflow"` that returns focus to the chip, and that closes when a
+row opens the subagent inspector or the request, or the view changes. Under the tree, a run
+with a branch shows the compact git card (`GitFlow` in
+`src/components/workflow/git-flow.tsx`), except on the Changes view, which
+shows the full one.
+
+The tree (`src/components/workflow/workflow-tree.tsx`) is derived by
+`src/store/workflow.ts` from what the dashboard already holds: the run's
+`presentRun` state and reason, and the session's subagent index. Its root is
+the run; a run that needs you leads with a Needs you row naming the
+request; under it every subagent and nested workflow nests under the agent
+that launched it (one whose launch the loaded history lacks sits under the
+run, `Not checked yet`), with its label, state and a summary of its tool calls
+("Read 3 files and ran 2 commands"), never its prose. Node ids are server
+ids (`run:<id>`, `agent:<tool call id>`), and a re-derivation keeps every
+unchanged subtree's object, so only rows that changed re-render.
+
+Each 28px row shows a status dot (shape and text, the vocabulary of
+[Run state](#run-state) plus `Not started` and `Not checked yet`), the label,
+the muted reason, and at the right the elapsed time in tabular figures, or
+on the root real counts (`2 agents running`, counting every depth, or
+`3 of 5 tasks done`).
+Completed subtrees start folded to their summary row; everything else starts
+open. A folded parent still lists every descendant that needs you under it.
+Rows below the fourth level collapse into one `Nested workflow · N agents`
+row that opens that subtree in place, with **Show the whole workflow** to go
+back. Past 200 visible rows the tree renders only the rows in view.
+Selecting an agent row opens it in the subagent inspector; selecting the
+Needs you row performs the header's action or reveals the request card.
+
+The tree is a `tree` with one tab stop among its rows: Up and Down move,
+Home and End jump, Right opens a folded row or moves to its first child,
+Left folds an open row or moves to its parent, and Enter or Space selects.
+Links and buttons inside a row, a pull request link or **Task details**, are
+tab stops of their own after it. When the focused row disappears, as when a
+completed subtree folds, focus moves to its nearest remaining ancestor; in a
+virtualized tree the focused row stays mounted while scrolled away. Each
+`treeitem` carries `aria-level`, `aria-posinset`, `aria-setsize` and, on a
+parent, `aria-expanded`. One polite status region announces rows that come
+to need you, fail, become ready for review or complete: transitions are
+gathered for 1.5 seconds from the first, then up to three are read, Needs
+you and Failed first. Only Working dots pulse, and rows added after the first render fade
+in over 120ms; with reduced motion requested, neither animates.
+
 ### Captures and candidate review
 
 **Captures…** in More (and in the terminal's **Tools** menu) opens
@@ -3793,29 +3857,41 @@ The body is one column, in this order:
    answer.`
    Answering needs `mission.question.answer`, launch permission and the
    accountable human or an admin.
-3. **Tasks**, a tree rooted at the current integrator run. Each run row
-   shows its status dot (`presentRun`, pulsing while working), the name
-   (`Integrator`, or `Worker <n>` and `attempt <m>` from `workerName` via `missionTree`),
-   agent and mode, the run's reason (its latest tool activity while working,
-   with the `live-shimmer` sweep) and the elapsed time from the run's or
-   attempt's start to its finish or now. Under the integrator, each task
-   shows its status word (Proposed, Ready, Working, Review, Done, Abandoned,
-   Blocked) and `Depends on` with each prerequisite's status dot and title.
-   Under each task, every attempt is listed newest first with the attempt
-   state ahead of the run's reason, and `from a replaced integrator` when an
-   earlier integrator generation dispatched it. A run the store does not
-   hold shows a neutral dot and the attempt state, or `Run not loaded` for
-   the integrator. The integrator and each task fold with their chevron and
-   start open. Folding either keeps every control hold and every worker that
-   needs you visible; a task with neither disappears while the integrator is
-   folded. Swarm rows join with the sidebar's tree connectors. Selecting a
-   run row opens that run. The derivation is
-   `missionTree` in `src/routes/missions/tree.ts`. **Task details**, closed
-   by default, shows the task's objective, scope, blockers other than
+3. **Tasks**, the [workflow tree](#workflow-panel) of the swarm, derived by
+   `deriveSwarmWorkflow` in `src/store/workflow.ts` from `mission.show`,
+   the store's runs and `integration.list`. The root is the current
+   integrator run, labelled `Integrator · <agent> · <mode>`, with
+   `<n> of <m> tasks done`, where a task is done only when the server
+   accepted a submission for its current revision. Under it each task shows
+   its state: Not started (`No worker yet`, or `Proposed, not accepted yet`),
+   Waiting (`Waiting on <task>` for an unfinished dependency, or `Blocked on
+   <kind>: <action>`), the state of its newest worker for the current
+   revision while that worker runs,
+   Waiting for agents once the worker finished or submitted, and Completed.
+   Under each task every worker is listed newest first (`Worker <n>` and
+   `attempt <m>` from `workerName`, agent and mode) with the attempt state
+   ahead of the run's reason, `from a replaced integrator` when an earlier
+   integrator generation dispatched it, and a line with its branch and, when
+   this tab has read it, the pull request's number and state. A run the
+   store does not hold shows the attempt state alone. Under each worker are
+   its submissions: Accepted, Rejected, `Submitted, waiting for the
+   integrator`, Superseded or Abandoned, with `for revision <n>` when it was
+   for an earlier revision and any scope violations. After the tasks come
+   the integration candidates, newest first, each `Candidate for <ref>`:
+   Preparing, `<n> conflicts: <paths>`, `Verification running`,
+   `Verification passed`, `Verification failed: <error or exit code>`,
+   `Delivery pending`, `Delivered`, or `Not verified yet`; the newest three
+   are read with `integration.show` for their checks, a failed read shows
+   its error verbatim, and the list is read again on each
+   `integration.changed` and `mission.changed` for the swarm. Selecting a worker, submission or the
+   integrator opens that run. An open task, or one with no worker yet,
+   offers **Task details**, closed by default, with the task's objective, scope, blockers other than
    `proposal` in planning, scope diagnostics with a link to the other run,
    and attempt errors. A worker under a human control hold shows `<name>
-   holds control of this worker` with **Release control**, which sends
-   `mission.worker.release` with the observed `expected_takeover_generation`.
+   holds control of this worker` above the tree with **Release control**,
+   which sends `mission.worker.release` with the observed
+   `expected_takeover_generation`; it stays visible however the tree is
+   folded.
 4. **Agent messages**, described below.
 5. **Integration**, closed by default: the read-only candidate panel (see
    [Captures and candidate review](#captures-and-candidate-review)),
@@ -3825,10 +3901,8 @@ The body is one column, in this order:
    submission's run, retained revision, evidence reference, evidence
    exceptions and scope disposition. Every run ID there opens its run.
 
-A task is Done only when the server accepted a submission for its current
-revision; the tree shows the server's status, never a worker's exit.
-
-Each `mission.changed` for the open swarm re-reads `mission.show`, and one
+Each `mission.changed` for the open swarm re-reads `mission.show`, and
+with it the candidates, and one
 for any other swarm re-reads `mission.list`, without holding up the events
 behind it. A burst coalesces to one read in flight and one queued per swarm
 (or workspace list), so the page settles on the last state.
