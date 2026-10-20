@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ApiError } from '@/lib/api'
 import type { Api } from '@/lib/api'
-import type { InsightsParams } from '@/lib/types'
+import type { InsightsParams, InsightsResult } from '@/lib/types'
 import { InsightsRoute } from '@/routes/insights'
 import { useStore } from '@/store'
 import { alice, fakeApi, insights, insightsRun, otherWorkspace, serverInfo, teamInsights, workspace } from '@/test/fixtures'
@@ -346,5 +346,28 @@ describe('insights page', () => {
 
     expect((await screen.findByRole('link', { name: 'PR #7 (open)' })).getAttribute('title')).toBe('Could not refresh this pull request: run.pr.status: github: 401 Bad credentials')
     expect(runPRStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps statistics a newer read already showed when the first read fails late', async () => {
+    seed()
+    const run = insightsRun({ run_id: 'run_t', pr_url: 'https://github.com/acme/app/pull/9', pr_state: 'open' })
+    let failFirst: (error: Error) => void = () => {}
+    let mineReads = 0
+    const insightsGet = vi.fn(async (params: InsightsParams) => {
+      if (params.scope === 'everyone') return { ...teamInsights(), recent: [run] }
+      return mineReads++ === 0 ? new Promise<InsightsResult>((_, reject) => { failFirst = reject }) : insights()
+    })
+    const runPRStatus = vi.fn<Api['runPRStatus']>(async () => ({
+      identity: 'alice', account_member_id: alice.id, output: { exit_code: 0, truncated: false },
+      pull_request: { number: 9, url: '', state: 'merged', title: '', draft: false, repository: 'acme/app', base_branch: '', head_repository: '', head_branch: '', head_oid: '' },
+    }))
+    render(<InsightsRoute params={{}} client={fakeApi({ insightsGet, runPRStatus })} />)
+
+    await waitFor(() => expect(mineReads).toBe(2))
+    expect(await screen.findAllByRole('article', { name: 'Success rate' })).toHaveLength(2)
+    failFirst(new Error('late failure'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull()
+    expect(screen.getAllByRole('article', { name: 'Success rate' })).toHaveLength(2)
   })
 })
