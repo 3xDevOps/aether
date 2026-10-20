@@ -29,6 +29,7 @@ import { useRunRoom } from '@/routes/run/room'
 import { dockedRequestID } from '@/routes/run/session-requests'
 import { SessionView } from '@/routes/run/session-view'
 import { useRunShells } from '@/routes/run/shells'
+import { useRunWorkflow, WorkflowChip, WorkflowPanel, workflowPanelID } from '@/routes/run/workflow-panel'
 import { SubagentInspector } from '@/routes/run/subagent-inspector'
 import { TerminalView } from '@/routes/run/terminal-view'
 import { defaultView, isRunView, runViewLabel, runViews, type RunView } from '@/routes/run/views'
@@ -41,9 +42,10 @@ import type { RunRecord } from '@/store/runs'
  * display:none measures zero and would resize the shared PTY. */
 const panel = 'absolute inset-0 outline-none'
 
-/** The inline inspectors' widths: `w-80` and `w-[28rem]`. */
+/** The inline inspectors' widths: `w-80`, `w-[28rem]` and `w-80`. */
 const detailsWidth = 320
 const agentWidth = 448
+const workflowWidth = 320
 
 function RunRoute({ params }: RouteProps) {
   const run = useStore((s) => s.runs[params.runId])
@@ -74,6 +76,10 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const [overlayDetails, setOverlayDetails] = useState(false)
+  const workflowPreference = useStore((s) => s.workflowOpen)
+  const setWorkflowPreference = useStore((s) => s.setWorkflowOpen)
+  const [overlayWorkflow, setOverlayWorkflow] = useState(false)
+  const workflowTree = useRunWorkflow(run)
   const [composing, setComposing] = useState(false)
   const [dialog, setDialog] = useState<'captures' | 'events' | null>(null)
   const returnTo = useRef<HTMLElement | null>(null)
@@ -121,12 +127,27 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
     if (squeezed) replaceRouteKeepingFocus({ name: 'run', params: { runId: run.id, view } })
   }, [resized, squeezed, row.width, assistantDocked, run.id, view])
 
-  const detailsOpen = inline ? detailsPreference && !agentID : overlayDetails
+  // The Workflow rail sits beside the session when it fits; otherwise it opens as a sheet.
+  const workflowInline = row.width >= workflowWidth + minReadableWidth
+  const besideDetails = row.width >= workflowWidth + detailsWidth + minReadableWidth
+  const besideAgent = row.width >= workflowWidth + agentWidth + minReadableWidth
+  const workflowOpen = workflowInline ? workflowPreference && (!agentID || besideAgent) : overlayWorkflow
+  const detailsOpen = inline ? detailsPreference && !agentID && (!workflowOpen || !workflowInline || besideDetails) : overlayDetails
   const setDetails = useCallback((open: boolean) => {
     if (inline && open && agentID) closeAgent()
+    if (inline && open && workflowInline && !besideDetails) setWorkflowPreference(false)
     if (inline) setDetailsPreference(open)
     else setOverlayDetails(open)
-  }, [inline, setDetailsPreference, agentID, closeAgent])
+  }, [inline, setDetailsPreference, agentID, closeAgent, workflowInline, besideDetails, setWorkflowPreference])
+  const setWorkflow = useCallback((open: boolean) => {
+    if (!workflowInline) {
+      setOverlayWorkflow(open)
+      return
+    }
+    if (open && agentID && !besideAgent) closeAgent()
+    if (open && detailsOpen && !besideDetails) setDetailsPreference(false)
+    setWorkflowPreference(open)
+  }, [workflowInline, agentID, besideAgent, closeAgent, detailsOpen, besideDetails, setDetailsPreference, setWorkflowPreference])
   useLayoutEffect(() => {
     if (!agentID) return
     agentOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -234,6 +255,17 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
           onEvents={openDialog('events')}
           agentName={agentName}
           agentEntry={agentEntry}
+          workflow={(
+            <WorkflowChip
+              run={run}
+              tree={workflowTree}
+              open={workflowOpen}
+              onToggle={(opener) => {
+                returnTo.current = opener
+                setWorkflow(!workflowOpen)
+              }}
+            />
+          )}
         />
         {run.mode === 'acp' && view !== 'browser' && view !== 'files' && <MultiplayerControls run={run} agent={agent} onPeople={() => nav.reveal('details-people')} />}
         <div ref={frameRef} className="flex min-h-0 flex-1">
@@ -285,6 +317,29 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
         <aside aria-label="Subagent" className="flex w-[28rem] shrink-0 flex-col border-l border-seam bg-canvas">
           <SubagentInspector key={agentID} run={run} agentID={agentID} agent={agent} nav={nav} onClose={closeAgent} />
         </aside>
+      )}
+      {workflowInline && workflowOpen && (
+        <aside id={workflowPanelID} aria-label="Workflow" className="flex w-80 shrink-0 flex-col border-l border-seam bg-canvas">
+          <WorkflowPanel run={run} tree={workflowTree} view={view} agent={agent} nav={nav} onClose={() => setWorkflow(false)} />
+        </aside>
+      )}
+      {measured && !workflowInline && (
+        <Dialog open={workflowOpen} onOpenChange={setWorkflow}>
+          <DialogContent
+            id={workflowPanelID}
+            variant={mobile ? 'bottom' : 'side'}
+            aria-describedby={undefined}
+            onCloseAutoFocus={(event) => {
+              if (!returnTo.current?.isConnected) return
+              event.preventDefault()
+              returnTo.current.focus()
+            }}
+            className={mobile ? 'flex max-h-[85dvh] min-h-0 flex-col p-0' : 'flex w-80 flex-col p-0'}
+          >
+            <DialogTitle className="sr-only">Workflow</DialogTitle>
+            <WorkflowPanel run={run} tree={workflowTree} view={view} agent={agent} nav={nav} onClose={() => setWorkflow(false)} className="flex-1" />
+          </DialogContent>
+        </Dialog>
       )}
       {inline && detailsOpen && (
         <aside id="run-details" aria-label="Run details" className="w-80 shrink-0 overflow-y-auto border-l border-seam bg-canvas">

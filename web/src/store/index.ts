@@ -92,6 +92,7 @@ const persistedUi = (s: RootState) => ({
   assistantWidth: s.assistantWidth,
   terminalDockHeight: s.terminalDockHeight,
   detailsOpen: s.detailsOpen,
+  workflowOpen: s.workflowOpen,
   browserBeside: s.browserBeside,
   browserBesideWidth: s.browserBesideWidth,
   terminalFontSize: s.terminalFontSize,
