@@ -99,8 +99,33 @@ func (s *Service) Log(ctx context.Context, run Execution, req LogRequest) (LogRe
 		for _, path := range paths[1:] {
 			result.Conflicts = append(result.Conflicts, protocol.RunGitConflict{Path: path})
 		}
+		err = s.conflictingCommits(ctx, run, req.Limit, result.Head+".."+result.Base, paths[1:], result.Upstream)
 	}
-	return result, nil
+	return result, err
+}
+
+// conflictingCommits sets Paths on each of commits that touches one of the
+// conflicting paths.
+func (s *Service) conflictingCommits(ctx context.Context, run Execution, limit int, revisions string, paths []string, commits []protocol.RunGitCommit) error {
+	args := append([]string{"log", "-z", "--name-only", "--no-renames", "--max-count=" + strconv.Itoa(limit), "--format=%x1e%H", revisions, "--"}, paths...)
+	out, err := s.git(ctx, run, false, args...)
+	text, err := complete(out, err)
+	if err != nil {
+		return err
+	}
+	touched := map[string][]string{}
+	for _, record := range strings.Split(text, "\x1e") {
+		sha, names, _ := strings.Cut(record, "\x00")
+		for _, name := range strings.Split(strings.TrimPrefix(names, "\n"), "\x00") {
+			if name != "" {
+				touched[sha] = append(touched[sha], name)
+			}
+		}
+	}
+	for i := range commits {
+		commits[i].Paths = touched[commits[i].SHA]
+	}
+	return nil
 }
 
 func (s *Service) commits(ctx context.Context, run Execution, limit int, revisions string) ([]protocol.RunGitCommit, error) {

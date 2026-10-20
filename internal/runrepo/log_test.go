@@ -72,6 +72,9 @@ func TestLogTracksBaseMovementAndPredictsConflicts(t *testing.T) {
 	if got := subjects(log.Upstream); !reflect.DeepEqual(got, []string{"upstream conflicting", "upstream clean"}) {
 		t.Fatalf("upstream = %v", got)
 	}
+	if !reflect.DeepEqual(log.Upstream[0].Paths, []string{"selected"}) || log.Upstream[1].Paths != nil {
+		t.Fatalf("upstream conflict paths = %v / %v", log.Upstream[0].Paths, log.Upstream[1].Paths)
+	}
 	if status := gitCmd(t, dir, "status", "--porcelain"); status != "" {
 		t.Fatalf("conflict prediction touched the worktree: %q", status)
 	}

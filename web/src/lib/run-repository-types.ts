@@ -98,6 +98,8 @@ export interface GitLogCommit {
   author: string
   authored_at: string
   parents: string[]
+  /** On upstream commits only: the conflicting paths the commit touches. */
+  paths?: string[]
 }
 
 export interface RunGitLogConflict {

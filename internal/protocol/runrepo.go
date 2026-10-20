@@ -152,6 +152,8 @@ type RunGitCommit struct {
 	Author     string   `json:"author"`
 	AuthoredAt string   `json:"authored_at"`
 	Parents    []string `json:"parents"`
+	// Paths, on upstream commits only, are the conflicting paths it touches.
+	Paths []string `json:"paths,omitempty"`
 }
 
 type RunGitConflict struct {

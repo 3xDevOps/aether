@@ -1078,6 +1078,7 @@ at most `limit`; `truncated` is set when `ahead` or `behind` exceeds it. A
 `{"sha":"...","short":"1a2b3c4","subject":"...","author":"...","authored_at":"2026-10-20T01:02:03+00:00","parents":["..."]}`.
 `conflicts` lists the paths `git merge-tree --write-tree --name-only` of
 `head` and `base` reports as conflicting, empty when they merge cleanly;
+an `upstream` commit that touches one of them lists those in `paths`;
 the index and worktree are untouched. It needs Git 2.38 or later in the
 run's image.
 
