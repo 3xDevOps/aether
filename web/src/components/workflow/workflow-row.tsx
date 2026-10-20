@@ -3,9 +3,12 @@ import type * as React from 'react'
 import { ChevronRight } from '@/components/icons'
 import { StatusDot } from '@/components/ui/status-dot'
 import { useClock } from '@/lib/clock'
+import type { Run } from '@/lib/types'
 import { cn, focusRingInset } from '@/lib/utils'
+import { stateLabel as prStateLabel, usePullRequest } from '@/routes/diff/publish-pr'
 import { elapsed } from '@/routes/missions/tree'
 import type { WorkflowRow } from '@/components/workflow/flatten'
+import { useStore } from '@/store'
 import { countsText, workflowLabel, workflowTone, type WorkflowNode } from '@/store/workflow'
 
 const step = 16
@@ -38,15 +41,23 @@ function Trailing({ node }: { node: WorkflowNode }) {
   return live.has(node.state) ? <LiveElapsed from={node.startedAt} /> : null
 }
 
-function GitLine({ git }: { git: NonNullable<WorkflowNode['git']> }) {
+function TrackedPR({ run }: { run: Run }) {
+  const pr = usePullRequest(run, false).feedback?.pull_request
+  if (!pr) return null
+  return (
+    <a href={pr.url} target="_blank" rel="noreferrer" tabIndex={-1} className="shrink-0 tabular-nums hover:text-text hover:underline">
+      #{pr.number} {prStateLabel(pr)}
+    </a>
+  )
+}
+
+/** The branch, and the pull request this tab last read for it; nothing here is fetched per row. */
+function GitLine({ branch, runId }: { branch: string; runId?: string }) {
+  const run = useStore((s) => (runId ? s.runs[runId] : undefined))
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-ui-xs text-muted">
-      <span className="min-w-0 truncate rounded-control bg-chrome px-1 font-code" title={git.branch}>{git.branch}</span>
-      {git.pr && (
-        <a href={git.pr.url} target="_blank" rel="noreferrer" tabIndex={-1} className="shrink-0 tabular-nums hover:text-text hover:underline">
-          #{git.pr.number} {git.pr.state}
-        </a>
-      )}
+      <span className="min-w-0 truncate rounded-control bg-chrome px-1 font-code" title={branch}>{branch}</span>
+      {run && <TrackedPR run={run} />}
     </span>
   )
 }
@@ -127,9 +138,9 @@ export const WorkflowRowItem = memo(function WorkflowRowItem({
           </span>
         )}
       </div>
-      {node.git && nested === undefined && (
+      {node.branch && nested === undefined && (
         <div className="pr-2 pb-1" style={{ paddingLeft: (level - 1) * step + 34 }}>
-          <GitLine git={node.git} />
+          <GitLine branch={node.branch} runId={node.runId} />
         </div>
       )}
       {more && <div data-extra style={{ paddingLeft: (level - 1) * step + 22 }}>{more}</div>}

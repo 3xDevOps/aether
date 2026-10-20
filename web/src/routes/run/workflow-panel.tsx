@@ -23,14 +23,12 @@ export const workflowPanelID = 'run-workflow'
 export function useRunWorkflow(run: RunRecord): WorkflowNode {
   const shown = useRunPresentation(run)
   const agents = useStore((s) => s.acpSessions[run.id]?.agents ?? noAgents)
-  const pr = usePullRequest(run, false).feedback?.pull_request
-  const prFact = useMemo(() => (pr ? { number: pr.number, state: pr.state, url: pr.url } : undefined), [pr])
   const previous = useRef<WorkflowNode | undefined>(undefined)
   return useMemo(() => {
-    const next = shareTree(previous.current, deriveRunWorkflow(run.id, runFacts(run, shown, runLabel(run), prFact), agents))
+    const next = shareTree(previous.current, deriveRunWorkflow(run.id, runFacts(run, shown, runLabel(run)), agents))
     previous.current = next
     return next
-  }, [run, shown, agents, prFact])
+  }, [run, shown, agents])
 }
 
 function runningAgents(node: WorkflowNode): number {

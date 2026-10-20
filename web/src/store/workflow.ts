@@ -19,11 +19,6 @@ export interface WorkflowCounts {
   running: number
 }
 
-export interface WorkflowGit {
-  branch: string
-  pr?: { number: number; state: string; url: string }
-}
-
 export interface WorkflowNode {
   id: string
   parentId: string | null
@@ -37,7 +32,8 @@ export interface WorkflowNode {
   runId?: string
   /** The subagent the inspector opens for an agent or workflow row. */
   agentId?: string
-  git?: WorkflowGit
+  /** A worker's or run's branch, for its one-line git summary. */
+  branch?: string
   children: WorkflowNode[]
 }
 
@@ -53,11 +49,14 @@ export function startsOpen(node: WorkflowNode): boolean {
 
 const asking = new WeakMap<WorkflowNode, WorkflowNode[]>()
 
-/** The descendants that need the viewer, which a folded parent still shows. */
+/** The deepest descendants that need the viewer, the rows that lead to the request, which a folded parent still shows. */
 export function needsYouBelow(node: WorkflowNode): WorkflowNode[] {
   let found = asking.get(node)
   if (!found) {
-    found = node.children.flatMap((child) => (child.state === 'needs-you' ? [child] : needsYouBelow(child)))
+    found = node.children.flatMap((child) => {
+      const deeper = needsYouBelow(child)
+      return deeper.length > 0 || child.state !== 'needs-you' ? deeper : [child]
+    })
     asking.set(node, found)
   }
   return found
@@ -79,14 +78,12 @@ export interface RunFacts {
   startedAt?: string
   endedAt?: string
   branch?: string
-  pr?: WorkflowGit['pr']
 }
 
 export function runFacts(
   run: { task: string; title?: string; branch: string; created_at: string; started_at: string | null; finished_at: string | null },
   shown: Pick<RunPresentation, 'state' | 'reason' | 'needsYou'>,
   label: string,
-  pr?: WorkflowGit['pr'],
 ): RunFacts {
   return {
     label,
@@ -96,7 +93,6 @@ export function runFacts(
     startedAt: run.started_at ?? run.created_at,
     endedAt: run.finished_at ?? undefined,
     branch: run.branch || undefined,
-    pr,
   }
 }
 
@@ -177,7 +173,6 @@ export function deriveRunWorkflow(runID: string, run: RunFacts, agents: AgentInd
     startedAt: run.startedAt,
     endedAt: run.endedAt,
     runId: runID,
-    git: run.branch ? { branch: run.branch, pr: run.pr } : undefined,
     children,
   }
 }
@@ -262,7 +257,7 @@ function attemptNode(attempt: MissionAttempt, name: string, note: string | undef
     startedAt: attempt.started_at ?? undefined,
     endedAt: attempt.finished_at ?? run?.endedAt,
     runId: attempt.run_id || undefined,
-    git: run?.branch ? { branch: run.branch, pr: run.pr } : undefined,
+    branch: run?.branch,
     children: submissions.filter((item) => item.attempt_id === attempt.id).map((item) => submissionNode(item, task, id)),
   }
 }
@@ -281,6 +276,7 @@ function taskState(task: MissionTask, latest: WorkflowNode | undefined, waitingO
     case 'review':
       return { state: 'waiting-agents', detail: 'Waiting for the integrator to review' }
   }
+  if (latest && ['ready', 'completed', 'merged'].includes(latest.state)) return { state: 'waiting-agents', detail: 'Worker finished, waiting for the integrator' }
   if (latest && latest.state !== 'closed') return { state: latest.state, detail: latest.detail }
   if (waitingOn.length > 0) return { state: 'waiting', detail: `Waiting on ${waitingOn.join(', ')}` }
   return { state: 'pending', detail: 'No worker yet' }
@@ -395,17 +391,11 @@ export function deriveSwarmWorkflow({ detail, runs, candidates, integratorLabel,
   }
 }
 
-function sameGit(a: WorkflowGit | undefined, b: WorkflowGit | undefined): boolean {
-  if (a === b) return true
-  if (!a || !b || a.branch !== b.branch) return false
-  return a.pr === b.pr || (a.pr?.number === b.pr?.number && a.pr?.state === b.pr?.state && a.pr?.url === b.pr?.url)
-}
-
 function sameCounts(a: WorkflowCounts | undefined, b: WorkflowCounts | undefined): boolean {
   return a === b || (!!a && !!b && a.noun === b.noun && a.done === b.done && a.total === b.total && a.running === b.running)
 }
 
-const fields = ['parentId', 'kind', 'state', 'label', 'detail', 'startedAt', 'endedAt', 'runId', 'agentId'] as const
+const fields = ['parentId', 'kind', 'state', 'label', 'detail', 'startedAt', 'endedAt', 'runId', 'agentId', 'branch'] as const
 
 function index(node: WorkflowNode | undefined, into = new Map<string, WorkflowNode>()): Map<string, WorkflowNode> {
   if (!node) return into
@@ -428,7 +418,6 @@ export function shareTree(prev: WorkflowNode | undefined, next: WorkflowNode): W
       before &&
       fields.every((key) => before[key] === node[key]) &&
       sameCounts(before.counts, node.counts) &&
-      sameGit(before.git, node.git) &&
       before.children.length === children.length &&
       before.children.every((child, i) => child === children[i])
     ) {

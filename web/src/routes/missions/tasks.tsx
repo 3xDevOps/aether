@@ -1,58 +1,24 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { agentLabel, modeLabel } from '@/components/launch/modes'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { SectionLabel } from '@/components/ui/section-label'
-import { StateLine, StatusDot, type Tone } from '@/components/ui/status-dot'
+import { WorkflowTree } from '@/components/workflow/workflow-tree'
 import type { Api } from '@/lib/api'
 import { useClock } from '@/lib/clock'
 import { message } from '@/lib/format'
 import { memberName } from '@/lib/member-name'
 import { plainReason } from '@/lib/reasons'
-import { stateLabel, stateTone } from '@/lib/status'
-import type { AgentInfo, MissionAttempt, MissionAttemptState, MissionTask, MissionTaskScope } from '@/lib/types'
-import { cn } from '@/lib/utils'
-import { connectors } from '@/components/shell/sidebar-runs'
-import { elapsed, missionTree, taskTitle, type AttemptNode, type TaskNode } from '@/routes/missions/tree'
+import { presentRun } from '@/lib/status'
+import type { AgentInfo, MissionAttempt, MissionTask, MissionTaskScope } from '@/lib/types'
+import { missionTree } from '@/routes/missions/tree'
 import { useStore } from '@/store'
-import { useNeedsYouRuns, useRun, useRunPresentation } from '@/store/hooks'
+import { useCapability } from '@/store/hooks'
 import type { MissionDetail } from '@/store/missions'
-import type { RunRecord } from '@/store/runs'
-
-const statusWord: Record<MissionTask['status'], string> = {
-  proposed: 'Proposed',
-  ready: 'Ready',
-  working: 'Working',
-  review: 'Review',
-  done: 'Done',
-  abandoned: 'Abandoned',
-  blocked: 'Blocked',
-}
-
-const statusTone: Record<MissionTask['status'], Tone> = {
-  proposed: 'neutral',
-  ready: 'neutral',
-  working: 'working',
-  review: 'working',
-  done: 'done',
-  abandoned: 'neutral',
-  blocked: 'failed',
-}
-
-const attemptWord: Record<MissionAttemptState, string> = {
-  reserved: 'Reserved',
-  launching: 'Launching',
-  running: 'Running',
-  unknown: 'State unknown',
-  submitted: 'Submitted',
-  completed: 'Completed',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-  superseded: 'Superseded',
-  abandoned: 'Abandoned',
-}
+import { stateContextOf } from '@/store/selectors'
+import { deriveSwarmWorkflow, runFacts, shareTree, type CandidateFacts, type RunFacts, type WorkflowNode } from '@/store/workflow'
 
 function scopeFacts(scope: MissionTaskScope): string[] {
   return [
@@ -101,81 +67,6 @@ function TaskDetails({ task, detail, showProposalBlocker }: { task: MissionTask;
   )
 }
 
-interface RunLineProps {
-  runID: string
-  label: string
-  lead?: string
-  note?: string
-  from?: string | null
-  to?: string | null
-}
-
-function RunRow({ runID, label, tone, state, pulse = false, detail, shimmer = false, from, to }: {
-  runID: string
-  label: string
-  tone: Tone
-  state?: string
-  pulse?: boolean
-  detail: string
-  shimmer?: boolean
-  from?: string | null
-  to?: string | null
-}) {
-  const navigate = useStore((s) => s.navigate)
-  useClock()
-  const time = from ? elapsed(from, to ?? Date.now()) : ''
-  return (
-    <Button
-      variant="ghost"
-      className="h-auto min-h-7 w-full justify-start gap-2 py-1 text-left whitespace-normal coarse:min-h-11"
-      onClick={() => navigate('run', { runId: runID })}
-    >
-      <StatusDot tone={tone} pulse={pulse} label={state} />
-      <span className="line-clamp-2 min-w-0 flex-1 text-ui-sm md:block md:truncate">
-        <span className="text-text">{label}</span>
-        <span className={cn(shimmer && 'live-shimmer')}> · {detail}</span>
-      </span>
-      {time && <span className="shrink-0 text-ui-sm tabular-nums">{time}</span>}
-    </Button>
-  )
-}
-
-function LoadedRunLine({ run, label, lead, note, from, to }: RunLineProps & { run: RunRecord }) {
-  const shown = useRunPresentation(run)
-  const working = shown.state === 'working'
-  return (
-    <RunRow
-      runID={run.id}
-      label={label}
-      tone={stateTone[shown.state]}
-      pulse={working}
-      shimmer={working}
-      state={stateLabel[shown.state]}
-      detail={[lead ?? stateLabel[shown.state], shown.reason, note].filter(Boolean).join(' · ')}
-      from={from}
-      to={run.finished_at ?? to}
-    />
-  )
-}
-
-function RunLine(props: RunLineProps) {
-  const run = useRun(props.runID)
-  if (!props.runID) return <p className="py-1 pl-1 text-ui-sm text-muted">{props.label} · No run yet</p>
-  if (!run) {
-    return (
-      <RunRow
-        runID={props.runID}
-        label={props.label}
-        tone="neutral"
-        detail={[props.lead ?? 'Run not loaded', props.note].filter(Boolean).join(' · ')}
-        from={props.from}
-        to={props.to}
-      />
-    )
-  }
-  return <LoadedRunLine run={run} {...props} />
-}
-
 function ControlHold({ attempt, canRelease, client, onReleased }: {
   attempt: MissionAttempt
   canRelease: boolean
@@ -219,112 +110,49 @@ function runLabel(name: string, harness: string, mode: string, agents: AgentInfo
   return `${name} · ${agentLabel(agents?.find((item) => item.name === harness), harness)} · ${modeLabel(mode)}`
 }
 
-function AttemptRow({ node, agents }: { node: AttemptNode; agents: AgentInfo[] | null }) {
-  const { attempt } = node
-  return (
-    <li>
-      <RunLine
-        runID={attempt.run_id}
-        label={runLabel(node.name, attempt.harness, attempt.mode, agents)}
-        lead={attemptWord[attempt.state]}
-        note={node.earlierIntegrator ? 'from a replaced integrator' : undefined}
-        from={attempt.started_at}
-        to={attempt.finished_at}
-      />
-    </li>
-  )
+function useSwarmRuns(runIDs: string[]): Record<string, RunFacts> {
+  const now = useClock()
+  const key = useStore((s) => {
+    const ctx = stateContextOf(s, now)
+    return JSON.stringify(runIDs.flatMap((id) => {
+      const run = s.runs[id]
+      return run ? [[id, runFacts(run, presentRun(run, ctx), '')]] : []
+    }))
+  })
+  return useMemo(() => Object.fromEntries(JSON.parse(key) as [string, RunFacts][]), [key])
 }
 
-function TaskRow({ node, detail, agents, needy, folded, showProposalBlocker, canRelease, client, onChanged }: {
-  node: TaskNode
-  detail: MissionDetail
-  agents: AgentInfo[] | null
-  needy: ReadonlySet<string>
-  folded: boolean
-  showProposalBlocker: boolean
-  canRelease: boolean
-  client: Api
-  onChanged: () => void
-}) {
-  const { task, title, dependsOn, attempts } = node
-  const [open, setOpen] = useState(true)
-  const latest = attempts[0]?.attempt
-  const held = latest && (latest.takeover_active || latest.orchestration_hold)
-  const expanded = open && !folded
-  const needing = attempts.filter((item) => needy.has(item.attempt.run_id))
-  if (folded && !held && needing.length === 0) return null
-  return (
-    <li className={cn(connectors, '[--wire:--spacing(3.5)] coarse:[--wire:--spacing(5.5)]')}>
-      <Collapsible open={expanded} onOpenChange={setOpen}>
-        <div className="flex min-h-7 items-center gap-3 coarse:min-h-11">
-          {folded ? (
-            <span className="min-w-0 flex-1 truncate pl-5 text-ui">{title}</span>
-          ) : (
-            <CollapsibleTrigger className="w-auto min-w-0 flex-1">
-              <span className="min-w-0 truncate">{title}</span>
-            </CollapsibleTrigger>
-          )}
-          <StateLine tone={statusTone[task.status]} className="shrink-0">{statusWord[task.status]}</StateLine>
-        </div>
-        {!folded && dependsOn.length > 0 && (
-          <p className="flex flex-wrap items-center gap-x-1 pb-1 pl-5 text-ui-sm text-muted">
-            Depends on
-            {dependsOn.map((other, index) => (
-              <span key={other.id} className="inline-flex items-center gap-1">
-                <StatusDot tone={statusTone[other.status]} label={statusWord[other.status]} />
-                {taskTitle(other)}
-                {index < dependsOn.length - 1 && ','}
-              </span>
-            ))}
-          </p>
-        )}
-        {held && (
-          <div className="pb-2 pl-5">
-            <ControlHold attempt={latest} canRelease={canRelease} client={client} onReleased={onChanged} />
-          </div>
-        )}
-        {!expanded && needing.length > 0 && (
-          <ul className="flex flex-col pl-5">
-            {needing.map((attempt) => (
-              <AttemptRow key={attempt.attempt.id} node={attempt} agents={agents} />
-            ))}
-          </ul>
-        )}
-        <CollapsibleContent>
-          <div className="pl-5">
-            {attempts.length === 0 ? (
-              <p className="py-1 text-ui-sm text-muted">No worker yet</p>
-            ) : (
-              <ul className="flex flex-col">
-                {attempts.map((attempt) => (
-                  <AttemptRow key={attempt.attempt.id} node={attempt} agents={agents} />
-                ))}
-              </ul>
-            )}
-            <Collapsible>
-              <CollapsibleTrigger>Task details</CollapsibleTrigger>
-              <CollapsibleContent>
-                <TaskDetails task={task} detail={detail} showProposalBlocker={showProposalBlocker} />
-              </CollapsibleContent>
-            </Collapsible>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-    </li>
-  )
-}
+const candidateDetails = 3
 
-function IntegratorLine({ detail, agents }: { detail: MissionDetail; agents: AgentInfo[] | null }) {
-  const { integrator, current_integrator_run_id: runID } = detail.mission
-  const run = useRun(runID)
-  return (
-    <RunLine
-      runID={runID}
-      label={runLabel('Integrator', integrator.harness, integrator.mode, agents)}
-      from={run?.started_at ?? run?.created_at}
-      to={run?.finished_at}
-    />
-  )
+/** integration.list for the swarm, with integration.show's verifications for the newest few. */
+function useCandidates(detail: MissionDetail, client: Api): { candidates: CandidateFacts[]; error?: string } {
+  const cap = useCapability()
+  const [state, setState] = useState<{ candidates: CandidateFacts[]; error?: string }>({ candidates: [] })
+  const { mission } = detail
+  const readable = cap.hasMethod('integration.list') && cap.hasMethod('integration.show')
+  useEffect(() => {
+    if (!readable) return
+    let live = true
+    const load = async () => {
+      const listed = await client.integrationList({ workspace_id: mission.workspace_id, mission_id: mission.id, limit: 50 })
+      const newest = [...listed.candidates].sort((a, b) => b.created_at.localeCompare(a.created_at))
+      const shown = await Promise.all(newest.map(async (summary, index): Promise<CandidateFacts> => {
+        if (index >= candidateDetails) return summary
+        try {
+          const { candidate } = await client.integrationShow({ workspace_id: mission.workspace_id, candidate_id: summary.candidate_id })
+          return candidate
+        } catch (err) {
+          return { ...summary, error: message(err) }
+        }
+      }))
+      if (live) setState({ candidates: shown })
+    }
+    load().catch((err) => live && setState((current) => ({ ...current, error: message(err) })))
+    return () => {
+      live = false
+    }
+  }, [client, detail, mission.id, mission.workspace_id, readable])
+  return state
 }
 
 export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
@@ -335,45 +163,60 @@ export function SwarmTasks({ detail, agents, canRelease, client, onChanged }: {
   onChanged: () => void
 }) {
   const { mission } = detail
-  const tree = useMemo(() => missionTree(detail), [detail])
-  const [open, setOpen] = useState(true)
-  const runIDs = useMemo(() => detail.attempts.map((attempt) => attempt.run_id), [detail.attempts])
-  const needy = useNeedsYouRuns(runIDs)
+  const navigate = useStore((s) => s.navigate)
+  const runIDs = useMemo(
+    () => [mission.current_integrator_run_id, ...detail.attempts.map((attempt) => attempt.run_id)].filter(Boolean),
+    [mission.current_integrator_run_id, detail.attempts],
+  )
+  const runs = useSwarmRuns(runIDs)
+  const { candidates, error } = useCandidates(detail, client)
+  const previous = useRef<WorkflowNode | undefined>(undefined)
+  const tree = useMemo(() => {
+    const next = shareTree(previous.current, deriveSwarmWorkflow({
+      detail,
+      runs,
+      candidates,
+      integratorLabel: runLabel('Integrator', mission.integrator.harness, mission.integrator.mode, agents),
+      workerLabel: (attempt, name) => runLabel(name, attempt.harness, attempt.mode, agents),
+    }))
+    previous.current = next
+    return next
+  }, [detail, runs, candidates, agents, mission.integrator.harness, mission.integrator.mode])
+  const tasks = useMemo(() => new Map(detail.tasks.map((task) => [`task:${task.id}`, task])), [detail.tasks])
+  const held = useMemo(() => missionTree(detail).flatMap((node) => {
+    const latest = node.attempts[0]?.attempt
+    return latest && (latest.takeover_active || latest.orchestration_hold) ? [latest] : []
+  }), [detail])
+  const select = (node: WorkflowNode) => {
+    if (!node.runId || node.kind === 'task' || node.kind === 'candidate') return false
+    navigate('run', { runId: node.runId })
+    return true
+  }
+  const extra = (node: WorkflowNode, expanded: boolean) => {
+    const task = tasks.get(node.id)
+    if (!task || !expanded) return null
+    return (
+      <Collapsible>
+        <CollapsibleTrigger>Task details</CollapsibleTrigger>
+        <CollapsibleContent>
+          <TaskDetails task={task} detail={detail} showProposalBlocker={mission.phase === 'active'} />
+        </CollapsibleContent>
+      </Collapsible>
+    )
+  }
   return (
     <section aria-label="Tasks" className="flex flex-col gap-1">
       <SectionLabel as="h2">Tasks</SectionLabel>
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <div className="flex items-center gap-1">
-          <CollapsibleTrigger className="w-auto shrink-0" aria-label="Integrator's tasks" />
-          <div className="min-w-0 flex-1">
-            <IntegratorLine detail={detail} agents={agents} />
-          </div>
-        </div>
-        {tree.length === 0 ? (
-          open && (
-            <p className="ml-2 pl-3 text-ui text-muted">
-              {mission.phase === 'planning' ? 'The integrator has not proposed tasks yet.' : 'This swarm has no tasks.'}
-            </p>
-          )
-        ) : (
-          <ul className="ml-2 flex flex-col [--trunk:--spacing(7.75)]">
-            {tree.map((node) => (
-              <TaskRow
-                key={node.task.id}
-                node={node}
-                detail={detail}
-                agents={agents}
-                needy={needy}
-                folded={!open}
-                showProposalBlocker={mission.phase === 'active'}
-                canRelease={canRelease}
-                client={client}
-                onChanged={onChanged}
-              />
-            ))}
-          </ul>
-        )}
-      </Collapsible>
+      {held.map((attempt) => (
+        <ControlHold key={attempt.id} attempt={attempt} canRelease={canRelease} client={client} onReleased={onChanged} />
+      ))}
+      <WorkflowTree root={tree} label="Swarm workflow" onSelect={select} extra={extra} />
+      {detail.tasks.length === 0 && (
+        <p className="pl-5 text-ui text-muted">
+          {mission.phase === 'planning' ? 'The integrator has not proposed tasks yet.' : 'This swarm has no tasks.'}
+        </p>
+      )}
+      {error && <p className="pl-5 text-ui-sm text-state-failed">Integration candidates: {error}</p>}
     </section>
   )
 }

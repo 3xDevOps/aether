@@ -153,7 +153,7 @@ describe('swarm workflow', () => {
     const tree = swarm({}, { run_w1: asking })
     const task = byID(tree, 'task:task_1')!
     expect(task.state).toBe('needs-you')
-    expect(needsYouBelow(tree).map((node) => node.id)).toEqual(['task:task_1'])
+    expect(needsYouBelow(tree).map((node) => node.id)).toEqual(['attempt:att_1'])
     const rows = flattenWorkflow(tree, new Map([['task:task_1', false]]))
     const surfaced = rows.find((row) => row.surfaced)
     expect(surfaced).toMatchObject({ key: 'task:task_1>attempt:att_1', level: 3, parentKey: 'task:task_1' })
