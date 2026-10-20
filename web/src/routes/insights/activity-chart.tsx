@@ -67,7 +67,9 @@ function Bar({ day, outcome, max }: { day: Day; outcome: OutcomeKey; max: number
   )
 }
 
-function Tooltip({ day, index, count, tags }: { day: Day; index: number; count: number; tags: Record<string, string> }) {
+const OutcomeDot = ({ outcome, team }: { outcome: OutcomeKey; team: boolean }) => <Dot className={team ? 'bg-icon-faint' : outcomes[outcome].fill} style={outcomes[outcome].texture} />
+
+function Tooltip({ day, index, count, tags, team }: { day: Day; index: number; count: number; tags: Record<string, string>; team: boolean }) {
   const edge = index < 2 ? 'translate-x-[-0.5rem]' : index > count - 3 ? '-translate-x-[calc(100%-0.5rem)]' : '-translate-x-1/2'
   return (
     <div
@@ -80,7 +82,7 @@ function Tooltip({ day, index, count, tags }: { day: Day; index: number; count: 
         {outcomeKeys.map((key) => (
           <li key={key} className="flex flex-col">
             <span className="flex items-center gap-1.5 text-text">
-              <Dot className={outcomes[key].fill} style={outcomes[key].texture} />
+              <OutcomeDot outcome={key} team={team} />
               {outcomes[key].label}
               <span className="ml-auto pl-3 tabular-nums">{day.counts[key]}</span>
             </span>
@@ -126,7 +128,7 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
           <span>0</span>
         </div>
         <div className="relative min-w-0 flex-1" onMouseLeave={() => setHovered(null)}>
-          {active !== null && <Tooltip day={days[active]} index={active} count={days.length} tags={tags} />}
+          {active !== null && <Tooltip day={days[active]} index={active} count={days.length} tags={tags} team={team} />}
           <div
             role="group"
             aria-label={`${unit === 'runs' ? 'Runs' : 'Swarms'} per day, ${team ? 'everyone' : 'yours'}, by how they ended`}
@@ -168,7 +170,7 @@ export function ActivityChart({ result, team }: { result: InsightsResult; team: 
       <ul aria-label="Legend" className="ml-8 flex flex-wrap gap-x-4 gap-y-1 text-ui-sm text-muted">
         <li className="text-muted">Bars, left to right:</li>
         {outcomeKeys.map((key) => (
-          <li key={key} className="flex items-center gap-1.5"><Dot className={outcomes[key].fill} style={outcomes[key].texture} />{outcomes[key].letter} {outcomes[key].label}</li>
+          <li key={key} className="flex items-center gap-1.5"><OutcomeDot outcome={key} team={team} />{outcomes[key].letter} {outcomes[key].label}</li>
         ))}
       </ul>
       {team && (

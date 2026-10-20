@@ -31,6 +31,9 @@ function renderPage(over: Partial<Api> = {}) {
 }
 
 describe('insights page', () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ['Date'], now: new Date(2026, 9, 16, 12) }))
+  afterEach(() => vi.useRealTimers())
+
   it('reads the last seven days for me and for everyone in the browser zone', async () => {
     const insightsGet = vi.fn(async (params: InsightsParams) => byScope(params))
     renderPage({ insightsGet })

@@ -4216,7 +4216,10 @@ section loads, fails and retries on its own.
   profile color from `outcomes.members` and a legend of members. A color
   repeats after eight members, so each member also has a two-letter tag
   (numbered when two collide) in the legend and tooltip, and a ringed
-  swatch; labels give each member's count. The chart always draws its
+  swatch; labels give each member's count. On the team chart the outcome
+  swatches in the legend and tooltip are neutral gray, keeping their
+  stripes and dots, so they cannot be mistaken for a member's color. The
+  chart always draws its
   axes and says so when nothing ended. The y axis tops out at the busiest
   bar.
 The sections below cover only the member's own runs in the same window.
