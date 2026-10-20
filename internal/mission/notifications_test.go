@@ -10,9 +10,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// TestMissionChangedNamesTheChangeAndWhatItTouched follows one task from
-// proposal to an accepted submission and checks each mission.changed says
-// which kind of change it was and which task and attempt it touched.
 func TestMissionChangedNamesTheChangeAndWhatItTouched(t *testing.T) {
 	ctx := context.Background()
 	f := newMissionFixture(t)
