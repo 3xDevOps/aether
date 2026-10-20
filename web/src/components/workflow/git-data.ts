@@ -9,7 +9,7 @@ import { coalesce } from '@/store/coalesce'
 
 export interface TrackedLog {
   log?: RunGitLogResult
-  /** The last read's failure, kept beside the log it could not replace. */
+  /** The last read's failure, kept beside the last good log it could not replace. */
   error?: string
   reading: boolean
 }
@@ -44,7 +44,7 @@ export function refreshGitLog(runID: string, client: Api = api): void {
   coalesce(owner, runID, async () => {
     const identity = useStore.getState().identityKey
     const patch = await client.runGitLog({ run_id: runID, limit: logLimit }).then(
-      (log): Partial<TrackedLog> => (log.error && !log.commits && !log.head ? { error: log.error } : { log, error: undefined }),
+      (log): Partial<TrackedLog> => (log.error ? { error: log.error } : { log, error: undefined }),
       (cause): Partial<TrackedLog> => ({ error: message(cause) }),
     )
     if (useStore.getState().identityKey !== identity) return
@@ -72,4 +72,19 @@ export function useGitLog(runID: string, watch: boolean): TrackedLog {
 /** Commits the run branch has that its base does not, once read. */
 export function useAhead(runID: string): number {
   return useGitLogs((all) => all[runID]?.log?.ahead ?? 0)
+}
+
+const usePrimaries = create<Record<string, true>>(() => ({}))
+
+/** Whether a full card for the run offers a primary action, which then is the view's one filled button. */
+export function useCardPrimary(runID: string): boolean {
+  return usePrimaries((all) => all[runID] === true)
+}
+
+export function useOfferPrimary(runID: string, offered: boolean): void {
+  useEffect(() => {
+    if (!offered) return
+    usePrimaries.setState({ [runID]: true })
+    return () => usePrimaries.setState(({ [runID]: _, ...rest }) => rest, true)
+  }, [runID, offered])
 }

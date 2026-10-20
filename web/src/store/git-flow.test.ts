@@ -24,7 +24,7 @@ function feedback(over: Partial<RunPRFeedbackResult> = {}): RunPRFeedbackResult 
   return {
     identity: 'ada', account_member_id: 'm1', pull_request: pr, checks: [{ name: 'test', status: 'completed', conclusion: 'success' }],
     comments: [], reviews: [{ id: 'r1', author: 'bob', body: '', state: 'APPROVED', submitted_at: '2026-10-20T10:05:00Z' }],
-    review_comments: [], truncated: false, output, ...over,
+    review_comments: [], mergeable: 'MERGEABLE', merge_state_status: 'CLEAN', truncated: false, output, ...over,
   }
 }
 
@@ -136,12 +136,18 @@ describe('readiness', () => {
       ['base', 'unknown', 'Not checked yet'],
     ])
     expect(ready.ready).toBe(false)
-    expect(readiness(log({ error: 'fatal: bad revision' }), feedback()).items[1]!.state).toBe('unknown')
+    expect(readiness(log(), feedback({ mergeable: 'UNKNOWN', merge_state_status: 'UNKNOWN' })).items.map((entry) => entry.state))
+      .toEqual(['ok', 'unknown', 'ok', 'unknown'])
   })
 
-  it('is ready only when every item is grounded', () => {
+  it('is ready only when GitHub grounds every item', () => {
     const ready = readiness(log(), feedback())
-    expect(ready.items.map((entry) => entry.state)).toEqual(['ok', 'ok', 'ok', 'ok'])
+    expect(ready.items.map((entry) => `${entry.key}:${entry.state}:${entry.text}`)).toEqual([
+      'checks:ok:1 of 1 check passed',
+      'conflicts:ok:None with main',
+      'review:ok:Approved by bob',
+      'base:ok:GitHub needs no update from main',
+    ])
     expect(ready.ready).toBe(true)
   })
 
@@ -152,7 +158,8 @@ describe('readiness', () => {
     expect(state(log(), feedback({ checks: [{ name: 'test', status: 'in_progress' }] }))[0]).toBe('checks:pending:0 of 1 check passed · 1 running')
     expect(state(log(), feedback({ checks: [] }))[0]).toBe('checks:unknown:No check has reported yet')
     expect(state(log(), feedback({ error: 'gh: rate limited' }))[0]).toBe('checks:unknown:Incomplete answer from GitHub')
-    expect(state(log({ conflicts: [{ path: 'a.go' }, { path: 'b.go' }] }), feedback())[1]).toBe('conflicts:blocked:2 files conflict with main')
+    expect(state(log({ conflicts: [{ path: 'a.go' }, { path: 'b.go' }] }), feedback({ mergeable: 'CONFLICTING', merge_state_status: 'DIRTY' }))[1])
+      .toBe('conflicts:blocked:GitHub reports conflicts with main: 2 files')
     expect(state(log(), feedback({
       reviews: [
         { id: 'r1', author: 'bob', body: '', state: 'APPROVED', submitted_at: '2026-10-20T10:05:00Z' },
@@ -160,7 +167,29 @@ describe('readiness', () => {
       ],
     }))[2]).toBe('review:blocked:Changes requested by bob')
     expect(state(log(), feedback({ reviews: [] }))[2]).toBe('review:pending:No approving review yet')
-    expect(state(log({ behind: 3 }), feedback())[3]).toBe('base:pending:3 commits behind main')
+    expect(state(log({ behind: 3 }), feedback({ merge_state_status: 'BEHIND' }))[3]).toBe('base:pending:Behind main by 3 commits')
+  })
+
+  it('only predicts from the checkout before there is a pull request', () => {
+    const items = (l: RunGitLogResult) => readiness(l, undefined).items.map((entry) => `${entry.key}:${entry.state}:${entry.text}`)
+    expect(items(log())).toEqual([
+      'checks:unknown:Not checked yet',
+      'conflicts:unknown:None against main as last fetched',
+      'review:unknown:Not checked yet',
+      'base:unknown:Up to date with main as last fetched',
+    ])
+    expect(items(log({ behind: 3, conflicts: [{ path: 'a.go' }] })).filter((entry) => !entry.startsWith('checks') && !entry.startsWith('review'))).toEqual([
+      'conflicts:blocked:1 file conflicts with main as last fetched',
+      'base:pending:3 commits behind main as last fetched',
+    ])
+    expect(readiness(log({ conflicts_error: 'merge-tree: output truncated' }), undefined).items[1])
+      .toMatchObject({ key: 'conflicts', state: 'unknown', text: 'merge-tree: output truncated' })
+  })
+
+  it('lists a draft first and never calls it ready', () => {
+    const ready = readiness(log(), feedback({ pull_request: { ...pr, draft: true } }))
+    expect(ready.items.map((entry) => `${entry.key}:${entry.state}`)).toEqual(['draft:pending', 'checks:ok', 'conflicts:ok', 'review:ok', 'base:ok'])
+    expect(ready.ready).toBe(false)
   })
 
   it('keeps a partial answer from turning anything green', () => {
@@ -169,23 +198,19 @@ describe('readiness', () => {
     expect(readiness(log(), feedback({ error: 'gh: HTTP 502' })).items[2]!.state).toBe('unknown')
   })
 
-  it('does not judge a pull request into another branch by the run base', () => {
-    const release = feedback({ pull_request: { ...pr, base_branch: 'release' } })
+  it('takes GitHub at its word for a pull request into another branch, naming no files the run base found', () => {
+    const release = feedback({ pull_request: { ...pr, base_branch: 'release' }, mergeable: 'CONFLICTING', merge_state_status: 'DIRTY' })
     const ready = readiness(log({ base_ref: 'origin/main', conflicts: [{ path: 'a.go' }] }), release)
-    expect(ready.items.map((entry) => `${entry.key}:${entry.state}:${entry.text}`)).toEqual([
-      'checks:ok:1 of 1 check passed',
-      'conflicts:unknown:Compared with origin/main, not release',
-      'review:ok:Approved by bob',
-      'base:unknown:Compared with origin/main, not release',
-    ])
-    expect(chooseAction(log({ base_ref: 'origin/main', conflicts: [{ path: 'a.go' }] }), release.pull_request, ready, everyone, true)).toBe('github')
-    expect(readiness(log({ base_ref: 'origin/main' }), feedback()).ready).toBe(true)
+    expect(ready.items[1]).toMatchObject({ state: 'blocked', text: 'GitHub reports conflicts with release', short: 'conflicts' })
+    expect(resolvePrompt(log({ base_ref: 'origin/main', conflicts: [{ path: 'a.go' }] }), release.pull_request)).toContain(
+      'GitHub reports that pull request #128 conflicts with release.\n\nFetch origin/release, merge it into aether/run-1',
+    )
   })
 
-  it('does not judge a pull request by a checkout that moved past its head', () => {
+  it('holds the merge while the checkout has commits the pull request does not', () => {
     const moved = log({ head: 'own3', commits: [commit('own3', ['own2'], '2026-10-20T10:03:00Z'), ...log().commits] })
     const ready = readiness(moved, feedback())
-    expect(ready.items[1]!.text).toBe('Checkout at own3 is not the pull request\'s head own2')
+    expect(ready.items[3]).toMatchObject({ state: 'pending', text: 'Pull request head is behind the branch: 1 unpushed commit' })
     expect(ready.ready).toBe(false)
     expect(headRow(moved, pr, ready).state).toBe('not pushed')
     expect(chooseAction(moved, pr, ready, everyone, true)).toBe('github')
@@ -200,10 +225,11 @@ describe('headRow', () => {
     }
     expect(row(log(), null)).toBe('Open pull request · 2 ahead')
     expect(row(log({ ahead: 0, commits: [] }), null)).toBe('No commits ahead of main · ')
-    expect(row(log({ conflicts: [{ path: 'a.go' }] }), pr, feedback())).toBe('Merge into main · 1 conflict')
-    expect(row(log({ behind: 2 }), pr, feedback())).toBe('Update from main · 2 behind')
+    expect(row(log({ conflicts: [{ path: 'a.go' }] }), pr, feedback({ mergeable: 'CONFLICTING' }))).toBe('Merge into main · 1 conflict')
+    expect(row(log({ behind: 2 }), pr, feedback({ merge_state_status: 'BEHIND' }))).toBe('Merge into main · 2 behind')
     expect(row(log(), pr, feedback())).toBe('Merge into main · ready')
     expect(row(log(), pr, feedback({ checks: [] }))).toBe('Merge into main · no checks yet')
+    expect(row(log(), { ...pr, draft: true }, feedback({ pull_request: { ...pr, draft: true } }))).toBe('Merge into main · draft')
     expect(row(log(), { ...pr, state: 'merged' }, feedback())).toBe('Merged into main · merged')
   })
 })
@@ -215,10 +241,10 @@ describe('chooseAction', () => {
     expect(chooseAction(log(), null, ready(log()), everyone, true)).toBe('open-pr')
     expect(chooseAction(log({ ahead: 0, commits: [] }), null, ready(log()), everyone, false)).toBe('review')
     expect(chooseAction(log({ ahead: 0, commits: [] }), null, ready(log()), everyone, true)).toBeNull()
-    const conflicted = log({ conflicts: [{ path: 'a.go' }] })
-    expect(chooseAction(conflicted, pr, ready(conflicted, feedback()), everyone, true)).toBe('resolve')
+    const conflicting = feedback({ mergeable: 'CONFLICTING', merge_state_status: 'DIRTY' })
+    expect(chooseAction(log(), pr, ready(log(), conflicting), everyone, true)).toBe('resolve')
     expect(chooseAction(log(), pr, ready(log(), feedback()), everyone, true)).toBe('merge')
-    expect(chooseAction(log({ behind: 2 }), pr, ready(log({ behind: 2 }), feedback()), everyone, true)).toBe('merge')
+    expect(chooseAction(log({ behind: 2 }), pr, ready(log({ behind: 2 }), feedback({ merge_state_status: 'BEHIND' })), everyone, true)).toBe('merge')
     const failing = feedback({ checks: [{ name: 'test', status: 'completed', conclusion: 'failure' }] })
     expect(chooseAction(log(), pr, ready(log(), failing), everyone, true)).toBe('github')
     expect(chooseAction(log(), { ...pr, draft: true }, ready(log(), feedback()), everyone, true)).toBe('github')
@@ -232,13 +258,13 @@ describe('chooseAction', () => {
     expect(chooseAction(log(), null, ready(log()), { ...everyone, create: false }, true)).toBeNull()
     expect(chooseAction(log(), pr, ready(log(), feedback()), viewer, true)).toBe('github')
     expect(chooseAction(log(), pr, ready(log(), feedback()), { ...everyone, merge: false }, true)).toBe('github')
-    const conflicted = log({ conflicts: [{ path: 'a.go' }] })
-    expect(chooseAction(conflicted, pr, ready(conflicted, feedback()), { ...everyone, prompt: false }, true)).toBe('github')
+    const conflicting = feedback({ mergeable: 'CONFLICTING' })
+    expect(chooseAction(log(), pr, ready(log(), conflicting), { ...everyone, prompt: false }, true)).toBe('github')
   })
 })
 
-it('names the base and every conflicting file in the prompt', () => {
-  const text = resolvePrompt(log({ base: 'abcdef0123456789', conflicts: [{ path: 'a.go' }, { path: 'web/b.ts' }] }))
-  expect(text).toContain('Merging main (abcdef012345) into aether/run-1')
-  expect(text).toContain('- a.go\n- web/b.ts')
+it('names the base and every conflicting file the checkout found in the prompt', () => {
+  const text = resolvePrompt(log({ base: 'abcdef0123456789', conflicts: [{ path: 'a.go' }, { path: 'web/b.ts' }] }), null)
+  expect(text).toContain('Merging main (abcdef012345) into aether/run-1 conflicts in these files:\n- a.go\n- web/b.ts')
+  expect(text).toContain('Fetch main, merge it into aether/run-1')
 })

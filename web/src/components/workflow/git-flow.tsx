@@ -7,7 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Spinner } from '@/components/ui/spinner'
 import { StatusDot, toneClasses } from '@/components/ui/status-dot'
 import { CheckPills, ReadinessList, Reviews } from '@/components/workflow/git-checks'
-import { refreshGitLog, useGitLog } from '@/components/workflow/git-data'
+import { refreshGitLog, useGitLog, useOfferPrimary } from '@/components/workflow/git-data'
 import { GitGraphView } from '@/components/workflow/git-graph'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
@@ -87,17 +87,24 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
   const [acting, setActing] = useState<ActionKind | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [sent, setSent] = useState<RoomMessage | null>(null)
-  const [queued, setQueued] = useState(false)
+  const [queued, setQueued] = useState('')
   const delivered = useStore((s) => (sent ? s.roomMessages[run.id]?.find((entry) => entry.id === sent.id) : undefined))
 
-  const log = logged.log && !logged.log.error ? logged.log : undefined
+  const log = logged.log
   const feedback = tracked.feedback
   const pr = feedback?.pull_request ?? null
-  // A failed refresh keeps the last graph, but not as a fact about the branch now.
+  // A failed refresh keeps the last answer on screen, but not as a fact about now.
   const current = logged.error ? undefined : log
-  const ready = useMemo(() => readiness(current, feedback), [current, feedback])
+  const judged = useMemo(
+    () => (tracked.error && feedback ? { ...feedback, error: tracked.error, mergeable: undefined, merge_state_status: undefined } : feedback),
+    [tracked.error, feedback],
+  )
+  const ready = useMemo(() => readiness(current, judged), [current, judged])
   const laidOut = useRef<GitGraph | undefined>(undefined)
-  const full = useMemo(() => (laidOut.current = log ? layoutGraph(log, expanded, laidOut.current) : headOnly), [log, expanded])
+  const full = useMemo(() => (log ? layoutGraph(log, expanded, laidOut.current) : headOnly), [log, expanded])
+  useEffect(() => {
+    laidOut.current = full
+  }, [full])
   const graph = compact && !open ? headOnly : full
   const head = headRow(current, pr, ready)
   const conflicted = ready.items.find((entry) => entry.key === 'conflicts' && entry.state === 'blocked')
@@ -108,7 +115,12 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
     merge: caps.hasMethod('run.pr.merge'),
     prompt: live && send !== null && send.blocked === null,
   }, !compact)
-  const said = sent ? receipt(delivered ?? sent, 'the conflict list', agentName) : null
+  useOfferPrimary(run.id, !compact && action !== null)
+  const conflictPaths = (current?.conflicts ?? []).map((conflict) => conflict.path).join('\n')
+  useEffect(() => setSent(null), [conflictPaths])
+  const dropped = useRef<number | undefined>(undefined)
+  useEffect(() => () => clearTimeout(dropped.current), [])
+  const said = sent ? receipt(delivered ?? sent, 'conflict list', agentName) : null
   const base = log?.base_ref || pr?.base_branch || run.base_branch
   const summary = [
     pr && feedback ? checkCounts(feedback.checks ?? []) : '',
@@ -117,16 +129,16 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
   const status =
     acting === 'merge' ? `Merging #${pr?.number} into ${base}…`
       : acting === 'resolve' ? `Sending the conflict list to ${agentName}…`
-        : queued && pr?.state === 'open' ? `GitHub accepted the merge; #${pr.number} is not merged yet.`
+        : queued && pr?.state === 'open' ? queued
           : said?.text ?? (logged.reading && !log ? 'Reading the branch…' : summary || (live ? 'Not checked yet' : 'The run is not live; its branch is not read.'))
   const announced = useAnnounced(status)
-  const errors = [logged.error, logged.log?.error, tracked.error, feedback?.error].filter((entry): entry is string => !!entry)
+  const errors = [logged.error, tracked.error, feedback?.error].filter((entry): entry is string => !!entry)
 
   if (!reads && !log && !pr && !errors.length) return null
 
   const go = (view: 'changes') => useStore.getState().navigate('run', { runId: run.id, view })
   const resolve = () => {
-    if (!send || !log || acting) return
+    if (!send || acting) return
     setActing('resolve')
     setFailure(null)
     setSent(null)
@@ -134,10 +146,10 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
       setActing(null)
       if (error) setFailure(error)
     }
-    const dropped = window.setTimeout(() => settle('Control of the run did not arrive, so nothing was sent.'), implicitControlWindowMs + 500)
+    dropped.current = window.setTimeout(() => settle('Control of the run did not arrive, so nothing was sent.'), implicitControlWindowMs + 500)
     send.dispatch(() => {
-      clearTimeout(dropped)
-      void send.post(resolvePrompt(log)).then(
+      clearTimeout(dropped.current)
+      void send.post(resolvePrompt(current, pr)).then(
         (posted) => {
           if (posted.state !== 'sent' && posted.state !== 'queued') return settle(refusal(posted))
           setSent(posted)
@@ -150,11 +162,15 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
   const merge = async () => {
     setActing('merge')
     setFailure(null)
+    setQueued('')
     try {
-      const result = await api.runPRMerge({ run_id: run.id, method, repository: pr?.repository, number: pr?.number })
+      if (!pr) return
+      const result = await api.runPRMerge({
+        run_id: run.id, method, repository: pr.repository, number: pr.number, expected_head: pr.head_oid, expected_login: feedback?.identity,
+      })
       if (result.error) throw new Error(result.error)
       // A merge queue accepts the request and merges later.
-      if (!result.merged) setQueued(true)
+      if (!result.merged) setQueued(result.output.stdout?.trim() || `GitHub has not merged #${pr.number}; it is ${result.pull_request?.state ?? pr.state}.`)
     } catch (cause) {
       setFailure(message(cause))
       throw cause
@@ -222,8 +238,8 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
   const headContent = (
     <>
       <span className="min-w-0 truncate font-medium text-text">{head.label}</span>
-      {log && conflicted && head.state === conflicted.short ? (
-        <Conflicts log={log} head={head} />
+      {current?.conflicts?.length && conflicted && head.state === conflicted.short ? (
+        <Conflicts log={current} head={head} />
       ) : (
         head.state && <span className={cn('ml-auto shrink-0 pl-2 text-ui-sm tabular-nums', toneClasses(head.tone).text)}>{head.state}</span>
       )}

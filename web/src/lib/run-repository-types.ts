@@ -290,6 +290,10 @@ export interface RunPRFeedbackResult {
   comments: RunPRComment[]
   reviews: RunPRReview[]
   review_comments: RunPRReviewComment[]
+  /** GitHub's verdict on the merge; absent before a pull request is found. */
+  mergeable?: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN'
+  /** GitHub's mergeable_state upper-cased: CLEAN, BEHIND, DIRTY, BLOCKED, UNSTABLE, DRAFT, HAS_HOOKS or UNKNOWN. */
+  merge_state_status?: string
   account_member_id: string
   actual?: RunGitExpected
   truncated: boolean

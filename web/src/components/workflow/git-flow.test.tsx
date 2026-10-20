@@ -40,7 +40,7 @@ function feedback(over: Partial<RunPRFeedbackResult> = {}): RunPRFeedbackResult 
     identity: 'alice', account_member_id: serverInfo.member.id, pull_request: pr,
     checks: [{ name: 'test', status: 'completed', conclusion: 'success', url: 'https://github.com/acme/app/actions/runs/1' }],
     comments: [], reviews: [{ id: 'r1', author: 'bob', body: '', state: 'APPROVED', submitted_at: '2026-10-20T10:05:00Z' }],
-    review_comments: [], truncated: false, output, ...over,
+    review_comments: [], mergeable: 'MERGEABLE', merge_state_status: 'CLEAN', truncated: false, output, ...over,
   }
 }
 
@@ -76,7 +76,7 @@ beforeEach(() => {
 
 it('reaches the merge, its method and the confirm by keyboard, and shows GitHubâ€™s refusal verbatim', async () => {
   const refusal = 'GraphQL: Pull request is not mergeable: the merge commit cannot be cleanly created. (mergePullRequest)'
-  vi.mocked(api.runPRMerge).mockResolvedValue({ pull_request: pr, merged: false, account_member_id: serverInfo.member.id, output, error: refusal })
+  vi.mocked(api.runPRMerge).mockResolvedValue({ pull_request: pr, merged: false, identity: 'alice', account_member_id: serverInfo.member.id, output, error: refusal })
   const user = userEvent.setup()
   const record = renderCard()
   const card = within(await screen.findByRole('region', { name: 'Branch and pull request' }))
@@ -97,13 +97,16 @@ it('reaches the merge, its method and the confirm by keyboard, and shows GitHubâ
   await user.keyboard('{Enter}')
   const confirm = within(await screen.findByRole('alertdialog', { name: 'Rebase and merge #128?' }))
   await user.click(confirm.getByRole('button', { name: 'Rebase and merge' }))
-  expect(api.runPRMerge).toHaveBeenCalledWith({ run_id: record.id, method: 'rebase', repository: 'acme/app', number: 128 })
+  expect(api.runPRMerge).toHaveBeenCalledWith({
+    run_id: record.id, method: 'rebase', repository: 'acme/app', number: 128, expected_head: head, expected_login: 'alice',
+  })
   expect((await confirm.findByRole('alert')).textContent).toBe(refusal)
   await waitFor(() => expect(card.getAllByRole('alert').map((entry) => entry.textContent)).toContain(refusal))
 })
 
 it('asks the agent to resolve conflicts, naming the base and each file', async () => {
-  vi.mocked(api.runGitLog).mockResolvedValue(log({ behind: 1, conflicts: [{ path: 'upload.go' }, { path: 'web/retry.ts' }] }))
+  vi.mocked(api.runGitLog).mockResolvedValue(log({ base_ref: 'origin/main', behind: 1, conflicts: [{ path: 'upload.go' }, { path: 'web/retry.ts' }] }))
+  vi.mocked(api.runPRFeedback).mockResolvedValue(feedback({ mergeable: 'CONFLICTING', merge_state_status: 'DIRTY' }))
   const user = userEvent.setup()
   const record = renderCard()
   const card = within(await screen.findByRole('region', { name: 'Branch and pull request' }))
@@ -115,13 +118,13 @@ it('asks the agent to resolve conflicts, naming the base and each file', async (
   await user.click(card.getByRole('button', { name: 'Ask agent to resolve conflicts' }))
   await waitFor(() => expect(api.runRoomPost).toHaveBeenCalled())
   expect(vi.mocked(api.runRoomPost).mock.calls[0]![0]).toMatchObject({ run_id: record.id, kind: 'steer_request' })
-  expect(vi.mocked(api.runRoomPost).mock.calls[0]![0].body).toContain('Merging main (bbbbbbbbbbbb) into aether/run-1 conflicts in these files:\n- upload.go\n- web/retry.ts')
-  expect(await card.findByText('Sent the conflict list to Claude Code.')).toBeTruthy()
+  expect(vi.mocked(api.runRoomPost).mock.calls[0]![0].body).toContain('Merging origin/main (bbbbbbbbbbbb) into aether/run-1 conflicts in these files:\n- upload.go\n- web/retry.ts')
+  expect(await card.findByText('Sent conflict list to Claude Code.')).toBeTruthy()
 })
 
 it('offers a viewer no merge and no send, only the pull request on GitHub', async () => {
   useStore.setState({ info: { ...serverInfo, member: { ...bob, role: 'viewer' } } })
-  vi.mocked(api.runGitLog).mockResolvedValue(log({ conflicts: [{ path: 'upload.go' }] }))
+  vi.mocked(api.runPRFeedback).mockResolvedValue(feedback({ mergeable: 'CONFLICTING' }))
   renderCard()
   const card = within(await screen.findByRole('region', { name: 'Branch and pull request' }))
   expect(await card.findByRole('link', { name: 'Open on GitHub' })).toHaveProperty('href', pr.url)

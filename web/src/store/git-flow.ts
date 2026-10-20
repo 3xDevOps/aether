@@ -133,7 +133,7 @@ export function layoutGraph(log: RunGitLogResult, expanded = false, previous?: G
 export type ItemState = 'ok' | 'pending' | 'blocked' | 'unknown'
 
 export interface ReadinessItem {
-  key: 'checks' | 'conflicts' | 'review' | 'base'
+  key: 'draft' | 'checks' | 'conflicts' | 'review' | 'base'
   label: string
   state: ItemState
   text: string
@@ -149,7 +149,7 @@ export interface Readiness {
 
 export const notChecked = 'Not checked yet'
 
-const labels: Record<ReadinessItem['key'], string> = { checks: 'Checks', conflicts: 'Conflicts', review: 'Review', base: 'Base' }
+const labels: Record<ReadinessItem['key'], string> = { draft: 'Draft', checks: 'Checks', conflicts: 'Conflicts', review: 'Review', base: 'Base' }
 const tones: Record<ItemState, Tone> = { ok: 'done', pending: 'needs-you', blocked: 'failed', unknown: 'neutral' }
 
 function item(key: ReadinessItem['key'], state: ItemState, text = notChecked, short = text, tone = tones[state]): ReadinessItem {
@@ -160,7 +160,7 @@ function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`
 }
 
-/** A partial answer may be missing entries: it can report a failure it saw, never that all passed. */
+/** A partial or failed answer may be missing entries: it can report a failure it saw, never that all passed. */
 function checksItem(feedback: RunPRFeedbackResult | undefined): ReadinessItem {
   if (!feedback?.pull_request) return item('checks', 'unknown')
   const checks = feedback.checks ?? []
@@ -196,7 +196,7 @@ function reviewItem(feedback: RunPRFeedbackResult | undefined): ReadinessItem {
   return item('review', 'pending', 'No approving review yet', 'awaiting review')
 }
 
-/** The log compares with origin/<run base>; a pull request into another branch is not what it measured. */
+/** The log, when it measured what the pull request would merge: the same head, into the same base. */
 export function comparedWith(log: RunGitLogResult | undefined, pr: RunPullRequest | null | undefined): RunGitLogResult | undefined {
   if (!log || log.error) return undefined
   if (pr && log.base_ref !== pr.base_branch && log.base_ref !== `origin/${pr.base_branch}`) return undefined
@@ -204,32 +204,62 @@ export function comparedWith(log: RunGitLogResult | undefined, pr: RunPullReques
   return log
 }
 
-/** Why the log says nothing about the pull request, when it does not. */
-function apart(log: RunGitLogResult | undefined, pr: RunPullRequest | null | undefined): { text: string; short: string } | undefined {
-  if (!log || log.error || !pr || comparedWith(log, pr)) return undefined
-  if (log.head !== pr.head_oid) return { text: `Checkout at ${log.head.slice(0, 7)} is not the pull request's head ${pr.head_oid.slice(0, 7)}`, short: 'not pushed' }
-  return { text: `Compared with ${log.base_ref}, not ${pr.base_branch}`, short: notChecked }
+/** Before a pull request the log only predicts: its base is the checkout's last fetch, so nothing it says counts as done. */
+function predicted(log: RunGitLogResult): [ReadinessItem, ReadinessItem] {
+  const ref = `${log.base_ref} as last fetched`
+  const count = log.conflicts?.length ?? 0
+  return [
+    log.conflicts_error
+      ? item('conflicts', 'unknown', log.conflicts_error, notChecked)
+      : count
+        ? item('conflicts', 'blocked', `${plural(count, 'file')} ${count === 1 ? 'conflicts' : 'conflict'} with ${ref}`, plural(count, 'conflict'), 'needs-you')
+        : item('conflicts', 'unknown', `None against ${ref}`, notChecked),
+    log.behind > 0
+      ? item('base', 'pending', `${plural(log.behind, 'commit')} behind ${ref}`, `${log.behind} behind`)
+      : item('base', 'unknown', `Up to date with ${ref}`, notChecked),
+  ]
+}
+
+const current = new Set(['CLEAN', 'UNSTABLE', 'BLOCKED', 'HAS_HOOKS'])
+
+/** GitHub's own verdict on the pull request; the log, when it measured the same merge, names the files. */
+function reported(feedback: RunPRFeedbackResult, pr: RunPullRequest, read: RunGitLogResult | undefined): [ReadinessItem, ReadinessItem] {
+  const count = read?.conflicts?.length ?? 0
+  const conflicts =
+    feedback.mergeable === 'CONFLICTING'
+      ? item('conflicts', 'blocked', `GitHub reports conflicts with ${pr.base_branch}${count ? `: ${plural(count, 'file')}` : ''}`, count ? plural(count, 'conflict') : 'conflicts', 'needs-you')
+      : feedback.mergeable === 'MERGEABLE'
+        ? item('conflicts', 'ok', `None with ${pr.base_branch}`)
+        : item('conflicts', 'unknown')
+  const status = feedback.merge_state_status ?? ''
+  const base =
+    status === 'BEHIND'
+      ? item('base', 'pending', `Behind ${pr.base_branch}${read?.behind ? ` by ${plural(read.behind, 'commit')}` : ''}`, read?.behind ? `${read.behind} behind` : 'behind')
+      : current.has(status)
+        ? item('base', 'ok', `GitHub needs no update from ${pr.base_branch}`)
+        : item('base', 'unknown')
+  return [conflicts, base]
+}
+
+function unpushed(log: RunGitLogResult, pr: RunPullRequest): ReadinessItem {
+  const count = log.commits?.findIndex((entry) => entry.sha === pr.head_oid) ?? -1
+  const text = count > 0
+    ? `Pull request head is behind the branch: ${plural(count, 'unpushed commit')}`
+    : `Pull request head ${pr.head_oid.slice(0, 7)} is not the checkout's ${log.head.slice(0, 7)}`
+  return item('base', 'pending', text, 'not pushed')
 }
 
 export function readiness(log: RunGitLogResult | undefined, feedback: RunPRFeedbackResult | undefined): Readiness {
   const pr = feedback?.pull_request
-  const read = comparedWith(log, pr)
-  const elsewhere = apart(log, pr)
-  const base = read?.base_ref || 'the base'
-  const conflicts = read?.conflicts
+  const fresh = log && !log.error ? log : undefined
+  let [conflicts, base] = pr ? reported(feedback!, pr, comparedWith(fresh, pr)) : fresh ? predicted(fresh) : [item('conflicts', 'unknown'), item('base', 'unknown')]
+  if (pr?.state === 'open' && fresh && fresh.head !== pr.head_oid) base = unpushed(fresh, pr)
   const items = [
+    ...(pr?.state === 'open' && pr.draft ? [item('draft', 'pending', 'Draft: mark it ready for review on GitHub', 'draft')] : []),
     checksItem(feedback),
-    !conflicts
-      ? item('conflicts', 'unknown', elsewhere?.text, elsewhere?.short)
-      : conflicts.length
-        ? item('conflicts', 'blocked', `${plural(conflicts.length, 'file')} ${conflicts.length === 1 ? 'conflicts' : 'conflict'} with ${base}`, plural(conflicts.length, 'conflict'), 'needs-you')
-        : item('conflicts', 'ok', `None with ${base}`),
+    conflicts,
     reviewItem(feedback),
-    !read
-      ? item('base', 'unknown', elsewhere?.text, elsewhere?.short)
-      : read.behind > 0
-        ? item('base', 'pending', `${plural(read.behind, 'commit')} behind ${base}`, `${read.behind} behind`)
-        : item('base', 'ok', `Up to date with ${base}`),
+    base,
   ]
   return { items, ready: items.every((entry) => entry.state === 'ok') }
 }
@@ -254,14 +284,13 @@ export function headRow(log: RunGitLogResult | undefined, pr: RunPullRequest | n
   const base = pr?.base_branch || log?.base_ref || 'the base'
   if (pr?.state === 'merged') return { label: `Merged into ${base}`, state: 'merged', tone: 'done' }
   if (pr?.state === 'closed') return { label: 'Closed without merging', state: 'closed', tone: 'closed' }
-  const blocker = ready.items.find((entry) => entry.state === 'blocked') ?? ready.items.find((entry) => entry.state !== 'ok')
+  const blocker = (['blocked', 'pending', 'unknown'] as const).map((state) => ready.items.find((entry) => entry.state === state)).find(Boolean)
   const conflicts = ready.items.find((entry) => entry.key === 'conflicts')!
   if (!pr) {
     if (log && !log.error && log.ahead === 0) return { label: `No commits ahead of ${base}`, state: log.behind ? `${log.behind} behind` : '', tone: 'neutral' }
     const state = conflicts.state === 'blocked' ? conflicts : undefined
     return { label: 'Open pull request', state: state?.short ?? (log && !log.error ? `${log.ahead} ahead` : ''), tone: state?.tone ?? 'neutral' }
   }
-  if (log && !log.error && log.behind > 0 && conflicts.state === 'ok') return { label: `Update from ${base}`, state: `${log.behind} behind`, tone: 'needs-you' }
   if (ready.ready) return { label: `Merge into ${base}`, state: 'ready', tone: 'done' }
   return { label: `Merge into ${base}`, state: blocker!.short, tone: blocker!.tone }
 }
@@ -294,13 +323,21 @@ export function chooseAction(
     if (log && !log.error && log.ahead > 0 && can.publish && can.create && !conflicted) return 'open-pr'
     return onChanges ? null : 'review'
   }
-  if (!pr.draft && !conflicted && comparedWith(log, pr) && can.publish && can.merge && !ready.items.some((entry) => entry.state === 'blocked')) return 'merge'
+  const pushed = !log || !!log.error || log.head === pr.head_oid
+  if (!pr.draft && !conflicted && pushed && can.publish && can.merge && !ready.items.some((entry) => entry.state === 'blocked')) return 'merge'
   return 'github'
 }
 
-export function resolvePrompt(log: RunGitLogResult): string {
-  const paths = (log.conflicts ?? []).map((conflict) => `- ${conflict.path}`).join('\n')
-  return `Merging ${log.base_ref} (${log.base.slice(0, 12)}) into ${log.branch} conflicts in these files:\n${paths}\n\nMerge ${log.base_ref} into ${log.branch}, resolve each conflict keeping the intent of both sides, run the checks, and commit the merge.`
+/** Names the files when the checkout's log found them; GitHub alone says only that there are conflicts. */
+export function resolvePrompt(log: RunGitLogResult | undefined, pr: RunPullRequest | null | undefined): string {
+  const base = pr ? `origin/${pr.base_branch}` : log?.base_ref ?? 'the base branch'
+  const branch = log?.branch || pr?.head_branch || 'the run branch'
+  const sameBase = !pr || log?.base_ref === base || log?.base_ref === pr.base_branch
+  const paths = sameBase ? (log?.conflicts ?? []).map((conflict) => `- ${conflict.path}`).join('\n') : ''
+  const found = paths && log
+    ? `Merging ${log.base_ref} (${log.base.slice(0, 12)}) into ${branch} conflicts in these files:\n${paths}`
+    : `GitHub reports that pull request #${pr?.number} conflicts with ${pr?.base_branch}.`
+  return `${found}\n\nFetch ${base}, merge it into ${branch}, resolve each conflict keeping the intent of both sides, run the checks, and commit the merge.`
 }
 
 export type PillState = 'failing' | 'running' | 'passing'

@@ -68,7 +68,7 @@ export function trackPullRequest(run: Run, target: RunPRTarget, client: Api = ap
 
 const pollMs = 60_000
 
-/** One poll per run however many surfaces watch it; a `run.pr` or integration event reads at once. */
+/** One poll per run however many surfaces watch it; a `run.pr`, `git.branch` or integration event reads at once. */
 const polls = new Map<string, { run: Run; watchers: number; timer?: number; stopped: boolean }>()
 const pollListeners = new Set<(runID: string) => void>()
 
@@ -79,10 +79,10 @@ export function onPullRequestPoll(listener: (runID: string) => void): () => void
 }
 
 useStore.subscribe((state, previous) => {
-  if (state.prSeq === previous.prSeq && state.integrationSeq === previous.integrationSeq) return
+  if (state.prSeq === previous.prSeq && state.gitSeq === previous.gitSeq && state.integrationSeq === previous.integrationSeq) return
   for (const [runID, poll] of polls) {
     const mission = poll.run.mission_id
-    if (state.prSeq[runID] !== previous.prSeq[runID] || (mission && state.integrationSeq[mission] !== previous.integrationSeq[mission])) {
+    if (state.prSeq[runID] !== previous.prSeq[runID] || state.gitSeq[runID] !== previous.gitSeq[runID] || (mission && state.integrationSeq[mission] !== previous.integrationSeq[mission])) {
       coalesce(polls, runID, () => refreshPullRequest(poll.run))
     }
   }

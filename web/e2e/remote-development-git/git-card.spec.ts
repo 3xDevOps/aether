@@ -59,8 +59,8 @@ test('the git card draws the run branch against a base that moved, names the con
   await expect(commits).toContainText('Merge base with origin/main')
   await expect(card).toContainText('2 ahead · 1 behind origin/main')
   const readiness = card.getByRole('region', { name: 'Merge readiness' })
-  await expect(readiness).toContainText('1 file conflicts with origin/main')
-  await expect(readiness).toContainText('1 commit behind origin/main')
+  await expect(readiness).toContainText('1 file conflicts with origin/main as last fetched')
+  await expect(readiness).toContainText('1 commit behind origin/main as last fetched')
   await expect(readiness).not.toContainText('Ready to merge')
 
   await card.getByRole('button', { name: '1 conflict' }).click()

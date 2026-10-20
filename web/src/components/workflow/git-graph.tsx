@@ -2,7 +2,8 @@ import { memo } from 'react'
 import type * as React from 'react'
 import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
-import { cn } from '@/lib/utils'
+import { Tooltip } from '@/components/ui/tooltip'
+import { cn, focusRingInset } from '@/lib/utils'
 import { rowHeight, type GitGraph, type GraphEdge, type GraphRow, type Lane } from '@/store/git-flow'
 
 const laneGap = 14
@@ -72,9 +73,11 @@ const CommitRow = memo(function CommitRow({ row }: { row: Extract<GraphRow, { ki
   const { commit } = row
   return (
     <>
-      <span className={cn('min-w-0 truncate', row.conflicts ? 'text-state-needs-you' : row.own ? 'text-text' : 'text-muted')} title={commit.subject}>
-        {commit.subject}
-      </span>
+      <Tooltip content={commit.subject}>
+        <span tabIndex={0} className={cn(focusRingInset, 'min-w-0 truncate rounded-control', row.conflicts ? 'text-state-needs-you' : row.own ? 'text-text' : 'text-muted')}>
+          {commit.subject}
+        </span>
+      </Tooltip>
       {row.tip && <span className="shrink-0 truncate rounded-control bg-chrome px-1 font-code text-ui-xs text-muted max-w-32">{row.tip}</span>}
       {row.conflicts > 0 && (
         <span className="shrink-0 rounded-control bg-state-needs-you-soft px-1 text-ui-xs text-state-needs-you tabular-nums">
