@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Confirm } from '@/components/confirm'
 import { Callout } from '@/components/ui/callout'
 import { Code } from '@/components/ui/code'
 import { FormField } from '@/components/ui/form-field'
@@ -252,5 +253,41 @@ function MirrorRow({ client }: { client: Api }) {
       )}
       {shown && <SyncPanel key={runID} runID={runID} client={client} />}
     </SettingRow>
+  )
+}
+
+export function ResetSection({ client }: { client: Api }) {
+  const caps = useCapability()
+  const [open, setOpen] = useState(false)
+  if (!caps.hasLocal('link.reset')) return null
+  return (
+    <SettingsSection title="Danger zone">
+      <SettingRow
+        label="Disconnect and clear local state"
+        help="Forgets every server, edge sign-in and device key on this computer so you can connect to a different machine and set up again."
+        control={<Button size="sm" variant="danger" onClick={() => setOpen(true)}>Clear local state</Button>}
+      />
+      {open && (
+        <Confirm
+          title="Clear all local state?"
+          description={(
+            <>
+              Deletes <Code>config.json</Code>, the edge device key and tokens, and this app's saved settings.
+              This computer disconnects from its server and onboarding starts over. Your SSH key, your clone and the
+              server's data stay. The edge keeps this device approved until you revoke it on its Devices page, or run{' '}
+              <Code>aether logout</Code> first.
+            </>
+          )}
+          action="Clear local state"
+          pending="Clearing…"
+          onConfirm={() => client.localLinkReset()}
+          onDone={() => {
+            window.localStorage.clear()
+            window.location.reload()
+          }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </SettingsSection>
   )
 }
