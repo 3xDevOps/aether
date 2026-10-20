@@ -341,7 +341,7 @@ func (s *Service) MergePR(ctx context.Context, run Execution, req PRMergeRequest
 		return result, fmt.Errorf("runrepo: GitHub identity changed from %s to %s", req.ExpectedLogin, identity)
 	}
 	number := strconv.Itoa(req.Number)
-	out, mergeErr := s.command(ctx, run, true, "gh", "pr", "merge", number, "--repo", req.Repository, "--"+req.Method, "--match-head-commit", req.ExpectedHead)
+	out, mergeErr := s.command(ctx, run, true, "gh", "pr", "merge", number, "--repo", "github.com/"+req.Repository, "--"+req.Method, "--match-head-commit", req.ExpectedHead)
 	result.Output = out
 	var commandErr *CommandError
 	if mergeErr != nil && !errors.As(mergeErr, &commandErr) {

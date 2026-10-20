@@ -169,7 +169,7 @@ func TestMergePRKeepsGHStderrAndRereadsState(t *testing.T) {
 	if result.Identity != "octo" {
 		t.Fatalf("identity = %q", result.Identity)
 	}
-	if !reflect.DeepEqual(calls[1], []string{"gh", "pr", "merge", "7", "--repo", "acme/app", "--squash", "--match-head-commit", "0123456789abcdef0123456789abcdef01234567"}) {
+	if !reflect.DeepEqual(calls[1], []string{"gh", "pr", "merge", "7", "--repo", "github.com/acme/app", "--squash", "--match-head-commit", "0123456789abcdef0123456789abcdef01234567"}) {
 		t.Fatalf("merge argv = %v", calls[0])
 	}
 

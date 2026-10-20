@@ -1084,9 +1084,11 @@ example with Git older than 2.38 in the run's image or an upstream with no
 common history, `conflicts_error` carries Git's error, `conflicts` is empty
 and means unknown, and the rest of the answer stands.
 
-`run.pr.merge` runs `gh pr merge <number> --repo <repository> --<method>
---match-head-commit <expected_head>`, so GitHub refuses the merge when the
-pull request's head is no longer the `head_oid` the member reviewed.
+`run.pr.merge` runs `gh pr merge <number> --repo github.com/<repository>
+--<method> --match-head-commit <expected_head>`, so GitHub refuses the
+merge when the pull request's head is no longer the `head_oid` the member
+reviewed. The host is explicit, as in every other read, so a `GH_HOST` in
+the run's environment cannot send the merge elsewhere.
 Without `repository` and `number` it merges the pull request the run most
 recently opened through `run.pr.create`, and fails with `-32602` when there
 is none. A pull request an agent opened with native `gh` must be named.
