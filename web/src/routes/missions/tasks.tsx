@@ -18,6 +18,7 @@ import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import type { MissionDetail } from '@/store/missions'
 import { stateContextOf } from '@/store/selectors'
+import { integrationSeqOf } from '@/store/workflow-signals'
 import { deriveSwarmWorkflow, runFacts, shareTree, type CandidateFacts, type RunFacts, type WorkflowNode } from '@/store/workflow'
 
 function scopeFacts(scope: MissionTaskScope): string[] {
@@ -126,21 +127,13 @@ function useSwarmRuns(runIDs: string[]): Record<string, RunFacts> {
 }
 
 const candidateDetails = 3
-/** No event marks a verification or delivery finishing, so a candidate in flight is read again. */
-const candidatePollMs = 5_000
-
-function inFlight(candidate: CandidateFacts): boolean {
-  const request = candidate.delivery_request?.state
-  const checks = (candidate.verifications ?? []).filter((item) => item.candidate_revision === candidate.candidate_revision)
-  return candidate.state === 'preparing' || request === 'pending' || request === 'approved' || request === 'delivering' || checks.at(-1)?.status === 'running'
-}
 
 const noCandidates: CandidateFacts[] = []
 
 function useCandidates(detail: MissionDetail, client: Api): { candidates: CandidateFacts[]; error?: string } {
   const cap = useCapability()
   const [state, setState] = useState<{ missionID: string; candidates: CandidateFacts[]; error?: string }>({ missionID: '', candidates: noCandidates })
-  const [tick, setTick] = useState(0)
+  const changed = useStore(integrationSeqOf(detail.mission.id))
   const { mission } = detail
   const readable = cap.hasMethod('integration.list') && cap.hasMethod('integration.show')
   useEffect(() => {
@@ -159,9 +152,7 @@ function useCandidates(detail: MissionDetail, client: Api): { candidates: Candid
         }
       }))
       if (live) setState({ missionID: mission.id, candidates: shown })
-      if (live && shown.some(inFlight)) timer = window.setTimeout(() => setTick((n) => n + 1), candidatePollMs)
     }
-    let timer: number | undefined
     load().catch((err) => live && setState((current) => ({
       missionID: mission.id,
       candidates: current.missionID === mission.id ? current.candidates : noCandidates,
@@ -169,9 +160,8 @@ function useCandidates(detail: MissionDetail, client: Api): { candidates: Candid
     })))
     return () => {
       live = false
-      clearTimeout(timer)
     }
-  }, [client, detail, mission.id, mission.workspace_id, readable, tick])
+  }, [client, detail, mission.id, mission.workspace_id, readable, changed])
   return state.missionID === mission.id ? state : { candidates: noCandidates }
 }
 

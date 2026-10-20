@@ -334,6 +334,15 @@ describe('swarm detail', () => {
     expect(tasks.queryByText('add empty cart tests')).toBeNull()
   })
 
+  it('reads the candidates again on integration.changed', async () => {
+    seed({ runs: { run_integrator: toRecord(integrator()) } })
+    const client = showing({}, { tasks: [missionTask()] })
+    await mount(client)
+    const reads = vi.mocked(client.integrationList).mock.calls.length
+    await act(async () => useStore.getState().bumpWorkflowSignal('integrationSeq', 'mission_1'))
+    expect(vi.mocked(client.integrationList).mock.calls.length).toBeGreaterThan(reads)
+  })
+
   it('keeps control holds and workers that need you visible when the integrator is folded', async () => {
     seed({
       runs: Object.fromEntries([

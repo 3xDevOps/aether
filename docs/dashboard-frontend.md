@@ -3875,9 +3875,8 @@ The body is one column, in this order:
    `Verification passed`, `Verification failed: <error or exit code>`,
    `Delivery pending`, `Delivered`, or `Not verified yet`; the newest three
    are read with `integration.show` for their checks, a failed read shows
-   its error verbatim, and the list is read again every 5 seconds while a
-   candidate is preparing, verifying or delivering, since no event marks
-   those finishing. Selecting a worker, submission or the
+   its error verbatim, and the list is read again on each
+   `integration.changed` and `mission.changed` for the swarm. Selecting a worker, submission or the
    integrator opens that run. An open task, or one with no worker yet,
    offers **Task details**, closed by default, with the task's objective, scope, blockers other than
    `proposal` in planning, scope diagnostics with a link to the other run,
