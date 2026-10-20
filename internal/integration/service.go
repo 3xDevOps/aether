@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/permissions"
@@ -98,7 +100,9 @@ type Config struct {
 	// only after the runtime container is proven absent.
 	ReleaseRuntime func(context.Context, string) error
 	Admission      AdmissionFunc
-	Now            func() time.Time
+	// Bus receives integration.changed after every durable candidate write.
+	Bus events.Bus
+	Now func() time.Time
 }
 type Service struct {
 	store             Store
@@ -110,6 +114,7 @@ type Service struct {
 	prepareRuntime    func(context.Context, *runtime.Spec) (func(), error)
 	releaseRuntime    func(context.Context, string) error
 	admission         AdmissionFunc
+	bus               events.Bus
 	now               func() time.Time
 	ctx               context.Context
 	cancel            context.CancelFunc
@@ -154,7 +159,7 @@ func New(cfg Config) (*Service, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{store: cfg.Store, git: cfg.Git, evidence: cfg.Evidence, runtime: cfg.Runtime, root: cfg.Root,
 		environment: cfg.Environment, prepareRuntime: cfg.PrepareRuntime, releaseRuntime: cfg.ReleaseRuntime,
-		admission: cfg.Admission, now: now, ctx: ctx, cancel: cancel, active: make(map[string]context.CancelFunc)}, nil
+		admission: cfg.Admission, bus: cfg.Bus, now: now, ctx: ctx, cancel: cancel, active: make(map[string]context.CancelFunc)}, nil
 }
 
 func (s *Service) Close() error {
@@ -413,7 +418,27 @@ func (s *Service) save(ctx context.Context, r *store.IntegrationCandidate, c *pr
 	r.State = string(c.State)
 	r.ExpiresAt = c.ExpiresAt
 	c.Version = r.Version
-	return s.store.UpdateIntegrationCandidate(ctx, r, expected)
+	if err := s.store.UpdateIntegrationCandidate(ctx, r, expected); err != nil {
+		return err
+	}
+	s.publishChanged(ctx, c)
+	return nil
+}
+
+// publishChanged reports a committed candidate write. Callers undo side
+// effects when a save fails, so a lost hint must not fail the committed write;
+// readers re-read integration.show on resubscribe.
+func (s *Service) publishChanged(ctx context.Context, c *protocol.Candidate) {
+	if s.bus == nil {
+		return
+	}
+	if _, err := s.bus.Publish(context.WithoutCancel(ctx), events.Event{
+		WorkspaceID: domain.WorkspaceID(c.WorkspaceID),
+		Payload: events.IntegrationChangedPayload{MissionID: domain.MissionID(c.MissionID), CandidateID: c.CandidateID,
+			State: string(c.State), Version: c.Version},
+	}); err != nil {
+		slog.Warn("integration: candidate is written, but its integration.changed event was not published", "candidate", c.CandidateID, "version", c.Version, "error", err)
+	}
 }
 func mutationFor(c *protocol.Candidate, actor Actor, operation, key, dig string) (protocol.CandidateMutation, bool, error) {
 	if c == nil {

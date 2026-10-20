@@ -398,6 +398,11 @@ type GitBranchPayload struct {
 	WorkspaceID domain.WorkspaceID `json:"workspace_id"`
 	Branch      string             `json:"branch"`
 	Commit      string             `json:"commit"`
+	// Previous is the tip before this update, empty for a new branch.
+	// Forced is set when Previous is not an ancestor of Commit: a rebase,
+	// reset or other rewrite.
+	Previous string `json:"previous"`
+	Forced   bool   `json:"forced"`
 }
 
 func (GitBranchPayload) EventType() Type { return TypeGitBranch }

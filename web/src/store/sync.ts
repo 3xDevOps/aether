@@ -12,13 +12,16 @@ import type {
   Event,
   GatewayCapabilities,
   GitBranchPayload,
+  IntegrationChangedPayload,
   LinkStatus,
+  MissionChangedPayload,
   OverlapPayload,
   RunAccountPayload,
   RunArchivedPayload,
   RunControllerPayload,
   RunDiffPayload,
   RunInputPayload,
+  RunPRPayload,
   RunModelPayload,
   RunProtectedPayload,
   RunRetentionPayload,
@@ -411,8 +414,10 @@ export async function applyEvent(
     await store.getState().readMembers(client.memberList()).then(store.getState().setMemberList).catch(ignore)
   }
 
-  if (ev.type === 'mission.changed' && (ev.payload as { deleted?: boolean } | null)?.deleted) {
-    const missionID = (ev.payload as { mission_id: string }).mission_id
+  const missionChange = ev.type === 'mission.changed' ? (ev.payload as MissionChangedPayload | null) : null
+  if (missionChange?.mission_id) store.getState().bumpWorkflowSignal('missionSeq', missionChange.mission_id)
+  if (missionChange?.deleted) {
+    const missionID = missionChange.mission_id
     const state = store.getState()
     missionDeletions.set(store, (missionDeletions.get(store) ?? 0) + 1)
     state.removeMission(missionID)
@@ -695,6 +700,17 @@ export async function applyEvent(
         }
       }
       if (p.commit) store.getState().applyLastCommit(ev.run_id, p.commit, ev.time)
+      store.getState().bumpWorkflowSignal('gitSeq', ev.run_id)
+      break
+    }
+    case 'run.pr': {
+      const p = ev.payload as RunPRPayload
+      if (p.run_id) store.getState().bumpWorkflowSignal('prSeq', p.run_id)
+      break
+    }
+    case 'integration.changed': {
+      const p = ev.payload as IntegrationChangedPayload
+      if (p.mission_id) store.getState().bumpWorkflowSignal('integrationSeq', p.mission_id)
       break
     }
     case 'run.overlap': {

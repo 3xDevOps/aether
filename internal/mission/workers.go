@@ -111,7 +111,7 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	if replayed {
 		return protocol.WorkerStartResult{Attempt: attemptWire(attempt), Replayed: true}, nil
 	}
-	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+	if publishErr := s.publishMissionChanged(ctx, m.ID, attemptChange("", attempt)); publishErr != nil {
 		return nil, publishErr
 	}
 	if s.cfg.Cost != nil {
@@ -149,7 +149,7 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	if err != nil {
 		return nil, err
 	}
-	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+	if publishErr := s.publishMissionChanged(ctx, m.ID, attemptChange("", attempt)); publishErr != nil {
 		return nil, publishErr
 	}
 	return protocol.WorkerStartResult{Attempt: attemptWire(attempt)}, nil
@@ -290,7 +290,7 @@ func (s *Service) workerCancel(ctx context.Context, run domain.RunID, raw json.R
 		return s.cfg.Cancel.CancelMission(s.operationContext(ctx), a.RunID)
 	})
 	if requested != nil {
-		if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+		if publishErr := s.publishMissionChanged(ctx, m.ID, attemptChange("", requested)); publishErr != nil {
 			return nil, publishErr
 		}
 	}

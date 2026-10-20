@@ -22,6 +22,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -45,6 +46,7 @@ type candidateLifecycleFixture struct {
 	now       time.Time
 	admitMu   sync.Mutex
 	admitted  []Admission
+	bus       *recordingBus
 }
 
 type candidateLifecycleFailingStore struct {
@@ -148,7 +150,7 @@ func newCandidateLifecycleFixture(t *testing.T, transcript io.Reader, withAdmiss
 	f := &candidateLifecycleFixture{
 		ctx: ctx, root: root, repos: repos, db: db, git: git, evidence: evidenceSvc,
 		runtime: docker, workspace: workspace, owner: owner,
-		now: time.Now().UTC(),
+		now: time.Now().UTC(), bus: &recordingBus{},
 	}
 	var admissionFn AdmissionFunc
 	if withAdmission {
@@ -166,6 +168,7 @@ func newCandidateLifecycleFixture(t *testing.T, transcript io.Reader, withAdmiss
 			return runtime.Spec{Image: "busybox:1.36", Command: []string{"true"}}, nil
 		},
 		Admission: admissionFn,
+		Bus:       f.bus,
 		Now: func() time.Time {
 			f.nowMu.Lock()
 			defer f.nowMu.Unlock()
@@ -330,6 +333,16 @@ func TestCandidateLifecycleRetainsCombinedInputsAfterSourcePurge(t *testing.T) {
 	}
 	if got := f.candidateCommitFile(t, candidate, "two.txt"); got != "two\n" {
 		t.Fatalf("retained commit two.txt = %q", got)
+	}
+	var changes []events.IntegrationChangedPayload
+	for _, e := range f.bus.events {
+		if p, ok := e.Payload.(events.IntegrationChangedPayload); ok && e.WorkspaceID == f.workspace.ID {
+			changes = append(changes, p)
+		}
+	}
+	want := events.IntegrationChangedPayload{CandidateID: candidate.CandidateID, State: string(protocol.CandidateFrozen), Version: candidate.Version}
+	if int64(len(changes)) != candidate.Version || changes[0].Version != 1 || changes[0].State != string(protocol.CandidatePreparing) || changes[len(changes)-1] != want {
+		t.Fatalf("integration.changed for prepare = %+v, want versions 1..%d ending with %+v", changes, candidate.Version, want)
 	}
 	f.removeSource(t, first)
 	f.removeSource(t, second)

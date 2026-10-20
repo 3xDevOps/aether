@@ -204,6 +204,8 @@ import type {
   RunGitCommitResult,
   RunGitDiffParams,
   RunGitDiffResult,
+  RunGitLogParams,
+  RunGitLogResult,
   RunGitPushParams,
   RunGitPushResult,
   RunGitStatusParams,
@@ -212,6 +214,8 @@ import type {
   RunPRCreateResult,
   RunPRFeedbackParams,
   RunPRFeedbackResult,
+  RunPRMergeParams,
+  RunPRMergeResult,
   RunPRStatusParams,
   RunPRStatusResult,
   WorkspaceImportParams,
@@ -539,6 +543,8 @@ export const api = {
     call<RunGitStatusResult>('run.git.status', params),
   runGitDiff: (params: RunGitDiffParams) =>
     call<RunGitDiffResult>('run.git.diff', params),
+  runGitLog: (params: RunGitLogParams) =>
+    call<RunGitLogResult>('run.git.log', params),
   runGitCommit: (params: RunGitCommitParams) =>
     call<RunGitCommitResult>('run.git.commit', params),
   runGitPush: (params: RunGitPushParams) =>
@@ -549,6 +555,8 @@ export const api = {
     call<RunPRCreateResult>('run.pr.create', params),
   runPRFeedback: (params: RunPRFeedbackParams) =>
     call<RunPRFeedbackResult>('run.pr.feedback', params),
+  runPRMerge: (params: RunPRMergeParams) =>
+    call<RunPRMergeResult>('run.pr.merge', params),
   workspaceImport: (params: WorkspaceImportParams) =>
     call<WorkspaceImportResult>('workspace.import', params),
   devTerminalList: (params: DevTerminalListParams) =>

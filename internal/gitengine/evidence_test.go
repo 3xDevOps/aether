@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 )
 
 func seedEvidenceWorkspace(t *testing.T, e *Engine, ws domain.WorkspaceID) {
@@ -437,5 +438,65 @@ func TestPublishRunBranchUsesLiveCheckoutHead(t *testing.T) {
 	}
 	if tip, err := e.git(ctx, repo, "rev-parse", "--verify", "refs/heads/"+branch); err != nil || tip != want {
 		t.Fatalf("workspace run branch = %q (%v), want %q", tip, err, want)
+	}
+}
+
+func TestPublishRunBranchFlagsRewrittenHistoryAsForced(t *testing.T) {
+	bus, err := events.NewInProc(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = bus.Close() })
+	e := newUnitEngine(t)
+	e.cfg.Bus = bus
+	seedEvidenceWorkspace(t, e, "ws-forced")
+	ctx := t.Context()
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws-forced", "run-forced", "main", "forced", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeGitBranch}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sub.Close() })
+	gitFileTest(t, checkout, "config", "user.name", "Forced Test")
+	gitFileTest(t, checkout, "config", "user.email", "forced@example.test")
+	commit := func(name string, amend bool) {
+		t.Helper()
+		if writeErr := os.WriteFile(filepath.Join(checkout, name), []byte(name+"\n"), 0o644); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		gitFileTest(t, checkout, "add", "-A")
+		args := []string{"commit", "-q", "-m", name}
+		if amend {
+			args = append(args, "--amend")
+		}
+		gitFileTest(t, checkout, args...)
+	}
+	publish := func() events.GitBranchPayload {
+		t.Helper()
+		if _, publishErr := e.PublishRunBranch(ctx, "run-forced"); publishErr != nil {
+			t.Fatalf("PublishRunBranch: %v", publishErr)
+		}
+		select {
+		case event := <-sub.Events():
+			return event.Payload.(events.GitBranchPayload)
+		case <-time.After(5 * time.Second):
+			t.Fatal("PublishRunBranch did not emit git.branch")
+			return events.GitBranchPayload{}
+		}
+	}
+	commit("one.txt", false)
+	first := publish()
+	commit("two.txt", false)
+	second := publish()
+	if second.Previous != first.Commit || second.Forced {
+		t.Fatalf("fast-forward payload = %+v, want previous %s and not forced", second, first.Commit)
+	}
+	commit("three.txt", true)
+	third := publish()
+	if third.Previous != second.Commit || !third.Forced {
+		t.Fatalf("amended payload = %+v, want previous %s and forced", third, second.Commit)
 	}
 }

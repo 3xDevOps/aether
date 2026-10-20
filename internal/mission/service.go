@@ -266,7 +266,7 @@ func (s *Service) reconcilePendingMissionChange(ctx context.Context, missionID d
 	if s.cfg.Bus == nil {
 		return errors.New("mission: mission notification bus is unavailable")
 	}
-	if publishErr := s.publishMissionChanged(ctx, missionID); publishErr != nil {
+	if publishErr := s.publishMissionChanged(ctx, missionID, missionChange{}); publishErr != nil {
 		return fmt.Errorf("mission: publish pending notification %s: %w", missionID, publishErr)
 	}
 	if ackErr := s.cfg.Missions.AckMissionControlChange(ctx, missionID, version); ackErr != nil {
@@ -466,7 +466,7 @@ func (s *Service) settleObservedAttempt(ctx context.Context, attempt *domain.Att
 	if err := s.cfg.Missions.EndObservedAttempt(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, target, run.Reason); err != nil {
 		return err
 	}
-	if err := s.publishMissionChanged(ctx, attempt.MissionID); err != nil {
+	if err := s.publishMissionChanged(ctx, attempt.MissionID, attemptChange(domain.MissionWorkerEnded, attempt)); err != nil {
 		return err
 	}
 	return nil
@@ -480,7 +480,7 @@ func (s *Service) markAttemptUnknown(ctx context.Context, attempt *domain.Attemp
 		slog.Warn("mission: record attempt policy failure", "attempt", attempt.ID, "error", err)
 		return
 	}
-	_ = s.publishMissionChanged(ctx, attempt.MissionID)
+	_ = s.publishMissionChanged(ctx, attempt.MissionID, attemptChange("", attempt))
 }
 
 func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission) error {
@@ -570,7 +570,7 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 				s.cfg.AuthorizationMu.Unlock()
 				if stateErr != nil {
 					slog.Warn("mission: confirm worker execution", "attempt", attempt.ID, "error", stateErr)
-				} else if publishErr := s.publishMissionChanged(ctx, mission.ID); publishErr != nil {
+				} else if publishErr := s.publishMissionChanged(ctx, mission.ID, attemptChange("", attempt)); publishErr != nil {
 					return publishErr
 				}
 			}
@@ -596,7 +596,7 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 				if stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
 					return stateErr
 				}
-				_ = s.publishMissionChanged(ctx, mission.ID)
+				_ = s.publishMissionChanged(ctx, mission.ID, attemptChange("", attempt))
 				continue
 			}
 			s.dispatchMu.Unlock()
@@ -628,11 +628,11 @@ func (s *Service) reconcileMission(ctx context.Context, mission *domain.Mission)
 			if stateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptUnknown, launchErr.Error()); stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
 				slog.Warn("mission: record worker recovery failure", "attempt", attempt.ID, "error", stateErr)
 			} else {
-				_ = s.publishMissionChanged(ctx, mission.ID)
+				_ = s.publishMissionChanged(ctx, mission.ID, attemptChange("", attempt))
 			}
 			continue
 		}
-		_ = s.publishMissionChanged(ctx, mission.ID)
+		_ = s.publishMissionChanged(ctx, mission.ID, attemptChange("", attempt))
 	}
 	return nil
 }
@@ -658,7 +658,7 @@ func (s *Service) recordIntegratorLaunch(ctx context.Context, m *domain.Mission,
 	if launched {
 		m.IntegratorRunLaunched = true
 	}
-	return s.publishMissionChanged(ctx, m.ID)
+	return s.publishMissionChanged(ctx, m.ID, missionChange{})
 }
 
 // launchErrorForRow keeps the recorded cause while the integrator's run row
@@ -680,7 +680,7 @@ func (s *Service) reconcileCancellation(ctx context.Context, mission *domain.Mis
 			if updateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCancelled, currentRun.Reason); updateErr != nil {
 				return updateErr
 			}
-			return s.publishMissionChanged(ctx, mission.ID)
+			return s.publishMissionChanged(ctx, mission.ID, attemptChange("", attempt))
 		}
 	}
 	s.cfg.AuthorizationMu.Lock()
@@ -740,7 +740,7 @@ func (s *Service) reconcileSubmitted(ctx context.Context, mission *domain.Missio
 		if updateErr := s.cfg.Missions.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCompleted, "retained"); updateErr != nil {
 			return updateErr
 		}
-		return s.publishMissionChanged(ctx, mission.ID)
+		return s.publishMissionChanged(ctx, mission.ID, attemptChange("", attempt))
 	}
 	s.cfg.AuthorizationMu.Lock()
 	defer s.cfg.AuthorizationMu.Unlock()
@@ -849,7 +849,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if createErr := s.cfg.Missions.CreateMission(ctx, m); createErr != nil {
 		return protocol.MissionCreateResult{}, createErr
 	}
-	if publishErr := s.publishMissionChanged(ctx, m.ID); publishErr != nil {
+	if publishErr := s.publishMissionChanged(ctx, m.ID, missionChange{}); publishErr != nil {
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, publishErr
 	}
 	if s.cfg.Runs == nil || m.CurrentIntegratorRunID == "" {
@@ -958,7 +958,7 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{}, err
 	}
-	if publishErr := s.publishMissionChanged(ctx, replaced.ID); publishErr != nil {
+	if publishErr := s.publishMissionChanged(ctx, replaced.ID, missionChange{}); publishErr != nil {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, publishErr
 	}
 	if s.cfg.Runs == nil || replaced.CurrentIntegratorRunID == "" {
