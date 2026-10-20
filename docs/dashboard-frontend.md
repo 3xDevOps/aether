@@ -3909,8 +3909,8 @@ questions and queued messages stay contextual to their run, in its Details
   is mounted (`useLiveFeed`), `applyEvent` appends each event the filters
   select by the server reader's own rule (workspace, run or mail to it, actor,
   type; `run.diff`, `run.title`, `run.agent`, `coord.message.acked`,
-  `mission.changed`, `integration.changed` and `workspace.presence` only when
-  asked for by type),
+  `mission.changed`, `integration.changed`, `run.pr` and `workspace.presence`
+  only when asked for by type),
   skipping a sequence already held. The cursor follows only while the window
   is whole - no read in flight, failed or cut short - and a view reads from
   the cursor again when the stream reconnects. A failed or cut-short read is

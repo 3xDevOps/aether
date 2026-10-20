@@ -29,8 +29,8 @@ const (
 )
 
 // detailTypes are the firehoses the feed leaves out by default: diff
-// snapshots, adapter activity, mail acknowledgements, swarm refresh hints
-// and presence are detail, not workspace history. Asking for one by type still returns it.
+// snapshots, adapter activity, mail acknowledgements, swarm and pull request refresh
+// hints and presence are detail, not workspace history. Asking for one by type still returns it.
 var detailTypes = map[events.Type]bool{
 	events.TypeRunDiff:            true,
 	events.TypeRunTitle:           true,
@@ -38,6 +38,7 @@ var detailTypes = map[events.Type]bool{
 	events.TypeCoordMessageAcked:  true,
 	events.TypeMissionChanged:     true,
 	events.TypeIntegrationChanged: true,
+	events.TypeRunPR:              true,
 	events.TypePresence:           true,
 }
 
