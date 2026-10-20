@@ -59,7 +59,7 @@ export function Tiles({ result, agentNames }: { result: InsightsResult; agentNam
         {top && cost.total_tokens > 0 ? (
           <span>{agentNames[top.harness] ?? top.harness} used {percent(top.total_tokens, cost.total_tokens)}% of the {tokens(cost.total_tokens)}</span>
         ) : (
-          <span>{cost.unmetered_runs > 0 ? 'No tokens reported' : 'No runs ended'}</span>
+          <span>{outcomes.runs.done + outcomes.runs.failed + outcomes.runs.abandoned > 0 ? 'No tokens reported' : 'No runs ended'}</span>
         )}
         {cost.unmetered_runs > 0 && <span>{plural(cost.unmetered_runs, 'run')} did not report tokens</span>}
       </Tile>

@@ -313,4 +313,27 @@ describe('insights page', () => {
     await waitFor(() => expect(insightsGet.mock.calls.map(([p]) => p.scope).sort()).toEqual(['everyone', 'everyone', 'mine', 'mine']))
     expect(screen.getByRole('link', { name: 'PR #8 (open)' }).getAttribute('title')).toBe('Could not refresh this pull request: run.pr.status: github: 401 Bad credentials')
   })
+
+  it('refreshes a teammate\'s open pull request once and re-reads the team when it merged', async () => {
+    seed()
+    const shared = insightsRun({ run_id: 'run_a', pr_url: 'https://github.com/acme/app/pull/7', pr_state: 'open' })
+    const theirs = insightsRun({ run_id: 'run_t', pr_url: 'https://github.com/acme/app/pull/9', pr_state: 'open' })
+    const insightsGet = vi.fn(async (params: InsightsParams) => params.scope === 'mine' ? insights({ recent: [shared] }) : { ...teamInsights(), recent: [shared, theirs] })
+    const runPRStatus = vi.fn<Api['runPRStatus']>(async ({ run_id }) => ({
+      identity: 'alice', account_member_id: alice.id, output: { exit_code: 0, truncated: false },
+      pull_request: { number: run_id === 'run_t' ? 9 : 7, url: '', state: run_id === 'run_t' ? 'merged' : 'open', title: '', draft: false, repository: 'acme/app', base_branch: '', head_repository: '', head_branch: '', head_oid: '' },
+    }))
+    render(<InsightsRoute params={{}} client={fakeApi({ insightsGet, runPRStatus })} />)
+
+    await waitFor(() => expect(insightsGet.mock.calls.filter(([p]) => p.scope === 'everyone')).toHaveLength(2))
+    expect(runPRStatus.mock.calls.map(([p]) => p.run_id).sort()).toEqual(['run_a', 'run_t'])
+  })
+
+  it('says no tokens were reported, not that no runs ended, when runs finished without any', async () => {
+    const base = insights()
+    const quiet = insights({ cost: { ...base.cost, total_tokens: 0, unmetered_runs: 0, by_agent: [] } })
+    renderPage({ insightsGet: vi.fn(async () => quiet) })
+    const box = await screen.findAllByRole('article', { name: 'Total tokens used' })
+    expect(within(box[0]).getByText('No tokens reported')).toBeDefined()
+  })
 })

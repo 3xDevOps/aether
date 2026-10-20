@@ -4231,7 +4231,9 @@ The sections below cover only the member's own runs in the same window.
   learns a merge only when `run.pr.status` is called for the run, so after
   each load the page calls `run.pr.status {"run_id":"<run-id>"}` one after
   another for up to ten listed runs whose pull request is recorded `open`,
-  then reads `insights.get` again once if any state changed. A failed call
+  then reads `insights.get` again once if any state changed. The team
+  statistics do the same for their own list, skipping runs already
+  checked, and a change in either rereads both. A failed call
   leaves the row as it was and puts the error in the pull request link's
   tooltip; a failed second read is shown above the page, which keeps the
   first.
