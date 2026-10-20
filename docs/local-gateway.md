@@ -1066,7 +1066,7 @@ command's `output` (`exit_code`, `stdout`, `stderr`, `truncated`) verbatim.
 | Method | Params | Result |
 | --- | --- | --- |
 | `run.git.log` | `{"run_id":"...","limit":50}` (`limit` optional, 1 to 200, default 50) | `{"branch":"aether/run-...","base_ref":"origin/main","base":"<sha>","head":"<sha>","merge_base":"<sha>","ahead":2,"behind":3,"commits":[Commit],"upstream":[Commit],"conflicts":[{"path":"go.mod"}],"conflicts_error":"...","truncated":false,"output":{...},"error":"..."}` |
-| `run.pr.merge` | `{"run_id":"...","method":"squash"\|"merge"\|"rebase","expected_head":"<sha>","repository":"owner/name","number":128,"expected_login":"octocat"}` (`repository` and `number` optional, together; `expected_login` optional) | `{"identity":"octocat","pull_request":RunPullRequest,"merged":true,"account_member_id":"...","output":{...},"error":"..."}` |
+| `run.pr.merge` | `{"run_id":"...","method":"squash"\|"merge"\|"rebase","expected_head":"<sha>","repository":"owner/name","number":128,"expected_login":"octocat","expected_base":"main"}` (`repository` and `number` optional, together; `expected_login` and `expected_base` optional) | `{"identity":"octocat","pull_request":RunPullRequest,"merged":true,"account_member_id":"...","output":{...},"error":"..."}` |
 
 `run.git.log` compares the checkout's `HEAD` with its upstream base: the
 checkout's `origin/<base branch>` (`base_ref`), or the commit the run forked
@@ -1084,9 +1084,13 @@ example with Git older than 2.38 in the run's image or an upstream with no
 common history, `conflicts_error` carries Git's error, `conflicts` is empty
 and means unknown, and the rest of the answer stands.
 
-`run.pr.merge` runs `gh pr merge <number> --repo <repository> --<method>
---match-head-commit <expected_head>`, so GitHub refuses the merge when the
-pull request's head is no longer the `head_oid` the member reviewed.
+`run.pr.merge` runs `gh pr merge <number> --repo github.com/<repository>
+--<method> --match-head-commit <expected_head>`, so GitHub refuses the
+merge when the pull request's head is no longer the `head_oid` the member
+reviewed. The host is explicit, as in every other read, so a `GH_HOST` in
+the run's environment cannot send the merge elsewhere. With `expected_base`
+it first reads the pull request and refuses, without merging, when it now
+targets another base branch: a retarget leaves the head unchanged.
 Without `repository` and `number` it merges the pull request the run most
 recently opened through `run.pr.create`, and fails with `-32602` when there
 is none. A pull request an agent opened with native `gh` must be named.
@@ -1098,6 +1102,14 @@ merge failed, and records its state and `merged_at`.
 auto-merge that accepted it leaves it `open`. GitHub's refusal, such as a
 failing required check, is in `error` and `output.stderr` as `gh` printed
 it.
+
+`run.pr.feedback` also returns GitHub's own verdict on the merge, read from
+`repos/<repository>/pulls/<number>`: `mergeable` is `MERGEABLE`,
+`CONFLICTING` or `UNKNOWN` (GitHub has not computed it yet), and
+`merge_state_status` is its `mergeable_state` upper-cased, such as `CLEAN`,
+`BEHIND`, `DIRTY`, `BLOCKED`, `UNSTABLE` or `UNKNOWN`. Both are absent when
+no pull request was found or that read failed, and `UNKNOWN` when the pull
+request's head moved between that read and the one the checks used.
 
 ### Administrator GitHub connection and import
 

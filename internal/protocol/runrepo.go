@@ -319,17 +319,22 @@ type RunPRReviewComment struct {
 }
 
 type RunPRFeedbackResult struct {
-	Identity        string               `json:"identity"`
-	PullRequest     *RunPullRequest      `json:"pull_request"`
-	Checks          []RunPRCheck         `json:"checks"`
-	Comments        []RunPRComment       `json:"comments"`
-	Reviews         []RunPRReview        `json:"reviews"`
-	ReviewComments  []RunPRReviewComment `json:"review_comments"`
-	AccountMemberID string               `json:"account_member_id"`
-	Actual          *RunGitExpected      `json:"actual,omitempty"`
-	Truncated       bool                 `json:"truncated"`
-	Output          RunRepoCommandOutput `json:"output"`
-	Error           string               `json:"error,omitempty"`
+	Identity       string               `json:"identity"`
+	PullRequest    *RunPullRequest      `json:"pull_request"`
+	Checks         []RunPRCheck         `json:"checks"`
+	Comments       []RunPRComment       `json:"comments"`
+	Reviews        []RunPRReview        `json:"reviews"`
+	ReviewComments []RunPRReviewComment `json:"review_comments"`
+	// GitHub's own verdict on the merge: Mergeable is MERGEABLE, CONFLICTING
+	// or UNKNOWN, MergeStateStatus is CLEAN, BEHIND, DIRTY, BLOCKED, UNSTABLE,
+	// DRAFT, HAS_HOOKS or UNKNOWN.
+	Mergeable        string               `json:"mergeable,omitempty"`
+	MergeStateStatus string               `json:"merge_state_status,omitempty"`
+	AccountMemberID  string               `json:"account_member_id"`
+	Actual           *RunGitExpected      `json:"actual,omitempty"`
+	Truncated        bool                 `json:"truncated"`
+	Output           RunRepoCommandOutput `json:"output"`
+	Error            string               `json:"error,omitempty"`
 }
 
 // Without Repository and Number, run.pr.merge merges the pull request the run
@@ -344,6 +349,9 @@ type RunPRMergeParams struct {
 	// ExpectedLogin, as on run.pr.create, fails the merge when gh's login
 	// is no longer the one shown.
 	ExpectedLogin string `json:"expected_login,omitempty"`
+	// ExpectedBase fails the merge, before it is attempted, when the pull
+	// request now targets another base branch.
+	ExpectedBase string `json:"expected_base,omitempty"`
 }
 
 // PullRequest is GitHub's state read after the merge attempt, also when

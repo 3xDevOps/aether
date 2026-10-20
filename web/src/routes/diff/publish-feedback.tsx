@@ -31,7 +31,7 @@ function checkSummary(checks: RunPRCheck[]): string {
   ].filter(Boolean).join(' · ')
 }
 
-interface Comment {
+export interface Comment {
   key: string
   author: string
   lines?: string
@@ -43,7 +43,7 @@ interface Comment {
   text: string
 }
 
-function commentsOf(feedback: RunPRFeedbackResult): Comment[] {
+export function commentsOf(feedback: RunPRFeedbackResult): Comment[] {
   return [
     ...(feedback.reviews ?? []).filter((review) => review.body || review.state === 'APPROVED' || review.state === 'CHANGES_REQUESTED').map((review) => ({
       key: `review:${review.id}`, author: review.author, verdict: words(review.state), at: review.submitted_at, body: review.body,

@@ -396,7 +396,7 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 	if err == nil {
 		feedback, err = call.native.PRFeedback(ctx, call.execution, runrepo.PRTarget(p.Target), p.Limit)
 	}
-	return protocol.RunPRFeedbackResult{Identity: feedback.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(feedback.PullRequest), Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Truncated: feedback.Truncated, Output: runrepo.FailureOutput(feedback.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
+	return protocol.RunPRFeedbackResult{Identity: feedback.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(feedback.PullRequest), Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Mergeable: feedback.Mergeable, MergeStateStatus: feedback.MergeStateStatus, Truncated: feedback.Truncated, Output: runrepo.FailureOutput(feedback.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
 }
 
 func (s *Server) runGitLog(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -436,7 +436,7 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 		}
 		p.Repository, p.Number = prs[0].Repository, prs[0].Number
 	}
-	merged, err := call.native.MergePR(ctx, call.execution, runrepo.PRMergeRequest{Repository: p.Repository, Number: p.Number, Method: p.Method, ExpectedHead: p.ExpectedHead, ExpectedLogin: p.ExpectedLogin})
+	merged, err := call.native.MergePR(ctx, call.execution, runrepo.PRMergeRequest{Repository: p.Repository, Number: p.Number, Method: p.Method, ExpectedHead: p.ExpectedHead, ExpectedLogin: p.ExpectedLogin, ExpectedBase: p.ExpectedBase})
 	if merged.PullRequest != nil {
 		s.recordPR(ctx, call.run, merged.PullRequest, false)
 	}
