@@ -336,4 +336,15 @@ describe('insights page', () => {
     const box = await screen.findAllByRole('article', { name: 'Total tokens used' })
     expect(within(box[0]).getByText('No tokens reported')).toBeDefined()
   })
+
+  it('shows a failed pull request check on the row whichever list checked it', async () => {
+    seed()
+    const run = insightsRun({ run_id: 'run_a', pr_url: 'https://github.com/acme/app/pull/7', pr_state: 'open' })
+    const insightsGet = vi.fn(async (params: InsightsParams) => params.scope === 'mine' ? insights({ recent: [run] }) : { ...teamInsights(), recent: [run] })
+    const runPRStatus = vi.fn<Api['runPRStatus']>(async () => { throw new ApiError(502, 'run.pr.status: github: 401 Bad credentials') })
+    render(<InsightsRoute params={{}} client={fakeApi({ insightsGet, runPRStatus })} />)
+
+    expect((await screen.findByRole('link', { name: 'PR #7 (open)' })).getAttribute('title')).toBe('Could not refresh this pull request: run.pr.status: github: 401 Bad credentials')
+    expect(runPRStatus).toHaveBeenCalledTimes(1)
+  })
 })

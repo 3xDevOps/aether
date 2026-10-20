@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -37,26 +37,30 @@ function WorkspaceSelect({ workspace, onWorkspace }: { workspace: string; onWork
 }
 
 /** Reads one scope of the last seven days. Answers to an older request are dropped. */
-function useScope(client: Api, scope: InsightsParams['scope'], workspace: string, timeZone: string, connection: string, checked: Set<string>, onPRChange: () => void) {
+type PRChecks = { checked: Set<string>; setErrors: Dispatch<SetStateAction<Record<string, string>>> }
+
+function useScope(client: Api, scope: InsightsParams['scope'], workspace: string, timeZone: string, connection: string, prs: PRChecks, onPRChange: () => void) {
   const caps = useCapability()
   const [load, setLoad] = useState<SectionLoad>({ kind: 'loading' })
-  const [prErrors, setPRErrors] = useState<Record<string, string>>({})
   const [rereadError, setRereadError] = useState('')
   const requestID = useRef(0)
+  const rereadID = useRef(0)
+  const rereadLanded = useRef(0)
   const lastParams = useRef<InsightsParams | null>(null)
 
   // A finished run's pull request stays open in the record until run.pr.status reads it again from GitHub.
   const refreshPRs = useCallback(async (id: number, result: InsightsResult, params: InsightsParams) => {
     let changed = false
-    for (const run of result.recent.filter((r) => r.pr_state === 'open' && !checked.has(r.run_id)).slice(0, 10)) {
+    for (const run of result.recent.filter((r) => r.pr_state === 'open').slice(0, 10)) {
       if (id !== requestID.current) return
-      checked.add(run.run_id)
+      if (prs.checked.has(run.run_id)) continue
+      prs.checked.add(run.run_id)
       try {
         const status = await client.runPRStatus({ run_id: run.run_id })
-        if (status.error) setPRErrors((errors) => ({ ...errors, [run.run_id]: status.error! }))
+        if (status.error) prs.setErrors((errors) => ({ ...errors, [run.run_id]: status.error! }))
         if (status.pull_request && status.pull_request.state !== run.pr_state) changed = true
       } catch (error) {
-        setPRErrors((errors) => ({ ...errors, [run.run_id]: message(error) }))
+        prs.setErrors((errors) => ({ ...errors, [run.run_id]: message(error) }))
       }
     }
     if (!changed || id !== requestID.current) return
@@ -67,20 +71,22 @@ function useScope(client: Api, scope: InsightsParams['scope'], workspace: string
     } catch (error) {
       if (id === requestID.current) setRereadError(message(error))
     }
-  }, [client, checked, onPRChange])
+  }, [client, prs, onPRChange])
 
   // Reads again without clearing what is shown; the team's success rate moves when a pull request merges.
   const reread = useCallback(async () => {
     const params = lastParams.current
     if (!params) return
-    const id = ++requestID.current
+    const id = requestID.current
+    const mine = ++rereadID.current
     try {
       const fresh = await client.insightsGet(params)
-      if (id === requestID.current && hasOutcomes(fresh)) setLoad({ kind: 'ready', result: fresh })
+      if (id === requestID.current && mine === rereadID.current && hasOutcomes(fresh)) {
+        rereadLanded.current = id
+        setLoad({ kind: 'ready', result: fresh })
+      }
     } catch (error) {
-      if (id !== requestID.current) return
-      setRereadError(message(error))
-      setLoad((current) => current.kind === 'loading' ? { kind: 'failed', message: message(error) } : current)
+      if (id === requestID.current && mine === rereadID.current) setRereadError(message(error))
     }
   }, [client])
 
@@ -88,7 +94,6 @@ function useScope(client: Api, scope: InsightsParams['scope'], workspace: string
     const id = ++requestID.current
     const { from, to } = weekRange(new Date())
     setLoad({ kind: 'loading' })
-    setPRErrors({})
     setRereadError('')
     const params = { workspace_id: workspace, scope, from: rfc3339(from), to: rfc3339(to), time_zone: timeZone }
     lastParams.current = params
@@ -99,7 +104,7 @@ function useScope(client: Api, scope: InsightsParams['scope'], workspace: string
         setLoad({ kind: 'unsupported' })
         return
       }
-      setLoad({ kind: 'ready', result })
+      if (rereadLanded.current !== id) setLoad({ kind: 'ready', result })
       if (caps.hasMethod('run.pr.status')) void refreshPRs(id, result, params)
     } catch (error) {
       if (id !== requestID.current) return
@@ -111,7 +116,7 @@ function useScope(client: Api, scope: InsightsParams['scope'], workspace: string
     if (connection === 'live') void read()
   }, [connection, read])
 
-  return { load, read, reread, prErrors, rereadError }
+  return { load, read, reread, rereadError }
 }
 
 export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
@@ -127,13 +132,19 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
   const timeZone = resolvedZone && resolvedZone !== 'Etc/Unknown' ? resolvedZone : ''
   const problem = useConnectionProblem()
   const navigate = useStore((s) => s.navigate)
-  const checked = useMemo(() => new Set<string>(), [workspace, connection])
+  const [prErrors, setPRErrors] = useState<Record<string, string>>({})
+  const checked = useRef(new Set<string>()).current
+  const prs = useMemo(() => ({ checked, setErrors: setPRErrors }), [])
+  useEffect(() => {
+    checked.clear()
+    setPRErrors({})
+  }, [workspace, connection, checked])
   const mineReread = useRef<() => void>(() => {})
   const teamReread = useRef<() => void>(() => {})
   const rereadMine = useCallback(() => mineReread.current(), [])
   const rereadTeam = useCallback(() => teamReread.current(), [])
-  const mine = useScope(client, 'mine', workspace, timeZone, connection, checked, rereadTeam)
-  const team = useScope(client, 'everyone', workspace, timeZone, connection, checked, rereadMine)
+  const mine = useScope(client, 'mine', workspace, timeZone, connection, prs, rereadTeam)
+  const team = useScope(client, 'everyone', workspace, timeZone, connection, prs, rereadMine)
   mineReread.current = () => void mine.reread()
   teamReread.current = () => void team.reread()
   const waiting = mine.load.kind === 'loading' && connection !== 'live'
@@ -173,7 +184,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
               result={mine.load.result}
               workspaceOf={(id) => mine.load.kind === 'ready' ? mine.load.result.by_workspace.find((w) => w.workspace_id === id)?.name ?? workspaceNames[id] ?? id : id}
               agentNames={agentNames}
-              prErrors={mine.prErrors}
+              prErrors={prErrors}
             />
           )}
         </div>
