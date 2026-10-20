@@ -67,23 +67,45 @@ export function trackPullRequest(run: Run, target: RunPRTarget, client: Api = ap
 
 const pollMs = 60_000
 
+/** One poll per run however many surfaces watch it; a `run.pr` or integration event reads at once. */
+const polls = new Map<string, { run: Run; watchers: number; timer?: number; stopped: boolean }>()
+
+useStore.subscribe((state, previous) => {
+  if (state.prSeq === previous.prSeq && state.integrationSeq === previous.integrationSeq) return
+  for (const [runID, poll] of polls) {
+    const mission = poll.run.mission_id
+    if (state.prSeq[runID] !== previous.prSeq[runID] || (mission && state.integrationSeq[mission] !== previous.integrationSeq[mission])) {
+      void refreshPullRequest(poll.run)
+    }
+  }
+})
+
+function watchPullRequest(run: Run): () => void {
+  let poll = polls.get(run.id)
+  if (!poll) {
+    const started = { run, watchers: 0, timer: undefined as number | undefined, stopped: false }
+    const tick = async () => {
+      if (document.visibilityState === 'visible') await refreshPullRequest(run)
+      if (!started.stopped) started.timer = window.setTimeout(() => void tick(), pollMs)
+    }
+    polls.set(run.id, started)
+    void tick()
+    poll = started
+  }
+  poll.watchers++
+  const watching = poll
+  return () => {
+    if (--watching.watchers > 0) return
+    watching.stopped = true
+    clearTimeout(watching.timer)
+    polls.delete(run.id)
+  }
+}
+
 export function usePullRequest(run: Run, watch: boolean): TrackedPR {
   const tracked = usePullRequests((all) => all[run.id]) ?? none
-  useEffect(() => {
-    if (!watch) return
-    let cancelled = false
-    let timer: number | undefined
-    const poll = async () => {
-      if (document.visibilityState === 'visible') await refreshPullRequest(run)
-      if (!cancelled) timer = window.setTimeout(() => void poll(), pollMs)
-    }
-    void poll()
-    return () => {
-      cancelled = true
-      clearTimeout(timer)
-    }
-    // The run's identity and base never change under one id.
-  }, [run.id, watch])
+  // The run's identity and base never change under one id.
+  useEffect(() => (watch ? watchPullRequest(run) : undefined), [run.id, watch])
   return tracked
 }
 

@@ -2059,8 +2059,10 @@ pull request from the checkout's branch on its GitHub remote into the run's
 base branch, the same target the Publish dialog fills in, or one a member
 typed into that dialog and found or opened a pull request at. It asks once
 when the run page opens, every 60
-seconds while the page is visible and after each push or creation in the
-dialog, and re-reads `run.git.status` only when the answer says the branch or
+seconds while the page is visible, after each push or creation in the
+dialog, and at once on a `run.pr` event or an `integration.changed` event
+for the run's swarm. The header and the [git card](#changes-view-and-publish)
+share one poll per run however many of them are mounted. It re-reads `run.git.status` only when the answer says the branch or
 HEAD moved. Both calls execute `git` and `gh` in the run's container, so the
 check state exists only while the run is `running` or `needs-attention`: a
 run that leaves those states keeps the link and drops the state, and a page
@@ -2853,6 +2855,65 @@ both what it renders and the overlap set the conflict chips read.
   nothing changed the view is the "No changes yet." empty state. `Land`
   (`land.tsx`) adds a row above the strip only after a pull put the run branch
   on this machine.
+- **The git card sits above the strip.** `components/workflow/git-flow.tsx`
+  (`GitFlow`, model in `store/git-flow.ts`) is the run branch, its pull
+  request, checks and merge readiness in one card that updates in place.
+  The Workflow panel shows the same card with `compact`. The header is the
+  pull request's title and `#128` linking to GitHub with **Draft**,
+  **Open**, **Merged** or **Closed** and its dot, or the branch name before
+  there is a pull request.
+- **The graph is `run.git.log`.** One 28px row per commit under one SVG of
+  two lanes: the run branch's commits (`commits`) on the accent lane, the
+  base's commits the branch does not have (`upstream`) muted on the second,
+  interleaved by author time, and the merge base at the bottom. A merge
+  curves into the base lane from its own row; the branch's first commit
+  bends into the merge base. A row shows the subject, a mono pill with the
+  branch or base name at its tip, the short SHA, and the author and age once
+  the card is 420px wide. An upstream commit that touches a path a merge
+  would conflict on (`paths`) is amber with a count. More than eight commits
+  fold into **N more commits**, which unfolds them; a `truncated` log ends in
+  a row that says so, with dotted edges. The top row is the pending action,
+  a hollow node with dashed edges to both tips: **Open pull request**,
+  **Merge into origin/main**, **Update from origin/main**, **Merged into
+  origin/main** or **No commits ahead of origin/main**, with its state on
+  the right: **2 conflicts** (a button whose popover lists the files), **3
+  behind**, **ready**, **merged**, or what holds the merge. The status line
+  under the card reads "7 of 9 checks passed · 1 running · 2 ahead · 1 behind
+  origin/main".
+- **Checks, reviews and readiness come from the last `run.pr.feedback`.**
+  Each check is a pill, failed first, with its name and **passed**,
+  **failed** or **running**; its tooltip gives its status and conclusion and
+  the pill links to the check on GitHub. Under them, the latest approval or
+  change request of each reviewer by name, and the review comments behind a
+  disclosure (send them to the agent from the header's dialog). **Merge
+  readiness** lists **Checks**, **Conflicts**, **Review** and **Base**, each
+  with its own dot. Anything not yet read, or read from a partial answer, is
+  **Not checked yet**; zero checks is "No check has reported yet"; a
+  review-less pull request is "No approving review yet". The heading reads
+  **Ready to merge** only when all four are grounded.
+- **One primary action, by state.** **Review changes** (outside the Changes
+  tab, with nothing to publish yet) opens the Changes tab; **Open pull
+  request** opens the Publish dialog, so **Publish…** turns secondary while
+  the card shows; **Ask agent to resolve conflicts** sends the run, through
+  `useAgentSend`, one message naming the base, its commit and every
+  conflicting file, under the composer's rules; **Squash and merge** calls
+  `run.pr.merge` with the pull request's repository and number after a
+  confirmation that repeats the checklist, and its menu switches to **Create
+  a merge commit** or **Rebase and merge**; **Open on GitHub** covers a
+  draft, a blocked, a merged or a closed pull request. Open, merge and
+  resolve need a live run and the collaborator role, as Publish does;
+  resolve also needs a member who may message the agent. A running action
+  disables the button with a spinner and names itself in the status line.
+  Every error, from the log, the feedback, a send or a merge, is shown as
+  the server or GitHub wrote it.
+- **The card reads on events, not timers.** The log is read when the first
+  card for a run mounts and again on each `git.branch` event for the run or
+  `integration.changed` for its swarm (`gitSeq` and `integrationSeq` in
+  `store/workflow-signals.ts`), one read in flight per run
+  (`store/coalesce.ts`). A refetch keeps every row whose commit did not
+  change as the same object, so its memoised row does not re-render. A
+  polite screen-reader region repeats the status line once it has held for a
+  second.
 - **The patch is fetched, the events only say when.** `run.diff` carries
   per-file stats and no patch text, so a snapshot bumps the run's `revision`
   and the view re-fetches the chosen comparison from `GET /api/v1/run/<id>/patch`

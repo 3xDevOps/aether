@@ -3,6 +3,7 @@ import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { MissingRun } from '@/components/missing-run'
 import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
+import { GitFlow } from '@/components/workflow/git-flow'
 import { api } from '@/lib/api'
 import { clockTime } from '@/lib/format'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
@@ -127,6 +128,9 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
   return (
     <div className="@container flex h-full min-h-0 min-w-0 flex-col bg-canvas">
       <Land run={run} />
+      <div className="max-h-[45%] shrink-0 overflow-y-auto p-2 empty:hidden">
+        <GitFlow runId={run.id} />
+      </div>
       <SummaryStrip
         run={run}
         files={files}

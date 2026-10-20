@@ -525,7 +525,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runGitDiff: vi.fn<Api['runGitDiff']>(async () => ({
       state: { ...gitState }, output: { exit_code: 0, truncated: false },
     })),
-    runGitLog: vi.fn<Api['runGitLog']>(async () => needsOverride('runGitLog')),
+    runGitLog: vi.fn<Api['runGitLog']>(async () => ({
+      branch: gitStatus.branch, base_ref: 'main', base: gitStatus.head, head: gitStatus.head, merge_base: gitStatus.head,
+      ahead: 0, behind: 0, commits: [], upstream: [], conflicts: [], truncated: false,
+      output: { exit_code: 0, truncated: false },
+    })),
     runGitCommit: vi.fn<Api['runGitCommit']>(async () => needsOverride('runGitCommit')),
     runGitPush: vi.fn<Api['runGitPush']>(async () => needsOverride('runGitPush')),
     runPRStatus: vi.fn<Api['runPRStatus']>(async () => ({

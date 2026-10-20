@@ -152,7 +152,7 @@ export function SummaryStrip({
             )}
           </MenuContent>
         </Menu>
-        {publishable && caps.hasMethod('run.git.status') && <PublishDialog key={run.id} run={run} quiet={commenting} />}
+        {publishable && caps.hasMethod('run.git.status') && <PublishDialog key={run.id} run={run} quiet={commenting || caps.hasMethod('run.git.log')} />}
       </span>
       {local && <ReviewLocallyDialog run={run} open={reviewing} onOpenChange={setReviewing} returnFocus={more} />}
     </div>
