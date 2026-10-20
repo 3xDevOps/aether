@@ -345,10 +345,10 @@ func (s *Service) MergePR(ctx context.Context, run Execution, req PRMergeRequest
 	}
 	number := strconv.Itoa(req.Number)
 	if req.ExpectedBase != "" {
-		pr, out, err := s.readPR(ctx, run, req.Repository, number)
-		if err != nil {
-			result.Output = FailureOutput(out, err)
-			return result, err
+		pr, out, readErr := s.readPR(ctx, run, req.Repository, number)
+		if readErr != nil {
+			result.Output = FailureOutput(out, readErr)
+			return result, readErr
 		}
 		if pr.Target.BaseBranch != req.ExpectedBase {
 			result.PullRequest = pr
