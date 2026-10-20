@@ -49,7 +49,7 @@ describe('run workflow', () => {
     const nested = byID(tree, 'agent:b1')!
     expect(nested).toMatchObject({ parentId: 'agent:a1', kind: 'agent', state: 'working', label: 'Job b1', detail: 'Read 2 files', agentId: 'b1' })
     expect(byID(tree, 'agent:a2')!.state).toBe('completed')
-    expect(countsText(tree.counts!)).toBe('3 subagents running')
+    expect(countsText(tree.counts!)).toBe('3 agents running')
     expect(byID(tree, 'agent:a1')!.counts).toBeUndefined()
     expect(tree.counts).toMatchObject({ total: 4, running: 3, done: 1 })
   })

@@ -107,7 +107,7 @@ export const WorkflowRowItem = memo(function WorkflowRowItem({ row, active, fres
       }}
       className={cn(
         focusRingInset,
-        'relative min-w-0 rounded-control outline-none [--wire:14px] coarse:[--wire:22px]',
+        'relative min-w-0 rounded-control [--wire:14px] coarse:[--wire:22px]',
         fresh && 'workflow-enter',
       )}
     >

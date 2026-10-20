@@ -250,7 +250,13 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
   const commits = (log?.commits?.length ?? 0) + (log?.upstream?.length ?? 0)
 
   return (
-    <section aria-label="Branch and pull request" className="@container/git grid min-w-0 gap-2 rounded-panel border border-seam bg-canvas p-3">
+    <section
+      aria-label="Branch and pull request"
+      className={cn(
+        '@container/git flex min-h-0 min-w-0 flex-col rounded-panel border border-seam bg-canvas p-3 [&>*:not([data-commits])]:shrink-0',
+        compact ? 'gap-1' : 'gap-2',
+      )}
+    >
       <header className="flex min-w-0 items-center gap-2 text-ui">
         {pr ? (
           <a className="min-w-0 truncate font-medium text-text underline-offset-2 hover:underline" href={pr.url} target="_blank" rel="noreferrer">
@@ -269,9 +275,11 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
           </span>
         )}
       </header>
-      <GitGraphView graph={graph} head={headContent} onExpand={() => setExpanded(true)} />
+      <div data-commits className="min-h-14 overflow-y-auto [mask-image:linear-gradient(to_bottom,black_calc(100%-0.75rem),transparent)]">
+        <GitGraphView graph={graph} head={headContent} onExpand={() => setExpanded(true)} />
+      </div>
       {compact && log && commits > 0 && (
-        <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(!open)} className="justify-self-start text-muted">
+        <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(!open)} className="h-6 self-start text-muted coarse:h-8">
           <ChevronRight aria-hidden className={cn('size-3 transition-transform motion-reduce:transition-none', open && 'rotate-90')} />
           {open ? 'Hide commits' : `Show ${commits} ${commits === 1 ? 'commit' : 'commits'}`}
         </Button>

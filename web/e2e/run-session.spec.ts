@@ -196,7 +196,7 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   await expect(tree.getByRole('treeitem', { name: /^Map the billing module, Completed, Read 1 file/ })).toHaveAttribute('aria-level', '2')
   await expect(tree.getByRole('treeitem', { name: /^Run the tests, Completed/ })).toHaveAttribute('aria-posinset', '2')
   await expect(tree.getByRole('treeitem', { name: /^Round totals to cents, Completed/ })).toHaveAttribute('aria-setsize', '3')
-  await expect(tree.getByRole('treeitem').first()).toContainText('4 of 4 subagents done')
+  await expect(tree.getByRole('treeitem').first()).toContainText('4 of 4 agents done')
   await expect(tree.getByRole('treeitem', { name: /^Find the callers/ })).toHaveCount(0)
   await tree.getByRole('treeitem', { name: /^Map the billing module/ }).focus()
   await page.keyboard.press('ArrowRight')

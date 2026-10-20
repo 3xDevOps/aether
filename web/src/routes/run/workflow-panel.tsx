@@ -39,7 +39,7 @@ export function WorkflowChip({ run, open, onToggle }: { run: RunRecord; open: bo
   const running = tree.counts?.running ?? 0
   const busy = state === 'waiting-ci' && checks && checks.length > 0
     ? `${countChecks(checks).passing} of ${checks.length} checks`
-    : running > 0 ? `${running} ${running === 1 ? 'subagent' : 'subagents'}` : ''
+    : running > 0 ? `${running} ${running === 1 ? 'agent' : 'agents'} running` : ''
   const text = busy ? `${workflowLabel[state]} · ${busy}` : workflowLabel[state]
   return (
     <Button
@@ -95,7 +95,7 @@ export function WorkflowPanel({ run, view, agent, nav, onClose, onLeave, classNa
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2">
         <WorkflowTree root={tree} label="Run workflow" onSelect={select} />
-        {run.branch && <GitFlow runId={run.id} compact />}
+        {run.branch && view !== 'changes' && <GitFlow runId={run.id} compact />}
       </div>
     </div>
   )

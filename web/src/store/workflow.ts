@@ -13,7 +13,7 @@ export type WorkflowState = PresentationState | 'pending' | 'unknown'
 export type WorkflowKind = 'run' | 'request' | 'agent' | 'workflow' | 'integrator' | 'task' | 'attempt' | 'submission' | 'candidate'
 
 export interface WorkflowCounts {
-  noun: 'task' | 'subagent'
+  noun: 'task' | 'agent'
   done: number
   total: number
   running?: number
@@ -141,7 +141,7 @@ function agentCounts(children: WorkflowNode[]): WorkflowCounts | undefined {
   const agents = agentsIn(children)
   if (agents.length === 0) return undefined
   return {
-    noun: 'subagent',
+    noun: 'agent',
     total: agents.length,
     running: agents.filter((agent) => agent.state === 'working' || agent.state === 'running').length,
     done: agents.filter((agent) => agent.state === 'completed').length,

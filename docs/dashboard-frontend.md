@@ -2861,9 +2861,14 @@ both what it renders and the overlap set the conflict chips read.
   request, checks and merge readiness in one card that updates in place.
   The header is the pull request's title and `#128` linking to GitHub with
   **Draft**, **Open**, **Merged** or **Closed** and its dot, or the branch
-  name before there is a pull request. The Workflow panel shows it with
-  `compact`: the header, the head row, one line of check counts and the
-  primary action, with **Show N commits** unfolding the graph.
+  name before there is a pull request. Above the strip it takes at most 55%
+  of the view's height; only its commit list gives up room, down to two
+  rows, and scrolls, so
+  the header, the head row, readiness and the primary action stay in sight.
+  The Workflow panel shows it with `compact`: the header, the head row, one
+  line of check counts and the primary action, with **Show N commits**
+  unfolding the graph. The panel leaves it out while the Changes view shows
+  the full card.
 - **The graph is `run.git.log`.** One 28px row per commit under one SVG of
   two lanes: the run branch's commits (`commits`) on the accent lane, the
   base's commits the branch does not have (`upstream`) muted on the second,
@@ -3592,9 +3597,10 @@ Any other failed room action shows its error above the sections with
 
 The Workflow panel (`src/routes/run/workflow-panel.tsx`) shows what the run
 and its agents are doing as a tree. Its chip sits after the view switch and
-mirrors the run's state: `● Working · 2 subagents` (subagents running at any
-depth, a background one included) or `● Waiting for CI · 3 of 9 checks` (passing checks of the pull
-request's checks this tab last read). The chip toggles the panel. While the
+mirrors the run's state: `● Working · 2 agents running` (subagents and
+workflows running at any depth, a background one included) or
+`● Waiting for CI · 3 of 9 checks` (passing checks of the pull request's
+checks this tab last read). The chip toggles the panel. While the
 run's row holds 320px for it plus `minReadableWidth`, the panel is a 320px
 `complementary "Workflow"` rail at the right of the frame, remembered per
 device (`workflowOpen`, persisted, closed until the chip first opens it). A
@@ -3604,7 +3610,8 @@ Narrower rows open it as a side sheet and phones as a bottom sheet, a
 `dialog "Workflow"` that returns focus to the chip, and that closes when a
 row opens the subagent inspector or the request. Under the tree, a run
 with a branch shows the compact git card (`GitFlow` in
-`src/components/workflow/git-flow.tsx`).
+`src/components/workflow/git-flow.tsx`), except on the Changes view, which
+shows the full one.
 
 The tree (`src/components/workflow/workflow-tree.tsx`) is derived by
 `src/store/workflow.ts` from what the dashboard already holds: the run's
@@ -3620,7 +3627,7 @@ unchanged subtree's object, so only rows that changed re-render.
 Each 28px row shows a status dot (shape and text, the vocabulary of
 [Run state](#run-state) plus `Not started` and `Not checked yet`), the label,
 the muted reason, and at the right the elapsed time in tabular figures, or
-on the root real counts (`2 subagents running`, counting every depth, or
+on the root real counts (`2 agents running`, counting every depth, or
 `3 of 5 tasks done`).
 Completed subtrees start folded to their summary row; everything else starts
 open. A folded parent still lists every descendant that needs you under it.
