@@ -1,214 +1,167 @@
 # Networking and identity
 
-Aether needs exactly one thing from your network: **the CLI must be able to
-reach the server's SSH port.** Git transport, the control channel, event
-streams, PTY attach, the dashboard forward and `ssh` into a run
-([terminal.md](terminal.md#ssh-and-editors)) all multiplex over that one
-connection. The server opens no HTTP port unless you set `web-port`, and that
-one listens on the host's tailnet addresses only - see
-[The dashboard](#the-dashboard). Through an edge the server opens no port at
-all: it dials out.
+A client (the `aether` CLI or the dashboard) must reach the server's SSH port,
+`:2222` by default. Git, the control channel, terminals and `ssh` into a run
+([terminal.md](terminal.md#ssh-and-editors)) all travel over that one
+connection. The server opens no HTTP port unless you set `web-port`
+([The dashboard](#the-dashboard)). Through an edge it opens no port at all.
 
-How you make that port reachable is up to you. Tailscale is the recommended
-answer, and it is also the recommended identity layer, because it removes SSH
-key management entirely. When neither side can reach the other, an **edge**
-relays the SSH connection instead: server and client both dial out to it, and
-you sign in with GitHub - see [Through an edge](#through-an-edge).
+How clients reach that port also decides how people prove who they are. Terms
+such as server, member and edge are in the [glossary](README.md#concepts).
 
----
-
-## Tailscale: the keyless path
-
-Put the server on your tailnet and joining is three words long:
-
-```sh
-aether link my-server
+```mermaid
+flowchart LR
+    C[Client] -->|tailnet| T[Tailscale]
+    C -->|GitHub sign-in| E[Edge relay]
+    C -->|SSH key| L[LAN, VPN or public IP]
+    T --> S[Aether server :2222]
+    E -->|server dials out| S
+    L --> S
 ```
 
-No key generation. No `authorized_keys`. No invite code. Nothing to copy
-between machines.
+## Which path to use
 
-### Setting it up
+| Path | You need | Who can join | Each person installs | Trade-offs |
+| --- | --- | --- | --- | --- |
+| [Tailscale](#tailscale) | The server on a tailnet | Anyone on the tailnet, once an admin approves | Tailscale and `aether` | No keys or invite codes. Enables the dashboard for phones. Identity is the device owner |
+| [An edge](#through-an-edge) | A GitHub account. No open port | Anyone invited by GitHub account | `aether` | Works behind any NAT. A third party relays traffic but cannot read SSH. No server-hosted dashboard |
+| [LAN, VPN or public IP](#plain-lan-vpn-or-a-cloud-box) | A reachable `host:2222` | Anyone with an invite code | `aether` | You manage SSH keys and invite codes. Keep the port behind a firewall |
 
-On the server box:
+All paths feed one member list, so a tailnet server can also hand an invite
+code to someone outside the tailnet. With no preference, use Tailscale. When
+neither side can reach the other (a hotel network, a server behind home NAT),
+use an edge.
 
-```sh
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
-tailscale status --self
-```
+## Tailscale
 
-`tailscale status --self` prints the machine's tailnet hostname
-(`my-server.tailnet-name.ts.net`); that is what you hand teammates. Then
-install the server as usual (`sudo aether-server setup`; see
-[install.md](install.md#first-boot)) - it detects the tailscaled socket, names
-the tailnet, and asks `Will people reach this server over the tailnet <name>`.
-Answer `yes`: the first-run default, no, turns tailnet sign-in off.
+[Tailscale](https://tailscale.com) is a private network between your devices.
+With the server on your tailnet, joining needs no SSH key, `authorized_keys`
+or invite code.
 
-The server checks for the tailscaled socket **at startup**. If it is there,
-tailnet identity is on; if not, the server is key-only. Start Tailscale before
-the server, and restart the server if you add Tailscale later.
+1. On the server box, join the tailnet and print its host name:
 
-On your machine, join the same tailnet and link:
+   ```sh
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up
+   tailscale status --self
+   ```
 
-```sh
-sudo tailscale up
-aether link my-server
-```
+   Give your team the name it prints, such as `my-server.tailnet-name.ts.net`.
 
-A bare hostname picks up the default port `:2222`, so the MagicDNS name is the
-whole address. On first contact the CLI records the server's host key in
-`~/.ssh/known_hosts` and prints its fingerprint - which is also why plain
-`git push aether main` works afterwards with no further setup.
+2. Run `sudo aether-server setup` ([install.md](install.md#first-boot)). It
+   finds tailscaled and asks `Will people reach this server over the tailnet
+   <name>`. Answer `yes`. The default, no, turns tailnet sign-in off.
 
-### How it works
+3. On each client, join the same tailnet and link:
 
-When a connection arrives, the server asks the local Tailscale daemon who is on
-the other end - a WhoIs lookup against the connection's source address, the
-same mechanism Tailscale SSH uses. Tailscale already authenticated that person
-against your identity provider, so Aether reuses the answer as the member
-identity. The tailnet login becomes the member; the part before the `@` becomes
-the default display name.
+   ```sh
+   sudo tailscale up
+   aether link my-server
+   ```
 
-Aether does **not** take over port 22 and does not use Tailscale SSH itself
-(which targets OS accounts on the host). It keeps its own embedded SSH server
-and borrows only the identity mechanism.
+   A bare host name uses port `:2222`. The first link saves the host key in
+   `~/.ssh/known_hosts`, so `git push aether main` works afterwards.
 
-### Joining and approval
+> [!WARNING]
+> The server looks for the tailscaled socket once, at startup. Start
+> Tailscale before the server, and run `sudo systemctl restart aether-server`
+> if you add it later. Without it the server accepts SSH keys only.
 
-- **First contact creates the admin.** The first tailnet identity to link a
-  fresh server is registered as an admin, not pending. Solo developers never
-  see a join step.
-- **Everyone after that joins pending.** They are registered as collaborators
-  with `Pending` set, and can authenticate but not act until an admin runs
-  `aether member approve <member-id>`. Until then commands fail with
-  `membership pending admin approval`. That is the role they *join* with; an
-  admin can change it afterwards with `aether member role` (see
-  [teams.md](teams.md)).
-- **`--tailnet-auto-join`** removes the approval step, for teams whose tailnet
-  boundary already is the team boundary.
-- **Revocation follows the tailnet.** Remove someone from the tailnet, or deny
-  them the server in your Tailscale ACLs, and they are locked out of Aether.
-  `aether member remove <member-id>` is the in-Aether equivalent.
+### Who is let in
 
-Details of the team flow are in [teams.md](teams.md).
+The server asks the local Tailscale daemon who is on the other end of each
+connection, as Tailscale SSH does. The tailnet login becomes the member, and the
+part before the `@` becomes the display name.
 
-### The trust boundary
+- The first tailnet identity to link a fresh server becomes its admin.
+- Everyone after that joins as a pending collaborator. They cannot act until an
+  admin runs `aether member approve <member-id>`; until then commands fail with
+  `membership pending admin approval`. Roles change with `aether member role`
+  ([teams.md](teams.md)).
+- `--tailnet-auto-join` skips approval, for teams whose tailnet already is the
+  team boundary.
+- Removing someone from the tailnet, or denying them the server in your
+  Tailscale ACLs, locks them out. `aether member remove <member-id>` does the
+  same inside Aether.
 
-**WhoIs names the device's owner, not the person at the keyboard.** Any process
-or OS user on that machine can open a connection attributed to them. This is
-the same boundary Tailscale SSH has, and it is fine for single-user laptops -
-the common case.
+### What an attacker can and cannot do
 
-Two guards for when it is not:
+The lookup names the owner of the device, not the person at the keyboard. Any
+process or OS user on a tailnet machine can connect as its owner. That is fine
+for a single-user laptop and wrong for a shared box. Two guards:
 
-- **Tagged nodes get no identity.** CI runners and shared boxes should be
-  tagged. A tagged node is refused tailnet identity outright
-  (`tagged tailnet node; key authentication required`) and must use a key.
-- **`--tailnet-require-key`** demands a registered SSH key *in addition to*
-  WhoIs on every tailnet connection. Use it when you cannot guarantee
-  single-user devices.
+- A tagged node (CI runners, shared machines) gets no identity. It is refused
+  with `tagged tailnet node; key authentication required` and must use an SSH
+  key.
+- `--tailnet-require-key` demands a registered SSH key on top of the tailnet
+  identity. Use it when you cannot guarantee single-user devices.
 
-### When tailscaled is not there
-
-Every failure falls back to key authentication rather than locking anyone out:
+When the lookup fails, the server falls back to SSH keys instead of locking
+anyone out. A member with only a tailnet identity cannot open new connections
+while tailscaled is down.
 
 | Message on the client | What happened |
 | --- | --- |
-| `tailnet identity unavailable; key authentication required` | The lookup failed - the connection did not arrive over the tailnet, or tailscaled is down. Informational; the key path then runs normally. |
-| `tagged tailnet node; key authentication required` | The connecting node is tagged. |
-| `tailnet login <x> must also present a registered SSH key` | `--tailnet-require-key` is set, as `aether-server setup` does when you answer no to its tailnet question. `sudo aether-server config set tailnet-require-key false`, then `sudo systemctl restart aether-server`, turns tailnet sign-in back on. |
-
-You will see the first message routinely on a tailnet-enabled server whenever
-something connects over loopback or the LAN. It is not an error.
-
-Members who have **only** a tailnet identity and no registered key cannot open
-new connections while tailscaled is down. Runs already going and PTYs already
-attached are unaffected.
+| `tailnet identity unavailable; key authentication required` | The connection did not arrive over the tailnet, or tailscaled is down. Routine on LAN connections |
+| `tailnet login <x> must also present a registered SSH key` | `--tailnet-require-key` is on, as `aether-server setup` leaves it when you answer no to its tailnet question. To undo: `sudo aether-server config set tailnet-require-key false`, then `sudo systemctl restart aether-server` |
 
 The server's user must be able to read `/var/run/tailscale/tailscaled.sock`.
-Running as root (the shipped systemd unit) always can; for an unprivileged
-server user, `sudo tailscale set --operator=<user>`.
-
----
+The shipped unit runs as root. For another user, run `sudo tailscale set
+--operator=<user>`.
 
 ## Through an edge
 
-An edge is a relay both the server and your client dial out to, so neither
-needs an open port, a tailnet or a copied SSH key. The project runs one at
-`https://edge.onaether.dev`, and `aether-server setup` turns it on when the
-host has no tailscaled or you answer no to its tailnet question. SSH still
-runs end to end: the edge splices bytes and cannot read them. You sign in
-once with GitHub and link the server with the link you were given, which the
-desktop app also opens:
+An edge is a relay on the public internet. The server and the client both dial
+out to it, so neither needs an open port, a tailnet or a copied SSH key, and
+people sign in with GitHub. The project runs one at
+`https://edge.onaether.dev`. `aether-server setup` turns it on when the host has
+no tailscaled or you answer no to its tailnet question. You can also
+[run your own](edge.md#running-your-own-edge).
 
 ```sh
-aether login
-aether link --claim <code>        # the owner, with the code inside the claim link aether-server setup printed
+aether login                      # sign in with GitHub
+aether link --claim <code>        # the owner, with the claim code aether-server setup printed
 aether link '<invite link>'       # anyone an admin invited, with the link the admin sent
 ```
 
-A bare name such as `my-server` is always an SSH address, as on a tailnet;
-only a server id, a claim code or a join link goes through the edge.
+A bare name such as `my-server` is always an SSH address. Only a server id, a
+claim code or a join link goes through the edge.
 
-The server's host key is checked against its id on every connection, and
-each device holds its own key. The server's owner chooses, on the machine,
-whether signing in is enough to admit a new device (`edge-access account`)
-or whether each new device waits for a person to approve it
-(`approved-devices`, the default when the setting is missing). Tailnet
-identities and SSH keys work the same under both. The edge serves no
-dashboard in this release: a phone reaches it over the tailnet
-([The dashboard](#the-dashboard)) or through the Android app's Edge mode, and
-a computer through `aether gui`.
-[edge.md](edge.md) covers the two policies, claiming, what the edge can
-see, and running your own; invitations and device approval are in
-[teams.md](teams.md#through-an-edge).
-
----
+The server's owner sets who is let in with `edge-access`: `account` (a GitHub
+sign-in is enough) or `approved-devices` (the default; each new device waits for
+a person to approve it). SSH is end to end, so the edge cannot read it, but it
+sees who connects to which server and when. The [edge guide](edge.md) covers
+the policies, what an attacker needs under each, and claiming. Invitations and
+device approval are in [teams.md](teams.md#through-an-edge).
 
 ## Plain LAN, VPN, or a cloud box
 
-No tailnet? Everything still works; you manage identity with SSH keys and
-invite codes instead.
+With no tailnet and no edge, SSH keys and invite codes identify people.
 
-### The admin
+### The first admin
 
 ```sh
 aether link 192.168.1.50:2222
 ```
 
-The first key to link a fresh server is registered as the admin. The CLI uses
-`~/.ssh/id_ed25519` by default and also offers any key loaded in your ssh-agent.
-With no key to offer (no `id_ed25519`, `id_ecdsa` or `id_rsa` in `~/.ssh` and
-none in the agent), `aether link` creates `~/.ssh/id_ed25519` and its `.pub`
-itself.
-For a key at another path:
+The first key to link a fresh server becomes the admin. The CLI offers
+`~/.ssh/id_ed25519` and any key in your ssh-agent, and creates
+`~/.ssh/id_ed25519` if it finds none. For another key:
 
 ```sh
 aether link 192.168.1.50:2222 --key ~/.ssh/aether_ed25519
 ```
 
-`link` saves that path in `~/.config/aether/config.json`, and re-linking
-without `--key` keeps it. Every command that dials the server's control
-connection - `aether runs`, `attach`, `workspace`, `gui`, and the daemon the
-dashboard installs - reads it from there. Two paths do not:
-
-- git. `aether pull` and `git push aether` shell out to the system `ssh`
-  client, which follows `~/.ssh/config`. Point it at the same key with an
-  `IdentityFile` line for the server host.
-- `aether daemon run` and `aether daemon install` on the command line, which
-  take their own `--key` and otherwise default to `~/.ssh/id_ed25519`.
-
-A `--key` path that does not exist fails before the dial, rather than falling
-back to the agent. The CLI never prompts for a passphrase: to use a
-passphrase-protected key, `ssh-add` it first. Without a usable key the
-handshake fails with `attempted methods [none]`, followed by the reason the
-key it found was rejected - unreadable, unparseable, or passphrase-protected.
+`link` saves the path in `~/.config/aether/config.json`. `git push aether`
+calls the system `ssh` instead, so add an `IdentityFile` line for the server
+host in `~/.ssh/config`. The CLI never asks for a passphrase: run `ssh-add` on
+a protected key first. Without a usable key the handshake fails with
+`attempted methods [none]`, followed by why the key was rejected.
 
 ### Everyone else
 
-Unknown keys are refused (`no Aether member for this key`). An admin mints a
-one-time code:
+An unknown key is refused with `no Aether member for this key`. An admin
+creates a one-time code (`--ttl` is in seconds, default 24 hours):
 
 ```sh
 aether invite --ttl 3600
@@ -230,106 +183,76 @@ aether link <server-host> --invite <invite-code> --name "Example"
 linked to <server-host> as Example (collaborator)
 ```
 
-Invites default to a 24-hour TTL (`--ttl` is in seconds). Nobody needs shell
-access to the server box to join.
+### What an attacker can and cannot do
 
-### Exposure
-
-Only the SSH port has to be reachable. Behind a VPN or on a private LAN, bind
-it normally. On a public cloud box, put the port behind a firewall or a VPN
-rather than opening it to the internet - Aether is an SSH server with a
-container runtime behind it.
-
-Both identity paths share one member table, so a tailnet server can still hand
-out invites to someone connecting from outside the tailnet.
-
----
+Every connection is authenticated by key, and a member can run code in
+containers on the host. Keep the port behind a firewall or a VPN, and do not
+open it to the whole internet on a cloud box. Treat invite codes and member
+keys as secrets.
 
 ## The dashboard
 
-There are two ways to reach the dashboard, and they are independent of each
-other.
+There are two dashboards, and they are independent.
 
-**From your own machine.** `aether gui` serves it from your laptop, bound to
-`127.0.0.1`, over the same SSH connection the CLI uses. Nothing on the server
-listens for it, and nothing about it changes the server's network shape. See
-[local-gateway.md](local-gateway.md).
+| | `aether gui` | Server-hosted |
+| --- | --- | --- |
+| Runs on | Your own machine, on `127.0.0.1` | The server |
+| Reaches the server | Over the same SSH link as the CLI | Directly, over HTTPS |
+| Works with | Every path above | Tailscale only |
+| Good for | Computers: has the directory picker and other local actions ([local-gateway.md](local-gateway.md)) | Phones and borrowed laptops: open a URL, already signed in |
 
-**From the server, for phones.** Set `web-port` and the server hosts the
-dashboard itself, over HTTPS, on every tailnet address of the host (IPv4 and
-IPv6):
+`aether gui` changes nothing about the server's network shape. The
+server-hosted dashboard is the server's only HTTP port, and it listens on the
+host's tailnet addresses only. It needs tailscaled running before the server,
+MagicDNS and HTTPS certificates enabled for the tailnet (Tailscale admin
+console, DNS page), and root or the tailscaled operator to fetch the
+certificate. Plain HTTP is never offered. Turn it on:
 
 ```sh
 sudo aether-server config set web-port 443
 sudo systemctl restart aether-server
 ```
 
-Any device already on the tailnet - a phone, a tablet, a borrowed laptop -
-then opens the server's MagicDNS name and is already signed in:
+Any device on the tailnet then opens the server's MagicDNS name, already signed
+in, with no token or install: `https://my-server.tailnet-name.ts.net/` (other
+ports append `:<port>`). `web-port` defaults to `0`, SSH only.
+`aether-server setup` offers `443` after you answer yes to its tailnet
+question, and `aether-server install --web-port 443` sets it without questions.
 
-```
-https://my-server.tailnet-name.ts.net/
-```
-
-No token or install is needed to open this URL. Port 443 gives that bare URL;
-any other port appends `:<port>`. The server-hosted dashboard has no
-machine-local verbs or onboarding wizard, but its authenticated **Files** view
-can edit the shared member home. Use local `aether gui` for the directory
-picker and other local filesystem or repository actions. Once the dashboard
-serves, the server logs its URL:
-```
-INFO server: serving the dashboard url=https://my-server.tailnet-name.ts.net/
-```
-
-On Android, the [app on every release](install.md#android-app) in its
-Tailscale mode wraps this same URL full screen. It is a WebView and nothing
-more, so everything below holds for it unchanged, except
-[notifications](#notifications), which a WebView cannot receive. Its Aether
-Edge mode needs no tailnet and no `web-port`: it runs the local gateway on the
-phone and reaches the server through the [edge](edge.md).
-
-`web-port` defaults to `0`, which leaves the server SSH-only. `aether-server
-setup` asks for it after a yes to its tailnet question, when
-`--tailnet-require-key` is off; `aether-server install --web-port 443` and
-`aether-server config set web-port 443` set it without questions
-([install.md](install.md#first-boot)).
+Requests are identified by the same tailnet lookup as SSH, on every request
+with no session or token. The joining, approval and role rules above apply, and
+the same trust boundary: the lookup names the device owner, and tagged nodes
+are refused. `--tailnet-require-key` and `web-port` exclude each other, because
+a browser cannot present an SSH key. A server with no tailscaled, including
+one reached through an edge, has no server-hosted dashboard. The
+[Android app](install.md#android-app) in Tailscale mode wraps this URL and
+cannot receive [notifications](#notifications). Its Edge mode needs no tailnet
+and no `web-port`: it runs `aether gui` on the phone and reaches the server
+through the [edge](edge.md).
 
 ### Add it to your home screen
 
-The dashboard ships a web app manifest, so a phone can keep it as an app
-instead of a tab. The installed app opens full screen with no browser chrome:
-the dashboard draws its own top bar, so nothing is lost.
+A phone can keep the dashboard as an app that opens full screen.
 
 - **Android.** Open the server URL in Chrome and pick **Install app** from the
   ⋮ menu.
 - **iPhone.** Open the server URL in Safari and pick **Share > Add to Home
   Screen**.
 
-Install the **server** URL, not an `aether gui` one. `aether gui` puts a
-per-process bearer token in the URL, and the home-screen icon starts the app at
-the site root with no query string - so a saved `aether gui` app opens
-unauthenticated, and the token is dead the next time `aether gui` restarts
-anyway. The server-hosted dashboard has no token to lose: every request is
-identified by tailnet WhoIs, so the installed app is signed in whenever the
-phone is on the tailnet.
-
-There is no offline mode. The dashboard is served out of the server binary and
-has to change the moment the binary does, so nothing is cached; away from the
-tailnet the installed app shows the same connection error the browser does.
-The one service worker the dashboard ships, `/sw.js`, shows
-[notifications](#notifications) and answers no requests.
+Install the server URL, not an `aether gui` one. An `aether gui` URL carries a
+per-process token that the home-screen icon drops, so the app opens
+unauthenticated. There is no offline mode: away from the tailnet the app shows
+the same connection error as the browser.
 
 ### Notifications
 
-The server-hosted dashboard can notify a device when one of your runs needs
-you. On that device, open **Settings** and turn on **Notify this device when a
-run needs me**. The browser asks for permission once. Each browser subscribes
-on its own, and turning the switch off unsubscribes that one. **Send test
-notification** sends one through the whole path and shows the push service's
-own error when it fails.
+The server-hosted dashboard can notify a device when a run of yours needs you.
+On that device open **Settings** and turn on **Notify this device when a run
+needs me**. The browser asks for permission once. **Send test notification**
+tests the whole path and shows the push service's own error when it fails.
 
-A notification goes to a run's owner when the run starts needing them, by
-the [rule](failure-handling.md#run-activity) **Needs you** applies:
+A notification goes to a run's owner when the run starts needing them, by the
+rule behind **Needs you** ([failure-handling.md](failure-handling.md#run-activity)):
 
 | The run | The notification says |
 | --- | --- |
@@ -340,184 +263,85 @@ the [rule](failure-handling.md#run-activity) **Needs you** applies:
 | needs you another way | `Waiting for your reply`, or the usage-limit reason |
 | loses its Enhanced session | `Enhanced could not start: <error>` or `Agent disconnected: <cause>` |
 | fails a turn or reports failure | `Turn failed: <error>`, `Agent failed` or `Agent reported failure, review the result` |
-| reports success | `Agent reported success, review the result`, once each time the review becomes `ready` |
+| reports success | `Agent reported success, review the result` |
 | ends `failed` with a result nobody has seen | `Failed, review the result` |
 
-A run that is working, waiting, stalled, waiting on its own agents, CI or a
-process, or whose success you marked complete or put off for later does not
-notify. A Background run does not notify for a question, a paused
-run notifies once it is resumed, and a swarm worker, whose integrator
-answers for it, notifies only when blocked. A teammate's question, a queued
-message and the swarm rows do not notify. A success is sent with
-`Urgency: normal`, which a device saving battery may hold back; everything
-else with `Urgency: high`.
-
-- The title is the run's title, or the first line of its task. Tapping the
-  notification opens that run, in a dashboard window that is already open
-  when there is one.
-- One notification per run: a newer one replaces the older.
-- A standing state is announced once, and nothing is sent for one that has
-  cleared. A notification already on a device stays until it is dismissed.
-- While you are using a dashboard on any device, notifications wait. Moving
-  the pointer, typing and scrolling count as using it. A notification is sent
-  once you have left every dashboard alone for a minute, if the run still
-  needs you.
-- Runs the [assistant](assistant.md#notifications) launched or messaged for
-  you also notify you when they finish, and when a run you do not own needs
-  you, with the same one-per-run topic and the same wait.
-- `aether handoff` moves a run's notifications to its new owner, who is told
-  what the run needs at that moment.
+A working, waiting or stalled run does not notify. A Background run does not
+notify for a question, and a swarm worker notifies only when blocked. One
+notification per run: a newer one replaces the older, and tapping it opens the
+run. While you use a dashboard on any device, notifications wait until you have
+left every dashboard alone for a minute and the run still needs you. Runs the
+[assistant](assistant.md#notifications) launched for you also notify you when
+they finish.
 
 It needs:
 
-- **The dashboard your server hosts.** `aether gui` serves from a loopback
-  port behind a per-process token, where a notification could not open the run
-  later, so its Settings say so instead of offering the switch. The
-  [desktop app](install.md#desktop-app) shows its own notification while it is
-  open.
-- **A browser with Web Push.** Chrome, Edge and Firefox on a computer or on
-  Android, and Safari on a Mac. On an iPhone or iPad it works only in the
-  dashboard [added to the home screen](#add-it-to-your-home-screen), on iOS
-  16.4 or later; in a Safari tab the switch says so. The
-  [Android app](install.md#android-app) cannot receive notifications at all:
-  on an Android phone, install the dashboard from Chrome as above and turn the
-  switch on there.
-- **Outbound HTTPS from the server to the browser vendors' push services**, on
-  port 443: `fcm.googleapis.com` for Chrome and most Chromium browsers,
-  `updates.push.services.mozilla.com` for Firefox, `web.push.apple.com` for
-  Safari, and `*.notify.windows.com` for Edge. The server connects directly,
-  not through an `HTTPS_PROXY`, and only to public addresses: an endpoint on
-  the server's own host, LAN or tailnet is refused.
+- The server-hosted dashboard. `aether gui` does not offer the switch. The
+  [desktop app](install.md#desktop-app) shows its own notification while open.
+- A browser with Web Push: Chrome, Edge and Firefox on a computer or Android,
+  Safari on a Mac. On an iPhone or iPad it works only in the dashboard added to
+  the home screen, on iOS 16.4 or later. The
+  [Android app](install.md#android-app) cannot receive notifications: install
+  the dashboard from Chrome instead.
+- Outbound HTTPS from the server on port 443 to the browser vendors' push
+  services: `fcm.googleapis.com` (Chrome), `updates.push.services.mozilla.com`
+  (Firefox), `web.push.apple.com` (Safari) and `*.notify.windows.com` (Edge).
+  The server connects directly, ignoring `HTTPS_PROXY`, and only to public
+  addresses.
 
-The server signs every message with a key it creates on first start,
-`<data-dir>/push/vapid_key.pem`, mode `0600`. Each subscription is bound to
-that key. If the file is lost, turn the switch off and on again on each
-device.
-
-A notification the push service does not take is logged as `push:
-notification not delivered` with the service's answer, and never delays the
-run. A device the push service reports gone is forgotten, and its switch reads
-off the next time Settings opens. What the push service receives is in
+The server signs messages with a key it creates on first start,
+`<data-dir>/push/vapid_key.pem`. If that file is lost, turn the switch off and
+on again on each device. A refused message is logged as `push: notification not
+delivered` with the service's answer. What the push service receives is in
 [privacy.md](privacy.md#push-notifications).
-
-### What it needs
-
-- **tailscaled on the server host**, running before the server starts. It is
-  the same daemon and the same unix socket
-  (`/var/run/tailscale/tailscaled.sock`) the WhoIs identity path uses.
-- **MagicDNS and HTTPS certificates enabled for the tailnet**, in the
-  Tailscale admin console on the DNS page. The certificate and key for the
-  node's MagicDNS name come from tailscaled, which issues them through Let's
-  Encrypt and renews them; the server re-fetches hourly in the background and
-  keeps serving the cached pair if a refresh fails.
-- **Permission to fetch that certificate**, which is root or the tailscaled
-  operator (`sudo tailscale set --operator=<user>`). The shipped systemd unit
-  runs as root.
-
-Plain HTTP is never offered - there is no redirect and no cleartext port.
-Without the certificate the server serves no dashboard
-([When it does not start](#when-it-does-not-start)).
-
-### Who you are on it
-
-Every request is identified the same way an SSH connection is: a WhoIs lookup
-on the request's source address, resolved afresh per request. There is no
-session and no token, so nothing can outlive the tailnet's answer - remove
-someone from the tailnet, or deny them the server in your ACLs, and their next
-request is refused.
-
-That means the joining, approval and capability rules above apply unchanged.
-The first identity to reach a fresh server becomes the admin; later ones join
-pending unless `--tailnet-auto-join`, and a pending member's dashboard shows
-`membership pending admin approval` on every call until an admin runs
-`aether member approve <member-id>`. Every call then passes the same
-capability checks a CLI call does.
-
-**The trust boundary is the same one, and it now covers the browser.** WhoIs
-names the device's owner, not the person holding the phone. Tagged nodes are
-refused here too. `--tailnet-require-key` and `web-port` are mutually
-exclusive: HTTP cannot present a key, so a server set to require one does not
-start the dashboard.
-
-Key-only and invite-code servers - anything with no tailscaled, including
-one reached through an edge - have no server-hosted dashboard in this release.
-On a computer `aether gui` serves it; on a phone the Android app's Edge mode
-does, for a server reached through an edge.
 
 ### Android DNS
 
-Go's pure resolver reads `/etc/resolv.conf`, which Android does not have. The
-[Android app](install.md#android-app) in Edge mode (permission
-`ACCESS_NETWORK_STATE`) writes the active network's DNS servers to
-`resolv.conf` in its private files directory, rewrites it on network change,
-and starts the bundled CLI with `AETHER_RESOLV_CONF` set to that path. The CLI
-honours the variable only when `/etc/resolv.conf` is absent, so it changes
-nothing on a computer.
+Android has no `/etc/resolv.conf`. The Android app in Edge mode writes the
+network's DNS servers to a file in its private directory and starts the bundled
+CLI with `AETHER_RESOLV_CONF` pointing at it. The CLI reads the variable only
+when `/etc/resolv.conf` is absent.
 
 ### When it does not start
 
-Rather than serve something it cannot identify or encrypt, the dashboard does
-not start. It is optional, so the server keeps serving SSH and the edge
-without it and says why: at error level in `journalctl -u aether-server`
-(`server: the tailnet dashboard is not serving; the server runs without it`),
-and verbatim in **Settings > Server** of a dashboard opened another way, such
-as `aether gui`.
-
-The first two reasons below are checked once, when the server starts: fix
-them, then `sudo systemctl restart aether-server`. For the others the server
-tries again after 5 seconds, then less often, up to every 5 minutes, and logs
-each new reason once. So a server that starts before tailscaled has
-connected, or before HTTPS certificates are enabled, starts the dashboard by
-itself and logs `server: serving the dashboard`. A dashboard whose listeners
-all stop later is reported the same way and stays down until a restart. The
-reasons:
+If the dashboard cannot identify or encrypt, it does not start. The server keeps
+serving SSH and the edge, and says why in `journalctl -u aether-server`
+(`server: the tailnet dashboard is not serving; the server runs without it`)
+and in **Settings > Server** of a dashboard opened another way. The first two
+reasons are checked once at startup: fix them, then `sudo systemctl restart
+aether-server`. For the others the server retries, up to every 5 minutes, so a
+server that starts before tailscaled or before HTTPS certificates are on starts
+the dashboard by itself.
 
 | Message | What to do |
 | --- | --- |
-| `the dashboard identifies members by tailnet WhoIs and tailscaled was not running when the server started (no /var/run/tailscale/tailscaled.sock); start Tailscale before the server, or set web-port to 0` | Start tailscaled first, then the server. |
-| `tailnet-require-key demands an SSH key on every tailnet connection and the dashboard cannot present one; set one of tailnet-require-key and web-port off` | Pick one: keyed tailnet connections, or the dashboard. |
-| `tailscaled did not report this node: status has no DNS name` | Enable MagicDNS for the tailnet. |
-| `servergw: tailscaled reports no tailnet address for <name>` | The node is not up on the tailnet; `tailscale status --self`. |
-| `servergw: HTTPS certificate for <name>: <error>; enable MagicDNS and HTTPS certificates for the tailnet in the Tailscale admin console (DNS page), or set web-port to 0` | Enable HTTPS certificates, or run as root or the tailscaled operator. The error tailscaled gave is quoted in place of `<error>`. |
-| `servergw: listen: no tailnet address could be bound: <errors>` | The port is taken on every tailnet address, or binding it needs privileges the server does not have. One address that will not bind - the IPv6 one on a host with IPv6 disabled - is only a warning in the journal (`servergw: tailnet address not bound`); the others still serve. |
+| `the dashboard identifies members by tailnet WhoIs and tailscaled was not running when the server started (no /var/run/tailscale/tailscaled.sock); start Tailscale before the server, or set web-port to 0` | Start tailscaled, then restart the server |
+| `tailnet-require-key demands an SSH key on every tailnet connection and the dashboard cannot present one; set one of tailnet-require-key and web-port off` | Pick one |
+| `tailscaled did not report this node: status has no DNS name` | Enable MagicDNS |
+| `servergw: tailscaled reports no tailnet address for <name>` | The node is not up. Run `tailscale status --self` |
+| `servergw: HTTPS certificate for <name>: <error>; enable MagicDNS and HTTPS certificates for the tailnet in the Tailscale admin console (DNS page), or set web-port to 0` | Enable HTTPS certificates, or run as root or the tailscaled operator |
+| `servergw: listen: no tailnet address could be bound: <errors>` | The port is taken on every tailnet address, or binding needs privileges the server lacks. One address that will not bind (IPv6 on a host with IPv6 off) is only a warning |
 
-Once it is serving, a request that cannot be identified is refused per
-request, with the JSON error body the dashboard shows:
+Once it serves, a request it cannot identify is refused with a JSON error:
+`403` `tagged tailnet node; the dashboard identifies members by their tailnet
+login and a tagged node has none` (tagged nodes use a key over SSH), or `503`
+`tailnet identity unavailable: <error>` (tailscaled is down, or the source is
+not on the tailnet).
 
-| Status | Message | What happened |
-| --- | --- | --- |
-| `403` | `tagged tailnet node; the dashboard identifies members by their tailnet login and a tagged node has none` | The request came from a tagged node. Tagged nodes use a key over SSH; they have no dashboard. |
-| `503` | `tailnet identity unavailable: <error>` | The lookup failed - tailscaled is down, or the source address is not on the tailnet. |
+`web-port` is off by default because it needs tailscaled, MagicDNS and HTTPS
+certificates that an existing install may lack. On a fresh config `aether-server
+setup` checks that tailscaled answers, that HTTPS certificates are on, that the
+host holds its tailnet addresses (tailscaled with `--tun=userspace-networking`
+does not) and that nothing listens on port 443. If a check fails it offers `0`
+and prints the fix. Typing `443` anyway still sets it, and the dashboard starts
+once the tailnet is ready.
 
-### Why it is off by default
+## Limits
 
-The listener has hard prerequisites (tailscaled, MagicDNS, HTTPS
-certificates) that an existing install may not have, and it is the server's
-only HTTP port. So `web-port` defaults to `0` and turning it on is a deliberate
-act. `aether-server setup` offers 443 by default once you answer that people
-reach the server over the tailnet, because a phone reaching the dashboard is
-the point of putting the server on a tailnet. On a fresh config setup first
-checks that tailscaled answers, that it reports HTTPS certificates for the
-tailnet, that the host holds its tailnet addresses (tailscaled with
-`--tun=userspace-networking` does not), and that nothing already listens on
-port 443 there. When a check fails, setup offers `0` and prints the reason and
-the fix:
+- Tailnet identity names a device owner, not a person.
+- A server without tailscaled, or reached through an edge, has no
+  server-hosted dashboard.
+- Any other tunnel that gets a TCP port to the server works, but only Tailscale
+  and the edge bring identity with them.
 
-```
-Defaulting to 0: HTTPS certificates are off for this tailnet; enable MagicDNS and HTTPS certificates on the DNS page of the Tailscale admin console, then run: sudo aether-server config set web-port 443
-```
-
-Typing `443` at the question still sets it; on a tailnet that is not ready the
-server then runs without the dashboard, names what to enable, and starts the
-dashboard once it is. Re-running setup keeps the `web-port` already in the
-config.
-
----
-
-## Other tunnels
-
-The reachability seam inside the server covers announcement and address
-discovery - Tailscale first-class, plain host/port always available, and the
-edge for servers nothing can dial. Anything else that gets a TCP port from
-your laptop to the server box works too; Tailscale and the edge are the paths
-with identity built in.
+Next: [teams.md](teams.md) for roles, invitations and approval.
