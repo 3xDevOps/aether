@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ type terminalTestExec struct {
 	identity   runtime.ExecIdentity
 	process    *fakeContainer
 	attachment *fakeAttachment
+	stopGate   func(context.Context) error
 }
 
 func newTerminalTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
@@ -122,6 +124,11 @@ func (e *terminalTestExec) Wait(ctx context.Context) (runtime.ExitStatus, error)
 	}
 }
 func (e *terminalTestExec) Stop(ctx context.Context, _ time.Duration) (runtime.ExitStatus, error) {
+	if e.stopGate != nil {
+		if err := e.stopGate(ctx); err != nil {
+			return runtime.ExitStatus{}, err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return runtime.ExitStatus{}, err
 	}
@@ -293,6 +300,38 @@ func TestDevelopmentTerminalsShareOneListAndStopOnlyOwnedProcess(t *testing.T) {
 	_, _, err = e.sched.CaptureDevelopmentTerminal(t.Context(), run.ID, terminalTestTarget(terminal))
 	if !errors.Is(err, ptyhost.ErrSessionReplaced) {
 		t.Fatalf("old target = %v", err)
+	}
+}
+
+func TestStopDevelopmentTerminalsStopsEveryTerminalAtOnce(t *testing.T) {
+	e := newTerminalTestEnv(t, nil)
+	run, _ := e.launchFake(t, "close with open shells")
+	names := []string{"a1", "a2", "a3", "a4"}
+	var arrived atomic.Int32
+	everyStopStarted := make(chan struct{})
+	for _, name := range names {
+		terminalTestProcess(t, e, run.ID, startTestTerminal(t, e, run.ID, name)).stopGate = func(ctx context.Context) error {
+			if arrived.Add(1) == int32(len(names)) {
+				close(everyStopStarted)
+			}
+			select {
+			case <-everyStopStarted:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := e.sched.StopDevelopmentTerminals(ctx, run.ID); err != nil {
+		t.Fatalf("stop waited for one terminal before stopping the next: %v", err)
+	}
+	for _, name := range names {
+		terminal, err := e.sched.LookupDevelopmentTerminal(t.Context(), run.ID, name)
+		if err != nil || terminal.Process.State != "stopped" {
+			t.Fatalf("%s after close = %+v, %v", name, terminal.Process, err)
+		}
 	}
 }
 
