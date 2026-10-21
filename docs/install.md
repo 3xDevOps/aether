@@ -2368,6 +2368,13 @@ for API-key agents. No system user or group is ever created, so there is nothing
 
 ### Client
 
+Sign out of every edge first. Deleting the config directory does not revoke
+this device's tokens at the edges. Plain `aether logout` signs out of one
+edge; with several, run `aether logout --edge <url>` for each origin listed
+under `edges` in `edge-tokens.json` in the config directory. When an edge
+cannot be reached, logout keeps the token and says so; retry before deleting
+anything. A token left behind can still be revoked on that edge's Devices page.
+
 ```sh
 rm -rf ~/.config/aether ~/.config/aether-desktop
 ssh-keygen -R '[<server-host>]:2222'
@@ -2394,11 +2401,8 @@ On macOS the desktop state is `~/Library/Application Support/aether-desktop`,
 the app is `/Applications/Aether.app` (or `~/Applications/Aether.app` for a
 non-administrator account), and the build caches are
 `~/Library/Caches/aether`, `~/Library/Caches/electron`, and
-`~/Library/Caches/electron-builder`. On Windows the state is
-`%APPDATA%\aether-desktop`, the app is `%LOCALAPPDATA%\Programs\Aether Desktop` plus
-its Start Menu shortcut, the build caches are `%LOCALAPPDATA%\aether`,
-`%LOCALAPPDATA%\electron`, and `%LOCALAPPDATA%\electron-builder`, and the
-client binary is wherever you put `aether.exe` on PATH.
+`~/Library/Caches/electron-builder`. Windows has its own list in
+[Windows client](#windows-client).
 
 The `ssh-keygen -R` line matters more than it looks. A reinstalled server
 generates a new host key, so a stale `known_hosts` entry makes the next
@@ -2419,18 +2423,63 @@ systemctl --user daemon-reload
 ```
 
 macOS: `launchctl unload -w ~/Library/LaunchAgents/com.aether.daemon.plist`
-then delete the plist. Windows: `schtasks /Delete /TN aether-daemon` then
-delete `%USERPROFILE%\aether-daemon.xml`.
+then delete the plist.
+
+### Windows client
+
+Sign out of every edge first, as described in [Client](#client)
+(`edge-tokens.json` is in `%APPDATA%\aether`). Then close Aether and run this
+in PowerShell. A line for something you never installed prints an
+error, and the rest still run:
+
+```powershell
+schtasks /End /TN aether-daemon
+schtasks /Delete /TN aether-daemon /F
+Remove-Item "$env:USERPROFILE\aether-daemon.xml"
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\Aether Desktop", "$env:LOCALAPPDATA\Programs\.aether-*"
+Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'Aether.lnk')
+Remove-Item -Recurse HKCU:\Software\Classes\aether
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\Aether"
+Remove-Item -Recurse -Force "$env:APPDATA\aether", "$env:APPDATA\aether-desktop"
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\aether"
+# only if you ran `aether gui build --source`:
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\electron", "$env:LOCALAPPDATA\electron-builder"
+ssh-keygen -R '[<server-host>]:2222'
+rundll32 'sysdm.cpl,EditEnvironmentVariables'
+```
+
+- The first three lines remove the sync daemon's Scheduled Task. It runs
+  `aether.exe` from the CLI directory, so it goes first.
+- The `.aether-*` directories beside `Aether Desktop` are copies of the app
+  that an update set aside and could not delete while it was running.
+- `Aether.lnk` is the Start Menu entry. It lives in the Programs known folder,
+  which folder redirection can move; `GetFolderPath('Programs')` finds it.
+- `HKCU:\Software\Classes\aether` is the `aether://` link handler the app
+  registers each time it starts.
+- `%LOCALAPPDATA%\Programs\Aether` is the installer's default CLI directory,
+  including the `aether.exe.old*` copies `aether update` leaves. With a custom
+  `-BinDir`, delete `aether.exe` and `aether.exe.old*` there instead;
+  `Get-Command aether -All` lists every copy on `PATH`.
+- `%APPDATA%\aether` is the config directory: `config.json`, the device key
+  and the edge tokens. `%APPDATA%\aether-desktop` is the app's own state,
+  including the dashboard's saved settings.
+- The `ssh-keygen -R` line edits `%USERPROFILE%\.ssh\known_hosts`, for the
+  reason given above. Leave `%USERPROFILE%\.ssh\id_ed25519` alone.
+- `rundll32` opens Environment Variables. Under **User variables**, edit
+  `Path` and delete the CLI directory the installer added. The dialog keeps
+  entries written with `%VARIABLES%` as they are. Terminals that are already
+  open keep the old `PATH`.
 
 ### Linked repositories
 
 Each repo you linked has an `aether` git remote and one local branch per run
-you pulled. Repoint the base branch **before** removing the remote:
+you pulled. Repoint the base branch **before** removing the remote. These
+lines run unchanged in PowerShell:
 
 ```sh
 cd ~/code/myproject
 git branch --set-upstream-to=origin/main main   # link may have set this to aether
-git branch -D $(git branch --list 'aether/run-*')
+git branch -D $(git branch --format='%(refname:short)' --list 'aether/run-*')
 git remote remove aether
 ```
 
