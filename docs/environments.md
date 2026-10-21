@@ -17,12 +17,10 @@ flowchart LR
 
 Your **home directory** is a folder on the server, mounted as `$HOME` in your
 environment and in every run you launch ([environment-home.md](environment-home.md)).
-It is the only thing shared before you save. After **Save environment**, new
-runs also get the software you installed outside the home.
-
-A run on another member's shared agent account still starts from the image of
-the member who launches it. Sharing an account never lends your image
-([teams.md](teams.md#agent-accounts)).
+Before you save, only the home is shared. After **Save environment**, new runs
+also get the software you installed outside it. A run on another member's
+shared agent account still starts from the image of the member who launches
+it ([teams.md](teams.md#agent-accounts)).
 
 ## The standard image
 
@@ -41,33 +39,29 @@ The server uses the image tagged for its own release, from
 
 ### Git in run environments
 
-Aether commits for a run with Git inside the run's container. The stock Git in
-Ubuntu 24.04 is enough. These commits do not run commit hooks. If your
-repository needs hooks, run `git commit` in the run's terminal instead. A
-custom image whose Git lacks prepared reference transactions fails the commit
-instead of falling back. See
-[install.md](install.md#git-inside-run-environments) for the diagnostics.
+Aether commits for a run with the Git in the run's container. Stock Ubuntu
+24.04 Git is enough. These commits do not run commit hooks, so if your
+repository needs hooks, run `git commit` in the run's terminal. A custom image
+whose Git lacks prepared reference transactions fails the commit with no
+fallback ([install.md](install.md#git-inside-run-environments)).
 
 ### Updating the standard image
 
-A server update brings the new standard image with it
-([install.md](install.md#upgrading)). The image reaches you in two more steps:
+`aether server update` brings the matching standard image
+([install.md](install.md#upgrading)). It reaches you only after two steps:
 
-1. If you saved an environment, it takes precedence over the new standard
-   image. Run `aether env reset` to go back to standard (this discards what you
-   installed outside the home), or install the update yourself in your
-   environment and save again.
-2. A container keeps the image it started from. Stop and reopen your
-   environment, and start a new run. Running containers are never changed.
+1. A saved environment wins over the standard image. Run `aether env reset`
+   (this discards what you installed outside the home), or update the tool
+   yourself in your environment and save again.
+2. Stop and reopen your environment and start a new run. A container keeps the
+   image it started from.
 
-An admin who set `--standard-image` has to move it to a newer tag or digest:
+An admin who set `--standard-image` has to move it to a newer tag or digest. A
+reused tag such as `:latest` also needs `docker pull` on the host.
 
 ```sh
 sudo aether-server config set standard-image <a newer image> && sudo systemctl restart aether-server
 ```
-
-A reused tag such as `:latest` keeps whatever the server's Docker already has
-until an admin pulls it again on the host (`docker pull <image>`).
 
 ## Install tools in your environment
 
@@ -86,9 +80,9 @@ the environment. The header reads **Installs here reach agents after you
 save.** until you do. `/tmp` is scratch space that saving never captures
 ([environment-home.md](environment-home.md#what-persists)).
 
-The workspace's setup script and variables apply to runs, not to this
-terminal ([Workspace environment](#workspace-environment)). The terminal
-itself is covered in [terminal.md](terminal.md).
+The workspace's setup script and variables apply to runs, not to this terminal
+([Workspace environment](#workspace-environment)). See
+[terminal.md](terminal.md) for the terminal itself.
 
 ## Save the environment
 
@@ -104,9 +98,9 @@ environment`. The image is stored on the server's Docker daemon and is never
 pushed to a registry.
 
 - New runs, workspace shells and the next environment open use the saved image.
-  Runs that are already running keep their containers.
-- Each save replaces the previous one. There is no history. To fix a bad save,
-  repair the installation and save again, or reset.
+  Running containers keep theirs.
+- Each save replaces the previous one. To fix a bad save, repair it and save
+  again, or reset.
 - Saving needs a running terminal. Open the environment first.
 - The environment container survives a stop, a shell exit and a server
   restart, so unsaved changes stay until you reset. Aether recreates the
@@ -118,20 +112,12 @@ pushed to a registry.
 ## Reset to standard
 
 Open **Environment actions**, then **Reset to standard…** (offered once you
-have saved an image), or run:
+have saved an image), or run `aether env reset`. Reset destroys the container,
+forgets your saved image and removes it from the server. Files outside your
+home are lost. The next open and all new runs use the standard image.
 
-```sh
-aether env reset
-```
-
-Reset destroys the environment container, forgets your saved image and removes
-it from the server. Files outside your home are lost. The next open and all
-new runs use the standard image. The command prints `environment reset to the
-standard image`.
-
-**Stop environment…** (`aether terminal stop`) is different: it stops the
-container but keeps your home, your saved image and the container's unsaved
-changes.
+**Stop environment…** (`aether terminal stop`) only stops the container. Your
+home, saved image and unsaved changes stay.
 
 ### When a saved image is missing
 
@@ -164,27 +150,12 @@ aether-server sysbox status     # prints on or off
 
 The host must be Ubuntu or Debian on amd64 or arm64, run Docker, and have Linux
 5.19 or newer or the `shiftfs` module. Otherwise the install stops and changes
-nothing:
+nothing with `Docker inside runs is unavailable on this host: <reason>`.
+[install.md](install.md) covers the server side.
 
-```
-Docker inside runs is unavailable on this host: <reason>
-```
-
-The installer adds a missing `bip` or `default-address-pools` key to
-`/etc/docker/daemon.json`, because Sysbox refuses to install otherwise. It picks
-a free private range, prints each value it writes and does not restart Docker.
-If no free range is left it stops without changing the file. Set the key
-yourself and run it again.
-
-`--container-runtime` (config key `container-runtime`) picks the runtime:
-
-| Value | Meaning |
-| --- | --- |
-| `auto` (default) | `sysbox-runc` when Docker has it registered, otherwise Docker's default. Checked once a minute. |
-| `runc` | Never use Sysbox. Docker is unavailable inside runs. |
-| any other name | That runtime, as registered in Docker. |
-
-To opt out:
+`--container-runtime` (config key `container-runtime`) defaults to `auto`: use
+`sysbox-runc` when Docker has it, checked once a minute. `runc` never uses
+Sysbox. Any other value names a runtime registered in Docker. To opt out:
 
 ```sh
 sudo aether-server config set container-runtime runc
@@ -193,28 +164,21 @@ sudo systemctl restart aether-server
 
 What to expect:
 
-- Existing containers keep the runtime they were created with. After Sysbox is
-  installed, new runs and terminals get Docker within a minute. Close and
-  reopen an open environment terminal.
-- Images, containers and volumes inside a run are deleted with the run's
-  container. `aether env save` does not keep them. Pull or build again in each
-  run.
+- Existing containers keep their runtime. After Sysbox is installed, new runs
+  and terminals get Docker within a minute. Reopen an open environment
+  terminal.
+- Images, containers and volumes inside a run are deleted with its container,
+  and `aether env save` does not keep them.
 - A port published by an inner container is on the run's own network. Reach it
-  from the run at `127.0.0.1`.
-- If `dockerd` cannot start, the launch fails with the log tail. The full log is
+  at `127.0.0.1`.
+- If `dockerd` cannot start, the launch fails with `runtime: dockerd did not
+  become ready (exit 1): <last lines of the log>`. The full log is
   `/var/log/aether-dockerd.log` in the container.
-
-  ```
-  runtime: dockerd did not become ready (exit 1): <last lines of the log>
-  ```
-- Without Sysbox the CLI is present but has no daemon:
-
-  ```
-  Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
-  ```
-- A saved image from before Docker joined the standard image has no Docker CLI.
-  In the environment run `sudo apt-get install -y docker.io docker-compose-v2
-  docker-buildx`, then `aether env save`. Or `aether env reset`.
+- Without Sysbox the CLI has no daemon: `Cannot connect to the Docker daemon at
+  unix:///var/run/docker.sock. Is the docker daemon running?`
+- A saved image from before Docker joined the standard image has no CLI.
+  Install it with `sudo apt-get install -y docker.io docker-compose-v2
+  docker-buildx` and `aether env save`, or `aether env reset`.
 
 How the boundary differs from the host is in
 [security.md](security.md#the-agent-container).
@@ -231,14 +195,12 @@ processes. An admin changes the defaults with `aether-server serve` flags:
 | `--run-pids` | 4096 | Processes and threads |
 
 ```sh
-sudo aether-server config set run-memory 12884901888
-sudo systemctl restart aether-server
+sudo aether-server config set run-memory 12884901888   # 12 GiB
 ```
 
-A new limit applies to containers created afterwards. Existing containers keep
-theirs. Each container also gets swap of a quarter of its memory limit. Docker
-must report support for CPU quotas, memory and swap limits, and PID limits, or
-new containers are refused.
+A new limit applies to containers created afterwards. Docker must report
+support for CPU quotas, memory and swap limits, and PID limits, or new
+containers are refused.
 
 Before it creates a run, environment, browser or agent-updater container,
 Aether checks that the host has room. It refuses the launch when:
@@ -247,22 +209,15 @@ Aether checks that the host has room. It refuses the launch when:
   `max(5 GiB, min(5% of its size, 20 GiB))`. `--min-free-disk` sets the reserve
   in bytes; `0` is automatic and a negative value disables the check.
 - Available host memory is below `max(2 GiB, 10% of host RAM)`.
-- Fewer than 1 GiB of disk and 512 MiB of memory remain for the container
-  being created, counting other launches in progress.
+- Less than 1 GiB of disk or 512 MiB of memory remains for the new container,
+  counting other launches in progress.
 
-The launch fails with a message such as:
-
-```
-scheduler: insufficient disk headroom
-scheduler: insufficient host memory headroom
-scheduler: host capacity unavailable
-```
-
-Aether never stops a running agent to make room. Reopening a paused or live
-retained run does not need admission. A remote Docker daemon, an unsupported
-storage driver or a failed probe also refuses new containers with a capacity
-error. [failure-handling.md](failure-handling.md#picking-a-disk-floor) covers
-diagnosis and the disk floor.
+The launch fails with `scheduler: insufficient disk headroom`, `scheduler:
+insufficient host memory headroom` or `scheduler: host capacity unavailable`
+(a remote Docker daemon, an unsupported storage driver or a failed probe).
+Aether never stops a running agent to make room, and reopening a retained run
+needs no admission. See
+[failure-handling.md](failure-handling.md#picking-a-disk-floor).
 
 ## After a run closes
 
@@ -275,18 +230,14 @@ processes. An admin changes this with `--run-container-ttl` (`0` is seven days,
 a negative value releases at once).
 
 - When free disk nears the `--min-free-disk` floor, Aether removes closed
-  runs' containers early, oldest first, and adds a note to the run. Such a run
-  cannot be reopened. Its branch, evidence and history stay.
-- Reopen works only while the exact container still exists and is within its
-  deadline. It does not restart stopped processes. Finished swarm workers
-  cannot be reopened.
-- A paused container still holds its memory. Pausing stops execution only.
-- **Free container…** releases the container early without deleting history.
-  **Delete** removes the run.
+  runs' containers early, oldest first. Such a run cannot be reopened. Its
+  branch, evidence and history stay.
+- Reopen needs the exact container to still exist. It does not restart stopped
+  processes. A paused container still holds its memory.
+- **Free container…** releases the container early. **Delete** removes the run.
 - The finished checkout is cleaned up after about 72 hours (`--checkout-ttl`)
-  unless evidence still needs it. Terminal recordings, session logs and diff
-  history survive until you delete the run. Published branches are never
-  removed by this cleanup.
+  unless evidence needs it. Recordings, session logs and diff history stay
+  until you delete the run, and published branches are never removed.
 
 ## Workspace environment
 
@@ -313,22 +264,16 @@ aether workspace env script --file setup.sh    # replace it; - reads stdin
 aether workspace env script --clear
 ```
 
-For a Node project, `setup.sh` can be one line:
+The script (for a Node project, one line: `npm ci`) runs once in each new
+run's container, after it starts and before the agent. It runs as `/bin/sh -ec`
+(POSIX `sh`, stops at the first failing command, stderr merged into stdout) in
+`/workspace` as the container's user (root in the standard image). It sees the
+workspace variables, your `$HOME` and tool caches, `AETHER_RUN_ID` and
+`AETHER_WORKSPACE_ID`.
 
-```sh
-npm ci
-```
-
-The script runs once in each new run's container, after it starts and before
-the agent:
-
-| Property | Value |
-| --- | --- |
-| Shell | `/bin/sh -ec '<script>'`, POSIX `sh`, stops at the first failing command, not a login shell. Stderr goes to stdout. |
-| Directory | `/workspace`, the run's checkout |
-| User | The container's user: root in the standard image |
-| Environment | The workspace variables, your `$HOME` and tool caches, `AETHER_RUN_ID` and `AETHER_WORKSPACE_ID` |
-| Time limit | None. The launch waits for it, and launches are admitted one at a time, so a slow script delays every other launch on the server. Install dependencies here and leave builds and tests to the agent. |
+There is no time limit. The launch waits, and launches are admitted one at a
+time, so a slow script delays every other launch on the server. Install
+dependencies here and leave builds and tests to the agent.
 
 If the script exits non-zero, the container is removed and the launch fails:
 
@@ -338,9 +283,9 @@ setup script output:
 npm error code E401
 ```
 
-The run is listed as failed. The last 16 KiB of the script's output goes only
-to whoever launched: `aether run` prints it and the launch dialog shows it. It
-is not stored with the run. Secrets in it are replaced with `***`.
+The last 16 KiB of output goes only to whoever launched (`aether run` prints it,
+the launch dialog shows it) and is not stored with the run. Secrets in it are
+replaced with `***`.
 
 ### Variables
 
@@ -370,8 +315,7 @@ aether workspace env set --secret NPM_TOKEN     # on a terminal: prompts, input 
 well. To change a secret, set it again.
 
 Import a `.env` file to add many at once. Values are stored as secrets unless
-you pass `--plain`. The dashboard's **Import .env…** reads the same format and
-lists what each line adds or replaces before it saves anything.
+you pass `--plain`. The dashboard's **Import .env…** previews each line first.
 
 ```sh
 aether workspace env import .env
@@ -383,11 +327,3 @@ aether workspace env import --plain .env
 > is an ordinary environment variable, so the agent can read it, and so can
 > anyone who can launch a run in the workspace or message one.
 > [security.md](security.md#workspace-secrets) lists where the value is kept.
-
-## Limits
-
-- One saved image per member. No history, no undo.
-- Saved images exist only on the server. Nothing is pushed to a registry.
-- A running container never picks up a new image, a new limit or a new
-  workspace variable.
-- Docker inside a run needs Sysbox, and its images do not survive the run.
