@@ -1894,6 +1894,17 @@ END;
 ALTER TABLE missions ADD COLUMN finished_at INTEGER;
 UPDATE missions SET finished_at = updated_at WHERE phase IN ('completed', 'cancelled');
 `,
+	// v77: indexes for reads on hot paths. A run snapshot finds the run's
+	// questions and their replies by run, the overdue sweep reads only
+	// queued steer requests, and a run's timeline finds the agent messages
+	// addressed to it without scanning its workspace's events.
+	`
+CREATE INDEX idx_room_messages_run_kind ON room_messages(run_id, kind, correlation_id);
+CREATE INDEX idx_room_messages_queued_steer ON room_messages(workspace_id, created_at)
+	WHERE kind = 'steer_request' AND state = 'queued';
+CREATE INDEX idx_events_coord_to_run ON events (json_extract(payload, '$.to_run_id'))
+	WHERE type = 'coord.message';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

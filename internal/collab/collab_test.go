@@ -147,6 +147,24 @@ func (s *collabStore) ListRoomMessages(_ context.Context, workspace domain.Works
 	}
 	return page, nil
 }
+func (s *collabStore) ListDueSteerRequests(ctx context.Context, workspace domain.WorkspaceID, now time.Time, before string, limit int) (*store.RoomMessagePage, error) {
+	all, err := s.ListRoomMessages(ctx, workspace, "", before, 0)
+	if err != nil {
+		return nil, err
+	}
+	due := &store.RoomMessagePage{}
+	for _, m := range all.Items {
+		if m.Kind != store.RoomMessageSteerRequest || m.State != store.RoomMessageQueued || m.DeliverAfter != nil && m.DeliverAfter.After(now) {
+			continue
+		}
+		if len(due.Items) == limit {
+			due.NextBefore = due.Items[limit-1].ID
+			break
+		}
+		due.Items = append(due.Items, m)
+	}
+	return due, nil
+}
 func (s *collabStore) ClaimRoomMessage(_ context.Context, id string, now time.Time, force bool, by string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -203,14 +203,11 @@ func (s *Service) DeliverDue(ctx context.Context, limit int) (int, error) {
 	for _, ws := range list {
 		before := ""
 		for {
-			page, err := s.cfg.Store.ListRoomMessages(ctx, ws.ID, "", before, limit)
+			page, err := s.cfg.Store.ListDueSteerRequests(ctx, ws.ID, s.now(), before, limit)
 			if err != nil {
 				return total, fmt.Errorf("list overdue room messages for workspace %q: %w", ws.ID, err)
 			}
 			for _, msg := range page.Items {
-				if msg.Kind != store.RoomMessageSteerRequest || msg.State != store.RoomMessageQueued || msg.DeliverAfter != nil && msg.DeliverAfter.After(s.now()) {
-					continue
-				}
 				run, err := s.cfg.Runs.GetRun(ctx, msg.RunID)
 				if err != nil {
 					sweepErrs = append(sweepErrs, fmt.Errorf("load overdue run %q for message %q: %w", msg.RunID, msg.ID, err))
