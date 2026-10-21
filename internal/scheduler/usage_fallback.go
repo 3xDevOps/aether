@@ -25,9 +25,10 @@ import (
 // its account's usage limit continues on another account.
 type UsageFallback struct {
 	Usage fallback.QuotaReader
-	// AuthorizationMu is the mutex the RPC layer holds over every launch and
-	// share revocation; a move holds it from choosing the account until the
-	// run records it, and not while it replaces the container.
+	// AuthorizationMu is the mutex the RPC layer holds over a launch until
+	// its admission and over a share revocation; a move holds it from
+	// choosing the account until the run records it, and not while it
+	// replaces the container.
 	AuthorizationMu *sync.Mutex
 	// Note posts a system note to the run's room; key makes it idempotent.
 	Note func(ctx context.Context, run *domain.Run, body, key string) error
