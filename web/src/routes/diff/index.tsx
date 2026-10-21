@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { MissingRun } from '@/components/missing-run'
 import { Callout } from '@/components/ui/callout'
@@ -7,7 +7,7 @@ import { useAhead } from '@/components/workflow/git-data'
 import { GitFlow } from '@/components/workflow/git-flow'
 import { api } from '@/lib/api'
 import { clockTime } from '@/lib/format'
-import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { coarsePointer, useElementSize, useMediaQuery } from '@/lib/hooks'
 import { CommentCard } from '@/routes/diff/comment-card'
 import { FileList } from '@/routes/diff/file-list'
 import { Land } from '@/routes/diff/land'
@@ -58,6 +58,10 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
   const [focusedFile, setFocusedFile] = useState<number | null>(null)
   const list = useRef<VirtualizerHandle>(null)
   const scroller = useRef<HTMLDivElement>(null)
+  const [content, setContent] = useState<HTMLDivElement | null>(null)
+  const [start, setStart] = useState<HTMLDivElement | null>(null)
+  const startMargin = useOffsetTop(content, start)
+  const [setToolbar, toolbar] = useElementSize<HTMLDivElement>()
   const from = comparisonFrom(comparison, state.forkTree)
   const behind = usePatch(run ? runID : '', from)
   // The stored patch answers for one comparison; another one's is not shown as this one's.
@@ -84,10 +88,10 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
     setCollapsed((all) => ({ ...all, [path]: false }))
     const index = files.findIndex((file) => file.path === path)
     requestAnimationFrame(() => {
-      if (virtual) list.current?.scrollToIndex(index, { align: 'start' })
+      if (virtual) list.current?.scrollToIndex(index, { align: 'start', offset: -toolbar.height })
       else document.getElementById(`${ids}-${index}`)?.scrollIntoView({ block: 'start' })
     })
-  }, [files, virtual, ids])
+  }, [files, virtual, ids, toolbar.height])
 
   const workspaceID = run?.workspace_id
   const live = useStore((s) => s.connection === 'live')
@@ -128,63 +132,75 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
     />
   )
   return (
-    <div className="@container flex h-full min-h-0 min-w-0 flex-col bg-canvas">
-      <Land run={run} />
-      <div className="flex max-h-[55%] min-h-0 shrink-0 flex-col overflow-y-auto p-2 empty:hidden">
-        <GitFlow runId={run.id} />
-      </div>
-      <SummaryStrip
-        run={run}
-        files={files}
-        comparison={comparison}
-        onCompare={setComparison}
-        wrap={wrap}
-        onWrap={setWrapping}
-        loading={state.status === 'loading'}
-        behind={behind}
-        onRefresh={() => {
-          useStore.getState().refreshDiff(runID)
-          loadPatch(runID, from)
-        }}
-        onJump={jump}
-        onCollapseAll={(next) => setCollapsed(Object.fromEntries(files.map((file) => [file.path, next])))}
-        publishable={!state.recorded && (comparison.kind !== 'all' || files.length > 0 || ahead > 0)}
-      />
-      <ReviewBar run={run} agent={agent} agentName={agentName} files={files} scope={scope} />
-      {(files.length > 0 || (!loading && !failed)) && <Unplaced runID={runID} files={files} scope={scope} />}
-      {answered && state.recorded && (
-        <Callout tone="neutral" role="status" className="m-2 shrink-0">
-          {comparison.kind === 'all'
-            ? 'Checkout removed. Showing the last recorded changes.'
-            : 'Checkout removed. Showing changes up to the last recorded snapshot.'}
-        </Callout>
-      )}
-      {(historyNotice?.historyGap || historyNotice?.snapshotError) && (
-        <Callout tone={historyNotice.snapshotError ? 'failed' : 'needs-you'} role="status" className="m-2 shrink-0">
-          {historyNotice.snapshotError && <p>{historyNotice.snapshotError}</p>}
-          <p>Some snapshot history is unavailable. All changes is separate and still shows the run's changes against its base.</p>
-        </Callout>
-      )}
-      {failed && (
-        <Callout tone="failed" role="alert" className="m-2 shrink-0">
-          {state.error ?? 'The diff could not be loaded.'}
-          {comparison.kind !== 'all' && <p>Choose All changes to view the run's changes against its base.</p>}
-        </Callout>
-      )}
-      {truncated && (
-        <Callout tone="needs-you" className="m-2 shrink-0">
-          The server returned an incomplete diff. Refresh it or fetch the run branch to read the complete change.
-        </Callout>
-      )}
-      <div className="flex min-h-0 flex-1">
-        {files.length > 0 && <FileList files={files} current={current} onJump={jump} />}
-        <div ref={scroller} className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+    <div className="@container flex h-full min-h-0 min-w-0 bg-canvas">
+      {files.length > 0 && <FileList files={files} current={current} onJump={jump} />}
+      <div
+        ref={scroller}
+        style={{ '--diff-top': `${toolbar.height}px` } as CSSProperties}
+        className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
+      >
+        <div ref={setContent} className="relative">
+          <Land run={run} />
+          <div className="p-2 empty:hidden">
+            <GitFlow runId={run.id} />
+          </div>
+          <div ref={setToolbar} className="sticky top-0 z-20">
+            <SummaryStrip
+              run={run}
+              files={files}
+              comparison={comparison}
+              onCompare={setComparison}
+              wrap={wrap}
+              onWrap={setWrapping}
+              loading={state.status === 'loading'}
+              behind={behind}
+              onRefresh={() => {
+                useStore.getState().refreshDiff(runID)
+                loadPatch(runID, from)
+              }}
+              onJump={jump}
+              onCollapseAll={(next) => setCollapsed(Object.fromEntries(files.map((file) => [file.path, next])))}
+              publishable={!state.recorded && (comparison.kind !== 'all' || files.length > 0 || ahead > 0)}
+            />
+            <ReviewBar run={run} agent={agent} agentName={agentName} files={files} scope={scope} />
+          </div>
+          {(files.length > 0 || (!loading && !failed)) && <Unplaced runID={runID} files={files} scope={scope} />}
+          {answered && state.recorded && (
+            <Callout tone="neutral" role="status" className="m-2">
+              {comparison.kind === 'all'
+                ? 'Checkout removed. Showing the last recorded changes.'
+                : 'Checkout removed. Showing changes up to the last recorded snapshot.'}
+            </Callout>
+          )}
+          {(historyNotice?.historyGap || historyNotice?.snapshotError) && (
+            <Callout tone={historyNotice.snapshotError ? 'failed' : 'needs-you'} role="status" className="m-2">
+              {historyNotice.snapshotError && <p>{historyNotice.snapshotError}</p>}
+              <p>Some snapshot history is unavailable. All changes is separate and still shows the run's changes against its base.</p>
+            </Callout>
+          )}
+          {failed && (
+            <Callout tone="failed" role="alert" className="m-2">
+              {state.error ?? 'The diff could not be loaded.'}
+              {comparison.kind !== 'all' && <p>Choose All changes to view the run's changes against its base.</p>}
+            </Callout>
+          )}
+          {truncated && (
+            <Callout tone="needs-you" className="m-2">
+              The server returned an incomplete diff. Refresh it or fetch the run branch to read the complete change.
+            </Callout>
+          )}
           {virtual ? (
-            <div onFocus={(event) => {
+            <div ref={setStart} onFocus={(event) => {
               const id = (event.target as HTMLElement).closest('section')?.id ?? ''
               if (id.startsWith(`${ids}-`)) setFocusedFile(Number(id.slice(ids.length + 1)))
             }}>
-              <Virtualizer ref={list} scrollRef={scroller} data={files} keepMounted={focusedFile !== null && focusedFile < files.length ? [focusedFile] : undefined}>
+              <Virtualizer
+                ref={list}
+                scrollRef={scroller}
+                startMargin={startMargin}
+                data={files}
+                keepMounted={focusedFile !== null && focusedFile < files.length ? [focusedFile] : undefined}
+              >
                 {patchAt}
               </Virtualizer>
             </div>
@@ -198,13 +214,28 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
   )
 }
 
+/** Where `element` starts in the scrolled `content`, kept current as anything above it changes size. */
+function useOffsetTop(content: HTMLElement | null, element: HTMLElement | null): number {
+  const [top, setTop] = useState(0)
+  useLayoutEffect(() => {
+    if (!content || !element) return
+    const measure = () => setTop(element.offsetTop)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(content)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [content, element])
+  return top
+}
+
 /** Comments on a file this diff no longer has. They stay, with their quote, until sent or deleted. */
 function Unplaced({ runID, files, scope }: { runID: string; files: PatchFile[]; scope: string }) {
   const { comments } = useReview(runID)
   const gone = comments.filter((comment) => comment.scope === scope && !files.some((file) => file.path === comment.path))
   if (gone.length === 0) return null
   return (
-    <section aria-label="Outdated comments" className="flex max-h-[40%] shrink-0 flex-col gap-2 overflow-y-auto border-b border-seam bg-chrome p-2">
+    <section aria-label="Outdated comments" className="flex flex-col gap-2 border-b border-seam bg-chrome p-2">
       {gone.map((comment) => (
         <CommentCard key={comment.id} runID={runID} comment={comment} lines={comment.lines} outdated />
       ))}
