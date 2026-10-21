@@ -561,7 +561,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   line clears at the next turn or a new conversation, and is dropped if
   another member signed in before the answer arrived. A refusal stays in the
   notice, focused. The server decides when the suggestion is due; see
-  [assistant.md](assistant.md#the-suggestion). These links, **Skip these
+  [assistant.md](assistant.md#auto-approval). These links, **Skip these
   cards…** and the **Acts without asking** line's **Change in Settings**
   close the panel when it is a sheet, and leave a docked panel open.
 
@@ -1844,7 +1844,7 @@ the wire: an empty task and `tui` are the server's defaults.
 **Model**, under Mode, is a searchable picker (`ModelPicker` in
 `src/components/launch/model-picker.tsx`) whose choice is sent as `model` on
 `run.launch` and passed to the agent as is
-([per-agent flags](harnesses.md#launch-argv)). Its first entry, **Agent
+([per-agent flags](harnesses.md#choose-a-model)). Its first entry, **Agent
 default**, sends no `model` and shows what that default resolves to when the
 agent reports it. The rest come from `agent.models` for the chosen agent and
 account, fetched when the field first shows and kept for the page session;
@@ -2191,7 +2191,7 @@ abandoned, which removes its checkout; a
 failed read shows the server's error with **Retry**. Conversation rows carry no file lists: each edit's diff stays in its `work` entry.
 
 For a run with `acp: true` (Enhanced, or Background over ACP) the rows come
-from its [session item log](enhanced-runs.md#the-session-item-log) instead.
+from its [session item log](enhanced-runs.md#instructions-and-the-session-log) instead.
 With no conversation rows or older-history control, the pane shows a
 decorative, low-contrast Aether mark above the run's title, workspace, agent
 and mode, branch, owner and creation time. The title and each metadata row
@@ -2271,11 +2271,9 @@ components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
 
 A subagent is the agent that Claude Code's `Agent` or `Task` tool launches,
 that another agent announces as an ACP child session, or that a fallback
-launch call names ([session item
-log](enhanced-runs.md#the-session-item-log)); a dynamic workflow is its
-`Workflow` tool. A launch card is any call with `tool_call.subagent`, or a
+launch call names; a dynamic workflow is its `Workflow` tool. A launch card is any call with `tool_call.subagent`, or a
 Claude `Agent`, `Task` or `Workflow` call. Their items carry a parent link
-([session item log](enhanced-runs.md#the-session-item-log)), and
+(`parent_id` in [`internal/acphost/items.go`](../internal/acphost/items.go)), and
 `store/subagents.ts` keeps them out of the conversation. Each session holds
 an index keyed by the launching tool call's id, with the call's latest
 snapshot, the subagent's own items, nested subagents, tool count, latest
@@ -2294,7 +2292,7 @@ loaded is unknown. Elapsed time counts from the call's opening snapshot, so a
 card whose replay starts after it shows none until history reaches it. A
 Workflow call, or an Agent call with `run_in_background`, completes as soon
 as its work starts. When the call carries `tool_call.task`
-([session item log](enhanced-runs.md#the-session-item-log)), the card follows
+([`internal/acphost/items.go`](../internal/acphost/items.go)), the card follows
 the task: running, then done, failed or stopped, with elapsed time to the
 snapshot that settled it. Without it, the card reads "Launched in the
 background", and running once a child item is logged after the call

@@ -45,7 +45,7 @@ instruction set 1 at submission; neither value is in the repository.
 | Category | Productivity |
 | Contact email | The publisher's support address; not in the repository |
 | Website | <https://github.com/3xDevOps/Aether> |
-| Release file | `aether-android.aab` from the GitHub release, [docs/install.md](../../docs/install.md#releases) |
+| Release file | `aether-android.aab` from the GitHub release, [CONTRIBUTING.md](../../CONTRIBUTING.md#releases) |
 
 Play's asset rules are at
 <https://support.google.com/googleplay/android-developer/answer/9866151>.
@@ -119,7 +119,7 @@ If Play App Signing is kept, Google also advises that "for maximum security,
 your upload key and app signing key should be different". Today one GitHub
 Actions keystore is both the GitHub release's signing key and the Play upload
 key; a separate upload key would mean a second keystore and a second set of
-release secrets ([docs/install.md](../../docs/install.md#releases)).
+release secrets ([CONTRIBUTING.md](../../CONTRIBUTING.md#releases)).
 
 ## Android developer verification
 

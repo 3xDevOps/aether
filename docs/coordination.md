@@ -81,7 +81,7 @@ The six advertised coordination methods are unchanged. Native hooks use
 `coord.hook.status`, an internal endpoint with a separate request budget, not
 an additional agent capability or MCP tool. Absent or null parameters retain
 the ordinary read-only result and authorization of `coord.status`. A params
-object opts into bounded observation: `wait_seconds` is 0–30 (zero when
+object opts into bounded observation: `wait_seconds` is 0 to 30 (zero when
 omitted on the wire), and `seen_message_ids` is at most 100 opaque message
 IDs. The result adds optional `wait_supported`, `unread_message_ids`, and
 `wake_admitted` fields; false/empty values may be omitted on the wire. Every
@@ -267,7 +267,7 @@ are four ways to notice mail:
    arriving after their last hook waits for the next supported boundary or
    explicit inbox read. Managed Standard Codex runs load their hooks
    automatically, but Codex runs them only after you [trust them
-   once](harnesses.md#codex-inbox-integration).
+   once](harnesses.md#codex).
 4. **An Enhanced run is prompted by the server.** When mail arrives or a
    turn ends with mail unread, and the run's ACP session is idle with nothing
    queued, the server sends one `session/prompt` carrying the inbox
@@ -342,7 +342,7 @@ Disconnecting or letting the control lease expire does **not** clear the
 durable swarm hold, so it cannot silently re-enable native wake.
 
 A shell, a command or a file transfer over SSH into a worker
-([terminal.md](terminal.md#swarm-workers)) commits the same hold before its
+([terminal.md](terminal.md#swarm-workers-over-ssh)) commits the same hold before its
 process starts, and a session whose hold cannot be recorded does not start.
 Port forwarding alone commits nothing. Closing the SSH connection does not
 clear the hold either; it is released as any other takeover hold is.
@@ -551,12 +551,12 @@ Where the instructions go:
 
 - Standard and non-ACP Background launches of a shipped agent, with or
   without a task, carry them in the agent's system prompt, so they survive
-  compaction; see [harnesses.md](harnesses.md#how-aether-launches-them).
+  compaction; see [harnesses.md](harnesses.md#agent-instructions-and-the-team-memory-brief).
   Gemini CLI, Cursor CLI, Antigravity CLI, custom definitions and admin overrides have no
   such mechanism and get them appended to the task prompt; a taskless
   launch of one gets none.
 - Enhanced runs get them as described in
-  [enhanced-runs.md](enhanced-runs.md#run-instructions).
+  [enhanced-runs.md](enhanced-runs.md#instructions-and-the-session-log).
 - The `SessionStart` hook prints the role card and the
   [team memory](#team-memory) brief only when the launch does
   not carry the card; at compaction and clear it re-announces the
@@ -648,7 +648,7 @@ destination, and [authoring an integration](harness-integration.md) for an
 unsupported agent.
 
 Coordinated, task-bearing Claude Code Standard runs need no installation:
-their [managed launch](harnesses.md#managed-native-loading) loads the
+their [managed launch](harnesses.md#incoming-coordination-hooks) loads the
 `claude.json` hooks next to the status reporter and an idle-wake waiter. It
 leaves out the inbox `Stop` hook: Claude Code runs all `Stop` hooks in
 parallel, so the reporter would record a turn end that a block for unread
@@ -707,7 +707,7 @@ held by protection can wake after release, while the same unacknowledged
 batch cannot cause endless turns. A session/process restart may produce one
 duplicate hint; durable inbox delivery and explicit acknowledgement are
 unchanged. An unsupported server is an error to stop on, not a reason to
-retry immediately. See the [helper contract](harness-integration.md#optional-native-idle-wake)
+retry immediately. See the [helper contract](harness-integration.md#add-native-idle-wake)
 for error handling and lifecycle requirements.
 
 ### Development terminals, browser and captures
@@ -834,7 +834,7 @@ parameters, an unknown browser action, or an invalid surface or control
 session are refused with `-32602` (exit 2), and an unavailable or timed-out
 browser companion with `-32004` (exit 4). A companion created from a browser
 image older than the server refuses `inspect` with `-32601`; see
-[install.md](install.md#headless-browser-companion) for how a run gets a
+[install.md](install.md#what-an-update-does-not-change) for how a run gets a
 current one.
 
 Browser observers receive the latest complete frame when joining an active
@@ -883,7 +883,7 @@ printf '%s\n' '{"artifact_ids":["<capture_id>"],"verification_notes":"Observed b
 run's **Captures** dialog (the run's **More** menu > **Captures…**), including
 its selected captures and notes, then pass
 the ID to the existing `report --evidence-ref <packet_id>`. Retention does not
-report an outcome or prove verification. Select 1–64 captures; optional notes
+report an outcome or prove verification. Select 1 to 64 captures; optional notes
 must be valid UTF-8 and at most 4096 bytes. Retained and staged capture files
 together are bounded to 64 captures and 128 MiB per run, with an 8 MiB limit
 per capture. Transient captures separately have a 64-capture/128 MiB run bound.
@@ -1020,7 +1020,7 @@ from 1. A missing push permission, a secret, a `<team-memory` tag and a
 note an agent may not replace are `-32001`; the 20-note limit and a
 replacement another live note already holds are `-32003`;
 a bad kind or a cap is `-32602`; an unknown note is `-32000`.
-[memory.md](memory.md#limits-and-their-errors) lists every message.
+[memory.md](memory.md#limits) lists every message.
 
 `search` matches any of the words against titles, bodies and cited files,
 best first, ranked by bm25 and weighted toward newer notes; with no words

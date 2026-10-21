@@ -57,144 +57,55 @@ it stores and sends is in [docs/privacy.md](docs/privacy.md).
 
 For manual installation or uninstallation, see [install.md](docs/install.md#manual-install).
 
-## Well, why is this needed? 
+## Why Aether
 
-Laptops are bad hosts for agent fleets. Agents eat a lot of resources even
-when the model is served from remote, and every workflow dies or freezes when you close the laptop lid. 
+Coding agents run for hours, and a laptop is a poor host for that. They use a
+lot of its resources, and they stop when you close the lid. Hosted agent
+services keep them running, but they charge per seat on top of your inference
+bill and keep a copy of your code. Aether runs your agents on hardware you own,
+such as a home server or a spare PC, and you control them from your laptop,
+your phone or the desktop app.
 
-Alternatively, you could also pay money in addition to your (already massive) inference bill by using commercialized hosting services to keep your agents running. They take your source code and charge you on a per-seat basis.
+## What you get
 
-Aether is the third option: **your hardware, your code, agents that keep working
-while you sleep.**
+- Several people share one server. Everyone can watch and message each other's
+  agents live, and every action is attributed to the person who took it.
+- Agents run in containers on the server, so they keep working after you close
+  your laptop.
+- Each run works on its own git branch. Pull it and review it, or let the agent
+  push it and open a pull request.
+- You bring your own agent CLIs and logins: Claude Code, Codex, OpenCode and
+  [others](docs/harnesses.md). Their configuration and logins live in a
+  persistent home on the server.
+- Runs share a team memory of short notes per repository, and a dashboard
+  assistant answers questions and acts for you with your own agent login.
+- It works for one person too: the first person to link a server becomes its
+  administrator.
 
-- **Multiplayer by design.** Several people, one server. **See and message each other's agents in real time, with every act
-  attributed.**
-- **Agents run continuously in remote containers.** Agents run in containers on the server. Launch them once, close your laptop laptop and they still continue to work. 
-- **Results arrive as git branches.** Every run gets its own worktree and
-  branch. You can pull, review, and merge - or set your agent up with Git & Github on Aether
-  to let them handle Git operations autonomously. Run-branch pulls remain
-  available whether a workspace is local-only or mirror-backed.
-- **Your agents, your setup.** Each member has a server-owned persistent home,
-  mounted read-write in that member's environment and runs. Import
-  configuration once with the local dashboard's directory picker, or edit it
-  remotely in **Files**; changes are immediately visible, including to active
-  runs. Vendor logins stay on the remote you own, through each vendor's own
-  authentication flow, and are never extracted or proxied.
-- **Team memory every agent shares.** Runs of any agent CLI search and add
-  short, attributed notes per workspace; members pin the ones every new run
-  should start with. See [docs/memory.md](docs/memory.md).
-- **An assistant that acts as you.** Ask in plain language from the dashboard; it
-  runs on your own agent login and asks before it stops a run or saves your
-  environment. See [docs/assistant.md](docs/assistant.md).
-- **Full support for solo developers.** Team features are present, never in the way.
-  Linking a fresh server makes you its administrator, giving you full control for your solo workflow. 
-
-## Dashboard
-
-`aether gui` serves the dashboard and control entrypoint from your own client
-machine, bound to loopback and carried over the same SSH connection as the
-CLI. On a tailnet, the server can optionally host the dashboard over HTTPS with
-`--web-port`; Tailscale WhoIs identifies each request, so a phone needs no
-install or token. Both dashboards include onboarding. Admins can choose
-**Onboarding → Repository → From GitHub → Add GitHub repository**, connect
-GitHub in the browser, choose a repository, then **Review repository → Use
-repository** to accept its fetched revision. No terminal or deploy key is
-needed for this path; see the [browser walkthrough](docs/quickstart.md#github-repository).
-Later, use **Settings → GitHub → Add repository** with the same connection.
-Machine-local directory and clone actions still need the desktop app or local
-`aether gui`; the hosted dashboard cannot read arbitrary paths on your computer.
-
-Inside either dashboard: a workspace switcher, a board bucketed by what needs
-attention (Needs you, Working, Finished; approve or reply from the card), a
-live terminal for any run, each run's **Changes**, the **Activity** feed, the
-shared approval inbox, presence indicators, the member roster, and the disk
-usage in **Settings**. Launch, message, pause, kill, close, reopen and hand
-off all call the same methods the CLI does, with the same permission checks
-and timeline attribution. The server-hosted dashboard also exposes the shared
-member-home **Files** editor through the same authenticated RPCs.
-A live TUI run closed as merged or abandoned keeps its exact run row, container
-and checkout for `--run-container-ttl` (default `7 days`); **Reopen** (`aether
-reopen`) resumes that retained run before expiry rather than creating a new
-run or container. Expired or unavailable runs cannot be reopened.
-Launch freshness is server-owned: before a run row exists, the server captures
-the workspace base. A configured mirror refreshes that base; a local-only
-workspace reads its local base. A failed pre-run check creates no run row.
-Workspace pages expose admin-only Source control for mirror status and
-controls; launch freshness is handled on the server rather than by a client
-pre-launch operation.
-
-## Supported agents
-
-Aether does not install agents - install the agent CLI in your
-**Environment**, the container shell that belongs to you. Built-in agents
-cover Claude Code, Codex, pi, OMP, and OpenCode; other CLIs can use a custom
-agent definition. Native idle wake is available through the loaded pi and OMP
-extensions and a version-matched OpenCode plugin; command hooks deliver at the
-next supported boundary instead. Neither a send receipt nor a wake acknowledges mail.
-Every built-in agent can also run in **Enhanced** mode, driven over the Agent Client
-Protocol so the dashboard shows its messages, tool calls and permission
-requests as native controls: `aether run "..." --agent codex --mode enhanced`
-([enhanced runs](docs/enhanced-runs.md)).
-See [per-agent setup and limits](docs/harnesses.md) and
-[member environments](docs/environments.md).
+```mermaid
+flowchart LR
+    you["Your laptop, phone<br>or desktop app"] -->|"SSH, a tailnet<br>or an edge"| server["Aether server"]
+    server -->|"one container<br>per run"| run["Agent run"]
+    run -->|"commits to"| branch["A git branch<br>you review"]
+```
 
 ## Documentation
 
-| Guide | |
-| --- | --- |
-| [Quickstart](docs/quickstart.md) | Zero to a finished run in ten minutes. |
-| [Install](docs/install.md) | The install script, systemd, upgrades, data layout. |
-| [Environments](docs/environments.md) | Member images, saving, resetting, and persistence. |
-| [Networking](docs/networking.md) | Tailscale, the edge relay, and plain LAN or VPN. |
-| [Edge](docs/edge.md) | Reaching a server through an edge with a GitHub sign-in, and running your own edge as a binary or a container. |
-| [Teams](docs/teams.md) | Joining, roles, workspaces, budgets, attribution. |
-| [Insights](docs/insights.md) | What the run statistics count and what the server records for them. |
-| [Agents](docs/harnesses.md) | Per-agent login, configuration, and launch requirements. |
-| [Enhanced runs](docs/enhanced-runs.md) | Driving an agent over the Agent Client Protocol: launch, permissions, restarts, the session log. |
-| [Agent integration](docs/harness-integration.md) | Connecting an unsupported CLI to the durable inbox, boundary hooks, and optional native wake. |
-| [Adapters](docs/adapters.md) | Adding a built-in agent or an output adapter. |
-| [Security](docs/security.md) | What the container boundary does and does not do. |
-| [Privacy](docs/privacy.md) | What the Android app and the dashboard store and send. |
-| [Notices](docs/notices.md) | The licence Aether ships under and what its artifacts bundle. |
-| [Local gateway](docs/local-gateway.md) | The HTTP/WS surface `aether gui` serves. |
-| [Dashboard SPA](docs/dashboard-frontend.md) | The web client's structure. |
-| [Coordination](docs/coordination.md) | How overlapping runs warn and message each other. |
-| [Team memory](docs/memory.md) | The notes every run searches and writes, pinning, and the launch brief. |
-| [MCP bridge](docs/mcp-bridge.md) | The in-container half of coordination. |
-| [Connectors](docs/connectors.md) | Adding your server to ChatGPT or Claude as a custom connector, to run agents from their phone apps. |
-| [Failure handling](docs/failure-handling.md) | Reboots, disk pressure, stalls, dropped connections - and the knobs. |
-| [Testing](docs/testing.md) | The E2E scenario suite and its failure-table coverage. |
-| [Contributing](CONTRIBUTING.md) | Build, test, and change the thing. |
+[docs/README.md](docs/README.md) lists every guide and defines Aether's terms.
+The guides people open most:
 
-## Building from source
+- [Quickstart](docs/quickstart.md): from install to your first reviewed run.
+- [Install](docs/install.md): every platform, upgrades and removal.
+- [Agents](docs/harnesses.md): which agent CLIs work, how to sign in, and their
+  limits.
+- [Teams](docs/teams.md): inviting people, roles and workspaces.
+- [Troubleshooting](docs/failure-handling.md): reboots, full disks, stalled
+  runs and dropped connections.
 
-Requires Go 1.26+, GNU make, Bun 1.3+, and Node.js 22+. Bun installs the web
-dependencies and drives the scripts; Node.js runs the Next build and
-development server.
+## Contributing
 
-```sh
-make build            # static dashboard export, then both binaries into dist/
-make test             # unit tests, race detector on
-make test-integration # integration tests; needs real Docker and git
-make test-native-hooks # native adapter lifecycle regressions; Node.js 22.13+
-make release          # cross-compile the full release matrix
-```
-
-The production web build is a Next static export into `web/dist`, which Go
-embeds through `web/embed.go`. Running the installed server or CLI needs no
-Node.js and no Next server. For dashboard development, run
-`cd web && bun run dev` with Node.js 22+ available on `PATH`.
-
-The server targets Linux (amd64/arm64) and only Linux. The CLI is a supported
-client on Linux, macOS, and Windows (amd64/arm64 each), and CI builds, vets,
-unit-tests and virus-scans the Windows client on a real Windows runner. Two
-commands are not part of the Windows client: `aether init`, which prepares a
-Linux server's data directory and belongs on the server box, and `aether
-update`, which has no Windows implementation yet - re-download the release
-binary to upgrade. The Windows binaries are not code-signed yet; see
-[docs/install.md](docs/install.md#windows-defender-and-smartscreen) for what
-Defender does about that and how to report a detection.
-[CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers changes, tests and releases, and
+[how to build from source](CONTRIBUTING.md#build-from-source).
 
 ## License
 

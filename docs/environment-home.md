@@ -1,69 +1,49 @@
 # Member environment home
 
-Each member has one server-owned home directory under `<data>/homes/<member>`.
-Aether mounts it read-write as `$HOME` in the member's environment - the
-container shell on the dashboard's **Environment** page - and in every run
-the member launches, including the run's shell tabs and runs on another
-member's shared agent account. Those containers also start from that
-member's saved image, or the standard image when none is saved. A share of
-your own account exposes the launched agent's login to the recipient's runs
-and, when the recipient has no installation of that agent, your
-`~/.local/bin`, `~/.local/lib`, and the agent's install directory, read-only;
-nothing else of this home. See [teams.md](teams.md#agent-accounts).
+Your home is a directory on the server that Aether mounts read-write as `$HOME`
+in your environment (see [environments.md](environments.md)) and in every run
+you launch, including runs on another member's shared agent account. Agent
+installs, logins, GitHub credentials and agent configuration live here. This
+guide covers what survives, how to set up an agent and GitHub, and how to edit
+files in the home.
+
+A share of your agent account exposes only that agent's login to the
+recipient's runs and, when they have no installation of that agent, your
+`~/.local/bin`, `~/.local/lib` and the agent's install directory, read-only
+([teams.md](teams.md#agent-accounts)).
 
 ## What persists
 
-The home is the member's durable environment:
+The home survives every stop, save, reset and server restart:
 
-- Executables installed in `~/.local/bin`
-- Global installs: `npm install -g` and `cargo install` write to `~/.local`,
-  because Aether sets `NPM_CONFIG_PREFIX` and `CARGO_INSTALL_ROOT` to it unless
-  the image, workspace or profile already sets them. nvm refuses to switch
-  versions while `NPM_CONFIG_PREFIX` is set; put `unset NPM_CONFIG_PREFIX`
-  before nvm's lines in `~/.bashrc` if you use it
-- Vendor login state and other files written by the agent
-- Agent configuration uploaded with `aether config push` or edited in **Files**
-- The GitHub login written by `gh auth login`, in `~/.config/gh/hosts.yml`
-- The commit signing key, `~/.ssh/aether_signing` and `~/.ssh/aether_signing.pub`
-- `~/.gitconfig`, which carries the git identity, gh's credential helper, and
-  the signing settings
-- The remote server an editor installs when it attaches to a run over SSH
-  (`~/.vscode-server`, `~/.cursor-server`, `~/.zed_server`), so it is
-  downloaded once; see [terminal.md](terminal.md#editors)
+- Executables in `~/.local/bin`. `npm install -g` and `cargo install` write to
+  `~/.local` because Aether sets `NPM_CONFIG_PREFIX` and `CARGO_INSTALL_ROOT`
+  to it, unless the image, workspace or profile sets them. nvm refuses to
+  switch versions while `NPM_CONFIG_PREFIX` is set, so put `unset
+  NPM_CONFIG_PREFIX` before nvm's lines in `~/.bashrc` if you use it.
+- Agent logins and other files the agent writes.
+- Agent configuration, uploaded with `aether config push` or edited in
+  **Files**.
+- The GitHub login in `~/.config/gh/hosts.yml`, the signing key
+  `~/.ssh/aether_signing` and `~/.ssh/aether_signing.pub`, and `~/.gitconfig`
+  (git identity, gh's credential helper, signing settings).
+- The remote server an editor installs when it attaches over SSH
+  (`~/.vscode-server`, `~/.cursor-server`, `~/.zed_server`), so it downloads
+  once ([terminal.md](terminal.md#editors)).
 
-`/tmp` is scratch on disk, not part of the home and not tmpfs, so it does
-not count against container memory. Each run gets `<data>/scratch/<run-id>`,
-removed with the run's container. The environment terminal gets
-`<data>/scratch/terminal-<member-id>`, emptied each time the environment
-starts. **Save environment** never captures `/tmp`, because it commits the
-container layer, not bind mounts. An hourly sweep deletes scratch
-directories whose run or terminal is gone.
+Files outside the home live in the environment container. They survive a stop
+until **Reset to standard**, and reach runs only after **Save environment**
+([environments.md](environments.md#save-the-environment)).
 
-Other files outside the home live in the environment terminal's container
-layer, which survives a stop until **Reset to standard**. **Save environment**
-on the **Environment** page turns that layer into your member image so later
-runs get it; see [environments.md](environments.md#save-the-environment).
+`/tmp` is scratch on disk, not memory. A run's `/tmp` is deleted with the run,
+the environment's is emptied each time the environment starts, and **Save
+environment** never captures it.
 
-## Automatic tool caches
+## Tool caches
 
-Aether keeps reconstructible tool caches outside this durable home, at
-`<data>/home-caches/<member>/{runs,terminal}/data`, mounted at `/aether-cache`.
-The run pool belongs to the immutable launching member, including launches
-on someone else's shared account. The environment shell and automatic agent
-updater use the separate terminal pool, so an open environment does not pin
-all completed-run caches.
-Candidate verification also uses that launcher's run pool (the originating
-run's immutable home owner for an agent request). Its durable creation key
-protects both cache data and legacy home caches through startup and failed
-runtime lookup/destruction; only confirmed cleanup releases that ownership.
-Verification resolves the container UID:GID before creating its runtime and
-grants that user access only to the managed cache, not the persistent home.
-Its journal preserves the same home-user reservation across server restart;
-conflicting users cannot change cache ownership beneath a live verification.
-Malformed published ownership journals stop startup rather than guessing that
-the cache is unused; unpublished temporary files cannot own a runtime.
-
-Only tool variables unset by the image, workspace and profile receive defaults:
+Package caches live outside the home, at `/aether-cache`, so they never fill
+it and Aether can clean them. These variables default there unless the image,
+workspace or profile sets them:
 
 | Variable | Default |
 | --- | --- |
@@ -76,150 +56,54 @@ Only tool variables unset by the image, workspace and profile receive defaults:
 | `YARN_CACHE_FOLDER` | `/aether-cache/yarn` |
 | `npm_config_store_dir` (pnpm) | `/aether-cache/pnpm` |
 
-`AETHER_CACHE_DIR` identifies the mount. Explicit tool cache paths remain
-unchanged and outside automatic cleanup; Aether does not replace `HOME`,
-`PATH` or `XDG_CACHE_HOME` wholesale. Installed CLIs, vendor logins, GitHub
-credentials and signing keys remain in the persistent home.
+You do not need to clean them. Aether removes the oldest inactive caches
+hourly and before refusing work for disk pressure, aiming for 4 GiB per member
+pool, 16 GiB in total and 7 days since last use. A cache path you set
+yourself is never cleaned. Logins, CLIs and keys stay in the home.
 
-No housekeeping is required. After recovery, hourly, and once before refusing
-new work for disk pressure, Aether tries eligible inactive caches, oldest
-first. Soft reclaim targets are 4 GiB per pool, 16 GiB total and 7 days since
-last use/release. Live, retained, finalizing or uncertain owners always win
-over these targets, with one exception: a pool with a live, retained or
-finalizing owner still loses Go build cache (`go-build`) entries unused for a
-day when it is over 4 GiB or the disk is under pressure. Go keeps an entry's
-timestamp within an hour of its last use, so a running build keeps its files.
-The targets are not hard quotas, and no waiting shell or silent agent is
-killed for cache space. Failed cleanup and deleted-member resources retain
-small server-owned retry metadata outside the writable mount; normal
-maintenance retries them even if a partial removal brought the remaining data
-below its age or size target. Successful retries clear only their own
-diagnostic; image or legacy-cache cleanup cannot clear a pending cache-data
-failure. An open environment protects its cache data, not an exited updater
-container whose cleanup needs retrying.
+## Set up an agent
 
-Before legacy cleanup, Aether re-reads the current image, workspace and harness
-cache settings, including configurations that have never launched or were edited
-while idle. Explicit paths inside the resolved container home protect overlapping
-allowlisted directories (including configured ancestors or descendants); a
-similarly named sibling does not. Protection observed by planning or cleanup is
-remembered in server-owned metadata across restart and subsequent configuration
-edits. Unavailable configuration or image inspection defers legacy cleanup.
-Ambiguous paths or symlink aliases are preserved conservatively, without following
-links. These protections do not prevent reclaiming inactive managed cache pools.
-Before the first managed cache is created, an absent cache root is an empty
-inventory. Existing broken or unreadable roots remain measurement errors.
+[harnesses.md](harnesses.md#set-up-an-agent) has the steps: **Set up** on the
+**Agents** page, or `aether agent add <name>` on your computer, which installs
+the agent and leaves you in your environment's shell for the vendor login. The
+agent, its login and its settings land in your home, so you do not save the
+environment afterwards.
 
-For homes created before managed caches, cleanup waits until all users of
-the old home are gone. Under disk pressure it does not wait: containers keep
-npm, pip, uv, Go, bun, yarn and pnpm caches under `/aether-cache`, so these
-paths are not in use, and they are removed even while the member has runs
-open. Pending updaters and verification runs still protect them. Either way
-it removes only `.npm/_cacache`, `.npm/_logs`, `.cache/pip`, `.cache/uv`,
-`.cache/go-build`, `go/pkg/mod`, `.bun/install/cache`, `.cache/yarn` and
-`.local/share/pnpm/store`. It never clears all of `.npm`, `_npx`, `.cache`,
-`.local`, `.config`, `.ssh`, vendor stores or arbitrary home files. Symlink targets and external hardlink contents are
-not mutated. Saved-image maintenance removes only obsolete exact member
-tags, preserving current member, terminal and configured base/browser
-references; it does not run broad Docker image or volume prune.
+The launch form offers an agent only when its executable is in your
+`~/.local/bin`. Aether follows relative symlinks, and absolute ones under
+`/root` or `/home/aether`, that stay inside your home. Broken links, links
+outside the home and files without execute permission do not count. On a shared
+account the form uses the owner's installation when you have none, and the
+owner must have logged in. With none installed, the form offers **Set up an
+agent**.
 
-
-## Setting up an agent
-
-Both dashboards and the CLI list the agents Aether ships and the ones members
-define. The launch form, which onboarding's First run step reuses, only offers
-agents whose executable is installed in your own
-`~/.local/bin` or, when launching on a shared account, in the owner's, since a
-run there uses the owner's installation when you have none. You need not
-install an agent to launch it on a shared account. With none installed they
-say so and offer **Set up an agent** rather than a launch the server would
-refuse; the Agents page still lists uninstalled shipped agents so
-you can set them up. On a shared account, an agent whose owner has no login
-for it is not offered either, nor is your own member-defined agent, which
-runs only on your own account.
-
-In either dashboard, **Set up** on **Onboarding → Agent** or the **Agents**
-page compares Standard and Enhanced, then **Install <agent>** runs the install
-command in this home through `agent.install`, with the pinned adapter when
-Enhanced is chosen, and shows the command's output and any failure. Your
-environment then opens with the agent's login command typed, and
-**Check** reads `agent.list` back: **Installed**, **Enhanced installed**, and
-**Login found** when the agent's login file exists in this home. It does not
-save the environment image; the home already persists the install.
-`aether agent remove <name>` or **Remove…** on the Agents page undoes it: it
-deletes the agent's `~/.local/bin` links and nothing else, so the packages,
-login and settings stay ([harnesses.md](harnesses.md#removing-an-agent)).
-
-Discovery follows relative symlinks and absolute links under `/root` or
-`/home/aether` within your home. Claude's native installer uses an
-absolute link to its versioned executable. Broken links, links outside the
-home, and files without executable permission are not marked installed.
-The launch dialog reads the agent list each time it opens, so an install in an
-open terminal shows up the next time you open it; no app or server restart is
-needed.
-
-Choose an agent once:
-
-```sh
-aether agent add <name>
-```
-
-The command tells you what to run. Open your [environment](terminal.md),
-install the agent into `~/.local/bin`, and complete the vendor login there:
-
-```sh
-aether terminal
-```
-
-`aether agent add <name> --enhanced` also installs the agent's pinned
-enhanced-mode adapter into `~/.local` (see
-[harnesses.md](harnesses.md#enhanced-mode-adapters)).
-
-After setup, every run you launch sees the same executable and login state.
-A member-defined agent also records its launch arguments for later runs.
-The terminal command ships in this release series.
-
-Aether keeps a shipped agent installed in `~/.local/bin` current: before a
-launch it runs the agent's own update command against this home, at most every
-6 hours. See [harnesses.md](harnesses.md#updates-before-launch).
+Aether updates a shipped agent in `~/.local/bin` before a launch, at most every
+6 hours ([harnesses.md](harnesses.md#updates-before-launch)). `aether agent
+remove <name>` deletes only its `~/.local/bin` links. Packages, login and
+settings stay ([harnesses.md](harnesses.md#remove-an-agent)).
 
 ## Connect GitHub
 
-Connect GitHub once so your runs can use your native GitHub credentials to
-push branches to a writable checkout Origin, open pull requests, and sign
-commits. This also applies when you use another member's shared agent
-account; sharing your agent account does not give their runs your GitHub login.
-GitHub connection is separate from agent vendor login and edge/server sign-in.
-See [credentials and signing](security.md#github-credentials-and-signing-keys)
-for the home-sharing boundary and GitHub's requirements for a **Verified**
-signature; registering a signing key alone does not guarantee that label.
+Connect GitHub once so your runs can push branches, open pull requests and sign
+commits with your credentials. Sharing an agent account does not give the other
+member's runs your GitHub login, and the GitHub connection is separate from an
+agent's vendor login and your server sign-in.
 
-For admins, use **Settings → GitHub → Connect GitHub**, or **Onboarding →
-Repository → From GitHub → Add GitHub repository**. Choose **Copy code and
-open GitHub**, enter the code and approve on GitHub, then return to Aether.
-Use the visible **Open GitHub** link and copy the code manually if needed.
-Completion automatically configures native Git and signing; no terminal,
-deploy key, or **I've logged in** confirmation is needed. **Check connection**
-is read-only and does not perform that setup.
+An admin connects in the dashboard: **Settings → GitHub → Connect GitHub**, or
+**Onboarding → Repository → From GitHub → Add GitHub repository**. Choose **Copy
+code and open GitHub**, enter the code on GitHub, approve and return. Aether
+sets up Git and signing for you. **Check connection** only reads the state. To
+import a repository, follow the
+[browser walkthrough](quickstart.md#github-repository).
 
-To import a repository, follow the [browser walkthrough](quickstart.md#github-repository):
-choose it, **Review repository**, then **Use repository** to accept the fetched
-revision. Later **Settings → GitHub → Add repository** reuses the connection.
-Readable private repositories need no repository-admin permission, subject to
-organization/SSO policy. For shared source access and its dependence on the
-authorizing account, see [workspace source mirrors](security.md#workspace-source-mirrors).
+A collaborator uses **Onboarding → Agent → GitHub → Connect GitHub**, which
+embeds the terminal with the login command typed in. Press Enter, finish the
+device login in your browser, then select **I've logged in**.
 
-The login runs in your environment, so that container needs
-`gh` 2.81.0 or newer - the release that added `gh auth status --json`,
-which is how the server reads your login back. The server also needs its
-normal Docker runtime, Git, and host `ssh-keygen` for signing setup. The
-standard image ships a current gh. Older saved environments may not; see
-[No gh in the environment](#no-gh-in-the-environment) below.
+### From the CLI
 
-Collaborators can use **Onboarding → Agent → GitHub → Connect GitHub**:
-the embedded terminal supplies the login command, and **I've logged in**
-finishes native setup. For the manual CLI alternative, open your
-[environment](terminal.md) and log in there:
+Your environment needs `gh` 2.81.0 or newer (the standard image has one). Open
+it and log in:
 
 ```sh
 aether terminal
@@ -230,14 +114,10 @@ gh auth login --hostname github.com --git-protocol https --web \
   --scopes admin:ssh_signing_key
 ```
 
-`--web` is GitHub's device flow: gh prints a one-time code and a URL, and
-you finish in a browser on your own machine. Nothing is forwarded and no
-password reaches the server. gh asks you to press Enter to open the browser,
-then reports that it could not open one; that is expected inside a
-container: press Enter, ignore the failure, and open the printed URL
-yourself with the one-time code. `--scopes admin:ssh_signing_key` is on top
-of gh's own defaults, and it is what lets the next command register your
-signing key on your account without you pasting it into GitHub by hand.
+`--web` is GitHub's device flow: gh prints a one-time code and a URL, and you
+finish in a browser on your own machine. gh may say it could not open a
+browser. That is expected in a container. Open the URL yourself. The
+`admin:ssh_signing_key` scope lets the next command register your signing key.
 
 Then, from your machine:
 
@@ -250,220 +130,132 @@ logged in to github.com as octocat
 signing key SHA256:2E3v9x... registered on GitHub
 ```
 
-Admin OAuth completion and the explicit `aether github connect` command both
-perform this setup on the server (reading connection status does not):
+This command, and the admin dashboard flow, confirm the `gh` login, write gh's
+credential helper and your identity into `~/.gitconfig`, create an ed25519
+signing key at `~/.ssh/aether_signing` if there is none, turn on commit signing
+(`gpg.format=ssh`, `commit.gpgsign=true`), and register the public key on your
+account. It is safe to run again. `aether member git` keeps the identity in
+`~/.gitconfig` in step with your name and address.
 
-1. Checks `gh auth status` for `github.com` inside your terminal container
-   to confirm the login took.
-2. Runs `gh auth setup-git --hostname github.com` there, which writes gh's
-   credential helper into `~/.gitconfig` so `git push` over HTTPS
-   authenticates as you.
-3. Generates an ed25519 key pair at `~/.ssh/aether_signing` and
-   `~/.ssh/aether_signing.pub` if there is not one already, and rewrites the
-   `.pub` from the private key every time, so the file it registers always
-   belongs to the key it signs with.
-4. Writes five keys into `~/.gitconfig`: `user.name`, `user.email`,
-   `gpg.format=ssh`, `user.signingkey=~/.ssh/aether_signing`, and
-   `commit.gpgsign=true`.
-5. Registers the public key on your account with `gh ssh-key add --type
-   signing`, then reads the account's keys back with `gh ssh-key list` and
-   refuses unless the fingerprint it computed is among them:
+> [!WARNING]
+> Container root in every run you launch can read and replace the GitHub
+> credential and the signing key. Read
+> [security.md](security.md#github-credentials-and-signing-keys) before
+> connecting an account whose reach is wider than this workspace.
 
-   ```
-   github: the signing key registered on the account does not match this member's key (fingerprint SHA256:2E3v9x... not listed)
-   ```
+### GitHub errors
 
-Re-running it is safe. An existing key is reused rather than replaced, and
-GitHub accepts a key it already holds without an error.
+| Error | Fix |
+| --- | --- |
+| `github: not logged in to github.com in the environment terminal; run gh auth login there first: HTTP 401: Bad credentials` | Log in again. The line ends with gh's own reason. |
+| `github: the gh login on github.com lacks the admin:ssh_signing_key scope; run gh auth refresh -h github.com -s admin:ssh_signing_key in the environment terminal` | Run the command it names. Nothing in the home was changed. |
+| `github: the signing key registered on the account does not match this member's key (fingerprint SHA256:... not listed)` | Run `aether github connect` again. |
+| `github: gh is not on PATH in the environment terminal; ask a server admin to run aether server update, then run aether terminal stop and open the terminal again: ...` | See [No gh in the environment](#no-gh-in-the-environment). |
+| `github: the gh in the environment terminal is too old to check the login: 2.81.0 is the oldest gh that answers auth status --json; ...` | See [No gh in the environment](#no-gh-in-the-environment). |
 
-Seven failures have their own messages. An environment whose gh cannot do
-the login is refused before the login is asked about at all, naming the
-way out and ending with what gh - or the container that could not run it -
-actually printed. With no gh at all, on the server's standard image:
-
-```
-github: gh is not on PATH in the environment terminal; ask a server admin to run aether server update, then run aether terminal stop and open the terminal again: OCI runtime exec failed: exec failed: unable to start container process: exec: "gh": executable file not found in $PATH
-```
-
-Both halves are there because a newer image on the server reaches you only
-when you open the terminal again
-([environments.md](environments.md#the-standard-image)). Which command the
-admin gets depends on the server's image; see [No gh in the
-environment](#no-gh-in-the-environment) below.
-
-With a gh too old to answer the check - Ubuntu 24.04 packages 2.45.0 - in
-an environment you saved yourself, the way out is yours alone:
-
-```
-github: the gh in the environment terminal is too old to check the login: 2.81.0 is the oldest gh that answers auth status --json; install a current gh there and save the environment again, or run aether env reset to remove the saved image and return to the standard one: gh version 2.45.0 (2025-07-18 Ubuntu 2.45.0-1ubuntu0.3)
-```
-
-When the image you should be on has already moved - after a reset, or a
-server update - the container is the only thing left behind, and the
-refusal asks for nothing but `aether terminal stop` and a reopen. A gh that
-is on `PATH` but exits non-zero is refused the same way, as `gh in the
-environment terminal would not run`, ending with what it printed. The
-collaborator dashboard flow checks all of this before it prints the login
-command, so it shows the remedy instead of a login that container cannot
-run. The admin browser connection also reports prerequisite failures before
-asking you to authorize.
-
-Without a terminal login:
-
-```
-github: not logged in to github.com in the environment terminal; run gh auth login there first: HTTP 401: Bad credentials
-```
-
-The line ends with gh's own reason for that account - `HTTP 401: Bad
-credentials` when the token was revoked or expired - or with gh's whole
-output when it reported no account at all. A gh that fails the check
-outright, rather than reporting on an account, is not a missing login and
-does not read as one: `gh auth status exited <code>` ends with what it
-printed.
-
-A login made without `--scopes admin:ssh_signing_key` is refused before
-anything in the home changes: no key is generated and no `.gitconfig` is
-rewritten.
-
-```
-github: the gh login on github.com lacks the admin:ssh_signing_key scope; run gh auth refresh -h github.com -s admin:ssh_signing_key in the environment terminal
-```
-
-When the **server host** has no `ssh-keygen`, the command refuses before
-generating anything, because that binary is what signs Aether's own
-commits; install the OpenSSH client package on the server
+A missing `ssh-keygen` on the server host refuses the command before
+anything is generated. Install the OpenSSH client there
 ([install.md](install.md#server-prerequisites)).
-
-`aether member git` keeps `~/.gitconfig` in step: once a signing key
-exists, changing your name or address rewrites the identity in the home's
-`.gitconfig` too, so the signature and the author stay the same person.
-
-Container root in every run you launch can read and replace the credentials
-and the key. Read [security.md](security.md#github-credentials-and-signing-keys)
-before connecting an account whose reach is wider than this workspace.
 
 ## No gh in the environment
 
-The standard image has shipped `gh` since the v0.2.0-alpha.6 release. Three
-kinds of environment can still be without a usable one.
+Three kinds of environment can lack a usable `gh`:
 
-A **saved environment** committed before then keeps whatever was installed
-when it was saved. Install gh in the terminal and save again, or drop back
-to the standard image:
+- A saved environment from before the standard image shipped `gh`. Install gh
+  in the terminal and save again, or run `aether env reset`.
+- A standard image without `gh`. Only an admin can move it, by updating the
+  server (`aether server update`, [install.md](install.md#upgrading)). The
+  refusal names the exact command for the server's image.
+- A `gh` you installed into `~/.local/bin`. It comes first on `PATH` and the
+  home survives every image, so remove it with `rm ~/.local/bin/gh` or replace
+  it with 2.81.0 or newer.
 
-```sh
-aether env reset
-```
+After either image fix, run `aether terminal stop` and open the terminal
+again, because a container keeps the image it started from.
 
-A **standard image** is the server's, not yours, so only an admin can move
-it. Each release publishes its own tag and the server defaults to the tag
-matching its own build, so a server still on an image without gh is a
-server on a release without gh, and the answer is a server update
-([install.md](install.md#upgrading)):
+## Upload and edit configuration
 
-```sh
-aether server update
-```
-
-That assumes the server takes the default; a pinned or rebuilt
-`--standard-image` is refreshed some other way
-([environments.md](environments.md#the-standard-image)). Aether picks the
-command from the image the server is configured with, so the one to run is
-the one in the refusal.
-
-Either way the new image is not yours until you open the terminal again:
+An agent's configuration (settings, `CLAUDE.md`, commands, skills, hooks, MCP
+configuration) lives in a directory such as `~/.claude`, and runs read the same
+path in your home. To copy yours from a computer, open **Agents → Agent config
+files**, click **Copy prompt** and paste it into an agent on that computer
+([quickstart](quickstart.md#upload-agent-configuration)). That agent uses
+`aether config`, which you can also run yourself:
 
 ```sh
-aether terminal stop
+aether config ls                                # each agent, its directory, what is always left out
+aether config ls [-r] <agent> [path]            # what the server has
+aether config cat <agent> <path>                # print one server text file
+aether config push [--dry-run] [--overwrite] <agent> <path>...
+aether config push [--dry-run] [--overwrite] <agent> <path> --from <file>
 ```
 
-A **gh you installed yourself** into your environment home is the third,
-and no image remedy reaches it: `~/.local/bin` comes first on `PATH` and
-the home is kept across every image. Aether names the file it found when
-that is what answered, so the way out is to remove it and let the image's
-own gh take over, or to replace it with 2.81.0 or newer:
+A path is a file or directory inside the agent's directory, relative to it,
+and `.` is the whole directory. `--from` uploads `<file>` as `<path>`, for a
+copy you edited for the server. `--dry-run` sends nothing and prints the same
+lines with `would create`, `would skip`, `would refuse`, `would replace` and
+`would leave out`.
 
-```sh
-rm ~/.local/bin/gh
+A push prints one line per file, then a total:
+
+```text
+left out .credentials.json: credential
+left out history.jsonl: runtime or history path
+left out skills/linked: symlink, not followed
+left out skills/deploy/notes.md: secret detected at 0:27 (generic-api-key)
+created CLAUDE.md
+skipped commands/review.md: identical on the server
+refused settings.json: the server has a different file (1108 bytes, 40769 here); --overwrite replaces it
+created 1, replaced 0, skipped 1 identical, refused 1, left out 4 in ~/.claude (42 bytes uploaded)
 ```
 
-## Uploading and editing configuration
+- Credential files, `*.pem`, `.env`, `.env.*`, runtime and history paths
+  (sessions, caches, plugin caches), symlinks, special files and
+  `.aether-profile-ignore` are never read. `aether config ls` lists each
+  agent's credential and runtime paths.
+- A file the secret scanner flags is left out on your computer, so its bytes
+  never leave it. There is no override.
+- A file over 64 MiB is left out with `<size> bytes is over the 64 MiB upload
+  limit; copy it onto the server from aether terminal`.
+- A file the server has with different content is refused and the server's
+  copy stays. `--overwrite` replaces it, and applies to every path in the
+  command, so name only the files you mean to replace.
+- A push deletes nothing and is safe to repeat.
 
-A coding agent on your computer uploads your agent configuration with
-`aether config push`, from a prompt the dashboard gives you under
-**Agents > Agent config files**. [Upload agent
-configuration](quickstart.md#upload-agent-configuration) covers the prompt,
-the commands, what is always left out, and the output.
+A push with a refused file uploads the rest, then exits non-zero:
 
-The server advertises effective `credential_names` and `runtime_ignores` for
-each agent in `config.roots`, and `aether config push` applies them before
-reading a file. Credential names match any path component
-case-insensitively, and `*.pem`, `.env`, and `.env.*` files are always
-excluded. Runtime patterns are case-sensitive and anchored at the agent's
-directory; one covers a path and everything below it, and `*` matches within
-one name. `.aether-profile-ignore` is also excluded; its rules apply only to
-`aether profile push`. Known runtime files are excluded before the 64 MiB
-size check, including OMP's statistics database and SQLite sidecars. See the
-[runtime policy](harnesses.md#agent-configuration-import-and-files).
-For a required larger asset, run `aether terminal` and install or download it
-directly into the agent's directory in your persistent home. Neither
-**Files** nor `aether profile push` is a large-file upload alternative.
+```text
+aether: refused 1: the server has a different file at each of those paths; read it with aether config cat claude <path>, then push with --overwrite to replace it
+```
 
-A push never replaces a server file that differs unless it is run with
-`--overwrite`, and it skips a file that is already identical there.
+If the server stops answering mid-push, the files it may not have are printed
+as `unconfirmed <path>`, and the error ends with `aether config ls -r <agent>
+shows what the server has`. A server older than the CLI fails with `the server
+is older than this CLI, and an admin updates it with aether server update`.
 
-Empty files and binary assets are preserved. New files get the permission
-bits sent with them (`0644` when none are sent); existing files retain their
-current modes, including restrictive server-side umask modes. Server-side
-validation rejects unsafe paths, symlink components, hardlinks, and
-nonregular files, while preserving directory and staged-file ownership.
+The upload writes your own home, so your environment and active runs see it at
+once. The agent may need to reload. Nothing watches the local directory: push
+again after you change it.
 
-An upload writes the authenticated member's own persistent home. Because that
-home is mounted read-write in your environment and in every run the
-member launches, uploaded or edited files are visible immediately, including
-to active runs; the agent may need to reload. It is not an isolated per-run
-profile, and a share of your agent account does not expose it, except the
-`~/.omp/agent` directory an `omp` share mounts. A snapshot
-pin is audit metadata, not a private writable copy, and changing configuration
-does not rebuild an installed-agent image.
+**Files** in the dashboard has a **Home** tree beside the workspace and live
+run files. It shows your whole home, dotfiles included. Each row's **…** menu
+(or right click) creates, uploads, downloads, renames, copies the path and
+deletes. Drag a row onto a folder to move it, or drag files from your desktop
+to upload. Deleting, moving and replacing ask first, and there is no trash.
 
-**Files** in the dashboard has a **Home** tree beside workspace base and
-live-run files: your whole persistent home, dotfiles and agent runtime
-folders included. Each row's **…** menu, also on right click, creates a
-file or folder, uploads, downloads, renames, copies the path, and deletes.
-Dragging a row onto a folder moves it, and files or folders dragged from your
-desktop upload into the folder under the pointer. Deleting, moving, and
-replacing an existing file ask first; there is no trash. One file is at most
-64 MiB. Nothing is filtered: the exclusions above apply to
-`aether config push` only.
+- Nothing is filtered in **Files**. The upload exclusions apply to `aether
+  config push` only.
+- Credential files show a lock and cannot be opened, edited, downloaded,
+  renamed or moved: agent logins such as `~/.claude/.credentials.json`,
+  `~/.ssh` except `*.pub`, `~/.config/gh/hosts.yml`, `~/.git-credentials`,
+  `~/.netrc`, `*.pem` and `.env*`. You can delete or upload over one.
+- Text files up to 64 MiB open in the editor. Binary and larger files are
+  read-only. Save with **Save** or Ctrl/Cmd-S. There is no autosave. A failed
+  or stale save keeps your draft, and **Reload from server** discards it.
 
-Credential files are listed with a lock and cannot be opened, edited,
-downloaded, renamed, or moved in Files: agent logins such as `~/.claude/.credentials.json`,
-everything in `~/.ssh` except `*.pub`, `~/.config/gh/hosts.yml`,
-`~/.git-credentials`, `~/.netrc`, `*.pem`, `.env`, and `.env.*`. Deleting
-one and uploading over one work. Do the rest in the Environment terminal.
-Symlinks are listed and never followed.
+The workspace explorer is separate. Saving a base-branch file there is **Commit
+to <branch>** (one commit, not pushed) and needs permission to push. Saving a
+live run's file edits its uncommitted checkout and needs permission to steer the
+run
+([local-gateway.md](local-gateway.md#files-and-member-configuration)).
 
-Text edits are complete UTF-8 text up to 64 MiB; binary and oversized files
-are read-only. Save explicitly with **Save** or
-Ctrl/Cmd-S. Dirty tabs remain in memory across routes, and the browser warns
-before unloading them. There is no autosave or force-save. A failed or stale
-save keeps the draft. Later pushes also leave open buffers intact;
-**Reload from server** deliberately discards the draft and loads remote bytes.
-All `config.*` and `home.*` methods require `Launch` and target only the
-authenticated member's own home; there is no admin/member selector.
-
-For the separate workspace explorer, base-branch saves are **Commit to
-<branch>**, creating one file commit without pushing upstream; live-run saves
-modify the uncommitted checkout. Base writes require **Push**, and run writes
-require **Steer**. The [Files protocol](local-gateway.md#files-and-member-configuration)
-defines revision and concurrency rules.
-
-## Migration
-
-On upgrade, legacy content in
-`<data>/homes/<member>/<harness>/<home-relative-path>` is moved to
-`<data>/homes/<member>/<home-relative-path>` for known agent names. Empty
-per-agent directories are removed. Existing files win if two paths conflict.
-Old per-workspace executable snapshots are removed. The migration is
-idempotent and does not move files outside the member home root.
