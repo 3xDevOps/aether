@@ -168,7 +168,7 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
   }
 
   const replaced = (old: string, result: MemoryAddResult) => {
-    setOpen(result.item.id)
+    setOpen((shown) => (shown === old ? result.item.id : shown))
     toast.success(`Replaced ${old} with ${result.item.id}${result.duplicate ? ', which already held this text' : ''}`)
     changed()
   }

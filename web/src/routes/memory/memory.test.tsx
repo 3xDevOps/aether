@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describeEvent } from '@/components/event-words'
 import { api, ApiError, type Api } from '@/lib/api'
 import { surfaces } from '@/lib/surfaces'
-import type { Event, MemoryItem, MemorySearchParams } from '@/lib/types'
+import type { Event, MemoryAddResult, MemoryItem, MemorySearchParams } from '@/lib/types'
 import { MemoryRoute } from '@/routes/memory'
 import { useStore } from '@/store'
 import { capability } from '@/store/hooks'
@@ -305,6 +305,30 @@ describe('memory page', () => {
     expect(memoryShow).toHaveBeenLastCalledWith(workspace.id, replacement.id)
     await waitFor(() => expect(memorySearch.mock.calls.length).toBeGreaterThan(reads))
     expect(memoryBrief).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves another open note in place when a cancelled replacement finishes saving', async () => {
+    seed()
+    const replacement = memoryItem({ id: 'note-replace002', title: 'Replaced text', body: 'Replaced text' })
+    let finish: (result: MemoryAddResult) => void = () => {}
+    const memoryAdd = vi.fn<Api['memoryAdd']>(() => new Promise((resolve) => { finish = resolve }))
+    const memoryShow = vi.fn<Api['memoryShow']>(async (_, id) => ({ item: id === workspacePin.id ? workspacePin : id === replacement.id ? replacement : agentNote }))
+    const memorySearch = vi.fn(async () => ({ items: [workspacePin, agentNote] }))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch, memoryShow, memoryAdd })} />)
+    fireEvent.click(await screen.findByRole('button', { name: agentNote.title }))
+    fireEvent.click(await within(await screen.findByRole('dialog', { name: agentNote.title })).findByRole('button', { name: 'Replace…' }))
+    const form = await screen.findByRole('dialog', { name: `Replace ${agentNote.id}` })
+    fireEvent.click(within(form).getByRole('button', { name: 'Replace note' }))
+    await waitFor(() => expect(memoryAdd).toHaveBeenCalled())
+    fireEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: agentNote.title })).toBeNull())
+    fireEvent.click(await screen.findByRole('button', { name: workspacePin.title }))
+    await screen.findByRole('dialog', { name: workspacePin.title })
+
+    await act(async () => finish({ item: replacement }))
+    expect(screen.getByRole('dialog', { name: workspacePin.title })).toBeDefined()
+    expect(screen.queryByRole('dialog', { name: replacement.title })).toBeNull()
   })
 
   it("replaces an outcome note as a decision, keeps a pinned note's pin and scope, and shows a refusal word for word", async () => {
