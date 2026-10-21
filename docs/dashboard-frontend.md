@@ -4313,12 +4313,20 @@ when the event stream comes back live, dropping answers to an older request.
   and the supersede chain in replacement order, each other note a link.
   A member who may push gets **Pin for me only** (`scope: member`, as
   `aether memory pin --me`), **Pin** on a workspace-scope note (no `scope`,
-  so the note keeps its own, as `aether memory pin`), **Unpin** and
-  **Remove…**, which asks before `memory.rm`; a replaced note offers no
-  pin.
+  so the note keeps its own, as `aether memory pin`), **Unpin**,
+  **Replace…** and **Remove…**, which asks before `memory.rm`; a replaced
+  note offers no pin and no **Replace…**.
 - **Add note.** Kind (decision, convention, gotcha or preference), the text,
-  **Only me** (`scope: member`) and **Pin**. A duplicate answers with the
-  live note already holding the text and says so.
+  **Files** (cited repository paths, one per line, sent as `files` trimmed
+  and without blank lines), **Only me** (`scope: member`) and **Pin**. A
+  duplicate answers with the live note already holding the text and says
+  so.
+- **Replace…** opens the same form, as `aether memory add --supersedes`:
+  the note's text, its kind (an outcome note's becomes decision), its files
+  and **Only me** for a member-scope note. It sends `supersedes` with the
+  note's ID and, on success, opens the replacement. For a pinned note the
+  server moves the pin to the replacement in its own scope, so **Pin** is
+  hidden and **Only me** is disabled at the note's scope.
 - **Brief**, collapsed, with its size against the 3072-byte cap: the bytes
   `memory.brief` returns for the viewing member, in a code block.
 

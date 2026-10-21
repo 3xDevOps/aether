@@ -11,7 +11,8 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { MemoryItem, MemoryShowResult } from '@/lib/types'
+import type { MemoryAddResult, MemoryItem, MemoryShowResult } from '@/lib/types'
+import { AddNote } from '@/routes/memory/add-note'
 import { kindLabel, sourceLabel, superseded } from '@/routes/memory/model'
 import { useStore } from '@/store'
 
@@ -100,7 +101,7 @@ function Chain({ notes, current, onOpen }: { notes: MemoryItem[]; current: strin
 
 type Load = { kind: 'loading' } | { kind: 'ready'; result: MemoryShowResult } | { kind: 'failed'; message: string }
 
-/** memory.show for one note; pins, unpins and removes it for a member who may write. */
+/** memory.show for one note; pins, unpins, replaces and removes it for a member who may write. */
 export function NoteDialog({
   workspaceID,
   id,
@@ -109,6 +110,7 @@ export function NoteDialog({
   agents,
   onOpen,
   onChanged,
+  onReplaced,
   onClose,
 }: {
   workspaceID: string
@@ -118,12 +120,14 @@ export function NoteDialog({
   agents: Record<string, string>
   onOpen: (id: string) => void
   onChanged: () => void
+  onReplaced: (result: MemoryAddResult) => void
   onClose: () => void
 }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [removing, setRemoving] = useState(false)
+  const [replacing, setReplacing] = useState(false)
   const request = useRef(0)
 
   const read = useCallback(async () => {
@@ -188,6 +192,7 @@ export function NoteDialog({
         {item && canWrite && (
           <DialogFooter>
             <Button variant="secondary" className="sm:mr-auto" disabled={busy} onClick={() => setRemoving(true)}>Remove…</Button>
+            {!superseded(item) && <Button variant="secondary" disabled={busy} onClick={() => setReplacing(true)}>Replace…</Button>}
             {item.pinned_at ? (
               <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryUnpin(workspaceID, item.id))}>Unpin</Button>
             ) : !superseded(item) && (
@@ -210,6 +215,19 @@ export function NoteDialog({
               onClose()
             }}
             onClose={() => setRemoving(false)}
+          />
+        )}
+        {replacing && item && (
+          <AddNote
+            workspaceID={workspaceID}
+            client={client}
+            replaces={item}
+            onAdded={(result) => {
+              setReplacing(false)
+              onReplaced(result)
+            }}
+            onFailed={onChanged}
+            onClose={() => setReplacing(false)}
           />
         )}
       </DialogContent>

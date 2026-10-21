@@ -229,8 +229,12 @@ note-h151ddhqzh  convention  member  Dana  -    0m   for the workspace  Use bun 
 `brief` writes the brief's bytes and nothing else, so
 `aether memory brief > brief.txt` captures exactly what a run receives; on a
 terminal it adds a final newline. The built-in [assistant](assistant.md) can
-search notes with `aether_memory_search`, and the dashboard calls the same
-`memory.*` methods ([local-gateway.md](local-gateway.md#team-memory-methods)).
+search notes with `aether_memory_search`, and the dashboard's **Memory**
+page calls the same `memory.*` methods
+([local-gateway.md](local-gateway.md#team-memory-methods)): its **Add note**
+form takes cited files one per line, and **Replace…** on a live note opens
+that form filled from the note and saves it as `--supersedes` does
+([dashboard-frontend.md](dashboard-frontend.md#memory)).
 Each add, captured note, replacement, pin, unpin and removal appears in
 **Activity** and in `aether timeline --type memory.change`, naming the
 member who acted and, for an agent's note or a captured one, its run.
