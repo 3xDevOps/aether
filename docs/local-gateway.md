@@ -326,7 +326,16 @@ unavailable identity service is reported as `-32004`.
 Anything that is not `/api/`, `/ws/`, or `/local/` is served from the
 embedded `web/dist`, without authentication - the SPA bundle is not secret
 and has to load before the gateway can authenticate API calls. Unknown paths
-fall back to `index.html` so client-side routing works on a hard refresh. An
+fall back to `index.html` so client-side routing works on a hard refresh.
+Files under `_next/static/`, whose names change with their content, carry
+`Cache-Control: public, max-age=31536000, immutable`; everything else,
+`index.html` included, carries `no-cache` and an `ETag`, so a browser
+revalidates it on each load and picks up a server update on the next one.
+A client that is not on loopback and sends `Accept-Encoding: gzip` gets a
+file gzipped when that saves at least a tenth; each file is compressed once,
+on its first such request (`internal/webgate/static.go`). `aether gui`'s
+loopback client gets the files uncompressed, because compressing them would
+cost CPU on every launch and save no transfer time. An
 `/api/`, `/ws/`, or `/local/` path hit with the wrong method is the exception:
 it answers `405` with a JSON error body instead of falling through to the SPA,
 so a wrong-verb client bug cannot masquerade as a `200`. Ordinary JSON request
