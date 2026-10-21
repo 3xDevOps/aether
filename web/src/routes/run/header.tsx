@@ -149,12 +149,14 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
           <span className="min-w-0 truncate">On {accountOwner}&apos;s account (fallback)</span>
         </>
       )}
-      {detail && (
-        <span className="flex min-w-0 flex-1 basis-0 items-center gap-1.5 overflow-hidden" title={stateTitle(presentation, since)}>
-          <span aria-hidden>·</span>
-          <span className={asks && !run.switching ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{detail}</span>
-        </span>
-      )}
+      <span className="flex min-w-0 flex-1 basis-0 items-center gap-1.5 self-stretch overflow-hidden" title={stateTitle(presentation, since)}>
+        {detail && (
+          <>
+            <span aria-hidden>·</span>
+            <span className={asks && !run.switching ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{detail}</span>
+          </>
+        )}
+      </span>
       <span className="hidden shrink-0 @lg/state:flex">
         <Avatar name={ownerName} color={owner?.color} />
       </span>

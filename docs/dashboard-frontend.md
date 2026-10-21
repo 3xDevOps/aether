@@ -1351,7 +1351,8 @@ since 5 minutes ago — Turn ended without a report. Send a message to
 continue." A board card reads *Label* · *reason* outside Needs you, where
 the reason alone leads. `stateDetail` drops a reason that only restates the
 label. The run header's state line shows only the reason, with `stateTitle`
-as its tooltip, because the Workflow chip under it already shows the dot and
+as the tooltip of the space it fills, there even when the reason is empty,
+because the Workflow chip under it already shows the dot and
 label; the label stays in a visually hidden `role=status` element, so a
 screen reader hears only a change of state. While a run waits for agents,
 the header counts the Enhanced session's running subagents, "2 subagents

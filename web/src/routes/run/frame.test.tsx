@@ -99,6 +99,11 @@ describe('run frame', () => {
     await waitFor(() => expect(screen.getByRole('banner').textContent).toContain("On Bob's account (fallback)"))
   })
 
+  it('keeps the state time on the state line when no reason shows', async () => {
+    open({ paused: true })
+    await waitFor(() => expect(screen.getByTitle(/^Paused since /)).toBeDefined())
+  })
+
   it('keeps the model out of the state line and in the agent tooltip', async () => {
     open({ model: 'opus' })
     await waitFor(() => expect(screen.getByTitle('Claude Code · Standard · opus')).toBeDefined())
