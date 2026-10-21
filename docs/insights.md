@@ -23,7 +23,7 @@ Authorization: Bearer <local-gateway-token>
 | Param | Meaning |
 | --- | --- |
 | `workspace_id` | One workspace, or `""` for every workspace. An unknown workspace is error `-32000`. |
-| `scope` | `mine`: runs you own and swarms you are accountable for. `everyone`: every member's, summed; never broken down per member. Any member who can see runs can ask for either. |
+| `scope` | `mine`: runs you own and swarms you are accountable for. `everyone`: every member's, summed, and broken down per member in `outcomes.members`. Any member who can see runs can ask for either. |
 | `from`, `to` | RFC3339 times; the range is `[from, to)`. `to` must be after `from` and the range at most 400 local days. |
 | `time_zone` | IANA name, such as `Europe/Berlin`, that days are counted in, DST included. `""` is UTC; `Local` and unknown names are rejected. The server binary carries its own zone database, so a host without system tzdata resolves every name. |
 
@@ -38,11 +38,11 @@ shape. The rest of this guide says what each number means.
 ## Which runs count
 
 Run counts, the series, the heatmap, `by_workspace`, `by_agent`,
-`durations`, `cost` and `recent` count only *top-level* runs: runs that are
+`durations`, `cost` (except `total_tokens`), `success.runs`, `outcomes.runs` and `recent` count only *top-level* runs: runs that are
 not a swarm worker and not a swarm integrator of any generation. A swarm's
 runs are counted once, under `swarms`, so a worker retry or a replaced
 integrator never adds a run of its own. `needs_you` and `pull_requests`
-count swarm runs as well.
+count swarm runs as well, and so does `total_tokens`; see [Cost](#cost).
 
 Whether a run belongs to a swarm is stored on the run (`runs.swarm_run`)
 when the run is created, so deleting the swarm does not turn its runs into
@@ -66,6 +66,51 @@ top-level.
 | `swarms` | Swarms created in the range, scoped by their accountable member: how many, how many are now completed or cancelled, `agents` (distinct worker and integrator runs they started that still exist) and `tasks_accepted`. |
 | `needs_you` | Runs in scope waiting for a member right now, as on the Board, swarm runs included. Ignores the range. |
 | `recent` | Up to 50 runs that finished in the range, newest first, with the last pull request the run recorded. `title` is the run's title, or the first non-blank line of its task when it has none, cut to 120 characters, as the dashboard names runs. |
+
+## Outcomes
+
+`outcomes` buckets how runs and swarms ended into three counts the
+dashboard stacks: `done`, `failed` and `abandoned`.
+
+| | `done` | `failed` | `abandoned` |
+| --- | --- | --- | --- |
+| Run | `completed` or `merged` | `failed` | `abandoned` or `interrupted` |
+| Swarm | phase `completed` | always `0`: a swarm has no failed phase | phase `cancelled` |
+
+Runs follow the top-level rule above and count on the day they finished.
+A swarm counts on the day it became `completed` or `cancelled`, a time
+that later changes to the swarm do not move, and belongs to its accountable
+member. Swarms that finished before the server recorded this time count on
+their last update.
+
+- `outcomes.runs`, `outcomes.swarms`: the counts over the whole range.
+  `outcomes.runs` equals `totals.finished`, `totals.failed` and
+  `totals.abandoned` + `totals.interrupted`.
+- `outcomes.series`: one entry per `series` bucket, same order and `start`,
+  zero-filled.
+- `outcomes.members`: for `scope: "everyone"`, one entry per current member,
+  oldest first, including members with no activity; `[]` for `mine`.
+  `member_id` never changes, so assign chart colors by it; `color` is the
+  member's profile color. Each entry carries `runs`, `swarms` and a
+  zero-filled `series` shaped like `outcomes.series`. Adding the members'
+  counts bucket by bucket gives `outcomes.series`. A deleted member has no
+  entry, and their deleted runs are in no count.
+
+## Success
+
+`success` is how much of what finished ended with a merged pull request:
+`runs.succeeded` of `runs.finished`, `swarms.succeeded` of
+`swarms.finished`.
+
+- `runs.finished`: top-level runs that finished in the range with any
+  status; `succeeded` are those with status `merged` or a recorded pull
+  request whose last observed state is merged (see
+  [Pull requests](#pull-requests)).
+- `swarms.finished`: swarms completed or cancelled in the range;
+  `succeeded` are those where any of their runs, worker or integrator,
+  recorded a merged pull request.
+
+A merge the server has not observed yet is not counted.
 
 ## Durations
 
@@ -110,6 +155,17 @@ not the paying account, decides whether it is in scope. Only headless Claude
 runs are metered; any other run is counted in `unmetered_runs`. An unmetered
 run's cost is unknown, not zero, so `cost_usd` and the token counts are a
 floor.
+
+`total_tokens` is every token the scope used in the range: `input_tokens`
++ `output_tokens` of top-level runs, plus the metered tokens of swarm worker
+and integrator runs that finished in the range. `metered_runs`,
+`unmetered_runs`, `cost_usd`, `input_tokens` and `output_tokens` stay
+top-level only, so `total_tokens` can exceed `input_tokens` +
+`output_tokens`; a team that mostly runs swarms reads near zero in those
+fields. `by_agent` splits the same fields and `total_tokens` per `harness`,
+largest `total_tokens` first, so a harness's share is its `total_tokens`
+over `cost.total_tokens`. A harness with only unmetered runs is listed with
+zero tokens; one with only swarm runs is listed with zero run counts.
 
 ## Pull requests
 

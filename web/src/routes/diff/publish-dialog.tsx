@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { create } from 'zustand'
 import { RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
@@ -15,12 +16,25 @@ import { usePublish, type Publish } from '@/routes/diff/publish-state'
 import { useStore } from '@/store'
 import { useHeaderPrimary } from '@/store/hooks'
 
+const useRequests = create<Record<string, true>>(() => ({}))
+
+/** Opens the run's Publish dialog, now or when the Changes view first mounts it. */
+export function openPublish(runID: string) {
+  useRequests.setState({ [runID]: true })
+}
+
 /** Stays mounted while the run is open so a typed message or an uncertain
  * PR creation survives closing the dialog and switching views. `quiet` gives
  * the view's one filled button to another action. */
 export function PublishDialog({ run, client = api, quiet = false }: { run: Run; client?: Api; quiet?: boolean }) {
   useHeaderPrimary(true)
   const [open, setOpen] = useState(false)
+  const requested = useRequests((all) => all[run.id])
+  useEffect(() => {
+    if (!requested) return
+    setOpen(true)
+    useRequests.setState(({ [run.id]: _, ...rest }) => rest, true)
+  }, [requested, run.id])
   const p = usePublish(run, client, open)
   const [chosen, setStep] = useState<string>()
   // Nothing left to commit when the first status arrives: open on the push.

@@ -396,6 +396,12 @@ export function insightsRun(over: Partial<InsightsRun> = {}): InsightsRun {
 const insightsTotals = { launched: 0, completed: 0, merged: 0, failed: 0, interrupted: 0, abandoned: 0, killed: 0, active: 0, finished: 0 }
 
 /** insights.get for 2026-10-09 to 2026-10-16 in UTC. */
+const outcomeSeries = Array.from({ length: 7 }, (_, i) => ({
+  start: `2026-10-${String(9 + i).padStart(2, '0')}`,
+  runs: { done: 0, failed: 0, abandoned: 0 },
+  swarms: { done: 0, failed: 0, abandoned: 0 },
+}))
+
 export function insights(over: Partial<InsightsResult> = {}): InsightsResult {
   const series = Array.from({ length: 7 }, (_, i) => ({
     start: `2026-10-${String(9 + i).padStart(2, '0')}`,
@@ -438,8 +444,26 @@ export function insights(over: Partial<InsightsResult> = {}): InsightsResult {
       median_waiting_seconds: 240,
       median_response_seconds: 75,
     },
-    cost: { metered_runs: 3, unmetered_runs: 6, cost_usd: 4.12, input_tokens: 120000, output_tokens: 9000 },
+    cost: {
+      metered_runs: 3,
+      unmetered_runs: 6,
+      cost_usd: 4.12,
+      input_tokens: 120000,
+      output_tokens: 9000,
+      total_tokens: 129000,
+      by_agent: [
+        { harness: 'claude', metered_runs: 2, unmetered_runs: 3, cost_usd: 3.2, input_tokens: 92000, output_tokens: 8000, total_tokens: 100000 },
+        { harness: 'codex', metered_runs: 1, unmetered_runs: 3, cost_usd: 0.92, input_tokens: 28000, output_tokens: 1000, total_tokens: 29000 },
+      ],
+    },
     pull_requests: { opened: 2, merged: 1 },
+    success: { runs: { succeeded: 3, finished: 9 }, swarms: { succeeded: 1, finished: 1 } },
+    outcomes: {
+      runs: { done: 7, failed: 1, abandoned: 1 },
+      swarms: { done: 1, failed: 0, abandoned: 0 },
+      series: outcomeSeries.map((day, i) => i === 5 ? { ...day, runs: { done: 5, failed: 1, abandoned: 0 } } : i === 6 ? { ...day, runs: { done: 2, failed: 0, abandoned: 1 }, swarms: { done: 1, failed: 0, abandoned: 0 } } : day),
+      members: [],
+    },
     recent: [
       insightsRun({ run_id: 'run_3', title: 'Retry flaky upload', status: 'interrupted', harness: 'codex', model: 'gpt-5.5', workspace_id: otherWorkspace.id, finished_at: '2026-10-15T11:00:00Z' }),
       insightsRun({ run_id: 'run_2', title: 'Add the export button', status: 'merged', finished_at: '2026-10-15T10:00:00Z', pr_url: 'https://github.com/acme/app/pull/42', pr_state: 'merged' }),
@@ -525,6 +549,11 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     runGitDiff: vi.fn<Api['runGitDiff']>(async () => ({
       state: { ...gitState }, output: { exit_code: 0, truncated: false },
     })),
+    runGitLog: vi.fn<Api['runGitLog']>(async () => ({
+      branch: gitStatus.branch, base_ref: 'main', base: gitStatus.head, head: gitStatus.head, merge_base: gitStatus.head,
+      ahead: 0, behind: 0, commits: [], upstream: [], conflicts: [], truncated: false,
+      output: { exit_code: 0, truncated: false },
+    })),
     runGitCommit: vi.fn<Api['runGitCommit']>(async () => needsOverride('runGitCommit')),
     runGitPush: vi.fn<Api['runGitPush']>(async () => needsOverride('runGitPush')),
     runPRStatus: vi.fn<Api['runPRStatus']>(async () => ({
@@ -542,6 +571,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       truncated: false,
       output: { exit_code: 0, truncated: false },
     })),
+    runPRMerge: vi.fn<Api['runPRMerge']>(async () => needsOverride('runPRMerge')),
     workspaceImport: vi.fn<Api['workspaceImport']>(async () => needsOverride('workspaceImport')),
     devTerminalList: vi.fn<Api['devTerminalList']>(async ({ run_id }) => ({
       terminals: Array.from(terminals.get(run_id)?.values() ?? [], (terminal) => ({
@@ -972,4 +1002,32 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     ...over,
   }
+}
+
+const none = { done: 0, failed: 0, abandoned: 0 }
+
+/** insights.get for the same week with scope everyone: alice's runs from insights() plus bob's. */
+export function teamInsights(): InsightsResult {
+  const base = insights()
+  const bobDay = (i: number) => ({
+    start: base.outcomes.series[i].start,
+    runs: i === 5 ? { done: 2, failed: 1, abandoned: 0 } : i === 6 ? { done: 1, failed: 0, abandoned: 0 } : none,
+    swarms: i === 6 ? { done: 0, failed: 0, abandoned: 1 } : none,
+  })
+  const bobSeries = base.outcomes.series.map((_, i) => bobDay(i))
+  const sum = (a: typeof none, b: typeof none) => ({ done: a.done + b.done, failed: a.failed + b.failed, abandoned: a.abandoned + b.abandoned })
+  return insights({
+    totals: { ...base.totals, launched: 15, completed: 9, merged: 1, failed: 2, interrupted: 1, finished: 10 },
+    swarms: { ...base.swarms, launched: 2, completed: 1, cancelled: 1, agents: 8, tasks_accepted: 6 },
+    success: { runs: { succeeded: 5, finished: 13 }, swarms: { succeeded: 1, finished: 2 } },
+    outcomes: {
+      runs: { done: 10, failed: 2, abandoned: 1 },
+      swarms: { done: 1, failed: 0, abandoned: 1 },
+      series: base.outcomes.series.map((day, i) => ({ start: day.start, runs: sum(day.runs, bobSeries[i].runs), swarms: sum(day.swarms, bobSeries[i].swarms) })),
+      members: [
+        { member_id: alice.id, display_name: alice.display_name, color: '#e6194b', runs: base.outcomes.runs, swarms: base.outcomes.swarms, series: base.outcomes.series },
+        { member_id: 'mem_bob', display_name: 'Bob', color: '#3cb44b', runs: { done: 3, failed: 1, abandoned: 0 }, swarms: { done: 0, failed: 0, abandoned: 1 }, series: bobSeries },
+      ],
+    },
+  })
 }

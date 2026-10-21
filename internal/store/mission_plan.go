@@ -383,7 +383,7 @@ func (d *DB) CompleteMission(ctx context.Context, missionID domain.MissionID, ru
 	if phaseErr := requireMissionPhase(m, "mission complete", domain.MissionPhaseActive); phaseErr != nil {
 		return nil, phaseErr
 	}
-	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=?`, domain.MissionPhaseCompleted, n, missionID); updateErr != nil {
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=?, finished_at=? WHERE id=?`, domain.MissionPhaseCompleted, n, n, missionID); updateErr != nil {
 		return nil, fmt.Errorf("store: move mission %s to completed: %w", missionID, updateErr)
 	}
 	if enqueueErr := enqueueMissionControlChange(ctx, tx, missionID); enqueueErr != nil {
@@ -476,7 +476,7 @@ func (d *DB) CancelMission(ctx context.Context, missionID domain.MissionID, canc
 	if err != nil {
 		return nil, err
 	}
-	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=? WHERE id=?`, domain.MissionPhaseCancelled, n, missionID); updateErr != nil {
+	if _, updateErr := tx.ExecContext(ctx, `UPDATE missions SET phase=?, updated_at=?, finished_at=? WHERE id=?`, domain.MissionPhaseCancelled, n, n, missionID); updateErr != nil {
 		return nil, fmt.Errorf("store: move mission %s to cancelled: %w", missionID, updateErr)
 	}
 	if receiptErr := recordMutationReceipt(tx, ctx, missionID, "mission.cancel", key, payload, string(missionID), 0, n); receiptErr != nil {

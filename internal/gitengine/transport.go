@@ -42,7 +42,7 @@ func (e *Engine) ReceivePack(ctx context.Context, ws domain.WorkspaceID, stdin i
 		after := e.watchedBranchTips(ctx, ws)
 		for run, tip := range after {
 			if tip != "" && tip != before[run] {
-				e.publishBranch(ctx, run, tip)
+				e.publishBranch(ctx, run, before[run], tip)
 			}
 		}
 	}

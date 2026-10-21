@@ -81,18 +81,22 @@ unchanged and outside automatic cleanup; Aether does not replace `HOME`,
 `PATH` or `XDG_CACHE_HOME` wholesale. Installed CLIs, vendor logins, GitHub
 credentials and signing keys remain in the persistent home.
 
-No housekeeping is required. After recovery, hourly, and once before
-refusing new work for disk pressure, Aether tries eligible inactive caches,
-oldest first. Soft reclaim targets are 4 GiB per pool, 16 GiB total and 7 days
-since last use/release. Live, retained, finalizing or uncertain owners always
-win over these targets. They are not hard quotas, and no waiting shell or
-silent agent is killed for cache space. Failed cleanup and deleted-member
-resources retain small server-owned retry metadata outside the writable
-mount; normal maintenance retries them even if a partial removal brought the
-remaining data below its age or size target. Successful retries clear only
-their own diagnostic; image or legacy-cache cleanup cannot clear a pending
-cache-data failure. An open environment protects its cache data, not an exited
-updater container whose cleanup needs retrying.
+No housekeeping is required. After recovery, hourly, and once before refusing
+new work for disk pressure, Aether tries eligible inactive caches, oldest
+first. Soft reclaim targets are 4 GiB per pool, 16 GiB total and 7 days since
+last use/release. Live, retained, finalizing or uncertain owners always win
+over these targets, with one exception: a pool with a live, retained or
+finalizing owner still loses Go build cache (`go-build`) entries unused for a
+day when it is over 4 GiB or the disk is under pressure. Go keeps an entry's
+timestamp within an hour of its last use, so a running build keeps its files.
+The targets are not hard quotas, and no waiting shell or silent agent is
+killed for cache space. Failed cleanup and deleted-member resources retain
+small server-owned retry metadata outside the writable mount; normal
+maintenance retries them even if a partial removal brought the remaining data
+below its age or size target. Successful retries clear only their own
+diagnostic; image or legacy-cache cleanup cannot clear a pending cache-data
+failure. An open environment protects its cache data, not an exited updater
+container whose cleanup needs retrying.
 
 Before legacy cleanup, Aether re-reads the current image, workspace and harness
 cache settings, including configurations that have never launched or were edited

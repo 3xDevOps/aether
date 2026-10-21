@@ -916,6 +916,12 @@ Removal also repairs the selection and open route before any refresh awaits.
 - **Server-gateway reconnects also refresh the snapshot** when replay is
   possible: Tailscale may identify the new connection as a different member.
   Only a local gateway's fixed identity can reuse replay without that refresh.
+- **Branch, pull request and swarm hints are counters.** `git.branch` and
+  `run.pr` bump a per-run `gitSeq` and `prSeq`, and `integration.changed`
+  and `mission.changed` a per-swarm `integrationSeq` and `missionSeq`
+  (`src/store/workflow-signals.ts`). A view that shows that state keys its
+  `run.git.log`, `run.pr.feedback` or `integration.show` re-read on the
+  counter (`useStore(gitSeqOf(runID))`) instead of polling.
 - **A failed hydration retries** on the same backoff, and the affected panes
   say the server is unreachable rather than animating skeletons forever. That
   generic copy never overwrites a more precise error already recorded.
@@ -2035,8 +2041,9 @@ activation, on its own 32px row under the header at every width. When the
 row is too narrow for every tab, as on a phone whose run has a pull request,
 the tabs scroll sideways (`ViewSwitch`): the shown view's tab is kept in
 sight as the view or the room changes, and the right edge fades while more
-tabs lie past it. On a phone with the composer focused the header keeps only
-the title line.
+tabs lie past it. The [Workflow panel](#workflow-panel)'s chip follows the
+tabs. On a phone with the composer focused the header keeps only the title
+line.
 
 A run with a pull request shows it at the right end of that row
 (`pull-request.tsx`): `#412`, a link to the pull request on GitHub, then the
@@ -2053,8 +2060,10 @@ pull request from the checkout's branch on its GitHub remote into the run's
 base branch, the same target the Publish dialog fills in, or one a member
 typed into that dialog and found or opened a pull request at. It asks once
 when the run page opens, every 60
-seconds while the page is visible and after each push or creation in the
-dialog, and re-reads `run.git.status` only when the answer says the branch or
+seconds while the page is visible, after each push or creation in the
+dialog, and at once on a `run.pr` or `git.branch` event for the run or an
+`integration.changed` event for its swarm. The header and the [git card](#changes-view-and-publish)
+share one poll per run however many of them are mounted. It re-reads `run.git.status` only when the answer says the branch or
 HEAD moved. Both calls execute `git` and `gh` in the run's container, so the
 check state exists only while the run is `running` or `needs-attention`: a
 run that leaves those states keeps the link and drops the state, and a page
@@ -2847,6 +2856,97 @@ both what it renders and the overlap set the conflict chips read.
   nothing changed the view is the "No changes yet." empty state. `Land`
   (`land.tsx`) adds a row above the strip only after a pull put the run branch
   on this machine.
+- **The git card sits above the strip.** `components/workflow/git-flow.tsx`
+  (`GitFlow`, model in `store/git-flow.ts`) is the run branch, its pull
+  request, checks and merge readiness in one card that updates in place.
+  The header is the pull request's title and `#128` linking to GitHub with
+  **Draft**, **Open**, **Merged** or **Closed** and its dot, or the branch
+  name before there is a pull request. Above the strip it takes at most 55%
+  of the view's height; only its commit list gives up room, down to two
+  rows, and scrolls, so
+  the header, the head row, readiness and the primary action stay in sight.
+  The Workflow panel shows it with `compact`: the header, the head row, one
+  line of check counts and the primary action, with **Show N commits**
+  unfolding the graph. The panel leaves it out while the Changes view shows
+  the full card.
+- **The graph is `run.git.log`.** One 28px row per commit under one SVG of
+  two lanes: the run branch's commits (`commits`) on the accent lane, the
+  base's commits the branch does not have (`upstream`) muted on the second,
+  interleaved by time, and the merge base at the bottom. A merge curves into
+  the base lane from its own row; the branch's first commit bends into the
+  merge base. A row shows the subject (focusable, with the full subject in a
+  tooltip), a mono pill with the branch or base name at its tip, the short
+  SHA, and the author and age once the card is 420px wide. An upstream
+  commit that touches a path a merge would conflict on (`paths`) is amber
+  with a count. More than eight commits fold into **N more commits**, which
+  keeps the three newest upstream commits in sight and unfolds the rest; a
+  `truncated` log ends in a row that says so, with dotted edges. The top row
+  is the pending action, a hollow node with dashed edges to both tips:
+  **Open pull request**, **Merge into main**, **Merged into main**, **Closed
+  without merging** or **No commits ahead of origin/main**, with its state
+  on the right: **2 conflicts** (a button whose popover lists the files), **3
+  behind**, **not pushed**, **draft**, **ready**, **merged**, or what else
+  holds the merge. The status line under the card reads "7 of 9 checks
+  passed · 1 running · 2 ahead · 1 behind origin/main". A failed log read
+  keeps the last graph on screen beside the error.
+- **Checks, reviews and readiness come from GitHub.** Each check from the
+  last `run.pr.feedback` is a pill, failed first, with its name and
+  **passed**, **failed** or **running**; its tooltip gives its status and
+  conclusion and the pill links to the check on GitHub. Under them, the
+  latest approval or change request of each reviewer by name, and the review
+  comments behind a disclosure (send them to the agent from the header's
+  dialog). **Merge readiness** lists **Draft** for a draft, then **Checks**,
+  **Conflicts**, **Review** and **Base**, each with its own dot. With a pull
+  request, **Conflicts** and **Base** are GitHub's `mergeable` and
+  `merge_state_status`: `CONFLICTING` is "GitHub reports conflicts with
+  main", naming the file count when the run's log measured the same merge;
+  `BEHIND` is "Behind main"; `BLOCKED`, a branch rule GitHub still
+  enforces such as a second required approval, blocks the row and offers
+  **Open on GitHub** instead of **Merge**; `UNKNOWN`, which GitHub answers while it is
+  still computing, is **Not checked yet**. While the checkout has commits
+  the pull request lacks, **Base** reads "Pull request head is behind the
+  branch: 2 unpushed commits" and **Merge** is not offered. Before a pull
+  request the log only predicts, against the checkout's last fetch of the
+  base: "1 file conflicts with origin/main as last fetched" holds the row,
+  and "None against origin/main as last fetched" is never counted as done.
+  Anything not yet read, read from a failed refresh, or from a partial
+  answer is **Not checked yet** or "Incomplete answer from GitHub", though
+  a failure or change request it saw still counts. The heading reads
+  **Ready to merge** only when every item is grounded.
+- **One primary action, by state.** **Review changes** (outside the Changes
+  tab, with nothing to publish yet) opens the Changes tab; **Open pull
+  request** opens the Publish dialog, which also appears when the branch is
+  ahead of its base with an empty patch; **Ask agent to resolve conflicts**
+  sends the run, through `useAgentSend`, one message naming the base, its
+  commit and every conflicting file the log found (or only GitHub's report
+  when it found none against that base), under the composer's rules, and
+  the receipt reads "Sent conflict list to Claude Code."; **Squash and
+  merge** calls `run.pr.merge` with the pull request's repository, number,
+  `expected_head` (the head on screen), `expected_base` and
+  `expected_login`, after a
+  confirmation that repeats the checklist, and its menu switches to **Create
+  a merge commit** or **Rebase and merge**; **Open on GitHub** covers a
+  draft, a blocked, an unpushed, a merged or a closed pull request. A merge
+  GitHub accepted but has not done, as through a merge queue, shows `gh`'s
+  output, or "GitHub has not merged #128; it is open.". Open, merge and
+  resolve need a live run, the collaborator role and leave to steer the run
+  (its owner, or anyone the run's protection and the workspace's
+  `steer_others` allow), the rules the server applies; resolve also needs a
+  member who may message the agent now. While the card
+  offers an action, **Publish…** turns secondary, so the view keeps one
+  filled button. A running action disables its button with a spinner and
+  names itself in the status line. Every error, from the log, the feedback,
+  a send or a merge, is shown as the server or GitHub wrote it.
+- **The card reads on events, not timers.** The log is read when the first
+  card for a run mounts and again on each `git.branch` event for the run or
+  `integration.changed` for its swarm (`gitSeq` and `integrationSeq` in
+  `store/workflow-signals.ts`), and with each 60s pull request poll, since
+  a fetch moves the base without a `git.branch` event. The pull request is
+  read again on `run.pr`, `git.branch` and `integration.changed`. One read
+  of each is in flight per run (`store/coalesce.ts`). A refetch keeps every
+  row whose commit did not change as the same object, so its memoised row
+  does not re-render. A polite screen-reader region repeats the status line
+  once it has held for a second.
 - **The patch is fetched, the events only say when.** `run.diff` carries
   per-file stats and no patch text, so a snapshot bumps the run's `revision`
   and the view re-fetches the chosen comparison from `GET /api/v1/run/<id>/patch`
@@ -3493,6 +3593,64 @@ whatever opened it. Sections (`details.tsx`):
 Any other failed room action shows its error above the sections with
 **Dismiss**; the composer's own failures stay above the composer.
 
+### Workflow panel
+
+The Workflow panel (`src/routes/run/workflow-panel.tsx`) shows what the run
+and its agents are doing as a tree. Its chip sits after the view switch and
+mirrors the run's state: `● Working · 2 agents running` (subagents and
+workflows running at any depth, a background one included) or
+`● Waiting for CI · 3 of 9 checks` (passing checks of the pull request's
+checks this tab last read). The chip toggles the panel. While the
+run's row holds 320px for it plus `minReadableWidth`, the panel is a 320px
+`complementary "Workflow"` rail at the right of the frame, remembered per
+device (`workflowOpen`, persisted, closed until the chip first opens it). A
+row too narrow for it beside Details or the subagent inspector shows those
+instead; the chip then closes Details to make room.
+Narrower rows open it as a side sheet and phones as a bottom sheet, a
+`dialog "Workflow"` that returns focus to the chip, and that closes when a
+row opens the subagent inspector or the request, or the view changes. Under the tree, a run
+with a branch shows the compact git card (`GitFlow` in
+`src/components/workflow/git-flow.tsx`), except on the Changes view, which
+shows the full one.
+
+The tree (`src/components/workflow/workflow-tree.tsx`) is derived by
+`src/store/workflow.ts` from what the dashboard already holds: the run's
+`presentRun` state and reason, and the session's subagent index. Its root is
+the run; a run that needs you leads with a Needs you row naming the
+request; under it every subagent and nested workflow nests under the agent
+that launched it (one whose launch the loaded history lacks sits under the
+run, `Not checked yet`), with its label, state and a summary of its tool calls
+("Read 3 files and ran 2 commands"), never its prose. Node ids are server
+ids (`run:<id>`, `agent:<tool call id>`), and a re-derivation keeps every
+unchanged subtree's object, so only rows that changed re-render.
+
+Each 28px row shows a status dot (shape and text, the vocabulary of
+[Run state](#run-state) plus `Not started` and `Not checked yet`), the label,
+the muted reason, and at the right the elapsed time in tabular figures, or
+on the root real counts (`2 agents running`, counting every depth, or
+`3 of 5 tasks done`).
+Completed subtrees start folded to their summary row; everything else starts
+open. A folded parent still lists every descendant that needs you under it.
+Rows below the fourth level collapse into one `Nested workflow · N agents`
+row that opens that subtree in place, with **Show the whole workflow** to go
+back. Past 200 visible rows the tree renders only the rows in view.
+Selecting an agent row opens it in the subagent inspector; selecting the
+Needs you row performs the header's action or reveals the request card.
+
+The tree is a `tree` with one tab stop among its rows: Up and Down move,
+Home and End jump, Right opens a folded row or moves to its first child,
+Left folds an open row or moves to its parent, and Enter or Space selects.
+Links and buttons inside a row, a pull request link or **Task details**, are
+tab stops of their own after it. When the focused row disappears, as when a
+completed subtree folds, focus moves to its nearest remaining ancestor; in a
+virtualized tree the focused row stays mounted while scrolled away. Each
+`treeitem` carries `aria-level`, `aria-posinset`, `aria-setsize` and, on a
+parent, `aria-expanded`. One polite status region announces rows that come
+to need you, fail, become ready for review or complete: transitions are
+gathered for 1.5 seconds from the first, then up to three are read, Needs
+you and Failed first. Only Working dots pulse, and rows added after the first render fade
+in over 120ms; with reduced motion requested, neither animates.
+
 ### Captures and candidate review
 
 **Captures…** in More (and in the terminal's **Tools** menu) opens
@@ -3699,29 +3857,41 @@ The body is one column, in this order:
    answer.`
    Answering needs `mission.question.answer`, launch permission and the
    accountable human or an admin.
-3. **Tasks**, a tree rooted at the current integrator run. Each run row
-   shows its status dot (`presentRun`, pulsing while working), the name
-   (`Integrator`, or `Worker <n>` and `attempt <m>` from `workerName` via `missionTree`),
-   agent and mode, the run's reason (its latest tool activity while working,
-   with the `live-shimmer` sweep) and the elapsed time from the run's or
-   attempt's start to its finish or now. Under the integrator, each task
-   shows its status word (Proposed, Ready, Working, Review, Done, Abandoned,
-   Blocked) and `Depends on` with each prerequisite's status dot and title.
-   Under each task, every attempt is listed newest first with the attempt
-   state ahead of the run's reason, and `from a replaced integrator` when an
-   earlier integrator generation dispatched it. A run the store does not
-   hold shows a neutral dot and the attempt state, or `Run not loaded` for
-   the integrator. The integrator and each task fold with their chevron and
-   start open. Folding either keeps every control hold and every worker that
-   needs you visible; a task with neither disappears while the integrator is
-   folded. Swarm rows join with the sidebar's tree connectors. Selecting a
-   run row opens that run. The derivation is
-   `missionTree` in `src/routes/missions/tree.ts`. **Task details**, closed
-   by default, shows the task's objective, scope, blockers other than
+3. **Tasks**, the [workflow tree](#workflow-panel) of the swarm, derived by
+   `deriveSwarmWorkflow` in `src/store/workflow.ts` from `mission.show`,
+   the store's runs and `integration.list`. The root is the current
+   integrator run, labelled `Integrator · <agent> · <mode>`, with
+   `<n> of <m> tasks done`, where a task is done only when the server
+   accepted a submission for its current revision. Under it each task shows
+   its state: Not started (`No worker yet`, or `Proposed, not accepted yet`),
+   Waiting (`Waiting on <task>` for an unfinished dependency, or `Blocked on
+   <kind>: <action>`), the state of its newest worker for the current
+   revision while that worker runs,
+   Waiting for agents once the worker finished or submitted, and Completed.
+   Under each task every worker is listed newest first (`Worker <n>` and
+   `attempt <m>` from `workerName`, agent and mode) with the attempt state
+   ahead of the run's reason, `from a replaced integrator` when an earlier
+   integrator generation dispatched it, and a line with its branch and, when
+   this tab has read it, the pull request's number and state. A run the
+   store does not hold shows the attempt state alone. Under each worker are
+   its submissions: Accepted, Rejected, `Submitted, waiting for the
+   integrator`, Superseded or Abandoned, with `for revision <n>` when it was
+   for an earlier revision and any scope violations. After the tasks come
+   the integration candidates, newest first, each `Candidate for <ref>`:
+   Preparing, `<n> conflicts: <paths>`, `Verification running`,
+   `Verification passed`, `Verification failed: <error or exit code>`,
+   `Delivery pending`, `Delivered`, or `Not verified yet`; the newest three
+   are read with `integration.show` for their checks, a failed read shows
+   its error verbatim, and the list is read again on each
+   `integration.changed` and `mission.changed` for the swarm. Selecting a worker, submission or the
+   integrator opens that run. An open task, or one with no worker yet,
+   offers **Task details**, closed by default, with the task's objective, scope, blockers other than
    `proposal` in planning, scope diagnostics with a link to the other run,
    and attempt errors. A worker under a human control hold shows `<name>
-   holds control of this worker` with **Release control**, which sends
-   `mission.worker.release` with the observed `expected_takeover_generation`.
+   holds control of this worker` above the tree with **Release control**,
+   which sends `mission.worker.release` with the observed
+   `expected_takeover_generation`; it stays visible however the tree is
+   folded.
 4. **Agent messages**, described below.
 5. **Integration**, closed by default: the read-only candidate panel (see
    [Captures and candidate review](#captures-and-candidate-review)),
@@ -3731,10 +3901,8 @@ The body is one column, in this order:
    submission's run, retained revision, evidence reference, evidence
    exceptions and scope disposition. Every run ID there opens its run.
 
-A task is Done only when the server accepted a submission for its current
-revision; the tree shows the server's status, never a worker's exit.
-
-Each `mission.changed` for the open swarm re-reads `mission.show`, and one
+Each `mission.changed` for the open swarm re-reads `mission.show`, and
+with it the candidates, and one
 for any other swarm re-reads `mission.list`, without holding up the events
 behind it. A burst coalesces to one read in flight and one queued per swarm
 (or workspace list), so the page settles on the last state.
@@ -3903,7 +4071,8 @@ questions and queued messages stay contextual to their run, in its Details
   is mounted (`useLiveFeed`), `applyEvent` appends each event the filters
   select by the server reader's own rule (workspace, run or mail to it, actor,
   type; `run.diff`, `run.title`, `run.agent`, `coord.message.acked`,
-  `mission.changed` and `workspace.presence` only when asked for by type),
+  `mission.changed`, `integration.changed`, `run.pr` and `workspace.presence`
+  only when asked for by type),
   skipping a sequence already held. The cursor follows only while the window
   is whole - no read in flight, failed or cut short - and a view reads from
   the cursor again when the stream reconnects. A failed or cut-short read is
@@ -4002,39 +4171,59 @@ questions and queued messages stay contextual to their run, in its Details
 ## Insights
 
 `src/routes/insights/` is **Insights** (`?page=insights`), what a member's
-agents finished over a period. It is in the header navigation after
-**Activity** when the gateway offers `insights.get`, and reads that one
-method, and the server computes every number. The page re-reads when its
-controls change and
-when the event stream comes back live, dropping answers to an older request.
+agents finished over the last seven local days. It is in the header
+navigation after **Activity** when the gateway offers `insights.get`, and
+reads that one method; the server computes every number
+([insights.md](insights.md)). The page reads twice, `scope: "mine"` and
+`scope: "everyone"`, and re-reads when the workspace changes and when the
+event stream comes back live, dropping answers to an older request. Each
+section loads, fails and retries on its own.
 
-- **Controls.** **Period** (Last 7 days, the default; 30 days; 90 days; 12
-  months), **Workspace** (All workspaces or one; shown with more than one
-  workspace, opening on `activeWorkspace`) and **Mine** / **Everyone**. A
-  period ends at the next local midnight, so today counts; 12 months starts
-  on the Monday on or before, where weekly buckets start. The request
-  carries the browser's IANA time zone for day buckets, or "" (UTC) when the
-  browser reports none, which the page then says. The choices last while the
-  page is open; they are not in the address. On a phone the controls wrap
-  above the content instead of sitting in the header.
-- **Headline.** One sentence: "Last 7 days: 12 runs finished and 1 swarm
-  completed across 3 workspaces." Runs in **Needs you** follow as a link to
-  the Board.
-- **Tiles.** Runs finished, success rate (finished of runs that ended, with
-  both counts, rounded down so 100% means nothing failed), swarms completed
-  (with agents and tasks accepted) and pull requests Aether opened. Runs
-  finished and success rate compare with the period before in raw numbers
-  ("Up from 8 the 7 days before"). Pull requests show a dash and say none
-  are recorded until the server reports `coverage.pull_requests_since`.
-- **Activity chart.** Per day (per week past 92 days): launched runs as the
-  outlined left bar, runs that ended as the right bar stacked Done, Failed
-  (failed and interrupted) and Abandoned, with a text legend. The chart is
-  one tab stop; arrow keys, **Home** and **End** move between bars, and
-  **Enter**, **Space** or a click selects one, and **Finished work** reads
-  `insights.get` again for that bucket alone, since the period's list holds
-  only its newest 50 runs. "Show every day" clears it. On a phone more than
-  30 daily bars fold into weeks, and on a coarse pointer each bar is at
-  least 44px wide, the chart scrolling sideways from the newest end.
+- **Controls.** **Workspace** (All workspaces or one; shown with more than
+  one workspace, opening on `activeWorkspace`). The window is the seven
+  local days ending at the next local midnight, so today counts. The
+  request carries the browser's IANA time zone for day buckets, or "" (UTC)
+  when the browser reports none, which the page then says. The choice lasts
+  while the page is open; it is not in the address. On a phone it wraps
+  above the content instead of sitting in the header. Runs in **Needs you**
+  follow as a link to the Board.
+- **My statistics** and **Team statistics.** Two sections with the same
+  layout, mine first. Each has four boxes and one chart:
+  - *Runs / swarms completed*: `outcomes.runs.done` and
+    `outcomes.swarms.done` as "7 runs / 1 swarm", with the failed and
+    abandoned counts of each below. Every number is from `outcomes`, work
+    that finished in the window, so the box and the chart agree.
+  - *Success rate*: runs and swarms that ended with a merged pull request
+    over all that finished, `success.runs` plus `success.swarms`, rounded
+    down in integers so 100% means exactly all succeeded; a dash when none finished. Each
+    fraction is written out below.
+  - *Swarm tasks accepted*: `swarms.tasks_accepted`, with the agents in
+    those swarms. Unlike the other boxes, `swarms.*` counts swarms started
+    in the window, which the box says; the page never shows swarms launched
+    beside swarms completed.
+  - *Total tokens used*: `cost.total_tokens` as "100K tokens", with the
+    harness at the head of `cost.by_agent` and its share, rounded down
+    ("Claude Code used 56% of the 100K tokens") and how many runs reported no tokens.
+- **Outcome chart.** One chart per section: seven day groups, each three
+  bars side by side, Done, Failed and Abandoned, from `outcomes.series`. A
+  **Runs** / **Swarms** toggle switches the unit. Every bar carries its
+  count; the letters D, F and A under each group name its bars, and Failed is
+  striped and Abandoned dotted, so no outcome is told by color alone, not
+  even when a member's color is red. Hovering or focusing a day highlights
+  its group, dims the other six and opens a tooltip with the counts; a day
+  stays active while the pointer is on it, whichever day loses focus. Each day is one tab stop labelled with its
+  counts. The team chart stacks every bar by member, using the member's
+  profile color from `outcomes.members` and a legend of members. A color
+  repeats after eight members, so each member also has a two-letter tag
+  (numbered when two collide) in the legend and tooltip, and a ringed
+  swatch; labels give each member's count. On the team chart the outcome
+  swatches in the legend and tooltip are neutral gray, keeping their
+  stripes and dots, so they cannot be mistaken for a member's color. The
+  chart always draws its
+  axes and says so when nothing ended. The y axis tops out at the busiest
+  bar.
+The sections below cover only the member's own runs in the same window.
+
 - **Finished work.** The server's 50 most recent runs that ended, ten shown
   until **Show all**: title, outcome badge, workspace, agent and model
   ("default model" when the run used the agent's own), duration, pull
@@ -4042,7 +4231,9 @@ when the event stream comes back live, dropping answers to an older request.
   learns a merge only when `run.pr.status` is called for the run, so after
   each load the page calls `run.pr.status {"run_id":"<run-id>"}` one after
   another for up to ten listed runs whose pull request is recorded `open`,
-  then reads `insights.get` again once if any state changed. A failed call
+  then reads `insights.get` again once if any state changed. The team
+  statistics do the same for their own list, skipping runs already
+  checked, and a change in either rereads both. A failed call
   leaves the row as it was and puts the error in the pull request link's
   tooltip; a failed second read is shown above the page, which keeps the
   first.
@@ -4059,11 +4250,12 @@ when the event stream comes back live, dropping answers to an older request.
   runs reported it, tokens, and a link to **Settings › Usage** for
   subscription quota. Cost never stops a run.
 
-A failed read shows the server's error with **Retry**; a server without
-`insights.get` gets a neutral line asking for an update. Until the event
-stream is live the page names the connection problem instead of loading. An
-empty period offers **New run**, the last 12 months, and everyone's runs
-from **Mine**.
+A failed read shows the server's error with **Retry** in the section that
+failed; a server without `insights.get`, or one whose answer lacks
+`outcomes`, `success` or `cost.by_agent`, gets one neutral line asking for
+an update. Until the event stream is live the page names the connection
+problem instead of loading. With nothing in the window the boxes read zero
+and the chart says nothing ended.
 
 ## Memory
 

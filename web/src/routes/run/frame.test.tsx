@@ -448,6 +448,18 @@ describe('run details', () => {
     expect(useStore.getState().route.params.view).toBe('session')
   })
 
+  it('leads the workflow with the request that needs the viewer, and leaves the sheet for it', async () => {
+    vi.mocked(api.runRoomList).mockResolvedValue({ messages: [] })
+    open({ status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?' }, 'terminal')
+    fireEvent.click(screen.getByRole('button', { name: 'Workflow: Needs you' }))
+    const sheet = within(await screen.findByRole('dialog', { name: 'Workflow' }))
+    const request = sheet.getByRole('treeitem', { name: /^Agent asks: Which port\?, Needs you/ })
+    expect(request.getAttribute('aria-level')).toBe('2')
+    fireEvent.click(request)
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Workflow' })).toBeNull())
+    expect(useStore.getState().route.params.view).toBe('session')
+  })
+
   it('shows a Failed run that needs review as its card', async () => {
     vi.mocked(api.runRoomList).mockResolvedValue({ messages: [] })
     open({ status: 'needs-attention', state: 'failed', reason: 'enhanced turn failed: EOF', outcome_unseen: true }, 'terminal')

@@ -133,6 +133,53 @@ func TestCacheTerminalCreateGapDoesNotBlockSweepOrLoseData(t *testing.T) {
 	}
 }
 
+func TestProtectedCacheTrimsOnlyUnusedGoBuildEntries(t *testing.T) {
+	e := newTestEnv(t, nil)
+	run, _ := e.launchFake(t, "go builder")
+	path := writeCacheFixture(t, e, run.HomeMember(), "runs", int64(cachePoolTarget+1))
+	idle := writeCacheFixture(t, e, run.HomeMember(), "terminal", 4096)
+	outside := t.TempDir()
+	old := time.Now().Add(-2 * goBuildCacheInactiveAge)
+	write := func(name string, mtime time.Time) string {
+		if err := os.MkdirAll(filepath.Dir(name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(name, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(name, mtime, mtime); err != nil {
+			t.Fatal(err)
+		}
+		return name
+	}
+	cache := filepath.Join(path, "go-build")
+	stale := write(filepath.Join(cache, "ab", "stale-d"), old)
+	fresh := write(filepath.Join(cache, "ab", "fresh-a"), time.Now())
+	other := write(filepath.Join(cache, "ab", "other"), old)
+	executable := filepath.Join(cache, "cd", "executable-d")
+	if err := os.Truncate(write(filepath.Join(executable, "tool"), old), int64(cacheTotalTarget)); err != nil {
+		t.Fatal(err)
+	}
+	fuzz := filepath.Join(cache, "fuzz", "svc-a")
+	write(filepath.Join(fuzz, "corpus"), old)
+	for _, dir := range []string{executable, fuzz} {
+		if err := os.Chtimes(dir, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	victim := write(filepath.Join(outside, "victim-d"), old)
+	if err := os.Symlink(outside, filepath.Join(cache, "ef")); err != nil {
+		t.Fatal(err)
+	}
+	e.sched.sweepCaches(t.Context(), false)
+	for _, gone := range []string{stale, executable} {
+		requireCacheExists(t, gone, false)
+	}
+	for _, kept := range []string{fresh, other, fuzz, victim, filepath.Join(path, "packages"), idle} {
+		requireCacheExists(t, kept, true)
+	}
+}
+
 func TestCachePoolBudgetAndAgeReclaimWithoutPressure(t *testing.T) {
 	for _, age := range []bool{false, true} {
 		t.Run(map[bool]string{false: "pool bytes", true: "inactive age"}[age], func(t *testing.T) {

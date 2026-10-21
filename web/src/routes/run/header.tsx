@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type * as React from 'react'
 import { Camera, Lock, PanelRight, ScrollText } from '@/components/icons'
 import { RunActions } from '@/components/run-actions'
 import { RunRetention } from '@/components/run-retention'
@@ -222,10 +223,13 @@ export function RunHeader({
   onEvents,
   agentName,
   agentEntry,
+  workflow,
 }: {
   run: RunRecord
   agentName: string
   agentEntry: AgentInfo | undefined
+  /** The Workflow chip, which sits beside the view switch. */
+  workflow?: React.ReactNode
   view: RunView
   views: RunView[]
   agent: AgentTerminal
@@ -289,6 +293,7 @@ export function RunHeader({
       {!composing && (
         <div className="@container/views flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
           <ViewSwitch view={view} views={views} />
+          {workflow}
           {pullRequest.status}
         </div>
       )}

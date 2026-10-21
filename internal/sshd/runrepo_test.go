@@ -8,14 +8,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runrepo"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 type nativeRepoFixture struct {
@@ -225,5 +229,108 @@ func TestRunRepoHandlersRejectCallerExecutionFields(t *testing.T) {
 	_, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunGitDiff, repoParams(t, map[string]any{"run_id": string(e.run.ID), "argv": []string{"gh", "api", "user"}, "workdir": "/root"}))
 	if perr == nil || perr.Code != protocol.CodeInvalidParams {
 		t.Fatalf("caller execution accepted: %+v", perr)
+	}
+}
+
+func TestRunGitLogUsesTheRunsRecordedBase(t *testing.T) {
+	fixture, expected := newNativeRepoFixture(t)
+	e := newTestEnv(t, func(cfg *Config) { cfg.Services.RunRepo = fixture })
+	e.run.BaseBranch, e.run.BaseCommit = "main", expected.Head
+	if err := e.store.UpdateRun(t.Context(), e.run); err != nil {
+		t.Fatal(err)
+	}
+	repoGit(t, fixture.dir, "update-ref", "refs/remotes/origin/main", expected.Head)
+	repoGit(t, fixture.dir, "checkout", "-q", "-b", "aether/run")
+	repoGit(t, fixture.dir, "commit", "-q", "--allow-empty", "-m", "run work")
+	value, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunGitLog, repoParams(t, protocol.RunGitLogParams{RunID: string(e.run.ID)}))
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	var log protocol.RunGitLogResult
+	if err := json.Unmarshal(value, &log); err != nil {
+		t.Fatal(err)
+	}
+	if log.Error != "" || log.BaseRef != "origin/main" || log.Base != expected.Head || log.Ahead != 1 || len(log.Commits) != 1 || log.Commits[0].Subject != "run work" {
+		t.Fatalf("run.git.log = %+v", log)
+	}
+}
+
+func TestRunPRMergePassesGHStderrAndPublishesState(t *testing.T) {
+	fixture, _ := newNativeRepoFixture(t)
+	e := newTestEnv(t, func(cfg *Config) { cfg.Services.RunRepo = fixture })
+	if err := e.store.RecordRunPullRequest(t.Context(), &store.RunPullRequest{RunID: e.run.ID, Repository: "acme/app", Number: 7, URL: "https://github.com/acme/app/pull/7", State: "open", ObservedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := e.bus.Subscribe(t.Context(), events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeRunPR}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sub.Close() })
+	const refusal = "X Pull request acme/app#7 is not mergeable: 1 of 2 required status checks are failing.\n"
+	pull := `{"number":7,"html_url":"https://github.com/acme/app/pull/7","state":"open","merged":false,"merged_at":null,"base":{"ref":"main","repo":{"full_name":"acme/app"}},"head":{"ref":"aether/run","sha":"0123456789abcdef0123456789abcdef01234567","repo":{"full_name":"acme/app"}}}`
+	mergeCode, mergeStderr := 1, refusal
+	var merges [][]string
+	fixture.native = runrepo.New(func(_ context.Context, _ runtime.ID, args []string, _ string) (int, string, string, error) {
+		native := args[slices.Index(args, "gh"):]
+		if native[1] == "pr" {
+			merges = append(merges, slices.Clone(native))
+			return mergeCode, "", mergeStderr, nil
+		}
+		if slices.Contains(native, "user") {
+			return 0, "octo\n", "", nil
+		}
+		path := strings.Split(native[slices.IndexFunc(native, func(arg string) bool { return strings.HasPrefix(arg, "repos/") })], "/")
+		return 0, strings.NewReplacer("acme/app", path[1]+"/"+path[2], `"number":7`, `"number":`+path[4]).Replace(pull), "", nil
+	})
+	merge := func(params protocol.RunPRMergeParams) protocol.RunPRMergeResult {
+		t.Helper()
+		params.RunID, params.Method, params.ExpectedHead = string(e.run.ID), "squash", "0123456789abcdef0123456789abcdef01234567"
+		value, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunPRMerge, repoParams(t, params))
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		var result protocol.RunPRMergeResult
+		if decodeErr := json.Unmarshal(value, &result); decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		return result
+	}
+	event := func() events.RunPRPayload {
+		t.Helper()
+		select {
+		case ev := <-sub.Events():
+			if ev.RunID != e.run.ID || ev.WorkspaceID != e.ws.ID {
+				t.Fatalf("run.pr scope = %s/%s", ev.WorkspaceID, ev.RunID)
+			}
+			return ev.Payload.(events.RunPRPayload)
+		case <-time.After(5 * time.Second):
+			t.Fatal("run.pr was not published")
+			return events.RunPRPayload{}
+		}
+	}
+
+	refused := merge(protocol.RunPRMergeParams{})
+	if refused.Merged || refused.Identity != "octo" || refused.Output.Stderr != refusal || !strings.Contains(refused.Error, refusal) || refused.PullRequest == nil || refused.PullRequest.State != "open" {
+		t.Fatalf("refused merge = %+v", refused)
+	}
+	if !reflect.DeepEqual(merges[0], []string{"gh", "pr", "merge", "7", "--repo", "github.com/acme/app", "--squash", "--match-head-commit", "0123456789abcdef0123456789abcdef01234567"}) {
+		t.Fatalf("merge argv = %v", merges[0])
+	}
+
+	mergeCode, mergeStderr = 0, ""
+	pull = strings.NewReplacer(`"merged":false`, `"merged":true`, `"merged_at":null`, `"merged_at":"2026-10-20T01:02:03Z"`).Replace(pull)
+	if unrelated := merge(protocol.RunPRMergeParams{Repository: "acme/other", Number: 9}); !unrelated.Merged {
+		t.Fatalf("explicit merge = %+v", unrelated)
+	}
+	done := merge(protocol.RunPRMergeParams{})
+	if !done.Merged || done.Error != "" || done.PullRequest.MergedAt == nil {
+		t.Fatalf("merge = %+v", done)
+	}
+	if got := event(); got.Number != 7 || got.State != "merged" || got.MergedAt == nil {
+		t.Fatalf("run.pr after merge = %+v; an unchanged or unrecorded pull request must publish nothing", got)
+	}
+	prs, err := e.store.RunPullRequests(t.Context(), e.run.ID)
+	if err != nil || len(prs) != 1 || prs[0].State != "merged" || prs[0].MergedAt == nil {
+		t.Fatalf("recorded pull request = %+v, %v", prs, err)
 	}
 }

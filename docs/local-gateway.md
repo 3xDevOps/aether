@@ -956,7 +956,7 @@ unavailable owned source remains the server's protocol error.
 | `server.sysbox.status` | none; admin only | `{"state":"on"\|"off"\|"unsupported"\|"installing"\|"failed","reason":"...","log":"..."}` - whether Docker lists `sysbox-runc`. `reason` explains `off`, `unsupported` and `failed`; `off` with a reason naming `sudo aether-server sysbox install` means the server is not root. `log` is the last 8 KiB of installer output |
 | `server.sysbox.install` | none; admin only | the same status. Starts the installer in the background, one at a time; a call while one runs returns `installing`. Poll `server.sysbox.status` until `on`, `unsupported` or `failed`. The server then uses Sysbox for new containers at once. Never retried after a transport failure. While it runs, `server.update` answers `-32003` |
 | `account.usage` | `{"account_member_id":"<member-id>","refresh":false}` (`account_member_id` may be empty for the caller's account) | `{"account_member_id":"<member-id>","providers":[{"provider":"claude"\|"codex","status":"ok"\|"stale"\|"unauthenticated"\|"unsupported"\|"unavailable"\|"error","windows":[{"id":"...","label":"...","used_percent":12.5,"resets_at":"2026-09-18T13:00:00Z"}],"plan":"...","updated_at":"2026-09-18T11:59:00Z","checked_at":"2026-09-18T12:00:00Z","retry_at":"...","error":"..."},...]}` |
-| `insights.get` | `{"workspace_id":"","scope":"mine"\|"everyone","from":"<RFC3339>","to":"<RFC3339>","time_zone":"America/Los_Angeles"}` | `{"generated_at":"...","from":"...","to":"...","time_zone":"...","bucket":"day"\|"week","totals":Totals,"previous":Totals,"series":[{"start":"2026-10-09","launched":3,"completed":2,"merged":1,"failed":0,"interrupted":0,"abandoned":0}],"heatmap":[{"date":"2026-04-20","runs":2}],"by_workspace":[{"workspace_id":"...","name":"...","launched":4,"finished":3,"failed":1}],"by_agent":[{"harness":"claude","model":"","launched":4,"finished":3,"failed":1}],"swarms":{"launched":1,"completed":1,"cancelled":0,"agents":5,"tasks_accepted":4},"durations":{"runs_measured":9,"median_run_seconds":1260,"p90_run_seconds":4100,"state_runs_measured":6,"median_working_seconds":900,"median_waiting_seconds":240,"median_response_seconds":75},"cost":{"metered_runs":3,"unmetered_runs":6,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000},"pull_requests":{"opened":2,"merged":1},"recent":[{"run_id":"...","title":"...","workspace_id":"...","status":"completed","reason":"","harness":"claude","model":"","created_at":"...","finished_at":"...","duration_seconds":1200,"mission_id":"","pr_url":"","pr_state":""}],"needs_you":2,"coverage":{"state_times_since":"...","pull_requests_since":""}}`; `Totals` is `{"launched","completed","merged","failed","interrupted","abandoned","killed","active","finished"}`. What each number counts is in [insights.md](insights.md) |
+| `insights.get` | `{"workspace_id":"","scope":"mine"\|"everyone","from":"<RFC3339>","to":"<RFC3339>","time_zone":"America/Los_Angeles"}` | `{"generated_at":"...","from":"...","to":"...","time_zone":"...","bucket":"day"\|"week","totals":Totals,"previous":Totals,"series":[{"start":"2026-10-09","launched":3,"completed":2,"merged":1,"failed":0,"interrupted":0,"abandoned":0}],"heatmap":[{"date":"2026-04-20","runs":2}],"by_workspace":[{"workspace_id":"...","name":"...","launched":4,"finished":3,"failed":1}],"by_agent":[{"harness":"claude","model":"","launched":4,"finished":3,"failed":1}],"swarms":{"launched":1,"completed":1,"cancelled":0,"agents":5,"tasks_accepted":4},"durations":{"runs_measured":9,"median_run_seconds":1260,"p90_run_seconds":4100,"state_runs_measured":6,"median_working_seconds":900,"median_waiting_seconds":240,"median_response_seconds":75},"cost":{"metered_runs":3,"unmetered_runs":6,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000,"by_agent":[{"harness":"claude","metered_runs":3,"unmetered_runs":0,"cost_usd":4.12,"input_tokens":120000,"output_tokens":9000,"total_tokens":129000}]},"pull_requests":{"opened":2,"merged":1},"success":{"runs":{"succeeded":4,"finished":9},"swarms":{"succeeded":1,"finished":2}},"outcomes":{"runs":Outcome,"swarms":Outcome,"series":[{"start":"2026-10-09","runs":Outcome,"swarms":Outcome}],"members":[{"member_id":"...","display_name":"...","color":"#e6194b","runs":Outcome,"swarms":Outcome,"series":[{"start":"2026-10-09","runs":Outcome,"swarms":Outcome}]}]},"recent":[{"run_id":"...","title":"...","workspace_id":"...","status":"completed","reason":"","harness":"claude","model":"","created_at":"...","finished_at":"...","duration_seconds":1200,"mission_id":"","pr_url":"","pr_state":""}],"needs_you":2,"coverage":{"state_times_since":"...","pull_requests_since":""}}`; `Outcome` is `{"done","failed","abandoned"}`; `outcomes.members` is filled only for `scope` `everyone`. `Totals` is `{"launched","completed","merged","failed","interrupted","abandoned","killed","active","finished"}`. What each number counts is in [insights.md](insights.md) |
 | `agent.list` | `{"account_member_id":"<member-id>"}` (optional; empty selects the caller's account) | `{"agents":[{"name":"claude","display_name":"Claude Code","glyph":"claude","source":"shipped"\|"member","installed":true,"executable":"claude","enhanced":"native"\|"adapter"\|"none","enhanced_installed":false,"switchable":true,"login_found":true,"default_mode":"tui"\|"acp","enhanced_default":false,"login_missing":false,"own_account_only":false,"unavailable":"","install_script":"...","enhanced_install_script":"..."}]}` - the caller's own shipped and member-defined agents, also for a shared account; `installed` reads the caller's `~/.local/bin`, and on a shared account is also true when only the owner's has the executable, whose installation a launch there then uses. `glyph` is the shipped name, or `custom` for a member-defined agent. `enhanced_installed`, `login_found`, `default_mode` and `enhanced_default` are described in [harnesses.md](harnesses.md#enhanced-mode-adapters); `executable` is the command the agent runs, which a member's agent may name differently from the agent; `login_found` is absent for an agent that declares no login path. `switchable` says whether `run.mode.switch` can move a running session of that agent between Standard and Enhanced. On a shared account, `login_missing` is true when a launch of that agent there is refused because its owner has no login for it (a missing or empty file), and `own_account_only` when it is refused because the name resolves to the caller's own member-defined agent, which runs only on the caller's own account, and `unavailable` carries the launch's own error when the owner's login exists but cannot be shared; at most one is set |
 | `agent.models` | `{"name":"claude","account_member_id":"<member-id>","refresh":true}` (`account_member_id` and `refresh` optional) | `{"models":[{"id":"opus","name":"Opus 5.5","description":"..."}],"default_label":"Opus 5.5 · ...","source":"agent"\|"cache"\|"fallback"\|"none","fetched_at":"<RFC3339>","error":"..."}` - the models the agent's installed CLI offers on the account's login, cached for an hour; `refresh` discovers again. `error` is the last failed discovery's error, also when `models` holds an older or fallback list. A shared account that a launch would refuse answers with that refusal. See [harnesses.md](harnesses.md#model-discovery) |
 | `agent.install` | `{"name":"claude","enhanced":true}` (`enhanced` optional) | `{"log_tail":"...","installed":true,"enhanced_installed":true,"error":"the install command exited 1"}` - runs a shipped agent's install command, and its adapter's with `enhanced`, in the caller's environment terminal, starting it if needed; `error` is set when the command failed. Needs the launch capability. Answers within 10 minutes; one install per member at a time, a second answers `-32003` |
@@ -1051,6 +1051,65 @@ which `/ws/events` streams with `"types":["memory.change"]`. A captured
 outcome note publishes `add`, or `rewrite` when a later report rewrites
 it, and an answer note `answer`
 ([memory.md](memory.md#what-is-captured-automatically)).
+
+### Run branch and pull request methods
+
+These run native `git` and `gh` in a live run's container, as the run's
+account, like the other `run.git.*` and `run.pr.*` methods. `run.git.log`
+needs view; `run.pr.merge` needs push and steering, re-checked before every
+command. A run whose container is gone fails with `-32002`
+(`scheduler: the run has no live environment: the run is completed and its
+container is gone`). A failed `git`
+or `gh` command is not an RPC error: the result carries `error` and the
+command's `output` (`exit_code`, `stdout`, `stderr`, `truncated`) verbatim.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `run.git.log` | `{"run_id":"...","limit":50}` (`limit` optional, 1 to 200, default 50) | `{"branch":"aether/run-...","base_ref":"origin/main","base":"<sha>","head":"<sha>","merge_base":"<sha>","ahead":2,"behind":3,"commits":[Commit],"upstream":[Commit],"conflicts":[{"path":"go.mod"}],"conflicts_error":"...","truncated":false,"output":{...},"error":"..."}` |
+| `run.pr.merge` | `{"run_id":"...","method":"squash"\|"merge"\|"rebase","expected_head":"<sha>","repository":"owner/name","number":128,"expected_login":"octocat","expected_base":"main"}` (`repository` and `number` optional, together; `expected_login` and `expected_base` optional) | `{"identity":"octocat","pull_request":RunPullRequest,"merged":true,"account_member_id":"...","output":{...},"error":"..."}` |
+
+`run.git.log` compares the checkout's `HEAD` with its upstream base: the
+checkout's `origin/<base branch>` (`base_ref`), or the commit the run forked
+from when that ref is missing (`base_ref` empty). The server does not fetch;
+`behind` counts what the checkout last fetched. `commits` is
+`merge_base..head` and `upstream` is `merge_base..base`, newest first, each
+at most `limit`; `truncated` is set when `ahead` or `behind` exceeds it. A
+`Commit` is
+`{"sha":"...","short":"1a2b3c4","subject":"...","author":"...","authored_at":"2026-10-20T01:02:03+00:00","parents":["..."]}`.
+`conflicts` lists the paths `git merge-tree --write-tree --name-only` of
+`head` and `base` reports as conflicting, empty when they merge cleanly;
+an `upstream` commit that touches one of them lists those in `paths`;
+the index and worktree are untouched. When the prediction fails, for
+example with Git older than 2.38 in the run's image or an upstream with no
+common history, `conflicts_error` carries Git's error, `conflicts` is empty
+and means unknown, and the rest of the answer stands.
+
+`run.pr.merge` runs `gh pr merge <number> --repo github.com/<repository>
+--<method> --match-head-commit <expected_head>`, so GitHub refuses the
+merge when the pull request's head is no longer the `head_oid` the member
+reviewed. The host is explicit, as in every other read, so a `GH_HOST` in
+the run's environment cannot send the merge elsewhere. With `expected_base`
+it first reads the pull request and refuses, without merging, when it now
+targets another base branch: a retarget leaves the head unchanged.
+Without `repository` and `number` it merges the pull request the run most
+recently opened through `run.pr.create`, and fails with `-32602` when there
+is none. A pull request an agent opened with native `gh` must be named.
+It first reads the GitHub login `gh` uses (`identity`) and, like
+`run.pr.create`, refuses when it differs from `expected_login`.
+Afterwards the server reads the pull request from GitHub, also when the
+merge failed, and records its state and `merged_at`.
+`merged` is true only when GitHub reports it merged: a merge queue or
+auto-merge that accepted it leaves it `open`. GitHub's refusal, such as a
+failing required check, is in `error` and `output.stderr` as `gh` printed
+it.
+
+`run.pr.feedback` also returns GitHub's own verdict on the merge, read from
+`repos/<repository>/pulls/<number>`: `mergeable` is `MERGEABLE`,
+`CONFLICTING` or `UNKNOWN` (GitHub has not computed it yet), and
+`merge_state_status` is its `mergeable_state` upper-cased, such as `CLEAN`,
+`BEHIND`, `DIRTY`, `BLOCKED`, `UNSTABLE` or `UNKNOWN`. Both are absent when
+no pull request was found or that read failed, and `UNKNOWN` when the pull
+request's head moved between that read and the one the checks used.
 
 ### Administrator GitHub connection and import
 
@@ -2286,6 +2345,49 @@ workspace receives it; a client shows it only to the member in `member_id`.
 
 `kind` is `finished`, `needs_input`, `needs_approval` or `needs_attention`.
 The event is published once per announced state.
+
+### Branch, pull request and swarm events
+
+These tell a client what to re-read; none carries the full state.
+
+- `git.branch`: a run branch moved in the workspace repository, by a
+  publish from the run's checkout or a push. `previous` is the tip before
+  (empty for a new branch); `forced` is true when `previous` is not an
+  ancestor of `commit`, so the branch was rebased, reset or amended, and
+  false when Git could not tell.
+  Re-read `run.git.log`.
+
+  ```json
+  {"type":"git.branch","run_id":"run_...","payload":{"workspace_id":"ws_...",
+   "branch":"aether/run-...","commit":"<sha>","previous":"<sha>","forced":false}}
+  ```
+
+- `run.pr`: a pull request recorded for the run was opened through
+  `run.pr.create`, or a `run.pr.status` or `run.pr.merge` read found its
+  state or `merged_at` changed. A read that changes nothing, and a pull
+  request the run has no record of, publish nothing. `merged_at` is present
+  once GitHub reports the merge. Re-read `run.pr.feedback`.
+
+  ```json
+  {"type":"run.pr","run_id":"run_...","payload":{"run_id":"run_...","number":128,
+   "url":"https://github.com/owner/name/pull/128","state":"merged",
+   "merged_at":"2026-10-20T01:02:03Z"}}
+  ```
+
+- `integration.changed`: an integration candidate, its verification or
+  its delivery was written. `state` and `version` are the candidate's after
+  the write, so verification and delivery progress raise `version` while
+  `state` can stay `frozen`; `mission_id` is empty for a candidate outside a
+  swarm. Re-read `integration.show`.
+
+  ```json
+  {"type":"integration.changed","payload":{"mission_id":"mis_...",
+   "candidate_id":"cand_...","state":"frozen","version":4}}
+  ```
+
+- `mission.changed`: see [coordination.md](coordination.md). `change`
+  names the kind of change when there is one, with `task_id` and
+  `attempt_id` when it concerns one task or attempt.
 
 ### `GET /ws/attach/<run_id>`
 

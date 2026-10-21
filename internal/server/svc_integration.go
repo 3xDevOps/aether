@@ -165,6 +165,7 @@ func init() {
 			Root:        d.DataDir,
 			Environment: integrationEnvironment(d),
 			Admission:   admission,
+			Bus:         d.Bus,
 			PrepareRuntime: func(ctx context.Context, spec *runtime.Spec) (func(), error) {
 				if d.Runs == nil {
 					return nil, fmt.Errorf("integration: scheduler is unavailable")

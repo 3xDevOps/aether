@@ -10,13 +10,18 @@ const TypeMissionChanged Type = "mission.changed"
 // MissionChangedPayload identifies the authoritative mission snapshot version
 // that caused a projection refresh. The envelope's WorkspaceID scopes delivery;
 // these fields let consumers reject stale refresh work when useful. Deleted
-// means the mission is gone and there is nothing to re-read.
+// means the mission is gone and there is nothing to re-read. Change names the
+// kind of write when it is one the mission counts; TaskID and AttemptID name
+// the task and attempt it touched when there is one.
 type MissionChangedPayload struct {
-	MissionID            domain.MissionID `json:"mission_id"`
-	IntegratorGeneration uint64           `json:"integrator_generation"`
-	AcceptedSetVersion   uint64           `json:"accepted_set_version"`
-	Deleted              bool             `json:"deleted,omitempty"`
-	ChangeSeq            uint64           `json:"change_seq"`
+	MissionID            domain.MissionID     `json:"mission_id"`
+	IntegratorGeneration uint64               `json:"integrator_generation"`
+	AcceptedSetVersion   uint64               `json:"accepted_set_version"`
+	Deleted              bool                 `json:"deleted,omitempty"`
+	ChangeSeq            uint64               `json:"change_seq"`
+	Change               domain.MissionChange `json:"change,omitempty"`
+	TaskID               domain.TaskID        `json:"task_id,omitempty"`
+	AttemptID            domain.AttemptID     `json:"attempt_id,omitempty"`
 }
 
 func (MissionChangedPayload) EventType() Type { return TypeMissionChanged }

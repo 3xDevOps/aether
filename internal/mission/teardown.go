@@ -109,5 +109,5 @@ func (s *Service) stopEndedAttempt(ctx context.Context, mission *domain.Mission,
 	if stateErr != nil && !errors.Is(stateErr, store.ErrMissionStale) {
 		return stateErr
 	}
-	return s.publishMissionChanged(ctx, mission.ID)
+	return s.publishMissionChanged(ctx, mission.ID, attemptChange("", attempt))
 }
