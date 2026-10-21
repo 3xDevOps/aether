@@ -1121,12 +1121,12 @@ surface to answer; the indicator is not a separate answer channel.
 
 ### Agent update fails, or the vendor is unreachable
 
-Before a launch, the server may update the shipped agent installed in the
-member home ([harnesses.md](harnesses.md#updates-before-launch)). No update
-problem stops the launch. A launch waits at most 25 seconds for the update,
-then starts the agent on whatever is installed at that moment. A nonzero
-exit, a runtime error, or an updater stopped after 10 minutes is recorded on
-the timeline of the run that started the update:
+A launch may update the shipped agent installed in the member home
+([harnesses.md](harnesses.md#updates-before-launch)). No update problem stops
+the launch: a launch never waits for the update, and starts the agent on
+whatever is installed at that moment. A nonzero exit, a runtime error, or an
+updater stopped after 10 minutes is recorded on the timeline of the run that
+started the update:
 
 ```text
 could not update codex from codex-cli 0.155.1: the updater exited 1: <updater output>
@@ -1139,7 +1139,8 @@ The next launch from that home tries again after 15 minutes.
 An interrupted `codex` or `pi` exchange leaves either complete version
 launchable. If an older updater left the installed package missing and a
 surviving `~/.local/lib/.<agent>-update.*/previous` copy, the next attempt
-restores that copy before contacting npm.
+restores that copy before contacting npm. The launch that starts that attempt
+may not find the agent; the next launch does.
 
 ### Edge status during sign-in or logout
 

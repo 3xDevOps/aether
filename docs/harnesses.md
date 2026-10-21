@@ -1838,13 +1838,13 @@ transport for installation and login.
 
 ## Updates before launch
 
-Before it launches a run, the server updates the shipped agent installed in
+When it launches a run, the server updates the shipped agent installed in
 the member home's `~/.local/bin`. It runs the agent's own update command in a
 short-lived container with the run's image, user, environment, and member
-home. The first launch per member home and agent checks for an update; after
-that, a launch checks again once 6 hours have passed, or 15 minutes after a
-failed update. Concurrent launches on one home, such as a swarm, share one
-update.
+home. The first launch per member home and agent since the server started
+checks for an update; after that, a launch checks again once 6 hours have
+passed, or 15 minutes after a failed update. Concurrent launches on one home,
+such as a swarm, share one update.
 
 | Agent | Update command |
 | --- | --- |
@@ -1888,16 +1888,10 @@ release channel. These are never updated:
 - an account owner's installation a recipient's run borrows: it is mounted
   read-only, and the owner's own launches update it.
 
-A launch waits at most 25 seconds for the update. If it is still running, the
-agent starts on whatever is installed at that moment, the update finishes in
-the background, and the run's timeline in the dashboard shows:
-
-```text
-starting the installed version 2.1.288 (Claude Code) while claude updates
-```
-
-The update's result appears on the timeline of the run that started it, also
-when it finishes after the agent started. A new version reads
+A launch never waits for the update: the agent starts on whatever is
+installed at that moment, and the update finishes in the background. The
+update's result appears in the dashboard on the timeline of the run that
+started it, also when it finishes after the agent started. A new version reads
 `updated <agent> from <old> to <new>`, or `to an unknown version` when the
 new `--version` cannot be read; an unchanged one adds nothing. A
 failure, including a vendor release server that cannot be reached, never
@@ -2050,8 +2044,9 @@ The registry defines argv templates for both modes, credential/configuration
 roots, denylist, API-key passthrough, system-prompt instructions
 (`InstructionArgs`/`InstructionEnv`), status reporting,
 the install command (`InstallScript`), and the optional pre-launch update
-command (`UpdateScript`), which must be a cheap no-op when the CLI is current
-and must update only the program.
+command (`UpdateScript`), which must be a cheap no-op when the CLI is current,
+must update only the program, and must swap the new version in atomically,
+because a launch can start the CLI while the update runs.
 An output adapter is optional; see [adapters.md](adapters.md).
 Inbox support is a separate capability: follow the
 [harness integration guide](harness-integration.md) for the durable CLI,

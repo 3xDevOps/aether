@@ -371,7 +371,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	if err != nil {
 		return err
 	}
-	s.updateHarness(ctx, run, plan, profile)
+	s.updateHarness(run, plan, profile)
 	// Recorded before coordination is provisioned, because the co-author
 	// list written there already leaves this address out: the agent's own
 	// commits carry it, so telling the agent to credit it would make it
