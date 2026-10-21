@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { toast, type Action } from 'sonner'
 import type { Mock } from 'vitest'
 import { RunActions } from '@/components/run-actions'
-import { api, codeInvalidState } from '@/lib/api'
+import { api, codeInvalidState, codeNotFound } from '@/lib/api'
 import type * as apiModule from '@/lib/api'
 import type { GatewayCapabilities, Member, PullResult, Run } from '@/lib/types'
 import { useStore } from '@/store'
@@ -56,6 +56,7 @@ function seed(
     paletteDialog: null,
     paletteRunID: null,
     predicting: {},
+    deletingRuns: {},
   })
   return record
 }
@@ -410,6 +411,68 @@ test('a refusal puts back a kill even when the agent wrote to the run meanwhile'
   expect(toast.error).toHaveBeenCalledWith('Killed failed: run is finishing')
   expect(runOne(useStore.getState())).toMatchObject({ status: 'running', last_commit: 'b'.repeat(40) })
   expect(runOne(useStore.getState()).stateChangedAtPredicted).toBeUndefined()
+})
+
+async function confirmDelete() {
+  await selectMore('Delete run')
+  fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete run' }))
+}
+
+test('Delete takes the run off at once, and no re-read brings it back before the answer', async () => {
+  const answer = Promise.withResolvers<unknown>()
+  vi.mocked(api.runDelete).mockReturnValueOnce(answer.promise)
+  render(<RunActions run={seed({ paused: false })} />)
+  await confirmDelete()
+  expect(runOne(useStore.getState())).toBeUndefined()
+  act(() => useStore.getState().upsertRun(run({ id: 'run_1', status: 'abandoned' })))
+  act(() => useStore.getState().setRuns([run({ id: 'run_1' })]))
+  expect(runOne(useStore.getState())).toBeUndefined()
+  expect(toast.success).not.toHaveBeenCalled()
+  await act(async () => answer.resolve({}))
+  expect(toast.success).toHaveBeenCalledWith('Deleted')
+  expect(runOne(useStore.getState())).toBeUndefined()
+  expect(useStore.getState().deletingRuns).toEqual({})
+})
+
+test('a refused delete puts the run back and shows the refusal', async () => {
+  vi.mocked(api.runDelete).mockRejectedValueOnce(refusal('run.delete: run is protected'))
+  render(<RunActions run={seed({ paused: false })} />)
+  await confirmDelete()
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Deleted failed: run is protected'))
+  expect(runOne(useStore.getState()).status).toBe('running')
+  expect(useStore.getState().deletingRuns).toEqual({})
+})
+
+test('a delete with no answer puts the run back as the server still holds it', async () => {
+  vi.mocked(api.runDelete).mockRejectedValueOnce(new Error('Failed to fetch'))
+  vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', title: 'renamed' }))
+  render(<RunActions run={seed({ paused: false })} />)
+  await confirmDelete()
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Deleted failed: Failed to fetch', expect.objectContaining({ duration: Infinity })))
+  expect(runOne(useStore.getState()).title).toBe('renamed')
+  expect(useStore.getState().deletingRuns).toEqual({})
+})
+
+const notFound = () => Object.assign(new Error('run.delete: run not found'), { code: codeNotFound })
+
+test.each([
+  { says: 'the delete', arrange: () => vi.mocked(api.runDelete).mockRejectedValueOnce(notFound()) },
+  {
+    says: 'the re-read after a lost answer',
+    arrange: () => {
+      vi.mocked(api.runDelete).mockRejectedValueOnce(new Error('Failed to fetch'))
+      vi.mocked(api.runGet).mockRejectedValueOnce(notFound())
+    },
+  },
+])('a not-found answer from $says counts as deleted', async ({ arrange }) => {
+  arrange()
+  render(<RunActions run={seed({ paused: false })} />)
+  await confirmDelete()
+  await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Deleted'))
+  expect(toast.error).not.toHaveBeenCalled()
+  expect(runOne(useStore.getState())).toBeUndefined()
+  expect(useStore.getState().deletingRuns).toEqual({})
+  expect(useStore.getState().predicting.run_1).toBeUndefined()
 })
 
 async function pastDeadline(press: () => void) {

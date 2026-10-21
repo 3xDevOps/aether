@@ -96,6 +96,14 @@ export interface RunsSlice {
   predicting: Record<string, PredictionMarker>
   /** Clearing leaves alone a lock another verb's marker holds. */
   setPredicting: (runID: string, marker: PredictionMarker, pending: boolean) => void
+  /**
+   * Runs a pending Delete took off screen, each with the record to put back
+   * if the server refuses. A snapshot or event re-read cannot bring one back
+   * meanwhile. See "Commands and the palette" in docs/dashboard-frontend.md.
+   */
+  deletingRuns: Record<string, RunRecord>
+  /** Putting back leaves a run re-added since in place; `removeRun` drops the held record. */
+  setDeleting: (runID: string, deleting: boolean) => void
   applyRunInput: (runID: string, requests: RunInputRequest[]) => void
   /** Ignores an event whose `status_seq` is not past the held one. */
   applyRunStatus: (runID: string, payload: RunStatusPayload, time: string) => void
@@ -124,9 +132,9 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
   setRuns: (runs) =>
     set((s) => {
       const records = Object.fromEntries(
-        runs.map((r) => [r.id, toRecord(r, s.runs[r.id])]),
+        runs.filter((r) => !s.deletingRuns[r.id]).map((r) => [r.id, toRecord(r, s.runs[r.id])]),
       )
-      const listed = (runID: string) => runID in records
+      const listed = (runID: string) => runID in records || runID in s.deletingRuns
       return {
         runs: records,
         terminalWriteIntents: pruneRuns(s.terminalWriteIntents, listed),
@@ -135,6 +143,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
     }),
   upsertRun: (run) =>
     set((s) => {
+      if (s.deletingRuns[run.id]) return {}
       const current = s.runs[run.id]
       // A late route/launch snapshot must not resurrect a resolved request.
       const next = toRecord(run, current)
@@ -146,6 +155,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       const other = (id: string) => id !== runID
       return {
         runs: pruneRuns(s.runs, other),
+        deletingRuns: pruneRuns(s.deletingRuns, other),
         terminalWriteIntents: pruneRuns(s.terminalWriteIntents, other),
         terminalControlSessions: pruneRuns(s.terminalControlSessions, other),
       }
@@ -161,6 +171,21 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
     set((s) => {
       if (pending) return { predicting: { ...s.predicting, [runID]: marker } }
       return s.predicting[runID] === marker ? { predicting: pruneRuns(s.predicting, (id) => id !== runID) } : {}
+    }),
+  deletingRuns: {},
+  setDeleting: (runID, deleting) =>
+    set((s) => {
+      const other = (id: string) => id !== runID
+      if (deleting) {
+        const current = s.runs[runID]
+        return current ? { runs: pruneRuns(s.runs, other), deletingRuns: { ...s.deletingRuns, [runID]: current } } : {}
+      }
+      const held = s.deletingRuns[runID]
+      if (!held) return {}
+      return {
+        runs: s.runs[runID] ? s.runs : { ...s.runs, [runID]: held },
+        deletingRuns: pruneRuns(s.deletingRuns, other),
+      }
     }),
   applyRunStatus: (runID, { to, reason, state, status_seq, outcome_unseen = false, finish_unopened = false, review = '', review_changed_at }, time) =>
     set((s) => {

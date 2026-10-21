@@ -11,6 +11,7 @@ import {
   Download,
   Hourglass,
   FileText,
+  GitMerge,
   House,
   List,
   type LucideIcon,
@@ -84,6 +85,8 @@ export interface Prediction {
   record?: Partial<RunRecord>
   /** Paused lives in `pausedRuns`, not on the record. */
   paused?: boolean
+  /** Delete takes the run off screen; see `deletingRuns`. */
+  removed?: boolean
 }
 
 export interface RunCommandContext {
@@ -396,17 +399,7 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         body: 'The agent stops immediately. Work already committed to the run branch stays.',
         action: 'Kill run',
       },
-      predict: () => ({
-        runID: id,
-        record: {
-          status: 'abandoned',
-          reason: 'killed',
-          state: '',
-          stateChangedAt: new Date().toISOString(),
-          stateChangedAtEstimated: true,
-          stateChangedAtPredicted: true,
-        },
-      }),
+      predict: () => ({ runID: id, record: { status: 'abandoned', reason: 'killed', ...finishedNow() } }),
       slow: true,
       perform: (d) => d.api.runKill(id),
     })
@@ -424,8 +417,15 @@ export function runCommands(ctx: RunCommandContext): Command[] {
         body: 'The run, transcript, and coordination records will be removed from Aether.',
         action: 'Delete run',
       },
+      // Over another verb's pending prediction it waits for the server instead.
+      predict: ctx.predicting ? undefined : () => ({ runID: id, removed: true }),
+      // A live run is stopped and its evidence purged before the server answers.
+      slow: true,
       perform: (d) =>
-        d.api.runDelete(id).then(() => {
+        d.api.runDelete(id).catch((err: unknown) => {
+          // A Retry after a lost answer finds the run already deleted.
+          if (!(err instanceof ApiError && err.code === codeNotFound)) throw err
+        }).then(() => {
           d.removeRun(id)
         }),
     })
@@ -517,6 +517,25 @@ export function runCommands(ctx: RunCommandContext): Command[] {
 
   // A verb offered from a pending prediction's state could re-read the run and erase that prediction.
   return ctx.predicting ? list.filter((command) => !command.predict) : list
+}
+
+/** A terminal status has no agent state; the server's run.status event replaces the guessed time. */
+function finishedNow(): Partial<RunRecord> {
+  return { state: '', stateChangedAt: new Date().toISOString(), stateChangedAtEstimated: true, stateChangedAtPredicted: true }
+}
+
+/** The Close dialog's choice; the server answers a repeat of a landed close as success. */
+export function closeCommand(runID: string, outcome: 'merged' | 'abandoned'): Command {
+  return {
+    id: `close-${outcome}`,
+    label: outcome === 'merged' ? 'Merged' : 'Abandoned',
+    Icon: outcome === 'merged' ? GitMerge : Archive,
+    done: `Closed as ${outcome}`,
+    predict: () => ({ runID, record: { status: outcome, ...finishedNow() } }),
+    // A live run is detached, committed and published before the server answers.
+    slow: true,
+    perform: (d) => d.api.runClose(runID, outcome),
+  }
 }
 
 /** A run whose agent reported success and that its owner has not marked complete. */
@@ -644,23 +663,25 @@ const guessed = new Set(['stateChangedAt', 'stateChangedAtEstimated', 'stateChan
 /** The wire omits a field at its zero value (`omitempty`), so a re-read lacks a false or empty field. */
 const omitZero = (value: unknown) => value || undefined
 
-function holds({ runID, record, paused }: Prediction): boolean {
+function holds({ runID, record, paused, removed }: Prediction): boolean {
   const s = useStore.getState()
   const run = s.runs[runID]
   return (
     (!record || (run !== undefined && Object.entries(record).every(([key, value]) => run[key as keyof RunRecord] === value))) &&
-    (paused === undefined || s.pausedRuns[runID] === paused)
+    (paused === undefined || s.pausedRuns[runID] === paused) &&
+    (removed === undefined || removed === !run)
   )
 }
 
-function show({ runID, record, paused }: Prediction) {
+function show({ runID, record, paused, removed }: Prediction) {
   const s = useStore.getState()
   if (record) s.patchRun(runID, record)
   if (paused !== undefined) s.setPaused(runID, paused)
+  if (removed !== undefined) s.setDeleting(runID, removed)
 }
 
 /** Puts back each predicted value still on screen; a value anything else wrote stays. */
-function unshow({ runID, record, paused }: Prediction, before: Prediction) {
+function unshow({ runID, record, paused, removed }: Prediction, before: Prediction) {
   const s = useStore.getState()
   const run = s.runs[runID]
   show({
@@ -671,6 +692,7 @@ function unshow({ runID, record, paused }: Prediction, before: Prediction) {
         .map((key) => [key, before.record?.[key as keyof RunRecord]]),
     ),
     paused: paused !== undefined && s.pausedRuns[runID] === paused ? before.paused : undefined,
+    removed: removed && s.deletingRuns[runID] ? before.removed : undefined,
   })
 }
 
@@ -681,6 +703,14 @@ function unshow({ runID, record, paused }: Prediction, before: Prediction) {
  */
 function applyRead(prediction: Prediction, run: Run, unchanged: boolean): boolean {
   const s = useStore.getState()
+  if (prediction.removed) {
+    // The server still holds the run; a removal that landed meanwhile is newer than the read.
+    if (s.deletingRuns[run.id]) {
+      s.setDeleting(run.id, false)
+      s.upsertRun(run)
+    }
+    return false
+  }
   const read = toRecord(run, s.runs[run.id])
   const server: Prediction = {
     runID: run.id,
@@ -780,7 +810,13 @@ function predicted(
         if (press.confirmed || !press.same()) return
         if (applyRead(prediction, run, unchanged())) press.confirmed = true
         else reverted = true
-      }, putBack)
+      }, (cause: unknown) => {
+        // The server no longer holds a run whose delete landed.
+        if (prediction.removed && cause instanceof ApiError && cause.code === codeNotFound && !press.confirmed && press.same()) {
+          useStore.getState().removeRun(runID)
+          press.confirmed = true
+        } else putBack()
+      })
       .finally(() => {
         finish()
         land(press.confirmed ? 'shown' : 'lost')
@@ -796,6 +832,7 @@ function predicted(
         runID,
         record: prediction.record && run && Object.fromEntries(Object.keys(prediction.record).map((key) => [key, run[key as keyof RunRecord]])),
         paused: prediction.paused === undefined ? undefined : s.pausedRuns[runID],
+        removed: prediction.removed === undefined ? undefined : !run,
       }
       show(prediction)
       s.setPredicting(runID, marker, true)

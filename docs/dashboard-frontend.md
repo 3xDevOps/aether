@@ -1178,6 +1178,7 @@ where a resend is deduped or refused and the eventual result still shows:
 | Enhanced pill's **Interrupt** and **Resume**, and a session option | Sending… | No: these carry no key, so a late interrupt could stop the turn sent after it |
 | **Create workspace** | Creating… | No: `workspace.add` carries no idempotency key |
 | **Launch** / **Create swarm** (launch dialog) | Launching… / Creating swarm… | The dialog's **Cancel** closes it at any time; the request keeps going, a success still opens the run or swarm, and a refusal shows as a toast |
+| Close dialog **Merged** / **Abandoned**, over another verb's pending prediction | Closing… | The dialog's **Cancel** closes it at any time; the answer shows as a toast |
 | Workspace settings **Save**, budget **Set** / **Clear budget** | Saving… / Clearing… | The dialog's own **Cancel** closes it at any time; the call sets values, so a repeat is harmless |
 | **Save identity** | Saving… | No: a second save could reach the server before the first and be overwritten by it |
 | Needs you device card **Approve** / **Deny** | Approving… / Denying… | No: a second decision would race the first |
@@ -1390,7 +1391,7 @@ and `toRecord` keeps every field such an event set (status, reason, state,
 snapshot is older, so an out-of-order event or a late `run.get` never moves a
 run back. A snapshot at the same `status_seq` never sets `outcome_unseen` or
 `finish_unopened` again once `run.outcome_seen` or opening the run cleared it.
-A kill's prediction clears `state` with the status. `applyRunReview` applies
+A kill's or close's prediction clears `state` with the status. `applyRunReview` applies
 a `run.review` event under the same `status_seq` rule.
 
 **Review** is the owner's answer to a reported success
@@ -1673,11 +1674,13 @@ serves `assistant.status`), **New run…**, **New swarm…**, **Launch from a te
 commands. Each verb is offered only when the server would allow it: the gates
 ask the same questions `internal/permissions` does. `useCommandRunner()`
 reports gateway success or its real refusal in both the run's More menu and
-the palette. Pause, resume, kill, free, archive, restore, protect and
-unprotect follow [Actions](#actions): the command's `predict` names the
-fields the server's success certainly sets (`pausedRuns`; `status`
-`abandoned` with reason `killed`; cleared `container_retained_until` and
-`cleanup_pending`; `archived_at`; `protected`), the runner shows them at
+the palette. Pause, resume, kill, close, delete, free, archive, restore,
+protect and unprotect follow [Actions](#actions): the command's `predict`
+names what the server's success certainly sets (`pausedRuns`; `status`
+`abandoned` with reason `killed`; the chosen `status` for close, which
+like kill clears `state`; the run's removal for delete; cleared
+`container_retained_until` and `cleanup_pending`; `archived_at`;
+`protected`), the runner shows them at
 once, and the success toast waits for the answer. A refusal puts back each
 predicted field that still holds its predicted value; a field anything else
 wrote meanwhile stays. With no answer by the deadline, or a failure that
@@ -1700,10 +1703,11 @@ other attempt puts it back, a re-read answered before the commit is
 ignored, and an earlier attempt's late refusal is dropped. Once the
 signed-in member changes, the toast is dismissed, its **Retry** sends
 nothing, and the press's late answer, re-read or refusal changes and shows
-nothing. Kill and free
+nothing. Kill, close, delete and free
 (`slow` on the command) skip the deadline, because the server answers only
 after the container stops: `run.kill` waits out the runtime's stop grace,
-10 seconds by default. Past the deadline their prediction stays, More
+10 seconds by default; `run.close` also commits and publishes a live run,
+and `run.delete` purges its evidence. Past the deadline their prediction stays, More
 shows a disabled "Still waiting for the server…" entry (`waiting` on the
 run's `predicting` marker), a late success clears it without a toast, and
 a refusal puts the prediction back and toasts the server's error. A failure
@@ -1720,8 +1724,15 @@ menu shows the verbs again once the answer lands. An invalid-state refusal
 (`codeInvalidState`, such as "run is already paused" after a retry) re-reads
 the run with `run.get` instead, bounded by the deadline and applied on the
 same condition, and toasts only if the run does not show the
-predicted state. Deletion removes the
-confirmed run locally; archive, restore, protect and free do not overwrite
+predicted state; a repeated `run.close` with the same outcome is answered
+as a success. Delete takes the run off every list at once: `deletingRuns`
+(`store/runs.ts`) holds its record, and neither a snapshot nor an event's
+`run.get` puts it back before the answer. A refusal, or a re-read that
+finds the run, puts it back; `not found` from `run.delete` or from that
+re-read counts as deleted, because a **Retry** can resend a delete that
+landed. Over another verb's pending prediction, Delete and the Close
+dialog's choice do not predict: they wait for the server, as an
+unpredicted verb does. Archive, restore, protect and free do not overwrite
 the server's events with an RPC response.
 
 - **Forward a port…** opens `forward-dialog.tsx` over the local `forward.*`
@@ -1756,7 +1767,8 @@ the server's events with an RPC response.
 A command with a `confirm` field - Kill, Delete and Free container - opens
 the run-naming confirmation (`run-command-confirmation.tsx`) from More or the
 palette, with Cancel initially focused. **Close run…** opens its own dialog,
-which asks whether the work was merged or abandoned. Palette confirmations
+which asks whether the work was merged or abandoned; a choice closes it and
+shows the outcome at once. Palette confirmations
 capture the authenticated identity with the run and command; an identity
 change dismisses a pending or visible confirmation instead of applying it to
 another account. More locks while an unpredicted verb is in flight and shows
