@@ -275,7 +275,7 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
           </span>
         )}
       </header>
-      <div data-commits className={cn('overflow-y-auto [mask-image:linear-gradient(to_bottom,black_calc(100%-0.75rem),transparent)]', compact ? 'min-h-7' : 'min-h-14')}>
+      <div data-commits className={cn('overflow-y-auto [mask-image:linear-gradient(to_bottom,black_calc(100%-0.75rem),transparent)]', compact ? 'min-h-7' : 'max-h-42')}>
         <GitGraphView graph={graph} head={headContent} onExpand={() => setExpanded(true)} />
       </div>
       {compact && log && commits > 0 && (

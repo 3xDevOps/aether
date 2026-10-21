@@ -110,8 +110,8 @@ export const FilePatch = memo(function FilePatch({
   }
 
   return (
-    <section id={id} aria-label={file.path} className="border-b border-seam">
-      <header className="sticky top-0 z-10 flex h-8 min-w-0 items-center gap-2 border-b border-seam bg-chrome px-2 text-ui-sm coarse:h-11">
+    <section id={id} aria-label={file.path} className="scroll-mt-[var(--diff-top,0px)] border-b border-seam">
+      <header className="sticky top-[var(--diff-top,0px)] z-10 flex h-8 min-w-0 items-center gap-2 border-b border-seam bg-chrome px-2 text-ui-sm coarse:h-11">
         {onCollapsedChange && (
           <Button
             variant="ghost"

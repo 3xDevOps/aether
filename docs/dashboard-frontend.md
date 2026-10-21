@@ -2848,23 +2848,29 @@ both what it renders and the overlap set the conflict chips read.
 - **One strip, then the files.** A 32px strip (`strip.tsx`) holds the file
   count and `+a −d` totals, the Compare menu, the conflict chips, and on the
   right **Wrap lines**, **Refresh**, **More** (**Expand all files**,
-  **Collapse all files**, **Review locally…**) and **Publish…**. Below it a
-  file list (`file-list.tsx`: status letter, name, folder, `+a −d`) sits
-  beside the patch once the view itself is 780px wide - a container query,
+  **Collapse all files**, **Review locally…**) and **Publish…**. A file list
+  (`file-list.tsx`: status letter, name, folder, `+a −d`) runs down the
+  view's left edge once the view itself is 780px wide - a container query,
   so opening Details narrows it too; narrower, the count in the strip is a
-  menu of the same files. Picking a file opens it and scrolls to it. With
-  nothing changed the view is the "No changes yet." empty state. `Land`
-  (`land.tsx`) adds a row above the strip only after a pull put the run branch
-  on this machine.
+  menu of the same files. Picking a file opens it and scrolls its header to
+  just under the strip. With nothing changed the view is the "No changes
+  yet." empty state. `Land` (`land.tsx`) adds a row above the git card only
+  after a pull put the run branch on this machine.
+- **The card scrolls away; the strip stays.** Everything right of the file
+  list is one scroller: `Land`, the git card, the strip with the review bar,
+  then the patches. Scrolling down moves the card out of view while the
+  strip sticks to the top and each file's header sticks under it, so a long
+  list of checks never squeezes the diff. The strip's measured height is the
+  `--diff-top` CSS variable the file headers stick to, and the virtual file
+  list's `startMargin` is its measured offset in the scroller.
 - **The git card sits above the strip.** `components/workflow/git-flow.tsx`
   (`GitFlow`, model in `store/git-flow.ts`) is the run branch, its pull
   request, checks and merge readiness in one card that updates in place.
   The header is the pull request's title and `#128` linking to GitHub with
   **Draft**, **Open**, **Merged** or **Closed** and its dot, or the branch
-  name before there is a pull request. Above the strip it takes at most 55%
-  of the view's height; only its commit list gives up room, down to two
-  rows, and scrolls, so
-  the header, the head row, readiness and the primary action stay in sight.
+  name before there is a pull request. Its commit list shows at most six
+  rows (168px) and scrolls inside the card past that; the rest of the card
+  takes the height it needs.
   The Workflow panel shows it with `compact`: the header, the head row, one
   line of check counts and the primary action, with **Show N commits**
   unfolding the graph. The panel leaves it out while the Changes view shows
