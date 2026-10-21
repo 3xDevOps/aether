@@ -167,6 +167,12 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
     changed()
   }
 
+  const replaced = (old: string, result: MemoryAddResult) => {
+    setOpen(result.item.id)
+    toast.success(`Replaced ${old} with ${result.item.id}${result.duplicate ? ', which already held this text' : ''}`)
+    changed()
+  }
+
   const waiting = load.kind === 'loading' && connection !== 'live'
   const skeleton = useDelayed(load.kind === 'loading' && !waiting)
   const items = load.kind === 'ready' ? listed(load.items) : []
@@ -260,6 +266,7 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
           agents={agentNames}
           onOpen={setOpen}
           onChanged={changed}
+          onReplaced={(result) => replaced(open, result)}
           onClose={() => setOpen(null)}
         />
       )}

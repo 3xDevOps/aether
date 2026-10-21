@@ -272,6 +272,75 @@ describe('memory page', () => {
     expect((await within(dialog).findByRole('alert')).textContent).toBe(refusal)
   })
 
+  it('replaces a note with one pre-filled from it, citing files, then opens the replacement', async () => {
+    seed()
+    const note = { ...agentNote, scope: 'member' as const }
+    const text = 'Reattach races the lease sweeper\nTake the lease, then read the container state, then sweep.'
+    const replacement = memoryItem({ id: 'note-replace001', kind: 'gotcha', scope: 'member', title: 'Reattach races the lease sweeper', body: text })
+    const memoryAdd = vi.fn<Api['memoryAdd']>(async () => ({ item: replacement }))
+    const memoryShow = vi.fn<Api['memoryShow']>(async (_, id) => (id === note.id ? { item: note } : { item: replacement, chain: [{ ...note, superseded_by: replacement.id }] }))
+    const memorySearch = vi.fn(async () => ({ items: [note] }))
+    const memoryBrief = vi.fn(async () => ({ text: '' }))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch, memoryShow, memoryAdd, memoryBrief })} />)
+    fireEvent.click(await screen.findByRole('button', { name: note.title }))
+    fireEvent.click(await within(await screen.findByRole('dialog', { name: note.title })).findByRole('button', { name: 'Replace…' }))
+
+    const dialog = await screen.findByRole('dialog', { name: `Replace ${note.id}` })
+    expect(within(dialog).getByText('The old note stays in history as Superseded. A pin on it moves to the replacement.')).toBeDefined()
+    expect(within(dialog).getByLabelText('Kind').textContent).toBe('Gotcha')
+    expect((within(dialog).getByLabelText('Note') as HTMLTextAreaElement).value).toBe(note.body)
+    expect((within(dialog).getByLabelText('Files') as HTMLTextAreaElement).value).toBe('internal/scheduler/reattach.go\ninternal/scheduler/lease.go')
+    expect(within(dialog).getByRole('checkbox', { name: 'Only me' }).getAttribute('aria-checked')).toBe('true')
+
+    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: text } })
+    fireEvent.change(within(dialog).getByLabelText('Files'), { target: { value: ' internal/scheduler/reattach.go \n\n internal/scheduler/sweep.go\n' } })
+    const reads = memorySearch.mock.calls.length
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Replace note' }))
+
+    expect(await screen.findByText(`Gotcha · Member note · ${replacement.id}`)).toBeDefined()
+    expect(memoryAdd).toHaveBeenCalledWith({
+      workspace_id: workspace.id, kind: 'gotcha', text, files: ['internal/scheduler/reattach.go', 'internal/scheduler/sweep.go'], supersedes: note.id, scope: 'member',
+    })
+    expect(screen.queryByRole('dialog', { name: `Replace ${note.id}` })).toBeNull()
+    expect(memoryShow).toHaveBeenLastCalledWith(workspace.id, replacement.id)
+    await waitFor(() => expect(memorySearch.mock.calls.length).toBeGreaterThan(reads))
+    expect(memoryBrief).toHaveBeenCalledTimes(2)
+  })
+
+  it("replaces an outcome note as a decision, keeps a pinned note's pin and scope, and shows a refusal word for word", async () => {
+    seed()
+    const pinned = { ...outcome, scope: 'member' as const, pinned_by: alice.id, pinned_by_name: 'Alice', pinned_at: '2026-10-18T12:00:00Z' }
+    const refusal = 'memory.add: file 1 is 600 bytes; a cited path holds at most 512'
+    const memoryAdd = vi.fn<Api['memoryAdd']>(async () => { throw new ApiError(400, refusal, -32602) })
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [pinned] })), memoryShow: vi.fn(async () => ({ item: pinned })), memoryAdd })} />)
+    fireEvent.click(await screen.findByRole('button', { name: pinned.title }))
+    fireEvent.click(await within(await screen.findByRole('dialog', { name: pinned.title })).findByRole('button', { name: 'Replace…' }))
+
+    const dialog = await screen.findByRole('dialog', { name: `Replace ${pinned.id}` })
+    expect(within(dialog).getByLabelText('Kind').textContent).toBe('Decision')
+    expect(within(dialog).queryByRole('checkbox', { name: 'Pin' })).toBeNull()
+    const onlyMe = within(dialog).getByRole('checkbox', { name: 'Only me' }) as HTMLButtonElement
+    expect(onlyMe.getAttribute('aria-checked')).toBe('true')
+    expect(onlyMe.disabled).toBe(true)
+    expect(within(dialog).getByText('Follows the pin, which moves to the replacement.')).toBeDefined()
+    const long = `web/${'x'.repeat(596)}`
+    fireEvent.change(within(dialog).getByLabelText('Files'), { target: { value: long } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Replace note' }))
+
+    expect((await within(dialog).findByRole('alert')).textContent).toBe(refusal)
+    expect(memoryAdd).toHaveBeenCalledWith({ workspace_id: workspace.id, kind: 'decision', text: pinned.body, files: [long], supersedes: pinned.id, scope: 'member' })
+    expect((within(dialog).getByLabelText('Files') as HTMLTextAreaElement).value).toBe(long)
+  })
+
+  it('offers no Replace on a superseded note', async () => {
+    seed()
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [replaced] })), memoryShow: vi.fn(async () => ({ item: replaced })) })} />)
+    fireEvent.click(await screen.findByRole('button', { name: replaced.title }))
+    const dialog = await screen.findByRole('dialog', { name: replaced.title })
+    expect(await within(dialog).findByRole('button', { name: 'Remove…' })).toBeDefined()
+    expect(within(dialog).queryByRole('button', { name: 'Replace…' })).toBeNull()
+  })
+
   it('re-reads the list and the brief when a memory.change arrives for its workspace', async () => {
     seed()
     let notes = [agentNote]
@@ -319,6 +388,7 @@ describe('memory page', () => {
     await within(dialog).findByText(`Gotcha · Agent note · ${agentNote.id}`)
     expect(within(dialog).queryByRole('button', { name: 'Pin' })).toBeNull()
     expect(within(dialog).queryByRole('button', { name: 'Remove…' })).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: 'Replace…' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Add note' })).toBeNull()
   })
 
