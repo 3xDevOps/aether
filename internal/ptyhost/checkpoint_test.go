@@ -590,3 +590,47 @@ func TestCheckpointV2MigratesWithoutResettingPosition(t *testing.T) {
 		t.Fatalf("v2 migration did not compact its lineage: %+v, %v", migrated, err)
 	}
 }
+
+func TestCheckpointRewritesOnlyAChangedScreen(t *testing.T) {
+	h, dir := newTestHost(t)
+	run := domain.RunID("checkpoint-idle")
+	att := newFakeAtt()
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatal(err)
+	}
+	s := h.lookup(RunSession(run))
+	path := filepath.Join(dir, string(run)+".screen")
+	checkpointAfter := func(output string, sequence int) os.FileInfo {
+		t.Helper()
+		if output != "" {
+			att.writeOutput(t, output)
+		}
+		waitFor(t, "live output", func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.ring.position().Sequence == TerminalSequence(sequence)
+		})
+		if err := s.checkpointNow(); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info
+	}
+	first := checkpointAfter("first", len("first"))
+	if idle := checkpointAfter("", len("first")); !os.SameFile(first, idle) {
+		t.Fatal("an unchanged screen rewrote its checkpoint")
+	}
+	if changed := checkpointAfter("-second", len("first-second")); os.SameFile(first, changed) {
+		t.Fatal("a changed screen kept its old checkpoint")
+	}
+	checkpoint, err := decodeCheckpoint(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkpoint.Sequence != TerminalSequence(len("first-second")) {
+		t.Fatalf("checkpoint sequence = %d, want %d", checkpoint.Sequence, len("first-second"))
+	}
+}

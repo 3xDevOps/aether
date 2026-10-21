@@ -69,6 +69,7 @@ type session struct {
 	checkpoint      string
 	checkpointMu    sync.Mutex
 	checkpointSeq   uint64
+	persisted       *checkpointCapture // the last capture written; checkpointMu guards it
 	stdinMu         sync.Mutex
 	stdin           io.WriteCloser
 
