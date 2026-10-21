@@ -200,6 +200,75 @@ func TestMemorySupersede(t *testing.T) {
 	}
 }
 
+// The chain follows the replacement links, not creation time: replacing C
+// with an older note's text points C back at that note, A.
+func TestMemoryChainFollowsReplacements(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	note := func(body string) *Memory {
+		return &Memory{WorkspaceID: w.ID, Kind: MemoryConvention, Source: MemoryFromMember, Body: body}
+	}
+	supersede := func(old *Memory, body string) *Memory {
+		t.Helper()
+		m := note(body)
+		if _, _, err := db.SupersedeMemory(ctx, old.ID, m, nil); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	a := mustAddNote(t, db, note("Use bun in web/."))
+	b := mustAddNote(t, db, note("Use npm in web/."))
+	c := supersede(b, "Use pnpm in web/.")
+	if again := supersede(c, "use BUN in web/."); again.ID != a.ID {
+		t.Fatalf("replacing C with A's text stored %s, want A %s", again.ID, a.ID)
+	}
+	d := mustAddNote(t, db, note("Use yarn in web/."))
+	supersede(d, "Use bun in web/.")
+	check := func(shown *Memory, want ...*Memory) {
+		t.Helper()
+		_, chain, err := db.GetMemory(ctx, w.ID, shown.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got, wantIDs []string
+		for _, n := range chain {
+			got = append(got, n.ID)
+		}
+		for _, n := range want {
+			wantIDs = append(wantIDs, n.ID)
+		}
+		if !slices.Equal(got, wantIDs) {
+			t.Errorf("chain of %s = %v, want %v", shown.ID, got, wantIDs)
+		}
+	}
+	check(a, b, c, d)
+	check(b, c, a)
+	check(c, b, a)
+
+	if err := db.DeleteMemory(ctx, w.ID, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	check(a, b, d)
+	check(b, a)
+}
+
+func TestMemoryChainEndsOnACycle(t *testing.T) {
+	db := openTestDB(t)
+	w := mustCreateWorkspace(t, db)
+	x := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "Note X."})
+	y := mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "Note Y."})
+	if _, err := db.db.Exec(`UPDATE memory SET superseded_by = CASE id WHEN ?1 THEN ?2 ELSE ?1 END, invalid_at = 1 WHERE id IN (?1, ?2)`,
+		x.ID, y.ID); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, _, err := db.GetMemory(ctx, w.ID, x.ID); err != nil {
+		t.Fatalf("show a note in a cycle: %v", err)
+	}
+}
+
 // Superseding a pinned note moves the pin to the replacement, pinned by its
 // author in the old note's scope, with the old note's cost freed first. A
 // replacement past the budget leaves the old note live and pinned.

@@ -83,7 +83,7 @@ function Provenance({ item, agents, onOpen }: { item: MemoryItem; agents: Record
 function Chain({ notes, current, onOpen }: { notes: MemoryItem[]; current: string; onOpen: (id: string) => void }) {
   return (
     <section aria-label="Supersede chain" className="flex min-w-0 flex-col gap-1">
-      <SectionLabel as="h3">Supersede chain, oldest first</SectionLabel>
+      <SectionLabel as="h3">Supersede chain, in replacement order</SectionLabel>
       <ol className="flex min-w-0 flex-col gap-1 text-ui-sm">
         {notes.map((note) => (
           <li key={note.id} className="flex min-w-0 items-baseline gap-2">
@@ -157,7 +157,7 @@ export function NoteDialog({
   }
 
   const item = load.kind === 'ready' ? load.result.item : undefined
-  // The server orders the chain oldest first; this note follows the last note it replaced.
+  // The server orders the chain by replacement; this note follows the last note it replaced.
   const others = load.kind === 'ready' ? load.result.chain ?? [] : []
   const at = others.reduce((last, note, i) => (note.superseded_by === item?.id ? i + 1 : last), 0)
   const chain = item ? [...others.slice(0, at), item, ...others.slice(at)] : []
