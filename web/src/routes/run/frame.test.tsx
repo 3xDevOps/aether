@@ -99,9 +99,10 @@ describe('run frame', () => {
     await waitFor(() => expect(screen.getByRole('banner').textContent).toContain("On Bob's account (fallback)"))
   })
 
-  it('names the model after the mode when the run chose one', async () => {
+  it('keeps the model out of the state line and in the agent tooltip', async () => {
     open({ model: 'opus' })
-    await waitFor(() => expect(screen.getByRole('banner').textContent).toContain('Claude Code · Standard · opus'))
+    await waitFor(() => expect(screen.getByTitle('Claude Code · Standard · opus')).toBeDefined())
+    expect(screen.getByRole('banner').textContent).not.toContain('opus')
   })
 
   it('keeps the agent terminal attached while other views are shown', () => {

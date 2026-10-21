@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
-import { Camera, Lock, PanelRight, ScrollText } from '@/components/icons'
+import { Camera, Copy, GitBranch, Lock, PanelRight, ScrollText } from '@/components/icons'
 import { RunActions } from '@/components/run-actions'
 import { RunRetention } from '@/components/run-retention'
 import { ConnectionLine } from '@/components/shell/connection'
@@ -8,8 +8,6 @@ import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { PaneHeader } from '@/components/ui/pane-header'
-import { RelativeTime } from '@/components/ui/relative-time'
-import { StatusDot } from '@/components/ui/status-dot'
 import { TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
@@ -18,7 +16,7 @@ import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
-import { runLabel, stateDetail, stateLabel, stateTitle, stateTone } from '@/lib/status'
+import { runLabel, stateDetail, stateLabel, stateTitle } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
@@ -119,57 +117,47 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const ownerName = useStore((s) => memberName(s, run.member_id))
   const accountID = run.requested_account_member_id ? run.account_member_id ?? '' : ''
   const accountOwner = useStore((s) => memberName(s, accountID))
+  const mode = modeLabel[run.mode] ?? run.mode
   return (
-    <div className="@container/state w-full min-w-0">
-      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-ui-sm text-muted" title={stateTitle(presentation, since)}>
-        <StatusDot tone={stateTone[state]} pulse={state === 'working'} />
-        <span role="status" className="shrink-0 text-text">{stateLabel[state]}</span>
-        <span className="hidden shrink-0 items-center gap-1.5 @xs/state:flex">
-          <span aria-hidden>·</span>
-          <RelativeTime at={since} compact title={undefined} className="tabular-nums" />
-        </span>
-        {detail && (
-          <>
-            <span aria-hidden>·</span>
-            <span className={asks && !run.switching ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{detail}</span>
-          </>
-        )}
-        <span className="flex shrink-0 items-center gap-1.5">
-          <span aria-hidden>·</span>
-          <AgentGlyph agent={run.harness} />
-          <span className="sr-only @3xs/state:not-sr-only">
-            <span className="sr-only @xs/state:not-sr-only">{agentName} · </span>
-            {modeLabel[run.mode] ?? run.mode}
-          </span>
-        </span>
-        {run.model && (
-          <span className="sr-only min-w-0 truncate @3xs/state:not-sr-only" title={run.model}>
-            {` · ${run.model}`}
-          </span>
-        )}
-        {accountID && (
-          <>
-            <span aria-hidden>·</span>
-            <span className="min-w-0 truncate">On {accountOwner}&apos;s account (fallback)</span>
-          </>
-        )}
-        <span className="hidden min-w-0 shrink items-center gap-1.5 @2xl/state:flex">
-          <span aria-hidden>·</span>
+    <div className="@container/state flex w-full min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-ui-sm text-muted">
+      <span role="status" className="sr-only">{stateLabel[state]}</span>
+      {run.branch && (
+        <>
           <Button
-            variant="link"
+            variant="quiet"
             size="sm"
             hint="Copy branch name"
-            aria-label={`Branch ${run.branch}, copy`}
-            className="min-w-0 shrink"
+            aria-label={`Copy branch ${run.branch}`}
+            className="max-w-full"
             onClick={(event) => void copyText(run.branch, event.currentTarget)}
           >
-            <span className="max-w-56 truncate font-code text-muted">{run.branch}</span>
+            <GitBranch aria-hidden />
+            <span className="min-w-0 truncate font-code">{run.branch}</span>
+            <Copy aria-hidden />
           </Button>
+          <span aria-hidden>·</span>
+        </>
+      )}
+      <span className="flex min-w-0 items-center gap-1.5" title={[agentName, mode, run.model].filter(Boolean).join(' · ')}>
+        <AgentGlyph agent={run.harness} />
+        <span className="sr-only">{agentName} · </span>
+        <span className="min-w-0 truncate">{mode}</span>
+      </span>
+      {accountID && (
+        <>
+          <span aria-hidden>·</span>
+          <span className="min-w-0 truncate">On {accountOwner}&apos;s account (fallback)</span>
+        </>
+      )}
+      {detail && (
+        <span className="flex min-w-0 flex-1 basis-0 items-center gap-1.5 overflow-hidden" title={stateTitle(presentation, since)}>
+          <span aria-hidden>·</span>
+          <span className={asks && !run.switching ? 'min-w-0 truncate text-text' : 'min-w-0 truncate'}>{detail}</span>
         </span>
-        <span className="hidden shrink-0 @lg/state:flex">
-          <Avatar name={ownerName} color={owner?.color} />
-        </span>
-      </div>
+      )}
+      <span className="hidden shrink-0 @lg/state:flex">
+        <Avatar name={ownerName} color={owner?.color} />
+      </span>
     </div>
   )
 }

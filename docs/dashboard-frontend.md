@@ -854,10 +854,10 @@ What gives way first:
   prompt's actions sit on their own row so long diagnostics never hide them.
 - **The sidebar** keeps the run list scrollable between its fixed header and
   its navigation rows and footer, from 220px wide up.
-- **The run header** truncates its title to one line; the state line drops
-  the branch, then the owner, then the agent's name, keeping its glyph and
-  the mode, and below 16rem the mode word as well. The view switch always
-  sits on its own row (see [Header](#header)).
+- **The run header** truncates its title to one line and keeps its state
+  line on one line: the reason gives up its room first, then the owner, then
+  the mode word; the branch truncates only when it alone is wider than the
+  line. The view switch always sits on its own row (see [Header](#header)).
 - **The board** stacks its three columns into one list on narrow screens and
   places them side by side from the `lg`/1024px breakpoint (see
   [Board](#board)).
@@ -1350,10 +1350,12 @@ since *relative* — *reason*. *What happens next*", for example "Waiting
 since 5 minutes ago — Turn ended without a report. Send a message to
 continue." A board card reads *Label* · *reason* outside Needs you, where
 the reason alone leads. `stateDetail` drops a reason that only restates the
-label. The run header's state line reads *Label* · *elapsed* · *reason*; its label sits in a `role=status` element, so a screen reader
-hears only a change of state, and the elapsed time is the first part to go
-on a narrow header. While a run waits for agents, the header counts the
-Enhanced session's running subagents, "2 subagents running".
+label. The run header's state line shows only the reason, with `stateTitle`
+as its tooltip, because the Workflow chip under it already shows the dot and
+label; the label stays in a visually hidden `role=status` element, so a
+screen reader hears only a change of state. While a run waits for agents,
+the header counts the Enhanced session's running subagents, "2 subagents
+running".
 
 | State | Dot | Comes from | Group |
 | --- | --- | --- | --- |
@@ -1971,17 +1973,17 @@ The header (`header.tsx`) is a 56px `PaneHeader size="run"`: the title (the
 agent's last terminal or Enhanced session title,
 [until then](enhanced-runs.md#status) a taskless Enhanced run's first message
 line, else the task's first line cut at 120 characters, with a lock for a
-protected run), then a state line with the
-`StatusDot` (it pulses while Working, and stops under reduced motion), the
-reason, "Claude Code · Standard" (`agent.list` display names, `run.mode`)
-followed by the model when `run.model` is set ("Claude Code · Standard ·
-opus"), "On `<name>`'s account (fallback)" when the run carries
+protected run), then a one-line state line: the run branch with a copy
+icon (click copies the name), the agent's glyph and mode ("Standard"; the
+tooltip adds the `agent.list` display name and `run.model`, "Claude Code ·
+Standard · opus"), "On `<name>`'s account (fallback)" when the run carries
 `requested_account_member_id` ([usage fallback](teams.md#usage-fallback);
-a `run.account` event updates it live when the run moves),
-the branch (click copies it) and the owner. Container queries on the state
-line drop the branch first, then the owner, then the agent's name (the glyph
-stays), and only on a phone-width column the mode word; the reason truncates
-before any of them. The full task and the run record are in Details.
+a `run.account` event updates it live when the run moves), the reason, and
+the owner. The state's dot and label are the Workflow chip's, on the row
+below. The reason takes only the room left over, so a long command never
+moves or hides the branch; the owner goes below 32rem, and the mode word
+truncates before the branch does. The full task and the run record are in
+Details.
 
 The actions, in order:
 
