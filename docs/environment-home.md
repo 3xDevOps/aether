@@ -47,14 +47,9 @@ workspace or profile sets them:
 
 | Variable | Default |
 | --- | --- |
-| `npm_config_cache` | `/aether-cache/npm` |
-| `PIP_CACHE_DIR` | `/aether-cache/pip` |
-| `UV_CACHE_DIR` | `/aether-cache/uv` |
-| `GOCACHE` | `/aether-cache/go-build` |
-| `GOMODCACHE` | `/aether-cache/go-mod` |
-| `BUN_INSTALL_CACHE_DIR` | `/aether-cache/bun` |
-| `YARN_CACHE_FOLDER` | `/aether-cache/yarn` |
-| `npm_config_store_dir` (pnpm) | `/aether-cache/pnpm` |
+| `npm_config_cache`, `PIP_CACHE_DIR`, `UV_CACHE_DIR` | `/aether-cache/npm`, `/pip`, `/uv` |
+| `GOCACHE`, `GOMODCACHE` | `/aether-cache/go-build`, `/go-mod` |
+| `BUN_INSTALL_CACHE_DIR`, `YARN_CACHE_FOLDER`, `npm_config_store_dir` (pnpm) | `/aether-cache/bun`, `/yarn`, `/pnpm` |
 
 You do not need to clean them. Aether removes the oldest inactive caches
 hourly and before refusing work for disk pressure, aiming for 4 GiB per member
@@ -150,19 +145,12 @@ logged in to github.com as octocat
 signing key SHA256:2E3v9x... registered on GitHub
 ```
 
-This command, and the admin dashboard flow, do five things on the server:
-
-1. Check `gh auth status` for `github.com` in your environment.
-2. Run `gh auth setup-git --hostname github.com`, which writes gh's credential
-   helper into `~/.gitconfig`.
-3. Create an ed25519 key pair at `~/.ssh/aether_signing` if there is none.
-4. Write `user.name`, `user.email`, `gpg.format=ssh`, `user.signingkey` and
-   `commit.gpgsign=true` into `~/.gitconfig`.
-5. Register the public key with `gh ssh-key add --type signing` and confirm
-   it appears in `gh ssh-key list`.
-
-Running it again is safe. `aether member git` keeps the identity in
-`~/.gitconfig` in step with your name and address once a key exists.
+This command, and the admin dashboard flow, confirm the `gh` login, write gh's
+credential helper and your identity into `~/.gitconfig`, create an ed25519
+signing key at `~/.ssh/aether_signing` if there is none, turn on commit signing
+(`gpg.format=ssh`, `commit.gpgsign=true`), and register the public key on your
+account. It is safe to run again. `aether member git` keeps the identity in
+`~/.gitconfig` in step with your name and address.
 
 > [!WARNING]
 > Container root in every run you launch can read and replace the GitHub
@@ -228,26 +216,18 @@ run files. It shows your whole home, dotfiles included. Each row's **…** menu
 deletes. Drag a row onto a folder to move it, or drag files from your desktop
 to upload. Deleting, moving and replacing ask first, and there is no trash.
 
-- Nothing is filtered in **Files**. The exclusions above apply to `aether
+- Nothing is filtered in **Files**. The upload exclusions apply to `aether
   config push` only.
 - Credential files show a lock and cannot be opened, edited, downloaded,
   renamed or moved: agent logins such as `~/.claude/.credentials.json`,
-  everything in `~/.ssh` except `*.pub`, `~/.config/gh/hosts.yml`,
-  `~/.git-credentials`, `~/.netrc`, `*.pem`, `.env` and `.env.*`. You can
-  delete or upload over one. Use the environment terminal for the rest.
+  `~/.ssh` except `*.pub`, `~/.config/gh/hosts.yml`, `~/.git-credentials`,
+  `~/.netrc`, `*.pem` and `.env*`. You can delete or upload over one.
 - Text files up to 64 MiB open in the editor. Binary and larger files are
   read-only. Save with **Save** or Ctrl/Cmd-S. There is no autosave. A failed
   or stale save keeps your draft, and **Reload from server** discards it.
-- Symlinks are listed and never followed.
 
 The workspace explorer is separate. Saving a base-branch file there is **Commit
 to <branch>** (one commit, not pushed) and needs **Push**. Saving a live run's
 file edits its uncommitted checkout and needs **Steer**
 ([local-gateway.md](local-gateway.md#files-and-member-configuration)).
 
-## Limits
-
-- The home is one directory per member. There is no per-run profile.
-- Caches under `/aether-cache` can be removed at any time. Do not keep data
-  there.
-- Files over 64 MiB cannot be uploaded or edited in **Files**.
