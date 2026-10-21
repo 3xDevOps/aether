@@ -572,7 +572,10 @@ the confirmation set, the composer draft and the generation a new
 conversation bumps; `assistantOpen` and `assistantWidth` persist.
 `store/assistant-stream.ts` connects `/ws/assistant` through
 `connectSessionStream` with the assistant endpoint. `AssistantPanel` reads
-`assistant.status` once on load and on each open, then connects unless the
+`assistant.status` once on load, as soon as hydration has set the identity
+(`useIdentityKnown` in `store/hooks.ts`; `useAgentList` waits for it too, so
+neither read is sent under no identity and repeated), and on each open, then
+connects unless the
 state is `setup` or `needs_restart`. It stays connected with the panel closed
 only while the state is `running` or `starting`, or a confirmation or a
 harness prompt is pending. After that, `status` frames carry the state and the
@@ -4005,10 +4008,11 @@ questions and queued messages stay contextual to their run, in its Details
 **Needs you**, and neither creates a second action inbox.
 
 - **Events keep them current; a full read only fills gaps.**
-  `useTeamRefresh` in `src/routes/team/sync.ts` reads everything once on
-  mount, again whenever the event stream comes back live - a reconnect that
-  re-hydrates does not replay what it missed - and when the workspace set or
-  **Show decided** changes. Between those, `applyEvent` updates the store
+  `useTeamRefresh` in `src/routes/team/sync.ts` reads everything once
+  hydration has listed the workspaces, again whenever the event stream comes
+  back live - a reconnect that re-hydrates does not replay what it missed -
+  and when the workspace set or **Show decided** changes. A read before
+  hydration would find no workspaces and be repeated. Between those, `applyEvent` updates the store
   from the events that change these reads:
   - `workspace.approval` names the request and its decision but not its text.
     A request the inbox holds is decided in place (and dropped while decided

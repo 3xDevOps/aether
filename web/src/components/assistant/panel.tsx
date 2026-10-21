@@ -26,6 +26,7 @@ import { requestTitle } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
 import { assistantWaiting, clampAssistantWidth, maxAssistantWidth, minAssistantWidth } from '@/store/assistant'
 import { connectAssistant, refreshAssistant } from '@/store/assistant-stream'
+import { useIdentityKnown } from '@/store/hooks'
 import { assistantShareView, syncViewContext, trackViewContext } from '@/store/view-context'
 
 const stateWord: Record<AssistantState, string> = {
@@ -304,6 +305,7 @@ export function AssistantPanel() {
   const setOpen = useStore((s) => s.setAssistantOpen)
   const generation = useStore((s) => s.assistantGeneration)
   const identity = useStore((s) => s.identityKey)
+  const identityKnown = useIdentityKnown()
   const state = useStore((s) => s.assistantStatus?.state)
   const waiting = useStore(assistantWaiting) > 0
   const share = useStore(assistantShareView)
@@ -331,8 +333,8 @@ export function AssistantPanel() {
 
   // Read once on load and on each open, before the stream decides whether there is a session.
   useEffect(() => {
-    if (supported && (open || useStore.getState().assistantStatus === null)) void refreshAssistant(useStore, api)
-  }, [supported, open, identity])
+    if (supported && identityKnown && (open || useStore.getState().assistantStatus === null)) void refreshAssistant(useStore, api)
+  }, [supported, identityKnown, open, identity])
   useEffect(() => (streamable ? connectAssistant(useStore, api) : undefined), [streamable, generation, identity])
   useEffect(() => (supported && share ? trackViewContext(useStore) : undefined), [supported, share, identity])
   useEffect(() => (shown && hasSession && share ? syncViewContext(useStore, api) : undefined), [shown, hasSession, share, identity])
