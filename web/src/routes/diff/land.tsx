@@ -1,9 +1,7 @@
 import { useState } from 'react'
-import { toast } from 'sonner'
 import { Check, GitBranch } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { api } from '@/lib/api'
-import { errorSentence } from '@/lib/format'
+import { switchToPull } from '@/lib/commands'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
@@ -18,15 +16,8 @@ export function Land({ run }: { run: RunRecord }) {
 
   const switchBranch = async () => {
     setSwitching(true)
-    try {
-      await api.localPullSwitch(run.id)
-      useStore.getState().recordPull(run.id, { ...pull, current: true })
-      toast.success(`Now on ${pull.branch}`)
-    } catch (err) {
-      toast.error(errorSentence(err))
-    } finally {
-      setSwitching(false)
-    }
+    await switchToPull(run.id, pull)
+    setSwitching(false)
   }
 
   return (

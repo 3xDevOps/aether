@@ -272,9 +272,27 @@ test('an in-flight command locks the menu, prevents duplicate RPCs, and retains 
   expect(screen.queryByRole('menu')).toBeNull()
   expect(api.localPull).toHaveBeenCalledTimes(1)
   await act(async () => finish({ branch: record.branch, ref: `refs/heads/${record.branch}`, output: 'From ssh://host\n * [new branch] run-1-checkout', current: false, dirty: false }))
-  await waitFor(() => expect(toast.success).toHaveBeenCalledWith(`Pulled refs/heads/${record.branch}`))
+  await waitFor(() => expect(toast.success).toHaveBeenCalledWith(`Pulled ${record.branch}`, expect.objectContaining({ cancel: expect.objectContaining({ label: 'Copy command' }) })))
   expect(useStore.getState().pulls[record.id]?.output).toContain('new branch')
   await waitFor(() => expect(more.getAttribute('aria-disabled')).toBeNull())
+})
+
+test('the pull toast copies the switch command and switches to the pulled branch', async () => {
+  const record = seed({ paused: false, local: ['pull', 'pull.switch'], run: { last_commit: 'a'.repeat(40) } })
+  vi.mocked(api.localPull).mockResolvedValueOnce({ branch: record.branch, ref: `refs/remotes/aether/${record.branch}`, output: '', current: false, dirty: false })
+  render(<RunActions run={record} />)
+  await selectMore('Pull branch')
+  await waitFor(() => expect(toast.success).toHaveBeenCalledWith(`Pulled ${record.branch}`, expect.anything()))
+  const options = vi.mocked(toast.success).mock.calls.at(-1)![1]!
+  const copy = options.cancel as { label: string; onClick: () => void }
+  act(() => copy.onClick())
+  // jsdom has no navigator.clipboard, so the copy fails and the toast carries the command instead.
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/^Could not copy: /), { description: `git switch ${record.branch}` }))
+  const action = options.action as { label: string; onClick: () => void }
+  expect(action.label).toBe('Switch to it')
+  act(() => action.onClick())
+  await waitFor(() => expect(api.localPullSwitch).toHaveBeenCalledWith(record.id))
+  await waitFor(() => expect(useStore.getState().pulls[record.id]?.current).toBe(true))
 })
 
 test('a viewer gets no mutating actions, but can use eligible local Pull', async () => {
