@@ -236,11 +236,10 @@ func (e *Engine) RemoveEvidence(ctx context.Context, workspaceID domain.Workspac
 	if err := os.WriteFile(filepath.Join(repo, evidencePrunePending), nil, 0o600); err != nil {
 		return fmt.Errorf("gitengine: mark evidence prune pending: %w", err)
 	}
+	// update-ref -d succeeds on a missing ref, so any failure, such as a
+	// stale packed-refs.lock, means the ref is still there.
 	if _, err := e.git(ctx, repo, "update-ref", "-d", evidenceRef(packetID)); err != nil {
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
-			return fmt.Errorf("gitengine: remove evidence: %w", err)
-		}
+		return fmt.Errorf("gitengine: remove evidence: %w", err)
 	}
 	e.mu.Lock()
 	e.scheduleEvidencePruneLocked(workspaceID)
@@ -355,8 +354,7 @@ func (e *Engine) pruneEvidence(ctx context.Context, ws domain.WorkspaceID) error
 	cmd.Stderr = &stderr
 	// gc's repack, pack-objects and prune children outlive a killed gc and
 	// would keep rewriting the repository after the locks are released.
-	killProcessGroupOnCancel(cmd)
-	if runErr := cmd.Run(); runErr != nil {
+	if runErr := runInProcessGroup(cmd); runErr != nil {
 		return fmt.Errorf("gitengine: prune evidence objects: %w: %s", runErr, strings.TrimSpace(stderr.String()))
 	}
 	if removeErr := os.Remove(filepath.Join(repo, evidencePrunePending)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {

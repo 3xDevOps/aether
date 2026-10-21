@@ -4,4 +4,4 @@ package gitengine
 
 import "os/exec"
 
-func killProcessGroupOnCancel(*exec.Cmd) {}
+func runInProcessGroup(cmd *exec.Cmd) error { return cmd.Run() }
