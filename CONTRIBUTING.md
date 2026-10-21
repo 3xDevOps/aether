@@ -1,33 +1,43 @@
 # Contributing to Aether
 
-Thanks for contributing. Aether is a self-hosted development environment for
-coding agents, built as a Go server, a Go CLI, and an embedded web dashboard.
+How to build Aether from source, run your build beside an installed release,
+test it, put it on a test server, and get it merged. Aether has a Linux
+server (`aether-server`) that runs coding agents in containers, a client CLI
+(`aether`) for Linux, macOS and Windows, and a web dashboard built into both
+binaries. Terms such as run, workspace and environment are explained in the
+[glossary](docs/README.md#concepts).
 
-## Before you write code
-
-1. Read the relevant guide in `docs/` and the package you will change.
-2. Search for an existing helper or dependency before adding one.
-3. Keep credentials and local server state outside the checkout.
-4. Update public documentation when commands, defaults, or behavior change.
+```mermaid
+flowchart LR
+  A[Change code] --> B[make build]
+  B --> C[Test locally]
+  C --> D[Run or deploy the dev build]
+  D -->|works| E[Open a pull request]
+  D -->|broken| A
+  E --> F[CI]
+  F -->|red| A
+  F -->|green| G[Merge queue]
+  G --> H[main]
+  H -->|maintainer pushes a tag| I[Release]
+```
 
 ## Toolchain
 
-| Need | Version | Use |
+| Tool | Version | Used for |
 | --- | --- | --- |
-| Go | 1.25+ | Server and CLI |
-| GNU make | any recent | Build and checks |
-| Bun | 1.3+ | Dashboard build and tests |
-| Docker | recent | Integration tests, server runtime, and the Android APK build |
-| git | recent | Integration tests and workspace transport |
-| Node | 22+ | Next dashboard build and dev server, plus desktop installers from `desktop/` |
+| Go | 1.26 (`go.mod` pins toolchain go1.26.9) | Server, CLI, edge |
+| GNU make | any recent | Builds and checks |
+| Bun | 1.3+ (`web/.bun-version`) | Dashboard dependencies and tests |
+| Node.js | 22+ (22.13+ for `make test-native-hooks`) | Dashboard build and dev server, desktop shell |
+| git | recent | Builds, integration tests |
+| Docker | recent | Integration and end-to-end suites, the server's runtime, the Android build |
+| ShellCheck | any | `make lint-workflows` |
+| OpenSSL 3 | 3.x | `make test-scripts`; on macOS, `brew install openssl@3` and put its `bin` first on `PATH` |
 
-SQLite is pure Go and the project builds with `CGO_ENABLED=0`.
+The binaries are pure Go (`CGO_ENABLED=0`) and need no Node.js or Bun at run
+time.
 
-Node.js 22+ must be on `PATH` for the Next build and development server:
-`make build` (or `make dashboard`) and `cd web && bun run dev`. It is a
-source-build prerequisite, not only an optional desktop-installer tool.
-Production uses a static Next export in `web/dist`, embedded into the Go
-server and CLI, so running those binaries needs no Node.js or Next server.
+## Build from source
 
 ```sh
 git clone https://github.com/3xDevOps/Aether
@@ -35,127 +45,283 @@ cd Aether
 make build
 ```
 
-## Checks
+`make build` builds the dashboard into `web/dist` (Bun installs the
+dependencies, Node runs the Next build), then the Go binaries for the
+machine you are on:
 
-Run the fast checks before opening a change:
+| File | What it is |
+| --- | --- |
+| `dist/aether` | The client CLI, which serves the dashboard with `aether gui` |
+| `dist/aether-server` | The server, Linux only. It serves the dashboard on its tailnet web port |
+| `dist/aether-edge` | The edge relay ([docs/edge.md](docs/edge.md)), Linux only |
 
-```sh
-make fmt-check
-make vet
-make lint
-make lint-workflows
-make test
-make test-scripts
-make public-audit
+`web/embed.go` embeds `web/dist` when Go compiles, so rebuild the binaries
+after a dashboard change. A binary compiled without `make dashboard` answers
+every page with `dashboard not built: this server binary embeds no web/dist`.
+
+Every build is stamped with `git describe --tags --always --dirty`:
+
+```console
+$ ./dist/aether version
+aether v0.7.1-beta.1-12-gabc1234-dirty (abc1234)
 ```
 
-The Android app has its own build and tests, in containers
-([Android shell](#android-shell)):
+That is 12 commits past the release `v0.7.1-beta.1`, at commit `abc1234`,
+with uncommitted changes. Aether ranks it above that release and below the
+next one. A checkout without tags stamps a bare commit hash (run
+`git fetch --tags`), and a plain `go build` reports `dev`. Neither compares
+with a release, so update checks and version gates never count them as
+behind.
+
+`make release-binaries` builds the ten release binaries into `dist/`: server
+and edge for Linux, the CLI for Linux, macOS and Windows, each on amd64 and
+arm64. `SERVER_PLATFORMS`, `EDGE_PLATFORMS` and `CLI_PLATFORMS` pick the
+targets, for example `make release-binaries SERVER_PLATFORMS=linux/arm64
+EDGE_PLATFORMS= CLI_PLATFORMS=` for one server binary.
+
+## Run a development build
+
+`./dist/aether` does not replace the `aether` on your `PATH`. Call it by its
+path; `aether` keeps meaning the installed release.
+
+The two share everything a client stores: the link config
+(`~/.config/aether/config.json` on Linux,
+`~/Library/Application Support/aether/config.json` on macOS,
+`%AppData%\aether\config.json` on Windows), the SSH key `~/.ssh/id_ed25519`
+and `~/.ssh/known_hosts`. So `./dist/aether link` changes what the installed
+CLI and a running desktop app connect to. Ports do not clash: every
+`aether gui`, the desktop app's included, binds a free port on 127.0.0.1
+unless you pass `--port`, and a taken `--port` fails with
+`aether: localgw: listen: listen tcp 127.0.0.1:8080: bind: address already in use`.
+
+To give the dev CLI its own key and links on Linux or macOS, point `HOME` and
+`AETHER_CONFIG_DIR` at an empty directory. The server then sees a new person,
+so join with an invite code ([docs/teams.md](docs/teams.md)):
 
 ```sh
-make android
+devhome=$(mktemp -d)
+HOME=$devhome AETHER_CONFIG_DIR=$devhome ./dist/aether link <server>:2222 --invite <code>
+HOME=$devhome AETHER_CONFIG_DIR=$devhome ./dist/aether gui
 ```
 
-`make lint` runs golangci-lint under the toolchain pinned in `go.mod`, the same
-Go version CI uses. Without that pin, a host whose default Go is newer fails
-with `export data version 4 is greater than maximum supported version 2`
-before linting anything. It first runs `golangci-lint config verify` against
-the schema inside the pinned golangci-lint module, because `run` silently
-ignores a misspelled key in `.golangci.yml`. CI's `lint` job runs the same
-target.
+> [!WARNING]
+> `aether gui` checks for a newer release when it starts, and the dashboard
+> offers it ([update prompts](docs/dashboard-frontend.md#update-prompts)).
+> Accepting it, or running `./dist/aether update`, replaces `dist/aether`
+> (and `dist/aether-server` on Linux) with the release and rebuilds an
+> installed desktop app against it. `AETHER_NO_UPDATE_CHECK=1` turns the
+> checks off.
 
-`make lint-workflows` uses pinned actionlint v1.7.12, matching CI's workflow
-lint gate without adding a tool dependency to `go.mod`. It requires
-ShellCheck on `PATH`: on Linux, run `sudo apt-get install shellcheck`.
-GitHub's Ubuntu runners already provide it; the prerequisite ensures
-embedded shell commands are checked locally too. `make test-scripts`
-includes `sh scripts/release-ci-check-test.sh`: it checks exact-commit main
-CI authorization and fail-closed rejection using API fixtures, without
-publishing a release or contacting GitHub.
-It also runs `sh scripts/install-test.sh`, which signs its fixture releases
-with OpenSSL 3. macOS ships LibreSSL; `brew install openssl@3` and put its
-`bin` first on `PATH`.
+### The desktop app
 
-The integration suite uses real Docker and git:
+`./dist/aether gui build` replaces your installed desktop app, builds it from
+source, and ties it to the absolute path of `dist/aether`. If `dist/` is then
+deleted or moved, the app stops with `The CLI that installed this app is no
+longer executable at <path>`. Run `aether gui build` with the released CLI to
+go back. To try the shell on the dev CLI without touching the installed app:
 
 ```sh
-make test-integration
+cd desktop && npm ci && AETHER_BIN="$PWD/../dist/aether" npm start
 ```
 
-The dashboard end-to-end suite drives a real browser against a real
-`aether gui` gateway and a real server. It needs Docker, real git, and
-Playwright's browser:
+### The dashboard with hot reload
+
+Run Next's dev server against a local gateway
+([details](docs/dashboard-frontend.md#runtime-boundary-and-commands)):
 
 ```sh
-(cd web && bunx playwright install chromium)   # once, from the repo root
-make test-e2e
+./dist/aether gui --port 8080 --url          # terminal 1: prints a URL with ?token=
+cd web && AETHER_DASHBOARD=http://127.0.0.1:8080 \
+  bun run dev -- --port 3000 --hostname 127.0.0.1   # terminal 2
 ```
 
-CI partitions the unchanged case set across four isolated runners, each
-with one Playwright worker. To select the first shard locally, with the same
-image prerequisites, use `make test-e2e E2E_ARGS='--shard=1/4'`; omit
-`E2E_ARGS` for the full suite. See [the testing guide](docs/testing.md) for
-integration shard ownership, root/non-root coverage, and per-shard reports
-and screenshots.
+Open `http://127.0.0.1:3000/?token=<token>` with the token from terminal 1;
+it works until that `aether gui` exits. Edits in `web/src` reload in the
+browser. Gateway or server changes need `make build` and a restart.
 
-The dashboard checks run from `web/`:
+The server needs Linux, Docker and systemd; see
+[Deploy a development build to a test server](#deploy-a-development-build-to-a-test-server).
+
+## Test your change
+
+Run these before you open a pull request:
+
+| Command | Catches |
+| --- | --- |
+| `make fmt-check` | Go files gofmt would change |
+| `make vet` | `go vet` findings |
+| `make lint` | golangci-lint findings, under `go.mod`'s toolchain (no install needed) |
+| `make lint-workflows` | Workflow mistakes (actionlint, with ShellCheck on embedded scripts) |
+| `make test` | Go unit tests, with the race detector |
+| `make test-scripts` | Installer, deploy, release and CI script tests, with every outside command stubbed |
+| `make public-audit` | Private data that must not enter the public tree |
+| `cd web && bun run typecheck && bun run test` | Dashboard type errors and component tests (`bun install --frozen-lockfile` first) |
+
+`make fmt-check` uses the `gofmt` on your `PATH`, and a Go newer than the
+pinned toolchain can flag files CI accepts. Check with the pinned one:
+`"$(GOTOOLCHAIN=go1.26.9 go env GOROOT)/bin/gofmt" -l .`
+
+Then run the suites for what you changed: `make test-integration` (real
+Docker and git) for server work that touches containers, git or storage, and
+`make test-e2e` for dashboard flows.
+[docs/testing.md](docs/testing.md#which-suite-to-run) maps each kind of
+change (Go, dashboard, scripts, desktop, Android, edge) to its suite.
+
+CI runs on every pull request. One that changes only `docs/` or root-level
+`*.md` files runs the public audit and nothing else, and the edge image and
+Windows desktop jobs run only when their paths change
+([How CI runs the suites](docs/testing.md#how-ci-runs-the-suites)). Inside an
+Aether run, unset the run's `AETHER_*` variables before testing, or some
+tests fail
+([how](docs/testing.md#running-the-docker-suites-inside-a-run)).
+
+## Deploy a development build to a test server
+
+`make deploy` puts your server build on a Linux machine with systemd and
+Docker. It skips tests and CI.
 
 ```sh
-bun install --frozen-lockfile
-bun run typecheck
-bun run test
+DEPLOY_HOST=user@host make deploy   # over SSH
+make deploy                         # this machine
 ```
 
-### Edge image
+1. It builds the dashboard and cross-compiles `aether-server` for the
+   target (amd64 or arm64).
+2. It installs it as `/usr/local/bin/aether-server`, with one SSH
+   connection and at most one `sudo` password prompt.
+3. It installs and enables `packaging/systemd/aether-server.service` only if
+   the target has no `aether-server` unit.
+4. It restarts the service and checks the new version is running, or fails
+   with `deploy: aether-server is not running after restart; check
+   journalctl -u aether-server`.
 
-`images/edge/Dockerfile` builds the edge's container image. CI builds and
-smoke-tests it on amd64 and arm64 when `scripts/ci-classify-edge.sh` says a
-pull request's changes can affect it, and always on `main` and in the merge
-queue. To run those checks on a branch the classifier skips, with write
-access to the repository:
+It leaves alone the `aether` CLI on the target, `/etc/aether/`, the data
+directory (`/var/lib/aether` by default) and Docker images. Environments
+without a saved image start from the standard image of the release the build
+descends from (`ghcr.io/3xdevops/aether-standard:v0.7.1-beta.1` for
+`v0.7.1-beta.1-12-gabc1234`), or `:latest` without a release tag. A run's
+Browser tab needs `aether/browser:test`, which the server never pulls, and
+fails with `runtime: image aether/browser:test is built locally and is
+missing from the daemon` until you run `make browser-image` on the target or
+`sudo aether-server config set browser-image ghcr.io/3xdevops/aether-browser:<tag>`
+and restart.
+
+### On a server that runs a release
+
+> [!WARNING]
+> Deploy development builds to a separate test server. A server your team
+> uses may not be able to go back to a release afterwards.
+
+The database moves forward when the dev build starts, with no backup.
+Migrations (`internal/store/migrate.go`) never run backwards, so if your
+branch adds one, the release then refuses to start:
+
+```text
+store: database schema version N is newer than this binary supports (M)
+```
+
+Migrations are tracked by number only. If yours later ships in a different
+form, a release will not apply it again.
+
+The server accepts clients at or past the release it descends from. An older
+client is refused with:
+
+```text
+rpc error -32005: this aether is <client> and the server runs <server>; update this client first: run `aether update` (desktop: Update in the app; Android: install the latest aether-android.apk), then retry
+```
+
+A server stamped `dev` or a bare hash refuses no client. The rule works the
+other way too: a release server refuses a dev CLI built from an older
+release.
+
+Once a newer release exists, `sudo aether-server update` and the dashboard's
+server update prompt offer it, and installing it replaces your dev build and
+the `aether` beside it. Nothing installs on its own: the server only checks,
+about every six hours. Add `AETHER_NO_UPDATE_CHECK=1` to
+`/etc/aether/aether-server.env` to stop the check.
+
+If the server has data you want to keep, copy its data directory while it is
+stopped, then deploy:
 
 ```sh
-gh workflow run edge-image.yml --ref <branch>
+sudo aether-server config show              # the data-dir row
+sudo systemctl stop aether-server
+sudo cp -a /var/lib/aether /var/lib/aether.bak
 ```
 
-To check it locally, with Docker and curl:
+### Test the latest main
+
+No nightly or main-branch release is published: the installer, `aether
+update` and `aether-server update` install only published releases, by
+default the newest that is not a prerelease. Build `main` yourself:
 
 ```sh
-make edge-image
-sh scripts/edge-image-smoke.sh aether/edge:test
+git fetch --tags origin
+git switch --detach origin/main
+make build                          # or: DEPLOY_HOST=user@host make deploy
 ```
 
-When `aether-edge` starts importing another repository package, `make
-test-scripts` fails naming the pattern to add to
-`scripts/ci-classify-edge.sh`; when the Dockerfile's golang image and
-go.mod's `toolchain` line name different Go versions, it fails naming both.
-All three are described in
-[docs/testing.md](docs/testing.md#the-edge-image).
-
-### Desktop shell
-
-The optional Electron shell in `desktop/` wraps `aether gui` in a window. The
-production dashboard is a static Next export embedded in the `aether` CLI
-(`web/embed.go`), so this package is just a sidecar launcher. Users build and
-install it with `aether gui build`, which unpacks the sources embedded by
-`desktop/embed.go` and runs electron-builder's unpacked target; see
-[docs/install.md](docs/install.md#desktop-app). That command needs no Node.js
-on the user's machine - it downloads a pinned copy when there is none. A new
-file in `desktop/` that the shell needs at runtime must be added to both
-`desktop/embed.go` and the `files` list in `electron-builder.yml`.
-
-Installers come from a checkout, which is where Node 22+ on `PATH` is
-required:
+CI also keeps the binaries of each push to `main` for seven days, as
+`binaries-go` (Linux and macOS) and `binaries-go-windows`. They are unsigned,
+come with no checksums, and nothing installs them for you:
 
 ```sh
-cd desktop
-npm ci
-npm run dist   # installer for this OS into desktop/dist/
+gh run list --workflow ci.yml --branch main --event push --status success --limit 1
+gh run download <run-id> --name binaries-go --dir aether-main
 ```
 
-`npm run dist` packages only the current platform's targets. Installers for
-every platform need one machine per platform (a CI matrix) or the cross-build
-routes below.
+## Go back to a release
+
+On the server, if your branch added no migration:
+
+```sh
+sudo aether-server update --version <tag>
+```
+
+`<tag>` is the release your build descends from or a newer one. The update
+checks the release's signature, keeps the old binary as
+`/usr/local/bin/aether-server.prev`, rolls back a start that fails, and
+refuses a database the release cannot open:
+
+```text
+refusing to downgrade: this database is at schema N and <tag> only knows schema M; it could not open it
+```
+
+An older release needs `aether server update --version <tag>
+--allow-downgrade` from an admin's client, with the same database check.
+
+If your branch added a migration, restore your copy, then install the
+release. Without a copy, no release can open that database.
+
+```sh
+sudo systemctl stop aether-server
+sudo rm -rf /var/lib/aether && sudo cp -a /var/lib/aether.bak /var/lib/aether
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh \
+  | sh -s -- --server --role none --version <tag>
+sudo systemctl start aether-server
+```
+
+On a client the installed `aether` was never replaced. If you ran
+`./dist/aether gui build`, run `aether gui build` to tie the desktop app to
+the release again. `make clean` deletes `dist/`.
+
+## Desktop shell
+
+`desktop/` is an Electron window around `aether gui`. It bundles no CLI: it
+starts the one named by `AETHER_BIN`, else the one recorded by the
+`aether gui build` that installed it, else `aether` on `PATH`. Users install
+it with `aether gui build`, which unpacks the sources embedded by
+`desktop/embed.go` ([docs/install.md](docs/install.md#desktop-app)), so a new
+file the shell needs at run time goes in both `desktop/embed.go` and the
+`files` list in `desktop/electron-builder.yml`. `make test-scripts` runs its
+tests (`cd desktop && node --test`). To build an installer for this machine:
+
+```sh
+cd desktop && npm ci && npm run dist   # into desktop/dist/
+```
+
+<details>
+<summary>Installers for other platforms</summary>
 
 | Artifact | On Linux | On macOS | On Windows |
 | --- | --- | --- | --- |
@@ -164,144 +330,76 @@ routes below.
 | macOS `.zip` | `npm run dist -- --mac zip` | `npm run dist -- --mac` | Docker image |
 | macOS `.dmg` | macOS only | `npm run dist -- --mac` | macOS only |
 
-The Docker image is electron-builder's own Wine image, so a Linux box can
-produce Linux and Windows installers plus an unsigned macOS zip:
+The Docker image is electron-builder's Wine image. Run it as your own user
+with a writable cache, or it leaves root-owned files in `dist/`:
 
 ```sh
-npm run dist -- --linux --mac zip   # AppImage, deb, macOS zip
-
 mkdir -p ~/.cache/aether-desktop-build
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/home/builder \
   -v "$PWD:/project" \
   -v "$HOME/.cache/aether-desktop-build:/home/builder" \
   electronuserland/builder:wine \
-  npx electron-builder --win --publish never   # NSIS .exe
+  npx electron-builder --win --publish never
 ```
 
-Run the container as your own user with a writable `HOME` on a cache directory:
-as root it writes root-owned files into `dist/` and the electron-builder
-download cache, breaking later builds. The cache mount also avoids
-re-downloading the ~100 MB Electron runtime each time.
+Cross-built Windows and macOS artifacts are unsigned: SmartScreen and
+Gatekeeper warn, and auto-update refuses them. Treat them as test builds.
 
-Two limits are not worked around. A `.dmg` needs macOS (its `dmg-license`
-module is macOS-only), so other hosts produce only the macOS `.zip` - both
-install the same `Aether.app`. And signing needs the target OS plus a
-certificate: cross-built Windows and macOS artifacts are unsigned, trip
-SmartScreen and Gatekeeper, and auto-update refuses them. Ship signed builds
-from real runners; treat cross-builds as test artifacts.
+</details>
 
-Every icon Aether ships is generated from `web/public/aether-mark.png` - the
-desktop app's into `desktop/build/`, the web app manifest's and the iOS
-home-screen one into `web/public/icons/`, the phone app's launcher icons
-into `android/app/src/main/res/mipmap-*`, and the Play listing's feature
-graphic into `android/listing/`. Regenerate them all with `python3
-scripts/make-icons.py` after the mark changes, and commit what it wrote. It
-needs `pillow` and `fonttools[woff]`; the extra pulls in brotli, without
-which fontTools cannot read the woff2 the banner's type comes from.
+Every icon Aether ships is generated from `web/public/aether-mark.png`. After
+changing it, run `python3 scripts/make-icons.py` (needs `pillow` and
+`fonttools[woff]`) and commit what it writes.
 
-### Android shell
+## Android shell
 
-`android/` is a Kotlin WebView shell that loads either a server-hosted
-dashboard or, in Aether Edge mode, the local gateway of the `aether` CLI it
-carries; see [docs/install.md](docs/install.md#android-app) for what it does.
-No Android SDK is installed on any machine, contributor or runner. The APK is
-built in
-`ghcr.io/cirruslabs/android-sdk` (JDK 21, the API 36 platform, build-tools
-36.0.0, licenses pre-accepted), whose digest the `Makefile` pins rather than
-its moving `:36` tag. CI and the release job use the same line, so a local
-build and a released one run the same toolchain:
+`android/` is a Kotlin WebView app that loads a server's dashboard or, in
+Aether Edge mode, the local gateway of the `aether` CLI it carries
+([docs/install.md](docs/install.md#android-app)). It builds in containers
+pinned by digest, so it needs Docker and no Android SDK:
 
 ```sh
-make android
+make android         # JUnit tests, then dist/aether-android-unsigned.apk and .aab
+make android-debug   # dist/aether-android-debug.apk, without the tests
+adb install -r dist/aether-android-debug.apk
 ```
 
-`make android` first runs `make android-cli`, which builds the dashboard on
-Node 22 with the Bun binary from `oven/bun`, then the CLI in `golang`, all
-pinned by digest in the `Makefile` (`ANDROID_NODE_IMAGE`, `ANDROID_BUN_IMAGE`,
-`ANDROID_GO_IMAGE`) and refused when they
-drift from `web/.bun-version` or `go.mod`'s toolchain. The CLI is built with
-`CGO_ENABLED=0` and the release `-ldflags` into
-`android/app/src/main/jniLibs/<abi>/libaether.so` (gitignored): `GOOS=android`
-for `arm64-v8a`, and a static `linux/amd64` build for `x86_64`, because Go
-links `android/amd64` only through cgo. Their caches live in
-`~/.cache/aether/android-cli` (`ANDROID_CLI_CACHE`). Gradle packages them as native libraries, and after the build
-`make android` checks with `unzip -l` that the APK holds both. A bare Gradle
-build without them still compiles; the app then reports the missing
-`libaether.so` path in Edge mode.
+`make android` first builds the dashboard and the CLI into
+`android/app/src/main/jniLibs/<abi>/libaether.so`. A debug or unsigned APK
+and a release never install over each other. Android Studio opens
+`android/` directly. A change to what the app stores or sends also changes
+the Play listing in `android/listing/` and [docs/privacy.md](docs/privacy.md).
 
-The container step runs the app's JUnit tests (`./gradlew test`, which `make
-android` runs before assembling; `make android-debug` builds the debug APK
-without it) and writes `dist/aether-android-unsigned.apk`
-and `dist/aether-android-unsigned.aab`, the app bundle Google Play takes. With
-signing variables in the environment it writes `dist/aether-android.apk` and
-`dist/aether-android.aab` instead and fails unless both carry the certificate
-of the keystore it was given
-([`scripts/android-verify-signature.sh`](scripts/android-verify-signature.sh)):
+<details>
+<summary>Signing, version codes and pinned dependencies</summary>
+
+With signing variables set, `make android` writes `dist/aether-android.apk`
+and `.aab` and fails unless both carry the keystore's certificate. Keep the
+keystore outside the checkout:
 
 ```sh
+keytool -genkeypair -keyalg RSA -keysize 2048 -validity 10950 \
+  -keystore /path/outside/the/checkout/throwaway.jks -alias throwaway
 ANDROID_KEYSTORE_FILE=/path/outside/the/checkout/throwaway.jks \
-ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_ALIAS=... ANDROID_KEY_PASSWORD=... \
+ANDROID_KEYSTORE_PASSWORD=... ANDROID_KEY_ALIAS=throwaway ANDROID_KEY_PASSWORD=... \
   make android
 ```
 
-Generate a throwaway keystore with `keytool -genkeypair -keyalg RSA -keysize
-2048 -validity 10950` and keep it outside the checkout. `keytool` defaults to
-90 days, and Google Play refuses an upload key whose certificate expires
-before 22 October 2033. `keytool` writes PKCS12, which holds
-one password for the store and the key, so `ANDROID_KEY_PASSWORD` is the same
-string as `ANDROID_KEYSTORE_PASSWORD` unless the keystore was made as JKS
-(`-storetype JKS`). The release keystore is never on a developer machine: the
-release workflow decodes it from `ANDROID_KEYSTORE_B64` into the runner's temp
-directory and deletes it afterwards
-([docs/install.md](docs/install.md#releases)).
+`keytool` defaults to 90 days, and Google Play refuses an upload key that
+expires before 22 October 2033. A PKCS12 keystore has one password, so
+`ANDROID_KEY_PASSWORD` equals `ANDROID_KEYSTORE_PASSWORD`. A signed build
+needs a release tag: `scripts/android-version-code.sh` derives the
+versionCode from it, so every release outranks the one before. An untagged
+or dirty tree builds versionCode 1.
 
-A signed build also needs a release tag, because the APK's versionCode comes
-from it (`scripts/android-version-code.sh`, and
-[docs/install.md](docs/install.md#releases) for the formula): signing an
-untagged tree stops with the tag the script could not parse. An unsigned or
-debug APK takes the same number when `git describe` returns a release tag,
-and versionCode 1 when it does not - an untagged tree, a dirty one, or a
-`VERSION=` the script cannot parse. Neither can install over a release either
-way. `sh scripts/android-version-code-test.sh`, part of `make test-scripts`,
-covers the mapping and its ordering, and
-`sh scripts/android-verify-signature-test.sh` beside it covers what the
-signature check accepts and refuses, with the SDK tools stubbed so it needs
-no keystore.
+`ANDROID_IMAGE` in the `Makefile` (a Cirrus Labs image, published unsigned)
+moves together with `compileSdk` and `buildToolsVersion` in
+`android/app/build.gradle.kts`.
 
-`make release` builds the APK and the bundle as part of the matrix, so it
-needs Docker as well as Go, Node and Bun.
-
-#### The build container
-
-That image is published by Cirrus Labs from
-<https://github.com/cirruslabs/docker-images-android>, built on Cirrus CI, and
-it carries no signature or attestation. The digest pin makes every build get
-the same bits; it does not make those bits anyone's but Cirrus Labs'. Their
-JDK and build-tools produce and sign everything Play and the GitHub release
-serve, so accepting the image is accepting a third party in the signing path.
-That is the trade we take: the alternative is a repo-owned image built from an
-official base plus Google's `sdkmanager`, which moves the same problem to
-whoever maintains it.
-
-To bump it, pull `ghcr.io/cirruslabs/android-sdk:<api level>`, read the digest
-out of `docker image inspect`, put it in `ANDROID_IMAGE` in the `Makefile`, and
-run `make android` and `make android-debug` before committing. The image and
-the `compileSdk`/`buildToolsVersion` in `android/app/build.gradle.kts` move
-together: the container carries one platform and one build-tools revision, and
-a mismatch makes Gradle try to download an SDK package the container will not
-let it install.
-
-#### Dependency verification
-
-`android/gradle/verification-metadata.xml` holds a sha256 for every artifact
-the build resolves, so a compromised or swapped dependency fails the build
-instead of being compiled into a signed APK. `gradle-wrapper.properties` pins
-the Gradle distribution by checksum, and CI runs
-`gradle/actions/wrapper-validation` against the committed wrapper jar.
-
-Bumping a version in `android/gradle/libs.versions.toml` changes what resolves,
-so the file has to be regenerated. Do it from a cold cache, or artifacts
-already downloaded are not re-resolved and the file comes out incomplete:
+`android/gradle/verification-metadata.xml` pins a sha256 for every
+dependency. After changing `android/gradle/libs.versions.toml`, regenerate it
+from a cold cache, then run `make android` and `make android-debug` with
+`ANDROID_GRADLE_HOME` set to an empty directory:
 
 ```sh
 rm -rf android/build android/app/build android/.gradle
@@ -313,109 +411,97 @@ GRADLE=$(mktemp -d) && docker run --rm -u "$(id -u):$(id -g)" \
     test assembleRelease bundleRelease assembleDebug
 ```
 
-Then run `make android` and `make android-debug` with `ANDROID_GRADLE_HOME`
-pointed at an empty directory, and commit the file if both pass. There is no
-`gradle.lockfile` beside it: `libs.versions.toml` pins the direct versions
-exactly, and a transitive version that moved resolves an artifact the metadata
-does not list, which fails the build just the same.
+</details>
 
-The Play listing's texts, reviewer instructions, data safety answers and
-feature graphic live in `android/listing/`
-([its README](android/listing/README.md) maps each to a console field), and
-the privacy policy the listing and the app link to is
-[docs/privacy.md](docs/privacy.md). A change to what the app stores or sends
-changes all three.
+## Edge image
 
-Gradle's caches live in `~/.cache/aether/android-gradle`; set
-`ANDROID_GRADLE_HOME` to move them. The wrapper and its distribution checksum
-are committed, and every plugin and library version is pinned in
-`android/gradle/libs.versions.toml`. AGP carries its own Kotlin compiler, so
-there is no separate Kotlin plugin version. `androidx.core` is held at the
-newest release that compiles against API 36, because that is the only platform
-the container carries; a newer one fails the build with the SDK level it wants.
-
-Android Studio opens `android/` directly and uses its own SDK. Nothing in the
-app depends on the container beyond the platform version.
-
-## Development deploy
-
-`make deploy` is the fast loop for testing server changes on a real machine:
-it builds the dashboard and the server binary for the target's architecture,
-installs it to `/usr/local/bin`, and restarts the `aether-server` systemd
-service. The first deploy to a machine without the unit installs and enables
-`packaging/systemd/aether-server.service`.
-
-```sh
-make deploy                          # this machine
-DEPLOY_HOST=user@server make deploy  # remote over SSH
-```
-
-A remote deploy authenticates SSH once (connection multiplexing) and prompts
-for sudo at most once. It deliberately skips tests and CI; releases stay the
-quality gate for
-published binaries. Deployed dev builds report their `git describe` version
-and pin the neutral bootstrap image of the nearest release tag.
-
-## Testing
-
-Prefer a test that follows the real user path. Integration tests are valuable
-because the project risk is the connection between SSH, git, containers,
-storage, and the dashboard. Do not add tests for language behavior, trivial
-getters, or the same contract at several layers.
-
-## Code style
-
-- Keep files focused and Go files below 1000 lines where practical.
-- Wrap errors with context and return them.
-- Use comments for constraints and decisions, not for restating code.
-- Prefer standard-library and existing dependency functionality.
-- Do not add speculative abstractions, configuration, or compatibility paths.
+`images/edge/Dockerfile` builds the edge's container image. CI builds and
+smoke-tests it on amd64 and arm64 when a pull request touches what the image
+contains, and always on `main`. [docs/testing.md](docs/testing.md#the-edge-image)
+has the local check and how to force the CI jobs on a branch.
 
 ## Commits and pull requests
 
-Commit messages and pull request titles follow Conventional Commits; the
-rules are in the Commits section of [AGENTS.md](AGENTS.md).
+Commit messages, pull request titles and code style follow
+[AGENTS.md](AGENTS.md#commits). Update the guide in `docs/` that a change
+affects in the same pull request. An agent working inside an Aether run ends
+every pull request description with `Opened from Aether run <run id>`, using
+the `run_id` that `aether-internal status` reports.
 
-An agent working inside an Aether run ends every pull request description
-with `Opened from Aether run <run id>`, using the `run_id` that
-`aether-internal status` reports; `aether-internal skill git` prints the line
-with the ID filled in. The count of agent-made pull requests is derived from
-this line.
-
-### AI assistance
-
-AI tools are welcome under the [AI contributions policy](AI_POLICY.md). In
-short: you own what you submit, you add `This PR was made with the help of
-<name of tool>.` to the pull request description, and you never list an AI
-tool as a commit or pull request co-author.
-
-## Documentation
-
-Public documentation lives in `docs/`. Root-level `README.md` and this file
-are entry points and should link to the detailed guides rather than duplicate
-them. Never commit host keys, invite codes, profile homes, transcripts, runtime
-state, or real credentials.
+AI tools are welcome under the [AI contributions policy](AI_POLICY.md): you
+own what you submit, you add `This PR was made with the help of <name of
+tool>.` to the pull request description, and you never list an AI tool as a
+commit or pull request co-author.
 
 ## Security
 
-Do not open public issues for sensitive reports. Use the repository's private
-security reporting channel and include a reproducible explanation without
-including live credentials.
+Do not report a security problem in a public issue or pull request, and
+never put live credentials in a report.
 
 ## Releases
 
-Release tags use `vX.Y.Z` with an optional prerelease suffix, for example
-`v0.3.0-alpha.1`. Publish alpha tags as ordinary, non-draft GitHub releases:
-do not mark them as GitHub prereleases. The installer and `aether update`
-resolve `/releases/latest`, which requires the alpha release to be published
-through the normal latest-release endpoint.
+Maintainers release by pushing a tag: `vMAJOR.MINOR.PATCH` with an optional
+`-alpha.N`, `-beta.N` or `-rc.N`. The tag's exact commit needs a successful
+`CI` run from a push to `main`; a pull request run, a merge queue run or
+another commit's run does not count. From a `main` checkout with `gh` and
+`jq`:
 
-Release tags are built by the repository workflow only after the latest
-matching main-push CI run/current attempt has succeeded for the exact tagged
-commit. An older green run, a PR run, or a merge-group run is not a substitute.
-Local `make release-binaries` builds the dashboard and ten Go assets without
-Android; `make android` builds Android separately, and `make release` still
-builds both. Keep the installer, `aether update` (`internal/selfupdate`),
-release asset names, checksums, and documentation synchronized when changing
-packaging. See [docs/install.md](docs/install.md#releases) for the publish
-commands.
+```sh
+git tag -a v0.8.0 -m v0.8.0 <commit>
+sh scripts/release-ci-check.sh 3xDevOps/aether "$(git rev-parse 'v0.8.0^{commit}')" &&
+git push origin v0.8.0
+```
+
+Push tags one at a time: GitHub starts no workflow when more than three are
+pushed at once. Do not create the GitHub release yourself.
+`.github/workflows/release.yml` runs only when the tag's pusher is a
+repository admin and `AETHER_RELEASE_SIGNING_KEY` is set. It builds every
+binary, the Windows desktop zips, the signed Android app and the browser,
+edge and standard images from the tag's commit, runs the edge upgrade
+qualification and a Defender scan, and uploads the assets to a draft. After
+checking them against the signed manifest it publishes a normal release,
+never a GitHub prerelease, because the installers and update checks read
+`/releases/latest`, which skips prereleases. The highest published version
+becomes Latest.
+
+Besides the binaries, the Windows desktop zips and the Android APK and AAB,
+a release carries `checksums.txt` and a manifest signed with Ed25519
+(`aether-release.json` and `.sig`) that both update commands verify, and the
+installer too when OpenSSL 3 is present. Images carry Sigstore build
+attestations. Windows and macOS binaries are not code-signed.
+
+A failure before publishing leaves at most a draft: fix the cause and run
+`gh run rerun <run-id> --failed`. Published assets are never replaced, so a
+bad published release needs a new tag.
+
+<details>
+<summary>Edge releases and the signing key</summary>
+
+`packaging/edge/upgrade.json` records what an edge upgrade needs:
+`min_upgrade_from`, the `manual_steps` an operator must take, and the edge
+store schema, protocol and file hashes. A pull request that adds an edge
+migration, protocol version or `AETHER_EDGE_*` variable, or changes the edge
+image or unit, updates it; `go test ./internal/edge/cmd/release-edge` fails
+until it does. Never remove a step.
+
+A release that becomes Latest moves `ghcr.io/3xdevops/aether-edge:latest`.
+Production edges follow `:stable`, which only `promote-edge.yml` moves, run
+by an admin at least 24 hours after the release
+(`-f soak_override_reason='<why>'` promotes sooner):
+
+```sh
+docker buildx imagetools inspect ghcr.io/3xdevops/aether-edge:<tag>   # Digest:
+gh workflow run promote-edge.yml -f tag=<tag> -f digest=sha256:<digest>
+```
+
+It refuses a release older than `stable`, and one whose `min_upgrade_from`
+is above the release `stable` carries.
+
+Keep `AETHER_RELEASE_SIGNING_KEY` in the `release` environment
+(**Settings → Environments**) limited to `v*` tags, delete any repository
+secret of that name, and limit `edge-promotion` to `main`. The Android job
+reads `ANDROID_KEYSTORE_B64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`
+and `ANDROID_KEY_PASSWORD`. Losing that keystore means no release can update
+an installed app again.
+
+</details>
