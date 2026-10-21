@@ -41,6 +41,6 @@ export function refusals(agent: AgentInfo | undefined, name: string): Partial<Re
 }
 
 export function initialMode(agent: AgentInfo | undefined, name: string, remembered: LaunchMode | undefined): LaunchMode {
-  const mode = remembered ?? (agent?.default_mode === 'acp' ? 'acp' : 'tui')
+  const mode = remembered ?? 'acp'
   return modeRefusal(agent, name, mode) ? 'tui' : mode
 }

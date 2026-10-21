@@ -1854,9 +1854,9 @@ The form remembers a mode and a model per agent in the persisted
 `launchDefaults` slice (`{mode, model, at}` keyed by agent name). It
 preselects the launchable agent launched most recently, then the agent of
 the newest run, then the first launchable one, and starts in that agent's
-remembered mode, else its `default_mode` from `agent.list`, else Standard,
-with its remembered model; a remembered mode the agent can no longer use
-shows as Standard.
+remembered mode, else Enhanced, with its remembered model; an Enhanced or
+remembered mode the agent cannot use (no Enhanced support, or its adapter
+not installed) shows as Standard.
 
 **Options** appears when `account.list` returns more than the caller and
 holds the **Account** select: the caller first as "(you)", then accounts
@@ -3737,8 +3737,9 @@ The launch dialog opens on **Run**. When the gateway advertises
 tab, titled **New swarm**, with the help line "The integrator plans the
 work, starts a worker run per task, and combines the results." It asks for
 an objective, the **Integrator agent** (the same picker as Run, on the
-account under Options), **Integrator mode** (Standard by default; Enhanced
-when the agent supports it; Background disabled with the reason
+account under Options), **Integrator mode** (the integrator agent's
+remembered mode, shared with Run and saved when the swarm is created, else
+Enhanced when the agent can use it and Standard otherwise; Background disabled with the reason
 `mission.create` gives: it exits after one turn), **Integrator model**
 (the same field as Run), **Agents for workers** (a checkbox row per
 installed agent and account, defaulting to the integrator account's first

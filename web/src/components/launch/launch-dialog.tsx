@@ -68,9 +68,8 @@ export function LaunchDialog() {
   const [workerError, setWorkerError] = useState<string | null>(null)
   const [workers, setWorkers] = useState<WorkerChoice[]>([])
   const [workerMode, setWorkerMode] = useState<LaunchMode>('headless')
-  const [chosenIntegratorMode, setIntegratorMode] = useState<LaunchMode>('tui')
   const integratorRefused = { ...refusals(agent, harness), headless: backgroundIntegrator }
-  const integratorMode = integratorRefused[chosenIntegratorMode] ? 'tui' : chosenIntegratorMode
+  const integratorMode = integratorRefused[mode] ? 'tui' : mode
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
@@ -194,6 +193,7 @@ export function LaunchDialog() {
     swarmKeys.set(serialized, key)
     const result = await api.missionCreate({ ...contents, idempotency_key: key })
     swarmKeys.delete(serialized)
+    rememberLaunch(harness, integratorMode, integratorModel)
     close()
     navigate('missions', { missionId: result.mission.id })
     toast.success('Swarm created')
@@ -281,7 +281,7 @@ export function LaunchDialog() {
                 <ModeControl
                   label="Integrator mode"
                   value={integratorMode}
-                  onChange={(next) => { setError(null); setIntegratorMode(next) }}
+                  onChange={(next) => { setError(null); choice.setMode(next) }}
                   refused={integratorRefused}
                   onSetUp={setUp}
                 />
