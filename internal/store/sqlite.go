@@ -52,6 +52,9 @@ func Open(path string) (*DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
 	}
+	// database/sql keeps 2 idle connections by default, so a burst of
+	// concurrent reads reopens SQLite connections and reapplies the pragmas.
+	db.SetMaxIdleConns(16)
 	if err := migrate(db); err != nil {
 		db.Close() //nolint:errcheck // migrate error takes precedence
 		return nil, err
