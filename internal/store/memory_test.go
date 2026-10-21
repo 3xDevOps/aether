@@ -264,8 +264,17 @@ func TestMemoryChainEndsOnACycle(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, _, err := db.GetMemory(ctx, w.ID, x.ID); err != nil {
+	mustAddNote(t, db, &Memory{WorkspaceID: w.ID, Body: "An unrelated note."})
+	_, chain, err := db.GetMemory(ctx, w.ID, x.ID)
+	if err != nil {
 		t.Fatalf("show a note in a cycle: %v", err)
+	}
+	var got []string
+	for _, n := range chain {
+		got = append(got, n.ID)
+	}
+	if !slices.Equal(got, []string{y.ID}) {
+		t.Fatalf("chain of a note in a cycle = %v, want only %s once", got, y.ID)
 	}
 }
 

@@ -407,7 +407,10 @@ func (d *DB) GetMemory(ctx context.Context, workspace domain.WorkspaceID, id str
 			SELECT id, -1 FROM memory WHERE workspace_id = ?1 AND superseded_by = ?2
 			UNION SELECT m.id, o.step - 1 FROM memory m JOIN older o ON m.superseded_by = o.id
 			LIMIT (SELECT count(*) FROM memory WHERE workspace_id = ?1))
-		SELECT `+memoryCols+` FROM (SELECT id, step FROM newer UNION ALL SELECT id, step FROM older) chain
+		SELECT `+memoryCols+` FROM (
+			-- With min(), SQLite takes step from each note's nearest visit.
+			SELECT id, step, min(abs(step)) FROM (SELECT id, step FROM newer UNION ALL SELECT id, step FROM older)
+			WHERE id <> ?2 GROUP BY id) chain
 		JOIN memory m ON m.id = chain.id`+memoryJoins+`
 		WHERE m.workspace_id = ?1
 		ORDER BY chain.step, m.created_at, m.id`, workspace, id)
