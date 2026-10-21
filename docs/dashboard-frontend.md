@@ -1177,6 +1177,7 @@ where a resend is deduped or refused and the eventual result still shows:
 | Composer **Send** and the Enhanced pill's Send, Steer and Queue | Sending… | Yes: the draft keeps its idempotency key, so a resend delivers once |
 | Enhanced pill's **Interrupt** and **Resume**, and a session option | Sending… | No: these carry no key, so a late interrupt could stop the turn sent after it |
 | **Create workspace** | Creating… | No: `workspace.add` carries no idempotency key |
+| **Launch** / **Create swarm** (launch dialog) | Launching… / Creating swarm… | The dialog's **Cancel** closes it at any time; the request keeps going, a success still opens the run or swarm, and a refusal shows as a toast |
 | Workspace settings **Save**, budget **Set** / **Clear budget** | Saving… / Clearing… | The dialog's own **Cancel** closes it at any time; the call sets values, so a repeat is harmless |
 | **Save identity** | Saving… | No: a second save could reach the server before the first and be overwritten by it |
 | Needs you device card **Approve** / **Deny** | Approving… / Denying… | No: a second decision would race the first |
@@ -1831,7 +1832,11 @@ installed ("The Enhanced adapter for <agent> is not installed.", with
 **Set up**). A launch never switches mode on its own: the mode sent is the
 one the control shows, and a refusal from `run.launch` appears in the dialog
 verbatim under "Launch failed" while the dialog stays open, until another
-agent or mode is chosen. The task is
+agent or mode is chosen. `run.launch` answers only once the run is
+provisioned, which can take seconds, so the dialog navigates only then: until
+the answer the button reads "Launching…" ("Creating swarm…") with a spinner,
+and past the deadline "Still waiting for the server…". A refusal that
+arrives after the dialog was closed shows as a toast. The task is
 optional in Standard and Enhanced - a taskless launch opens the agent with
 no prompt - and required in Background, which takes no input, so Launch
 stays disabled until one is written (`runLaunch` in

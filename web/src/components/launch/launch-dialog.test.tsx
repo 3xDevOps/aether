@@ -1,8 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { api } from '@/lib/api'
 import { useStore } from '@/store'
+import { optimisticDeadlineMs } from '@/store/optimistic'
 import { agentInfo, alice, bob, run, runRecords, serverInfo, vera, workspace } from '@/test/fixtures'
 import { chooseModel, pickModel } from '@/test/model'
 import { pickOption } from '@/test/select'
@@ -215,6 +217,39 @@ describe('new run', () => {
 
     await userEvent.click(modeSegment('Standard'))
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('says the launch is in flight, and past the deadline that it is still waiting', async () => {
+    const answer = Promise.withResolvers<never>()
+    vi.mocked(api.runLaunch).mockReturnValueOnce(answer.promise)
+    await open()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(launchButton())
+      const pending = screen.getByRole('button', { name: 'Launching…' }) as HTMLButtonElement
+      expect(pending.disabled).toBe(true)
+      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
+      expect(screen.getByRole('button', { name: 'Still waiting for the server…' })).toBe(pending)
+    } finally {
+      vi.useRealTimers()
+    }
+    await act(async () => answer.reject(new Error('scheduler: harness update timed out')))
+    expect((await screen.findByRole('alert')).textContent).toBe('Launch failedscheduler: harness update timed out')
+    expect(launchButton().disabled).toBe(false)
+    expect(useStore.getState().paletteDialog).toBe('launch')
+  })
+
+  it('toasts the refusal of a launch whose dialog was closed while it ran', async () => {
+    const answer = Promise.withResolvers<never>()
+    vi.mocked(api.runLaunch).mockReturnValueOnce(answer.promise)
+    const error = vi.spyOn(toast, 'error')
+    const view = render(<LaunchDialog />)
+    await waitFor(() => expect(launchButton().disabled).toBe(false))
+    fireEvent.click(launchButton())
+    view.unmount()
+    await act(async () => answer.reject(new Error('scheduler: harness update timed out')))
+    expect(error).toHaveBeenCalledWith('Launch failed: scheduler: harness update timed out')
+    error.mockRestore()
   })
 
   it('shows what the workspace setup script printed when it fails the launch', async () => {
