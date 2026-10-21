@@ -531,16 +531,6 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 			}
 		}
 	}()
-	s.mu.Lock()
-	author := entry.gitAuthorEmail
-	s.mu.Unlock()
-	var trailers []string
-	if trailers, err = s.containerCoAuthors(ctx, run, author); err != nil {
-		return nil, nil, nil, err
-	}
-	if err = c.svc.WriteCoAuthors(run.ID, trailers); err != nil {
-		return nil, nil, nil, fmt.Errorf("write run co-authors: %w", err)
-	}
 	mounts = []runtime.Mount{
 		{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
 		cliMount,
@@ -561,6 +551,11 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	entry.reporter = reporter
 	sc := entry.sidecar()
 	s.mu.Unlock()
+	// A handoff that committed before coordDir was published skipped its
+	// refresh, so the first list is written only after publishing it.
+	if err = s.refreshCoAuthorsErr(ctx, run.ID); err != nil {
+		return nil, nil, nil, err
+	}
 	if err = s.writeSidecar(sc); err != nil {
 		return nil, nil, nil, err
 	}
