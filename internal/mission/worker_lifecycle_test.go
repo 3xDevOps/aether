@@ -35,11 +35,13 @@ func (l *confirmedWorkerLauncher) LaunchMission(ctx context.Context, req Mission
 }
 
 // admittingLauncher writes each reserved run's row, reports it admitted and
-// then provisions until release closes.
+// then provisions until release closes. With err set, provisioning then
+// fails the row and returns err.
 type admittingLauncher struct {
 	db       *store.DB
 	admitted chan struct{}
 	release  chan struct{}
+	err      error
 }
 
 func (l *admittingLauncher) LaunchMission(ctx context.Context, req MissionLaunchRequest) (*domain.Run, error) {
@@ -53,6 +55,13 @@ func (l *admittingLauncher) LaunchMission(ctx context.Context, req MissionLaunch
 	req.Admitted()
 	l.admitted <- struct{}{}
 	<-l.release
+	if l.err != nil {
+		now := time.Now()
+		if _, err := l.db.UpdateRunStatus(ctx, r.ID, domain.RunFailed, l.err.Error(), "", nil, &now); err != nil {
+			return nil, err
+		}
+		return nil, l.err
+	}
 	return r, nil
 }
 
