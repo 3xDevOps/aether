@@ -210,23 +210,27 @@ function SendActions({ pill, label, hint, description, disabled, onClick, onCanc
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1">
       {onCancel && <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>}
-      {pill === 'send' && label === look.label ? (
-        <Button size="round" variant={look.variant} label={look.label} hint={tip} disabled={disabled} onClick={onClick}>
-          {icon}
-        </Button>
-      ) : (
-        <Button
-          size="pill"
-          variant={look.variant}
-          hint={tip}
-          aria-label={pill === 'interrupt' ? 'Interrupt the agent' : pill === 'stop-waiting' ? 'Stop waiting for background work' : undefined}
-          disabled={disabled}
-          onClick={onClick}
-        >
-          {icon}
-          {label}
-        </Button>
-      )}
+      <Tooltip content={tip}>
+        <span className="inline-flex">
+          {pill === 'send' && label === look.label ? (
+            <Button size="round" variant={look.variant} label={look.label} hint={false} disabled={disabled} onClick={onClick}>
+              {icon}
+            </Button>
+          ) : (
+            <Button
+              size="pill"
+              variant={look.variant}
+              hint={false}
+              aria-label={pill === 'interrupt' ? 'Interrupt the agent' : pill === 'stop-waiting' ? 'Stop waiting for background work' : undefined}
+              disabled={disabled}
+              onClick={onClick}
+            >
+              {icon}
+              {label}
+            </Button>
+          )}
+        </span>
+      </Tooltip>
     </div>
   )
 }
