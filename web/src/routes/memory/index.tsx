@@ -34,7 +34,7 @@ const searchDelay = 250
 
 type Load =
   | { kind: 'loading' }
-  | { kind: 'ready'; items: MemoryItem[]; full: boolean; words: string; filter: Filter }
+  | { kind: 'ready'; items: MemoryItem[]; pinsFull: boolean; full: boolean; words: string; filter: Filter }
   | { kind: 'failed'; message: string }
   | { kind: 'unsupported' }
 
@@ -116,10 +116,11 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
   const readList = useCallback(async () => {
     const id = ++listRequest.current
     try {
-      const results = await Promise.all(reads(workspaceID, words, filter).map((params) => client.memorySearch(params)))
+      const params = reads(workspaceID, words, filter)
+      const results = await Promise.all(params.map((p) => client.memorySearch(p)))
       const items = results.flatMap((result) => result.items)
-      const full = filter !== 'pinned' && results[results.length - 1].items.length >= listLimit
-      if (id === listRequest.current) setLoad({ kind: 'ready', items, full, words, filter })
+      const filled = (pinned: boolean) => params.some((p, i) => Boolean(p.pinned) === pinned && results[i].items.length >= listLimit)
+      if (id === listRequest.current) setLoad({ kind: 'ready', items, pinsFull: filled(true), full: filled(false), words, filter })
     } catch (error) {
       if (id !== listRequest.current) return
       // A 404 with a code is the server's own answer, such as an unknown workspace.
@@ -244,8 +245,12 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
                   ))}
                 </ul>
               )}
-              {load.kind === 'ready' && load.full && (
-                <p className="text-ui-sm text-muted">{load.words ? `Every pinned match, then the ${listLimit} best matches.` : `Every pinned note, then the ${listLimit} newest notes. Search to find older ones.`}</p>
+              {load.kind === 'ready' && (load.pinsFull || load.full) && (
+                <p className="text-ui-sm text-muted">
+                  {load.pinsFull ? `The ${listLimit} ${load.words ? 'best pinned matches' : 'newest pinned notes'}` : `Every pinned ${load.words ? 'match' : 'note'}`}
+                  {load.full && `, then the ${listLimit} ${load.words ? 'best matches' : 'newest notes'}`}
+                  .{!load.words && ' Search to find older ones.'}
+                </p>
               )}
             </>
           )}

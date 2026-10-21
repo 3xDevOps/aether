@@ -97,6 +97,48 @@ describe('memory page', () => {
     expect(screen.getByText('Every pinned note, then the 100 newest notes. Search to find older ones.')).toBeDefined()
   })
 
+  function pins(count: number): MemoryItem[] {
+    return Array.from({ length: count }, (_, i) => memoryItem({
+      id: `note-pin${String(i).padStart(7, '0')}`, title: `Pinned note ${i}`, body: `Pinned note ${i}`,
+      pinned_by: bob.id, pinned_by_name: 'Bob', pinned_at: '2026-10-18T10:00:00Z',
+    }))
+  }
+
+  it('says when the pinned read stops at 100, since older pins are left out', async () => {
+    seed()
+    const memorySearch = vi.fn(async () => ({ items: pins(100) }))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
+    expect(await screen.findByText('The 100 newest pinned notes, then the 100 newest notes. Search to find older ones.')).toBeDefined()
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Pinned' }))
+    expect(await screen.findByText('The 100 newest pinned notes. Search to find older ones.')).toBeDefined()
+    expect(titles()).toHaveLength(100)
+  })
+
+  it('words a cut-off pinned search as best matches, with no hint to search for older ones', async () => {
+    seed()
+    const memorySearch = vi.fn(async () => ({ items: pins(100) }))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
+    await screen.findByRole('list', { name: 'Notes' })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search notes' }), { target: { value: 'lease' } })
+    expect(await screen.findByText('The 100 best pinned matches, then the 100 best matches.')).toBeDefined()
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Pinned' }))
+    expect(await screen.findByText('The 100 best pinned matches.')).toBeDefined()
+    expect(screen.queryByText(/newest|Search to find older ones/)).toBeNull()
+  })
+
+  it('lists fewer than 100 pins without a notice', async () => {
+    seed()
+    const memorySearch = vi.fn(async (params: MemorySearchParams) => ({ items: params.pinned ? pins(99) : [agentNote] }))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
+    await waitFor(() => expect(titles()).toHaveLength(100))
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Pinned' }))
+    await waitFor(() => expect(titles()).toHaveLength(99))
+    expect(screen.queryByText(/Search to find older ones/)).toBeNull()
+  })
+
   it('filters to pinned notes, agent notes, outcomes, answers and superseded notes', async () => {
     seed()
     const memorySearch = vi.fn(async (params: MemorySearchParams) => search(params))

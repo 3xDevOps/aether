@@ -4283,9 +4283,9 @@ when the event stream comes back live, dropping answers to an older request.
   which `memory.search` applies as `pinned: true`, `source: agent`,
   `kind: outcome`, `source: answer` and `replaced: true`, so a match older
   than the newest 100 notes is still listed.
-- **List.** Two reads with the same words and filter: every pinned note
-  (`pinned: true`), and the 100 newest notes or best matches, which
-  **Pinned** skips. **Superseded** makes only the second read, since a
+- **List.** Two reads with the same words and filter: the 100 newest
+  pinned notes or best pinned matches (`pinned: true`), and the 100 newest
+  notes or best matches, which **Pinned** skips. **Superseded** makes only the second read, since a
   replaced note is never pinned. Each note is listed once, pinned first,
   each group in the server's order, so a pin older than the newest 100
   still leads the list. A row shows the title, a pin badge
@@ -4294,8 +4294,11 @@ when the event stream comes back live, dropping answers to an older request.
   **Superseded**, the kind, the source (Agent note, Member note, Run report,
   Swarm answer), the author with the agent's display name, the run as a link,
   the pull request, the first cited file and how many more, and the age.
-  When the 100-note read is full the page says it shows every pinned note,
-  then the 100 newest notes or best matches. While a new search or filter
+  When a read returns 100 notes the page says what the list holds: every
+  pinned note, or the 100 newest pinned notes or best pinned matches, then
+  the 100 newest notes or best matches. Each member's own pins have their
+  own budget, so a workspace can hold more than 100 pins; there is no
+  paging, and an older pin is found by searching. While a new search or filter
   is read, the previous list stays on screen as it was.
 - **Detail.** A row opens `memory.show`: the note's text, its provenance
   (author, run and its ID, commit, pull request, files, the report or
