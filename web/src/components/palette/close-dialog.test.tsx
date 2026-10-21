@@ -44,10 +44,23 @@ describe('close dialog', () => {
 
   it('puts the run back and shows the server\'s refusal', async () => {
     vi.mocked(api.runClose).mockRejectedValueOnce(Object.assign(new Error('run is finishing'), { code: -32001 }))
+    vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'completed' }))
     render(<CloseDialog />)
     fireEvent.click(screen.getByRole('button', { name: 'Abandoned' }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Closed as abandoned failed: run is finishing'))
     expect(status()).toBe('completed')
+  })
+
+  it('keeps a close the server published before refusing, and shows the refusal', async () => {
+    const answer = Promise.withResolvers<never>()
+    vi.mocked(api.runClose).mockReturnValueOnce(answer.promise)
+    vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'merged', reason: 'closed', state: undefined, status_seq: 1 }))
+    render(<CloseDialog />)
+    fireEvent.click(screen.getByRole('button', { name: 'Merged' }))
+    act(() => useStore.getState().applyRunStatus('run_1', { to: 'merged', reason: 'closed', status_seq: 1 }, new Date().toISOString()))
+    await act(async () => answer.reject(Object.assign(new Error('run.close: scheduler: evidence run lookup: database is locked'), { code: -32603 })))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Closed as merged failed: evidence run lookup: database is locked'))
+    expect(status()).toBe('merged')
   })
 
   it('counts a refusal of a close that already landed as success', async () => {

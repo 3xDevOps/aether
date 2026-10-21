@@ -95,6 +95,7 @@ describe('CompletionPrompt', () => {
   it('puts the prompt back and shows the server’s error when Mark complete is refused', async () => {
     seed()
     vi.mocked(api.runReview).mockRejectedValueOnce(new ApiError(400, 'run is protected', -32602))
+    vi.mocked(api.runGet).mockResolvedValueOnce(reported())
     render(<Prompt />)
     fireEvent.click(screen.getByRole('button', { name: 'Mark complete' }))
     expect(banner()).toBeNull()

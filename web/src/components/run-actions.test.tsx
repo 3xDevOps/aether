@@ -248,6 +248,7 @@ test.each([
 test('release confirms, keeps the run, and shows the real gateway error', async () => {
   const record = seed({ run: { status: 'merged', reason: 'closed; retained container' } })
   vi.mocked(api.runRelease).mockRejectedValueOnce(refusal('evidence is still pending'))
+  vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'merged', reason: 'closed; retained container' }))
   render(<RunActions run={record} />)
   await selectMore('Free container…')
   fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Free container' }))
@@ -304,6 +305,8 @@ const runOne = (s: State) => s.runs.run_1
 const verbs: {
   name: string
   confirm?: string
+  /** A refusal re-reads the run. */
+  slow?: boolean
   method: 'runPause' | 'runResume' | 'runKill' | 'runRelease' | 'runArchive' | 'runProtect'
   done: string
   over: Parameters<typeof seed>[0]
@@ -313,9 +316,9 @@ const verbs: {
 }[] = [
   { name: 'Pause run', method: 'runPause', done: 'Paused', over: { paused: false }, read: (s) => s.pausedRuns.run_1, from: false, to: true },
   { name: 'Resume run', method: 'runResume', done: 'Resumed', over: { paused: true }, read: (s) => s.pausedRuns.run_1, from: true, to: false },
-  { name: 'Kill run', confirm: 'Kill run', method: 'runKill', done: 'Killed', over: { paused: false }, read: (s) => runOne(s).status, from: 'running', to: 'abandoned' },
+  { name: 'Kill run', confirm: 'Kill run', slow: true, method: 'runKill', done: 'Killed', over: { paused: false }, read: (s) => runOne(s).status, from: 'running', to: 'abandoned' },
   {
-    name: 'Free container…', confirm: 'Free container', method: 'runRelease', done: 'Freed container',
+    name: 'Free container…', confirm: 'Free container', slow: true, method: 'runRelease', done: 'Freed container',
     over: { run: { status: 'merged', container_retained_until: '2030-01-01T00:00:00Z' } },
     read: (s) => runOne(s).container_retained_until, from: '2030-01-01T00:00:00Z', to: undefined,
   },
@@ -348,6 +351,7 @@ test.each(verbs)('$name shows its result before the server answers and toasts on
 
 test.each(verbs)('$name reverts on refusal and shows the server error', async (verb) => {
   ;(api[verb.method] as Mock).mockRejectedValueOnce(refusal('run.verb: refused by policy'))
+  if (verb.slow) vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', ...verb.over?.run }))
   render(<RunActions run={seed(verb.over)} />)
   await choose(verb)
   await waitFor(() => expect(toast.error).toHaveBeenCalledWith(`${verb.done} failed: refused by policy`))
@@ -400,9 +404,10 @@ test('an unanswered verb reverts with a lasting Retry, and a late answer dismiss
   expect(toast.success).toHaveBeenCalledTimes(1)
 })
 
-test('a refusal puts back a kill even when the agent wrote to the run meanwhile', async () => {
+test('a refusal whose re-read fails puts back a kill even when the agent wrote to the run meanwhile', async () => {
   const { promise, reject } = Promise.withResolvers<unknown>()
   vi.mocked(api.runKill).mockReturnValueOnce(promise)
+  vi.mocked(api.runGet).mockRejectedValueOnce(new Error('Failed to fetch'))
   render(<RunActions run={seed({ paused: false })} />)
   await choose(verbs[2])
   await waitFor(() => expect(runOne(useStore.getState()).status).toBe('abandoned'))
@@ -440,6 +445,19 @@ test('a refused delete puts the run back and shows the refusal', async () => {
   await confirmDelete()
   await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Deleted failed: run is protected'))
   expect(runOne(useStore.getState()).status).toBe('running')
+  expect(useStore.getState().deletingRuns).toEqual({})
+})
+
+test('a delete refused after the server stopped the run puts the run back stopped', async () => {
+  const { promise, reject } = Promise.withResolvers<unknown>()
+  vi.mocked(api.runDelete).mockReturnValueOnce(promise)
+  vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'abandoned', reason: 'killed', state: undefined, status_seq: 1 }))
+  render(<RunActions run={seed({ paused: false })} />)
+  await confirmDelete()
+  act(() => useStore.getState().applyRunStatus('run_1', { to: 'abandoned', reason: 'killed', status_seq: 1 }, new Date().toISOString()))
+  await act(async () => reject(refusal('run.delete: scheduler: delete run checkout: device or resource busy')))
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Deleted failed: delete run checkout: device or resource busy'))
+  expect(runOne(useStore.getState())).toMatchObject({ status: 'abandoned', reason: 'killed', status_seq: 1 })
   expect(useStore.getState().deletingRuns).toEqual({})
 })
 

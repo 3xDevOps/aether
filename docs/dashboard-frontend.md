@@ -1709,8 +1709,11 @@ after the container stops: `run.kill` waits out the runtime's stop grace,
 10 seconds by default; `run.close` also commits and publishes a live run,
 and `run.delete` purges its evidence. Past the deadline their prediction stays, More
 shows a disabled "Still waiting for the server…" entry (`waiting` on the
-run's `predicting` marker), a late success clears it without a toast, and
-a refusal puts the prediction back and toasts the server's error. A failure
+run's `predicting` marker), and a late success clears it without a toast.
+Their server can publish a new status, such as a killed run's `abandoned`,
+before a later step fails, so a refusal re-reads the run with `run.get`,
+bounded by the deadline: the run shows what the server holds, the server's
+error is toasted, and only a failed re-read puts the prediction back. A failure
 that carries no answer still re-reads the run, and if the re-read does not
 show the result, toasts that failure's own error with **Retry**. Kill's predicted change time carries
 `stateChangedAtPredicted`, so the server's `run.status` event replaces it
@@ -1727,8 +1730,9 @@ same condition, and toasts only if the run does not show the
 predicted state; a repeated `run.close` with the same outcome is answered
 as a success. Delete takes the run off every list at once: `deletingRuns`
 (`store/runs.ts`) holds its record, and neither a snapshot nor an event's
-`run.get` puts it back before the answer. A refusal, or a re-read that
-finds the run, puts it back; `not found` from `run.delete` or from that
+`run.get` puts it back before the answer. A re-read that finds the run puts
+it back as read, and a refusal whose re-read fails puts back the held
+record; `not found` from `run.delete` or from that
 re-read counts as deleted, because a **Retry** can resend a delete that
 landed. Over another verb's pending prediction, Delete and the Close
 dialog's choice do not predict: they wait for the server, as an

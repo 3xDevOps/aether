@@ -770,7 +770,11 @@ interface Attempt {
   lostError: () => string | undefined
 }
 
-/** An invalid-state refusal can follow a call that already landed, so it re-reads the run. */
+/**
+ * An invalid-state refusal can follow a call that already landed, and a slow
+ * verb's server can publish a status before a later step fails, so both
+ * re-read the run instead of putting back the press-time values.
+ */
 function predicted(
   prediction: Prediction,
   send: () => Promise<unknown>,
@@ -849,11 +853,10 @@ function predicted(
         }
         refused = true
         const unchanged = unchangedSince(runID)
-        const run = cause instanceof ApiError && cause.code === codeInvalidState
-          ? await readRun(client, runID).catch(() => undefined)
-          : undefined
+        const invalidState = cause instanceof ApiError && cause.code === codeInvalidState
+        const run = invalidState || slow ? await readRun(client, runID).catch(() => undefined) : undefined
         if (run && !press.confirmed && press.same()) {
-          if (applyRead(prediction, run, unchanged())) return
+          if (applyRead(prediction, run, unchanged()) && invalidState) return
         } else putBack()
         finish()
         land('quiet')
