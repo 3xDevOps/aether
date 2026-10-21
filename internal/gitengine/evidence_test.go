@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -210,6 +211,166 @@ func TestRemoveEvidenceDeletesOnlyExactPacketRef(t *testing.T) {
 	}
 	if _, found, err := e.evidenceRefCommit(context.Background(), repo, evidenceRef("packet-b")); err != nil || !found {
 		t.Fatalf("packet-b ref after removal = found %v, err %v", found, err)
+	}
+}
+
+// TestRunDeletionPrunesEvidenceOnceInTheBackground removes a run the way
+// DeleteRun does. Before, each packet ran a synchronous whole-repository gc,
+// and a failed or slow gc failed the deletion. An interrupted gc must not
+// leave packed-refs.lock behind: it fails every later ref deletion.
+func TestRunDeletionPrunesEvidenceOnceInTheBackground(t *testing.T) {
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	gcLog, failGC, slowGC := filepath.Join(bin, "gc.log"), filepath.Join(bin, "fail"), filepath.Join(bin, "slow")
+	// The slow gc holds packed-refs.lock in a real git, as gc's pack-refs
+	// does, and its sleep holds stderr like a repack child would.
+	wrapper := "#!/bin/sh\nfor arg in \"$@\"; do\n\tif [ \"$arg\" = gc ]; then\n" +
+		"\t\techo gc >> '" + gcLog + "'\n" +
+		"\t\t[ -e '" + failGC + "' ] && exit 1\n" +
+		"\t\t[ -e '" + slowGC + "' ] && { printf 'start\\ndelete refs/aether/gc-probe\\nprepare\\n'; sleep 60; } |\n" +
+		"\t\t\t'" + realGit + "' -C \"$2\" update-ref --stdin\n" +
+		"\tfi\ndone\nexec '" + realGit + "' \"$@\"\n"
+	gitPath := filepath.Join(bin, "git")
+	if writeErr := os.WriteFile(gitPath, []byte(wrapper), 0o755); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	gcRuns := func() int {
+		data, readErr := os.ReadFile(gcLog)
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			t.Fatal(readErr)
+		}
+		return strings.Count(string(data), "gc\n")
+	}
+	waitUntil := func(what string, done func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(10 * time.Second); !done(); time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+		}
+	}
+	data := t.TempDir()
+	cfg := Config{ReposDir: filepath.Join(data, "repos"), CheckoutsDir: filepath.Join(data, "checkouts"), GitPath: gitPath}
+	start := func() *Engine {
+		e, newErr := New(cfg)
+		if newErr != nil {
+			t.Fatal(newErr)
+		}
+		t.Cleanup(func() { _ = e.Close() })
+		e.evidencePruneDelay = 20 * time.Millisecond
+		return e
+	}
+	ctx := t.Context()
+	e := start()
+	seedEvidenceWorkspace(t, e, "ws1")
+	checkout, _, err := e.CreateRunCheckout(ctx, "ws1", "run-delete", "main", "capture", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writeErr := os.WriteFile(filepath.Join(checkout, "new.txt"), []byte("retained\n"), 0o644); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	packets := []string{"packet-a", "packet-b", "packet-c"}
+	var commits []string
+	for _, packet := range packets {
+		revision, captureErr := e.CaptureEvidence(ctx, "run-delete", packet)
+		if captureErr != nil {
+			t.Fatal(captureErr)
+		}
+		commits = append(commits, revision.Commit)
+	}
+	repo := filepath.Join(cfg.ReposDir, "ws1.git")
+	pending := func() bool {
+		_, statErr := os.Stat(filepath.Join(repo, evidencePrunePending))
+		return statErr == nil
+	}
+	retained := func(commit string) bool {
+		return exec.Command(realGit, "-C", repo, "cat-file", "-e", commit).Run() == nil
+	}
+	packedRefsLock := filepath.Join(repo, "packed-refs.lock")
+	locked := func() bool {
+		_, statErr := os.Stat(packedRefsLock)
+		return statErr == nil
+	}
+
+	if writeErr := os.WriteFile(packedRefsLock, nil, 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	if removeErr := e.RemoveEvidence(ctx, "ws1", packets[0]); removeErr == nil {
+		t.Fatal("RemoveEvidence reported success while a stale packed-refs.lock kept the ref")
+	}
+	if removeErr := os.Remove(packedRefsLock); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	if writeErr := os.WriteFile(failGC, nil, 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	for _, packet := range packets {
+		if removeErr := e.RemoveEvidence(ctx, "ws1", packet); removeErr != nil {
+			t.Fatalf("RemoveEvidence(%s) with a failing gc: %v", packet, removeErr)
+		}
+	}
+	if removeErr := e.RemoveRunHistory(ctx, "run-delete"); removeErr != nil {
+		t.Fatalf("RemoveRunHistory: %v", removeErr)
+	}
+	waitUntil("the failed prune", func() bool {
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		return len(e.evidencePrunes) == 0
+	})
+	time.Sleep(5 * e.evidencePruneDelay)
+	if n := gcRuns(); n != 1 {
+		t.Fatalf("gc runs after removing %d packets = %d, want 1", len(packets), n)
+	}
+	if !pending() || !retained(commits[0]) {
+		t.Fatalf("after a failed gc: pending marker %v, objects retained %v; want both", pending(), retained(commits[0]))
+	}
+
+	if removeErr := os.Remove(failGC); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	if writeErr := os.WriteFile(slowGC, nil, 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	if retryErr := e.RetryEvidencePrunes(); retryErr != nil {
+		t.Fatal(retryErr)
+	}
+	waitUntil("the slow gc to lock packed-refs", locked)
+	closed := time.Now()
+	if closeErr := e.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if elapsed := time.Since(closed); elapsed > 10*time.Second {
+		t.Fatalf("Close waited %v for the slow gc's children", elapsed)
+	}
+	if !pending() {
+		t.Fatal("an interrupted gc cleared the pending marker")
+	}
+	if locked() {
+		t.Fatal("an interrupted gc left packed-refs.lock behind")
+	}
+
+	if removeErr := os.Remove(slowGC); removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	restarted := start()
+	if retryErr := restarted.RetryEvidencePrunes(); retryErr != nil {
+		t.Fatal(retryErr)
+	}
+	waitUntil("the retried prune", func() bool { return !pending() })
+	if n := gcRuns(); n != 3 {
+		t.Fatalf("gc runs after the restart = %d, want 3", n)
+	}
+	for _, commit := range commits {
+		if retained(commit) {
+			t.Fatalf("evidence commit %s survived the prune", commit)
+		}
+	}
+	if _, statErr := os.Stat(checkout); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("checkout after RemoveRunHistory: %v", statErr)
 	}
 }
 

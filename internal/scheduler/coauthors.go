@@ -247,7 +247,7 @@ func (s *Scheduler) RecordSteer(ctx context.Context, run domain.RunID, actor dom
 		return
 	}
 	if s.addSteerer(ctx, r, actor) {
-		s.refreshCoAuthors(ctx, r)
+		s.refreshCoAuthors(ctx, r.ID)
 	}
 }
 
@@ -263,7 +263,7 @@ func (s *Scheduler) RecordHandoff(ctx context.Context, run domain.RunID, from do
 		return
 	}
 	s.addSteerer(ctx, r, from)
-	s.refreshCoAuthors(ctx, r)
+	s.refreshCoAuthors(ctx, r.ID)
 }
 
 // RecordHandoffOperation applies the co-author phase of one durable handoff.
@@ -292,7 +292,7 @@ func (s *Scheduler) RecordHandoffOperation(ctx context.Context, run domain.RunID
 			return fmt.Errorf("scheduler: publish handoff co-author: %w", err)
 		}
 	}
-	if err := s.refreshCoAuthorsErr(ctx, r); err != nil {
+	if err := s.refreshCoAuthorsErr(ctx, run); err != nil {
 		return err
 	}
 	return nil
@@ -320,7 +320,7 @@ func (s *Scheduler) RefreshMemberCoAuthors(ctx context.Context, member domain.Me
 	}
 	for _, r := range runs {
 		if r.MemberID == member {
-			s.refreshCoAuthors(ctx, r)
+			s.refreshCoAuthors(ctx, r.ID)
 			continue
 		}
 		steerers, lerr := s.cfg.Store.ListRunSteerers(ctx, r.ID)
@@ -329,7 +329,7 @@ func (s *Scheduler) RefreshMemberCoAuthors(ctx context.Context, member domain.Me
 			continue
 		}
 		if slices.ContainsFunc(steerers, func(m *domain.Member) bool { return m.ID == member }) {
-			s.refreshCoAuthors(ctx, r)
+			s.refreshCoAuthors(ctx, r.ID)
 		}
 	}
 }
@@ -362,19 +362,16 @@ func (s *Scheduler) addSteerer(ctx context.Context, run *domain.Run, member doma
 // is created, so telling the agent to append a trailer for itself would
 // credit the author twice, while the member who took the run over after a
 // handoff is credited nowhere else on those commits.
-func (s *Scheduler) refreshCoAuthors(ctx context.Context, run *domain.Run) {
+func (s *Scheduler) refreshCoAuthors(ctx context.Context, run domain.RunID) {
 	if err := s.refreshCoAuthorsErr(ctx, run); err != nil {
-		slog.Warn("scheduler: refresh co-authors", "run", run.ID, "error", err)
+		slog.Warn("scheduler: refresh co-authors", "run", run, "error", err)
 	}
 }
 
-func (s *Scheduler) refreshCoAuthorsErr(ctx context.Context, run *domain.Run) error {
-	if run == nil {
-		return nil
-	}
+func (s *Scheduler) refreshCoAuthorsErr(ctx context.Context, run domain.RunID) error {
 	c := s.coordinationSeam()
 	s.mu.Lock()
-	entry := s.runs[run.ID]
+	entry := s.runs[run]
 	var dir, author string
 	if entry != nil {
 		dir, author = entry.coordDir, entry.gitAuthorEmail
@@ -383,13 +380,19 @@ func (s *Scheduler) refreshCoAuthorsErr(ctx context.Context, run *domain.Run) er
 	if c == nil || dir == "" {
 		return nil
 	}
+	// The run is read under the lock, so a handoff committed after the read
+	// refreshes after this write and the list ends on the current owner.
 	entry.coAuthorMu.Lock()
 	defer entry.coAuthorMu.Unlock()
-	trailers, err := s.containerCoAuthors(ctx, run, author)
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return fmt.Errorf("scheduler: resolve run for co-authors: %w", err)
+	}
+	trailers, err := s.containerCoAuthors(ctx, r, author)
 	if err != nil {
 		return fmt.Errorf("scheduler: resolve co-authors: %w", err)
 	}
-	if err := c.svc.WriteCoAuthors(run.ID, trailers); err != nil {
+	if err := c.svc.WriteCoAuthors(run, trailers); err != nil {
 		return fmt.Errorf("scheduler: write run co-authors: %w", err)
 	}
 	return nil

@@ -117,16 +117,19 @@ function rememberDiskError(error: unknown): void {
 export function useTeamRefresh(client: Api = api): void {
   const route = useStore((s) => s.route)
   const offline = useStore((s) => s.connection !== 'live')
+  const hydrated = useStore((s) => s.hydrated)
   const showDecided = useStore((s) => s.showDecided)
   const workspaceIDs = useStore((s) => Object.keys(s.workspaces).sort().join(','))
   const lastRun = useRef(0)
 
   useEffect(() => {
-    // Losing the connection is no reason to read; getting it back is.
-    if (offline && lastRun.current > 0) return
+    // Hydration lists the workspaces, after the stream is live, so a read
+    // before it is repeated. Losing the connection is no reason to read;
+    // getting it back is.
+    if (!hydrated || (offline && lastRun.current > 0)) return
     lastRun.current = Date.now()
     void refreshTeam(useStore, client)
-  }, [offline, showDecided, workspaceIDs, client])
+  }, [hydrated, offline, showDecided, workspaceIDs, client])
 
   useEffect(() => {
     void heartbeat(useStore, client)

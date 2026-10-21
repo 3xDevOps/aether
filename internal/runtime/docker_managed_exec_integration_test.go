@@ -77,7 +77,7 @@ func TestDockerManagedExecLifecycle(t *testing.T) {
 
 			spec := ExecSpec{
 				CreationKey: "long-running", Cols: 80, Rows: 24,
-				Argv: []string{"/bin/sh", "-c", `trap '' TERM; sleep 300 & echo $! > /workspace/owned.pid; echo owned-ready; read answer; echo input:$answer; wait`},
+				Argv: []string{"/bin/sh", "-c", `trap '' HUP TERM; sleep 300 & echo $! > /workspace/owned.pid; echo owned-ready; read answer; echo input:$answer; wait`},
 			}
 			owned, err := d.StartExecTTY(ctx, id, spec)
 			if err != nil {

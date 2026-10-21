@@ -13,34 +13,48 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
+import { closeCommand, useCommandRunner } from '@/lib/commands'
 import { errorSentence } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
+
+type Outcome = 'merged' | 'abandoned'
 
 export function CloseDialog() {
   const returnFocus = useReturnFocus()
   const runID = useStore((s) => s.paletteRunID)
   const run = useStore((s) => (s.paletteRunID ? s.runs[s.paletteRunID] : undefined))
   const close = useStore((s) => s.closePaletteDialog)
-  const [closing, setClosing] = useState(false)
+  const perform = useCommandRunner()
+  const [closing, setClosing] = useState<Outcome | null>(null)
+  const late = usePastDeadline(closing !== null)
   const [error, setError] = useState<string | null>(null)
 
-  const finish = async (outcome: 'merged' | 'abandoned') => {
+  const finish = async (outcome: Outcome) => {
     if (!runID) return
-    setClosing(true)
+    // Over another verb's pending prediction it waits for the server instead.
+    if (!useStore.getState().predicting[runID]) {
+      close()
+      void perform(closeCommand(runID, outcome))
+      return
+    }
+    setClosing(outcome)
     setError(null)
     try {
       await api.runClose(runID, outcome)
       close()
       toast.success(`Closed as ${outcome}`)
     } catch (err) {
-      setClosing(false)
+      setClosing(null)
       const detail = `Close failed: ${errorSentence(err)}`
       setError(detail)
       toast.error(detail)
     }
   }
+
+  const pending = late ? stillWaiting : 'Closing…'
 
   return (
     <Dialog open onOpenChange={close}>
@@ -63,13 +77,13 @@ export function CloseDialog() {
           <Button variant="secondary" onClick={close}>
             Cancel
           </Button>
-          <Button variant="secondary" disabled={closing} onClick={() => void finish('abandoned')}>
+          <Button variant="secondary" disabled={closing !== null} onClick={() => void finish('abandoned')}>
             <Archive aria-hidden />
-            Abandoned
+            {closing === 'abandoned' ? pending : 'Abandoned'}
           </Button>
-          <Button disabled={closing} onClick={() => void finish('merged')}>
+          <Button disabled={closing !== null} onClick={() => void finish('merged')}>
             <GitMerge aria-hidden />
-            Merged
+            {closing === 'merged' ? pending : 'Merged'}
           </Button>
         </DialogFooter>
       </DialogContent>

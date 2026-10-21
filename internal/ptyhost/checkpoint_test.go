@@ -1,6 +1,7 @@
 package ptyhost
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -588,5 +589,97 @@ func TestCheckpointV2MigratesWithoutResettingPosition(t *testing.T) {
 	migrated, err := decodeCheckpoint(checkpointPath(path))
 	if err != nil || migrated.Version != screenCheckpointVersion || migrated.SegmentCount != 2 || len(migrated.Segments) != 1 || migrated.CastOutputBytes != checkpoint.CastOutputBytes {
 		t.Fatalf("v2 migration did not compact its lineage: %+v, %v", migrated, err)
+	}
+}
+
+func TestCheckpointRewritesOnlyAChangedScreen(t *testing.T) {
+	h, dir := newTestHost(t)
+	run := domain.RunID("checkpoint-idle")
+	att := newFakeAtt()
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatal(err)
+	}
+	s := h.lookup(RunSession(run))
+	path := filepath.Join(dir, string(run)+".screen")
+	checkpointAfter := func(output string, sequence int) os.FileInfo {
+		t.Helper()
+		if output != "" {
+			att.writeOutput(t, output)
+		}
+		waitFor(t, "live output", func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.ring.position().Sequence == TerminalSequence(sequence)
+		})
+		if err := s.checkpointNow(); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info
+	}
+	first := checkpointAfter("first", len("first"))
+	if idle := checkpointAfter("", len("first")); !os.SameFile(first, idle) {
+		t.Fatal("an unchanged screen rewrote its checkpoint")
+	}
+	if changed := checkpointAfter("-second", len("first-second")); os.SameFile(first, changed) {
+		t.Fatal("a changed screen kept its old checkpoint")
+	}
+	checkpoint, err := decodeCheckpoint(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkpoint.Sequence != TerminalSequence(len("first-second")) {
+		t.Fatalf("checkpoint sequence = %d, want %d", checkpoint.Sequence, len("first-second"))
+	}
+}
+
+func TestStoppedSessionDropsCheckpointWhenFinalCaptureFails(t *testing.T) {
+	h, _ := newTestHost(t)
+	run := domain.RunID("checkpoint-final-failure")
+	att := newFakeAtt()
+	if err := h.StartSession(context.Background(), RunSession(run), att); err != nil {
+		t.Fatal(err)
+	}
+	s := h.lookup(RunSession(run))
+	att.writeOutput(t, "saved")
+	waitFor(t, "live output", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.ring.position().Sequence == TerminalSequence(len("saved"))
+	})
+	if err := s.checkpointNow(); err != nil {
+		t.Fatal(err)
+	}
+	s.checkpointMu.Lock()
+	persisted := s.persisted
+	s.checkpointMu.Unlock()
+	if persisted == nil {
+		t.Fatal("checkpoint was not persisted")
+	}
+	s.mu.Lock()
+	tr := s.tr
+	s.mu.Unlock()
+	tr.mu.Lock()
+	tr.bw = bufio.NewWriter(funcWriter{write: func([]byte) (int, error) { return 0, errors.New("transcript disk full") }})
+	_, _ = tr.bw.WriteString("x")
+	_ = tr.bw.Flush()
+	tr.mu.Unlock()
+	if err := h.StopSession(t.Context(), RunSession(run)); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	captureErr := s.checkpointErr
+	s.mu.Unlock()
+	if captureErr == nil {
+		t.Fatal("final checkpoint capture did not fail")
+	}
+	s.checkpointMu.Lock()
+	persisted = s.persisted
+	s.checkpointMu.Unlock()
+	if persisted != nil {
+		t.Fatal("stopped session kept its last checkpoint capture")
 	}
 }

@@ -48,6 +48,7 @@ function rerouted(view: string) {
 beforeEach(() => {
   StubSocket.install()
   useStore.setState({
+    hydrated: true,
     runs: {},
     info: serverInfo,
     members: { [alice.id]: alice, [bob.id]: bob },

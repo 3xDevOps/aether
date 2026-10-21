@@ -253,8 +253,8 @@ run's container, after it starts and before the agent. It runs as `/bin/sh -ec`
 workspace variables, your `$HOME` and tool caches, `AETHER_RUN_ID` and
 `AETHER_WORKSPACE_ID`.
 
-There is no time limit. The launch waits, and launches are admitted one at a
-time, so a slow script delays every other launch on the server. Install
+There is no time limit. The launch waits for it, and so does another launch by
+the same member or on the same agent account; other launches do not. Install
 dependencies here and leave builds and tests to the agent.
 
 If the script exits non-zero, the container is removed and the launch fails:

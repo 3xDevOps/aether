@@ -3,11 +3,13 @@ import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { AgentInfo } from '@/lib/types'
 import { useStore } from '@/store'
+import { useIdentityKnown } from '@/store/hooks'
 
 /** agent.list inspects the member's home on the server, so one read serves
  * every view until the identity changes; `fresh` re-reads on mount. */
 export function useAgentList(client: Api = api, fresh = false) {
   const identity = useStore((s) => s.identityKey)
+  const ready = useIdentityKnown()
   const agents = useStore((s) => (s.agentList?.identity === identity ? s.agentList.agents : null))
   const [error, setError] = useState<string | null>(null)
   const reload = useCallback(() => {
@@ -17,8 +19,8 @@ export function useAgentList(client: Api = api, fresh = false) {
   }, [client])
   useEffect(() => {
     const cached = useStore.getState().agentList
-    if (fresh || cached?.identity !== identity) reload()
-  }, [reload, fresh, identity])
+    if (ready && (fresh || cached?.identity !== identity)) reload()
+  }, [reload, fresh, identity, ready])
   return { agents, error, reload }
 }
 

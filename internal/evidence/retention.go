@@ -217,9 +217,20 @@ func (s *Service) ReadTranscript(ctx context.Context, workspace domain.Workspace
 }
 
 // CleanupExpired removes expired private Git refs, transcript copies, and
-// metadata in bounded batches. It is safe to call repeatedly and does not
-// depend on an in-memory workspace index.
+// metadata in bounded batches, and retries pending Git object prunes. It is
+// safe to call repeatedly and does not depend on an in-memory workspace index.
 func (s *Service) CleanupExpired(ctx context.Context) (int, error) {
+	var retryErr error
+	if pruner, ok := s.git.(GitEvidencePruner); ok {
+		if err := pruner.RetryEvidencePrunes(); err != nil {
+			retryErr = fmt.Errorf("evidence: retry pending git prunes: %w", err)
+		}
+	}
+	n, err := s.expireBatch(ctx)
+	return n, errors.Join(err, retryErr)
+}
+
+func (s *Service) expireBatch(ctx context.Context) (int, error) {
 	cleanupCtx, cancel := s.cleanupContext(ctx)
 	defer cancel()
 	now := s.now().UTC()
@@ -284,11 +295,6 @@ func (s *Service) expirePacket(ctx context.Context, p *store.EvidencePacket, exp
 	key := StorageKey(p)
 	if err := s.removeStagedArtifacts(ctx, p.WorkspaceID, key); err != nil {
 		return err
-	}
-	if pruner, ok := s.git.(GitEvidencePruner); ok {
-		if err := pruner.PruneEvidence(ctx, p.WorkspaceID); err != nil {
-			return fmt.Errorf("evidence: prune expired git evidence: %w", err)
-		}
 	}
 	sources := make([]store.EvidenceSourceFact, len(p.Sources))
 	for i, source := range p.Sources {
@@ -394,11 +400,6 @@ func (s *Service) purgePacket(ctx context.Context, p *store.EvidencePacket) erro
 	}
 	if err := s.git.RemoveEvidence(cleanupCtx, p.WorkspaceID, key); err != nil {
 		return fmt.Errorf("evidence: remove git evidence: %w", err)
-	}
-	if pruner, ok := s.git.(GitEvidencePruner); ok {
-		if err := pruner.PruneEvidence(cleanupCtx, p.WorkspaceID); err != nil {
-			return fmt.Errorf("evidence: prune git evidence: %w", err)
-		}
 	}
 	if err := s.store.DeleteEvidencePacket(cleanupCtx, p.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("evidence: remove packet: %w", err)

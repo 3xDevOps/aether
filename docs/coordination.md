@@ -58,7 +58,10 @@ Caller-supplied mounts are validated before these mounts are appended. A caller 
 `/usr/local/bin/aether-internal`, so a credential home, profile, or worktree
 cannot shadow the socket or either executable. The server fails closed if it
 cannot stage and verify its binary: managed-container creation or launch is
-refused rather than proceeding without the canonical CLI or bridge.
+refused rather than proceeding without the canonical CLI or bridge. It hashes
+its own binary once per process, and re-hashes the staged copy only when that
+file's device, inode, size, mtime, ctime, or mode changed since it was last
+verified.
 Every run receives its own authenticated socket, independently of conflict
 policy. Member terminals and verification containers receive the CLI without
 borrowing a run's identity.

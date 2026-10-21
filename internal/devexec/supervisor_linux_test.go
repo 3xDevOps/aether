@@ -66,7 +66,7 @@ func TestSupervisorSubprocess(t *testing.T) {
 		_, _ = fmt.Fprintf(os.Stdout, "received:%s", line)
 		os.Exit(19)
 	case "tree", "tree-exit", "zombie":
-		signal.Ignore(syscall.SIGTERM)
+		signal.Ignore(syscall.SIGHUP, syscall.SIGTERM)
 		role := "escape"
 		if args[0] == "zombie" {
 			role = "escape-exit"
@@ -457,6 +457,34 @@ func TestSupervisorReapsEscapedDescendants(t *testing.T) {
 			state, err := Control(t.Context(), p.key, request)
 			if err != nil || state.ExitCode == nil || *state.ExitCode != want {
 				t.Fatalf("repeated stop lost the original exit status: %+v, %v", state, err)
+			}
+		})
+	}
+}
+
+func TestSupervisorStopHangsUpInteractiveLoginShell(t *testing.T) {
+	for _, shell := range []string{"/bin/sh", "/bin/bash"} {
+		t.Run(filepath.Base(shell), func(t *testing.T) {
+			if _, err := os.Stat(shell); err != nil {
+				t.Skip(err)
+			}
+			p := startSupervisor(t, shell, "-l")
+			if _, err := Control(t.Context(), p.key, p.request); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := io.WriteString(p.pty, "case $- in *i*) printf '\\ninteractive\\n';; esac\n"); err != nil {
+				t.Fatal(err)
+			}
+			p.line(t, "interactive")
+			request := p.request
+			request.Action, request.GraceMillis = "stop", 10000
+			started := time.Now()
+			if _, err := Control(t.Context(), p.key, request); err != nil {
+				t.Fatal(err)
+			}
+			p.exited(t, 129)
+			if elapsed := time.Since(started); elapsed > 2*time.Second {
+				t.Fatalf("stop took %s of its 10s grace", elapsed)
 			}
 		})
 	}

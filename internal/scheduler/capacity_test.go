@@ -555,8 +555,7 @@ func TestUpdaterCapacityRefusalAndCreateFailureRelease(t *testing.T) {
 	host := healthyAdmissionHost()
 	host.MemoryAvailableBytes = 1
 	rt.setHost(host)
-	update := &harnessUpdateRun{}
-	if _, _, err := e.sched.updateInContainer(t.Context(), update, spec, "fake", "update"); !errors.Is(err, ErrMemoryPressure) {
+	if _, _, err := e.sched.updateInContainer(t.Context(), spec, "fake", "update"); !errors.Is(err, ErrMemoryPressure) {
 		t.Fatalf("updater bypassed memory admission: %v", err)
 	}
 	if creates.Load() != 0 {
@@ -564,7 +563,7 @@ func TestUpdaterCapacityRefusalAndCreateFailureRelease(t *testing.T) {
 	}
 	host.MemoryAvailableBytes = host.MemoryTotalBytes/10 + startupMemoryBytes
 	rt.setHost(host)
-	if _, _, err := e.sched.updateInContainer(t.Context(), update, spec, "fake", "update"); !errors.Is(err, createFailure) {
+	if _, _, err := e.sched.updateInContainer(t.Context(), spec, "fake", "update"); !errors.Is(err, createFailure) {
 		t.Fatalf("updater did not reach Create with sufficient capacity: %v", err)
 	}
 	release, err := e.sched.reserveCapacity(t.Context())

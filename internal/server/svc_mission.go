@@ -120,6 +120,7 @@ func (l schedulerLauncher) LaunchMission(ctx context.Context, req mission.Missio
 
 		RequestedAccount: req.RequestedAccount,
 		Fallback:         req.Fallback,
+		Admitted:         req.Admitted,
 	})
 }
 

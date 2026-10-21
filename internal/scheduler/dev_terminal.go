@@ -10,10 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/control"
@@ -421,24 +424,39 @@ func cleanupUnpublishedTerminal(execution runtime.ManagedExec) error {
 	return errors.Join(err, execution.Detach())
 }
 
-func (s *Scheduler) stopRunTerminalLocked(ctx context.Context, run domain.RunID, set *runTerminalSet, terminal *runTerminal, grace time.Duration) error {
-	if terminal.ContainerEnded || (terminal.State.Exited && terminal.State.ExitCode != nil) {
-		return nil
+func (s *Scheduler) stopRunTerminalsLocked(ctx context.Context, run domain.RunID, set *runTerminalSet, grace time.Duration, terminals ...*runTerminal) error {
+	errs := make([]error, len(terminals)+1)
+	stopping := false
+	var wg sync.WaitGroup
+	for i, terminal := range terminals {
+		if terminal.ContainerEnded || (terminal.State.Exited && terminal.State.ExitCode != nil) {
+			continue
+		}
+		if terminal.Exec == nil {
+			errs[i] = fmt.Errorf("%w: %s", runtime.ErrExecUnavailable, terminal.Unavailable)
+			continue
+		}
+		stopping = true
+		// Each stop writes only its own terminal; the set is read and
+		// persisted after all of them return.
+		wg.Go(func() {
+			exit, err := terminal.Exec.Stop(ctx, grace)
+			if err != nil {
+				terminal.Unavailable, errs[i] = err.Error(), err
+				return
+			}
+			terminal.State = runtime.ExecState{Exited: true, ExitCode: &exit.Code}
+			terminal.Stopped = true
+			terminal.Unavailable = ""
+		})
 	}
-	if terminal.Exec == nil {
-		return fmt.Errorf("%w: %s", runtime.ErrExecUnavailable, terminal.Unavailable)
+	wg.Wait()
+	if stopping {
+		// Keep the ended PTY and its rendered/output observations until explicit
+		// replacement or run deletion. Closing an attachment is not process stop.
+		errs[len(terminals)] = s.persistRunTerminalsLocked(run, set)
 	}
-	exit, err := terminal.Exec.Stop(ctx, grace)
-	if err != nil {
-		terminal.Unavailable = err.Error()
-		return errors.Join(err, s.persistRunTerminalsLocked(run, set))
-	}
-	terminal.State = runtime.ExecState{Exited: true, ExitCode: &exit.Code}
-	terminal.Stopped = true
-	terminal.Unavailable = ""
-	// Keep the ended PTY and its rendered/output observations until explicit
-	// replacement or run deletion. Closing an attachment is not process stop.
-	return s.persistRunTerminalsLocked(run, set)
+	return errors.Join(errs...)
 }
 
 func (s *Scheduler) RecoverDevelopmentTerminals(ctx context.Context, run domain.RunID) error {
@@ -458,13 +476,8 @@ func (s *Scheduler) StopDevelopmentTerminals(ctx context.Context, run domain.Run
 		return err
 	}
 	set.Closed = true
-	var errs []error
-	for _, terminal := range set.Terminals {
-		if err := s.stopRunTerminalLocked(ctx, run, set, terminal, s.cfg.StopGrace); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(append(errs, s.persistRunTerminalsLocked(run, set))...)
+	stopErr := s.stopRunTerminalsLocked(ctx, run, set, s.cfg.StopGrace, slices.Collect(maps.Values(set.Terminals))...)
+	return errors.Join(stopErr, s.persistRunTerminalsLocked(run, set))
 }
 
 // MarkDevelopmentContainerEnded requires a proved parent-container exit or

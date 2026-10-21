@@ -6,10 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
 var _ EventLog = (*SQLiteLog)(nil)
@@ -231,5 +234,83 @@ func TestSQLiteLogGetPreservesQueryError(t *testing.T) {
 
 	if _, err := log.Get(ctx, "event-1"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("get after cancellation = %v, want context.Canceled", err)
+	}
+}
+
+func TestSQLiteLogReadsOneRunThroughIndexes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	// The store's migrations create the events indexes, as on a server.
+	db, err := storetest.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	log, err := OpenSQLiteLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = log.Close() })
+	appendN(t, log,
+		logEvent(1, "w1", "r1", RunStatusPayload{To: domain.RunRunning}),
+		logEvent(2, "w1", "r2", CoordMessagePayload{FromRunID: "r2", ToRunID: "r1"}),
+		logEvent(3, "w1", "r1", CoordMessagePayload{FromRunID: "r1", ToRunID: "r1"}),
+		logEvent(4, "w1", "r2", CoordMessagePayload{FromRunID: "r2", ToRunID: "r3"}),
+		logEvent(5, "w1", "r2", CoordMessageAckedPayload{ToRunID: "r1"}),
+		logEvent(6, "w2", "r9", CoordMessagePayload{FromRunID: "r9", ToRunID: "r1"}),
+		logEvent(7, "w1", "r1", TimelinePayload{Kind: TimelineKill}),
+	)
+	ctx := context.Background()
+	f := Filter{Workspace: "w1", Runs: []domain.RunID{"r1"}}
+	seqs := func(got []Event, err error) []uint64 {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		out := make([]uint64, len(got))
+		for i, e := range got {
+			out[i] = e.Seq
+		}
+		return out
+	}
+	for name, tc := range map[string]struct {
+		got, want []uint64
+	}{
+		"oldest first": {seqs(log.Read(ctx, f, 0, 0, 10)), []uint64{1, 2, 3, 7}},
+		"after cursor": {seqs(log.Read(ctx, f, 1, 0, 2)), []uint64{2, 3}},
+		"newest first": {seqs(log.ReadBefore(ctx, f, 8, 3)), []uint64{7, 3, 2}},
+	} {
+		if !slices.Equal(tc.got, tc.want) {
+			t.Errorf("%s: seqs = %v, want %v", name, tc.got, tc.want)
+		}
+	}
+
+	query, args := readQuery(f, 0, 7, 10, "DESC")
+	rows, err := log.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var steps []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		steps = append(steps, detail)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	plan := strings.Join(steps, "; ")
+	for _, step := range []string{
+		"SEARCH events USING INDEX idx_events_run (run_id=? AND rowid>? AND rowid<?)",
+		"SEARCH events USING INDEX idx_events_coord_to_run (<expr>=? AND rowid>? AND rowid<?)",
+	} {
+		if !strings.Contains(plan, step) {
+			t.Errorf("plan %q lacks %q", plan, step)
+		}
+	}
+	if strings.Contains(plan, "TEMP B-TREE") {
+		t.Errorf("plan %q sorts its rows", plan)
 	}
 }

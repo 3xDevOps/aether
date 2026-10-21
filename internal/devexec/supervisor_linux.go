@@ -193,8 +193,18 @@ func Run(key, claim string, tty bool, argv []string) (int, error) {
 					stopAt = deadline
 				}
 				if !killing {
-					if err := unix.Kill(-child.Process.Pid, unix.SIGTERM); err != nil && !errors.Is(err, unix.ESRCH) {
-						response.Error = err.Error()
+					// Stopping a terminal hangs it up: an interactive shell
+					// ignores SIGTERM, exits on SIGHUP and passes the hang-up
+					// on to its jobs.
+					stopSignals := []unix.Signal{unix.SIGTERM}
+					if tty {
+						stopSignals = []unix.Signal{unix.SIGHUP, unix.SIGTERM}
+					}
+					for _, sig := range stopSignals {
+						if err := unix.Kill(-child.Process.Pid, sig); err != nil && !errors.Is(err, unix.ESRCH) {
+							response.Error = err.Error()
+							break
+						}
 					}
 				}
 			default:

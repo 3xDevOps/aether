@@ -274,14 +274,15 @@ agent you defined answers `unknown harness "x"; register it with: aether agent a
 
 ### Updates before launch
 
-Before a run launches, the server updates the shipped agent in your
+When a run launches, the server updates the shipped agent in your
 `~/.local/bin`, using the agent's own update command or `npm`. It checks on the
-first launch per agent and then at most every 6 hours (15 minutes after a
-failed update). A launch waits at most 25 seconds. If the update is still
-running, the agent starts on the installed version and the run's timeline says:
+first launch per agent since the server started, and then at most every 6 hours
+(15 minutes after a failed update). A launch never waits for the update: the
+agent starts on the installed version and the update finishes in the
+background. A new version shows on the timeline of the run that started it:
 
 ```text
-starting the installed version 2.1.288 (Claude Code) while claude updates
+updated <agent> from <old> to <new> for the next launch
 ```
 
 A failed update never stops a launch. The timeline shows the real cause:

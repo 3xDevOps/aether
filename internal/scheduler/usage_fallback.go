@@ -25,9 +25,10 @@ import (
 // its account's usage limit continues on another account.
 type UsageFallback struct {
 	Usage fallback.QuotaReader
-	// AuthorizationMu is the mutex the RPC layer holds over every launch and
-	// share revocation; a move holds it from choosing the account until the
-	// run records it, and not while it replaces the container.
+	// AuthorizationMu is the mutex the RPC layer holds over a launch until
+	// its admission and over a share revocation; a move holds it from
+	// choosing the account until the run records it, and not while it
+	// replaces the container.
 	AuthorizationMu *sync.Mutex
 	// Note posts a system note to the run's room; key makes it idempotent.
 	Note func(ctx context.Context, run *domain.Run, body, key string) error
@@ -841,7 +842,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	s.mu.Lock()
 	entry.gitAuthorEmail = home.GitIdentity().Email
 	s.mu.Unlock()
-	unlockCaches := s.lockRunCaches(home.ID, to)
+	unlockCaches := sync.OnceFunc(s.lockRunCaches(home.ID, to))
 	plan, err := s.runPlan(ctx, entry, &next, ws, home, profile)
 	if err != nil {
 		unlockCaches()
@@ -850,7 +851,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	s.mu.Lock()
 	persistSupervisor := entry.missionAssigned
 	s.mu.Unlock()
-	_, err = s.startRunContainer(ctx, entry, &next, home, argv, profile, plan, persistSupervisor)
+	_, err = s.startRunContainer(ctx, entry, &next, home, argv, profile, plan, persistSupervisor, unlockCaches)
 	unlockCaches()
 	if err != nil {
 		return failed(err)

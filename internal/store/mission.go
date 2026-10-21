@@ -501,9 +501,11 @@ func (d *DB) ReplaceIntegrator(ctx context.Context, id domain.MissionID, expecte
 // RecordIntegratorLaunch stores launchErr as the reason run, the mission's
 // current integrator, did not launch. An empty launchErr means the run's row
 // exists: it clears the error and marks the run launched, after which
-// reconciliation never relaunches it. Repeating the stored error keeps its
-// first time. It reports whether the mission changed; a run that is no
-// longer the current integrator changes nothing.
+// reconciliation never relaunches it. While the row is terminal it leaves a
+// recorded error in place: only a live integrator proves the launch went
+// through. Repeating the stored error keeps its first time. It reports
+// whether the mission changed; a run that is no longer the current
+// integrator changes nothing.
 func (d *DB) RecordIntegratorLaunch(ctx context.Context, id domain.MissionID, run domain.RunID, launchErr string, launched bool, at time.Time) (bool, error) {
 	if id == "" || run == "" {
 		return false, errors.New("store: record integrator launch requires mission_id and run_id")
@@ -525,12 +527,16 @@ func (d *DB) RecordIntegratorLaunch(ctx context.Context, id domain.MissionID, ru
 	if launched {
 		launchedFlag = 1
 	}
-	// An unchanged error keeps its first-seen time.
+	// An unchanged error keeps its first-seen time. A replay that read the run
+	// row while it provisioned must not clear the failure recorded since.
+	live, liveArgs := liveStatusArgs()
 	res, err := tx.ExecContext(ctx, `UPDATE missions SET
 		integrator_launch_error_at=CASE WHEN integrator_launch_error=? THEN integrator_launch_error_at ELSE ? END,
 		integrator_launch_error=?, integrator_run_launched=MAX(integrator_run_launched, ?), updated_at=?
-		WHERE id=? AND current_integrator_run_id=? AND (integrator_launch_error<>? OR integrator_run_launched<?)`,
-		launchErr, errorAt, launchErr, launchedFlag, n, id, run, launchErr, launchedFlag)
+		WHERE id=? AND current_integrator_run_id=? AND (integrator_launch_error<>? OR integrator_run_launched<?)
+		AND NOT (?='' AND integrator_launch_error<>'' AND EXISTS (SELECT 1 FROM runs
+			WHERE runs.id=missions.current_integrator_run_id AND runs.status NOT IN (`+live+`)))`,
+		append([]any{launchErr, errorAt, launchErr, launchedFlag, n, id, run, launchErr, launchedFlag, launchErr}, liveArgs...)...)
 	if err != nil {
 		return false, fmt.Errorf("store: record integrator launch of mission %s: %w", id, err)
 	}

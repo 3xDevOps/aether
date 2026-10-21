@@ -23,7 +23,8 @@ shown beside the status says why it is there.
 | A Standard agent exits | The run stays live and its terminal shows a login shell. | Opens a shell in place of the agent. It never restarts the agent. | Start the agent again in that shell, or close the run. |
 | A Background agent exits | `completed`, or `failed` with `agent exited <code>: <last line of output>`. | Commits and publishes the branch, then removes the container. | Read the full output in the run's transcript. |
 | The agent hits its account's usage limit | `Usage limit reached on <owner>'s account; ...` when it cannot continue. | Moves the run to another account that has usage left. | [Usage limit mid-run](#usage-limit-mid-run). |
-| An agent update fails, or the vendor is unreachable | Timeline note `could not update <agent> from <version>: the updater exited <code>: <output>`. | Waits at most 25 seconds, then launches whatever is installed. Tries again from that home after 15 minutes. | Usually nothing. `sudo aether-server config set agent-update false` turns updates off. |
+| An agent update fails, or the vendor is unreachable | Timeline note `could not update <agent> from <version>: the updater exited <code>: <output>`. | Launches whatever is installed without waiting for the update. Tries again from that home after 15 minutes. | Usually nothing. `sudo aether-server config set agent-update false` turns updates off. |
+| An agent update an older Aether interrupted left the agent's npm package missing | The launch that starts the repair may not find the agent. | Restores the copy in `~/.local/lib/.<agent>-update.*/previous` in the background, before contacting npm. | Launch again. The next launch finds the agent. |
 | An SSH connection drops during an attach | The CLI or dashboard disconnects. | Nothing changes for the run: its terminal lives on the server. Input that never reached the server is dropped whole. | Attach again. The full transcript replays before live output. |
 | An `aether forward` connection drops | The local port stops answering. | Closes both ends of the tunnel. | Run `aether forward <run-id|terminal> <port>` again. |
 | A launch cannot refresh the workspace mirror | The launch fails with `gitengine: mirror <kind> for branch "<branch>": <diagnostic>`. No run is created. | Never falls back to an older base on its own. | [Launch and mirror failures](#launch-and-mirror-failures). |
@@ -409,7 +410,7 @@ sudo systemctl restart aether-server
 | `--run-cpus` | 8, or the host's CPU count if lower | CPU ceiling per run and environment. | Lower to share a small host. |
 | `--run-memory` | 8 GiB | Memory ceiling per run and environment, in bytes. Swap adds a quarter of it. | Raise when runs hit out-of-memory kills. |
 | `--run-pids` | `4096` | Process and thread ceiling per container. | Raise for builds that start many processes. |
-| `--agent-update` | `true` | Update a shipped agent in the member's home before each launch. | Turn off on a host without internet access, or to hold a version. |
+| `--agent-update` | `true` | Update a shipped agent in the member's home, in the background, when a run launches. | Turn off on a host without internet access, or to hold a version. |
 
 The CPU, memory and process ceilings apply to containers created after the
 change. A host-wide out-of-memory kill takes agent processes before the server

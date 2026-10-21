@@ -146,9 +146,9 @@ func installInHome(t *testing.T, e *testEnv, exe string) {
 	}
 }
 
-// launchNotes launches harnessName and returns the run with the timeline
-// notes published on it before it reached running.
-func launchNotes(t *testing.T, e *testEnv, harnessName string, mode domain.LaunchMode) (*domain.Run, []events.Event) {
+// launchNotes launches harnessName, lets the harness update it started
+// finish, and returns the timeline notes published on the run by then.
+func launchNotes(t *testing.T, e *testEnv, harnessName string, mode domain.LaunchMode) []events.Event {
 	t.Helper()
 	sub := e.subscribe(t)
 	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.member.ID, "task", harnessName, mode)
@@ -158,23 +158,37 @@ func launchNotes(t *testing.T, e *testEnv, harnessName string, mode domain.Launc
 	if run.Status != domain.RunRunning {
 		t.Fatalf("run status = %s, want running", run.Status)
 	}
+	waitHarnessUpdates(t, e)
+	marker, err := e.bus.Publish(t.Context(), events.Event{
+		WorkspaceID: e.ws.ID, RunID: run.ID,
+		Payload: events.TimelinePayload{Kind: events.TimelineNote, Message: "end of update notes"},
+	})
+	if err != nil {
+		t.Fatalf("publish marker: %v", err)
+	}
 	var notes []events.Event
 	for {
-		select {
-		case ev := <-sub.Events():
-			if ev.RunID != run.ID {
-				continue
-			}
-			if p, ok := ev.Payload.(events.TimelinePayload); ok && p.Kind == events.TimelineNote {
-				notes = append(notes, ev)
-			}
-			if p, ok := ev.Payload.(events.RunStatusPayload); ok && p.To == domain.RunRunning {
-				return run, notes
-			}
-		case <-time.After(waitTimeout):
-			t.Fatalf("timed out waiting for run %s to reach running", run.ID)
+		ev := waitTimelineEvent(t, sub, run.ID, events.TimelineNote)
+		if ev.ID == marker.ID {
+			return notes
 		}
+		notes = append(notes, ev)
 	}
+}
+
+// waitHarnessUpdates waits until no harness update runs.
+func waitHarnessUpdates(t *testing.T, e *testEnv) {
+	t.Helper()
+	waitFor(t, "harness updates to finish", func() bool {
+		e.sched.mu.Lock()
+		defer e.sched.mu.Unlock()
+		for _, state := range e.sched.harnessUpdates {
+			if state.running != nil {
+				return false
+			}
+		}
+		return true
+	})
 }
 
 func noteMessages(notes []events.Event) []string {
@@ -205,8 +219,8 @@ func TestHarnessUpdateUnreadableNewVersion(t *testing.T) {
 	installInHome(t, e, "claude")
 	rt.afterFails = true
 
-	_, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
-	want := []string{"updated claude from 2.1.0 (Claude Code) to an unknown version"}
+	notes := launchNotes(t, e, "claude", domain.LaunchTUI)
+	want := []string{"updated claude from 2.1.0 (Claude Code) to an unknown version for the next launch"}
 	if got := noteMessages(notes); !slices.Equal(got, want) {
 		t.Fatalf("notes = %q, want %q", got, want)
 	}
@@ -222,7 +236,7 @@ func TestHarnessUpdateCurrentIsQuietAndRechecksAfterInterval(t *testing.T) {
 	e, rt, clock := newUpdateEnv(t, nil)
 	installInHome(t, e, "claude")
 
-	if _, notes := launchNotes(t, e, "claude", domain.LaunchTUI); len(notes) != 0 {
+	if notes := launchNotes(t, e, "claude", domain.LaunchTUI); len(notes) != 0 {
 		t.Fatalf("notes = %q, want none for a current harness", noteMessages(notes))
 	}
 	clock.advance(harnessUpdateInterval - time.Minute)
@@ -244,7 +258,7 @@ func TestHarnessUpdateFailureStillLaunches(t *testing.T) {
 	rt.code = 1
 	rt.output = "Failed to fetch\x1b[0m latest version:\nnetwork unreachable\n"
 
-	_, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
+	notes := launchNotes(t, e, "claude", domain.LaunchTUI)
 	want := []string{"could not update claude from 2.1.0 (Claude Code): " +
 		"the updater exited 1: Failed to fetch[0m latest version: network unreachable"}
 	if got := noteMessages(notes); !slices.Equal(got, want) {
@@ -268,7 +282,7 @@ func TestHarnessUpdateTimeoutStillLaunches(t *testing.T) {
 	installInHome(t, e, "claude")
 	rt.release = make(chan struct{})
 
-	_, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
+	notes := launchNotes(t, e, "claude", domain.LaunchTUI)
 	want := []string{"could not update claude from 2.1.0 (Claude Code): " +
 		"the updater did not finish within 50ms"}
 	if got := noteMessages(notes); !slices.Equal(got, want) {
@@ -282,7 +296,7 @@ func TestHarnessUpdateCreateFailureStillLaunches(t *testing.T) {
 	installInHome(t, e, "claude")
 	rt.createErr = errors.New("runtime: create container: no space left on device")
 
-	_, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
+	notes := launchNotes(t, e, "claude", domain.LaunchTUI)
 	want := []string{"could not update claude: " +
 		"runtime: create container: no space left on device"}
 	if got := noteMessages(notes); !slices.Equal(got, want) {
@@ -360,79 +374,67 @@ func updateExecs(e *testEnv) int {
 	return n
 }
 
-// A launch that outwaits the update starts on the installed version, and the
-// update's result still lands on the run that started it.
-func TestHarnessUpdateWaitExpiresAndResultLandsLater(t *testing.T) {
+// A launch starts on the installed version while the update it started is
+// held, and the update's result lands on that run later.
+func TestHarnessUpdateDoesNotDelayLaunch(t *testing.T) {
 	t.Parallel()
-	e, rt, _ := newUpdateEnv(t, func(cfg *Config) { cfg.harnessUpdateWait = 50 * time.Millisecond })
+	e, rt, _ := newUpdateEnv(t, nil)
 	installInHome(t, e, "claude")
 	rt.after = "2.1.1 (Claude Code)"
 	rt.release = make(chan struct{})
 	sub := e.subscribe(t)
 
-	first := launchAsync(t.Context(), e)
+	results := launchAsync(t.Context(), e)
 	<-rt.started
-	_, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
-	want := []string{"starting the installed version 2.1.0 (Claude Code) while claude updates"}
-	if got := noteMessages(notes); !slices.Equal(got, want) {
-		t.Fatalf("waiting run notes = %q, want %q", got, want)
+	var launched launchResult
+	select {
+	case launched = <-results:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Launch waited for the held update")
 	}
-	trigger := awaitLaunch(t, first)
-	if trigger.err != nil || trigger.run.Status != domain.RunRunning {
-		t.Fatalf("triggering launch = %+v, want running", trigger)
+	if launched.err != nil || launched.run.Status != domain.RunRunning {
+		t.Fatalf("launch = %+v, want running", launched)
 	}
 	rt.releaseUpdate()
-	for {
-		ev := waitTimelineEvent(t, sub, trigger.run.ID, events.TimelineNote)
-		msg := ev.Payload.(events.TimelinePayload).Message
-		if strings.HasPrefix(msg, "starting the installed version") {
-			continue
-		}
-		if msg != "updated claude from 2.1.0 (Claude Code) to 2.1.1 (Claude Code)" {
-			t.Fatalf("result note = %q", msg)
-		}
-		return
+	ev := waitTimelineEvent(t, sub, launched.run.ID, events.TimelineNote)
+	if msg := ev.Payload.(events.TimelinePayload).Message; msg != "updated claude from 2.1.0 (Claude Code) to 2.1.1 (Claude Code) for the next launch" {
+		t.Fatalf("result note = %q", msg)
 	}
 }
 
-// While one update is held open, a second launch on the same home waits on
-// it instead of starting its own.
+// While one update is held open, a second launch on the same home starts
+// without starting its own.
 func TestHarnessUpdateRunsOncePerHome(t *testing.T) {
 	t.Parallel()
-	e, rt, _ := newUpdateEnv(t, func(cfg *Config) { cfg.harnessUpdateWait = 50 * time.Millisecond })
+	e, rt, _ := newUpdateEnv(t, nil)
 	installInHome(t, e, "claude")
 	rt.release = make(chan struct{})
 
-	first := launchAsync(t.Context(), e)
+	first := awaitLaunch(t, launchAsync(t.Context(), e))
 	<-rt.started
-	second, notes := launchNotes(t, e, "claude", domain.LaunchTUI)
-	if len(notes) != 1 || !strings.HasSuffix(noteMessages(notes)[0], "while claude updates") {
-		t.Fatalf("second launch notes = %q, want it to have waited on the running update", noteMessages(notes))
+	second := awaitLaunch(t, launchAsync(t.Context(), e))
+	for _, got := range []launchResult{first, second} {
+		if got.err != nil || got.run.Status != domain.RunRunning {
+			t.Fatalf("launch = %+v, want running", got)
+		}
 	}
 	if n, execs := len(rt.updates()), updateExecs(e); n != 1 || execs != 1 {
 		t.Fatalf("while held: update containers = %d, update execs = %d, want 1 and 1", n, execs)
-	}
-	firstRun := awaitLaunch(t, first)
-	if firstRun.err != nil {
-		t.Fatalf("first Launch: %v", firstRun.err)
 	}
 	rt.releaseUpdate()
 	waitFor(t, "the held update to finish", func() bool {
 		_, err := e.rt.get(rt.ids[0])
 		return errors.Is(err, runtime.ErrNotFound)
 	})
-	for _, id := range []domain.RunID{firstRun.run.ID, second.ID} {
-		e.waitStoreStatus(t, id, domain.RunRunning)
-	}
 	if n, execs := len(rt.updates()), updateExecs(e); n != 1 || execs != 1 {
 		t.Fatalf("after release: update containers = %d, update execs = %d, want 1 and 1", n, execs)
 	}
 }
 
-// Killing the run that waits for an update ends the run, not the install.
+// Killing the run that started an update ends the run, not the install.
 func TestHarnessUpdateKillDoesNotStopUpdate(t *testing.T) {
 	t.Parallel()
-	e, rt, _ := newUpdateEnv(t, func(cfg *Config) { cfg.harnessUpdateWait = 200 * time.Millisecond })
+	e, rt, _ := newUpdateEnv(t, nil)
 	installInHome(t, e, "claude")
 	rt.after = "2.1.1 (Claude Code)"
 	rt.release = make(chan struct{})
@@ -457,38 +459,13 @@ func TestHarnessUpdateKillDoesNotStopUpdate(t *testing.T) {
 	}
 }
 
-// A launch request that goes away while it waits leaves the update running.
-func TestHarnessUpdateSurvivesCancelledLaunch(t *testing.T) {
-	t.Parallel()
-	e, rt, _ := newUpdateEnv(t, nil)
-	installInHome(t, e, "claude")
-	rt.after = "2.1.1 (Claude Code)"
-	rt.release = make(chan struct{})
-	sub := e.subscribe(t)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	results := launchAsync(ctx, e)
-	provisioning := waitStatusEvent(t, sub, "", domain.RunProvisioning)
-	<-rt.started
-	cancel()
-	// Returns well before the 25-second wait: the cancelled request ended it.
-	awaitLaunch(t, results)
-	rt.releaseUpdate()
-	for {
-		ev := waitTimelineEvent(t, sub, provisioning.RunID, events.TimelineNote)
-		if msg := ev.Payload.(events.TimelinePayload).Message; strings.HasPrefix(msg, "updated claude") {
-			return
-		}
-	}
-}
-
 func TestHarnessUpdateHeadless(t *testing.T) {
 	t.Parallel()
 	e, rt, _ := newUpdateEnv(t, nil)
 	installInHome(t, e, "claude")
 	rt.after = "2.1.1 (Claude Code)"
 
-	_, notes := launchNotes(t, e, "claude", domain.LaunchHeadless)
+	notes := launchNotes(t, e, "claude", domain.LaunchHeadless)
 	if len(notes) != 1 || len(rt.updates()) != 1 {
 		t.Fatalf("headless launch: notes = %q, update containers = %d, want one update", noteMessages(notes), len(rt.updates()))
 	}

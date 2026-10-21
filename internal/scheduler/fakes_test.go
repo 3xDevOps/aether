@@ -712,7 +712,7 @@ func (g *fakeGit) RemoveRunCheckout(_ context.Context, run domain.RunID) error {
 }
 
 func (g *fakeGit) RemoveRunHistory(_ context.Context, run domain.RunID) error {
-	return os.RemoveAll(g.checkoutPath(run) + ".diffsnap")
+	return errors.Join(os.RemoveAll(g.checkoutPath(run)), os.RemoveAll(g.checkoutPath(run)+".diffsnap"))
 }
 
 func (g *fakeGit) StartDiffWatch(_ context.Context, workspace domain.WorkspaceID, run domain.RunID) error {

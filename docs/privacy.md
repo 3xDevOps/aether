@@ -427,6 +427,12 @@ which no other app can hold and which grants nothing.
   administrator deletes those first; what a run wrote stays in the data
   directory until it is deleted too ([teams.md](teams.md#roles)). The
   publisher holds no copy and cannot delete anything on your behalf.
+- Evidence: deleting a run, or the packet's 30-day expiry, removes its
+  evidence packets at once. The Git objects they retained stay in the
+  workspace repository until one background `git gc` runs there, 30 seconds
+  after the last such removal in that workspace. A gc that fails or runs
+  past 5 minutes logs `gitengine: evidence prune failed` and is retried at
+  the next hourly evidence sweep or server start.
 
 ## Children
 
