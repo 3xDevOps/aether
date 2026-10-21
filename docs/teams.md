@@ -1,54 +1,51 @@
 # Running Aether with a team
 
-One server, several people, everyone's agents side by side. Nothing here is a
-separate mode: a solo setup is a team of one, and turning it into a team is
-adding members.
+One Aether server can serve several people. Each person is a **member** with a
+**role**, and everyone's agents run side by side in the same **workspaces** (a
+workspace is one repository plus its settings). A solo setup is a team of one,
+so there is nothing to switch on: you add members.
 
-Prerequisite: the server is up and someone has linked to it, which made that
-person the admin. See [quickstart.md](quickstart.md).
+You need a running server and a first member, who is the admin. See
+[quickstart.md](quickstart.md). New terms are in the
+[glossary](README.md#concepts).
 
-## Joining
+## Join the server
 
-### Over a tailnet (primary)
+There are three ways to join. Pick the one that matches how your team reaches
+the server.
 
-This needs tailnet sign-in on the server. On a host with tailscaled,
-`aether-server setup` leaves it on only when you answer yes to its tailnet
-question ([install.md](install.md#first-boot)). The teammate joins your
-tailnet, then:
+| Method | Use it when | Who approves |
+| --- | --- | --- |
+| Tailnet | Everyone is on your Tailscale network | An admin, once per person |
+| Edge | People sign in with GitHub through an [edge](edge.md) (a relay that lets people reach the server without sharing a network) | The invitation, then a device approval |
+| Invite code | A person has neither, and you can send a code | Nobody: the code is the approval |
+
+### Over a tailnet
+
+The server must have tailnet sign-in on. `aether-server setup` turns it on when
+you answer yes to its tailnet question ([install.md](install.md#first-boot)).
+The teammate joins your tailnet and runs:
 
 ```sh
 aether link my-server
 ```
 
-That is the whole procedure. Tailscale proves who they are, the server
-registers them as a **pending collaborator**, and an admin approves:
+Tailscale proves who they are, and the server adds them as a pending
+collaborator. Until an admin approves them, their commands fail with
+`membership pending admin approval`.
 
 ```sh
-aether member list
-```
-
-```
-ID              NAME   ROLE          PENDING
-mem-50w1bcqm42  admin  admin
-mem-rbekp4h6fx  dana   collaborator  pending
-```
-
-```sh
+aether member list              # the PENDING column marks who waits
 aether member approve mem-rbekp4h6fx
 ```
 
-Until then their commands fail with `membership pending admin approval`.
-Approval is per person, once. `--tailnet-auto-join` on the server drops the
-approval step entirely, for teams whose tailnet already is the team.
-
-Full detail on tailnet identity, tagged nodes, and revocation is in
-[networking.md](networking.md).
+Start the server with `--tailnet-auto-join` to skip approval when your tailnet
+already is your team. [networking.md](networking.md) covers tailnet identity and
+revocation.
 
 ### Through an edge
 
-For servers enrolled with an edge ([edge.md](edge.md)), the relay that lets
-people sign in with GitHub instead of sharing a network or an SSH key. An
-admin invites the teammate's GitHub login, or the verified primary email of
+An admin invites a teammate by GitHub login, or by the verified primary email of
 their GitHub account:
 
 ```sh
@@ -56,1075 +53,315 @@ aether invite --github dana --role collaborator
 aether invite --email dana@example.com --role viewer
 ```
 
-```
-invite link: https://<edge host>/join/<server id>/<invitation id>#<secret>
-server id: <server id>
-send them the link; they open it, sign in with GitHub and join
-Under edge-access approved-devices, the default, their device waits until an admin approves it from the dashboard's Needs you card
-invited <account> as collaborator until <expiry> (invitation <invitation-id>)
-```
-
-`--role` is `viewer`, `collaborator` (the default) or `admin`. An email
-invitation matches the account whose primary email GitHub reports as
-verified, whatever its login: use it when you know the address but not the
-login. In the dashboard, Members › **Invite…** does the same and shows
-the link with **Copy link**. The link is shown once: it carries the
-invitation's join secret after the `#`, and the server keeps only a hash
-of it. Send it to the teammate. The part after `#` never reaches the edge:
-the client presents the secret inside SSH, after the server's host key
-proved the server id in the link.
-
-The teammate opens the link. The edge's [join page](edge.md#join-page)
-opens the desktop app at its Connect step, which has them sign in with
-GitHub if this machine is not signed in to that edge, then asks `Join
-<server id> as the invited account?`; **Join** joins. In a terminal:
+`--role` is `viewer`, `collaborator` (the default) or `admin`. The command prints
+an invite link of the form `https://<edge host>/join/<server id>/<invitation
+id>#<secret>`. It is shown once. In the dashboard, **Members → Invite…** shows it
+with **Copy link**. Send it to the teammate, who opens it and selects **Join** in
+the desktop app, or in a terminal runs:
 
 ```sh
 aether login
 aether link '<invite link>'
 ```
 
-```
-joined server <server id> as <name> (<role>)
-linked to server <server id> through <edge host> as <name> (<role>)
-```
+What happens next depends on the server's `edge-access` policy
+([edge.md](edge.md#turning-it-on)). Under `approved-devices` (the default), the
+teammate's device waits until an admin approves it from a **Needs you** card or
+[the commands below](#approve-devices), and `aether link` prints `waiting for an
+admin of <server> to approve this device (<label>, <fingerprint>)…`. Under
+`account`, signing in admits the device and creates the member at once.
 
-An invited account that connects without the link, with `aether link
-<server id>`, is refused with `<account> is invited to this server; open
-the invitation link the admin sent, or run: aether link <link>`, and
-nothing is recorded. A link with a wrong secret, or one already used, is
-refused with `the invitation link is not valid for this server: wrong,
-revoked or expired; ask the admin for a new one`. The edge refuses a
-revoked or expired invitation's link earlier, with `not a member of this
-server`.
+An invitation expires after 7 days, and an invited login or email matches only
+within 24 hours of the teammate's last GitHub sign-in at the edge. If you see
+`open this edge in a browser to confirm them`, open any edge page to sign in
+again. List and revoke invitations with `aether invite list` and `aether invite
+revoke <invitation-id>`.
 
-Under `account`, the join creates their member with the invited role, binds
-it to their account, and uses the invitation up. The member is not pending:
-the invitation admitted the account. Under `approved-devices` the join only
-records their device as waiting on the invitation. The app shows `Waiting
-for an admin of <server> to approve this device` with the device label and
-key fingerprint; `aether link` prints `waiting for an admin of <server> to
-approve this device (<label>, <fingerprint>)…`. When nobody can approve
-the device in the app, both show the server's refusal instead, which names
-`sudo aether-server device approve <code>`. Both try again every 5
-seconds until the device is admitted. Each admin's dashboard shows a Needs
-you card, `<label> (github <login>) wants to join as <role>`, and **Approve**
-there creates the member, binds the account and uses the invitation up
-([Devices](#devices)). An
-invitation matches a login or email only within 24 hours of the
-teammate's last GitHub sign-in at the edge, because a login or email can
-move to someone else; past that, `aether servers` leaves it out and
-connecting is refused with `open this edge in a browser to confirm them`.
-Opening any edge page, including the one `aether login` shows, signs them
-in with GitHub again. Upgrading to a server with join links removes the
-invitations and account links still open, and the devices waiting on them,
-since they carry no secret; issue them again.
-Invitations expire after 7 days:
+| Error | Meaning |
+| --- | --- |
+| `<account> is invited to this server; open the invitation link the admin sent, or run: aether link <link>` | They ran `aether link <server id>` instead of using the link |
+| `the invitation link is not valid for this server: wrong, revoked or expired; ask the admin for a new one` | The link was used, revoked or expired |
+
+### Approve devices
+
+Each client install is a **device** with its own key. Under `approved-devices`,
+every new device waits for approval, a member's own second laptop included.
+Approve from the dashboard's **Needs you** card, or:
 
 ```sh
-aether invite list
-aether invite revoke <invitation-id>
-```
-
-Without `--github` or `--email`, `aether invite` still mints the one-time
-invite code described [below](#by-invite-code-fallback).
-
-#### Linking and merging sign-ins
-
-A member is one person however they reach the server: a tailnet login, an
-SSH key, GitHub accounts at the edge, or several. Sign-ins are joined only
-by an explicit step that proves the person holds both; matching emails,
-logins or names never join them.
-
-**Linking a GitHub account to your member.** An admin who joined by SSH key
-or tailnet and is claiming the server uses **Connect my GitHub account** in
-Settings › Remote access, or from a linked terminal:
-
-```sh
-aether edge connect
-```
-
-That claims the server for the account this machine is signed in with at
-the server's edge, binds it to the admin's member, and approves this
-device ([edge.md](edge.md#server-id-and-claiming)). It is refused once
-the server has an owner. Any approved member links an account to their own
-member, never another's, by naming it, in the dashboard with **Link a
-GitHub account** under Profile › Sign-ins, or:
-
-```sh
-aether member link --github dana
-aether member link --email dana@example.com
-```
-
-```
-invite link: https://<edge host>/join/<server id>/<invitation id>#<secret>
-server id: <server id>
-github:dana can link to member <member id> until <expiry>: open the link on a device signed in with that account
-```
-
-Naming the account proves nothing. Opening that link while signed in with
-it, or `aether link '<invite link>'`, shows on that device:
-
-```
-This links your github account dana to the existing member Dana (<member id>), role collaborator; you will act as that member. device "dana-laptop", signed in as github account dana, is waiting for approval. ...
-```
-
-and binds nothing: under either policy the device waits on the link until
-you approve it from this SSH key, tailnet connection or an approved
-device, with **Approve** on its Needs you card or `aether device approve
-<device id>`, which binds the account. A link opened by anyone else is
-yours to deny. While the edge reports the server unclaimed, linking and
-inviting are refused ([edge.md](edge.md#server-id-and-claiming)); an
-ownerless server the edge has recorded keeps relaying and accepts both. A
-member has one open link at a time: a new one replaces it. Someone who is
-not a member yet is invited by an admin with `aether invite --github` or
-`--email`, which creates a new member for that account.
-
-**Merging two members.** Someone who reached the server two ways before
-linking them, say through Tailscale and through the edge with GitHub, is
-two members. Both sides take part: the one that mints a code accepts the
-merge the other proposes. On one sign-in:
-
-```sh
-aether member merge start
-```
-
-```
-merge code ABCD-EFGH-IJKL-MNOP, valid until <expiry>
-on your other sign-in run: aether member merge ABCD-EFGH-IJKL-MNOP, or open Profile > Sign-ins > Merge in the dashboard
-Anyone who enters this code can propose joining their sign-ins to your member; you will be asked to accept.
-then accept here: aether member merge accept
-```
-
-The code is shown once, kept on the server only as a SHA-256 hash, valid
-for 10 minutes and used once; a new `start` replaces your open one. On the
-other sign-in, enter it in the dashboard (below) or run:
-
-```sh
-aether member merge <code> [--keep <member id>] [--keep-admin] [--yes]
-```
-
-It prints both members (role, tailnet login, SSH key fingerprint, GitHub
-logins, device labels, runs and schedules), every sign-in the merged
-member will have, asks whose settings prevail (`1` or `2`) unless `--keep`
-names the member, lists exactly what of the other member is discarded,
-and asks `discard these settings and merge? [y/N]` unless `--yes`; without
-a terminal it needs both. That records a proposal, open for 10 minutes.
-Back on the first sign-in:
-
-```sh
-aether member merge accept [<proposal-id>] [--keep-admin] [--yes]
-```
-
-shows the same plan and the choice made, and merges on `y`; with more
-than one proposal open, name the one you mean. `--yes` accepts the plan
-it printed. `aether member
-merge cancel`, on either side, drops your open codes and proposals. Every
-step is refused on a connection that signed in with a device no person
-approved, under either policy.
-
-In the dashboard, Profile › Sign-ins lists the member's tailnet login,
-SSH key fingerprint, GitHub accounts and devices (`member.identity.list`,
-which the member or an admin reads). **Merge with another
-member** › **Get a merge code** shows the code with its countdown, and
-the proposal to accept appears there, in Sign-ins and on Needs you, with
-the choice made, what is discarded and the resulting role. **I have a
-merge code** previews both members side by side; choose whose settings to
-keep, tick **Discard the listed settings** and press **Propose merge**.
-Accepting asks for the same tick; either side cancels an open proposal
-there. Each refusal shows the server's error.
-Merge history lists `member.merge.list`.
-
-The member whose settings prevail survives with its id, display name,
-color, git identity, saved image, custom agents, profiles, home and the
-account shares it grants. The other member is absorbed: its GitHub
-accounts, devices (each keeping its status, revoked ones included),
-tailnet login or SSH key, runs with the agent account and home they run
-on, schedules, the finished swarms it owns, push subscriptions and the
-account shares it received become the survivor's, so the survivor reopens
-those runs. It stays as a
-tombstone that signs nothing in: history it made, such as events,
-comments, costs and swarm records, keeps naming its id, which
-`member.list` maps to the survivor (`merged_into`); the dashboard shows
-the survivor's name there, marked `(merged)`, and the CLI the old id. Its discarded settings are recorded, its account shares
-are revoked, and its home (agent logins, git signing key, files) moves to
-`<data-dir>/merged/<merge id>/home` on the server. That directory, owner
-only and outside every member's home and Files view, still holds live
-agent logins; once nothing in it is needed, the machine's administrator
-removes it with `sudo rm -r <data-dir>/merged/<merge id>`. The home is
-moved by renaming it, so `<data-dir>/homes` and `<data-dir>/merged` must
-be on one filesystem; otherwise the merge is refused with the rename's
-error (`invalid cross-device link`) and nothing changes. A merge
-interrupted after the move and before it was recorded, by the server
-stopping, has the home put back when `aether-server` next starts. The absorbed
-member's saved environment image is removed by cache cleanup, like a
-removed member's. A workspace mirror that fetched with its GitHub
-connection needs GitHub reconnected on the merged member. Its connections
-close and reconnect as the survivor.
-
-The merged member never gains a permission: it takes the lower of the two
-roles. When one of them is an admin, that side keeps it admin with
-`--keep-admin`: the admin who minted the code when accepting, or the admin
-who proposes. When the merged member is no longer an admin, the open
-invitations and links either member created are revoked, and so are the
-invite codes they minted ([By invite code](#by-invite-code-fallback)). A
-merge that would leave the server without an admin, or leave its owner's
-GitHub account at the edge on a member who is not an admin, is refused
-(`aether member transfer` first).
-
-A merge is refused, with what to do, when the code is unknown, expired or
-used; both members have a tailnet login, or both an SSH key; either is
-pending (`aether member approve <id>` first); either has a run that has
-not finished, an Environment terminal, a role in an open swarm (stop
-those first), a handoff still publishing (retry in a minute) or a finished
-run whose container the server still keeps, since it mounts the agent
-logins (merge once it is released, or `aether delete <run-id>`); or the members changed since the preview or proposal
-(`the members changed since the preview; preview again`). Entering your
-own code answers `already the same member`; accepting again from the
-merged member returns the recorded merge.
-
-```sh
-aether member merges   # your merges; an admin sees every one
-```
-
-lists each merge with the roles before and after, the connection that
-accepted it, the discarded settings, custom agent definitions included,
-and where the home went, so an admin can restore a setting by hand.
-Nothing undoes a merge.
-
-An admin makes another admin with a linked GitHub account the server's
-owner at its edge, as before deleting their own account
-([edge.md](edge.md#deleting-an-account)):
-
-```sh
-aether member transfer <member id>
-```
-
-Demoting an admin (`aether member role <id> collaborator`) revokes the open
-invitations and links they created. The server pushes at most 1000 members
-and open invitations to the edge; past that, `aether invite` is refused
-with `the edge directory already holds <n> members and open invitations,
-the most an edge accepts; revoke an open invitation first`.
-
-#### Devices
-
-Each client install is a **device** with its own device key. What a new
-device gets depends on the server's `edge-access` policy
-([edge.md](edge.md#turning-it-on)):
-
-- `approved-devices`, the default: every new device waits, a member's first
-  one included, and is refused until a person approves it. A device
-  signing in with an invited account waits on the invitation: nothing is
-  created until a person approves it, and that approval creates the member
-  with the invited role, or binds the account to the linked member, and
-  uses the invitation up. Several devices may wait on one invitation, such
-  as one an edge forged for the same login; approving one deletes the
-  others. A device that joins with another valid invitation's link becomes
-  a new device, with a new id, waiting on that invitation; an approval of
-  the device as it was shown before approves nothing, with `not found` by
-  id or `approval code "<code>" names device <new id>, not "<id>"; nothing
-  was approved` by code, and on the console `device <id> no longer waits
-  for approval as it was shown; nothing was approved: not found`. Only an admin approves a device waiting on an invitation, or the
-  member a link names. Revoking the invitation deletes its waiting devices;
-  once it expires they are no longer listed or approvable. A new or rotated
-  key is a new device.
-- `account`: signing in admits the new device, recorded as `registered`,
-  except a device joining with a link to an existing member, which waits
-  on the link as under `approved-devices`.
-
-A waiting device of an existing member is refused with:
-
-```
-device "dana-laptop", signed in as github account dana, is waiting for approval. An admin approves it from the dashboard's Needs you card, or you do, from an approved device of yours, or with:
-  aether device approve <device id>
-or on the server:
-  sudo aether-server device review
-```
-
-A device waiting on an invitation gets the same without `, or you do, from
-an approved device of yours`. Approval is one click. Every admin's
-dashboard shows the device as a Needs you card, and a member's approved
-devices show their own new one:
-
-| Device | Card | Shown to |
-| --- | --- | --- |
-| Waiting on an invitation | `<label> (github <login>) wants to join as <role>` | Admins |
-| A member's | `<label> (github <login>) signed in as <member>` | Admins |
-| Your own | `New device <label> signed in as you` | You, on an approved device |
-
-The card also shows the account, the key fingerprint and the member and
-role approving admits it as. **Approve** approves the device by its id, and
-**Deny** revokes it. The joining device is admitted on its next attempt.
-
-Only when the device admits as the server's only admin, and that admin has
-no approved device, can nobody approve it in the app. The refusal then
-carries its approval code instead:
-
-```
-device "ada-laptop", signed in as github account ada, is waiting for approval. Approve it from an approved device, SSH key or tailnet connection of this account, or as an admin:
-  aether device approve <code>
-or on the server:
-  sudo aether-server device approve <code>
-```
-
-The code is derived from the device key and shown only to that device;
-`aether device list` never shows it. At most 10 pending devices wait per
-account, and 10 per invitation; past that a new device is refused with `10
-devices of <account> are waiting for approval on this server already, so no
-new one is recorded`, and an admin approves or revokes the waiting ones.
-
-`aether device approve` takes a code or a device id and first shows what
-approving admits. The member a device belongs to follows from the account
-it signed in as, which the edge vouches for, so check that it is the
-member and role you expect: a code someone hands you can admit their key
-as your own member.
-
-```
-device "dana-laptop", key SHA256:<fingerprint>
-  signed in as: github account dana
-  admits it as: a new member, collaborator
-  accepts invitation <invitation id>
-Whoever holds this device gets that member's access. approve it? [y/N]:
-```
-
-Only `y` or `yes` approves. `sudo aether-server device approve <code>`
-shows the same and asks the same, and the dashboard's Members > Devices tab
-shows it in a dialog before **Approve** when you type a code there.
-
-```sh
-aether device list                 # yours; an admin sees every member's, and those waiting on invitations; never shows codes
-aether device approve <code or device-id>   # the member, or an admin
+aether device list                         # yours; an admin sees everyone's
+aether device approve <code or device-id>
 aether device revoke <device-id>
-sudo aether-server device approve <code>   # on the server
-sudo aether-server device review           # every registered and pending device, to approve or revoke
+sudo aether-server device review           # on the server
 ```
 
-`aether device list` names the account each device signed in as, and the
-invitation a device waits on:
+`aether device approve` shows who the device would be admitted as and asks
+`approve it? [y/N]`. Check the member and role first: whoever holds an approved
+device gets that member's access. If the only admin has no approved device, the
+refusal includes a code, and the admin runs `sudo aether-server device approve
+<code>` on the server. At most 10 devices wait per account.
 
-```
-ID           MEMBER                     ACCOUNT      LABEL        STATUS    KEY                   LAST SEEN
-<device id>  <member id>                github dana  dana-laptop  approved  SHA256:<fingerprint>  <time>
-<device id>  invitation <invitation id>  github erin  erin-laptop  pending   SHA256:<fingerprint>
-```
+### By invite code
 
-`aether device approve` and a one-time invite code (`aether invite`
-without `--github` or `--email`) are refused on a connection that signed
-in with a device no person has approved, under either policy, so a device
-never approves itself and a later switch to `approved-devices` inherits
-nothing. Under `approved-devices`, inviting, unlinking an account,
-changing a role, approving a tailnet member and transferring ownership
-are refused on such a connection too; linking an account and every merge
-step are refused on it under either policy. A device key belongs to the edge account it first signed in
-with: a grant naming another account with that key is refused. The direct
-SSH path accepts approved device keys only.
-
-#### A member's edge accounts
-
-```sh
-aether member identities <member-id>                  # the member's accounts, and each device with the account it signed in as
-aether member unlink <member-id> github:<user id>     # the identity as identities prints it
-```
-
-Unlinking removes one account from the member when it was linked while
-someone else held it: the devices that signed in with it are revoked and
-their connections closed, and the member, its role, its other accounts, SSH
-key and tailnet identity stay. The member or an admin may do both. A
-member links an account to themself again with `aether member link` and its
-link, an admin also or with **Connect my GitHub account** while the server has no owner;
-an admin who has no other way in is restored on the machine
-([edge.md](edge.md#console-recovery)).
-
-A server built from the `v0.5.2-alpha.3` tag that used an edge with Google
-sign-in, which only such builds had, may list identities as
-`google:<subject>`, and invitations as `google:<email>` in `aether invite
-list`. They admit nobody: the edge directory leaves them
-out, and a grant naming a Google account is refused with `sign-in provider
-"google" is not supported: Aether signs in with GitHub only`. `aether
-member transfer` refuses a member whose only identity is one of them.
-Remove them with `aether member unlink <member-id> google:<subject>` and
-`aether invite revoke <invitation-id>`.
-
-#### Revocation
-
-| Revoke | Command | Effect |
-| --- | --- | --- |
-| A member | `aether member remove <id>` | Identity and devices deleted, directory updated, live connections closed |
-| A device | `aether device revoke <id>`, or **Deny** on its Needs you card | That device key refused on every path; its connections closed |
-| One edge account of a member | `aether member unlink <member-id> github:<user id>` | Account unbound; the devices that signed in with it revoked and their connections closed; the member stays |
-| A device token | `aether logout`, or the edge's Devices page | No further relayed connections; live relayed ones closed. The device key stays approved on the server, so a direct connection with it still works |
-| An edge account | The edge's Account page, whose address `aether logout --delete-account` prints | Each server removes that identity and its edge devices and closes their connections, direct ones included; the member, its role and its SSH keys and tailnet identity stay ([edge.md](edge.md#deleting-an-account)) |
-| An invitation | `aether invite revoke <id>` | Removed from the directory; its link stops working and the devices waiting on it are deleted |
-| A server | `sudo aether-server edge leave`, or the edge's Servers page | Unenrolled; members keep direct and tailnet access |
-
-### By invite code (fallback)
-
-For people connecting from outside a tailnet. An admin mints a one-time code:
+For someone with neither a tailnet nor a GitHub sign-in. An admin mints a
+one-time code, and the teammate redeems it, which registers their SSH key:
 
 ```sh
 aether invite --ttl 3600      # seconds; default 86400
-```
-
-The teammate redeems it, which registers their SSH key and burns the code:
-
-```sh
 aether link my-server:2222 --invite <code> --name "Dana"
 ```
 
-```
-linked to my-server:2222 as Dana (collaborator)
+The member is a collaborator at once, because the code was the approval. A code
+stops working when the admin who minted it stops being an admin.
+
+### Link or merge sign-ins
+
+One person can reach the server through a tailnet login, an SSH key and GitHub
+accounts. They join one member only through an explicit step. Matching emails or
+names never join them.
+
+To add a GitHub account to your own member, use **Profile → Sign-ins → Link a
+GitHub account**, or `aether member link --github dana`. Open the link it prints
+while signed in with that account, then approve the new device from your existing
+sign-in.
+
+Someone who already became two members can merge them. Run `aether member merge
+start` on one sign-in, which prints a code valid for 10 minutes. On the other:
+
+```sh
+aether member merge <code> [--keep <member id>] [--keep-admin] [--yes]
+aether member merge accept       # back on the first sign-in
 ```
 
-Invited members are collaborators immediately - no approval step, because the
-code was the approval. Nobody needs shell access to the server box to join.
-A code stops working once the admin who minted it is no longer an admin,
-and a merge that demotes them deletes it for good.
-A code minted by an older server, which did not record who minted it,
-lasts until it expires.
+Both commands show the members and what is discarded before you confirm. The
+survivor keeps the other member's runs, schedules, devices and accounts, and
+takes the lower of the two roles (`--keep-admin` keeps an admin). The absorbed
+member's home moves to `<data-dir>/merged/<merge id>/home` and still holds agent
+logins, so remove it with `sudo rm -r` when nothing in it is needed. Nothing
+undoes a merge. It is refused, with the reason, when either member is pending or
+has an unfinished run, terminal or swarm role.
+
+### Remove access
+
+`aether member remove <id>` deletes a member and their environment and closes
+their connections. `aether device revoke <id>` refuses a device key everywhere.
+`aether member unlink <member-id> github:<user id>` unbinds one GitHub account
+and revokes the devices that signed in with it. `aether invite revoke <id>` kills
+a link.
+
+`aether member remove` fails with `in use` while runs or schedules still belong
+to the member. Delete those first. `aether member transfer <member id>` makes
+another admin the server's owner at its edge.
 
 ## Roles
 
-Three capabilities on runs - **view**, **steer** (attach-write, message,
-approve, pause), **kill** - plus **push** to the workspace repo and
-`workspace_admin`, bundled into roles:
-
-| Role | Own runs | Others' runs | Workspace |
+| Role | Own runs | Other members' runs | Workspace |
 | --- | --- | --- | --- |
-| viewer | - | view | read the feed |
-| collaborator (default) | everything | view, steer, kill | launch runs, push, use templates |
-| admin | everything | everything | members, workspaces, budgets, templates, settings, server self-update |
+| viewer | Cannot launch | View | Read the feed |
+| collaborator (default) | Everything | View, message, steer, stop | Launch runs, push, use templates, set schedules, add memory notes |
+| admin | Everything | Everything | Also members, workspaces and their settings, budgets, saving templates, `aether server update` |
 
-The viewer row is a real choice, not a placeholder: `aether member role <id>
-viewer` assigns it. It is for the person who should watch the work and read the
-feed without being able to start, message, or kill anything.
+Everyone who joins is a collaborator, so teammates can message and stop each
+other's agents with no setup. Every such act is recorded in the workspace
+timeline with who did it. Change a role with `aether member role <id>
+viewer|collaborator|admin`. It applies to connections that are already open: a
+demoted member's live attach drops with `detached: you can no longer control
+this run`.
 
-A separate **message** capability covers agent-to-agent coordination mail
-between runs in one workspace: the runs of a collaborator or admin can message
-any live run there, except a protected run of another member, which only its
-owner's runs, admins' runs, and runs it overlaps or shares a swarm with can
-reach. The message-others policy below restricts it the same way: under
-`admins-only`, a collaborator's runs reach other members' runs only over a
-shared swarm or a file overlap. A viewer's runs cannot message any run, swarm
-and overlap peers included, except to answer a question it was asked, and a
-demotion applies to the next message; see
-[Conflict radar](#conflict-radar).
+The last admin cannot be removed or demoted: `refusing to delete the last admin`
+or `refusing to demote the last admin`. Admin-only commands fail for others with
+`aether: rpc error -32001: workspace.add requires the admin role`.
 
-**Everyone is a collaborator by default, on purpose.** Teammates can message and
-control each other's agents with zero setup; every privileged act is attributed in the
-workspace timeline instead of being prevented.
-
-The first identity to link a fresh server becomes the admin and everyone who
-joins afterwards is a collaborator, but an admin can change that:
+To limit who can control runs:
 
 ```sh
-aether member role mem-rbekp4h6fx viewer
+aether protect <run>                                    # owner and admins only
+aether workspace settings --message-others admins-only  # every member's runs
+aether workspace settings --message-others everyone     # the default
 ```
 
-```
-set mem-rbekp4h6fx dana to viewer
-```
-
-`member list`, `member approve`, `member color`, `member git`, `member role`
-and `member remove` are the member surface. Two rules hold no matter what you
-type. **The last admin can neither be removed nor demoted** - `refusing to
-delete the last admin` and `refusing to demote the last admin` - because a
-server with no admin has no way back. **A role change lands on connections
-that are already open**, not at next login: the role is re-read from the
-store on every request, so a demotion takes effect mid-session. A live write
-attach is re-checked every few seconds and dropped when steer goes away -
-`detached: you can no longer control this run` - and `aether attach
---read-only` still shows the terminal afterwards. `member remove` first stops
-and destroys that member's environment, then deletes the member row
-and erases their member home. If cleanup fails, the command returns the
-runtime error and leaves the member in place so an admin can retry. **It
-refuses while any row still references the member** - runs (including one
-the member launched and handed off, since its container mounted their home),
-schedules and pushed profile snapshots reference members with no cascade, so
-the delete returns `in use` - and an admin deletes those first; what a run
-wrote stays in the data directory until the run is deleted. A successful
-removal ends every attach and live sync of theirs.
-
-Setting someone to the role they already hold is a harmless no-op, and a
-pending member's role can be changed before they are approved - approval and
-role are separate questions.
-
-Admin-only commands answer with a clear error otherwise:
-
-```
-aether: rpc error -32001: workspace.add requires the admin role
-```
-
-`aether server update` is gated the same way: `rpc error -32001: server.update
-requires the admin role` for anyone but an admin. Any member can still read
-`aether server update --status`. See [install.md](install.md#upgrading) for
-the command.
+A refused member sees `workspace restricts steer of others' runs to their owner
+and admins`. `aether unprotect <run>` lifts a protection.
 
 ## Workspaces
 
-A workspace is the whole shared scope. It is a repository plus workspace
-settings; a run and its shells use the launching member's saved image, or the
-server's standard image when that member has not saved one. See
-[environments.md](environments.md) for image selection and saving. Everything
-the team shares hangs off the workspace: runs, the event feed, the approval
-inbox, presence, templates, schedules, costs, and the budget. One workspace
-normally covers one project.
+A workspace is a repository plus its settings. Runs, the activity feed, the
+approval inbox, templates, schedules, costs and the budget all belong to one. A
+run and its shells use the launching member's saved image, or the server's
+standard image ([environments.md](environments.md)).
 
-Creating one is an admin operation:
+An admin creates a workspace. In the dashboard, open **Manage workspaces** from
+the workspace selector, select **Add workspace**, choose **GitHub**, pick a
+repository you can read and accept its first revision. From the CLI:
 
 ```sh
 aether workspace init myproject [--base <branch>]
 aether workspace add myproject [--base <branch>]
 ```
 
-In the dashboard, open **Manage workspaces** from the workspace selector or
-the command palette and press **Add workspace**. Choose **GitHub** to connect
-your account, select a repository you can read, and review and explicitly
-accept its initial revision. Private collaborator repositories do not need
-repository-admin access or a deploy key. The picker uses the repository's
-default branch; advanced choices let you change the branch, workspace name,
-and independent publishing destination.
-
-Onboarding and the administrator's **Settings** GitHub section use the same
-connection and repository flow, so an additional repository can reuse your
-login. Manual Git URL import (public HTTPS or a private deploy key) and
-**Create from local clone** remain alternatives. Local-clone selection needs
-the desktop app or `aether gui`; a hosted gateway shows the desktop and CLI
-handoff instead of browsing your computer.
-
-For a local clone, select its existing base branch when creating the workspace,
-then link its absolute path and use **Push now**. For a remote import, creation
-retains a workspace even if configuring or fetching fails. On that
-workspace's repository page (**Repository** in the workspace selector),
-repair the source, verify it, and explicitly adopt the reviewed commit at its
-configuration generation; do not import again. Link or relink a clone later
-from the same page.
-
-An admin can permanently delete an inactive workspace by name or ID:
-
-```sh
-aether workspace delete myproject --yes
-```
-
-`--yes` is required. In **Manage workspaces**, admins use **Delete…** in the
-workspace's row menu and confirm
-**Delete workspace** in the warning dialog. Both remove the workspace, finished
-runs (including completed runs), retained containers, checkouts, transcripts, evidence,
-integration candidates, swarms, templates, budget, costs, timeline,
-repository branches, and server-side mirror keys. Member accounts, homes,
-local clones, and upstream repositories remain. Revoke any remote mirror
-deploy key separately.
-
-Deletion never force-stops active work. Close or stop queued, provisioning,
-running, and needs-attention runs; wait for runtime cleanup and pending
-swarm attempts or candidate verifications/delivery to settle; remove
-schedules first. A swarm awaiting its initial integrator launch also blocks
-deletion. The error names the blocker. In-flight control, Git, or live-sync
-operations on that workspace return `workspace operations are in progress;
-retry deletion when they finish`. Unrelated Git transfers and live overlays
-do not block deletion. If filesystem or runtime cleanup fails, the workspace
-remains so an admin can retry; data already removed is not restored.
-
-Four settings belong to the workspace rather than to any run in it:
-
-- **The base branch** is what every new run's worktree is cut from. `--base`
-  sets it at creation; it defaults to `main`.
-- **The checkout Origin** is the git URL every new run checkout gets as its
-  `origin` remote - the place a run branch can be pushed for review. Normally
-  the first `aether link --repo` (or **Link local repository** in the dashboard)
-  reads that clone's own `origin` and records it.
-  Recording happens only when the caller may push - a viewer may not - and the
-  clone's origin is one the server accepts. When either does not hold, the link
-  succeeds and nothing is recorded; set it later with `aether workspace origin`.
-  **First one wins.** A later link from a teammate whose clone points somewhere
-  else does not overwrite it, so one member's fork cannot silently redirect
-  everyone's runs. Change it deliberately:
-
-  ```sh
-  aether workspace origin --workspace myproject
-  aether workspace origin --workspace myproject https://github.com/acme/myproject.git
-  aether workspace origin --workspace myproject --clear
-  ```
-
-  A `github.com` origin in scp-like or ssh form - `git@github.com:acme/app.git`
-  or `ssh://git@github.com/acme/app.git` - is recorded as
-  `https://github.com/acme/app.git`. gh's credential helper authenticates
-  HTTPS only and nothing in the member home authenticates SSH, so the HTTPS
-  form is the one a run can push to. Every other host is recorded verbatim.
-  Its native Git credentials and upstream write permission remain the member's
-  responsibility. A source mirror never grants publishing access: neither a
-  read-only deploy key nor another member's GitHub source binding supplies
-  your run's credentials. The GitHub picker shows a proposed writable
-  destination before import; review it, change it, or leave it unset.
-
-  The remote is set when a run's checkout is created, so a change reaches new
-  runs only; runs already going keep the URL they were given. With no checkout
-  Origin recorded, run checkouts have no usable `origin`, but `aether pull`
-  still brings their server branch into your clone.
-- **The source mirror** is optional and separate from checkout Origin. A
-  workspace with no mirror is **local-only**: collaborators and the daemon
-  may push its base branch in the normal way. An administrator can configure a
-  read-only upstream source:
-
-  ```sh
-  aether workspace mirror configure --workspace myproject \
-    --source https://github.com/acme/myproject.git --branch main --auth public
-  ```
-
-  `--branch` defaults to the workspace base branch. Public mode fetches
-  credential-free HTTPS. For a private GitHub source, connect your own
-  GitHub account on this server, then use:
-
-  ```sh
-  aether workspace mirror configure --workspace myproject \
-    --source https://github.com/acme/myproject.git --branch main --auth github
-  ```
-
-  GitHub mode requires the canonical HTTPS URL ending in `.git`. The optional
-  `--github-account-id <numeric-id>` asserts the expected account; a mismatch
-  is refused rather than binding a different account. Without it, configuration
-  binds the current caller's verified native GitHub account. It cannot name
-  another member's credential owner. Read access is enough; upstream push or
-  repository-admin permission is not required.
-
-  The server reads your native member-home gh login for each refresh and
-  stores only your member/numeric-account binding, not the token. Native gh
-  scopes can be broad: fetch-only operation is not a read-only token scope.
-  Importing deliberately shares the source code with the workspace, not your
-  GitHub token. If the token expires, is revoked or logged out, your member
-  is removed, or the active GitHub account changes, refresh fails without
-  moving the accepted base. Reconnect the same account as the authorizing
-  member, or explicitly configure the mirror again as the admin/account that
-  should own the binding. See
-  [security.md](security.md#workspace-source-mirrors).
-
-  Alternatively, use `--auth deploy-key` with the GitHub HTTPS URL. Aether
-  prints a public key and the exact
-  `https://github.com/<owner>/<repo>/settings/keys/new` URL. Add the key as a
-  read-only repository deploy key, then verify it. For generic SSH, use
-  `--auth deploy-key` with an `ssh://` source and
-  `--known-hosts-file <file>` containing a host key verified with the host
-  administrator, not a blindly trusted scan. The private key is never printed
-  or sent to a member. Installing the public key needs upstream repository
-  administration; an Aether admin role alone does not grant that access.
-
-Configuration starts **pending**. On the dashboard's repository page, open
-the source mirror and use **Verify** or **Refresh**; from the CLI:
-
-  ```sh
-  aether workspace mirror refresh --workspace myproject
-  aether workspace mirror status --workspace myproject
-  ```
-
-  The panel shows source, branch, accepted and observed candidate commits,
-  and check times. A newly imported source needs explicit adoption before the
-  first run; fetching alone is not approval. A subsequent forward-only update
-  becomes **ready** and moves the mirrored base. A rewrite or local/server divergence retains the
-  candidate without moving the accepted base; an administrator must review
-  and explicitly **Adopt candidate** (`aether workspace mirror adopt
-  --workspace myproject --generation <n> --commit <reviewed-sha> --yes`).
-  Generation pins the source configuration; the full SHA pins the code reviewed
-  (the API requires `expected_commit`). A refresh can change the candidate at
-  the same generation. The server rejects a stale reviewed SHA before changing
-  any base, accepted, or candidate ref; refresh the review and explicitly
-  accept the new revision in the existing workspace rather than importing again.
-  **Disable** requires
-  confirmation and returns the workspace to local-only. It does not log out
-  or revoke a native GitHub login. Remove any remote deploy key separately,
-  because disabling cannot revoke it at the provider either.
-- **The message-others policy** decides whether collaborators may
-  message, control and kill each other's runs. It is permissive by default;
-  an admin restricts it to owners and admins:
-
-  ```sh
-  aether workspace settings                              # show
-  aether workspace settings --message-others admins-only
-  aether workspace settings --message-others everyone    # back to the default
-  ```
-
-  The repository page's **Messages to others' runs** row has the same
-  switch under **Change…**. A member
-  refused by it reads
-  `workspace restricts steer of others' runs to their owner and admins`.
-  `aether protect <run>` does the same for one run alone, whatever the
-  policy; `aether unprotect <run>` lifts it. Both are for the run's owner or
-  an admin, and both land on anyone already attached.
-
-Scoped commands - `run`, `budget`, `cost`, `inbox`, `who`, `timeline`,
-`template`, `schedule` - take `--workspace <name-or-id>` and default to the
-only workspace when there is exactly one. Explicit selectors keep commands
-unambiguous as you add workspaces. With more than one they insist:
-`--workspace is required when more than one workspace exists`.
-
-Two commands sit outside that rule. `aether runs` takes no `--workspace` at
-all: it lists every run you can see, so a teammate's work in another workspace
-is never hidden from you. And `aether profile push --allow-secret` requires
-`--workspace` outright, with no default, because the override is only worth
-recording against a named timeline.
-
-Every member links their own clone to the server:
+Each member links their own clone, which adds an `aether` git remote:
 
 ```sh
 aether link my-server --repo ~/code/myproject
 ```
 
-which adds the `aether` git remote. Run branches (`aether/run-*`) are
-server-owned - clients cannot force-push or delete them, because the branch is
-the artifact. Every other branch behaves like a normal git remote.
+Branches named `aether/run-*` belong to the server and cannot be force-pushed or
+deleted. Every other branch behaves like a normal git remote. `aether pull`
+brings a run branch into your clone.
 
-The checkout Origin does not change workspace base ownership. For run
-completion, Aether publishes each run's `aether/run-*` branch to the workspace
-repo; candidate delivery is a separate review path, not another run-branch
-publication. `aether pull` still brings a published run branch into your clone.
-Pushing that run branch to checkout Origin is somebody's own act: the agent
-inside the run can `git push origin <branch>`, or you can push it from your
-clone after reviewing and merging.
+| Setting | Default | What it does |
+| --- | --- | --- |
+| Base branch | `main` | New runs branch from it. Set with `--base` at creation |
+| Checkout origin | The `origin` of the first clone linked | The git URL each run checkout gets as `origin`, where a run branch can be pushed for review |
+| Source mirror | Off (local-only) | Follows an upstream repository read-only |
+| Message-others policy | `everyone` | Whether collaborators can message and stop each other's runs |
 
-## Candidate integration
+A later clone that points elsewhere does not overwrite the checkout origin.
+Change it on purpose; a change reaches new runs only:
 
-Candidate integration is the review boundary for combining retained run
-submissions. It does not change run ownership or the swarm scheduler. A
-candidate is prepared from an ordered list whose entries carry
-`workspace_id`, `run_id`, `evidence_ref`, and `retained_revision`, plus a full
-`target_ref` in the form `refs/heads/<branch>` and its exact
-`expected_target_revision`. Optional `required_sources` names are checked
-while the packet is copied; a required unavailable or truncated source fails
-preparation rather than becoming an empty observation. The candidate stores an
-evidence snapshot and candidate-owned Git refs and transcript artifacts, so
-later source cleanup does not change what was reviewed.
-Packet snapshots are bounded to 1 MiB total per candidate.
+```sh
+aether workspace origin --workspace myproject https://github.com/acme/myproject.git
+aether workspace origin --workspace myproject --clear
+```
 
-Assembly happens in a server-owned isolated checkout, never in a live run
-checkout. Inputs are applied in their submitted order while preserving each
-source base. A conflict leaves the journal and checkout available for explicit
-file resolutions; the candidate freezes only after every input is applied.
-Once frozen, its candidate revision and inputs cannot be edited. The review
-surface labels evidence as observations: a server verification records the
-exact argv, observed image, runtime identity and working directory, bounded
-resource and timeout details, setup/environment provenance, exit and bounded
-output, and checks that the frozen tree was not changed, but a passed
-verification is not proof of semantic correctness.
+A `git@github.com:` address is stored as its HTTPS form, because runs can
+authenticate over HTTPS only.
 
-Delivery is a human gate over the exact candidate revision, verification IDs,
-target ref, expected target revision, and action, except for a swarm: its
-integrator's verified candidate is approved on behalf of the swarm's
-accountable human, with no human step; see
-[integration.md](integration.md). The caller and approver must
-still be active members with the existing **Push** capability when the action
-is performed; no candidate operation grants a new permission. On a local
-target, `update_ref` uses an atomic expected-old compare-and-swap and refuses
-if the target moved. A mirrored target cannot be updated directly: `proposal`
-creates the public `refs/heads/aether/proposal-<request-id>` ref and a private
-receipt without changing the upstream-owned base. A human fetches that proposal
-and pushes it through the normal protected upstream review route; **proposed**
-does not mean landed.
+### Source mirror
 
-Candidate-owned evidence has its own bounded lifetime: candidates live for 30
-days, and verification results and delivery requests expire no later than the
-candidate (verification validity is 24 hours). Original evidence packets may
-be deleted or expire after ownership transfer without deleting the candidate's
-copies. A missing or checksum-mismatched owned artifact makes the candidate
-unavailable and blocks verification and delivery; it is never silently
-reconstructed from the original packet. Expiry or deletion first fences new
-actions, then cleans owned resources; recoverable resources remain when that
-transition or cleanup cannot be completed. See [integration.md](integration.md)
-for the method-level contract and [failure-handling.md](failure-handling.md)
-for restart and cleanup behavior.
+A local-only workspace lets collaborators push the base branch directly. A
+mirror makes an upstream repository own it instead. An admin configures one:
 
-In a **local-only** workspace, the base branch is client-writable. It is
-usually already there by the time the second member links: whoever created the
-workspace pushed it. Nothing guarantees that, so **Push now** in onboarding or
-workspace repository settings compares your clone with the workspace's base
-branch before it pushes, and reports
-what it found instead of failing with git's
-`! [rejected] main -> main (fetch first)`:
+```sh
+aether workspace mirror configure --workspace myproject \
+  --source https://github.com/acme/myproject.git --branch main --auth github
+aether workspace mirror refresh --workspace myproject
+```
 
-- **Not there yet** - nobody has pushed the branch. Your clone seeds it,
-  exactly as the first member's would.
-- **Level** - both sides are the same commit. Nothing to push; carry on.
-- **Your clone is ahead** - you cloned, then committed. The push runs as
-  usual.
-- **The workspace is ahead** - your clone is missing commits a teammate
-  pushed. **Fast-forward my clone** moves your branch up to the workspace's
-  commit, fast-forward only: no merge commit, and the commits you made are
-  never rewritten. With another branch checked out, only the branch ref
-  moves and your working tree is left alone; an uncommitted change the
-  fast-forward would overwrite stops it, in git's own words.
-- **Diverged** - you both committed since. Aether does not force-push and
-  does not merge for you; the wizard prints the `git fetch`, `git log`,
-  `git rebase` and `git push` commands and you decide.
+`--auth` is `public`, `github` (your own GitHub login on the server, read access
+is enough) or `deploy-key` (Aether prints a public key to add as a read-only
+deploy key). A new mirror starts pending: verify it and adopt its first revision
+before the first run. Fast-forward updates apply on their own. If upstream
+rewrote history, the base stays put until an admin reviews the candidate and runs
+`aether workspace mirror adopt --workspace myproject --generation <n> --commit
+<reviewed-sha> --yes`. `aether workspace mirror status` shows where it stands.
 
-In a **mirrored** workspace, the source mirror owns the base branch. `git push
-aether <base>` and the dashboard's **Push now**/`repo.push` are rejected by
-design, as are local-daemon base pushes:
+Pushing a mirrored base branch is rejected. Update the upstream and refresh:
 
 ```
 aether: rejected write to protected ref refs/heads/<base>: this mirrored base is owned by the upstream; use the configured upstream to update it
 ```
 
-Do not work around that rejection: an administrator refreshes the mirror,
-reviews a retained candidate, and uses **Adopt candidate** only when a rewrite
-or divergence is intentional. Runs always branch from the accepted mirror
-commit captured at launch.
+A scheduled run refreshes the mirror first and creates no run if that fails. See
+[security.md](security.md#workspace-source-mirrors).
 
-## Working together
+### Delete a workspace
+
+```sh
+aether workspace delete myproject --yes
+```
+
+This removes the workspace with its runs, checkouts, transcripts, swarms,
+templates, budget and costs. Member accounts, local clones and the upstream
+repository stay. It never stops work: stop active runs and remove schedules
+first. The error names what blocks it.
+
+## Work together
+
+Commands that depend on a workspace take `--workspace <name-or-id>` and default
+to the only workspace. With several, they insist: `--workspace is required when
+more than one workspace exists`. `aether runs` lists runs from every workspace.
 
 | Command | What it does |
 | --- | --- |
-| `aether runs` | Every run you can see, colored by owner, with conflict warnings. `STATUS` is the dashboard label of a live run's [state](failure-handling.md#run-activity) (`Working`, `Waiting for agents`, `Waiting for CI`, `Waiting for process`, `Waiting`, `Needs you`, `Failed`, `Disconnected`), else of its status (`Queued`, `Provisioning`, `Running`, `Needs attention`, `Completed`, `Merged`, `Closed`, `Failed`, `Interrupted`). A reported success, live or completed, reads `Ready for review` until you mark it complete or later; an older parked success reads `Finished`. A notice counts the runs that need you; `--needs-you` lists only them, including runs whose review is `ready`. Archived runs are hidden; `--archived` lists only those, with their deletion date. |
-| `aether who` | Who is online and which runs they are watching. |
-| `aether attach [--read-only] <run>` | Raw PTY passthrough. Multiple people can attach at once; write access needs steer, and without it the attach falls back to read-only by itself. |
-| `aether message <run> "..."` | Send a message to a running agent. Renders as a banner in your member color. |
-| `aether pause` / `resume` / `kill <run>` | Suspend, thaw, terminate. Worktree and transcript survive a kill. |
-| `aether delete <run>` | Stop the run if it is live, then remove its checkout, transcript, captures, and run records. Needs the same permission as `kill`. A published run branch stays in the workspace repo and the timeline keeps the history. |
-| `aether archive <run>` / `unarchive <run>` | Hide a finished run from the board and default `aether runs`, or restore it. Needs the same permission as `kill`; only a merged, abandoned, failed, or interrupted run can be archived. Archiving itself removes nothing; the server deletes the run on the printed date. See [failure-handling.md](failure-handling.md) for what the checkout TTL GC reclaims sooner. |
-| `aether protect` / `unprotect <run>` | Limit messaging, controlling and killing one run to its owner and admins, whatever the workspace policy says. |
-| `aether handoff <run> <member>` | Transfer ownership and notification routing immediately. The recipient needs no acceptance handshake; Aether records the actor and both owners and captures handoff context. The agent account and its cost attribution do not change. |
-| `aether close <run> --outcome merged\|abandoned` | Record the finish outcome and clear a finished run off **Needs you** after its automatic evidence capture. |
-| `aether inbox` | The shared approval queue; `aether inbox approve\|deny <request-id>` decides, and any member with **steer** on the run can. `--all` includes decided requests. |
-| `aether timeline` | The workspace's whole history; filter with `--run`, `--member`, `--type`, `--limit`, export with `--jsonl`. |
-| `aether memory ls\|search\|show\|add\|pin\|unpin\|rm\|brief` | Read and curate the workspace's [team memory](memory.md): the notes runs search and the brief each new run gets. See [Team memory](#team-memory). |
-| `aether cost --runs` | Token spend per member and per run. |
-| `aether budget` | The workspace's spend cap and what has been used. |
-| `aether sync --live <local-dir> <run>` | Live-overlay a local directory onto a run's worktree. Local edits that collide are preserved as `*.aether-conflict` files. |
-| `aether forward <run-id|terminal> <port> [--local <port>]` | Forward a run or Environment port to loopback for callbacks such as agent OAuth. The local port defaults to the forwarded port. |
-| `aether ssh-config` | Make every run an ssh host, `<run-id>.aether`, for `ssh`, `scp`, `sftp`, `rsync` and editors. Run it once per computer. See [terminal.md](terminal.md#ssh-and-editors). |
-| `aether ssh [ssh options] <run> [command]` | Open a login shell in a live run's checkout, or run one command there and exit with its status. Needs what a run shell needs: steer, and use of the run's agent account. |
-| `aether member git [--name <name>] [--email <email>] [member-id]` | Show or set the name and email every commit made for that member is authored as. Members set their own; an admin can set anyone's. |
-| `aether member assistant [--auto-approve on\|off]` | Show or set whether your [assistant](assistant.md#auto-approval) launches runs, messages and stops your own runs and saves your environment without a card, and what still asks. Only your own. |
-| `aether github connect` | Finish connecting GitHub after `gh auth login` in your Environment: sets up git credentials there, generates and registers a commit signing key. See [environment-home.md](environment-home.md#connect-github). |
-| `aether workspace origin [--workspace <name-or-id>] [<url>\|--clear]` | Show or set the checkout Origin run checkouts use for pushing review branches. Needs the push capability. |
-| `aether workspace env list\|set\|unset\|import\|script` | The workspace's variables, secrets and setup script, which every new run in it gets. Any member can `list` and print the `script`; changing either needs the admin role. See [environments.md](environments.md#workspace-environment). |
-| `aether workspace mirror status\|configure\|refresh\|adopt\|disable` | Admitted members can read status; configure/refresh/adopt/disable require an admin. Configure takes `--source`, optional `--branch`, `--auth public\|deploy-key`, and optional `--known-hosts-file`; refresh/adopt/disable require `--workspace`. |
-| `aether account list` / `share <member>` / `revoke <member>` | List usable agent accounts, or grant and revoke access to your own account. |
-| `aether files ls <workspace|run> [path]` / `aether files cat <workspace|run> <path>` | Browse or read files from a workspace base tree or live run checkout. The dashboard's **Files** view also edits workspace base and live-run files, and manages every file in your own persistent home. |
-| `aether config ls [-r] [<agent> [path]]` / `aether config cat <agent> <path>` / `aether config push [--dry-run] [--overwrite] <agent> <path>... [--from <file>]` | List the agents Aether holds configuration for and what your home has for one, print one of its files, or upload files and directories from an agent's directory into your own home. A push replaces a differing file only with `--overwrite`. See [quickstart.md](quickstart.md#upload-agent-configuration). |
+| `aether runs` | Every run you can see, colored by owner, with an overlap column. `--needs-you` lists only runs that need you |
+| `aether who` | Who is online and which runs they watch |
+| `aether attach [--read-only] <run>` | Attach to a run's terminal. Several people can attach at once |
+| `aether message <run> "..."` | Message a run's agent. It shows as a banner in your color |
+| `aether pause`, `resume`, `kill <run>` | Suspend, thaw or stop a run. The checkout and transcript survive a kill |
+| `aether inbox` | The shared approval queue. `aether inbox approve\|deny <request-id>` decides |
+| `aether timeline` | The workspace history. Filter with `--run`, `--member`, `--type`, `--limit`. `--jsonl` exports |
+| `aether cost --runs` | Token spend per member and run |
 
-The dashboard shows each run in one of five states: **Needs you**,
-**Working**, **Paused**, **Done** or **Failed**, with a reason line. **Needs
-you** means something blocks the run that you can resolve: a permission or
-question on your run or the run whose terminal you control, a parked or
-stalled run of yours, your unreviewed finish, a teammate's queued message, a
-teammate's question to you, or a swarm question, a stopped integrator or a
-blocked worker in a swarm you are accountable for. The full list is in
-[dashboard-frontend.md](dashboard-frontend.md#run-state). The same run reads
-**Working** with "Waiting for Alice" for everyone else. Needs you lists every
-workspace; Working and Finished list the selected one. Native question
-coverage depends on the agent's reporter; see [harnesses.md](harnesses.md).
-`aether runs --needs-you`, assistant notices and
-[push notifications](networking.md#notifications) apply the same
-[rule](failure-handling.md#run-activity) as Needs you.
+The dashboard shows each run as **Needs you**, **Working**, **Paused**, **Done**
+or **Failed**. **Needs you** means something blocks the run that you can
+resolve, such as a permission or question, a stalled run of yours, an unreviewed
+finish or a swarm question. Everyone else sees that run as **Working** with
+"Waiting for Alice" ([dashboard-frontend.md](dashboard-frontend.md#run-state)).
 
-### Handoff and finishing runs
+### Hand off and finish runs
 
-Handoff is an immediate transfer. `aether handoff <run> <member>` changes the
-run owner and notification routing without waiting for the recipient to accept.
-The timeline and the run's Session view record the handoff actor, outgoing owner, and incoming
-owner. A system entry points to the handoff evidence packet, or says that
-evidence is unavailable when preservation did not succeed. The transfer does
-not switch the selected agent account or its cost attribution, and the run's
-container keeps the home it was created with: the launcher's. Candidate
-verification the run's agent starts runs in that same home, which Aether
-records on the run at launch, never the incoming owner's; it does not need
-the run's container to still be alive.
+`aether handoff <run> <member>` changes the run's owner and notifications at
+once. The recipient does not accept. The agent account, cost attribution and the
+run container's home stay the launcher's.
 
-Aether captures an evidence packet automatically when a run is handed off and
-when it finishes. The finish capture happens before automatic checkout or
-transcript cleanup. A run whose checkout exceeds the 64 MiB capture bound gets
-no finish packet; its checkout is removed only once its results are published
-on the run branch ([failure-handling.md](failure-handling.md)). A packet is a factual record of the run at capture time,
-including its objective and identity, capture time and event-log boundary, base
-and retained Git revisions, changed-file facts, source availability, unresolved
-facts, next action, and provenance. Source metadata says when a source is
-unavailable or truncated and gives the reason when one is known.
+When a run is handed off or finishes, Aether captures an **evidence packet**: the
+objective, base and final git revisions, changed files and a transcript copy. It
+records what Aether observed. It does not prove a command succeeded or that
+anyone reviewed the result. Packets expire after 30 days, and a run whose
+checkout exceeds 64 MiB gets no finish packet. If capturing fails, Aether keeps
+the checkout and transcript instead of deleting them.
 
-The packet retains the repository state in a private Git evidence commit, so
-the diff remains available after the live checkout is removed. A rendered patch
-is bounded to 1 MiB per request and reports `truncated` when that bound is
-reached. A copy of the PTY transcript is retained separately, capped at 16 MiB.
-The packet and its retained Git and transcript objects expire after 30 days.
-After expiry they are unavailable rather than silently replaced with a partial
-result.
+```sh
+aether close <run> --outcome merged|abandoned   # clear a finished run off Needs you
+aether archive <run>                            # hide a finished run; unarchive restores it
+aether delete <run>                             # stop it and remove its checkout and records
+```
 
-Evidence is provenance, not independent verification. It records what Aether
-observed or what an agent or member reported; it does not prove that a
-command succeeded or that the result was reviewed. The Git tree and transcript
-are captured sources, not one atomic snapshot of the container, its processes,
-environment, or credentials. Treat a missing source as unavailable and a
-truncated source as incomplete.
-
-If required preservation fails, Aether reports the failure and keeps the
-recoverable run resources instead of deleting the checkout or transcript
-silently. A handoff itself is not rolled back solely because its evidence
-packet could not be captured. Unresolved facts remain inspectable in the
-run's **Captures**. A fact's **Answer** action puts it in the Details **Notes**
-field, to edit and add as a normal note. Evidence
-facts do not put a run in **Needs you**; an unanswered teammate question to
-the owner does. This is not a separate action inbox, blocker, or task model.
+These need the same permission as stopping a run. A published run branch stays in
+the workspace repository after `delete`.
 
 ### Task templates and schedules
 
-A template is a saved launch: agent, task, mode, model, and parameters. Save one,
-launch it by name, or put it on a cron schedule:
+A template is a saved launch: agent, task, mode, model and parameters. An admin
+saves and deletes templates. Any collaborator launches them and sets schedules.
 
 ```sh
 aether template save nightly-triage --agent claude --task "triage new issues" \
   [--mode standard|enhanced|background] [--model <model>] [--param key=value] \
-  [--budget <tokens>]
-aether template list
+  [--budget <usd>]
 aether run --template nightly-triage [--param key=value]
-aether template delete nightly-triage
-```
-
-`template save` refuses a `--model` the agent has no model flag for, with
-`scheduler: agent "<agent>" has no model flag; launch it without a model`.
-
-```sh
-aether schedule list
 aether schedule set nightly-triage "0 6 * * *"
-aether schedule delete nightly-triage
 ```
 
-Cron expressions are standard five-field syntax or an `@descriptor`, in UTC.
-A schedule that was due while the server was down does not catch up; it waits
-for the next occurrence.
-
-Scheduled runs use the same launch gate as manual runs. A mirrored workspace
-refreshes its source before each scheduled launch; an offline, authentication,
-missing-source, rewrite, divergence, or other failure means that occurrence
-does not create a run. Fix the mirror or use the explicit one-shot cached-base
-retry for a still-unchanged accepted commit; the next scheduled occurrence
-does not silently reuse a cache.
+`--mode` defaults to `background`, and `--budget` is an advisory per-run cost
+hint in USD. Use `{{name}}` in the task for a parameter. Cron is five-field
+syntax or an `@descriptor`, in UTC. A schedule that was due while the server was
+down waits for its next occurrence. `aether template list|delete` and `aether
+schedule list|delete` manage the rest. A `--model` the agent has no flag for
+fails with `scheduler: agent "<agent>" has no model flag; launch it without a
+model`.
 
 ### Attribution
 
-A member's display name is what teammates see on avatars, runs and
-messages. Change your own under **Display name** in **Profile** (the sidebar
-footer menu); the control-channel method is `member.rename`
-(`{"display_name":"..."}`, plus `member_id` for an admin renaming someone
-else). The name is trimmed, must not be empty, is at most 64 characters, and
-holds no control characters; anything else is refused with the reason, for
-example `display_name is longer than 64 characters`. A rename publishes a
-`member.changed` event in every workspace, so open dashboards show the new
-name at once and **Activity** records who renamed whom.
+Each member has a color, shown on run rows, message banners and timeline dots.
+Change yours with `aether member color <#rrggbb>` and your display name under
+**Profile → Display name**. Every privileged act (message, stop, approve, hand
+off, change settings) is recorded in the timeline with who did it.
 
-Every member gets a stable color from a colorblind-safe palette at join time
-(`aether member color <#rrggbb> [member-id]` overrides it). That color is the
-same everywhere: run rows in `aether runs`, message banners in transcripts,
-timeline dots, overlapping diff hunks, dashboard cards. "Whose agent is doing
-what" is meant to be answerable at a glance from any screen.
+Set your git identity under **Profile → Git identity**, or `aether member git
+--name "Dana Lee" --email dana@example.com`. The agent in a run commits as the
+member who launched it, fixed when the container starts. Aether's own commits
+(when a run finishes, is stopped or is recovered) use the run's current owner.
+With no identity set, commits use your display name and `<member-id>@aether.local`,
+which matches no GitHub account. Signed commits show **Verified** on GitHub only
+if the commit email is verified there
+([security.md](security.md#github-credentials-and-signing-keys)).
 
-Every privileged act - message, kill, approve, handoff, settings change - is
-stamped into the workspace timeline with the actor. A server update is
-stamped into every workspace's timeline, since it affects all of them.
-Permissive by default, always attributed.
-
-That attribution reaches git too. Each member has a git identity - the real
-name and email their commits are authored as - collected by onboarding on
-either gateway and editable under **Git identity** in **Profile** (the
-sidebar footer menu) or
-`aether member git`. This is attribution, not repository authentication. The
-agent in a run container commits with the identity of the member who launched
-it, baked into the container when it is created, and the commits Aether makes
-itself when a run finishes, is killed, or is recovered are authored as the
-run's current owner with Aether as the committer. A member who has set no
-identity keeps the fallback: their display name, or their member id when
-the display name cannot be a git author name, at `<member-id>@aether.local`,
-which maps to no upstream account.
-
-Once that member has connected GitHub, those commits are signed with the
-key in their environment home - the agent's own, from the home's
-`.gitconfig`, and Aether's, with the same key read on the server. GitHub
-shows a signature as **Verified** only when the committer address is a
-verified address on the account that registered the key. So the agent's own
-commits show as verified when the member's git email is on their GitHub
-account, and Unverified when it is not - the `<member-id>@aether.local`
-fallback above never is. Aether's commits are committed as Aether, so they
-stay unverified either way;
-[security.md](security.md#github-credentials-and-signing-keys) has the
-detail.
-
-Whoever else messages a run is credited as a co-author of it. That is
-sending the agent a message or typing into the run's own agent terminal - a
-shell tab in the run's container does not count - and it adds that member,
-once, to the run's co-authors. Every commit Aether makes for the run then
-ends with one `Co-authored-by:` trailer per co-author, deduplicated by address, so two
-members sharing one address produce a single line. The run's own agent gets
-the same list in `/run/aether/co-authors` and is told in its task prompt to
-end its commits and pull requests with those lines - see
-[coordination.md](coordination.md). Aether's own commits credit everyone who
-messaged the run; the file the agent reads credits everyone the run involves,
-its owner included, less the address that container already authors as. A
-handoff moves the roles the server still decides: the incoming owner becomes
-the author of Aether's own commits and the outgoing one joins the co-authors.
-
-Two limits, both from one fact: a container's `GIT_AUTHOR_*` and
-`GIT_COMMITTER_*` are fixed when it is created, from the member who launched
-it, and never move while it lives. Changing a git identity while a run is
-live refreshes that run's `/run/aether/co-authors`, but the agent's own
-commits in that run keep the identity it started with; later runs use the
-new one. And after a handoff the agent's own commits are still authored as
-the outgoing owner, while Aether's end-of-run commits are authored as the
-current one - which is why the incoming owner is on the co-author list at
-all, and the outgoing one is not.
-
-One consequence worth naming: a member who changes their git identity while
-they own a live run is credited on that run's remaining agent commits under
-the new address, because the container is still authoring under the old one.
-The commits carry both addresses rather than losing the change, which is the
-useful answer.
-
-### Team memory
-
-[Team memory](memory.md) is the workspace's shared notes: decisions,
-conventions, gotchas and preferences that runs and members write, plus an
-outcome note for each run that reports success or failure. Who may do what:
-
-| Who | Read: `ls`, `search`, `show`, `brief` | Add | Pin, unpin | Remove |
-| --- | --- | --- | --- | --- |
-| viewer | yes | no | no | no |
-| collaborator, admin | yes | yes | any note | any note, or every note of a run |
-| a run's agent | search, show, its own brief | while its owner may push, 20 per run | no | no |
-
-The role is re-read on every call, so a demotion stops the next write. A
-viewer gets `memory.add: permission denied: pushing to a workspace requires
-the collaborator role`, and so does a viewer-owned run. An agent may replace
-only another agent's unpinned note; a member may replace any note with
-`aether memory add --supersedes <id>`, and the replacement takes over its
-pin.
-
-A pin decides which briefs a note enters, never who can read it: a note you
-pin with `--me` goes only into your own runs' briefs, but every member,
-viewers included, and every run in the workspace can still search it.
-
-Every note is attributed. A member's note names that member. An agent's note
-names the run's owner when it was written, with the run, harness and commit;
-a handoff does not move notes already written. An outcome note names the
-run's owner, and a swarm answer the member who answered. A pin records who
-pinned it. Each add, captured note, replacement, pin, unpin and removal
-is a `memory.change` event in **Activity** and `aether timeline --type
-memory.change`, naming the member who acted and, for an agent's note or a
-captured one, its run.
+Anyone who messages a run is added to its co-authors. Aether's commits end with a
+`Co-authored-by:` line for each, and the run's agent finds the list in
+`/run/aether/co-authors` ([coordination.md](coordination.md)).
 
 ### Conflict radar
 
-Per-run diff snapshots feed an overlap index. When two runs touch the same
-file, `aether runs` shows it in the `OVERLAP` column and the dashboard puts an
-overlap warning on both run cards that opens to the shared files and the
-other run. It is early warning, not locking - nothing is blocked. A run's
-files are only its own changes: work it merged or rebased in from upstream
-`main` does not count, so pulling `main` does not create overlaps.
+When two runs change the same file, `aether runs` shows it in the `OVERLAP`
+column and the dashboard puts a warning on both cards that opens the shared
+files. It warns and does not block. Changes merged in from `main` do not count.
 
-On top of that, runs in one workspace can message each other directly through
-their agents, before or after the radar sees an overlap (on by default;
-`--conflict-coordination=false` turns it off). `aether-internal status` inside
-a run lists the runs it can reach: swarm peers, overlapping runs, then other
-live runs in the workspace its owner may message. `aether protect <run>` limits
-messages to a run to its owner's runs, admins' runs, and overlapping or swarm
-peers; `aether workspace settings --message-others admins-only` does the same
-for every member's runs. Every message shows in Activity as an **Agent message** row naming sender,
-recipient, and kind, and every member can read the bodies through
-`coord.messages.list`. See [coordination.md](coordination.md#seeing-agent-messages)
-and [mcp-bridge.md](mcp-bridge.md).
+Agents in one workspace can also message each other. `aether-internal status`
+inside a run lists the runs it can reach, and protection and the message-others
+policy limit this the same way. Every message appears in **Activity** as an
+**Agent message** ([coordination.md](coordination.md#seeing-agent-messages)).
 
 ### Budgets
 
@@ -1135,189 +372,73 @@ aether budget set --override                   # admit new runs past the cap
 aether budget set --override=false             # and stop again
 ```
 
-An omitted flag keeps its current value, so `--warn` alone edits only the
-warning threshold. `--limit 0` clears the budget.
+An omitted flag keeps its value, and `--limit 0` clears the budget. At the cap,
+new runs are refused and running runs finish. Runs whose agent reports no token
+usage are unmetered, so totals are a floor. Deleting a run or a member keeps
+their spend in the totals. Only an admin sets a budget.
 
-At the cap, new runs are refused and running runs finish. Note that runs whose
-agent reports no token usage are counted as *unmetered* - `aether cost` says
-so explicitly, and the totals are a floor rather than the real spend.
+### Team memory
 
-Deleting a run keeps its cost counted. `aether delete` removes the run's own
-record, but its numbers stay folded into its workspace's and its member's
-totals, so `aether cost`, `aether budget`, and the cap itself see the same
-spend before and after the delete. Removing the member with `member remove`
-does not clear that folded spend either: it stays in the workspace's total
-under the member's now-gone ID.
+Runs and members keep short shared notes, and every new run is given the pinned
+ones. See [memory.md](memory.md).
 
 ## Agent accounts
 
-Each member runs `aether agent add <name>` once, then opens `aether terminal`
-to install the agent and complete the vendor login. The member's server-side
-home is mounted into every container that person receives, so all their runs
-share the same login and installed files. See [harnesses.md](harnesses.md).
+Each member signs in to each agent once, in their own environment (`aether agent
+add <name>`, then `aether terminal`). That home is mounted into every run they
+launch. A member's **agent account** is that vendor login and the subscription
+behind it. One member can let a collaborator launch runs on theirs.
 
-A member's **agent account** is their vendor login for each agent CLI, the
-subscription a run spends. A member may explicitly let another collaborator
-launch runs on that account. In the dashboard:
-
-- **Share or revoke:** the owner opens **Profile** from the sidebar footer
-  menu and, under **Agent account sharing**, presses **Share account** beside
-  the teammate, or **Revoke access** to take it back.
-- **Launch on it:** the recipient presses **New run**, opens **Options** and
-  picks the owner, listed as `<name> (shared)`, under **Account**
-  (**Integrator account** on the **Swarm** tab).
-
-The CLI equivalent, for agents and scripts:
+The owner shares under **Profile → Agent account sharing → Share account**. The
+recipient selects **New run → Options → Account** and picks `<name> (shared)`
+(**Integrator account** on the **Swarm** tab). From the CLI:
 
 ```sh
-# Account owner
-aether account share <member-id>
+aether account share <member-id>      # owner
 aether account list
-
-# Recipient
-aether run "triage the failures" --agent codex --account <owner-member-id>
-
-# Account owner
-aether account revoke <member-id>
+aether run "triage the failures" --agent codex --account <owner-member-id>   # recipient
+aether account revoke <member-id>     # owner
 ```
 
-The run is owned by the authenticated launcher and runs in the launcher's
-environment: their saved image, home, git identity, GitHub login, installed
-agents, and configuration.
-The selected account supplies the agent's login file, read-write, plus
-vendor quota and cost attribution. `omp` is the exception: it shares the
-owner's whole `~/.omp/agent` directory, from which omp loads extensions and
-MCP server commands, so a recipient's run can plant code that runs in the
-owner's own omp sessions with the owner's home, gh token, and signing key.
-Share an `omp` account only with someone you would give your home to.
-[security.md](security.md#account-sharing) lists exactly what is shared and
-what a recipient's run can still do with the login.
+A run on a shared account belongs to whoever launched it and uses their image,
+home, git identity and GitHub login. The shared account supplies the agent login,
+the vendor quota and the cost attribution. The recipient needs neither the agent
+nor a login of their own, but must connect their own GitHub first, because the
+run pushes and opens pull requests as them. [security.md](security.md#account-sharing)
+lists exactly what is shared.
 
-The recipient needs neither the agent installed nor its vendor login. A run
-uses the recipient's own installation in `~/.local/bin` when there is one,
-and otherwise the owner's, mounted read-only. The launch dialog lists every
-agent installed in either home (`agent.list` reports `installed` for either).
-With nothing installed on either side, it says **Neither you nor `<owner>`
-has an agent installed.** and offers **Set up an agent**, which installs one
-in the recipient's environment. `aether agent remove` deletes only the
-caller's own links, so removing the recipient's copy falls back to the
-owner's, and the owner's removal never touches a recipient's. A borrowed Claude Code login starts signed in
-as the owner: Aether marks Claude's first-time setup complete in the
-recipient's own `~/.claude.json`, since that wizard asks to sign in whatever
-login is present.
+> [!WARNING]
+> `omp` shares the owner's whole `~/.omp/agent` directory. A recipient's run can
+> plant code that runs in the owner's own omp sessions with the owner's home, gh
+> token and signing key. Share an `omp` account only with someone you would give
+> your home to.
 
-Before launching on a shared account, the recipient connects their own
-GitHub; the run pushes and opens pull requests as the recipient. **Connect
-GitHub** is available from the Agents page and the onboarding Agent step on
-local and hosted gateways. `aether github connect`
-([environment-home.md](environment-home.md#connect-github)) is the CLI
-equivalent.
-
-A member-defined agent (`aether agent add`) runs only on its member's own
-account. On a shared account the launch dialog shows it disabled as **Your
-account only**; a launch from the CLI is refused:
-
-```
-scheduler: harness "<name>" is your own agent definition, which runs only on your own account; on a shared account, only a server-wide definition (aether-server --agent-definitions) can declare the login it shares
-```
-
-An agent whose owner has no login for it, or only an empty file at its login
-path, is a disabled row reading **Not logged in** in the launch dialog's agent
-list. The owner logs in from their own **Environment**, and the
-recipient opens the dialog again, which reads the list afresh. A launch from
-the CLI fails with a reason like:
-
-```
-provisioning: scheduler: Grace is not logged in to claude: no login at ~/.claude/.credentials.json in their home; Grace logs in to claude in their own environment terminal
-```
-
-An agent whose owner login is there but cannot be shared (a symlink in its
-path, a file with another hard link) is a disabled row reading
-**Unavailable**, and the dialog shows the error a launch returns.
-
-A Claude Code login refreshed in the owner's environment reaches
-recipients' runs only if that environment was started after the owner's first
-share ([security.md](security.md#account-sharing) explains why). When the
-environment is running at that share, **Profile** says so and offers **Stop
-environment**; the owner then reopens it with **Open** on the **Environment**
-page. From the CLI: `aether terminal stop`, then `aether terminal`.
-
-Runs on a shared account, and every container that mounts a sharing owner's
-home - their runs, their environment, and candidate verification
-started by them or by their runs - need Docker Engine 26.0 or newer (API 1.45)
-on the server. On an older engine
-Aether refuses them: `runtime: docker engine API "1.44" cannot mount a path
-beneath a member home; that needs API 1.45 (Docker Engine 26.0) or newer`.
-
-The login file is mounted over the same path in the recipient's home, so an
-empty file can remain there after the run ends. Aether treats an empty login
-file as no login, and the recipient logging in to that agent from their own
-terminal replaces it. Logging in inside the shared run (`/login` in Claude
-Code, `codex login`) instead writes the recipient's login into the owner's
-file. If the recipient logs in to that agent, or deletes that file, from
-another of their own containers while a shared run is live, the kernel
-detaches the mount and that run continues on the recipient's own login.
-
-With a non-root image, a shared run hands the owner's login path to the run's
-uid. The owner's own runs and terminal are never refused because of it. A
-recipient's launch is refused while its uid differs from that of the owner's
-live containers or of another recipient's live run on that login, with an
-error naming `the login <member-id> shares is held by`, also when the
-owner's container is admitted while the recipient's launch is still handing
-the login over. If the owner starts a container with a different non-root uid
-while a recipient's run is live, that run loses access to the login. So does
-the owner's profile push or rollback of that agent (`aether profile push`,
-`aether profile rollback`) while the owner's home is owned by a uid other
-than the run's.
-
-Sharing is directional. It does not let the recipient open the owner's
-environment, and admins get no implicit account access. Revocation
-blocks new launches and reopens but does not stop existing runs; stop them
-first if access must end immediately, with **Kill run** in the run header's
-**More** menu
-(`aether kill <run-id>`). A run started on a shared account before the server
-upgrade that narrowed shares to the login file still mounts the owner's whole
-home until it ends, and cannot be reopened.
-
-**Usage** in the dashboard's Settings reads the selected account's
-subscription quota through the read-only `account.usage` RPC. An empty
-`account_member_id` means the caller's account; selecting another account
-requires the same explicit share as a launch, and an admin has no implicit
-access. The server rechecks that grant after each provider read, so a revoke
-during a request cannot return the owner's data. This read never copies a
-credential to the client or to a run. Native OAuth credentials are read only
-for Claude Code and Codex; API-key logins and other agents are reported as
-unsupported, and native reauthentication remains the owner's terminal action.
-
-Normal successful usage is cached for 60 seconds. `refresh:true` bypasses that
-success cache only within a 10-second request floor; failures wait at least
-60 seconds and honor a provider retry deadline. A stale row keeps only a
-same-credential successful window, reports its error and stale status, and is
-not presented as current after a reset has passed without a fresh measurement.
+- Sharing is one-way. Admins get no implicit access to anyone's account.
+- Revoking blocks new launches, but runs already going continue. Stop them with
+  **Kill run** in the run header's **More** menu, or `aether kill <run-id>`.
+- An agent you defined with `aether agent add` runs only on your own account. A
+  shared account shows it disabled as **Your account only**.
+- An owner with no login shows **Not logged in**. A CLI launch fails with `Grace
+  is not logged in to claude: no login at ~/.claude/.credentials.json in their
+  home; Grace logs in to claude in their own environment terminal`.
+- A refreshed Claude Code login reaches recipients only if the owner's environment
+  started after the first share. Use **Stop environment** in **Profile**, or
+  `aether terminal stop`, then reopen it.
+- Shared accounts need Docker Engine 26.0 or newer on the server, or the launch
+  fails with `runtime: docker engine API "1.44" cannot mount a path beneath a
+  member home; that needs API 1.45 (Docker Engine 26.0) or newer`.
 
 ### Usage fallback
 
-A `claude` or `codex` launch whose account has used 95% or more of its
-subscription quota starts on another account instead, when one qualifies. The server reads the
-same cached usage **Usage** shows ([harnesses.md](harnesses.md#subscription-quota)
-names the windows). An account whose usage cannot be read, such as an API-key
-login, a signed-out one, or one whose uncached vendor read takes longer than
-3 seconds, is launched on as requested; a fallback account
-needs a successful read below 95%. Other agents always launch as requested.
+When a `claude` or `codex` launch's account has used 95% or more of its
+subscription quota, Aether starts the run on another account with usage left.
+Other agents always launch as requested, and so does an account whose usage
+cannot be read (an API-key login, signed out, or a vendor read over 3 seconds).
 
-The fallback accounts are your own and every account shared with you at that
-moment. An account qualifies only when its owner is logged in to the agent
-and the run would start the agent from your own installation, or from the
-environment image when the launch on the requested account would too: a
-fallback never runs a teammate's installation, and never lands where the
-agent is missing. By default the one with the most usage left wins, ties going to the
-lower member ID. In the launch dialog, **Options** (shown once someone shares
-with you) holds **Fall back to another account** and, under it, the
-**Fallback accounts** list: untick an account to leave it out, or reorder it
-with **Move `<name>` up** and **Move `<name>` down**. Once you change the
-list, the first ticked account with usage left, top to bottom, wins.
-Unticking **Fall back to another account**, or every account, turns fallback
-off, and the **Options** summary adds `· Fallback off`. From the CLI:
+Candidates are your own account and every account shared with you whose owner is
+logged in to the agent. The one with the most usage left wins. In the launch
+dialog, **Options → Fall back to another account** turns it off and lists
+**Fallback accounts**, which you untick or reorder. From the CLI:
 
 ```sh
 # If Grace's account is exhausted, try Lin's, then your own
@@ -1328,97 +449,48 @@ aether run "triage the failures" --agent claude --account <grace-member-id> \
 aether run "triage the failures" --agent claude --no-fallback
 ```
 
-`--fallback` takes member IDs, comma separated, and never uses an account it
-does not list. Passing both flags fails with `--fallback and --no-fallback
-cannot be used together`. `aether swarm create` takes the same two flags; the
-swarm keeps that choice for its integrator and every worker it starts.
+Passing both flags fails with `--fallback and --no-fallback cannot be used
+together`. `aether swarm create` takes the same flags. With no qualifying account
+the run launches on the requested one. A run that fell back stays owned by its
+launcher. Its header reads **On `<name>`'s account (fallback)**, and `aether
+runs` appends ` (fallback)` to the `ACCOUNT` column.
 
-When no account qualifies, the run launches on the requested account, as it
-would without fallback, and spends what usage is left there.
+A run also moves to another account mid-run when its agent reports the usage
+limit. Aether starts a new container on the next account and resumes the agent's
+session there. The run keeps its ID, checkout and branch, but processes in the
+old container, terminals included, end. This works for Enhanced and Background
+runs of `claude` and `codex` and Standard `claude` runs
+([harnesses.md](harnesses.md#usage-limit-signals)). With no account left, an
+Enhanced or Standard run parks as **Needs you** and a Background run fails, with
+`Usage limit reached on Grace's account; no fallback has usage left`. With
+fallback off the reason ends `fallback is off for this run`. Cost stays with the
+account that spent it.
 
-A run that fell back keeps its launcher as owner. Its header reads
-**On `<name>`'s account (fallback)**, and `aether runs` shows the account it
-uses in the `ACCOUNT` column with ` (fallback)` appended.
+## Swarms
 
-A run also moves mid-run when its agent reports that the account's usage
-limit stopped it: Enhanced runs of `claude` and `codex`, Background runs of
-`claude` and of `codex` over ACP, and Standard `claude` runs
-([harnesses.md](harnesses.md#usage-limit-signals) lists each signal and what
-is not covered). The next account is chosen as at launch, leaving out the
-current account and every account the run already used; after a handoff it
-must be shared with both the run's owner and the launcher, whose home the
-container mounts. Aether stops the
-agent, removes the run's container, and starts a new one with that account's
-login; the agent resumes its own session there and is told: "Your previous
-turn stopped because Grace's usage ran out. The run continues on Lin's
-account. Continue the task where you stopped." The run keeps its ID,
-checkout, branch, room and swarm attempt; processes in the old container,
-its terminals included, end. The run's room gets "Continued on Lin's
-account because Grace's usage ran out.", the header switches to Lin's
-account, and `aether runs` marks it ` (fallback)`.
+A **swarm** is one objective handed to an **integrator** run. The integrator asks
+you clarifying questions only if it needs answers, splits the objective into
+tasks, starts **worker** runs for them, combines and verifies their results, and
+reports success. No human approves the plan or the delivery.
 
-With no account to move to, an Enhanced or Standard run parks at
-`needs-attention` and a Background run fails (a swarm's Background worker
-parks instead), both with
-`Usage limit reached on Grace's account; no fallback has usage left`, which
-the dashboard shows as **Needs you**. With fallback off the reason ends
-`fallback is off for this run`, and a run that cannot move ends
-`cannot continue on another account: <reason>` with the real reason, such as
-`the agent has not reported a session to resume`. A move that fails once the
-old container is gone fails the run with `Usage limit reached on Grace's
-account; continuing on Lin's account failed: <error>`; an Enhanced session
-that cannot be restored on Lin's account parks the run there with
-`Usage limit reached on Grace's account; the run is on Lin's account and its
-session could not be restored: <error>`. A run that hits the limit again on Lin's account moves on to the
-next account.
+```mermaid
+flowchart LR
+    Y[You: objective] --> I[Integrator run]
+    I -->|asks if unclear| Y
+    I -->|tasks| W1[Worker run]
+    I -->|tasks| W2[Worker run]
+    W1 -->|report| I
+    W2 -->|report| I
+    I -->|verified result| D[Delivered branch]
+```
 
-Metered cost stays with the account that spent it: a result counts for the
-account the run was on when the agent reported it, even when it is recorded
-after the move. `aether cost` counts a moved run once, on the account it
-launched on (as unmetered when nothing was measured there), and adds each
-stretch's usage to the account it ran on; `aether cost --runs` lists the run once,
-with its whole spend, under the account it is on now, and marks it metered
-only when its first account's stretch was measured.
+### Launch a swarm
 
-### Launching a swarm
-
-A **swarm** is one objective handed to an interactive integrator
-run that asks you clarifying questions only if it needs answers, splits the
-objective into tasks, runs as many workers on them as it judges useful,
-delivers the verified result, and reports success. No human approves the plan
-or the delivery.
-The dashboard's launch dialog creates one on its **Swarm** tab: an
-objective, the **Integrator agent**, an **Integrator mode** (Standard or
-Enhanced; Background is refused because it exits after one turn), the
-**Integrator model**, **Agents for workers** with a model picker on each
-ticked row, and a **Worker mode** that defaults to Background. A
-worker whose agent cannot use the worker mode runs Standard, which its row
-says. An empty model keeps the agent's default. The CLI does the same with `aether swarm create`. The integrator runs on your account (or the
-shared account named by `--account`) with the agent `--agent` names, in
-`standard` mode, or `enhanced` with `--mode enhanced`
-([enhanced-runs.md](enhanced-runs.md)), and on the model `--model` names.
-Each `--worker agent[:mode[:model]]` allows workers on an agent, in
-`standard` mode unless the mode is `enhanced` or `background` (an empty
-mode keeps `standard`, so `codex::gpt-5-codex` is a Standard worker on
-`gpt-5-codex`), on the model given or else the agent's default; workers may use the integrator's agent.
-An execution choice is an account, agent, mode and model, so a swarm can
-mix models per agent. `-` in place of the
-objective reads it from stdin. An enhanced integrator or worker is prompted
-when mail reaches its idle session, so worker reports reach an enhanced
-integrator without a hook ([enhanced-runs.md](enhanced-runs.md#mail)). A
-`:background` `codex`, `omp`, `opencode`, `copilot`, `gemini` or `cursor`
-worker whose ACP server is installed runs its task as one ACP turn
-([enhanced-runs.md](enhanced-runs.md#background-runs)).
-
-In the dashboard, **Swarms** lists each swarm with its phase, integrator and
-worker counts, swarms that need you first. A swarm's page puts **Questions
-for you** first, then **Tasks**, **Agent messages** (the swarm's
-agent-to-agent mail, grouped by thread) and **Integration** (the read-only
-candidate, with the swarm's IDs under **Technical details**). **More swarm
-actions** holds
-**Replace integrator…** and **Cancel swarm…**. An integrator that leaves
-mail unread for over two minutes says so in muted text ("Integrator has
-not read 3 messages (12 min)").
+In the dashboard, open **New run** and use the **Swarm** tab. Set the objective,
+the **Integrator agent**, **Integrator mode** (Standard or Enhanced, since
+Background exits after one turn), the **Integrator model**, **Agents for
+workers** with a model on each, and **Worker mode** (Background by default). A
+worker whose agent cannot use that mode runs Standard. The CLI does the same:
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \
@@ -1426,230 +498,77 @@ aether swarm create "add a health check endpoint and document it" \
   --worker codex:background:gpt-5-codex
 ```
 
-```
-swarm mis-cxcteyzdh4 planning
-integrator run run-bfknxzhp9j
-```
+`--worker agent[:mode[:model]]` allows workers on an agent and repeats. The mode
+defaults to `standard`, and an empty model keeps the agent's default. `-` as the
+objective reads it from stdin. The integrator runs on your account, or the one
+named by `--account`, in `--mode standard` or `enhanced`
+([enhanced-runs.md](enhanced-runs.md)). If the server stored the swarm but could
+not start the integrator, the command prints the error
+([failure-handling.md](failure-handling.md#integrator-launch-failures)).
 
-If the server stored the swarm but could not start the
-integrator, the command prints the server's error verbatim and the
-`aether swarm show` command to follow it; see
-[failure-handling.md](failure-handling.md#integrator-launch-failures).
+### Follow a swarm
 
-```sh
-aether swarm list
-```
+**Swarms** in the dashboard lists each swarm with its phase and run counts,
+swarms that need you first. A swarm's page shows **Questions for you**,
+**Tasks**, **Agent messages** and **Integration**. From the CLI,
+`aether swarm list` and `aether swarm show <swarm-id>` print the same: the
+objective, the integrator, open questions, tasks with their blockers and each
+worker attempt with its account.
 
-```
-ID              PHASE   OBJECTIVE                                    INTEGRATOR      UPDATED
-mis-cxcteyzdh4  active  add a health check endpoint and document it  run-bfknxzhp9j  2026-09-25T07:28:57Z
-```
+| Phase | Meaning |
+| --- | --- |
+| `planning` | The integrator asks questions and proposes tasks |
+| `active` | The integrator starts workers, accepts their work and delivers |
+| `completed` | The integrator reported success. Prompting it again moves the swarm back to `active` |
+| `cancelled` | You or an admin cancelled it |
 
-```sh
-aether swarm show mis-cxcteyzdh4
-```
+A task is **Done** only when its accepted submission has the required evidence. A
+worker's report or a clean exit is not enough.
 
-```
-swarm mis-cxcteyzdh4 active
-objective: add a health check endpoint and document it
-accountable human: mem-h9zeh65yp9
-integrator: run run-bfknxzhp9j generation 1 (claude standard, account mem-h9zeh65yp9)
+### Answer, cancel or replace the integrator
 
-questions (0 open):
-  ques-17e8e78tzz Which HTTP framework does the service use?
-    answer: net/http, no framework
-
-tasks:
-ID               TITLE                  STATUS   BLOCKERS
-task-6jt9r5f3t3  Add /healthz           working
-task-0vstvmqcgn  Document the endpoint  ready    dependency task-6jt9r5f3t3
-
-attempts:
-ID              TASK             STATE    RUN             ACCOUNT
-att-t94k4wyqed  task-6jt9r5f3t3  running  run-k1y24dw3q5  mem-h9zeh65yp9
-```
-
-`show` prints the launch error, when there is one, after the integrator line.
-An attempt's `ACCOUNT` is the member ID of the account its run launched on,
-with ` (fallback)` appended when [usage fallback](#usage-fallback) launched
-it off the account the swarm declared for that worker. A worker that later
-moves to another account keeps its attempt; `aether runs` shows the account
-it is on. Workers fall back within the
-accountable human's accounts. An integrator that cannot launch for lack of
-usage leaves the swarm in place with that error, and the server retries the
-launch ([failure-handling.md](failure-handling.md#integrator-launch-failures)).
-
-The integrator's questions wait for you; nothing else does. `show` lists the
-question IDs; the commands below act on them and on the swarm, as the
-dashboard's swarm page does. Each one sends one mutation with a fresh
-idempotency key. `cancel` and `replace-integrator` print the swarm's phase
-afterwards; `answer` prints the question ID. A server refusal is printed
-verbatim.
+The integrator's questions are the only thing that waits for you. Only the
+swarm's accountable human (the member who created it) or an admin can act on a
+swarm, and they need the collaborator role at that moment.
 
 ```sh
-aether swarm answer mis-cxcteyzdh4 \
-  --question ques-17e8e78tzz "net/http, no framework"
-aether swarm cancel mis-cxcteyzdh4
-aether swarm replace-integrator mis-cxcteyzdh4 --agent codex
+aether swarm answer <swarm-id> --question <question-id> "net/http, no framework"
+aether swarm cancel <swarm-id>
+aether swarm replace-integrator <swarm-id> --agent codex
 ```
 
-```
-swarm mis-cxcteyzdh4 cancelled
-```
+`answer` takes `-` to read from stdin. `cancel` stops every run of a swarm in
+`planning` or `active`. `replace-integrator` starts a new integrator when the old
+run exited or reported failure. In the dashboard these are under **More swarm
+actions**. The server rechecks your role and account grants on every action.
 
-`answer` takes the answer as its last argument, or `-` to read it from stdin,
-and refuses a question ID that is not on that swarm. `cancel` stops a swarm in
-`planning` or `active`: its workers and integrator run are stopped and the
-swarm moves to `cancelled`. The server refuses `cancel` on a `completed` or
-`cancelled` swarm, and refuses every one of these from anyone but the
-accountable human or an admin; see [Swarm identity and current
-authority](#swarm-identity-and-current-authority). `replace-integrator`
-starts a new integrator run on the agent `--agent` names and the model
-`--model` names, in `tui` mode, under the
-current integrator's account or the one named by `--account`; both must be
-among the swarm's execution choices. It reads the swarm first, sends the
-integrator generation `show` reports, and prints the new run ID after the
-phase.
+### Combine several runs into one result
 
-### Swarm identity and current authority
+A **candidate** combines the retained results of several runs, applied in order
+in an isolated checkout on the server. Conflicts wait for explicit file
+resolutions, and a frozen candidate cannot be edited. The server then runs
+verification commands against it. A pass is evidence, not proof the code is
+correct. The swarm's **Integration** section shows the candidate read-only.
 
-Swarm work does not introduce a second identity or credential boundary.
-Record these roles separately:
+Delivery is a human decision over the exact candidate and verification results,
+except in a swarm, where the integrator delivers its verified candidate on behalf
+of the accountable human. The delivering member must still be allowed to push.
 
-- **Actor:** the authenticated human, originating run, or server action that
-  performed an operation. An integrator run is the actor for dispatches it
-  makes.
-- **Authorizing human:** the human who authorized the swarm or consequential
-  action.
-- **Run owner:** the member responsible for the run's workflow and
-  notifications.
-- **Account owner:** the member whose selected account supplies the run's
-  agent login and vendor quota. The image, home, and configuration are the
-  run owner's.
+| Target | What delivery does |
+| --- | --- |
+| A local-only workspace branch | Moves the branch, only if it has not moved since the candidate was prepared |
+| A mirrored workspace | Creates `refs/heads/aether/proposal-<request-id>`. Fetch it and push it through your normal upstream review. **Proposed** does not mean landed |
 
-The actor is not rewritten as the authorizing human, run owner, or account
-owner merely because the operation was performed on somebody's behalf.
+A candidate lives 30 days, and a passing verification is valid for 24 hours. A
+candidate whose stored files go missing becomes unavailable. See
+[integration.md](integration.md) and [failure-handling.md](failure-handling.md).
 
-Release B rechecks the current member role, account-sharing authority,
-swarm assignment, and control/assignment generation at each consequential
-operation. Presence, a skill, an integrator label, or a run ID does not grant
-authority. There is no separate eligible-controller administration, grant
-expiry, or per-worker approval product, and taking control does not grant
-access to another member's account.
+## Limits
 
-The durable worker takeover hold has its own generation and is independent of
-the ephemeral control lease. `mission.worker.release` is a human-only
-compare-and-swap action: the caller supplies the worker run ID and observed
-`expected_takeover_generation`, and Aether rechecks current `steer` authority
-and control admission before clearing the hold. A stale generation, revoked
-authority, or foreign holder is refused without clearing it; an integrator or
-worker cannot release the hold through its assignment socket. Releasing a
-hold changes control state, not account sharing.
-
-A swarm is in one of four phases: `planning`, `active`, `completed`, or
-`cancelled`. It starts in `planning`, where the integrator may ask clarifying
-questions, proposes tasks, and runs `mission start`, which accepts every
-proposed task and moves the swarm to `active`. Start is refused while a
-question is unanswered and rechecks the swarm's own launch admission, so a
-member who created the swarm or last replaced its integrator, and lost
-`run.launch` or the share of the account the integrator runs on, cannot carry
-the swarm forward. In `active` the integrator dispatches
-workers, accepts their work, adds or revises tasks and accepts them itself,
-and delivers the verified candidate. Its success report moves the swarm to
-`completed` and stops leftover workers; a failure report leaves the swarm
-`active` for **Replace integrator**. The integrator's run stays open either
-way. Prompt it again on a `completed` swarm and its first new task or worker
-moves the swarm back to `active`. See
-[coordination.md](coordination.md#mission-phases).
-
-Five control-channel methods are the human's part. Each needs the `run.launch`
-permission (collaborator or admin) and is refused unless the authenticated
-member is the swarm's accountable human or holds the `admin` role, so an
-accountable human demoted to viewer can no longer answer or cancel, and an
-admin must take over:
-
-- `mission.question.answer` answers one clarifying question the integrator
-  asked, in `planning` only. The answering member is the session, never a
-  request field.
-- `mission.cancel` ends a swarm in `planning` or `active` by moving it to
-  `cancelled`. It is refused on a swarm that already ended.
-- `mission.archive`, `mission.unarchive` and `mission.delete` put away a
-  swarm that ended; see [coordination.md](coordination.md#archiving-and-deleting-a-swarm).
-
-`mission.show` stays a View read: every member sees the questions and the
-answers.
-
-Cancelling a swarm stops its live workers and its integrator run. That
-needs no per-run Kill check: the runs are the swarm's own and the canceller
-is already the accountable human or an admin. Stopping them is the reconcile
-loop's job and is retried every pass until each run is terminal, so a
-cancellation survives a server restart.
-
-`mission.replace-integrator` is the recovery when an integrator run exits, in
-`planning` and `active`. It does not change the phase. A completed or
-cancelled swarm refuses it.
-
-The integrator does not poll for any of this. The server types one `aether:`
-line into its terminal when a human answers a question, when a worker
-reports, and when a worker's run ends without a report, each naming the
-command to run next. A notice never reaches a retired integrator run.
-
-Each revision records its proposer, and, once accepted, the member or
-integrator run that accepted it.
-
-Swarm progress has the same evidence boundary as the dashboard: a worker
-report or process success does not make a task **Done**. The current task
-revision must have an accepted submission with required evidence available,
-and any scope deviation must carry an explicit disposition. The resulting
-evidence remains provenance of what Aether captured or a participant reported,
-not independent verification.
-
-Agent configuration is not watched or inventoried automatically. Each member
-uploads their own with `aether config push`, usually run by a coding agent on
-their computer from the prompt under **Agents → Agent config files**
-([Upload agent configuration](quickstart.md#upload-agent-configuration)).
-The upload writes the authenticated member's persistent home immediately,
-including for that member's active runs. An agent may need to reload its
-configuration.
-
-The **Files** view browses and edits the member's own home, that
-configuration included, under **Home**, beside workspace base and live-run
-files. It has explicit **Save** or
-**Commit to <branch>** actions, Ctrl/Cmd-S, syntax highlighting, find/replace,
-dirty tabs that survive navigation, unload warnings, and no autosave or
-force-save. A failed or stale save keeps the draft; **Reload from server**
-deliberately discards it. Configuration files are complete UTF-8 text up to 64
-MiB. Binary and oversized files are read-only. A new file never overwrites
-an existing one. Every `config.*` and `home.*` method
-requires `Launch` and targets only the authenticated member's own home; an
-admin cannot select another member.
-
-Uploaded files keep their local permission bits when new; existing remote
-permission bits are preserved. The server rejects unsafe paths, symlink
-components, hardlinks, and nonregular files. Every run a member launches, on their own or a shared account, uses
-that member's read-write home rather than an isolated per-run copy; an account
-share never exposes it. A snapshot pin records launch provenance, not an
-isolated writable home or a promise that home edits wait for later runs.
-Editing does not rebuild the installed-agent image.
-
-The manual CLI profile surface remains available for operators who need
-snapshots or rollback:
-
-```sh
-aether profile push --agent claude
-aether profile status --agent claude
-aether profile rollback --agent claude <snapshot-id>
-```
-
-`profile push` is explicit and not run by the sync daemon. Its repeatable
-secret flags are `--skip-secret <file>` and
-`--allow-secret <file>`; the latter requires `--workspace <workspace>`:
-
-```sh
-aether profile push --agent claude --skip-secret <file>
-aether profile push --agent claude --allow-secret <file> --workspace <workspace>
-```
-
-`aether config push` and **Files** edits do not create profile snapshots. A manual
-push or rollback overlays snapshot files into the same persistent home; it
-does not remove unlisted files or create isolated configuration for a run.
+- Roles are viewer, collaborator and admin. There are no custom roles.
+- The permissive default lets any collaborator stop any run. Use `aether protect`
+  or `--message-others admins-only` to narrow it.
+- Evidence packets and candidates expire after 30 days.
+- Budget totals are a floor when agents report no token usage.
+- A merge of two members cannot be undone.
+- Revoking a shared account does not stop runs already started on it.

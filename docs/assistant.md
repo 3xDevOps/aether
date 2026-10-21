@@ -1,157 +1,105 @@
 # Assistant
 
-The assistant is a chat panel in the dashboard where you ask Aether for
-things in plain language: "what's the status of my runs?", "launch a run to
-fix the flaky login test", "install Rust in my environment". It acts with
-your permissions and asks before it launches, messages or stops a run, or
-saves your environment, unless you turn on [auto-approval](#auto-approval).
+The assistant is a chat panel in the dashboard where you ask Aether for things
+in plain language: "what's the status of my runs?", "launch a run to fix the
+flaky login test", "install Rust in my environment". It acts with your
+permissions and asks before it launches, messages or stops a run, or saves your
+environment, unless you turn on [auto-approval](#auto-approval).
 
-It is not a run. It is an [Enhanced](enhanced-runs.md) session of your own
-Claude Code or Codex, started in your [environment](terminal.md) container
-(the persistent container `aether terminal` opens, with your home at `$HOME`).
-It uses the login in that home, so its usage counts against your own
-subscription. It works before you have a workspace, so a new member can use it
-as soon as one agent is set up. The server writes its instructions to
-`~/.aether/assistant/AGENTS.md` and `CLAUDE.md` and starts the agent there.
+The assistant is not a run. It is an [Enhanced](enhanced-runs.md) session of
+your own Claude Code or Codex, started in your
+[environment](terminal.md) (the persistent container `aether terminal` opens,
+with your home at `$HOME`). It uses the login in that home, so its usage counts
+against your own subscription. It works before you have a workspace.
 
 ## Open it
 
-Every entry point is offered only when the server supports the assistant.
+- Select **Assistant** in the sidebar next to **New run**, in the top bar when
+  the sidebar is hidden, or in the phone toolbar. A dot on it means an action
+  waits for your approval.
+- Press `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS) to open and close it, even
+  while a text field or a terminal has focus.
+- Run **Ask Aether** from the command palette, or select **Ask Aether** on an
+  empty board or **Stuck? Ask Aether** during onboarding.
 
-- The **Assistant** button in the sidebar beside **New run**, or in the top bar while the sidebar is hidden, or in the phone toolbar. Every entry point is hidden from members who cannot launch runs, because the assistant needs that capability. A dot on it means an action waits
-  for your approval.
-- The command palette entry **Ask Aether**.
-- `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS) opens and closes the panel,
-  including while a text field, an editor or a terminal has focus. A
-  terminal loses nothing to it: `Ctrl+Space` without Shift still sends NUL.
-  It is inactive while a dialog or menu is open.
-- **Ask Aether** on the board when it is empty, and **Stuck? Ask Aether** in
-  the onboarding steps.
-
-On desktop the panel docks to the right of the page and can be resized, as
-long as the page keeps 560px beside it. A run's Details panel hides to make
-that room and returns when the assistant closes; an open Subagent panel
-closes. In a window too narrow for that, the panel floats over the right of
-the page instead, without dimming it and leaving at least 240px of the page
-uncovered: the run underneath keeps its size, the part you can see stays
-usable, and `Esc` inside the panel or the shortcut closes it. On a phone it is a side
-sheet. Closing the panel keeps your unsent message and your place in the
-conversation.
+Members who cannot launch runs (viewers) do not see the assistant. On a wide
+screen the panel docks on the right and can be resized. On a narrow window it
+floats over the page, and `Esc` closes it. On a phone it is a side sheet.
+Closing the panel keeps your unsent message and your place.
 
 ## First use
 
 With no ready agent the panel shows **Needs setup** and lists Claude Code and
-Codex. An agent is ready when all three hold:
-
-- the agent is installed in your home;
-- its Enhanced adapter is installed;
-- its login file was found.
-
-Each row that is not ready states the missing piece (`Not installed`,
-`Enhanced adapter not installed`, `No sign-in found`) and
-has **Set up**, which runs the same flow as the **Agents** page. From the CLI:
+Codex. An agent is ready when it is installed in your home, its Enhanced adapter
+is installed and a login file exists. Each row that is not ready says which
+piece is missing (`Not installed`, `Enhanced adapter not installed`,
+`No sign-in found`) and has **Set up**, which runs the same flow as the
+**Agents** page. From the CLI:
 
 ```sh
 aether agent add claude --enhanced
 aether terminal
 ```
 
-`aether agent add` installs the agent and, with `--enhanced`, its adapter.
-Then sign in to the agent inside `aether terminal`. See
-[quickstart.md](quickstart.md#5-set-up-your-agent) for the full flow. The
-panel updates when setup finishes.
+Sign in to the agent inside `aether terminal`. The full flow is in
+[quickstart.md](quickstart.md#5-set-up-your-agent). The panel updates when
+setup finishes.
 
-With no conversation yet, the assistant uses the first ready of Claude Code and
-Codex. Afterwards it keeps the agent the conversation began with and never
-switches unasked, because another agent cannot continue the conversation. If
-that agent stops being ready, a prompt fails with, for example, `Claude Code is
-not ready: No sign-in found; sign in again or start with another agent`. Sign
-in again, or start with the other agent explicitly (`assistant.start` with
-`agent`), which clears the conversation.
+The first conversation uses the first ready agent, Claude Code before Codex. A
+conversation keeps its agent, because another agent cannot continue it. If that
+agent stops being ready, a prompt fails with, for example, `Claude Code is not
+ready: No sign-in found; sign in again or start with another agent`. Sign in
+again, or select **New conversation**, which picks the first ready agent.
 
-## Restart the environment
+### Restart the environment
 
-An environment container created before the assistant existed lacks the two
-read-only mounts it needs (`/run/aether-assistant` and
-`/opt/aether/aether-server`). Mounts can only be added when a container is
-created, so the panel shows **Restart your environment** with **Restart
-environment**. Restarting closes any shells open in it. Files in `$HOME` are
-kept; anything installed outside `$HOME` is lost unless you
-[saved the environment](environments.md#save-the-environment). Over the
-API the same step is `assistant.start` with `restart_environment: true`.
+An environment created before the assistant existed cannot be given the mounts
+the assistant needs, so the panel shows **Restart your environment** with
+**Restart environment**. Restarting closes any shell open in it. Files in
+`$HOME` are kept. Anything installed outside `$HOME` is lost unless you
+[saved the environment](environments.md#save-the-environment).
 
 ## What it can do
 
-The assistant calls Aether through tools served on a socket bound to you. Each
-tool maps to a control method, so it can do what you can do and nothing more.
-`aether_docs` reads these guides, so it can explain Aether features from the
-documentation of the server you run.
+The assistant can do what you can do through the dashboard and nothing more. It
+can also read Aether's own guides, so it can explain features of the server you
+run.
 
-| Tier | Tool | Method | Effect |
-| --- | --- | --- | --- |
-| Read | `aether_list_runs` | `run.list` | Runs you can see, optionally only yours (`mine`), active only or per workspace |
-| Read | `aether_get_run` | `run.get` | One run's record |
-| Read | `aether_run_history` | `run.acp.history` | A page of an Enhanced run's conversation |
-| Read | `aether_list_workspaces` | `workspace.list` | Workspaces you can launch in |
-| Read | `aether_get_workspace` | `workspace.get` | One workspace |
-| Read | `aether_list_agents` | `agent.list` | Agents, logins and Enhanced support |
-| Read | `aether_usage` | `account.usage` | Remaining agent quota |
-| Read | `aether_environment_status` | `terminal.status` | Your environment's state and saved image |
-| Read | `aether_docs` | `assistant.docs` | Aether's own guides |
-| Read | `aether_view_context` | `assistant.view_context` | What your dashboard shows now; see [What it sees](#what-it-sees) |
-| Read | `aether_memory_search` | `memory.search` | A workspace's [team memory](memory.md) notes, best first; the assistant cannot add, pin or remove them |
-| Reversible | `aether_pause_run` | `run.pause` | Pauses a run |
-| Reversible | `aether_resume_run` | `run.resume` | Resumes a run |
-| Confirmed | `aether_launch_run` | `run.launch` | Starts a run, naming the agent, workspace and task |
-| Confirmed | `aether_message_run` | `run.inject` | Sends a message to a run's agent, naming the run and its owner |
-| Confirmed | `aether_stop_run` | `run.kill` | Stops a run |
-| Confirmed | `aether_save_environment` | `env.save` | Saves your environment as the image new runs and terminals start from |
+| What | Examples | Asks first? |
+| --- | --- | --- |
+| Read | List runs, workspaces and agents. Read one run and its conversation. See your remaining agent quota and your environment's state. Search [team memory](memory.md) (it cannot add, pin or remove notes). | No |
+| Pause and resume | Pause or resume a run | No |
+| Launch a run | Start a run with a workspace, agent and task | Yes |
+| Message a run | Send a message to a run's agent | Yes |
+| Stop a run | Stop a run | Yes |
+| Save your environment | Save it as the image new runs and terminals start from | Yes |
 
-Read tools, pause and resume run immediately; the events name you as the actor.
-Confirmed tools wait for your approval, including launching a run and
-messaging one, unless auto-approval is on and the run, if any, is yours.
+Pausing and resuming run at once. The run's events name you as the actor.
 
-Environment changes, such as installing a toolchain, are not an Aether tool.
-The assistant runs them in its own shell in your environment container, then
-offers `aether_save_environment`.
+Installing a toolchain or editing a file is not an Aether action. The assistant
+does it in its own shell in your environment, then offers to save the
+environment.
 
 ## What it sees
 
-Each message you send carries a **view context**: what your dashboard shows,
-so "why is this stuck?" or "go back to that run I was looking at" needs no
-ids. It holds:
+Each message carries a short description of what your dashboard shows, so "why
+is this stuck?" works without ids. It holds:
 
-- the page you are on, with its workspace, run, mission and subagent ids and
-  the run view it shows (Session, Terminal, Changes, Files, Browser)
-- the open file's kind and path while the page shows it, never its contents
-- the last 8 pages you visited this session, newest first, one per run or
-  page
+- the page you are on, with its workspace and run, and which run view is open
+  (Session, Terminal, Changes, Files, Browser)
+- the open file's kind and path, never its contents
+- the last 8 pages you visited this session
 
 It never holds titles, file contents, drafts, terminal text or secrets. The
-page history is recorded only while sharing is on and is gone on reload. The server cuts it to 4 KiB, dropping the
-oldest pages and then the file path. The agent gets it as an
-`aether://view-context` resource, or for an agent without embedded-resource
-support as text between `<aether-view-context>` tags; either way only your
-own text is saved in the transcript. While the panel is open, navigating also
-sends it, at most once a second, so the assistant reads the current page
-mid-turn with `aether_view_context`. The server keeps only the latest one per
-member, in memory; with several tabs or devices the one it received last
-wins. A retried message still carries the context it was first sent with,
-but does not replace a newer one the server holds. The ids are hints: the assistant looks everything up with the tools
-above, as you.
+line above the message box, **Sharing: run run-8x2 · Changes**, expands to the
+exact JSON the next message sends. Clear **Share the page I am on with the
+assistant** to stop sharing; the choice is saved for you on every device.
 
-The line above the message box, **Sharing: run run-8x2 · Changes**, expands
-to the exact JSON the next message sends; when it retries a failed message,
-the JSON that message carried. Clear **Share the page I am on with the
-assistant** to stop: the server saves the choice for you on every device,
-forgets its copy, and drops any context still on its way. Over the API it is
-`assistant.settings` (`{"share_view":false}`).
+## Approve an action
 
-## Confirmations
-
-A confirmed call blocks until you answer. The panel shows a card, **Approve
-this action?**, with a one-sentence summary, the method, its exact parameters
-and when it expires. For example:
+An action that asks waits for you. The panel shows a card, **Approve this
+action?**, with a one-sentence summary, the exact parameters and when it
+expires:
 
 ```text
 Launch claude (acp) in api: "Fix the flaky login test"
@@ -159,26 +107,19 @@ Stop run run-8x2... ("Fix flaky login test")
 Save your environment as a new image; new runs and terminals start from it
 ```
 
-**Approve** runs the call. **Decline**, no answer within 10 minutes, or ending
-the session fails the call with the reason, for example `run.kill was not
+**Approve** runs it. **Decline**, no answer within 10 minutes, or ending the
+session fails the action with the reason, for example `run.kill was not
 approved: the member declined this action`. The assistant is told to report the
-failure and not retry. The server enforces this; the assistant cannot
-approve for you. If the agent's call goes away, for example because you
-stopped the turn, its card is withdrawn.
-
-An approved call is noted in the transcript before it runs, as a notice
-titled `Approved: <summary>` with `<method> passed after you approved its card.`, for example `Approved: Stop run run-8x2...
-("Add retry to uploader")`. The server log gets an `assistant approval` line
-with your member id, the method, the summary and `auto=false`.
+failure and not retry. The assistant cannot approve for you. Each approval is
+recorded in the transcript before the action runs.
 
 ## Auto-approval
 
-**Settings > Assistant > Let the assistant act without asking** lets the
-assistant launch runs, message and stop your own runs and save your
-environment at once, as if you had approved their card. It is off by default,
-and it is yours alone: it applies only to your assistant. Turning it on in the
-dashboard asks first, with a warning that the assistant will do those things
-on its own. The CLI does not ask, and prints what the setting covers:
+**Settings → Assistant → Let the assistant act without asking** lets the
+assistant launch runs, message and stop your own runs and save your environment
+without a card. It is off by default and applies only to your assistant. While
+it is on, the panel says **Acts without asking**. The dashboard asks you to
+confirm before turning it on. The CLI does not ask:
 
 ```sh
 aether member assistant                     # show the setting
@@ -193,162 +134,90 @@ always asks   messaging or stopping another member's run
 not covered   the assistant's own shell and file tools, which never ask
 ```
 
-Over the API it is `assistant.settings` (`{"auto_approve":true}`), and
-`assistant.status` reports it as `auto_approve`. While it is on, the panel
-says **Acts without asking** under its header.
+- Messaging or stopping another member's run always asks, with the owner named
+  on the card.
+- A change applies to the live session at once. Cards already open stay open.
+- The assistant cannot change the setting.
+- Every auto-approved action is still recorded in the transcript as
+  `Auto-approved: <summary>`. If the note cannot be written, the action does not
+  run.
 
-- **It covers a fixed list.** Only `run.launch`, `run.inject`, `run.kill` and
-  `env.save` can pass without a card. A confirmed tool added later asks until
-  it is added to that list.
-- **Messaging or stopping another member's run always asks.** It shows a
-  card even with auto-approval on. The card says who owns the run (`other_member` and `other_owner` in the confirmation, `owned by
-  <name>` in the summary).
-- **The server decides.** It reads the setting on every confirmed call, so a
-  change applies to the live session at once, with no restart. A call and a
-  change of the setting never overlap: each call sees the setting from before
-  or after the change, and the transcript shows them in that order. Cards
-  already open when you turn it on stay open until you answer them.
-- **The assistant cannot change it.** Only `assistant.settings`, called as
-  you from the dashboard or the CLI, changes it. The assistant's tool socket
-  does not serve that method, and no tool reads or sets it.
-- **Every action is still recorded.** An auto-approved call is noted in the
-  transcript before it runs, as `Auto-approved: <summary>` with `<method> passed
-  without a card: auto-approval is on.`, and the server log line has
-  `auto=true`. If the note cannot be written, the call does not run. Turning
-  the setting on or off is noted too. The run's own events name you as the
-  actor, as with an approved card.
-- **Notifications are unchanged.** Runs the assistant launches or messages
-  are [followed](#notifications) the same way.
+> [!WARNING]
+> With auto-approval on, nothing checks a launch, a message to your own run or
+> a save before it happens. Text the assistant reads from runs, files and web
+> pages can carry injected instructions. The assistant is told to treat it as
+> data, but that is an instruction, not a control. Any program in your
+> environment can also call the assistant's tools and gets the same pass. See
+> [security.md](security.md#the-assistant).
 
-With auto-approval on, nothing checks a launch, a message to or stop of your
-own run, or a save before it happens. Text the assistant reads from runs,
-files and web pages can carry injected instructions; the assistant is told to
-treat it as data, but that is an instruction, not a control. Any program in
-your environment can also call the tool socket directly, and gets the same
-pass. See [security.md](security.md#the-assistant).
+After you approve three cards in a row that auto-approval would have passed, the
+panel shows **Skip approval cards for the assistant?** once the assistant is
+idle. **Turn on auto-approval** turns it on. **Not now** asks again in 7 days,
+then 30 days, then never. **Don't suggest again** stops the suggestion.
 
-### The suggestion
+### Shell and file tools never ask
 
-After you approve three cards in a row that auto-approval would have passed,
-with auto-approval off, `assistant.status` reports `suggest_auto_approve:
-true`. The panel then shows **Skip approval cards for the assistant?** below
-the conversation, once the assistant is idle with nothing waiting on you. It
-never appears mid-turn or in an empty conversation. Approving a card on
-another member's run does not add to the count; declining, not answering or
-having any card withdrawn (the turn stopped or the session ended) starts it
-over.
-
-| Button | `assistant.settings` | Effect |
-| --- | --- | --- |
-| **Turn on auto-approval** | `{"auto_approve":true}` | Turns it on at once; the notice is the warning |
-| **Not now** | `{"suggestion":"later"}` | Starts the count over and waits 7 days, 30 the second time; the third time counts as never and returns `suggestion_off: true` |
-| **Don't suggest again** | `{"suggestion":"never"}` | Stops the suggestion; the setting stays in Settings |
-
-Turning auto-approval off after it was on also stops the suggestion. Once it
-is stopped, `assistant.settings` returns `suggestion_off: true`. The
-assistant's tool socket cannot answer it. The count and the answers are
-stored per member on the server.
-
-## Shell and file tools
-
-The assistant's own shell and file tools are the agent's, and they run without
-asking. The session starts in the same mode Enhanced runs use: Claude Code
-`bypassPermissions` (the ACP form of `--dangerously-skip-permissions`), Codex
-`agent-full-access`. Installing a tool, editing a file or running a command in
-your environment therefore needs no click, and auto-approval does not change
-that. Only the Aether actions above (launch, message, stop, save the
-environment) wait for a card, and with auto-approval on only a message to or
-stop of another member's run does. If the mode
-cannot be set, the start fails with `assistant: set the "<mode>" mode: <error>`.
-A question the agent asks you still appears as a card.
+The assistant's own shell and file tools run without asking, with or without
+auto-approval. The session starts in the same mode Enhanced runs use: Claude
+Code `bypassPermissions`, Codex `agent-full-access`. Installing a tool, editing
+a file or running a command in your environment needs no click. A question the
+agent asks you still appears as a card.
 
 ## Notifications
 
-Aether follows every run the assistant launches (`run.launch`) or messages
-(`run.inject`) for you. The assistant does not poll or ask to be reminded; the
-server tells you itself when the run:
+Aether follows every run the assistant launches or messages for you. You do not
+ask for updates. You are told when the run:
 
-| Kind | When | Body |
-| --- | --- | --- |
-| `finished` | The run is completed, merged, failed, stopped or interrupted, or a live run's reported success is ready for review | The run's reason, if any |
-| `needs_input` | The agent asks a question, a permission or a form | `Question: <text>`, `Permission: <title>` or `Form: <title>` |
-| `needs_approval` | An approval is requested for the run | The requested action |
-| `needs_attention` | The run reaches `needs-attention` | Why, worded as in [push notifications](networking.md#notifications) |
+| Notice | When |
+| --- | --- |
+| Finished | The run completed, merged, failed, stopped or was interrupted, or a live run's reported success is ready for review |
+| Needs input | The agent asks a question, a permission or a form |
+| Needs approval | An approval is requested for the run |
+| Needs attention | The run reaches `needs-attention`; the reason is worded as in [push notifications](networking.md#notifications) |
 
-The title names the run, for example `Run "Fix flaky login test" finished`. A
-notice reaches you four ways:
-
-- **Assistant transcript.** A notice item, `info` for `finished` and `warning`
-  for the rest. It is appended while the assistant is idle too.
-- **Dashboard.** The `assistant.notice` event
-  ([local-gateway.md](local-gateway.md#assistant-notices)) raises a toast and
-  badges the Assistant button.
-- **Desktop app.** The same event shows an OS notification.
-- **Phone.** A Web Push notification to your subscribed devices, for
-  `finished` always, and for the `needs_*` kinds only on runs you do not own,
-  since your own runs already notify you when they need you. It replaces any
-  earlier notification for that run and waits while you are using a dashboard
-  ([networking.md](networking.md#notifications)); if the run no longer needs
-  you when the wait ends, nothing is sent.
-
-Each state is announced once. Aether stores the last state it announced for
-each followed run, after it is in your transcript, so answering a question, a
-server restart or a repeated status event does not repeat a notice, and a
-notice still queued when the server stops is announced after it starts. The
-next question or a new `needs-attention` reason is a new state. The follow
-ends when the run finishes, and a run that finished while the server was down
-is announced at startup. A run that finishes between the call and the moment
-Aether records the follow is announced at once. Deleting the run or removing
-the member removes the follow, and a member merged into another keeps their
-follows on the surviving member.
+A notice appears in the assistant's transcript, as a toast with a badge on the
+**Assistant** button, as an OS notification in the desktop app, and as a push
+notification on your phone. On the phone, a finished run always notifies you.
+The other three notify only for runs you do not own, since your own runs already
+notify you when they need you. Each state is announced once. You stop being
+told about a run when it finishes or is deleted.
 
 ## Conversations
 
 Send with Enter (Shift+Enter inserts a newline). **Stop** cancels the turn in
-flight. While a turn runs you cannot send another prompt; stop it first.
+progress. While a turn runs you cannot send another prompt.
 
 There is one conversation per member. It survives page reloads and server
-restarts: the transcript is stored on the server and the agent's session is
-resumed on the next prompt. If the environment stops, the agent stops with
-it and the next prompt starts it again.
-
-**New conversation** (the header button) asks **Start a new conversation?**
-and discards the transcript and the agent's session. What the assistant
-already did stays done. The server keeps the transcript in an item log that
-grows for the life of a conversation; **New conversation** clears it, and
-removing a member deletes the assistant's files for that member.
+restarts. If the environment stops, the agent stops with it and the next prompt
+starts it again. **New conversation** asks **Start a new conversation?** and
+discards the transcript and the agent's session. What the assistant already did
+stays done.
 
 ## Limits
 
-- One assistant per member, acting only for that member. It cannot see or act
-  for anyone else.
+- One assistant per member, acting only for that member.
 - It uses your own agent account. [Account sharing](security.md#account-sharing)
   does not apply to it.
-- Sending a prompt needs the Launch permission, the same as launching a run.
+- Sending a prompt needs the permission to launch runs (collaborator or
+  admin).
 - Text from runs and files is treated as data, not instructions.
 
-## Errors
-
-The panel and the API show these as written.
-
-| Message | Meaning and fix |
-| --- | --- |
-| `assistant: no agent is ready; install Claude Code or Codex with its Enhanced adapter and sign in` | Set up an agent, [above](#first-use) |
-| `scheduler: the environment was created before the assistant existed; restart it to add the assistant's mounts` | [Restart the environment](#restart-the-environment) |
-| `assistant: a turn is running; stop it first` | Press **Stop**, then send again (code `-32002`) |
-| `assistant: no live session; send a prompt or start it` | Answering or cancelling needs a live session; send a prompt |
-| `assistant: open the claude session; stderr: ...` | The adapter failed to start. The agent's stderr is appended; fix it in `aether terminal`, then **Retry** |
-| `assistant: no such pending confirmation: <id>` | The card was already answered or expired |
-| `the member did not answer within 10m0s` | A confirmation timed out |
-| `<method> was not approved: record the approval: <error>` | The approval could not be noted in the transcript, so the call did not run |
-| `<method> was not approved: read the auto-approval setting: <error>` | The server could not read the setting, so the call did not run |
-| `<method> was not approved: count the approval: <error>` | The server could not store the count of approved cards, so the approved call did not run |
-| `suggestion "<value>": want "later" or "never"` | `assistant.settings` got an unknown answer to the suggestion (code `-32602`) |
-| `the assistant session ended before the member answered` | The session stopped while a card was open |
-| `the assistant is not configured on this server` | The server runs without the assistant |
-| `assistant: the server is shutting down` | Try again after the restart |
+## Troubleshooting
 
 A failed start shows **The assistant stopped** with the error and **Retry**.
+
+| Message | Fix |
+| --- | --- |
+| `assistant: no agent is ready; install Claude Code or Codex with its Enhanced adapter and sign in` | [Set up an agent](#first-use) |
+| `scheduler: the environment was created before the assistant existed; restart it to add the assistant's mounts` | [Restart the environment](#restart-the-environment) |
+| `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
+| `assistant: open the claude session; stderr: ...` | The adapter failed to start. Fix the agent in `aether terminal`, then **Retry** |
+| `assistant: no such pending confirmation: <id>` | The card was already answered or expired |
+| `the member did not answer within 10m0s` | The card timed out. Ask again |
+| `the assistant session ended before the member answered` | The session stopped while a card was open |
+| `<method> was not approved: record the approval: <error>` | The approval could not be saved, so the action did not run. Try again |
+| `the assistant is not configured on this server` | The server runs without the assistant |
+| `assistant: the server is shutting down` | Try again after the restart |
 
 ## Example
 
@@ -361,9 +230,6 @@ You:       Stop run-8x2.
            Stop run run-8x2... ("Add retry to uploader")   [Approve] [Decline]
 You:       (Approve)
 Assistant: Stopped run-8x2.
-You:       Launch a run in api to fix the flaky login test.
-           [card] Approve this action?
-           Launch claude (acp) in api: "Fix the flaky login test"   [Approve] [Decline]
 You:       Install Rust in my environment.
 Assistant: (runs `curl ... | sh -s -- -y` without asking)
            rustc 1.xx installed. Save the environment so new runs have it?
