@@ -3,11 +3,14 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/quota"
@@ -221,17 +224,18 @@ func TestLaunchAdmissionSerializesAccountRevoke(t *testing.T) {
 }
 
 // Once the scheduler admits the run, run.launch stops holding the
-// authorization lock: a revoke completes while the run provisions.
-func TestAccountRevokeDoesNotWaitForAdmittedProvisioning(t *testing.T) {
+// authorization lock: a revoke completes while the run provisions, and
+// fences the admitted run as it would a running one.
+func TestAccountRevokeFencesAdmittedProvisioningRun(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, func(cfg *Config) { cfg.Control = control.New(control.Config{}) })
 	ctx := context.Background()
 	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
 	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
 		t.Fatal(err)
 	}
 	e.runs.mu.Lock()
-	e.runs.launchAdmits = true
+	e.runs.admitInto = e.store
 	e.runs.mu.Unlock()
 	started, release := e.runs.blockLaunch()
 	released := false
@@ -253,6 +257,19 @@ func TestAccountRevokeDoesNotWaitForAdmittedProvisioning(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("launch did not reach provisioning")
 	}
+	active, err := e.store.ListActiveRuns(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(active, func(r *domain.Run) bool { return r.MemberID == grantee.ID })
+	if i < 0 {
+		t.Fatalf("active runs while provisioning = %+v, want the admitted run", active)
+	}
+	admitted := active[i]
+	lease, _, err := e.srv.cfg.Control.Acquire(string(admitted.ID), string(grantee.ID), "grace-tab", false)
+	if err != nil {
+		t.Fatalf("acquire control of the admitted run: %v", err)
+	}
 
 	revokeDone := make(chan *protocol.Error, 1)
 	go func() {
@@ -266,6 +283,9 @@ func TestAccountRevokeDoesNotWaitForAdmittedProvisioning(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("account revoke waited for an admitted launch to finish provisioning")
+	}
+	if err := e.srv.cfg.Control.Validate(string(admitted.ID), lease.SessionID, lease.Generation); !errors.Is(err, control.ErrStale) {
+		t.Fatalf("control of the admitted run after the revoke = %v, want it fenced", err)
 	}
 
 	close(release)

@@ -355,8 +355,9 @@ type fakeRuns struct {
 	terminalRelease <-chan struct{}
 	launchStarted   chan<- struct{}
 	launchRelease   <-chan struct{}
-	// launchAdmits reports a launch admitted before it blocks.
-	launchAdmits    bool
+	// admitInto, when set, is where a launch writes its run row before it
+	// reports the run admitted and blocks, as the scheduler does.
+	admitInto       store.Store
 	terminalAddr    string
 	terminalAddrErr error
 	terminalStopErr error
@@ -471,12 +472,23 @@ func (f *fakeRuns) AgentSwitchable(_ context.Context, _, _ domain.MemberID, harn
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	f.mu.Lock()
 	f.launchOptions = append(f.launchOptions, opts)
-	started, release, admits := f.launchStarted, f.launchRelease, f.launchAdmits
+	started, release, admitInto := f.launchStarted, f.launchRelease, f.admitInto
 	f.mu.Unlock()
 	if err := f.record(fmt.Sprintf("launch:%s:%s:%s:%s:%s", workspace, member, task, harness, mode)); err != nil {
 		return nil, err
 	}
-	if admits && opts.Admitted != nil {
+	run := &domain.Run{
+		ID: "run_new", WorkspaceID: workspace, MemberID: member, AccountMemberID: account,
+		Task: task, Harness: harness, Mode: mode, Status: domain.RunQueued,
+		CreatedAt: time.Now().UTC(), Fallback: opts.Fallback,
+	}
+	if opts.RequestedAccount != account {
+		run.RequestedAccountMemberID = opts.RequestedAccount
+	}
+	if admitInto != nil {
+		if err := admitInto.CreateRun(ctx, run); err != nil {
+			return nil, err
+		}
 		opts.Admitted()
 	}
 	if release != nil {
@@ -489,14 +501,6 @@ func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.Works
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-	}
-	run := &domain.Run{
-		ID: "run_new", WorkspaceID: workspace, MemberID: member, AccountMemberID: account,
-		Task: task, Harness: harness, Mode: mode, Status: domain.RunQueued,
-		CreatedAt: time.Now().UTC(), Fallback: opts.Fallback,
-	}
-	if opts.RequestedAccount != account {
-		run.RequestedAccountMemberID = opts.RequestedAccount
 	}
 	return run, nil
 }
