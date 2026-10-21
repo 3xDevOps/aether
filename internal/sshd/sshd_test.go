@@ -355,6 +355,8 @@ type fakeRuns struct {
 	terminalRelease <-chan struct{}
 	launchStarted   chan<- struct{}
 	launchRelease   <-chan struct{}
+	// launchAdmits reports a launch admitted before it blocks.
+	launchAdmits    bool
 	terminalAddr    string
 	terminalAddrErr error
 	terminalStopErr error
@@ -469,10 +471,13 @@ func (f *fakeRuns) AgentSwitchable(_ context.Context, _, _ domain.MemberID, harn
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	f.mu.Lock()
 	f.launchOptions = append(f.launchOptions, opts)
-	started, release := f.launchStarted, f.launchRelease
+	started, release, admits := f.launchStarted, f.launchRelease, f.launchAdmits
 	f.mu.Unlock()
 	if err := f.record(fmt.Sprintf("launch:%s:%s:%s:%s:%s", workspace, member, task, harness, mode)); err != nil {
 		return nil, err
+	}
+	if admits && opts.Admitted != nil {
+		opts.Admitted()
 	}
 	if release != nil {
 		select {

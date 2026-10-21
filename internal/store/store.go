@@ -138,6 +138,9 @@ type Store interface {
 	// SetRunTitle sets only the run's title, leaving every other field
 	// untouched.
 	SetRunTitle(ctx context.Context, id domain.RunID, title string) error
+	// SetRunCheckout records only the run's checkout path and branch,
+	// leaving every other field untouched.
+	SetRunCheckout(ctx context.Context, id domain.RunID, worktree, branch string) error
 	// SetRunAgentSession records only the agent's own session id
 	// (Run.HarnessSessionID), leaving every other field untouched.
 	SetRunAgentSession(ctx context.Context, id domain.RunID, session string) error

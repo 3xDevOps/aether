@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/quota"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 type confirmedWorkerLauncher struct {
@@ -30,6 +32,63 @@ func (l *confirmedWorkerLauncher) LaunchMission(ctx context.Context, req Mission
 	}
 	run.Status = l.status
 	return run, l.err
+}
+
+// admittingLauncher writes each reserved run's row, reports it admitted and
+// then provisions until release closes.
+type admittingLauncher struct {
+	db       *store.DB
+	admitted chan struct{}
+	release  chan struct{}
+}
+
+func (l *admittingLauncher) LaunchMission(ctx context.Context, req MissionLaunchRequest) (*domain.Run, error) {
+	r := &domain.Run{
+		ID: req.RunID, WorkspaceID: req.WorkspaceID, MemberID: req.RunOwnerID, AccountMemberID: req.AccountOwner,
+		Task: req.Task, Harness: req.Harness, Mode: req.Mode, Status: domain.RunQueued,
+	}
+	if err := l.db.CreateRunWithID(ctx, r); err != nil {
+		return nil, err
+	}
+	req.Admitted()
+	l.admitted <- struct{}{}
+	<-l.release
+	return r, nil
+}
+
+// worker.start releases the authorization and dispatch locks when its run
+// is admitted, so a second worker is admitted while the first provisions.
+func TestWorkerStartsOverlapAfterAdmission(t *testing.T) {
+	f := newMissionFixture(t)
+	tasks := f.activate(t, taskSpec{key: "first", title: "first"}, taskSpec{key: "second", title: "second"})
+	launcher := &admittingLauncher{db: f.db, admitted: make(chan struct{}, 2), release: make(chan struct{})}
+	release := sync.OnceFunc(func() { close(launcher.release) })
+	t.Cleanup(release)
+	f.svc.cfg.Runs = launcher
+	errs := make(chan error, 2)
+	for _, task := range tasks {
+		params := protocol.WorkerStartParams{
+			MissionID: string(f.mission.ID), TaskID: string(task.ID), TaskRevision: task.CurrentRevision,
+			DispatchKey: "overlap-" + string(task.ID), Harness: "claude", Mode: string(domain.LaunchHeadless), AccountOwnerID: string(f.member.ID),
+		}
+		go func() {
+			_, err := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodWorkerStart, params)
+			errs <- err
+		}()
+	}
+	for range 2 {
+		select {
+		case <-launcher.admitted:
+		case <-time.After(10 * time.Second):
+			t.Fatal("a worker launch waited for another worker's provisioning")
+		}
+	}
+	release()
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("worker.start: %v", err)
+		}
+	}
 }
 
 func TestWorkerStartReturnsConfirmedLifecycle(t *testing.T) {

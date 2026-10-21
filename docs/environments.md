@@ -524,9 +524,9 @@ container starts and before the agent's process does:
   ([environment-home.md](environment-home.md)), `AETHER_RUN_ID` and
   `AETHER_WORKSPACE_ID`.
 - **For how long:** the launch waits until it exits; there is no time limit.
-  `run.launch` calls are admitted one at a time, so every other launch on the
-  server waits behind a slow script. Install dependencies in it and leave
-  builds and tests to the agent.
+  Another launch by the same member, or on the same agent account, waits
+  behind a slow script; other launches do not. Install dependencies in it and
+  leave builds and tests to the agent.
 
 If the script exits non-zero, the container is removed and the launch fails:
 

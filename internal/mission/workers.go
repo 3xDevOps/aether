@@ -23,7 +23,9 @@ func (s *Service) workerStart(ctx context.Context, run domain.RunID, raw json.Ra
 	if err != nil {
 		return nil, err
 	}
-	return s.workerStartInternal(ctx, run, raw, measured, false)
+	unlockAuthorization := lockOnce(s.cfg.AuthorizationMu)
+	defer unlockAuthorization()
+	return s.workerStartInternal(ctx, run, raw, measured, unlockAuthorization)
 }
 
 // measureWorker reads the usage a worker launch's account selection decides
@@ -36,7 +38,9 @@ func (s *Service) measureWorker(ctx context.Context, run domain.RunID, missionID
 	return fallback.Measure(ctx, s.cfg.Store, s.cfg.Usage, m.AccountableHumanID, account, harness, m.Fallback)
 }
 
-func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw json.RawMessage, measured fallback.Measured, authorizationHeld bool) (any, error) {
+// workerStartInternal runs with AuthorizationMu held; unlockAuthorization
+// releases it once the worker's run is admitted.
+func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw json.RawMessage, measured fallback.Measured, unlockAuthorization func()) (any, error) {
 	var p protocol.WorkerStartParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, err
@@ -46,10 +50,6 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	}
 	if err := domain.ValidModel(p.Model); err != nil {
 		return nil, fmt.Errorf("mission: worker.start: %w", err)
-	}
-	if !authorizationHeld {
-		s.cfg.AuthorizationMu.Lock()
-		defer s.cfg.AuthorizationMu.Unlock()
 	}
 	// Resolve the assignment only after taking the shared authorization lock:
 	// replacement cannot race the account/share decision below.
@@ -96,8 +96,8 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	if coordinationErr := s.requireCoordination(); coordinationErr != nil {
 		return nil, coordinationErr
 	}
-	s.dispatchMu.Lock()
-	defer s.dispatchMu.Unlock()
+	unlockDispatch := lockOnce(&s.dispatchMu)
+	defer unlockDispatch()
 	attempt, replayed, err := s.cfg.Missions.ReserveAttempt(ctx, &domain.AttemptReservation{
 		MissionID: m.ID, TaskID: task.ID, TaskRevision: p.TaskRevision,
 		DispatchKey: p.DispatchKey, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
@@ -137,6 +137,7 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 		WorkspaceID: m.WorkspaceID, RunID: attempt.RunID, ActorRunID: run,
 		RunOwnerID: attempt.RunOwnerID, RequestedAccount: attempt.AccountOwnerID, AccountOwner: account,
 		Fallback: m.Fallback, Task: task.Revision.Objective, Harness: attempt.Harness, Mode: attempt.Mode, Model: attempt.Model,
+		Admitted: func() { unlockDispatch(); unlockAuthorization() },
 	})
 	if err != nil {
 		s.markAttemptUnknown(ctx, attempt, err.Error())
@@ -312,8 +313,8 @@ func (s *Service) workerRetry(ctx context.Context, run domain.RunID, raw json.Ra
 	if err != nil {
 		return nil, err
 	}
-	s.cfg.AuthorizationMu.Lock()
-	defer s.cfg.AuthorizationMu.Unlock()
+	unlockAuthorization := lockOnce(s.cfg.AuthorizationMu)
+	defer unlockAuthorization()
 	m, err := s.integratorMission(ctx, run, "")
 	if err != nil {
 		return nil, err
@@ -343,7 +344,7 @@ func (s *Service) workerRetry(ctx context.Context, run domain.RunID, raw json.Ra
 		ExpectedIntegratorGeneration: p.ExpectedIntegratorGeneration,
 	}
 	b, _ := json.Marshal(req)
-	return s.workerStartInternal(ctx, run, b, measured, true)
+	return s.workerStartInternal(ctx, run, b, measured, unlockAuthorization)
 }
 
 func attemptWire(a *domain.Attempt) protocol.Attempt {

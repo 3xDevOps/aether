@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/collab"
@@ -164,7 +165,8 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		return nil, rpcError(err)
 	}
 	s.authorizationMu.Lock()
-	defer s.authorizationMu.Unlock()
+	unlockAuthorization := sync.OnceFunc(s.authorizationMu.Unlock)
+	defer unlockAuthorization()
 	admission, err := AuthorizeLaunch(ctx, s.cfg.Store, member, p.AccountMemberID)
 	if err != nil {
 		if errors.Is(err, permissions.ErrDenied) {
@@ -181,6 +183,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	}
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
 		CachedBase: p.CachedBase, Model: p.Model, RequestedAccount: requested, Fallback: policy,
+		Admitted: unlockAuthorization,
 	})
 	if err != nil {
 		if errors.Is(err, errLaunchOptionsUnsupported) {

@@ -214,6 +214,11 @@ type LaunchOptions struct {
 	// run when a fallback launched it on another one.
 	RequestedAccount MemberID
 	Fallback         AccountFallback
+	// Admitted is called once the run's row is durable and a Kill of the run
+	// stops its provisioning, before any provisioning work. A launcher that
+	// holds an admission lock releases it here; a replayed or refused launch
+	// never calls it.
+	Admitted func()
 }
 
 // AccountFallback is where a launch may move when the requested account's

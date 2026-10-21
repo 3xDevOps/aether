@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -295,6 +296,9 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	}
 	pending := s.beginPending(run.ID)
 	defer s.finishPending(run.ID, pending)
+	if opts.Admitted != nil {
+		opts.Admitted()
+	}
 	persistSupervisor := opts.AssignedRunID != ""
 	if err := s.provision(ctx, run, ws, actor, argv, profile, persistSupervisor); err != nil {
 		return nil, err
@@ -306,7 +310,6 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 // concurrent Kill takes the supervised path instead of transitioning the row
 // underneath the in-flight launch.
 func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
-	defer s.lockRunCaches(run.HomeMember(), run.AccountMember())()
 	entry := &supervised{
 		runID:           run.ID,
 		workspaceID:     run.WorkspaceID,
@@ -361,12 +364,14 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 		return fmt.Errorf("create checkout: %w", err)
 	}
 	run.Worktree, run.Branch = checkout, branch
-	if updateErr := s.cfg.Store.UpdateRun(ctx, run); updateErr != nil {
+	if updateErr := s.cfg.Store.SetRunCheckout(ctx, run.ID, checkout, branch); updateErr != nil {
 		return fmt.Errorf("record checkout: %w", updateErr)
 	}
 	if pinErr := s.pinLatestProfile(ctx, run); pinErr != nil {
 		return fmt.Errorf("pin profile: %w", pinErr)
 	}
+	unlockCaches := sync.OnceFunc(s.lockRunCaches(run.HomeMember(), run.AccountMember()))
+	defer unlockCaches()
 	plan, err := s.runPlan(ctx, entry, run, ws, actor, profile)
 	if err != nil {
 		return err
@@ -379,7 +384,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	s.mu.Lock()
 	entry.gitAuthorEmail = actor.GitIdentity().Email
 	s.mu.Unlock()
-	driver, err := s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, persistSupervisor)
+	driver, err := s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, persistSupervisor, unlockCaches)
 	if err != nil {
 		return err
 	}
@@ -429,8 +434,9 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 }
 
 // startRunContainer is the part of a launch a move to another account
-// repeats. On failure no container of it is left running.
-func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, run *domain.Run, actor *domain.Member, argv []string, profile harness.Profile, plan *EnvironmentPlan, persistSupervisor bool) (AgentDriver, error) {
+// repeats. On failure no container of it is left running. It calls
+// unlockCaches once the sidecar publishes the container's cache ownership.
+func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, run *domain.Run, actor *domain.Member, argv []string, profile harness.Profile, plan *EnvironmentPlan, persistSupervisor bool, unlockCaches func()) (AgentDriver, error) {
 	var native harness.NativeLaunch
 	if coordination := s.coordinationSeam(); coordination != nil && coordination.enabled &&
 		run.Mode == domain.LaunchTUI && run.Task != "" {
@@ -486,6 +492,7 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	if werr := s.writeSidecar(sc); werr != nil {
 		return nil, s.failContainer(ctx, entry, cid, "write sidecar", werr)
 	}
+	unlockCaches()
 	att, err := s.cfg.Runtime.Attach(ctx, cid)
 	if err != nil {
 		return nil, s.failContainer(ctx, entry, cid, "attach", err)

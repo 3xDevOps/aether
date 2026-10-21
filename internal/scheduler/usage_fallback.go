@@ -841,7 +841,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	s.mu.Lock()
 	entry.gitAuthorEmail = home.GitIdentity().Email
 	s.mu.Unlock()
-	unlockCaches := s.lockRunCaches(home.ID, to)
+	unlockCaches := sync.OnceFunc(s.lockRunCaches(home.ID, to))
 	plan, err := s.runPlan(ctx, entry, &next, ws, home, profile)
 	if err != nil {
 		unlockCaches()
@@ -850,7 +850,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	s.mu.Lock()
 	persistSupervisor := entry.missionAssigned
 	s.mu.Unlock()
-	_, err = s.startRunContainer(ctx, entry, &next, home, argv, profile, plan, persistSupervisor)
+	_, err = s.startRunContainer(ctx, entry, &next, home, argv, profile, plan, persistSupervisor, unlockCaches)
 	unlockCaches()
 	if err != nil {
 		return failed(err)

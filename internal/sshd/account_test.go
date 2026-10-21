@@ -220,6 +220,61 @@ func TestLaunchAdmissionSerializesAccountRevoke(t *testing.T) {
 	}
 }
 
+// Once the scheduler admits the run, run.launch stops holding the
+// authorization lock: a revoke completes while the run provisions.
+func TestAccountRevokeDoesNotWaitForAdmittedProvisioning(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	_, grantee := addMember(t, e, "Grace", domain.RoleCollaborator, false)
+	if err := e.store.ShareAccount(ctx, e.member.ID, grantee.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.runs.mu.Lock()
+	e.runs.launchAdmits = true
+	e.runs.mu.Unlock()
+	started, release := e.runs.blockLaunch()
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	launchParams := launchParams(t, e.ws.ID, e.member.ID)
+	revokeParams := accountParams(t, grantee.ID)
+
+	launchDone := make(chan *protocol.Error, 1)
+	go func() {
+		_, perr := e.srv.runLaunch(ctx, grantee.ID, launchParams)
+		launchDone <- perr
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("launch did not reach provisioning")
+	}
+
+	revokeDone := make(chan *protocol.Error, 1)
+	go func() {
+		_, perr := e.srv.accountRevoke(ctx, e.member.ID, revokeParams)
+		revokeDone <- perr
+	}()
+	select {
+	case perr := <-revokeDone:
+		if perr != nil {
+			t.Fatalf("account revoke during provisioning: %+v", perr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("account revoke waited for an admitted launch to finish provisioning")
+	}
+
+	close(release)
+	released = true
+	if perr := <-launchDone; perr != nil {
+		t.Fatalf("launch: %+v", perr)
+	}
+}
+
 // Relaunch reuses the retained container, so a handoff cannot silently
 // authorize access to an unshared backing account.
 func TestRelaunchRetainedRunRequiresCurrentAccountGrant(t *testing.T) {
