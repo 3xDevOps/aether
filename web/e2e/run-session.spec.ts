@@ -310,8 +310,9 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
 
     const instruction = 'Please inspect the migration'
     const composer = bobPage.getByRole('combobox', { name: 'Message the agent' })
-    await expect(bobPage.getByText('Delivers in 45 s unless the controller decides sooner.')).toBeVisible()
     await composer.fill(instruction)
+    await bobPage.getByRole('button', { name: 'Send', exact: true }).hover()
+    await expect(bobPage.getByRole('tooltip')).toContainText('Delivers in 45 s unless the controller decides sooner.')
     await bobPage.getByRole('button', { name: 'Send', exact: true }).click()
     const request = aliceDetails.getByRole('region', { name: 'Needs you' }).locator('[data-slot=request-card]').filter({ hasText: instruction })
     await expect(request).toContainText(`${bobMember.display_name} sent the agent a message`)
