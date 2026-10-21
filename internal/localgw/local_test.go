@@ -618,6 +618,41 @@ func TestLocalLinkSwitch(t *testing.T) {
 	}
 }
 
+func TestLocalLinkReset(t *testing.T) {
+	useTempConfigDir(t)
+	saved := cli.Config{Addr: "home:2222", Links: []cli.NamedLink{{Name: "prod", Addr: "prod:2222"}}}
+	if err := cli.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := cli.Dir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "edge-tokens.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	backend := &switchBackend{}
+	g := newVerbGateway(t, backend, saved)
+
+	rec := do(g, http.MethodPost, "/local/v1/link.reset", `{}`, true)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reset = %d: %s", rec.Code, rec.Body)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("config dir after reset: %v, want it deleted", err)
+	}
+	if len(backend.relinked) != 1 || backend.relinked[0].Addr != "" {
+		t.Fatalf("relinked = %+v, want one empty link", backend.relinked)
+	}
+	if got := g.local.snapshot(); got.Addr != "" || len(got.Links) != 0 {
+		t.Fatalf("cached config = %+v, want it empty", got)
+	}
+	rec = do(g, http.MethodPost, "/local/v1/link.status", `{}`, true)
+	if !strings.Contains(rec.Body.String(), `"server_configured":false`) {
+		t.Fatalf("status after reset: %s", rec.Body)
+	}
+}
+
 func TestPackagedGatewayOmitsHostVerbs(t *testing.T) {
 	useTempConfigDir(t)
 	if err := cli.Save(cli.Config{Addr: "home:2222"}); err != nil {

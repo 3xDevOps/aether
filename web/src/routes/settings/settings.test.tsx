@@ -273,6 +273,52 @@ describe('settings view', () => {
     expect(client.localDaemonInstall).not.toHaveBeenCalled()
   })
 
+  describe('clear local state', () => {
+    const reload = vi.fn()
+
+    beforeEach(() => {
+      reload.mockClear()
+      vi.stubGlobal('location', { ...window.location, reload })
+    })
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('is the last section and resets only after confirmation', async () => {
+      const client = fakeApi()
+      seed({ capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'link.reset'] } })
+      render(<SettingsRoute params={{}} client={client} />)
+
+      const headings = screen.getAllByRole('heading', { level: 2 })
+      expect(headings[headings.length - 1].textContent).toBe('Danger zone')
+      fireEvent.click(screen.getByRole('button', { name: 'Clear local state' }))
+      expect(client.localLinkReset).not.toHaveBeenCalled()
+
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Clear local state' }))
+      await waitFor(() => expect(reload).toHaveBeenCalled())
+      expect(client.localLinkReset).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps the refusal on screen and does not reload', async () => {
+      const client = fakeApi({
+        localLinkReset: vi.fn(async () => {
+          throw new Error('delete /config/aether: permission denied')
+        }),
+      })
+      seed({ capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'link.reset'] } })
+      render(<SettingsRoute params={{}} client={client} />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Clear local state' }))
+      fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Clear local state' }))
+      expect(await screen.findByText('delete /config/aether: permission denied')).toBeDefined()
+      expect(reload).not.toHaveBeenCalled()
+    })
+
+    it('is absent without the link.reset verb', () => {
+      seed()
+      render(<SettingsRoute params={{}} client={fakeApi()} />)
+      expect(screen.queryByRole('button', { name: 'Clear local state' })).toBeNull()
+    })
+  })
+
   describe('saved servers', () => {
     const status = {
       server_configured: true,

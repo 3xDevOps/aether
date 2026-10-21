@@ -909,6 +909,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       url: 'ssh://alice@host:2222/wsp_1',
     })),
     localLinkSwitch: vi.fn(async (name: string) => ({ active: name })),
+    localLinkReset: vi.fn(async () => ({ deleted: '/config/aether' })),
     localEdgeStatus: vi.fn(async () => ({ edges: [] })),
     localEdgeLogin: vi.fn(async () => needsOverride('localEdgeLogin')),
     localEdgeServers: vi.fn(async () => needsOverride('localEdgeServers')),

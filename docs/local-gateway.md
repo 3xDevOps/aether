@@ -811,7 +811,7 @@ retention, so a closed interactive run is unavailable to `run.relaunch` immediat
  "local":["daemon.install","daemon.status","edge.claim","edge.hostkey","edge.join","edge.link",
           "edge.login","edge.logout","edge.servers","edge.status","env.agents","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
-          "link.status","link.switch","pull","pull.switch","repo.fast-forward",
+          "link.reset","link.status","link.switch","pull","pull.switch","repo.fast-forward",
           "repo.push","sync.start","sync.status","sync.stop",
           "update.apply","update.check","update.status","workspace.selection"],
  "version":"v1.2.3","commit":"abc1234"}
@@ -1706,6 +1706,7 @@ authority.
 | `edge.join` | `{"link":"<join link>","addr":"host[:port]","name":"..."}` (`addr` and `name` optional) | as `edge.link` |
 | `edge.logout` | `{"edge":"https://..."}` (optional) | `{"edge":"https://..."}` |
 | `link.switch` | `{"name":"..."}` (empty selects the default link) | `{"active":"<name>"}` after relinking the gateway in place; the dashboard reloads. It stops the gateway's forwards and syncs first and saves the choice as `gui_server` in `config.json`, which a later `aether gui` without `--server` starts on. Naming the active link changes nothing. An unknown name is `-32602`: `no server named "<name>"` |
+| `link.reset` | `{}` | `{"deleted":"<config dir>"}` after relinking the gateway to nothing, stopping its forwards and syncs, and deleting the Aether config directory: `config.json`, the edge device key and tokens, and the workspace selection. The SSH key under `~/.ssh` and the linked clone stay, and the edge keeps the device approved until it is revoked there or `aether logout` ran first. The next `link.status` reports `server_configured:false`; the dashboard clears its saved settings and reloads into onboarding |
 | `link.repo` | `{"repo":"/path/to/clone","workspace_id":"..."}` (`workspace_id` optional) | `{"repo":"...","remote":"aether","url":"...","origin":"..."}` (`origin` is the workspace checkout `Origin` afterwards, omitted when it has none) |
 | `git.identity` | `{}` | `{"name":"Ada Lovelace","email":"ada@example.com"}` - this machine's `git config user.name` and `user.email`; either is empty when unset |
 | `pull` | `{"run_id":"..."}` | `{"branch":"...","ref":"...","output":"...","current":bool,"dirty":bool}` |

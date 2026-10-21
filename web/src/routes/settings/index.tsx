@@ -11,7 +11,7 @@ import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { NotificationsSection } from '@/routes/settings/notifications'
 import { RemoteAccessSection } from '@/routes/settings/remote-access'
 import { ServerSection } from '@/routes/settings/server'
-import { ThisComputerSection } from '@/routes/settings/this-computer'
+import { ResetSection, ThisComputerSection } from '@/routes/settings/this-computer'
 import { UsageSection } from '@/routes/settings/usage'
 import { useStore } from '@/store'
 import type { TextSize, Theme } from '@/store/ui'
@@ -91,6 +91,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
           <RemoteAccessSection client={client} />
           <UsageSection client={client} />
           <OnboardingSection />
+          <ResetSection client={client} />
         </div>
       </div>
     </div>

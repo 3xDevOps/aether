@@ -5230,6 +5230,13 @@ before any), **Saved servers** (the default link, then named ones) with
   already mirroring). **Change** edits the target; **Install** and **Start
   mirroring** are secondary buttons. The server-hosted dashboard omits the
   section.
+- **Danger zone**, last on the page and only on the local gateway: a red
+  **Clear local state** button. Its confirmation dialog names what goes -
+  `config.json`, the edge device key and tokens, and the dashboard's saved
+  settings - and what stays: the SSH key, the clone and the server's data.
+  Confirming calls `link.reset`, clears `localStorage` and reloads into
+  onboarding, so the computer can link to a different server from scratch.
+  A refusal stays in the dialog.
 - **GitHub**, for admins when the OAuth methods are available: the same
   `GitHubConnection` and **Add repository** picker used in onboarding and
   Manage workspaces, not another importer. Existing native authorization is

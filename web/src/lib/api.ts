@@ -1073,6 +1073,8 @@ export const api = {
     local<LinkRepoResult>('link.repo', { repo, workspace_id: workspaceID }),
   /** An empty name is the top-level default link. */
   localLinkSwitch: (name: string) => local<{ active: string }>('link.switch', { name }),
+  /** Deletes every saved link, edge sign-in and device key on this computer. */
+  localLinkReset: () => local<{ deleted: string }>('link.reset'),
   /** Starts a sign-in at the edge; edge.status reports how it ends. */
   localEdgeLogin: (edge?: string) => local<EdgeLogin>('edge.login', edge ? { edge } : {}),
   localEdgeStatus: () => local<EdgeStatus>('edge.status'),

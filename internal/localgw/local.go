@@ -43,6 +43,7 @@ var localHandlers = map[string]func(*Gateway, *http.Request, []byte) (any, *prot
 	"git.identity":        (*Gateway).localGitIdentity,
 	"link.apply":          (*Gateway).localLinkApply,
 	"link.repo":           (*Gateway).localLinkRepo,
+	"link.reset":          (*Gateway).localLinkReset,
 	"link.status":         (*Gateway).localLinkStatus,
 	"link.switch":         (*Gateway).localLinkSwitch,
 	"pull":                (*Gateway).localPull,
