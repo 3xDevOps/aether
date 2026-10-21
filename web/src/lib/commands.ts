@@ -1,7 +1,7 @@
 // Run and board verbs as data: the palette and the action buttons render the same list.
 
 import { useCallback } from 'react'
-import { toast } from 'sonner'
+import { type ExternalToast, toast } from 'sonner'
 import {
   Archive,
   ArchiveRestore,
@@ -32,6 +32,7 @@ import {
   UserPlus,
 } from '@/components/icons'
 import { api, ApiError, codeInvalidState, codeNotFound, type Api } from '@/lib/api'
+import { copyText } from '@/lib/clipboard'
 import { errorSentence, message } from '@/lib/format'
 import { awaitsCompletion } from '@/lib/needs-you'
 import { allowed } from '@/lib/permissions'
@@ -67,8 +68,8 @@ export interface Command {
   value?: string
   /** Success toast and failure-toast prefix; set only on gateway calls. */
   done?: string
-  /** A success toast naming something the call returned, such as a pull's ref. */
-  report?: (result: unknown) => string
+  /** A success toast naming something the call returned, such as a pull's branch, with any next step as its buttons. */
+  report?: (result: unknown) => [string, ExternalToast?]
   disabled?: boolean
   /** Set on irreversible verbs; every surface confirms before running them. */
   confirm?: { title: string; body: string; action: string }
@@ -506,7 +507,16 @@ export function runCommands(ctx: RunCommandContext): Command[] {
       Icon: Download,
       disabled: !run.last_commit,
       done: 'Pulled branch',
-      report: (result) => `Pulled ${(result as PullResult).ref}`,
+      report: (result) => {
+        const pull = result as PullResult
+        if (pull.current) return [`Pulled ${pull.branch}, the branch you are on`]
+        const command = `git switch ${pull.branch}`
+        return [`Pulled ${pull.branch}`, {
+          duration: 10_000,
+          action: cap.hasLocal('pull.switch') ? { label: 'Switch to it', onClick: () => void switchToPull(id, pull) } : undefined,
+          cancel: { label: 'Copy command', onClick: () => void copyText(command, null) },
+        }]
+      },
       perform: (d) =>
         d.api.localPull(id).then((result) => {
           d.recordPull(id, result)
@@ -517,6 +527,17 @@ export function runCommands(ctx: RunCommandContext): Command[] {
 
   // A verb offered from a pending prediction's state could re-read the run and erase that prediction.
   return ctx.predicting ? list.filter((command) => !command.predict) : list
+}
+
+/** Checks out a pulled run branch in the linked repository; a refusal, such as uncommitted changes, is shown as the gateway words it. */
+export async function switchToPull(runID: string, pull: PullResult): Promise<void> {
+  try {
+    await api.localPullSwitch(runID)
+    useStore.getState().recordPull(runID, { ...pull, current: true })
+    toast.success(`Now on ${pull.branch}`)
+  } catch (err) {
+    toast.error(errorSentence(err))
+  }
 }
 
 /** A run whose agent reported success and that its owner has not marked complete. */
@@ -919,7 +940,8 @@ export function useCommandRunner(
       if (!done) return
       try {
         const value = await result
-        toast.success(command.report ? command.report(value) : done)
+        const [text, options] = command.report?.(value) ?? [done]
+        toast.success(text, options)
       } catch (err) {
         toast.error(`${done} failed: ${errorSentence(err)}`)
       }

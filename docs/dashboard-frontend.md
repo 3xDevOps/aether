@@ -1665,7 +1665,10 @@ capability gate, optional confirmation and call. Run verbs (`runCommands`):
 port…** (local gateway), **Close run…**, **Kill run**, **Delete run**, **Free
 container…**, **Archive run** / **Restore run**, **Protect run** /
 **Unprotect run**, **Reopen run**, **Pull branch** (local gateway) and **Hand
-off to <member>**. Board verbs (`boardCommands`): **Open the board**, **Open
+off to <member>**. Pull branch fetches the run branch into the linked
+repository; unless you are already on that branch, its toast offers **Switch
+to it** (`pull.switch`, which refuses a dirty checkout with git's own
+reason) and **Copy command** (`git switch <branch>`). Board verbs (`boardCommands`): **Open the board**, **Open
 all workspaces**, **Ask Aether** (opens the assistant; offered when the server
 serves `assistant.status`), **New run…**, **New swarm…**, **Launch from a template…**,
 **Archive closed runs…**, **Free retained containers…** and the three theme
@@ -2858,7 +2861,8 @@ both what it renders and the overlap set the conflict chips read.
   menu of the same files. Picking a file opens it and scrolls its header to
   just under the strip. With nothing changed the view is the "No changes
   yet." empty state. `Land` (`land.tsx`) adds a row above the git card only
-  after a pull put the run branch on this machine.
+  after a pull put the run branch on this machine, with the same **Switch to
+  it** as the pull's toast.
 - **The card scrolls away; the strip stays.** Everything right of the file
   list is one scroller: `Land`, the git card, the strip with the review bar,
   then the patches. Scrolling down moves the card out of view while the
