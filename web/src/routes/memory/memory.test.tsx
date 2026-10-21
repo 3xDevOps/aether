@@ -115,6 +115,19 @@ describe('memory page', () => {
     expect(titles()).toHaveLength(100)
   })
 
+  it('words a cut-off pinned search as best matches, with no hint to search for older ones', async () => {
+    seed()
+    const memorySearch = vi.fn(async () => ({ items: pins(100) }))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
+    await screen.findByRole('list', { name: 'Notes' })
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search notes' }), { target: { value: 'lease' } })
+    expect(await screen.findByText('The 100 best pinned matches, then the 100 best matches.')).toBeDefined()
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Pinned' }))
+    expect(await screen.findByText('The 100 best pinned matches.')).toBeDefined()
+    expect(screen.queryByText(/newest|Search to find older ones/)).toBeNull()
+  })
+
   it('lists fewer than 100 pins without a notice', async () => {
     seed()
     const memorySearch = vi.fn(async (params: MemorySearchParams) => ({ items: params.pinned ? pins(99) : [agentNote] }))
