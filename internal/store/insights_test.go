@@ -51,7 +51,7 @@ func TestInsightsMigrationMarksSwarmRuns(t *testing.T) {
 
 func TestSwarmFinishedMigrationBackfillsFinishedSwarms(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aether.db")
-	raw := openLegacy(t, path, len(migrations)-1)
+	raw := openLegacy(t, path, 75)
 	if _, err := raw.Exec(`
 		INSERT INTO members (id, display_name, public_key, color, role, created_at) VALUES ('m1', 'Ada', ?, '#e6194b', 'admin', 1);
 		INSERT INTO workspaces (id, name, created_at) VALUES ('w1', 'proj', 1);

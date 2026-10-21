@@ -77,10 +77,11 @@ account the form uses the owner's installation when you have none, and the
 owner must have logged in. With none installed, the form offers **Set up an
 agent**.
 
-Aether updates a shipped agent in `~/.local/bin` before a launch, at most every
-6 hours ([harnesses.md](harnesses.md#updates-before-launch)). `aether agent
-remove <name>` deletes only its `~/.local/bin` links. Packages, login and
-settings stay ([harnesses.md](harnesses.md#remove-an-agent)).
+Aether updates a shipped agent in `~/.local/bin` in the background when a run
+launches, at most every 6 hours
+([harnesses.md](harnesses.md#updates-before-launch)). `aether agent remove
+<name>` deletes only its `~/.local/bin` links. Packages, login and settings stay
+([harnesses.md](harnesses.md#remove-an-agent)).
 
 ## Connect GitHub
 

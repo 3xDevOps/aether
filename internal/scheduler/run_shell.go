@@ -161,7 +161,7 @@ func (r *shellTabReservation) Rollback(ctx context.Context) error {
 		if string(ptyhost.RunShellSession(r.run, id)) != r.key || terminal.Generation != r.generation {
 			continue
 		}
-		if err := r.s.stopRunTerminalLocked(ctx, r.run, set, terminal, r.s.cfg.StopGrace); err != nil {
+		if err := r.s.stopRunTerminalsLocked(ctx, r.run, set, r.s.cfg.StopGrace, terminal); err != nil {
 			return err
 		}
 		_ = r.s.cfg.PTY.StopSession(ctx, ptyhost.SessionKey(r.key))
@@ -201,5 +201,5 @@ func (s *Scheduler) StopRunShellTab(ctx context.Context, run domain.RunID, tab s
 	if terminal == nil {
 		return ptyhost.ErrNoSession
 	}
-	return s.stopRunTerminalLocked(ctx, run, set, terminal, s.cfg.StopGrace)
+	return s.stopRunTerminalsLocked(ctx, run, set, s.cfg.StopGrace, terminal)
 }

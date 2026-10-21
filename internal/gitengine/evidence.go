@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -17,6 +19,12 @@ import (
 
 const (
 	evidenceRefRoot = "refs/aether/evidence/"
+
+	// evidencePrunePending marks a workspace repository whose removed
+	// evidence refs still await a gc. It is a file so it survives restarts.
+	evidencePrunePending = "aether-evidence-prune"
+	evidencePruneDelay   = 30 * time.Second
+	evidencePruneTimeout = 5 * time.Minute
 
 	// Evidence diff statistics are metadata, not patch content. Keep both the
 	// subprocess output and the parsed facts bounded before either can grow a
@@ -202,8 +210,9 @@ func (e *Engine) RenderEvidence(ctx context.Context, workspaceID domain.Workspac
 	return Patch{Base: revision.BaseCommit, Text: trimToLastLine(text, truncated), Truncated: truncated}, nil
 }
 
-// RemoveEvidence deletes only packetID's exact private evidence ref. Missing
-// refs are intentionally harmless so retention GC can retry safely.
+// RemoveEvidence deletes only packetID's exact private evidence ref and
+// schedules the workspace's object prune. Missing refs are intentionally
+// harmless so retention GC can retry safely.
 func (e *Engine) RemoveEvidence(ctx context.Context, workspaceID domain.WorkspaceID, packetID string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -222,37 +231,134 @@ func (e *Engine) RemoveEvidence(ctx context.Context, workspaceID domain.Workspac
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// Marked before the ref goes, so a crash in between still leaves the
+	// prune pending.
+	if err := os.WriteFile(filepath.Join(repo, evidencePrunePending), nil, 0o600); err != nil {
+		return fmt.Errorf("gitengine: mark evidence prune pending: %w", err)
+	}
+	// update-ref -d succeeds on a missing ref, so any failure, such as a
+	// stale packed-refs.lock, means the ref is still there.
 	if _, err := e.git(ctx, repo, "update-ref", "-d", evidenceRef(packetID)); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
-			return nil
-		}
 		return fmt.Errorf("gitengine: remove evidence: %w", err)
+	}
+	e.mu.Lock()
+	e.scheduleEvidencePruneLocked(workspaceID)
+	e.mu.Unlock()
+	return nil
+}
+
+// evidencePrune is one workspace's debounced object prune. A removal while
+// the gc runs sets again, which schedules one more gc after it.
+type evidencePrune struct {
+	timer   *time.Timer
+	running bool
+	again   bool
+}
+
+// RetryEvidencePrunes schedules a prune for every workspace whose pending
+// marker a failed gc or a server restart left behind.
+func (e *Engine) RetryEvidencePrunes() error {
+	entries, err := os.ReadDir(e.cfg.ReposDir)
+	if err != nil {
+		return fmt.Errorf("gitengine: list workspace repositories: %w", err)
+	}
+	var pending []domain.WorkspaceID
+	for _, entry := range entries {
+		ws, ok := strings.CutSuffix(entry.Name(), ".git")
+		if !ok || validateID(ws) != nil {
+			continue
+		}
+		_, statErr := os.Stat(filepath.Join(e.cfg.ReposDir, entry.Name(), evidencePrunePending))
+		if statErr == nil {
+			pending = append(pending, domain.WorkspaceID(ws))
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return fmt.Errorf("gitengine: inspect pending evidence prune: %w", statErr)
+		}
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, ws := range pending {
+		e.scheduleEvidencePruneLocked(ws)
 	}
 	return nil
 }
 
-// PruneEvidence repacks a workspace repository after evidence refs have been
-// removed. Git's reachability walk preserves every live branch and object
-// reachable from a checkout while reclaiming unreachable retained evidence.
-// The maintenance lock serializes this with internal ref/object writers.
-func (e *Engine) PruneEvidence(ctx context.Context, workspaceID domain.WorkspaceID) error {
-	if err := ctx.Err(); err != nil {
-		return err
+// scheduleEvidencePruneLocked restarts ws's debounce, so a burst of removals
+// costs one gc. The caller holds e.mu.
+func (e *Engine) scheduleEvidencePruneLocked(ws domain.WorkspaceID) {
+	if e.closed {
+		return
 	}
-	repo, err := e.existingRepoPath(workspaceID)
-	if err != nil {
-		return err
+	p := e.evidencePrunes[ws]
+	switch {
+	case p == nil:
+		p = &evidencePrune{}
+		p.timer = time.AfterFunc(e.evidencePruneDelay, func() { e.runEvidencePrune(ws, p) })
+		e.evidencePrunes[ws] = p
+	case p.running:
+		p.again = true
+	// Stop fails only once the timer fired. That callback is waiting for
+	// e.mu and its gc starts after this request's ref removal, so it covers
+	// this request too.
+	case p.timer.Stop():
+		p.timer.Reset(e.evidencePruneDelay)
 	}
+}
+
+func (e *Engine) runEvidencePrune(ws domain.WorkspaceID, p *evidencePrune) {
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return
+	}
+	p.running, p.again = true, false
+	e.prunesRunning.Add(1)
+	e.mu.Unlock()
+	defer e.prunesRunning.Done()
+
+	ctx, cancel := context.WithTimeout(e.pruneCtx, evidencePruneTimeout)
+	err := e.pruneEvidence(ctx, ws)
+	cancel()
+	if err != nil && !errors.Is(err, ErrRepoNotFound) && e.pruneCtx.Err() == nil {
+		slog.Warn("gitengine: evidence prune failed; the next evidence retention sweep retries it", "workspace", string(ws), "error", err)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	p.running = false
+	if p.again && !e.closed {
+		p.timer.Reset(e.evidencePruneDelay)
+		return
+	}
+	delete(e.evidencePrunes, ws)
+}
+
+// pruneEvidence reclaims removed evidence with git gc. Git's reachability
+// walk preserves every live branch and object reachable from a checkout.
+// It holds RemoveEvidence's locks, so clearing the pending marker cannot
+// drop a removal made while the gc ran.
+func (e *Engine) pruneEvidence(ctx context.Context, ws domain.WorkspaceID) error {
 	e.fileWriteMu.Lock()
 	defer e.fileWriteMu.Unlock()
 	e.repoMaintenanceMu.Lock()
 	defer e.repoMaintenanceMu.Unlock()
-	if err := ctx.Err(); err != nil {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	repo, err := e.existingRepoPath(ws)
+	if err != nil {
 		return err
 	}
-	if _, err := e.git(ctx, repo, "gc", "--prune=now", "--quiet"); err != nil {
-		return fmt.Errorf("gitengine: prune evidence objects: %w", err)
+	cmd := exec.CommandContext(ctx, e.cfg.GitPath, "-C", repo, "-c", "safe.directory=*", "gc", "--prune=now", "--quiet")
+	cmd.Env = gitEnv()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	// gc's repack, pack-objects and prune children outlive a killed gc and
+	// would keep rewriting the repository after the locks are released.
+	if runErr := runInProcessGroup(cmd); runErr != nil {
+		return fmt.Errorf("gitengine: prune evidence objects: %w: %s", runErr, strings.TrimSpace(stderr.String()))
+	}
+	if removeErr := os.Remove(filepath.Join(repo, evidencePrunePending)); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return fmt.Errorf("gitengine: clear pending evidence prune: %w", removeErr)
 	}
 	return nil
 }

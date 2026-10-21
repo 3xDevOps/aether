@@ -129,7 +129,6 @@ type Config struct {
 	// Test-only overrides of the matching default* constants.
 	turnTail             time.Duration
 	harnessUpdateTimeout time.Duration
-	harnessUpdateWait    time.Duration
 	filesystemCapacity   func(string) (disk.Usage, error)
 }
 

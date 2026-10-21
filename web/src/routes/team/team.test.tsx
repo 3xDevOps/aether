@@ -81,6 +81,24 @@ describe('team refresh and summary', () => {
     expect(client.presenceHeartbeat).toHaveBeenCalledWith(workspace.id)
   })
 
+  it('reads once per connect, after hydration lists the workspaces, and again on a reconnect', async () => {
+    const client = fakeApi()
+    seed({ hydrated: false, workspaces: {}, connection: 'connecting' })
+    render(<TeamRefresh client={client} />)
+    act(() => useStore.setState({ connection: 'live' }))
+    act(() => useStore.setState({ workspaces: { [workspace.id]: workspace } }))
+    expect(client.presenceRoster).not.toHaveBeenCalled()
+    act(() => useStore.setState({ hydrated: true }))
+    await vi.waitFor(() => expect(client.budgetGet).toHaveBeenCalledTimes(1))
+    expect(client.presenceRoster).toHaveBeenCalledTimes(1)
+    expect(client.approvalList).toHaveBeenCalledTimes(1)
+
+    act(() => useStore.setState({ connection: 'offline' }))
+    act(() => useStore.setState({ connection: 'live' }))
+    await vi.waitFor(() => expect(client.presenceRoster).toHaveBeenCalledTimes(2))
+    expect(client.budgetGet).toHaveBeenCalledTimes(2)
+  })
+
   // Both readouts claim a whole-deployment fact, so idle workspaces count too.
   it('refreshes every workspace, not just the ones with live runs', async () => {
     const client = fakeApi()

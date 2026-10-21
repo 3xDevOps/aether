@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -64,11 +65,16 @@ func (s *session) captureCheckpointLocked() (*checkpointCapture, error) {
 }
 
 func (s *session) persistCheckpoint(capture *checkpointCapture) error {
-	if capture == nil {
-		return nil
-	}
 	s.checkpointMu.Lock()
 	defer s.checkpointMu.Unlock()
+	if capture == nil {
+		s.mu.Lock()
+		if s.tr == nil {
+			s.persisted = nil
+		}
+		s.mu.Unlock()
+		return nil
+	}
 	s.mu.Lock()
 	stale := capture.seq < s.checkpointSeq
 	s.mu.Unlock()
@@ -76,10 +82,25 @@ func (s *session) persistCheckpoint(capture *checkpointCapture) error {
 		capture.boundary.release()
 		return nil
 	}
-	err := capture.persist()
+	var err error
+	// Only this session and a rotation, which changes the incarnation, write
+	// a live session's checkpoint. An unchanged one is therefore still on
+	// disk, with the transcript prefix it names already synced.
+	if prior := s.persisted; prior != nil && prior.path == capture.path && reflect.DeepEqual(prior.record(), capture.record()) {
+		capture.boundary.release()
+	} else {
+		s.persisted = nil
+		if err = capture.persist(); err == nil {
+			s.persisted = capture
+		}
+	}
 	s.mu.Lock()
 	if capture.seq == s.checkpointSeq {
 		s.checkpointErr = err
+	}
+	if s.tr == nil {
+		// A finished session captures nothing more; its entry must not keep the screen.
+		s.persisted = nil
 	}
 	s.mu.Unlock()
 	// Publication is best-effort. The in-memory screen remains authoritative,
@@ -198,7 +219,11 @@ func (c *checkpointCapture) persist() error {
 	if err := c.boundary.sync(); err != nil {
 		return fmt.Errorf("ptyhost: sync checkpoint transcript: %w", err)
 	}
-	return writeCheckpointFile(c.path, screenCheckpoint{
+	return writeCheckpointFile(c.path, c.record())
+}
+
+func (c *checkpointCapture) record() screenCheckpoint {
+	return screenCheckpoint{
 		Version:           screenCheckpointVersion,
 		Epoch:             c.snapshot.Position.Epoch,
 		Sequence:          c.snapshot.Position.Sequence,
@@ -211,7 +236,7 @@ func (c *checkpointCapture) persist() error {
 		Data:              c.snapshot.Data,
 		Segments:          c.segments,
 		SegmentCount:      c.segmentCount,
-	})
+	}
 }
 
 // captureCheckpoint records the logical cast boundary represented by snap.

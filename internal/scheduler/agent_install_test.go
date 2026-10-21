@@ -55,7 +55,7 @@ func TestInstallAgentHoldsTheGuardPastADroppedRequest(t *testing.T) {
 
 func installHomeEnv(t *testing.T) (e *testEnv, rt *updateRuntime, installStarted, releaseInstall chan struct{}) {
 	t.Helper()
-	e, rt, _ = newUpdateEnv(t, func(cfg *Config) { cfg.harnessUpdateWait = 50 * time.Millisecond })
+	e, rt, _ = newUpdateEnv(t, nil)
 	installInHome(t, e, "claude")
 	installStarted, releaseInstall = make(chan struct{}, 1), make(chan struct{})
 	update := rt.execHandler

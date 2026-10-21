@@ -1,41 +1,91 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { toast } from 'sonner'
 import { vi } from 'vitest'
 import { CloseDialog } from '@/components/palette/close-dialog'
-import { api } from '@/lib/api'
+import { api, codeInvalidState } from '@/lib/api'
+import type * as apiModule from '@/lib/api'
 import { runCommands } from '@/lib/commands'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { run } from '@/test/fixtures'
 
-const closeMocks = vi.hoisted(() => ({
-  runClose: vi.fn(),
-}))
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof apiModule>()
+  const { fakeApi } = await import('@/test/fixtures')
+  return { ...actual, api: fakeApi(), ApiError: Error }
+})
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() } }))
 
-vi.mock('@/lib/api', () => ({ api: closeMocks }))
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+const status = () => useStore.getState().runs.run_1?.status
 
 beforeEach(() => {
   vi.clearAllMocks()
-  closeMocks.runClose.mockResolvedValue(run({ status: 'merged' }))
   useStore.setState({
     paletteDialog: 'close',
     paletteRunID: 'run_1',
     runs: { run_1: toRecord(run({ id: 'run_1', status: 'completed' })) },
+    predicting: {},
   })
 })
 
 describe('close dialog', () => {
-  it('records the outcome the member picks', async () => {
+  it('closes at once and shows the outcome before the server answers', async () => {
+    const answer = Promise.withResolvers<never>()
+    vi.mocked(api.runClose).mockReturnValueOnce(answer.promise)
     render(<CloseDialog />)
     fireEvent.click(screen.getByRole('button', { name: 'Merged' }))
-    await waitFor(() => expect(api.runClose).toHaveBeenCalledWith('run_1', 'merged'))
+    expect(api.runClose).toHaveBeenCalledWith('run_1', 'merged')
     expect(useStore.getState().paletteDialog).toBeNull()
+    expect(status()).toBe('merged')
+    expect(toast.success).not.toHaveBeenCalled()
+    await act(async () => answer.resolve(run({ id: 'run_1', status: 'merged' }) as never))
+    expect(toast.success).toHaveBeenCalledWith('Closed as merged')
   })
 
-  it('records abandoned too', async () => {
+  it('puts the run back and shows the server\'s refusal', async () => {
+    vi.mocked(api.runClose).mockRejectedValueOnce(Object.assign(new Error('run is finishing'), { code: -32001 }))
+    vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'completed' }))
     render(<CloseDialog />)
     fireEvent.click(screen.getByRole('button', { name: 'Abandoned' }))
-    await waitFor(() => expect(api.runClose).toHaveBeenCalledWith('run_1', 'abandoned'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Closed as abandoned failed: run is finishing'))
+    expect(status()).toBe('completed')
+  })
+
+  it('keeps a close the server published before refusing, and shows the refusal', async () => {
+    const answer = Promise.withResolvers<never>()
+    vi.mocked(api.runClose).mockReturnValueOnce(answer.promise)
+    vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'merged', reason: 'closed', state: undefined, status_seq: 1 }))
+    render(<CloseDialog />)
+    fireEvent.click(screen.getByRole('button', { name: 'Merged' }))
+    act(() => useStore.getState().applyRunStatus('run_1', { to: 'merged', reason: 'closed', status_seq: 1 }, new Date().toISOString()))
+    await act(async () => answer.reject(Object.assign(new Error('run.close: scheduler: evidence run lookup: database is locked'), { code: -32603 })))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Closed as merged failed: evidence run lookup: database is locked'))
+    expect(status()).toBe('merged')
+  })
+
+  it('counts a refusal of a close that already landed as success', async () => {
+    vi.mocked(api.runClose).mockRejectedValueOnce(Object.assign(new Error('run finalization is in progress'), { code: codeInvalidState }))
+    vi.mocked(api.runGet).mockResolvedValueOnce(run({ id: 'run_1', status: 'merged', state: undefined }))
+    render(<CloseDialog />)
+    fireEvent.click(screen.getByRole('button', { name: 'Merged' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Closed as merged'))
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(status()).toBe('merged')
+  })
+
+  it('waits for the server, naming the choice, over another verb\'s pending prediction', async () => {
+    const answer = Promise.withResolvers<never>()
+    vi.mocked(api.runClose).mockReturnValueOnce(answer.promise)
+    useStore.setState({ predicting: { run_1: {} } })
+    render(<CloseDialog />)
+    fireEvent.click(screen.getByRole('button', { name: 'Merged' }))
+    expect(screen.getByRole('button', { name: 'Closing…' })).toHaveProperty('disabled', true)
+    expect(screen.getByRole('button', { name: 'Abandoned' })).toHaveProperty('disabled', true)
+    expect(useStore.getState().paletteDialog).toBe('close')
+    expect(status()).toBe('completed')
+    await act(async () => answer.resolve(run({ id: 'run_1', status: 'merged' }) as never))
+    expect(useStore.getState().paletteDialog).toBeNull()
+    expect(toast.success).toHaveBeenCalledWith('Closed as merged')
   })
 })
 

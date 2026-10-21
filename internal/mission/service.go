@@ -62,6 +62,9 @@ type MissionLaunchRequest struct {
 	RequestedAccount domain.MemberID
 	Fallback         domain.AccountFallback
 	Model            string
+	// Admitted is domain.LaunchOptions.Admitted: the caller releases
+	// AuthorizationMu and dispatchMu there.
+	Admitted func()
 }
 
 type Budget interface {
@@ -119,6 +122,9 @@ type Service struct {
 	mu              sync.Mutex
 	integrationMu   sync.RWMutex
 	integrationBase sshd.IntegrationService
+	// dispatchMu orders each mission launch, up to its admission, against
+	// cancelling or completing a mission run and against the observation
+	// that settles a reservation as never launched.
 	dispatchMu      sync.Mutex
 	reconcileCursor map[domain.WorkspaceID]string
 	cancel          context.CancelFunc
@@ -336,6 +342,13 @@ func (s *Service) authorizeAttemptKill(ctx context.Context, mission *domain.Miss
 		permissions.Target{Workspace: run.WorkspaceID, Owner: run.MemberID, Protected: run.Protected, SteerOthers: ws.SteerOthers})
 }
 
+// lockOnce locks mu and returns its unlock, which a launch calls at
+// admission and the caller defers for every other return.
+func lockOnce(mu *sync.Mutex) func() {
+	mu.Lock()
+	return sync.OnceFunc(mu.Unlock)
+}
+
 func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest) error {
 	if err := s.requireCoordination(); err != nil {
 		return err
@@ -353,8 +366,8 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 			return err
 		}
 	}
-	s.cfg.AuthorizationMu.Lock()
-	defer s.cfg.AuthorizationMu.Unlock()
+	unlockAuthorization := lockOnce(s.cfg.AuthorizationMu)
+	defer unlockAuthorization()
 	// A worker that already chose its launch account needs only that one;
 	// every other recovery is admitted on the declared account first.
 	authorizeDeclared := func() error {
@@ -426,8 +439,9 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 			return admitErr
 		}
 	}
-	s.dispatchMu.Lock()
-	defer s.dispatchMu.Unlock()
+	unlockDispatch := lockOnce(&s.dispatchMu)
+	defer unlockDispatch()
+	req.Admitted = func() { unlockDispatch(); unlockAuthorization() }
 	launched, err := s.cfg.Runs.LaunchMission(s.operationContext(ctx), req)
 	if err != nil {
 		return err
@@ -783,8 +797,8 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if err != nil {
 		return protocol.MissionCreateResult{}, err
 	}
-	s.cfg.AuthorizationMu.Lock()
-	defer s.cfg.AuthorizationMu.Unlock()
+	unlockAuthorization := lockOnce(s.cfg.AuthorizationMu)
+	defer unlockAuthorization()
 	admission, err := sshd.AuthorizeLaunch(ctx, s.cfg.Store, actor, p.Integrator.AccountMemberID)
 	if err != nil {
 		return protocol.MissionCreateResult{}, err
@@ -855,8 +869,8 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if s.cfg.Runs == nil || m.CurrentIntegratorRunID == "" {
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, errors.New("mission: integrator run reservation is unavailable")
 	}
-	s.dispatchMu.Lock()
-	defer s.dispatchMu.Unlock()
+	unlockDispatch := lockOnce(&s.dispatchMu)
+	defer unlockDispatch()
 	if existing, getErr := s.cfg.Store.GetRun(ctx, m.CurrentIntegratorRunID); getErr == nil && existing != nil {
 		err = s.recordIntegratorLaunch(ctx, m, launchErrorForRow(m, existing), true)
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, err
@@ -873,6 +887,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		ActorRunID: m.CurrentIntegratorRunID, RunOwnerID: m.IntegratorRunOwnerID,
 		RequestedAccount: admission.Account.ID, AccountOwner: account, Fallback: m.Fallback,
 		Task: m.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
+		Admitted: func() { unlockDispatch(); unlockAuthorization() },
 	})
 	if err != nil {
 		failure := s.integratorLaunchFailure(ctx, m, err)
@@ -916,8 +931,8 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{}, err
 	}
-	s.cfg.AuthorizationMu.Lock()
-	defer s.cfg.AuthorizationMu.Unlock()
+	unlockAuthorization := lockOnce(s.cfg.AuthorizationMu)
+	defer unlockAuthorization()
 	m, err := s.cfg.Missions.GetMission(ctx, domain.MissionID(p.MissionID))
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{}, err
@@ -964,8 +979,8 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if s.cfg.Runs == nil || replaced.CurrentIntegratorRunID == "" {
 		return protocol.MissionReplaceIntegratorResult{Mission: protocol.MissionFromDomain(replaced)}, errors.New("mission: integrator run reservation is unavailable")
 	}
-	s.dispatchMu.Lock()
-	defer s.dispatchMu.Unlock()
+	unlockDispatch := lockOnce(&s.dispatchMu)
+	defer unlockDispatch()
 	// A replay of a replacement whose run already has a row returns that run
 	// instead of launching it again.
 	if existing, getErr := s.cfg.Store.GetRun(ctx, replaced.CurrentIntegratorRunID); getErr == nil {
@@ -984,6 +999,7 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 		ActorRunID: replaced.CurrentIntegratorRunID, RunOwnerID: replaced.IntegratorRunOwnerID,
 		RequestedAccount: admission.Account.ID, AccountOwner: account, Fallback: replaced.Fallback,
 		Task: replaced.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
+		Admitted: func() { unlockDispatch(); unlockAuthorization() },
 	})
 	if err != nil {
 		failure := s.integratorLaunchFailure(ctx, replaced, err)

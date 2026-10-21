@@ -307,6 +307,54 @@ func TestStagedBridgesAreCollectedOnlyWhenUnreferenced(t *testing.T) {
 	}
 }
 
+// TestStagingRereadsOnlyAChangedCopy proves staging opens neither the server
+// binary nor its staged copy while that copy is unchanged, and verifies and
+// replaces a copy that changed.
+func TestStagingRereadsOnlyAChangedCopy(t *testing.T) {
+	t.Parallel()
+	self := fakeServerBinary(t, "current build")
+	e := newTestEnv(t, withServerBinary(self))
+	withCoordination(t, e)
+	seam := e.sched.coordinationSeam()
+	_, path, err := seam.stage()
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	opens, err := syscall.InotifyInit1(syscall.IN_CLOEXEC | syscall.IN_NONBLOCK)
+	if err != nil {
+		t.Fatalf("inotify: %v", err)
+	}
+	t.Cleanup(func() { _ = syscall.Close(opens) })
+	for _, p := range []string{self, path} {
+		if _, err = syscall.InotifyAddWatch(opens, p, syscall.IN_OPEN); err != nil {
+			t.Fatalf("watch %s: %v", p, err)
+		}
+	}
+	var again string
+	if _, again, err = seam.stage(); err != nil || again != path {
+		t.Fatalf("second stage = %q, %v; want %q", again, err, path)
+	}
+	if n, readErr := syscall.Read(opens, make([]byte, 4096)); !errors.Is(readErr, syscall.EAGAIN) {
+		t.Fatalf("second stage opened a binary: %d bytes of inotify events, error %v", n, readErr)
+	}
+
+	if err = os.Chmod(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, []byte("tampered"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(path, bridgeMode); err != nil {
+		t.Fatal(err)
+	}
+	if _, again, err = seam.stage(); err != nil || again != path {
+		t.Fatalf("stage after a change = %q, %v; want %q", again, err, path)
+	}
+	if got, readErr := os.ReadFile(path); readErr != nil || string(got) != "current build" {
+		t.Fatalf("restaged copy = %q, %v; want the server binary", got, readErr)
+	}
+}
+
 // TestArgvOverrideRespectsHarnessCommand proves a Config.Harnesses override is
 // respected verbatim. Registry-owned MCP registration and status reporting
 // are not synthesized for an override; the mounted CLI remains the explicit

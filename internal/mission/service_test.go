@@ -183,6 +183,73 @@ func TestCreateReportsPersistedMissionWhenIntegratorLaunchFails(t *testing.T) {
 	}
 }
 
+// clearHold runs beforeClear ahead of every write that would clear the
+// integrator's launch error.
+type clearHold struct {
+	store.MissionStore
+	beforeClear func()
+}
+
+func (h clearHold) RecordIntegratorLaunch(ctx context.Context, id domain.MissionID, run domain.RunID, launchErr string, launched bool, at time.Time) (bool, error) {
+	if launchErr == "" {
+		h.beforeClear()
+	}
+	return h.MissionStore.RecordIntegratorLaunch(ctx, id, run, launchErr, launched, at)
+}
+
+// A launch releases its locks at admission, so a same-key replay can read the
+// integrator's row while it still provisions. When the launch then fails, the
+// replay's later write must not clear the cause the launch recorded.
+func TestCreateReplayKeepsALaunchFailureRecordedAfterItReadTheRow(t *testing.T) {
+	ctx := context.Background()
+	db := openMissionRegressionDB(t)
+	workspace := regressionWorkspace(t, db)
+	member := regressionMember(t, db, "accountable")
+	cause := errors.New("container start failed")
+	launcher := &admittingLauncher{db: db, admitted: make(chan struct{}, 1), release: make(chan struct{}), err: cause}
+	original := make(chan error, 1)
+	var originalErr error
+	hold := clearHold{MissionStore: db, beforeClear: func() {
+		close(launcher.release)
+		originalErr = <-original
+	}}
+	svc, err := New(Config{Store: db, Missions: hold, Runs: launcher, RequireCoordination: func() error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: string(member.ID), Harness: "claude", Mode: "tui"}
+	params := protocol.MissionCreateParams{
+		WorkspaceID: string(workspace.ID), Objective: "objective", IdempotencyKey: "create",
+		Integrator:       protocol.MissionIntegrator(integrator),
+		ExecutionChoices: []protocol.MissionExecutionChoice{integrator},
+	}
+	go func() {
+		_, createErr := svc.Create(ctx, member.ID, params)
+		original <- createErr
+	}()
+	select {
+	case <-launcher.admitted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the integrator launch was never admitted")
+	}
+
+	out, err := svc.Create(ctx, member.ID, params)
+	if err != nil {
+		t.Fatalf("same-key replay: %v", err)
+	}
+	if !errors.Is(originalErr, cause) {
+		t.Fatalf("original create = %v, want %v", originalErr, cause)
+	}
+	m, err := db.GetMission(ctx, domain.MissionID(out.Mission.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.IntegratorLaunchError != cause.Error() || m.IntegratorLaunchErrorAt == nil || !m.IntegratorRunLaunched {
+		t.Fatalf("after the replay: error %q at %v, launched %v; want %q with a time and launched",
+			m.IntegratorLaunchError, m.IntegratorLaunchErrorAt, m.IntegratorRunLaunched, cause)
+	}
+}
+
 func TestReconcileRecordsAndClearsTheIntegratorLaunchError(t *testing.T) {
 	ctx := context.Background()
 	db := openMissionRegressionDB(t)

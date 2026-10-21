@@ -21,11 +21,8 @@ import (
 )
 
 const (
-	harnessUpdateInterval = 6 * time.Hour
-	harnessUpdateRetry    = 15 * time.Minute
-	// defaultHarnessUpdateWait keeps a launch well inside the 60 seconds the
-	// dashboard gateway allows one control call (internal/localgw).
-	defaultHarnessUpdateWait    = 25 * time.Second
+	harnessUpdateInterval       = 6 * time.Hour
+	harnessUpdateRetry          = 15 * time.Minute
 	defaultHarnessUpdateTimeout = 10 * time.Minute
 	harnessUpdateDestroyTimeout = 30 * time.Second
 	harnessVersionTimeout       = 15 * time.Second
@@ -44,16 +41,16 @@ type harnessUpdateState struct {
 }
 
 // harnessUpdateRun is one update in flight; done closes when it finishes.
-// before is guarded by Scheduler.mu.
 type harnessUpdateRun struct {
-	done   chan struct{}
-	before string
+	done chan struct{}
 }
 
-// updateHarness waits a bounded time for the update, which runs detached from
-// the launch so a dropped request or kill never stops an install halfway and
-// nothing it does can fail the launch.
-func (s *Scheduler) updateHarness(ctx context.Context, run *domain.Run, plan *EnvironmentPlan, profile harness.Profile) {
+// updateHarness starts a due update and returns without waiting for it: the
+// launch starts whatever is installed, so an UpdateScript must swap a new
+// version in atomically. The update runs detached from the launch so a
+// dropped request or kill never stops an install halfway and nothing it does
+// can fail the launch.
+func (s *Scheduler) updateHarness(run *domain.Run, plan *EnvironmentPlan, profile harness.Profile) {
 	if s.cfg.HarnessUpdateDisabled || profile.UpdateScript == "" || len(profile.TUIArgs) == 0 {
 		return
 	}
@@ -75,80 +72,54 @@ func (s *Scheduler) updateHarness(ctx context.Context, run *domain.Run, plan *En
 		state = &harnessUpdateState{}
 		s.harnessUpdates[key] = state
 	}
-	update := state.running
 	installing := slices.Contains(slices.Collect(maps.Values(s.agentInstalls)), home.HostPath)
-	start := update == nil && !installing && !s.cfg.Now().Before(state.next)
-	if start {
-		update = &harnessUpdateRun{done: make(chan struct{})}
-		state.running = update
+	if state.running != nil || installing || s.cfg.Now().Before(state.next) {
+		s.mu.Unlock()
+		return
 	}
+	update := &harnessUpdateRun{done: make(chan struct{})}
+	state.running = update
 	s.mu.Unlock()
-	if start {
-		member := domain.MemberID(filepath.Base(home.HostPath))
-		name := "harness-update-" + string(member) + "-" + profile.Name
-		mounts := []runtime.Mount{home}
-		env := maps.Clone(plan.Env)
-		if s.cfg.Homes != nil {
-			// Provisioning holds this member's cache lock. Publish the key
-			// before starting the detached worker; running state protects
-			// the pre-create gap and metadata survives crashes.
-			cache, cacheErr := s.cfg.Homes.CachePath(member, "terminal")
-			if cacheErr == nil {
-				cacheErr = s.cfg.Homes.AddCacheOwner(member, "terminal", name)
-			}
-			if cacheErr == nil {
-				cacheErr = s.applyRunOwnership(nil, &domain.Run{}, member,
-					[]runtime.Mount{{HostPath: cache, ContainerPath: "/aether-cache"}}, plan.User)
-			}
-			if cacheErr != nil {
-				s.mu.Lock()
-				state.running = nil
-				close(update.done)
-				s.mu.Unlock()
-				slog.Warn("scheduler: preserve updater cache ownership", "member", member, "error", cacheErr)
-				return
-			}
-			mounts = append(mounts, runtime.Mount{HostPath: cache, ContainerPath: "/aether-cache"})
+	member := domain.MemberID(filepath.Base(home.HostPath))
+	name := "harness-update-" + string(member) + "-" + profile.Name
+	mounts := []runtime.Mount{home}
+	env := maps.Clone(plan.Env)
+	if s.cfg.Homes != nil {
+		// Provisioning holds this member's cache lock. Publish the key
+		// before starting the detached worker; running state protects
+		// the pre-create gap and metadata survives crashes.
+		cache, cacheErr := s.cfg.Homes.CachePath(member, "terminal")
+		if cacheErr == nil {
+			cacheErr = s.cfg.Homes.AddCacheOwner(member, "terminal", name)
 		}
-		if s.cfg.ServerBinary != "" {
-			mounts = append(mounts, runtime.Mount{
-				HostPath: s.cfg.ServerBinary, ContainerPath: agentstatus.ReporterCommand, ReadOnly: true,
-			})
+		if cacheErr == nil {
+			cacheErr = s.applyRunOwnership(nil, &domain.Run{}, member,
+				[]runtime.Mount{{HostPath: cache, ContainerPath: "/aether-cache"}}, plan.User)
 		}
-		spec := runtime.Spec{
-			Name: name, Image: plan.Image, Env: env, Mounts: mounts,
-			User: plan.User, WorkingDir: plan.Home,
-			// Outlives the execs, and ends on its own if the server dies first.
-			Command: []string{"/bin/sh", "-c", "sleep 900"}, CreationKey: name,
-			CPULimit: s.cfg.RunCPULimit, MemoryLimitBytes: s.cfg.RunMemoryBytes,
-			PidsLimit: s.cfg.RunPidsLimit,
+		if cacheErr != nil {
+			s.mu.Lock()
+			state.running = nil
+			close(update.done)
+			s.mu.Unlock()
+			slog.Warn("scheduler: preserve updater cache ownership", "member", member, "error", cacheErr)
+			return
 		}
-		go s.runHarnessUpdate(state, update, run.WorkspaceID, run.ID, spec, exe, profile)
+		mounts = append(mounts, runtime.Mount{HostPath: cache, ContainerPath: "/aether-cache"})
 	}
-	if update == nil {
-		return
+	if s.cfg.ServerBinary != "" {
+		mounts = append(mounts, runtime.Mount{
+			HostPath: s.cfg.ServerBinary, ContainerPath: agentstatus.ReporterCommand, ReadOnly: true,
+		})
 	}
-	wait := s.cfg.harnessUpdateWait
-	if wait <= 0 {
-		wait = defaultHarnessUpdateWait
+	spec := runtime.Spec{
+		Name: name, Image: plan.Image, Env: env, Mounts: mounts,
+		User: plan.User, WorkingDir: plan.Home,
+		// Outlives the execs, and ends on its own if the server dies first.
+		Command: []string{"/bin/sh", "-c", "sleep 900"}, CreationKey: name,
+		CPULimit: s.cfg.RunCPULimit, MemoryLimitBytes: s.cfg.RunMemoryBytes,
+		PidsLimit: s.cfg.RunPidsLimit,
 	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-update.done:
-		return
-	case <-ctx.Done():
-		return
-	case <-timer.C:
-	}
-	s.mu.Lock()
-	before := update.before
-	s.mu.Unlock()
-	msg := "starting the installed version "
-	if before != "" {
-		msg += before + " "
-	}
-	s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote, msg+"while "+profile.Name+" updates")
+	go s.runHarnessUpdate(state, update, run.WorkspaceID, run.ID, spec, exe, profile)
 }
 
 func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessUpdateRun, workspace domain.WorkspaceID, runID domain.RunID, spec runtime.Spec, exe string, profile harness.Profile) {
@@ -158,7 +129,7 @@ func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessU
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	before, after, err := s.updateInContainer(ctx, update, spec, exe, profile.UpdateScript)
+	before, after, err := s.updateInContainer(ctx, spec, exe, profile.UpdateScript)
 	if err != nil && ctx.Err() != nil {
 		err = fmt.Errorf("the updater did not finish within %s", timeout)
 	}
@@ -181,7 +152,7 @@ func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessU
 		if after == "" {
 			after = "an unknown version"
 		}
-		s.publishTimeline(context.Background(), workspace, runID, "", events.TimelineNote, msg+" to "+after)
+		s.publishTimeline(context.Background(), workspace, runID, "", events.TimelineNote, msg+" to "+after+" for the next launch")
 	}
 	s.mu.Lock()
 	state.next = s.cfg.Now().Add(next)
@@ -207,7 +178,7 @@ func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessU
 // updateInContainer runs script in a throwaway container with the run's
 // image, user, environment and member home, and reports the harness version
 // before and after it.
-func (s *Scheduler) updateInContainer(ctx context.Context, update *harnessUpdateRun, spec runtime.Spec, exe, script string) (before, after string, err error) {
+func (s *Scheduler) updateInContainer(ctx context.Context, spec runtime.Spec, exe, script string) (before, after string, err error) {
 	if leftover, findErr := s.cfg.Runtime.FindByCreationKey(ctx, spec.CreationKey); findErr == nil {
 		if destroyErr := s.cfg.Runtime.Destroy(ctx, leftover); destroyErr != nil {
 			return "", "", fmt.Errorf("remove the update container a previous server left behind: %w", destroyErr)
@@ -244,9 +215,6 @@ func (s *Scheduler) updateInContainer(ctx context.Context, update *harnessUpdate
 	}
 	release()
 	before = s.harnessVersion(ctx, cid, exe, spec.WorkingDir)
-	s.mu.Lock()
-	update.before = before
-	s.mu.Unlock()
 	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", script}, spec.WorkingDir)
 	switch {
 	case err != nil:

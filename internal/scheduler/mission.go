@@ -30,6 +30,8 @@ type MissionLaunchSpec struct {
 	// differs from it after a usage fallback.
 	RequestedAccount domain.MemberID
 	Fallback         domain.AccountFallback
+	// Admitted is domain.LaunchOptions.Admitted.
+	Admitted func()
 }
 
 // MissionLauncher is the optional scheduler extension consumed by mission
@@ -201,6 +203,7 @@ func (s *Scheduler) LaunchMission(ctx context.Context, spec MissionLaunchSpec) (
 	}
 	return s.launchWithOptions(ctx, spec.WorkspaceID, spec.RunOwner, spec.AccountOwner, spec.Task, spec.Harness, spec.Mode, domain.LaunchOptions{
 		Model: spec.Model, CachedBase: spec.CachedBase, AssignedRunID: spec.RunID, RequestedAccount: spec.RequestedAccount, Fallback: spec.Fallback,
+		Admitted: spec.Admitted,
 	})
 }
 

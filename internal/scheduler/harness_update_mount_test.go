@@ -121,7 +121,8 @@ func TestHarnessUpdateDefaultBinaryAcrossProcesses(t *testing.T) {
 		Home:   home,
 		Mounts: []runtime.Mount{{HostPath: home, ContainerPath: home}},
 	}
-	e.sched.updateHarness(t.Context(), &domain.Run{WorkspaceID: e.ws.ID, ID: "mount-regression"}, plan, profile)
+	e.sched.updateHarness(&domain.Run{WorkspaceID: e.ws.ID, ID: "mount-regression"}, plan, profile)
+	waitHarnessUpdates(t, e)
 	version("2.0.0")
 	old, err := os.ReadFile(filepath.Join(staged, "version"))
 	if err != nil || string(old) != "1.0.0" {

@@ -276,6 +276,7 @@ type RoomMessageStore interface {
 	CreateRoomMessage(context.Context, *RoomMessage) error
 	GetRoomMessage(context.Context, string) (*RoomMessage, error)
 	ListRoomMessages(context.Context, domain.WorkspaceID, domain.RunID, string, int) (*RoomMessagePage, error)
+	ListDueSteerRequests(context.Context, domain.WorkspaceID, time.Time, string, int) (*RoomMessagePage, error)
 	// ClaimRoomMessage atomically moves one queued row to uncertain. A
 	// normal claim requires the row to be due; force ignores its deadline and
 	// records the approving member and timestamp. The boolean is false when
@@ -492,13 +493,34 @@ func (d *DB) ListRoomMessages(ctx context.Context, workspace domain.WorkspaceID,
 	if workspace == "" {
 		return nil, errors.New("store: list room messages: workspace_id is required")
 	}
-	limit = normalizeCollaborationLimit(limit)
 	query := `SELECT rowid, ` + roomMessageCols + ` FROM room_messages WHERE workspace_id = ?`
 	args := []any{workspace}
 	if run != "" {
 		query += ` AND run_id = ?`
 		args = append(args, run)
 	}
+	return d.pageRoomMessages(ctx, query, args, before, limit)
+}
+
+// ListDueSteerRequests pages a workspace's queued steer requests that are
+// due at now, in ListRoomMessages order.
+func (d *DB) ListDueSteerRequests(ctx context.Context, workspace domain.WorkspaceID, now time.Time, before string, limit int) (*RoomMessagePage, error) {
+	nowN, err := encodeTime(now)
+	if err != nil {
+		return nil, fmt.Errorf("store: list due steer requests: %w", err)
+	}
+	return d.pageRoomMessages(ctx, dueSteerRequestsQuery, []any{workspace, nowN}, before, limit)
+}
+
+// dueSteerRequestsQuery spells out kind and state as literals: SQLite uses
+// the partial idx_room_messages_queued_steer only for a query whose terms
+// match its WHERE clause, and a bound parameter never does.
+const dueSteerRequestsQuery = `SELECT rowid, ` + roomMessageCols + ` FROM room_messages
+	WHERE workspace_id = ? AND kind = 'steer_request' AND state = 'queued'
+	  AND (deliver_after IS NULL OR deliver_after <= ?)`
+
+func (d *DB) pageRoomMessages(ctx context.Context, query string, args []any, before string, limit int) (*RoomMessagePage, error) {
+	limit = normalizeCollaborationLimit(limit)
 	if beforeAt, beforeRowid, ok := decodeMessageCursor(before); ok {
 		query += ` AND (created_at, rowid) < (?, ?)`
 		args = append(args, beforeAt, beforeRowid)

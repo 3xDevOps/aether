@@ -7,6 +7,7 @@ import { modeRefusal, refusals, type Refusal } from '@/components/launch/modes'
 import { ModelField, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
 import { sameWorker, WorkerAgents, type WorkerChoice } from '@/components/launch/worker-agents'
+import { LoaderCircle } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -20,6 +21,7 @@ import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/li
 import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
+import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 type Kind = 'run' | 'swarm'
 
@@ -73,8 +75,10 @@ export function LaunchDialog() {
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
+  const late = usePastDeadline(launching)
 
   const errorCallout = useRef<HTMLDivElement>(null)
+  const shown = useRef(true)
   const sharedAccount = account !== '' && account !== ownAccountID
   const accountName = accounts.find((member) => member.id === account)?.display_name ?? account
   const accountField = kind === 'swarm' ? 'Integrator account' : 'Account'
@@ -92,6 +96,11 @@ export function LaunchDialog() {
   useEffect(() => {
     if (error) errorCallout.current?.scrollIntoView({ block: 'nearest' })
   }, [error])
+
+  useEffect(() => {
+    shown.current = true
+    return () => { shown.current = false }
+  }, [])
 
   useEffect(() => {
     let live = true
@@ -206,6 +215,8 @@ export function LaunchDialog() {
     try {
       await (kind === 'run' ? launchRun() : createSwarm())
     } catch (err) {
+      // Closed while the request ran, the dialog can no longer show the refusal.
+      if (!shown.current) toast.error(`${kind === 'swarm' ? 'Swarm not created' : 'Launch failed'}: ${message(err)}`)
       setLaunching(false)
       setError(message(err))
       setSetup(setupOutput(err))
@@ -312,7 +323,8 @@ export function LaunchDialog() {
             aria-describedby={swarmUnavailable ? 'launch-swarm-unavailable' : undefined}
             disabled={launching || !workspaceID || !account || !harness || taskMissing || swarmUnavailable !== null || (kind === 'swarm' && objective.trim() === '')}
           >
-            {kind === 'swarm' ? 'Create swarm' : 'Launch'}
+            {launching && <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />}
+            {late ? stillWaiting : launching ? (kind === 'swarm' ? 'Creating swarm…' : 'Launching…') : kind === 'swarm' ? 'Create swarm' : 'Launch'}
           </Button>
         </DialogFooter>
       </DialogContent>

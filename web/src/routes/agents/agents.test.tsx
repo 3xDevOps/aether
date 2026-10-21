@@ -37,6 +37,7 @@ beforeEach(() => {
   ])
   useStore.setState({
     capabilities: { gateway: 'local', methods: ['*'], ws: ['events', 'attach'] },
+    hydrated: true,
   })
 })
 
@@ -48,6 +49,19 @@ describe('splitArgv', () => {
 })
 
 describe('agents page', () => {
+  it('reads agent.list once, under the identity hydration sets', async () => {
+    vi.mocked(api.agentList).mockClear()
+    useStore.setState({ hydrated: false })
+    mount()
+    await flush()
+    expect(api.agentList).not.toHaveBeenCalled()
+    act(() => useStore.setState({ identityKey: 'alice' }))
+    act(() => useStore.setState({ hydrated: true }))
+    await flush()
+    expect(api.agentList).toHaveBeenCalledTimes(1)
+    expect(useStore.getState().agentList?.identity).toBe('alice')
+  })
+
   it('lists installed agents first and folds the rest under More agents', async () => {
     mount()
     await flush()

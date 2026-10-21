@@ -229,6 +229,34 @@ func TestHandoffRewritesTheCoAuthorList(t *testing.T) {
 	}
 }
 
+// A handoff can commit while the run provisions, before its coordination
+// directory is published, when the handoff's own refresh has nothing to
+// rewrite. The list provisioning writes credits the new owner anyway.
+func TestHandoffDuringProvisioningReachesTheCoAuthorList(t *testing.T) {
+	t.Parallel()
+	staged := fakeServerBinary(t, "#!/bin/sh\necho aether\n")
+	e := newTestEnv(t, withServerBinary(staged))
+	coord, _ := withCoordination(t, e)
+	if err := e.db.UpdateMemberGitIdentity(t.Context(), e.member.ID, "Ada Lovelace", "ada@example.com"); err != nil {
+		t.Fatalf("UpdateMemberGitIdentity: %v", err)
+	}
+	bob := newSteerer(t, e, "Bob", "Bob Steer", "bob@example.com")
+	e.git.createHook = func(run domain.RunID) {
+		if err := e.db.TransferRun(t.Context(), run, bob.ID); err != nil {
+			t.Errorf("TransferRun: %v", err)
+		}
+		if err := e.sched.RecordHandoffOperation(t.Context(), run, e.member.ID, "handoff-1", time.Time{}); err != nil {
+			t.Errorf("RecordHandoffOperation: %v", err)
+		}
+	}
+
+	run, _ := e.launchFake(t, "add OAuth login")
+	want := []string{"Co-authored-by: Bob Steer <bob@example.com>"}
+	if got := coord.trailers(run.ID); !slices.Equal(got, want) {
+		t.Errorf("co-authors after a handoff during provisioning = %v, want %v", got, want)
+	}
+}
+
 // Two members can stand behind one address - a shared account, or one
 // person joined twice. Git and GitHub credit the address, so a second
 // trailer says nothing, and one matching the address the commit is

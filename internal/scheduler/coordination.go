@@ -52,8 +52,12 @@ type coordination struct {
 	selfExe string
 	enabled bool
 
-	// stageMu serializes stage() against collectStagedBridges().
+	// stageMu serializes stage() against collectStagedBridges() and guards
+	// verified.
 	stageMu sync.Mutex
+	// verified is the identity the staged copy had when its bytes last
+	// matched this server's digest.
+	verified fileIdentity
 	// mu guards staged: the digest of this server's own binary once staged.
 	mu     sync.Mutex
 	staged string
@@ -531,16 +535,6 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 			}
 		}
 	}()
-	s.mu.Lock()
-	author := entry.gitAuthorEmail
-	s.mu.Unlock()
-	var trailers []string
-	if trailers, err = s.containerCoAuthors(ctx, run, author); err != nil {
-		return nil, nil, nil, err
-	}
-	if err = c.svc.WriteCoAuthors(run.ID, trailers); err != nil {
-		return nil, nil, nil, fmt.Errorf("write run co-authors: %w", err)
-	}
 	mounts = []runtime.Mount{
 		{HostPath: bin, ContainerPath: coordtransport.BinaryPath, ReadOnly: true},
 		cliMount,
@@ -561,6 +555,11 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	entry.reporter = reporter
 	sc := entry.sidecar()
 	s.mu.Unlock()
+	// A handoff that committed before coordDir was published skipped its
+	// refresh, so the first list is written only after publishing it.
+	if err = s.refreshCoAuthorsErr(ctx, run.ID); err != nil {
+		return nil, nil, nil, err
+	}
 	if err = s.writeSidecar(sc); err != nil {
 		return nil, nil, nil, err
 	}
@@ -664,7 +663,8 @@ func checkCoordinationMounts(mounts []runtime.Mount) error {
 }
 
 // stage serializes content-addressed staging against collection. A staged
-// copy is reused only after its content and read-only mode are verified.
+// copy is reused only after its content and read-only mode are verified, or
+// while its identity is the one it had when they last were.
 func (c *coordination) stage() (digest, path string, err error) {
 	c.stageMu.Lock()
 	defer c.stageMu.Unlock()
@@ -672,17 +672,25 @@ func (c *coordination) stage() (digest, path string, err error) {
 }
 
 func (c *coordination) stageLocked() (digest, path string, err error) {
-	digest, err = hashFile(c.selfExe)
-	if err != nil {
-		return "", "", fmt.Errorf("hash server binary: %w", err)
+	// Outside tests selfExe is /proc/self/exe, whose bytes cannot change
+	// while this process runs, so a digest once staged is still its digest.
+	if digest = c.currentDigest(); digest == "" {
+		if digest, err = hashFile(c.selfExe); err != nil {
+			return "", "", fmt.Errorf("hash server binary: %w", err)
+		}
 	}
 	path = filepath.Join(c.binDir, bridgePrefix+digest)
-	if staged, herr := hashFile(path); herr == nil && staged == digest {
-		if info, serr := os.Lstat(path); serr == nil && info.Mode().IsRegular() && info.Mode().Perm() == bridgeMode.Perm() {
-			c.markStaged(digest)
-			return digest, path, nil
-		}
-		if info, serr := os.Lstat(path); serr == nil && info.Mode().IsRegular() {
+	info, serr := os.Lstat(path)
+	if serr == nil && c.verified != (fileIdentity{}) && identityOf(info) == c.verified {
+		return digest, path, nil
+	}
+	if serr == nil && info.Mode().IsRegular() {
+		if staged, herr := hashFile(path); herr == nil && staged == digest {
+			if info.Mode().Perm() == bridgeMode.Perm() {
+				c.verified = identityOf(info)
+				c.markStaged(digest)
+				return digest, path, nil
+			}
 			if err := os.Chmod(path, bridgeMode); err == nil && fsyncDir(filepath.Dir(path)) == nil {
 				c.markStaged(digest)
 				return digest, path, nil
@@ -697,10 +705,12 @@ func (c *coordination) stageLocked() (digest, path string, err error) {
 	}
 	// Never mount what was not verified after it landed: a short copy or a
 	// filesystem that lied about the write is caught here, not by an agent.
-	if staged, herr := hashFile(path); herr != nil || staged != digest {
+	info, serr = os.Lstat(path)
+	if staged, herr := hashFile(path); serr != nil || herr != nil || staged != digest {
 		_ = os.Remove(path)
 		return "", "", fmt.Errorf("staged binary %s does not match its digest", path)
 	}
+	c.verified = identityOf(info)
 	c.markStaged(digest)
 	return digest, path, nil
 }

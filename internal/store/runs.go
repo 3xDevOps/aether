@@ -470,6 +470,15 @@ func (d *DB) SetRunTitle(ctx context.Context, id domain.RunID, title string) err
 	return err
 }
 
+func (d *DB) SetRunCheckout(ctx context.Context, id domain.RunID, worktree, branch string) error {
+	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
+		`UPDATE runs SET worktree = ?, branch = ? WHERE id = ?`, worktree, branch, id))
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		err = fmt.Errorf("store: set run checkout: %w", err)
+	}
+	return err
+}
+
 func (d *DB) UpdateRunStatus(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) (RunStatusStamp, error) {
 	return d.updateRunStatus(ctx, id, status, reason, activity, startedAt, finishedAt, false, false)
 }

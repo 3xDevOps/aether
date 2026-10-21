@@ -196,6 +196,15 @@ export function useSelf(): { id: string | null; role: Member['role'] | null } {
   return useMemo(() => ({ id, role }), [id, role])
 }
 
+/**
+ * Whether a per-member read can be filed under the identity hydration sets;
+ * one sent before it is repeated once it lands. An unlinked gateway hydrates
+ * with no identity.
+ */
+export function useIdentityKnown(): boolean {
+  return useStore((s) => s.identityKey !== null || s.hydrated)
+}
+
 /** Whether the caller holds the admin role. False until hydrated. */
 export function useIsAdmin(): boolean {
   return useStore((s) => s.info?.member.role === 'admin')

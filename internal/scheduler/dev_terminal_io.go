@@ -328,7 +328,7 @@ func (s *Scheduler) developmentTerminalStop(ctx context.Context, run domain.RunI
 		if authorizeErr := authorize(); authorizeErr != nil {
 			return authorizeErr
 		}
-		err = s.stopRunTerminalLocked(stopCtx, run, set, terminal, min(s.cfg.StopGrace, timeout/2))
+		err = s.stopRunTerminalsLocked(stopCtx, run, set, min(s.cfg.StopGrace, timeout/2), terminal)
 		result.Terminal = terminalDescription(terminal)
 		result.Stopped = err == nil && terminal.State.Exited
 		result.TimedOut = errors.Is(err, context.DeadlineExceeded)

@@ -244,6 +244,8 @@ type evidenceTestGit struct {
 	mu               sync.Mutex
 	captures         int
 	removes          int
+	pruneRetries     int
+	pruneRetryErr    error
 	captured         bool
 	captureErr       error
 	changedTruncated bool
@@ -280,6 +282,12 @@ func (g *evidenceTestGit) RemoveEvidence(_ context.Context, _ domain.WorkspaceID
 	defer g.mu.Unlock()
 	g.removes++
 	return nil
+}
+func (g *evidenceTestGit) RetryEvidencePrunes() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.pruneRetries++
+	return g.pruneRetryErr
 }
 
 type evidenceTestRuns struct{ run *domain.Run }
@@ -726,18 +734,21 @@ func TestCleanupExpiredIsBoundedIdempotentAndPathSafe(t *testing.T) {
 	st.mu.Lock()
 	st.packets[packet.ID].ExpiresAt = new(now.Add(-time.Minute))
 	st.mu.Unlock()
-	if n, cleanupErr := svc.CleanupExpired(context.Background()); cleanupErr != nil || n != 1 {
+	retryErr := errors.New("list workspace repositories: permission denied")
+	git.pruneRetryErr = retryErr
+	if n, cleanupErr := svc.CleanupExpired(context.Background()); !errors.Is(cleanupErr, retryErr) || n != 1 {
 		t.Fatalf("cleanup = %d, %v", n, cleanupErr)
 	}
 	got, err := svc.Get(context.Background(), "workspace-1", packet.ID)
 	if err != nil || got.Availability != "expired" || got.ExpiredAt == nil {
 		t.Fatalf("expired tombstone = %+v, %v", got, err)
 	}
+	git.pruneRetryErr = nil
 	if n, err := svc.CleanupExpired(context.Background()); err != nil || n != 0 {
 		t.Fatalf("second cleanup = %d, %v", n, err)
 	}
-	if git.removes != 1 || st.deletes != 0 {
-		t.Fatalf("cleanup calls removes=%d deletes=%d", git.removes, st.deletes)
+	if git.removes != 1 || st.deletes != 0 || git.pruneRetries != 2 {
+		t.Fatalf("cleanup calls removes=%d deletes=%d prune retries=%d", git.removes, st.deletes, git.pruneRetries)
 	}
 }
 

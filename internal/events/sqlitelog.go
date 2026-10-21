@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -138,44 +139,8 @@ func (l *SQLiteLog) ReadBefore(ctx context.Context, f Filter, beforeSeq uint64, 
 }
 
 func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64, limit int, order string) ([]Event, error) {
-	var sb strings.Builder
-	sb.WriteString(`SELECT seq, id, ts, workspace_id, run_id, actor_id, type, payload
-		FROM events WHERE seq > ?`)
-	args := []any{afterSeq}
-	if uptoSeq > 0 {
-		sb.WriteString(" AND seq <= ?")
-		args = append(args, uptoSeq)
-	}
-	if f.Workspace != "" {
-		sb.WriteString(" AND workspace_id = ?")
-		args = append(args, string(f.Workspace))
-	}
-	if f.Run != "" {
-		sb.WriteString(" AND run_id = ?")
-		args = append(args, string(f.Run))
-	}
-	if len(f.Runs) > 0 {
-		set := "(?" + strings.Repeat(", ?", len(f.Runs)-1) + ")"
-		sb.WriteString(" AND (run_id IN " + set +
-			" OR (type = ? AND json_extract(payload, '$.to_run_id') IN " + set + "))")
-		for _, r := range f.Runs {
-			args = append(args, string(r))
-		}
-		args = append(args, string(TypeCoordMessage))
-		for _, r := range f.Runs {
-			args = append(args, string(r))
-		}
-	}
-	if len(f.Types) > 0 {
-		sb.WriteString(" AND type IN (?" + strings.Repeat(", ?", len(f.Types)-1) + ")")
-		for _, t := range f.Types {
-			args = append(args, string(t))
-		}
-	}
-	sb.WriteString(" ORDER BY seq " + order + " LIMIT ?")
-	args = append(args, limit)
-
-	rows, err := l.db.QueryContext(ctx, sb.String(), args...)
+	query, args := readQuery(f, afterSeq, uptoSeq, limit, order)
+	rows, err := l.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("events: read log: %w", err)
 	}
@@ -211,6 +176,57 @@ func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 		return nil, fmt.Errorf("events: read log: %w", err)
 	}
 	return out, nil
+}
+
+// readQuery reads a one-run Runs filter as two indexed lookups, the run's
+// own events and the agent messages other runs addressed to it, because
+// SQLite answers their OR by scanning the workspace's events. The message
+// type is a literal so the partial idx_events_coord_to_run can serve the
+// second lookup. Several runs keep the OR: SQLite would read both lookups
+// off the workspace index and scan it twice.
+func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (string, []any) {
+	where := "seq > ?"
+	args := []any{afterSeq}
+	if uptoSeq > 0 {
+		where += " AND seq <= ?"
+		args = append(args, uptoSeq)
+	}
+	if f.Workspace != "" {
+		where += " AND workspace_id = ?"
+		args = append(args, string(f.Workspace))
+	}
+	if f.Run != "" {
+		where += " AND run_id = ?"
+		args = append(args, string(f.Run))
+	}
+	if len(f.Runs) > 1 {
+		set := "(?" + strings.Repeat(", ?", len(f.Runs)-1) + ")"
+		where += " AND (run_id IN " + set +
+			" OR (type = ? AND json_extract(payload, '$.to_run_id') IN " + set + "))"
+		for _, r := range f.Runs {
+			args = append(args, string(r))
+		}
+		args = append(args, string(TypeCoordMessage))
+		for _, r := range f.Runs {
+			args = append(args, string(r))
+		}
+	}
+	if len(f.Types) > 0 {
+		where += " AND type IN (?" + strings.Repeat(", ?", len(f.Types)-1) + ")"
+		for _, t := range f.Types {
+			args = append(args, string(t))
+		}
+	}
+	const cols = "seq, id, ts, workspace_id, run_id, actor_id, type, payload"
+	query := "SELECT " + cols + " FROM events WHERE " + where
+	if len(f.Runs) == 1 {
+		run := string(f.Runs[0])
+		query += " AND run_id = ? UNION ALL SELECT " + cols + " FROM events WHERE " + where +
+			" AND type = '" + string(TypeCoordMessage) + "' AND json_extract(payload, '$.to_run_id') = ? AND run_id <> ?"
+		args = slices.Concat(args, []any{run}, args, []any{run, run})
+	}
+	query += " ORDER BY seq " + order + " LIMIT ?"
+	return query, append(args, limit)
 }
 
 // LastSeq implements EventLog.

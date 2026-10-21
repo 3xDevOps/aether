@@ -297,6 +297,96 @@ func TestListRoomMessagesPagesPastADeletedCursorRow(t *testing.T) {
 	}
 }
 
+func TestListDueSteerRequestsMatchesTheSweepFilter(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	member := mustCreateMember(t, db)
+	workspace := mustCreateWorkspace(t, db)
+	run := mustCreateRun(t, db, workspace.ID, member.ID, domain.RunRunning)
+	other := mustCreateWorkspace(t, db)
+	elsewhere := mustCreateRun(t, db, other.ID, member.ID, domain.RunRunning)
+	now := time.Now().UTC()
+	after := func(d time.Duration) *time.Time {
+		at := now.Add(d)
+		return &at
+	}
+	for i, m := range []struct {
+		run          *domain.Run
+		kind         RoomMessageKind
+		deliverAfter *time.Time
+		settle       func(id string) error
+		sameInstant  bool
+	}{
+		{run: run, kind: RoomMessageSteerRequest},
+		{run: run, kind: RoomMessageSteerRequest, deliverAfter: after(-time.Minute)},
+		{run: run, kind: RoomMessageSteerRequest, deliverAfter: after(0)},
+		{run: run, kind: RoomMessageSteerRequest, deliverAfter: after(time.Nanosecond)},
+		{run: run, kind: RoomMessageSteerRequest, deliverAfter: after(time.Hour)},
+		{run: run, kind: RoomMessageSteerRequest, settle: func(id string) error {
+			_, err := db.DecideRoomMessage(ctx, id, RoomMessageQueued, RoomMessageDenied, "moderator", now)
+			return err
+		}},
+		{run: run, kind: RoomMessageSteerRequest, settle: func(id string) error {
+			_, err := db.ClaimRoomMessage(ctx, id, now, false, "")
+			return err
+		}},
+		{run: run, kind: RoomMessageComment},
+		{run: run, kind: RoomMessageQuestion},
+		{run: elsewhere, kind: RoomMessageSteerRequest},
+		{run: run, kind: RoomMessageSteerRequest, sameInstant: true},
+		{run: run, kind: RoomMessageSteerRequest, sameInstant: true},
+	} {
+		created := now.Add(time.Duration(i-20) * time.Second)
+		if m.sameInstant {
+			created = now.Add(-time.Second)
+		}
+		msg := &RoomMessage{
+			WorkspaceID: m.run.WorkspaceID, RunID: m.run.ID, ActorID: member.ID, Kind: m.kind, Body: "steer",
+			IdempotencyKey: "due-" + strconv.Itoa(i), CreatedAt: created, DeliverAfter: m.deliverAfter,
+		}
+		if err := db.CreateRoomMessage(ctx, msg); err != nil {
+			t.Fatalf("CreateRoomMessage %d: %v", i, err)
+		}
+		if m.settle != nil {
+			if err := m.settle(msg.ID); err != nil {
+				t.Fatalf("settle %d: %v", i, err)
+			}
+		}
+	}
+
+	var want []string
+	for before := ""; ; {
+		page, err := db.ListRoomMessages(ctx, workspace.ID, "", before, 3)
+		if err != nil {
+			t.Fatalf("ListRoomMessages: %v", err)
+		}
+		for _, msg := range page.Items {
+			if msg.Kind == RoomMessageSteerRequest && msg.State == RoomMessageQueued && (msg.DeliverAfter == nil || !msg.DeliverAfter.After(now)) {
+				want = append(want, msg.ID)
+			}
+		}
+		if before = page.NextBefore; before == "" {
+			break
+		}
+	}
+	var got []string
+	for before := ""; ; {
+		page, err := db.ListDueSteerRequests(ctx, workspace.ID, now, before, 2)
+		if err != nil {
+			t.Fatalf("ListDueSteerRequests: %v", err)
+		}
+		for _, msg := range page.Items {
+			got = append(got, msg.ID)
+		}
+		if before = page.NextBefore; before == "" {
+			break
+		}
+	}
+	if len(want) != 5 || !slices.Equal(got, want) {
+		t.Fatalf("due steer requests = %v, want the sweep filter's 5: %v", got, want)
+	}
+}
+
 func TestEvidencePacketExpiresAtRoundTrip(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
