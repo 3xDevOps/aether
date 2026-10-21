@@ -220,7 +220,7 @@ func TestHarnessUpdateUnreadableNewVersion(t *testing.T) {
 	rt.afterFails = true
 
 	notes := launchNotes(t, e, "claude", domain.LaunchTUI)
-	want := []string{"updated claude from 2.1.0 (Claude Code) to an unknown version"}
+	want := []string{"updated claude from 2.1.0 (Claude Code) to an unknown version for the next launch"}
 	if got := noteMessages(notes); !slices.Equal(got, want) {
 		t.Fatalf("notes = %q, want %q", got, want)
 	}
@@ -397,7 +397,7 @@ func TestHarnessUpdateDoesNotDelayLaunch(t *testing.T) {
 	}
 	rt.releaseUpdate()
 	ev := waitTimelineEvent(t, sub, launched.run.ID, events.TimelineNote)
-	if msg := ev.Payload.(events.TimelinePayload).Message; msg != "updated claude from 2.1.0 (Claude Code) to 2.1.1 (Claude Code)" {
+	if msg := ev.Payload.(events.TimelinePayload).Message; msg != "updated claude from 2.1.0 (Claude Code) to 2.1.1 (Claude Code) for the next launch" {
 		t.Fatalf("result note = %q", msg)
 	}
 }

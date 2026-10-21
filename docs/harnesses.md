@@ -1891,11 +1891,13 @@ release channel. These are never updated:
 A launch never waits for the update: the agent starts on whatever is
 installed at that moment, and the update finishes in the background. The
 update's result appears in the dashboard on the timeline of the run that
-started it, also when it finishes after the agent started. A new version reads
-`updated <agent> from <old> to <new>`, or `to an unknown version` when the
-new `--version` cannot be read; an unchanged one adds nothing. A
-failure, including a vendor release server that cannot be reached, never
-stops a launch; the timeline shows the real cause:
+started it, also when it finishes after the agent started. That run almost
+always runs the old version, so a new version reads
+`updated <agent> from <old> to <new> for the next launch`, or
+`to an unknown version` when the new `--version` cannot be read; an
+unchanged one adds nothing. A failure, including a vendor release server
+that cannot be reached, never stops a launch; the timeline shows the real
+cause:
 
 ```text
 could not update claude from 2.1.288 (Claude Code): the updater exited 1: <updater output>

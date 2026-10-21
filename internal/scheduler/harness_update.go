@@ -152,7 +152,7 @@ func (s *Scheduler) runHarnessUpdate(state *harnessUpdateState, update *harnessU
 		if after == "" {
 			after = "an unknown version"
 		}
-		s.publishTimeline(context.Background(), workspace, runID, "", events.TimelineNote, msg+" to "+after)
+		s.publishTimeline(context.Background(), workspace, runID, "", events.TimelineNote, msg+" to "+after+" for the next launch")
 	}
 	s.mu.Lock()
 	state.next = s.cfg.Now().Add(next)
