@@ -189,32 +189,36 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusCha
   )
 }
 
-function ComposerHint({ id, status, children }: { id: string; status?: boolean; children: React.ReactNode }) {
-  return <p id={id} role={status ? 'status' : undefined} className="line-clamp-2 px-4 text-ui-sm text-muted empty:hidden">{children}</p>
+function ComposerHint({ id, uploading, description }: { id: string; uploading: boolean; description: string }) {
+  return uploading
+    ? <p id={id} role="status" className="line-clamp-2 px-4 text-ui-sm text-muted">Uploading…</p>
+    : <p id={id} className="sr-only">{description}</p>
 }
 
-function SendActions({ pill, label, hint, disabled, onClick, onCancel }: {
+function SendActions({ pill, label, hint, description, disabled, onClick, onCancel }: {
   pill: Pill
   label: string
   hint?: string
+  description: string
   disabled: boolean
   onClick: () => void
   onCancel?: () => void
 }) {
   const look = pillLook[pill]
+  const tip = [hint ? `${look.label} (${hint})` : look.label, description].filter(Boolean).join('. ')
   const icon = <look.Icon className={cn((pill === 'interrupt' || pill === 'stop-waiting') && 'fill-current')} />
   return (
     <div className="ml-auto flex shrink-0 items-center gap-1">
       {onCancel && <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>}
       {pill === 'send' && label === look.label ? (
-        <Button size="round" variant={look.variant} label={look.label} hint={hint ? `${look.label} (${hint})` : undefined} disabled={disabled} onClick={onClick}>
+        <Button size="round" variant={look.variant} label={look.label} hint={tip} disabled={disabled} onClick={onClick}>
           {icon}
         </Button>
       ) : (
         <Button
           size="pill"
           variant={look.variant}
-          hint={hint ? `${look.label} (${hint})` : undefined}
+          hint={tip}
           aria-label={pill === 'interrupt' ? 'Interrupt the agent' : pill === 'stop-waiting' ? 'Stop waiting for background work' : undefined}
           disabled={disabled}
           onClick={onClick}
@@ -296,6 +300,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
               pill="send"
               label={late ? stillWaiting : busy ? 'Sending…' : 'Send'}
               hint={coarse ? undefined : shortcutLabel('composer-send')}
+              description={hint}
               disabled={!body.trim() || busy || !images.ready}
               onClick={send}
               onCancel={late ? () => saveComposerDraft(run.id, { busy: undefined }) : undefined}
@@ -303,7 +308,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
           </>
         )}
       />
-      <ComposerHint id={hintID}>{uploading ? 'Uploading…' : hint}</ComposerHint>
+      <ComposerHint id={hintID} uploading={uploading} description={hint} />
     </ComposerFrame>
   )
 }
@@ -471,6 +476,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   }
 
   const pillDisabled = busy || images.uploading || (pill !== 'interrupt' && pill !== 'stop-waiting' && pill !== 'resume' && (!images.ready || !hasContent || refusedImages))
+  const hintText = moderated ? 'Delivers in 45 s unless the controller decides sooner.' : turnRunning || pill === 'stop-waiting' || pill === 'resume' ? pillHint[pill] : ''
   const keyHint = coarse || pill === 'stop-waiting' ? undefined : pill === 'steer' ? `${shortcutLabel('composer-send')}; ${shortcutLabel('composer-queue')} queues` : shortcutLabel(pill === 'queue' && state?.steering ? 'composer-queue' : 'composer-send')
 
   return (
@@ -508,6 +514,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
               pill={pill}
               label={late ? stillWaiting : busy ? 'Sending…' : pillLook[pill].label}
               hint={keyHint}
+              description={hintText}
               disabled={pillDisabled}
               onClick={() => act(pill)}
               onCancel={late && draft.busyPrompt ? () => saveComposerDraft(run.id, { busy: undefined }) : undefined}
@@ -551,9 +558,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           }
         }}
       />
-      <ComposerHint id={hintID} status={images.uploading}>
-        {images.uploading ? 'Uploading…' : moderated ? 'Delivers in 45 s unless the controller decides sooner.' : turnRunning || pill === 'stop-waiting' || pill === 'resume' ? pillHint[pill] : ''}
-      </ComposerHint>
+      <ComposerHint id={hintID} uploading={images.uploading} description={hintText} />
     </ComposerFrame>
   )
 }
