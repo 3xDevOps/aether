@@ -117,29 +117,22 @@ stops working when the admin who minted it stops being an admin.
 ### Link or merge sign-ins
 
 One person can reach the server through a tailnet login, an SSH key and GitHub
-accounts. They join one member only through an explicit step. Matching emails or
-names never join them.
-
-To add a GitHub account to your own member, use **Profile → Sign-ins → Link a
-GitHub account**, or `aether member link --github dana`. Open the link it prints
-while signed in with that account, then approve the new device from your existing
-sign-in.
+accounts. They join one member only through an explicit step, never by matching
+emails or names. Add a GitHub account to your own member with **Profile →
+Sign-ins → Link a GitHub account** or `aether member link --github dana`. Open the
+link it prints while signed in with that account, then approve the new device
+from your existing sign-in.
 
 Someone who already became two members can merge them. Run `aether member merge
-start` on one sign-in, which prints a code valid for 10 minutes. On the other:
-
-```sh
-aether member merge <code> [--keep <member id>] [--keep-admin] [--yes]
-aether member merge accept       # back on the first sign-in
-```
-
-Both commands show the members and what is discarded before you confirm. The
-survivor keeps the other member's runs, schedules, devices and accounts, and
-takes the lower of the two roles (`--keep-admin` keeps an admin). The absorbed
+start` on one sign-in, which prints a code valid for 10 minutes. On the other,
+run `aether member merge <code>` (options `--keep <member id>`, `--keep-admin`,
+`--yes`), then `aether member merge accept` back on the first. Both show what is
+discarded before you confirm. The survivor takes the other member's runs,
+schedules, devices and accounts, and the lower of the two roles. The absorbed
 member's home moves to `<data-dir>/merged/<merge id>/home` and still holds agent
-logins, so remove it with `sudo rm -r` when nothing in it is needed. Nothing
-undoes a merge. It is refused, with the reason, when either member is pending or
-has an unfinished run, terminal or swarm role.
+logins, so remove it with `sudo rm -r` once nothing in it is needed. A merge is
+refused, with the reason, when either member is pending or has an unfinished run,
+terminal or swarm role. Nothing undoes a merge.
 
 ### Remove access
 
@@ -257,14 +250,10 @@ A scheduled run refreshes the mirror first and creates no run if that fails. See
 
 ### Delete a workspace
 
-```sh
-aether workspace delete myproject --yes
-```
-
-This removes the workspace with its runs, checkouts, transcripts, swarms,
-templates, budget and costs. Member accounts, local clones and the upstream
-repository stay. It never stops work: stop active runs and remove schedules
-first. The error names what blocks it.
+`aether workspace delete myproject --yes` removes the workspace with its runs,
+checkouts, transcripts, swarms, templates, budget and costs. Member accounts,
+local clones and the upstream repository stay. It never stops work: stop active
+runs and remove schedules first. The error names what blocks it.
 
 ## Work together
 
@@ -292,15 +281,15 @@ finish or a swarm question. Everyone else sees that run as **Working** with
 ### Hand off and finish runs
 
 `aether handoff <run> <member>` changes the run's owner and notifications at
-once. The recipient does not accept. The agent account, cost attribution and the
-run container's home stay the launcher's.
+once, with no acceptance step. The agent account, cost attribution and the
+container's home stay the launcher's.
 
-When a run is handed off or finishes, Aether captures an **evidence packet**: the
+When a run is handed off or finishes, Aether saves an **evidence packet**: the
 objective, base and final git revisions, changed files and a transcript copy. It
-records what Aether observed. It does not prove a command succeeded or that
+records what Aether observed and does not prove a command succeeded or that
 anyone reviewed the result. Packets expire after 30 days, and a run whose
-checkout exceeds 64 MiB gets no finish packet. If capturing fails, Aether keeps
-the checkout and transcript instead of deleting them.
+checkout exceeds 64 MiB gets no finish packet. If saving fails, Aether keeps the
+checkout and transcript instead of deleting them.
 
 ```sh
 aether close <run> --outcome merged|abandoned   # clear a finished run off Needs you
@@ -379,8 +368,8 @@ their spend in the totals. Only an admin sets a budget.
 
 ### Team memory
 
-Runs and members keep short shared notes, and every new run is given the pinned
-ones. See [memory.md](memory.md).
+Runs and members keep shared notes, and every new run is given the pinned ones.
+See [memory.md](memory.md).
 
 ## Agent accounts
 
@@ -508,22 +497,17 @@ not start the integrator, the command prints the error
 
 ### Follow a swarm
 
-**Swarms** in the dashboard lists each swarm with its phase and run counts,
-swarms that need you first. A swarm's page shows **Questions for you**,
-**Tasks**, **Agent messages** and **Integration**. From the CLI,
-`aether swarm list` and `aether swarm show <swarm-id>` print the same: the
-objective, the integrator, open questions, tasks with their blockers and each
-worker attempt with its account.
+**Swarms** in the dashboard lists each swarm with its phase and run counts, swarms
+that need you first. A swarm's page shows **Questions for you**, **Tasks**,
+**Agent messages** and **Integration**. `aether swarm list` and `aether swarm show
+<swarm-id>` print the objective, integrator, open questions, tasks with their
+blockers and each worker attempt.
 
-| Phase | Meaning |
-| --- | --- |
-| `planning` | The integrator asks questions and proposes tasks |
-| `active` | The integrator starts workers, accepts their work and delivers |
-| `completed` | The integrator reported success. Prompting it again moves the swarm back to `active` |
-| `cancelled` | You or an admin cancelled it |
-
-A task is **Done** only when its accepted submission has the required evidence. A
-worker's report or a clean exit is not enough.
+A swarm is `planning` while the integrator asks questions and proposes tasks,
+`active` while it runs workers and delivers, `completed` after it reports success
+(prompting it again moves the swarm back to `active`), or `cancelled`. A task is
+**Done** only when its accepted submission has the required evidence. A worker's
+report or a clean exit is not enough.
 
 ### Answer, cancel or replace the integrator
 
@@ -544,23 +528,21 @@ actions**. The server rechecks your role and account grants on every action.
 
 ### Combine several runs into one result
 
-A **candidate** combines the retained results of several runs, applied in order
-in an isolated checkout on the server. Conflicts wait for explicit file
-resolutions, and a frozen candidate cannot be edited. The server then runs
-verification commands against it. A pass is evidence, not proof the code is
-correct. The swarm's **Integration** section shows the candidate read-only.
+A **candidate** combines the retained results of several runs, applied in order in
+an isolated checkout on the server. Conflicts wait for explicit file resolutions,
+and a frozen candidate cannot be edited. The server then runs verification
+commands against it. A pass is evidence, not proof the code is correct. A swarm's
+**Integration** section shows its candidate read-only.
 
-Delivery is a human decision over the exact candidate and verification results,
-except in a swarm, where the integrator delivers its verified candidate on behalf
-of the accountable human. The delivering member must still be allowed to push.
+Delivery is a human decision over the exact candidate and verification results.
+In a swarm, the integrator delivers its verified candidate on behalf of the
+accountable human. The delivering member must still be allowed to push. In a
+local-only workspace, delivery moves the branch, only if it has not moved since
+the candidate was prepared. In a mirrored workspace it creates
+`refs/heads/aether/proposal-<request-id>`, which you fetch and push through your
+normal upstream review. **Proposed** does not mean landed.
 
-| Target | What delivery does |
-| --- | --- |
-| A local-only workspace branch | Moves the branch, only if it has not moved since the candidate was prepared |
-| A mirrored workspace | Creates `refs/heads/aether/proposal-<request-id>`. Fetch it and push it through your normal upstream review. **Proposed** does not mean landed |
-
-A candidate lives 30 days, and a passing verification is valid for 24 hours. A
-candidate whose stored files go missing becomes unavailable. See
+A candidate lives 30 days, and a passing verification is valid for 24 hours. See
 [integration.md](integration.md) and [failure-handling.md](failure-handling.md).
 
 ## Limits
@@ -569,6 +551,4 @@ candidate whose stored files go missing becomes unavailable. See
 - The permissive default lets any collaborator stop any run. Use `aether protect`
   or `--message-others admins-only` to narrow it.
 - Evidence packets and candidates expire after 30 days.
-- Budget totals are a floor when agents report no token usage.
 - A merge of two members cannot be undone.
-- Revoking a shared account does not stop runs already started on it.

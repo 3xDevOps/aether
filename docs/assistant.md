@@ -17,15 +17,13 @@ against your own subscription. It works before you have a workspace.
 - Select **Assistant** in the sidebar next to **New run**, in the top bar when
   the sidebar is hidden, or in the phone toolbar. A dot on it means an action
   waits for your approval.
-- Press `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS) to open and close it, even
-  while a text field or a terminal has focus.
-- Run **Ask Aether** from the command palette, or select **Ask Aether** on an
-  empty board or **Stuck? Ask Aether** during onboarding.
+- Press `Ctrl+Shift+Space` (`⌘Shift+Space` on macOS), even while a text field or
+  a terminal has focus.
+- Run **Ask Aether** from the command palette.
 
-Members who cannot launch runs (viewers) do not see the assistant. On a wide
-screen the panel docks on the right and can be resized. On a narrow window it
-floats over the page, and `Esc` closes it. On a phone it is a side sheet.
-Closing the panel keeps your unsent message and your place.
+Viewers do not see the assistant. On a wide screen the panel docks on the right
+and can be resized. On a narrow window it floats over the page and `Esc` closes
+it. On a phone it is a side sheet. Closing it keeps your unsent message.
 
 ## First use
 
@@ -83,17 +81,12 @@ environment.
 ## What it sees
 
 Each message carries a short description of what your dashboard shows, so "why
-is this stuck?" works without ids. It holds:
-
-- the page you are on, with its workspace and run, and which run view is open
-  (Session, Terminal, Changes, Files, Browser)
-- the open file's kind and path, never its contents
-- the last 8 pages you visited this session
-
-It never holds titles, file contents, drafts, terminal text or secrets. The
-line above the message box, **Sharing: run run-8x2 · Changes**, expands to the
-exact JSON the next message sends. Clear **Share the page I am on with the
-assistant** to stop sharing; the choice is saved for you on every device.
+is this stuck?" works without ids: the page you are on, the workspace and run,
+the open run view, the open file's path (never its contents) and the last 8
+pages you visited. It never holds titles, file contents, drafts, terminal text
+or secrets. The line above the message box, **Sharing: run run-8x2 · Changes**,
+expands to the exact JSON the next message sends. Clear **Share the page I am on
+with the assistant** to stop. The choice is saved for you on every device.
 
 ## Approve an action
 
@@ -136,8 +129,8 @@ not covered   the assistant's own shell and file tools, which never ask
 
 - Messaging or stopping another member's run always asks, with the owner named
   on the card.
-- A change applies to the live session at once. Cards already open stay open.
-- The assistant cannot change the setting.
+- A change applies to the live session at once. The assistant cannot change the
+  setting.
 - Every auto-approved action is still recorded in the transcript as
   `Auto-approved: <summary>`. If the note cannot be written, the action does not
   run.
@@ -151,9 +144,9 @@ not covered   the assistant's own shell and file tools, which never ask
 > [security.md](security.md#the-assistant).
 
 After you approve three cards in a row that auto-approval would have passed, the
-panel shows **Skip approval cards for the assistant?** once the assistant is
-idle. **Turn on auto-approval** turns it on. **Not now** asks again in 7 days,
-then 30 days, then never. **Don't suggest again** stops the suggestion.
+panel offers **Skip approval cards for the assistant?** when it is idle.
+**Turn on auto-approval** turns it on. **Not now** asks again in 7 days, then 30,
+then never. **Don't suggest again** stops it.
 
 ### Shell and file tools never ask
 
@@ -176,11 +169,10 @@ ask for updates. You are told when the run:
 | Needs attention | The run reaches `needs-attention`; the reason is worded as in [push notifications](networking.md#notifications) |
 
 A notice appears in the assistant's transcript, as a toast with a badge on the
-**Assistant** button, as an OS notification in the desktop app, and as a push
-notification on your phone. On the phone, a finished run always notifies you.
-The other three notify only for runs you do not own, since your own runs already
-notify you when they need you. Each state is announced once. You stop being
-told about a run when it finishes or is deleted.
+**Assistant** button, as an OS notification in the desktop app, and as a phone
+push. On the phone, a finished run always notifies you. The other three notify
+only for runs you do not own, since your own runs already notify you. Each state
+is announced once, and the follow ends when the run finishes or is deleted.
 
 ## Conversations
 
@@ -212,25 +204,7 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | `scheduler: the environment was created before the assistant existed; restart it to add the assistant's mounts` | [Restart the environment](#restart-the-environment) |
 | `assistant: a turn is running; stop it first` | Press **Stop**, then send again |
 | `assistant: open the claude session; stderr: ...` | The adapter failed to start. Fix the agent in `aether terminal`, then **Retry** |
-| `assistant: no such pending confirmation: <id>` | The card was already answered or expired |
 | `the member did not answer within 10m0s` | The card timed out. Ask again |
-| `the assistant session ended before the member answered` | The session stopped while a card was open |
 | `<method> was not approved: record the approval: <error>` | The approval could not be saved, so the action did not run. Try again |
 | `the assistant is not configured on this server` | The server runs without the assistant |
 | `assistant: the server is shutting down` | Try again after the restart |
-
-## Example
-
-```text
-You:       What's running?
-Assistant: run-3k9 "Fix flaky login test"  working
-           run-8x2 "Add retry to uploader"  needs you
-You:       Stop run-8x2.
-           [card] Approve this action?
-           Stop run run-8x2... ("Add retry to uploader")   [Approve] [Decline]
-You:       (Approve)
-Assistant: Stopped run-8x2.
-You:       Install Rust in my environment.
-Assistant: (runs `curl ... | sh -s -- -y` without asking)
-           rustc 1.xx installed. Save the environment so new runs have it?
-```

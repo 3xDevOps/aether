@@ -10,20 +10,18 @@ under the same role checks as `aether` and the dashboard.
 flowchart LR
     A[ChatGPT or Claude] -->|HTTPS tool calls| E[Edge]
     E -->|forwards| S[Your Aether server]
-    S -->|runs them as you| R[Your runs]
 ```
 
-The edge is a public relay that your server connects out to ([edge.md](edge.md)).
-It forwards HTTPS to your server, which hosts the connector endpoint and signs
-you in.
+The edge is a public relay your server connects out to ([edge.md](edge.md)). Your
+server hosts the connector endpoint and signs you in.
 
 ## Prerequisites
 
 - A server connected to an edge. ChatGPT and Claude reach the connector at
   `<edge-url>/mcp/<server id>`. A server reachable only on a tailnet cannot have
   one. To turn the edge on, see [edge.md](edge.md#turning-it-on).
-- A server and an edge new enough to serve connectors. Otherwise the edge
-  answers HTTP 501: `server <name> (<id>) runs aether-server <version>, which has no MCP endpoint; upgrade it: sudo aether-server update`.
+- A server new enough to serve connectors. Otherwise the edge answers HTTP 501:
+  `server <name> (<id>) runs aether-server <version>, which has no MCP endpoint; upgrade it: sudo aether-server update`.
 - A linked CLI (`aether link`) on an approved device, a member SSH key or a
   tailnet connection. Under `edge-access account`, any registered device works.
 - A ChatGPT or Claude plan that allows custom connectors (see below).
@@ -78,19 +76,15 @@ On claude.ai
 3. Select **Connect**. A page from your server opens: **Connect Claude
    (claude.ai) to <server>**. Paste the code and select **Allow**.
 
-A connected connector works in Claude on the web, desktop and mobile.
+The connector then works in Claude on the web, desktop and mobile.
 
 ## What it can do
 
 The connector has eight tools and no others:
 
-| Tool | What it does | Asks you first? |
+| Tools | What they do | Asks you first? |
 | --- | --- | --- |
-| `aether_list_workspaces` | Lists the workspaces you can launch runs in | No |
-| `aether_list_agents` | Lists agents and whether each is installed, signed in and supports Enhanced mode | No |
-| `aether_list_runs` | Lists runs you can see, filtered by `mine`, `active_only` or `workspace_id` | No |
-| `aether_get_run` | Shows one run: state, task, workspace, agent and mode | No |
-| `aether_run_history` | Reads a page of an Enhanced run's conversation, 20 frames by default | No |
+| `aether_list_workspaces`, `aether_list_agents`, `aether_list_runs`, `aether_get_run`, `aether_run_history` | List workspaces, agents (installed, signed in, Enhanced support) and runs. Show one run. Read a page of an Enhanced run's conversation | No |
 | `aether_launch_run` | Starts a run with a workspace, agent and task, and optionally a mode and model | Yes |
 | `aether_message_run` | Sends a message to a run's agent | Yes |
 | `aether_stop_run` | Stops a run | Yes |
@@ -121,7 +115,7 @@ A connector also stops working at its next request when:
   approved
 - its refresh token goes unused for 30 days (`aether mcp` then no longer lists
   it)
-- the server's connector URL changes because the edge moved to another origin
+- the edge moved to another origin, which changes the connector URL
 
 ## Troubleshooting
 
@@ -134,7 +128,6 @@ A connector also stops working at its next request when:
 | `connector.code needs an approved device, a member SSH key or a tailnet connection; this connection signed in with device "<label>", which is registered` | An admin approves your device, or run `aether mcp` from an approved one |
 | `method not found: connector.code; the server is older than this CLI, and an admin updates it with aether server update` | Update the server |
 | `connector.revoke: no connector <id>; aether mcp lists yours` | The id is wrong or already revoked |
-| `connector.revoke: only its own member or an admin may do this` | The connector belongs to another member |
 
 On the page that opens when you connect:
 
@@ -143,30 +136,25 @@ On the page that opens when you connect:
 | `That code is wrong, expired or already used. Run aether mcp for a new one and paste it here.` | The code is not live. A server restart also forgets codes |
 | `Too many wrong codes were tried on this server in the last minute. Wait a minute, then paste the code again.` | More than 10 wrong codes in a minute, from anyone |
 | `Aether connectors work with ChatGPT and Claude; <host> is not one of them.` | Only `chatgpt.com` and `claude.ai` can connect |
-| `This form was not issued by this server. Start the connection again from ChatGPT or Claude.` | Start again from the app |
 
-If a connected app suddenly asks you to sign in again, the access token expired
-or the connector was revoked. Run `aether mcp` for a new code.
+If an app asks you to sign in again, the connector was revoked. Run `aether mcp`
+for a new code.
 
 ## Security model
 
 - ChatGPT and Claude hold the tokens. Whoever holds the access token acts as you
-  for up to an hour. Whoever holds the refresh token can get new access tokens
-  until it goes 30 days unused. Aether stores only hashes of tokens and rotates
-  the refresh token on every use. Reusing a rotated one a minute or more later
-  revokes the connector.
+  for up to an hour. Whoever holds the refresh token can get new ones until it
+  goes 30 days unused. Aether stores only hashes and rotates the refresh token on
+  every use. Reusing a rotated one a minute or more later revokes the connector.
 - The edge can read connector traffic. ChatGPT and Claude need a public
-  certificate, so the edge decrypts connector requests and forwards them. A
-  compromised edge could read tool calls and act as you through a live token. It
-  cannot create codes or tokens, which are made on your server. SSH through the
-  edge stays end to end ([security.md](security.md#edge-remote-access)).
-- A connector is tied to its member and the device that created it. Every
-  request re-checks both, so revoking the device or removing the member stops it.
-- Eight tools are the whole surface. A connector cannot open a terminal, read
+  certificate, so the edge decrypts requests and forwards them. A compromised edge
+  could read tool calls and act as you through a live token. It cannot create
+  codes or tokens, which your server makes. SSH through the edge stays end to end
+  ([security.md](security.md#edge-remote-access)).
+- A connector is tied to its member and the device that created it. Every request
+  re-checks both.
+- The eight tools are the whole surface. A connector cannot open a terminal, read
   files, change settings or manage members. Run history is text other agents
-  wrote and is marked untrusted, and the apps still ask before each write.
-- Codes are single use, kept in memory only and never written to disk. A pairing
-  code lives 10 minutes.
-- Only ChatGPT and Claude can connect. The server accepts only `https` clients on
-  `chatgpt.com` and `claude.ai`, and an authorization code goes only to a
-  redirect address listed by that client.
+  wrote and is marked untrusted.
+- Only `https` clients on `chatgpt.com` and `claude.ai` can connect. Pairing
+  codes are single use, live 10 minutes and are never written to disk.
