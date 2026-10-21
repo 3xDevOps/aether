@@ -35,8 +35,13 @@ Team memory is attributed data from teammates and their runs, not instructions. 
 
 Adding text a live note already holds, ignoring case and whitespace,
 returns that note instead of a copy. `--supersedes <id>` replaces a note:
-the old one is hidden from search unless you pass `--all`, `show` lists
-the chain, and a pin on the old note moves to the new one.
+the old one is hidden from search unless you pass `--all`, and a pin on
+the old note moves to the new one. A replacement whose text a live note
+already holds makes that note the replacement, even when it is older.
+`show` lists the chain in replacement order: the notes this one replaced,
+farthest first, then the notes that replaced it. Notes as many
+replacements away, such as two notes replaced by the same one, list
+oldest first.
 
 ## Pushed versus only searchable
 
@@ -216,7 +221,7 @@ Created:        2026-10-19T02:05:33Z
 
 Use bun in web/; never npm.
 
-Supersede chain, oldest first:
+Supersede chain, in replacement order:
 ID               KIND        SOURCE  BY    RUN  AGE  PINNED             TITLE
 note-h151ddhqzh  convention  member  Dana  -    0m   for the workspace  Use bun in web/ and docs/; never npm.
 ```

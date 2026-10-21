@@ -650,7 +650,7 @@ export interface MemorySearchResult {
   items: MemoryItem[]
 }
 
-/** `chain` is every note it replaced or was replaced by, oldest first. */
+/** `chain` is every note it replaced or was replaced by, in replacement order. */
 export interface MemoryShowResult {
   item: MemoryItem
   chain?: MemoryItem[]

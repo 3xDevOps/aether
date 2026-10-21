@@ -272,7 +272,7 @@ func memoryShow(ctx context.Context, socket string, args []string) (string, erro
 				at = i + 1
 			}
 		}
-		b.WriteString("\nSupersede chain, oldest first:\n")
+		b.WriteString("\nSupersede chain, in replacement order:\n")
 		for _, other := range out.Chain[:at] {
 			b.WriteString(memoryLine(other, now) + "\n")
 		}

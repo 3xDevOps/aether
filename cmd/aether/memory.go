@@ -346,7 +346,7 @@ func printMemoryNote(w io.Writer, res protocol.MemoryShowResult, now time.Time) 
 	if len(res.Chain) == 0 {
 		return nil
 	}
-	if _, err := fmt.Fprintln(w, "\nSupersede chain, oldest first:"); err != nil {
+	if _, err := fmt.Fprintln(w, "\nSupersede chain, in replacement order:"); err != nil {
 		return err
 	}
 	return printMemoryList(w, res.Chain, now)

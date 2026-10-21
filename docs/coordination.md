@@ -114,7 +114,7 @@ permission, re-read on every call. They serve the workspace's
 | --- | --- | --- |
 | `memory.add` | `kind`, `text`, optional `files`, `supersedes`, `scope` (`workspace` or `member`) | the stored `item`, `duplicate` when a live note already holds the text, and up to 3 `similar` live notes |
 | `memory.search` | optional `words`, `kind`, `file`, `all`, `limit` (default 10, at most 100) | `items`, best first |
-| `memory.show` | `id` | `item`, and the `chain` of notes it replaced or was replaced by, oldest first |
+| `memory.show` | `id` | `item`, and the `chain` of notes it replaced or was replaced by, in replacement order ([memory.md](memory.md#what-a-note-holds)) |
 | `memory.brief` | none | `text`, empty when there is nothing to brief |
 
 The socket supplies the workspace, member, run, agent and commit: a
@@ -1038,7 +1038,7 @@ Each line is the note ID, kind, source (`agent`, `member`, `report` or
 the rest), the run's pull request, `replaced by <id>` for a replaced note,
 and the first 100 characters of the text. `show` prints the full text with
 its author, run, agent, commit, files, pull request and pin, then the
-supersede chain, oldest first.
+supersede chain in replacement order.
 
 `add` takes `--kind decision|convention|gotcha|preference` and the text, at
 most 1024 bytes; its first line is the title. `--file` cites a repository

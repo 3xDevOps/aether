@@ -388,23 +388,32 @@ func ftsPhrase(s string) string {
 }
 
 // GetMemory returns the note and every note in its supersede chain other
-// than itself, oldest first: the notes it replaced, and those that
-// replaced it.
+// than itself, in replacement order: the notes it replaced, farthest
+// first, then those that replaced it. Notes as many replacements away,
+// such as two notes replaced by the same one, are ordered oldest first.
 func (d *DB) GetMemory(ctx context.Context, workspace domain.WorkspaceID, id string) (*Memory, []*Memory, error) {
 	m, err := readMemory(ctx, d.db, workspace, id)
 	if err != nil {
 		return nil, nil, err
 	}
+	// No chain outgrows the workspace's notes, so the LIMITs only stop a
+	// superseded_by cycle, which the step column keeps UNION from ending.
 	rows, err := d.db.QueryContext(ctx, `WITH RECURSIVE
-		newer(id) AS (
-			SELECT superseded_by FROM memory WHERE workspace_id = ?1 AND id = ?2 AND superseded_by <> ''
-			UNION SELECT m.superseded_by FROM memory m JOIN newer n ON m.id = n.id WHERE m.superseded_by <> ''),
-		older(id) AS (
-			SELECT id FROM memory WHERE workspace_id = ?1 AND superseded_by = ?2
-			UNION SELECT m.id FROM memory m JOIN older o ON m.superseded_by = o.id)
-		SELECT `+memoryCols+` FROM memory m`+memoryJoins+`
-		WHERE m.workspace_id = ?1 AND m.id IN (SELECT id FROM newer UNION SELECT id FROM older)
-		ORDER BY m.created_at, m.rowid`, workspace, id)
+		newer(id, step) AS (
+			SELECT superseded_by, 1 FROM memory WHERE workspace_id = ?1 AND id = ?2 AND superseded_by <> ''
+			UNION SELECT m.superseded_by, n.step + 1 FROM memory m JOIN newer n ON m.id = n.id WHERE m.superseded_by <> ''
+			LIMIT (SELECT count(*) FROM memory WHERE workspace_id = ?1)),
+		older(id, step) AS (
+			SELECT id, -1 FROM memory WHERE workspace_id = ?1 AND superseded_by = ?2
+			UNION SELECT m.id, o.step - 1 FROM memory m JOIN older o ON m.superseded_by = o.id
+			LIMIT (SELECT count(*) FROM memory WHERE workspace_id = ?1))
+		SELECT `+memoryCols+` FROM (
+			-- With min(), SQLite takes step from each note's nearest visit.
+			SELECT id, step, min(abs(step)) FROM (SELECT id, step FROM newer UNION ALL SELECT id, step FROM older)
+			WHERE id <> ?2 GROUP BY id) chain
+		JOIN memory m ON m.id = chain.id`+memoryJoins+`
+		WHERE m.workspace_id = ?1
+		ORDER BY chain.step, m.created_at, m.id`, workspace, id)
 	if err != nil {
 		return nil, nil, fmt.Errorf("store: read memory chain of %s: %w", id, err)
 	}

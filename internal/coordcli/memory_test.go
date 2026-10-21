@@ -191,7 +191,7 @@ func TestMemoryShowPrintsProvenanceAndChain(t *testing.T) {
 		"Pinned: by ben at " + pinned + "\n",
 		"Replaced by: note-new0000000\n",
 		"\nPin the toolchain.\nThe default go is newer.\n",
-		"Supersede chain, oldest first:\nnote-old0000000 decision agent 3h replaced by note-mid0000000: Use any go.\nnote-mid0000000 decision agent dana/claude run-a1 2h files=go.mod PR #7 open replaced by note-new0000000: Pin the toolchain. The default go is newer. (this note)\nnote-new0000000 decision member 1h: Use go1.26.9.\n",
+		"Supersede chain, in replacement order:\nnote-old0000000 decision agent 3h replaced by note-mid0000000: Use any go.\nnote-mid0000000 decision agent dana/claude run-a1 2h files=go.mod PR #7 open replaced by note-new0000000: Pin the toolchain. The default go is newer. (this note)\nnote-new0000000 decision member 1h: Use go1.26.9.\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("show lacks %q:\n%s", want, out)
