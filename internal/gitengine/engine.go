@@ -100,6 +100,14 @@ type Engine struct {
 	// repoMaintenanceMu prevents internal repository writers from racing
 	// evidence object pruning and repacking.
 	repoMaintenanceMu sync.Mutex
+	// evidencePrunes holds each workspace's debounced object prune. mu
+	// guards it and may be taken under fileWriteMu and repoMaintenanceMu,
+	// never the reverse. Close cancels pruneCtx and waits for prunesRunning.
+	evidencePrunes     map[domain.WorkspaceID]*evidencePrune
+	evidencePruneDelay time.Duration
+	pruneCtx           context.Context
+	cancelPrunes       context.CancelFunc
+	prunesRunning      sync.WaitGroup
 }
 
 // New validates cfg, applies defaults, and creates the repos and checkouts
@@ -132,16 +140,22 @@ func New(cfg Config) (*Engine, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gitengine: open checkouts root: %w", err)
 	}
+	pruneCtx, cancelPrunes := context.WithCancel(context.Background())
 	return &Engine{
-		cfg:           cfg,
-		checkoutsRoot: checkoutsRoot,
-		watches:       make(map[domain.RunID]*diffWatch),
-		registry:      make(map[domain.RunID]runInfo),
-		snapshotLocks: make(map[domain.RunID]*sync.Mutex),
+		cfg:                cfg,
+		checkoutsRoot:      checkoutsRoot,
+		watches:            make(map[domain.RunID]*diffWatch),
+		registry:           make(map[domain.RunID]runInfo),
+		snapshotLocks:      make(map[domain.RunID]*sync.Mutex),
+		evidencePrunes:     make(map[domain.WorkspaceID]*evidencePrune),
+		evidencePruneDelay: evidencePruneDelay,
+		pruneCtx:           pruneCtx,
+		cancelPrunes:       cancelPrunes,
 	}, nil
 }
 
-// Close stops all diff watchers and waits for them to finish.
+// Close stops all diff watchers and evidence prunes and waits for them to
+// finish.
 func (e *Engine) Close() error {
 	e.mu.Lock()
 	if e.closed {
@@ -155,9 +169,11 @@ func (e *Engine) Close() error {
 	}
 	e.watches = make(map[domain.RunID]*diffWatch)
 	e.mu.Unlock()
+	e.cancelPrunes()
 	for _, w := range watches {
 		w.stop(false)
 	}
+	e.prunesRunning.Wait()
 	if e.checkoutsRoot != nil {
 		return e.checkoutsRoot.Close()
 	}

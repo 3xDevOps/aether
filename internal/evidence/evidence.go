@@ -90,11 +90,12 @@ type GitEvidence interface {
 	RemoveEvidence(context.Context, domain.WorkspaceID, string) error
 }
 
-// GitEvidencePruner optionally reclaims unreachable objects after a packet's
-// evidence ref is removed. Production git engines implement this maintenance
-// path; narrow test doubles and compatibility engines may omit it.
+// GitEvidencePruner optionally reclaims unreachable objects. RemoveEvidence
+// schedules that reclamation in the background; RetryEvidencePrunes
+// reschedules any a failed prune or a restart left pending. Production git
+// engines implement it; narrow test doubles may omit it.
 type GitEvidencePruner interface {
-	PruneEvidence(context.Context, domain.WorkspaceID) error
+	RetryEvidencePrunes() error
 }
 
 // TranscriptExporter opens a finite export of a run's retained PTY transcript.

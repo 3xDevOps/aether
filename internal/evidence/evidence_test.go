@@ -244,6 +244,7 @@ type evidenceTestGit struct {
 	mu               sync.Mutex
 	captures         int
 	removes          int
+	pruneRetries     int
 	captured         bool
 	captureErr       error
 	changedTruncated bool
@@ -279,6 +280,12 @@ func (g *evidenceTestGit) RemoveEvidence(_ context.Context, _ domain.WorkspaceID
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.removes++
+	return nil
+}
+func (g *evidenceTestGit) RetryEvidencePrunes() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.pruneRetries++
 	return nil
 }
 
@@ -736,8 +743,8 @@ func TestCleanupExpiredIsBoundedIdempotentAndPathSafe(t *testing.T) {
 	if n, err := svc.CleanupExpired(context.Background()); err != nil || n != 0 {
 		t.Fatalf("second cleanup = %d, %v", n, err)
 	}
-	if git.removes != 1 || st.deletes != 0 {
-		t.Fatalf("cleanup calls removes=%d deletes=%d", git.removes, st.deletes)
+	if git.removes != 1 || st.deletes != 0 || git.pruneRetries != 2 {
+		t.Fatalf("cleanup calls removes=%d deletes=%d prune retries=%d", git.removes, st.deletes, git.pruneRetries)
 	}
 }
 

@@ -436,9 +436,20 @@ func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, check
 	return tree, nil
 }
 
-// RemoveRunHistory explicitly deletes only the run's diff history. It stops
-// the watcher and serializes with captures and readers; missing paths are safe.
+// RemoveRunHistory explicitly deletes the run's checkout, identity and diff
+// history. Unlike RemoveRunCheckout it does not first pack the snapshot store,
+// which is deleted too. The checkout goes first: while it exists, rendering a
+// live patch recreates the store. It stops the watcher and serializes with
+// captures and readers; missing paths are safe.
 func (e *Engine) RemoveRunHistory(ctx context.Context, run domain.RunID) error {
+	checkout, err := e.checkoutPath(run)
+	if err != nil {
+		return err
+	}
+	meta, err := e.runMetaPath(run)
+	if err != nil {
+		return err
+	}
 	store, err := e.snapshotStorePath(run)
 	if err != nil {
 		return err
@@ -449,6 +460,12 @@ func (e *Engine) RemoveRunHistory(ctx context.Context, run domain.RunID) error {
 	defer lock.Unlock()
 	if contextErr := ctx.Err(); contextErr != nil {
 		return contextErr
+	}
+	if removeErr := e.cfg.RemoveCheckout(ctx, checkout); removeErr != nil {
+		return fmt.Errorf("gitengine: remove checkout for run %s: %w", run, removeErr)
+	}
+	if removeErr := os.Remove(meta); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return fmt.Errorf("gitengine: remove run metadata for %s: %w", run, removeErr)
 	}
 	if removeErr := os.RemoveAll(store); removeErr != nil {
 		return fmt.Errorf("gitengine: remove snapshot store for run %s: %w", run, removeErr)
