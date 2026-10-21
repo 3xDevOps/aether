@@ -227,7 +227,7 @@ a browser cannot present an SSH key. A server with no tailscaled, including
 one reached through an edge, has no server-hosted dashboard. The
 [Android app](install.md#android-app) in Tailscale mode wraps this URL and
 cannot receive [notifications](#notifications). Its Edge mode needs no tailnet
-and no `web-port`: it runs `aether gui` on the phone and reaches the server
+and no `web-port`: it runs the local gateway on the phone and reaches the server
 through the [edge](edge.md).
 
 ### Add it to your home screen
