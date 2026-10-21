@@ -245,6 +245,7 @@ type evidenceTestGit struct {
 	captures         int
 	removes          int
 	pruneRetries     int
+	pruneRetryErr    error
 	captured         bool
 	captureErr       error
 	changedTruncated bool
@@ -286,7 +287,7 @@ func (g *evidenceTestGit) RetryEvidencePrunes() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.pruneRetries++
-	return nil
+	return g.pruneRetryErr
 }
 
 type evidenceTestRuns struct{ run *domain.Run }
@@ -733,6 +734,7 @@ func TestCleanupExpiredIsBoundedIdempotentAndPathSafe(t *testing.T) {
 	st.mu.Lock()
 	st.packets[packet.ID].ExpiresAt = new(now.Add(-time.Minute))
 	st.mu.Unlock()
+	git.pruneRetryErr = errors.New("list workspace repositories: permission denied")
 	if n, cleanupErr := svc.CleanupExpired(context.Background()); cleanupErr != nil || n != 1 {
 		t.Fatalf("cleanup = %d, %v", n, cleanupErr)
 	}

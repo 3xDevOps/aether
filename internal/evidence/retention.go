@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -222,7 +223,7 @@ func (s *Service) ReadTranscript(ctx context.Context, workspace domain.Workspace
 func (s *Service) CleanupExpired(ctx context.Context) (int, error) {
 	if pruner, ok := s.git.(GitEvidencePruner); ok {
 		if err := pruner.RetryEvidencePrunes(); err != nil {
-			return 0, fmt.Errorf("evidence: retry pending git prunes: %w", err)
+			slog.Warn("evidence: retry pending git prunes failed", "error", err)
 		}
 	}
 	cleanupCtx, cancel := s.cleanupContext(ctx)
