@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -96,8 +97,13 @@ func newFake(t *testing.T) *fakeServer {
 
 func connectorSession(t *testing.T, f *fakeServer, scopes ...Scope) *mcp.ClientSession {
 	t.Helper()
+	return callSession(t, f.call, scopes...)
+}
+
+func callSession(t *testing.T, call Call, scopes ...Scope) *mcp.ClientSession {
+	t.Helper()
 	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "v0"}, nil)
-	RegisterConnectorTools(srv, f.call, func(s Scope) bool { return s == ScopeRead || slices.Contains(scopes, s) })
+	RegisterConnectorTools(srv, call, func(s Scope) bool { return s == ScopeRead || slices.Contains(scopes, s) })
 	st, ct := mcp.NewInMemoryTransports()
 	if _, err := srv.Connect(t.Context(), st, nil); err != nil {
 		t.Fatal(err)
@@ -324,7 +330,8 @@ func TestConnectorReadTools(t *testing.T) {
 				Options: []protocol.AttentionOption{{ID: "accept", Label: "Accept"}}}},
 	}})
 	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-2", "waiting", "older"), reportEvent("run-1", "waiting", injection))
-	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{PullRequest: &protocol.RunPullRequest{Number: 7, URL: "https://github.com/o/r/pull/7", State: "OPEN", Title: injection}})
+	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{PullRequest: &protocol.RunPullRequest{Number: 7, URL: "https://github.com/o/r/pull/7", State: "OPEN", Title: injection},
+		Error: "refresh pull request: gh: rate limited"})
 	cs := connectorSession(t, f)
 
 	text, out := run(t, cs, "aether_list_runs", map[string]any{"query": "LOGIN"})
@@ -352,7 +359,7 @@ func TestConnectorReadTools(t *testing.T) {
 	text, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run:run-1"})
 	untrusted := out["untrusted"].(map[string]any)
 	if text != "Run run-1 is running. The agent asks a question." || out["pr"].(map[string]any)["number"] != float64(7) ||
-		untrusted["latest_report"].(map[string]any)["summary"] != injection || untrusted["pr_title"] != injection ||
+		out["pr_error"] != "refresh pull request: gh: rate limited" || untrusted["latest_report"].(map[string]any)["summary"] != injection || untrusted["pr_title"] != injection ||
 		out["needs_you"].(map[string]any)["answer_with"] != "aether_answer" || strings.Contains(trusted(t, out), injection) {
 		t.Fatalf("aether_get_run of a search id = %q %v", text, out)
 	}
@@ -606,13 +613,22 @@ func TestConnectorLaunchRace(t *testing.T) {
 		defer mu.Unlock()
 		return protocol.RunListResult{Runs: slices.Clone(launched)}, nil
 	}
-	f.answers[protocol.MethodRunLaunch] = func(json.RawMessage) (any, error) {
+	keys := map[string]protocol.Run{}
+	f.answers[protocol.MethodRunLaunch] = func(raw json.RawMessage) (any, error) {
+		var p protocol.RunLaunchParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
 		time.Sleep(50 * time.Millisecond)
 		mu.Lock()
 		defer mu.Unlock()
+		if r, ok := keys[p.IdempotencyKey]; ok {
+			return protocol.RunLaunchResult{Run: r, Replayed: true}, nil
+		}
 		r := protocol.Run{ID: fmt.Sprintf("run-%d", len(launched)+1), WorkspaceID: "ws-1", Harness: "claude", Task: "t", Status: "queued",
 			CreatedAt: time.Now().UTC().Format(time.RFC3339)}
 		launched = append(launched, r)
+		keys[p.IdempotencyKey] = r
 		return protocol.RunLaunchResult{Run: r}, nil
 	}
 	cs := connectorSession(t, f, ScopeWrite)
@@ -628,6 +644,46 @@ func TestConnectorLaunchRace(t *testing.T) {
 	wg.Wait()
 	if len(launched) != 1 {
 		t.Fatalf("two overlapping launches started %d runs, want 1", len(launched))
+	}
+}
+
+// A launch still provisioning when the tool's budget runs out answers with
+// its run, recovered by replaying the key the connector derived, and keeps
+// provisioning after the tool call ends.
+func TestConnectorLaunchOutlastsTheTool(t *testing.T) {
+	defer func(wait time.Duration) { launchWait = wait }(launchWait)
+	launchWait = 50 * time.Millisecond
+	f := newFake(t)
+	f.answers[protocol.MethodRunList] = returns(protocol.RunListResult{})
+	f.answers[protocol.MethodRunLaunch] = returns(protocol.RunLaunchResult{Run: protocol.Run{ID: "run-7", Status: "queued"}, Replayed: true})
+	release, provisioned := make(chan struct{}), make(chan error, 1)
+	var launches atomic.Int32
+	cs := callSession(t, func(ctx context.Context, method string, params, out any) error {
+		if method == protocol.MethodRunLaunch && launches.Add(1) == 1 {
+			<-release
+			provisioned <- ctx.Err()
+		}
+		return f.call(ctx, method, params, out)
+	}, ScopeWrite)
+	args := map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "build the image"}
+	text, out := run(t, cs, "aether_launch_run", args)
+	if out["run_id"] != "run-7" || out["state"] != "starting" || out["idempotency_key"] == "" || out["next"] != "poll aether_get_run with run_id" ||
+		text != "Run run-7 is starting." {
+		t.Fatalf("a launch outlasting the tool = %q %v", text, out)
+	}
+	key := fmt.Sprintf(`"idempotency_key":%q`, out["idempotency_key"])
+	text, out = run(t, cs, "aether_launch_run", args)
+	if out["run_id"] != "run-7" || out["duplicate"] != true || !strings.Contains(text, "already launching") {
+		t.Fatalf("the same launch while the first provisions = %q %v", text, out)
+	}
+	for _, c := range called(f, protocol.MethodRunLaunch) {
+		if !strings.Contains(c.params, key) {
+			t.Fatalf("run.launch = %+v, want every call with the derived %s", c, key)
+		}
+	}
+	close(release)
+	if err := <-provisioned; err != nil {
+		t.Fatalf("the launch's context ended with the tool call: %v", err)
 	}
 }
 
@@ -730,10 +786,14 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 		protocol.MethodRunInputRespond, `{"run_id":"run-3","request_id":"req-3","option_id":"accept","values":{"db":"pg"}}`)
 	acted("aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Run rm -rf build"},
 		protocol.MethodRunInputRespond, `{"run_id":"run-4","request_id":"req-4","option_id":"once"}`)
+	if text, out := run(t, cs, "aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Run rm -rf build"}); text !=
+		"Allowed the request once on run run-4: answered." || out["answer_id"] != "req-4" {
+		t.Fatalf("a decided permission = %q %v, want its agent-chosen id only as answer_id", text, out)
+	}
 	acted("aether_decide_approval", map[string]any{"run_id": "run-5", "answer_id": "ap-5", "decision": "deny", "action": "git push --force"},
 		protocol.MethodApprovalDecide, `{"run_id":"run-5","request_id":"ap-5","approve":false}`)
 	if text, out := run(t, cs, "aether_decide_approval", map[string]any{"run_id": "run-5", "answer_id": "ap-5", "decision": "deny", "action": "git push --force"}); text !=
-		"Approval ap-5 on run run-5: denied." || strings.Contains(trusted(t, out), "git push") {
+		"Approval on run run-5: denied." || strings.Contains(trusted(t, out), "git push") {
 		t.Fatalf("a decided approval = %q %v, want the agent's text only under untrusted", text, out)
 	}
 
@@ -743,12 +803,12 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 		want string
 	}{
 		{"aether_answer", map[string]any{"run_id": "run-4", "answer_id": "req-4", "option_id": "always"}, "this item is a permission, which is answered with aether_decide_approval"},
-		{"aether_answer", map[string]any{"run_id": "run-1", "answer_id": "gone", "answer": "x"}, "run run-1 has nothing pending for you with answer_id gone; it may be answered already; call aether_needs_attention"},
+		{"aether_answer", map[string]any{"run_id": "run-1", "answer_id": "gone", "answer": "x"}, "run run-1 has nothing pending for you with that answer_id; it may be answered already; call aether_needs_attention"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-5", "answer_id": "ap-5", "decision": "allow", "action": "git push"}, "action is not the pending request's untrusted.text word for word; call aether_needs_attention"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-6", "answer_id": "ap-6", "decision": "allow", "action": strings.Repeat("x", 600) + "…"},
-			"run run-6's request ap-6 is longer than the connector shows; decide it in the Aether dashboard at https://aether.example/?run=run-6"},
+			"run run-6's request is longer than the connector shows; decide it in the Aether dashboard at https://aether.example/?run=run-6"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-7", "answer_id": "req-7", "decision": "allow", "action": strings.Repeat("x", 600) + "…"},
-			"run run-7's request req-7 is longer than the connector shows"},
+			"run run-7's request is longer than the connector shows"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-3", "answer_id": "req-3", "decision": "allow", "action": ""}, "this item is a question, which is answered with aether_answer"},
 	} {
 		f.calls = nil

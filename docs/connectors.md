@@ -140,7 +140,8 @@ reasons runs wait included, comes back under an `untrusted` field; outside it
 are only fixed labels such as `The agent asks a question`, ids, states, counts,
 times, links, workspace and agent names, branch names, file paths and the
 server's own errors. Untrusted text is cut to 200 characters for titles, check
-names, commit subjects, a list row's reason, last report or swarm goal; 300 for
+names, commit subjects, a swarm task's blockers, a list row's reason, last
+report or swarm goal; 300 for
 each pull request review or comment; 2000 for a conversation item; 12000 for a
 diff; and 600 for everything else, such as tasks, reports, questions, request
 and approval text, terminal lines and memory notes. `search` and `fetch` keep
@@ -154,18 +155,22 @@ returns at most 30 items. Tools that take a `run_id` or `swarm_id` also accept
 the `run:` and `swarm:` ids `search` returns.
 
 A launch, swarm or message takes an optional `idempotency_key`; a retry with
-the same key returns the first result. Without one, a run launch with the same
-workspace, agent, task, mode and model within 60 seconds returns your earlier
-run, unless it failed, was interrupted or was abandoned, and a swarm with the
-same workspace, objective and agents within 60 seconds returns your earlier
-swarm, unless it was cancelled, instead of starting another. A retried message
-without a key is sent again. `aether_mark_reviewed` completes only a run whose
-agent reported success and awaits your review; to end any other run, use
-`aether_stop_run` or `aether_close_run` under `control`. A message to a run
-another member controls waits about 45 seconds for them to approve it.
-`aether_decide_approval` allows or denies a permission request once; it never
-picks an "always" option, so it cannot change what the agent may do next time.
-A tool call is cut off after 40 seconds, inside ChatGPT's wait.
+the same key returns the first result. A launch or swarm still starting after
+30 seconds, such as one pulling its image, answers with its id, `state:
+"starting"` and the key, and keeps starting after the tool call ends: poll
+`aether_get_run` or `aether_get_swarm`. Without a key, a run launch with the
+same workspace, agent, task, mode and model within 60 seconds returns your
+earlier run, unless it failed, was interrupted or was abandoned, and a swarm
+with the same workspace, objective and agents within 60 seconds returns your
+earlier swarm, unless it was cancelled, instead of starting another; so does an
+identical launch still starting. A retried message without a key is sent again.
+`aether_mark_reviewed` completes only a run whose agent reported success and
+awaits your review; to end any other run, use `aether_stop_run` or
+`aether_close_run` under `control`. A message to a run another member controls
+waits about 45 seconds for them to approve it. `aether_decide_approval` allows
+or denies a permission request once; it never picks an "always" option, so it
+cannot change what the agent may do next time. Any other tool call is cut off
+after 40 seconds, inside ChatGPT's wait.
 
 ChatGPT and Claude ask before each tool that is not read-only. ChatGPT asks by
 default and can remember your answer for a conversation. Claude offers **Allow

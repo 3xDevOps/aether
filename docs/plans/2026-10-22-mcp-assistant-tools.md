@@ -12,6 +12,10 @@
   `run.review`; a run whose review changes between the two is completed
   anyway. Accepted: the window is one round trip, and `ready` only moves
   when the member or the agent acts on the run.
+- `aether_activity_summary` counts and lists finished runs only; runs still
+  working are in `aether_list_runs`. Follow-up.
+- The keyless swarm guard reads the workspace's newest 20 swarms, so a
+  duplicate older than those is missed. Follow-up.
 
 **Goal:** From ChatGPT (or Claude), a member launches runs and swarms, sees
 what needs them, answers agents and approvals, reads pull request status
@@ -63,19 +67,20 @@ runs, all through the connector of
    `*member_id`, and for `mission.create` fills the accountable human and
    every account with the connector's member.
 7. **Idempotency is the caller's key.** Launch, swarm and message take an
-   optional `idempotency_key`. Without one nothing is derived, except that a
-   run launch of the same workspace, agent, task, mode and model by the
-   member within 60 seconds that has not failed, been interrupted or been
-   abandoned returns that run, and a swarm of the same workspace,
-   objective, integrator and worker choices whose accountable human is the
-   member (`server.info`'s member) within 60 seconds that is not cancelled
-   returns that swarm (`duplicate: true`). A keyless launch holds a mutex
-   per member from that check through the launch, so two overlapping
-   retries through one server cannot both launch. `run.inject` and
-   `mission.create` need a key on the wire, so a missing one is a fresh
-   UUID: a retried message sends again, as its description says. Answers
-   and swarm cancellation use keys derived from the answered item or swarm,
-   since each happens once.
+   optional `idempotency_key`. Without one, a run launch of the same
+   workspace, agent, task, mode and model by the member within 60 seconds
+   that has not failed, been interrupted or been abandoned returns that run,
+   and a swarm of the same workspace, objective, integrator and worker
+   choices whose accountable human is the member (`server.info`'s member)
+   within 60 seconds that is not cancelled returns that swarm
+   (`duplicate: true`). Otherwise the connector derives a fresh UUID key: a
+   per-member mutex covers only the check and recording the key as in
+   flight, and an identical keyless call while that launch is in flight
+   replays its key, so two overlapping retries through one server launch
+   once without serializing behind provisioning. A retried message without
+   a key sends again, as its description says. Answers and swarm
+   cancellation use keys derived from the answered item or swarm, since
+   each happens once.
 8. **Approvals are decided once, as shown.** `aether_decide_approval` picks
    the `allow_once` or `reject_once` option itself and never an "always"
    one, which would change the agent's policy unasked. Its `action` argument
@@ -89,8 +94,9 @@ runs, all through the connector of
    `mission.question.answer`, a teammate's room question to a
    `run.room.post` reply, an agent's question to `run.input.respond`. It
    refuses permission items, which need `control`.
-10. **Calls fit ChatGPT's wait.** Each tool runs under a 40-second context,
-    inside ChatGPT's roughly 50 seconds. The server stays stateless.
+10. **Calls fit ChatGPT's wait.** Each tool answers within 40 seconds,
+    inside ChatGPT's roughly 50; every call but a launch's runs under that
+    deadline. The server stays stateless.
 11. **A call never fails after its action.** Write and control tools make
     every lookup that can fail (`server.info`, `run.get`, `attention.list`)
     before they act. The run state read after a pause, resume, stop, close
@@ -113,6 +119,16 @@ runs, all through the connector of
     `additionalProperties: false` is dropped and the handler refuses an
     unknown argument itself, naming the ones the tool takes; descriptions
     say when to call a tool, not what it returns.
+16. **Launches outlive the tool call.** `run.launch` provisions the run
+    synchronously and `mission.create` launches its integrator the same
+    way; cancelling either fails what it started, and an image pull can
+    outlast ChatGPT's wait. Both run on `context.WithoutCancel`, keeping
+    the caller's identity and attribution. After 30 seconds the tool
+    replays the key and answers with the id and `state: "starting"`; the
+    server's per-key launch lock is released once the run row is bound to
+    the key, so that replay (and a client's own retry) returns at once. If
+    the replay is not answered within 5 seconds either, the tool returns
+    the key to retry with.
 
 ## 2. Tools
 
@@ -163,9 +179,9 @@ is among its workspace's last 100 timeline entries (or the run's own, for
   approval text, terminal lines, memory notes). `fetch` returns a run's
   title, task and reason and a swarm's goal whole.
 - `aether_run_history` pages an enhanced run's conversation by the oldest
-  seq of each page and stops at the oldest retained one. `aether_pr_status` passes `run.pr.feedback`'s
-  `truncated` on and qualifies its counts; `aether_run_changes` reports
-  `run.git.diff`'s error as `diff_error`.
+  seq of each page and stops at the oldest retained one. `aether_pr_status`
+  passes `run.pr.feedback`'s `truncated` on and qualifies its counts;
+  `aether_run_changes` reports `run.git.diff`'s error as `diff_error`.
 - The write limiter of 30 calls, then one every 2 seconds, is unchanged.
 
 ## 4. Tests
@@ -175,11 +191,13 @@ is among its workspace's last 100 timeline entries (or the run's own, for
   hints, enums and size; text that ends with the result's JSON; results,
   summaries and routed params; an injection string that never leaves
   `untrusted`; truncation, multi-page history, prefix stripping, empty enum
-  values, duplicate guards and two overlapping keyless launches; refused
-  decisions of cut requests;
-  no action after a failed lookup and no failure after an action; refusals
-  and hints.
+  values, duplicate guards, two overlapping keyless launches and a launch
+  still provisioning past the tool's budget; refused decisions of cut
+  requests; no action after a failed lookup and no failure after an action;
+  refusals and hints.
 - `internal/assistant/tools`: `Prepare` fills and guards `mission.create`.
+- `internal/sshd/launch_replay_test.go`: a retry with the key during the
+  first launch's provisioning returns its run at once.
 - `internal/edge/edgetest/connector_tools_test.go`: through a real edge and
   server with OAuth, the tools per scope, launch replay and duplicate
   launches, a swarm as its caller, a message, a teammate's question listed

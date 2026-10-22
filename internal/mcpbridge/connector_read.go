@@ -384,13 +384,14 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 		untrusted["latest_report"] = reps[0]
 	}
 	var pr protocol.RunPRStatusResult
-	switch err := c.read(ctx, protocol.MethodRunPRStatus, protocol.RunPRStatusParams{RunID: r.ID}, &pr); {
-	case err != nil:
-		out["pr_error"] = err.Error()
-	case pr.PullRequest != nil:
+	if err := c.read(ctx, protocol.MethodRunPRStatus, protocol.RunPRStatusParams{RunID: r.ID}, &pr); err != nil {
+		pr.Error = err.Error()
+	}
+	if pr.PullRequest != nil {
 		out["pr"] = prOf(pr.PullRequest)
 		untrusted["pr_title"] = clip(pr.PullRequest.Title, maxReport)
-	case pr.Error != "":
+	}
+	if pr.Error != "" {
 		out["pr_error"] = pr.Error
 	}
 	return summary, out, nil

@@ -127,14 +127,86 @@ func recent(at string, now time.Time) bool {
 }
 
 // launchLocks holds a mutex per member id. A member's keyless launch holds
-// it from the duplicate check through the launch, so two overlapping
-// retries through this server cannot both launch.
+// it from the duplicate check until its launch is in flight, so two
+// overlapping retries through this server cannot both launch.
 var launchLocks sync.Map
 
 func lockLaunches(member string) func() {
 	mu, _ := launchLocks.LoadOrStore(member, &sync.Mutex{})
 	mu.(*sync.Mutex).Lock()
 	return mu.(*sync.Mutex).Unlock
+}
+
+// inflight maps a member's keyless launch still in flight, by method and
+// params, to the idempotency key derived for it; an identical keyless call
+// replays that key and gets the same run or swarm.
+var inflight sync.Map
+
+// keyless gives a launch with no idempotency key one: an identical
+// launch's still in flight (dup is true), else a new one, unless guard,
+// run under the member's lock, finds a recent identical launch (found is
+// true). done ends the in-flight entry when the launch call returns.
+func keyless(member, method string, params any, guard func() (bool, error)) (key string, dup, found bool, done func(), err error) {
+	defer lockLaunches(member)()
+	b, err := json.Marshal(params)
+	if err != nil {
+		return "", false, false, nil, fmt.Errorf("fingerprint launch: %w", err)
+	}
+	fingerprint := member + "\x00" + method + "\x00" + string(b)
+	if k, ok := inflight.Load(fingerprint); ok {
+		return k.(string), true, false, func() {}, nil
+	}
+	if found, err = guard(); err != nil || found {
+		return "", false, found, nil, err
+	}
+	key = uuid.NewString()
+	inflight.Store(fingerprint, key)
+	return key, false, false, func() { inflight.Delete(fingerprint) }, nil
+}
+
+// launchWait is how long a launch tool waits for the launch call before
+// answering with what it started; provisioning can take minutes.
+var launchWait = toolTimeout - 10*time.Second
+
+// replayWait bounds the replay that recovers what a launch started.
+const replayWait = 5 * time.Second
+
+// launch calls method, a launch whose params carry an idempotency key, on
+// a context the tool's deadline and the client's disconnect do not cancel,
+// since cancelling it fails the run it is provisioning. Past launchWait it
+// replays the key, which the server answers as soon as the run or swarm
+// exists; finished is false then, and res is empty if that replay is not
+// answered in time either. done runs when the launch call returns.
+func launch[R any](ctx context.Context, act Call, method string, params any, done func()) (res R, finished bool, err error) {
+	detached := context.WithoutCancel(ctx)
+	first := make(chan error, 1)
+	var launched R
+	go func() {
+		err := act(detached, method, params, &launched)
+		done()
+		first <- err
+	}()
+	select {
+	case err := <-first:
+		return launched, true, err
+	case <-ctx.Done():
+	case <-time.After(launchWait):
+	}
+	replay := make(chan error, 1)
+	var replayed R
+	go func() { replay <- act(detached, method, params, &replayed) }()
+	select {
+	case err := <-replay:
+		return replayed, false, err
+	case <-time.After(replayWait):
+		return res, false, nil
+	}
+}
+
+// starting answers a launch the replay did not recover in time.
+func starting(tool, key string) (string, any, error) {
+	return fmt.Sprintf("The launch is still starting; call %s again with the same arguments and idempotency_key %s to get it.", tool, key),
+		map[string]any{"state": "starting", "idempotency_key": key, "next": "call " + tool + " again with the same arguments and idempotency_key"}, nil
 }
 
 // recentLaunch is the member's run of the same task, agent, mode and
@@ -164,26 +236,42 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 		return "", nil, err
 	}
 	l := links(info.DashboardURL)
-	if in.IdempotencyKey == "" {
-		defer lockLaunches(info.Member.ID)()
-		r, dup, err := recentLaunch(ctx, c.read, in, time.Now())
+	params := protocol.RunLaunchParams{WorkspaceID: in.WorkspaceID, Task: in.Task, Harness: in.Harness, Mode: in.Mode, Model: in.Model,
+		IdempotencyKey: in.IdempotencyKey}
+	dup, done := false, func() {}
+	if params.IdempotencyKey == "" {
+		var prior protocol.Run
+		var found bool
+		params.IdempotencyKey, dup, found, done, err = keyless(info.Member.ID, protocol.MethodRunLaunch, params, func() (ok bool, err error) {
+			prior, ok, err = recentLaunch(ctx, c.read, in, time.Now())
+			return ok, err
+		})
 		if err != nil {
 			return "", nil, err
 		}
-		if dup {
-			out := launched(r, l)
+		if found {
+			out := launched(prior, l)
 			out["duplicate"] = true
 			return fmt.Sprintf("You launched this task with %s at %s; returning run %s instead of launching it again. Pass an idempotency_key to launch another.",
-				r.Harness, r.CreatedAt, r.ID), out, nil
+				prior.Harness, prior.CreatedAt, prior.ID), out, nil
 		}
 	}
-	var res protocol.RunLaunchResult
-	if err := c.act(ctx, protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: in.WorkspaceID, Task: in.Task, Harness: in.Harness,
-		Mode: in.Mode, Model: in.Model, IdempotencyKey: in.IdempotencyKey}, &res); err != nil {
+	res, finished, err := launch[protocol.RunLaunchResult](ctx, c.act, protocol.MethodRunLaunch, params, done)
+	if err != nil {
 		return "", nil, err
 	}
+	if res.Run.ID == "" {
+		return starting("aether_launch_run", params.IdempotencyKey)
+	}
 	out := launched(res.Run, l)
-	if res.Replayed {
+	switch {
+	case dup:
+		out["duplicate"] = true
+		return fmt.Sprintf("You are already launching this task; returning run %s instead of launching it again. Pass an idempotency_key to launch another.", res.Run.ID), out, nil
+	case !finished:
+		out["state"], out["idempotency_key"] = "starting", params.IdempotencyKey
+		return fmt.Sprintf("Run %s is starting.", res.Run.ID), out, nil
+	case res.Replayed:
 		out["replayed"] = true
 		return fmt.Sprintf("This idempotency_key already launched run %s; nothing new was launched.", res.Run.ID), out, nil
 	}
@@ -247,27 +335,42 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	l := links(info.DashboardURL)
 	params := protocol.MissionCreateParams{WorkspaceID: in.WorkspaceID, Objective: in.Objective,
 		Integrator: protocol.MissionIntegrator(integrator), ExecutionChoices: choices, IdempotencyKey: in.IdempotencyKey}
+	dup, done := false, func() {}
 	if params.IdempotencyKey == "" {
-		defer lockLaunches(info.Member.ID)()
-		m, dup, err := recentSwarm(ctx, c.read, info.Member.ID, params, time.Now())
+		var prior protocol.Mission
+		var found bool
+		params.IdempotencyKey, dup, found, done, err = keyless(info.Member.ID, protocol.MethodMissionCreate, params, func() (ok bool, err error) {
+			prior, ok, err = recentSwarm(ctx, c.read, info.Member.ID, params, time.Now())
+			return ok, err
+		})
 		if err != nil {
 			return "", nil, err
 		}
-		if dup {
-			out := swarmLaunched(m, l)
+		if found {
+			out := swarmLaunched(prior, l)
 			out["duplicate"] = true
 			return fmt.Sprintf("You launched this objective at %s; returning swarm %s instead of launching it again. Pass an idempotency_key to launch another.",
-				m.CreatedAt, m.ID), out, nil
+				prior.CreatedAt, prior.ID), out, nil
 		}
-		// mission.create needs a key; recentSwarm guards retries instead.
-		params.IdempotencyKey = uuid.NewString()
 	}
-	var res protocol.MissionCreateResult
-	if err := c.act(ctx, protocol.MethodMissionCreate, params, &res); err != nil {
+	res, finished, err := launch[protocol.MissionCreateResult](ctx, c.act, protocol.MethodMissionCreate, params, done)
+	if err != nil {
 		return "", nil, err
 	}
 	m := res.Mission
-	return fmt.Sprintf("Launched swarm %s (%s); its integrator is run %s.", m.ID, m.Phase, cmp.Or(m.CurrentIntegratorRunID, "not started yet")), swarmLaunched(m, l), nil
+	if m.ID == "" {
+		return starting("aether_launch_swarm", params.IdempotencyKey)
+	}
+	out := swarmLaunched(m, l)
+	switch {
+	case dup:
+		out["duplicate"] = true
+		return fmt.Sprintf("You are already launching this objective; returning swarm %s instead of launching it again. Pass an idempotency_key to launch another.", m.ID), out, nil
+	case !finished:
+		out["state"], out["idempotency_key"] = "starting", params.IdempotencyKey
+		return fmt.Sprintf("Swarm %s is starting; its integrator is run %s.", m.ID, cmp.Or(m.CurrentIntegratorRunID, "not started yet")), out, nil
+	}
+	return fmt.Sprintf("Launched swarm %s (%s); its integrator is run %s.", m.ID, m.Phase, cmp.Or(m.CurrentIntegratorRunID, "not started yet")), out, nil
 }
 
 func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string, any, error) {
@@ -301,7 +404,7 @@ func pendingItem(ctx context.Context, read Call, runID, id string) (protocol.Att
 		}
 	}
 	return protocol.AttentionItem{}, &protocol.Error{Code: protocol.CodeNotFound,
-		Message: fmt.Sprintf("run %s has nothing pending for you with answer_id %s; it may be answered already", runID, id)}
+		Message: fmt.Sprintf("run %s has nothing pending for you with that answer_id; it may be answered already", runID)}
 }
 
 // controlHeld adds the way forward to run.input.respond's refusal while
@@ -421,7 +524,7 @@ func decidable(in decideInput, l links, shown ...string) error {
 	for _, text := range shown {
 		if len([]rune(text)) > maxText {
 			return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
-				"run %s's request %s is longer than the connector shows; decide it in the Aether dashboard%s", in.RunID, in.AnswerID, at(l.run(in.RunID)))}
+				"run %s's request is longer than the connector shows; decide it in the Aether dashboard%s", in.RunID, at(l.run(in.RunID)))}
 		}
 	}
 	if in.Action != shown[0] {
@@ -456,8 +559,8 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 		if err := c.act(ctx, protocol.MethodApprovalDecide, protocol.ApprovalDecideParams{RunID: in.RunID, RequestID: in.AnswerID, Approve: allow}, &res); err != nil {
 			return "", nil, err
 		}
-		return fmt.Sprintf("Approval %s on run %s: %s.", in.AnswerID, in.RunID, res.Approval.Decision),
-			map[string]any{"run_id": in.RunID, "decision": res.Approval.Decision, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
+		return fmt.Sprintf("Approval on run %s: %s.", in.RunID, res.Approval.Decision),
+			map[string]any{"run_id": in.RunID, "answer_id": in.AnswerID, "decision": res.Approval.Decision, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
 	case it.Kind == protocol.AttentionKindPermission && it.Request != nil && len(it.Request.Options) > 0:
 		if err := decidable(in, l, it.Request.Title); err != nil {
 			return "", nil, err
@@ -482,8 +585,8 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 		if err := c.act(ctx, protocol.MethodRunInputRespond, protocol.RunInputRespondParams{RunID: in.RunID, RequestID: in.AnswerID, OptionID: option}, &res); err != nil {
 			return "", nil, controlHeld(err)
 		}
-		return fmt.Sprintf("%s request %s once on run %s: %s.", verb, in.AnswerID, in.RunID, res.Status),
-			map[string]any{"run_id": in.RunID, "option": want, "status": res.Status, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
+		return fmt.Sprintf("%s the request once on run %s: %s.", verb, in.RunID, res.Status),
+			map[string]any{"run_id": in.RunID, "answer_id": in.AnswerID, "option": want, "status": res.Status, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
 	}
 	return "", nil, invalid("this item is a %s, which is answered with %s", it.Kind, answerWith(it))
 }
