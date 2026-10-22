@@ -31,9 +31,10 @@ type launchKeyLock struct {
 // The receipt is reserved before launch and bound to the run as soon as its
 // row is durable, through the created callback launch passes on as
 // domain.LaunchOptions.Created; a launch that fails after that is replayed
-// as the run it left. A reservation with no run is a launch that failed or
-// stopped before creating one, and a retry launches again. An empty key
-// launches every time.
+// as the run it left. The key's lock is held only until then, so a retry
+// during the run's provisioning returns the run at once. A reservation with
+// no run is a launch that failed or stopped before creating one, and a
+// retry launches again. An empty key launches every time.
 func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, key, method string, params any, launch func(created func(domain.RunID)) (*domain.Run, *protocol.Error)) (*domain.Run, bool, *protocol.Error) {
 	if key == "" {
 		run, perr := launch(nil)
@@ -46,7 +47,7 @@ func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, k
 	if err != nil {
 		return nil, false, rpcError(err)
 	}
-	unlock := s.lockLaunchKey(launchKey{member, key})
+	unlock := sync.OnceFunc(s.lockLaunchKey(launchKey{member, key}))
 	defer unlock()
 	prior, recorded, err := s.cfg.Store.LaunchReceipt(ctx, member, key)
 	switch {
@@ -72,6 +73,9 @@ func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, k
 	var bindErr error
 	bind := func(id domain.RunID) {
 		started, bindErr = id, s.cfg.Store.CompleteLaunchReceipt(context.WithoutCancel(ctx), member, key, id)
+		if bindErr == nil {
+			unlock()
+		}
 	}
 	run, perr := launch(bind)
 	if started == "" && run != nil {

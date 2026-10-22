@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -58,6 +59,42 @@ func TestRunLaunchReplaysAnIdempotencyKey(t *testing.T) {
 	}
 	if _, perr := launch("build it", ""); perr != nil || launches() != 3 {
 		t.Fatalf("keyless launches = %d, %v; want each to launch", launches(), perr)
+	}
+}
+
+// A retry with the key while the first launch is still provisioning
+// returns the run without waiting for the provisioning.
+func TestRunLaunchReplaysDuringProvisioning(t *testing.T) {
+	e := newTestEnv(t, nil)
+	started, release := make(chan struct{}, 1), make(chan struct{})
+	e.runs.admitInto, e.runs.launchStarted, e.runs.launchRelease = e.store, started, release
+	params := protocol.RunLaunchParams{WorkspaceID: string(e.ws.ID), Task: "slow image", Harness: "claude", IdempotencyKey: "k-slow"}
+	first := make(chan *protocol.Error, 1)
+	go func() {
+		_, perr := callJSON(t, e, e.member.ID, protocol.MethodRunLaunch, params)
+		first <- perr
+	}()
+	<-started
+	replayed := make(chan protocol.RunLaunchResult, 1)
+	go func() {
+		var result protocol.RunLaunchResult
+		raw, perr := callJSON(t, e, e.member.ID, protocol.MethodRunLaunch, params)
+		if perr != nil || json.Unmarshal(raw, &result) != nil {
+			t.Errorf("retry during provisioning = %s, %v", raw, perr)
+		}
+		replayed <- result
+	}()
+	select {
+	case got := <-replayed:
+		if bound, _, err := e.store.LaunchReceipt(t.Context(), e.member.ID, "k-slow"); err != nil || !got.Replayed || got.Run.ID != string(bound) {
+			t.Errorf("retry during provisioning = %+v, want run %s replayed (%v)", got, bound, err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("a retry waited for the first launch's provisioning")
+	}
+	close(release)
+	if perr := <-first; perr != nil {
+		t.Fatal(perr)
 	}
 }
 

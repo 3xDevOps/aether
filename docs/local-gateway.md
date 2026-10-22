@@ -964,7 +964,8 @@ launches nothing; one with other params is `-32003`, and one whose run was
 deleted is `-32000`. One key names one launch across both methods. The key
 is reserved before the launch and records the run as soon as its row
 exists, so a launch that fails after that replays as the run it left. A
-retry of a key whose launch failed before creating a run launches again;
+retry while the first launch is still provisioning returns that run at once
+instead of waiting for it. A retry of a key whose launch failed before creating a run launches again;
 so does one after the server stopped in the instant between creating the
 run and recording it. When recording the run fails, the launch answers
 the store error naming the run it started: a retry with that key would launch
