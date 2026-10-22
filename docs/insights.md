@@ -94,6 +94,38 @@ appears in.
 Cost is reported, not enforced. To cap spend, use a [budget](teams.md#budgets).
 Subscription quota is under **Settings → Usage**.
 
+## System
+
+The **System** tab shows how busy the server is right now and which runs use
+it. The Activity tab is the 7-day history above; System is live.
+
+- **Time range.** 5m, 15m or 1h scopes the charts. The line beside it reads
+  `Live · every 5s`, `Paused while this tab is hidden`, or the error of the
+  last failed poll; the last data stays on screen, dimmed.
+- **Tiles.** CPU busy (user, system, I/O wait and steal), memory used,
+  the data filesystem, network, running containers, and pressure when the
+  kernel reports it. Pressure is the share of the last 10 seconds some task
+  waited for CPU, memory or I/O.
+- **Resources by run.** A donut of CPU or memory use. Each of up to five
+  containers using at least 2% of the host gets a slice; the rest are one
+  **Other runs** slice. **Everything else** is host use outside the listed
+  containers: the Aether server, Docker, host processes and containers you
+  cannot see. Click a slice or its legend entry to filter the ranked list to
+  it; click again or **Show all** to clear. The list ranks every container
+  by use, with its limit, **near limit** from 80% of that limit, **throttled**
+  when CPU is capped, and a 15-minute trend. A run's browser is its own row,
+  with its own limits. A row opens its run, or your own Environment.
+- **History.** CPU, memory, load average, pressure, network and disk I/O.
+- **Storage.** The data filesystem, Aether data by category, Docker storage,
+  container writable layers and, for admins, the largest storage owners.
+
+The server reads host figures from `/proc` and `/sys` every 5 seconds and
+keeps one hour. Container figures come from Docker's per-container stats and
+are sampled only while someone has the System tab open. Admins see every
+container; members see their own, and the rest counts toward **Everything
+else**. The tab reads `This server does not report system stats. Update the
+server to see them.` when the server is too old.
+
 ## Limits
 
 - The page covers the last 7 days. Older runs appear only in the 26-week

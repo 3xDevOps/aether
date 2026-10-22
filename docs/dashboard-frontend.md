@@ -1103,8 +1103,8 @@ not base64 in control JSON. The shared browser's observation-only WebSocket is
 and as `?token=` on WebSockets. The server-hosted gateway sends no token;
 WhoIs authenticates each request.
 
-The disk gauge in Settings > **Server** renders when `server.info` carries a
-`disk` object (`used_bytes`, `total_bytes`). That field does not arrive with
+The disk gauge in **Insights › System** (the Disk tile and the Storage
+section) renders when `server.info` carries a `disk` object (`used_bytes`, `total_bytes`). That field does not arrive with
 `server.info`: the gateway serves the number on `GET /api/v1/disk` and the
 team reads write it onto the stored info, which is the gauge's only reader. The field
 stays optional and the gauge stays hidden if the read fails. What `statfs`
@@ -4201,12 +4201,23 @@ questions and queued messages stay contextual to their run, in its Details
   fills from live PTY attaches - the browser's attaches included.
 - The full read and the heartbeat interval read `GET /api/v1/disk` and write
   it onto the stored `server.info`, which is what fills the disk gauge in
-  Settings > Server. One read runs at a time, so a reconnect or wake joins
+  Insights › System. One read runs at a time, so a reconnect or wake joins
   the heartbeat's read, and a read unanswered after 10 seconds is aborted and
   shown as the gauge's error: both gateways speak HTTP/1.1, so a stuck read
   holds one of the browser's six connections to the host.
 
 ## Insights
+
+The page has two tabs, **Activity** (below) and **System**, kept in the route
+as `params.tab` (`?page=insights&id=system`). `src/routes/insights/system/`
+is the System tab: `use-system-stats.ts` polls `system.stats` every
+`interval_ms` while the tab is mounted, the connection is live and the
+document is visible, sends the newest `t_ms` as `since_ms`, merges samples
+into a one-hour buffer and polls once more after 1.5 s while a container has
+no CPU figure. `model.ts` builds the donut slices and keeps each run on its
+colour slot (`--series-1` to `--series-8`) while it is present. Charts are
+Recharts, framed by `components/ui/chart.tsx`. The Storage section there
+replaced the disk rows of Settings › Server.
 
 `src/routes/insights/` is **Insights** (`?page=insights`), what a member's
 agents finished over the last seven local days. It is in the header

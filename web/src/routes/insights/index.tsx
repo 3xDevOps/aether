@@ -3,14 +3,17 @@ import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ViewHeader } from '@/components/view-header'
 import { api, ApiError, type Api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
+import { cn } from '@/lib/utils'
 import { useConnectionProblem } from '@/components/shell/connection'
 import type { InsightsParams, InsightsResult } from '@/lib/types'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { Heatmap } from '@/routes/insights/heatmap'
+import { SystemTab } from '@/routes/insights/system'
 import { hasOutcomes, plural, rfc3339, weekRange, type SectionLoad } from '@/routes/insights/model'
 import { Breakdown, FinishedList, Section, StatsSection, Time, Usage } from '@/routes/insights/sections'
 import { registerRoute, type RouteProps } from '@/routes/registry'
@@ -133,6 +136,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
   const timeZone = resolvedZone && resolvedZone !== 'Etc/Unknown' ? resolvedZone : ''
   const problem = useConnectionProblem()
   const navigate = useStore((s) => s.navigate)
+  const tab = useStore((s) => s.route.params.tab) === 'system' ? 'system' : 'activity'
   const [prErrors, setPRErrors] = useState<Record<string, string>>({})
   const checked = useRef(new Set<string>()).current
   const prs = useMemo(() => ({ checked, setErrors: setPRErrors }), [])
@@ -149,46 +153,57 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
   mineReread.current = () => void mine.reread()
   teamReread.current = () => void team.reread()
   const waiting = mine.load.kind === 'loading' && connection !== 'live'
-  const controls = <WorkspaceSelect workspace={workspace} onWorkspace={setWorkspace} />
+  const controls = tab === 'activity' ? <WorkspaceSelect workspace={workspace} onWorkspace={setWorkspace} /> : null
 
   return (
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader title="Insights" actions={mobile ? undefined : controls} />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-8 px-4 py-6 sm:px-6">
-          {mobile && controls && <div role="toolbar" aria-label="Insights actions" className="flex flex-wrap items-center gap-2">{controls}</div>}
-          {waiting && (
-            <Callout tone="neutral" role="status">{problem ?? 'Connecting'}. Insights load once the server connection is live.</Callout>
-          )}
-          {timeZone === '' && mine.load.kind === 'ready' && (
-            <p className="text-ui-sm text-muted">This browser reports no time zone, so days are counted in UTC.</p>
-          )}
-          {mine.load.kind === 'ready' && mine.load.result.needs_you > 0 && (
-            <p className="text-ui">
-              <Button variant="link" onClick={() => navigate('board')}>
-                {plural(mine.load.result.needs_you, 'run')} {mine.load.result.needs_you === 1 ? 'needs' : 'need'} you
-              </Button>
-            </p>
-          )}
-          {mine.load.kind === 'ready' && mine.rereadError && (
-            <p className="text-ui-sm text-muted">A pull request changed state, but reading Insights again failed: {mine.rereadError}</p>
-          )}
-          {mine.load.kind === 'unsupported' && (
-            <Callout tone="neutral" role="status">This server does not report insights. Update the server to see them.</Callout>
-          )}
-          {mine.load.kind !== 'unsupported' && <>
-          <StatsSection title="My statistics" load={waiting ? { kind: 'loading' } : mine.load} onRetry={() => void mine.read()} team={false} agentNames={agentNames} />
-          <StatsSection title="Team statistics" load={waiting ? { kind: 'loading' } : team.load} onRetry={() => void team.read()} team agentNames={agentNames} />
-          </>}
-          {mine.load.kind === 'ready' && (
-            <Details
-              result={mine.load.result}
-              workspaceOf={(id) => mine.load.kind === 'ready' ? mine.load.result.by_workspace.find((w) => w.workspace_id === id)?.name ?? workspaceNames[id] ?? id : id}
-              agentNames={agentNames}
-              prErrors={prErrors}
-            />
-          )}
-        </div>
+        <Tabs value={tab} onValueChange={(value) => navigate('insights', value === 'system' ? { tab: 'system' } : {})}>
+          <div className={cn('mx-auto flex w-full min-w-0 flex-col gap-6 px-4 py-6 sm:px-6', tab === 'system' ? 'max-w-6xl' : 'max-w-4xl')}>
+            <TabsList aria-label="Insights view">
+              <TabsTrigger value="activity">Activity</TabsTrigger>
+              <TabsTrigger value="system">System</TabsTrigger>
+            </TabsList>
+            <TabsContent value="activity" className="flex min-w-0 flex-col gap-8">
+              {mobile && controls && <div role="toolbar" aria-label="Insights actions" className="flex flex-wrap items-center gap-2">{controls}</div>}
+              {waiting && (
+                <Callout tone="neutral" role="status">{problem ?? 'Connecting'}. Insights load once the server connection is live.</Callout>
+              )}
+              {timeZone === '' && mine.load.kind === 'ready' && (
+                <p className="text-ui-sm text-muted">This browser reports no time zone, so days are counted in UTC.</p>
+              )}
+              {mine.load.kind === 'ready' && mine.load.result.needs_you > 0 && (
+                <p className="text-ui">
+                  <Button variant="link" onClick={() => navigate('board')}>
+                    {plural(mine.load.result.needs_you, 'run')} {mine.load.result.needs_you === 1 ? 'needs' : 'need'} you
+                  </Button>
+                </p>
+              )}
+              {mine.load.kind === 'ready' && mine.rereadError && (
+                <p className="text-ui-sm text-muted">A pull request changed state, but reading Insights again failed: {mine.rereadError}</p>
+              )}
+              {mine.load.kind === 'unsupported' && (
+                <Callout tone="neutral" role="status">This server does not report insights. Update the server to see them.</Callout>
+              )}
+              {mine.load.kind !== 'unsupported' && <>
+              <StatsSection title="My statistics" load={waiting ? { kind: 'loading' } : mine.load} onRetry={() => void mine.read()} team={false} agentNames={agentNames} />
+              <StatsSection title="Team statistics" load={waiting ? { kind: 'loading' } : team.load} onRetry={() => void team.read()} team agentNames={agentNames} />
+              </>}
+              {mine.load.kind === 'ready' && (
+                <Details
+                  result={mine.load.result}
+                  workspaceOf={(id) => mine.load.kind === 'ready' ? mine.load.result.by_workspace.find((w) => w.workspace_id === id)?.name ?? workspaceNames[id] ?? id : id}
+                  agentNames={agentNames}
+                  prErrors={prErrors}
+                />
+              )}
+            </TabsContent>
+            <TabsContent value="system">
+              <SystemTab client={client} />
+            </TabsContent>
+          </div>
+        </Tabs>
       </div>
     </div>
   )

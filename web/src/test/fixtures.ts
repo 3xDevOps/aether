@@ -24,6 +24,8 @@ import type {
   Schedule,
   ServerInfo,
   ServerUpdateStatus,
+  SystemContainer,
+  SystemStatsResult,
   Template,
   UpdateStatus,
   UsageResult,
@@ -519,6 +521,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     accountList: vi.fn(async () => ({ accounts: [alice], shared_with: [] })),
     insightsGet: vi.fn(async () => insights()),
+    systemStats: vi.fn(async () => systemStats()),
     memorySearch: vi.fn<Api['memorySearch']>(async () => ({ items: [] })),
     memoryShow: vi.fn<Api['memoryShow']>(async () => needsOverride('memoryShow')),
     memoryBrief: vi.fn<Api['memoryBrief']>(async () => ({ text: '' })),
@@ -1030,4 +1033,64 @@ export function teamInsights(): InsightsResult {
       ],
     },
   })
+}
+
+export function systemContainer(over: Partial<SystemContainer> = {}): SystemContainer {
+  return {
+    owner_kind: 'run',
+    owner_id: 'run_1',
+    member_id: alice.id,
+    workspace_id: workspace.id,
+    title: 'rewrite the checkout flow',
+    status: 'running',
+    cpu_cores: 2.5,
+    cpu_limit_cores: 4,
+    memory_bytes: 4 * 1024 ** 3,
+    memory_limit_bytes: 8 * 1024 ** 3,
+    pids: 40,
+    pids_limit: 4096,
+    ...over,
+  }
+}
+
+/** An 8-core, 16 GiB host with one busy run and seven idle ones. */
+export function systemStats(over: Partial<SystemStatsResult> = {}): SystemStatsResult {
+  const t0 = 1_761_100_000_000
+  const sample = (i: number) => ({
+    t_ms: t0 + i * 5000,
+    cpu_user: 30,
+    cpu_system: 10,
+    cpu_iowait: 1,
+    cpu_steal: 0,
+    memory_used_bytes: 8 * 1024 ** 3,
+    memory_available_bytes: 8 * 1024 ** 3,
+    memory_free_bytes: 2 * 1024 ** 3,
+    swap_used_bytes: 0,
+    load1: 3.25,
+    load5: 2.5,
+    load15: 2,
+    net_rx_bps: 120_000,
+    net_tx_bps: 30_000,
+    disk_read_bps: 0,
+    disk_write_bps: 400_000,
+    pressure_cpu: 2,
+    pressure_memory: 0,
+    pressure_io: 0.5,
+  })
+  return {
+    interval_ms: 5000,
+    retention_ms: 3_600_000,
+    host: { cpu_cores: 8, memory_total_bytes: 16 * 1024 ** 3, swap_total_bytes: 2 * 1024 ** 3, uptime_seconds: 273_600 },
+    samples: [sample(0), sample(1), sample(2)],
+    containers_at_ms: t0 + 10_000,
+    containers: [
+      systemContainer(),
+      ...['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) =>
+        systemContainer({ owner_id: `run_${id}`, title: `idle run ${id}`, cpu_cores: 0.02, memory_bytes: 256 * 1024 ** 2 }),
+      ),
+      systemContainer({ owner_kind: 'member', owner_id: bob.id, member_id: bob.id, title: undefined, status: undefined, cpu_cores: 0.3, memory_bytes: 1024 ** 3 }),
+    ],
+    others: { containers: 3, cpu_cores: 0.8, memory_bytes: 1_500_000_000 },
+    ...over,
+  }
 }

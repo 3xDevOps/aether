@@ -131,7 +131,7 @@ Attaching, messaging, pulling, closing, killing and deleting runs keep
 working below the reserve, and so does reopening a closed run whose container
 is still there. To free space yourself:
 
-1. Open **Settings → Server** to see what uses the space.
+1. Open **Insights → System** to see what uses the space.
 2. Delete runs you no longer need with **Delete run** or `aether delete
    <run-id>`. That removes the checkout, transcript and records; the
    published branch, the timeline and the cost totals stay.

@@ -8,6 +8,8 @@ const (
 	MethodRunPatch = "run.patch"
 	// MethodServerDisk reads the data directory's disk usage.
 	MethodServerDisk = "server.disk"
+	// MethodSystemStats reads live host and per-container resource usage.
+	MethodSystemStats = "system.stats"
 )
 
 // RunPatchParams asks for one run's patch. From and To are snapshot
@@ -104,6 +106,88 @@ type ServerDiskEntry struct {
 	RetainedUntil    string  `json:"retained_until,omitempty"`
 	Reason           string  `json:"reason"`
 	Error            string  `json:"error,omitempty"`
+}
+
+// SystemStatsParams asks for host samples taken after SinceMS (Unix
+// milliseconds); 0 returns the whole retained window.
+type SystemStatsParams struct {
+	SinceMS int64 `json:"since_ms,omitempty"`
+}
+
+// SystemStatsResult is the host's recent history and the latest container
+// snapshot. Pointer fields are omitted when unknown, never reported as zero.
+type SystemStatsResult struct {
+	IntervalMS      int64                  `json:"interval_ms"`
+	RetentionMS     int64                  `json:"retention_ms"`
+	Host            SystemHost             `json:"host"`
+	HostError       string                 `json:"host_error"`
+	Samples         []SystemHostSample     `json:"samples"`
+	ContainersAtMS  int64                  `json:"containers_at_ms"`
+	ContainersError string                 `json:"containers_error"`
+	Containers      []SystemContainer      `json:"containers"`
+	Others          *SystemOtherContainers `json:"others,omitempty"`
+}
+
+type SystemHost struct {
+	CPUCores         int     `json:"cpu_cores"`
+	MemoryTotalBytes uint64  `json:"memory_total_bytes"`
+	SwapTotalBytes   uint64  `json:"swap_total_bytes"`
+	UptimeSeconds    float64 `json:"uptime_seconds"`
+}
+
+// SystemHostSample is one interval. CPU fields are percent of all cores.
+type SystemHostSample struct {
+	TMS                  int64    `json:"t_ms"`
+	CPUUser              float64  `json:"cpu_user"`
+	CPUSystem            float64  `json:"cpu_system"`
+	CPUIOWait            float64  `json:"cpu_iowait"`
+	CPUSteal             float64  `json:"cpu_steal"`
+	MemoryUsedBytes      uint64   `json:"memory_used_bytes"`
+	MemoryAvailableBytes uint64   `json:"memory_available_bytes"`
+	MemoryFreeBytes      uint64   `json:"memory_free_bytes"`
+	SwapUsedBytes        uint64   `json:"swap_used_bytes"`
+	Load1                float64  `json:"load1"`
+	Load5                float64  `json:"load5"`
+	Load15               float64  `json:"load15"`
+	NetRxBps             float64  `json:"net_rx_bps"`
+	NetTxBps             float64  `json:"net_tx_bps"`
+	DiskReadBps          float64  `json:"disk_read_bps"`
+	DiskWriteBps         float64  `json:"disk_write_bps"`
+	PressureCPU          *float64 `json:"pressure_cpu,omitempty"`
+	PressureMemory       *float64 `json:"pressure_memory,omitempty"`
+	PressureIO           *float64 `json:"pressure_io,omitempty"`
+}
+
+// SystemContainer is a running container the caller may see. OwnerKind is
+// "run", "browser" (a run's browser sidecar; OwnerID is the run) or "member"
+// (a member's environment). Rate fields are omitted until the container has
+// two samples; CPULimitCores is omitted when unlimited.
+type SystemContainer struct {
+	OwnerKind           string   `json:"owner_kind"`
+	OwnerID             string   `json:"owner_id"`
+	MemberID            string   `json:"member_id"`
+	WorkspaceID         string   `json:"workspace_id,omitempty"`
+	Title               string   `json:"title,omitempty"`
+	Status              string   `json:"status,omitempty"`
+	CPUCores            *float64 `json:"cpu_cores,omitempty"`
+	CPULimitCores       float64  `json:"cpu_limit_cores,omitempty"`
+	CPUThrottledPercent *float64 `json:"cpu_throttled_percent,omitempty"`
+	MemoryBytes         uint64   `json:"memory_bytes"`
+	MemoryLimitBytes    uint64   `json:"memory_limit_bytes"`
+	Pids                uint64   `json:"pids"`
+	PidsLimit           uint64   `json:"pids_limit"`
+	NetRxBps            *float64 `json:"net_rx_bps,omitempty"`
+	NetTxBps            *float64 `json:"net_tx_bps,omitempty"`
+	DiskReadBps         *float64 `json:"disk_read_bps,omitempty"`
+	DiskWriteBps        *float64 `json:"disk_write_bps,omitempty"`
+}
+
+// SystemOtherContainers sums the containers the caller may not see and the
+// Aether containers with no run or member owner.
+type SystemOtherContainers struct {
+	Containers  int     `json:"containers"`
+	CPUCores    float64 `json:"cpu_cores"`
+	MemoryBytes uint64  `json:"memory_bytes"`
 }
 
 // GatewayCapabilities describes what one gateway deployment can do, so a

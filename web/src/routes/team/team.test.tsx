@@ -4,7 +4,7 @@ import type { PresenceEntry } from '@/lib/types'
 import { useTeamRefresh } from '@/routes/team'
 import { ApprovalInbox } from '@/routes/team/approvals'
 import { TeamSummary } from '@/routes/team/budget'
-import { ServerSection } from '@/routes/settings/server'
+import { StorageSection } from '@/routes/insights/system/storage'
 import type { Api } from '@/lib/api'
 import { pendingApprovals } from '@/store/approvals'
 import { optimisticDeadlineMs } from '@/store/optimistic'
@@ -277,7 +277,7 @@ describe('team refresh and summary', () => {
   it('lights the disk gauge from the read server.info cannot carry', async () => {
     const client = fakeApi()
     seed({ info: { ...serverInfo, disk: undefined } })
-    render(<ServerSection />)
+    render(<StorageSection />)
     expect(screen.queryByLabelText('Disk usage')).toBeNull()
 
     await act(async () => {
@@ -292,17 +292,17 @@ describe('team refresh and summary', () => {
   it('breaks the disk gauge down into attributed components', async () => {
     const client = fakeApi()
     seed({ info: { ...serverInfo, disk: undefined } })
-    render(<ServerSection />)
+    render(<StorageSection />)
 
     await act(async () => {
       await refreshTeam(useStore, client)
     })
 
-    const detail = screen.getByLabelText('Disk usage').textContent
-    expect(detail).toContain('Worktrees 256 MB')
-    expect(detail).toContain('Transcripts 128 MB')
-    expect(detail).toContain('Database 64 MB')
-    expect(detail).toContain('Repositories 512 MB')
+    const detail = screen.getByRole('list', { name: 'Aether data' }).textContent
+    expect(detail).toContain('Worktrees256 MB')
+    expect(detail).toContain('Transcripts128 MB')
+    expect(detail).toContain('Database64 MB')
+    expect(detail).toContain('Repositories512 MB')
   })
 
   // An upgraded server can add a component while the filesystem totals stay put.
@@ -316,18 +316,14 @@ describe('team refresh and summary', () => {
     }
     client.disk = vi.fn(async () => current)
     seed({ info: { ...serverInfo, disk: { ...stale, repo_bytes: undefined } } })
-    render(<ServerSection />)
-    expect(
-      screen.getByLabelText('Disk usage').textContent,
-    ).not.toContain('Repositories')
+    render(<StorageSection />)
+    expect(screen.getByRole('list', { name: 'Aether data' }).textContent).not.toContain('Repositories')
 
     await act(async () => {
       await refreshTeam(useStore, client)
     })
 
-    expect(screen.getByLabelText('Disk usage').textContent).toContain(
-      'Repositories 512 MB',
-    )
+    expect(screen.getByRole('list', { name: 'Aether data' }).textContent).toContain('Repositories512 MB')
     expect(useStore.getState().info?.disk).toEqual(current)
 
     const failure = new Error('disk RPC unavailable')
@@ -374,8 +370,8 @@ describe('team refresh and summary', () => {
 
   it('lists what each container holds outside its mounted folders', () => {
     seed({ info: { ...serverInfo, disk: { ...serverInfo.disk!, containers: undefined } } })
-    const { unmount } = render(<ServerSection />)
-    expect(screen.queryByText('Container sizes')).toBeNull()
+    const { unmount } = render(<StorageSection />)
+    expect(screen.queryByText('Container writable layers')).toBeNull()
     unmount()
 
     seed({
@@ -392,11 +388,12 @@ describe('team refresh and summary', () => {
         },
       },
     })
-    render(<ServerSection />)
-    const list = screen.getByText(/2 containers hold 4\.0 GB/).closest('details') as HTMLElement
-    const items = within(list).getAllByRole('listitem').map((item) => item.textContent)
-    expect(items[0]).toContain('(run_1) · 3.0 GB')
-    expect(items[1]).toContain(`environment ${bob.display_name} (${bob.id}) · 1.0 GB`)
+    render(<StorageSection />)
+    expect(screen.getByText(/2 containers hold 4\.0 GB/)).toBeDefined()
+    const items = screen.getAllByRole('button').map((item) => item.textContent)
+    expect(items).toHaveLength(1)
+    expect(items[0]).toContain('(run_1)3.0 GB')
+    expect(screen.getByText(`environment ${bob.display_name} (${bob.id})`)).toBeDefined()
     expect(screen.getByText('Docker container sizes unavailable: request timed out.')).toBeDefined()
   })
 })

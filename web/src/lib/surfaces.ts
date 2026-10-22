@@ -37,7 +37,8 @@ export function surfaces(cap: Capability, admin = false): Surface[] {
     list.push({ name: 'missions', label: 'Swarms', Icon: Waypoints, place: 'nav' })
   if (cap.hasMethod('workspace.timeline'))
     list.push({ name: 'timeline', label: 'Activity', Icon: History, place: 'nav' })
-  if (cap.hasMethod('insights.get'))
+  // A server older than insights.get still reports disk use, which Insights › System shows.
+  if (cap.hasMethod('insights.get') || cap.hasMethod('server.disk'))
     list.push({ name: 'insights', label: 'Insights', Icon: ChartColumn, place: 'nav', keywords: 'Statistics outcomes' })
   if (cap.hasMethod('memory.search'))
     list.push({ name: 'memory', label: 'Memory', Icon: BookMarked, place: 'nav', keywords: 'Team memory notes brief pins' })

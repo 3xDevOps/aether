@@ -224,6 +224,18 @@ describe('settings view', () => {
     expect(within(server).queryByText('Retained containers')).toBeNull()
   })
 
+  it('leaves disk figures to Insights › System and links there', () => {
+    seed()
+    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    const server = screen.getByRole('region', { name: 'Server' })
+    expect(within(server).queryByLabelText('Disk usage')).toBeNull()
+    expect(within(server).queryByText('Largest storage owners')).toBeNull()
+
+    fireEvent.click(within(server).getByRole('button', { name: 'Open Insights › System' }))
+
+    expect(useStore.getState().route).toEqual({ name: 'insights', params: { tab: 'system' } })
+  })
+
   it('shows the linked server and repository read-only until Change', async () => {
     seed()
     render(<SettingsRoute params={{}} client={fakeApi()} />)
