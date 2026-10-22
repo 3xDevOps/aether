@@ -5,6 +5,7 @@ package localops
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -57,5 +58,50 @@ func TestWaitForExitAcceptsAProcessThatIsGone(t *testing.T) {
 	_ = cmd.Wait()
 	if err := waitForExit(cmd.Process.Pid, time.Second); err != nil {
 		t.Fatalf("waitForExit: %v", err)
+	}
+}
+
+// heldApp is an installed app directory with one of its files open, the
+// way an app that is exiting, or a Defender scan, holds it.
+func heldApp(t *testing.T) (dir string, held *os.File) {
+	t.Helper()
+	dir = filepath.Join(t.TempDir(), "Aether Desktop")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(dir, desktopExe)
+	if err := os.WriteFile(exe, []byte("app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	held, err := os.Open(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
+	if err := os.Rename(dir, dir+".aside"); err == nil || !renameBusy(err) {
+		t.Fatalf("rename under an open handle = %v, want a busy error", err)
+	}
+	return dir, held
+}
+
+func TestRenameWhileBusyWaitsForTheAppToBeReleased(t *testing.T) {
+	dir, held := heldApp(t)
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_ = held.Close()
+	}()
+	if err := renameWhileBusy(os.Rename, dir, dir+".aside", 10*time.Second); err != nil {
+		t.Fatalf("renameWhileBusy: %v", err)
+	}
+}
+
+func TestRenameWhileBusyReturnsTheErrorOfAnAppStillOpen(t *testing.T) {
+	dir, _ := heldApp(t)
+	err := renameWhileBusy(os.Rename, dir, dir+".aside", 200*time.Millisecond)
+	if err == nil || !renameBusy(err) {
+		t.Fatalf("err = %v, want the busy error itself", err)
+	}
+	if _, statErr := os.Stat(dir); statErr != nil {
+		t.Fatalf("the app moved anyway: %v", statErr)
 	}
 }
