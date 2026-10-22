@@ -930,8 +930,9 @@ These serve a client with no dashboard and no stream, such as the
 An `AttentionItem` is `{kind, run_id, mission_id, workspace_id, title,
 harness, reason, since}` plus what answering it needs. `kind` is one of
 `approval`, `permission`, `question`, `queued-message`, `room-question`,
-`swarm-question`, `integrator-down`, `disconnected`, `blocked`,
-`needs-input`, `ready` or `failed`. `approval` carries
+`swarm-question`, `integrator-down`, `control-hold`, `disconnected`,
+`blocked`, `needs-input`, `ready` or `failed`; `control-hold` is a swarm
+worker whose control the caller holds. `approval` carries
 `approval: {id, action, detail}` for `approval.decide`. `permission` and
 `question` carry `request: {id, kind, title, options, schema}`; an enhanced
 run's `options` are `{id, label, kind}`, `kind` being `allow_once`,
@@ -940,7 +941,9 @@ Standard run's request has none: it is answered in the terminal.
 `swarm-question`, `room-question` and `queued-message` carry
 `message: {id, body, from}`: a `mission.question.answer` question, a room
 question to answer with a `run.room.post` reply, and a steer request to
-decide with `run.room.decide`.
+decide with `run.room.decide`. A `room-question` whose text cannot be read
+says `A teammate asked a question` and has no `message`. An item with no
+known `since` sorts last.
 
 `run.input.respond` is `run.input.answer` without a control lease. It
 answers under the run's control admission, so nobody can take control
@@ -956,7 +959,14 @@ a dashboard action with its hold and review. An unknown request is
 most 256 bytes). A retry by the same member with the same key and params
 returns the run the first launch started, with `"replayed": true`, and
 launches nothing; one with other params is `-32003`, and one whose run was
-deleted is `-32000`. One key names one launch across both methods.
+deleted is `-32000`. One key names one launch across both methods. The key
+is reserved before the launch and records the run as soon as its row
+exists, so a launch that fails after that replays as the run it left. A
+retry of a key whose launch failed before creating a run launches again;
+so does one after the server stopped in the instant between creating the
+run and recording it. When recording the run fails, the launch answers
+the store error naming the run it started: a retry with that key would launch
+again, so look the run up instead.
 
 `run.pr.status` and `run.pr.feedback` default an omitted `expected` to the
 checkout's branch and head, and an omitted `target` to the pull request the
@@ -964,7 +974,7 @@ dashboard proposes: the branch's upstream (else `origin`, when the
 workspace sets an origin) as the head, into the run's base branch on the
 workspace's GitHub source, or on the head repository without one. A
 checkout with no GitHub push remote answers `error` saying to pass
-`target`. Once a finished run's container is gone, both report the pull
+`target`, and one on a detached HEAD answers `error` saying to pass both. Once a finished run's container is gone, both report the pull
 request the run last recorded (`number`, `url`, `state`); `run.pr.feedback`
 then has no checks or comments, and `error` says why.
 

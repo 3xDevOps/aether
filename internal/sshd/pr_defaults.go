@@ -24,28 +24,32 @@ func githubRepository(url string) string {
 // a zero target with the pull request the dashboard proposes
 // (web/src/routes/diff/publish-pr.ts): the branch's upstream, else origin
 // when the workspace sets one, into the run's base branch on the workspace
-// source.
-func (s *Server) prDefaults(ctx context.Context, call runRepoCall, expected *protocol.RunGitExpected, target *protocol.RunPRTarget) error {
+// source. A store failure is perr; repoErr is what the checkout cannot
+// answer, for the result's error.
+func (s *Server) prDefaults(ctx context.Context, call runRepoCall, expected *protocol.RunGitExpected, target *protocol.RunPRTarget) (perr *protocol.Error, repoErr error) {
 	if *expected != (protocol.RunGitExpected{}) && *target != (protocol.RunPRTarget{}) {
-		return nil
+		return nil, nil
 	}
 	state, err := call.native.Status(ctx, call.execution)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if state.Branch == "" {
+		return nil, fmt.Errorf("the checkout is on a detached HEAD at %s, so expected and target cannot default; pass both", state.Head)
 	}
 	if *expected == (protocol.RunGitExpected{}) {
 		*expected = protocol.RunGitExpected{Branch: state.Branch, Head: state.Head}
 	}
 	if *target != (protocol.RunPRTarget{}) {
-		return nil
+		return nil, nil
 	}
 	remotes, upstream, err := call.native.Remotes(ctx, call.execution, state.Branch)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	workspace, err := s.cfg.Store.GetWorkspace(ctx, call.run.WorkspaceID)
 	if err != nil {
-		return err
+		return rpcError(fmt.Errorf("default pr target: %w", err)), nil
 	}
 	source := ""
 	mirror, err := s.cfg.Store.GetWorkspaceMirror(ctx, call.run.WorkspaceID)
@@ -53,7 +57,7 @@ func (s *Server) prDefaults(ctx context.Context, call runRepoCall, expected *pro
 	case err == nil:
 		source = mirror.SourceURL
 	case !errors.Is(err, store.ErrNotFound):
-		return err
+		return rpcError(fmt.Errorf("default pr target: %w", err)), nil
 	}
 	var tracked, origin *protocol.RunGitRemote
 	for i := range remotes {
@@ -73,7 +77,7 @@ func (s *Server) prDefaults(ctx context.Context, call runRepoCall, expected *pro
 		head = githubRepository(remote.PushURLs[0])
 	}
 	if head == "" || headBranch == "" {
-		return fmt.Errorf("the checkout's branch %q has no GitHub push remote; pass target", state.Branch)
+		return nil, fmt.Errorf("the checkout's branch %q has no GitHub push remote; pass target", state.Branch)
 	}
 	base := call.run.BaseBranch
 	if base == "" {
@@ -84,5 +88,5 @@ func (s *Server) prDefaults(ctx context.Context, call runRepoCall, expected *pro
 		repository = head
 	}
 	*target = protocol.RunPRTarget{Repository: repository, BaseBranch: base, HeadRepository: head, HeadBranch: headBranch}
-	return nil
+	return nil, nil
 }

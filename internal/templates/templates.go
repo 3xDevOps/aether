@@ -244,21 +244,21 @@ func (s *Service) Delete(ctx context.Context, workspace domain.WorkspaceID, name
 
 // Launch renders a template and launches it as member. Permission is the
 // caller's business: this is the manually invoked path, guarded at the RPC
-// boundary like any other launch.
-func (s *Service) Launch(ctx context.Context, workspace domain.WorkspaceID, name string, member domain.MemberID, params map[string]string) (*Launched, error) {
+// boundary like any other launch. created is domain.LaunchOptions.Created.
+func (s *Service) Launch(ctx context.Context, workspace domain.WorkspaceID, name string, member domain.MemberID, params map[string]string, created func(domain.RunID)) (*Launched, error) {
 	t, err := s.store.GetTemplate(ctx, workspace, name)
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", name, err)
 	}
-	return s.launch(ctx, t, member, params)
+	return s.launch(ctx, t, member, params, created)
 }
 
-func (s *Service) launch(ctx context.Context, t *store.Template, member domain.MemberID, params map[string]string) (*Launched, error) {
+func (s *Service) launch(ctx context.Context, t *store.Template, member domain.MemberID, params map[string]string, created func(domain.RunID)) (*Launched, error) {
 	task, err := Render(t.Task, t.Params, params)
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}
-	run, err := s.runs.LaunchWithOptions(ctx, t.WorkspaceID, member, member, task, t.Harness, t.Mode, domain.LaunchOptions{Model: t.Model})
+	run, err := s.runs.LaunchWithOptions(ctx, t.WorkspaceID, member, member, task, t.Harness, t.Mode, domain.LaunchOptions{Model: t.Model, Created: created})
 	if err != nil {
 		return nil, fmt.Errorf("templates: launch %s: %w", t.Name, err)
 	}

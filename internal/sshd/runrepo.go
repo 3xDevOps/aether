@@ -263,7 +263,10 @@ func (s *Server) runPRStatus(ctx context.Context, member domain.MemberID, raw js
 		return nil, rpcError(err)
 	}
 	var status runrepo.PRResult
-	err = s.prDefaults(ctx, call, &p.Expected, &p.Target)
+	perr, err := s.prDefaults(ctx, call, &p.Expected, &p.Target)
+	if perr != nil {
+		return nil, perr
+	}
 	if err == nil {
 		err = call.native.CheckExpected(ctx, call.execution, p.Expected)
 	}
@@ -410,7 +413,10 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	err = s.prDefaults(ctx, call, &p.Expected, &p.Target)
+	perr, err := s.prDefaults(ctx, call, &p.Expected, &p.Target)
+	if perr != nil {
+		return nil, perr
+	}
 	if err == nil {
 		err = call.native.CheckExpected(ctx, call.execution, p.Expected)
 	}

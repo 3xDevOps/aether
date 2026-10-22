@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -29,28 +28,31 @@ type launchKeyLock struct {
 // one racing the first, gets the run the first started, replayed. The
 // fingerprint ties the key to method and params, so a key reused for a
 // different launch is refused rather than answered with an unrelated run.
-// An empty key launches every time.
-func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, key, method string, params any, launch func() (*domain.Run, *protocol.Error)) (*domain.Run, bool, *protocol.Error) {
+// The receipt is reserved before launch and bound to the run as soon as its
+// row is durable, through the created callback launch passes on as
+// domain.LaunchOptions.Created; a launch that fails after that is replayed
+// as the run it left. A reservation with no run is a launch that failed or
+// stopped before creating one, and a retry launches again. An empty key
+// launches every time.
+func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, key, method string, params any, launch func(created func(domain.RunID)) (*domain.Run, *protocol.Error)) (*domain.Run, bool, *protocol.Error) {
 	if key == "" {
-		run, perr := launch()
+		run, perr := launch(nil)
 		return run, false, perr
 	}
 	if len(key) > protocol.CoordMaxIdempotencyKeyBytes {
 		return nil, false, invalidParams("idempotency_key is too long")
 	}
-	b, err := json.Marshal(params)
+	fingerprint, err := launchFingerprint(method, params)
 	if err != nil {
-		return nil, false, rpcError(fmt.Errorf("fingerprint launch params: %w", err))
+		return nil, false, rpcError(err)
 	}
-	sum := sha256.Sum256(append([]byte(method+"\x00"), b...))
-	fingerprint := hex.EncodeToString(sum[:])
 	unlock := s.lockLaunchKey(launchKey{member, key})
 	defer unlock()
 	prior, recorded, err := s.cfg.Store.LaunchReceipt(ctx, member, key)
 	switch {
 	case err == nil && recorded != fingerprint:
-		return nil, false, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("%s: idempotency_key %q already launched run %s with other params; use a new key for a new launch", method, key, prior)}
-	case err == nil:
+		return nil, false, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("%s: idempotency_key %q was used for a launch with other params; use a new key for a new launch", method, key)}
+	case err == nil && prior != "":
 		run, getErr := s.cfg.Store.GetRun(ctx, prior)
 		if errors.Is(getErr, store.ErrNotFound) {
 			return nil, false, &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: run %s launched under idempotency_key %q was deleted", method, prior, key)}
@@ -59,19 +61,38 @@ func (s *Server) idempotentLaunch(ctx context.Context, member domain.MemberID, k
 			return nil, false, rpcError(getErr)
 		}
 		return run, true, nil
-	case !errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound):
+		if reserveErr := s.cfg.Store.ReserveLaunchReceipt(ctx, member, key, fingerprint); reserveErr != nil {
+			return nil, false, rpcError(fmt.Errorf("%s: reserve idempotency_key %q: %w", method, key, reserveErr))
+		}
+	case err != nil:
 		return nil, false, rpcError(err)
 	}
-	run, perr := launch()
+	var started domain.RunID
+	var bindErr error
+	bind := func(id domain.RunID) {
+		started, bindErr = id, s.cfg.Store.CompleteLaunchReceipt(context.WithoutCancel(ctx), member, key, id)
+	}
+	run, perr := launch(bind)
+	if started == "" && run != nil {
+		bind(run.ID)
+	}
+	if bindErr != nil {
+		return nil, false, rpcError(fmt.Errorf("%s: run %s started, but recording it under idempotency_key %q failed, so a retry with this key launches again: %w", method, started, key, bindErr))
+	}
 	if perr != nil {
 		return nil, false, perr
 	}
-	// The run started; failing the call now would invite the duplicate the
-	// key exists to prevent.
-	if err := s.cfg.Store.RecordLaunchReceipt(context.WithoutCancel(ctx), member, key, fingerprint, run); err != nil {
-		slog.Warn("sshd: record launch receipt", "run", run.ID, "member", member, "error", err)
-	}
 	return run, false, nil
+}
+
+func launchFingerprint(method string, params any) (string, error) {
+	b, err := json.Marshal(params)
+	if err != nil {
+		return "", fmt.Errorf("fingerprint launch params: %w", err)
+	}
+	sum := sha256.Sum256(append([]byte(method+"\x00"), b...))
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func (s *Server) lockLaunchKey(k launchKey) func() {

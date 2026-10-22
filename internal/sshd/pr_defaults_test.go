@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -78,5 +79,40 @@ func TestRunPRFeedbackReportsTheRecordedPRWhenTheEnvironmentIsGone(t *testing.T)
 	pr := feedback.PullRequest
 	if pr == nil || pr.Number != 7 || pr.URL != "https://github.com/acme/app/pull/7" || pr.State != "open" || !strings.Contains(feedback.Error, "environment") {
 		t.Fatalf("run.pr.feedback = %+v", feedback)
+	}
+}
+
+type mirrorReadFails struct{ store.Store }
+
+func (mirrorReadFails) GetWorkspaceMirror(context.Context, domain.WorkspaceID) (*domain.WorkspaceMirror, error) {
+	return nil, errors.New("database is locked")
+}
+
+func TestRunPRStatusDefaultsExplainWhatTheyNeed(t *testing.T) {
+	fixture, _ := newNativeRepoFixture(t)
+	e := newTestEnv(t, func(cfg *Config) { cfg.Services.RunRepo = fixture })
+	repoGit(t, fixture.dir, "remote", "add", "origin", "https://github.com/acme/app.git")
+	status := func() (protocol.RunPRStatusResult, *protocol.Error) {
+		t.Helper()
+		value, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunPRStatus, repoParams(t, map[string]string{"run_id": string(e.run.ID)}))
+		var result protocol.RunPRStatusResult
+		if perr == nil {
+			if err := json.Unmarshal(value, &result); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return result, perr
+	}
+
+	e.srv.cfg.Store = mirrorReadFails{e.store}
+	if _, perr := status(); perr == nil || !strings.Contains(perr.Message, "database is locked") {
+		t.Fatalf("run.pr.status with a failing store = %v, want the store error as an RPC error", perr)
+	}
+	e.srv.cfg.Store = e.store
+
+	repoGit(t, fixture.dir, "checkout", "-q", "--detach")
+	result, perr := status()
+	if perr != nil || !strings.Contains(result.Error, "detached HEAD") || !strings.Contains(result.Error, "pass both") {
+		t.Fatalf("run.pr.status on a detached HEAD = %+v, %v", result, perr)
 	}
 }

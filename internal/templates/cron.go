@@ -177,7 +177,7 @@ func (s *Service) fire(ctx context.Context, sc *store.Schedule, at time.Time) {
 			fmt.Sprintf("schedule for template %q skipped: %s", t.Name, err))
 		return
 	}
-	launched, err := s.launch(ctx, t, sc.MemberID, nil)
+	launched, err := s.launch(ctx, t, sc.MemberID, nil, nil)
 	if err != nil {
 		slog.Warn("templates: schedule fire failed", "schedule", sc.ID, "template", t.Name, "error", err)
 		s.publish(ctx, t.WorkspaceID, "", sc.MemberID,

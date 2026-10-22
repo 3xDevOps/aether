@@ -301,6 +301,14 @@ type RoomMessageStore interface {
 	DropAgentQueuedRoomMessages(context.Context, *RoomMessageFailure) ([]string, error)
 }
 
+// OpenRoomRequestStore reads what a run's room waits on.
+type OpenRoomRequestStore interface {
+	// ListOpenRoomRequests returns a run's questions to its owner that the
+	// run snapshot counts in UnansweredQuestions and its queued steer
+	// requests, oldest first, however deep in the room history.
+	ListOpenRoomRequests(context.Context, domain.RunID) ([]*RoomMessage, error)
+}
+
 // EvidencePacketStore is the durable evidence packet persistence surface.
 type EvidencePacketStore interface {
 	CreateEvidencePacket(context.Context, *EvidencePacket) error
@@ -518,6 +526,26 @@ func (d *DB) ListDueSteerRequests(ctx context.Context, workspace domain.Workspac
 const dueSteerRequestsQuery = `SELECT rowid, ` + roomMessageCols + ` FROM room_messages
 	WHERE workspace_id = ? AND kind = 'steer_request' AND state = 'queued'
 	  AND (deliver_after IS NULL OR deliver_after <= ?)`
+
+func (d *DB) ListOpenRoomRequests(ctx context.Context, run domain.RunID) ([]*RoomMessage, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT `+roomMessageCols+` FROM room_messages question
+		WHERE question.run_id = ? AND (
+			question.kind = 'steer_request' AND question.state = 'queued'
+			OR question.kind = 'question'
+			AND question.state NOT IN ('denied', 'cancelled')
+			AND question.actor_id <> (SELECT member_id FROM runs WHERE id = question.run_id)
+			AND NOT EXISTS (
+				SELECT 1 FROM room_messages reply
+				WHERE reply.run_id = question.run_id
+				  AND reply.kind = 'reply'
+				  AND reply.correlation_id = question.id
+			))
+		ORDER BY question.created_at, question.rowid`, run)
+	if err != nil {
+		return nil, fmt.Errorf("store: list open room requests: %w", err)
+	}
+	return collect(rows, scanRoomMessage)
+}
 
 func (d *DB) pageRoomMessages(ctx context.Context, query string, args []any, before string, limit int) (*RoomMessagePage, error) {
 	limit = normalizeCollaborationLimit(limit)

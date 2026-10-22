@@ -1,7 +1,9 @@
 package sshd
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -138,5 +140,71 @@ func TestPlainReasonMatchesTheDashboard(t *testing.T) {
 		if got := plainReason(reason); got != want {
 			t.Errorf("plainReason(%q) = %q, want %q", reason, got, want)
 		}
+	}
+}
+
+func TestAttentionListFindsRoomRequestsBeyondTheNewestPage(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) { cfg.Control = control.New(control.Config{}) })
+	ctx := t.Context()
+	_, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	bobs := &domain.Run{WorkspaceID: e.ws.ID, MemberID: bob.ID, Task: "bob's task", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := e.store.CreateRun(ctx, bobs); err != nil {
+		t.Fatal(err)
+	}
+	post := func(run domain.RunID, kind store.RoomMessageKind, state store.RoomMessageState, body, key string) *store.RoomMessage {
+		t.Helper()
+		m := &store.RoomMessage{WorkspaceID: e.ws.ID, RunID: run, ActorID: e.member.ID, Kind: kind, State: state, Body: body, IdempotencyKey: key}
+		if err := e.store.CreateRoomMessage(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	question := post(bobs.ID, store.RoomMessageQuestion, "", "Is the migration safe?", "q")
+	steer := post(e.run.ID, store.RoomMessageSteerRequest, store.RoomMessageQueued, "stop and rebase", "s")
+	for i := range store.MaxCollaborationPageSize + 20 {
+		post(bobs.ID, store.RoomMessageComment, "", "noise", fmt.Sprintf("b%d", i))
+		post(e.run.ID, store.RoomMessageComment, "", "noise", fmt.Sprintf("a%d", i))
+	}
+	if _, _, err := e.srv.cfg.Control.Acquire(string(e.run.ID), string(bob.ID), "bob-tab", false); err != nil {
+		t.Fatal(err)
+	}
+
+	got := attentionItems(t, e, bob.ID, protocol.AttentionListParams{})
+	if q := got[bobs.ID]; q.Kind != protocol.AttentionKindRoomQuestion || q.Message == nil || q.Message.ID != question.ID {
+		t.Errorf("room question = %+v, want %s", q, question.ID)
+	}
+	if q := got[e.run.ID]; q.Kind != protocol.AttentionKindQueuedMessage || q.Reason != "Ada sent a message, approve to deliver" || q.Message == nil || q.Message.ID != steer.ID {
+		t.Errorf("queued message = %+v, want %s", q, steer.ID)
+	}
+
+	e.srv.cfg.Store = noOpenRoomRequests{e.store}
+	if q := attentionItems(t, e, bob.ID, protocol.AttentionListParams{})[bobs.ID]; q.Kind != protocol.AttentionKindRoomQuestion || q.Reason != "A teammate asked a question" || q.Message != nil {
+		t.Errorf("room question without its text = %+v", q)
+	}
+}
+
+type noOpenRoomRequests struct{ store.Store }
+
+func (noOpenRoomRequests) ListOpenRoomRequests(context.Context, domain.RunID) ([]*store.RoomMessage, error) {
+	return nil, nil
+}
+
+func TestAttentionListNamesTheWorkerTheCallerHolds(t *testing.T) {
+	e, db, _ := missionWorkerTestEnv(t)
+	if _, err := db.SetMissionWorkerTakeover(t.Context(), e.run.ID, e.member.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	item := attentionItems(t, e, e.member.ID, protocol.AttentionListParams{})[e.run.ID]
+	if item.Kind != protocol.AttentionKindControlHold || item.Reason != "You hold control of worker 1" {
+		t.Errorf("held worker = %+v", item)
+	}
+}
+
+func TestCompareSinceOrdersByTimeUnknownLast(t *testing.T) {
+	got := []string{"", "2026-10-22T10:00:00Z", "2026-10-22T10:00:00.5Z", "2026-10-22T09:00:00-02:00"}
+	slices.SortStableFunc(got, compareSince)
+	want := []string{"2026-10-22T10:00:00Z", "2026-10-22T10:00:00.5Z", "2026-10-22T09:00:00-02:00", ""}
+	if !slices.Equal(got, want) {
+		t.Errorf("sorted = %q, want %q", got, want)
 	}
 }

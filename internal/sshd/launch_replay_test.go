@@ -1,12 +1,15 @@
 package sshd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func TestRunLaunchReplaysAnIdempotencyKey(t *testing.T) {
@@ -55,5 +58,73 @@ func TestRunLaunchReplaysAnIdempotencyKey(t *testing.T) {
 	}
 	if _, perr := launch("build it", ""); perr != nil || launches() != 3 {
 		t.Fatalf("keyless launches = %d, %v; want each to launch", launches(), perr)
+	}
+}
+
+type failingReceipts struct {
+	store.Store
+	err error
+}
+
+func (f failingReceipts) CompleteLaunchReceipt(context.Context, domain.MemberID, string, domain.RunID) error {
+	return f.err
+}
+
+func TestRunLaunchReceiptOutlivesAFailedLaunch(t *testing.T) {
+	e := newTestEnv(t, nil)
+	e.runs.admitInto = e.store
+	launch := func(task, key string) (protocol.RunLaunchResult, *protocol.Error) {
+		t.Helper()
+		raw, perr := callJSON(t, e, e.member.ID, protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: string(e.ws.ID), Task: task, Harness: "claude", IdempotencyKey: key})
+		var result protocol.RunLaunchResult
+		if perr == nil {
+			if err := json.Unmarshal(raw, &result); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return result, perr
+	}
+	launches := func() int {
+		n := 0
+		for _, call := range e.runs.Calls() {
+			if strings.HasPrefix(call, "launch:") {
+				n++
+			}
+		}
+		return n
+	}
+
+	e.runs.failAdmitted = errors.New("provision: image pull failed")
+	if _, perr := launch("provision fails", "k-failed"); perr == nil || !strings.Contains(perr.Message, "image pull failed") {
+		t.Fatalf("failed launch = %v, want the launch error", perr)
+	}
+	e.runs.failAdmitted = nil
+	left, _, err := e.store.LaunchReceipt(t.Context(), e.member.ID, "k-failed")
+	if err != nil || left == "" {
+		t.Fatalf("receipt after a failed launch = %q, %v; want the run it left", left, err)
+	}
+	replay, perr := launch("provision fails", "k-failed")
+	if perr != nil || !replay.Replayed || replay.Run.ID != string(left) || launches() != 1 {
+		t.Fatalf("retry after a failed launch = %+v, %v after %d launches; want run %s replayed", replay, perr, launches(), left)
+	}
+
+	fingerprint, err := launchFingerprint(protocol.MethodRunLaunch, protocol.RunLaunchParams{WorkspaceID: string(e.ws.ID), Task: "crashed", Harness: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.store.ReserveLaunchReceipt(t.Context(), e.member.ID, "k-pending", fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	relaunched, perr := launch("crashed", "k-pending")
+	if perr != nil || relaunched.Replayed || launches() != 2 {
+		t.Fatalf("retry of a reservation with no run = %+v, %v after %d launches; want one new launch", relaunched, perr, launches())
+	}
+	if bound, _, err := e.store.LaunchReceipt(t.Context(), e.member.ID, "k-pending"); err != nil || string(bound) != relaunched.Run.ID {
+		t.Fatalf("reservation bound to %q, %v; want %s", bound, err, relaunched.Run.ID)
+	}
+
+	e.srv.cfg.Store = failingReceipts{Store: e.store, err: errors.New("disk I/O error")}
+	if _, perr := launch("unrecorded", "k-unrecorded"); perr == nil || !strings.Contains(perr.Message, "disk I/O error") || !strings.Contains(perr.Message, "started") {
+		t.Fatalf("launch whose receipt write failed = %v, want the write error naming the started run", perr)
 	}
 }

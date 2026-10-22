@@ -29,6 +29,7 @@ const (
 	AttentionKindRoomQuestion   = "room-question"
 	AttentionKindSwarmQuestion  = "swarm-question"
 	AttentionKindIntegratorDown = "integrator-down"
+	AttentionKindControlHold    = "control-hold"
 	AttentionKindDisconnected   = "disconnected"
 	AttentionKindBlocked        = "blocked"
 	AttentionKindNeedsInput     = "needs-input"

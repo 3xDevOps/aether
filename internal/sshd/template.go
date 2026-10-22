@@ -148,8 +148,8 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	}
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
-	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodTemplateLaunch, p, func() (*domain.Run, *protocol.Error) {
-		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params)
+	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodTemplateLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
+		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params, created)
 		if err != nil {
 			return nil, templateError(err)
 		}

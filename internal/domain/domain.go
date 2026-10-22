@@ -219,6 +219,9 @@ type LaunchOptions struct {
 	// holds an admission lock releases it here; a replayed or refused launch
 	// never calls it.
 	Admitted func()
+	// Created is called with the run's ID once its row is durable, before
+	// Admitted; a replayed or refused launch never calls it.
+	Created func(RunID)
 }
 
 // AccountFallback is where a launch may move when the requested account's

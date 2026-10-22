@@ -1905,16 +1905,16 @@ CREATE INDEX idx_room_messages_queued_steer ON room_messages(workspace_id, creat
 CREATE INDEX idx_events_coord_to_run ON events (json_extract(payload, '$.to_run_id'))
 	WHERE type = 'coord.message';
 `,
-	// v78: the run each idempotent run.launch or template.launch started.
-	// run_id has no foreign key: a retry after the run was deleted must not
-	// start it again.
+	// v78: the run each idempotent run.launch or template.launch started,
+	// reserved with an empty run_id before the launch. run_id has no
+	// foreign key: a retry after the run was deleted must not start it
+	// again.
 	`
 CREATE TABLE run_launch_receipts (
 	member_id       TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
 	idempotency_key TEXT NOT NULL,
 	fingerprint     TEXT NOT NULL,
 	run_id          TEXT NOT NULL,
-	workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
 	created_at      INTEGER NOT NULL,
 	PRIMARY KEY (member_id, idempotency_key)
 );

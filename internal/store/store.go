@@ -218,6 +218,7 @@ type Store interface {
 	CostStore
 	ServerUpdateStore
 	CollaborationStore
+	OpenRoomRequestStore
 	RunMessageHistoryStore
 	PushStore
 	AssistantStore

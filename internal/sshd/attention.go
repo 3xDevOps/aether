@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -34,9 +35,11 @@ type attentionRun struct {
 	// questions are the swarm's unanswered questions, for its current
 	// integrator.
 	questions []*domain.MissionQuestion
-	// room is the run's room history, oldest first, read only when a room
-	// row can hold.
-	room []*store.RoomMessage
+	// open are the run's open room questions and queued steer requests,
+	// oldest first, read only when a room row can hold.
+	open []*store.RoomMessage
+	// hold is the swarm worker's attempt while a member holds its control.
+	hold *domain.Attempt
 	// integratorOwner owns the run's integrator run.
 	integratorOwner domain.MemberID
 }
@@ -103,9 +106,24 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 		}
 	}
 	slices.SortStableFunc(items, func(a, b protocol.AttentionItem) int {
-		return cmp.Or(cmp.Compare(a.Since, b.Since), cmp.Compare(a.RunID, b.RunID))
+		return cmp.Or(compareSince(a.Since, b.Since), cmp.Compare(a.RunID, b.RunID))
 	})
 	return protocol.AttentionListResult{Items: items}, nil
+}
+
+// compareSince orders RFC 3339 times oldest first, an unknown one last.
+func compareSince(a, b string) int {
+	at, aErr := time.Parse(time.RFC3339Nano, a)
+	bt, bErr := time.Parse(time.RFC3339Nano, b)
+	switch {
+	case aErr != nil && bErr != nil:
+		return 0
+	case aErr != nil:
+		return 1
+	case bErr != nil:
+		return -1
+	}
+	return at.Compare(bt)
 }
 
 func (s *Server) attentionRun(ctx context.Context, run *domain.Run, approvals []*store.Approval, owners map[domain.RunID]domain.MemberID, missions map[domain.MissionID]*domain.Mission) (*attentionRun, error) {
@@ -145,14 +163,22 @@ func (s *Server) attentionRun(ctx context.Context, run *domain.Run, approvals []
 			}
 			r.questions = slices.DeleteFunc(questions, func(q *domain.MissionQuestion) bool { return q.AnsweredAt != nil })
 		}
+		if run.MissionRole == "worker" {
+			attempt, err := ms.GetAttemptByRun(ctx, run.ID)
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return nil, err
+			}
+			if attempt != nil && attempt.TakeoverActive && attempt.TakeoverMemberID != "" {
+				r.hold = attempt
+			}
+		}
 	}
 	if run.UnansweredQuestions > 0 || r.controller != "" {
-		page, err := s.cfg.Store.ListRoomMessages(ctx, run.WorkspaceID, run.ID, "", store.MaxCollaborationPageSize)
+		open, err := s.cfg.Store.ListOpenRoomRequests(ctx, run.ID)
 		if err != nil {
 			return nil, err
 		}
-		r.room = slices.Clone(page.Items)
-		slices.Reverse(r.room)
+		r.open = open
 	}
 	return r, nil
 }
@@ -252,16 +278,9 @@ func (r *attentionRun) swarmHuman() domain.MemberID {
 }
 
 func (r *attentionRun) openRoomQuestions() []*store.RoomMessage {
-	answered := map[string]bool{}
-	for _, m := range r.room {
-		if m.Kind == store.RoomMessageReply && m.CorrelationID != "" {
-			answered[m.CorrelationID] = true
-		}
-	}
 	var open []*store.RoomMessage
-	for _, m := range r.room {
-		if m.Kind == store.RoomMessageQuestion && !answered[m.ID] && m.State != store.RoomMessageDenied &&
-			m.State != store.RoomMessageCancelled && m.ActorID != r.run.MemberID {
+	for _, m := range r.open {
+		if m.Kind == store.RoomMessageQuestion {
 			open = append(open, m)
 		}
 	}
@@ -270,8 +289,8 @@ func (r *attentionRun) openRoomQuestions() []*store.RoomMessage {
 
 func (r *attentionRun) queuedMessages() []*store.RoomMessage {
 	var queued []*store.RoomMessage
-	for _, m := range r.room {
-		if m.Kind == store.RoomMessageSteerRequest && m.State == store.RoomMessageQueued && m.ActorID != r.controller {
+	for _, m := range r.open {
+		if m.Kind == store.RoomMessageSteerRequest && m.ActorID != r.controller {
 			queued = append(queued, m)
 		}
 	}
@@ -358,10 +377,15 @@ var attentionRows = []attentionRow{
 	},
 	{
 		kind:      protocol.AttentionKindRoomQuestion,
-		holds:     func(r *attentionRun) bool { return r.run.UnansweredQuestions > 0 && len(r.openRoomQuestions()) > 0 },
+		holds:     func(r *attentionRun) bool { return r.run.UnansweredQuestions > 0 },
 		resolvers: owner,
 		fill: func(r *attentionRun, viewer attentionViewer, item *protocol.AttentionItem) {
-			q := r.openRoomQuestions()[0]
+			open := r.openRoomQuestions()
+			if len(open) == 0 {
+				item.Reason = "A teammate asked a question"
+				return
+			}
+			q := open[0]
 			asker := q.ActorDisplayName
 			if asker == "" {
 				asker = viewer.name(q.ActorID)
@@ -409,6 +433,16 @@ var attentionRows = []attentionRow{
 			if at := since(r.mission.IntegratorLaunchErrorAt); at != "" {
 				item.Since = at
 			}
+		},
+	},
+	{
+		kind:       protocol.AttentionKindControlHold,
+		background: true,
+		workers:    true,
+		holds:      func(r *attentionRun) bool { return r.hold != nil },
+		resolvers:  func(r *attentionRun) []domain.MemberID { return []domain.MemberID{r.hold.TakeoverMemberID} },
+		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
+			item.Reason = fmt.Sprintf("You hold control of worker %d", r.hold.Number)
 		},
 	},
 	{

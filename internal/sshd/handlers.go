@@ -163,8 +163,8 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	}
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
-	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func() (*domain.Run, *protocol.Error) {
-		return s.launchRun(ctx, member, p, mode, policy)
+	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
+		return s.launchRun(ctx, member, p, mode, policy, created)
 	})
 	if perr != nil {
 		return nil, perr
@@ -172,7 +172,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed}, nil
 }
 
-func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback) (*domain.Run, *protocol.Error) {
+func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback, created func(domain.RunID)) (*domain.Run, *protocol.Error) {
 	measured, err := fallback.Measure(ctx, s.cfg.Store, s.cfg.Services.Usage, member, p.AccountMemberID, p.Harness, policy)
 	if err != nil {
 		return nil, rpcError(err)
@@ -196,7 +196,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	}
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
 		CachedBase: p.CachedBase, Model: p.Model, RequestedAccount: requested, Fallback: policy,
-		Admitted: unlockAuthorization,
+		Admitted: unlockAuthorization, Created: created,
 	})
 	if err != nil {
 		if errors.Is(err, errLaunchOptionsUnsupported) {
