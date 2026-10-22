@@ -345,3 +345,24 @@ func TestViewContextIsServedFromTheMembersOwnSnapshot(t *testing.T) {
 		t.Fatalf("assistant.view_context reached the control surface: %v", calls)
 	}
 }
+
+// A connector's mission.create names no member: the caller is the swarm's
+// accountable human and every agent's account, and naming one is refused.
+func TestPrepareMissionCreate(t *testing.T) {
+	got, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(`{"workspace_id":"ws-1","objective":"o","integrator":{"harness":"claude","mode":"tui"},`+
+		`"execution_choices":[{"harness":"claude","mode":"tui"},{"harness":"codex","mode":"acp"}],"idempotency_key":"k"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := protocol.DecodeParams[protocol.MissionCreateParams](got)
+	if err != nil || p.AccountableHumanID != "m1" || p.Integrator.AccountMemberID != "m1" || p.ExecutionChoices[0].AccountMemberID != "m1" ||
+		p.ExecutionChoices[1].AccountMemberID != "m1" || p.IdempotencyKey != "k" {
+		t.Fatalf("prepared mission.create = %s %v", got, err)
+	}
+	for _, params := range []string{`{"accountable_human_id":"m2"}`, `{"integrator":{"account_member_id":"m2"}}`,
+		`{"execution_choices":[{"account_member_id":"m2"}]}`, `{"fallback_account_member_ids":["m2"]}`} {
+		if _, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(params)); err == nil || !strings.Contains(err.Error(), "not accepted") {
+			t.Errorf("mission.create %s = %v, want refused", params, err)
+		}
+	}
+}

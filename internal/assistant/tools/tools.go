@@ -365,7 +365,9 @@ func truncate(text string) string {
 // Prepare checks the params of a call made for member, by the assistant's
 // socket or a connector. Either is bound to one member, so the wire never
 // names one, except that run.list takes member_id as a read filter, and
-// "mine" there selects member.
+// "mine" there selects member. mission.create makes member the swarm's
+// accountable human and the account of every agent, which falls back to
+// accounts member may launch on as member's own launches do.
 func Prepare(member, method string, params json.RawMessage) (json.RawMessage, error) {
 	if len(params) == 0 || string(params) == "null" {
 		return params, nil
@@ -379,7 +381,11 @@ func Prepare(member, method string, params json.RawMessage) (json.RawMessage, er
 			return nil, fmt.Errorf("%s is not accepted: calls act as the member this socket belongs to", name)
 		}
 	}
-	if method != protocol.MethodRunList {
+	switch method {
+	case protocol.MethodMissionCreate:
+		return prepareMission(member, params)
+	case protocol.MethodRunList:
+	default:
 		return params, nil
 	}
 	var mine bool
@@ -394,6 +400,25 @@ func Prepare(member, method string, params json.RawMessage) (json.RawMessage, er
 		fields["member_id"] = id
 	}
 	return json.Marshal(fields)
+}
+
+func prepareMission(member string, params json.RawMessage) (json.RawMessage, error) {
+	p, err := protocol.DecodeParams[protocol.MissionCreateParams](params)
+	if err != nil {
+		return nil, err
+	}
+	named := p.AccountableHumanID != "" || p.Integrator.AccountMemberID != ""
+	for _, c := range p.ExecutionChoices {
+		named = named || c.AccountMemberID != ""
+	}
+	if named {
+		return nil, errors.New("accountable_human_id and account_member_id are not accepted: calls act as the member this socket belongs to")
+	}
+	p.AccountableHumanID, p.Integrator.AccountMemberID = member, member
+	for i := range p.ExecutionChoices {
+		p.ExecutionChoices[i].AccountMemberID = member
+	}
+	return json.Marshal(p)
 }
 
 func serveDocs(raw json.RawMessage) (json.RawMessage, *protocol.Error) {

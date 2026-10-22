@@ -88,8 +88,15 @@ func TestConnectorEndToEnd(t *testing.T) {
 	}
 
 	first := e.connect(t, allScopes...)
-	if got := first.session.InitializeResult().Instructions; !strings.Contains(got, "untrusted") {
-		t.Errorf("instructions = %q", got)
+	// Clients may keep only the first 512 characters of the instructions.
+	got := first.session.InitializeResult().Instructions
+	if len(got) > 512 {
+		t.Errorf("the instructions are %d characters, over 512: %q", len(got), got)
+	}
+	for _, want := range []string{"aether_list_workspaces", "aether_list_agents", "aether_get_run", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the instructions lack %q: %q", want, got)
+		}
 	}
 	var names []string
 	for tool, err := range first.session.Tools(ctx, nil) {
@@ -100,10 +107,10 @@ func TestConnectorEndToEnd(t *testing.T) {
 		a := tool.Annotations
 		hints := fmt.Sprintf("read-only %v, destructive %v, idempotent %v, open world %v", a.ReadOnlyHint, deref(a.DestructiveHint), a.IdempotentHint, deref(a.OpenWorldHint))
 		want := "read-only true, destructive <nil>, idempotent false, open world false"
-		switch tool.Name {
-		case "aether_launch_run", "aether_message_run":
-			want = "read-only false, destructive false, idempotent false, open world true"
-		case "aether_stop_run":
+		switch {
+		case slices.Contains(writeTools, tool.Name):
+			want = fmt.Sprintf("read-only false, destructive false, idempotent %v, open world true", !slices.Contains(launchAndMessage, tool.Name))
+		case slices.Contains(controlTools, tool.Name):
 			want = "read-only false, destructive true, idempotent true, open world false"
 		}
 		if hints != want || tool.Title == "" || strings.Contains(tool.Description, "tier") {
@@ -111,8 +118,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 		}
 	}
 	slices.Sort(names)
-	if want := []string{"aether_get_run", "aether_launch_run", "aether_list_agents", "aether_list_runs", "aether_list_workspaces",
-		"aether_message_run", "aether_run_history", "aether_stop_run"}; !slices.Equal(names, want) {
+	if want := sorted(readTools, writeTools, controlTools); !slices.Equal(names, want) {
 		t.Fatalf("tools = %v, want %v", names, want)
 	}
 	if out := e.callTool(t, first.session, "aether_list_workspaces", nil); !strings.Contains(out, string(e.ws.ID)) {
@@ -194,15 +200,15 @@ func TestConnectorScopes(t *testing.T) {
 		slices.Sort(names)
 		return names
 	}
-	reads := []string{"aether_get_run", "aether_list_agents", "aether_list_runs", "aether_list_workspaces", "aether_run_history"}
 	reader := e.connect(t)
-	if got := tools(reader); !slices.Equal(got, reads) {
-		t.Fatalf("tools with no box checked = %v, want %v", got, reads)
+	if got, want := tools(reader), sorted(readTools); !slices.Equal(got, want) {
+		t.Fatalf("tools with no box checked = %v, want %v", got, want)
 	}
 	for name, args := range map[string]map[string]any{
 		"aether_launch_run":  {"workspace_id": e.ws.ID, "harness": "claude", "task": "t"},
 		"aether_message_run": {"run_id": "run-1", "message": "m"},
 		"aether_stop_run":    {"run_id": "run-1"},
+		"aether_answer":      {"run_id": "run-1", "answer_id": "q-1", "answer": "a"},
 	} {
 		res, err := reader.session.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: args})
 		if err == nil && !res.IsError {
@@ -213,8 +219,7 @@ func TestConnectorScopes(t *testing.T) {
 		t.Fatalf("launches without the write scope = %v", got)
 	}
 	writer := e.connect(t, "write", "admin")
-	if got, want := tools(writer), []string{"aether_get_run", "aether_launch_run", "aether_list_agents", "aether_list_runs",
-		"aether_list_workspaces", "aether_message_run", "aether_run_history"}; !slices.Equal(got, want) {
+	if got, want := tools(writer), sorted(readTools, writeTools); !slices.Equal(got, want) {
 		t.Fatalf("tools with write checked = %v, want %v", got, want)
 	}
 	var list protocol.ConnectorListResult
@@ -491,6 +496,23 @@ type connection struct {
 	session  *mcp.ClientSession
 	token    *oauth2.Token
 	clientID string
+}
+
+// The connector's tools by scope.
+var (
+	readTools = []string{"aether_list_workspaces", "aether_list_agents", "aether_list_runs", "aether_get_run", "aether_run_history",
+		"aether_needs_attention", "aether_activity_summary", "aether_list_swarms", "aether_get_swarm", "aether_run_changes",
+		"aether_pr_status", "aether_overlaps", "aether_memory_search", "search", "fetch"}
+	writeTools = []string{"aether_launch_run", "aether_launch_swarm", "aether_message_run", "aether_answer", "aether_pause_run",
+		"aether_resume_run", "aether_mark_reviewed"}
+	controlTools     = []string{"aether_decide_approval", "aether_stop_run", "aether_close_run", "aether_cancel_swarm"}
+	launchAndMessage = []string{"aether_launch_run", "aether_launch_swarm", "aether_message_run"}
+)
+
+func sorted(lists ...[]string) []string {
+	out := slices.Concat(lists...)
+	slices.Sort(out)
+	return out
 }
 
 // allScopes checks both boxes on the consent page.

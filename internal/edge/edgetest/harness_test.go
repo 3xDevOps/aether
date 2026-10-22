@@ -40,6 +40,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
+	"github.com/3xDevOps/Aether/internal/timeline"
 )
 
 // waitTimeout bounds every wait for something asynchronous: a directory
@@ -674,11 +675,14 @@ type serverNode struct {
 	policy edgeproto.AccessPolicy
 	mcp    http.Handler
 	client *connectorClient
-	addr   string
-	db     *store.DB
-	ssh    *sshd.Server
-	agent  *edgeagent.Agent
-	stop   func()
+	// services are the team-feature services a connector server serves.
+	services sshd.Services
+	addr     string
+	db       *store.DB
+	bus      *events.InProc
+	ssh      *sshd.Server
+	agent    *edgeagent.Agent
+	stop     func()
 }
 
 func (h *harness) newServer(policy edgeproto.AccessPolicy) *serverNode {
@@ -705,7 +709,21 @@ func (s *serverNode) start() {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bus, err := events.NewInProc(context.Background(), nil)
+	// A connector server persists events, as the real one does, so
+	// workspace.timeline reads what the bus publishes.
+	var log *events.SQLiteLog
+	services := s.services
+	if s.client != nil {
+		if log, err = events.OpenSQLiteLog(filepath.Join(s.dir, "aether.db")); err != nil {
+			t.Fatal(err)
+		}
+		services.Timeline = timeline.NewReader(log, db)
+	}
+	var eventLog events.EventLog
+	if log != nil {
+		eventLog = log
+	}
+	bus, err := events.NewInProc(context.Background(), eventLog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,7 +735,7 @@ func (s *serverNode) start() {
 	srv, err := sshd.New(sshd.Config{
 		Addr: s.addr, HostKeyPath: hostKeyPath, Store: db, Bus: bus,
 		Git: noGit{}, PTY: noPTY{}, Runs: runs,
-		InvitesDir: filepath.Join(s.dir, "invites"), EdgeAccess: s.policy,
+		InvitesDir: filepath.Join(s.dir, "invites"), EdgeAccess: s.policy, Services: services,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -763,10 +781,13 @@ func (s *serverNode) start() {
 			_ = srv.Close()
 			<-served
 			_ = bus.Close()
+			if log != nil {
+				_ = log.Close()
+			}
 			_ = db.Close()
 		})
 	}
-	s.id, s.db, s.ssh, s.agent = agent.ServerID(), db, srv, agent
+	s.id, s.db, s.ssh, s.agent, s.bus = agent.ServerID(), db, srv, agent, bus
 	s.waitEnrolled()
 	s.addr = srv.Addr().String()
 }
