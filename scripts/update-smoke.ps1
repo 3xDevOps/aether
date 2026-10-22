@@ -35,8 +35,10 @@ $scanningFlags = @('DisableRealtimeMonitoring', 'DisableIOAVProtection', 'Disabl
 foreach ($flag in $scanningFlags) {
     if ($initialPreferences.$flag) { throw "Defender $flag is enabled; scanning would be incomplete." }
 }
-if ($initialPreferences.ExclusionPath -or $initialPreferences.ExclusionProcess -or $initialPreferences.ExclusionExtension) {
-    throw 'Run this scenario in a disposable runner without Defender exclusions.'
+# The one exclusion scripts/windows-defender.ps1 -Mode Prepare leaves: GitHub's hosted runner agent.
+$agentExclusion = "$env:SystemDrive\Users\*\AppData\Local\Temp\provjobd.exe*"
+if (($initialPreferences.ExclusionPath -join "`0") -ne $agentExclusion -or $initialPreferences.ExclusionProcess -or $initialPreferences.ExclusionExtension) {
+    throw "Run this scenario in a disposable runner whose only Defender exclusion is $agentExclusion."
 }
 $knownDetections = @(Get-MpThreatDetection | ForEach-Object { $_.DetectionID })
 $node = (Get-Command node.exe -CommandType Application | Select-Object -First 1).Source

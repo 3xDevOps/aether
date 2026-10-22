@@ -10,7 +10,7 @@ jobs:
   install:
     name: install (${{ matrix.shell }}, Node ${{ matrix.node }}, desktop ${{ matrix.desktop }})
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -134,7 +134,7 @@ jobs:
     name: update (${{ matrix.arch }}, running aether.exe and desktop)
     needs: dashboard
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:

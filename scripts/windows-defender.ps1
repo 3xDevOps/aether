@@ -1,6 +1,7 @@
-# Disposable GitHub-hosted runners only: Prepare removes inherited antivirus
-# exclusions before artifacts arrive. Scan uses that baseline to reject every
-# new detection, including threats Defender has already remediated.
+# Disposable GitHub-hosted runners only: Prepare replaces inherited antivirus
+# exclusions with one for the runner's own agent before artifacts arrive.
+# Scan uses that baseline to reject every new detection, including threats
+# Defender has already remediated.
 # StartUpdate runs Update in the background so a job can overlap the signature
 # download with other work; the next Prepare waits for it instead of updating.
 [CmdletBinding()]
@@ -24,6 +25,12 @@ $statePath = Join-Path $env:RUNNER_TEMP 'aether-defender-state.json'
 $updatePath = Join-Path $env:RUNNER_TEMP 'aether-defender-update'
 $deadline = (Get-Date).AddMinutes(5)
 $mpcmdrun = "$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+# GitHub's hosted compute agent runs from the runner user's Temp as
+# provjobd.exe<number>. On windows-11-arm, Defender flags it as
+# Trojan:Win32/Gracing.I and removes it; the job then never finishes and
+# GitHub fails it about 45 minutes later because the hosted runner lost
+# communication. This is the only exclusion Prepare leaves.
+$agentExclusion = "$env:SystemDrive\Users\*\AppData\Local\Temp\provjobd.exe*"
 $scanningFlags = @(
     'DisableRealtimeMonitoring', 'DisableIOAVProtection',
     'DisableBehaviorMonitoring', 'DisableScriptScanning',
@@ -68,8 +75,8 @@ function Assert-Protection {
     if ($preferences.MAPSReporting -ne 2 -or $preferences.SubmitSamplesConsent -ne 1) {
         throw 'Defender cloud reporting and automatic safe sample submission did not take effect.'
     }
-    if ($preferences.ExclusionPath -or $preferences.ExclusionProcess -or $preferences.ExclusionExtension) {
-        throw 'Inherited Defender antivirus exclusions remain active.'
+    if (($preferences.ExclusionPath -join "`0") -ne $agentExclusion -or $preferences.ExclusionProcess -or $preferences.ExclusionExtension) {
+        throw "Defender exclusions other than the hosted runner agent's $agentExclusion are active."
     }
 }
 
@@ -153,6 +160,11 @@ if ($Mode -eq 'Prepare') {
         Get-MpThreatDetection | ForEach-Object { [string]$_.DetectionID }
     })
     Invoke-Defender 'Arming Defender' {
+        $preferences = Get-MpPreference
+        if ($preferences.ExclusionPath) { Remove-MpPreference -ExclusionPath $preferences.ExclusionPath }
+        if ($preferences.ExclusionProcess) { Remove-MpPreference -ExclusionProcess $preferences.ExclusionProcess }
+        if ($preferences.ExclusionExtension) { Remove-MpPreference -ExclusionExtension $preferences.ExclusionExtension }
+        Add-MpPreference -ExclusionPath $agentExclusion
         Set-MpPreference -DisableRealtimeMonitoring $false
         Set-MpPreference -DisableIOAVProtection $false
         Set-MpPreference -DisableBehaviorMonitoring $false
@@ -161,10 +173,6 @@ if ($Mode -eq 'Prepare') {
         Set-MpPreference -DisableBlockAtFirstSeen $false
         Set-MpPreference -MAPSReporting 2
         Set-MpPreference -SubmitSamplesConsent 1
-        $preferences = Get-MpPreference
-        if ($preferences.ExclusionPath) { Remove-MpPreference -ExclusionPath $preferences.ExclusionPath }
-        if ($preferences.ExclusionProcess) { Remove-MpPreference -ExclusionProcess $preferences.ExclusionProcess }
-        if ($preferences.ExclusionExtension) { Remove-MpPreference -ExclusionExtension $preferences.ExclusionExtension }
     }
     if (Test-Path -LiteralPath "$updatePath.pid") {
         # Windows reuses process IDs quickly, so match the start time as well.
