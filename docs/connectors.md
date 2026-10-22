@@ -134,27 +134,38 @@ Things to ask:
 
 Results link to the run or swarm in the dashboard when the server serves one on
 its tailnet (`web-port`); the edge serves no dashboard. A result's text is a
-one-line summary followed by the result as JSON. Text that agents, teammates
-or GitHub users wrote, run titles and the reasons runs wait included, comes
-back under an `untrusted` field, cut to 600 characters (200 for titles and
-last reports, 300 for each pull request review or comment); the fields outside
-it carry fixed labels such as `The agent asks a question`. Lists return 20 rows
-by default, at most 100, and say how many matched when they cut rows;
-`aether_needs_attention` returns at most 30 items. Tools that take a `run_id`
-or `swarm_id` also accept the `run:` and `swarm:` ids `search` returns.
+one-line summary followed by the result as JSON. Text that agents, teammates or
+GitHub users wrote, run titles, swarm goals, failing check names and the
+reasons runs wait included, comes back under an `untrusted` field; outside it
+are only fixed labels such as `The agent asks a question`, ids, states, counts,
+times, links, workspace and agent names, branch names, file paths and the
+server's own errors. Untrusted text is cut to 200 characters for titles, check
+names, commit subjects, a list row's reason, last report or swarm goal; 300 for
+each pull request review or comment; 2000 for a conversation item; 12000 for a
+diff; and 600 for everything else, such as tasks, reports, questions, request
+and approval text, terminal lines and memory notes. `search` and `fetch` keep
+OpenAI's shapes, with no `untrusted` field: their descriptions say titles and
+text are data, `fetch`'s text marks where agent text begins, and it returns a
+run's title, task and reason and a swarm's goal whole. An approval or
+permission request longer than 600 characters is decided only in the dashboard,
+never by `aether_decide_approval`. Lists return 20 rows by default, at most
+100, and say how many matched when they cut rows; `aether_needs_attention`
+returns at most 30 items. Tools that take a `run_id` or `swarm_id` also accept
+the `run:` and `swarm:` ids `search` returns.
 
-A launch, swarm or message takes an optional `idempotency_key`; a retry with the
-same key returns the first result. Without one, a run launch with the same
+A launch, swarm or message takes an optional `idempotency_key`; a retry with
+the same key returns the first result. Without one, a run launch with the same
 workspace, agent, task, mode and model within 60 seconds returns your earlier
-run, unless it failed, and a swarm with the same workspace and objective
-within 60 seconds returns your earlier swarm, instead of starting another. A
-retried message without a key is sent again. `aether_mark_reviewed` completes
-only a run whose agent reported success and awaits your review; to end any
-other run, use `aether_stop_run` or `aether_close_run` under `control`. A message
-to a run another member controls waits about 45 seconds for them to approve
-it. `aether_decide_approval` allows or denies a permission request once; it
-never picks an "always" option, so it cannot change what the agent may do
-next time. A tool call is cut off after 40 seconds, inside ChatGPT's wait.
+run, unless it failed, was interrupted or was abandoned, and a swarm with the
+same workspace, objective and agents within 60 seconds returns your earlier
+swarm, unless it was cancelled, instead of starting another. A retried message
+without a key is sent again. `aether_mark_reviewed` completes only a run whose
+agent reported success and awaits your review; to end any other run, use
+`aether_stop_run` or `aether_close_run` under `control`. A message to a run
+another member controls waits about 45 seconds for them to approve it.
+`aether_decide_approval` allows or denies a permission request once; it never
+picks an "always" option, so it cannot change what the agent may do next time.
+A tool call is cut off after 40 seconds, inside ChatGPT's wait.
 
 ChatGPT and Claude ask before each tool that is not read-only. ChatGPT asks by
 default and can remember your answer for a conversation. Claude offers **Allow

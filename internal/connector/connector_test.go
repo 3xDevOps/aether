@@ -90,9 +90,12 @@ func TestConnectorEndToEnd(t *testing.T) {
 	first := e.connect(t, allScopes...)
 	// Clients may keep only the first 512 characters of the instructions.
 	got := first.session.InitializeResult().Instructions
-	for _, want := range []string{"aether_list_workspaces", "aether_list_agents", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted"} {
-		if !strings.Contains(got[:min(len(got), 512)], want) {
-			t.Errorf("the first 512 characters of the instructions lack %q: %q", want, got)
+	if len(got) > 512 {
+		t.Errorf("the instructions are %d characters, over 512: %q", len(got), got)
+	}
+	for _, want := range []string{"aether_list_workspaces", "aether_list_agents", "aether_get_run", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the instructions lack %q: %q", want, got)
 		}
 	}
 	var names []string

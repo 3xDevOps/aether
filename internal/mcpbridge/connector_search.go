@@ -47,7 +47,6 @@ const (
 	maxResults  = 10
 )
 
-// hits counts how many of words text contains.
 func hits(text string, words []string) int {
 	text = strings.ToLower(text)
 	n := 0
@@ -153,7 +152,7 @@ func fetchSwarm(ctx context.Context, read Call, l links, id string) (fetchResult
 	}
 	m := res.Mission
 	var b strings.Builder
-	fmt.Fprintf(&b, "Swarm %s, %s, created %s.\nGoal: %s\n%s\nTasks:\n", m.ID, m.Phase, m.CreatedAt, m.Objective, untrustedBelow)
+	fmt.Fprintf(&b, "Swarm %s, %s, created %s.\n%s\nGoal: %s\nTasks:\n", m.ID, m.Phase, m.CreatedAt, untrustedBelow, m.Objective)
 	for _, t := range res.Tasks {
 		title := ""
 		if t.Revision != nil {

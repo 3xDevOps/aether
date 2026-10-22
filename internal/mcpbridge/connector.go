@@ -76,12 +76,17 @@ func connectorToolOf[In any](name, title string, scope Scope, idempotent bool, n
 			panic(fmt.Errorf("connector tool %s: input schema: %w", name, err))
 		}
 		for path, values := range enums {
-			prop := schema
+			parent, prop := schema, schema
 			for _, key := range strings.Split(path, ".") {
-				if prop.Items != nil {
-					prop = prop.Items
+				if parent = prop; parent.Items != nil {
+					parent = parent.Items
 				}
-				prop = prop.Properties[key]
+				prop = parent.Properties[key]
+			}
+			// An optional value sent empty means its default, as it did
+			// before the enum.
+			if !slices.Contains(parent.Required, path[strings.LastIndex(path, ".")+1:]) {
+				values = append([]any{""}, values...)
 			}
 			prop.Enum = values
 		}
@@ -160,7 +165,6 @@ func stripIDPrefixes(in any) {
 	}
 }
 
-// hinted ends a not-found or invalid-params failure with the next step.
 func hinted(err error, next string) error {
 	var perr *protocol.Error
 	if next == "" || !errors.As(err, &perr) || (perr.Code != protocol.CodeNotFound && perr.Code != protocol.CodeInvalidParams) {
@@ -228,7 +232,6 @@ func (l links) swarm(id string) string {
 	return string(l) + "/?page=missions&id=" + url.QueryEscape(id)
 }
 
-// clip shortens text to n runes, marking the cut.
 func clip(text string, n int) string {
 	if r := []rune(text); len(r) > n {
 		return string(r[:n]) + "…"

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -125,9 +126,20 @@ func recent(at string, now time.Time) bool {
 	return err == nil && now.Sub(created) < duplicateWindow
 }
 
+// launchLocks holds a mutex per member id. A member's keyless launch holds
+// it from the duplicate check through the launch, so two overlapping
+// retries through this server cannot both launch.
+var launchLocks sync.Map
+
+func lockLaunches(member string) func() {
+	mu, _ := launchLocks.LoadOrStore(member, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	return mu.(*sync.Mutex).Unlock
+}
+
 // recentLaunch is the member's run of the same task, agent, mode and
 // model in the workspace created within duplicateWindow that has not
-// failed, if any. An omitted mode or model matches any.
+// stopped, if any. An omitted mode or model matches any.
 func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, now time.Time) (protocol.Run, bool, error) {
 	params := struct {
 		protocol.RunListParams
@@ -139,7 +151,7 @@ func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, now t
 	}
 	for _, r := range res.Runs {
 		if r.Harness == in.Harness && r.Task == in.Task && (in.Mode == "" || r.Mode == in.Mode) && (in.Model == "" || r.Model == in.Model) &&
-			r.Status != string(domain.RunFailed) && recent(r.CreatedAt, now) {
+			!domain.RunStatus(r.Status).Final() && recent(r.CreatedAt, now) {
 			return r, true, nil
 		}
 	}
@@ -147,11 +159,13 @@ func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, now t
 }
 
 func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, any, error) {
-	l, err := dashboardLinks(ctx, c.read)
+	info, err := serverInfo(ctx, c.read)
 	if err != nil {
 		return "", nil, err
 	}
+	l := links(info.DashboardURL)
 	if in.IdempotencyKey == "" {
+		defer lockLaunches(info.Member.ID)()
 		r, dup, err := recentLaunch(ctx, c.read, in, time.Now())
 		if err != nil {
 			return "", nil, err
@@ -181,19 +195,38 @@ func swarmLaunched(m protocol.Mission, l links) map[string]any {
 		"next": "poll aether_get_swarm with swarm_id"}
 }
 
-// recentSwarm is the member's swarm of the same objective in the workspace
-// created within duplicateWindow, if any.
-func recentSwarm(ctx context.Context, read Call, member string, in launchSwarmInput, now time.Time) (protocol.Mission, bool, error) {
+// recentSwarm is the member's swarm of the same objective, integrator and
+// worker choices in the workspace created within duplicateWindow that is
+// not cancelled, if any.
+func recentSwarm(ctx context.Context, read Call, member string, in protocol.MissionCreateParams, now time.Time) (protocol.Mission, bool, error) {
 	var res protocol.MissionListResult
 	if err := read(ctx, protocol.MethodMissionList, protocol.MissionListParams{WorkspaceID: in.WorkspaceID, Limit: defaultRows}, &res); err != nil {
 		return protocol.Mission{}, false, err
 	}
 	for _, m := range res.Missions {
-		if m.AccountableHumanID == member && m.Objective == in.Objective && recent(m.CreatedAt, now) {
+		if m.AccountableHumanID == member && m.Objective == in.Objective && sameChoices(m, in) && m.Phase != string(domain.MissionPhaseCancelled) && recent(m.CreatedAt, now) {
 			return m, true, nil
 		}
 	}
 	return protocol.Mission{}, false, nil
+}
+
+// sameChoices compares agents, modes and models; the server fills in the
+// account members.
+func sameChoices(m protocol.Mission, p protocol.MissionCreateParams) bool {
+	bare := func(c protocol.MissionExecutionChoice) protocol.MissionExecutionChoice {
+		c.AccountMemberID = ""
+		return c
+	}
+	if bare(protocol.MissionExecutionChoice(m.Integrator)) != bare(protocol.MissionExecutionChoice(p.Integrator)) || len(m.ExecutionChoices) != len(p.ExecutionChoices) {
+		return false
+	}
+	for _, c := range m.ExecutionChoices {
+		if !slices.Contains(p.ExecutionChoices, bare(c)) {
+			return false
+		}
+	}
+	return true
 }
 
 func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any, error) {
@@ -212,9 +245,11 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 		return "", nil, err
 	}
 	l := links(info.DashboardURL)
-	key := in.IdempotencyKey
-	if key == "" {
-		m, dup, err := recentSwarm(ctx, c.read, info.Member.ID, in, time.Now())
+	params := protocol.MissionCreateParams{WorkspaceID: in.WorkspaceID, Objective: in.Objective,
+		Integrator: protocol.MissionIntegrator(integrator), ExecutionChoices: choices, IdempotencyKey: in.IdempotencyKey}
+	if params.IdempotencyKey == "" {
+		defer lockLaunches(info.Member.ID)()
+		m, dup, err := recentSwarm(ctx, c.read, info.Member.ID, params, time.Now())
 		if err != nil {
 			return "", nil, err
 		}
@@ -225,11 +260,10 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 				m.CreatedAt, m.ID), out, nil
 		}
 		// mission.create needs a key; recentSwarm guards retries instead.
-		key = uuid.NewString()
+		params.IdempotencyKey = uuid.NewString()
 	}
 	var res protocol.MissionCreateResult
-	if err := c.act(ctx, protocol.MethodMissionCreate, protocol.MissionCreateParams{WorkspaceID: in.WorkspaceID, Objective: in.Objective,
-		Integrator: protocol.MissionIntegrator(integrator), ExecutionChoices: choices, IdempotencyKey: key}, &res); err != nil {
+	if err := c.act(ctx, protocol.MethodMissionCreate, params, &res); err != nil {
 		return "", nil, err
 	}
 	m := res.Mission
@@ -256,8 +290,6 @@ func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string,
 	return summary, out, nil
 }
 
-// pendingItem is the attention item of the caller's whose answer_id is id
-// on run runID.
 func pendingItem(ctx context.Context, read Call, runID, id string) (protocol.AttentionItem, error) {
 	items, err := attention(ctx, read, "")
 	if err != nil {
@@ -349,7 +381,6 @@ func acted(ctx context.Context, read Call, l links, id, did string) (string, any
 		map[string]any{"run_id": r.ID, "state": r.Status, "activity": r.Activity, "paused": r.Paused, "review": r.Review, "url": l.run(r.ID)}, nil
 }
 
-// runAction calls method on the run with params and reports it as did.
 func runAction(ctx context.Context, c calls, method, id, did string, params any) (string, any, error) {
 	l, err := dashboardLinks(ctx, c.read)
 	if err != nil {
@@ -383,25 +414,53 @@ func markReviewed(ctx context.Context, c calls, in reviewInput) (string, any, er
 	return runAction(ctx, c, protocol.MethodRunReview, in.RunID, "Marked reviewed ("+in.Action+")", protocol.RunReviewParams{RunID: in.RunID, Action: in.Action})
 }
 
+// decidable refuses a request the connector showed cut, since deciding it
+// by id would decide text nobody saw, and one whose action differs from
+// what it showed. Neither message quotes the agent's text.
+func decidable(in decideInput, l links, shown ...string) error {
+	for _, text := range shown {
+		if len([]rune(text)) > maxText {
+			return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+				"run %s's request %s is longer than the connector shows; decide it in the Aether dashboard%s", in.RunID, in.AnswerID, at(l.run(in.RunID)))}
+		}
+	}
+	if in.Action != shown[0] {
+		return invalid("action is not the pending request's untrusted.text word for word")
+	}
+	return nil
+}
+
+func at(url string) string {
+	if url == "" {
+		return ""
+	}
+	return " at " + url
+}
+
 func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, error) {
 	it, err := pendingItem(ctx, c.read, in.RunID, in.AnswerID)
+	if err != nil {
+		return "", nil, err
+	}
+	l, err := dashboardLinks(ctx, c.read)
 	if err != nil {
 		return "", nil, err
 	}
 	allow := in.Decision == "allow"
 	switch {
 	case it.Kind == protocol.AttentionKindApproval && it.Approval != nil:
-		if action := clip(it.Approval.Action, maxText); in.Action != action {
-			return "", nil, invalid("action %q is not the pending request's %q", in.Action, action)
+		if err := decidable(in, l, it.Approval.Action, it.Approval.Detail); err != nil {
+			return "", nil, err
 		}
 		var res protocol.ApprovalDecideResult
 		if err := c.act(ctx, protocol.MethodApprovalDecide, protocol.ApprovalDecideParams{RunID: in.RunID, RequestID: in.AnswerID, Approve: allow}, &res); err != nil {
 			return "", nil, err
 		}
-		return fmt.Sprintf("%s on run %s: %s.", it.Approval.Action, in.RunID, res.Approval.Decision), map[string]any{"run_id": in.RunID, "decision": res.Approval.Decision}, nil
+		return fmt.Sprintf("Approval %s on run %s: %s.", in.AnswerID, in.RunID, res.Approval.Decision),
+			map[string]any{"run_id": in.RunID, "decision": res.Approval.Decision, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
 	case it.Kind == protocol.AttentionKindPermission && it.Request != nil && len(it.Request.Options) > 0:
-		if title := clip(it.Request.Title, maxText); in.Action != title {
-			return "", nil, invalid("action %q is not the pending request's %q", in.Action, title)
+		if err := decidable(in, l, it.Request.Title); err != nil {
+			return "", nil, err
 		}
 		// allow_always and reject_always would change the agent's policy
 		// for later requests, which nobody confirmed.
@@ -417,14 +476,14 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 		}
 		if option == "" {
 			return "", nil, &protocol.Error{Code: protocol.CodeInvalidState,
-				Message: fmt.Sprintf("run %s's request offers no %s option, and the connector never answers for always; decide it in the Aether dashboard", in.RunID, want)}
+				Message: fmt.Sprintf("run %s's request offers no %s option, and the connector never answers for always; decide it in the Aether dashboard%s", in.RunID, want, at(l.run(in.RunID)))}
 		}
 		var res protocol.RunInputRespondResult
 		if err := c.act(ctx, protocol.MethodRunInputRespond, protocol.RunInputRespondParams{RunID: in.RunID, RequestID: in.AnswerID, OptionID: option}, &res); err != nil {
 			return "", nil, controlHeld(err)
 		}
-		return fmt.Sprintf("%s once on run %s: %s.", verb, in.RunID, res.Status),
-			map[string]any{"run_id": in.RunID, "option": want, "status": res.Status}, nil
+		return fmt.Sprintf("%s request %s once on run %s: %s.", verb, in.AnswerID, in.RunID, res.Status),
+			map[string]any{"run_id": in.RunID, "option": want, "status": res.Status, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
 	}
 	return "", nil, invalid("this item is a %s, which is answered with %s", it.Kind, answerWith(it))
 }

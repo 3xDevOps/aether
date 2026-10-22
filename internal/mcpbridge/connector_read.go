@@ -177,7 +177,7 @@ type runText struct {
 }
 
 func runTitle(r protocol.Run) string {
-	return cmp.Or(r.Title, clip(r.Task, 80))
+	return cmp.Or(clip(r.Title, maxReport), clip(r.Task, 80))
 }
 
 func rowOf(r protocol.Run, l links, workspaces map[string]string) runRow {
@@ -257,8 +257,6 @@ func listRuns(ctx context.Context, c calls, in connectorListRunsInput) (string, 
 	return summary, out, nil
 }
 
-// addLastReports sets each row's last report from its workspace's newest
-// timeline page.
 func addLastReports(ctx context.Context, read Call, rows []runRow) error {
 	latest := map[string]report{}
 	done := map[string]bool{}
@@ -430,8 +428,8 @@ func runHistory(ctx context.Context, c calls, in historyInput) (string, any, err
 			frames = append(frames, frame{Seq: f.Seq, Item: clip(string(f.Item), 2000)})
 		}
 		untrusted["conversation"] = frames
-		if res.TruncatedBefore || len(frames) == limit {
-			out["next_before"] = strconv.FormatInt(res.OldestSeq, 10)
+		if len(frames) > 0 && frames[0].Seq > res.OldestSeq {
+			out["next_before"] = strconv.FormatInt(frames[0].Seq, 10)
 		}
 		return fmt.Sprintf("%d conversation items of run %s.", len(frames), r.ID), out, nil
 	}
@@ -531,12 +529,21 @@ func activitySummary(ctx context.Context, c calls, in activityInput) (string, an
 type swarmRow struct {
 	ID              string `json:"id"`
 	WorkspaceID     string `json:"workspace_id"`
-	Objective       string `json:"objective"`
 	Phase           string `json:"phase"`
 	OpenQuestions   int    `json:"open_questions"`
 	IntegratorRunID string `json:"integrator_run_id,omitempty"`
 	CreatedAt       string `json:"created_at"`
 	URL             string `json:"url,omitempty"`
+	Untrusted       struct {
+		Objective string `json:"objective"`
+	} `json:"untrusted"`
+}
+
+func swarmRowOf(m protocol.Mission, l links, objective int) swarmRow {
+	row := swarmRow{ID: m.ID, WorkspaceID: m.WorkspaceID, Phase: m.Phase, OpenQuestions: m.OpenQuestions,
+		IntegratorRunID: m.CurrentIntegratorRunID, CreatedAt: m.CreatedAt, URL: l.swarm(m.ID)}
+	row.Untrusted.Objective = clip(m.Objective, objective)
+	return row
 }
 
 // allSwarms lists the swarms of one workspace, or of every workspace when
@@ -583,8 +590,7 @@ func listSwarms(ctx context.Context, c calls, in swarmsInput) (string, any, erro
 	}
 	rows := []swarmRow{}
 	for _, m := range missions[:min(len(missions), rowLimit(in.Limit))] {
-		rows = append(rows, swarmRow{ID: m.ID, WorkspaceID: m.WorkspaceID, Objective: clip(m.Objective, 200), Phase: m.Phase,
-			OpenQuestions: m.OpenQuestions, IntegratorRunID: m.CurrentIntegratorRunID, CreatedAt: m.CreatedAt, URL: l.swarm(m.ID)})
+		rows = append(rows, swarmRowOf(m, l, maxReport))
 	}
 	out := map[string]any{"swarms": rows}
 	if len(missions) > len(rows) {
@@ -658,8 +664,7 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 		messages = append(messages, message{FromRunID: msg.FromRunID, ToRunID: msg.ToRunID, Kind: msg.Kind,
 			Body: clip(cmp.Or(msg.Summary, msg.Body), maxText), At: msg.CreatedAt})
 	}
-	out := map[string]any{"swarm": swarmRow{ID: m.ID, WorkspaceID: m.WorkspaceID, Objective: m.Objective, Phase: m.Phase,
-		OpenQuestions: m.OpenQuestions, IntegratorRunID: m.CurrentIntegratorRunID, CreatedAt: m.CreatedAt, URL: l.swarm(m.ID)},
+	out := map[string]any{"swarm": swarmRowOf(m, l, maxText),
 		"workers": workers, "untrusted": map[string]any{"tasks": tasks, "questions": questions, "messages": messages}}
 	if m.IntegratorLaunchError != "" {
 		out["integrator_launch_error"] = m.IntegratorLaunchError
@@ -738,8 +743,13 @@ func prStatus(ctx context.Context, c calls, in runIDInput) (string, any, error) 
 		msg := cmp.Or(res.Error, "run "+in.RunID+" has no pull request")
 		return "", nil, &protocol.Error{Code: protocol.CodeNotFound, Message: msg + "; aether_message_run can ask its agent to open one"}
 	}
+	type check struct {
+		Name       string `json:"name"`
+		Conclusion string `json:"conclusion"`
+		URL        string `json:"url,omitempty"`
+	}
 	var passed, pending int
-	failing := []protocol.RunPRCheck{}
+	failing := []check{}
 	for _, ch := range res.Checks {
 		switch strings.ToUpper(ch.Conclusion) {
 		case "SUCCESS", "NEUTRAL", "SKIPPED":
@@ -747,7 +757,7 @@ func prStatus(ctx context.Context, c calls, in runIDInput) (string, any, error) 
 		case "":
 			pending++
 		default:
-			failing = append(failing, protocol.RunPRCheck{Name: ch.Name, Conclusion: ch.Conclusion, URL: ch.URL})
+			failing = append(failing, check{Name: clip(ch.Name, maxReport), Conclusion: ch.Conclusion, URL: ch.URL})
 		}
 	}
 	type review struct {
@@ -775,8 +785,8 @@ func prStatus(ctx context.Context, c calls, in runIDInput) (string, any, error) 
 	}
 	pr := prOf(res.PullRequest)
 	out := map[string]any{"run_id": in.RunID, "pr": pr, "mergeable": res.Mergeable, "merge_state": res.MergeStateStatus,
-		"checks":    map[string]any{"passed": passed, "pending": pending, "failing": failing},
-		"untrusted": map[string]any{"title": clip(res.PullRequest.Title, maxReport), "reviews": reviews, "comments": comments}}
+		"checks":    map[string]int{"passed": passed, "pending": pending, "failing": len(failing)},
+		"untrusted": map[string]any{"title": clip(res.PullRequest.Title, maxReport), "failing_checks": failing, "reviews": reviews, "comments": comments}}
 	if res.Error != "" {
 		out["error"] = res.Error
 	}

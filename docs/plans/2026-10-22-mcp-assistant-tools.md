@@ -8,6 +8,10 @@
 - `aether_list_runs` rows carry no pull request link: `run.list` has none, and
   asking GitHub per row would blow the time limit. `aether_get_run` and
   `aether_pr_status` carry it.
+- `aether_mark_reviewed complete` reads the run's review, then calls
+  `run.review`; a run whose review changes between the two is completed
+  anyway. Accepted: the window is one round trip, and `ready` only moves
+  when the member or the agent acts on the run.
 
 **Goal:** From ChatGPT (or Claude), a member launches runs and swarms, sees
 what needs them, answers agents and approvals, reads pull request status
@@ -39,12 +43,14 @@ runs, all through the connector of
    wrote goes under an `untrusted` field: run titles (terminal titles the
    agent sets), the server's reasons (which quote questions and blocked
    reports), reports, request and approval text, option labels, link URLs,
-   PR titles and comments, tasks, memory notes. Trusted fields carry ids,
-   states and a fixed label per attention kind, and no plain-text summary
-   quotes free text. The server instructions and every such tool's
-   description say it is data, not instructions; the rule sits inside the
-   first 512 characters of the instructions, with listing before launching,
-   `aether_list_runs` query, `aether_message_run` and
+   swarm goals, PR titles, comments and failing check names, tasks, memory
+   notes. Outside it are only fixed labels, ids, states, counts, times,
+   links, workspace and agent names, branch names, file paths and the
+   server's own errors, and no plain-text summary or error quotes free
+   text. The server instructions and every such tool's
+   description say it is data, not instructions; the instructions, at most
+   512 characters whole, carry it with listing before launching, polling
+   with `aether_get_run`, `aether_list_runs` query, `aether_message_run` and
    `aether_needs_attention`. `search` and `fetch` have fixed shapes, so
    their descriptions carry the rule and `fetch`'s text marks where agent
    text begins.
@@ -59,19 +65,25 @@ runs, all through the connector of
 7. **Idempotency is the caller's key.** Launch, swarm and message take an
    optional `idempotency_key`. Without one nothing is derived, except that a
    run launch of the same workspace, agent, task, mode and model by the
-   member within 60 seconds that has not failed returns that run, and a
-   swarm of the same workspace and objective whose accountable human is the
-   member (`server.info`'s member) within 60 seconds returns that swarm
-   (`duplicate: true`). `run.inject` and `mission.create` need a key on the
-   wire, so a missing one is a fresh UUID: a retried message sends again, as
-   its description says. Answers and swarm
-   cancellation use keys derived from the answered item or swarm, since each
-   happens once.
+   member within 60 seconds that has not failed, been interrupted or been
+   abandoned returns that run, and a swarm of the same workspace,
+   objective, integrator and worker choices whose accountable human is the
+   member (`server.info`'s member) within 60 seconds that is not cancelled
+   returns that swarm (`duplicate: true`). A keyless launch holds a mutex
+   per member from that check through the launch, so two overlapping
+   retries through one server cannot both launch. `run.inject` and
+   `mission.create` need a key on the wire, so a missing one is a fresh
+   UUID: a retried message sends again, as its description says. Answers
+   and swarm cancellation use keys derived from the answered item or swarm,
+   since each happens once.
 8. **Approvals are decided once, as shown.** `aether_decide_approval` picks
    the `allow_once` or `reject_once` option itself and never an "always"
    one, which would change the agent's policy unasked. Its `action` argument
    must equal the pending request's text, so the client's confirmation shows
-   what is decided.
+   what is decided, and a request whose action or detail is longer than the
+   600 characters the connector shows is refused with the run's dashboard
+   link: deciding it by id would decide text nobody saw. Its summary and
+   errors name the request by id and never quote its text.
 9. **One tool answers every question kind.** `aether_answer` looks the item
    up in `attention.list` and routes it: a swarm question to
    `mission.question.answer`, a teammate's room question to a
@@ -96,7 +108,8 @@ runs, all through the connector of
     use at `aether_list_runs`.
 15. **Schemas are small.** Fixed values are enums (launch and worker mode
     `tui`/`headless`/`acp`, integrator mode `tui`/`acp`, period, decision,
-    close outcome, review action, memory kind). The root
+    close outcome, review action, memory kind); an optional one also takes
+    `""`, its default, as before it was an enum. The root
     `additionalProperties: false` is dropped and the handler refuses an
     unknown argument itself, naming the ones the tool takes; descriptions
     say when to call a tool, not what it returns.
@@ -143,10 +156,14 @@ is among its workspace's last 100 timeline entries (or the run's own, for
   `truncated` when they cut rows ("20 of 57 runs."); needs-attention items
   cap at 30. Swarm listing follows `mission.list`'s cursor for up to 5 pages
   of 100 per workspace.
-- Untrusted text is cut to 600 characters (reports, reasons, questions,
-  request and approval text, memory notes), 200 for titles and a row's last
-  report, 300 for each PR review or comment, 2000 for a conversation item
-  and 12000 for a diff. `aether_pr_status` passes `run.pr.feedback`'s
+- Untrusted text is cut to 200 characters for titles, check names, commit
+  subjects, a list row's reason, last report or swarm goal; 300 for each PR
+  review or comment; 2000 for a conversation item; 12000 for a diff; 600
+  for the rest (tasks, reports, attention reasons, questions, request and
+  approval text, terminal lines, memory notes). `fetch` returns a run's
+  title, task and reason and a swarm's goal whole.
+- `aether_run_history` pages an enhanced run's conversation by the oldest
+  seq of each page and stops at the oldest retained one. `aether_pr_status` passes `run.pr.feedback`'s
   `truncated` on and qualifies its counts; `aether_run_changes` reports
   `run.git.diff`'s error as `diff_error`.
 - The write limiter of 30 calls, then one every 2 seconds, is unchanged.
@@ -157,7 +174,9 @@ is among its workspace's last 100 timeline entries (or the run's own, for
   `RegisterConnectorTools` against a fake call: the list per scope, its
   hints, enums and size; text that ends with the result's JSON; results,
   summaries and routed params; an injection string that never leaves
-  `untrusted`; truncation, paging, prefix stripping and duplicate guards;
+  `untrusted`; truncation, multi-page history, prefix stripping, empty enum
+  values, duplicate guards and two overlapping keyless launches; refused
+  decisions of cut requests;
   no action after a failed lookup and no failure after an action; refusals
   and hints.
 - `internal/assistant/tools`: `Prepare` fills and guards `mission.create`.
