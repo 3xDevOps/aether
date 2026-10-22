@@ -22,6 +22,8 @@ type Services struct {
 	Patch RunPatcher
 	// Disk reads the data directory's disk usage ().
 	Disk DiskReader
+	// System reads live host and per-container resource usage.
+	System SystemReader
 	// Files reads workspace trees and run checkouts without exposing host paths.
 	Files FileReader
 	// ServerUpdate replaces the server's own binaries and restarts ().

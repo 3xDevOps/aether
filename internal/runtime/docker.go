@@ -82,6 +82,8 @@ type Docker struct {
 	sysboxFound      bool
 	sysboxMissingAt  time.Time
 	sysboxVeto       func() bool
+
+	cpuLimits sync.Map // container ID to float64 CPU limit in cores
 }
 
 // sysboxRecheck is how long a daemon without Sysbox is trusted to stay
