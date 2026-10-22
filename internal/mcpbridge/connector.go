@@ -42,6 +42,15 @@ func CallScope(ctx context.Context) Scope {
 	return s
 }
 
+type replayKey struct{}
+
+// Replay reports whether a connector call repeats a launch's idempotency
+// key to learn what the launch, already charged as a write, started.
+func Replay(ctx context.Context) bool {
+	replay, _ := ctx.Value(replayKey{}).(bool)
+	return replay
+}
+
 // toolTimeout keeps a tool's answer inside ChatGPT's wait of about 50
 // seconds.
 const toolTimeout = 40 * time.Second

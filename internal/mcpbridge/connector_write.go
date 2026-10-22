@@ -175,8 +175,9 @@ const replayWait = 5 * time.Second
 // a context the tool's deadline and the client's disconnect do not cancel,
 // since cancelling it fails the run it is provisioning. Past launchWait it
 // replays the key, which the server answers as soon as the run or swarm
-// exists; finished is false then, and res is empty if that replay is not
-// answered in time either. done runs when the launch call returns.
+// exists; finished is false then, err is the replay's, and res is empty if
+// that replay failed or is not answered in time either. done runs when the
+// launch call returns.
 func launch[R any](ctx context.Context, act Call, method string, params any, done func()) (res R, finished bool, err error) {
 	detached := context.WithoutCancel(ctx)
 	first := make(chan error, 1)
@@ -194,19 +195,28 @@ func launch[R any](ctx context.Context, act Call, method string, params any, don
 	}
 	replay := make(chan error, 1)
 	var replayed R
-	go func() { replay <- act(detached, method, params, &replayed) }()
+	go func() { replay <- act(context.WithValue(detached, replayKey{}, true), method, params, &replayed) }()
 	select {
 	case err := <-replay:
-		return replayed, false, err
+		if err != nil {
+			return res, false, err
+		}
+		return replayed, false, nil
 	case <-time.After(replayWait):
 		return res, false, nil
 	}
 }
 
-// starting answers a launch the replay did not recover in time.
-func starting(tool, key string) (string, any, error) {
-	return fmt.Sprintf("The launch is still starting; call %s again with the same arguments and idempotency_key %s to get it.", tool, key),
-		map[string]any{"state": "starting", "idempotency_key": key, "next": "call " + tool + " again with the same arguments and idempotency_key"}, nil
+// starting answers a launch the replay did not recover, with replayErr
+// when the replay failed.
+func starting(tool, key string, replayErr error) (string, any, error) {
+	text := fmt.Sprintf("The launch is still starting; call %s again with the same arguments and idempotency_key %s to get it.", tool, key)
+	out := map[string]any{"state": "starting", "idempotency_key": key, "next": "call " + tool + " again with the same arguments and idempotency_key"}
+	if replayErr != nil {
+		text += " Looking it up failed: " + replayErr.Error()
+		out["error"] = replayErr.Error()
+	}
+	return text, out, nil
 }
 
 // recentLaunch is the member's run of the same task, agent, mode and
@@ -257,11 +267,11 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 		}
 	}
 	res, finished, err := launch[protocol.RunLaunchResult](ctx, c.act, protocol.MethodRunLaunch, params, done)
-	if err != nil {
+	if err != nil && finished {
 		return "", nil, err
 	}
 	if res.Run.ID == "" {
-		return starting("aether_launch_run", params.IdempotencyKey)
+		return starting("aether_launch_run", params.IdempotencyKey, err)
 	}
 	out := launched(res.Run, l)
 	switch {
@@ -354,12 +364,12 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 		}
 	}
 	res, finished, err := launch[protocol.MissionCreateResult](ctx, c.act, protocol.MethodMissionCreate, params, done)
-	if err != nil {
+	if err != nil && finished {
 		return "", nil, err
 	}
 	m := res.Mission
 	if m.ID == "" {
-		return starting("aether_launch_swarm", params.IdempotencyKey)
+		return starting("aether_launch_swarm", params.IdempotencyKey, err)
 	}
 	out := swarmLaunched(m, l)
 	switch {

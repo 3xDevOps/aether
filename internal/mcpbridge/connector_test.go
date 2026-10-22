@@ -382,7 +382,8 @@ func TestConnectorReadTools(t *testing.T) {
 	args := map[string]any{"run_id": "run-1", "limit": 4}
 	for page := 0; ; page++ {
 		text, out = run(t, cs, "aether_run_history", args)
-		if page == 0 && (text != "4 conversation items of run run-1." || len(out["untrusted"].(map[string]any)["reports"].([]any)) != 1) {
+		if page == 0 && (text != "4 conversation items of run run-1." || len(out["untrusted"].(map[string]any)["reports"].([]any)) != 1 ||
+			out["truncated_before"] != true || out["note"] != historyExpired) {
 			t.Fatalf("aether_run_history = %q %v", text, out)
 		}
 		frames := out["untrusted"].(map[string]any)["conversation"].([]any)
@@ -398,6 +399,15 @@ func TestConnectorReadTools(t *testing.T) {
 	if want := []float64{12, 11, 10, 9, 8, 7, 6, 5, 4, 3}; !slices.Equal(seqs, want) {
 		t.Fatalf("aether_run_history pages read seqs %v, want %v", seqs, want)
 	}
+	terminalRun := testRun
+	terminalRun.ACP, terminalRun.Mode = false, "tui"
+	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: terminalRun})
+	f.answers[protocol.MethodTerminalHistory] = returns(protocol.TerminalHistoryResult{Lines: []protocol.TerminalHistoryLine{{Text: "$ make"}}, TruncatedBefore: true})
+	if text, out = run(t, cs, "aether_run_history", map[string]any{"run_id": "run-1"}); text != "1 terminal lines of run run-1." ||
+		out["truncated_before"] != true || out["note"] != historyExpired {
+		t.Fatalf("aether_run_history of an expired terminal = %q %v", text, out)
+	}
+	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: testRun})
 
 	text, out = run(t, cs, "aether_needs_attention", nil)
 	item := out["items"].([]any)[0].(map[string]any)
@@ -684,6 +694,65 @@ func TestConnectorLaunchOutlastsTheTool(t *testing.T) {
 	close(release)
 	if err := <-provisioned; err != nil {
 		t.Fatalf("the launch's context ended with the tool call: %v", err)
+	}
+}
+
+// Replays of slow launches are not charged as writes, so a burst that
+// spends the connector's write limit still gets each run back; a replay
+// that fails anyway still answers with the idempotency key.
+func TestConnectorSlowLaunchBurstOnTheWriteLimit(t *testing.T) {
+	defer func(wait time.Duration) { launchWait = wait }(launchWait)
+	launchWait = 50 * time.Millisecond
+	const limit = 3
+	var mu sync.Mutex
+	writes, firsts := 0, map[string]bool{}
+	release := make(chan struct{})
+	defer close(release)
+	var replayErr error
+	cs := callSession(t, func(ctx context.Context, method string, params, out any) error {
+		if CallScope(ctx) == ScopeRead {
+			return newFake(t).call(ctx, method, params, out)
+		}
+		p := params.(protocol.RunLaunchParams)
+		mu.Lock()
+		if !Replay(ctx) {
+			if writes == limit {
+				mu.Unlock()
+				return &protocol.Error{Code: protocol.CodeDenied, Message: "connector used its write calls"}
+			}
+			writes++
+		}
+		first := !firsts[p.IdempotencyKey]
+		firsts[p.IdempotencyKey] = true
+		failReplay := replayErr
+		mu.Unlock()
+		if first {
+			<-release
+		} else if failReplay != nil {
+			return failReplay
+		}
+		*out.(*protocol.RunLaunchResult) = protocol.RunLaunchResult{Run: protocol.Run{ID: "run-" + p.IdempotencyKey, Status: "queued"}, Replayed: true}
+		return nil
+	}, ScopeWrite)
+	var wg sync.WaitGroup
+	for i := range limit {
+		wg.Go(func() {
+			key := fmt.Sprint(i)
+			text, out, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "t", "idempotency_key": key})
+			if failed || out["run_id"] != "run-"+key || out["idempotency_key"] != key {
+				t.Errorf("slow launch %s on a spent write limit = %q %v", key, text, out)
+			}
+		})
+	}
+	wg.Wait()
+
+	mu.Lock()
+	writes, replayErr = 0, &protocol.Error{Code: protocol.CodeDenied, Message: "connector used its write calls"}
+	mu.Unlock()
+	text, out, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "t", "idempotency_key": "k"})
+	if failed || out["state"] != "starting" || out["idempotency_key"] != "k" || !strings.Contains(fmt.Sprint(out["error"]), "connector used its write calls") ||
+		!strings.Contains(text, "Looking it up failed: rpc error") {
+		t.Fatalf("a slow launch whose replay failed = %q %v", text, out)
 	}
 }
 

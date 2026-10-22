@@ -216,7 +216,10 @@ func (h *handler) server(r *http.Request) *mcp.Server {
 		if mcpbridge.CallScope(ctx) == mcpbridge.ScopeRead {
 			return call(ctx, local, c.Member, method, raw, out)
 		}
-		err := h.allowWrite(c.ID, h.now())
+		var err error
+		if !mcpbridge.Replay(ctx) {
+			err = h.allowWrite(c.ID, h.now())
+		}
 		if err == nil {
 			err = call(ctx, local, c.Member, method, raw, out)
 		}

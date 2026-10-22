@@ -141,25 +141,30 @@ are only fixed labels such as `The agent asks a question`, ids, states, counts,
 times, links, workspace and agent names, branch names, file paths and the
 server's own errors. Untrusted text is cut to 200 characters for titles, check
 names, commit subjects, a swarm task's blockers, a list row's reason, last
-report or swarm goal; 300 for
-each pull request review or comment; 2000 for a conversation item; 12000 for a
-diff; and 600 for everything else, such as tasks, reports, questions, request
-and approval text, terminal lines and memory notes. `search` and `fetch` keep
-OpenAI's shapes, with no `untrusted` field: their descriptions say titles and
-text are data, `fetch`'s text marks where agent text begins, and it returns a
-run's title, task and reason and a swarm's goal whole. An approval or
-permission request longer than 600 characters is decided only in the dashboard,
-never by `aether_decide_approval`. Lists return 20 rows by default, at most
-100, and say how many matched when they cut rows; `aether_needs_attention`
-returns at most 30 items. Tools that take a `run_id` or `swarm_id` also accept
-the `run:` and `swarm:` ids `search` returns.
+report or swarm goal; 300 for each pull request review or comment; 2000 for a
+conversation item; 12000 for a diff; and 600 for everything else, such as
+tasks, reports, questions, request and approval text, terminal lines and memory
+notes. `search` and `fetch` keep OpenAI's shapes, with no `untrusted` field:
+their descriptions say titles and text are data, `fetch`'s text marks where
+agent text begins, and it returns a run's title, task and reason and a swarm's
+goal whole. An approval or permission request longer than 600 characters is
+decided only in the dashboard, never by `aether_decide_approval`. Lists return
+20 rows by default, at most 100, and say how many matched when they cut rows;
+`aether_needs_attention` returns at most 30 items. Tools that take a `run_id`
+or `swarm_id` also accept the `run:` and `swarm:` ids `search` returns. When
+the server no longer keeps the start of a run's conversation or terminal,
+`aether_run_history` returns `truncated_before: true` and a `note` saying so.
 
 A launch, swarm or message takes an optional `idempotency_key`; a retry with
 the same key returns the first result. A launch or swarm still starting after
-30 seconds, such as one pulling its image, answers with its id, `state:
-"starting"` and the key, and keeps starting after the tool call ends: poll
-`aether_get_run` or `aether_get_swarm`. Without a key, a run launch with the
-same workspace, agent, task, mode and model within 60 seconds returns your
+30 seconds, such as one pulling its image, keeps starting after the tool call
+ends. The tool then repeats the call with the key to look up the run or swarm,
+which does not count as a write call. If the lookup answers within 5 seconds,
+the result has the id, `state: "starting"` and the key; poll `aether_get_run`
+or `aether_get_swarm`. If it does not, the result has only `state: "starting"`
+and the key, plus the lookup's `error` when it failed; call the same tool again
+with the same arguments and key to get the id. Without a key, a run launch with
+the same workspace, agent, task, mode and model within 60 seconds returns your
 earlier run, unless it failed, was interrupted or was abandoned, and a swarm
 with the same workspace, objective and agents within 60 seconds returns your
 earlier swarm, unless it was cancelled, instead of starting another; so does an

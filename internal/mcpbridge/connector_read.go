@@ -397,6 +397,8 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 	return summary, out, nil
 }
 
+const historyExpired = "The server no longer keeps this run's oldest history, so its start is missing."
+
 func runHistory(ctx context.Context, c calls, in historyInput) (string, any, error) {
 	r, err := getRunRecord(ctx, c.read, in.RunID)
 	if err != nil {
@@ -432,6 +434,9 @@ func runHistory(ctx context.Context, c calls, in historyInput) (string, any, err
 		if len(frames) > 0 && frames[0].Seq > res.OldestSeq {
 			out["next_before"] = strconv.FormatInt(frames[0].Seq, 10)
 		}
+		if res.TruncatedBefore {
+			out["truncated_before"], out["note"] = true, historyExpired
+		}
 		return fmt.Sprintf("%d conversation items of run %s.", len(frames), r.ID), out, nil
 	}
 	var res protocol.TerminalHistoryResult
@@ -445,6 +450,9 @@ func runHistory(ctx context.Context, c calls, in historyInput) (string, any, err
 	untrusted["terminal"] = lines
 	if res.HasMore {
 		out["next_before"] = res.NextCursor
+	}
+	if res.TruncatedBefore {
+		out["truncated_before"], out["note"] = true, historyExpired
 	}
 	return fmt.Sprintf("%d terminal lines of run %s.", len(lines), r.ID), out, nil
 }

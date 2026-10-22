@@ -957,18 +957,19 @@ name in the message: the request is theirs, and taking control from them is
 a dashboard action with its hold and review. An unknown request is
 `-32000`.
 
-`run.launch` and `template.launch` take an optional `idempotency_key` (at
-most 256 bytes). A retry by the same member with the same key and params
-returns the run the first launch started, with `"replayed": true`, and
-launches nothing; one with other params is `-32003`, and one whose run was
-deleted is `-32000`. One key names one launch across both methods. The key
-is reserved before the launch and records the run as soon as its row
-exists, so a launch that fails after that replays as the run it left. A
-retry while the first launch is still provisioning returns that run at once
-instead of waiting for it. A retry of a key whose launch failed before creating a run launches again;
-so does one after the server stopped in the instant between creating the
-run and recording it. When recording the run fails, the launch answers
-the store error naming the run it started: a retry with that key would launch
+`run.launch` and `template.launch` take an optional `idempotency_key`
+(at most 256 bytes). A retry by the same member with the same key and
+params returns the run the first launch started, with `"replayed":
+true`, and launches nothing; one with other params is `-32003`, and one
+whose run was deleted is `-32000`. One key names one launch across both
+methods. The key is reserved before the launch and records the run as
+soon as its row exists, so a launch that fails after that replays as the
+run it left. A retry while the first launch is still provisioning
+returns that run at once instead of waiting for it. A retry of a key
+whose launch failed before creating a run launches again; so does one
+after the server stopped in the instant between creating the run and
+recording it. When recording the run fails, the launch answers the store
+error naming the run it started: a retry with that key would launch
 again, so look the run up instead.
 
 `run.pr.status` and `run.pr.feedback` default an omitted `expected` to the
