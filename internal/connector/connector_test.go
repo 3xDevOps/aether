@@ -251,6 +251,60 @@ func TestConnectorScopes(t *testing.T) {
 	e.callTool(t, writer.session, "aether_launch_run", launch)
 }
 
+// An expired access token gets a 401 that names the metadata and says it
+// expired, on which a client refreshes; the refreshed token then works. Refreshes racing with one refresh token rotate it once: one gets
+// tokens, the rest are told another refresh rotated it, and the connector
+// is kept.
+func TestConnectorExpiryAndConcurrentRefresh(t *testing.T) {
+	e := newEnv(t)
+	c := e.connect(t)
+	e.skew.Store(int64(accessTokenTTL))
+	status, header, body := e.bearer(c.token.AccessToken)
+	if challenge := header.Get("WWW-Authenticate"); status != http.StatusUnauthorized || !strings.Contains(challenge, "resource_metadata=") ||
+		!strings.Contains(body, "the access token expired at") {
+		t.Fatalf("expired access token = %d %q %s, want 401 naming the metadata", status, challenge, body)
+	}
+	refreshed := e.refresh(t, c, c.token.RefreshToken, http.StatusOK)
+	if status, _, body := e.bearer(refreshed.AccessToken); status != http.StatusOK {
+		t.Fatalf("the refreshed access token = %d %s", status, body)
+	}
+
+	const racers = 8
+	statuses := make(chan int, racers)
+	var wg sync.WaitGroup
+	for range racers {
+		wg.Go(func() {
+			resp, err := http.PostForm(e.base+"/token", url.Values{"grant_type": {"refresh_token"}, "client_id": {c.clientID},
+				"refresh_token": {refreshed.RefreshToken}, "resource": {e.base}})
+			if err != nil {
+				statuses <- 0
+				return
+			}
+			_, _ = readBody(resp)
+			statuses <- resp.StatusCode
+		})
+	}
+	wg.Wait()
+	close(statuses)
+	won := 0
+	for s := range statuses {
+		switch s {
+		case http.StatusOK:
+			won++
+		case http.StatusBadRequest:
+		default:
+			t.Fatalf("a racing refresh = %d", s)
+		}
+	}
+	if won != 1 {
+		t.Fatalf("%d of %d racing refreshes got tokens, want 1", won, racers)
+	}
+	var list protocol.ConnectorListResult
+	if err := e.admin.Call(protocol.MethodConnectorList, struct{}{}, &list); err != nil || len(list.Connectors) != 1 {
+		t.Fatalf("connector.list after racing refreshes = %+v %v, want the connector kept", list, err)
+	}
+}
+
 // Wrong pairing codes lock out only the address that sent them, so no one
 // can deny pairing to another member.
 func TestWrongCodesLockOutOnlyTheirAddress(t *testing.T) {
