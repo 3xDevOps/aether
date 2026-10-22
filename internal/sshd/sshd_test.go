@@ -652,7 +652,11 @@ func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 	defer f.mu.Unlock()
 	inputs := []domain.RunInputRequest{}
 	for _, r := range f.acpPending[run] {
-		inputs = append(inputs, domain.RunInputRequest{ID: r.ID, SessionID: "s1", Kind: r.Kind})
+		in := domain.RunInputRequest{ID: r.ID, SessionID: "s1", Kind: "question"}
+		if r.Kind == acphost.RequestPermission {
+			in.Kind = "permission"
+		}
+		inputs = append(inputs, in)
 	}
 	return inputs
 }

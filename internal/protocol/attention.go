@@ -76,6 +76,9 @@ type AttentionRequest struct {
 	Options []AttentionOption `json:"options,omitempty"`
 	// Schema is the form a question's accept option fills, as values.
 	Schema json.RawMessage `json:"schema,omitempty"`
+	// URL is the page a link request asks the person to open; it is set
+	// only on a link request, which is otherwise a question.
+	URL string `json:"url,omitempty"`
 }
 
 // AttentionOption.Kind is the ACP permission option kind: allow_once,

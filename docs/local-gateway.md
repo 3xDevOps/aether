@@ -937,7 +937,9 @@ worker whose control the caller holds. `approval` carries
 `question` carry `request: {id, kind, title, options, schema}`; an enhanced
 run's `options` are `{id, label, kind}`, `kind` being `allow_once`,
 `allow_always`, `reject_once` or `reject_always` for a permission, and a
-Standard run's request has none: it is answered in the terminal.
+Standard run's request has none: it is answered in the terminal. A link
+request is a `question` whose `request` also carries `url`: open that page,
+then accept or decline.
 `swarm-question`, `room-question` and `queued-message` carry
 `message: {id, body, from}`: a `mission.question.answer` question, a room
 question to answer with a `run.room.post` reply, and a steer request to

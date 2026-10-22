@@ -316,7 +316,7 @@ func (r *attentionRun) request(input *domain.RunInputRequest) *protocol.Attentio
 		if pending.ID != input.ID {
 			continue
 		}
-		out.Title, out.Schema = pending.Title, pending.Schema
+		out.Title, out.Schema, out.URL = pending.Title, pending.Schema, pending.URL
 		for _, o := range pending.Options {
 			out.Options = append(out.Options, protocol.AttentionOption{ID: o.ID, Label: o.Name, Kind: o.Kind})
 		}

@@ -126,6 +126,29 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 	}
 }
 
+func TestAttentionListCarriesTheLinkOfALinkRequest(t *testing.T) {
+	e := newTestEnv(t, func(cfg *Config) { cfg.Control = control.New(control.Config{}) })
+	run := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "sign in", Harness: "codex", Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning}
+	if err := e.store.CreateRun(t.Context(), run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.store.UpdateRunStatus(t.Context(), run.ID, domain.RunNeedsAttention, "", domain.ActivityNeedsYou, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	e.runs.mu.Lock()
+	e.runs.acpPending = map[domain.RunID][]acphost.Request{run.ID: {{
+		ID: "req-1", Kind: acphost.RequestLink, Title: "Sign in to GitHub", URL: "https://github.com/login/device",
+		Options: []acphost.Option{{ID: "accept", Name: "Accept"}, {ID: "decline", Name: "Decline"}},
+	}}}
+	e.runs.mu.Unlock()
+
+	item := attentionItems(t, e, e.member.ID, protocol.AttentionListParams{})[run.ID]
+	if item.Kind != protocol.AttentionKindQuestion || item.Request == nil ||
+		item.Request.Kind != "question" || item.Request.URL != "https://github.com/login/device" || len(item.Request.Options) != 2 {
+		t.Errorf("link request item = %+v request %+v", item, item.Request)
+	}
+}
+
 func TestPlainReasonMatchesTheDashboard(t *testing.T) {
 	for reason, want := range map[string]string{
 		"killed; retained container":     "Stopped",
