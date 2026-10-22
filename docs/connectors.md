@@ -89,8 +89,8 @@ than `offline_access`.
 | Scope | On the page | Grants |
 | --- | --- | --- |
 | `read` | Always granted | Every read-only tool |
-| `write` | **Launch and message**, checked by default | Launching runs and swarms, messaging runs, pausing and resuming them, answering agents' questions, marking runs reviewed |
-| `control` | **Approve, stop and close**, unchecked by default | Deciding permission and approval requests, stopping and closing runs, cancelling swarms |
+| `write` | **Launch and message**, checked by default | Launching runs and messaging them |
+| `control` | **Stop**, unchecked by default | Stopping runs. Text an agent wrote could talk the assistant into ending work without asking you |
 
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
@@ -117,15 +117,15 @@ apply. Your role still decides: a viewer's launch is refused, as it is in
 a method that needs an approved device refuses a connector minted on a
 registered one.
 
-Each connector makes at most 30 write calls a minute, enough for a swarm of
-parallel launches. Past that, the call fails with
-`connector <id> is limited to 30 write calls a minute and used them; retry in <seconds>, at <time>`.
+Each connector can make 30 write calls at once, enough for many parallel
+launches, then regains one every 2 seconds, up to 30 again. Past that, the
+call fails with
+`connector <id> used its 30 write calls and gets one more every 2s; retry in <seconds>, at <time>`.
 
 ## Attribution
 
 A run launched through a connector shows **Launched via ChatGPT** (or Claude)
-in its header, a run a swarm created through one does too, and a message sent
-through one shows `<member> via ChatGPT` as its author. The server logs one
+in its header, and a message sent through one shows `<member> via ChatGPT` as its author. The server logs one
 line per write call:
 
 ```
@@ -178,6 +178,7 @@ On the page that opens when you connect:
 | --- | --- |
 | `That code is wrong, expired or already used. Run aether mcp for a new one and paste it here.` | The code is not live. A server restart also forgets codes |
 | `10 wrong codes came from your address in the last minute. Wait a minute, then paste the code again.` | 10 wrong codes in a minute from your address (your IPv6 /64). Other addresses are not affected |
+| `300 wrong codes came to this server from all addresses in the last minute. Wait a minute, then paste the code again.` | Someone is guessing codes from many addresses. Pairing resumes a minute after the guessing stops |
 | `Aether connectors work with ChatGPT and Claude; <host> is not one of them.` | Only `chatgpt.com` and `claude.ai` can connect |
 
 If an app asks you to sign in again, the connector was revoked. Run `aether mcp`

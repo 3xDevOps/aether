@@ -84,11 +84,10 @@ type Scope string
 const (
 	// ScopeRead is every read-only tool, always granted.
 	ScopeRead Scope = "read"
-	// ScopeWrite launches runs and swarms, messages runs, pauses and
-	// resumes them, answers questions and marks runs reviewed.
+	// ScopeWrite starts and steers work, such as launching and messaging
+	// runs.
 	ScopeWrite Scope = "write"
-	// ScopeControl decides permission and approval requests, stops and
-	// closes runs and cancels swarms.
+	// ScopeControl ends work, such as stopping runs.
 	ScopeControl Scope = "control"
 )
 

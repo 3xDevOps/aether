@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -49,9 +50,10 @@ const (
 	tokenTimeout = 5 * time.Second
 	maxFormBytes = 64 << 10
 	keyBytes     = 32
-	// writeBurst write tool calls a minute per connector: room for a swarm
-	// of parallel launches, not for a loop.
-	writeBurst = 30
+	// A connector makes up to writeBurst write tool calls at once, room for
+	// a swarm of parallel launches, then one more every writeRefill.
+	writeBurst  = 30
+	writeRefill = 2 * time.Second
 )
 
 var b64 = base64.RawURLEncoding
@@ -89,12 +91,15 @@ type handler struct {
 	mux         *http.ServeMux
 	now         func() time.Time
 
-	// mu guards codes, wrong, wrongSwept and writes.
-	mu         sync.Mutex
-	codes      map[string]authCode
-	wrong      map[netip.Prefix]wrongCodes
-	wrongSwept time.Time
-	writes     map[string]*rate.Limiter
+	// mu guards codes, wrong, wrongAll, wrongSwept, writes and
+	// writesSwept.
+	mu          sync.Mutex
+	codes       map[string]authCode
+	wrong       map[netip.Prefix]wrongCodes
+	wrongAll    wrongCodes
+	wrongSwept  time.Time
+	writes      map[string]*rate.Limiter
+	writesSwept time.Time
 }
 
 // New returns the handler for every path under the base URL's path and
@@ -249,25 +254,32 @@ func callTarget(raw json.RawMessage) string {
 	return cmp.Or(ids.RunID, ids.MissionID, ids.WorkspaceID)
 }
 
-// allowWrite takes one of connector id's write calls, writeBurst a
-// minute, or says when the next is allowed.
+// allowWrite takes one of connector id's write calls or says when the
+// next is allowed. A full bucket is the same as none, so buckets full at
+// the minute's sweep, of idle or revoked connectors, are dropped.
 func (h *handler) allowWrite(id string, now time.Time) error {
 	h.mu.Lock()
+	if now.Sub(h.writesSwept) >= time.Minute {
+		maps.DeleteFunc(h.writes, func(_ string, lim *rate.Limiter) bool { return lim.TokensAt(now) >= writeBurst })
+		h.writesSwept = now
+	}
 	lim, ok := h.writes[id]
 	if !ok {
-		lim = rate.NewLimiter(rate.Every(time.Minute/writeBurst), writeBurst)
+		lim = rate.NewLimiter(rate.Every(writeRefill), writeBurst)
 		h.writes[id] = lim
 	}
-	h.mu.Unlock()
 	res := lim.ReserveN(now, 1)
 	delay := res.DelayFrom(now)
+	if delay > 0 {
+		res.CancelAt(now)
+	}
+	h.mu.Unlock()
 	if delay == 0 {
 		return nil
 	}
-	res.CancelAt(now)
 	return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
-		"connector %s is limited to %d write calls a minute and used them; retry in %s, at %s",
-		id, writeBurst, delay.Round(time.Second), now.Add(delay).UTC().Format(time.RFC3339))}
+		"connector %s used its %d write calls and gets one more every %s; retry in %s, at %s",
+		id, writeBurst, writeRefill, delay.Round(time.Second), now.Add(delay).UTC().Format(time.RFC3339))}
 }
 
 func (h *handler) serverName() string {

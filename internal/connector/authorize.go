@@ -32,6 +32,10 @@ const (
 	// guesser; keyed by address, it never locks out anyone else.
 	wrongCodeLimit  = 10
 	wrongCodeWindow = time.Minute
+	// serverWrongCodeLimit wrong pairing codes per wrongCodeWindow from all
+	// addresses together, so a guesser holding many addresses, such as an
+	// IPv6 /48, is still slowed. It takes 30 addresses at their limit.
+	serverWrongCodeLimit = 300
 )
 
 // clientHosts are the hosts whose client_id metadata documents the server
@@ -102,8 +106,8 @@ type authCode struct {
 	expires time.Time
 }
 
-// wrongCodes counts the wrong pairing codes one client address sent since
-// since.
+// wrongCodes counts the wrong pairing codes sent since since, from one
+// client address or from all of them.
 type wrongCodes struct {
 	since time.Time
 	n     int
@@ -172,8 +176,8 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request) {
 		Write: slices.Contains(scopes, string(mcpbridge.ScopeWrite)), Control: slices.Contains(scopes, string(mcpbridge.ScopeControl))}
 	now := h.now()
 	from := clientPrefix(r)
-	if !h.attemptAllowed(from, now) {
-		page.Error = fmt.Sprintf("%d wrong codes came from your address in the last minute. Wait a minute, then paste the code again.", wrongCodeLimit)
+	if refused := h.attemptRefused(from, now); refused != "" {
+		page.Error = refused
 		h.renderConsent(w, http.StatusTooManyRequests, page)
 		return
 	}
@@ -234,26 +238,48 @@ func clientPrefix(r *http.Request) netip.Prefix {
 	return p
 }
 
-func (h *handler) attemptAllowed(from netip.Prefix, now time.Time) bool {
+// attemptRefused says why a pairing code from from is not checked now, or
+// is empty when it is.
+func (h *handler) attemptRefused(from netip.Prefix, now time.Time) string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	wc := h.wrong[from]
-	return now.Sub(wc.since) >= wrongCodeWindow || wc.n < wrongCodeLimit
+	switch {
+	case h.wrong[from].live(now) >= wrongCodeLimit:
+		return fmt.Sprintf("%d wrong codes came from your address in the last minute. Wait a minute, then paste the code again.", wrongCodeLimit)
+	case h.wrongAll.live(now) >= serverWrongCodeLimit:
+		return fmt.Sprintf("%d wrong codes came to this server from all addresses in the last minute. Wait a minute, then paste the code again.", serverWrongCodeLimit)
+	}
+	return ""
 }
 
 func (h *handler) recordWrong(from netip.Prefix, now time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if now.Sub(h.wrongSwept) >= wrongCodeWindow {
-		maps.DeleteFunc(h.wrong, func(_ netip.Prefix, wc wrongCodes) bool { return now.Sub(wc.since) >= wrongCodeWindow })
+		maps.DeleteFunc(h.wrong, func(_ netip.Prefix, wc wrongCodes) bool { return wc.live(now) == 0 })
 		h.wrongSwept = now
 	}
-	wc := h.wrong[from]
-	if wc.n == 0 {
-		wc.since = now
+	h.wrong[from] = h.wrong[from].add(now)
+	h.wrongAll = h.wrongAll.add(now)
+}
+
+// live is how many wrong codes count at now: none once the window that
+// began at since has passed.
+func (wc wrongCodes) live(now time.Time) int {
+	if now.Sub(wc.since) >= wrongCodeWindow {
+		return 0
+	}
+	return wc.n
+}
+
+// add counts one more wrong code at now, starting a new window if the
+// last one has passed.
+func (wc wrongCodes) add(now time.Time) wrongCodes {
+	if wc.live(now) == 0 {
+		return wrongCodes{since: now, n: 1}
 	}
 	wc.n++
-	h.wrong[from] = wc
+	return wc
 }
 
 // takeCode spends an authorization code, live or not.
@@ -350,8 +376,8 @@ input[type=checkbox]{width:auto;font-size:inherit}
 <input type="hidden" name="request" value="{{.Request}}">
 <fieldset>
 <legend>Also allow it to:</legend>
-<p><label><input type="checkbox" name="scope" value="write"{{if .Write}} checked{{end}}> <strong>Launch and message</strong>: launch runs and swarms, message runs, pause and resume them, answer agents' questions and mark runs reviewed.</label></p>
-<p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Approve, stop and close</strong>: decide agents' permission and approval requests, stop and close runs and cancel swarms. Text an agent wrote that the assistant reads could then talk it into approving a command or ending work without asking you.</label></p>
+<p><label><input type="checkbox" name="scope" value="write"{{if .Write}} checked{{end}}> <strong>Launch and message</strong>: launch runs and message them.</label></p>
+<p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Stop</strong>: stop runs. Text an agent wrote that the assistant reads could then talk it into ending work without asking you.</label></p>
 </fieldset>
 <p><label for="code">Paste the code from <code>aether mcp</code>:</label></p>
 <p><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit"><strong>Allow</strong></button></p>

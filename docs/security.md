@@ -479,24 +479,25 @@ checks; there is no terminal, file, git or settings tool.
   records name the connector, such as `ChatGPT connector con-7k2m9q4xbd`.
 - Scopes: the member picks them on the consent page, not the client. `read`
   is always granted, and every member can read every run on the server, so a
-  connector can read all of them. `write` (launch and message) is checked by
-  default; `control` (approve, stop and close) is not, because text an agent
-  wrote could talk the assistant into approving a command or ending work. A
-  connector serves only its scopes' tools and makes at most 30 write calls a
-  minute.
+  connector can read all of them. `write` (launch runs and message them) is
+  checked by default; `control` (stop runs) is not, because text an agent
+  wrote could talk the assistant into ending work. A connector serves only
+  its scopes' tools. It can make 30 write calls at once, then one every 2
+  seconds.
 - A connector minted over a member SSH key or a tailnet connection has no
   device: revoking a device does not cut it off. `aether mcp revoke` does.
-
 - TLS ends at the edge, because ChatGPT and Claude need a public certificate.
   A compromised edge sees every tool call, result and token it relays, and can
   act as the member until the token expires (an hour), a refresh rotates it, or
   you revoke the connector. It cannot mint codes or tokens: your server makes
   them and stores only their hashes.
 - Pairing needs a single-use 40-bit code, valid for 10 minutes, from a device
-  you already use. Wrong codes are limited per client address, so no one can
-  lock other members out of pairing. Revoking that device, removing the member or tightening
-  `edge-access` cuts off their connectors. Only clients on `chatgpt.com` and
-  `claude.ai` can connect.
+  you already use. Wrong codes are limited to 10 a minute per client address
+  (IPv6 /64), so one address cannot lock other members out of pairing, and to
+  300 a minute server-wide, which someone guessing from many addresses can
+  reach to pause pairing for everyone while they guess. Revoking that device,
+  removing the member or tightening `edge-access` cuts off their connectors.
+  Only clients on `chatgpt.com` and `claude.ai` can connect.
 - Refresh tokens rotate on every use and lapse after 30 days unused. A rotated
   refresh token used again a minute or more later deletes the connector.
 - Results contain run text other agents wrote. ChatGPT and Claude ask you
