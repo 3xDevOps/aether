@@ -42,19 +42,83 @@ func (localEdge) EdgeVersion() int { return 2 }
 
 var consentRequest = regexp.MustCompile(`name="request" value="([^"]+)"`)
 
-// TestIntegrationConnectorFlows drives the connector as ChatGPT does,
-// over HTTP with go-sdk's OAuth and MCP client, against a real server
-// whose runs are enhanced runs of the acpmock agent in real containers,
-// through the requests a user makes from a chat: launch four tasks at
-// once, see the active runs, message the run working on one of them,
-// answer what needs them, launch a swarm, pause, resume and stop a run,
-// and summarize the day.
 func TestIntegrationConnectorFlows(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	env := startEnhancedServer(ctx, t)
 	defer env.stop(t)
-	session := env.connector(t)
+	clients := http.NewServeMux()
+	client := httptest.NewUnstartedServer(clients)
+	host := client.Listener.Addr().String()
+	clientID, redirect := "https://"+host+"/client.json", "https://"+host+"/callback"
+	doc, _ := json.Marshal(map[string]any{"client_id": clientID, "client_name": "Test client", "redirect_uris": []string{redirect}})
+	clients.HandleFunc("GET /client.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(doc)
+	})
+	client.StartTLS()
+	t.Cleanup(client.Close)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.srv.ssh.SetEdgeOwner(localEdge{origin: "http://" + ln.Addr().String()})
+	h, err := connector.New(connector.Config{BaseURL: env.srv.ssh.ConnectorURL(), Store: env.srv.db, SSH: env.srv.ssh,
+		KeyPath: filepath.Join(env.data, "connector", "hmac.key"), ClientHosts: []string{host}, Transport: client.Client().Transport})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mcpSrv := httptest.NewUnstartedServer(h)
+	_ = mcpSrv.Listener.Close()
+	mcpSrv.Listener = ln
+	mcpSrv.Start()
+	t.Cleanup(mcpSrv.Close)
+
+	var code protocol.ConnectorCodeResult
+	if status := postJSON(t, env.web+"/api/v1/"+protocol.MethodConnectorCode, "{}", &code); status != http.StatusOK {
+		t.Fatalf("connector.code status %d", status)
+	}
+	browser := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	handler, err := auth.NewAuthorizationCodeHandler(&auth.AuthorizationCodeHandlerConfig{
+		ClientIDMetadataDocumentConfig: &auth.ClientIDMetadataDocumentConfig{URL: clientID},
+		RedirectURL:                    redirect,
+		AuthorizationCodeFetcher: func(_ context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
+			resp, err := browser.Get(args.URL)
+			if err != nil {
+				return nil, err
+			}
+			page, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			m := consentRequest.FindSubmatch(page)
+			if m == nil {
+				return nil, fmt.Errorf("consent page %s: %s", resp.Status, page)
+			}
+			if resp, err = browser.PostForm(args.URL, url.Values{"request": {string(m[1])}, "code": {code.Code}, "scope": {"write", "control"}}); err != nil {
+				return nil, err
+			}
+			_ = resp.Body.Close()
+			loc, err := resp.Location()
+			if err != nil {
+				return nil, fmt.Errorf("allow %s: %w", resp.Status, err)
+			}
+			q := loc.Query()
+			return &auth.AuthorizationResult{Code: q.Get("code"), State: q.Get("state"), Iss: q.Get("iss")}, nil
+		},
+		RequestRefreshToken: true,
+		NewTokenSource: func(_ context.Context, _ *oauth2.Config, tok *oauth2.Token) (oauth2.TokenSource, error) {
+			return oauth2.StaticTokenSource(tok), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil).Connect(t.Context(),
+		&mcp.StreamableClientTransport{Endpoint: env.srv.ssh.ConnectorURL(), OAuthHandler: handler, DisableStandaloneSSE: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
 
 	tool := func(name string, args map[string]any) map[string]any {
 		t.Helper()
@@ -140,9 +204,18 @@ func TestIntegrationConnectorFlows(t *testing.T) {
 		"action": permission["untrusted"].(map[string]any)["text"]})
 	waitTurns(ctx, t, env.srv, domain.RunID(ids[3]), 2)
 
-	tool("aether_pause_run", map[string]any{"run_id": ids[1]})
-	tool("aether_resume_run", map[string]any{"run_id": ids[1]})
-	tool("aether_get_run", map[string]any{"run_id": ids[1]})
+	if paused := tool("aether_pause_run", map[string]any{"run_id": ids[1]}); paused["paused"] != true {
+		t.Fatalf("aether_pause_run = %v, want paused", paused)
+	}
+	if got := tool("aether_get_run", map[string]any{"run_id": ids[1]}); got["paused"] != true {
+		t.Fatalf("aether_get_run after pause = %v, want paused", got)
+	}
+	if resumed := tool("aether_resume_run", map[string]any{"run_id": ids[1]}); resumed["paused"] != false {
+		t.Fatalf("aether_resume_run = %v, want not paused", resumed)
+	}
+	if got := tool("aether_get_run", map[string]any{"run_id": ids[1]}); got["paused"] != false {
+		t.Fatalf("aether_get_run after resume = %v, want not paused", got)
+	}
 	tool("aether_run_history", map[string]any{"run_id": ids[1]})
 
 	swarm := tool("aether_launch_swarm", map[string]any{"workspace_id": ws, "objective": "add audit logging", "harness": "fake", "mode": "acp",
@@ -188,85 +261,4 @@ func TestIntegrationConnectorFlows(t *testing.T) {
 	if raw, _ := json.Marshal(summary); !strings.Contains(string(raw), ids[2]) {
 		t.Fatalf("today's activity = %s, want the runs launched today", raw)
 	}
-}
-
-// connector serves the real connector handler for env's server on a local
-// origin, as the edge would relay it, trusting a client_id metadata
-// document the test serves, and authorizes a connector with every scope
-// as the tailnet member.
-func (env *enhancedServer) connector(t *testing.T) *mcp.ClientSession {
-	t.Helper()
-	clients := http.NewServeMux()
-	client := httptest.NewUnstartedServer(clients)
-	host := client.Listener.Addr().String()
-	clientID, redirect := "https://"+host+"/client.json", "https://"+host+"/callback"
-	doc, _ := json.Marshal(map[string]any{"client_id": clientID, "client_name": "Test client", "redirect_uris": []string{redirect}})
-	clients.HandleFunc("GET /client.json", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(doc)
-	})
-	client.StartTLS()
-	t.Cleanup(client.Close)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	env.srv.ssh.SetEdgeOwner(localEdge{origin: "http://" + ln.Addr().String()})
-	h, err := connector.New(connector.Config{BaseURL: env.srv.ssh.ConnectorURL(), Store: env.srv.db, SSH: env.srv.ssh,
-		KeyPath: filepath.Join(env.data, "connector", "hmac.key"), ClientHosts: []string{host}, Transport: client.Client().Transport})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mcpSrv := httptest.NewUnstartedServer(h)
-	_ = mcpSrv.Listener.Close()
-	mcpSrv.Listener = ln
-	mcpSrv.Start()
-	t.Cleanup(mcpSrv.Close)
-
-	var code protocol.ConnectorCodeResult
-	if status := postJSON(t, env.web+"/api/v1/"+protocol.MethodConnectorCode, "{}", &code); status != http.StatusOK {
-		t.Fatalf("connector.code status %d", status)
-	}
-	browser := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	handler, err := auth.NewAuthorizationCodeHandler(&auth.AuthorizationCodeHandlerConfig{
-		ClientIDMetadataDocumentConfig: &auth.ClientIDMetadataDocumentConfig{URL: clientID},
-		RedirectURL:                    redirect,
-		AuthorizationCodeFetcher: func(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
-			resp, err := browser.Get(args.URL)
-			if err != nil {
-				return nil, err
-			}
-			page, _ := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			m := consentRequest.FindSubmatch(page)
-			if m == nil {
-				return nil, fmt.Errorf("consent page %s: %s", resp.Status, page)
-			}
-			if resp, err = browser.PostForm(args.URL, url.Values{"request": {string(m[1])}, "code": {code.Code}, "scope": {"write", "control"}}); err != nil {
-				return nil, err
-			}
-			_ = resp.Body.Close()
-			loc, err := resp.Location()
-			if err != nil {
-				return nil, fmt.Errorf("allow %s: %w", resp.Status, err)
-			}
-			q := loc.Query()
-			return &auth.AuthorizationResult{Code: q.Get("code"), State: q.Get("state"), Iss: q.Get("iss")}, nil
-		},
-		RequestRefreshToken: true,
-		NewTokenSource: func(_ context.Context, _ *oauth2.Config, tok *oauth2.Token) (oauth2.TokenSource, error) {
-			return oauth2.StaticTokenSource(tok), nil
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil).Connect(t.Context(),
-		&mcp.StreamableClientTransport{Endpoint: env.srv.ssh.ConnectorURL(), OAuthHandler: handler, DisableStandaloneSSE: true}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cs.Close() })
-	return cs
 }

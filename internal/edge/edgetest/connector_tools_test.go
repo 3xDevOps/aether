@@ -82,8 +82,6 @@ func connectAs(t *testing.T, ctl *protocol.Client, client *connectorClient, base
 	return cs
 }
 
-// connectWithToken is connectAs that also returns the tokens the
-// connector was issued.
 func connectWithToken(t *testing.T, ctl *protocol.Client, client *connectorClient, base string, scopes ...string) (*mcp.ClientSession, *oauth2.Token) {
 	t.Helper()
 	var token *oauth2.Token

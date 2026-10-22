@@ -16,8 +16,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/sshd"
 )
 
-// rpc posts one JSON-RPC request to the connector with token and no
-// Mcp-Session-Id, as a stateless client does, and returns the answer.
 func rpc(t *testing.T, base, token, method string, params any) (*http.Response, map[string]any) {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
@@ -35,7 +33,6 @@ func rpc(t *testing.T, base, token, method string, params any) (*http.Response, 
 	return resp, out
 }
 
-// toolText calls tool name and returns whether it failed and its text.
 func toolText(t *testing.T, cs *mcp.ClientSession, name string, args map[string]any) (bool, string) {
 	t.Helper()
 	res, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: args})
@@ -45,13 +42,6 @@ func toolText(t *testing.T, cs *mcp.ClientSession, name string, args map[string]
 	return res.IsError, res.Content[0].(*mcp.TextContent).Text
 }
 
-// TestConnectorProtocolThroughTheEdge speaks raw Streamable HTTP to the
-// connector through the edge, with a bearer token and no session: each
-// protocol version ChatGPT and Claude send is accepted on initialize, a
-// newer one gets the newest initialize has, go-sdk's client negotiates
-// 2026-07-28 over server/discover, tools/list and tools/call work without
-// initialize or Mcp-Session-Id and the server issues none, and the tool
-// list fits ChatGPT's budget for a connector's tool definitions.
 func TestConnectorProtocolThroughTheEdge(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -103,13 +93,6 @@ func TestConnectorProtocolThroughTheEdge(t *testing.T) {
 	}
 }
 
-// TestConnectorIsolationThroughTheEdge holds a connector to what its
-// member may do, through the edge: a collaborator's connector messages a
-// teammate's run until the workspace restricts steering to owners, then
-// is refused, and cannot stop it; demoted to viewer, the next write call
-// is refused; a member id smuggled into any argument, nested ones
-// included, is refused; and an access token for one server is refused by
-// another on the same edge.
 func TestConnectorIsolationThroughTheEdge(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

@@ -251,10 +251,8 @@ func TestConnectorScopes(t *testing.T) {
 	e.callTool(t, writer.session, "aether_launch_run", launch)
 }
 
-// An expired access token gets a 401 that names the metadata and says it
-// expired, on which a client refreshes; the refreshed token then works. Refreshes racing with one refresh token rotate it once: one gets
-// tokens, the rest are told another refresh rotated it, and the connector
-// is kept.
+// Refreshes racing with one refresh token must rotate it once and keep
+// the connector.
 func TestConnectorExpiryAndConcurrentRefresh(t *testing.T) {
 	e := newEnv(t)
 	c := e.connect(t)
@@ -270,34 +268,48 @@ func TestConnectorExpiryAndConcurrentRefresh(t *testing.T) {
 	}
 
 	const racers = 8
-	statuses := make(chan int, racers)
+	type reply struct {
+		status int
+		body   string
+	}
+	replies := make(chan reply, racers)
 	var wg sync.WaitGroup
 	for range racers {
 		wg.Go(func() {
 			resp, err := http.PostForm(e.base+"/token", url.Values{"grant_type": {"refresh_token"}, "client_id": {c.clientID},
 				"refresh_token": {refreshed.RefreshToken}, "resource": {e.base}})
 			if err != nil {
-				statuses <- 0
+				replies <- reply{body: err.Error()}
 				return
 			}
-			_, _ = readBody(resp)
-			statuses <- resp.StatusCode
+			body, _ := readBody(resp)
+			replies <- reply{resp.StatusCode, body}
 		})
 	}
 	wg.Wait()
-	close(statuses)
-	won := 0
-	for s := range statuses {
-		switch s {
+	close(replies)
+	var winners []tokenReply
+	for r := range replies {
+		switch r.status {
 		case http.StatusOK:
-			won++
+			var won tokenReply
+			if err := json.Unmarshal([]byte(r.body), &won); err != nil {
+				t.Fatalf("the winning refresh = %s: %v", r.body, err)
+			}
+			winners = append(winners, won)
 		case http.StatusBadRequest:
 		default:
-			t.Fatalf("a racing refresh = %d", s)
+			t.Fatalf("a racing refresh = %d %s", r.status, r.body)
 		}
 	}
-	if won != 1 {
-		t.Fatalf("%d of %d racing refreshes got tokens, want 1", won, racers)
+	if len(winners) != 1 {
+		t.Fatalf("%d of %d racing refreshes got tokens, want 1", len(winners), racers)
+	}
+	if status, _, body := e.bearer(winners[0].AccessToken); status != http.StatusOK {
+		t.Fatalf("the winning access token = %d %s", status, body)
+	}
+	if next := e.refresh(t, c, winners[0].RefreshToken, http.StatusOK); next.AccessToken == "" {
+		t.Fatal("the winning refresh token issued no access token")
 	}
 	var list protocol.ConnectorListResult
 	if err := e.admin.Call(protocol.MethodConnectorList, struct{}{}, &list); err != nil || len(list.Connectors) != 1 {
