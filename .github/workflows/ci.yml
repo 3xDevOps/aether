@@ -26,9 +26,11 @@ concurrency:
 # main. Go module archives are separate from compiler archives, whose keys
 # also include their native or cross-build lane. Each lane has one writer;
 # build-and-test owns Linux amd64 native Go and bun, windows owns Windows
-# native Go, and smoke owns Linux arm64 native Go. These three Go owners
-# also save modules for their host. runner.environment stays in every key
-# so a self-hosted archive is never restored onto a hosted VM.
+# amd64 native Go, smoke owns Linux arm64 native Go, and the windows-install
+# arm64 update leg owns Windows arm64 Go. These four Go owners also save
+# modules for their host. desktop-windows owns the Windows npm caches.
+# runner.environment stays in every key so a self-hosted archive is never
+# restored onto a hosted VM.
 
 jobs:
   # Lists changed files and decides whether the code jobs run. A push to
@@ -684,6 +686,7 @@ jobs:
         with:
           version: v0.0.0-ci
           arch: ${{ matrix.arch }}
+          save-npm-cache: 'true'
 
   # The client ships for Windows, so it gets a real Windows runner. Only the
   # client's package closure is built and tested: the server is Linux-only by

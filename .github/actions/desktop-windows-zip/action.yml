@@ -12,6 +12,9 @@ inputs:
   arch:
     description: "amd64 or arm64"
     required: true
+  save-npm-cache:
+    description: "Save npm's cache after a push to main, from the one job that owns it"
+    default: 'false'
 outputs:
   zip:
     description: "Path of the zip"
@@ -45,6 +48,17 @@ runs:
           fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n")
         ' "$build/package.json" "$VERSION"
         echo "dir=$build" >> "$GITHUB_OUTPUT"
+    # npm ci checks every cached tarball against package-lock.json's
+    # integrity hashes, so a cache hit changes only the download time.
+    - name: Resolve npm's cache directory
+      id: npm
+      shell: bash
+      run: echo "dir=$(npm config get cache)" >> "$GITHUB_OUTPUT"
+    - name: Restore npm's cache
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.npm.outputs.dir }}
+        key: npm-desktop-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
     # electron-builder downloads the Electron runtime for the target
     # architecture itself; the postinstall copy would be a second download.
     - name: Install the locked shell dependencies
@@ -54,6 +68,20 @@ runs:
         ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       run: |
         npm ci --no-audit --no-fund
+    - name: Check for a saved npm cache
+      id: saved-npm
+      if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.npm.outputs.dir }}
+        key: npm-desktop-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
+        lookup-only: true
+    - name: Save npm's cache
+      if: inputs.save-npm-cache == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.saved-npm.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ steps.npm.outputs.dir }}
+        key: npm-desktop-${{ runner.os }}-${{ runner.arch }}-${{ runner.environment }}-${{ hashFiles('desktop/package-lock.json') }}
     - name: Package the unpacked app
       id: package
       shell: bash

@@ -541,15 +541,7 @@ exit 1
     $link = $shell.CreateShortcut($shortcut)
     Assert ($link.TargetPath -ieq $desktop -and $link.WorkingDirectory -ieq $appDir) 'the shortcut targets the installed app and starts it in its directory'
 
-    # Does the task come back on its own after the helper's schtasks /End?
     New-DaemonTask
-    & schtasks.exe /End /TN $taskName
-    Write-Host 'Waiting 75s to see whether the aether-daemon task restarts by itself after schtasks /End...'
-    Start-Sleep -Seconds 75
-    $selfRestart = Get-DaemonState
-    Write-Host "75s after schtasks /End the aether-daemon task is: $selfRestart (RestartOnFailure=PT1M x10)"
-    & schtasks.exe /Run /TN $taskName
-    Assert (Wait-DaemonState 'Running' 30) 'the stand-in aether-daemon task is running before the update'
 
     $electron = Join-Path $root 'Electron'
     $port = Get-FreePort
