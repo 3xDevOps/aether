@@ -215,7 +215,7 @@ func (s *Service) operationContext(request context.Context) context.Context {
 	runCtx := s.runCtx
 	s.mu.Unlock()
 	if runCtx != nil {
-		return runCtx
+		return domain.WithVia(runCtx, domain.ViaFrom(request))
 	}
 	return context.WithoutCancel(request)
 }

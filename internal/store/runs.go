@@ -105,8 +105,8 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		                   reason, branch, worktree, protected, created_at, started_at,
 		                   finished_at, profile_snapshot_id, title, last_commit, last_commit_at,
 		                   harness_session_id, base_commit, base_branch, base_source, base_checked_at, acp,
-		                   status_changed_at, requested_account_member_id, fallback_disabled, fallback_order, model, swarm_run)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?,
+		                   status_changed_at, requested_account_member_id, fallback_disabled, fallback_order, model, via, swarm_run)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?,
 		         ? AND ? IN (SELECT run_id FROM mission_attempts WHERE run_id IS NOT NULL
 		                     UNION ALL SELECT current_integrator_run_id FROM missions WHERE current_integrator_run_id IS NOT NULL
 		                     UNION ALL SELECT initial_run_id FROM mission_create_receipts
@@ -115,7 +115,7 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
 		r.BaseCommit, r.BaseBranch, r.BaseSource, baseCheckedAt, r.ACP, createdAt,
-		r.RequestedAccountMemberID, r.Fallback.Disabled, fallbackOrder, r.Model, reserved, id,
+		r.RequestedAccountMemberID, r.Fallback.Disabled, fallbackOrder, r.Model, r.Via, reserved, id,
 	); err != nil {
 		return fmt.Errorf("store: create run: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -142,7 +142,7 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
 		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt,
 		&r.Review, &reviewChangedAt, &r.ACP,
-		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.UnansweredQuestions,
+		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.Via, &r.UnansweredQuestions,
 		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked); err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member
 	runs.reason, runs.activity, runs.status_seq, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
 	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at,
-	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model`
+	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model, runs.via`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions
 // with a denied/cancelled state are not actionable, and a correlated reply

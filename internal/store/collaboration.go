@@ -92,13 +92,16 @@ type RoomMessage struct {
 	// when the message is created; neither field grants current access.
 	ActorID          domain.MemberID
 	ActorDisplayName string
-	Kind             RoomMessageKind
-	Body             string
-	Attachments      []string
-	Anchor           *RoomAnchor
-	CorrelationID    string
-	IdempotencyKey   string
-	State            RoomMessageState
+	// Via is the connector client, such as ChatGPT, the actor posted
+	// through; empty for every other caller.
+	Via            string
+	Kind           RoomMessageKind
+	Body           string
+	Attachments    []string
+	Anchor         *RoomAnchor
+	CorrelationID  string
+	IdempotencyKey string
+	State          RoomMessageState
 	// DeliverAfter is the server-selected instant at which delivery may be
 	// attempted. A nil value means the message is immediately settleable.
 	DeliverAfter  *time.Time
@@ -354,7 +357,7 @@ type CollaborationStore interface {
 
 var _ CollaborationStore = (*DB)(nil)
 
-const roomMessageCols = `id, workspace_id, run_id, actor_id, actor_display_name, kind, body, attachments, anchor, correlation_id, idempotency_key, state, deliver_after, decided_by, decided_at, delivered_at, failure, created_at, updated_at, agent_delivery`
+const roomMessageCols = `id, workspace_id, run_id, actor_id, actor_display_name, kind, body, attachments, anchor, correlation_id, idempotency_key, state, deliver_after, decided_by, decided_at, delivered_at, failure, created_at, updated_at, agent_delivery, via`
 const evidencePacketCols = `id, workspace_id, run_id, origin_kind, origin_id, owner_id, creator_id, publication_owner, trigger, objective, captured_at, expires_at, availability, expired_at, event_boundary, base_revision, retained_revision, changed_files, sources, related_room_message_ids, unresolved_facts, next_action, provenance, idempotency_key, created_at, updated_at, captures, verification_notes`
 
 func marshalCollaborationJSON(v any, empty string) (string, error) {
@@ -429,10 +432,10 @@ func (d *DB) CreateRoomMessage(ctx context.Context, m *RoomMessage) error {
 		return fmt.Errorf("store: create room message: %w", err)
 	}
 	res, err := d.db.ExecContext(ctx, `INSERT INTO room_messages (`+roomMessageCols+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, ?, NULL, ?, ?, '')
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, ?, NULL, ?, ?, '', ?)
 		ON CONFLICT (actor_id, run_id, idempotency_key) DO NOTHING`,
 		id, m.WorkspaceID, m.RunID, m.ActorID, m.ActorDisplayName, m.Kind, m.Body, attachments, nullableJSON(anchor),
-		m.CorrelationID, m.IdempotencyKey, state, deliverAfter, deliveredAt, createdAt, updatedAt)
+		m.CorrelationID, m.IdempotencyKey, state, deliverAfter, deliveredAt, createdAt, updatedAt, m.Via)
 	if err != nil {
 		return fmt.Errorf("store: create room message: %w", mapConstraint(err, ErrNotFound))
 	}
@@ -931,7 +934,7 @@ func scanRoomMessage(row interface{ Scan(...any) error }) (*RoomMessage, error) 
 	)
 	if err := row.Scan(&m.ID, &m.WorkspaceID, &m.RunID, &m.ActorID, &m.ActorDisplayName, &m.Kind, &m.Body, &attachments, &anchor,
 		&m.CorrelationID, &m.IdempotencyKey, &m.State, &deliverAfter, &m.DecidedBy, &decidedAt,
-		&deliveredAt, &failure, &createdAt, &updatedAt, &m.AgentDelivery); err != nil {
+		&deliveredAt, &failure, &createdAt, &updatedAt, &m.AgentDelivery, &m.Via); err != nil {
 		return nil, err
 	}
 	if attachments.Valid && attachments.String != "" {

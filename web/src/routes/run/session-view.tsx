@@ -95,11 +95,11 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
       used.add(messageID)
     }
     if (!steer) return messageID ? { ...row, id: messageID } : row
-    return { ...row, id: steer.id, body: steer.body, images: roomImages(steer) ?? row.images, files: roomFiles(steer) ?? row.files, authorID: steer.actor_id, ...deliveryOf(steer) }
+    return { ...row, id: steer.id, body: steer.body, images: roomImages(steer) ?? row.images, files: roomFiles(steer) ?? row.files, authorID: steer.actor_id, via: steer.via, ...deliveryOf(steer) }
   }).filter((row): row is SessionRow => row !== null)
   const waiting = steers
     .filter((m) => !used.has(m.id) && m.state !== 'cancelled' && (Date.parse(m.created_at) >= floor || deliveryOf(m).delivery === 'Queued'))
-    .map((m): SessionRow => ({ kind: 'user', id: m.id, at: m.created_at, body: m.body, images: roomImages(m), files: roomFiles(m), authorID: m.actor_id, ...deliveryOf(m) }))
+    .map((m): SessionRow => ({ kind: 'user', id: m.id, at: m.created_at, body: m.body, images: roomImages(m), files: roomFiles(m), authorID: m.actor_id, via: m.via, ...deliveryOf(m) }))
   return byTime(matched, waiting)
 }
 

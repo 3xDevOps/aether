@@ -53,22 +53,25 @@ type RoomMessage struct {
 	ActorID     string `json:"actor_id"`
 	// ActorDisplayName is the immutable display snapshot captured when the
 	// message was authored. It remains available after member removal.
-	ActorDisplayName string              `json:"actor_display_name,omitempty"`
-	Body             string              `json:"body"`
-	Kind             RoomMessageKind     `json:"kind"`
-	Attachments      []string            `json:"attachments,omitempty"`
-	Anchor           *RoomMessageAnchor  `json:"anchor,omitempty"`
-	CorrelationID    string              `json:"correlation_id,omitempty"`
-	IdempotencyKey   string              `json:"idempotency_key,omitempty"`
-	State            RoomMessageState    `json:"state"`
-	DeliverAfter     *string             `json:"deliver_after,omitempty"`
-	DecidedBy        string              `json:"decided_by,omitempty"`
-	DecidedAt        *string             `json:"decided_at,omitempty"`
-	DeliveredAt      *string             `json:"delivered_at,omitempty"`
-	AgentDelivery    string              `json:"agent_delivery,omitempty"`
-	Failure          *RoomMessageFailure `json:"failure,omitempty"`
-	CreatedAt        string              `json:"created_at"`
-	UpdatedAt        string              `json:"updated_at"`
+	ActorDisplayName string `json:"actor_display_name,omitempty"`
+	// Via is the connector client, such as ChatGPT, the actor posted
+	// through.
+	Via            string              `json:"via,omitempty"`
+	Body           string              `json:"body"`
+	Kind           RoomMessageKind     `json:"kind"`
+	Attachments    []string            `json:"attachments,omitempty"`
+	Anchor         *RoomMessageAnchor  `json:"anchor,omitempty"`
+	CorrelationID  string              `json:"correlation_id,omitempty"`
+	IdempotencyKey string              `json:"idempotency_key,omitempty"`
+	State          RoomMessageState    `json:"state"`
+	DeliverAfter   *string             `json:"deliver_after,omitempty"`
+	DecidedBy      string              `json:"decided_by,omitempty"`
+	DecidedAt      *string             `json:"decided_at,omitempty"`
+	DeliveredAt    *string             `json:"delivered_at,omitempty"`
+	AgentDelivery  string              `json:"agent_delivery,omitempty"`
+	Failure        *RoomMessageFailure `json:"failure,omitempty"`
+	CreatedAt      string              `json:"created_at"`
+	UpdatedAt      string              `json:"updated_at"`
 }
 
 type EvidenceTrigger string
@@ -314,8 +317,8 @@ func RoomMessageFromStore(m *store.RoomMessage) RoomMessage {
 	attachments := append([]string(nil), m.Attachments...)
 	return RoomMessage{
 		ID: m.ID, WorkspaceID: string(m.WorkspaceID), RunID: string(m.RunID), ActorID: string(m.ActorID),
-		ActorDisplayName: m.ActorDisplayName,
-		Kind:             RoomMessageKind(m.Kind), Body: m.Body, Attachments: attachments,
+		ActorDisplayName: m.ActorDisplayName, Via: m.Via,
+		Kind: RoomMessageKind(m.Kind), Body: m.Body, Attachments: attachments,
 		Anchor: roomMessageAnchorFromStore(m.Anchor), CorrelationID: m.CorrelationID,
 		IdempotencyKey: m.IdempotencyKey, State: RoomMessageState(m.State),
 		DeliverAfter: collaborationTimePtr(m.DeliverAfter), DecidedBy: string(m.DecidedBy),

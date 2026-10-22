@@ -36,7 +36,7 @@ credentials out of the report.
 | [Agent configuration and Files](#agent-configuration-and-files) | `aether config push` skips credential files and leaves out files with secrets. Files will not show a known credential file. | Files acts on your whole home. A credential under an unrecognized name is not locked. |
 | [SSH into a run and port forwarding](#ssh-into-a-run) | Same admission as a run shell. Forwards reach only the run's own loopback. | Sessions are not recorded. Attaching an editor lets the run's agent reach your computer through the editor. |
 | [Edge](#edge-remote-access) | SSH stays end to end. The server decides membership. By default a person approves every new device. | Under `edge-access account`, a taken-over GitHub account or edge admits a device. The edge sees connection metadata. |
-| [Connectors](#chatgpt-and-claude-connectors) | A connector acts as one member through eight tools, with that member's permissions. | TLS ends at the edge, so a compromised edge sees connector traffic and tokens. |
+| [Connectors](#chatgpt-and-claude-connectors) | A connector acts as one member through the tools of the scopes they granted, with that member's permissions. | TLS ends at the edge, so a compromised edge sees connector traffic and tokens. |
 | [Coordination](#coordination-between-runs) | Runs message only allowed peers in their workspace. A message grants no control. | Runs in one workspace share a repository and can influence each other through files. |
 | [Team memory](#team-memory) | Only members pin notes into briefs. Notes with secrets are refused. Agents cannot delete. | A note can be wrong or planted. It is data, never an instruction. |
 | [Sysbox](#the-agent-container) | Docker inside a run without the host socket. Container root maps to an unprivileged host user. | Installing it from the dashboard runs a root script on the host. |
@@ -473,15 +473,31 @@ A [connector](connectors.md) lets ChatGPT or Claude act as one member through
 eight tools: five reads, launch, message and stop. Calls get that member's role
 checks; there is no terminal, file, git or settings tool.
 
+- Identity: a connector's calls carry the device its pairing code was minted
+  on, so a method that needs an approved device refuses a connector minted on
+  a registered or pending one, under either `edge-access` policy. Audit
+  records name the connector, such as `ChatGPT connector con-7k2m9q4xbd`.
+- Scopes: the member picks them on the consent page, not the client. `read`
+  is always granted, and every member can read every run on the server, so a
+  connector can read all of them. `write` (launch runs and message them) is
+  checked by default; `control` (stop runs) is not, because text an agent
+  wrote could talk the assistant into ending work. A connector serves only
+  its scopes' tools. It can make 30 write calls at once, then one every 2
+  seconds.
+- A connector minted over a member SSH key or a tailnet connection has no
+  device: revoking a device does not cut it off. `aether mcp revoke` does.
 - TLS ends at the edge, because ChatGPT and Claude need a public certificate.
   A compromised edge sees every tool call, result and token it relays, and can
   act as the member until the token expires (an hour), a refresh rotates it, or
   you revoke the connector. It cannot mint codes or tokens: your server makes
   them and stores only their hashes.
-- Pairing needs a single-use code, valid for 10 minutes, from a device you
-  already use. Revoking that device, removing the member or tightening
-  `edge-access` cuts off their connectors. Only clients on `chatgpt.com` and
-  `claude.ai` can connect.
+- Pairing needs a single-use 40-bit code, valid for 10 minutes, from a device
+  you already use. Wrong codes are limited to 10 a minute per client address
+  (IPv6 /64), so one address cannot lock other members out of pairing, and to
+  300 a minute server-wide, which someone guessing from many addresses can
+  reach to pause pairing for everyone while they guess. Revoking that device,
+  removing the member or tightening `edge-access` cuts off their connectors.
+  Only clients on `chatgpt.com` and `claude.ai` can connect.
 - Refresh tokens rotate on every use and lapse after 30 days unused. A rotated
   refresh token used again a minute or more later deletes the connector.
 - Results contain run text other agents wrote. ChatGPT and Claude ask you

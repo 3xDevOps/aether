@@ -93,12 +93,12 @@ func (h *handler) exchangeCode(ctx context.Context, w http.ResponseWriter, r *ht
 		return
 	}
 	conn := &store.Connector{Member: ac.grant.Member, Device: ac.grant.Device, ClientID: clientID, ClientName: ac.request.ClientName,
-		RedirectHost: redirectHost(ac.request.RedirectURI), Resource: h.base, CreatedAt: now}
+		RedirectHost: redirectHost(ac.request.RedirectURI), Resource: h.base, Scopes: ac.scopes, CreatedAt: now}
 	if err := h.store.CreateConnector(ctx, conn, tokens); err != nil {
 		tokenFail(w, http.StatusInternalServerError, "server_error", err.Error())
 		return
 	}
-	slog.Info("connector: created", "connector", conn.ID, "member", conn.Member, "device", conn.Device, "redirect_host", conn.RedirectHost)
+	slog.Info("connector: created", "connector", conn.ID, "member", conn.Member, "device", conn.Device, "redirect_host", conn.RedirectHost, "scopes", conn.Scopes)
 	writeTokens(w, access, refresh)
 }
 

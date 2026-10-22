@@ -149,6 +149,12 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
           <span className="min-w-0 truncate">On {accountOwner}&apos;s account (fallback)</span>
         </>
       )}
+      {run.via && (
+        <>
+          <span aria-hidden>·</span>
+          <span className="min-w-0 truncate">Launched via {run.via}</span>
+        </>
+      )}
       <span className="flex min-w-0 flex-1 basis-0 items-center gap-1.5 self-stretch overflow-hidden" title={stateTitle(presentation, since)}>
         {detail && (
           <>

@@ -13,8 +13,8 @@ func TestPrintConnectors(t *testing.T) {
 	code := protocol.ConnectorCodeResult{URL: "https://edge.onaether.dev/mcp/abc", Code: "ABCD-EFGH",
 		ExpiresAt: now.Add(10 * time.Minute).UTC().Format(time.RFC3339)}
 	connectors := []protocol.Connector{
-		{ID: "con-1", ClientName: "ChatGPT", RedirectHost: "chatgpt.com", CreatedAt: now.UTC().Format(time.RFC3339), LastUsedAt: now.Add(-2 * time.Hour).UTC().Format(time.RFC3339)},
-		{ID: "con-2", ClientName: "Claude", RedirectHost: "claude.ai", CreatedAt: now.UTC().Format(time.RFC3339)},
+		{ID: "con-1", ClientName: "ChatGPT", RedirectHost: "chatgpt.com", Scopes: []string{"read", "write"}, CreatedAt: now.UTC().Format(time.RFC3339), LastUsedAt: now.Add(-2 * time.Hour).UTC().Format(time.RFC3339)},
+		{ID: "con-2", ClientName: "Claude", RedirectHost: "claude.ai", Scopes: []string{"read", "write", "control"}, CreatedAt: now.UTC().Format(time.RFC3339)},
 	}
 	var out strings.Builder
 	if err := printConnectors(&out, code, connectors, now); err != nil {
@@ -24,8 +24,8 @@ func TestPrintConnectors(t *testing.T) {
   URL   https://edge.onaether.dev/mcp/abc
   Code  ABCD-EFGH   one use, expires in 10 minutes; paste it on the page that opens when you connect
 Connected:
-  con-1  ChatGPT (chatgpt.com)  added 2026-10-18  last used 2h ago
-  con-2  Claude (claude.ai)  added 2026-10-18  never used
+  con-1  ChatGPT (chatgpt.com)  scopes read,write  added 2026-10-18  last used 2h ago
+  con-2  Claude (claude.ai)  scopes read,write,control  added 2026-10-18  never used
 Remove one: aether mcp revoke <id>
 `
 	if out.String() != want {

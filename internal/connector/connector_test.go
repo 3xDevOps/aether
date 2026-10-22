@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/oauth2"
+	"golang.org/x/time/rate"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
@@ -76,7 +78,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	if page, _ := readBody(resp); resp.StatusCode != http.StatusBadRequest || !strings.Contains(page, "evil.example is not one of them") {
 		t.Fatalf("untrusted client = %d %s", resp.StatusCode, page)
 	}
-	granted, err := e.consent(authorize(e.clientID), e.mintCode(t))
+	granted, err := e.consent(authorize(e.clientID), e.mintCode(t), allScopes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +87,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatalf("exchange with the wrong code_verifier = %+v", wrong)
 	}
 
-	first := e.connect(t)
+	first := e.connect(t, allScopes...)
 	if got := first.session.InitializeResult().Instructions; !strings.Contains(got, "untrusted") {
 		t.Errorf("instructions = %q", got)
 	}
@@ -117,7 +119,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatalf("aether_list_workspaces = %s", out)
 	}
 	e.callTool(t, first.session, "aether_launch_run", map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "fix the flaky test"})
-	if got := e.runs.launches(); !slices.Equal(got, []string{string(e.ws.ID) + " claude fix the flaky test"}) {
+	if got := e.runs.launches(); !slices.Equal(got, []string{string(e.ws.ID) + " claude fix the flaky test via Test client"}) {
 		t.Fatalf("launches = %v", got)
 	}
 
@@ -126,7 +128,8 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(list.Connectors) != 1 || list.Connectors[0].DeviceID != string(e.deviceID) || list.Connectors[0].RedirectHost != e.clientHost ||
-		list.Connectors[0].ClientName != "Test client" || list.Connectors[0].LastUsedAt == "" {
+		list.Connectors[0].ClientName != "Test client" || list.Connectors[0].LastUsedAt == "" ||
+		!slices.Equal(list.Connectors[0].Scopes, []string{"read", "write", "control"}) {
 		t.Fatalf("connector.list = %+v", list)
 	}
 
@@ -145,7 +148,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatal("a revoked connector still lists tools")
 	}
 
-	second := e.connect(t)
+	second := e.connect(t, allScopes...)
 	next := e.refresh(t, second, second.token.RefreshToken, http.StatusOK)
 	if raced := e.refresh(t, second, second.token.RefreshToken, http.StatusBadRequest); raced.Error != "invalid_grant" ||
 		!strings.Contains(raced.Description, "less than a minute ago") {
@@ -163,7 +166,7 @@ func TestConnectorEndToEnd(t *testing.T) {
 	}
 	e.refresh(t, second, next.RefreshToken, http.StatusBadRequest)
 
-	third := e.connect(t)
+	third := e.connect(t, allScopes...)
 	if err := e.db.RevokeDevice(ctx, e.deviceID); err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +175,187 @@ func TestConnectorEndToEnd(t *testing.T) {
 	}
 	if refused := e.refresh(t, third, third.token.RefreshToken, http.StatusBadRequest); !strings.Contains(refused.Description, "revoked") {
 		t.Fatalf("refresh on a revoked device = %+v", refused)
+	}
+}
+
+// The consent page grants read always and write and control only when
+// checked, tools/list shows only the granted tools, and a connector's
+// write calls are limited per minute with the time to retry.
+func TestConnectorScopes(t *testing.T) {
+	e := newEnv(t)
+	tools := func(c *connection) []string {
+		var names []string
+		for tool, err := range c.session.Tools(t.Context(), nil) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			names = append(names, tool.Name)
+		}
+		slices.Sort(names)
+		return names
+	}
+	reads := []string{"aether_get_run", "aether_list_agents", "aether_list_runs", "aether_list_workspaces", "aether_run_history"}
+	reader := e.connect(t)
+	if got := tools(reader); !slices.Equal(got, reads) {
+		t.Fatalf("tools with no box checked = %v, want %v", got, reads)
+	}
+	for name, args := range map[string]map[string]any{
+		"aether_launch_run":  {"workspace_id": e.ws.ID, "harness": "claude", "task": "t"},
+		"aether_message_run": {"run_id": "run-1", "message": "m"},
+		"aether_stop_run":    {"run_id": "run-1"},
+	} {
+		res, err := reader.session.CallTool(t.Context(), &mcp.CallToolParams{Name: name, Arguments: args})
+		if err == nil && !res.IsError {
+			t.Fatalf("%s by name without its scope = %+v", name, res)
+		}
+	}
+	if got := e.runs.launches(); len(got) != 0 {
+		t.Fatalf("launches without the write scope = %v", got)
+	}
+	writer := e.connect(t, "write", "admin")
+	if got, want := tools(writer), []string{"aether_get_run", "aether_launch_run", "aether_list_agents", "aether_list_runs",
+		"aether_list_workspaces", "aether_message_run", "aether_run_history"}; !slices.Equal(got, want) {
+		t.Fatalf("tools with write checked = %v, want %v", got, want)
+	}
+	var list protocol.ConnectorListResult
+	if err := e.admin.Call(protocol.MethodConnectorList, struct{}{}, &list); err != nil {
+		t.Fatal(err)
+	}
+	scopes := make([]string, 0, len(list.Connectors))
+	for _, c := range list.Connectors {
+		scopes = append(scopes, strings.Join(c.Scopes, " "))
+	}
+	if slices.Sort(scopes); !slices.Equal(scopes, []string{"read", "read write"}) {
+		t.Fatalf("connector.list = %+v", list)
+	}
+
+	launch := map[string]any{"workspace_id": e.ws.ID, "harness": "claude", "task": "t"}
+	for range writeBurst {
+		e.callTool(t, writer.session, "aether_launch_run", launch)
+	}
+	res, err := writer.session.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_launch_run", Arguments: launch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := fmt.Sprint(res.Content[0].(*mcp.TextContent).Text); !res.IsError ||
+		!strings.Contains(text, fmt.Sprintf("used its %d write calls and gets one more every 2s; retry in 2s", writeBurst)) {
+		t.Fatalf("write call over the limit = %v %s", res.IsError, text)
+	}
+	e.callTool(t, writer.session, "aether_list_runs", nil)
+	e.skew.Store(int64(2 * time.Second))
+	e.callTool(t, writer.session, "aether_launch_run", launch)
+}
+
+// Wrong pairing codes lock out only the address that sent them, so no one
+// can deny pairing to another member.
+func TestWrongCodesLockOutOnlyTheirAddress(t *testing.T) {
+	e := newEnv(t)
+	post := e.consentPoster(t)
+	for range wrongCodeLimit {
+		if status, _ := post("[2001:db8::1]:4000", "zzzz-zzzz"); status != http.StatusForbidden {
+			t.Fatalf("wrong code = %d", status)
+		}
+	}
+	if status, body := post("[2001:db8::2]:4001", "zzzz-zzzz"); status != http.StatusTooManyRequests || !strings.Contains(body, "came from your address") {
+		t.Fatalf("wrong code from the same /64 after the limit = %d %s", status, body)
+	}
+	if status, body := post("192.0.2.7:5000", e.mintCode(t)); status != http.StatusSeeOther {
+		t.Fatalf("right code from another address = %d %s", status, body)
+	}
+}
+
+// An address whose window of wrong codes has passed starts a new one,
+// rather than guessing freely until the next sweep forgets it: here the
+// sweep at 65s keeps the address's window from 10s.
+func TestWrongCodeWindowRestarts(t *testing.T) {
+	e := newEnv(t)
+	post := e.consentPoster(t)
+	post("192.0.2.1:4000", "zzzz-zzzz")
+	e.skew.Store(int64(10 * time.Second))
+	post("192.0.2.2:4000", "zzzz-zzzz")
+	e.skew.Store(int64(65 * time.Second))
+	post("192.0.2.3:4000", "zzzz-zzzz")
+	e.skew.Store(int64(75 * time.Second))
+	checked := 0
+	for range 1000 {
+		switch status, body := post("192.0.2.2:4000", "zzzz-zzzz"); status {
+		case http.StatusForbidden:
+			checked++
+		case http.StatusTooManyRequests:
+		default:
+			t.Fatalf("wrong code = %d %s", status, body)
+		}
+	}
+	if checked != wrongCodeLimit {
+		t.Fatalf("checked %d of 1000 wrong codes from one address in a minute, want %d", checked, wrongCodeLimit)
+	}
+}
+
+// Wrong codes from many addresses, each under its own limit, stop pairing
+// server-wide at serverWrongCodeLimit a minute, and it resumes after.
+func TestWrongCodesServerWideCeiling(t *testing.T) {
+	e := newEnv(t)
+	post := e.consentPoster(t)
+	for i := range serverWrongCodeLimit {
+		from := fmt.Sprintf("[2001:db8:0:%x::1]:4000", i/wrongCodeLimit)
+		if status, body := post(from, "zzzz-zzzz"); status != http.StatusForbidden {
+			t.Fatalf("wrong code %d from %s = %d %s", i, from, status, body)
+		}
+	}
+	code := e.mintCode(t)
+	if status, body := post("192.0.2.7:5000", code); status != http.StatusTooManyRequests ||
+		!strings.Contains(body, fmt.Sprintf("%d wrong codes came to this server from all addresses", serverWrongCodeLimit)) {
+		t.Fatalf("right code past the server-wide limit = %d %s", status, body)
+	}
+	e.skew.Store(int64(wrongCodeWindow))
+	if status, body := post("192.0.2.7:5000", code); status != http.StatusSeeOther {
+		t.Fatalf("right code a minute later = %d %s", status, body)
+	}
+}
+
+// The write buckets of connectors idle for a minute are dropped.
+func TestWriteBucketsOfIdleConnectorsDropped(t *testing.T) {
+	h := &handler{writes: map[string]*rate.Limiter{}}
+	now := time.Now()
+	for range writeBurst {
+		if err := h.allowWrite("con-a", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := h.allowWrite("con-b", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, kept := h.writes["con-a"]; kept || len(h.writes) != 1 {
+		t.Fatalf("write buckets a minute later = %v", slices.Collect(maps.Keys(h.writes)))
+	}
+}
+
+// consentPoster posts a consent form for one authorization request with a
+// pairing code, as the edge relays it from a client address.
+func (e *env) consentPoster(t *testing.T) func(from, code string) (int, string) {
+	t.Helper()
+	resp, err := http.Get(e.base + "/authorize?" + url.Values{"response_type": {"code"}, "client_id": {e.clientID},
+		"redirect_uri": {e.redirect}, "code_challenge": {oauth2.S256ChallengeFromVerifier(oauth2.GenerateVerifier())},
+		"code_challenge_method": {"S256"}, "resource": {e.base}}.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := readBody(resp)
+	m := requestField.FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("consent page = %d %s", resp.StatusCode, page)
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return func(from, code string) (int, string) {
+		req, _ := http.NewRequest(http.MethodPost, e.base+"/authorize", strings.NewReader(url.Values{"request": {m[1]}, "code": {code}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set(edgeproto.HeaderClientAddr, from)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := readBody(resp)
+		return resp.StatusCode, body
 	}
 }
 
@@ -189,7 +373,7 @@ type env struct {
 	// device calls as the member over their approved edge device key,
 	// admin over their member SSH key.
 	device, admin *protocol.Client
-	// skew moves the handler's clock forward.
+	// skew moves the handler's clock, frozen at the env's start, forward.
 	skew *atomic.Int64
 }
 
@@ -269,7 +453,8 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	skew := new(atomic.Int64)
-	h.(*handler).now = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
+	start := time.Now()
+	h.(*handler).now = func() time.Time { return start.Add(time.Duration(skew.Load())) }
 	serve(t, ln, h, false)
 
 	return &env{db: db, runs: runs, ws: ws, edge: edge, origin: origin, base: srv.ConnectorURL(), deviceID: dev.ID,
@@ -308,10 +493,13 @@ type connection struct {
 	clientID string
 }
 
+// allScopes checks both boxes on the consent page.
+var allScopes = []string{"write", "control"}
+
 // connect mints a pairing code on the member's device and lets go-sdk's
 // client discover and authorize with the test's client_id metadata
-// document, pasting a wrong code first.
-func (e *env) connect(t *testing.T) *connection {
+// document, pasting a wrong code first and checking the boxes of scopes.
+func (e *env) connect(t *testing.T, scopes ...string) *connection {
 	t.Helper()
 	code := e.mintCode(t)
 	c := &connection{clientID: e.clientID}
@@ -319,7 +507,7 @@ func (e *env) connect(t *testing.T) *connection {
 		ClientIDMetadataDocumentConfig: &auth.ClientIDMetadataDocumentConfig{URL: e.clientID},
 		RedirectURL:                    e.redirect,
 		AuthorizationCodeFetcher: func(_ context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
-			return e.consent(args.URL, code)
+			return e.consent(args.URL, code, scopes)
 		},
 		RequestRefreshToken: true,
 		NewTokenSource: func(_ context.Context, _ *oauth2.Config, token *oauth2.Token) (oauth2.TokenSource, error) {
@@ -355,8 +543,9 @@ func (e *env) mintCode(t *testing.T) string {
 var requestField = regexp.MustCompile(`name="request" value="([^"]+)"`)
 
 // consent is the member in the browser: it opens the consent page, pastes
-// a wrong code, then the right one, and returns where it was sent.
-func (e *env) consent(authURL, code string) (*auth.AuthorizationResult, error) {
+// a wrong code, then the right one with the boxes of scopes checked, and
+// returns where it was sent.
+func (e *env) consent(authURL, code string, scopes []string) (*auth.AuthorizationResult, error) {
 	browser := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := browser.Get(authURL)
 	if err != nil {
@@ -367,7 +556,8 @@ func (e *env) consent(authURL, code string) (*auth.AuthorizationResult, error) {
 		return nil, err
 	}
 	m := requestField.FindStringSubmatch(page)
-	if resp.StatusCode != http.StatusOK || m == nil || !strings.Contains(page, "Connect <strong>Test client ("+e.clientHost+")</strong> to <strong>devbox</strong>") {
+	if resp.StatusCode != http.StatusOK || m == nil || !strings.Contains(page, "Connect <strong>Test client ("+e.clientHost+")</strong> to <strong>devbox</strong>") ||
+		!strings.Contains(page, `value="write" checked>`) || !strings.Contains(page, `value="control">`) {
 		return nil, fmt.Errorf("consent page = %d %s", resp.StatusCode, page)
 	}
 	if resp, err = browser.PostForm(authURL, url.Values{"request": {m[1]}, "code": {"zzzz-zzzz"}}); err != nil {
@@ -379,7 +569,7 @@ func (e *env) consent(authURL, code string) (*auth.AuthorizationResult, error) {
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(page, "wrong, expired or already used") {
 		return nil, fmt.Errorf("wrong code = %d %s", resp.StatusCode, page)
 	}
-	if resp, err = browser.PostForm(authURL, url.Values{"request": {m[1]}, "code": {code}}); err != nil {
+	if resp, err = browser.PostForm(authURL, url.Values{"request": {m[1]}, "code": {code}, "scope": scopes}); err != nil {
 		return nil, err
 	}
 	if _, err = readBody(resp); err != nil {
@@ -546,17 +736,18 @@ type edgeAt struct {
 func (e *edgeAt) Origin() string   { return e.origin }
 func (e *edgeAt) EdgeVersion() int { return int(e.version.Load()) }
 
-// fakeRuns records launches and answers the reads a run snapshot makes.
+// fakeRuns records launches, with the connector client each came via, and
+// answers the reads a run snapshot makes.
 type fakeRuns struct {
 	sshd.RunController
 	mu       sync.Mutex
 	launched []string
 }
 
-func (f *fakeRuns) Launch(_ context.Context, ws domain.WorkspaceID, member, _ domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
+func (f *fakeRuns) Launch(ctx context.Context, ws domain.WorkspaceID, member, _ domain.MemberID, task, harness string, mode domain.LaunchMode) (*domain.Run, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.launched = append(f.launched, fmt.Sprintf("%s %s %s", ws, harness, task))
+	f.launched = append(f.launched, fmt.Sprintf("%s %s %s via %s", ws, harness, task, domain.ViaFrom(ctx)))
 	return &domain.Run{ID: "run-launched", WorkspaceID: ws, MemberID: member, Task: task, Harness: harness, Mode: mode, Status: domain.RunQueued}, nil
 }
 
