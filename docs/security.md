@@ -470,8 +470,8 @@ labels, client addresses, timing and byte counts
 ## ChatGPT and Claude connectors
 
 A [connector](connectors.md) lets ChatGPT or Claude act as one member through
-eight tools: five reads, launch, message and stop. Calls get that member's role
-checks; there is no terminal, file, git or settings tool.
+the tools of the scopes they granted. Calls get that member's role checks;
+there is no terminal, file, settings or git-writing tool.
 
 - Identity: a connector's calls carry the device its pairing code was minted
   on, so a method that needs an approved device refuses a connector minted on
@@ -479,9 +479,11 @@ checks; there is no terminal, file, git or settings tool.
   records name the connector, such as `ChatGPT connector con-7k2m9q4xbd`.
 - Scopes: the member picks them on the consent page, not the client. `read`
   is always granted, and every member can read every run on the server, so a
-  connector can read all of them. `write` (launch runs and message them) is
-  checked by default; `control` (stop runs) is not, because text an agent
-  wrote could talk the assistant into ending work. A connector serves only
+  connector can read all of them. `write` (launch runs and swarms, message,
+  pause and resume runs, answer questions, mark runs reviewed) is checked by
+  default; `control` (decide approvals and permission requests, stop and close
+  runs, cancel swarms) is not, because text an agent wrote could talk the
+  assistant into approving or ending work. A connector serves only
   its scopes' tools. It can make 30 write calls at once, then one every 2
   seconds.
 - A connector minted over a member SSH key or a tailnet connection has no
@@ -500,8 +502,16 @@ checks; there is no terminal, file, git or settings tool.
   Only clients on `chatgpt.com` and `claude.ai` can connect.
 - Refresh tokens rotate on every use and lapse after 30 days unused. A rotated
   refresh token used again a minute or more later deletes the connector.
-- Results contain run text other agents wrote. ChatGPT and Claude ask you
-  before each write tool; Aether adds no confirmation of its own.
+- Results contain text agents and other people wrote: reports, history, PR
+  comments, memory notes. Tools put it under an `untrusted` field, and the
+  server's instructions tell the assistant never to follow it. ChatGPT and
+  Claude ask you before each write tool; Aether adds no confirmation of its
+  own. A permission request is only ever allowed or denied once: the
+  connector never picks an "always" option, and refuses a decision whose
+  `action` text differs from the pending request's, so the confirmation
+  shows what is decided.
+- No tool takes a member id. A swarm's accountable human and every agent's
+  account are the connector's member.
 
 ## Coordination between runs
 

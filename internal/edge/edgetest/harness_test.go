@@ -674,11 +674,13 @@ type serverNode struct {
 	policy edgeproto.AccessPolicy
 	mcp    http.Handler
 	client *connectorClient
-	addr   string
-	db     *store.DB
-	ssh    *sshd.Server
-	agent  *edgeagent.Agent
-	stop   func()
+	// services are the team-feature services a connector server serves.
+	services sshd.Services
+	addr     string
+	db       *store.DB
+	ssh      *sshd.Server
+	agent    *edgeagent.Agent
+	stop     func()
 }
 
 func (h *harness) newServer(policy edgeproto.AccessPolicy) *serverNode {
@@ -717,7 +719,7 @@ func (s *serverNode) start() {
 	srv, err := sshd.New(sshd.Config{
 		Addr: s.addr, HostKeyPath: hostKeyPath, Store: db, Bus: bus,
 		Git: noGit{}, PTY: noPTY{}, Runs: runs,
-		InvitesDir: filepath.Join(s.dir, "invites"), EdgeAccess: s.policy,
+		InvitesDir: filepath.Join(s.dir, "invites"), EdgeAccess: s.policy, Services: s.services,
 	})
 	if err != nil {
 		t.Fatal(err)

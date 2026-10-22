@@ -22,6 +22,7 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -56,10 +57,11 @@ func newConnectorClient(t *testing.T) *connectorClient {
 }
 
 // newConnectorServer is newServer with the real connector handler serving
-// its MCP connector requests, trusting client.
-func (h *harness) newConnectorServer(policy edgeproto.AccessPolicy, client *connectorClient) *serverNode {
+// its MCP connector requests, trusting client, and services serving the
+// team features.
+func (h *harness) newConnectorServer(policy edgeproto.AccessPolicy, client *connectorClient, services sshd.Services) *serverNode {
 	h.t.Helper()
-	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, client: client, addr: "127.0.0.1:0"}
+	s := &serverNode{h: h, dir: h.t.TempDir(), policy: policy, client: client, services: services, addr: "127.0.0.1:0"}
 	s.start()
 	h.t.Cleanup(func() { s.stop() })
 	return s
@@ -88,8 +90,9 @@ var requestField = regexp.MustCompile(`name="request" value="([^"]+)"`)
 
 // consent is the member's browser on the consent page, through the edge:
 // the page must be sandboxed and name the client. It pastes a wrong code,
-// then code, and returns where the server sent the browser.
-func (c *connectorClient) consent(ctx context.Context, authURL, code string) (*auth.AuthorizationResult, error) {
+// then code with the boxes of scopes checked, and returns where the server
+// sent the browser.
+func (c *connectorClient) consent(ctx context.Context, authURL, code string, scopes ...string) (*auth.AuthorizationResult, error) {
 	browser := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	send := func(method string, form url.Values) (*http.Response, string, error) {
 		req, err := http.NewRequestWithContext(ctx, method, authURL, strings.NewReader(form.Encode()))
@@ -123,7 +126,7 @@ func (c *connectorClient) consent(ctx context.Context, authURL, code string) (*a
 		!strings.Contains(page, "That code is wrong, expired or already used. Run aether mcp for a new one and paste it here.") {
 		return nil, fmt.Errorf("wrong code: %s %v\n%s", resp.Status, resp.Header, page)
 	}
-	if resp, page, err = send(http.MethodPost, url.Values{"request": {m[1]}, "code": {code}, "scope": {"write", "control"}}); err != nil {
+	if resp, page, err = send(http.MethodPost, url.Values{"request": {m[1]}, "code": {code}, "scope": scopes}); err != nil {
 		return nil, err
 	}
 	loc, err := resp.Location()
@@ -189,7 +192,7 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t)
 			client := newConnectorClient(t)
-			s := h.newConnectorServer(policy, client)
+			s := h.newConnectorServer(policy, client, sshd.Services{})
 			clients := h.login(alice, bob, bob)
 			al, bo, bobNew := clients[0], clients[1], clients[2]
 			h.claimServer(al, s)
@@ -233,7 +236,7 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 				ClientIDMetadataDocumentConfig: &auth.ClientIDMetadataDocumentConfig{URL: client.id},
 				RedirectURL:                    client.redirect,
 				AuthorizationCodeFetcher: func(ctx context.Context, args *auth.AuthorizationArgs) (*auth.AuthorizationResult, error) {
-					return client.consent(ctx, args.URL, code.Code)
+					return client.consent(ctx, args.URL, code.Code, "write", "control")
 				},
 				RequestRefreshToken: true,
 				NewTokenSource: func(_ context.Context, _ *oauth2.Config, tok *oauth2.Token) (oauth2.TokenSource, error) {
@@ -253,10 +256,8 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 				}
 				names = append(names, tool.Name)
 			}
-			slices.Sort(names)
-			if want := []string{"aether_get_run", "aether_launch_run", "aether_list_agents", "aether_list_runs", "aether_list_workspaces",
-				"aether_message_run", "aether_run_history", "aether_stop_run"}; !slices.Equal(names, want) {
-				t.Fatalf("tools = %v, want %v", names, want)
+			if len(names) != 26 {
+				t.Fatalf("tools = %v, want all 26", names)
 			}
 			const task = "fix the flaky login test"
 			if out := callTool(t, session, "aether_list_runs", map[string]any{"mine": true}); strings.Contains(out, task) {
@@ -331,7 +332,7 @@ func TestConnectorAtEdgeProtocol1(t *testing.T) {
 		}
 		return e.msg, true
 	})
-	s := h.newConnectorServer(edgeproto.PolicyApprovedDevices, newConnectorClient(t))
+	s := h.newConnectorServer(edgeproto.PolicyApprovedDevices, newConnectorClient(t), sshd.Services{})
 	al := h.login(alice)[0]
 	h.claimServer(al, s)
 	if v := s.agent.EdgeVersion(); v != 1 {

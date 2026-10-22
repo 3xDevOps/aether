@@ -376,8 +376,8 @@ input[type=checkbox]{width:auto;font-size:inherit}
 <input type="hidden" name="request" value="{{.Request}}">
 <fieldset>
 <legend>Also allow it to:</legend>
-<p><label><input type="checkbox" name="scope" value="write"{{if .Write}} checked{{end}}> <strong>Launch and message</strong>: launch runs and message them.</label></p>
-<p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Stop</strong>: stop runs. Text an agent wrote that the assistant reads could then talk it into ending work without asking you.</label></p>
+<p><label><input type="checkbox" name="scope" value="write"{{if .Write}} checked{{end}}> <strong>Launch and message</strong>: launch runs and swarms, message runs, answer agents' questions, pause, resume and mark runs reviewed.</label></p>
+<p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Stop and approve</strong>: decide approvals and permission requests, stop and close runs, cancel swarms. Text an agent wrote that the assistant reads could then talk it into approving or ending work without asking you.</label></p>
 </fieldset>
 <p><label for="code">Paste the code from <code>aether mcp</code>:</label></p>
 <p><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit"><strong>Allow</strong></button></p>
