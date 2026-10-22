@@ -221,8 +221,11 @@ func TestConnectorScopes(t *testing.T) {
 	if err := e.admin.Call(protocol.MethodConnectorList, struct{}{}, &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Connectors) != 2 || !slices.Equal(list.Connectors[0].Scopes, []string{"read"}) ||
-		!slices.Equal(list.Connectors[1].Scopes, []string{"read", "write"}) {
+	scopes := make([]string, 0, len(list.Connectors))
+	for _, c := range list.Connectors {
+		scopes = append(scopes, strings.Join(c.Scopes, " "))
+	}
+	if slices.Sort(scopes); !slices.Equal(scopes, []string{"read", "read write"}) {
 		t.Fatalf("connector.list = %+v", list)
 	}
 
@@ -370,7 +373,7 @@ type env struct {
 	// device calls as the member over their approved edge device key,
 	// admin over their member SSH key.
 	device, admin *protocol.Client
-	// skew moves the handler's clock forward.
+	// skew moves the handler's clock, frozen at the env's start, forward.
 	skew *atomic.Int64
 }
 
@@ -450,7 +453,8 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	skew := new(atomic.Int64)
-	h.(*handler).now = func() time.Time { return time.Now().Add(time.Duration(skew.Load())) }
+	start := time.Now()
+	h.(*handler).now = func() time.Time { return start.Add(time.Duration(skew.Load())) }
 	serve(t, ln, h, false)
 
 	return &env{db: db, runs: runs, ws: ws, edge: edge, origin: origin, base: srv.ConnectorURL(), deviceID: dev.ID,
