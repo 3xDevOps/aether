@@ -484,11 +484,18 @@ pwsh -NoProfile -File scripts/install-test.ps1
 ```
 
 `scripts/install-smoke.ps1` and `scripts/update-smoke.ps1` install, update
-and launch the real app under Defender with no exclusions. They change
-Defender settings, the Start Menu and the registry, so they refuse to run
-unless `GITHUB_ACTIONS=true` and `RUNNER_ENVIRONMENT=github-hosted`. When one
+and launch the real app under Defender. They change Defender settings, the
+Start Menu and the registry, so they refuse to run unless
+`GITHUB_ACTIONS=true` and `RUNNER_ENVIRONMENT=github-hosted`. When one
 fails, `scripts/defender-diagnostics.ps1` prints Defender's detections in the
 job log. The screenshots are uploaded as `windows-desktop-*` artifacts.
+
+Before they run, `scripts/windows-defender.ps1 -Mode Prepare` removes the
+runner image's Defender exclusions and adds one for GitHub's own agent,
+`provjobd.exe*` in the runner user's Temp. On `windows-11-arm`, Defender
+flags that agent as `Trojan:Win32/Gracing.I` and removes it; the job then
+hangs until GitHub fails it with "The hosted runner lost communication with
+the server". Nothing Aether builds or installs is excluded.
 
 ## How CI runs the suites
 

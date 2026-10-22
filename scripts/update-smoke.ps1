@@ -35,8 +35,10 @@ $scanningFlags = @('DisableRealtimeMonitoring', 'DisableIOAVProtection', 'Disabl
 foreach ($flag in $scanningFlags) {
     if ($initialPreferences.$flag) { throw "Defender $flag is enabled; scanning would be incomplete." }
 }
-if ($initialPreferences.ExclusionPath -or $initialPreferences.ExclusionProcess -or $initialPreferences.ExclusionExtension) {
-    throw 'Run this scenario in a disposable runner without Defender exclusions.'
+# The one exclusion scripts/windows-defender.ps1 -Mode Prepare leaves: GitHub's hosted runner agent.
+$agentExclusion = "$env:SystemDrive\Users\*\AppData\Local\Temp\provjobd.exe*"
+if (($initialPreferences.ExclusionPath -join "`0") -ne $agentExclusion -or $initialPreferences.ExclusionProcess -or $initialPreferences.ExclusionExtension) {
+    throw "Run this scenario in a disposable runner whose only Defender exclusion is $agentExclusion."
 }
 $knownDetections = @(Get-MpThreatDetection | ForEach-Object { $_.DetectionID })
 $node = (Get-Command node.exe -CommandType Application | Select-Object -First 1).Source
@@ -539,15 +541,7 @@ exit 1
     $link = $shell.CreateShortcut($shortcut)
     Assert ($link.TargetPath -ieq $desktop -and $link.WorkingDirectory -ieq $appDir) 'the shortcut targets the installed app and starts it in its directory'
 
-    # Does the task come back on its own after the helper's schtasks /End?
     New-DaemonTask
-    & schtasks.exe /End /TN $taskName
-    Write-Host 'Waiting 75s to see whether the aether-daemon task restarts by itself after schtasks /End...'
-    Start-Sleep -Seconds 75
-    $selfRestart = Get-DaemonState
-    Write-Host "75s after schtasks /End the aether-daemon task is: $selfRestart (RestartOnFailure=PT1M x10)"
-    & schtasks.exe /Run /TN $taskName
-    Assert (Wait-DaemonState 'Running' 30) 'the stand-in aether-daemon task is running before the update'
 
     $electron = Join-Path $root 'Electron'
     $port = Get-FreePort
@@ -693,7 +687,7 @@ exit 1
             throw "The scenario changed Defender $property."
         }
     }
-    Write-Host 'Defender real-time protection stayed on with no exclusions through every update.'
+    Write-Host "Defender real-time protection stayed on, with no exclusion but $agentExclusion, through every update."
 } catch {
     Write-Host $_.ScriptStackTrace
     & "$PSScriptRoot/defender-diagnostics.ps1"

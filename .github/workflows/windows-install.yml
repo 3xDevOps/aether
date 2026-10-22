@@ -10,7 +10,7 @@ jobs:
   install:
     name: install (${{ matrix.shell }}, Node ${{ matrix.node }}, desktop ${{ matrix.desktop }})
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -134,7 +134,7 @@ jobs:
     name: update (${{ matrix.arch }}, running aether.exe and desktop)
     needs: dashboard
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -206,6 +206,14 @@ jobs:
             go build -trimpath -overlay $overlay -ldflags "-s -w -X github.com/3xDevOps/Aether/internal/version.Version=$($pair[1]) -X github.com/3xDevOps/Aether/internal/version.Commit=$env:GITHUB_SHA" -o "$env:RUNNER_TEMP/aether-$($pair[0]).exe" ./cmd/aether
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
+      # The only Windows arm64 Go job, so it writes that host's module and
+      # compiler caches, before Defender is armed.
+      - uses: ./.github/actions/go-cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.arch == 'arm64'
+        with:
+          mode: save
+          variant: windows-install
+          save-modules: 'true'
       - id: desktop
         uses: ./.github/actions/desktop-windows-zip
         with:
