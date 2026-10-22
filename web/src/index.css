@@ -179,6 +179,17 @@
   --state-paused: #6e6e6e;
   --on-failed: #ffffff;
 
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --series-other: #8f8f8f;
+  --series-rest: #c9c9c9;
+
   --diff-add: #1a7a36;
   --diff-del: #c8321f;
   --diff-bg: 8%;
@@ -225,6 +236,17 @@
   --state-done: #45c26a;
   --state-paused: #8a8a8a;
   --on-failed: #141516;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --series-other: #7a7a7a;
+  --series-rest: #4a4a4a;
 
   --diff-add: #45c26a;
   --diff-del: #f05c4a;
@@ -341,6 +363,16 @@
   --color-state-failed: var(--state-failed);
   --color-state-done: var(--state-done);
   --color-state-paused: var(--state-paused);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
+  --color-series-6: var(--series-6);
+  --color-series-7: var(--series-7);
+  --color-series-8: var(--series-8);
+  --color-series-other: var(--series-other);
+  --color-series-rest: var(--series-rest);
   --color-state-working-soft: color-mix(in srgb, var(--state-working) var(--tone-soft), transparent);
   --color-state-needs-you-soft: color-mix(in srgb, var(--state-needs-you) var(--tone-soft), transparent);
   --color-state-failed-soft: color-mix(in srgb, var(--state-failed) var(--tone-soft), transparent);

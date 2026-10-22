@@ -2126,3 +2126,81 @@ export interface AssistantNoticePayload {
   title: string
   body: string
 }
+
+export interface SystemStatsParams {
+  /** Only host samples taken after this Unix-millisecond time; 0 or absent returns the whole retained window. */
+  since_ms?: number
+}
+
+export interface SystemHost {
+  cpu_cores: number
+  memory_total_bytes: number
+  swap_total_bytes: number
+  uptime_seconds: number
+}
+
+/** CPU figures are percent of all cores; rates are bytes per second; pressure is PSI "some avg10" and absent without /proc/pressure. */
+export interface SystemSample {
+  t_ms: number
+  cpu_user: number
+  cpu_system: number
+  cpu_iowait: number
+  cpu_steal: number
+  memory_used_bytes: number
+  memory_available_bytes: number
+  memory_free_bytes: number
+  swap_used_bytes: number
+  load1: number
+  load5: number
+  load15: number
+  net_rx_bps: number
+  net_tx_bps: number
+  disk_read_bps: number
+  disk_write_bps: number
+  pressure_cpu?: number
+  pressure_memory?: number
+  pressure_io?: number
+}
+
+export interface SystemContainer {
+  /** `browser` is a run's browser sidecar and `owner_id` its run; `member` is that member's environment container. */
+  owner_kind: 'run' | 'browser' | 'member'
+  owner_id: string
+  member_id: string
+  workspace_id?: string
+  title?: string
+  status?: string
+  /** Absent until two samples exist. */
+  cpu_cores?: number
+  /** Absent or 0 is unlimited. */
+  cpu_limit_cores?: number
+  cpu_throttled_percent?: number
+  memory_bytes: number
+  memory_limit_bytes: number
+  pids: number
+  pids_limit: number
+  net_rx_bps?: number
+  net_tx_bps?: number
+  disk_read_bps?: number
+  disk_write_bps?: number
+}
+
+/** Containers the caller may not see, plus Aether containers with no run or member owner. */
+export interface SystemOthers {
+  containers: number
+  cpu_cores: number
+  memory_bytes: number
+}
+
+export interface SystemStatsResult {
+  interval_ms: number
+  retention_ms: number
+  host: SystemHost
+  host_error?: string
+  samples: SystemSample[]
+  /** 0 or absent: containers not measured yet. */
+  containers_at_ms?: number
+  containers_error?: string
+  containers: SystemContainer[]
+  others?: SystemOthers
+}

@@ -111,6 +111,8 @@ import type {
   Workspace,
   WorkspaceEnvironment,
   WorkspaceVariable,
+  SystemStatsParams,
+  SystemStatsResult,
 } from '@/lib/types'
 import type {
   IntegrationDecideParams,
@@ -507,6 +509,7 @@ export const api = {
   accountUsage: (params: { account_member_id?: string; refresh?: boolean } = {}) =>
     call<UsageResult>('account.usage', params),
   insightsGet: (params: InsightsParams) => call<InsightsResult>('insights.get', params),
+  systemStats: (params: SystemStatsParams, signal?: AbortSignal) => call<SystemStatsResult>('system.stats', params, signal),
   memorySearch: (params: MemorySearchParams) => call<MemorySearchResult>('memory.search', params),
   memoryShow: (workspaceID: string, id: string) =>
     call<MemoryShowResult>('memory.show', { workspace_id: workspaceID, id }),

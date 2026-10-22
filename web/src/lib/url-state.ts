@@ -6,6 +6,7 @@ const renamedViews: Record<string, string> = { diff: 'changes' }
 const pageIDs: Record<string, string> = {
   missions: 'missionId',
   workspace: 'workspaceId',
+  insights: 'tab',
 }
 
 const keys = ['run', 'view', 'agent', 'page', 'id']
