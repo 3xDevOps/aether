@@ -229,6 +229,9 @@ type ServerInfoResult struct {
 	// TailnetDashboardError is why the dashboard web-port asks for is not
 	// serving on the tailnet; empty while it serves and when web-port is 0.
 	TailnetDashboardError string `json:"tailnet_dashboard_error,omitempty"`
+	// DashboardURL is the tailnet dashboard's base URL, without a trailing
+	// slash, while it serves; empty otherwise.
+	DashboardURL string `json:"dashboard_url,omitempty"`
 	// MinClientVersion is the oldest client release the server serves:
 	// its own release, any `git describe` tail removed.
 	MinClientVersion string `json:"min_client_version"`
@@ -355,6 +358,16 @@ type RunLaunchParams struct {
 	FallbackAccountMemberIDs []string `json:"fallback_account_member_ids,omitempty"`
 	// NoFallback keeps the launch on the requested account.
 	NoFallback bool `json:"no_fallback,omitempty"`
+	// IdempotencyKey makes a retry by the same member return the run the
+	// first launch started instead of starting another.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
+// RunLaunchResult is a RunResult; Replayed is true when IdempotencyKey
+// matched an earlier launch, whose run it is.
+type RunLaunchResult struct {
+	Run      Run  `json:"run"`
+	Replayed bool `json:"replayed,omitempty"`
 }
 
 type RunListParams struct {
