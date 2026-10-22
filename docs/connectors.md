@@ -37,7 +37,7 @@ Add this server to ChatGPT or Claude as a custom connector:
   URL   https://edge.onaether.dev/mcp/<server id>
   Code  ABCD-EFGH   one use, expires in 10 minutes; paste it on the page that opens when you connect
 Connected:
-  con-7k2m9q4xbd  ChatGPT (chatgpt.com)  added 2026-10-18  last used 2h ago
+  con-7k2m9q4xbd  ChatGPT (chatgpt.com)  scopes read,write  added 2026-10-18  last used 2h ago
 Remove one: aether mcp revoke <id>
 ```
 
@@ -55,7 +55,8 @@ Custom MCP servers are added on the web only, at chatgpt.com
 3. Paste the URL from `aether mcp`.
 4. Select **Create as a plugin**, then install it.
 5. A page from your server opens: **Connect ChatGPT (chatgpt.com) to
-   <server>**. Paste the code and select **Allow**.
+   <server>**. Paste the code, choose its [scopes](#scopes) and select
+   **Allow**.
 
 As of October 2026, OpenAI says write tools need ChatGPT Business or
 Enterprise/Edu. Pro gets the read tools only
@@ -74,27 +75,65 @@ On claude.ai
    selects **Add**, **Custom**, then **Web**, and pastes the URL. Each member
    then selects **Connect** under **Customize → Connectors**.
 3. Select **Connect**. A page from your server opens: **Connect Claude
-   (claude.ai) to <server>**. Paste the code and select **Allow**.
+   (claude.ai) to <server>**. Paste the code, choose its [scopes](#scopes)
+   and select **Allow**.
 
 The connector then works in Claude on the web, desktop and mobile.
+
+## Scopes
+
+The page you paste the code on also sets the connector's scopes. ChatGPT and
+Claude do not choose them; the server ignores any scope they request other
+than `offline_access`.
+
+| Scope | On the page | Grants |
+| --- | --- | --- |
+| `read` | Always granted | Every read-only tool |
+| `write` | **Launch and message**, checked by default | Launching runs and messaging them |
+| `control` | **Stop**, unchecked by default | Stopping runs. Text an agent wrote could talk the assistant into ending work without asking you |
+
+Every member can read every run on the server, so a connector can read all of
+them. A connector lists only the tools of its scopes, and `aether mcp` shows
+each connector's scopes. To change them, revoke the connector and connect
+again. Connectors added before scopes existed have all three.
 
 ## What it can do
 
 The connector has eight tools and no others:
 
-| Tools | What they do | Asks you first? |
-| --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_agents`, `aether_list_runs`, `aether_get_run`, `aether_run_history` | List workspaces, agents (installed, signed in, Enhanced support) and runs. Show one run. Read a page of an Enhanced run's conversation | No |
-| `aether_launch_run` | Starts a run with a workspace, agent and task, and optionally a mode and model | Yes |
-| `aether_message_run` | Sends a message to a run's agent | Yes |
-| `aether_stop_run` | Stops a run | Yes |
+| Tools | What they do | Scope | Asks you first? |
+| --- | --- | --- | --- |
+| `aether_list_workspaces`, `aether_list_agents`, `aether_list_runs`, `aether_get_run`, `aether_run_history` | List workspaces, agents (installed, signed in, Enhanced support) and runs. Show one run. Read a page of an Enhanced run's conversation | `read` | No |
+| `aether_launch_run` | Starts a run with a workspace, agent and task, and optionally a mode and model | `write` | Yes |
+| `aether_message_run` | Sends a message to a run's agent | `write` | Yes |
+| `aether_stop_run` | Stops a run | `control` | Yes |
 
 ChatGPT and Claude ask before each tool that is not read-only. ChatGPT asks by
 default and can remember your answer for a conversation. Claude offers **Allow
 once** and **Always allow** per tool. Aether shows no confirmation card of its
 own, and the [assistant's auto-approval](assistant.md#auto-approval) does not
 apply. Your role still decides: a viewer's launch is refused, as it is in
-`aether`.
+`aether`. A connector's calls are judged by the device its code was minted on:
+a method that needs an approved device refuses a connector minted on a
+registered one.
+
+Each connector can make 30 write calls at once, enough for many parallel
+launches, then regains one every 2 seconds, up to 30 again. Past that, the
+call fails with
+`connector <id> used its 30 write calls and gets one more every 2s; retry in <seconds>, at <time>`.
+
+## Attribution
+
+A run launched through a connector shows **Launched via ChatGPT** (or Claude)
+in its header, and a message sent through one shows `<member> via ChatGPT` as its author. The server logs one
+line per write call:
+
+```
+connector: write call connector=con-7k2m9q4xbd member=mem-... method=run.launch target=ws-... result=ok
+```
+
+`result` is `ok` or the call's error. Audit records, such as a member merge's
+`confirmed_by`, name the connector: `ChatGPT connector con-7k2m9q4xbd of member mem-...`.
 
 ## Revoke a connector
 
@@ -117,6 +156,10 @@ A connector also stops working at its next request when:
   it)
 - the edge moved to another origin, which changes the connector URL
 
+A connector whose code was minted over a member SSH key or a tailnet
+connection has no device, so revoking a device never cuts it off. Revoke it
+with `aether mcp revoke`.
+
 ## Troubleshooting
 
 `aether mcp` prints errors as `aether: rpc error <code>: <message>`.
@@ -134,7 +177,8 @@ On the page that opens when you connect:
 | Message | Cause |
 | --- | --- |
 | `That code is wrong, expired or already used. Run aether mcp for a new one and paste it here.` | The code is not live. A server restart also forgets codes |
-| `Too many wrong codes were tried on this server in the last minute. Wait a minute, then paste the code again.` | More than 10 wrong codes in a minute, from anyone |
+| `10 wrong codes came from your address in the last minute. Wait a minute, then paste the code again.` | 10 wrong codes in a minute from your address (your IPv6 /64). Other addresses are not affected |
+| `300 wrong codes came to this server from all addresses in the last minute. Wait a minute, then paste the code again.` | Someone is guessing codes from many addresses. Pairing resumes a minute after the guessing stops |
 | `Aether connectors work with ChatGPT and Claude; <host> is not one of them.` | Only `chatgpt.com` and `claude.ai` can connect |
 
 If an app asks you to sign in again, the connector was revoked. Run `aether mcp`
@@ -142,7 +186,7 @@ for a new code.
 
 ## Security model
 
-The connector acts as you through the eight tools above and nothing else. The
+The connector acts as you through the tools of its scopes and nothing else. The
 edge decrypts connector traffic, because ChatGPT and Claude need a public
 certificate, so a compromised edge can read tool calls and act as you through a
 live token. [security.md](security.md#chatgpt-and-claude-connectors) lists what

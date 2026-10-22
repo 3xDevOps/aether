@@ -274,6 +274,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		Harness:         harness,
 		Mode:            mode,
 		Model:           opts.Model,
+		Via:             domain.ViaFrom(ctx),
 		ACP:             acp,
 		Status:          domain.RunQueued,
 		BaseCommit:      base.Commit,

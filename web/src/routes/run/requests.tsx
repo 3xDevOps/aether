@@ -154,7 +154,7 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
         <RequestCard
           key={steer.id}
           id={requestCardID.steer(steer.id)}
-          title={`${name(steer.actor_id, steer.actor_display_name)} sent the agent a message`}
+          title={`${name(steer.actor_id, steer.actor_display_name)} sent the agent a message${steer.via ? ` via ${steer.via}` : ''}`}
           meta={<DeliveryCountdown deliverAfter={steer.deliver_after} />}
           actions={agent.localControl ? (
             <DecisionButtons decide={(approve) => room.decide(steer.id, approve ? 'approve' : 'deny')} />

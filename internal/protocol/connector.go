@@ -32,8 +32,11 @@ type Connector struct {
 	ClientName   string `json:"client_name"`
 	RedirectHost string `json:"redirect_host"`
 	DeviceID     string `json:"device_id,omitempty"`
-	CreatedAt    string `json:"created_at"`
-	LastUsedAt   string `json:"last_used_at,omitempty"`
+	// Scopes are the scopes the member granted on the consent page: read,
+	// and write and control when checked.
+	Scopes     []string `json:"scopes"`
+	CreatedAt  string   `json:"created_at"`
+	LastUsedAt string   `json:"last_used_at,omitempty"`
 }
 
 type ConnectorListResult struct {

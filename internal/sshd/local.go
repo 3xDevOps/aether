@@ -23,10 +23,20 @@ import (
 type Local struct {
 	s      *Server
 	member domain.MemberID
+	id     *connIdentity
 }
 
 func (s *Server) Local(member domain.MemberID) *Local {
 	return &Local{s: s, member: member}
+}
+
+// ConnectorLocal is Local for connector connectorID, which client (such as
+// ChatGPT) holds under grant: its calls are judged by the grant's device,
+// as a relayed connection on that device is, and audit records name the
+// connector.
+func (s *Server) ConnectorLocal(grant ConnectorGrant, connectorID, client string) *Local {
+	return &Local{s: s, member: grant.Member, id: &connIdentity{member: grant.Member, device: grant.Device,
+		connector: connectorID, connectorClient: client}}
 }
 
 // Call applies the SSH control channel's request payload budget, which the
@@ -37,6 +47,9 @@ func (l *Local) Call(ctx context.Context, method string, params json.RawMessage)
 			Code:    protocol.CodeParse,
 			Message: fmt.Sprintf("control request exceeds %d bytes", protocol.MaxLineBytes),
 		}
+	}
+	if l.id != nil {
+		ctx = domain.WithVia(context.WithValue(ctx, connIdentityKey{}, *l.id), l.id.connectorClient)
 	}
 	return l.s.dispatch(ctx, l.member, method, params)
 }

@@ -29,18 +29,23 @@ const (
 // connIdentity is who an authenticated connection is. device and deviceKey
 // are set on connections that authenticated with an edge device key,
 // relayed or direct. clientVersion and legacyClient come from the SSH
-// banner; see parseClientBanner.
+// banner; see parseClientBanner. connector and connectorClient are set on
+// a ChatGPT or Claude connector's calls, whose device is the one its
+// pairing code was minted on.
 type connIdentity struct {
-	member        domain.MemberID
-	device        domain.DeviceID
-	deviceKey     string
-	clientVersion string
-	legacyClient  bool
+	member          domain.MemberID
+	device          domain.DeviceID
+	deviceKey       string
+	clientVersion   string
+	legacyClient    bool
+	connector       string
+	connectorClient string
 }
 
 // connIdentityKey carries a connection's connIdentity in the context of its
 // channels. The tailnet dashboard's in-process client (Local) carries none:
-// it acts for a tailnet identity.
+// it acts for a tailnet identity. A connector's (ConnectorLocal) carries
+// its grant.
 type connIdentityKey struct{}
 
 func (s *Server) identityStore() (store.IdentityStore, error) {

@@ -3,6 +3,7 @@
 package domain
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"slices"
@@ -752,6 +753,9 @@ type Run struct {
 	// ProfileSnapshotID is the agent-profile snapshot pinned at provisioning;
 	// empty means unpinned.
 	ProfileSnapshotID ProfileSnapshotID
+	// Via is the connector client, such as ChatGPT, the run was launched
+	// through; empty for every other launch.
+	Via string
 	// HarnessSessionID is the agent's own session id, which a driver records
 	// so a reopened run can resume the same conversation. Empty until a
 	// driver records one.
@@ -774,6 +778,20 @@ var agentSessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 // switch puts it on the agent's command line.
 func ValidAgentSessionID(id string) bool {
 	return agentSessionID.MatchString(id)
+}
+
+type viaKey struct{}
+
+// WithVia marks ctx as a call a connector client, such as ChatGPT, made:
+// the runs it launches and the room messages it posts record client.
+func WithVia(ctx context.Context, client string) context.Context {
+	return context.WithValue(ctx, viaKey{}, client)
+}
+
+// ViaFrom is the connector client WithVia put on ctx, empty for none.
+func ViaFrom(ctx context.Context) string {
+	via, _ := ctx.Value(viaKey{}).(string)
+	return via
 }
 
 // AccountMember returns the member whose agent account backs the run.

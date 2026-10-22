@@ -521,6 +521,8 @@ func (s *Server) connDescription(ctx context.Context) (kind, description string)
 	switch {
 	case !ok:
 		return "dashboard", "the tailnet dashboard"
+	case id.connector != "":
+		return "connector", ConnectorLabel(id.connectorClient, id.connector) + " of member " + string(id.member)
 	case id.device != "":
 		if ids, err := s.identityStore(); err == nil {
 			if dev, err := ids.GetDevice(ctx, id.device); err == nil {

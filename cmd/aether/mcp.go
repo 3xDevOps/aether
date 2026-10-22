@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -80,7 +81,8 @@ func printConnectors(w io.Writer, code protocol.ConnectorCodeResult, connectors 
 			}
 			used = "last used " + ago(now.Sub(last))
 		}
-		_, _ = fmt.Fprintf(w, "  %s  %s (%s)  added %s  %s\n", c.ID, c.ClientName, c.RedirectHost, added.Local().Format(time.DateOnly), used)
+		_, _ = fmt.Fprintf(w, "  %s  %s (%s)  scopes %s  added %s  %s\n", c.ID, c.ClientName, c.RedirectHost, strings.Join(c.Scopes, ","),
+			added.Local().Format(time.DateOnly), used)
 	}
 	_, _ = fmt.Fprintln(w, "Remove one: aether mcp revoke <id>")
 	return nil
