@@ -160,8 +160,9 @@ type Server struct {
 	// edgeOwner records ownership at the edge; nil while no edge agent
 	// runs. Guarded by mu.
 	edgeOwner EdgeOwner
-	// tailnetDashboardErr is what server.info reports as
-	// tailnet_dashboard_error. Guarded by mu.
+	// tailnetDashboardURL and tailnetDashboardErr are what server.info
+	// reports as dashboard_url and tailnet_dashboard_error. Guarded by mu.
+	tailnetDashboardURL string
 	tailnetDashboardErr string
 
 	// wg counts every handler goroutine (per-connection, per-channel, and
@@ -190,6 +191,8 @@ type Server struct {
 	// cannot acquire a replacement lock and recreate removed resources.
 	workspaceLocksMu sync.Mutex
 	workspaceLocks   map[domain.WorkspaceID]*sync.RWMutex
+	launchKeysMu     sync.Mutex
+	launchKeys       map[launchKey]*launchKeyLock
 
 	// environmentMu makes workspace.environment.set's read, merge and write
 	// of the workspace row and its secret file one step, also for

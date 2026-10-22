@@ -531,7 +531,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 // dashboard is optional, so SSH and the edge keep serving.
 func (s *Server) webFailed(err error) {
 	slog.Error("server: the tailnet dashboard is not serving; the server runs without it", "error", err)
-	s.ssh.SetTailnetDashboardError(err)
+	s.ssh.SetTailnetDashboard("", err)
 }
 
 // serveWeb starts the tailnet dashboard and serves it until ctx ends. A
@@ -567,12 +567,12 @@ func (s *Server) serveWeb(ctx context.Context) {
 		case <-time.After(delay):
 		}
 	}
-	s.ssh.SetTailnetDashboardError(nil)
-	url := fmt.Sprintf("https://%s:%d/", tn.Node.DNSName, tn.Port)
+	url := fmt.Sprintf("https://%s:%d", tn.Node.DNSName, tn.Port)
 	if tn.Port == 443 {
-		url = "https://" + tn.Node.DNSName + "/"
+		url = "https://" + tn.Node.DNSName
 	}
-	slog.Info("server: serving the dashboard", "url", url)
+	s.ssh.SetTailnetDashboard(url, nil)
+	slog.Info("server: serving the dashboard", "url", url+"/")
 	select {
 	case <-s.web.Done():
 		s.webFailed(fmt.Errorf("server: web: %w", s.web.Err()))

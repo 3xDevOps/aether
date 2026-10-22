@@ -21,16 +21,16 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// SetTailnetDashboardError records why the tailnet dashboard is not
-// serving, for server.info to report; nil clears it.
-func (s *Server) SetTailnetDashboardError(err error) {
+// SetTailnetDashboard records, for server.info, the tailnet dashboard's
+// base URL while it serves, or why it is not serving.
+func (s *Server) SetTailnetDashboard(url string, err error) {
 	msg := ""
 	if err != nil {
-		msg = err.Error()
+		url, msg = "", err.Error()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tailnetDashboardErr = msg
+	s.tailnetDashboardURL, s.tailnetDashboardErr = url, msg
 }
 
 func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
@@ -39,7 +39,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		return nil, rpcError(err)
 	}
 	s.mu.Lock()
-	dashboardErr := s.tailnetDashboardErr
+	dashboardURL, dashboardErr := s.tailnetDashboardURL, s.tailnetDashboardErr
 	s.mu.Unlock()
 	return protocol.ServerInfoResult{
 		ServerVersion:         s.cfg.release,
@@ -49,6 +49,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		TailnetHostname:       s.cfg.TailnetHostname,
 		TailnetIdentityAuth:   s.cfg.WhoIs != nil,
 		TailnetDashboardError: dashboardErr,
+		DashboardURL:          dashboardURL,
 		MinClientVersion:      s.minClientVersion(),
 	}, nil
 }
@@ -160,6 +161,18 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if err != nil {
 		return nil, invalidParams(err.Error())
 	}
+	key := p.IdempotencyKey
+	p.IdempotencyKey = ""
+	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func() (*domain.Run, *protocol.Error) {
+		return s.launchRun(ctx, member, p, mode, policy)
+	})
+	if perr != nil {
+		return nil, perr
+	}
+	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed}, nil
+}
+
+func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback) (*domain.Run, *protocol.Error) {
 	measured, err := fallback.Measure(ctx, s.cfg.Store, s.cfg.Services.Usage, member, p.AccountMemberID, p.Harness, policy)
 	if err != nil {
 		return nil, rpcError(err)
@@ -191,7 +204,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		}
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+	return run, nil
 }
 
 func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {

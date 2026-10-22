@@ -92,6 +92,9 @@ type RunController interface {
 	Inject(ctx context.Context, run domain.RunID, actor domain.MemberID, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error)
 	ReadImage(ctx context.Context, runID domain.RunID, reference string) ([]byte, string, error)
 	ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACPStream, error)
+	// ACPPending lists an enhanced run's open requests with their options;
+	// nil without a live session.
+	ACPPending(run domain.RunID) []acphost.Request
 	// ACPAnswer resolves a pending request of an enhanced run's agent; the
 	// first answer wins. values is the form answer for an accepted question.
 	ACPAnswer(run domain.RunID, requestID, optionID string, values map[string]any) error

@@ -146,18 +146,27 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	if p.Name == "" {
 		return nil, invalidParams("name is required")
 	}
-	launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params)
-	if err != nil {
-		return nil, templateError(err)
+	key := p.IdempotencyKey
+	p.IdempotencyKey = ""
+	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodTemplateLaunch, p, func() (*domain.Run, *protocol.Error) {
+		launched, err := svc.Launch(ctx, workspace, p.Name, member, p.Params)
+		if err != nil {
+			return nil, templateError(err)
+		}
+		return launched.Run, nil
+	})
+	if perr != nil {
+		return nil, perr
 	}
 	out := protocol.TemplateLaunchResult{
-		Run:        s.runSnapshot(launched.Run),
-		BaseCommit: launched.Run.BaseCommit,
-		BaseBranch: launched.Run.BaseBranch,
-		BaseSource: launched.Run.BaseSource,
+		Run:        s.runSnapshot(run),
+		BaseCommit: run.BaseCommit,
+		BaseBranch: run.BaseBranch,
+		BaseSource: run.BaseSource,
+		Replayed:   replayed,
 	}
-	if !launched.Run.BaseCheckedAt.IsZero() {
-		out.BaseCheckedAt = launched.Run.BaseCheckedAt.UTC().Format(time.RFC3339)
+	if !run.BaseCheckedAt.IsZero() {
+		out.BaseCheckedAt = run.BaseCheckedAt.UTC().Format(time.RFC3339)
 	}
 	return out, nil
 }

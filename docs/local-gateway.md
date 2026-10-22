@@ -917,6 +917,63 @@ and the session item log keeps that URI. An image attached for an agent
 without `prompt_images` refuses the message as **Not sent**; other files need
 no capability.
 
+### Methods for an external assistant
+
+These serve a client with no dashboard and no stream, such as the
+[connector](connectors.md); the CLI and dashboard may call them too.
+
+| Method | Params | Result |
+| --- | --- | --- |
+| `attention.list` | `{"workspace_id":"..."}` (optional; omitted lists every workspace). View | `{"items":[AttentionItem]}`, oldest `since` first: each run that waits on the caller, once, under the first **Needs you** row that holds, worded as the dashboard words it |
+| `run.input.respond` | `{"run_id":"...","request_id":"...","option_id":"...","values":{...}}`; Steer | `{"status":"answered"}`, or `{"status":"already_answered"}` when an earlier answer won |
+
+An `AttentionItem` is `{kind, run_id, mission_id, workspace_id, title,
+harness, reason, since}` plus what answering it needs. `kind` is one of
+`approval`, `permission`, `question`, `queued-message`, `room-question`,
+`swarm-question`, `integrator-down`, `disconnected`, `blocked`,
+`needs-input`, `ready` or `failed`. `approval` carries
+`approval: {id, action, detail}` for `approval.decide`. `permission` and
+`question` carry `request: {id, kind, title, options, schema}`; an enhanced
+run's `options` are `{id, label, kind}`, `kind` being `allow_once`,
+`allow_always`, `reject_once` or `reject_always` for a permission, and a
+Standard run's request has none: it is answered in the terminal.
+`swarm-question`, `room-question` and `queued-message` carry
+`message: {id, body, from}`: a `mission.question.answer` question, a room
+question to answer with a `run.room.post` reply, and a steer request to
+decide with `run.room.decide`.
+
+`run.input.respond` is `run.input.answer` without a control lease. It
+answers under the run's control admission, so nobody can take control
+between its check and the answer. With nobody in control, or the caller in
+control from another tab, it answers. While another member holds control,
+including during their reconnect window, it answers `-32003` with
+`data: {"reason":"control_held","member_id":"..."}` and the controller's
+name in the message: the request is theirs, and taking control from them is
+a dashboard action with its hold and review. An unknown request is
+`-32000`.
+
+`run.launch` and `template.launch` take an optional `idempotency_key` (at
+most 256 bytes). A retry by the same member with the same key and params
+returns the run the first launch started, with `"replayed": true`, and
+launches nothing; one with other params is `-32003`, and one whose run was
+deleted is `-32000`. One key names one launch across both methods.
+
+`run.pr.status` and `run.pr.feedback` default an omitted `expected` to the
+checkout's branch and head, and an omitted `target` to the pull request the
+dashboard proposes: the branch's upstream (else `origin`, when the
+workspace sets an origin) as the head, into the run's base branch on the
+workspace's GitHub source, or on the head repository without one. A
+checkout with no GitHub push remote answers `error` saying to pass
+`target`. Once a finished run's container is gone, both report the pull
+request the run last recorded (`number`, `url`, `state`); `run.pr.feedback`
+then has no checks or comments, and `error` says why.
+
+`server.info` carries `dashboard_url`, the tailnet dashboard's base URL
+without a trailing slash, only while that dashboard serves. Links use the
+dashboard's query state: `<dashboard_url>/?run=<run_id>` opens a run and
+`<dashboard_url>/?page=missions&id=<mission_id>` a swarm. The edge serves no
+dashboard, so there is no link without `web-port`.
+
 ### Candidate integration methods
 
 The authenticated gateway exposes the candidate integration service through

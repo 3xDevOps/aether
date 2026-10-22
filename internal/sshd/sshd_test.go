@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -373,6 +374,7 @@ type fakeRuns struct {
 	sharedRefusals map[string]string
 	unswitchable   map[string]bool
 	acpStream      scheduler.ACPStream
+	acpPending     map[domain.RunID][]acphost.Request
 	readImage      func(context.Context, domain.RunID, string) ([]byte, string, error)
 }
 
@@ -636,8 +638,14 @@ func (f *fakeRuns) Paused(run domain.RunID) bool {
 	return f.paused[run]
 }
 
-func (f *fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest {
-	return []domain.RunInputRequest{}
+func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	inputs := []domain.RunInputRequest{}
+	for _, r := range f.acpPending[run] {
+		inputs = append(inputs, domain.RunInputRequest{ID: r.ID, SessionID: "s1", Kind: r.Kind})
+	}
+	return inputs
 }
 
 func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {

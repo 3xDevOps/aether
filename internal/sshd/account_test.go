@@ -102,7 +102,7 @@ func TestSharedAccountLaunchRequiresOwnerGrant(t *testing.T) {
 	if perr != nil {
 		t.Fatalf("shared launch: %+v", perr)
 	}
-	run := result.(protocol.RunResult).Run
+	run := result.(protocol.RunLaunchResult).Run
 	if run.MemberID != string(grantee.ID) || run.AccountMemberID != string(e.member.ID) {
 		t.Fatalf("run actor/account = %s/%s, want %s/%s", run.MemberID, run.AccountMemberID, grantee.ID, e.member.ID)
 	}
@@ -517,7 +517,7 @@ func TestRunLaunchFallsBackFromExhaustedAccount(t *testing.T) {
 	if perr != nil {
 		t.Fatalf("run.launch: %+v", perr)
 	}
-	run := result.(protocol.RunResult).Run
+	run := result.(protocol.RunLaunchResult).Run
 	if run.AccountMemberID != string(e.member.ID) || run.RequestedAccountMemberID != string(grantee.ID) {
 		t.Fatalf("run account/requested = %s/%s, want %s/%s", run.AccountMemberID, run.RequestedAccountMemberID, e.member.ID, grantee.ID)
 	}
@@ -527,7 +527,7 @@ func TestRunLaunchFallsBackFromExhaustedAccount(t *testing.T) {
 	if perr != nil {
 		t.Fatalf("run.launch with every account exhausted: %+v", perr)
 	}
-	if run := result.(protocol.RunResult).Run; run.AccountMemberID != string(grantee.ID) || run.RequestedAccountMemberID != "" {
+	if run := result.(protocol.RunLaunchResult).Run; run.AccountMemberID != string(grantee.ID) || run.RequestedAccountMemberID != "" {
 		t.Fatalf("run account/requested with no usable fallback = %s/%s, want %s/none", run.AccountMemberID, run.RequestedAccountMemberID, grantee.ID)
 	}
 	both, err := json.Marshal(protocol.RunLaunchParams{
