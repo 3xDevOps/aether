@@ -88,6 +88,9 @@ type TemplateLaunchParams struct {
 	WorkspaceID string            `json:"workspace_id"`
 	Name        string            `json:"name"`
 	Params      map[string]string `json:"params,omitempty"`
+	// IdempotencyKey is RunLaunchParams.IdempotencyKey; one key names one
+	// launch across run.launch and template.launch.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 // TemplateLaunchResult is the launched run plus the immutable base
@@ -98,6 +101,7 @@ type TemplateLaunchResult struct {
 	BaseBranch    string `json:"base_branch"`
 	BaseSource    string `json:"base_source"`
 	BaseCheckedAt string `json:"base_checked_at"`
+	Replayed      bool   `json:"replayed,omitempty"`
 }
 
 // ScheduleListParams selects one workspace's schedules.

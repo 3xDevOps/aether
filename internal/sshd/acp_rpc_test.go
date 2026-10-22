@@ -167,6 +167,12 @@ func (f *fakeRuns) ACPSubscribe(run domain.RunID, afterSeq int64) (scheduler.ACP
 	return stream, nil
 }
 
+func (f *fakeRuns) ACPPending(run domain.RunID) []acphost.Request {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.acpPending[run]
+}
+
 func (f *fakeRuns) ACPAnswer(run domain.RunID, requestID, optionID string, values map[string]any) error {
 	return f.record(fmt.Sprintf("acp.answer:%s:%s:%s:%v", run, requestID, optionID, values))
 }

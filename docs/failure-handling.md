@@ -84,8 +84,9 @@ Any new turn clears the review, and a later success report asks again.
 ### Needs you
 
 One rule decides whether a run needs a person. The **Needs you** list,
-`aether runs --needs-you`, push notifications and the assistant's notices all
-use it.
+`aether runs --needs-you`, `attention.list`
+([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)), push
+notifications and the assistant's notices all use it.
 
 | Run | Needs you | Notifies |
 | --- | --- | --- |

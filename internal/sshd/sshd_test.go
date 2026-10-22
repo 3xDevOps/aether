@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -357,7 +358,10 @@ type fakeRuns struct {
 	launchRelease   <-chan struct{}
 	// admitInto, when set, is where a launch writes its run row before it
 	// reports the run admitted and blocks, as the scheduler does.
-	admitInto       store.Store
+	admitInto store.Store
+	// failAdmitted, when set with admitInto, fails a launch after its run
+	// row is written.
+	failAdmitted    error
 	terminalAddr    string
 	terminalAddrErr error
 	terminalStopErr error
@@ -373,6 +377,7 @@ type fakeRuns struct {
 	sharedRefusals map[string]string
 	unswitchable   map[string]bool
 	acpStream      scheduler.ACPStream
+	acpPending     map[domain.RunID][]acphost.Request
 	readImage      func(context.Context, domain.RunID, string) ([]byte, string, error)
 }
 
@@ -472,7 +477,7 @@ func (f *fakeRuns) AgentSwitchable(_ context.Context, _, _ domain.MemberID, harn
 func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
 	f.mu.Lock()
 	f.launchOptions = append(f.launchOptions, opts)
-	started, release, admitInto := f.launchStarted, f.launchRelease, f.admitInto
+	started, release, admitInto, failAdmitted := f.launchStarted, f.launchRelease, f.admitInto, f.failAdmitted
 	f.mu.Unlock()
 	if err := f.record(fmt.Sprintf("launch:%s:%s:%s:%s:%s", workspace, member, task, harness, mode)); err != nil {
 		return nil, err
@@ -489,7 +494,13 @@ func (f *fakeRuns) LaunchWithOptions(ctx context.Context, workspace domain.Works
 		if err := admitInto.CreateRun(ctx, run); err != nil {
 			return nil, err
 		}
+		if opts.Created != nil {
+			opts.Created(run.ID)
+		}
 		opts.Admitted()
+		if failAdmitted != nil {
+			return nil, failAdmitted
+		}
 	}
 	if release != nil {
 		select {
@@ -636,8 +647,18 @@ func (f *fakeRuns) Paused(run domain.RunID) bool {
 	return f.paused[run]
 }
 
-func (f *fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest {
-	return []domain.RunInputRequest{}
+func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	inputs := []domain.RunInputRequest{}
+	for _, r := range f.acpPending[run] {
+		in := domain.RunInputRequest{ID: r.ID, SessionID: "s1", Kind: "question"}
+		if r.Kind == acphost.RequestPermission {
+			in.Kind = "permission"
+		}
+		inputs = append(inputs, in)
+	}
+	return inputs
 }
 
 func (f *fakeRuns) setPaused(run domain.RunID, paused bool) {

@@ -78,6 +78,7 @@ var memberRefs = map[string]bool{
 	"room_messages.decided_by":                             false,
 	"run_account_segments.account_member_id":               false,
 	"run_cost_deletions.member_id":                         false,
+	"run_launch_receipts.member_id":                        false,
 	"run_costs.member_id":                                  false,
 	"server_update_state.pending_requested_by":             false,
 	"workspace_budgets.updated_by":                         false,

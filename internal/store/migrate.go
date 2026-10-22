@@ -1914,6 +1914,20 @@ ALTER TABLE connectors ADD COLUMN scopes TEXT NOT NULL DEFAULT 'read write contr
 ALTER TABLE runs ADD COLUMN via TEXT NOT NULL DEFAULT '';
 ALTER TABLE room_messages ADD COLUMN via TEXT NOT NULL DEFAULT '';
 `,
+	// v79: the run each idempotent run.launch or template.launch started,
+	// reserved with an empty run_id before the launch. run_id has no
+	// foreign key: a retry after the run was deleted must not start it
+	// again.
+	`
+CREATE TABLE run_launch_receipts (
+	member_id       TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	idempotency_key TEXT NOT NULL,
+	fingerprint     TEXT NOT NULL,
+	run_id          TEXT NOT NULL,
+	created_at      INTEGER NOT NULL,
+	PRIMARY KEY (member_id, idempotency_key)
+);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

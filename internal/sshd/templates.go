@@ -20,8 +20,8 @@ type TemplateService interface {
 	Delete(ctx context.Context, workspace domain.WorkspaceID, name string) error
 	// Launch renders a template and launches it as member through the
 	// same scheduler path a hand-launched run takes; params override the
-	// template's defaults.
-	Launch(ctx context.Context, workspace domain.WorkspaceID, name string, member domain.MemberID, params map[string]string) (*templates.Launched, error)
+	// template's defaults. created is domain.LaunchOptions.Created.
+	Launch(ctx context.Context, workspace domain.WorkspaceID, name string, member domain.MemberID, params map[string]string, created func(domain.RunID)) (*templates.Launched, error)
 	// Schedules returns a workspace's cron rules with their next fire time.
 	Schedules(ctx context.Context, workspace domain.WorkspaceID) ([]templates.ScheduleInfo, error)
 	// SaveSchedule creates or replaces a template's cron rule, recording

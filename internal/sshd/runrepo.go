@@ -252,14 +252,24 @@ func (s *Server) runPRStatus(ctx context.Context, member domain.MemberID, raw js
 			return nil, rpcError(runErr)
 		}
 		if run.Status.Terminal() {
-			return s.recordedPRStatus(ctx, call, p, err)
+			result, perr := s.recordedPRStatus(ctx, call, p, err)
+			if perr != nil {
+				return nil, perr
+			}
+			return result, nil
 		}
 	}
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	var status runrepo.PRResult
-	err = call.native.CheckExpected(ctx, call.execution, p.Expected)
+	perr, err := s.prDefaults(ctx, call, &p.Expected, &p.Target)
+	if perr != nil {
+		return nil, perr
+	}
+	if err == nil {
+		err = call.native.CheckExpected(ctx, call.execution, p.Expected)
+	}
 	if err == nil {
 		status, err = call.native.LookupPR(ctx, call.execution, runrepo.PRTarget(p.Target))
 	}
@@ -347,15 +357,15 @@ func (s *Server) publishRunPR(ctx context.Context, run domain.Run, number int, u
 // mounted, the one gh used there, so a merge after the run finished is still
 // recorded. A run with none recorded keeps the error that it has no live
 // environment.
-func (s *Server) recordedPRStatus(ctx context.Context, call runRepoCall, p protocol.RunPRStatusParams, liveErr error) (any, *protocol.Error) {
+func (s *Server) recordedPRStatus(ctx context.Context, call runRepoCall, p protocol.RunPRStatusParams, liveErr error) (protocol.RunPRStatusResult, *protocol.Error) {
 	prs, err := s.cfg.Store.RunPullRequests(ctx, domain.RunID(p.RunID))
 	if err != nil {
-		return nil, rpcError(err)
+		return protocol.RunPRStatusResult{}, rpcError(err)
 	}
 	repository := strings.ToLower(p.Target.Repository)
 	prs = slices.DeleteFunc(prs, func(pr *store.RunPullRequest) bool { return repository != "" && pr.Repository != repository })
 	if len(prs) == 0 {
-		return nil, rpcError(liveErr)
+		return protocol.RunPRStatusResult{}, rpcError(liveErr)
 	}
 	result := protocol.RunPRStatusResult{AccountMemberID: string(call.account)}
 	for _, pr := range prs {
@@ -371,7 +381,7 @@ func (s *Server) recordedPRStatus(ctx context.Context, call runRepoCall, p proto
 		changed := prChanged(pr, observed.State, observed.MergedAt)
 		pr.URL, pr.State, pr.MergedAt, pr.ObservedAt = observed.URL, observed.State, observed.MergedAt, time.Now().UTC()
 		if err := s.cfg.Store.ObserveRunPullRequest(ctx, pr); err != nil {
-			return nil, rpcError(err)
+			return protocol.RunPRStatusResult{}, rpcError(err)
 		}
 		if changed {
 			s.publishRunPR(ctx, call.run, pr.Number, pr.URL, pr.State, pr.MergedAt)
@@ -388,11 +398,28 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 		return nil, err
 	}
 	call, err := s.runRepoAuthority(ctx, member, p.RunID, false)
+	feedback := runrepo.PRFeedback{Checks: []protocol.RunPRCheck{}, Comments: []protocol.RunPRComment{}, Reviews: []protocol.RunPRReview{}, ReviewComments: []protocol.RunPRReviewComment{}}
+	if errors.Is(err, scheduler.ErrNoLiveEnvironment) && call.run.Status.Terminal() {
+		status, perr := s.recordedPRStatus(ctx, call, protocol.RunPRStatusParams{RunID: p.RunID, Target: p.Target}, err)
+		if perr != nil {
+			return nil, perr
+		}
+		message := "checks and review feedback need the run's environment, which is gone: " + err.Error()
+		if status.Error != "" {
+			message += "; " + status.Error
+		}
+		return protocol.RunPRFeedbackResult{Identity: status.Identity, AccountMemberID: status.AccountMemberID, PullRequest: status.PullRequest, Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Error: message}, nil
+	}
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	feedback := runrepo.PRFeedback{Checks: []protocol.RunPRCheck{}, Comments: []protocol.RunPRComment{}, Reviews: []protocol.RunPRReview{}, ReviewComments: []protocol.RunPRReviewComment{}}
-	err = call.native.CheckExpected(ctx, call.execution, p.Expected)
+	perr, err := s.prDefaults(ctx, call, &p.Expected, &p.Target)
+	if perr != nil {
+		return nil, perr
+	}
+	if err == nil {
+		err = call.native.CheckExpected(ctx, call.execution, p.Expected)
+	}
 	if err == nil {
 		feedback, err = call.native.PRFeedback(ctx, call.execution, runrepo.PRTarget(p.Target), p.Limit)
 	}

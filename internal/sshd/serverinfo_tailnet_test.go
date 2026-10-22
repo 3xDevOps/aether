@@ -63,3 +63,28 @@ func TestServerInfoTailnetFieldsOmitted(t *testing.T) {
 		t.Errorf("off-tailnet server.info leaks tailnet keys: %s", raw)
 	}
 }
+
+// dashboard_url is reported only while the tailnet dashboard serves.
+func TestServerInfoDashboardURL(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	info := func() protocol.ServerInfoResult {
+		t.Helper()
+		var info protocol.ServerInfoResult
+		if err := controlClient(t, e).Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+			t.Fatal(err)
+		}
+		return info
+	}
+	if got := info().DashboardURL; got != "" {
+		t.Fatalf("dashboard_url before serving = %q", got)
+	}
+	e.srv.SetTailnetDashboard("https://box.tail1234.ts.net:8443", nil)
+	if got := info().DashboardURL; got != "https://box.tail1234.ts.net:8443" {
+		t.Fatalf("dashboard_url while serving = %q", got)
+	}
+	e.srv.SetTailnetDashboard("https://box.tail1234.ts.net:8443", errors.New("web: closed"))
+	if got := info(); got.DashboardURL != "" || got.TailnetDashboardError != "web: closed" {
+		t.Fatalf("server.info after the dashboard stopped = %+v", got)
+	}
+}

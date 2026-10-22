@@ -215,6 +215,11 @@ type RunPRTarget struct {
 	HeadBranch     string `json:"head_branch"`
 }
 
+// A zero Expected defaults to the checkout's current branch and head, and a
+// zero Target to the pull request the dashboard would open: the branch's
+// push remote and branch into the run's base branch on the workspace
+// source. Once the run's environment is gone, run.pr.status and
+// run.pr.feedback report the pull request the run last recorded.
 type RunPRStatusParams struct {
 	RunID    string         `json:"run_id"`
 	Expected RunGitExpected `json:"expected"`

@@ -295,6 +295,9 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		}
 		return nil, err
 	}
+	if opts.Created != nil {
+		opts.Created(run.ID)
+	}
 	pending := s.beginPending(run.ID)
 	defer s.finishPending(run.ID, pending)
 	if opts.Admitted != nil {

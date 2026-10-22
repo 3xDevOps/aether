@@ -295,7 +295,7 @@ func TestScheduleRequiresATemplateThatRendersUnattended(t *testing.T) {
 	if len(tasks) != 1 || tasks[0] != "sweep go" || models[0] != "sonnet" {
 		t.Fatalf("fired tasks = %v with models %v, want exactly [\"sweep go\"] with sonnet", tasks, models)
 	}
-	if _, err = svc.Launch(ctx, ws.ID, "sweep", m.ID, nil); err != nil {
+	if _, err = svc.Launch(ctx, ws.ID, "sweep", m.ID, nil, nil); err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
 	runs.mu.Lock()
