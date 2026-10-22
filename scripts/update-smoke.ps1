@@ -687,7 +687,7 @@ exit 1
             throw "The scenario changed Defender $property."
         }
     }
-    Write-Host 'Defender real-time protection stayed on with no exclusions through every update.'
+    Write-Host "Defender real-time protection stayed on, with no exclusion but $agentExclusion, through every update."
 } catch {
     Write-Host $_.ScriptStackTrace
     & "$PSScriptRoot/defender-diagnostics.ps1"
