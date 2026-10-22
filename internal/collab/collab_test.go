@@ -701,6 +701,13 @@ func TestSteeringDelayAndControllerImmediateSend(t *testing.T) {
 	if result.Message.DeliverAfter == nil || !result.Message.DeliverAfter.Equal(clock.Now().Add(SteeringDelay)) {
 		t.Fatalf("deliver_after=%v, want +45s", result.Message.DeliverAfter)
 	}
+	mine, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID, Kind: store.RoomMessageSteerRequest, Body: "uncontrolled", IdempotencyKey: "uncontrolled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mine.Message.DeliverAfter != nil || pty.Calls() != 1 {
+		t.Fatalf("owner of an uncontrolled run: deliver_after=%v inject calls=%d, want immediate", mine.Message.DeliverAfter, pty.Calls())
+	}
 	lease, _, err := controlService.Acquire(string(run.ID), string(owner.ID), "session", false)
 	if err != nil {
 		t.Fatal(err)
@@ -712,8 +719,8 @@ func TestSteeringDelayAndControllerImmediateSend(t *testing.T) {
 	if bob.Message.DeliverAfter == nil || !bob.Message.DeliverAfter.Equal(clock.Now().Add(SteeringDelay)) {
 		t.Fatalf("bob deliver_after=%v, want +45s", bob.Message.DeliverAfter)
 	}
-	if pty.Calls() != 0 {
-		t.Fatalf("bob inject calls=%d, want 0", pty.Calls())
+	if pty.Calls() != 1 {
+		t.Fatalf("bob inject calls=%d, want 1", pty.Calls())
 	}
 	alice, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID, Kind: store.RoomMessageSteerRequest, Body: "now", IdempotencyKey: "now", ControllerSessionID: lease.SessionID, ControllerGeneration: lease.Generation})
 	if err != nil {
@@ -722,8 +729,8 @@ func TestSteeringDelayAndControllerImmediateSend(t *testing.T) {
 	if alice.Message.DeliverAfter != nil {
 		t.Fatalf("alice deliver_after=%v, want immediate", alice.Message.DeliverAfter)
 	}
-	if pty.Calls() != 1 {
-		t.Fatalf("inject calls=%d, want 1", pty.Calls())
+	if pty.Calls() != 2 {
+		t.Fatalf("inject calls=%d, want 2", pty.Calls())
 	}
 }
 
@@ -978,7 +985,7 @@ func TestProtectedRunRejectsOwnerAndAdminSteering(t *testing.T) {
 	}
 	run.Protected = false
 	queued, err := service.Post(context.Background(), MessageInput{
-		WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID,
+		WorkspaceID: ws.ID, RunID: run.ID, ActorID: admin.ID,
 		Kind: store.RoomMessageSteerRequest, Body: "protect before delivery",
 		IdempotencyKey: "protected-delivery",
 	})

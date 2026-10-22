@@ -383,11 +383,16 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 		}
 		session := in.ControllerSessionID
 		generation := in.ControllerGeneration
-		if hasController && current.Connected && current.MemberID == actor.ID &&
-			current.SessionID == session && current.Generation == generation {
+		switch {
+		case hasController && current.Connected && current.MemberID == actor.ID &&
+			current.SessionID == session && current.Generation == generation:
 			proof := current
 			deliveryProof = &proof
-		} else {
+		case !hasController && actor.ID == run.MemberID:
+			// The owner of a run nobody controls could take the lease, as
+			// the dashboard does before sending, so clients that hold no
+			// lease (aether message, connectors) send at once too.
+		default:
 			due := s.now().Add(SteeringDelay)
 			msg.DeliverAfter = &due
 		}
