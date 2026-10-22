@@ -50,14 +50,17 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	// Do not publish the uncertain claim before attempting PTY delivery. A
 	// publication outage must never turn an otherwise unattempted steer into
 	// a durable "uncertain" result.
-	receipt, outcome, deliveryErr := s.deliver(ctx, msg, actor, run, deliveryProof, steer)
+	receipt, outcome, deliveryErr := s.deliver(ctx, msg, actor, run, s.deliveryAdmission(run.ID, deliveryProof), steer)
 	if deliveryErr != nil {
 		return Result{}, deliveryErr
 	}
+	return s.settleResult(ctx, msg, receipt, outcome)
+}
+
+func (s *Service) settleResult(ctx context.Context, msg *store.RoomMessage, receipt Receipt, outcome string) (Result, error) {
 	if err := s.settleRoomMessage(ctx, msg, receipt, outcome == acphost.OutcomeQueued); err != nil {
 		if errors.Is(err, store.ErrConflict) {
-			var getErr error
-			stored, getErr = s.cfg.Store.GetRoomMessage(ctx, msg.ID)
+			stored, getErr := s.cfg.Store.GetRoomMessage(ctx, msg.ID)
 			if getErr != nil {
 				return Result{}, getErr
 			}
@@ -72,11 +75,25 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	return Result{Message: stored, Receipt: receipt, Outcome: outcome}, nil
 }
 
-// deliver rechecks mutable membership and workspace policy while holding the
-// same run admission lock used by controller takeover and fencing. An
-// immediate delivery also proves the exact member, session, and generation
-// that made it eligible. The callback must not call back into Control.
-func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, deliveryProof *control.Snapshot, steer bool) (Receipt, string, error) {
+// deliveryAdmission holds the same run admission lock used by controller
+// takeover and fencing. An immediate delivery also proves the exact member,
+// session, and generation that made it eligible.
+func (s *Service) deliveryAdmission(run domain.RunID, deliveryProof *control.Snapshot) func(func() error) error {
+	switch {
+	case s.cfg.Control == nil:
+		return func(fn func() error) error { return fn() }
+	case deliveryProof != nil:
+		return func(fn func() error) error {
+			return s.cfg.Control.AdmitMember(string(run), deliveryProof.MemberID, deliveryProof.SessionID, deliveryProof.Generation, fn)
+		}
+	default:
+		return func(fn func() error) error { return s.cfg.Control.Admit(string(run), fn) }
+	}
+}
+
+// deliver rechecks mutable membership and workspace policy inside admit. The
+// callback must not call back into Control.
+func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *domain.Member, run *domain.Run, admit func(func() error) error, steer bool) (Receipt, string, error) {
 	var attempted, revoked bool
 	var outcome string
 	accept := func() error {
@@ -105,21 +122,12 @@ func (s *Service) deliver(ctx context.Context, msg *store.RoomMessage, actor *do
 		outcome, err = s.inject(ctx, msg, actor, run, steer)
 		return err
 	}
-	var err error
-	if s.cfg.Control != nil {
-		if deliveryProof != nil {
-			err = s.cfg.Control.AdmitMember(string(run.ID), deliveryProof.MemberID, deliveryProof.SessionID, deliveryProof.Generation, accept)
-		} else {
-			err = s.cfg.Control.Admit(string(run.ID), accept)
-		}
-	} else {
-		err = accept()
-	}
+	err := admit(accept)
 	if revoked {
 		return ReceiptNotSent, "", nil
 	}
 	if err != nil {
-		if deliveryProof != nil && errors.Is(err, control.ErrStale) {
+		if !attempted && errors.Is(err, control.ErrStale) {
 			return ReceiptNotSent, "", nil
 		}
 		if !attempted {

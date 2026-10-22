@@ -347,6 +347,16 @@ func (s *claimBarrierStore) ClaimRoomMessage(ctx context.Context, id string, now
 	return s.collabStore.ClaimRoomMessage(ctx, id, now, force, by)
 }
 
+type claimHookStore struct {
+	*collabStore
+	beforeClaim func()
+}
+
+func (s *claimHookStore) ClaimRoomMessage(ctx context.Context, id string, now time.Time, force bool, by string) (bool, error) {
+	s.beforeClaim()
+	return s.collabStore.ClaimRoomMessage(ctx, id, now, force, by)
+}
+
 type collabPTY struct {
 	mu    sync.Mutex
 	calls int
@@ -731,6 +741,37 @@ func TestSteeringDelayAndControllerImmediateSend(t *testing.T) {
 	}
 	if pty.Calls() != 2 {
 		t.Fatalf("inject calls=%d, want 2", pty.Calls())
+	}
+}
+
+func TestOwnerImmediateSendCannotBypassANewController(t *testing.T) {
+	st, clock, ws, owner, other, run := setupCollab(t)
+	pty := &collabPTY{}
+	ctl := control.New(control.Config{Now: clock.Now})
+	acquired := false
+	hooked := &claimHookStore{collabStore: st, beforeClaim: func() {
+		if ctl.TryAdmit(string(run.ID), func() error { return nil }) != nil {
+			return
+		}
+		if _, _, err := ctl.Acquire(string(run.ID), string(other.ID), "dashboard", false); err != nil {
+			t.Errorf("acquire between admission and delivery: %v", err)
+			return
+		}
+		acquired = true
+	}}
+	service, err := New(Config{Store: hooked, Runs: hooked, Workspaces: hooked, Inject: pty.Inject, Control: ctl, Now: clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID, Kind: store.RoomMessageSteerRequest, Body: "raced", IdempotencyKey: "raced"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acquired {
+		t.Fatalf("a controller took the run between admission and delivery; inject calls=%d state=%s", pty.Calls(), result.Message.State)
+	}
+	if pty.Calls() != 1 || result.Message.State != store.RoomMessageSent {
+		t.Fatalf("inject calls=%d state=%s, want one immediate delivery", pty.Calls(), result.Message.State)
 	}
 }
 
