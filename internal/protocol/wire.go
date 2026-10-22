@@ -23,9 +23,12 @@ type Run struct {
 	Harness         string `json:"harness"`
 	Mode            string `json:"mode"`
 	Model           string `json:"model,omitempty"`
-	ACP             bool   `json:"acp,omitempty"`
-	Status          string `json:"status"`
-	Reason          string `json:"reason,omitempty"`
+	// Via is the connector client, such as ChatGPT, the run was launched
+	// through.
+	Via    string `json:"via,omitempty"`
+	ACP    bool   `json:"acp,omitempty"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 	// Activity is the live run's state on the wire; see domain.RunActivity.
 	Activity  string `json:"state,omitempty"`
 	StatusSeq int64  `json:"status_seq"`
@@ -158,6 +161,7 @@ func RunFromDomain(r *domain.Run) Run {
 		Harness:             r.Harness,
 		Mode:                string(r.Mode),
 		Model:               r.Model,
+		Via:                 r.Via,
 		ACP:                 r.ACP,
 		Status:              string(r.Status),
 		Reason:              r.Reason,

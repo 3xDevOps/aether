@@ -154,6 +154,37 @@ func TestSignInAloneMintsNoInviteCode(t *testing.T) {
 	}
 }
 
+// A connector's calls carry the device its pairing code was minted on, so
+// a connector minted on a registered device passes no gate that device
+// would not, and audit text names the connector.
+func TestConnectorIsJudgedByItsDevice(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "invites")
+	e := newTestEnv(t, func(c *Config) {
+		c.EdgeAccess = edgeproto.PolicyAccount
+		c.InvitesDir = dir
+	})
+	inviteAccount(t, e, domain.Invitation{Provider: "github", Login: "octo", Role: domain.RoleAdmin})
+	laptop := newSigner(t)
+	e.mustDialEdge(t, octo, laptop, "laptop")
+	dev, err := identities(t, e).GetDeviceByCredential(context.Background(), edgeproto.DeviceKeyLine(laptop.PublicKey()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector := e.srv.ConnectorLocal(ConnectorGrant{Member: dev.Member, Device: dev.ID}, "con-test", "ChatGPT")
+	_, perr := connector.Call(context.Background(), protocol.MethodMemberInvite, json.RawMessage(`{}`))
+	if perr == nil || perr.Code != protocol.CodeDenied || !strings.Contains(perr.Message, "ChatGPT connector con-test was minted on device \"laptop\", which is registered") {
+		t.Fatalf("invite code from a connector minted on a registered device = %v, want CodeDenied", perr)
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 0 {
+		t.Fatalf("a refused call left %d invite codes", len(left))
+	}
+	ctx := context.WithValue(context.Background(), connIdentityKey{}, *connector.id)
+	if kind, description := e.srv.connDescription(ctx); kind != "connector" || description != "ChatGPT connector con-test of member "+string(dev.Member) {
+		t.Fatalf("connDescription = %q, %q", kind, description)
+	}
+}
+
 // Switching to approved-devices changes no device's status, and a
 // registered device is refused like a pending one until someone approves
 // it (rule 13).

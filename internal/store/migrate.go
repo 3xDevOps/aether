@@ -1905,6 +1905,15 @@ CREATE INDEX idx_room_messages_queued_steer ON room_messages(workspace_id, creat
 CREATE INDEX idx_events_coord_to_run ON events (json_extract(payload, '$.to_run_id'))
 	WHERE type = 'coord.message';
 `,
+	// v78: the scopes a member granted a connector on its consent page,
+	// space-separated; connectors authorized before scopes keep every one.
+	// via names the connector client, such as ChatGPT, a run was launched
+	// or a room message posted through, '' for every other caller.
+	`
+ALTER TABLE connectors ADD COLUMN scopes TEXT NOT NULL DEFAULT 'read write control';
+ALTER TABLE runs ADD COLUMN via TEXT NOT NULL DEFAULT '';
+ALTER TABLE room_messages ADD COLUMN via TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

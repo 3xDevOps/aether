@@ -161,7 +161,7 @@ function Row({ row, ctx }: { row: SessionRow; ctx: RowContext }) {
       const body = row.body.startsWith(`${ctx.task}\n\n`) ? ctx.task : row.body
       return (
         <MessageRow
-          author={row.authorID ? name(row.authorID) : row.images?.length || row.files?.length ? 'User' : name(ctx.ownerID)}
+          author={`${row.authorID ? name(row.authorID) : row.images?.length || row.files?.length ? 'User' : name(ctx.ownerID)}${row.via ? ` via ${row.via}` : ''}`}
           attachments={row.images?.length || row.files?.length ? <MessageAttachments runID={ctx.runID} images={row.images} files={row.files} /> : undefined}
           meta={
             <>

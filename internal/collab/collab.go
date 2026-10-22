@@ -343,7 +343,7 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 			WorkspaceID: ws.ID, RunID: run.ID, ActorID: actor.ID, Kind: in.Kind,
 			Body: in.Body, Attachments: append([]string(nil), in.Attachments...),
 			Anchor: cloneAnchor(in.Anchor), CorrelationID: in.CorrelationID,
-			IdempotencyKey: in.IdempotencyKey,
+			IdempotencyKey: in.IdempotencyKey, Via: domain.ViaFrom(ctx),
 		}
 		now := s.now()
 		msg.State = store.RoomMessageSent
@@ -379,7 +379,7 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 			WorkspaceID: ws.ID, RunID: run.ID, ActorID: actor.ID, Kind: in.Kind,
 			Body: in.Body, Attachments: append([]string(nil), in.Attachments...),
 			Anchor: cloneAnchor(in.Anchor), CorrelationID: in.CorrelationID,
-			IdempotencyKey: in.IdempotencyKey,
+			IdempotencyKey: in.IdempotencyKey, Via: domain.ViaFrom(ctx),
 		}
 		session := in.ControllerSessionID
 		generation := in.ControllerGeneration

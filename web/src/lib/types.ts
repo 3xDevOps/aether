@@ -55,6 +55,8 @@ export interface Run {
   harness: string
   mode: string
   model?: string
+  /** The connector client, such as ChatGPT, the run was launched through. */
+  via?: string
   /** The server drives the agent over ACP, so /ws/acp streams its session: every acp run and an ACP-driven headless run. */
   acp?: boolean
   switching?: 'tui' | 'acp'
@@ -831,6 +833,8 @@ export interface RoomMessage {
   run_id: string
   actor_id: string
   actor_display_name?: string
+  /** The connector client, such as ChatGPT, the actor posted through. */
+  via?: string
   kind: RoomMessageKind
   body: string
   attachments?: string[]

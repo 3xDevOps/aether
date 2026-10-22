@@ -16,10 +16,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -27,8 +30,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
+	"golang.org/x/time/rate"
 
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/mcpbridge"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -44,6 +49,9 @@ const (
 	tokenTimeout = 5 * time.Second
 	maxFormBytes = 64 << 10
 	keyBytes     = 32
+	// writeBurst write tool calls a minute per connector: room for a swarm
+	// of parallel launches, not for a loop.
+	writeBurst = 30
 )
 
 var b64 = base64.RawURLEncoding
@@ -81,11 +89,12 @@ type handler struct {
 	mux         *http.ServeMux
 	now         func() time.Time
 
-	// mu guards codes and the wrong-code window.
+	// mu guards codes, wrong, wrongSwept and writes.
 	mu         sync.Mutex
 	codes      map[string]authCode
-	wrongSince time.Time
-	wrong      int
+	wrong      map[netip.Prefix]wrongCodes
+	wrongSwept time.Time
+	writes     map[string]*rate.Limiter
 }
 
 // New returns the handler for every path under the base URL's path and
@@ -112,7 +121,8 @@ func New(cfg Config) (http.Handler, error) {
 		fetch: &http.Client{Transport: cfg.Transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}},
-		mux: http.NewServeMux(), now: time.Now, codes: map[string]authCode{}}
+		mux: http.NewServeMux(), now: time.Now, codes: map[string]authCode{}, wrong: map[netip.Prefix]wrongCodes{},
+		writes: map[string]*rate.Limiter{}}
 
 	streamable := mcp.NewStreamableHTTPHandler(h.server, &mcp.StreamableHTTPOptions{
 		Stateless:    true,
@@ -183,12 +193,11 @@ func grantOf(c *store.Connector) sshd.ConnectorGrant {
 	return sshd.ConnectorGrant{Member: c.Member, Device: c.Device}
 }
 
-// server is the MCP server for one request, whose tools call as the
-// member its token resolved to.
+// server is the MCP server for one request, serving the tools of the
+// scopes its connector was granted, which call as the connector.
 func (h *handler) server(r *http.Request) *mcp.Server {
 	c := auth.TokenInfoFromContext(r.Context()).Extra["connector"].(*store.Connector)
-	member := string(c.Member)
-	local := h.ssh.Local(c.Member)
+	local := h.ssh.ConnectorLocal(grantOf(c), c.ID, c.ClientName)
 	srv := mcp.NewServer(&mcp.Implementation{Name: mcpbridge.ServerName, Title: "Aether", Version: version.String()},
 		&mcp.ServerOptions{Instructions: instructions})
 	mcpbridge.RegisterConnectorTools(srv, func(ctx context.Context, method string, params, out any) error {
@@ -199,17 +208,66 @@ func (h *handler) server(r *http.Request) *mcp.Server {
 				return err
 			}
 		}
-		raw, err := tools.Prepare(member, method, raw)
+		if mcpbridge.CallScope(ctx) == mcpbridge.ScopeRead {
+			return call(ctx, local, c.Member, method, raw, out)
+		}
+		err := h.allowWrite(c.ID, h.now())
+		if err == nil {
+			err = call(ctx, local, c.Member, method, raw, out)
+		}
+		result := "ok"
 		if err != nil {
-			return &protocol.Error{Code: protocol.CodeInvalidParams, Message: method + ": " + err.Error()}
+			result = err.Error()
 		}
-		result, perr := local.Call(ctx, method, raw)
-		if perr != nil {
-			return perr
-		}
-		return json.Unmarshal(result, out)
-	})
+		slog.Info("connector: write call", "connector", c.ID, "member", c.Member, "method", method,
+			"target", callTarget(raw), "result", result)
+		return err
+	}, func(s mcpbridge.Scope) bool { return slices.Contains(c.Scopes, string(s)) })
 	return srv
+}
+
+func call(ctx context.Context, local *sshd.Local, member domain.MemberID, method string, raw json.RawMessage, out any) error {
+	raw, err := tools.Prepare(string(member), method, raw)
+	if err != nil {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: method + ": " + err.Error()}
+	}
+	result, perr := local.Call(ctx, method, raw)
+	if perr != nil {
+		return perr
+	}
+	return json.Unmarshal(result, out)
+}
+
+// callTarget is the run, mission or workspace a call's params name.
+func callTarget(raw json.RawMessage) string {
+	var ids struct {
+		RunID       string `json:"run_id"`
+		MissionID   string `json:"mission_id"`
+		WorkspaceID string `json:"workspace_id"`
+	}
+	_ = json.Unmarshal(raw, &ids)
+	return cmp.Or(ids.RunID, ids.MissionID, ids.WorkspaceID)
+}
+
+// allowWrite takes one of connector id's write calls, writeBurst a
+// minute, or says when the next is allowed.
+func (h *handler) allowWrite(id string, now time.Time) error {
+	h.mu.Lock()
+	lim, ok := h.writes[id]
+	if !ok {
+		lim = rate.NewLimiter(rate.Every(time.Minute/writeBurst), writeBurst)
+		h.writes[id] = lim
+	}
+	h.mu.Unlock()
+	res := lim.ReserveN(now, 1)
+	delay := res.DelayFrom(now)
+	if delay == 0 {
+		return nil
+	}
+	res.CancelAt(now)
+	return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+		"connector %s is limited to %d write calls a minute and used them; retry in %s, at %s",
+		id, writeBurst, delay.Round(time.Second), now.Add(delay).UTC().Format(time.RFC3339))}
 }
 
 func (h *handler) serverName() string {

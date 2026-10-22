@@ -123,7 +123,7 @@ func (c *connectorClient) consent(ctx context.Context, authURL, code string) (*a
 		!strings.Contains(page, "That code is wrong, expired or already used. Run aether mcp for a new one and paste it here.") {
 		return nil, fmt.Errorf("wrong code: %s %v\n%s", resp.Status, resp.Header, page)
 	}
-	if resp, page, err = send(http.MethodPost, url.Values{"request": {m[1]}, "code": {code}}); err != nil {
+	if resp, page, err = send(http.MethodPost, url.Values{"request": {m[1]}, "code": {code}, "scope": {"write", "control"}}); err != nil {
 		return nil, err
 	}
 	loc, err := resp.Location()

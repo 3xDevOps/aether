@@ -46,6 +46,12 @@ type connectorCode struct {
 	expires time.Time
 }
 
+// ConnectorLabel names a connector in audit text and errors: ChatGPT
+// connector con-xxx.
+func ConnectorLabel(client, id string) string {
+	return client + " connector " + id
+}
+
 // ConnectorURL is the URL members add as a custom connector,
 // <edge origin>/mcp/<server id>, or empty while the server has no edge.
 func (s *Server) ConnectorURL() string {
@@ -147,7 +153,7 @@ func (s *Server) CheckConnectorGrant(ctx context.Context, g ConnectorGrant) erro
 
 func connectorToWire(c *store.Connector) protocol.Connector {
 	out := protocol.Connector{ID: c.ID, MemberID: string(c.Member), ClientName: c.ClientName, RedirectHost: c.RedirectHost,
-		DeviceID: string(c.Device), CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339)}
+		DeviceID: string(c.Device), Scopes: c.Scopes, CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339)}
 	if c.LastUsedAt != nil {
 		out.LastUsedAt = c.LastUsedAt.UTC().Format(time.RFC3339)
 	}

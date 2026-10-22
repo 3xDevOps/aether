@@ -143,8 +143,9 @@ func (s *Server) serverOwnerTransfer(ctx context.Context, member domain.MemberID
 // sign-in alone, and a later switch to approved-devices inherits nothing.
 // The other methods that raise privilege or admit a credential
 // need it under approved-devices, where signing in admits nothing. A
-// member SSH key, a tailnet identity and the tailnet dashboard carry no
-// device and pass.
+// connector is judged by the device its pairing code was minted on. A
+// member SSH key, a tailnet identity, the tailnet dashboard and a
+// connector minted over either carry no device and pass.
 func (s *Server) requireApprovedCaller(ctx context.Context, method string, always bool) *protocol.Error {
 	id, ok := ctx.Value(connIdentityKey{}).(connIdentity)
 	if !ok || id.device == "" {
@@ -162,6 +163,11 @@ func (s *Server) requireApprovedCaller(ctx context.Context, method string, alway
 		return rpcError(err)
 	}
 	if dev.Status != domain.DeviceApproved {
+		if id.connector != "" {
+			return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+				"%s needs an approved device, a member SSH key or a tailnet connection; %s was minted on device %q, which is %s",
+				method, ConnectorLabel(id.connectorClient, id.connector), dev.Label, dev.Status)}
+		}
 		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
 			"%s needs an approved device, a member SSH key or a tailnet connection; this connection signed in with device %q, which is %s",
 			method, dev.Label, dev.Status)}

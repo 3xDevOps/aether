@@ -10,20 +10,26 @@ import (
 	"html/template"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
 
+	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/mcpbridge"
 	"github.com/3xDevOps/Aether/internal/sshd"
 )
 
 const (
 	clientDocTimeout = 5 * time.Second
 	maxClientDoc     = 16 << 10
-	// wrongCodeLimit wrong pairing codes per wrongCodeWindow, across the
-	// whole server, before the consent page stops checking codes.
+	// wrongCodeLimit wrong pairing codes per wrongCodeWindow from one client
+	// address before the consent page stops checking that address's codes.
+	// A code has 40 bits and lives 10 minutes, so the limit only slows a
+	// guesser; keyed by address, it never locks out anyone else.
 	wrongCodeLimit  = 10
 	wrongCodeWindow = time.Minute
 )
@@ -88,11 +94,19 @@ type authRequest struct {
 }
 
 // authCode is an issued authorization code, kept by the SHA-256 of its
-// value and never stored.
+// value and never stored. scopes are the scopes the member checked.
 type authCode struct {
 	grant   sshd.ConnectorGrant
 	request authRequest
+	scopes  []string
 	expires time.Time
+}
+
+// wrongCodes counts the wrong pairing codes one client address sent since
+// since.
+type wrongCodes struct {
+	since time.Time
+	n     int
 }
 
 // authorizePage checks an authorization request and shows its consent
@@ -138,7 +152,7 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.renderConsent(w, http.StatusOK, consentPage{Request: h.sign("consent", payload), Client: clientLabel(req)})
+	h.renderConsent(w, http.StatusOK, consentPage{Request: h.sign("consent", payload), Client: clientLabel(req), Write: true})
 }
 
 // authorizeAllow spends the pairing code the member pasted and sends the
@@ -153,16 +167,19 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request) {
 		h.renderError(w, "This form was not issued by this server. Start the connection again from ChatGPT or Claude.")
 		return
 	}
-	page := consentPage{Request: signed, Client: clientLabel(req)}
+	scopes := grantedScopes(r.PostForm["scope"])
+	page := consentPage{Request: signed, Client: clientLabel(req),
+		Write: slices.Contains(scopes, string(mcpbridge.ScopeWrite)), Control: slices.Contains(scopes, string(mcpbridge.ScopeControl))}
 	now := h.now()
-	if !h.attemptAllowed(now) {
-		page.Error = "Too many wrong codes were tried on this server in the last minute. Wait a minute, then paste the code again."
+	from := clientPrefix(r)
+	if !h.attemptAllowed(from, now) {
+		page.Error = fmt.Sprintf("%d wrong codes came from your address in the last minute. Wait a minute, then paste the code again.", wrongCodeLimit)
 		h.renderConsent(w, http.StatusTooManyRequests, page)
 		return
 	}
 	grant, err := h.ssh.RedeemConnectorCode(r.PostFormValue("code"), now)
 	if errors.Is(err, sshd.ErrConnectorCode) {
-		h.recordWrong(now)
+		h.recordWrong(from, now)
 		page.Error = "That code is wrong, expired or already used. Run aether mcp for a new one and paste it here."
 		h.renderConsent(w, http.StatusForbidden, page)
 		return
@@ -182,28 +199,61 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request) {
 			delete(h.codes, k)
 		}
 	}
-	h.codes[hash] = authCode{grant: grant, request: req, expires: now.Add(authCodeTTL)}
+	h.codes[hash] = authCode{grant: grant, request: req, scopes: scopes, expires: now.Add(authCodeTTL)}
 	h.mu.Unlock()
-	slog.Info("connector: authorized", "member", grant.Member, "device", grant.Device, "client", req.ClientID)
+	slog.Info("connector: authorized", "member", grant.Member, "device", grant.Device, "client", req.ClientID, "scopes", scopes)
 	h.redirect(w, r, req, url.Values{"code": {code}})
 }
 
-func (h *handler) attemptAllowed(now time.Time) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if now.Sub(h.wrongSince) >= wrongCodeWindow {
-		h.wrongSince, h.wrong = now, 0
+// grantedScopes is read and whichever of write and control the consent
+// form checked; anything else in it is ignored.
+func grantedScopes(checked []string) []string {
+	scopes := []string{string(mcpbridge.ScopeRead)}
+	for _, s := range []mcpbridge.Scope{mcpbridge.ScopeWrite, mcpbridge.ScopeControl} {
+		if slices.Contains(checked, string(s)) {
+			scopes = append(scopes, string(s))
+		}
 	}
-	return h.wrong < wrongCodeLimit
+	return scopes
 }
 
-func (h *handler) recordWrong(now time.Time) {
+// clientPrefix is the address the edge says r came from, widened to its
+// /64 for IPv6, where one client holds a whole /64. The edge sets the
+// header on every request it relays and replaces any a client sends.
+func clientPrefix(r *http.Request) netip.Prefix {
+	ap, err := netip.ParseAddrPort(r.Header.Get(edgeproto.HeaderClientAddr))
+	if err != nil {
+		return netip.Prefix{}
+	}
+	addr := ap.Addr().Unmap()
+	bits := 32
+	if addr.Is6() {
+		bits = 64
+	}
+	p, _ := addr.Prefix(bits)
+	return p
+}
+
+func (h *handler) attemptAllowed(from netip.Prefix, now time.Time) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if now.Sub(h.wrongSince) >= wrongCodeWindow {
-		h.wrongSince, h.wrong = now, 0
+	wc := h.wrong[from]
+	return now.Sub(wc.since) >= wrongCodeWindow || wc.n < wrongCodeLimit
+}
+
+func (h *handler) recordWrong(from netip.Prefix, now time.Time) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if now.Sub(h.wrongSwept) >= wrongCodeWindow {
+		maps.DeleteFunc(h.wrong, func(_ netip.Prefix, wc wrongCodes) bool { return now.Sub(wc.since) >= wrongCodeWindow })
+		h.wrongSwept = now
 	}
-	h.wrong++
+	wc := h.wrong[from]
+	if wc.n == 0 {
+		wc.since = now
+	}
+	wc.n++
+	h.wrong[from] = wc
 }
 
 // takeCode spends an authorization code, live or not.
@@ -265,6 +315,9 @@ type consentPage struct {
 	Server  string
 	Request string
 	Error   string
+	// Write and Control are whether those scopes' boxes are checked.
+	Write   bool
+	Control bool
 	// Failed shows only Error, for a request that cannot continue.
 	Failed bool
 }
@@ -281,6 +334,8 @@ h1{font-size:1.4rem;font-weight:500}
 .error{background:#fdecec;border:1px solid #e5a5a5;padding:.6rem .8rem;border-radius:6px}
 input{font:inherit;font-size:1.2rem;letter-spacing:.1em;width:10rem;padding:.4rem;text-transform:uppercase}
 button{font:inherit;padding:.45rem 1.4rem;margin-left:.4rem}
+fieldset{border:1px solid #ccc;border-radius:6px;padding:.2rem .9rem}
+input[type=checkbox]{width:auto;font-size:inherit}
 </style>
 </head>
 <body>
@@ -289,10 +344,15 @@ button{font:inherit;padding:.45rem 1.4rem;margin-left:.4rem}
 <p class="error">{{.Error}}</p>
 {{else}}
 <h1>Connect <strong>{{.Client}}</strong> to <strong>{{.Server}}</strong></h1>
-<p>It acts as you and can list workspaces, agents and runs, read run history, launch runs, message runs and stop runs.</p>
+<p>It acts as you. It can always list workspaces, agents and runs and read run history; every member can read every run on this server, so it can read all of them.</p>
 {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
 <form method="post">
 <input type="hidden" name="request" value="{{.Request}}">
+<fieldset>
+<legend>Also allow it to:</legend>
+<p><label><input type="checkbox" name="scope" value="write"{{if .Write}} checked{{end}}> <strong>Launch and message</strong>: launch runs and swarms, message runs, pause and resume them, answer agents' questions and mark runs reviewed.</label></p>
+<p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Approve, stop and close</strong>: decide agents' permission and approval requests, stop and close runs and cancel swarms. Text an agent wrote that the assistant reads could then talk it into approving a command or ending work without asking you.</label></p>
+</fieldset>
 <p><label for="code">Paste the code from <code>aether mcp</code>:</label></p>
 <p><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit"><strong>Allow</strong></button></p>
 </form>

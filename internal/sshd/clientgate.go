@@ -52,7 +52,7 @@ func (s *Server) minClientVersion() string { return version.ReleaseCore(s.cfg.re
 
 // upgradeRequired is the refusal for the connection behind ctx when its
 // client is older than this server's release. The in-process client
-// (Local) carries no connection identity and is never gated.
+// (Local) carries no client version and is never gated.
 func (s *Server) upgradeRequired(ctx context.Context) *protocol.Error {
 	id, ok := ctx.Value(connIdentityKey{}).(connIdentity)
 	if !ok {
