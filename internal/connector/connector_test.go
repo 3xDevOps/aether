@@ -88,8 +88,12 @@ func TestConnectorEndToEnd(t *testing.T) {
 	}
 
 	first := e.connect(t, allScopes...)
-	if got := first.session.InitializeResult().Instructions; !strings.Contains(got, "untrusted") {
-		t.Errorf("instructions = %q", got)
+	// Clients may keep only the first 512 characters of the instructions.
+	got := first.session.InitializeResult().Instructions
+	for _, want := range []string{"aether_list_workspaces", "aether_list_agents", "aether_list_runs query", "aether_message_run", "aether_needs_attention", "untrusted"} {
+		if !strings.Contains(got[:min(len(got), 512)], want) {
+			t.Errorf("the first 512 characters of the instructions lack %q: %q", want, got)
+		}
 	}
 	var names []string
 	for tool, err := range first.session.Tools(ctx, nil) {

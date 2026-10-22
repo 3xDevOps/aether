@@ -502,16 +502,21 @@ there is no terminal, file, settings or git-writing tool.
   Only clients on `chatgpt.com` and `claude.ai` can connect.
 - Refresh tokens rotate on every use and lapse after 30 days unused. A rotated
   refresh token used again a minute or more later deletes the connector.
-- Results contain text agents and other people wrote: reports, history, PR
-  comments, memory notes. Tools put it under an `untrusted` field, and the
-  server's instructions tell the assistant never to follow it. ChatGPT and
+- Results contain text agents and other people wrote: run titles, reasons,
+  reports, history, questions, PR titles and comments, memory notes. Tools put
+  it under an `untrusted` field, outside of which they carry only fixed labels
+  and ids, and the server's instructions tell the assistant never to follow
+  it. ChatGPT and
   Claude ask you before each write tool; Aether adds no confirmation of its
   own. A permission request is only ever allowed or denied once: the
   connector never picks an "always" option, and refuses a decision whose
   `action` text differs from the pending request's, so the confirmation
   shows what is decided.
-- No tool takes a member id. A swarm's accountable human and every agent's
-  account are the connector's member.
+- No tool takes a member id. A swarm's accountable human is the connector's
+  member, and every agent starts on that member's account, falling back to
+  accounts the member may launch on exactly as the member's own launches do.
+- `write` cannot end a live run: `aether_mark_reviewed` completes only a run
+  whose agent reported success and awaits review.
 
 ## Coordination between runs
 

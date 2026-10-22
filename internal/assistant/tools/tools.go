@@ -366,7 +366,8 @@ func truncate(text string) string {
 // socket or a connector. Either is bound to one member, so the wire never
 // names one, except that run.list takes member_id as a read filter, and
 // "mine" there selects member. mission.create makes member the swarm's
-// accountable human and launches every agent on their account.
+// accountable human and the account of every agent, which falls back to
+// accounts member may launch on as member's own launches do.
 func Prepare(member, method string, params json.RawMessage) (json.RawMessage, error) {
 	if len(params) == 0 || string(params) == "null" {
 		return params, nil

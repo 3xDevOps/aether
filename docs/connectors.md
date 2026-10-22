@@ -3,8 +3,9 @@
 A connector is a custom MCP connector in ChatGPT or Claude that points at your
 Aether server. Once you add one, you can launch runs and swarms, see what needs
 you, answer agents, and check pull requests from a chat in ChatGPT or Claude,
-the phone apps included, with no Aether app on the phone. The connector acts as you: the Aether member who authorized it,
-under the same role checks as `aether` and the dashboard.
+the phone apps included, with no Aether app on the phone. The connector acts
+as you: the Aether member who authorized it, under the same role checks as
+`aether` and the dashboard.
 
 ```mermaid
 flowchart LR
@@ -105,24 +106,25 @@ others:
 
 | Tools | What they do | Scope |
 | --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_agents` | Workspaces; agents (installed, signed in, Enhanced) or one agent's models | `read` |
-| `aether_list_runs`, `aether_get_run` | Your runs (or everyone's with `mine: false`), filtered by workspace, activity, text or what needs you; one run with what it waits on, its latest report and its pull request | `read` |
+| `aether_list_workspaces`, `aether_list_agents` | Workspaces; agents (installed, signed in, Enhanced) | `read` |
+| `aether_list_runs`, `aether_get_run` | Your runs (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one run with what it waits on, its latest report and its pull request | `read` |
 | `aether_run_history` | A page of a run's conversation (Enhanced) or terminal, with its reports | `read` |
 | `aether_needs_attention` | What needs you, the dashboard's **Needs you** list, each item naming the tool that answers it | `read` |
 | `aether_activity_summary` | What your runs did today, yesterday or this week, in your time zone | `read` |
 | `aether_list_swarms`, `aether_get_swarm` | Swarms; one swarm's tasks, workers, questions and recent messages | `read` |
 | `aether_run_changes`, `aether_pr_status` | A run's commits, conflicts, changed files and optionally its diff; its pull request's checks, reviews, comments and merge state | `read` |
-| `aether_overlaps`, `aether_memory_search` | Active runs touching the same files; the workspace's [team memory](memory.md) | `read` |
+| `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md) | `read` |
 | `search`, `fetch` | Find runs and swarms by text, in the shape ChatGPT deep research uses | `read` |
 | `aether_launch_run`, `aether_launch_swarm` | Start a run, or a swarm with you as its accountable human | `write` |
 | `aether_message_run`, `aether_answer` | Message a run; answer an agent's, the integrator's or a teammate's question | `write` |
-| `aether_pause_run`, `aether_resume_run`, `aether_mark_reviewed` | Pause or resume a run; accept a reported result or put it off | `write` |
+| `aether_pause_run`, `aether_resume_run`, `aether_mark_reviewed` | Pause or resume a run; accept a reported success, which closes the run, or put it off | `write` |
 | `aether_decide_approval` | Allow or deny an approval or permission request, once | `control` |
 | `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | Stop a run; close it as merged or abandoned; cancel a swarm | `control` |
 
 Things to ask:
 
 - "What needs me in Aether?"
+- "What is the agent working on edge doing?"
 - "Launch a Claude run in api to fix the flaky login test."
 - "Start a swarm in api to add rate limiting, with Codex workers."
 - "What did my agents do today?"
@@ -131,13 +133,24 @@ Things to ask:
 - "Which runs touch the same files as the migration run?"
 
 Results link to the run or swarm in the dashboard when the server serves one on
-its tailnet (`web-port`); the edge serves no dashboard. Text that agents,
-teammates or GitHub users wrote comes back under an `untrusted` field.
+its tailnet (`web-port`); the edge serves no dashboard. A result's text is a
+one-line summary followed by the result as JSON. Text that agents, teammates
+or GitHub users wrote, run titles and the reasons runs wait included, comes
+back under an `untrusted` field, cut to 600 characters (200 for titles and
+last reports, 300 for each pull request review or comment); the fields outside
+it carry fixed labels such as `The agent asks a question`. Lists return 20 rows
+by default, at most 100, and say how many matched when they cut rows;
+`aether_needs_attention` returns at most 30 items. Tools that take a `run_id`
+or `swarm_id` also accept the `run:` and `swarm:` ids `search` returns.
 
 A launch, swarm or message takes an optional `idempotency_key`; a retry with the
 same key returns the first result. Without one, a run launch with the same
-workspace, agent and task within 60 seconds returns your earlier run instead
-of starting another, and a retried swarm or message is sent again. A message
+workspace, agent, task, mode and model within 60 seconds returns your earlier
+run, unless it failed, and a swarm with the same workspace and objective
+within 60 seconds returns your earlier swarm, instead of starting another. A
+retried message without a key is sent again. `aether_mark_reviewed` completes
+only a run whose agent reported success and awaits your review; to end any
+other run, use `aether_stop_run` or `aether_close_run` under `control`. A message
 to a run another member controls waits about 45 seconds for them to approve
 it. `aether_decide_approval` allows or denies a permission request once; it
 never picks an "always" option, so it cannot change what the agent may do
