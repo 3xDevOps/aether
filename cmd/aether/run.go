@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -76,6 +77,15 @@ func runRun(args []string) error {
 		wsID, err := pickWorkspace(list.Workspaces, *workspace)
 		if err != nil {
 			return err
+		}
+		if len(repos) > 0 {
+			var info protocol.ServerInfoResult
+			if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+				return err
+			}
+			if !slices.Contains(info.Features, protocol.FeatureMultiRepo) {
+				return fmt.Errorf("--repo: server %s does not support runs with several repositories; update the server with aether server update", info.ServerVersion)
+			}
 		}
 		var res protocol.RunResult
 		params := launchParams(wsID, task, *agent, *mode, *model, *account, *cachedBase)

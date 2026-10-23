@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -233,11 +234,25 @@ func (g *Gateway) handleDisk(w http.ResponseWriter, r *http.Request) {
 // handleCapabilities serves GET /api/v1/capabilities: the composer's
 // descriptor, with the parts every gateway shares filled in.
 func (g *Gateway) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	if _, ok := g.Authorize(w, r, false); !ok {
+	backend, ok := g.Authorize(w, r, false)
+	if !ok {
+		return
+	}
+	raw, perr := backend.Call(r.Context(), protocol.MethodServerInfo, json.RawMessage(`{}`))
+	if perr != nil {
+		WriteError(w, StatusFor(perr.Code), perr)
+		return
+	}
+	var info protocol.ServerInfoResult
+	if err := json.Unmarshal(raw, &info); err != nil {
+		WriteError(w, http.StatusBadGateway, &protocol.Error{Code: protocol.CodeInternal, Message: "decode server.info: " + err.Error()})
 		return
 	}
 	caps := g.cfg.Capabilities
-	caps.Methods = []string{"*", protocol.CapabilityRunRepos}
+	caps.Methods = []string{"*"}
+	if slices.Contains(info.Features, protocol.FeatureMultiRepo) {
+		caps.Methods = append(caps.Methods, protocol.CapabilityRunRepos)
+	}
 	caps.Version = version.Version
 	caps.Commit = version.Commit
 	w.Header().Set("Content-Type", "application/json")

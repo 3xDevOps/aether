@@ -1942,6 +1942,7 @@ CREATE TABLE run_repos (
 	PRIMARY KEY (run_id, position)
 );
 CREATE INDEX idx_run_repos_workspace ON run_repos(workspace_id);
+ALTER TABLE run_pull_requests ADD COLUMN repo_workspace_id TEXT NOT NULL DEFAULT '';
 `,
 }
 

@@ -33,13 +33,16 @@ type InsightsStore interface {
 // RunPullRequest is one observation of a run's pull request. MergedAt is
 // GitHub's merge time, nil while it is not merged.
 type RunPullRequest struct {
-	RunID      domain.RunID
-	Repository string
-	Number     int
-	URL        string
-	State      string
-	MergedAt   *time.Time
-	ObservedAt time.Time
+	RunID domain.RunID
+	// RepoWorkspace is the extra repository's workspace that owns the pull
+	// request, empty for the run's own.
+	RepoWorkspace domain.WorkspaceID
+	Repository    string
+	Number        int
+	URL           string
+	State         string
+	MergedAt      *time.Time
+	ObservedAt    time.Time
 }
 
 // Interval is the half-open time range [Start, End).
@@ -220,12 +223,12 @@ func (d *DB) RecordRunPullRequest(ctx context.Context, pr *RunPullRequest) error
 		return fmt.Errorf("store: record run pull request: %w", err)
 	}
 	res, err := d.db.ExecContext(ctx,
-		`INSERT INTO run_pull_requests (run_id, workspace_id, repo, number, url, state, created_at, merged_at, checked_at)
-		 SELECT id, workspace_id, ?, ?, ?, ?, ?, ?, ? FROM runs WHERE id = ?
+		`INSERT INTO run_pull_requests (run_id, workspace_id, repo_workspace_id, repo, number, url, state, created_at, merged_at, checked_at)
+		 SELECT id, workspace_id, ?, ?, ?, ?, ?, ?, ?, ? FROM runs WHERE id = ?
 		 ON CONFLICT (run_id, repo, number) DO UPDATE SET
 		     url = excluded.url, state = CASE WHEN state = 'merged' THEN state ELSE excluded.state END,
 		     merged_at = COALESCE(excluded.merged_at, merged_at), checked_at = excluded.checked_at`,
-		pr.Repository, pr.Number, pr.URL, pr.State, at, merged, at, pr.RunID)
+		pr.RepoWorkspace, pr.Repository, pr.Number, pr.URL, pr.State, at, merged, at, pr.RunID)
 	if err = notFoundOnZeroRows(res, err); err != nil {
 		return fmt.Errorf("store: record run pull request: %w", err)
 	}
@@ -248,7 +251,7 @@ func (d *DB) ObserveRunPullRequest(ctx context.Context, pr *RunPullRequest) erro
 
 func (d *DB) RunPullRequests(ctx context.Context, run domain.RunID) ([]*RunPullRequest, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT repo, number, url, state, merged_at, checked_at FROM run_pull_requests
+		`SELECT repo_workspace_id, repo, number, url, state, merged_at, checked_at FROM run_pull_requests
 		 WHERE run_id = ? ORDER BY created_at DESC, rowid DESC`, run)
 	if err != nil {
 		return nil, fmt.Errorf("store: run pull requests: %w", err)
@@ -259,7 +262,7 @@ func (d *DB) RunPullRequests(ctx context.Context, run domain.RunID) ([]*RunPullR
 			merged  *int64
 			checked int64
 		)
-		if scanErr := row.Scan(&pr.Repository, &pr.Number, &pr.URL, &pr.State, &merged, &checked); scanErr != nil {
+		if scanErr := row.Scan(&pr.RepoWorkspace, &pr.Repository, &pr.Number, &pr.URL, &pr.State, &merged, &checked); scanErr != nil {
 			return nil, scanErr
 		}
 		if merged != nil {

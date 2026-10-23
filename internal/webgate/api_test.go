@@ -23,11 +23,16 @@ import (
 // stubBackend records control calls; the streaming surfaces are never
 // reached by the handlers under test here.
 type stubBackend struct {
-	calls []string
+	calls    []string
+	features []string
 }
 
 func (b *stubBackend) Call(_ context.Context, method string, _ json.RawMessage) (json.RawMessage, *protocol.Error) {
 	b.calls = append(b.calls, method)
+	if method == protocol.MethodServerInfo {
+		raw, _ := json.Marshal(protocol.ServerInfoResult{Features: b.features})
+		return raw, nil
+	}
 	return nil, nil
 }
 
@@ -526,9 +531,32 @@ func TestConfigImportRequiresReadDeadlineSupport(t *testing.T) {
 	}
 }
 
+func TestCapabilitiesAdvertiseRunReposOnlyForAServerWithTheFeature(t *testing.T) {
+	for features, want := range map[string][]string{
+		"":                        {"*"},
+		protocol.FeatureMultiRepo: {"*", protocol.CapabilityRunRepos},
+	} {
+		backend := &stubBackend{}
+		if features != "" {
+			backend.features = []string{features}
+		}
+		g, err := New(Config{Authorize: admitAll(backend)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec := httptest.NewRecorder()
+		g.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/capabilities", nil))
+		var caps protocol.GatewayCapabilities
+		if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil || !reflect.DeepEqual(caps.Methods, want) {
+			t.Errorf("server features %q: methods = %v, %v; want %v", features, caps.Methods, err, want)
+		}
+		_ = g.Close()
+	}
+}
+
 func TestCapabilitiesFillTheSharedFields(t *testing.T) {
 	g, err := New(Config{
-		Authorize:    admitAll(&stubBackend{}),
+		Authorize:    admitAll(&stubBackend{features: []string{protocol.FeatureMultiRepo}}),
 		Capabilities: protocol.GatewayCapabilities{Gateway: "server", WS: []string{"events"}},
 	})
 	if err != nil {

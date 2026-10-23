@@ -30,6 +30,26 @@ func (d *DB) SetRunRepos(ctx context.Context, id domain.RunID, repos []domain.Ru
 	return nil
 }
 
+func (d *DB) RunsWithExtraRepo(ctx context.Context, workspace domain.WorkspaceID) ([]domain.RunID, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT DISTINCT run_id FROM run_repos WHERE workspace_id = ? ORDER BY run_id`, workspace)
+	if err != nil {
+		return nil, fmt.Errorf("store: runs with extra repo: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	var ids []domain.RunID
+	for rows.Next() {
+		var id domain.RunID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: scan run with extra repo: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: runs with extra repo: %w", err)
+	}
+	return ids, nil
+}
+
 const runRepoCols = `run_id, position, workspace_id, name, mount_path, branch, base_branch, base_commit, worktree`
 
 func (d *DB) attachExtras(ctx context.Context, runs ...*domain.Run) error {

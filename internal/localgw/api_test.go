@@ -286,7 +286,9 @@ func TestDiskProxies(t *testing.T) {
 }
 
 func TestCapabilities(t *testing.T) {
-	g := newTestGateway(t, &apiStubBackend{})
+	g := newTestGateway(t, &apiStubBackend{results: map[string]json.RawMessage{
+		protocol.MethodServerInfo: json.RawMessage(`{"features":["multi-repo"]}`),
+	}})
 
 	rec := do(g, http.MethodGet, "/api/v1/capabilities", "", true)
 	if rec.Code != http.StatusOK {

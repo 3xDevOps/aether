@@ -233,28 +233,32 @@ func name(display, id string) string {
 }
 
 // head is the run checkout's HEAD at its latest run.diff snapshot, empty
-// before the first one.
+// before the first one. A run's extra repositories publish run.diff under its
+// ID too, so it pages back past theirs.
 func (s *Service) head(ctx context.Context, run *domain.Run) (string, error) {
-	last, err := s.cfg.Log.LastSeq(ctx)
+	before, err := s.cfg.Log.LastSeq(ctx)
 	if err != nil {
 		return "", fmt.Errorf("read the latest diff of run %s: %w", run.ID, err)
 	}
-	diffs, err := s.cfg.Log.ReadBefore(ctx, events.Filter{Workspace: run.WorkspaceID, Run: run.ID,
-		Types: []events.Type{events.TypeRunDiff}}, last+1, headDiffWindow)
-	if err != nil {
-		return "", fmt.Errorf("read the latest diff of run %s: %w", run.ID, err)
-	}
-	for _, event := range diffs {
-		if diff, ok := event.Payload.(events.RunDiffPayload); ok && diff.Repo == "" {
-			return diff.Head, nil
+	filter := events.Filter{Workspace: run.WorkspaceID, Run: run.ID, Types: []events.Type{events.TypeRunDiff}}
+	for before++; ; {
+		diffs, err := s.cfg.Log.ReadBefore(ctx, filter, before, headDiffPage)
+		if err != nil {
+			return "", fmt.Errorf("read the latest diff of run %s: %w", run.ID, err)
 		}
+		for _, event := range diffs {
+			if diff, ok := event.Payload.(events.RunDiffPayload); ok && diff.Repo == "" {
+				return diff.Head, nil
+			}
+		}
+		if len(diffs) < headDiffPage {
+			return "", nil
+		}
+		before = diffs[len(diffs)-1].Seq
 	}
-	return "", nil
 }
 
-// headDiffWindow is how many of a run's newest run.diff events head scans; its
-// extras' events can precede the primary's.
-const headDiffWindow = 32
+const headDiffPage = 32
 
 // similar is the best live matches for text other than the note itself.
 func (s *Service) similar(ctx context.Context, workspace domain.WorkspaceID, self, text string) ([]protocol.MemoryItem, error) {

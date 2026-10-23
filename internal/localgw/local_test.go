@@ -658,7 +658,7 @@ func TestPackagedGatewayOmitsHostVerbs(t *testing.T) {
 	if err := cli.Save(cli.Config{Addr: "home:2222"}); err != nil {
 		t.Fatal(err)
 	}
-	g, err := New(Config{Backend: &verbStubBackend{}, CLI: cli.Config{Addr: "home:2222"}, Packaged: "Android app"})
+	g, err := New(Config{Backend: &verbStubBackend{apiStubBackend: apiStubBackend{results: map[string]json.RawMessage{protocol.MethodServerInfo: json.RawMessage(`{}`)}}}, CLI: cli.Config{Addr: "home:2222"}, Packaged: "Android app"})
 	if err != nil {
 		t.Fatal(err)
 	}

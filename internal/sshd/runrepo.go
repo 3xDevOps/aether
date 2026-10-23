@@ -67,6 +67,15 @@ type runRepoCall struct {
 	accountName string
 }
 
+// repoOwner is the workspace of the extra repository the call acts on, empty
+// for the run's own.
+func (c runRepoCall) repoOwner() domain.WorkspaceID {
+	if c.repo.WorkspaceID == c.run.WorkspaceID {
+		return ""
+	}
+	return c.repo.WorkspaceID
+}
+
 func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, runID, repoID string, mutation bool) (runRepoCall, error) {
 	var call runRepoCall
 	if runID == "" {
@@ -297,7 +306,7 @@ func (s *Server) runPRStatus(ctx context.Context, member domain.MemberID, raw js
 		status, err = call.native.LookupPR(ctx, call.execution, runrepo.PRTarget(p.Target))
 	}
 	if status.PullRequest != nil {
-		s.recordPR(ctx, call.run, status.PullRequest, false)
+		s.recordPR(ctx, call, status.PullRequest, false)
 	}
 	return protocol.RunPRStatusResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(status.PullRequest), Output: runrepo.FailureOutput(status.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
 }
@@ -313,7 +322,7 @@ func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw js
 	}
 	created, err := call.native.CreatePR(ctx, call.execution, runrepo.PRCreateRequest{Expected: p.Expected, Target: runrepo.PRTarget(p.Target), Title: p.Title, Body: p.Body, Draft: p.Draft, ExpectedLogin: p.ExpectedLogin})
 	if created.PullRequest != nil {
-		s.recordPR(ctx, call.run, created.PullRequest, created.Created || created.Reconciled)
+		s.recordPR(ctx, call, created.PullRequest, created.Created || created.Reconciled)
 	}
 	return protocol.RunPRCreateResult{Repo: p.Repo, Identity: created.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(created.PullRequest), Created: created.Created, Reconciled: created.Reconciled, CreationUncertain: created.CreationUncertain, Output: runrepo.FailureOutput(created.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
 }
@@ -323,9 +332,10 @@ func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw js
 // outlives a cancelled request, since CreatePR can confirm a PR after one. A
 // failure is only logged: the GitHub side already happened and must not be
 // reported as failed.
-func (s *Server) recordPR(ctx context.Context, run domain.Run, pr *runrepo.PullRequest, opened bool) {
+func (s *Server) recordPR(ctx context.Context, call runRepoCall, pr *runrepo.PullRequest, opened bool) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
+	run := call.run
 	repository := strings.ToLower(pr.Target.Repository)
 	recorded, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
 	if err != nil {
@@ -343,7 +353,7 @@ func (s *Server) recordPR(ctx context.Context, run domain.Run, pr *runrepo.PullR
 		record = s.cfg.Store.RecordRunPullRequest
 	}
 	err = record(ctx, &store.RunPullRequest{
-		RunID: run.ID, Repository: repository, Number: pr.Number,
+		RunID: run.ID, RepoWorkspace: call.repoOwner(), Repository: repository, Number: pr.Number,
 		URL: pr.URL, State: pr.State, MergedAt: pr.MergedAt, ObservedAt: time.Now().UTC(),
 	})
 	if err != nil {
@@ -386,7 +396,9 @@ func (s *Server) recordedPRStatus(ctx context.Context, call runRepoCall, p proto
 		return protocol.RunPRStatusResult{}, rpcError(err)
 	}
 	repository := strings.ToLower(p.Target.Repository)
-	prs = slices.DeleteFunc(prs, func(pr *store.RunPullRequest) bool { return repository != "" && pr.Repository != repository })
+	prs = slices.DeleteFunc(prs, func(pr *store.RunPullRequest) bool {
+		return pr.RepoWorkspace != call.repoOwner() || repository != "" && pr.Repository != repository
+	})
 	if len(prs) == 0 {
 		return protocol.RunPRStatusResult{}, rpcError(liveErr)
 	}
@@ -423,7 +435,7 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, false)
 	feedback := runrepo.PRFeedback{Checks: []protocol.RunPRCheck{}, Comments: []protocol.RunPRComment{}, Reviews: []protocol.RunPRReview{}, ReviewComments: []protocol.RunPRReviewComment{}}
 	if errors.Is(err, scheduler.ErrNoLiveEnvironment) && call.run.Status.Terminal() {
-		status, perr := s.recordedPRStatus(ctx, call, protocol.RunPRStatusParams{RunID: p.RunID, Target: p.Target}, err)
+		status, perr := s.recordedPRStatus(ctx, call, protocol.RunPRStatusParams{RunID: p.RunID, Repo: p.Repo, Target: p.Target}, err)
 		if perr != nil {
 			return nil, perr
 		}
@@ -482,17 +494,7 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 		if listErr != nil {
 			return nil, rpcError(listErr)
 		}
-		if len(call.run.Extras) > 0 {
-			var target protocol.RunPRTarget
-			var expected protocol.RunGitExpected
-			if defaultsPerr, defaultsErr := s.prDefaults(ctx, call, &expected, &target); defaultsPerr != nil {
-				return nil, defaultsPerr
-			} else if defaultsErr != nil {
-				return nil, rpcError(defaultsErr)
-			}
-			repository := strings.ToLower(target.Repository)
-			prs = slices.DeleteFunc(prs, func(pr *store.RunPullRequest) bool { return pr.Repository != repository })
-		}
+		prs = slices.DeleteFunc(prs, func(pr *store.RunPullRequest) bool { return pr.RepoWorkspace != call.repoOwner() })
 		if len(prs) == 0 {
 			return nil, invalidParams("run has no recorded pull request; pass repository and number")
 		}
@@ -500,7 +502,7 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 	}
 	merged, err := call.native.MergePR(ctx, call.execution, runrepo.PRMergeRequest{Repository: p.Repository, Number: p.Number, Method: p.Method, ExpectedHead: p.ExpectedHead, ExpectedLogin: p.ExpectedLogin, ExpectedBase: p.ExpectedBase})
 	if merged.PullRequest != nil {
-		s.recordPR(ctx, call.run, merged.PullRequest, false)
+		s.recordPR(ctx, call, merged.PullRequest, false)
 	}
 	return protocol.RunPRMergeResult{Repo: p.Repo, Identity: merged.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(merged.PullRequest), Merged: merged.PullRequest != nil && merged.PullRequest.State == "merged", Output: runrepo.FailureOutput(merged.Output, err), Error: repoError(err)}, nil
 }
