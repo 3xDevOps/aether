@@ -148,6 +148,11 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 		if run.Worktree != "" {
 			inUse[filepath.Clean(run.Worktree)] = true
 		}
+		for _, extra := range run.Extras {
+			if extra.Worktree != "" {
+				inUse[filepath.Clean(extra.Worktree)] = true
+			}
+		}
 	}
 	var caches map[string]scheduler.CacheRetentionInfo
 	var cacheErr error
@@ -204,7 +209,8 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 			e.OwnerKind, e.OwnerID = "workspace", string(workspace.ID)
 			e.Reason = "Persistent repository, run branches and shared clone objects; no automatic expiry"
 		case "checkout", "snapshot", "transcript", "coord":
-			run, err := d.Store.GetRun(ctx, domain.RunID(e.Key))
+			owner, _ := domain.ParentRun(domain.RunID(e.Key))
+			run, err := d.Store.GetRun(ctx, owner)
 			if err != nil {
 				unknownStorageOwner(e, err)
 				continue
@@ -215,8 +221,17 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 				continue
 			}
 			if e.Kind == "checkout" {
-				expected := filepath.Join(d.DataDir, "checkouts", string(run.ID))
-				if run.Worktree == "" || filepath.Clean(run.Worktree) != filepath.Clean(expected) {
+				expected := filepath.Join(d.DataDir, "checkouts", e.Key)
+				worktree := run.Worktree
+				if domain.RunID(e.Key) != run.ID {
+					worktree = ""
+					for _, extra := range run.Extras {
+						if string(extra.Key) == e.Key {
+							worktree = extra.Worktree
+						}
+					}
+				}
+				if worktree == "" || filepath.Clean(worktree) != filepath.Clean(expected) {
 					e.Reason = "Run does not own this checkout in durable state; cleanup eligibility unknown"
 					continue
 				}
@@ -225,7 +240,7 @@ func attributeStorage(ctx context.Context, d Deps, u *disk.Usage, now time.Time)
 					e.Error = "Run ownership lookup failed"
 					continue
 				}
-				if inUse[filepath.Clean(run.Worktree)] {
+				if inUse[filepath.Clean(worktree)] {
 					e.Reason = "Checkout is in use by an active run"
 					continue
 				}

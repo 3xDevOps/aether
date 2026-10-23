@@ -900,11 +900,7 @@ func (d *DB) FinishedRunsOf(ctx context.Context, a, b domain.MemberID) ([]*domai
 			finished = append(finished, "'"+string(s)+"'")
 		}
 	}
-	rows, err := d.db.QueryContext(ctx, runSnapshotQuery(`runs.status IN (`+strings.Join(finished, ", ")+`)
+	return d.listRuns(ctx, fmt.Sprintf("finished runs of %s and %s", a, b), runSnapshotQuery(`runs.status IN (`+strings.Join(finished, ", ")+`)
 		AND (runs.member_id IN (?, ?) OR runs.account_member_id IN (?, ?) OR runs.home_member_id IN (?, ?))`)+
 		` ORDER BY runs.created_at, runs.rowid`, a, b, a, b, a, b)
-	if err != nil {
-		return nil, fmt.Errorf("store: finished runs of %s and %s: %w", a, b, err)
-	}
-	return collect(rows, scanRun)
 }

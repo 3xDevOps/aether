@@ -425,7 +425,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 			mode = recorded
 		}
 	}
-	instructions, err := d.s.briefedInstructions(ctx, d.s.runGuide(ctx, entry.runID, entry.missionAssigned, oneShot, true), run.WorkspaceID, run.MemberID)
+	instructions, err := d.s.briefedInstructions(ctx, d.s.runGuide(ctx, entry.runID, entry.missionAssigned, oneShot, true), run.Extras, run.WorkspaceID, run.MemberID)
 	if err != nil {
 		return err
 	}

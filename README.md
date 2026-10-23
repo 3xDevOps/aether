@@ -99,6 +99,8 @@ The guides people open most:
 - [Agents](docs/harnesses.md): which agent CLIs work, how to sign in, and their
   limits.
 - [Teams](docs/teams.md): inviting people, roles and workspaces.
+- [Working across repos](docs/quickstart.md#working-across-repos): one run over
+  several workspaces.
 - [Troubleshooting](docs/failure-handling.md): reboots, full disks, stalled
   runs and dropped connections.
 

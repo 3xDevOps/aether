@@ -249,7 +249,9 @@ aether workspace env script --clear
 The script (for a Node project, one line: `npm ci`) runs once in each new
 run's container, after it starts and before the agent. It runs as `/bin/sh -ec`
 (POSIX `sh`, stops at the first failing command, stderr merged into stdout) in
-`/workspace` as the container's user (root in the standard image). It sees the
+`/workspace` as the container's user (root in the standard image). A run with
+extra repos (`aether run --repo`) runs it in the primary one; the others are at
+`/repos/<workspace name>`. It sees the
 workspace variables, your `$HOME` and tool caches, `AETHER_RUN_ID` and
 `AETHER_WORKSPACE_ID`.
 

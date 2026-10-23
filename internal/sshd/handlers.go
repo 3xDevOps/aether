@@ -51,6 +51,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		TailnetDashboardError: dashboardErr,
 		DashboardURL:          dashboardURL,
 		MinClientVersion:      s.minClientVersion(),
+		Features:              []string{protocol.FeatureMultiRepo},
 	}, nil
 }
 
@@ -157,6 +158,9 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if p.Task == "" && mode == domain.LaunchHeadless {
 		return nil, invalidParams("task is required in headless mode")
 	}
+	if err := validateExtraWorkspaces(p.WorkspaceID, p.ExtraWorkspaceIDs); err != nil {
+		return nil, invalidParams(err.Error())
+	}
 	policy, err := fallback.Policy(p.FallbackAccountMemberIDs, p.NoFallback)
 	if err != nil {
 		return nil, invalidParams(err.Error())
@@ -197,6 +201,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
 		CachedBase: p.CachedBase, Model: p.Model, RequestedAccount: requested, Fallback: policy,
 		Admitted: unlockAuthorization, Created: created,
+		ExtraWorkspaces: workspaceIDs(p.ExtraWorkspaceIDs),
 	})
 	if err != nil {
 		if errors.Is(err, errLaunchOptionsUnsupported) {
@@ -286,6 +291,13 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 			out.ControllerMemberID = string(holder.MemberID)
 		}
 		out.LastControllerMemberID = string(s.cfg.Control.LastHolder(string(run.ID)))
+	}
+	if len(run.Extras) > 0 {
+		name := string(run.WorkspaceID)
+		if ws, err := s.cfg.Store.GetWorkspace(context.Background(), run.WorkspaceID); err == nil {
+			name = ws.Name
+		}
+		out.Repos = protocol.RunRepos(run, name)
 	}
 	return out
 }
@@ -740,17 +752,55 @@ func captureHandoffEvidence(ctx context.Context, h *store.HandoffOutbox, capture
 }
 
 func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	id, perr := runIDParams(params)
+	p, perr := decodeParams[protocol.RunPullParams](params)
 	if perr != nil {
 		return nil, perr
 	}
-	run, err := s.cfg.Store.GetRun(ctx, id)
+	if p.RunID == "" {
+		return nil, invalidParams("run_id is required")
+	}
+	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	workspace, branch := run.WorkspaceID, run.Branch
+	if p.Repo != "" && domain.WorkspaceID(p.Repo) != run.WorkspaceID {
+		extra, ok := run.ExtraRepo(domain.WorkspaceID(p.Repo))
+		if !ok {
+			return nil, invalidParams("repo " + p.Repo + " is not one of the run's repos")
+		}
+		workspace, branch = extra.WorkspaceID, extra.Branch
+	}
 	return protocol.RunPullResult{
-		WorkspaceID: string(run.WorkspaceID),
-		RepoPath:    "/" + string(run.WorkspaceID) + ".git",
-		Branch:      run.Branch,
+		Repo:        p.Repo,
+		WorkspaceID: string(workspace),
+		RepoPath:    "/" + string(workspace) + ".git",
+		Branch:      branch,
 	}, nil
+}
+
+// validateExtraWorkspaces refuses a repeated extra workspace and the primary
+// one among the extras.
+func validateExtraWorkspaces(primary string, extras []string) error {
+	seen := map[string]bool{primary: true}
+	for _, id := range extras {
+		switch {
+		case id == "":
+			return errors.New("extra_workspace_ids must not contain an empty id")
+		case id == primary:
+			return fmt.Errorf("extra workspace %s is the run's primary workspace", id)
+		case seen[id]:
+			return fmt.Errorf("extra workspace %s is listed twice", id)
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+func workspaceIDs(ids []string) []domain.WorkspaceID {
+	out := make([]domain.WorkspaceID, len(ids))
+	for i, id := range ids {
+		out[i] = domain.WorkspaceID(id)
+	}
+	return out
 }

@@ -716,7 +716,7 @@ func withholdSecret(text string, files []string) (string, []string) {
 func (d *DB) latestRunDiff(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) ([]string, string, error) {
 	var payload string
 	err := d.db.QueryRowContext(ctx,
-		`SELECT payload FROM events WHERE workspace_id = ? AND run_id = ? AND type = 'run.diff' ORDER BY seq DESC LIMIT 1`,
+		`SELECT payload FROM events WHERE workspace_id = ? AND run_id = ? AND type = 'run.diff' AND json_extract(payload, '$.repo') IS NULL ORDER BY seq DESC LIMIT 1`,
 		workspace, run).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", nil

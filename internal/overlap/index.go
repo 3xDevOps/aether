@@ -208,6 +208,9 @@ func (i *Index) apply(e events.Event) bool {
 	}
 	switch p := e.Payload.(type) {
 	case events.RunDiffPayload:
+		if p.Repo != "" {
+			return false
+		}
 		files := make(map[string]struct{}, len(p.Files))
 		for _, f := range p.Files {
 			files[f.Path] = struct{}{}

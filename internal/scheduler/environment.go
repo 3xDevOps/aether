@@ -39,6 +39,10 @@ type EnvironmentPlan struct {
 	Home        string
 	Path        string
 	Mounts      []runtime.Mount
+	// Worktrees are the checkouts of the run's extra repositories, bound
+	// beside the primary worktree; they are not Mounts because a mount is
+	// chowned wholesale, which a checkout of hard-linked objects must not be.
+	Worktrees []runtime.Mount
 	// LoginMember is the account owner whose login paths are mounted, empty
 	// when the plan mounts nothing from another member's home.
 	LoginMember domain.MemberID
@@ -200,7 +204,15 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	if s.cfg.Homes != nil {
 		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot(), s.scratchRoot()}
 	}
-	if validateErr := runtime.ValidateMounts(plan.Mounts, runtime.MountPolicy{
+	var worktrees []runtime.Mount
+	if run != nil {
+		for _, extra := range run.Extras {
+			worktrees = append(worktrees, runtime.Mount{HostPath: extra.Worktree, ContainerPath: extra.Path})
+			roots = append(roots, filepath.Dir(extra.Worktree))
+		}
+	}
+	mounts := append(slices.Clone(plan.Mounts), worktrees...)
+	if validateErr := runtime.ValidateMounts(mounts, runtime.MountPolicy{
 		OwnedRoots:        roots,
 		WorktreeHostPath:  worktreePath(run),
 		WorktreeMountPath: s.cfg.WorktreeMount,
@@ -208,6 +220,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	}); validateErr != nil {
 		return nil, validateErr
 	}
+	plan.Mounts, plan.Worktrees = mounts[:len(plan.Mounts)], mounts[len(plan.Mounts):]
 	return plan, nil
 }
 

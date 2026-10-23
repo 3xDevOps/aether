@@ -272,7 +272,7 @@ func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceI
 	return e.branchExists(ctx, repo, branch)
 }
 
-// CommitAll stages and commits everything in the run's checkout, authored
+// commitAll stages and commits everything in the run's checkout, authored
 // as author and committed as Aether. Returns "", nil when the tree is
 // clean; a zero author leaves Aether as both. A non-empty signingKey is
 // the OpenSSH private key the commit is signed with.
@@ -295,7 +295,7 @@ func (e *Engine) WorkspaceBranchExists(ctx context.Context, ws domain.WorkspaceI
 // settings is therefore passed on the command line, which outranks the
 // checkout's config, and the key itself is copied to a private temp file
 // - never named at a path inside the checkout or the member home.
-func (e *Engine) CommitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (commit string, err error) {
+func (e *Engine) commitAll(ctx context.Context, run domain.RunID, message string, author domain.GitIdentity, signingKey []byte) (commit string, err error) {
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {
 		return "", err
@@ -382,11 +382,11 @@ func writeTempSigningKey(key []byte) (path string, cleanup func(), err error) {
 	return f.Name(), cleanup, nil
 }
 
-// PublishRunBranch fetches the run's branch from its checkout into the
+// publishRunBranch fetches the run's branch from its checkout into the
 // workspace bare repo, making it fetchable by clients. Returns the branch
 // tip sha. Publishes git.branch when the ref moved and the run's workspace
 // is known from the watch registry.
-func (e *Engine) PublishRunBranch(ctx context.Context, run domain.RunID) (commit string, err error) {
+func (e *Engine) publishRunBranch(ctx context.Context, run domain.RunID) (commit string, err error) {
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {
 		return "", err
@@ -425,10 +425,10 @@ func (e *Engine) PublishRunBranch(ctx context.Context, run domain.RunID) (commit
 	return after, nil
 }
 
-// RemoveRunCheckout deletes the checkout and identity, not recorded diff
+// removeRunCheckout deletes the checkout and identity, not recorded diff
 // history or source branches. Snapshot objects are detached from the checkout's
 // alternate object database before removal. Idempotent on missing paths.
-func (e *Engine) RemoveRunCheckout(ctx context.Context, run domain.RunID) error {
+func (e *Engine) removeRunCheckout(ctx context.Context, run domain.RunID) error {
 	checkout, err := e.checkoutPath(run)
 	if err != nil {
 		return err
@@ -437,7 +437,7 @@ func (e *Engine) RemoveRunCheckout(ctx context.Context, run domain.RunID) error 
 	if err != nil {
 		return err
 	}
-	e.StopDiffWatch(run)
+	e.stopDiffWatch(run, true)
 	// Detach while source/evidence maintenance is excluded. Acquire this
 	// before the per-run snapshot lock, as CaptureEvidence does.
 	e.repoMaintenanceMu.Lock()

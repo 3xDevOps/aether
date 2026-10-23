@@ -240,16 +240,21 @@ func (s *Service) head(ctx context.Context, run *domain.Run) (string, error) {
 		return "", fmt.Errorf("read the latest diff of run %s: %w", run.ID, err)
 	}
 	diffs, err := s.cfg.Log.ReadBefore(ctx, events.Filter{Workspace: run.WorkspaceID, Run: run.ID,
-		Types: []events.Type{events.TypeRunDiff}}, last+1, 1)
+		Types: []events.Type{events.TypeRunDiff}}, last+1, headDiffWindow)
 	if err != nil {
 		return "", fmt.Errorf("read the latest diff of run %s: %w", run.ID, err)
 	}
-	if len(diffs) == 0 {
-		return "", nil
+	for _, event := range diffs {
+		if diff, ok := event.Payload.(events.RunDiffPayload); ok && diff.Repo == "" {
+			return diff.Head, nil
+		}
 	}
-	diff, _ := diffs[0].Payload.(events.RunDiffPayload)
-	return diff.Head, nil
+	return "", nil
 }
+
+// headDiffWindow is how many of a run's newest run.diff events head looks
+// through for one of the run's own repository, past those of its extras.
+const headDiffWindow = 32
 
 // similar is the best live matches for text other than the note itself.
 func (s *Service) similar(ctx context.Context, workspace domain.WorkspaceID, self, text string) ([]protocol.MemoryItem, error) {

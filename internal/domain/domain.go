@@ -223,6 +223,9 @@ type LaunchOptions struct {
 	// Created is called with the run's ID once its row is durable, before
 	// Admitted; a replayed or refused launch never calls it.
 	Created func(RunID)
+	// ExtraWorkspaces are existing workspaces checked out beside the run's
+	// primary one; see RunRepo.
+	ExtraWorkspaces []WorkspaceID
 }
 
 // AccountFallback is where a launch may move when the requested account's
@@ -703,6 +706,9 @@ type Run struct {
 	LastCommitAt time.Time
 	// Worktree is the server-side path of the run's git worktree.
 	Worktree string
+	// Extras are the run's additional repositories, in launch order; nil
+	// for a single-repo run.
+	Extras []RunRepo
 	// Protected restricts messaging, steering and killing this run to its
 	// owner and admins, regardless of the workspace's SteerOthers setting.
 	Protected bool
@@ -836,4 +842,77 @@ type ServerBusy struct {
 
 func (b ServerBusy) Idle() bool {
 	return !b.Unknown && b.Runs == 0 && b.Shells == 0
+}
+
+// RunRepo is one extra repository of a run: an existing workspace checked
+// out beside the primary one at Path inside the container, on its own run
+// branch. Its checkout is keyed by Key in the git engine.
+type RunRepo struct {
+	WorkspaceID WorkspaceID
+	Name        string
+	// Path is where the checkout is mounted in the container.
+	Path       string
+	Branch     string
+	BaseBranch string
+	BaseCommit string
+	// Worktree is the server-side checkout path; empty once cleaned up.
+	Worktree string
+	// Key names the checkout in the git engine; see RepoKey.
+	Key RunID
+}
+
+// PrimaryRepoPath is where a run's primary repository is mounted in its
+// container.
+const PrimaryRepoPath = "/workspace"
+
+// ExtraReposRoot is the container directory the extra repositories of a run
+// are mounted under, one directory per workspace.
+const ExtraReposRoot = "/repos"
+
+// RepoKey is the git engine's checkout key for the position-th extra
+// repository (1-based) of run. Run IDs hold a single dash, so a key never
+// collides with one.
+func RepoKey(run RunID, position int) RunID {
+	return RunID(fmt.Sprintf("%s-r%d", run, position))
+}
+
+// ParentRun returns the run a checkout key belongs to, and false when key is
+// a run's own ID.
+func ParentRun(key RunID) (RunID, bool) {
+	i := strings.LastIndex(string(key), "-r")
+	if i < 0 || strings.Count(string(key), "-") < 2 || i+2 == len(key) {
+		return key, false
+	}
+	for _, c := range key[i+2:] {
+		if c < '0' || c > '9' {
+			return key, false
+		}
+	}
+	return key[:i], true
+}
+
+// RepoDirName is the directory name an extra repository mounts under: the
+// workspace name with anything outside [A-Za-z0-9._-] replaced by "-".
+func RepoDirName(name string) string {
+	dir := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			return r
+		}
+		return '-'
+	}, name)
+	if dir = strings.Trim(dir, ".-"); dir == "" {
+		return "repo"
+	}
+	return dir
+}
+
+// ExtraRepo returns the extra repository of workspace, if the run has one.
+func (r *Run) ExtraRepo(workspace WorkspaceID) (RunRepo, bool) {
+	for _, repo := range r.Extras {
+		if repo.WorkspaceID == workspace {
+			return repo, true
+		}
+	}
+	return RunRepo{}, false
 }

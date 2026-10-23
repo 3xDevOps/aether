@@ -278,7 +278,10 @@ type FileDiffStat struct {
 // RunDiffPayload is a point-in-time snapshot of a run worktree's diff
 // against its base, taken on file-change quiescence.
 type RunDiffPayload struct {
-	Files []FileDiffStat `json:"files"`
+	// Repo is the workspace of the extra repository of a multi-repo run this
+	// snapshot describes; empty for the run's primary repository.
+	Repo  domain.WorkspaceID `json:"repo,omitempty"`
+	Files []FileDiffStat     `json:"files"`
 	// Truncated marks a worktree with more untracked content than a stat
 	// set reads: every changed path is still in Files, the files left
 	// unread count zero, and the totals are a floor.
@@ -396,8 +399,12 @@ func (TimelinePayload) EventType() Type { return TypeTimeline }
 // GitBranchPayload reports a branch update in a workspace repo.
 type GitBranchPayload struct {
 	WorkspaceID domain.WorkspaceID `json:"workspace_id"`
-	Branch      string             `json:"branch"`
-	Commit      string             `json:"commit"`
+	// Repo is set when the branch belongs to an extra repository of a
+	// multi-repo run; WorkspaceID then names that repository's workspace,
+	// not the run's.
+	Repo   domain.WorkspaceID `json:"repo,omitempty"`
+	Branch string             `json:"branch"`
+	Commit string             `json:"commit"`
 	// Previous is the tip before this update, empty for a new branch.
 	// Forced is set when Previous is not an ancestor of Commit: a rebase,
 	// reset or other rewrite.
