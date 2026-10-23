@@ -617,7 +617,8 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 - Runs use Docker's default network. Nothing in Aether limits their outbound
   traffic, and on Docker's default bridge a run can reach ports that other runs
   and environments listen on.
-- Every run trusts `/workspace` for git through `GIT_CONFIG_COUNT`. An image
+- Every run trusts `/workspace`, and each extra repo's `/repos/<name>`, for git
+  through `GIT_CONFIG_COUNT`. An image
   with git older than 2.31 ignores that and can refuse the checkout when its
   owner differs from the agent's user. An image's own `ENV GIT_CONFIG_*`
   entries are replaced, so set them as workspace variables.

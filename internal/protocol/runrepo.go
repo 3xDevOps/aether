@@ -52,6 +52,7 @@ type WorkspaceImportResult struct {
 // These methods are human authenticated entry points. Agents use native Git
 // and gh; run_id here must never be passed through the run-socket dispatcher.
 type RunGitStatusParams struct {
+	Repo  string `json:"repo,omitempty"`
 	RunID string `json:"run_id"`
 }
 
@@ -83,6 +84,7 @@ type RunGitUpstream struct {
 }
 
 type RunGitStatusResult struct {
+	Repo            string               `json:"repo,omitempty"`
 	Branch          string               `json:"branch"`
 	Head            string               `json:"head"`
 	HeadSubject     string               `json:"head_subject,omitempty"`
@@ -110,18 +112,21 @@ type RunRepoCommandOutput struct {
 }
 
 type RunGitDiffParams struct {
+	Repo   string   `json:"repo,omitempty"`
 	RunID  string   `json:"run_id"`
 	Paths  []string `json:"paths,omitempty"`
 	Staged bool     `json:"staged,omitempty"`
 }
 
 type RunGitDiffResult struct {
+	Repo   string               `json:"repo,omitempty"`
 	State  RunGitExpected       `json:"state"`
 	Output RunRepoCommandOutput `json:"output"`
 	Error  string               `json:"error,omitempty"`
 }
 
 type RunGitCommitParams struct {
+	Repo     string         `json:"repo,omitempty"`
 	RunID    string         `json:"run_id"`
 	Expected RunGitExpected `json:"expected"`
 	Paths    []string       `json:"paths"`
@@ -129,6 +134,7 @@ type RunGitCommitParams struct {
 }
 
 type RunGitCommitResult struct {
+	Repo         string `json:"repo,omitempty"`
 	Committed    bool   `json:"committed"`
 	Head         string `json:"head"`
 	IndexUpdated bool   `json:"index_updated"`
@@ -141,6 +147,7 @@ type RunGitCommitResult struct {
 }
 
 type RunGitLogParams struct {
+	Repo  string `json:"repo,omitempty"`
 	RunID string `json:"run_id"`
 	Limit int    `json:"limit,omitempty"`
 }
@@ -165,6 +172,7 @@ type RunGitConflict struct {
 // and Upstream MergeBase..Base, newest first. Conflicts are predicted by
 // merging Head with Base without touching the worktree.
 type RunGitLogResult struct {
+	Repo      string           `json:"repo,omitempty"`
 	Branch    string           `json:"branch"`
 	BaseRef   string           `json:"base_ref"`
 	Base      string           `json:"base"`
@@ -192,12 +200,14 @@ type RunGitPushTarget struct {
 }
 
 type RunGitPushParams struct {
+	Repo     string           `json:"repo,omitempty"`
 	RunID    string           `json:"run_id"`
 	Expected RunGitExpected   `json:"expected"`
 	Target   RunGitPushTarget `json:"target"`
 }
 
 type RunGitPushResult struct {
+	Repo   string               `json:"repo,omitempty"`
 	Pushed bool                 `json:"pushed"`
 	Head   string               `json:"head"`
 	Target RunGitPushTarget     `json:"target"`
@@ -221,12 +231,14 @@ type RunPRTarget struct {
 // source. Once the run's environment is gone, run.pr.status and
 // run.pr.feedback report the pull request the run last recorded.
 type RunPRStatusParams struct {
+	Repo     string         `json:"repo,omitempty"`
 	RunID    string         `json:"run_id"`
 	Expected RunGitExpected `json:"expected"`
 	Target   RunPRTarget    `json:"target"`
 }
 
 type RunPRCreateParams struct {
+	Repo          string         `json:"repo,omitempty"`
 	RunID         string         `json:"run_id"`
 	Expected      RunGitExpected `json:"expected"`
 	Target        RunPRTarget    `json:"target"`
@@ -252,6 +264,7 @@ type RunPullRequest struct {
 
 // Status always comes from GitHub, including PRs created by native gh.
 type RunPRStatusResult struct {
+	Repo            string               `json:"repo,omitempty"`
 	Identity        string               `json:"identity"`
 	PullRequest     *RunPullRequest      `json:"pull_request"`
 	Output          RunRepoCommandOutput `json:"output"`
@@ -264,6 +277,7 @@ type RunPRStatusResult struct {
 // reconcile this exact head/base before retrying; it is not permission to
 // blindly replay an external mutation.
 type RunPRCreateResult struct {
+	Repo              string               `json:"repo,omitempty"`
 	Identity          string               `json:"identity"`
 	PullRequest       *RunPullRequest      `json:"pull_request"`
 	Created           bool                 `json:"created"`
@@ -276,6 +290,7 @@ type RunPRCreateResult struct {
 }
 
 type RunPRFeedbackParams struct {
+	Repo     string         `json:"repo,omitempty"`
 	RunID    string         `json:"run_id"`
 	Expected RunGitExpected `json:"expected"`
 	Target   RunPRTarget    `json:"target"`
@@ -324,6 +339,7 @@ type RunPRReviewComment struct {
 }
 
 type RunPRFeedbackResult struct {
+	Repo           string               `json:"repo,omitempty"`
 	Identity       string               `json:"identity"`
 	PullRequest    *RunPullRequest      `json:"pull_request"`
 	Checks         []RunPRCheck         `json:"checks"`
@@ -346,6 +362,7 @@ type RunPRFeedbackResult struct {
 // most recently recorded. GitHub refuses the merge unless the PR head is
 // still ExpectedHead, the head_oid the member reviewed.
 type RunPRMergeParams struct {
+	Repo         string `json:"repo,omitempty"`
 	RunID        string `json:"run_id"`
 	Method       string `json:"method"`
 	ExpectedHead string `json:"expected_head"`
@@ -362,6 +379,7 @@ type RunPRMergeParams struct {
 // PullRequest is GitHub's state read after the merge attempt, also when
 // it failed; a merge queue can accept a PR without merging it yet.
 type RunPRMergeResult struct {
+	Repo            string               `json:"repo,omitempty"`
 	Identity        string               `json:"identity"`
 	PullRequest     *RunPullRequest      `json:"pull_request"`
 	Merged          bool                 `json:"merged"`

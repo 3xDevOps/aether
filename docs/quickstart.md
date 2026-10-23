@@ -245,6 +245,40 @@ give one objective to a group of agents, see swarms in [teams.md](teams.md).
 It worked if the run is under **Working** on the **Board**, the dashboard's
 page of runs, and `aether runs` lists it.
 
+### Working across repos
+
+A run belongs to one **primary** workspace, checked out at `/workspace`. Add
+`--repo <workspace>` (repeatable) to check out other existing workspaces beside
+it:
+
+```sh
+aether run "rename the /users endpoint in the API and the web client" \
+  --workspace web --repo api --repo shared-types --agent claude
+```
+
+Each extra repo is cloned to `/repos/<workspace name>` (characters outside
+`A-Za-z0-9._-` become `-`), on its own run branch `aether/run-<task>-<id>` in
+its own workspace. The agent's startup prompt lists the extra paths. The
+dashboard shows each repo on the run page, and the per-run Git, pull request
+and **Changes** methods take a `repo` (the repo's workspace ID) to pick one;
+without it they act on the primary repo.
+
+A launch is all or nothing. If any repo cannot be checked out, no run starts
+and the error names that repo:
+
+```
+provisioning: create checkout: repo "api" (workspace 01m2xwb3es63c0cs0e7aewqpeq): gitengine: base commit "..." is unavailable
+```
+
+Limits: extras must already exist as workspaces and cannot repeat or include the
+primary one. The setup script, environment, agent account and budget are the
+primary workspace's. `aether pull <run>` fetches the primary repo's branch only,
+evidence packets cover the primary repo only, and the dashboard's Compare
+menu is the primary repo's.
+Extra branches are published to their own workspaces; closing the run commits
+and publishes every repo. Each pull request is per repo; there is no cross-repo
+merge. Swarms and templates use one workspace.
+
 ## 7. Watch it
 
 The **Board** groups runs into **Needs you**, **Working** and **Finished**.

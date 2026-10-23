@@ -33,6 +33,7 @@ export function ReviewBar({
   agentName,
   files,
   scope,
+  repo,
 }: {
   run: RunRecord
   agent: AgentTerminal
@@ -40,8 +41,10 @@ export function ReviewBar({
   /** The diff on screen, which decides each comment's line numbers and whether it is outdated. */
   files: PatchFile[]
   scope: string
+  repo?: { key: string; name: string }
 }) {
-  const { comments, sending, error, sent } = useReview(run.id)
+  const key = repo?.key ?? run.id
+  const { comments, sending, error, sent } = useReview(key)
   // The store's copy is the live one: a queued message is later sent, denied or refused.
   const delivered = useStore((s) => (sent ? s.roomMessages[run.id]?.find((entry) => entry.id === sent.message.id) : undefined))
   const agentSend = useAgentSend(run, agent)
@@ -53,22 +56,22 @@ export function ReviewBar({
 
   const deliver = async () => {
     const { files: shown, scope: at } = latest.current
-    const taken = review(run.id).comments
+    const taken = review(key).comments
     const entries = reviewEntries(taken, shown, at)
-    if (review(run.id).sending || entries.length === 0) return
+    if (review(key).sending || entries.length === 0) return
     const mark = ++sends
-    patchReview(run.id, { sending: mark, error: undefined })
+    patchReview(key, { sending: mark, error: undefined })
     // A review dropped meanwhile, by a sign-in or a deleted run, has a successor this must not write to.
     const settle = (patch: Partial<Review>) => {
-      if (review(run.id).sending === mark) patchReview(run.id, { ...patch, sending: undefined })
+      if (review(key).sending === mark) patchReview(key, { ...patch, sending: undefined })
     }
     try {
-      const posted = await agentSend.post(reviewMessage(entries))
+      const posted = await agentSend.post(reviewMessage(entries, repo?.name))
       if (posted.state !== 'sent' && posted.state !== 'queued') return settle({ error: refusal(posted) })
       const carried = new Set(entries.map((entry) => entry.comment.id))
       settle({
         // Only what the agent got goes: not a comment the message left out, nor one edited while the request was out.
-        comments: review(run.id).comments.filter((comment) => !carried.has(comment.id) || !taken.includes(comment)),
+        comments: review(key).comments.filter((comment) => !carried.has(comment.id) || !taken.includes(comment)),
         sent: { message: posted, count: entries.length },
       })
     } catch (cause) {
@@ -88,7 +91,7 @@ export function ReviewBar({
             Open the session
           </Button>
         </p>
-        <Button variant="ghost" size="icon-sm" label="Dismiss" onClick={() => patchReview(run.id, { sent: undefined })}>
+        <Button variant="ghost" size="icon-sm" label="Dismiss" onClick={() => patchReview(key, { sent: undefined })}>
           <X />
         </Button>
       </div>
@@ -120,7 +123,7 @@ export function ReviewBar({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep</AlertDialogCancel>
-            <AlertDialogAction onClick={() => patchReview(run.id, { comments: [], error: undefined })}>Discard</AlertDialogAction>
+            <AlertDialogAction onClick={() => patchReview(key, { comments: [], error: undefined })}>Discard</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

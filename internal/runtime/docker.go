@@ -268,7 +268,7 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 	cfg := &container.Config{
 		Image:      spec.Image,
 		User:       spec.User,
-		Env:        dockerEnv(trustCheckout(spec.Env, spec.WorktreeMountPath)),
+		Env:        dockerEnv(trustCheckouts(spec.Env, spec.WorktreeMountPath, spec.ExtraWorktrees)),
 		WorkingDir: spec.WorkingDir,
 		Entrypoint: spec.Command,
 		Labels:     labels,
@@ -332,6 +332,9 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 			HostPath:      spec.WorktreeHostPath,
 			ContainerPath: spec.WorktreeMountPath,
 		})}
+	}
+	for _, m := range spec.ExtraWorktrees {
+		hostCfg.Mounts = append(hostCfg.Mounts, bindMount(m))
 	}
 	for _, m := range spec.Mounts {
 		if m.Subpath != "" {
@@ -434,6 +437,14 @@ func dockerEnv(env map[string]string) []string {
 		out = append(out, k+"="+env[k])
 	}
 	return out
+}
+
+func trustCheckouts(env map[string]string, checkout string, extras []Mount) map[string]string {
+	env = trustCheckout(env, checkout)
+	for _, m := range extras {
+		env = trustCheckout(env, m.ContainerPath)
+	}
+	return env
 }
 
 // Execs inherit the container env, so this also covers every git the server

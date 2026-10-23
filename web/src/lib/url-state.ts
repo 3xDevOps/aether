@@ -9,17 +9,18 @@ const pageIDs: Record<string, string> = {
   insights: 'tab',
 }
 
-const keys = ['run', 'view', 'agent', 'page', 'id']
+const keys = ['run', 'view', 'agent', 'repo', 'page', 'id']
 
 const boardRoute: Route = { name: 'board', params: {} }
 
 export function routeQuery(route: Route): URLSearchParams {
   const query = new URLSearchParams()
-  const { runId, view, agent } = route.params
+  const { runId, view, agent, repo } = route.params
   if (route.name === 'run' && runId) {
     query.set('run', runId)
     if (view) query.set('view', view)
     if (agent) query.set('agent', agent)
+    if (repo && view === 'changes') query.set('repo', repo)
     return query
   }
   if (route.name === 'board') return query
@@ -36,7 +37,8 @@ export function routeFromQuery(query: URLSearchParams): Route {
     const view = renamedViews[asked] ?? asked
     const route = runRoute(run, isRunView(view) ? view : undefined)
     const agent = query.get('agent')
-    return agent ? { ...route, params: { ...route.params, agent } } : route
+    const repo = route.params.view === 'changes' ? query.get('repo') : null
+    return agent || repo ? { ...route, params: { ...route.params, ...(agent ? { agent } : {}), ...(repo ? { repo } : {}) } } : route
   }
   const page = query.get('page')
   if (!page) return boardRoute

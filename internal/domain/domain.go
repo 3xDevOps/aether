@@ -222,7 +222,8 @@ type LaunchOptions struct {
 	Admitted func()
 	// Created is called with the run's ID once its row is durable, before
 	// Admitted; a replayed or refused launch never calls it.
-	Created func(RunID)
+	Created         func(RunID)
+	ExtraWorkspaces []WorkspaceID
 }
 
 // AccountFallback is where a launch may move when the requested account's
@@ -703,6 +704,7 @@ type Run struct {
 	LastCommitAt time.Time
 	// Worktree is the server-side path of the run's git worktree.
 	Worktree string
+	Extras   []RunRepo
 	// Protected restricts messaging, steering and killing this run to its
 	// owner and admins, regardless of the workspace's SteerOthers setting.
 	Protected bool
@@ -836,4 +838,61 @@ type ServerBusy struct {
 
 func (b ServerBusy) Idle() bool {
 	return !b.Unknown && b.Runs == 0 && b.Shells == 0
+}
+
+type RunRepo struct {
+	WorkspaceID WorkspaceID
+	Name        string
+	Path        string
+	Branch      string
+	BaseBranch  string
+	BaseCommit  string
+	Worktree    string
+	Key         RunID
+}
+
+const PrimaryRepoPath = "/workspace"
+
+const ExtraReposRoot = "/repos"
+
+// RepoKey is the checkout key of the position-th extra repository (1-based) of run.
+// Run IDs hold a single dash, so a key never collides with one.
+func RepoKey(run RunID, position int) RunID {
+	return RunID(fmt.Sprintf("%s-r%d", run, position))
+}
+
+func ParentRun(key RunID) (RunID, bool) {
+	i := strings.LastIndex(string(key), "-r")
+	if i < 0 || strings.Count(string(key), "-") < 2 || i+2 == len(key) {
+		return key, false
+	}
+	for _, c := range key[i+2:] {
+		if c < '0' || c > '9' {
+			return key, false
+		}
+	}
+	return key[:i], true
+}
+
+func RepoDirName(name string) string {
+	dir := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			return r
+		}
+		return '-'
+	}, name)
+	if dir = strings.Trim(dir, ".-"); dir == "" {
+		return "repo"
+	}
+	return dir
+}
+
+func (r *Run) ExtraRepo(workspace WorkspaceID) (RunRepo, bool) {
+	for _, repo := range r.Extras {
+		if repo.WorkspaceID == workspace {
+			return repo, true
+		}
+	}
+	return RunRepo{}, false
 }

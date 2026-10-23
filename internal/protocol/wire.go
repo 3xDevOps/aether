@@ -82,6 +82,30 @@ type Run struct {
 	BaseBranch    string  `json:"base_branch,omitempty"`
 	BaseSource    string  `json:"base_source,omitempty"`
 	BaseCheckedAt *string `json:"base_checked_at,omitempty"`
+	// Repos are checkouts; their workspace_id is what the per-run methods take as repo, and empty repo is the primary.
+	Repos []RunRepo `json:"repos,omitempty"`
+}
+
+type RunRepo struct {
+	WorkspaceID string `json:"workspace_id"`
+	Name        string `json:"name"`
+	Path        string `json:"path"`
+	Branch      string `json:"branch"`
+	Primary     bool   `json:"primary"`
+}
+
+func RunRepos(r *domain.Run, primaryName string) []RunRepo {
+	if len(r.Extras) == 0 {
+		return nil
+	}
+	repos := make([]RunRepo, 0, 1+len(r.Extras))
+	repos = append(repos, RunRepo{
+		WorkspaceID: string(r.WorkspaceID), Name: primaryName, Path: domain.PrimaryRepoPath, Branch: r.Branch, Primary: true,
+	})
+	for _, extra := range r.Extras {
+		repos = append(repos, RunRepo{WorkspaceID: string(extra.WorkspaceID), Name: extra.Name, Path: extra.Path, Branch: extra.Branch})
+	}
+	return repos
 }
 
 // MirrorFailure lets a caller retry a failed base capture with the exact
@@ -238,8 +262,14 @@ type ServerInfoResult struct {
 	DashboardURL string `json:"dashboard_url,omitempty"`
 	// MinClientVersion is the oldest client release the server serves:
 	// its own release, any `git describe` tail removed.
-	MinClientVersion string `json:"min_client_version"`
+	MinClientVersion string   `json:"min_client_version"`
+	Features         []string `json:"features,omitempty"`
 }
+
+const FeatureMultiRepo = "multi-repo"
+
+// CapabilityRunRepos is listed in a gateway's capability methods but is not an RPC method.
+const CapabilityRunRepos = "run.repos"
 
 type WorkspaceListResult struct {
 	Workspaces []Workspace `json:"workspaces"`
@@ -365,6 +395,8 @@ type RunLaunchParams struct {
 	// IdempotencyKey makes a retry by the same member return the run the
 	// first launch started instead of starting another.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// ExtraWorkspaceIDs must differ from each other and from WorkspaceID.
+	ExtraWorkspaceIDs []string `json:"extra_workspace_ids,omitempty"`
 }
 
 // RunLaunchResult is a RunResult; Replayed is true when IdempotencyKey
@@ -388,6 +420,11 @@ type RunListResult struct {
 // (run.get, run.kill, run.release, run.delete, run.pause, run.resume, run.relaunch, run.pull).
 type RunIDParams struct {
 	RunID string `json:"run_id"`
+}
+
+type RunPullParams struct {
+	RunID string `json:"run_id"`
+	Repo  string `json:"repo,omitempty"`
 }
 
 // RunResult is the result of methods returning one run
@@ -474,6 +511,7 @@ type WorkspaceOriginResult struct {
 // RunPullResult holds fetch coordinates; the transfer is a normal git fetch
 // over the exec git transport.
 type RunPullResult struct {
+	Repo        string `json:"repo,omitempty"`
 	WorkspaceID string `json:"workspace_id"`
 	RepoPath    string `json:"repo_path"`
 	Branch      string `json:"branch"`

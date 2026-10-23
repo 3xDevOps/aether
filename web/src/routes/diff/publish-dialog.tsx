@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { create } from 'zustand'
 import { RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -7,11 +7,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, type Api } from '@/lib/api'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
-import type { Run } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { CommitStep } from '@/routes/diff/publish-commit'
 import { Diagnostics, InlineError } from '@/routes/diff/publish-parts'
 import { PushStep } from '@/routes/diff/publish-push'
+import type { ScopedRun } from '@/routes/diff/publish-pr'
 import { usePublish, type Publish } from '@/routes/diff/publish-state'
 import { useStore } from '@/store'
 import { useHeaderPrimary } from '@/store/hooks'
@@ -23,18 +23,47 @@ export function openPublish(runID: string) {
   useRequests.setState({ [runID]: true })
 }
 
+const Hosted = createContext(false)
+
+function requestKeyOf(run: ScopedRun): string {
+  return run.repo ? `${run.id}#${run.repo}` : run.id
+}
+
+/** Mounts one Publish dialog per repo of a multi-repo run, so a typed message or
+ * an uncertain PR creation survives switching repo tabs. Inside it, each
+ * `PublishDialog` is only the button that opens its repo's dialog. */
+export function PublishHosts({ repos, children }: { repos: { run: ScopedRun; name?: string }[]; children: ReactNode }) {
+  return (
+    <Hosted.Provider value>
+      {repos.map(({ run, name }) => (
+        <PublishPanel key={requestKeyOf(run)} run={run} repoName={name} />
+      ))}
+      {children}
+    </Hosted.Provider>
+  )
+}
+
 /** Stays mounted while the run is open so a typed message or an uncertain
  * PR creation survives closing the dialog and switching views. `quiet` gives
  * the view's one filled button to another action. */
-export function PublishDialog({ run, client = api, quiet = false }: { run: Run; client?: Api; quiet?: boolean }) {
-  useHeaderPrimary(true)
+export function PublishDialog({ run, client = api, quiet = false, repoName }: { run: ScopedRun; client?: Api; quiet?: boolean; repoName?: string }) {
+  const hosted = useContext(Hosted)
+  useHeaderPrimary(hosted)
+  if (!hosted) return <PublishPanel run={run} client={client} quiet={quiet} repoName={repoName} />
+  return <Button size="sm" variant={quiet ? 'secondary' : 'primary'} onClick={() => openPublish(requestKeyOf(run))}>Publish…</Button>
+}
+
+function PublishPanel({ run, client = api, quiet, repoName }: { run: ScopedRun; client?: Api; quiet?: boolean; repoName?: string }) {
+  const hosted = useContext(Hosted)
+  useHeaderPrimary(!hosted)
   const [open, setOpen] = useState(false)
-  const requested = useRequests((all) => all[run.id])
+  const requestKey = requestKeyOf(run)
+  const requested = useRequests((all) => all[requestKey])
   useEffect(() => {
     if (!requested) return
     setOpen(true)
-    useRequests.setState(({ [run.id]: _, ...rest }) => rest, true)
-  }, [requested, run.id])
+    useRequests.setState(({ [requestKey]: _, ...rest }) => rest, true)
+  }, [requested, requestKey])
   const p = usePublish(run, client, open)
   const [chosen, setStep] = useState<string>()
   // Nothing left to commit when the first status arrives: open on the push.
@@ -45,12 +74,14 @@ export function PublishDialog({ run, client = api, quiet = false }: { run: Run; 
   const coarse = useMediaQuery(coarsePointer)
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant={quiet ? 'secondary' : 'primary'}>Publish…</Button>
-      </DialogTrigger>
+      {!hosted && (
+        <DialogTrigger asChild>
+          <Button size="sm" variant={quiet ? 'secondary' : 'primary'}>Publish…</Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="md:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Publish</DialogTitle>
+          <DialogTitle>{repoName ? `Publish ${repoName}` : 'Publish'}</DialogTitle>
           <DialogDescription>
             Commit, push and open a pull request from the run's checkout with native Git, as the run's account.
           </DialogDescription>

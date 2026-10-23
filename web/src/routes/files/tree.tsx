@@ -153,7 +153,7 @@ export function useListing(source: FileSource, path: string, expanded: boolean, 
       useStore.getState().trees[key] !== pending
     const request = source.kind === 'home'
       ? client.homeTree(path)
-      : client.filesTree({ workspace_id: source.workspaceID, ...(source.runID ? { run_id: source.runID } : {}), path })
+      : client.filesTree({ workspace_id: source.workspaceID, ...(source.runID ? { run_id: source.runID } : {}), ...(source.repo ? { repo: source.repo } : {}), path })
     void request
       .then((result) => {
         if (!stale()) setTree(key, { entries: result.entries, loading: false, error: undefined })

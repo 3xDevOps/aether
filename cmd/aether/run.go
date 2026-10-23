@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -33,6 +34,8 @@ func runRun(args []string) error {
 	cachedBase := fs.String("cached-base", "", "retry a launch from an exact accepted base commit")
 	fallbackOrder := fs.String("fallback", "", fallbackHelp)
 	noFallback := fs.Bool("no-fallback", false, noFallbackHelp)
+	var repos stringList
+	fs.Var(&repos, "repo", "also check out this workspace ID or name at /repos/<name> with its own run branch (repeatable)")
 	params := kvFlag{}
 	fs.Var(params, "param", "value for a template parameter, name=value (repeatable)")
 
@@ -49,8 +52,8 @@ func runRun(args []string) error {
 		task = fs.Arg(0)
 	}
 	if *template != "" {
-		if task != "" || *agent != "" || *model != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback {
-			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --account, --cached-base, --fallback, and --no-fallback")
+		if task != "" || *agent != "" || *model != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback || len(repos) > 0 {
+			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --account, --cached-base, --fallback, --no-fallback, and --repo")
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
@@ -64,16 +67,36 @@ func runRun(args []string) error {
 		return err
 	}
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>]\n   (a task is required with --mode background)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
+		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...]\n   (a task is required with --mode background)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
 	}
 	return withControl(func(c *protocol.Client) error {
-		wsID, err := resolveWorkspace(c, *workspace)
+		var list protocol.WorkspaceListResult
+		if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
+			return err
+		}
+		wsID, err := pickWorkspace(list.Workspaces, *workspace)
 		if err != nil {
 			return err
+		}
+		if len(repos) > 0 {
+			var info protocol.ServerInfoResult
+			if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+				return err
+			}
+			if !slices.Contains(info.Features, protocol.FeatureMultiRepo) {
+				return fmt.Errorf("--repo: server %s does not support runs with several repositories; update the server with aether server update", info.ServerVersion)
+			}
 		}
 		var res protocol.RunResult
 		params := launchParams(wsID, task, *agent, *mode, *model, *account, *cachedBase)
 		params.FallbackAccountMemberIDs, params.NoFallback = fallbacks, *noFallback
+		for _, repo := range repos {
+			id, err := workspaceIDIn(list.Workspaces, repo)
+			if err != nil {
+				return fmt.Errorf("--repo %s: %w", repo, err)
+			}
+			params.ExtraWorkspaceIDs = append(params.ExtraWorkspaceIDs, id)
+		}
 		if err := c.Call(protocol.MethodRunLaunch, params, &res); err != nil {
 			return cachedBaseLaunchError(err, params)
 		}
@@ -152,6 +175,9 @@ func cachedBaseLaunchError(err error, params protocol.RunLaunchParams) error {
 	}
 	if params.NoFallback {
 		args = append(args, "--no-fallback")
+	}
+	for _, id := range params.ExtraWorkspaceIDs {
+		args = append(args, "--repo", shellquote.Quote(id))
 	}
 	command := strings.Join(append(args,
 		"--cached-base", shellquote.Quote(failure.AcceptedCommit),

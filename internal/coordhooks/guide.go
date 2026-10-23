@@ -31,7 +31,8 @@ type Guide struct {
 	// Wake is set where Aether resumes an idle session when mail arrives:
 	// Enhanced runs, managed Claude Code launches and loaded native
 	// pi/omp/OpenCode integrations.
-	Wake bool
+	Wake  bool
+	Repos string
 }
 
 // SubagentRule is the one rule a subagent needs about Aether.
@@ -193,6 +194,10 @@ func RoleCard(g Guide) string {
 	b.WriteString("Before acting, run the shell command `aether-internal skill` (not a harness skill) for your live identity, capabilities, assignment and rules; `aether-internal status` or aether_status shows live state. " +
 		"Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. " +
 		"Use only available capabilities.\n")
+	if g.Repos != "" {
+		b.WriteString("This run also has extra repositories beside the one in the working directory: " + g.Repos +
+			". Each is its own git repository with its own run branch; commit in every repository you change.\n")
+	}
 	if g.Role != "" {
 		b.WriteString(ReportGuide(g))
 		b.WriteString(PeerRule + "\n" + ReceiptRule + "\n" + UntrustedRule + "\n" + MemoryLine + "\n")

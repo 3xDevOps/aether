@@ -13,17 +13,20 @@ func (d *DB) CheckWorkspaceDeletion(ctx context.Context, id domain.WorkspaceID) 
 	if _, err := d.GetWorkspace(ctx, id); err != nil {
 		return err
 	}
+	placeholders, liveArgs := liveStatusArgs()
 	checks := []struct {
 		query   string
 		message string
+		extra   []any
 	}{
-		{`SELECT EXISTS (SELECT 1 FROM schedules s JOIN templates t ON t.id = s.template_id WHERE t.workspace_id = ?)`, "remove workspace schedules before deleting the workspace"},
-		{`SELECT EXISTS (SELECT 1 FROM missions WHERE workspace_id = ? AND phase NOT IN ('completed', 'cancelled') AND integrator_run_launched = 0)`, "workspace has a pending mission integrator launch"},
-		{`SELECT EXISTS (SELECT 1 FROM mission_attempts a JOIN missions m ON m.id = a.mission_id WHERE m.workspace_id = ? AND a.state IN ('reserved', 'launching', 'running', 'unknown', 'submitted'))`, "workspace has active or queued mission attempts"},
+		{`SELECT EXISTS (SELECT 1 FROM schedules s JOIN templates t ON t.id = s.template_id WHERE t.workspace_id = ?)`, "remove workspace schedules before deleting the workspace", nil},
+		{`SELECT EXISTS (SELECT 1 FROM run_repos rr JOIN runs r ON r.id = rr.run_id WHERE rr.workspace_id = ? AND r.status IN (` + placeholders + `))`, "workspace is an extra repository of an unfinished run", liveArgs},
+		{`SELECT EXISTS (SELECT 1 FROM missions WHERE workspace_id = ? AND phase NOT IN ('completed', 'cancelled') AND integrator_run_launched = 0)`, "workspace has a pending mission integrator launch", nil},
+		{`SELECT EXISTS (SELECT 1 FROM mission_attempts a JOIN missions m ON m.id = a.mission_id WHERE m.workspace_id = ? AND a.state IN ('reserved', 'launching', 'running', 'unknown', 'submitted'))`, "workspace has active or queued mission attempts", nil},
 	}
 	for _, check := range checks {
 		var blocked bool
-		if err := d.db.QueryRowContext(ctx, check.query, id).Scan(&blocked); err != nil {
+		if err := d.db.QueryRowContext(ctx, check.query, append([]any{id}, check.extra...)...).Scan(&blocked); err != nil {
 			return fmt.Errorf("store: check workspace deletion: %w", err)
 		}
 		if blocked {
@@ -61,6 +64,7 @@ func (d *DB) DeleteWorkspace(ctx context.Context, id domain.WorkspaceID) error {
 		`DELETE FROM templates WHERE workspace_id = ?`,
 		`DELETE FROM coord_audit_publications WHERE workspace_id = ?`,
 		`DELETE FROM events WHERE workspace_id = ?`,
+		`DELETE FROM run_repos WHERE workspace_id = ?`,
 	} {
 		if _, err = tx.ExecContext(ctx, query, id); err != nil {
 			return fmt.Errorf("store: delete workspace data: %w", mapConstraint(err, ErrInUse))

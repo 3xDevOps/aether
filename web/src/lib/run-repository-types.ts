@@ -31,6 +31,7 @@ export interface WorkspaceImportResult {
 
 export interface RunGitStatusParams {
   run_id: string
+  repo?: string
 }
 
 export interface RunGitExpected {
@@ -59,6 +60,7 @@ export interface RunGitUpstream {
 }
 
 export interface RunGitStatusResult {
+  repo?: string
   branch: string
   head: string
   /** First line of HEAD's commit message; absent on an unborn branch and on older servers. */
@@ -87,6 +89,7 @@ export interface RunRepoCommandOutput {
 
 export interface RunGitLogParams {
   run_id: string
+  repo?: string
   /** The server defaults to 50 and caps at 200. */
   limit?: number
 }
@@ -127,6 +130,7 @@ export interface RunGitLogResult {
 
 export interface RunGitDiffParams {
   run_id: string
+  repo?: string
   paths?: string[]
   staged?: boolean
 }
@@ -139,6 +143,7 @@ export interface RunGitDiffResult {
 
 export interface RunGitCommitParams {
   run_id: string
+  repo?: string
   expected: RunGitExpected
   paths: string[]
   message: string
@@ -163,6 +168,7 @@ export interface RunGitPushTarget {
 
 export interface RunGitPushParams {
   run_id: string
+  repo?: string
   expected: RunGitExpected
   target: RunGitPushTarget
 }
@@ -186,12 +192,14 @@ export interface RunPRTarget {
 
 export interface RunPRStatusParams {
   run_id: string
+  repo?: string
   expected?: RunGitExpected
   target?: RunPRTarget
 }
 
 export interface RunPRCreateParams {
   run_id: string
+  repo?: string
   expected: RunGitExpected
   target: RunPRTarget
   title: string
@@ -237,6 +245,7 @@ export interface RunPRCreateResult {
 
 export interface RunPRFeedbackParams {
   run_id: string
+  repo?: string
   expected: RunGitExpected
   target: RunPRTarget
   limit?: number
@@ -284,6 +293,7 @@ export interface RunPRReviewComment {
 }
 
 export interface RunPRFeedbackResult {
+  repo?: string
   identity: string
   pull_request: RunPullRequest | null
   checks: RunPRCheck[]
@@ -306,6 +316,7 @@ export type RunPRMergeMethod = 'squash' | 'merge' | 'rebase'
 /** Without repository and number the server merges the run's latest recorded pull request. */
 export interface RunPRMergeParams {
   run_id: string
+  repo?: string
   method: RunPRMergeMethod
   /** The PR's head_oid the member reviewed; GitHub refuses the merge if the head moved. */
   expected_head: string

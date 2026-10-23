@@ -57,5 +57,18 @@ func (s *Scheduler) WithInactiveWorkspace(ctx context.Context, id domain.Workspa
 			return fmt.Errorf("%w: run %s has pending runtime cleanup", ErrInvalidTransition, run.ID)
 		}
 	}
+	mounting, mountErr := s.cfg.Store.RunsWithExtraRepo(ctx, id)
+	if mountErr != nil {
+		return mountErr
+	}
+	for _, run := range mounting {
+		sc, scErr := s.readSidecar(run)
+		if scErr != nil && !os.IsNotExist(scErr) {
+			return scErr
+		}
+		if scErr == nil && sc.ContainerID != "" {
+			return fmt.Errorf("%w: run %s still has a container mounting this workspace as an extra repository; delete that run first", ErrInvalidTransition, run)
+		}
+	}
 	return cleanup(runs)
 }

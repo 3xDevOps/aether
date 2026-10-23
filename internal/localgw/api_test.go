@@ -286,7 +286,9 @@ func TestDiskProxies(t *testing.T) {
 }
 
 func TestCapabilities(t *testing.T) {
-	g := newTestGateway(t, &apiStubBackend{})
+	g := newTestGateway(t, &apiStubBackend{results: map[string]json.RawMessage{
+		protocol.MethodServerInfo: json.RawMessage(`{"features":["multi-repo"]}`),
+	}})
 
 	rec := do(g, http.MethodGet, "/api/v1/capabilities", "", true)
 	if rec.Code != http.StatusOK {
@@ -299,8 +301,8 @@ func TestCapabilities(t *testing.T) {
 	if caps.Gateway != "local" {
 		t.Errorf("gateway = %q, want local", caps.Gateway)
 	}
-	if !reflect.DeepEqual(caps.Methods, []string{"*"}) {
-		t.Errorf("methods = %v, want [*]", caps.Methods)
+	if !reflect.DeepEqual(caps.Methods, []string{"*", protocol.CapabilityRunRepos}) {
+		t.Errorf("methods = %v, want [* run.repos]", caps.Methods)
 	}
 	// The advertised verbs are what a client will call, so they must be
 	// exactly the verbs handleLocal can dispatch, in sorted order.

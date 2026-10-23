@@ -106,6 +106,15 @@ export interface Run {
   base_branch?: string
   base_source?: string
   base_checked_at?: string | null
+  repos?: RunRepo[]
+}
+
+export interface RunRepo {
+  workspace_id: string
+  name: string
+  path: string
+  branch: string
+  primary: boolean
 }
 /** Only `active` dispatches workers; `completed` and `cancelled` are final. */
 export type MissionPhase = 'planning' | 'active' | 'completed' | 'cancelled'
@@ -673,6 +682,8 @@ export interface ServerInfo {
   time: string
   member: Member
   tailnet_hostname?: string
+  /** Absent on servers that predate feature advertising. */
+  features?: string[]
   tailnet_identity_auth?: boolean
   /** Why the dashboard web-port asks for is not serving on the tailnet. */
   tailnet_dashboard_error?: string
@@ -985,6 +996,8 @@ export interface RunRetentionPayload {
 
 export interface GitBranchPayload {
   workspace_id: string
+  /** The extra repo's workspace ID, absent for the run's own checkout. */
+  repo?: string
   branch: string
   commit: string
   /** The commit the branch held before, or "" for a new branch. */
@@ -1170,6 +1183,8 @@ export interface FileDiffStat {
 }
 
 export interface RunDiffPayload {
+  /** The extra repo's workspace ID, absent for the run's own checkout. */
+  repo?: string
   files: FileDiffStat[]
   /** The run holds more untracked content than a stat set reads: every
    * changed path is in `files`, but the counts sum to a floor. */

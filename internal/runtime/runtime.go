@@ -108,6 +108,8 @@ type Spec struct {
 	// WorktreeMountPath is the absolute path inside the container where the
 	// worktree appears.
 	WorktreeMountPath string
+	// Callers must pass ExtraWorktrees through ValidateMounts first.
+	ExtraWorktrees []Mount
 	// WorkingDir is the working directory for the setup script and the main
 	// command; empty means the image default.
 	WorkingDir string
@@ -181,6 +183,11 @@ func (s Spec) Validate() error {
 		}
 		if !path.IsAbs(s.WorktreeMountPath) {
 			errs = append(errs, fmt.Errorf("worktree mount path %q must be absolute", s.WorktreeMountPath))
+		}
+	}
+	for _, m := range s.ExtraWorktrees {
+		if !path.IsAbs(m.HostPath) || !path.IsAbs(m.ContainerPath) {
+			errs = append(errs, fmt.Errorf("extra worktree %q at %q must use absolute paths", m.HostPath, m.ContainerPath))
 		}
 	}
 	if s.WorkingDir != "" && !path.IsAbs(s.WorkingDir) {

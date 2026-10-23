@@ -60,6 +60,15 @@ func (s *Scheduler) applyRunOwnership(ws *domain.Workspace, run *domain.Run, hom
 			return err
 		}
 	}
+	for _, extra := range run.Extras {
+		protected, err := protectedInodes(filepath.Join(s.cfg.ReposDir, string(extra.WorkspaceID)+".git"))
+		if err != nil {
+			return err
+		}
+		if err := chownTree(extra.Worktree, uid, gid, protected); err != nil {
+			return fmt.Errorf("repo %s: %w", extra.Name, err)
+		}
+	}
 	lock := s.homeLock(home)
 	lock.Lock()
 	defer lock.Unlock()

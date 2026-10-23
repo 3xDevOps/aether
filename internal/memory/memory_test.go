@@ -691,3 +691,22 @@ func TestSearchFiltersSourceAndReplaced(t *testing.T) {
 	_, err = f.svc.Search(ctx, protocol.MemorySearchParams{WorkspaceID: ws, Source: "lore"})
 	wantError(t, err, protocol.CodeInvalidParams, `memory.search: source must be agent, member, report or answer; got "lore"`)
 }
+
+func TestAgentAddFindsPrimaryHeadBehindManyExtraSnapshots(t *testing.T) {
+	f := newFixture(t)
+	run := f.run(f.dana, "codex", "fix reattach")
+	publish := func(p events.RunDiffPayload) {
+		t.Helper()
+		if _, err := f.bus.Publish(context.Background(), events.Event{WorkspaceID: f.ws.ID, RunID: run.ID, Payload: p}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish(events.RunDiffPayload{Head: "abc1234"})
+	for range 70 {
+		publish(events.RunDiffPayload{Head: "fff0000", Repo: "ws-extra"})
+	}
+	added, err := f.agentAdd(run, protocol.MemoryAddParams{Kind: protocol.MemoryKindDecision, Text: "Keep the primary commit link."})
+	if err != nil || added.Item.Commit != "abc1234" {
+		t.Fatalf("agent note = %+v, %v; want commit abc1234", added.Item, err)
+	}
+}

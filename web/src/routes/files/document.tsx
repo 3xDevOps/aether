@@ -225,14 +225,14 @@ export function DiffDocument({ selection, client, epoch }: { selection: Workspac
       requestID.current !== requestToken ||
       useStore.getState().identityEpoch !== requestIdentityEpoch ||
       useStore.getState().fileDiffs[key] !== pending
-    void client.filesDiff(selection.runID, selection.path)
+    void client.filesDiff(selection.runID, selection.path, selection.repo)
       .then((result) => {
         if (!stale()) setFileDiff(key, { ...result, loading: false, error: undefined })
       })
       .catch((err) => {
         if (!stale()) setFileDiff(key, { patch: '', truncated: false, loading: false, error: message(err) })
       })
-  }, [client, epoch, identityEpoch, key, selection.path, selection.runID, setFileDiff, state])
+  }, [client, epoch, identityEpoch, key, selection.path, selection.repo, selection.runID, setFileDiff, state])
   if (!state || state.loading) return <Notice>Loading diff…</Notice>
   if (state.error) return <Notice alert>{state.error}</Notice>
   const files = parsePatch(state.patch)

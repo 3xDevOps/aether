@@ -59,6 +59,7 @@ func decodeRunRepo(raw json.RawMessage, dst any) *protocol.Error {
 
 type runRepoCall struct {
 	run         domain.Run
+	repo        domain.Run
 	native      *runrepo.Service
 	execution   runrepo.Execution
 	account     domain.MemberID
@@ -66,7 +67,16 @@ type runRepoCall struct {
 	accountName string
 }
 
-func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, runID string, mutation bool) (runRepoCall, error) {
+// repoOwner is the workspace of the extra repository the call acts on, empty
+// for the run's own.
+func (c runRepoCall) repoOwner() domain.WorkspaceID {
+	if c.repo.WorkspaceID == c.run.WorkspaceID {
+		return ""
+	}
+	return c.repo.WorkspaceID
+}
+
+func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, runID, repoID string, mutation bool) (runRepoCall, error) {
 	var call runRepoCall
 	if runID == "" {
 		return call, invalidParams("run_id is required")
@@ -77,6 +87,10 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 	run, runErr := s.cfg.Store.GetRun(ctx, domain.RunID(runID))
 	if runErr != nil {
 		return call, runErr
+	}
+	repo, repoErr := repoView(run, repoID)
+	if repoErr != nil {
+		return call, repoErr
 	}
 	account := run.AccountMember()
 	authorize := func(ctx context.Context, mutate bool) error {
@@ -121,8 +135,12 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 	}
 	execution, executionErr := s.cfg.Services.RunRepo.Execution(ctx, *run)
 	if executionErr != nil {
-		call.run, call.account, call.home = *run, account, run.HomeMember()
+		call.run, call.repo, call.account, call.home = *run, repo, account, run.HomeMember()
 		return call, executionErr
+	}
+	if repo.WorkspaceID != run.WorkspaceID {
+		extra, _ := run.ExtraRepo(repo.WorkspaceID)
+		execution.WorkDir = extra.Path
 	}
 	liveAuthorize := execution.Authorize
 	if liveAuthorize == nil {
@@ -138,7 +156,21 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 	if ownerErr != nil {
 		return call, ownerErr
 	}
-	return runRepoCall{run: *run, native: s.cfg.Services.RunRepo.Native(), execution: execution, account: account, accountName: owner.DisplayName}, nil
+	return runRepoCall{run: *run, repo: repo, native: s.cfg.Services.RunRepo.Native(), execution: execution, account: account, accountName: owner.DisplayName}, nil
+}
+
+func repoView(run *domain.Run, repoID string) (domain.Run, error) {
+	if repoID == "" || domain.WorkspaceID(repoID) == run.WorkspaceID {
+		return *run, nil
+	}
+	extra, ok := run.ExtraRepo(domain.WorkspaceID(repoID))
+	if !ok {
+		return domain.Run{}, invalidParams("repo " + repoID + " is not one of the run's repos")
+	}
+	view := *run
+	view.WorkspaceID, view.Branch, view.Worktree = extra.WorkspaceID, extra.Branch, extra.Worktree
+	view.BaseBranch, view.BaseCommit = extra.BaseBranch, extra.BaseCommit
+	return view, nil
 }
 
 func repoError(err error) string {
@@ -168,12 +200,12 @@ func (s *Server) runGitStatus(ctx context.Context, member domain.MemberID, raw j
 	if err := decodeRunRepo(raw, &p); err != nil {
 		return nil, err
 	}
-	call, err := s.runRepoAuthority(ctx, member, p.RunID, false)
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, false)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	state, err := call.native.Status(ctx, call.execution)
-	result := protocol.RunGitStatusResult{Branch: state.Branch, Head: state.Head, Detached: state.Detached, Unborn: state.Unborn, Changes: state.Changes, AccountMemberID: string(call.account), AccountName: call.accountName, Remotes: []protocol.RunGitRemote{}}
+	result := protocol.RunGitStatusResult{Repo: p.Repo, Branch: state.Branch, Head: state.Head, Detached: state.Detached, Unborn: state.Unborn, Changes: state.Changes, AccountMemberID: string(call.account), AccountName: call.accountName, Remotes: []protocol.RunGitRemote{}}
 	if err == nil && !state.Unborn {
 		result.HeadSubject, err = call.native.Subject(ctx, call.execution, state.Head)
 	}
@@ -206,12 +238,12 @@ func (s *Server) runGitDiff(ctx context.Context, member domain.MemberID, raw jso
 	if err := decodeRunRepo(raw, &p); err != nil {
 		return nil, err
 	}
-	call, err := s.runRepoAuthority(ctx, member, p.RunID, false)
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, false)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	diff, err := call.native.Diff(ctx, call.execution, runrepo.DiffRequest{Paths: p.Paths, Staged: p.Staged})
-	return protocol.RunGitDiffResult{State: diff.State, Output: runrepo.FailureOutput(diff.Output, err), Error: repoError(err)}, nil
+	return protocol.RunGitDiffResult{Repo: p.Repo, State: diff.State, Output: runrepo.FailureOutput(diff.Output, err), Error: repoError(err)}, nil
 }
 
 func (s *Server) runGitCommit(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -219,12 +251,12 @@ func (s *Server) runGitCommit(ctx context.Context, member domain.MemberID, raw j
 	if err := decodeRunRepo(raw, &p); err != nil {
 		return nil, err
 	}
-	call, err := s.runRepoAuthority(ctx, member, p.RunID, true)
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, true)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	commit, err := call.native.Commit(ctx, call.execution, runrepo.CommitRequest{Expected: p.Expected, Paths: p.Paths, Message: p.Message})
-	return protocol.RunGitCommitResult{Committed: commit.Committed, Head: commit.Head, IndexUpdated: commit.IndexUpdated, HooksRun: false, Output: runrepo.FailureOutput(commit.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
+	return protocol.RunGitCommitResult{Repo: p.Repo, Committed: commit.Committed, Head: commit.Head, IndexUpdated: commit.IndexUpdated, HooksRun: false, Output: runrepo.FailureOutput(commit.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
 }
 
 func (s *Server) runGitPush(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -232,12 +264,12 @@ func (s *Server) runGitPush(ctx context.Context, member domain.MemberID, raw jso
 	if err := decodeRunRepo(raw, &p); err != nil {
 		return nil, err
 	}
-	call, err := s.runRepoAuthority(ctx, member, p.RunID, true)
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, true)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	push, err := call.native.Push(ctx, call.execution, runrepo.PushRequest{Expected: p.Expected, Target: runrepo.PushTarget(p.Target)})
-	return protocol.RunGitPushResult{Pushed: push.Pushed, Head: push.Head, Target: protocol.RunGitPushTarget(push.Target), Output: runrepo.FailureOutput(push.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
+	return protocol.RunGitPushResult{Repo: p.Repo, Pushed: push.Pushed, Head: push.Head, Target: protocol.RunGitPushTarget(push.Target), Output: runrepo.FailureOutput(push.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
 }
 
 func (s *Server) runPRStatus(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -245,7 +277,7 @@ func (s *Server) runPRStatus(ctx context.Context, member domain.MemberID, raw js
 	if err := decodeRunRepo(raw, &p); err != nil {
 		return nil, err
 	}
-	call, err := s.runRepoAuthority(ctx, member, p.RunID, false)
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, false)
 	if errors.Is(err, scheduler.ErrNoLiveEnvironment) {
 		run, runErr := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
 		if runErr != nil {
@@ -274,9 +306,9 @@ func (s *Server) runPRStatus(ctx context.Context, member domain.MemberID, raw js
 		status, err = call.native.LookupPR(ctx, call.execution, runrepo.PRTarget(p.Target))
 	}
 	if status.PullRequest != nil {
-		s.recordPR(ctx, call.run, status.PullRequest, false)
+		s.recordPR(ctx, call, status.PullRequest, false)
 	}
-	return protocol.RunPRStatusResult{Identity: status.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(status.PullRequest), Output: runrepo.FailureOutput(status.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
+	return protocol.RunPRStatusResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(status.PullRequest), Output: runrepo.FailureOutput(status.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
 }
 
 func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -284,15 +316,15 @@ func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw js
 	if err := decodeRunRepo(raw, &p); err != nil {
 		return nil, err
 	}
-	call, err := s.runRepoAuthority(ctx, member, p.RunID, true)
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, true)
 	if err != nil {
 		return nil, rpcError(err)
 	}
 	created, err := call.native.CreatePR(ctx, call.execution, runrepo.PRCreateRequest{Expected: p.Expected, Target: runrepo.PRTarget(p.Target), Title: p.Title, Body: p.Body, Draft: p.Draft, ExpectedLogin: p.ExpectedLogin})
 	if created.PullRequest != nil {
-		s.recordPR(ctx, call.run, created.PullRequest, created.Created || created.Reconciled)
+		s.recordPR(ctx, call, created.PullRequest, created.Created || created.Reconciled)
 	}
-	return protocol.RunPRCreateResult{Identity: created.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(created.PullRequest), Created: created.Created, Reconciled: created.Reconciled, CreationUncertain: created.CreationUncertain, Output: runrepo.FailureOutput(created.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
+	return protocol.RunPRCreateResult{Repo: p.Repo, Identity: created.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(created.PullRequest), Created: created.Created, Reconciled: created.Reconciled, CreationUncertain: created.CreationUncertain, Output: runrepo.FailureOutput(created.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
 }
 
 // recordPR keeps the PR a run opened, or the state of one it opened before,
@@ -300,9 +332,10 @@ func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw js
 // outlives a cancelled request, since CreatePR can confirm a PR after one. A
 // failure is only logged: the GitHub side already happened and must not be
 // reported as failed.
-func (s *Server) recordPR(ctx context.Context, run domain.Run, pr *runrepo.PullRequest, opened bool) {
+func (s *Server) recordPR(ctx context.Context, call runRepoCall, pr *runrepo.PullRequest, opened bool) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
+	run := call.run
 	repository := strings.ToLower(pr.Target.Repository)
 	recorded, err := s.cfg.Store.RunPullRequests(ctx, run.ID)
 	if err != nil {
@@ -320,7 +353,7 @@ func (s *Server) recordPR(ctx context.Context, run domain.Run, pr *runrepo.PullR
 		record = s.cfg.Store.RecordRunPullRequest
 	}
 	err = record(ctx, &store.RunPullRequest{
-		RunID: run.ID, Repository: repository, Number: pr.Number,
+		RunID: run.ID, RepoWorkspace: call.repoOwner(), Repository: repository, Number: pr.Number,
 		URL: pr.URL, State: pr.State, MergedAt: pr.MergedAt, ObservedAt: time.Now().UTC(),
 	})
 	if err != nil {
@@ -363,11 +396,13 @@ func (s *Server) recordedPRStatus(ctx context.Context, call runRepoCall, p proto
 		return protocol.RunPRStatusResult{}, rpcError(err)
 	}
 	repository := strings.ToLower(p.Target.Repository)
-	prs = slices.DeleteFunc(prs, func(pr *store.RunPullRequest) bool { return repository != "" && pr.Repository != repository })
+	prs = slices.DeleteFunc(prs, func(pr *store.RunPullRequest) bool {
+		return pr.RepoWorkspace != call.repoOwner() || repository != "" && pr.Repository != repository
+	})
 	if len(prs) == 0 {
 		return protocol.RunPRStatusResult{}, rpcError(liveErr)
 	}
-	result := protocol.RunPRStatusResult{AccountMemberID: string(call.account)}
+	result := protocol.RunPRStatusResult{Repo: p.Repo, AccountMemberID: string(call.account)}
 	for _, pr := range prs {
 		if pr.State == "merged" || s.cfg.Services.GitHub == nil {
 			continue
@@ -397,10 +432,10 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 	if err := decodeRunRepo(raw, &p); err != nil {
 		return nil, err
 	}
-	call, err := s.runRepoAuthority(ctx, member, p.RunID, false)
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, false)
 	feedback := runrepo.PRFeedback{Checks: []protocol.RunPRCheck{}, Comments: []protocol.RunPRComment{}, Reviews: []protocol.RunPRReview{}, ReviewComments: []protocol.RunPRReviewComment{}}
 	if errors.Is(err, scheduler.ErrNoLiveEnvironment) && call.run.Status.Terminal() {
-		status, perr := s.recordedPRStatus(ctx, call, protocol.RunPRStatusParams{RunID: p.RunID, Target: p.Target}, err)
+		status, perr := s.recordedPRStatus(ctx, call, protocol.RunPRStatusParams{RunID: p.RunID, Repo: p.Repo, Target: p.Target}, err)
 		if perr != nil {
 			return nil, perr
 		}
@@ -408,7 +443,7 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 		if status.Error != "" {
 			message += "; " + status.Error
 		}
-		return protocol.RunPRFeedbackResult{Identity: status.Identity, AccountMemberID: status.AccountMemberID, PullRequest: status.PullRequest, Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Error: message}, nil
+		return protocol.RunPRFeedbackResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: status.AccountMemberID, PullRequest: status.PullRequest, Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Error: message}, nil
 	}
 	if err != nil {
 		return nil, rpcError(err)
@@ -423,7 +458,7 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 	if err == nil {
 		feedback, err = call.native.PRFeedback(ctx, call.execution, runrepo.PRTarget(p.Target), p.Limit)
 	}
-	return protocol.RunPRFeedbackResult{Identity: feedback.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(feedback.PullRequest), Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Mergeable: feedback.Mergeable, MergeStateStatus: feedback.MergeStateStatus, Truncated: feedback.Truncated, Output: runrepo.FailureOutput(feedback.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
+	return protocol.RunPRFeedbackResult{Repo: p.Repo, Identity: feedback.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(feedback.PullRequest), Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Mergeable: feedback.Mergeable, MergeStateStatus: feedback.MergeStateStatus, Truncated: feedback.Truncated, Output: runrepo.FailureOutput(feedback.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
 }
 
 func (s *Server) runGitLog(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -431,11 +466,12 @@ func (s *Server) runGitLog(ctx context.Context, member domain.MemberID, raw json
 	if err := decodeRunRepo(raw, &p); err != nil {
 		return nil, err
 	}
-	call, err := s.runRepoAuthority(ctx, member, p.RunID, false)
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, false)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	log, err := call.native.Log(ctx, call.execution, runrepo.LogRequest{BaseBranch: call.run.BaseBranch, ForkPoint: call.run.BaseCommit, Limit: p.Limit})
+	log, err := call.native.Log(ctx, call.execution, runrepo.LogRequest{BaseBranch: call.repo.BaseBranch, ForkPoint: call.repo.BaseCommit, Limit: p.Limit})
+	log.Repo = p.Repo
 	log.Output = runrepo.FailureOutput(log.Output, err)
 	log.Error = repoError(err)
 	return log, nil
@@ -449,7 +485,7 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 	if (p.Repository == "") != (p.Number == 0) {
 		return nil, invalidParams("repository and number must be given together")
 	}
-	call, err := s.runRepoAuthority(ctx, member, p.RunID, true)
+	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, true)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -458,6 +494,7 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 		if listErr != nil {
 			return nil, rpcError(listErr)
 		}
+		prs = slices.DeleteFunc(prs, func(pr *store.RunPullRequest) bool { return pr.RepoWorkspace != call.repoOwner() })
 		if len(prs) == 0 {
 			return nil, invalidParams("run has no recorded pull request; pass repository and number")
 		}
@@ -465,7 +502,7 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 	}
 	merged, err := call.native.MergePR(ctx, call.execution, runrepo.PRMergeRequest{Repository: p.Repository, Number: p.Number, Method: p.Method, ExpectedHead: p.ExpectedHead, ExpectedLogin: p.ExpectedLogin, ExpectedBase: p.ExpectedBase})
 	if merged.PullRequest != nil {
-		s.recordPR(ctx, call.run, merged.PullRequest, false)
+		s.recordPR(ctx, call, merged.PullRequest, false)
 	}
-	return protocol.RunPRMergeResult{Identity: merged.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(merged.PullRequest), Merged: merged.PullRequest != nil && merged.PullRequest.State == "merged", Output: runrepo.FailureOutput(merged.Output, err), Error: repoError(err)}, nil
+	return protocol.RunPRMergeResult{Repo: p.Repo, Identity: merged.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(merged.PullRequest), Merged: merged.PullRequest != nil && merged.PullRequest.State == "merged", Output: runrepo.FailureOutput(merged.Output, err), Error: repoError(err)}, nil
 }

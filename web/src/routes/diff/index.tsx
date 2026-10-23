@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { MissingRun } from '@/components/missing-run'
 import { Callout } from '@/components/ui/callout'
@@ -7,15 +7,19 @@ import { useAhead } from '@/components/workflow/git-data'
 import { GitFlow } from '@/components/workflow/git-flow'
 import { api } from '@/lib/api'
 import { clockTime } from '@/lib/format'
+import { extraRepoCount } from '@/lib/repos'
 import { coarsePointer, useElementSize, useMediaQuery } from '@/lib/hooks'
-import { CommentCard } from '@/routes/diff/comment-card'
 import { FileList } from '@/routes/diff/file-list'
+import { isLargeDiff, useOffsetTop } from '@/routes/diff/large-diff'
 import { Land } from '@/routes/diff/land'
 import { parsePatch, type PatchFile } from '@/routes/diff/parse'
-import { FilePatch, largeFile, largeText } from '@/routes/diff/patch-view'
-import { useReview } from '@/routes/diff/review'
+import { collapsedByDefault, FilePatch } from '@/routes/diff/patch-view'
+import { PublishHosts } from '@/routes/diff/publish-dialog'
 import { ReviewBar } from '@/routes/diff/review-bar'
+import { allRepos, AllRepos, RepoChanges, RepoTabs, useSelectedRepo } from '@/routes/diff/repo-changes'
+import { useRepoRuns } from '@/routes/diff/repos'
 import { SummaryStrip } from '@/routes/diff/strip'
+import { Unplaced } from '@/routes/diff/unplaced'
 import { hasFiles, openInFiles } from '@/routes/files/open'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { isRunRoute } from '@/routes/run/views'
@@ -23,24 +27,48 @@ import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { comparisonFrom, comparisonScope, initialDiff, readCheckpoints, type Comparison } from '@/store/diff'
 
-/** Past this many content lines or files only the files near the screen are mounted. */
-const largePatch = 1500
-const largeFileCount = 100
 /** A stored patch longer than this is not re-fetched on a new snapshot: the reader chooses when. */
 const largeStored = 1024 * 1024
-
-function collapsedByDefault(file: PatchFile): boolean {
-  return file.contentLines > largeFile || file.size > largeText || file.status === 'binary' || file.status === 'deleted'
-}
 
 function useParsed(patch: string): PatchFile[] {
   const previous = useRef<PatchFile[]>([])
   return useMemo(() => (previous.current = parsePatch(patch, previous.current)), [patch])
 }
 
+export function ChangesView(props: { runID: string; agent: AgentTerminal; agentName: string }) {
+  const run = useStore((s) => s.runs[props.runID])
+  if (!run || extraRepoCount(run) === 0) return <PrimaryChanges {...props} />
+  return <RepoSwitch {...props} />
+}
+
+function RepoSwitch({ runID, agent, agentName }: { runID: string; agent: AgentTerminal; agentName: string }) {
+  const run = useStore((s) => s.runs[runID])!
+  const repos = useRepoRuns(run)
+  const selected = useSelectedRepo(runID)
+  const entry = repos.find((item) => item.repo.workspace_id === selected && !item.repo.primary)
+  const primary = repos.find((item) => item.repo.primary)!.repo.workspace_id
+  const caps = useCapability()
+  const views = (
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <RepoTabs run={run} selected={selected === allRepos ? allRepos : (entry?.repo.workspace_id ?? primary)} />
+      <div className="min-h-0 flex-1">
+        {selected === allRepos ? (
+          <AllRepos run={run} agent={agent} agentName={agentName} />
+        ) : entry ? (
+          <RepoChanges key={entry.repo.workspace_id} run={entry.run} repo={entry.repo} agent={agent} agentName={agentName} />
+        ) : (
+          <PrimaryChanges runID={runID} agent={agent} agentName={agentName} />
+        )}
+      </div>
+    </div>
+  )
+  if (!caps.hasMethod('run.git.status')) return views
+  return <PublishHosts repos={repos.map(({ repo, run: scoped }) => ({ run: scoped, name: repo.primary ? undefined : repo.name }))}>{views}</PublishHosts>
+}
+
 /** The run's changes against the comparison chosen in the strip: its effective
  * base, its starting point, or a recorded checkpoint. */
-export function ChangesView({ runID, agent, agentName }: { runID: string; agent: AgentTerminal; agentName: string }) {
+function PrimaryChanges({ runID, agent, agentName }: { runID: string; agent: AgentTerminal; agentName: string }) {
   const caps = useCapability()
   const run = useStore((s) => s.runs[runID])
   const route = useStore((s) => s.route)
@@ -67,10 +95,7 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
   // The stored patch answers for one comparison; another one's is not shown as this one's.
   const answered = state.from === from
   const files = useParsed(answered ? state.patch : '')
-  const virtual = useMemo(
-    () => files.length > largeFileCount || files.reduce((total, file) => total + file.contentLines, 0) > largePatch,
-    [files],
-  )
+  const virtual = useMemo(() => isLargeDiff(files), [files])
   const failed = answered && state.status === 'error'
   const loading = !answered || state.status === 'loading'
   const truncated = answered && state.truncated
@@ -211,35 +236,6 @@ export function ChangesView({ runID, agent, agentName }: { runID: string; agent:
         </div>
       </div>
     </div>
-  )
-}
-
-/** Where `element` starts in the scrolled `content`, kept current as anything above it changes size. */
-function useOffsetTop(content: HTMLElement | null, element: HTMLElement | null): number {
-  const [top, setTop] = useState(0)
-  useLayoutEffect(() => {
-    if (!content || !element) return
-    const measure = () => setTop(element.offsetTop)
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(content)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [content, element])
-  return top
-}
-
-/** Comments on a file this diff no longer has. They stay, with their quote, until sent or deleted. */
-function Unplaced({ runID, files, scope }: { runID: string; files: PatchFile[]; scope: string }) {
-  const { comments } = useReview(runID)
-  const gone = comments.filter((comment) => comment.scope === scope && !files.some((file) => file.path === comment.path))
-  if (gone.length === 0) return null
-  return (
-    <section aria-label="Outdated comments" className="flex flex-col gap-2 border-b border-seam bg-chrome p-2">
-      {gone.map((comment) => (
-        <CommentCard key={comment.id} runID={runID} comment={comment} lines={comment.lines} outdated />
-      ))}
-    </section>
   )
 }
 

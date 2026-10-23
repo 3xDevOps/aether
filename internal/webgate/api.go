@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -202,6 +203,7 @@ func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
 		RunID: r.PathValue("run"),
 		From:  query.Get("from"),
 		To:    query.Get("to"),
+		Repo:  query.Get("repo"),
 	})
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()})
@@ -232,11 +234,20 @@ func (g *Gateway) handleDisk(w http.ResponseWriter, r *http.Request) {
 // handleCapabilities serves GET /api/v1/capabilities: the composer's
 // descriptor, with the parts every gateway shares filled in.
 func (g *Gateway) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	if _, ok := g.Authorize(w, r, false); !ok {
+	backend, ok := g.Authorize(w, r, false)
+	if !ok {
 		return
+	}
+	// A server that cannot answer advertises no multi-repo support; the descriptor must still load.
+	var info protocol.ServerInfoResult
+	if raw, perr := backend.Call(r.Context(), protocol.MethodServerInfo, json.RawMessage(`{}`)); perr == nil {
+		_ = json.Unmarshal(raw, &info)
 	}
 	caps := g.cfg.Capabilities
 	caps.Methods = []string{"*"}
+	if slices.Contains(info.Features, protocol.FeatureMultiRepo) {
+		caps.Methods = append(caps.Methods, protocol.CapabilityRunRepos)
+	}
 	caps.Version = version.Version
 	caps.Commit = version.Commit
 	w.Header().Set("Content-Type", "application/json")

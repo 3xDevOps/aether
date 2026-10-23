@@ -191,13 +191,19 @@ func (s *Scheduler) Launch(ctx context.Context, workspace domain.WorkspaceID, me
 // LaunchWithOptions captures the base before the run row is created, so a
 // failed capture leaves no durable or in-memory run state.
 func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, task, harness string, mode domain.LaunchMode, opts domain.LaunchOptions) (*domain.Run, error) {
-	lock := s.workspaceLock(workspace)
-	lock.RLock()
-	defer lock.RUnlock()
+	for _, id := range append([]domain.WorkspaceID{workspace}, opts.ExtraWorkspaces...) {
+		lock := s.workspaceLock(id)
+		lock.RLock()
+		defer lock.RUnlock()
+	}
 	if mode == "" {
 		mode = domain.LaunchTUI
 	}
-	argv, profile, acp, err := s.command(ctx, workspace, member, account, harness, mode, opts.AssignedRunID != "", task, opts.Model)
+	extraRepos, err := s.resolveExtras(ctx, opts.ExtraWorkspaces)
+	if err != nil {
+		return nil, err
+	}
+	argv, profile, acp, err := s.command(ctx, workspace, member, account, harness, mode, opts.AssignedRunID != "", task, opts.Model, extraRepos...)
 	if err != nil {
 		return nil, err
 	}
@@ -242,9 +248,24 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 	if bases == nil {
 		return nil, errors.New("scheduler: base capture is not configured")
 	}
+	var extrasCh chan extraCapture
+	if len(opts.ExtraWorkspaces) > 0 {
+		extrasCh = make(chan extraCapture, 1)
+		go func() {
+			repos, captureErr := s.captureExtras(ctx, bases, extraRepos)
+			extrasCh <- extraCapture{repos, captureErr}
+		}()
+	}
 	base, err := bases.Capture(ctx, workspace, opts.CachedBase)
+	var extras extraCapture
+	if extrasCh != nil {
+		extras = <-extrasCh
+	}
 	if err != nil {
 		return nil, &BaseCaptureError{Capture: base, Err: err}
+	}
+	if extras.err != nil {
+		return nil, extras.err
 	}
 	if opts.CachedBase != "" && (!base.Cached || base.Commit != opts.CachedBase) {
 		return nil, &BaseCaptureError{
@@ -282,6 +303,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		BaseSource:      source,
 		BaseCheckedAt:   base.CheckedAt,
 		Fallback:        opts.Fallback,
+		Extras:          extras.repos,
 	}
 	if opts.RequestedAccount != account {
 		run.RequestedAccountMemberID = opts.RequestedAccount
@@ -294,6 +316,9 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 			}
 		}
 		return nil, err
+	}
+	for i := range run.Extras {
+		run.Extras[i].Key = domain.RepoKey(run.ID, i+1)
 	}
 	if opts.Created != nil {
 		opts.Created(run.ID)
@@ -363,13 +388,18 @@ type SetupFailure struct {
 func (e *SetupFailure) Error() string { return e.reason }
 
 func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
-	checkout, branch, err := s.cfg.Git.CreateRunCheckoutAt(ctx, ws.ID, run.ID, run.BaseCommit, run.BaseBranch, run.Task, ws.Origin)
+	checkout, branch, err := s.createCheckouts(ctx, run, ws)
 	if err != nil {
 		return fmt.Errorf("create checkout: %w", err)
 	}
 	run.Worktree, run.Branch = checkout, branch
 	if updateErr := s.cfg.Store.SetRunCheckout(ctx, run.ID, checkout, branch); updateErr != nil {
 		return fmt.Errorf("record checkout: %w", updateErr)
+	}
+	if len(run.Extras) > 0 {
+		if updateErr := s.cfg.Store.SetRunRepos(ctx, run.ID, run.Extras); updateErr != nil {
+			return fmt.Errorf("record extra repositories: %w", updateErr)
+		}
 	}
 	if pinErr := s.pinLatestProfile(ctx, run); pinErr != nil {
 		return fmt.Errorf("pin profile: %w", pinErr)
@@ -614,7 +644,7 @@ func (s *Scheduler) freshen(ctx context.Context, run *domain.Run) *domain.Run {
 // command resolves argv and profile for one launch by member in workspace on
 // account's shared account, with the profile from launchProfile. An acp
 // launch has no argv: the task travels over the protocol.
-func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, assigned bool, task, model string) (argv []string, profile harness.Profile, acp bool, err error) {
+func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, member, account domain.MemberID, harnessName string, mode domain.LaunchMode, assigned bool, task, model string, extras ...domain.RunRepo) (argv []string, profile harness.Profile, acp bool, err error) {
 	if err = domain.ValidModel(model); err != nil {
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", err)
 	}
@@ -644,7 +674,7 @@ func (s *Scheduler) command(ctx context.Context, workspace domain.WorkspaceID, m
 		return nil, harness.Profile{}, false, fmt.Errorf("scheduler: agent %q has no model flag; launch it without a model", harnessName)
 	}
 	if task != "" && !profile.CarriesInstructions() {
-		instructions, ierr := s.briefedInstructions(ctx, s.runGuide(ctx, "", assigned, mode == domain.LaunchHeadless, false), workspace, member)
+		instructions, ierr := s.briefedInstructions(ctx, s.runGuide(ctx, "", assigned, mode == domain.LaunchHeadless, false), extras, workspace, member)
 		if ierr != nil {
 			return nil, harness.Profile{}, false, fmt.Errorf("scheduler: %w", ierr)
 		}

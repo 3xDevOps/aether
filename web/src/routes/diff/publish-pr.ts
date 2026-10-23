@@ -1,11 +1,17 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
+import type { Tone } from '@/components/ui/status-dot'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { Run, RunGitExpected, RunPRCheck, RunPRFeedbackResult, RunPRTarget, RunPullRequest } from '@/lib/types'
 import { completeTarget, defaultPRTarget, defaultPushTarget } from '@/routes/diff/publish-target'
 import { useStore } from '@/store'
 import { coalesce } from '@/store/coalesce'
+
+export type ScopedRun = Run & { repo?: string }
+
+const prKey = (run: ScopedRun) => (run.repo ? `${run.id}:${run.repo}` : run.id)
 
 /** The server stores no pull request: every answer here is read from GitHub through the run's own `gh`. */
 export interface TrackedPR {
@@ -28,9 +34,9 @@ useStore.subscribe((state, previous) => {
   if (state.identityKey !== previous.identityKey) usePullRequests.setState({}, true)
 })
 
-async function read(run: Run, client: Api): Promise<Partial<TrackedPR>> {
-  const { chosen, asked } = usePullRequests.getState()[run.id] ?? none
-  const ask = async (next: NonNullable<TrackedPR['asked']>) => client.runPRFeedback({ run_id: run.id, ...next, limit: feedbackLimit })
+async function read(run: ScopedRun, client: Api): Promise<Partial<TrackedPR>> {
+  const { chosen, asked } = usePullRequests.getState()[prKey(run)] ?? none
+  const ask = async (next: NonNullable<TrackedPR['asked']>) => client.runPRFeedback({ run_id: run.id, ...repoParam(run), ...next, limit: feedbackLimit })
   // A failed read that found no pull request says nothing about the one on screen; a partial one carries its own error.
   const answer = (next: TrackedPR['asked'], feedback: RunPRFeedbackResult): Partial<TrackedPR> =>
     feedback.error && !feedback.pull_request ? { asked: next, error: feedback.error } : { asked: next, feedback, error: undefined }
@@ -39,11 +45,11 @@ async function read(run: Run, client: Api): Promise<Partial<TrackedPR>> {
     // A moved checkout may be on another branch, which is another pull request.
     if (!feedback.actual) return answer(asked, feedback)
   }
-  const workspace = useStore.getState().workspaces[run.workspace_id]
+  const workspace = useStore.getState().workspaces[repoWorkspaceID(run)]
   const [status, source] = await Promise.all([
-    client.runGitStatus({ run_id: run.id }),
+    client.runGitStatus({ run_id: run.id, ...repoParam(run) }),
     // Without the source, the pull request defaults to the repository pushed to.
-    client.workspaceMirrorStatus(run.workspace_id).then((mirror) => mirror.source_url, () => undefined),
+    client.workspaceMirrorStatus(repoWorkspaceID(run)).then((mirror) => mirror.source_url, () => undefined),
   ])
   if (status.error) throw new Error(status.error)
   const target = chosen ?? defaultPRTarget(defaultPushTarget(status, workspace?.origin), run.base_branch || workspace?.base_branch || '', source)
@@ -52,24 +58,31 @@ async function read(run: Run, client: Api): Promise<Partial<TrackedPR>> {
   return answer(next, await ask(next))
 }
 
-export async function refreshPullRequest(run: Run, client: Api = api): Promise<void> {
-  const revision = (revisions.get(run.id) ?? 0) + 1
-  revisions.set(run.id, revision)
+export async function refreshPullRequest(run: ScopedRun, client: Api = api): Promise<void> {
+  const key = prKey(run)
+  const revision = (revisions.get(key) ?? 0) + 1
+  revisions.set(key, revision)
   const identity = useStore.getState().identityKey
   const patch = await read(run, client).catch((cause): Partial<TrackedPR> => ({ error: message(cause) }))
-  if (revisions.get(run.id) !== revision || useStore.getState().identityKey !== identity) return
-  usePullRequests.setState((all) => ({ [run.id]: { ...all[run.id], ...patch } }))
+  if (revisions.get(key) !== revision || useStore.getState().identityKey !== identity) return
+  usePullRequests.setState((all) => ({ [key]: { ...all[key], ...patch } }))
 }
 
-export function trackPullRequest(run: Run, target: RunPRTarget, client: Api = api): Promise<void> {
-  usePullRequests.setState((all) => ({ [run.id]: { ...all[run.id], chosen: target, asked: undefined } }))
+export function trackPullRequest(run: ScopedRun, target: RunPRTarget, client: Api = api): Promise<void> {
+  const key = prKey(run)
+  usePullRequests.setState((all) => ({ [key]: { ...all[key], chosen: target, asked: undefined } }))
   return refreshPullRequest(run, client)
 }
+
+/** The workspace whose settings (origin, base branch, mirror) the repo's publish flow reads. */
+export const repoWorkspaceID = (run: ScopedRun): string => run.repo ?? run.workspace_id
+
+export const repoParam = (run: ScopedRun): { repo?: string } => (run.repo ? { repo: run.repo } : {})
 
 const pollMs = 60_000
 
 /** One poll per run however many surfaces watch it; a `run.pr`, `git.branch` or integration event reads at once. */
-const polls = new Map<string, { run: Run; watchers: number; timer?: number; stopped: boolean }>()
+const polls = new Map<string, { run: ScopedRun; watchers: number; timer?: number; stopped: boolean }>()
 const pollListeners = new Set<(runID: string) => void>()
 
 /** Hears each 60s poll of a watched run, for reads that ride on it. */
@@ -80,16 +93,18 @@ export function onPullRequestPoll(listener: (runID: string) => void): () => void
 
 useStore.subscribe((state, previous) => {
   if (state.prSeq === previous.prSeq && state.gitSeq === previous.gitSeq && state.integrationSeq === previous.integrationSeq) return
-  for (const [runID, poll] of polls) {
+  for (const [key, poll] of polls) {
+    const runID = poll.run.id
     const mission = poll.run.mission_id
     if (state.prSeq[runID] !== previous.prSeq[runID] || state.gitSeq[runID] !== previous.gitSeq[runID] || (mission && state.integrationSeq[mission] !== previous.integrationSeq[mission])) {
-      coalesce(polls, runID, () => refreshPullRequest(poll.run))
+      coalesce(polls, key, () => refreshPullRequest(poll.run))
     }
   }
 })
 
-function watchPullRequest(run: Run): () => void {
-  let poll = polls.get(run.id)
+function watchPullRequest(run: ScopedRun): () => void {
+  const key = prKey(run)
+  let poll = polls.get(key)
   if (!poll) {
     const started = { run, watchers: 0, timer: undefined as number | undefined, stopped: false }
     const tick = async () => {
@@ -99,7 +114,7 @@ function watchPullRequest(run: Run): () => void {
       }
       if (!started.stopped) started.timer = window.setTimeout(() => void tick(), pollMs)
     }
-    polls.set(run.id, started)
+    polls.set(key, started)
     void tick()
     poll = started
   }
@@ -109,14 +124,27 @@ function watchPullRequest(run: Run): () => void {
     if (--watching.watchers > 0) return
     watching.stopped = true
     clearTimeout(watching.timer)
-    polls.delete(run.id)
+    polls.delete(key)
   }
 }
 
-export function usePullRequest(run: Run, watch: boolean): TrackedPR {
-  const tracked = usePullRequests((all) => all[run.id]) ?? none
+export function usePullRequest(run: ScopedRun, watch: boolean): TrackedPR {
+  const key = prKey(run)
+  const tracked = usePullRequests((all) => all[key]) ?? none
   // The run's identity and base never change under one id.
-  useEffect(() => (watch ? watchPullRequest(run) : undefined), [run.id, watch])
+  useEffect(() => (watch ? watchPullRequest(run) : undefined), [key, watch])
+  return tracked
+}
+
+export function usePullRequestList(runs: ScopedRun[], watch: boolean): TrackedPR[] {
+  const keys = runs.map(prKey)
+  const tracked = usePullRequests(useShallow((all) => keys.map((key) => all[key] ?? none)))
+  const joined = keys.join()
+  useEffect(() => {
+    if (!watch) return
+    const stops = runs.map(watchPullRequest)
+    return () => stops.forEach((stop) => stop())
+  }, [joined, watch])
   return tracked
 }
 
@@ -138,4 +166,18 @@ export function countChecks(checks: RunPRCheck[]): Record<CheckState, number> {
 
 export function stateLabel(pr: RunPullRequest): string {
   return `${pr.draft ? 'Draft · ' : ''}${pr.state.charAt(0).toUpperCase()}${pr.state.slice(1)}`
+}
+
+/** `short` is what a narrow header keeps of `text`. An answer that failed part-way or stopped at its
+ * limit may be missing checks, so it can report a failure it saw but never that all of them passed. */
+export function summarizePR(pr: RunPullRequest, feedback: RunPRFeedbackResult): { tone: Tone; text: string; short?: string } {
+  if (pr.state === 'merged') return { tone: 'done', text: 'Merged' }
+  if (pr.state === 'closed') return { tone: 'neutral', text: 'Closed' }
+  const checks = feedback.checks ?? []
+  const counts = countChecks(checks)
+  if (counts.failing) return { tone: 'failed', text: `${counts.failing} failing`, short: String(counts.failing) }
+  if (feedback.error || (feedback.truncated && checks.length >= feedbackLimit)) return { tone: 'neutral', text: 'Checks incomplete' }
+  if (counts.running) return { tone: 'working', text: 'Checks running' }
+  if (counts.passing) return { tone: 'done', text: 'Checks passed' }
+  return { tone: 'neutral', text: 'No checks' }
 }

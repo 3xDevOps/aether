@@ -3,6 +3,7 @@ import { useMemo, useRef } from 'react'
 import type { RunActionCandidate } from '@/lib/commands'
 import { resolveMember } from '@/lib/member-name'
 import type { StateContext } from '@/lib/needs-you'
+import { extraRepoCount, repoLabel } from '@/lib/repos'
 import { groupLabel, groupOf, presentRun, type RunGroup } from '@/lib/status'
 import type { Workspace } from '@/lib/types'
 import { useStore } from '@/store'
@@ -72,8 +73,8 @@ export function mapRuns(s: RunsInput): { cards: BoardCard[]; archivedCards: Boar
   const individual = (row: RunRow): BoardCard => ({
     ...row,
     children: [],
-    workspaceName: !s.workspace || row.run.workspace_id !== s.workspace
-      ? s.ctx.workspaces[row.run.workspace_id]?.name ?? row.run.workspace_id
+    workspaceName: !s.workspace || row.run.workspace_id !== s.workspace || extraRepoCount(row.run) > 0
+      ? repoLabel(s.ctx.workspaces[row.run.workspace_id]?.name ?? row.run.workspace_id, row.run)
       : undefined,
   })
   return {

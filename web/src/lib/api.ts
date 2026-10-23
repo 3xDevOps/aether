@@ -539,6 +539,7 @@ export const api = {
     account_member_id?: string
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
+    extra_workspace_ids?: string[]
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
   runRelease: (runID: string) => call<Record<string, never>>('run.release', { run_id: runID }),
@@ -1036,16 +1037,16 @@ export const api = {
   // Not RPC methods; see docs/local-gateway.md. Without a range this is the
   // diff against the run's effective base; with `from`, everything since that
   // snapshot tree, and `base` is the `from` tree.
-  runPatch: (runID: string, range?: { from: string }) =>
+  runPatch: (runID: string, range?: { from: string }, repo?: string) =>
     get<RunPatch>(
       `/run/${encodeURIComponent(runID)}/patch` +
-        (range ? `?${new URLSearchParams(range).toString()}` : ''),
+        (range || repo ? `?${new URLSearchParams({ ...range, ...(repo ? { repo } : {}) }).toString()}` : ''),
     ),
-  filesTree: (params: { workspace_id: string; run_id?: string; path: string }) =>
+  filesTree: (params: { workspace_id: string; run_id?: string; repo?: string; path: string }) =>
     call<FilesTreeResult>('files.tree', params),
-  filesRead: (params: { workspace_id: string; run_id?: string; path: string }) =>
+  filesRead: (params: { workspace_id: string; run_id?: string; repo?: string; path: string }) =>
     call<FileRead>('files.read', params),
-  filesWrite: (params: { workspace_id: string; run_id?: string; path: string; content: string; revision: string }) =>
+  filesWrite: (params: { workspace_id: string; run_id?: string; repo?: string; path: string; content: string; revision: string }) =>
     call<FileRead>('files.write', params),
   homeTree: (path: string) => call<FilesTreeResult>('home.tree', { path }),
   homeRead: (path: string) => call<FileRead>('home.read', { path }),
@@ -1058,8 +1059,8 @@ export const api = {
     call<unknown>('home.upload', { path, content_base64: contentBase64, overwrite }),
   homeDownload: (path: string) =>
     call<{ content_base64: string; size: number }>('home.download', { path }),
-  filesDiff: (runID: string, path: string) =>
-    call<FileDiff>('files.diff', { run_id: runID, path }),
+  filesDiff: (runID: string, path: string, repo?: string) =>
+    call<FileDiff>('files.diff', { run_id: runID, path, ...(repo ? { repo } : {}) }),
   disk: (signal?: AbortSignal) => get<DiskUsage>('/disk', signal),
   capabilities: () => get<GatewayCapabilities>('/capabilities'),
   localLinkStatus: () => local<LinkStatus>('link.status'),

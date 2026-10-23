@@ -659,7 +659,9 @@ export async function applyEvent(
     }
     case 'run.diff': {
       // Also signals that the run's cumulative patch text is behind.
-      store.getState().noteDiffSnapshot(ev.run_id, diffSnapshot(ev.time, ev.payload as RunDiffPayload))
+      const p = ev.payload as RunDiffPayload
+      if (p.repo) store.getState().noteRepoDiff(ev.run_id)
+      else store.getState().noteDiffSnapshot(ev.run_id, diffSnapshot(ev.time, p))
       break
     }
     case 'workspace.approval':
@@ -699,7 +701,7 @@ export async function applyEvent(
           return false
         }
       }
-      if (p.commit) store.getState().applyLastCommit(ev.run_id, p.commit, ev.time)
+      if (p.commit && !p.repo) store.getState().applyLastCommit(ev.run_id, p.commit, ev.time)
       store.getState().bumpWorkflowSignal('gitSeq', ev.run_id)
       break
     }

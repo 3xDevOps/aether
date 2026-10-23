@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { GitBranch } from '@/components/icons'
 import { api, type Api } from '@/lib/api'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
 import { useElementSize } from '@/lib/hooks'
 import { runLabel } from '@/lib/status'
 import type { Run } from '@/lib/types'
+import { useRepoPatch } from '@/routes/diff/repo-patches'
+import { useRepoRuns } from '@/routes/diff/repos'
 import { FileEditor, type ViewerMode } from '@/routes/files/editor'
 import { closeTab, FilesPane } from '@/routes/files/pane'
 import type { FileTarget } from '@/routes/files/paths'
-import { fileTabFromSource, fileTabToSelection, sourceKey, type WorkspaceSource } from '@/routes/files/sources'
+import { fileTabFromSource, fileTabToSelection, sourceKey, type FileSource, type WorkspaceSource } from '@/routes/files/sources'
 import { touchedPaths, TreeDirectory, TreeExpansion } from '@/routes/files/tree'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
@@ -32,18 +35,23 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
   const [browsing, setBrowsing] = useState(false)
   const [reveal, setReveal] = useState<{ key: string; target: FileTarget } | null>(null)
 
-  const label = runLabel(run)
+  const repos = useRepoRuns(run)
+  const [repoID, setRepoID] = useState('')
+  const chosen = repos.find((entry) => entry.repo.workspace_id === repoID && !entry.repo.primary)?.repo
+  const repoPatch = useRepoPatch(run.id, chosen?.workspace_id ?? '', Boolean(chosen))
+  const repoTouched = useMemo(() => new Set(repoPatch.files.map((file) => file.path)), [repoPatch.files])
+  const label = chosen ? `${chosen.name} · ${runLabel(run)}` : runLabel(run)
   const source = useMemo<WorkspaceSource>(
-    () => ({ kind: 'workspace', workspaceID: run.workspace_id, runID: run.id, label }),
-    [run.workspace_id, run.id, label],
+    () => ({ kind: 'workspace', workspaceID: run.workspace_id, runID: run.id, ...(chosen ? { repo: chosen.workspace_id } : {}), label }),
+    [run.workspace_id, run.id, chosen?.workspace_id, label],
   )
   const tabs = fileTabs.filter((tab) => tab.kind === 'workspace' && tab.runID === run.id).map(fileTabToSelection)
   const holds = (key: string | null | undefined) => tabs.find((tab) => sourceKey(tab, tab.path) === key)
   const selection = holds(activeFileKey) ?? holds(lastSelected.get(run.id)) ?? tabs.at(-1) ?? null
 
-  const open = (path: string, target: FileTarget | null) => {
-    const key = sourceKey(source, path)
-    openFileTab(fileTabFromSource(source, path, key))
+  const open = (path: string, target: FileTarget | null, from: FileSource = source) => {
+    const key = sourceKey(from, path)
+    openFileTab(fileTabFromSource(from, path, key))
     setMode('file')
     setBrowsing(false)
     setReveal(target && { key, target })
@@ -57,16 +65,31 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
     open(file, line ? { path: file, line: Number(line), ...(column ? { column: Number(column) } : {}) } : null)
   }, [route, run.id])
 
+  const selectTab = (tab: FileSource, path: string) => {
+    if (tab.kind !== 'workspace') return
+    setRepoID(tab.repo ?? '')
+    open(path, null, tab)
+  }
+
   const tree = (
     <div className="p-2">
+      {repos.length > 0 && (
+        <Tabs value={chosen?.workspace_id ?? ''} onValueChange={setRepoID} className="mb-2">
+          <TabsList look="segmented" aria-label="Repos" className="overflow-x-auto [scrollbar-width:none]">
+            {repos.map(({ repo }) => (
+              <TabsTrigger key={repo.workspace_id} value={repo.primary ? '' : repo.workspace_id}>{repo.name}</TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
       <TreeDirectory
-        source={{ ...source, label: run.branch }}
+        source={{ ...source, label: chosen?.branch ?? run.branch }}
         path=""
         depth={0}
         client={client}
         onSelect={(_, path) => open(path, null)}
         selected={selection}
-        touched={touchedPaths(run.id)}
+        touched={chosen ? repoTouched : touchedPaths(run.id)}
         icon={<GitBranch />}
       />
     </div>
@@ -85,7 +108,7 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
       tabs={tabs}
       mode={mode}
       onMode={setMode}
-      onSelect={(_, path) => open(path, null)}
+      onSelect={selectTab}
       onClose={(tab) => {
         if (closeTab(tab, tabs)) setMode('file')
       }}

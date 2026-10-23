@@ -14,6 +14,10 @@ import { addComment, commentable, growComment, placeComments, reach, useFileComm
 export const largeFile = 500
 /** A file whose patch text is longer than this starts closed, whatever its line count. */
 export const largeText = 256 * 1024
+
+export function collapsedByDefault(file: PatchFile): boolean {
+  return file.contentLines > largeFile || file.size > largeText || file.status === 'binary' || file.status === 'deleted'
+}
 const longLine = 3000
 const noLines: PatchLine[] = []
 

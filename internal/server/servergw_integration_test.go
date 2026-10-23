@@ -83,7 +83,7 @@ func TestIntegrationServerGateway(t *testing.T) {
 	if status := getJSON(t, web.URL+"/api/v1/capabilities", &caps); status != http.StatusOK {
 		t.Fatalf("capabilities status = %d", status)
 	}
-	if caps.Gateway != "server" || strings.Join(caps.Methods, ",") != "*" || caps.Local != nil {
+	if caps.Gateway != "server" || strings.Join(caps.Methods, ",") != "*,"+protocol.CapabilityRunRepos || caps.Local != nil {
 		t.Fatalf("capabilities = %+v", caps)
 	}
 	var info protocol.ServerInfoResult

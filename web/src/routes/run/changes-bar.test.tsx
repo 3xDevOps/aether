@@ -116,7 +116,7 @@ describe('ChangesBar', () => {
     render(<ChangesBar run={record} />)
     expect((await screen.findByRole('alert')).textContent).toContain('Changes could not be read: timeline unavailable')
     expect(timeline).toHaveBeenCalledTimes(1)
-    expect(timeline).toHaveBeenCalledWith({ workspace_id: record.workspace_id, run_id: 'run_1', types: ['run.diff'], newest: true, limit: 1 })
+    expect(timeline).toHaveBeenCalledWith({ workspace_id: record.workspace_id, run_id: 'run_1', types: ['run.diff'], newest: true, limit: 50 })
 
     timeline.mockResolvedValueOnce({
       events: [{ time: '2026-08-14T10:05:00Z', payload: { files } }],

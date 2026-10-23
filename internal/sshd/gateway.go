@@ -47,7 +47,11 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	if _, err := s.cfg.Store.GetRun(ctx, id); err != nil {
 		return nil, rpcError(err)
 	}
-	p, err := patcher.RunPatch(ctx, id, gitengine.PatchRequest{
+	checkout, _, perr := s.resolveRepo(ctx, req.RunID, "", req.Repo)
+	if perr != nil {
+		return nil, perr
+	}
+	p, err := patcher.RunPatch(ctx, checkout, gitengine.PatchRequest{
 		From:     req.From,
 		To:       req.To,
 		MaxBytes: gitengine.MaxPatchBytes,
@@ -68,6 +72,7 @@ func (s *Server) runPatch(ctx context.Context, _ domain.MemberID, params json.Ra
 	}
 	return protocol.RunPatchResult{
 		RunID:     string(id),
+		Repo:      req.Repo,
 		Base:      p.Base,
 		Patch:     p.Text,
 		Truncated: p.Truncated,

@@ -17,6 +17,7 @@ const (
 // against its effective base; From alone for everything that changed since
 // that snapshot; both for what that one interval changed. To alone is invalid.
 type RunPatchParams struct {
+	Repo  string `json:"repo,omitempty"`
 	RunID string `json:"run_id"`
 	From  string `json:"from,omitempty"`
 	To    string `json:"to,omitempty"`
@@ -26,6 +27,7 @@ type RunPatchParams struct {
 // the fork-point commit recorded at checkout creation, or against the from
 // tree when a snapshot range was asked for.
 type RunPatchResult struct {
+	Repo  string `json:"repo,omitempty"`
 	RunID string `json:"run_id"`
 	// Base is what the diff is taken against: the effective base commit for a
 	// cumulative render, the requested from tree otherwise.

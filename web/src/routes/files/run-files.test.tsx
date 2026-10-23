@@ -57,6 +57,48 @@ describe('a run’s Files view', () => {
     expect(useStore.getState().route.name).toBe('run')
   })
 
+  it('reads the selected repo of a multi-repo run through the primary workspace', async () => {
+    const client = checkout()
+    const multi = run({
+      repos: [
+        { workspace_id: workspace.id, name: workspace.name, path: '/workspace', branch: 'aether/run-1-checkout', primary: true },
+        { workspace_id: 'wsp_api', name: 'api', path: '/repos/api', branch: 'aether/run-1-api', primary: false },
+      ],
+    })
+    act(() => useStore.getState().setRuns([multi]))
+    render(<RunFiles run={multi} shown client={client} />)
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'api' }))
+    await waitFor(() => expect(client.filesTree).toHaveBeenCalledWith({ workspace_id: workspace.id, run_id: 'run_1', repo: 'wsp_api', path: '' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'README.md' }))
+    await screen.findByRole('textbox', { name: 'Edit README.md' })
+    expect(client.filesRead).toHaveBeenCalledWith({ workspace_id: workspace.id, run_id: 'run_1', repo: 'wsp_api', path: 'README.md' })
+  })
+
+  it('follows a file tab to the repo it belongs to', async () => {
+    const client = checkout()
+    const multi = run({
+      repos: [
+        { workspace_id: workspace.id, name: workspace.name, path: '/workspace', branch: 'aether/run-1-checkout', primary: true },
+        { workspace_id: 'wsp_api', name: 'api', path: '/repos/api', branch: 'aether/run-1-api', primary: false },
+      ],
+    })
+    act(() => useStore.getState().setRuns([multi]))
+    render(<RunFiles run={multi} shown client={client} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'README.md' }))
+    await screen.findByRole('textbox', { name: 'Edit README.md' })
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'api' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'README.md' }))
+    await waitFor(() => expect(client.filesRead).toHaveBeenCalledWith({ workspace_id: workspace.id, run_id: 'run_1', repo: 'wsp_api', path: 'README.md' }))
+    expect(screen.getByRole('tab', { name: 'api' }).getAttribute('aria-selected')).toBe('true')
+
+    const open = screen.getAllByRole('tab', { name: /README\.md/ })
+    expect(open).toHaveLength(2)
+    fireEvent.mouseDown(open[0]!)
+    fireEvent.click(open[0]!)
+    await waitFor(() => expect(screen.getByRole('tab', { name: workspace.name }).getAttribute('aria-selected')).toBe('true'))
+    expect(useStore.getState().activeFileKey).toBe(filesKey(workspace.id, 'run_1', 'README.md'))
+  })
+
   it('opens the file a link names, shows it in the tree and marks its line, again when the link is followed again', async () => {
     const client = checkout()
     act(() => openInFiles('run_1', { path: 'src/app.ts', line: 3 }))
