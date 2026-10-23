@@ -309,7 +309,7 @@ describe('hydrate', () => {
           local: ['link.status'],
         })),
         localLinkStatus: vi.fn(async () => ({
-          server_configured: true,
+          server_configured: false,
           linked: false,
           addr: 'host:2222',
           user: 'alice',
@@ -590,7 +590,7 @@ describe('hydrate', () => {
           ...(tc.local ? { local: ['link.status'] } : {}),
         })),
         localLinkStatus: vi.fn(async () => ({
-          server_configured: true,
+          server_configured: tc.linked,
           linked: tc.linked,
           addr: 'host:2222',
           user: 'alice',
@@ -603,6 +603,22 @@ describe('hydrate', () => {
       expect(store.getState().route.name).toBe(tc.onboarding ? 'onboarding' : 'board')
       if (tc.linked) expect(store.getState().onboarded).toBe(true)
     }
+  })
+
+  it('goes straight to the board for a gateway linked through the edge without a clone', async () => {
+    const store = createRootStore()
+    store.setState({ onboarded: false, route: { name: 'board', params: {} } })
+    await hydrate(store, fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'local', methods: ['*'], ws: ['events', 'attach'], local: ['link.status'],
+      })),
+      localLinkStatus: vi.fn(async () => ({
+        server_configured: true, linked: false, addr: 'host:2222', user: 'alice', repo: '',
+      })),
+    }))
+
+    expect(store.getState().route).toEqual({ name: 'board', params: {} })
+    expect(store.getState().onboarded).toBe(true)
   })
 
   it.each([

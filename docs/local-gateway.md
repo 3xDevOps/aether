@@ -89,7 +89,7 @@ dashboard's server. The dashboard takes the fragment off the address
 already open, so the secret stays in neither the address bar nor history,
 and opens onboarding's Connect step with the link.
 
-Onboarding is an initial landing page, not a reconnect redirect. Choosing
+Onboarding is an initial landing page, not a reconnect redirect. A gateway that already has a configured server, linked through the edge or through a clone, opens the board instead. Choosing
 **Manage workspaces** during startup keeps that route, and linking a clone
 must not erase an in-progress wizard's workspace or first-run draft. Public
 and private remote import need no local clone and remain available from
