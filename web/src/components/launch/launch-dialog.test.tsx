@@ -369,6 +369,50 @@ describe('new run', () => {
   })
 })
 
+describe('extra repos', () => {
+  const docs = { ...workspace, id: 'wsp_docs', name: 'docs-site' }
+  const guides = { ...workspace, id: 'wsp_guides', name: 'guides' }
+  const two = { [workspace.id]: workspace, [docs.id]: docs, [guides.id]: guides }
+
+  it('adds other workspaces as chips and launches with their ids', async () => {
+    useStore.setState({ workspaces: two, capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    await open()
+    await userEvent.click(screen.getByRole('button', { name: 'Add repos' }))
+    const list = within(await screen.findByRole('dialog', { name: 'Add repos' }))
+    expect(list.queryByText('main-repo')).toBeNull()
+    await userEvent.click(list.getByRole('checkbox', { name: /docs-site/ }))
+    await userEvent.keyboard('{Escape}')
+
+    expect(screen.getByRole('button', { name: 'Remove docs-site' })).toBeTruthy()
+    expect(screen.getByText(/at \/repos\/<name>/)).toBeTruthy()
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ workspace_id: workspace.id, extra_workspace_ids: [docs.id] })))
+  })
+
+  it('removes a chip and then sends no extras', async () => {
+    useStore.setState({ workspaces: two, capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    await open()
+    await userEvent.click(screen.getByRole('button', { name: 'Add repos' }))
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Add repos' })).getByRole('checkbox', { name: /guides/ }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(screen.getByRole('button', { name: 'Remove guides' }))
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalled())
+    expect(vi.mocked(api.runLaunch).mock.calls[0]![0]).not.toHaveProperty('extra_workspace_ids')
+  })
+
+  it('is hidden with a single workspace and when the server does not offer it', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    await open()
+    expect(screen.queryByRole('button', { name: 'Add repos' })).toBeNull()
+    cleanup()
+
+    useStore.setState({ workspaces: two, capabilities: { gateway: 'remote', methods: ['run.launch'], ws: [] } })
+    await open()
+    expect(screen.queryByRole('button', { name: 'Add repos' })).toBeNull()
+  })
+})
+
 describe('swarm', () => {
   beforeEach(() => {
     useStore.setState({

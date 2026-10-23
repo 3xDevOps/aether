@@ -2,27 +2,13 @@ import { useState } from 'react'
 import type * as React from 'react'
 import { GitPullRequest } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { StatusDot, type Tone } from '@/components/ui/status-dot'
-import type { RunPRFeedbackResult, RunPullRequest } from '@/lib/types'
+import { StatusDot } from '@/components/ui/status-dot'
 import { PRFeedback } from '@/routes/diff/publish-feedback'
-import { countChecks, feedbackLimit, usePullRequest } from '@/routes/diff/publish-pr'
+import { summarizePR, usePullRequest } from '@/routes/diff/publish-pr'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { useRepoPullRequests } from '@/routes/run/repo-pull-requests'
 import { useCapability } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
-
-/** `short` is what a narrow header keeps of `text`. An answer that failed part-way or stopped at its
- * limit may be missing checks, so it can report a failure it saw but never that all of them passed. */
-function summarize(pr: RunPullRequest, feedback: RunPRFeedbackResult): { tone: Tone; text: string; short?: string } {
-  if (pr.state === 'merged') return { tone: 'done', text: 'Merged' }
-  if (pr.state === 'closed') return { tone: 'neutral', text: 'Closed' }
-  const checks = feedback.checks ?? []
-  const counts = countChecks(checks)
-  if (counts.failing) return { tone: 'failed', text: `${counts.failing} failing`, short: String(counts.failing) }
-  if (feedback.error || (feedback.truncated && checks.length >= feedbackLimit)) return { tone: 'neutral', text: 'Checks incomplete' }
-  if (counts.running) return { tone: 'working', text: 'Checks running' }
-  if (counts.passing) return { tone: 'done', text: 'Checks passed' }
-  return { tone: 'neutral', text: 'No checks' }
-}
 
 /**
  * `status` and `panel` are separate because the row `status` sits in leaves the header while the
@@ -33,12 +19,15 @@ function summarize(pr: RunPullRequest, feedback: RunPRFeedbackResult): { tone: T
 export function useRunPullRequest(run: RunRecord, agent: AgentTerminal, agentName: string): { status: React.ReactNode; panel: React.ReactNode } {
   const caps = useCapability()
   const watch = (run.status === 'running' || run.status === 'needs-attention') && caps.hasMethod('run.git.status') && caps.hasMethod('run.pr.feedback')
-  const tracked = usePullRequest(run, watch)
+  const multiRepo = (run.repos?.length ?? 0) > 1
+  const tracked = usePullRequest(run, watch && !multiRepo)
+  const repos = useRepoPullRequests(run, agent, agentName, watch && multiRepo)
   const [open, setOpen] = useState(false)
+  if (repos) return repos
   const feedback = tracked.feedback
   const pr = feedback?.pull_request
   if (!feedback || !pr) return { status: null, panel: null }
-  const { tone, text, short } = summarize(pr, feedback)
+  const { tone, text, short } = summarizePR(pr, feedback)
   return {
     status: (
       <div role="group" aria-label="Pull request" className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-ui-sm">

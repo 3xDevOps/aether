@@ -8,6 +8,7 @@ import {
   type PresentationState,
   type RunGroup,
 } from '@/lib/status'
+import { extraRepoCount, repoLabel } from '@/lib/repos'
 import type { Member } from '@/lib/types'
 import type { RootState } from '@/store'
 import { isArchivable, type RunRecord } from '@/store/runs'
@@ -167,9 +168,10 @@ const inGroup: Record<RunGroup, (a: RunRow, b: RunRow) => number> = {
 const groupOrder: RunGroup[] = ['needs-you', 'working', 'review', 'finished']
 
 function located(row: RunRow, s: RunsInput): RunRow {
-  if (!s.workspace || row.run.workspace_id === s.workspace) return row
-  const workspace = s.ctx.workspaces[row.run.workspace_id]
-  return { ...row, workspaceName: workspace?.name ?? row.run.workspace_id }
+  const elsewhere = s.workspace && row.run.workspace_id !== s.workspace
+  if (!elsewhere && extraRepoCount(row.run) === 0) return row
+  const name = s.ctx.workspaces[row.run.workspace_id]?.name ?? row.run.workspace_id
+  return { ...row, workspaceName: repoLabel(name, row.run) }
 }
 
 export function runGroups(s: RunsInput): RunGroups {

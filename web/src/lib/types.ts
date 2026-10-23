@@ -106,6 +106,17 @@ export interface Run {
   base_branch?: string
   base_source?: string
   base_checked_at?: string | null
+  /** Every checkout of a multi-repo run, the primary first; absent for a single-repo run. */
+  repos?: RunRepo[]
+}
+
+export interface RunRepo {
+  workspace_id: string
+  name: string
+  /** Where the checkout is mounted in the container. */
+  path: string
+  branch: string
+  primary: boolean
 }
 /** Only `active` dispatches workers; `completed` and `cancelled` are final. */
 export type MissionPhase = 'planning' | 'active' | 'completed' | 'cancelled'

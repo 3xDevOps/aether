@@ -79,7 +79,7 @@ export function PRFeedback({
   open,
   onOpenChange,
 }: {
-  run: RunRecord
+  run: RunRecord & { repo?: string }
   agent: AgentTerminal
   agentName: string
   tracked: TrackedPR

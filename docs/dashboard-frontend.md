@@ -725,7 +725,8 @@ its end, exposing the shell or the raw connection error and window controls.
 
 `src/lib/url-state.ts` keeps the route in the query string. A run view is
 `?run=<id>`, with `&view=session|terminal|changes|files|browser` (an old
-`&view=diff` reads as `changes`); any other
+`&view=diff` reads as `changes`; `changes` also takes `&repo=<workspace id>|all` on a
+[multi-repo run](#multi-repo-runs)); any other
 view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page;
 the name is the route's, so Activity is `?page=timeline`, and Devices is
 `?page=devices`, a tab of the Members view (`pageOf` in
@@ -3231,6 +3232,35 @@ both what it renders and the overlap set the conflict chips read.
   file and the other member, and navigates to their run. Attribution comes
   from the runs the store already holds; an empty peer list means the overlap
   cleared and the chip goes.
+
+### Multi-repo runs
+
+A run launched with extra workspaces carries `repos` (`RunRepo`: workspace id,
+name, container path, branch, `primary`), the primary first; a single-repo run
+has none and shows none of what follows. The dashboard offers it only when the
+gateway lists the `run.repos` method.
+
+- **Launch.** With another workspace to add, the run tab of the launch dialog
+  shows **Add repos** (`launch/extra-repos.tsx`), a checklist of the member's
+  other workspaces. Each pick becomes a chip and goes out as
+  `extra_workspace_ids`; the repo is checked out at `/repos/<name>`.
+- **Changes.** The view gains a **Repos** tab strip above it: one tab per repo
+  with its changed-file count, then **All repos**. The choice is the `repo`
+  query parameter of `?run=<id>&view=changes` (a workspace id, or `all`; none
+  is the primary). The primary tab is today's view unchanged. Another repo
+  (`repo-changes.tsx`) shows that repo's files against its base, with its own
+  review comments (kept under `<run id>#<workspace id>` in `review.ts`),
+  **Publish** and pull request; every call carries `repo`. It has no Compare
+  menu. **All repos** lists each repo's changed files under its name, branch
+  and pull request; a file opens in its repo. Paths in a repo are relative to
+  that repo.
+- **Pull requests.** The header's pull-request group becomes one chip, **2
+  PRs**, with the worst check state of them (failing, then running, then the
+  rest). It opens a list of repo, `#number` link, state and checks, and
+  **Feedback** opens the usual panel for that repo (`repo-pull-requests.tsx`).
+  A pull request is tracked per run and repo in `publish-pr.ts`.
+- **Names.** The run header, sidebar rows and board cards read `repo +N` when
+  the run has extra repos.
 
 ### Browser view
 
