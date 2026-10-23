@@ -621,6 +621,22 @@ describe('hydrate', () => {
     expect(store.getState().onboarded).toBe(true)
   })
 
+  it('keeps a workspace chosen in the wizard while a configured gateway hydrates', async () => {
+    const store = createRootStore()
+    store.setState({ onboarded: false, route: { name: 'onboarding', params: {} } })
+    await hydrate(store, fakeApi({
+      capabilities: vi.fn(async () => ({
+        gateway: 'local', methods: ['*'], ws: ['events', 'attach'], local: ['link.status'],
+      })),
+      localLinkStatus: vi.fn(async () => {
+        store.getState().setOnboardingWorkspace(workspace.id)
+        return { server_configured: true, linked: false, addr: 'host:2222', user: 'alice', repo: '' }
+      }),
+    }))
+
+    expect(store.getState().onboardingWorkspace).toBe(workspace.id)
+  })
+
   it.each([
     { methods: ['*'] },
     { methods: ['member.git', 'agent.list'] },
