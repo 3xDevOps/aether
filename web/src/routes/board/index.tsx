@@ -88,7 +88,7 @@ export function Board() {
   } else {
     body = (
       <div
-        className="grid min-h-0 flex-1 grid-cols-1 content-start gap-6 overflow-y-auto p-4 lg:grid-cols-3 lg:content-stretch lg:gap-4 lg:overflow-hidden lg:pb-0"
+        className="grid min-h-0 flex-1 grid-cols-1 content-start gap-6 overflow-y-auto overflow-x-hidden p-4 lg:grid-cols-3 lg:content-stretch lg:gap-4 lg:overflow-hidden lg:pb-0"
       >
         <Column column={column('needs-you')} devices={devices} merges={merges} placeholder={placeholder} agentNames={agentNames} />
         <Column column={column('working')} placeholder={placeholder} agentNames={agentNames} />
