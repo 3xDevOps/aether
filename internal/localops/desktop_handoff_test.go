@@ -2,6 +2,7 @@ package localops
 
 import (
 	"errors"
+	"io/fs"
 	"strings"
 	"testing"
 	"time"
@@ -124,5 +125,14 @@ func TestFinishDesktopUpdateLeavesATaskThatWasNotRunning(t *testing.T) {
 	}
 	if got := LastDesktopBuildError(); got != "" {
 		t.Fatalf("recorded %q for a task that was not running", got)
+	}
+}
+
+func TestRenameWhileBusyDoesNotRetryOtherErrors(t *testing.T) {
+	calls := 0
+	missing := &fs.PathError{Op: "rename", Path: "app", Err: fs.ErrNotExist}
+	err := renameWhileBusy(func(string, string) error { calls++; return missing }, "app", "aside", 10*time.Second)
+	if !errors.Is(err, fs.ErrNotExist) || calls != 1 {
+		t.Fatalf("err = %v after %d calls, want the error at once", err, calls)
 	}
 }

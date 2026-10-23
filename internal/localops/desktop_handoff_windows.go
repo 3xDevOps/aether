@@ -41,3 +41,11 @@ func waitForExit(pid int, timeout time.Duration) error {
 		return err
 	}
 }
+
+// renameBusy reports whether a failed rename is Windows refusing it over a
+// handle another process still holds, which an exiting process releases.
+func renameBusy(err error) bool {
+	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) ||
+		errors.Is(err, windows.ERROR_ACCESS_DENIED) ||
+		errors.Is(err, windows.ERROR_LOCK_VIOLATION)
+}

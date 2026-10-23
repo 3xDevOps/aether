@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 // DesktopApp is an installed desktop shell.
@@ -435,7 +436,7 @@ func swapInstalled(goos, staged, target string) error {
 			return fmt.Errorf("localops: make room beside %s: %w", target, err)
 		}
 		old = filepath.Join(aside, filepath.Base(target))
-		if err := os.Rename(target, old); err != nil {
+		if err := renameWhileBusy(os.Rename, target, old, renameAsideTimeout); err != nil {
 			_ = os.RemoveAll(aside)
 			return fmt.Errorf("localops: move the installed %s aside%s: %w", target, removeHint(goos, target, err), err)
 		}
@@ -451,6 +452,27 @@ func swapInstalled(goos, staged, target string) error {
 		_ = os.RemoveAll(filepath.Dir(old))
 	}
 	return nil
+}
+
+// renameAsideTimeout bounds the wait for Windows to release an app that has
+// just exited: process teardown, Defender and the search indexer hold its
+// directory for a moment, and the user may have closed the window only
+// seconds before running the build.
+const renameAsideTimeout = 10 * time.Second
+
+// renameWhileBusy renames from to to, retrying with backoff while
+// renameBusy reports the error as a handle Windows has yet to release. The
+// last error is returned unchanged, so a window that is really still open
+// is reported as such.
+func renameWhileBusy(rename func(from, to string) error, from, to string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for delay := 50 * time.Millisecond; ; delay = min(2*delay, time.Second) {
+		err := rename(from, to)
+		if err == nil || !renameBusy(err) || time.Until(deadline) < delay {
+			return err
+		}
+		time.Sleep(delay)
+	}
 }
 
 // restoreSetAside puts back the app a swap killed between its two renames
