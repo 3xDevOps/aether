@@ -19,7 +19,6 @@ export function useRepoRuns<R extends Run>(run: R): { repo: RunRepo; run: Scoped
         : {
             ...run,
             repo: repo.workspace_id,
-            workspace_id: repo.workspace_id,
             branch: repo.branch,
             base_branch: workspaces[repo.workspace_id]?.base_branch ?? '',
             base_commit: undefined,

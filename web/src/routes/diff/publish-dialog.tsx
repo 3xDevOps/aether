@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { create } from 'zustand'
 import { RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -23,13 +23,41 @@ export function openPublish(runID: string) {
   useRequests.setState({ [runID]: true })
 }
 
+const Hosted = createContext(false)
+
+function requestKeyOf(run: ScopedRun): string {
+  return run.repo ? `${run.id}#${run.repo}` : run.id
+}
+
+/** Mounts one Publish dialog per repo of a multi-repo run, so a typed message or
+ * an uncertain PR creation survives switching repo tabs. Inside it, each
+ * `PublishDialog` is only the button that opens its repo's dialog. */
+export function PublishHosts({ repos, children }: { repos: { run: ScopedRun; name?: string }[]; children: ReactNode }) {
+  return (
+    <Hosted.Provider value>
+      {repos.map(({ run, name }) => (
+        <PublishPanel key={requestKeyOf(run)} run={run} repoName={name} />
+      ))}
+      {children}
+    </Hosted.Provider>
+  )
+}
+
 /** Stays mounted while the run is open so a typed message or an uncertain
  * PR creation survives closing the dialog and switching views. `quiet` gives
  * the view's one filled button to another action. */
 export function PublishDialog({ run, client = api, quiet = false, repoName }: { run: ScopedRun; client?: Api; quiet?: boolean; repoName?: string }) {
-  useHeaderPrimary(true)
+  const hosted = useContext(Hosted)
+  useHeaderPrimary(hosted)
+  if (!hosted) return <PublishPanel run={run} client={client} quiet={quiet} repoName={repoName} />
+  return <Button size="sm" variant={quiet ? 'secondary' : 'primary'} onClick={() => openPublish(requestKeyOf(run))}>Publish…</Button>
+}
+
+function PublishPanel({ run, client = api, quiet, repoName }: { run: ScopedRun; client?: Api; quiet?: boolean; repoName?: string }) {
+  const hosted = useContext(Hosted)
+  useHeaderPrimary(!hosted)
   const [open, setOpen] = useState(false)
-  const requestKey = run.repo ? `${run.id}#${run.repo}` : run.id
+  const requestKey = requestKeyOf(run)
   const requested = useRequests((all) => all[requestKey])
   useEffect(() => {
     if (!requested) return
@@ -46,9 +74,11 @@ export function PublishDialog({ run, client = api, quiet = false, repoName }: { 
   const coarse = useMediaQuery(coarsePointer)
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" variant={quiet ? 'secondary' : 'primary'}>Publish…</Button>
-      </DialogTrigger>
+      {!hosted && (
+        <DialogTrigger asChild>
+          <Button size="sm" variant={quiet ? 'secondary' : 'primary'}>Publish…</Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="md:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{repoName ? `Publish ${repoName}` : 'Publish'}</DialogTitle>

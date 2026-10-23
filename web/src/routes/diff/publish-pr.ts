@@ -45,11 +45,11 @@ async function read(run: ScopedRun, client: Api): Promise<Partial<TrackedPR>> {
     // A moved checkout may be on another branch, which is another pull request.
     if (!feedback.actual) return answer(asked, feedback)
   }
-  const workspace = useStore.getState().workspaces[run.workspace_id]
+  const workspace = useStore.getState().workspaces[repoWorkspaceID(run)]
   const [status, source] = await Promise.all([
     client.runGitStatus({ run_id: run.id, ...repoParam(run) }),
     // Without the source, the pull request defaults to the repository pushed to.
-    client.workspaceMirrorStatus(run.workspace_id).then((mirror) => mirror.source_url, () => undefined),
+    client.workspaceMirrorStatus(repoWorkspaceID(run)).then((mirror) => mirror.source_url, () => undefined),
   ])
   if (status.error) throw new Error(status.error)
   const target = chosen ?? defaultPRTarget(defaultPushTarget(status, workspace?.origin), run.base_branch || workspace?.base_branch || '', source)
@@ -73,6 +73,9 @@ export function trackPullRequest(run: ScopedRun, target: RunPRTarget, client: Ap
   usePullRequests.setState((all) => ({ [key]: { ...all[key], chosen: target, asked: undefined } }))
   return refreshPullRequest(run, client)
 }
+
+/** The workspace whose settings (origin, base branch, mirror) the repo's publish flow reads. */
+export const repoWorkspaceID = (run: ScopedRun): string => run.repo ?? run.workspace_id
 
 export const repoParam = (run: ScopedRun): { repo?: string } => (run.repo ? { repo: run.repo } : {})
 

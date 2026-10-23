@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { MissingRun } from '@/components/missing-run'
 import { Callout } from '@/components/ui/callout'
@@ -10,9 +10,11 @@ import { clockTime } from '@/lib/format'
 import { extraRepoCount } from '@/lib/repos'
 import { coarsePointer, useElementSize, useMediaQuery } from '@/lib/hooks'
 import { FileList } from '@/routes/diff/file-list'
+import { isLargeDiff, useOffsetTop } from '@/routes/diff/large-diff'
 import { Land } from '@/routes/diff/land'
 import { parsePatch, type PatchFile } from '@/routes/diff/parse'
 import { collapsedByDefault, FilePatch } from '@/routes/diff/patch-view'
+import { PublishHosts } from '@/routes/diff/publish-dialog'
 import { ReviewBar } from '@/routes/diff/review-bar'
 import { allRepos, AllRepos, RepoChanges, RepoTabs, useSelectedRepo } from '@/routes/diff/repo-changes'
 import { useRepoRuns } from '@/routes/diff/repos'
@@ -25,9 +27,6 @@ import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { comparisonFrom, comparisonScope, initialDiff, readCheckpoints, type Comparison } from '@/store/diff'
 
-/** Past this many content lines or files only the files near the screen are mounted. */
-const largePatch = 1500
-const largeFileCount = 100
 /** A stored patch longer than this is not re-fetched on a new snapshot: the reader chooses when. */
 const largeStored = 1024 * 1024
 
@@ -48,7 +47,8 @@ function RepoSwitch({ runID, agent, agentName }: { runID: string; agent: AgentTe
   const selected = useSelectedRepo(runID)
   const entry = repos.find((item) => item.repo.workspace_id === selected && !item.repo.primary)
   const primary = repos.find((item) => item.repo.primary)!.repo.workspace_id
-  return (
+  const caps = useCapability()
+  const views = (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <RepoTabs run={run} selected={selected === allRepos ? allRepos : (entry?.repo.workspace_id ?? primary)} />
       <div className="min-h-0 flex-1">
@@ -62,6 +62,8 @@ function RepoSwitch({ runID, agent, agentName }: { runID: string; agent: AgentTe
       </div>
     </div>
   )
+  if (!caps.hasMethod('run.git.status')) return views
+  return <PublishHosts repos={repos.map(({ repo, run: scoped }) => ({ run: scoped, name: repo.primary ? undefined : repo.name }))}>{views}</PublishHosts>
 }
 
 /** The run's changes against the comparison chosen in the strip: its effective
@@ -93,10 +95,7 @@ function PrimaryChanges({ runID, agent, agentName }: { runID: string; agent: Age
   // The stored patch answers for one comparison; another one's is not shown as this one's.
   const answered = state.from === from
   const files = useParsed(answered ? state.patch : '')
-  const virtual = useMemo(
-    () => files.length > largeFileCount || files.reduce((total, file) => total + file.contentLines, 0) > largePatch,
-    [files],
-  )
+  const virtual = useMemo(() => isLargeDiff(files), [files])
   const failed = answered && state.status === 'error'
   const loading = !answered || state.status === 'loading'
   const truncated = answered && state.truncated
@@ -238,21 +237,6 @@ function PrimaryChanges({ runID, agent, agentName }: { runID: string; agent: Age
       </div>
     </div>
   )
-}
-
-/** Where `element` starts in the scrolled `content`, kept current as anything above it changes size. */
-function useOffsetTop(content: HTMLElement | null, element: HTMLElement | null): number {
-  const [top, setTop] = useState(0)
-  useLayoutEffect(() => {
-    if (!content || !element) return
-    const measure = () => setTop(element.offsetTop)
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(content)
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [content, element])
-  return top
 }
 
 function Empty({ comparison, loading, recorded, against }: { comparison: Comparison; loading: boolean; recorded: boolean; against: string }) {

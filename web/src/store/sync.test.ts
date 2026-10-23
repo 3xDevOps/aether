@@ -2524,6 +2524,26 @@ describe('connect', () => {
     stop()
   })
 
+  it('keeps an extra repo’s events out of the run’s own diff and last commit', async () => {
+    const client = fakeApi({ runList: vi.fn(async () => [run({ id: 'run_1', last_commit: 'primary-sha' })]) })
+    const store = createRootStore()
+    const stop = connect(store, client)
+    const socket = await subscribe()
+    await vi.waitFor(() => expect(store.getState().hydrated).toBe(true))
+
+    deliver(socket, { ...statusEvent({ seq: 20 }), type: 'run.diff', payload: { files: [{ path: 'a.go', additions: 1, deletions: 0 }], tree: 'primary-tree' } })
+    deliver(socket, { ...statusEvent({ seq: 21 }), type: 'run.diff', payload: { repo: 'wsp_api', files: [{ path: 'x.go', additions: 9, deletions: 9 }, { path: 'y.go', additions: 1, deletions: 1 }], tree: 'api-tree' } })
+    deliver(socket, { ...statusEvent({ seq: 22 }), type: 'git.branch', payload: { workspace_id: 'wsp_api', repo: 'wsp_api', branch: 'b', commit: 'api-sha', previous: '', forced: false } })
+    await vi.waitFor(() => expect(store.getState().lastSeq).toBe(22))
+
+    const diff = store.getState().diffs.run_1
+    expect(diff.snapshots.map((snapshot) => snapshot.tree)).toEqual(['primary-tree'])
+    expect(diff.checkpoints.map((checkpoint) => checkpoint.tree)).toEqual(['primary-tree'])
+    expect(diff.repoRevision).toBe(1)
+    expect(store.getState().runs.run_1.last_commit).toBe('primary-sha')
+    stop()
+  })
+
   it('re-fetches on a reconnect that has no cursor to replay from', async () => {
     const client = fakeApi()
     const store = createRootStore()

@@ -1,13 +1,16 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { Virtualizer, type VirtualizerHandle } from 'virtua'
 import { RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { coarsePointer, useMediaQuery } from '@/lib/hooks'
+import { coarsePointer, useElementSize, useMediaQuery } from '@/lib/hooks'
 import type { RunRepo } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import type { PatchFile } from '@/routes/diff/parse'
 import { ChangedFileRow, FileList } from '@/routes/diff/file-list'
+import { isLargeDiff, useOffsetTop } from '@/routes/diff/large-diff'
 import { collapsedByDefault, Counts, FilePatch } from '@/routes/diff/patch-view'
 import { PublishDialog } from '@/routes/diff/publish-dialog'
 import { RepoPR } from '@/routes/diff/repo-pr'
@@ -122,12 +125,23 @@ export function RepoChanges({ run, repo, agent, agentName }: { run: ScopedRecord
   const key = repoReviewKey(run.id, repo.workspace_id)
   const review = useMemo(() => ({ runID: key, scope: '' }), [key])
   const handled = useRef<string>(undefined)
+  const virtual = useMemo(() => isLargeDiff(files), [files])
+  const list = useRef<VirtualizerHandle>(null)
+  const scroller = useRef<HTMLDivElement>(null)
+  const [content, setContent] = useState<HTMLDivElement | null>(null)
+  const [start, setStart] = useState<HTMLDivElement | null>(null)
+  const startMargin = useOffsetTop(content, start)
+  const [setToolbar, toolbar] = useElementSize<HTMLDivElement>()
+  const [focusedFile, setFocusedFile] = useState<number | null>(null)
 
   const jump = (path: string) => {
     setCurrent(path)
     setCollapsed((all) => ({ ...all, [path]: false }))
     const index = files.findIndex((file) => file.path === path)
-    requestAnimationFrame(() => document.getElementById(`${ids}-${index}`)?.scrollIntoView({ block: 'start' }))
+    requestAnimationFrame(() => {
+      if (virtual) list.current?.scrollToIndex(index, { align: 'start', offset: -toolbar.height })
+      else document.getElementById(`${ids}-${index}`)?.scrollIntoView({ block: 'start' })
+    })
   }
   const asked = isRunRoute(route, run.id) ? route.params.file : undefined
   useEffect(() => {
@@ -137,11 +151,28 @@ export function RepoChanges({ run, repo, agent, agentName }: { run: ScopedRecord
   }, [asked, files])
 
   const publishable = caps.hasMethod('run.git.status')
+  const patchAt = (file: PatchFile, index: number) => (
+    <FilePatch
+      key={file.path}
+      id={`${ids}-${index}`}
+      file={file}
+      wrap={wrap}
+      lineNumbers
+      collapsed={collapsed[file.path] ?? collapsedByDefault(file)}
+      onCollapsedChange={(path, next) => setCollapsed((all) => ({ ...all, [path]: next }))}
+      review={review}
+    />
+  )
   return (
     <div className="@container flex h-full min-h-0 min-w-0 bg-canvas">
       {files.length > 0 && <FileList files={files} current={current} onJump={jump} />}
-      <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
-        <div className="sticky top-0 z-20">
+      <div
+        ref={scroller}
+        style={{ '--diff-top': `${toolbar.height}px` } as CSSProperties}
+        className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
+      >
+        <div ref={setContent} className="relative">
+        <div ref={setToolbar} className="sticky top-0 z-20">
           <div role="group" aria-label={`${repo.name} changes`} className="flex min-h-8 min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-seam bg-chrome px-2 py-0.5 text-ui-sm text-muted">
             <span className="tabular-nums">{plural(files.length)}</span>
             <span className="min-w-0 truncate font-code">{repo.branch}</span>
@@ -160,21 +191,28 @@ export function RepoChanges({ run, repo, agent, agentName }: { run: ScopedRecord
         {data.truncated && (
           <Callout tone="needs-you" className="m-2">The server returned an incomplete diff. Refresh it or fetch the run branch to read the complete change.</Callout>
         )}
-        {files.map((file, index) => (
-          <FilePatch
-            key={file.path}
-            id={`${ids}-${index}`}
-            file={file}
-            wrap={wrap}
-            lineNumbers
-            collapsed={collapsed[file.path] ?? collapsedByDefault(file)}
-            onCollapsedChange={(path, next) => setCollapsed((all) => ({ ...all, [path]: next }))}
-            review={review}
-          />
-        ))}
+        {virtual ? (
+          <div ref={setStart} onFocus={(event) => {
+            const id = (event.target as HTMLElement).closest('section')?.id ?? ''
+            if (id.startsWith(`${ids}-`)) setFocusedFile(Number(id.slice(ids.length + 1)))
+          }}>
+            <Virtualizer
+              ref={list}
+              scrollRef={scroller}
+              startMargin={startMargin}
+              data={files}
+              keepMounted={focusedFile !== null && focusedFile < files.length ? [focusedFile] : undefined}
+            >
+              {patchAt}
+            </Virtualizer>
+          </div>
+        ) : (
+          files.map(patchAt)
+        )}
         {files.length === 0 && !data.error && (data.loading
           ? <p className="p-4 text-ui text-muted">Loading the diff…</p>
           : <EmptyState title="No changes yet.">{`Nothing differs from ${run.base_branch || 'the base branch'} in ${repo.name}. Files the agent changes show up here.`}</EmptyState>)}
+        </div>
       </div>
     </div>
   )

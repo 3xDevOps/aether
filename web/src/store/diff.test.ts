@@ -19,6 +19,21 @@ describe('checkpoints', () => {
     ])
   })
 
+  it('leave out the snapshots of an extra repo', async () => {
+    const store = createRootStore()
+    const client = fakeApi()
+    const entry = (seq: number, tree: string, repo?: string) => ({ seq, time: `2026-08-14T10:0${seq}:00Z`, type: 'run.diff', payload: { files: [], tree, ...(repo && { repo }) } })
+    vi.mocked(client.workspaceTimeline).mockResolvedValue({
+      events: [entry(1, 'primary'), entry(2, 'api', 'wsp_api')] as never,
+      next_seq: 3,
+      more: false,
+    })
+
+    await readCheckpoints(store, client, run({ id: 'run-1' }))
+
+    expect(store.getState().diffs['run-1'].checkpoints.map((c) => c.tree)).toEqual(['primary'])
+  })
+
   it('merge history with live snapshots newest first, one entry per tree', async () => {
     const store = createRootStore()
     const client = fakeApi()

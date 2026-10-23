@@ -18,7 +18,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
-import { multiRepoMethod } from '@/lib/repos'
+import { multiRepoFeature, multiRepoMethod } from '@/lib/repos'
 import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
@@ -52,6 +52,7 @@ export function LaunchDialog() {
   const upsertRun = useStore((s) => s.upsertRun)
   const rememberLaunch = useStore((s) => s.rememberLaunch)
   const self = useStore((s) => s.info?.member)
+  const serverMountsRepos = useStore((s) => s.info?.features?.includes(multiRepoFeature) ?? false)
   const capabilities = useStore((s) => s.capabilities)
   const cap = useCapability()
   const workspaces = useStore((s) => s.workspaces)
@@ -290,7 +291,7 @@ export function LaunchDialog() {
           >
             <TabsContent value="run" className="flex flex-col gap-4">
               <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
-              {extraOptions.length > 0 && cap.hasMethod(multiRepoMethod) && (
+              {extraOptions.length > 0 && cap.hasMethod(multiRepoMethod) && serverMountsRepos && (
                 <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />
               )}
             </TabsContent>

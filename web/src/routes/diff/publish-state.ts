@@ -5,7 +5,7 @@ import type {
   FileRead, RunGitCommitResult, RunGitDiffResult, RunGitExpected, RunGitPushResult,
   RunGitPushTarget, RunGitStatusResult, RunPRCreateResult, RunPRStatusResult, RunPRTarget,
 } from '@/lib/types'
-import { refreshPullRequest, repoParam, trackPullRequest, type ScopedRun } from '@/routes/diff/publish-pr'
+import { refreshPullRequest, repoParam, repoWorkspaceID, trackPullRequest, type ScopedRun } from '@/routes/diff/publish-pr'
 import { completeTarget, defaultPRTarget, defaultPushTarget } from '@/routes/diff/publish-target'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
@@ -32,7 +32,7 @@ const noPush: RunGitPushTarget = { remote: '', repository: '', head_branch: '' }
 export function usePublish(run: ScopedRun, client: Api, open: boolean) {
   const caps = useCapability()
   const self = useSelf()
-  const workspace = useStore((s) => s.workspaces[run.workspace_id])
+  const workspace = useStore((s) => s.workspaces[repoWorkspaceID(run)])
   const [status, setStatus] = useState<RunGitStatusResult | null>(null)
   const [statusReady, setStatusReady] = useState(false)
   const [untracked, setUntracked] = useState<UntrackedPreview[]>([])
@@ -112,7 +112,7 @@ export function usePublish(run: ScopedRun, client: Api, open: boolean) {
     const [next, mirror] = await Promise.all([
       client.runGitStatus({ run_id: run.id, ...repoParam(run) }),
       // Without the source, the pull request defaults to the repository pushed to.
-      client.workspaceMirrorStatus(run.workspace_id).then((result) => result.source_url, () => undefined),
+      client.workspaceMirrorStatus(repoWorkspaceID(run)).then((result) => result.source_url, () => undefined),
     ])
     if (!mounted.current) return
     setStatus(next)
@@ -147,7 +147,7 @@ export function usePublish(run: ScopedRun, client: Api, open: boolean) {
       ]),
       Promise.all((status?.changes ?? []).filter((change) => change.untracked && paths.includes(change.path)).map(async (change) => {
         try {
-          return { path: change.path, file: await client.filesRead({ workspace_id: run.workspace_id, run_id: run.id, path: change.path }) }
+          return { path: change.path, file: await client.filesRead({ workspace_id: run.workspace_id, run_id: run.id, ...repoParam(run), path: change.path }) }
         } catch (cause) {
           return { path: change.path, error: message(cause) }
         }

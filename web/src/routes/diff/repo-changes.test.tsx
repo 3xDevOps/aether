@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { api } from '@/lib/api'
 import { routeFromQuery, routeQuery } from '@/lib/url-state'
 import { ChangesView } from '@/routes/diff'
@@ -82,6 +83,28 @@ it('opens Publish for the repo, naming it', async () => {
   fireEvent.click(await screen.findByRole('button', { name: 'Publish…' }))
   expect(await screen.findByRole('dialog', { name: 'Publish docs-site' })).toBeTruthy()
   await waitFor(() => expect(api.runGitStatus).toHaveBeenCalledWith({ run_id: multi.id, repo: docs.id }))
+})
+
+it('keeps a repo\'s Publish draft across repo tab switches', async () => {
+  const output = { exit_code: 0, truncated: false }
+  vi.mocked(api.runGitStatus).mockResolvedValue({
+    branch: 'aether/run-multi-docs', head: 'b'.repeat(40), detached: false, unborn: false,
+    changes: [{ path: 'guide.md', index: ' ', worktree: 'M', untracked: false, conflicted: false }], truncated: false,
+    account_member_id: serverInfo.member.id, account_name: 'Alice', identity: 'alice',
+    remotes: [{ name: 'origin', fetch_urls: ['git@github.com:acme/docs.git'], push_urls: ['git@github.com:acme/docs.git'] }], output,
+  })
+  seed({ repo: docs.id })
+  renderDiff()
+  fireEvent.click(await screen.findByRole('button', { name: 'Publish…' }))
+  fireEvent.change(await screen.findByRole('textbox', { name: 'Commit message' }), { target: { value: 'half written' } })
+  await userEvent.keyboard('{Escape}')
+
+  const tabs = within(screen.getByRole('tablist', { name: 'Repos' })).getAllByRole('tab')
+  fireEvent.mouseDown(tabs[0]!)
+  await screen.findByRole('region', { name: 'cmd/main.go' })
+  act(() => useStore.getState().navigate('run', { runId: multi.id, view: 'changes', repo: docs.id }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Publish…' }))
+  expect((await screen.findByRole('textbox', { name: 'Commit message' }) as HTMLTextAreaElement).value).toBe('half written')
 })
 
 it('groups every repo\'s changes under All repos and opens a file in its repo', async () => {

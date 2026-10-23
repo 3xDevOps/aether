@@ -11,7 +11,7 @@ import { useRepoRuns } from '@/routes/diff/repos'
 import { FileEditor, type ViewerMode } from '@/routes/files/editor'
 import { closeTab, FilesPane } from '@/routes/files/pane'
 import type { FileTarget } from '@/routes/files/paths'
-import { fileTabFromSource, fileTabToSelection, sourceKey, type WorkspaceSource } from '@/routes/files/sources'
+import { fileTabFromSource, fileTabToSelection, sourceKey, type FileSource, type WorkspaceSource } from '@/routes/files/sources'
 import { touchedPaths, TreeDirectory, TreeExpansion } from '@/routes/files/tree'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
@@ -49,9 +49,9 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
   const holds = (key: string | null | undefined) => tabs.find((tab) => sourceKey(tab, tab.path) === key)
   const selection = holds(activeFileKey) ?? holds(lastSelected.get(run.id)) ?? tabs.at(-1) ?? null
 
-  const open = (path: string, target: FileTarget | null) => {
-    const key = sourceKey(source, path)
-    openFileTab(fileTabFromSource(source, path, key))
+  const open = (path: string, target: FileTarget | null, from: FileSource = source) => {
+    const key = sourceKey(from, path)
+    openFileTab(fileTabFromSource(from, path, key))
     setMode('file')
     setBrowsing(false)
     setReveal(target && { key, target })
@@ -64,6 +64,12 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
     if (!isRunRoute(route, run.id) || view !== 'files' || !file) return
     open(file, line ? { path: file, line: Number(line), ...(column ? { column: Number(column) } : {}) } : null)
   }, [route, run.id])
+
+  const selectTab = (tab: FileSource, path: string) => {
+    if (tab.kind !== 'workspace') return
+    setRepoID(tab.repo ?? '')
+    open(path, null, tab)
+  }
 
   const tree = (
     <div className="p-2">
@@ -102,7 +108,7 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
       tabs={tabs}
       mode={mode}
       onMode={setMode}
-      onSelect={(_, path) => open(path, null)}
+      onSelect={selectTab}
       onClose={(tab) => {
         if (closeTab(tab, tabs)) setMode('file')
       }}

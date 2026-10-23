@@ -134,6 +134,8 @@ export interface RunDiffState {
    * gap when the answer arrives, instead of being written over.
    */
   revision: number
+  /** Bumped by every snapshot of an extra repo of a multi-repo run, which `snapshots` never holds. */
+  repoRevision: number
   /** The revision the patch, or the error, answers for; -1 before the first. */
   fetched: number
   /** Live snapshots with their file lists, newest first. */
@@ -161,6 +163,7 @@ export const initialDiff: RunDiffState = {
   recorded: false,
   status: 'loading',
   revision: 0,
+  repoRevision: 0,
   fetched: -1,
   snapshots: [],
   checkpoints: [],
@@ -178,6 +181,7 @@ export interface DiffSlice {
   applyPatch: (patch: RunPatch, revision: number, from: string) => void
   applyCheckpoints: (runID: string, checkpoints: Checkpoint[], history: { more: boolean; before?: number }) => void
   noteDiffSnapshot: (runID: string, snapshot: DiffSnapshot) => void
+  noteRepoDiff: (runID: string) => void
   refreshDiff: (runID: string) => void
   setOverlaps: (overlaps: Overlap[]) => void
   applyOverlap: (runID: string, peers: OverlapPeer[]) => void
@@ -253,6 +257,13 @@ export const createDiffSlice: SliceCreator<DiffSlice> = (set, get) => ({
       }
     })
   },
+  noteRepoDiff: (runID) => {
+    get().invalidateRun(runID)
+    set((s) => {
+      const current = s.diffs[runID] ?? initialDiff
+      return { diffs: { ...s.diffs, [runID]: { ...current, repoRevision: current.repoRevision + 1 } } }
+    })
+  },
   // Refresh asks again by declaring the current patch one revision behind.
   refreshDiff: (runID) =>
     set((s) => {
@@ -286,8 +297,21 @@ export async function readPersistedDiff(store: RootStore, client: Api, run: Pick
   }
   reading.set(run.id, false)
   try {
-    const page = await client.workspaceTimeline({ workspace_id: run.workspace_id, run_id: run.id, types: ['run.diff'], newest: true, limit: 1 })
-    const ev = page.events.at(-1)
+    let before: number | undefined
+    let ev: { time: string; payload: unknown } | undefined
+    for (;;) {
+      const page = await client.workspaceTimeline({
+        workspace_id: run.workspace_id,
+        run_id: run.id,
+        types: ['run.diff'],
+        newest: true,
+        limit: checkpointPage,
+        ...(before && { before_seq: before }),
+      })
+      ev = page.events.filter((e) => !(e.payload as RunDiffPayload).repo).at(-1)
+      if (ev || !page.more || !page.older_seq) break
+      before = page.older_seq
+    }
     store.getState().setDiff(run.id, { persisted: ev ? diffSnapshot(ev.time, ev.payload as RunDiffPayload) : null, persistedError: undefined })
   } catch (err) {
     store.getState().setDiff(run.id, { persistedError: err instanceof Error ? err.message : String(err) })
@@ -320,7 +344,7 @@ export async function readCheckpoints(store: RootStore, client: Api, run: Pick<R
       limit: checkpointPage,
       ...(older && { before_seq: before }),
     })
-    const read = page.events.map((ev) => checkpointOf(diffSnapshot(ev.time, ev.payload as RunDiffPayload)))
+    const read = page.events.filter((ev) => !(ev.payload as RunDiffPayload).repo).map((ev) => checkpointOf(diffSnapshot(ev.time, ev.payload as RunDiffPayload)))
     store.getState().applyCheckpoints(run.id, read, { more: page.more, before: page.older_seq })
   } catch (err) {
     store.getState().setDiff(run.id, { historyError: err instanceof Error ? err.message : String(err) })

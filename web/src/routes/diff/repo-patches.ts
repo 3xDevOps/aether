@@ -25,7 +25,8 @@ export async function loadRepoPatch(runID: string, repo: string, client: Pick<Ap
   const key = keyOf(runID, repo)
   if (inflight.has(key)) return
   inflight.add(key)
-  const revision = useStore.getState().diffs[runID]?.revision ?? 0
+  const diff = useStore.getState().diffs[runID]
+  const revision = (diff?.revision ?? 0) + (diff?.repoRevision ?? 0)
   usePatches.setState((all) => ({ [key]: { ...(all[key] ?? { patch: '', truncated: false }), loading: true, revision } }))
   try {
     const result = await client.runPatch(runID, undefined, repo)
@@ -47,7 +48,7 @@ export interface RepoChangesData {
 
 export function useRepoPatch(runID: string, repo: string, enabled = true): RepoChangesData {
   const entry = usePatches((all) => all[keyOf(runID, repo)])
-  const revision = useStore((s) => s.diffs[runID]?.revision ?? 0)
+  const revision = useStore((s) => (s.diffs[runID]?.revision ?? 0) + (s.diffs[runID]?.repoRevision ?? 0))
   useEffect(() => {
     if (enabled && !entry?.loading && entry?.revision !== revision) void loadRepoPatch(runID, repo)
   }, [enabled, runID, repo, revision, entry?.loading, entry?.revision])

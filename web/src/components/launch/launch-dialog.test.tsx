@@ -373,6 +373,11 @@ describe('extra repos', () => {
   const docs = { ...workspace, id: 'wsp_docs', name: 'docs-site' }
   const guides = { ...workspace, id: 'wsp_guides', name: 'guides' }
   const two = { [workspace.id]: workspace, [docs.id]: docs, [guides.id]: guides }
+  const remote = { gateway: 'remote' as const, methods: ['*'], ws: [] }
+
+  beforeEach(() => {
+    useStore.setState({ info: { ...serverInfo, features: ['multi-repo'] } })
+  })
 
   it('adds other workspaces as chips and launches with their ids', async () => {
     useStore.setState({ workspaces: two, capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
@@ -408,6 +413,11 @@ describe('extra repos', () => {
     cleanup()
 
     useStore.setState({ workspaces: two, capabilities: { gateway: 'remote', methods: ['run.launch'], ws: [] } })
+    await open()
+    expect(screen.queryByRole('button', { name: 'Add repos' })).toBeNull()
+    cleanup()
+
+    useStore.setState({ workspaces: two, capabilities: remote, info: { ...serverInfo } })
     await open()
     expect(screen.queryByRole('button', { name: 'Add repos' })).toBeNull()
   })
