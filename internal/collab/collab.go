@@ -360,6 +360,7 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 	var (
 		msg           *store.RoomMessage
 		deliveryProof *control.Snapshot
+		immediate     *Result
 	)
 	createSteer := func(current control.Snapshot, hasController bool) error {
 		freshRun, freshActor, freshWS, err := s.scope(ctx, in.WorkspaceID, in.RunID, in.ActorID)
@@ -383,11 +384,27 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 		}
 		session := in.ControllerSessionID
 		generation := in.ControllerGeneration
-		if hasController && current.Connected && current.MemberID == actor.ID &&
-			current.SessionID == session && current.Generation == generation {
+		switch {
+		case hasController && current.Connected && current.MemberID == actor.ID &&
+			current.SessionID == session && current.Generation == generation:
 			proof := current
 			deliveryProof = &proof
-		} else {
+		case !hasController && actor.ID == run.MemberID:
+			// The owner of a run nobody controls could take the lease, as
+			// the dashboard does before sending, so clients that hold no
+			// lease (aether message, connectors) send at once too. Delivery
+			// stays inside this admission so no controller can appear first.
+			if err := s.cfg.Store.CreateRoomMessage(ctx, msg); err != nil {
+				return err
+			}
+			claimed, err := s.cfg.Store.ClaimRoomMessage(ctx, msg.ID, s.now(), false, "")
+			if err != nil || !claimed {
+				return err
+			}
+			receipt, outcome, err := s.deliver(ctx, msg, actor, run, func(fn func() error) error { return fn() }, in.Steer)
+			immediate = &Result{Receipt: receipt, Outcome: outcome}
+			return err
+		default:
 			due := s.now().Add(SteeringDelay)
 			msg.DeliverAfter = &due
 		}
@@ -399,6 +416,9 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 		}
 	} else if err := createSteer(control.Snapshot{}, false); err != nil {
 		return Result{}, err
+	}
+	if immediate != nil {
+		return s.settleResult(ctx, msg, immediate.Receipt, immediate.Outcome)
 	}
 	if err := s.publishMessage(ctx, msg); err != nil {
 		return Result{}, err

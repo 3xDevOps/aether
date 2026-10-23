@@ -138,6 +138,7 @@ script committed to the test repository).
 | `TestIntegrationCoordination*`, `TestIntegrationMission*` | Messages between runs, swarms |
 | `TestIntegrationServerUpdate*` | `aether-server update`: preflight, rollback, downgrade guards |
 | `TestIntegrationServerGateway` | The dashboard the server hosts on the tailnet |
+| `TestIntegrationConnectorFlows` | A ChatGPT connector, over OAuth and MCP, launching, messaging, answering and stopping enhanced runs and a swarm |
 
 ```sh
 sudo env "PATH=$PATH" "HOME=$HOME" make test-integration \

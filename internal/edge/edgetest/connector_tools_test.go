@@ -78,6 +78,13 @@ func (f *fakeMissions) Show(context.Context, protocol.MissionShowParams) (protoc
 // boxes of scopes checked, the way ChatGPT does, and opens a session.
 func connectAs(t *testing.T, ctl *protocol.Client, client *connectorClient, base string, scopes ...string) *mcp.ClientSession {
 	t.Helper()
+	cs, _ := connectWithToken(t, ctl, client, base, scopes...)
+	return cs
+}
+
+func connectWithToken(t *testing.T, ctl *protocol.Client, client *connectorClient, base string, scopes ...string) (*mcp.ClientSession, *oauth2.Token) {
+	t.Helper()
+	var token *oauth2.Token
 	code := call[protocol.ConnectorCodeResult](t, ctl, protocol.MethodConnectorCode, struct{}{})
 	handler, err := auth.NewAuthorizationCodeHandler(&auth.AuthorizationCodeHandlerConfig{
 		ClientIDMetadataDocumentConfig: &auth.ClientIDMetadataDocumentConfig{URL: client.id},
@@ -87,13 +94,14 @@ func connectAs(t *testing.T, ctl *protocol.Client, client *connectorClient, base
 		},
 		RequestRefreshToken: true,
 		NewTokenSource: func(_ context.Context, _ *oauth2.Config, tok *oauth2.Token) (oauth2.TokenSource, error) {
+			token = tok
 			return oauth2.StaticTokenSource(tok), nil
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return connectMCP(t, &mcp.StreamableClientTransport{Endpoint: base, OAuthHandler: handler})
+	return connectMCP(t, &mcp.StreamableClientTransport{Endpoint: base, OAuthHandler: handler}), token
 }
 
 func toolNames(t *testing.T, cs *mcp.ClientSession) []string {

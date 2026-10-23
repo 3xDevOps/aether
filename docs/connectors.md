@@ -171,8 +171,9 @@ earlier swarm, unless it was cancelled, instead of starting another; so does an
 identical launch still starting. A retried message without a key is sent again.
 `aether_mark_reviewed` completes only a run whose agent reported success and
 awaits your review; to end any other run, use `aether_stop_run` or
-`aether_close_run` under `control`. A message to a run another member controls
-waits about 45 seconds for them to approve it. `aether_decide_approval` allows
+`aether_close_run` under `control`. A message to your own run that no one
+controls in the dashboard reaches the agent at once. Any other message waits
+about 45 seconds for the member in control to approve it. `aether_decide_approval` allows
 or denies a permission request once; it never picks an "always" option, so it
 cannot change what the agent may do next time. Any other tool call is cut off
 after 40 seconds, inside ChatGPT's wait.
