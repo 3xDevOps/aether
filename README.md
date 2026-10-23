@@ -15,8 +15,7 @@ Aether is an open-source multiplayer runtime where engineering teams run and joi
 
 ---
 
-Aether is in beta. The latest release is
-[v0.7.1-beta.2](https://github.com/3xDevOps/aether/releases/tag/v0.7.1-beta.2).
+Aether is in beta.
 
 ## What it does
 
