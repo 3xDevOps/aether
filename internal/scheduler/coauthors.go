@@ -51,7 +51,12 @@ func (s *Scheduler) runInstructions(g coordhooks.Guide) string {
 // briefedInstructions are the run instructions followed by the team memory
 // brief of the run's workspace and owner. Only a launch that carries
 // instructions carries the brief.
-func (s *Scheduler) briefedInstructions(ctx context.Context, g coordhooks.Guide, workspace domain.WorkspaceID, owner domain.MemberID) (string, error) {
+func (s *Scheduler) briefedInstructions(ctx context.Context, g coordhooks.Guide, repos []domain.RunRepo, workspace domain.WorkspaceID, owner domain.MemberID) (string, error) {
+	listed := make([]string, len(repos))
+	for i, repo := range repos {
+		listed[i] = repo.Name + " at " + repo.Path
+	}
+	g.Repos = strings.Join(listed, ", ")
 	text := s.runInstructions(g)
 	if text == "" || s.cfg.Memory == nil {
 		return text, nil
@@ -96,7 +101,7 @@ func (s *Scheduler) launchInstructions(ctx context.Context, run *domain.Run, pro
 	if !profile.CarriesInstructions() {
 		return "", nil
 	}
-	text, err := s.briefedInstructions(ctx, s.runGuide(ctx, run.ID, assigned, run.Mode == domain.LaunchHeadless, native.IdleWake), run.WorkspaceID, run.MemberID)
+	text, err := s.briefedInstructions(ctx, s.runGuide(ctx, run.ID, assigned, run.Mode == domain.LaunchHeadless, native.IdleWake), run.Extras, run.WorkspaceID, run.MemberID)
 	if err != nil {
 		return "", err
 	}

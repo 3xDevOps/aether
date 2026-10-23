@@ -47,12 +47,12 @@ func (s *Server) prDefaults(ctx context.Context, call runRepoCall, expected *pro
 	if err != nil {
 		return nil, err
 	}
-	workspace, err := s.cfg.Store.GetWorkspace(ctx, call.run.WorkspaceID)
+	workspace, err := s.cfg.Store.GetWorkspace(ctx, call.repo.WorkspaceID)
 	if err != nil {
 		return rpcError(fmt.Errorf("default pr target: %w", err)), nil
 	}
 	source := ""
-	mirror, err := s.cfg.Store.GetWorkspaceMirror(ctx, call.run.WorkspaceID)
+	mirror, err := s.cfg.Store.GetWorkspaceMirror(ctx, call.repo.WorkspaceID)
 	switch {
 	case err == nil:
 		source = mirror.SourceURL
@@ -79,7 +79,7 @@ func (s *Server) prDefaults(ctx context.Context, call runRepoCall, expected *pro
 	if head == "" || headBranch == "" {
 		return nil, fmt.Errorf("the checkout's branch %q has no GitHub push remote; pass target", state.Branch)
 	}
-	base := call.run.BaseBranch
+	base := call.repo.BaseBranch
 	if base == "" {
 		base = workspace.BaseBranch
 	}

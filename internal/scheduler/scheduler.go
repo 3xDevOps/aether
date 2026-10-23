@@ -515,7 +515,7 @@ func New(cfg Config) (*Scheduler, error) {
 		return nil, errors.New("scheduler: config requires a StateDir")
 	}
 	if cfg.WorktreeMount == "" {
-		cfg.WorktreeMount = "/workspace"
+		cfg.WorktreeMount = domain.PrimaryRepoPath
 	}
 	if cfg.StallThreshold <= 0 {
 		cfg.StallThreshold = 10 * time.Minute
@@ -949,6 +949,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		Command:           argv,
 		TTY:               true,
 		Mounts:            plan.Mounts,
+		ExtraWorktrees:    plan.Worktrees,
 		User:              plan.User,
 		CPULimit:          s.cfg.RunCPULimit,
 		MemoryLimitBytes:  s.cfg.RunMemoryBytes,

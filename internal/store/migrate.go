@@ -1928,6 +1928,23 @@ CREATE TABLE run_launch_receipts (
 	PRIMARY KEY (member_id, idempotency_key)
 );
 `,
+	// Extra repositories of a multi-repo run, position 1 upward; the primary
+	// repository stays on the runs row, so single-repo runs have no rows.
+	`
+CREATE TABLE run_repos (
+	run_id       TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	position     INTEGER NOT NULL CHECK (position > 0),
+	workspace_id TEXT NOT NULL,
+	name         TEXT NOT NULL,
+	mount_path   TEXT NOT NULL,
+	branch       TEXT NOT NULL DEFAULT '',
+	base_branch  TEXT NOT NULL,
+	base_commit  TEXT NOT NULL,
+	worktree     TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (run_id, position)
+);
+CREATE INDEX idx_run_repos_workspace ON run_repos(workspace_id);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

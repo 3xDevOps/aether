@@ -76,6 +76,20 @@ type Config struct {
 type runInfo struct {
 	workspace domain.WorkspaceID
 	branch    string
+	// extra is the run an extra repository's checkout belongs to, and scope
+	// the workspace its events are published under; both are empty for a
+	// run's own checkout, which publishes under workspace.
+	extra domain.RunID
+	scope domain.WorkspaceID
+}
+
+// events returns the run, workspace scope and repository the events of the
+// checkout key carry. repo is empty for a run's own checkout.
+func (i runInfo) events(key domain.RunID) (run domain.RunID, scope, repo domain.WorkspaceID) {
+	if i.extra == "" {
+		return key, i.workspace, ""
+	}
+	return i.extra, i.scope, i.workspace
 }
 
 // Engine is the git engine. Its exported method set satisfies the
@@ -464,31 +478,36 @@ func gitEnv() []string {
 // previous (empty for a new branch), scoped to the workspace recorded in the
 // watch registry or the run metadata sidecar. The callback records the commit
 // metadata even when no event bus is configured.
-func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, previous, commit string) {
+func (e *Engine) publishBranch(ctx context.Context, key domain.RunID, previous, commit string) {
 	e.mu.Lock()
-	info, ok := e.registry[run]
+	info, ok := e.registry[key]
 	e.mu.Unlock()
 	if !ok {
-		meta, err := e.readRunMeta(run)
+		meta, err := e.readRunMeta(key)
 		if err != nil {
 			return
 		}
 		info = runInfo{workspace: meta.Workspace, branch: meta.Branch}
+		if parent, extra := domain.ParentRun(key); extra {
+			info.extra, info.scope = parent, meta.Workspace
+		}
 	}
+	run, scope, repo := info.events(key)
 	if e.cfg.Bus != nil {
 		forced := false
 		if previous != "" {
-			if repo, repoErr := e.existingRepoPath(info.workspace); repoErr == nil {
-				_, ancestorErr := e.git(ctx, repo, "merge-base", "--is-ancestor", previous, commit)
+			if repoPath, repoErr := e.existingRepoPath(info.workspace); repoErr == nil {
+				_, ancestorErr := e.git(ctx, repoPath, "merge-base", "--is-ancestor", previous, commit)
 				var exit *exec.ExitError
 				forced = errors.As(ancestorErr, &exit) && exit.ExitCode() == 1
 			}
 		}
 		_, err := e.cfg.Bus.Publish(ctx, events.Event{
-			WorkspaceID: info.workspace,
+			WorkspaceID: scope,
 			RunID:       run,
 			Payload: events.GitBranchPayload{
 				WorkspaceID: info.workspace,
+				Repo:        repo,
 				Branch:      info.branch,
 				Commit:      commit,
 				Previous:    previous,
@@ -496,10 +515,10 @@ func (e *Engine) publishBranch(ctx context.Context, run domain.RunID, previous, 
 			},
 		})
 		if err != nil {
-			slog.Warn("gitengine: publish branch event failed", "run", string(run), "error", err)
+			slog.Warn("gitengine: publish branch event failed", "run", string(key), "error", err)
 		}
 	}
-	if e.cfg.OnBranchPublished != nil {
-		e.cfg.OnBranchPublished(run, commit, time.Now())
+	if e.cfg.OnBranchPublished != nil && info.extra == "" {
+		e.cfg.OnBranchPublished(key, commit, time.Now())
 	}
 }

@@ -61,16 +61,19 @@ func (s *Server) filesTree(ctx context.Context, _ domain.MemberID, params json.R
 	if reader == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "files.tree: file browsing is not enabled"}
 	}
-	workspace := domain.WorkspaceID(p.WorkspaceID)
+	run, workspace, perr := s.resolveRepo(ctx, p.RunID, p.WorkspaceID, p.Repo)
+	if perr != nil {
+		return nil, perr
+	}
 	ref := ""
-	if p.RunID == "" {
+	if run == "" {
 		ws, err := s.cfg.Store.GetWorkspace(ctx, workspace)
 		if err != nil {
 			return nil, rpcError(err)
 		}
 		ref = ws.BaseBranch
 	}
-	entries, err := reader.FilesTree(ctx, workspace, domain.RunID(p.RunID), ref, p.Path)
+	entries, err := reader.FilesTree(ctx, workspace, run, ref, p.Path)
 	if err != nil {
 		return nil, filesReadError(protocol.MethodFilesTree, p.RunID, err)
 	}
@@ -102,16 +105,19 @@ func (s *Server) filesRead(ctx context.Context, member domain.MemberID, params j
 	if reader == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "files.read: file browsing is not enabled"}
 	}
-	workspace := domain.WorkspaceID(p.WorkspaceID)
+	run, workspace, perr := s.resolveRepo(ctx, p.RunID, p.WorkspaceID, p.Repo)
+	if perr != nil {
+		return nil, perr
+	}
 	ref := ""
-	if p.RunID == "" {
+	if run == "" {
 		ws, err := s.cfg.Store.GetWorkspace(ctx, workspace)
 		if err != nil {
 			return nil, rpcError(err)
 		}
 		ref = ws.BaseBranch
 	}
-	result, err := reader.FilesRead(ctx, workspace, domain.RunID(p.RunID), ref, p.Path, gitengine.MaxFileBytes)
+	result, err := reader.FilesRead(ctx, workspace, run, ref, p.Path, gitengine.MaxFileBytes)
 	if err != nil {
 		return nil, filesReadError(protocol.MethodFilesRead, p.RunID, err)
 	}
@@ -163,7 +169,10 @@ func (s *Server) filesWrite(ctx context.Context, member domain.MemberID, params 
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	workspace := domain.WorkspaceID(p.WorkspaceID)
+	checkout, workspace, perr := s.resolveRepo(ctx, p.RunID, p.WorkspaceID, p.Repo)
+	if perr != nil {
+		return nil, perr
+	}
 	lock := s.workspaceLock(workspace)
 	lock.RLock()
 	defer lock.RUnlock()
@@ -198,7 +207,7 @@ func (s *Server) filesWrite(ctx context.Context, member domain.MemberID, params 
 			return nil, rpcError(err)
 		}
 	}
-	result, err := reader.FilesWrite(ctx, workspace, domain.RunID(p.RunID), ref, p.Path, []byte(p.Content), p.Revision, m.GitIdentity(), signingKey)
+	result, err := reader.FilesWrite(ctx, workspace, checkout, ref, p.Path, []byte(p.Content), p.Revision, m.GitIdentity(), signingKey)
 	if err != nil {
 		return nil, filesWriteError(p.RunID, err)
 	}
@@ -228,7 +237,11 @@ func (s *Server) filesDiff(ctx context.Context, _ domain.MemberID, params json.R
 	if reader == nil {
 		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "files.diff: file browsing is not enabled"}
 	}
-	patch, err := reader.FileDiff(ctx, domain.RunID(p.RunID), p.Path)
+	checkout, _, perr := s.resolveRepo(ctx, p.RunID, "", p.Repo)
+	if perr != nil {
+		return nil, perr
+	}
+	patch, err := reader.FileDiff(ctx, checkout, p.Path)
 	if err != nil {
 		return nil, filesReadError(protocol.MethodFilesDiff, p.RunID, err)
 	}

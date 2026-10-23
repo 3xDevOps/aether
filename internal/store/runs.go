@@ -215,37 +215,28 @@ func (d *DB) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: get run: %w", err)
 	}
+	if err := d.attachExtras(ctx, r); err != nil {
+		return nil, err
+	}
 	return r, nil
 }
 
 func (d *DB) ListRunsByWorkspace(ctx context.Context, id domain.WorkspaceID) ([]*domain.Run, error) {
-	rows, err := d.db.QueryContext(ctx,
+	return d.listRuns(ctx, "list runs by workspace",
 		runSnapshotQuery(`runs.workspace_id = ?`)+` ORDER BY runs.created_at, runs.rowid`, id)
-	if err != nil {
-		return nil, fmt.Errorf("store: list runs by workspace: %w", err)
-	}
-	return collect(rows, scanRun)
 }
 
 func (d *DB) ListRunsByMember(ctx context.Context, id domain.MemberID) ([]*domain.Run, error) {
-	rows, err := d.db.QueryContext(ctx,
+	return d.listRuns(ctx, "list runs by member",
 		runSnapshotQuery(`runs.member_id = ?`)+` ORDER BY runs.created_at, runs.rowid`, id)
-	if err != nil {
-		return nil, fmt.Errorf("store: list runs by member: %w", err)
-	}
-	return collect(rows, scanRun)
 }
 
 // ListActiveRuns returns runs whose status is non-terminal. The status set
 // is derived from domain.AllRunStatuses so it cannot drift from the enum.
 func (d *DB) ListActiveRuns(ctx context.Context) ([]*domain.Run, error) {
 	placeholders, args := liveStatusArgs()
-	rows, err := d.db.QueryContext(ctx,
+	return d.listRuns(ctx, "list active runs",
 		runSnapshotQuery(`runs.status IN (`+placeholders+`)`)+` ORDER BY runs.created_at, runs.rowid`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("store: list active runs: %w", err)
-	}
-	return collect(rows, scanRun)
 }
 
 // liveStatusArgs returns the SQL placeholders and arguments for every

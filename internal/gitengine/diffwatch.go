@@ -97,12 +97,12 @@ type diffWatch struct {
 	lastTip  string
 }
 
-// StartDiffWatch begins diff-snapshot watching for a run's checkout,
+// startDiffWatch begins diff-snapshot watching for a run's checkout,
 // scoping published events to workspace. It also registers the run in the
 // watch registry (run -> workspace/branch), which outlives StopDiffWatch
 // and is what allows git.branch events to carry a workspace scope.
 // Idempotent while a watch is already active.
-func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error {
+func (e *Engine) startDiffWatch(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID) error {
 	checkout, err := e.existingCheckoutPath(run)
 	if err != nil {
 		return err
@@ -128,7 +128,11 @@ func (e *Engine) StartDiffWatch(ctx context.Context, workspace domain.WorkspaceI
 		e.mu.Unlock()
 		return fmt.Errorf("gitengine: engine closed")
 	}
-	e.registry[run] = runInfo{workspace: workspace, branch: meta.Branch}
+	info := runInfo{workspace: workspace, branch: meta.Branch}
+	if parent, extra := domain.ParentRun(run); extra {
+		info = runInfo{workspace: meta.Workspace, branch: meta.Branch, extra: parent, scope: workspace}
+	}
+	e.registry[run] = info
 	if _, active := e.watches[run]; active {
 		e.mu.Unlock()
 		return nil
@@ -235,14 +239,6 @@ func (w *diffWatch) watchCheckout(ctx context.Context, refDir string) error {
 	return err
 }
 
-// StopDiffWatch stops the run's diff watcher after one last snapshot, so the
-// final run.diff and the published tree include changes still waiting on the
-// quiet-period timer. The registry entry survives so later branch
-// publications keep their workspace scope. Idempotent.
-func (e *Engine) StopDiffWatch(run domain.RunID) {
-	e.stopDiffWatch(run, true)
-}
-
 func (e *Engine) stopDiffWatch(run domain.RunID, final bool) {
 	e.mu.Lock()
 	w := e.watches[run]
@@ -253,10 +249,10 @@ func (e *Engine) stopDiffWatch(run domain.RunID, final bool) {
 	}
 }
 
-// LastFileChange reports the wall-clock time of the last file-change event
+// lastFileChange reports the wall-clock time of the last file-change event
 // observed in the run's checkout; false when the run has no active watch or
 // no change has been seen yet.
-func (e *Engine) LastFileChange(run domain.RunID) (time.Time, bool) {
+func (e *Engine) lastFileChange(run domain.RunID) (time.Time, bool) {
 	e.mu.Lock()
 	w := e.watches[run]
 	e.mu.Unlock()
@@ -829,11 +825,13 @@ func (w *diffWatch) snapshot() {
 		}
 		// The registry entry outlives the watch.
 		w.e.mu.Lock()
-		workspace := w.e.registry[w.run].workspace
+		info := w.e.registry[w.run]
 		w.e.mu.Unlock()
+		run, scope, repo := info.events(w.run)
+		payload.Repo = repo
 		_, err := w.e.cfg.Bus.Publish(ctx, events.Event{
-			WorkspaceID: workspace,
-			RunID:       w.run,
+			WorkspaceID: scope,
+			RunID:       run,
 			Payload:     payload,
 		})
 		return err
@@ -899,7 +897,7 @@ func (w *diffWatch) checkHead(ctx context.Context) bool {
 	if head == w.lastHead {
 		return true
 	}
-	if _, err := w.e.PublishRunBranch(ctx, w.run); err != nil {
+	if _, err := w.e.publishRunBranch(ctx, w.run); err != nil {
 		w.warnPublish(err)
 		return false
 	}

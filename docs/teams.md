@@ -211,6 +211,9 @@ brings a run branch into your clone.
 | Source mirror | Off (local-only) | Follows an upstream repository read-only |
 | Message-others policy | `everyone` | Whether collaborators can message and stop each other's runs |
 
+A run can also check out other workspaces beside its own; see [Working across
+repos](quickstart.md#working-across-repos).
+
 A later clone that points elsewhere does not overwrite the publish destination.
 Change it on purpose; a change reaches new runs only:
 
@@ -550,5 +553,7 @@ A candidate lives 30 days, and a passing verification is valid for 24 hours. See
 - Roles are viewer, collaborator and admin. There are no custom roles.
 - The permissive default lets any collaborator stop any run. Use `aether protect`
   or `--message-others admins-only` to narrow it.
+- A run's extra repos (`aether run --repo`) share its primary workspace's
+  environment, account and budget. Swarms and templates take one workspace.
 - Evidence packets and candidates expire after 30 days.
 - A merge of two members cannot be undone.

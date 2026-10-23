@@ -436,12 +436,12 @@ func (e *Engine) writeWatchSnapshot(ctx context.Context, run domain.RunID, check
 	return tree, nil
 }
 
-// RemoveRunHistory explicitly deletes the run's checkout, identity and diff
+// removeRunHistory explicitly deletes the run's checkout, identity and diff
 // history. Unlike RemoveRunCheckout it does not first pack the snapshot store,
 // which is deleted too. The checkout goes first: while it exists, rendering a
 // live patch recreates the store. It stops the watcher and serializes with
 // captures and readers; missing paths are safe.
-func (e *Engine) RemoveRunHistory(ctx context.Context, run domain.RunID) error {
+func (e *Engine) removeRunHistory(ctx context.Context, run domain.RunID) error {
 	checkout, err := e.checkoutPath(run)
 	if err != nil {
 		return err

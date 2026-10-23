@@ -192,6 +192,7 @@ func (r *configImportReader) Read(p []byte) (int, error) {
 // result bytes pass through verbatim. The optional from and to query
 // parameters name diff-snapshot trees: from alone renders what changed since
 // that snapshot, both render that interval, instead of the run's whole diff.
+// repo names one of a multi-repo run's workspaces; empty is the primary repo.
 func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
 	backend, ok := g.Authorize(w, r, false)
 	if !ok {
@@ -202,6 +203,7 @@ func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
 		RunID: r.PathValue("run"),
 		From:  query.Get("from"),
 		To:    query.Get("to"),
+		Repo:  query.Get("repo"),
 	})
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, &protocol.Error{Code: protocol.CodeInvalidParams, Message: err.Error()})
@@ -236,7 +238,7 @@ func (g *Gateway) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	caps := g.cfg.Capabilities
-	caps.Methods = []string{"*"}
+	caps.Methods = []string{"*", protocol.CapabilityRunRepos}
 	caps.Version = version.Version
 	caps.Commit = version.Commit
 	w.Header().Set("Content-Type", "application/json")

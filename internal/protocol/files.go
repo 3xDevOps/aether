@@ -14,6 +14,9 @@ const (
 // FilesTreeParams addresses a workspace tree, or a run checkout when RunID is
 // set. Path is relative to the repository root and may be empty for root.
 type FilesTreeParams struct {
+	// Repo is the workspace_id of one of the run's repos; empty is the
+	// primary. See Run.Repos.
+	Repo        string `json:"repo,omitempty"`
 	WorkspaceID string `json:"workspace_id"`
 	RunID       string `json:"run_id,omitempty"`
 	Path        string `json:"path"`
@@ -33,6 +36,9 @@ type FilesTreeResult struct {
 
 // FilesReadParams addresses one file in a workspace or run checkout.
 type FilesReadParams struct {
+	// Repo is the workspace_id of one of the run's repos; empty is the
+	// primary. See Run.Repos.
+	Repo        string `json:"repo,omitempty"`
 	WorkspaceID string `json:"workspace_id"`
 	RunID       string `json:"run_id,omitempty"`
 	Path        string `json:"path"`
@@ -57,6 +63,9 @@ type FilesReadResult struct {
 // An empty Revision creates a new file; existing files require the revision
 // returned by files.read.
 type FilesWriteParams struct {
+	// Repo is the workspace_id of one of the run's repos; empty is the
+	// primary. See Run.Repos.
+	Repo        string `json:"repo,omitempty"`
 	WorkspaceID string `json:"workspace_id"`
 	RunID       string `json:"run_id,omitempty"`
 	Path        string `json:"path"`
@@ -66,6 +75,9 @@ type FilesWriteParams struct {
 
 // FilesDiffParams addresses one file in a run checkout.
 type FilesDiffParams struct {
+	// Repo is the workspace_id of one of the run's repos; empty is the
+	// primary. See Run.Repos.
+	Repo  string `json:"repo,omitempty"`
 	RunID string `json:"run_id"`
 	Path  string `json:"path"`
 }
