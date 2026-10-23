@@ -32,6 +32,11 @@ const noComments: ReviewComment[] = []
 
 // Not a root-store slice, for the reason composer drafts are not: a write
 // there reaches a controlled textarea a frame late.
+const repoSeparator = '#'
+
+/** Where the review of one non-primary repo is kept; the primary's is the run's id. */
+export const repoReviewKey = (runID: string, repo: string) => `${runID}${repoSeparator}${repo}`
+
 const useReviews = create<Record<string, Review>>(() => ({}))
 
 export function review(runID: string): Review {
@@ -117,7 +122,7 @@ export function written(comments: ReviewComment[]): ReviewComment[] {
 
 useStore.subscribe((state, previous) => {
   if (state.identityKey !== previous.identityKey) useReviews.setState({}, true)
-  else if (state.runs !== previous.runs) useReviews.setState(pruneRuns(useReviews.getState(), (runID) => runID in state.runs), true)
+  else if (state.runs !== previous.runs) useReviews.setState(pruneRuns(useReviews.getState(), (key) => key.split(repoSeparator, 1)[0]! in state.runs), true)
 })
 
 export function commentable(line: PatchLine | undefined): boolean {
@@ -228,12 +233,12 @@ export function reviewEntries(comments: ReviewComment[], files: PatchFile[], sco
  * quotes them with their diff markers and then says its piece, so the agent
  * can act on it without the diff.
  */
-export function reviewMessage(entries: ReviewEntry[]): string {
+export function reviewMessage(entries: ReviewEntry[], repo?: string): string {
   const blocks = entries.map((entry, index) => [
     `${index + 1}. ${entry.comment.path}:${lineLabel(entry.lines)}${entry.outdated ? ' (these lines have changed since the comment was written)' : ''}`,
     fenced('diff', quoteLines(entry.lines)),
     entry.comment.body,
   ].join('\n'))
   const count = entries.length === 1 ? '1 review comment' : `${entries.length} review comments`
-  return [`${count} on your changes. Each quotes the diff lines it is about; line numbers are the new file's unless marked removed.`, ...blocks].join('\n\n')
+  return [`${count} on your changes${repo ? ` in ${repo}` : ''}. Each quotes the diff lines it is about; line numbers are the new file's unless marked removed.`, ...blocks].join('\n\n')
 }

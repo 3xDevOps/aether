@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type {
-  FileRead, Run, RunGitCommitResult, RunGitDiffResult, RunGitExpected, RunGitPushResult,
+  FileRead, RunGitCommitResult, RunGitDiffResult, RunGitExpected, RunGitPushResult,
   RunGitPushTarget, RunGitStatusResult, RunPRCreateResult, RunPRStatusResult, RunPRTarget,
 } from '@/lib/types'
-import { refreshPullRequest, trackPullRequest } from '@/routes/diff/publish-pr'
+import { refreshPullRequest, repoParam, trackPullRequest, type ScopedRun } from '@/routes/diff/publish-pr'
 import { completeTarget, defaultPRTarget, defaultPushTarget } from '@/routes/diff/publish-target'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
@@ -29,7 +29,7 @@ const noPush: RunGitPushTarget = { remote: '', repository: '', head_branch: '' }
 /** Every mutation names the branch and HEAD on screen; the server refuses it
  * when the checkout moved. Each destination field starts as the checkout's
  * own and follows every refresh until the member edits that field. */
-export function usePublish(run: Run, client: Api, open: boolean) {
+export function usePublish(run: ScopedRun, client: Api, open: boolean) {
   const caps = useCapability()
   const self = useSelf()
   const workspace = useStore((s) => s.workspaces[run.workspace_id])
@@ -110,7 +110,7 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     setReviewed(null)
     setPRReview(null)
     const [next, mirror] = await Promise.all([
-      client.runGitStatus({ run_id: run.id }),
+      client.runGitStatus({ run_id: run.id, ...repoParam(run) }),
       // Without the source, the pull request defaults to the repository pushed to.
       client.workspaceMirrorStatus(run.workspace_id).then((result) => result.source_url, () => undefined),
     ])
@@ -142,8 +142,8 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     }))]
     const [results, previews] = await Promise.all([
       Promise.all([
-        client.runGitDiff({ run_id: run.id, paths: diffPaths, staged: false }),
-        client.runGitDiff({ run_id: run.id, paths: diffPaths, staged: true }),
+        client.runGitDiff({ run_id: run.id, ...repoParam(run), paths: diffPaths, staged: false }),
+        client.runGitDiff({ run_id: run.id, ...repoParam(run), paths: diffPaths, staged: true }),
       ]),
       Promise.all((status?.changes ?? []).filter((change) => change.untracked && paths.includes(change.path)).map(async (change) => {
         try {
@@ -167,7 +167,7 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     if (!reviewed) return
     setReviewed(null)
     setStatusReady(false)
-    const result = await client.runGitCommit({ run_id: run.id, expected: reviewed, paths, message: commitMessage })
+    const result = await client.runGitCommit({ run_id: run.id, ...repoParam(run), expected: reviewed, paths, message: commitMessage })
     setCommit(result)
     if (result.committed) setCommitMessage('')
     await refreshStatus()
@@ -177,7 +177,7 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   async function pushBranch() {
     if (!expected) return
     setStatusReady(false)
-    const result = await client.runGitPush({ run_id: run.id, expected, target: pushTarget })
+    const result = await client.runGitPush({ run_id: run.id, ...repoParam(run), expected, target: pushTarget })
     setPush(result)
     if (result.pushed) void refreshPullRequest(run, client)
     await refreshStatus()
@@ -186,7 +186,7 @@ export function usePublish(run: Run, client: Api, open: boolean) {
   async function discoverPR() {
     if (!expected) return
     setPRReview(null)
-    const result = await client.runPRStatus({ run_id: run.id, expected, target })
+    const result = await client.runPRStatus({ run_id: run.id, ...repoParam(run), expected, target })
     if (!mounted.current) return
     setPRReview({ target: { ...target }, expected, result })
     if (!result.pull_request || result.error) return
@@ -205,7 +205,7 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     // read-only discovery is offered until that PR has been found.
     setUnsettled(review.target)
     const result = await client.runPRCreate({
-      run_id: run.id, expected: review.expected, target: review.target,
+      run_id: run.id, ...repoParam(run), expected: review.expected, target: review.target,
       expected_login: review.result.identity, title, body, draft,
     })
     setCreation(result)
@@ -229,7 +229,7 @@ export function usePublish(run: Run, client: Api, open: boolean) {
     if (!expected || !review || uncertain) return
     setStatusReady(false)
     setErrors((all) => ({ ...all, create: undefined }))
-    const result = await client.runGitPush({ run_id: run.id, expected, target: pushTarget })
+    const result = await client.runGitPush({ run_id: run.id, ...repoParam(run), expected, target: pushTarget })
     setPush(result)
     if (result.pushed) await create(review).catch((cause: unknown) => setErrors((all) => ({ ...all, create: message(cause) })))
     await refreshStatus()

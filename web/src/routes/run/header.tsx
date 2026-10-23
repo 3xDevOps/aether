@@ -12,6 +12,7 @@ import { TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsMobile } from '@/lib/breakpoints'
 import { copyText } from '@/lib/clipboard'
 import { memberName, resolveMember } from '@/lib/member-name'
+import { extraRepoCount, repoLabel } from '@/lib/repos'
 import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
@@ -135,6 +136,12 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
             <span className="min-w-0 truncate font-code">{run.branch}</span>
             <Copy aria-hidden />
           </Button>
+          <span aria-hidden>·</span>
+        </>
+      )}
+      {extraRepoCount(run) > 0 && (
+        <>
+          <span className="min-w-0 truncate" title={run.repos!.map((repo) => repo.name).join(', ')}>{repoLabel(run.repos![0]!.name, run)}</span>
           <span aria-hidden>·</span>
         </>
       )}

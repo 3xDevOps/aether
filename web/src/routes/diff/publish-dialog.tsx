@@ -7,11 +7,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, type Api } from '@/lib/api'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
-import type { Run } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { CommitStep } from '@/routes/diff/publish-commit'
 import { Diagnostics, InlineError } from '@/routes/diff/publish-parts'
 import { PushStep } from '@/routes/diff/publish-push'
+import type { ScopedRun } from '@/routes/diff/publish-pr'
 import { usePublish, type Publish } from '@/routes/diff/publish-state'
 import { useStore } from '@/store'
 import { useHeaderPrimary } from '@/store/hooks'
@@ -26,15 +26,16 @@ export function openPublish(runID: string) {
 /** Stays mounted while the run is open so a typed message or an uncertain
  * PR creation survives closing the dialog and switching views. `quiet` gives
  * the view's one filled button to another action. */
-export function PublishDialog({ run, client = api, quiet = false }: { run: Run; client?: Api; quiet?: boolean }) {
+export function PublishDialog({ run, client = api, quiet = false, repoName }: { run: ScopedRun; client?: Api; quiet?: boolean; repoName?: string }) {
   useHeaderPrimary(true)
   const [open, setOpen] = useState(false)
-  const requested = useRequests((all) => all[run.id])
+  const requestKey = run.repo ? `${run.id}#${run.repo}` : run.id
+  const requested = useRequests((all) => all[requestKey])
   useEffect(() => {
     if (!requested) return
     setOpen(true)
-    useRequests.setState(({ [run.id]: _, ...rest }) => rest, true)
-  }, [requested, run.id])
+    useRequests.setState(({ [requestKey]: _, ...rest }) => rest, true)
+  }, [requested, requestKey])
   const p = usePublish(run, client, open)
   const [chosen, setStep] = useState<string>()
   // Nothing left to commit when the first status arrives: open on the push.
@@ -50,7 +51,7 @@ export function PublishDialog({ run, client = api, quiet = false }: { run: Run; 
       </DialogTrigger>
       <DialogContent className="md:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Publish</DialogTitle>
+          <DialogTitle>{repoName ? `Publish ${repoName}` : 'Publish'}</DialogTitle>
           <DialogDescription>
             Commit, push and open a pull request from the run's checkout with native Git, as the run's account.
           </DialogDescription>

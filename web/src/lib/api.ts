@@ -539,6 +539,7 @@ export const api = {
     account_member_id?: string
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
+    extra_workspace_ids?: string[]
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
   runRelease: (runID: string) => call<Record<string, never>>('run.release', { run_id: runID }),
@@ -1036,10 +1037,10 @@ export const api = {
   // Not RPC methods; see docs/local-gateway.md. Without a range this is the
   // diff against the run's effective base; with `from`, everything since that
   // snapshot tree, and `base` is the `from` tree.
-  runPatch: (runID: string, range?: { from: string }) =>
+  runPatch: (runID: string, range?: { from: string }, repo?: string) =>
     get<RunPatch>(
       `/run/${encodeURIComponent(runID)}/patch` +
-        (range ? `?${new URLSearchParams(range).toString()}` : ''),
+        (range || repo ? `?${new URLSearchParams({ ...range, ...(repo ? { repo } : {}) }).toString()}` : ''),
     ),
   filesTree: (params: { workspace_id: string; run_id?: string; path: string }) =>
     call<FilesTreeResult>('files.tree', params),
