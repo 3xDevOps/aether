@@ -259,7 +259,7 @@ export async function hydrate(
         const linkStatus = await client.localLinkStatus()
         if (signal?.aborted) return false
         s.setLinkStatus(linkStatus)
-        if (!s.hydrated && linkStatus.linked === true && !s.onboardingWorkspace) s.setOnboarded(true)
+        if (!s.hydrated && (linkStatus.linked === true || linkStatus.server_configured === true) && !store.getState().onboardingWorkspace) s.setOnboarded(true)
       } catch {
         ignore()
       }
