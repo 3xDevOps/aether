@@ -279,6 +279,10 @@ type ServerInfoResult struct {
 // repository methods.
 const FeatureMultiRepo = "multi-repo"
 
+// CapabilityRunRepos is listed in a gateway's capability methods when the
+// runs it serves carry repos. It is not an RPC method.
+const CapabilityRunRepos = "run.repos"
+
 type WorkspaceListResult struct {
 	Workspaces []Workspace `json:"workspaces"`
 }

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -543,7 +544,7 @@ func TestCapabilitiesFillTheSharedFields(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &caps); err != nil {
 		t.Fatal(err)
 	}
-	if caps.Gateway != "server" || len(caps.Methods) != 1 || caps.Methods[0] != "*" || caps.Local != nil {
+	if caps.Gateway != "server" || !reflect.DeepEqual(caps.Methods, []string{"*", protocol.CapabilityRunRepos}) || caps.Local != nil {
 		t.Fatalf("capabilities = %+v", caps)
 	}
 	if !strings.Contains(rec.Body.String(), `"version"`) {

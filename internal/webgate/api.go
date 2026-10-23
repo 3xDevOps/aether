@@ -238,7 +238,7 @@ func (g *Gateway) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	caps := g.cfg.Capabilities
-	caps.Methods = []string{"*"}
+	caps.Methods = []string{"*", protocol.CapabilityRunRepos}
 	caps.Version = version.Version
 	caps.Commit = version.Commit
 	w.Header().Set("Content-Type", "application/json")

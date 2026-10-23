@@ -816,7 +816,7 @@ retention, so a closed interactive run is unavailable to `run.relaunch` immediat
 ### `GET /api/v1/capabilities`
 
 ```json
-{"gateway":"local","methods":["*"],"ws":["events","attach","acp","assistant","terminal","dev/browser"],
+{"gateway":"local","methods":["*","run.repos"],"ws":["events","attach","acp","assistant","terminal","dev/browser"],
  "local":["daemon.install","daemon.status","edge.claim","edge.hostkey","edge.join","edge.link",
           "edge.login","edge.logout","edge.servers","edge.status","env.agents","forward.start",
           "forward.status","forward.stop","git.identity","link.apply","link.repo",
@@ -830,12 +830,14 @@ The server gateway answers the same shape with no `local` field because it
 cannot run verbs on the browser's machine:
 
 ```json
-{"gateway":"server","methods":["*"],"ws":["events","attach","acp","assistant","terminal","dev/browser"],
+{"gateway":"server","methods":["*","run.repos"],"ws":["events","attach","acp","assistant","terminal","dev/browser"],
  "version":"v1.2.3","commit":"abc1234"}
 ```
 
-`methods` is `["*"]` because both transports dispatch every control-channel
-method; `ws` lists the WebSocket surfaces served; `local` is the sorted
+`methods` is `["*", "run.repos"]` because both transports dispatch every
+control-channel method; `run.repos` is not a method but marks a gateway whose
+runs carry `repos` (`aether run --repo`), which the SPA checks before showing a
+repo picker. `ws` lists the WebSocket surfaces served; `local` is the sorted
 `/local/v1` verb list, absent where there are none. A client probes this
 descriptor rather than hard-coding its transport. The SPA gates local linking,
 folder picking, Git operations and updates independently of shared server
