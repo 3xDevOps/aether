@@ -84,7 +84,7 @@ export function Column({
         <h2 className="flex items-center gap-2 text-ui font-medium text-text">{heading}</h2>
         {actions && <div className="ml-auto">{actions}</div>}
       </div>
-      <div className="flex flex-1 flex-col gap-2 lg:-mx-1 lg:min-h-0 lg:overflow-y-auto lg:px-1 lg:pb-4">{body}</div>
+      <div className="flex flex-1 flex-col gap-2 lg:-mx-1 lg:min-h-0 lg:overflow-y-auto lg:overflow-x-hidden lg:px-1 lg:pb-4">{body}</div>
     </section>
   )
 }
