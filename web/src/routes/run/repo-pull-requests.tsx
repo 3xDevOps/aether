@@ -10,14 +10,8 @@ import { useRepoRuns } from '@/routes/diff/repos'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunRecord } from '@/store/runs'
 
-/** Failing beats running beats an unknown state beats passed. */
 const severity: Partial<Record<Tone, number>> = { failed: 3, working: 2, neutral: 1 }
 
-/**
- * A multi-repo run's pull requests as one chip: the worst tone among them and how many there are.
- * It opens a list of the repos, each with its pull request and a way into the usual feedback panel.
- * Null for a single-repo run, which keeps the header's own indicator.
- */
 export function useRepoPullRequests(
   run: RunRecord,
   agent: AgentTerminal,

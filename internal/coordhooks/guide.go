@@ -31,9 +31,7 @@ type Guide struct {
 	// Wake is set where Aether resumes an idle session when mail arrives:
 	// Enhanced runs, managed Claude Code launches and loaded native
 	// pi/omp/OpenCode integrations.
-	Wake bool
-	// Repos lists the run's extra repositories mounted beside the primary
-	// one, as "name at path" separated by ", "; empty for a single-repo run.
+	Wake  bool
 	Repos string
 }
 

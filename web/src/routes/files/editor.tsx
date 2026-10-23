@@ -90,7 +90,7 @@ export function FileEditor({
       useStore.getState().documents[key] !== pending
     const promise = current.kind === 'home'
       ? client.homeRead(current.path)
-      : client.filesRead({ workspace_id: current.workspaceID, ...(current.runID ? { run_id: current.runID } : {}), path: current.path })
+      : client.filesRead({ workspace_id: current.workspaceID, ...(current.runID ? { run_id: current.runID } : {}), ...(current.repo ? { repo: current.repo } : {}), path: current.path })
     void promise
       .then((result) => {
         if (stale()) return
@@ -121,7 +121,7 @@ export function FileEditor({
     try {
       const result = selection.kind === 'home'
         ? await client.homeWrite({ path: selection.path, content: captured, revision })
-        : await client.filesWrite({ workspace_id: selection.workspaceID, ...(selection.runID ? { run_id: selection.runID } : {}), path: selection.path, content: captured, revision })
+        : await client.filesWrite({ workspace_id: selection.workspaceID, ...(selection.runID ? { run_id: selection.runID } : {}), ...(selection.repo ? { repo: selection.repo } : {}), path: selection.path, content: captured, revision })
       const savedAt = landed()
       if (useStore.getState().identityEpoch !== epochAtStart || savedAt === null) return false
       markDraftSaved(savedAt, captured, result)

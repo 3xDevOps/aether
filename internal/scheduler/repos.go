@@ -16,8 +16,6 @@ type extraCapture struct {
 	err   error
 }
 
-// resolveExtras names the extra workspaces of a launch and assigns each its
-// directory under /repos. An unknown workspace fails the launch.
 func (s *Scheduler) resolveExtras(ctx context.Context, ids []domain.WorkspaceID) ([]domain.RunRepo, error) {
 	taken := make(map[string]bool, len(ids))
 	repos := make([]domain.RunRepo, len(ids))
@@ -36,9 +34,6 @@ func (s *Scheduler) resolveExtras(ctx context.Context, ids []domain.WorkspaceID)
 	return repos, nil
 }
 
-// captureExtras captures the base of every extra repository in parallel, so
-// extra repositories add no launch latency of their own. The first failure
-// names the repository.
 func (s *Scheduler) captureExtras(ctx context.Context, bases BaseCapture, repos []domain.RunRepo) ([]domain.RunRepo, error) {
 	captured := slices.Clone(repos)
 	errs := make([]error, len(captured))
@@ -59,9 +54,7 @@ func (s *Scheduler) captureExtras(ctx context.Context, bases BaseCapture, repos 
 	return captured, nil
 }
 
-// createCheckouts creates the run's checkouts, the primary and every extra
-// repository's, in parallel. On any failure the checkouts that were made are
-// removed, so a refused launch leaves none behind.
+// createCheckouts removes the checkouts it made when any fails, so a refused launch leaves none.
 func (s *Scheduler) createCheckouts(ctx context.Context, run *domain.Run, ws *domain.Workspace) (checkout, branch string, err error) {
 	errs := make([]error, 1+len(run.Extras))
 	var wg sync.WaitGroup

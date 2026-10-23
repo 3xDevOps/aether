@@ -10,7 +10,6 @@ interface RepoPatch {
   truncated: boolean
   loading: boolean
   error?: string
-  /** The primary's snapshot revision this answer was read at. */
   revision: number
 }
 
@@ -22,7 +21,6 @@ useStore.subscribe((state, previous) => {
   if (state.identityKey !== previous.identityKey) usePatches.setState({}, true)
 })
 
-/** Reads one non-primary repo's changes against its base. */
 export async function loadRepoPatch(runID: string, repo: string, client: Pick<Api, 'runPatch'> = api): Promise<void> {
   const key = keyOf(runID, repo)
   if (inflight.has(key)) return
@@ -42,13 +40,11 @@ export async function loadRepoPatch(runID: string, repo: string, client: Pick<Ap
 export interface RepoChangesData {
   files: PatchFile[]
   truncated: boolean
-  /** True until the first answer arrives. */
   loading: boolean
   error?: string
   refresh: () => void
 }
 
-/** The repo's changes, read once and again whenever the run reports a new snapshot. */
 export function useRepoPatch(runID: string, repo: string, enabled = true): RepoChangesData {
   const entry = usePatches((all) => all[keyOf(runID, repo)])
   const revision = useStore((s) => s.diffs[runID]?.revision ?? 0)

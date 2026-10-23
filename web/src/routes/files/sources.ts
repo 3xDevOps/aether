@@ -5,6 +5,7 @@ export interface WorkspaceSource {
   kind: 'workspace'
   workspaceID: string
   runID: string
+  repo?: string
   label: string
   branch?: string
 }
@@ -24,7 +25,7 @@ export type Selection = FileSource & { path: string }
 export type SelectFile = (source: FileSource, path: string) => void
 
 export function sourceKey(source: FileSource, path: string): string {
-  return source.kind === 'home' ? homeKey(path) : filesKey(source.workspaceID, source.runID, path)
+  return source.kind === 'home' ? homeKey(path) : filesKey(source.workspaceID, source.runID, path, source.repo)
 }
 
 /** A home-relative path as it is typed in a shell. */
@@ -43,13 +44,13 @@ export function isBaseBranch(source: FileSource): source is WorkspaceSource {
 export function fileTabFromSource(source: FileSource, path: string, key: string): FileTab {
   return source.kind === 'home'
     ? { key, kind: 'home', path, label: source.label }
-    : { key, kind: 'workspace', workspaceID: source.workspaceID, runID: source.runID, path, label: source.label, branch: source.branch }
+    : { key, kind: 'workspace', workspaceID: source.workspaceID, runID: source.runID, repo: source.repo, path, label: source.label, branch: source.branch }
 }
 
 export function fileTabToSelection(tab: FileTab): Selection {
   return tab.kind === 'home'
     ? { kind: 'home', path: tab.path, label: tab.label }
-    : { kind: 'workspace', workspaceID: tab.workspaceID, runID: tab.runID, path: tab.path, label: tab.label, branch: tab.branch }
+    : { kind: 'workspace', workspaceID: tab.workspaceID, runID: tab.runID, repo: tab.repo, path: tab.path, label: tab.label, branch: tab.branch }
 }
 
 export function isLiveRun(run: Run): boolean {

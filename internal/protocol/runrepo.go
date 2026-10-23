@@ -52,8 +52,6 @@ type WorkspaceImportResult struct {
 // These methods are human authenticated entry points. Agents use native Git
 // and gh; run_id here must never be passed through the run-socket dispatcher.
 type RunGitStatusParams struct {
-	// Repo is the workspace_id of one of the run's repos; empty is the
-	// primary. See Run.Repos.
 	Repo  string `json:"repo,omitempty"`
 	RunID string `json:"run_id"`
 }
@@ -86,7 +84,6 @@ type RunGitUpstream struct {
 }
 
 type RunGitStatusResult struct {
-	// Repo echoes the request's Repo.
 	Repo            string               `json:"repo,omitempty"`
 	Branch          string               `json:"branch"`
 	Head            string               `json:"head"`
@@ -115,8 +112,6 @@ type RunRepoCommandOutput struct {
 }
 
 type RunGitDiffParams struct {
-	// Repo is the workspace_id of one of the run's repos; empty is the
-	// primary. See Run.Repos.
 	Repo   string   `json:"repo,omitempty"`
 	RunID  string   `json:"run_id"`
 	Paths  []string `json:"paths,omitempty"`
@@ -124,7 +119,6 @@ type RunGitDiffParams struct {
 }
 
 type RunGitDiffResult struct {
-	// Repo echoes the request's Repo.
 	Repo   string               `json:"repo,omitempty"`
 	State  RunGitExpected       `json:"state"`
 	Output RunRepoCommandOutput `json:"output"`
@@ -132,8 +126,6 @@ type RunGitDiffResult struct {
 }
 
 type RunGitCommitParams struct {
-	// Repo is the workspace_id of one of the run's repos; empty is the
-	// primary. See Run.Repos.
 	Repo     string         `json:"repo,omitempty"`
 	RunID    string         `json:"run_id"`
 	Expected RunGitExpected `json:"expected"`
@@ -142,7 +134,6 @@ type RunGitCommitParams struct {
 }
 
 type RunGitCommitResult struct {
-	// Repo echoes the request's Repo.
 	Repo         string `json:"repo,omitempty"`
 	Committed    bool   `json:"committed"`
 	Head         string `json:"head"`
@@ -156,8 +147,6 @@ type RunGitCommitResult struct {
 }
 
 type RunGitLogParams struct {
-	// Repo is the workspace_id of one of the run's repos; empty is the
-	// primary. See Run.Repos.
 	Repo  string `json:"repo,omitempty"`
 	RunID string `json:"run_id"`
 	Limit int    `json:"limit,omitempty"`
@@ -183,7 +172,6 @@ type RunGitConflict struct {
 // and Upstream MergeBase..Base, newest first. Conflicts are predicted by
 // merging Head with Base without touching the worktree.
 type RunGitLogResult struct {
-	// Repo echoes the request's Repo.
 	Repo      string           `json:"repo,omitempty"`
 	Branch    string           `json:"branch"`
 	BaseRef   string           `json:"base_ref"`
@@ -212,8 +200,6 @@ type RunGitPushTarget struct {
 }
 
 type RunGitPushParams struct {
-	// Repo is the workspace_id of one of the run's repos; empty is the
-	// primary. See Run.Repos.
 	Repo     string           `json:"repo,omitempty"`
 	RunID    string           `json:"run_id"`
 	Expected RunGitExpected   `json:"expected"`
@@ -221,7 +207,6 @@ type RunGitPushParams struct {
 }
 
 type RunGitPushResult struct {
-	// Repo echoes the request's Repo.
 	Repo   string               `json:"repo,omitempty"`
 	Pushed bool                 `json:"pushed"`
 	Head   string               `json:"head"`
@@ -246,8 +231,6 @@ type RunPRTarget struct {
 // source. Once the run's environment is gone, run.pr.status and
 // run.pr.feedback report the pull request the run last recorded.
 type RunPRStatusParams struct {
-	// Repo is the workspace_id of one of the run's repos; empty is the
-	// primary. See Run.Repos.
 	Repo     string         `json:"repo,omitempty"`
 	RunID    string         `json:"run_id"`
 	Expected RunGitExpected `json:"expected"`
@@ -255,8 +238,6 @@ type RunPRStatusParams struct {
 }
 
 type RunPRCreateParams struct {
-	// Repo is the workspace_id of one of the run's repos; empty is the
-	// primary. See Run.Repos.
 	Repo          string         `json:"repo,omitempty"`
 	RunID         string         `json:"run_id"`
 	Expected      RunGitExpected `json:"expected"`
@@ -283,7 +264,6 @@ type RunPullRequest struct {
 
 // Status always comes from GitHub, including PRs created by native gh.
 type RunPRStatusResult struct {
-	// Repo echoes the request's Repo.
 	Repo            string               `json:"repo,omitempty"`
 	Identity        string               `json:"identity"`
 	PullRequest     *RunPullRequest      `json:"pull_request"`
@@ -297,7 +277,6 @@ type RunPRStatusResult struct {
 // reconcile this exact head/base before retrying; it is not permission to
 // blindly replay an external mutation.
 type RunPRCreateResult struct {
-	// Repo echoes the request's Repo.
 	Repo              string               `json:"repo,omitempty"`
 	Identity          string               `json:"identity"`
 	PullRequest       *RunPullRequest      `json:"pull_request"`
@@ -311,8 +290,6 @@ type RunPRCreateResult struct {
 }
 
 type RunPRFeedbackParams struct {
-	// Repo is the workspace_id of one of the run's repos; empty is the
-	// primary. See Run.Repos.
 	Repo     string         `json:"repo,omitempty"`
 	RunID    string         `json:"run_id"`
 	Expected RunGitExpected `json:"expected"`
@@ -362,7 +339,6 @@ type RunPRReviewComment struct {
 }
 
 type RunPRFeedbackResult struct {
-	// Repo echoes the request's Repo.
 	Repo           string               `json:"repo,omitempty"`
 	Identity       string               `json:"identity"`
 	PullRequest    *RunPullRequest      `json:"pull_request"`
@@ -386,8 +362,6 @@ type RunPRFeedbackResult struct {
 // most recently recorded. GitHub refuses the merge unless the PR head is
 // still ExpectedHead, the head_oid the member reviewed.
 type RunPRMergeParams struct {
-	// Repo is the workspace_id of one of the run's repos; empty is the
-	// primary. See Run.Repos.
 	Repo         string `json:"repo,omitempty"`
 	RunID        string `json:"run_id"`
 	Method       string `json:"method"`
@@ -405,7 +379,6 @@ type RunPRMergeParams struct {
 // PullRequest is GitHub's state read after the merge attempt, also when
 // it failed; a merge queue can accept a PR without merging it yet.
 type RunPRMergeResult struct {
-	// Repo echoes the request's Repo.
 	Repo            string               `json:"repo,omitempty"`
 	Identity        string               `json:"identity"`
 	PullRequest     *RunPullRequest      `json:"pull_request"`

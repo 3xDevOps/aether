@@ -252,8 +252,8 @@ func (s *Service) head(ctx context.Context, run *domain.Run) (string, error) {
 	return "", nil
 }
 
-// headDiffWindow is how many of a run's newest run.diff events head looks
-// through for one of the run's own repository, past those of its extras.
+// headDiffWindow is how many of a run's newest run.diff events head scans; its
+// extras' events can precede the primary's.
 const headDiffWindow = 32
 
 // similar is the best live matches for text other than the note itself.

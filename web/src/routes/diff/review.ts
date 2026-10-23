@@ -34,7 +34,6 @@ const noComments: ReviewComment[] = []
 // there reaches a controlled textarea a frame late.
 const repoSeparator = '#'
 
-/** Where the review of one non-primary repo is kept; the primary's is the run's id. */
 export const repoReviewKey = (runID: string, repo: string) => `${runID}${repoSeparator}${repo}`
 
 const useReviews = create<Record<string, Review>>(() => ({}))

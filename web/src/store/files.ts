@@ -39,6 +39,7 @@ export interface WorkspaceFileTab {
   kind: 'workspace'
   workspaceID: string
   runID: string
+  repo?: string
   path: string
   label: string
   branch?: string
@@ -96,8 +97,8 @@ export interface FilesSlice {
 }
 
 /** A collision-free cache key for one workspace/run/path request. */
-export function filesKey(workspaceID: string, runID: string, path: string): string {
-  return [workspaceID, runID, path].join('\u0000')
+export function filesKey(workspaceID: string, runID: string, path: string, repo = ''): string {
+  return [workspaceID, runID, path, ...(repo ? [repo] : [])].join('\u0000')
 }
 
 const homePrefix = 'home\u0000'

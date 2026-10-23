@@ -39,9 +39,8 @@ type EnvironmentPlan struct {
 	Home        string
 	Path        string
 	Mounts      []runtime.Mount
-	// Worktrees are the checkouts of the run's extra repositories, bound
-	// beside the primary worktree; they are not Mounts because a mount is
-	// chowned wholesale, which a checkout of hard-linked objects must not be.
+	// Worktrees are not Mounts because a mount is chowned wholesale, which a
+	// checkout of hard-linked objects must not be.
 	Worktrees []runtime.Mount
 	// LoginMember is the account owner whose login paths are mounted, empty
 	// when the plan mounts nothing from another member's home.

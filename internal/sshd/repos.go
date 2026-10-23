@@ -7,10 +7,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// resolveRepo maps the repo param of a per-run request to the git engine's
-// checkout key and the workspace that checkout belongs to. An empty repo, or
-// the run's own workspace, is the run's primary checkout and leaves run and
-// workspace as given.
 func (s *Server) resolveRepo(ctx context.Context, run, workspace, repo string) (domain.RunID, domain.WorkspaceID, *protocol.Error) {
 	if repo == "" {
 		return domain.RunID(run), domain.WorkspaceID(workspace), nil

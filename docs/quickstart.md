@@ -272,7 +272,9 @@ provisioning: create checkout: repo "api" (workspace 01m2xwb3es63c0cs0e7aewqpeq)
 
 Limits: extras must already exist as workspaces and cannot repeat or include the
 primary one. The setup script, environment, agent account and budget are the
-primary workspace's. `aether pull <run>` fetches the primary repo's branch only.
+primary workspace's. `aether pull <run>` fetches the primary repo's branch only,
+evidence packets cover the primary repo only, and the dashboard's Compare
+menu is the primary repo's.
 Extra branches are published to their own workspaces; closing the run commits
 and publishes every repo. Each pull request is per repo; there is no cross-repo
 merge. Swarms and templates use one workspace.

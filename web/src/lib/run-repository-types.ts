@@ -60,7 +60,6 @@ export interface RunGitUpstream {
 }
 
 export interface RunGitStatusResult {
-  /** The run repo this answers for; absent for the primary checkout. */
   repo?: string
   branch: string
   head: string
@@ -294,7 +293,6 @@ export interface RunPRReviewComment {
 }
 
 export interface RunPRFeedbackResult {
-  /** The run repo this answers for; absent for the primary checkout. */
   repo?: string
   identity: string
   pull_request: RunPullRequest | null

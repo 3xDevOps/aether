@@ -1,13 +1,14 @@
 import { useMemo } from 'react'
 import { extraRepoCount } from '@/lib/repos'
-import type { RunRepo } from '@/lib/types'
+import type { Run, RunRepo } from '@/lib/types'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
 
 export type ScopedRecord = RunRecord & { repo?: string }
 
-/** The run seen through each of its repos, primary first, the primary being the record itself. Empty for a single-repo run. */
-export function useRepoRuns(run: RunRecord): { repo: RunRepo; run: ScopedRecord }[] {
+type Scoped<R extends Run> = R & { repo?: string }
+
+export function useRepoRuns<R extends Run>(run: R): { repo: RunRepo; run: Scoped<R> }[] {
   const workspaces = useStore((s) => s.workspaces)
   return useMemo(() => {
     if (extraRepoCount(run) === 0) return []

@@ -57,6 +57,23 @@ describe('a run’s Files view', () => {
     expect(useStore.getState().route.name).toBe('run')
   })
 
+  it('reads the selected repo of a multi-repo run through the primary workspace', async () => {
+    const client = checkout()
+    const multi = run({
+      repos: [
+        { workspace_id: workspace.id, name: workspace.name, path: '/workspace', branch: 'aether/run-1-checkout', primary: true },
+        { workspace_id: 'wsp_api', name: 'api', path: '/repos/api', branch: 'aether/run-1-api', primary: false },
+      ],
+    })
+    act(() => useStore.getState().setRuns([multi]))
+    render(<RunFiles run={multi} shown client={client} />)
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'api' }))
+    await waitFor(() => expect(client.filesTree).toHaveBeenCalledWith({ workspace_id: workspace.id, run_id: 'run_1', repo: 'wsp_api', path: '' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'README.md' }))
+    await screen.findByRole('textbox', { name: 'Edit README.md' })
+    expect(client.filesRead).toHaveBeenCalledWith({ workspace_id: workspace.id, run_id: 'run_1', repo: 'wsp_api', path: 'README.md' })
+  })
+
   it('opens the file a link names, shows it in the tree and marks its line, again when the link is followed again', async () => {
     const client = checkout()
     act(() => openInFiles('run_1', { path: 'src/app.ts', line: 3 }))

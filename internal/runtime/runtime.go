@@ -108,9 +108,7 @@ type Spec struct {
 	// WorktreeMountPath is the absolute path inside the container where the
 	// worktree appears.
 	WorktreeMountPath string
-	// ExtraWorktrees are the checkouts of a multi-repo run's extra
-	// repositories, bound read-write beside the worktree. Callers must pass
-	// them through ValidateMounts first.
+	// Callers must pass ExtraWorktrees through ValidateMounts first.
 	ExtraWorktrees []Mount
 	// WorkingDir is the working directory for the setup script and the main
 	// command; empty means the image default.

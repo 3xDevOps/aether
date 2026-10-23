@@ -8,9 +8,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// SetRunRepos records the extra repositories of a run, numbering them from 1
-// in order. Their position names their checkout in the git engine, so a run's
-// extras are written once, whole.
+// SetRunRepos writes a run's extras once, whole: their position names their git engine checkout.
 func (d *DB) SetRunRepos(ctx context.Context, id domain.RunID, repos []domain.RunRepo) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -34,8 +32,6 @@ func (d *DB) SetRunRepos(ctx context.Context, id domain.RunID, repos []domain.Ru
 
 const runRepoCols = `run_id, position, workspace_id, name, mount_path, branch, base_branch, base_commit, worktree`
 
-// attachExtras fills Run.Extras. Only multi-repo runs have rows, so a list
-// reads the whole table rather than a clause per run.
 func (d *DB) attachExtras(ctx context.Context, runs ...*domain.Run) error {
 	if len(runs) == 0 {
 		return nil

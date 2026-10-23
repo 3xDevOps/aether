@@ -278,8 +278,6 @@ type FileDiffStat struct {
 // RunDiffPayload is a point-in-time snapshot of a run worktree's diff
 // against its base, taken on file-change quiescence.
 type RunDiffPayload struct {
-	// Repo is the workspace of the extra repository of a multi-repo run this
-	// snapshot describes; empty for the run's primary repository.
 	Repo  domain.WorkspaceID `json:"repo,omitempty"`
 	Files []FileDiffStat     `json:"files"`
 	// Truncated marks a worktree with more untracked content than a stat

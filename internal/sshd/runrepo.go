@@ -58,10 +58,7 @@ func decodeRunRepo(raw json.RawMessage, dst any) *protocol.Error {
 }
 
 type runRepoCall struct {
-	run domain.Run
-	// repo is the run as the requested repo sees it: the run itself for the
-	// primary, else the run with that extra repository's workspace, branch
-	// and base.
+	run         domain.Run
 	repo        domain.Run
 	native      *runrepo.Service
 	execution   runrepo.Execution
@@ -153,8 +150,6 @@ func (s *Server) runRepoAuthority(ctx context.Context, member domain.MemberID, r
 	return runRepoCall{run: *run, repo: repo, native: s.cfg.Services.RunRepo.Native(), execution: execution, account: account, accountName: owner.DisplayName}, nil
 }
 
-// repoView is run as repoID sees it. An empty repoID, or the run's own
-// workspace, is the primary repository.
 func repoView(run *domain.Run, repoID string) (domain.Run, error) {
 	if repoID == "" || domain.WorkspaceID(repoID) == run.WorkspaceID {
 		return *run, nil
@@ -488,8 +483,6 @@ func (s *Server) runPRMerge(ctx context.Context, member domain.MemberID, raw jso
 			return nil, rpcError(listErr)
 		}
 		if len(call.run.Extras) > 0 {
-			// A multi-repo run records pull requests of several repositories;
-			// the requested repo's is the one whose repository matches.
 			var target protocol.RunPRTarget
 			var expected protocol.RunGitExpected
 			if defaultsPerr, defaultsErr := s.prDefaults(ctx, call, &expected, &target); defaultsPerr != nil {

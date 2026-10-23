@@ -76,15 +76,10 @@ type Config struct {
 type runInfo struct {
 	workspace domain.WorkspaceID
 	branch    string
-	// extra is the run an extra repository's checkout belongs to, and scope
-	// the workspace its events are published under; both are empty for a
-	// run's own checkout, which publishes under workspace.
-	extra domain.RunID
-	scope domain.WorkspaceID
+	extra     domain.RunID
+	scope     domain.WorkspaceID
 }
 
-// events returns the run, workspace scope and repository the events of the
-// checkout key carry. repo is empty for a run's own checkout.
 func (i runInfo) events(key domain.RunID) (run domain.RunID, scope, repo domain.WorkspaceID) {
 	if i.extra == "" {
 		return key, i.workspace, ""

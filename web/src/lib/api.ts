@@ -1042,11 +1042,11 @@ export const api = {
       `/run/${encodeURIComponent(runID)}/patch` +
         (range || repo ? `?${new URLSearchParams({ ...range, ...(repo ? { repo } : {}) }).toString()}` : ''),
     ),
-  filesTree: (params: { workspace_id: string; run_id?: string; path: string }) =>
+  filesTree: (params: { workspace_id: string; run_id?: string; repo?: string; path: string }) =>
     call<FilesTreeResult>('files.tree', params),
-  filesRead: (params: { workspace_id: string; run_id?: string; path: string }) =>
+  filesRead: (params: { workspace_id: string; run_id?: string; repo?: string; path: string }) =>
     call<FileRead>('files.read', params),
-  filesWrite: (params: { workspace_id: string; run_id?: string; path: string; content: string; revision: string }) =>
+  filesWrite: (params: { workspace_id: string; run_id?: string; repo?: string; path: string; content: string; revision: string }) =>
     call<FileRead>('files.write', params),
   homeTree: (path: string) => call<FilesTreeResult>('home.tree', { path }),
   homeRead: (path: string) => call<FileRead>('home.read', { path }),
@@ -1059,8 +1059,8 @@ export const api = {
     call<unknown>('home.upload', { path, content_base64: contentBase64, overwrite }),
   homeDownload: (path: string) =>
     call<{ content_base64: string; size: number }>('home.download', { path }),
-  filesDiff: (runID: string, path: string) =>
-    call<FileDiff>('files.diff', { run_id: runID, path }),
+  filesDiff: (runID: string, path: string, repo?: string) =>
+    call<FileDiff>('files.diff', { run_id: runID, path, ...(repo ? { repo } : {}) }),
   disk: (signal?: AbortSignal) => get<DiskUsage>('/disk', signal),
   capabilities: () => get<GatewayCapabilities>('/capabilities'),
   localLinkStatus: () => local<LinkStatus>('link.status'),

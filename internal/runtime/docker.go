@@ -439,7 +439,6 @@ func dockerEnv(env map[string]string) []string {
 	return out
 }
 
-// trustCheckouts trusts the worktree and each extra one.
 func trustCheckouts(env map[string]string, checkout string, extras []Mount) map[string]string {
 	env = trustCheckout(env, checkout)
 	for _, m := range extras {

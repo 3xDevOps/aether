@@ -36,7 +36,6 @@ function useParsed(patch: string): PatchFile[] {
   return useMemo(() => (previous.current = parsePatch(patch, previous.current)), [patch])
 }
 
-/** A single-repo run's changes view as it always was; a multi-repo run adds a repo selector above it. */
 export function ChangesView(props: { runID: string; agent: AgentTerminal; agentName: string }) {
   const run = useStore((s) => s.runs[props.runID])
   if (!run || extraRepoCount(run) === 0) return <PrimaryChanges {...props} />

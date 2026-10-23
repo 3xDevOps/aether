@@ -192,7 +192,6 @@ func (r *configImportReader) Read(p []byte) (int, error) {
 // result bytes pass through verbatim. The optional from and to query
 // parameters name diff-snapshot trees: from alone renders what changed since
 // that snapshot, both render that interval, instead of the run's whole diff.
-// repo names one of a multi-repo run's workspaces; empty is the primary repo.
 func (g *Gateway) handlePatch(w http.ResponseWriter, r *http.Request) {
 	backend, ok := g.Authorize(w, r, false)
 	if !ok {

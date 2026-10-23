@@ -30,7 +30,6 @@ func runGit(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// realGitEnv is a scheduler over the real git engine, with the fake runtime.
 func realGitEnv(t *testing.T) (*testEnv, func(domain.WorkspaceID) string) {
 	t.Helper()
 	root := t.TempDir()
@@ -144,7 +143,6 @@ func TestLaunchNamesTheRepoThatFails(t *testing.T) {
 	if err := e.db.CreateWorkspace(t.Context(), api); err != nil {
 		t.Fatal(err)
 	}
-	// The API workspace has no repository, so its checkout fails.
 	bases := baseCaptureFunc(func(_ context.Context, ws domain.WorkspaceID, _ string) (mirror.CaptureResult, error) {
 		commit := primaryCommit
 		if ws == api.ID {

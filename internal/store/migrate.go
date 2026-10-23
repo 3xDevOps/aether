@@ -1928,8 +1928,6 @@ CREATE TABLE run_launch_receipts (
 	PRIMARY KEY (member_id, idempotency_key)
 );
 `,
-	// Extra repositories of a multi-repo run, position 1 upward; the primary
-	// repository stays on the runs row, so single-repo runs have no rows.
 	`
 CREATE TABLE run_repos (
 	run_id       TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,

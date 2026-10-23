@@ -9,7 +9,6 @@ import { completeTarget, defaultPRTarget, defaultPushTarget } from '@/routes/dif
 import { useStore } from '@/store'
 import { coalesce } from '@/store/coalesce'
 
-/** A run seen through one of its repos. A repo other than the primary carries its own workspace, branch and base. */
 export type ScopedRun = Run & { repo?: string }
 
 const prKey = (run: ScopedRun) => (run.repo ? `${run.id}:${run.repo}` : run.id)
@@ -75,7 +74,6 @@ export function trackPullRequest(run: ScopedRun, target: RunPRTarget, client: Ap
   return refreshPullRequest(run, client)
 }
 
-/** The `repo` param of a call about one of the run's non-primary checkouts. */
 export const repoParam = (run: ScopedRun): { repo?: string } => (run.repo ? { repo: run.repo } : {})
 
 const pollMs = 60_000
@@ -135,7 +133,6 @@ export function usePullRequest(run: ScopedRun, watch: boolean): TrackedPR {
   return tracked
 }
 
-/** Every repo of a multi-repo run in one subscription; `runs` is as long as the run has repos. */
 export function usePullRequestList(runs: ScopedRun[], watch: boolean): TrackedPR[] {
   const keys = runs.map(prKey)
   const tracked = usePullRequests(useShallow((all) => keys.map((key) => all[key] ?? none)))

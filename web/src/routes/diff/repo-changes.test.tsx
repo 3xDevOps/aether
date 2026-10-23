@@ -100,3 +100,30 @@ it('keeps the selected repo in the address', () => {
   expect(routeQuery(route).toString()).toBe(`run=${multi.id}&view=changes&repo=${docs.id}`)
   expect(routeFromQuery(routeQuery(route))).toEqual(route)
 })
+
+it('merges the repo\'s pull request through the repo param', async () => {
+  const output = { exit_code: 0, truncated: false }
+  const head = 'b'.repeat(40)
+  vi.mocked(api.runGitStatus).mockResolvedValue({
+    branch: 'aether/run-multi-docs', head, detached: false, unborn: false, changes: [], truncated: false,
+    account_member_id: serverInfo.member.id, account_name: 'Alice', identity: 'alice',
+    remotes: [{ name: 'origin', fetch_urls: ['git@github.com:acme/docs.git'], push_urls: ['git@github.com:acme/docs.git'] }], output,
+  })
+  vi.mocked(api.runPRFeedback).mockResolvedValue({
+    identity: 'alice', account_member_id: serverInfo.member.id, checks: [], comments: [], reviews: [], review_comments: [], truncated: false, output,
+    pull_request: {
+      number: 4, url: 'https://github.com/acme/docs/pull/4', state: 'open', title: 'Docs', draft: false, repository: 'acme/docs',
+      base_branch: 'main', head_repository: 'acme/docs', head_branch: 'aether/run-multi-docs', head_oid: head,
+    },
+  })
+  vi.mocked(api.runPRMerge).mockResolvedValue({ merged: true, output } as Awaited<ReturnType<typeof api.runPRMerge>>)
+  seed({ repo: docs.id })
+  useStore.setState({ workspaces: { [workspace.id]: workspace, [docs.id]: { ...docs, origin: 'git@github.com:acme/docs.git' } } })
+  renderDiff()
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Merge' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Squash and merge' }))
+  await waitFor(() => expect(api.runPRMerge).toHaveBeenCalledWith(expect.objectContaining({
+    run_id: multi.id, repo: docs.id, method: 'squash', repository: 'acme/docs', number: 4, expected_head: head, expected_base: 'main',
+  })))
+})

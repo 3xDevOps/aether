@@ -779,8 +779,6 @@ func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.Raw
 	}, nil
 }
 
-// validateExtraWorkspaces refuses a repeated extra workspace and the primary
-// one among the extras.
 func validateExtraWorkspaces(primary string, extras []string) error {
 	seen := map[string]bool{primary: true}
 	for _, id := range extras {

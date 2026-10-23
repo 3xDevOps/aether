@@ -141,7 +141,6 @@ type Store interface {
 	// SetRunCheckout records only the run's checkout path and branch,
 	// leaving every other field untouched.
 	SetRunCheckout(ctx context.Context, id domain.RunID, worktree, branch string) error
-	// SetRunRepos records the run's extra repositories, once.
 	SetRunRepos(ctx context.Context, id domain.RunID, repos []domain.RunRepo) error
 	// SetRunAgentSession records only the agent's own session id
 	// (Run.HarnessSessionID), leaving every other field untouched.

@@ -5,7 +5,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { Workspace } from '@/lib/types'
 
-/** Other workspaces the run also gets a checkout of, each at /repos/<name> beside the primary /workspace. */
 export function ExtraRepos({
   options,
   value,

@@ -41,7 +41,6 @@ export function ReviewBar({
   /** The diff on screen, which decides each comment's line numbers and whether it is outdated. */
   files: PatchFile[]
   scope: string
-  /** A repo other than the primary: its review is kept apart, and the message says where the comments are. */
   repo?: { key: string; name: string }
 }) {
   const key = repo?.key ?? run.id

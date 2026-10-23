@@ -24,7 +24,6 @@ import type { RunRecord } from '@/store/runs'
 
 export const allRepos = 'all'
 
-/** The repo the changes view shows: `all`, a non-primary workspace id, or undefined for the primary. */
 export function useSelectedRepo(runID: string): string | undefined {
   return useStore((s) => (isRunRoute(s.route, runID) && s.route.params.view === 'changes' ? s.route.params.repo : undefined))
 }
@@ -37,7 +36,6 @@ function plural(count: number): string {
   return `${count} file${count === 1 ? '' : 's'}`
 }
 
-/** One tab per repo, primary first, each with its changed-file count once it is known. */
 export function RepoTabs({ run, selected }: { run: RunRecord; selected: string }) {
   const repos = useRepoRuns(run)
   const primaryCount = useStore((s) => s.diffs[run.id]?.snapshots[0]?.files.length)
@@ -56,8 +54,8 @@ export function RepoTabs({ run, selected }: { run: RunRecord; selected: string }
 }
 
 function RepoTab({ repo, run, knownCount }: { repo: RunRepo; run: ScopedRecord; knownCount: number | undefined }) {
-  const patch = useRepoPatch(run.id, repo.primary ? '' : repo.workspace_id, !repo.primary)
-  const count = repo.primary ? knownCount : patch.loading ? undefined : patch.files.length
+  const patch = useRepoPatch(run.id, repo.primary ? '' : repo.workspace_id, knownCount === undefined)
+  const count = knownCount ?? (patch.loading ? undefined : patch.files.length)
   return (
     <TabsTrigger value={repo.workspace_id}>
       {repo.name}
@@ -66,7 +64,6 @@ function RepoTab({ repo, run, knownCount }: { repo: RunRepo; run: ScopedRecord; 
   )
 }
 
-/** Every repo's changed files under its own heading, with its pull request beside it. */
 export function AllRepos({ run, agent, agentName }: { run: RunRecord; agent: AgentTerminal; agentName: string }) {
   const repos = useRepoRuns(run)
   return (
@@ -111,7 +108,6 @@ function RepoSummary({ repo, run, agent, agentName }: { repo: RunRepo; run: Scop
   )
 }
 
-/** A non-primary repo's changes against its base: its files, patches, review and Publish. */
 export function RepoChanges({ run, repo, agent, agentName }: { run: ScopedRecord; repo: RunRepo; agent: AgentTerminal; agentName: string }) {
   const caps = useCapability()
   const route = useStore((s) => s.route)

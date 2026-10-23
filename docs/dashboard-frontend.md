@@ -3250,10 +3250,17 @@ gateway lists the `run.repos` method.
   is the primary). The primary tab is today's view unchanged. Another repo
   (`repo-changes.tsx`) shows that repo's files against its base, with its own
   review comments (kept under `<run id>#<workspace id>` in `review.ts`),
-  **Publish** and pull request; every call carries `repo`. It has no Compare
-  menu. **All repos** lists each repo's changed files under its name, branch
+  **Publish**, pull request and **Merge** (squash); every call carries `repo`.
+  It has no Compare menu: Compare ranges over the run's diff snapshots, which
+  exist for the primary repo only. The primary tab's count comes from the run's snapshot, and from a `run.patch`
+  read until the first snapshot arrives. **All repos** lists each repo's changed files under its name, branch
   and pull request; a file opens in its repo. Paths in a repo are relative to
   that repo.
+- **Files.** With extra repos the view gains a **Repos** strip above the tree.
+  An extra repo's tree, files, saves and diffs send `workspace_id` of the
+  primary plus `repo` (the server refuses another `workspace_id`), and open
+  files are keyed by `repo` as well. The changed-file dots come from that
+  repo's patch.
 - **Pull requests.** The header's pull-request group becomes one chip, **2
   PRs**, with the worst check state of them (failing, then running, then the
   rest). It opens a list of repo, `#number` link, state and checks, and
