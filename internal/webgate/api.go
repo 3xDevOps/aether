@@ -238,15 +238,10 @@ func (g *Gateway) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	raw, perr := backend.Call(r.Context(), protocol.MethodServerInfo, json.RawMessage(`{}`))
-	if perr != nil {
-		WriteError(w, StatusFor(perr.Code), perr)
-		return
-	}
+	// A server that cannot answer advertises no multi-repo support; the descriptor must still load.
 	var info protocol.ServerInfoResult
-	if err := json.Unmarshal(raw, &info); err != nil {
-		WriteError(w, http.StatusBadGateway, &protocol.Error{Code: protocol.CodeInternal, Message: "decode server.info: " + err.Error()})
-		return
+	if raw, perr := backend.Call(r.Context(), protocol.MethodServerInfo, json.RawMessage(`{}`)); perr == nil {
+		_ = json.Unmarshal(raw, &info)
 	}
 	caps := g.cfg.Capabilities
 	caps.Methods = []string{"*"}
