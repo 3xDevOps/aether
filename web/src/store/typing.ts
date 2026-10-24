@@ -21,11 +21,14 @@ export const createTypingSlice: SliceCreator<TypingSlice> = (set, get) => ({
   typing: {},
   noteTyping: (runID, memberID, now = Date.now()) =>
     set((s) => {
-      const current = s.typing[runID] ?? {}
-      const held = current[memberID]
-      const live = Object.fromEntries(Object.entries(current).filter(([, t]) => t.until > now))
-      live[memberID] = { since: held && held.until > now ? held.since : now, until: now + typingTtlMs }
-      return { typing: { ...s.typing, [runID]: live } }
+      const typing: Record<string, Record<string, Typer>> = {}
+      for (const [id, entries] of Object.entries(s.typing)) {
+        const live = Object.entries(entries).filter(([, t]) => t.until > now)
+        if (live.length) typing[id] = Object.fromEntries(live)
+      }
+      const held = typing[runID]?.[memberID]
+      typing[runID] = { ...typing[runID], [memberID]: { since: held?.since ?? now, until: now + typingTtlMs } }
+      return { typing }
     }),
   clearTyping: (runID, memberID) => {
     const current = get().typing[runID]

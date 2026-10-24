@@ -46,11 +46,12 @@ function ComposerFrame({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Closed({ reason, action, dock, failure }: { reason: string; action?: React.ReactNode; dock?: React.ReactNode; failure?: string }) {
+function Closed({ runID, reason, action, dock, failure }: { runID: string; reason: string; action?: React.ReactNode; dock?: React.ReactNode; failure?: string }) {
   return (
     <ComposerFrame>
       {dock}
       {failure && <p role="alert" className="text-ui-sm text-state-failed">{failure}</p>}
+      <TypingIndicator runID={runID} />
       <div className="flex min-h-14 min-w-0 items-center gap-2 rounded-composer border border-seam bg-chrome py-2 pl-4 pr-2">
         <p role="status" className="min-w-0 flex-1 text-ui-sm text-muted">{reason}</p>
         {action}
@@ -273,7 +274,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
     else void post()
   }
 
-  if (block) return <Closed reason={block} />
+  if (block) return <Closed runID={run.id} reason={block} />
 
   return (
     <ComposerFrame>
@@ -470,6 +471,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   if (gate) {
     return (
       <Closed
+        runID={run.id}
         reason={gate.reason}
         dock={dock}
         failure={gate.interrupt ? error : undefined}

@@ -47,6 +47,13 @@ describe('typing entries', () => {
     expect(Object.keys(useStore.getState().typing.run_2 ?? {})).toEqual(['bob'])
   })
 
+  it('sweeps lapsed entries of every run on the next signal', () => {
+    const { noteTyping } = useStore.getState()
+    noteTyping('run_1', 'bob', 1_000)
+    noteTyping('run_2', 'amy', 1_000 + typingTtlMs + 1)
+    expect(Object.keys(useStore.getState().typing)).toEqual(['run_2'])
+  })
+
   it('reports when the next entry lapses', () => {
     const { noteTyping } = useStore.getState()
     noteTyping('run_1', 'bob', 1_000)

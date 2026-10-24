@@ -108,11 +108,22 @@ describe('useTypingSignal', () => {
     expect(api.presenceTyping).toHaveBeenLastCalledWith(runID, true)
   })
 
-  it('stays silent when nobody else watches, and for a restored draft', () => {
+  it('stays silent when nobody else watches', () => {
     seed([alice.id])
     const view = render(<Probe body="draft" />)
     view.rerender(<Probe body="draft!" />)
     view.unmount()
     expect(api.presenceTyping).not.toHaveBeenCalled()
+  })
+
+  it('keeps a restored draft silent until it changes', () => {
+    seed()
+    const view = render(<Probe body="draft" />)
+    expect(api.presenceTyping).not.toHaveBeenCalled()
+    view.rerender(<Probe body="draft!" />)
+    expect(api.presenceTyping).toHaveBeenCalledTimes(1)
+    expect(api.presenceTyping).toHaveBeenLastCalledWith(runID)
+    view.unmount()
+    expect(api.presenceTyping).toHaveBeenLastCalledWith(runID, true)
   })
 })
