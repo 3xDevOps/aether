@@ -16,6 +16,7 @@ import { ComposerImagePicker, ComposerImages, hasImages, useComposerImages } fro
 import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
 import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type ComposerDraft, type Pill } from '@/routes/run/composer-state'
 import type { RunRoom } from '@/routes/run/room'
+import { TypingIndicator, useTypingSignal } from '@/routes/run/typing'
 import { sessionColumn } from '@/routes/run/session-rows'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
@@ -242,6 +243,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const coarse = useMediaQuery(coarsePointer)
   const draft = useComposerDraft(run.id)
   const { body } = draft
+  useTypingSignal(run.id, body)
   const busy = Boolean(draft.busy)
   const late = usePastDeadline(busy)
   const hintID = useId()
@@ -284,6 +286,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
           }}>Dismiss</Button>
         </div>
       )}
+      <TypingIndicator runID={run.id} />
       <ComposerBox
         textarea={textarea}
         autoFocus={autoFocus}
@@ -348,6 +351,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const coarse = useMediaQuery(coarsePointer)
   const draft = useComposerDraft(run.id)
   const { body, error } = draft
+  useTypingSignal(run.id, body)
   const busy = Boolean(draft.busy)
   const late = usePastDeadline(busy)
   const setBody = (next: string) => saveComposerDraft(run.id, { body: next })
@@ -498,6 +502,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           <Button size="sm" variant="ghost" onClick={() => saveComposerDraft(run.id, { error: undefined })}>Dismiss</Button>
         </div>
       )}
+      <TypingIndicator runID={run.id} />
       <ComposerBox
         textarea={textarea}
         autoFocus={autoFocus}

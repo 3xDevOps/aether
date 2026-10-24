@@ -8,6 +8,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/approvals"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -18,6 +19,7 @@ func init() {
 	registerGuarded(protocol.MethodApprovalDecide, permissions.Steer, runTarget, (*Server).approvalDecide)
 	registerMethod(protocol.MethodPresenceHeartbeat, (*Server).presenceHeartbeat)
 	registerMethod(protocol.MethodPresenceRoster, (*Server).presenceRoster)
+	registerGuarded(protocol.MethodPresenceTyping, permissions.Steer, runTarget, (*Server).presenceTyping)
 }
 
 func (s *Server) approvals() (ApprovalService, *protocol.Error) {
@@ -94,6 +96,26 @@ func (s *Server) presenceHeartbeat(ctx context.Context, member domain.MemberID, 
 		return nil, rpcError(err)
 	}
 	return protocol.PresenceHeartbeatResult{TTLSeconds: int(svc.TTL() / time.Second)}, nil
+}
+
+func (s *Server) presenceTyping(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+	p, perr := decodeParams[protocol.PresenceTypingParams](params)
+	if perr != nil {
+		return nil, perr
+	}
+	run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
+		WorkspaceID: run.WorkspaceID,
+		RunID:       run.ID,
+		ActorID:     member,
+		Payload:     events.TypingPayload{Stopped: p.Stopped},
+	}); err != nil {
+		return nil, rpcError(err)
+	}
+	return struct{}{}, nil
 }
 
 func (s *Server) presenceRoster(_ context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
