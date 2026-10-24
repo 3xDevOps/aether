@@ -1228,7 +1228,7 @@ func TestRelaunchSuspendsRuntimeGraceUntilTheNextClose(t *testing.T) {
 	}
 
 	time.Sleep(10 * time.Millisecond)
-	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+	if err = e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
 		t.Fatalf("second CloseRun: %v", err)
 	}
 	again := e.waitStoreStatus(t, run.ID, domain.RunMerged)
