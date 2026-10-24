@@ -58,7 +58,6 @@ function Closed({ reason, action, dock, failure }: { reason: string; action?: Re
   )
 }
 
-/** Reopens the finished run's retained container in place; the returned run replaces the finished one. */
 function ClosedRun({ run, reason, dock }: { run: RunRecord; reason: string; dock?: React.ReactNode }) {
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string>()
