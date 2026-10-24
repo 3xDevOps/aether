@@ -17,6 +17,7 @@ import { createLocalSlice, type LocalSlice } from '@/store/local'
 import { createMembersSlice, type MembersSlice } from '@/store/members'
 import { createPaletteSlice, type PaletteSlice } from '@/store/palette'
 import { createPresenceSlice, type PresenceSlice } from '@/store/presence'
+import { createTypingSlice, type TypingSlice } from '@/store/typing'
 import { createRunsSlice, type RunsSlice } from '@/store/runs'
 import { createServerSlice, type ServerSlice } from '@/store/server'
 import { createSessionsSlice, type SessionsSlice } from '@/store/sessions'
@@ -68,6 +69,7 @@ export type RootState = ServerSlice &
   PaletteSlice &
   ApprovalsSlice &
   PresenceSlice &
+  TypingSlice &
   CostSlice &
   TimelineSlice &
   FilesSlice &
@@ -138,6 +140,7 @@ export function createRootStore() {
         ...createPaletteSlice(...a),
         ...createApprovalsSlice(...a),
         ...createPresenceSlice(...a),
+        ...createTypingSlice(...a),
         ...createCostSlice(...a),
         ...createTimelineSlice(...a),
         ...createDiffSlice(...a),

@@ -152,6 +152,7 @@ const LEGACY_REMOTE_METHODS: Record<string, true> = {
   'approval.decide': true,
   'presence.roster': true,
   'presence.heartbeat': true,
+  'presence.typing': true,
   'workspace.timeline': true,
   'cost.report': true,
   'budget.get': true,

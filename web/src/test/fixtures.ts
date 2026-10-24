@@ -729,6 +729,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     approvalDecide: vi.fn(async () => approval()),
     presenceRoster: vi.fn(async () => []),
     presenceHeartbeat: vi.fn(async () => 90),
+    presenceTyping: vi.fn(async () => undefined),
     budgetGet: vi.fn(async (workspaceID: string) => budget(workspaceID)),
     templateList: vi.fn(async () => [template]),
     templateLaunch: vi.fn(async () => ({

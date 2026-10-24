@@ -16,6 +16,7 @@ import { ComposerImagePicker, ComposerImages, hasImages, useComposerImages } fro
 import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
 import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type ComposerDraft, type Pill } from '@/routes/run/composer-state'
 import type { RunRoom } from '@/routes/run/room'
+import { TypingIndicator, useTypingSignal } from '@/routes/run/typing'
 import { sessionColumn } from '@/routes/run/session-rows'
 import { useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
@@ -45,11 +46,12 @@ function ComposerFrame({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Closed({ reason, action, dock, failure }: { reason: string; action?: React.ReactNode; dock?: React.ReactNode; failure?: string }) {
+function Closed({ runID, reason, action, dock, failure }: { runID: string; reason: string; action?: React.ReactNode; dock?: React.ReactNode; failure?: string }) {
   return (
     <ComposerFrame>
       {dock}
       {failure && <p role="alert" className="text-ui-sm text-state-failed">{failure}</p>}
+      <TypingIndicator runID={runID} />
       <div className="flex min-h-14 min-w-0 items-center gap-2 rounded-composer border border-seam bg-chrome py-2 pl-4 pr-2">
         <p role="status" className="min-w-0 flex-1 text-ui-sm text-muted">{reason}</p>
         {action}
@@ -242,6 +244,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const coarse = useMediaQuery(coarsePointer)
   const draft = useComposerDraft(run.id)
   const { body } = draft
+  useTypingSignal(run.id, body)
   const busy = Boolean(draft.busy)
   const late = usePastDeadline(busy)
   const hintID = useId()
@@ -271,7 +274,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
     else void post()
   }
 
-  if (block) return <Closed reason={block} />
+  if (block) return <Closed runID={run.id} reason={block} />
 
   return (
     <ComposerFrame>
@@ -284,6 +287,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
           }}>Dismiss</Button>
         </div>
       )}
+      <TypingIndicator runID={run.id} />
       <ComposerBox
         textarea={textarea}
         autoFocus={autoFocus}
@@ -348,6 +352,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const coarse = useMediaQuery(coarsePointer)
   const draft = useComposerDraft(run.id)
   const { body, error } = draft
+  useTypingSignal(run.id, body)
   const busy = Boolean(draft.busy)
   const late = usePastDeadline(busy)
   const setBody = (next: string) => saveComposerDraft(run.id, { body: next })
@@ -466,6 +471,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   if (gate) {
     return (
       <Closed
+        runID={run.id}
         reason={gate.reason}
         dock={dock}
         failure={gate.interrupt ? error : undefined}
@@ -498,6 +504,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
           <Button size="sm" variant="ghost" onClick={() => saveComposerDraft(run.id, { error: undefined })}>Dismiss</Button>
         </div>
       )}
+      <TypingIndicator runID={run.id} />
       <ComposerBox
         textarea={textarea}
         autoFocus={autoFocus}

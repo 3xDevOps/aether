@@ -545,3 +545,47 @@ func TestConcurrentPublishers(t *testing.T) {
 		t.Fatalf("log last seq = %d, want %d", last, publishers*perPublisher)
 	}
 }
+
+func TestEphemeralEventsReachLiveSubscribersOnly(t *testing.T) {
+	log := newTestLog(t)
+	b := newTestBus(t, log)
+	ctx := context.Background()
+
+	live, err := b.Subscribe(ctx, SubscribeOptions{Filter: Filter{Workspace: "w1"}})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	first := publish(t, b, statusEvent("w1", "r1", domain.RunRunning))
+	typing := publish(t, b, Event{WorkspaceID: "w1", RunID: "r1", ActorID: "m1", Payload: TypingPayload{}})
+	if typing.Seq != 0 || typing.Type != TypeTyping {
+		t.Fatalf("typing event = seq %d type %s, want seq 0 type %s", typing.Seq, typing.Type, TypeTyping)
+	}
+	second := publish(t, b, statusEvent("w1", "r1", domain.RunRunning))
+	if second.Seq != first.Seq+1 {
+		t.Fatalf("seq after typing = %d, want %d", second.Seq, first.Seq+1)
+	}
+
+	got := collect(t, live, 3)
+	if got[1].Type != TypeTyping || got[1].ActorID != "m1" || got[1].RunID != "r1" {
+		t.Fatalf("live subscriber got %+v, want the typing event between the status events", got[1])
+	}
+
+	stored, err := log.Read(ctx, Filter{}, 0, 0, 10)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	for _, e := range stored {
+		if e.Type == TypeTyping {
+			t.Fatalf("typing event was persisted: %+v", e)
+		}
+	}
+	replay, err := b.Subscribe(ctx, SubscribeOptions{Filter: Filter{Workspace: "w1"}, Replay: true})
+	if err != nil {
+		t.Fatalf("subscribe replay: %v", err)
+	}
+	for _, e := range collect(t, replay, 2) {
+		if e.Type == TypeTyping {
+			t.Fatalf("typing event was replayed: %+v", e)
+		}
+	}
+}

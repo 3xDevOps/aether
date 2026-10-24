@@ -41,7 +41,8 @@ func NewInProc(ctx context.Context, log EventLog) (*InProc, error) {
 	return b, nil
 }
 
-// Publish implements Bus. Events are persisted to the log before fan-out;
+// Publish implements Bus. An Ephemeral payload is fanned out without a
+// sequence number or a log write. Other events are persisted to the log before fan-out;
 // a persistence failure fails the publish so replay can never miss an
 // event that live subscribers saw. Sequence assignment, the log write, and
 // fan-out happen under one lock, so concurrent publishes (and Subscribe)
@@ -70,6 +71,14 @@ func (b *InProc) Publish(ctx context.Context, e Event) (Event, error) {
 	defer b.mu.Unlock()
 	if b.closed {
 		return Event{}, ErrBusClosed
+	}
+	if _, ok := e.Payload.(Ephemeral); ok {
+		for s := range b.subs {
+			if s.filter.Matches(e) {
+				s.enqueue(e)
+			}
+		}
+		return e, nil
 	}
 	if e.ID != "" && b.log != nil {
 		if lookup, ok := b.log.(EventLogByID); ok {
