@@ -804,6 +804,9 @@ agent-finished retained runs remain eligible. Interactive outcome reports
 now leave the run open and do not require reopening. `run.relaunch` resumes the
 same run row in the same container and checkout; it does not create a new run
 or container and does not perform a new launch or disk-floor admission.
+The response's `container_retained_until` is absent: the deadline is cleared
+while the run is live, `finished_at` is null, `started_at` is the relaunch, and
+the next close starts a new `--run-container-ttl` period.
 
 Retention expiry is swept within at most one minute and reconciled on server
 boot. Once expiry destroys the retained container, the call returns `-32002`

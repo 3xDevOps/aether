@@ -92,7 +92,7 @@ describe('the Enhanced composer gate', () => {
       expect(enhancedBlock({ ...open, run: parked, canReopen: false })).toBeNull()
       expect(composerBlock({ ...parked, outcome_unseen: false }, true, false)).toBeNull()
       expect(composerBlock({ ...parked, status: 'abandoned' }, true, true))
-        .toBe('This run has finished. Reopen it from More to message the agent.')
+        .toBe('This run has finished. Relaunch it to continue the chat and files.')
     }
   })
 

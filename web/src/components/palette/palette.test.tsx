@@ -815,7 +815,7 @@ describe('command palette', () => {
     })
     open()
 
-    fireEvent.click(await screen.findByText('Reopen run'))
+    fireEvent.click(await screen.findByText('Relaunch'))
 
     await waitFor(() => expect(api.runRelaunch).toHaveBeenCalledWith('run_1'))
   })

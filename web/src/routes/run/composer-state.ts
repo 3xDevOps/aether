@@ -103,7 +103,7 @@ export const pillHint: Record<Pill, string> = {
 }
 
 export function composerBlock(run: RunRecord, maySteer: boolean, canReopen: boolean): string | null {
-  if (isTerminal(run.status)) return canReopen ? 'This run has finished. Reopen it from More to message the agent.' : 'This run has finished.'
+  if (isTerminal(run.status)) return canReopen ? 'This run has finished. Relaunch it to continue the chat and files.' : 'This run has finished.'
   if (run.status === 'queued' || run.status === 'provisioning') return 'The agent is still starting.'
   if (!maySteer) return run.protected ? 'This run is protected: only its owner or an admin can message the agent.' : 'You can watch this run but not message the agent.'
   return null

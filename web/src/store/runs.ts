@@ -209,12 +209,13 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       }
       delete next.stateChangedAtPredicted
       if (to !== current.status) delete next.toolActivity
-      if (to === 'running' && !next.started_at) next.started_at = time
+      if (to === 'running' && (!next.started_at || isTerminal(current.status))) next.started_at = time
       if (isTerminal(to)) {
         next.finished_at = time
         next.pending_inputs = []
       }
       if (!isTerminal(to)) {
+        next.finished_at = null
         delete next.container_retained_until
         delete next.cleanup_pending
         delete next.cleanup_error

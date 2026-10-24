@@ -1670,7 +1670,7 @@ capability gate, optional confirmation and call. Run verbs (`runCommands`):
 **Pause run** / **Resume run**, **Send a message to the agent…**, **Forward a
 port…** (local gateway), **Close run…**, **Kill run**, **Delete run**, **Free
 container…**, **Archive run** / **Restore run**, **Protect run** /
-**Unprotect run**, **Reopen run**, **Pull branch** (local gateway) and **Hand
+**Unprotect run**, **Relaunch**, **Pull branch** (local gateway) and **Hand
 off to <member>**. Pull branch fetches the run branch into the linked
 repository; unless you are already on that branch, its toast offers **Switch
 to it** (`pull.switch`, which refuses a dirty checkout with git's own
@@ -1766,9 +1766,16 @@ the server's events with an RPC response.
   `run.release`, the kill permission and a retained-container reason
   (`isRetainedRun`). A freed or expired run no longer offers it, and the
   server checks the lifecycle again if the run changed after the menu opened.
-- **Reopen run** resumes a retained Standard or Enhanced run after explicit
-  Close (`aether reopen` on the command line). Reported interactive completion
-  needs no reopening. Older agent-finished retained runs remain eligible.
+- **Relaunch** resumes a retained Standard or Enhanced run after explicit
+  Close (`aether reopen` on the command line). It is offered in **More** and
+  as the primary button in the composer slot of a finished run, which calls
+  `run.relaunch` and swaps the finished record for the live one the server
+  returns. A run is eligible while the server reports `container_retained_until`
+  (or, before that arrives, a retained-container reason), except a finished
+  swarm worker. Relaunch clears the deadline, the status event drops
+  `finished_at` and `started_at` restarts, and the next close sets a fresh
+  deadline. Reported interactive completion needs no relaunching. Older
+  agent-finished retained runs remain eligible.
 - **Hand off** and **Protect** need the run's owner or an admin. Before
   hydration the caller's own record has not arrived, and the mirror answers
   yes rather than making the shell's buttons appear a beat late. **Pull

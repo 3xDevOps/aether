@@ -168,7 +168,7 @@ test('an archived run offers Restore and Reopen, not Archive', async () => {
   })
   render(<RunActions run={record} />)
   const menu = await openMore()
-  expect(menu.getByRole('menuitem', { name: 'Reopen run' })).toBeTruthy()
+  expect(menu.getByRole('menuitem', { name: 'Relaunch' })).toBeTruthy()
   expect(menu.queryByRole('menuitem', { name: 'Archive run' })).toBeNull()
   fireEvent.click(menu.getByRole('menuitem', { name: 'Restore run' }))
   await waitFor(() => expect(api.runArchive).toHaveBeenCalledWith(record.id, false))
@@ -228,10 +228,10 @@ test.each([
   { status: 'merged', reason: 'closed; retained container' },
   { status: 'completed', reason: 'agent reported success; retained container' },
   { status: 'failed', reason: 'agent reported failure; retained container' },
-] satisfies Partial<Run>[])('a TUI run that kept its container offers Reopen: %j', async (over) => {
+] satisfies Partial<Run>[])('a TUI run that kept its container offers Relaunch: %j', async (over) => {
   const record = seed({ run: { ...over, mode: 'tui' } })
   render(<RunActions run={record} />)
-  await selectMore('Reopen run')
+  await selectMore('Relaunch')
   await waitFor(() => expect(api.runRelaunch).toHaveBeenCalledWith(record.id))
 })
 
@@ -240,9 +240,9 @@ test.each([
   { status: 'failed', mode: 'tui', reason: 'closed; retained container' },
   { status: 'merged', mode: 'headless', reason: 'closed; retained container' },
   { status: 'completed', mode: 'tui', reason: 'worker finished; retained container' },
-] satisfies Partial<Run>[])('Reopen is absent when ineligible: %j', async (over) => {
+] satisfies Partial<Run>[])('Relaunch is absent when ineligible: %j', async (over) => {
   render(<RunActions run={seed({ run: over })} />)
-  expect((await openMore()).queryByRole('menuitem', { name: 'Reopen run' })).toBeNull()
+  expect((await openMore()).queryByRole('menuitem', { name: 'Relaunch' })).toBeNull()
 })
 
 test('release confirms, keeps the run, and shows the real gateway error', async () => {
@@ -851,4 +851,15 @@ test('a sign-in switch dismisses an unanswered verb\'s Retry and drops its late 
   expect(runOne(useStore.getState()).protected).toBeFalsy()
   expect(useStore.getState().predicting.run_1).toBeUndefined()
   expect(toast.success).not.toHaveBeenCalled()
+})
+
+test.each([
+  { status: 'merged', reason: 'closed' },
+  { status: 'abandoned', reason: 'killed' },
+  { status: 'failed', reason: 'agent exited 1' },
+] satisfies Partial<Run>[])('a run inside its runtime grace offers Relaunch whatever its reason: %j', async (over) => {
+  const record = seed({ run: { ...over, mode: 'acp', acp: true, container_retained_until: '2030-01-01T00:00:00Z' } })
+  render(<RunActions run={record} />)
+  await selectMore('Relaunch')
+  await waitFor(() => expect(api.runRelaunch).toHaveBeenCalledWith(record.id))
 })
