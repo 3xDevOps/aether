@@ -151,11 +151,15 @@ func (s *Scheduler) reclaimRetained(ctx context.Context, entry *supervised) (boo
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
 	closed := s.runs[entry.runID] == entry && entry.retained && entry.status.Terminal()
+	entry.reclaimed = closed
 	s.mu.Unlock()
 	if !closed {
 		return false, nil
 	}
 	err := s.expireRetainedLocked(ctx, entry, "")
+	s.mu.Lock()
+	entry.reclaimed = false
+	s.mu.Unlock()
 	if err == nil {
 		return true, nil
 	}

@@ -100,3 +100,15 @@ describe('the Enhanced composer gate', () => {
     expect(enhancedBlock({ ...open, pending: 1 })?.interrupt).toBe(true)
   })
 })
+
+describe('composerBlock for a finished run', () => {
+  const finished = (reason: string) => toRecord(run({ status: 'merged', reason }))
+
+  it.each([
+    ['retained container reclaimed for disk space', 'This run has finished. Its container was removed early because disk space was low.'],
+    ['retained container expired', 'This run has finished. Its container was removed when it expired.'],
+    ['closed', 'This run has finished.'],
+  ])('says why a released container is gone: %s', (reason, text) => {
+    expect(composerBlock(finished(reason), true, false)).toBe(text)
+  })
+})

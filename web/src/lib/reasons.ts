@@ -31,6 +31,7 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^closed$/, () => 'Closed'],
   [/^killed$/, () => 'Stopped'],
   [/^retained container expired$/, () => 'Its container was removed when it expired'],
+  [/^retained container reclaimed for disk space$/, () => 'Its container was removed early because disk space was low'],
   [/^retained container unavailable$/, () => 'Its container is no longer available'],
   [/^server restarted: container exited (-?\d+)$/, (code) => `Its container had stopped with exit code ${code} when the server restarted`],
   [/^(?:agent idle|turn ended without a report)$/, () => 'Turn ended without a report'],

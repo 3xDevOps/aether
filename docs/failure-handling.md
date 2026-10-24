@@ -389,7 +389,8 @@ loses committed work. When disk runs low, Aether removes both sooner
 ([Recover from disk pressure](#recover-from-disk-pressure)). Relaunching resumes
 the same container and checkout; it restarts no process that had stopped. When
 retention ends, a closed run's reason reads `retained container expired` or
-`retained container unavailable`.
+`retained container unavailable`; when low disk space removes the container
+early it reads `retained container reclaimed for disk space`.
 
 ## Tuning
 

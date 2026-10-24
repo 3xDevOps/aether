@@ -23,6 +23,7 @@ const (
 	retainedCompletionReason  = "worker finished; retained container"
 	retainedExpiredReason     = "retained container expired"
 	retainedUnavailableReason = "retained container unavailable"
+	retainedReclaimedReason   = "retained container reclaimed for disk space"
 	recoveryPTYRetryInitial   = 10 * time.Millisecond
 	recoveryPTYRetryMax       = 250 * time.Millisecond
 	// defaultExitProbeTimeout is the startup Wait window that learns whether a
