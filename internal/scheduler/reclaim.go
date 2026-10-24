@@ -157,9 +157,6 @@ func (s *Scheduler) reclaimRetained(ctx context.Context, entry *supervised) (boo
 		return false, nil
 	}
 	err := s.expireRetainedLocked(ctx, entry, "")
-	s.mu.Lock()
-	entry.reclaimed = false
-	s.mu.Unlock()
 	if err == nil {
 		return true, nil
 	}

@@ -103,7 +103,6 @@ export const pillHint: Record<Pill, string> = {
   resume: 'The run is paused. Resume it to continue.',
 }
 
-/** The reasons a finished run's container is gone, which the composer says instead of leaving the loss unexplained. */
 const releasedReason = /^retained container (?:expired|unavailable|reclaimed for disk space)$/
 
 export function composerBlock(run: RunRecord, maySteer: boolean, canReopen: boolean): string | null {

@@ -17,7 +17,7 @@ import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSugg
 import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type ComposerDraft, type Pill } from '@/routes/run/composer-state'
 import type { RunRoom } from '@/routes/run/room'
 import { sessionColumn } from '@/routes/run/session-rows'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
@@ -63,10 +63,12 @@ function ClosedRun({ run, reason, dock }: { run: RunRecord; reason: string; dock
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string>()
   const relaunch = async () => {
+    const same = sameIdentity()
     setBusy(true)
     setFailure(undefined)
     try {
-      useStore.getState().upsertRun(await api.runRelaunch(run.id))
+      const relaunched = await api.runRelaunch(run.id)
+      if (same()) useStore.getState().upsertRun(relaunched)
     } catch (err) {
       setFailure(message(err))
     } finally {

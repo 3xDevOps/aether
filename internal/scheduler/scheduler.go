@@ -403,8 +403,8 @@ type supervised struct {
 	moving   bool
 	moveFrom runtime.ID
 	noRetain bool
-	// reclaimed is set while disk reclaim removes the retained container
-	// before its deadline, so the row says why.
+	// reclaimed is set once disk reclaim picks the retained container, and
+	// stays through a failed removal so the retry says why.
 	reclaimed bool
 	// waitYielded is set when the wait for the container's exit returned
 	// because a move held the claim: nothing waits on the container until

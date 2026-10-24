@@ -520,9 +520,9 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised,
 	reason := retainedExpiredReason
 	if s.cfg.RunContainerTTL >= 0 && deadline != nil && time.Now().UTC().Before(*deadline) {
 		reason = retainedUnavailableReason
-		if entry.reclaimed {
-			reason = retainedReclaimedReason
-		}
+	}
+	if entry.reclaimed {
+		reason = retainedReclaimedReason
 	}
 	identity := entry.evidenceIdentity
 	s.mu.Unlock()
@@ -875,4 +875,13 @@ func (s *Scheduler) exitDetail(ctx context.Context, entry *supervised) string {
 		}
 	}
 	return ""
+}
+
+// expiryReasonLocked is the reason a retained run keeps once destruction of
+// its container is confirmed after a retry. The caller holds s.mu.
+func (e *supervised) expiryReasonLocked() string {
+	if e.reclaimed {
+		return retainedReclaimedReason
+	}
+	return retainedExpiredReason
 }

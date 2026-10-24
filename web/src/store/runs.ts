@@ -29,6 +29,7 @@ export function toRecord(snapshot: Run, previous?: RunRecord): RunRecord {
         review: previous.review,
         review_changed_at: previous.review_changed_at,
         finished_at: previous.finished_at,
+        started_at: previous.started_at,
         status_changed_at: undefined,
       }
     : previous && snapshot.status_seq === previous.status_seq
