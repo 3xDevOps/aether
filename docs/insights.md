@@ -40,7 +40,10 @@ swarm's runs are counted once, as the swarm, so a worker that is retried or an
 integrator that is replaced never adds a run. Two numbers include swarm runs:
 **Total tokens used** and the count of runs waiting for you.
 
-A run counts on the day it finished, even if it started before the 7 days.
+A run counts on the day it finished, even if it started before the 7 days. A
+relaunched run is one run: while it is live again it counts in no finished
+total, and after it closes again it counts once, on the day of its latest
+finish, with that outcome.
 
 How a run or swarm ended:
 
@@ -70,7 +73,7 @@ request status is read again. If GitHub cannot be read, the row shows
 
 Time covers runs that finished in the period.
 
-- Run time: from start to finish. **Slowest 10% take over** is the 90th
+- Run time: from the latest start (the relaunch, for a relaunched run) to finish. **Slowest 10% take over** is the 90th
   percentile.
 - Agent working: time the agent spent working, including waiting for other
   agents, CI or tools.

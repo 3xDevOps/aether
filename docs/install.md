@@ -334,7 +334,7 @@ rerun of `setup` or `install` keeps it unless you pass `--force`.
 | `run-cpus`, `run-memory`, `run-pids` | 8 CPUs (at most the host's), 8 GiB, 4096 | Ceilings per run and member environment, not reservations. |
 | `min-free-disk` | `0` (5% of the filesystem, 5 to 20 GiB) | Free-space reserve below which new runs are refused. Negative turns the check off. |
 | `checkout-ttl` | `72h` | How long a finished run's checkout is kept after the run ends. It also stays while the run's container is kept. Negative keeps it forever. |
-| `run-container-ttl` | `168h` | How long a closed run's container is kept so the run can be reopened. |
+| `run-container-ttl` | `168h` | How long a closed run's container is kept so the run can be relaunched. A relaunched run's clock restarts at its next close. |
 | `browser-image` | `ghcr.io/3xdevops/aether-browser:<release>` | The image a run's **Browser** tab starts from. Set it and updates stop moving it. |
 | `conflict-coordination` | on | Let overlapping runs message each other ([coordination.md](coordination.md)). Swarms need it. |
 

@@ -148,12 +148,19 @@ export function isRetainedRun(run: RunRecord): boolean {
   }
 }
 
-/** Reopen is explicit and only available while an interactive runtime is retained. */
-export function canReopenRun(run: Pick<Run, 'mode' | 'status' | 'reason'>): boolean {
-  return (run.mode === 'tui' || run.mode === 'acp') &&
-    (run.reason === 'closed; retained container'
-      ? run.status === 'merged' || run.status === 'abandoned' || run.status === 'completed'
-      : isTerminal(run.status) && agentReportRetained.has(run.reason ?? ''))
+/**
+ * Relaunch needs an interactive run whose container is still kept. The server
+ * reports the grace deadline only while it keeps the container, so its presence
+ * is the evidence; the reason strings cover a snapshot read before it arrived. A finished swarm worker's
+ * container is kept but never relaunchable.
+ */
+export function canReopenRun(run: Pick<Run, 'mode' | 'acp' | 'status' | 'reason' | 'container_retained_until' | 'cleanup_pending'>): boolean {
+  if (!(run.mode === 'tui' || run.mode === 'acp' || run.acp) || !isTerminal(run.status) || run.cleanup_pending) return false
+  if (run.reason === 'worker finished; retained container') return false
+  if (run.container_retained_until) return true
+  return run.reason === 'closed; retained container'
+    ? run.status === 'merged' || run.status === 'abandoned' || run.status === 'completed'
+    : agentReportRetained.has(run.reason ?? '')
 }
 
 export function releaseFinishedPlan(
@@ -492,10 +499,10 @@ export function runCommands(ctx: RunCommandContext): Command[] {
   ) {
     list.push({
       id: 'relaunch',
-      label: 'Reopen run',
-      short: 'Reopen',
+      label: 'Relaunch',
+      short: 'Relaunch',
       Icon: RefreshCw,
-      done: 'Reopened',
+      done: 'Relaunched',
       perform: (d) => d.api.runRelaunch(id),
     })
   }

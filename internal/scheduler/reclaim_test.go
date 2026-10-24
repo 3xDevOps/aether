@@ -72,6 +72,9 @@ func TestReclaimDiskRemovesClosedRunContainerFirstAndStopsWhenRecovered(t *testi
 	if e.rt.byName(string(run.ID)) != nil {
 		t.Fatal("retained container of the closed run survived reclaim")
 	}
+	if row, err := e.db.GetRun(t.Context(), run.ID); err != nil || row.Reason != retainedReclaimedReason {
+		t.Fatalf("reclaimed run = %+v, %v; want reason %q", row, err, retainedReclaimedReason)
+	}
 	requireCacheExists(t, cache, true)
 }
 

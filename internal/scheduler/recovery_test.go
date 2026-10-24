@@ -1197,6 +1197,50 @@ func TestTUICloseRelaunchKeepsExactRunAndContainer(t *testing.T) {
 	}
 }
 
+func TestRelaunchSuspendsRuntimeGraceUntilTheNextClose(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(cfg *Config) {
+		cfg.RunContainerTTL = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchFake(t, "grace follows the latest close")
+
+	if err := e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("CloseRun: %v", err)
+	}
+	closed := e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	first, err := e.sched.Retention(closed)
+	if err != nil || first.RetainedUntil == nil {
+		t.Fatalf("closed retention = %+v, %v; want a deadline", first, err)
+	}
+
+	reopened, err := e.sched.Relaunch(ctx, run.ID, e.member.ID)
+	if err != nil {
+		t.Fatalf("Relaunch: %v", err)
+	}
+	live, err := e.sched.Retention(reopened)
+	if err != nil || live.RetainedUntil != nil {
+		t.Fatalf("relaunched retention = %+v, %v; want no deadline while the run is live", live, err)
+	}
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil || sc.Retained || sc.RetainedUntil != nil {
+		t.Fatalf("relaunched sidecar = %+v, %v; want no retained deadline", sc, err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	if err = e.sched.CloseRun(ctx, run.ID, e.member.ID, domain.RunMerged); err != nil {
+		t.Fatalf("second CloseRun: %v", err)
+	}
+	again := e.waitStoreStatus(t, run.ID, domain.RunMerged)
+	second, err := e.sched.Retention(again)
+	if err != nil || second.RetainedUntil == nil {
+		t.Fatalf("second retention = %+v, %v; want a deadline", second, err)
+	}
+	if !second.RetainedUntil.After(*first.RetainedUntil) {
+		t.Fatalf("second deadline %v is not after the first %v: grace must restart at the new close", second.RetainedUntil, first.RetainedUntil)
+	}
+}
+
 func TestRetainedExpiryDestroysContainerAndHidesRelaunch(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, func(cfg *Config) {

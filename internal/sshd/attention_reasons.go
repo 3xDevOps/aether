@@ -45,6 +45,7 @@ var plainReasons = []struct {
 	{regexp.MustCompile(`^closed$`), func([]string) string { return "Closed" }},
 	{regexp.MustCompile(`^killed$`), func([]string) string { return "Stopped" }},
 	{regexp.MustCompile(`^retained container expired$`), func([]string) string { return "Its container was removed when it expired" }},
+	{regexp.MustCompile(`^retained container reclaimed for disk space$`), func([]string) string { return "Its container was removed early because disk space was low" }},
 	{regexp.MustCompile(`^retained container unavailable$`), func([]string) string { return "Its container is no longer available" }},
 	{regexp.MustCompile(`^server restarted: container exited (-?\d+)$`), func(g []string) string {
 		return "Its container had stopped with exit code " + g[0] + " when the server restarted"

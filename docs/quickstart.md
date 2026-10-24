@@ -321,8 +321,10 @@ failing check has **Send to agent**. Review and merge on GitHub as usual.
 When you are done, close the run: **Close run…** in its **More** menu, or
 `aether close <run-id> --outcome merged` (or `abandoned`). Closing commits the
 agent's latest work to the run's branch and keeps the container 7 days
-(`--run-container-ttl`); until then **Reopen run** or `aether reopen <run-id>`
-brings the run back. In a clone linked with `--repo` (next section), `aether
+(`--run-container-ttl`); until then the **Relaunch** button where the message box
+sat, **Relaunch** in the **More** menu, or `aether reopen <run-id>` brings the
+run back with its chat and files. The 7 days stop counting while the run is
+live again and start over when you close it. In a clone linked with `--repo` (next section), `aether
 pull <run-id>` fetches the branch, `aether/run-<task>-<id>`, without merging.
 
 ## Prove the plumbing without an agent subscription

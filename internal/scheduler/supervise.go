@@ -521,6 +521,9 @@ func (s *Scheduler) expireRetainedLocked(ctx context.Context, entry *supervised,
 	if s.cfg.RunContainerTTL >= 0 && deadline != nil && time.Now().UTC().Before(*deadline) {
 		reason = retainedUnavailableReason
 	}
+	if entry.reclaimed {
+		reason = retainedReclaimedReason
+	}
 	identity := entry.evidenceIdentity
 	s.mu.Unlock()
 

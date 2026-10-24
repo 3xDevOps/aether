@@ -983,6 +983,25 @@ describe('applyEvent', () => {
     expect(held()).toEqual({ status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?', status_seq: 6 })
   })
 
+  it('forgets the finish time and runtime grace when a relaunch reopens a finished run', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => [run({ status: 'merged', reason: 'closed; retained container', status_seq: 4, finished_at: '2026-08-14T11:00:00Z', container_retained_until: '2026-08-21T11:00:00Z' })]) }))
+
+    await applyEvent(store, statusEvent({ id: 'evt_20', seq: 20, payload: { from: 'merged', to: 'running', state: 'working', status_seq: 5 } }), fakeApi())
+
+    expect(store.getState().runs.run_1).toMatchObject({ status: 'running', finished_at: null })
+    expect(store.getState().runs.run_1.container_retained_until).toBeUndefined()
+  })
+
+  it('keeps the relaunch start time when an older snapshot arrives', async () => {
+    const store = createRootStore()
+    await hydrate(store, fakeApi({ runList: vi.fn(async () => [run({ status: 'running', status_seq: 5, started_at: '2026-08-14T12:00:00Z' })]) }))
+
+    store.getState().upsertRun(run({ status: 'merged', status_seq: 4, started_at: '2026-08-14T10:00:00Z' }))
+
+    expect(store.getState().runs.run_1).toMatchObject({ status: 'running', started_at: '2026-08-14T12:00:00Z' })
+  })
+
   it('keeps every field a status event set when an older snapshot arrives', async () => {
     const store = createRootStore()
     await hydrate(store, fakeApi({ runList: vi.fn(async () => [run({ state: 'working', status_seq: 3 })]) }))

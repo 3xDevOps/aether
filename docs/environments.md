@@ -217,7 +217,8 @@ has the thresholds and what to do.
 
 Reporting success or failure leaves an interactive run open for follow-up, and
 quiet runs do not expire. **Close** keeps the run's container for seven days
-(`--run-container-ttl`) so you can **Reopen** it, unless disk runs low first.
+(`--run-container-ttl`) so you can **Relaunch** it, unless disk runs low first. The seven days pause
+while the run is relaunched and start over at its next close.
 [What stays after a run ends](failure-handling.md#what-stays-after-a-run-ends)
 covers Close, Kill, **Free container…** and Delete.
 
