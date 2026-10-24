@@ -876,12 +876,3 @@ func (s *Scheduler) exitDetail(ctx context.Context, entry *supervised) string {
 	}
 	return ""
 }
-
-// expiryReasonLocked is the reason a retained run keeps once destruction of
-// its container is confirmed after a retry. The caller holds s.mu.
-func (e *supervised) expiryReasonLocked() string {
-	if e.reclaimed {
-		return retainedReclaimedReason
-	}
-	return retainedExpiredReason
-}

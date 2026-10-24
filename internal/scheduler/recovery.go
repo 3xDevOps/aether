@@ -1036,7 +1036,11 @@ func (s *Scheduler) finishDestroyPending(ctx context.Context, entry *supervised)
 		return err
 	}
 	if fresh.Status.Terminal() {
-		if released, ok := releasedReason(fresh.Status, fresh.Reason, entry.expiryReasonLocked()); entry.retained && ok {
+		expiry := retainedExpiredReason
+		if entry.reclaimed {
+			expiry = retainedReclaimedReason
+		}
+		if released, ok := releasedReason(fresh.Status, fresh.Reason, expiry); entry.retained && ok {
 			if err := s.relabelLocked(ctx, entry.runID, fresh.WorkspaceID, fresh.Status, released, ""); err != nil {
 				s.recordCleanupErrorLocked(entry, cleanupStateError)
 				s.mu.Unlock()
