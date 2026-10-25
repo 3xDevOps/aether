@@ -38,8 +38,6 @@ var waitingPrefixes = []struct {
 	{waitedProcessReasonPrefix, domain.ActivityWaitingTools, true},
 }
 
-// cutWaiting splits a waiting outcome's reason into the activity it shows,
-// whether it went stale, and the agent's summary.
 func cutWaiting(reason string) (domain.RunActivity, bool, string) {
 	for _, w := range waitingPrefixes {
 		if summary, ok := strings.CutPrefix(reason, w.prefix); ok {

@@ -681,7 +681,6 @@ type IntegratorWait struct {
 	Unread  int
 }
 
-// Live reports whether the integrator waits on its swarm.
 func (w IntegratorWait) Live() bool { return w.Workers > 0 || w.Unread > 0 }
 
 func (d *DB) IntegratorWaiting(ctx context.Context, run domain.RunID, since time.Time) (IntegratorWait, error) {
