@@ -62,13 +62,18 @@ type calls struct {
 }
 
 // connectorTool is one tool of a ChatGPT or Claude connector.
+// destructive and openWorld are its MCP hints, read under OpenAI's review
+// rules: destructive for a stop, a close or a send that cannot be taken
+// back, open-world for a tool that lets an agent push code or open pull
+// requests.
 type connectorTool struct {
-	name, title string
-	scope       Scope
-	idempotent  bool
-	does        string
-	enums       map[string][]any
-	add         func(srv *mcp.Server, t *mcp.Tool, c calls, enums map[string][]any)
+	name, title            string
+	scope                  Scope
+	idempotent             bool
+	destructive, openWorld bool
+	does                   string
+	enums                  map[string][]any
+	add                    func(srv *mcp.Server, t *mcp.Tool, c calls, enums map[string][]any)
 }
 
 // connectorToolOf defines a tool whose run returns a one-line summary and
@@ -125,6 +130,11 @@ func connectorToolOf[In any](name, title string, scope Scope, idempotent bool, n
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, out, nil
 		})
 	}
+	return t
+}
+
+func (t connectorTool) hints(destructive, openWorld bool) connectorTool {
+	t.destructive, t.openWorld = destructive, openWorld
 	return t
 }
 
@@ -197,14 +207,10 @@ func RegisterConnectorTools(srv *mcp.Server, call Call, granted func(Scope) bool
 			continue
 		}
 		// MCP assumes a tool writes, destroys and reaches the outside world
-		// unless its hints say otherwise. A launched agent does reach it.
-		annotations := &mcp.ToolAnnotations{DestructiveHint: new(false), IdempotentHint: t.idempotent, OpenWorldHint: new(true)}
-		switch t.scope {
-		case ScopeRead:
-			annotations = &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: new(false)}
-		case ScopeControl:
-			annotations = &mcp.ToolAnnotations{DestructiveHint: new(true), IdempotentHint: t.idempotent, OpenWorldHint: new(false)}
-		}
+		// unless its hints say otherwise, and OpenAI's review wants all three
+		// set.
+		annotations := &mcp.ToolAnnotations{ReadOnlyHint: t.scope == ScopeRead, DestructiveHint: new(t.destructive),
+			IdempotentHint: t.idempotent, OpenWorldHint: new(t.openWorld)}
 		t.add(srv, &mcp.Tool{Name: t.name, Title: t.title, Description: t.does, Annotations: annotations},
 			calls{read: scoped(ScopeRead), act: scoped(t.scope)}, t.enums)
 	}

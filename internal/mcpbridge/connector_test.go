@@ -285,22 +285,36 @@ func TestConnectorToolList(t *testing.T) {
 	if len(all) != len(connectorTools) {
 		t.Fatalf("tools with every scope = %d, want %d", len(all), len(connectorTools))
 	}
+	// Read tools are read-only, not destructive and closed-world. A
+	// launched, messaged, answered, resumed or allowed agent can push code
+	// and open pull requests, so those tools are open-world.
+	type hint struct{ readOnly, destructive, openWorld bool }
+	hints := map[string]hint{
+		"aether_launch_run": {false, false, true}, "aether_launch_swarm": {false, false, true},
+		"aether_message_run": {false, true, true}, "aether_answer": {false, true, true},
+		"aether_pause_run": {false, false, false}, "aether_resume_run": {false, false, true},
+		"aether_mark_reviewed": {false, true, false}, "aether_decide_approval": {false, true, true},
+		"aether_stop_run": {false, true, false}, "aether_close_run": {false, true, false}, "aether_cancel_swarm": {false, true, false},
+	}
 	names := map[Scope][]string{}
 	for _, tool := range all {
 		a := tool.Annotations
-		if tool.Title == "" || !strings.HasPrefix(tool.Description, "Use this when") || a == nil || a.OpenWorldHint == nil {
+		if tool.Title == "" || !strings.HasPrefix(tool.Description, "Use this when") || a == nil || a.DestructiveHint == nil || a.OpenWorldHint == nil {
 			t.Errorf("%s: title %q, description %q, annotations %+v", tool.Name, tool.Title, tool.Description, a)
 			continue
 		}
-		scope := ScopeRead
-		switch {
-		case a.ReadOnlyHint:
-		case *a.DestructiveHint:
-			scope = ScopeControl
-		default:
-			scope = ScopeWrite
+		want, ok := hints[tool.Name]
+		if !ok {
+			want = hint{readOnly: true}
 		}
-		names[scope] = append(names[scope], tool.Name)
+		if got := (hint{a.ReadOnlyHint, *a.DestructiveHint, *a.OpenWorldHint}); got != want {
+			t.Errorf("%s hints = %+v, want %+v", tool.Name, got, want)
+		}
+		for _, ct := range connectorTools {
+			if ct.name == tool.Name {
+				names[ct.scope] = append(names[ct.scope], tool.Name)
+			}
+		}
 	}
 	for _, name := range []string{"aether_list_workspaces", "aether_list_agents", "aether_list_runs", "aether_get_run", "aether_run_history",
 		"aether_launch_run", "aether_message_run", "aether_stop_run"} {
@@ -822,8 +836,8 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 	deliver := "2026-10-22T10:00:45Z"
 	f.answers[protocol.MethodRunInject] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-1", State: protocol.RoomMessageQueued, DeliverAfter: &deliver}})
 	text, _ = run(t, cs, "aether_message_run", map[string]any{"run_id": "run-1", "message": "use postgres", "idempotency_key": "m1"})
-	if !strings.Contains(text, "queued: the member in control can approve or deny it, else it is delivered at "+deliver) {
-		t.Fatalf("aether_message_run = %q", text)
+	if !strings.Contains(text, "queued: the member in control can approve or deny it, else it is delivered at "+deliver) || strings.Contains(text, "msg-1") {
+		t.Fatalf("aether_message_run = %q, want no internal message id", text)
 	}
 	if got := f.acted(); got.params != `{"run_id":"run-1","message":"use postgres","idempotency_key":"m1"}` {
 		t.Fatalf("run.inject = %+v", got)
@@ -870,8 +884,8 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 	acted("aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Run rm -rf build"},
 		protocol.MethodRunInputRespond, `{"run_id":"run-4","request_id":"req-4","option_id":"once"}`)
 	if text, out := run(t, cs, "aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Run rm -rf build"}); text !=
-		"Allowed the request once on run run-4: answered." || out["answer_id"] != "req-4" {
-		t.Fatalf("a decided permission = %q %v, want its agent-chosen id only as answer_id", text, out)
+		"Allowed the request once on run run-4: answered." || out["run_id"] != "run-4" || out["answer_id"] != nil {
+		t.Fatalf("a decided permission = %q %v, want no answer_id", text, out)
 	}
 
 	for _, c := range []struct {
