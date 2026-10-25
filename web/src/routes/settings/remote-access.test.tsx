@@ -39,16 +39,18 @@ it('shows the edge rows and re-reads server.edge on mount', async () => {
   await waitFor(() => expect(client.serverEdge).toHaveBeenCalledTimes(1))
   expect(screen.getByText(edgeURL)).toBeTruthy()
   expect(screen.getByText(ownerless.server_id)).toBeTruthy()
+  expect(screen.getByText('Approved devices only')).toBeTruthy()
   expect(screen.getByText('approved-devices')).toBeTruthy()
   expect(screen.getByText('octo (github)')).toBeTruthy()
-  expect(screen.getByText('connected')).toBeTruthy()
+  expect(screen.getByText('Connected')).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Connect my GitHub account' })).toBeNull()
 })
 
 it('offers Connect my GitHub account only to an admin of a server with no owner', () => {
   seed('collaborator', ownerless)
   const { unmount } = render(<RemoteAccessSection client={api()} />)
-  expect(screen.getByText('the edge has not recorded this server')).toBeTruthy()
+  expect(screen.getByText('Unclaimed')).toBeTruthy()
+  expect(screen.getByText('Connected, but the edge has not recorded this server')).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Connect my GitHub account' })).toBeNull()
   unmount()
 

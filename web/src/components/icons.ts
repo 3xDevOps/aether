@@ -121,6 +121,8 @@ import {
   ChartColumn as LucideChartColumn,
   BookMarked as LucideBookMarked,
   Pin as LucidePin,
+  Bell as LucideBell,
+  Gauge as LucideGauge,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -167,6 +169,8 @@ export const History = icon(LucideHistory)
 export const ChartColumn = icon(LucideChartColumn)
 export const BookMarked = icon(LucideBookMarked)
 export const Pin = icon(LucidePin)
+export const Bell = icon(LucideBell)
+export const Gauge = icon(LucideGauge)
 export const Keyboard = icon(LucideKeyboard)
 export const ListTodo = icon(LucideListTodo)
 export const LoaderCircle = icon(LucideLoaderCircle)

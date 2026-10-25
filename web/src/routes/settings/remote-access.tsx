@@ -3,10 +3,11 @@ import { toast } from 'sonner'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { Code } from '@/components/ui/code'
 import { type Api, ApiError } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { EdgeAccount, EdgeLogin, ServerEdge } from '@/lib/types'
-import { SettingRow, SettingsSection } from '@/routes/settings/layout'
+import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { loadEdge } from '@/store/edge'
 import { useCapability, useIsAdmin } from '@/store/hooks'
@@ -14,9 +15,14 @@ import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 const pollMs = 2000
 
+const policies: Record<ServerEdge['access_policy'], string> = {
+  account: 'Any device a member signs in on',
+  'approved-devices': 'Approved devices only',
+}
+
 function connection(edge: ServerEdge): string {
-  if (!edge.connected) return 'not connected'
-  return edge.claimed ? 'connected' : 'the edge has not recorded this server'
+  if (!edge.connected) return 'Not connected'
+  return edge.claimed ? 'Connected' : 'Connected, but the edge has not recorded this server'
 }
 
 export function RemoteAccessSection({ client }: { client: Api }) {
@@ -24,6 +30,7 @@ export function RemoteAccessSection({ client }: { client: Api }) {
   const admin = useIsAdmin()
   const caps = useCapability()
   const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let live = true
     loadEdge(useStore, client).then(
@@ -37,20 +44,27 @@ export function RemoteAccessSection({ client }: { client: Api }) {
     return () => {
       live = false
     }
-  }, [client])
+  }, [client, attempt])
   if (!edge) {
-    return error ? <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{error}</Callout> : null
+    return (
+      <SettingsSection title="Edge" id="edge">
+        <SettingRow label="Remote access" help={error ? null : 'Reading remote access…'}>
+          {error && <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{error}</Callout>}
+          {error && <TryAgain onClick={() => { setError(null); setAttempt((n) => n + 1) }} />}
+        </SettingRow>
+      </SettingsSection>
+    )
   }
   const connectable = admin && edge.edge_url !== '' && edge.owner === null
   const local = caps.hasLocal('edge.status') && caps.hasLocal('edge.login') && caps.hasLocal('edge.claim')
   return (
-    <SettingsSection title="Remote access">
-      <SettingRow label="Edge" help={edge.edge_url || 'off'} />
+    <SettingsSection title="Edge" id="edge">
+      <SettingRow label="Edge URL" help={edge.edge_url || 'Off'} />
       <SettingRow label="Server id">
         <CopyableCommand command={edge.server_id} />
       </SettingRow>
-      <SettingRow label="Access policy" help={edge.access_policy} />
-      <SettingRow label="Owner" help={edge.owner ? `${edge.owner.login} (${edge.owner.provider})` : 'none'}>
+      <SettingRow label="Access policy" help={<>{policies[edge.access_policy]} <Code>{edge.access_policy}</Code></>} />
+      <SettingRow label="Owner" help={edge.owner ? `${edge.owner.login} (${edge.owner.provider})` : 'Unclaimed'}>
         {connectable && (local
           ? <ConnectAccount client={client} edgeURL={edge.edge_url} serverID={edge.server_id} />
           : (

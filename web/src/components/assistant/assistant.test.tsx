@@ -291,7 +291,7 @@ describe('states', () => {
     expect(await within(aside).findByText(/Acts without asking/)).toBeDefined()
     expect(within(aside).getByText(/launches, messages and stops your runs and saves your environment without asking/)).toBeDefined()
     await userEvent.click(within(aside).getByRole('button', { name: 'Change in Settings' }))
-    expect(useStore.getState().route.name).toBe('settings')
+    expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'auto-approve' } })
     expect(useStore.getState().assistantOpen).toBe(true)
   })
 

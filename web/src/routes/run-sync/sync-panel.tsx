@@ -15,7 +15,7 @@ export function SyncBadge({ run }: CardSlotProps) {
   if (state !== 'running') return null
 
   return (
-    <Button variant="link" size="sm" hint="Sync overlay running" onClick={() => navigate('settings', {})}>
+    <Button variant="link" size="sm" hint="Sync overlay running" onClick={() => navigate('settings', { section: 'mirror' })}>
       <RefreshCw />
       Syncing
     </Button>
