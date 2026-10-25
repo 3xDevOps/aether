@@ -129,8 +129,15 @@ func TestInsightsGet(t *testing.T) {
 	run("i1", alice, alpha, "claude", "", domain.RunFailed, "", "2026-03-07T11:30:00-08:00", ptr("2026-03-07T11:30:00-08:00"), ptr("2026-03-07T11:45:00-08:00"))
 	run("i2", alice, alpha, "claude", "", domain.RunNeedsAttention, "", "2026-03-07T11:45:00-08:00", ptr("2026-03-07T11:45:00-08:00"), nil)
 	// Bob's runs and swarm.
+	// Needs you counts by domain.Run.NeedsAttention: top3's agent
+	// disconnected; paused top6 and integrator i2 waiting on its agents do not.
+	exec(`UPDATE runs SET activity = 'disconnected' WHERE id = 'top3'`)
+	exec(`UPDATE runs SET activity = 'needs-you', reason = 'needs input: which?' WHERE id = 'top6'`)
+	exec(`UPDATE runs SET activity = 'waiting-agents' WHERE id = 'i2'`)
+	e.runs.setPaused("top6", true)
 	run("top5", bob, beta, "claude", "opus", domain.RunCompleted, "", "2026-03-08T09:00:00-07:00", ptr("2026-03-08T09:00:00-07:00"), ptr("2026-03-08T10:00:00-07:00"))
 	run("top7", bob, beta, "claude", "opus", domain.RunNeedsAttention, "", "2026-03-09T08:00:00-07:00", ptr("2026-03-09T08:00:00-07:00"), nil)
+	exec(`UPDATE runs SET activity = 'needs-you', reason = 'blocked: no token' WHERE id = 'top7'`)
 	run("wb", bob, beta, "claude", "", domain.RunAbandoned, "", "2026-03-08T12:00:00-07:00", ptr("2026-03-08T12:00:00-07:00"), ptr("2026-03-08T13:00:00-07:00"))
 
 	exec(`INSERT INTO mission_acceptances (submission_id, mission_id, task_id, task_revision, accepted_set_version, integrator_generation, accepted_by_run_id, accepted_at)
@@ -297,7 +304,7 @@ func TestInsightsGet(t *testing.T) {
 		{"recent top1", mine.Recent[2], protocol.InsightsRecentRun{RunID: "top1", Title: "title top1", WorkspaceID: string(alpha),
 			Status: "completed", Harness: "claude", CreatedAt: "2026-03-07T18:00:00Z", FinishedAt: "2026-03-07T19:01:00Z",
 			DurationSeconds: 3600, PRURL: "https://github.com/acme/app/pull/top1", PRState: "merged"}},
-		{"needs you", mine.NeedsYou, 2},
+		{"needs you", mine.NeedsYou, 1},
 		{"coverage", mine.Coverage, protocol.InsightsCoverage{StateTimesSince: "2026-03-07T18:00:30Z", PullRequestsSince: "2026-03-07T19:00:00Z"}},
 
 		{"everyone totals", everyone.Totals, protocol.InsightsTotals{Launched: 5, Completed: 2, Failed: 1, Abandoned: 1, Killed: 1, Active: 2, Finished: 2}},
@@ -333,7 +340,7 @@ func TestInsightsGet(t *testing.T) {
 				}},
 			},
 		}},
-		{"everyone needs you", everyone.NeedsYou, 3},
+		{"everyone needs you", everyone.NeedsYou, 2},
 		{"everyone recent", recentIDs(everyone.Recent), []string{"top2", "top5", "top4", "top1"}},
 
 		{"bob totals", bobs.Totals, protocol.InsightsTotals{Launched: 2, Completed: 1, Active: 1, Finished: 1}},

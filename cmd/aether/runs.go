@@ -187,7 +187,7 @@ func writeJSON(w io.Writer, v any) error {
 }
 
 func statusLine(v runView) string {
-	line := fmt.Sprintf("run %s %s", v.ID, v.State)
+	line := fmt.Sprintf("run %s %s", v.ID, v.Status)
 	if v.Reason != "" {
 		line += ": " + printable(v.Reason)
 	}
@@ -197,13 +197,13 @@ func statusLine(v runView) string {
 func printRunView(w io.Writer, v runView, items []protocol.AttentionItem) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintf(tw, "run\t%s\n", v.ID)
-	_, _ = fmt.Fprintf(tw, "workspace\t%s (%s)\n", v.Workspace, v.WorkspaceID)
 	_, _ = fmt.Fprintf(tw, "status\t%s\n", v.Status)
-	_, _ = fmt.Fprintf(tw, "state\t%s\n", v.State)
 	if v.Reason != "" {
 		_, _ = fmt.Fprintf(tw, "reason\t%s\n", printable(v.Reason))
 	}
+	_, _ = fmt.Fprintf(tw, "workspace\t%s (%s)\n", v.Workspace, v.WorkspaceID)
 	_, _ = fmt.Fprintf(tw, "branch\t%s\n", v.Branch)
+	_, _ = fmt.Fprintf(tw, "state\t%s\n", v.State)
 	if v.Report != nil {
 		_, _ = fmt.Fprintf(tw, "report\t%s: %s\n", v.Report.Outcome, printable(v.Report.Summary))
 	}
@@ -289,13 +289,17 @@ func renderRuns(w io.Writer, runs []protocol.Run, memberName func(string) string
 
 // displayStatus is the dashboard's label for a live run's state, else for
 // its status. A reported success awaiting review is Ready for review, live or
-// completed.
+// completed. A swarm worker's request waits for its integrator unless the
+// worker reports itself blocked.
 func displayStatus(r protocol.Run) string {
 	review := domain.RunReview(r.Review)
 	if review == domain.ReviewReady || review == domain.ReviewLater {
 		if r.Activity == string(domain.ActivityFinished) || r.Status == string(domain.RunCompleted) {
 			return "Ready for review"
 		}
+	}
+	if r.MissionRole == "worker" && r.Activity == string(domain.ActivityNeedsYou) && !strings.HasPrefix(r.Reason, domain.BlockedReasonPrefix) {
+		return "Waiting for the integrator"
 	}
 	if label, ok := activityLabels[domain.RunActivity(r.Activity)]; ok {
 		return label
@@ -323,7 +327,7 @@ var statusLabels = map[domain.RunStatus]string{
 	domain.RunQueued:         "Queued",
 	domain.RunProvisioning:   "Provisioning",
 	domain.RunRunning:        "Running",
-	domain.RunNeedsAttention: "Needs attention",
+	domain.RunNeedsAttention: "Waiting",
 	domain.RunCompleted:      "Completed",
 	domain.RunMerged:         "Merged",
 	domain.RunAbandoned:      "Closed",

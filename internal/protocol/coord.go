@@ -156,18 +156,21 @@ const (
 // set only in the grace state and is RFC3339. RunStatus is the peer run's
 // lifecycle status.
 type CoordPeer struct {
-	RunID          string            `json:"run_id"`
-	MemberID       string            `json:"member_id"`
-	Task           string            `json:"task,omitempty"`
-	TaskBytes      int               `json:"task_bytes,omitempty"`
-	TaskTruncated  bool              `json:"task_truncated,omitempty"`
-	Files          []string          `json:"files,omitempty"`
-	FileTotal      int               `json:"file_total,omitempty"`
-	FilesTruncated bool              `json:"files_truncated,omitempty"`
-	State          string            `json:"state"`
-	ExpiresAt      string            `json:"expires_at,omitempty"`
-	RunStatus      string            `json:"run_status,omitempty"`
-	LastSent       *CoordSentMessage `json:"last_sent,omitempty"`
+	RunID           string            `json:"run_id"`
+	MemberID        string            `json:"member_id"`
+	Task            string            `json:"task,omitempty"`
+	TaskBytes       int               `json:"task_bytes,omitempty"`
+	TaskTruncated   bool              `json:"task_truncated,omitempty"`
+	Files           []string          `json:"files,omitempty"`
+	FileTotal       int               `json:"file_total,omitempty"`
+	FilesTruncated  bool              `json:"files_truncated,omitempty"`
+	State           string            `json:"state"`
+	ExpiresAt       string            `json:"expires_at,omitempty"`
+	Activity        string            `json:"activity,omitempty"`
+	Reason          string            `json:"reason,omitempty"`
+	ReasonTruncated bool              `json:"reason_truncated,omitempty"`
+	RunStatus       string            `json:"run_status,omitempty"`
+	LastSent        *CoordSentMessage `json:"last_sent,omitempty"`
 }
 
 // CoordSentMessage is the newest message the caller sent one peer and how

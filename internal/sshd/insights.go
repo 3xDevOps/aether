@@ -137,7 +137,7 @@ func (s *Server) insightsGet(ctx context.Context, member domain.MemberID, raw js
 			Members: make([]protocol.InsightsMemberOutcome, 0, len(got.Members)),
 		},
 		Recent:   make([]protocol.InsightsRecentRun, 0, len(got.Recent)),
-		NeedsYou: got.NeedsYou,
+		NeedsYou: s.unpaused(got.NeedsYou),
 		Coverage: protocol.InsightsCoverage{
 			StateTimesSince:   optionalRFC3339(got.StateTimesSince),
 			PullRequestsSince: optionalRFC3339(got.PullRequestsSince),
@@ -258,4 +258,14 @@ func optionalRFC3339(t *time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+func (s *Server) unpaused(runs []domain.RunID) int {
+	n := 0
+	for _, id := range runs {
+		if !s.cfg.Runs.Paused(id) {
+			n++
+		}
+	}
+	return n
 }

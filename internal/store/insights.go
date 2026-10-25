@@ -68,20 +68,22 @@ type InsightsQuery struct {
 // Insights is the aggregate of one InsightsQuery. Series has one entry per
 // query bucket and Heatmap one per query day.
 type Insights struct {
-	Totals            InsightsCounts
-	Previous          InsightsCounts
-	Series            []InsightsCounts
-	Heatmap           []int
-	ByWorkspace       []*InsightsWorkspace
-	ByAgent           []*InsightsAgent
-	Swarms            InsightsSwarms
-	Durations         InsightsDurations
-	Cost              InsightsCost
-	PullRequests      InsightsPullRequests
-	Success           InsightsSuccess
-	Members           []*InsightsMemberOutcomes
-	Recent            []*InsightsRun
-	NeedsYou          int
+	Totals       InsightsCounts
+	Previous     InsightsCounts
+	Series       []InsightsCounts
+	Heatmap      []int
+	ByWorkspace  []*InsightsWorkspace
+	ByAgent      []*InsightsAgent
+	Swarms       InsightsSwarms
+	Durations    InsightsDurations
+	Cost         InsightsCost
+	PullRequests InsightsPullRequests
+	Success      InsightsSuccess
+	Members      []*InsightsMemberOutcomes
+	Recent       []*InsightsRun
+	// NeedsYou is the runs domain.Run.NeedsAttention selects, before the
+	// caller drops paused ones.
+	NeedsYou          []domain.RunID
 	StateTimesSince   *time.Time
 	PullRequestsSince *time.Time
 }
@@ -875,16 +877,33 @@ func scanMemberOutcomes(ctx context.Context, tx *sql.Tx, query string, args []an
 	return rows.Err()
 }
 
-// insightsLive reads what ignores the range: runs waiting on a member now,
+// insightsLive reads what ignores the range: runs that need a member now,
 // swarm runs included as on the Board, and when this server started
 // recording transitions and PRs.
 func insightsLive(ctx context.Context, tx *sql.Tx, q InsightsQuery, args []any, out *Insights) error {
+	rows, err := tx.QueryContext(ctx, runSnapshotQuery(`runs.id IN (SELECT r.id FROM runs r WHERE `+q.ownerScope()+`
+		AND (r.status IN ('running', 'needs-attention') OR r.status = 'completed' AND r.review = 'ready'))`), args...)
+	if err != nil {
+		return fmt.Errorf("store: insights: needs you: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	for rows.Next() {
+		r, scanErr := scanRun(rows)
+		if scanErr != nil {
+			return fmt.Errorf("store: insights: needs you: %w", scanErr)
+		}
+		if r.NeedsAttention(false) {
+			out.NeedsYou = append(out.NeedsYou, r.ID)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("store: insights: needs you: %w", err)
+	}
 	var transitions, prs sql.NullInt64
-	err := tx.QueryRowContext(ctx, `
-		SELECT (SELECT COUNT(*) FROM runs r WHERE `+q.ownerScope()+` AND r.status = 'needs-attention'),
-			(SELECT at FROM run_state_transitions ORDER BY rowid LIMIT 1),
-			(SELECT created_at FROM run_pull_requests ORDER BY rowid LIMIT 1)`, args...,
-	).Scan(&out.NeedsYou, &transitions, &prs)
+	err = tx.QueryRowContext(ctx, `
+		SELECT (SELECT at FROM run_state_transitions ORDER BY rowid LIMIT 1),
+			(SELECT created_at FROM run_pull_requests ORDER BY rowid LIMIT 1)`,
+	).Scan(&transitions, &prs)
 	if err != nil {
 		return fmt.Errorf("store: insights: live: %w", err)
 	}
