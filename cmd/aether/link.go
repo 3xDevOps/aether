@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -22,6 +23,7 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 func init() {
@@ -269,6 +271,11 @@ func linkClone(cfg cli.Config, workspaceID, repo string) error {
 	fmt.Printf("git remote aether -> %s\n", url)
 	cfg.Repo = repo
 	return cli.Save(cli.WithRepo(cfg, workspaceID, repo))
+}
+
+func linkRepoCommand(cfg cli.Config, workspaceID, repo string) string {
+	return fmt.Sprintf("aether link %s --repo %s --workspace %s",
+		shellquote.Quote(cmp.Or(cfg.ServerID, cfg.Addr)), shellquote.Quote(repo), workspaceID)
 }
 
 // joinRetry is how often aether link tries a join again while the server
