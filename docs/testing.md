@@ -17,6 +17,7 @@ pull request runs are in
 | `scripts/`, the installers, `desktop/` | `make test-scripts` | sh, Node, OpenSSL 3 |
 | `.github/workflows/` | `make lint-workflows` | ShellCheck |
 | How an agent CLI is launched (`internal/harness`) | [Real-agent smoke tests](#real-agent-smoke-tests) | Docker |
+| How a run drives, reads or wakes its agent | [Real agents against a mock model](#real-agents-against-a-mock-model) | Docker, git |
 | Native hook adapters (the `.mjs` files in `internal/coordhooks` and `internal/agentstatus`) | `make test-native-hooks` | Node 22.13+ |
 | `cmd/aether-edge`, `internal/edge` | `go test -race ./internal/edge/edgetest/` | Go |
 | `images/edge/Dockerfile` | [The edge image](#the-edge-image) | Docker, curl |
@@ -211,6 +212,47 @@ asks for permission to run a shell command:
 ACP_LIVE=1 go test -tags integration -run TestLiveSwitch -v ./internal/harness/
 ACP_LIVE=1 go test -tags integration -run TestLiveEnhancedRunsWithoutPermissionPrompts -v ./internal/harness/
 ```
+
+## Real agents against a mock model
+
+`TestIntegrationRealAgents` (`internal/server/realagents_integration_test.go`)
+launches real Claude Code and Codex runs, Standard and Enhanced, on real
+Docker. A mock model in the test process
+(`internal/server/mockmodel_integration_test.go`) serves streaming Anthropic
+`/v1/messages` and OpenAI `/v1/responses` and plays one turn: a shell tool
+call, then a text answer. For each run the test requires that the tool's
+output reaches the model, the run settles idle, and the answer shows on the
+run's screen (Standard) or in its ACP history (Enhanced). It then sends the
+idle run mail and waits for the turn the mail starts, where Aether can wake
+the run: every Enhanced run, and a Standard run whose agent sets `IdleWake` in
+its capabilities (`internal/harness/capabilities.go`). The other runs report
+that step as skipped.
+
+Runs reach the mock the way they reach a [model
+gateway](harnesses.md#per-agent-setup): `ANTHROPIC_BASE_URL` for Claude Code,
+`openai_base_url` in `~/.codex/config.toml` for Codex. The test seeds the
+member home with what a member's first runs leave there: onboarding, an
+approved API key and a trusted checkout.
+
+CI's `agents` job runs it as root. Run it the same way, with Docker and git:
+
+```sh
+make agents-image   # images/agents/Dockerfile on the published standard image
+sudo env "PATH=$PATH" "HOME=$HOME" make test-agents
+```
+
+`AGENTS_BASE=aether-standard:local` builds on a standard image you built. A
+failure prints the agent's screen (Standard) or ACP history (Enhanced) and the
+final item of each request the mock received.
+
+### Bumping the pinned versions
+
+`images/agents/Dockerfile` pins the CLIs in `CLAUDE_CODE_VERSION` and
+`CODEX_VERSION`; the ACP adapters follow `internal/harness/acpregistry.json`,
+the versions members install. The smoke image takes each vendor's latest
+release; this one is pinned so a vendor release cannot fail an unrelated pull
+request. To bump, change the version, run the two commands above, and fix
+what the new release broke in the same pull request.
 
 ## Native hook tests
 
@@ -510,6 +552,7 @@ every merge queue entry and every push to `main`.
 | `build-and-test` | Unit tests, then `make build` | `make test build` |
 | `scripts` | Script and native hook tests | `make test-scripts test-native-hooks` |
 | `smoke` | Standard image checks, then the `internal/harness` integration tests on the smoke image, amd64 and arm64 | [Real-agent smoke tests](#real-agent-smoke-tests) |
+| `agents` | [Real agents against a mock model](#real-agents-against-a-mock-model), amd64 | See that section |
 | `browser` | Companion image build and smoke, amd64 and arm64 | [The browser companion](#the-browser-companion) |
 | `integration`, `integration-server-rest` | [Integration tests](#integration-tests) in six jobs | See that table |
 | `dashboard` | `bun run typecheck` and `bun run test` | Same, from `web/` |
