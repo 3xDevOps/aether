@@ -29,6 +29,13 @@ server hosts the connector endpoint and signs you in.
 
 ## Get the URL and a code
 
+In the app, open **Settings → ChatGPT and Claude** and select **Get a code**.
+It shows the URL, the code and the steps below, notices when the connector
+connects, and lists your connectors with a **Revoke** button for each. It shows
+the same errors as `aether mcp`.
+
+From a terminal:
+
 ```sh
 aether mcp
 ```
@@ -206,6 +213,8 @@ connector: write call connector=con-7k2m9q4xbd member=mem-... method=run.launch 
 `confirmed_by`, name the connector: `ChatGPT connector con-7k2m9q4xbd of member mem-...`.
 
 ## Revoke a connector
+
+Select **Revoke** next to it in **Settings → ChatGPT and Claude**, or run:
 
 ```sh
 aether mcp revoke con-7k2m9q4xbd
