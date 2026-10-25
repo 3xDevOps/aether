@@ -40,6 +40,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/secretstore"
 	"github.com/3xDevOps/Aether/internal/servergw"
 	"github.com/3xDevOps/Aether/internal/serverupdate"
+	"github.com/3xDevOps/Aether/internal/signing"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
@@ -191,6 +192,7 @@ type Server struct {
 	git       *gitengine.Engine
 	pty       *ptyhost.Host
 	sched     *scheduler.Scheduler
+	signing   *signing.Service
 	assistant *assistant.Service
 	control   *control.Service
 	evidence  *evidence.Service
@@ -354,6 +356,9 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if merr := memberhome.MigrateLegacyHomes(homesRoot, names); merr != nil {
 		return nil, fmt.Errorf("server: migrate legacy homes: %w", merr)
 	}
+	if s.signing, err = signing.New(filepath.Join(cfg.DataDir, "signing-keys"), filepath.Join(cfg.DataDir, "sign"), homes); err != nil {
+		return nil, err
+	}
 	if rerr := os.RemoveAll(filepath.Join(cfg.DataDir, "toolenv")); rerr != nil {
 		return nil, fmt.Errorf("server: remove legacy toolenv: %w", rerr)
 	}
@@ -373,6 +378,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		StateDir:      filepath.Join(cfg.DataDir, "scheduler"),
 		DataDir:       cfg.DataDir,
 		Homes:         homes,
+		Signing:       s.signing,
 		Memory:        mem,
 		RemoveAll:     removeAgentFiles,
 		Secrets:       secrets,
@@ -438,6 +444,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Runs:              s.sched,
 		Control:           s.control,
 		Homes:             homes,
+		Signing:           s.signing,
 		Secrets:           secrets,
 		WhoIs:             whois,
 		TailnetAutoJoin:   cfg.TailnetAutoJoin,
@@ -507,6 +514,16 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	}
 	if err = s.ssh.RecoverMergeArchives(ctx); err != nil {
 		return nil, err
+	}
+	if err = s.signing.Migrate(ctx, members); err != nil {
+		return nil, fmt.Errorf("server: move signing keys out of member homes: %w", err)
+	}
+	// Containers that outlive a server restart still mount their member's
+	// agent.
+	for _, member := range members {
+		if _, err = s.signing.Serve(member.ID); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.EdgeURL != "" {
 		if s.edge, err = newEdgeAgent(cfg, s.db, s.ssh); err != nil {
@@ -721,6 +738,9 @@ func (s *Server) Close() error {
 		}
 		if s.sched != nil {
 			closeAll = append(closeAll, s.sched.Close)
+		}
+		if s.signing != nil {
+			closeAll = append(closeAll, s.signing.Close)
 		}
 		if s.adapters != nil {
 			closeAll = append(closeAll, s.adapters.Close)

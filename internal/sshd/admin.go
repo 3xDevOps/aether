@@ -187,6 +187,7 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	// recreate an owner between stopping the terminal and deleting its home.
 	// Lock order is terminal lifecycle -> cache; never call StopTerminal while
 	// holding the cache lock.
+	var keyErr error
 	remove := func() error {
 		stopped := false
 		err := s.cfg.Runs.WithStoppedTerminal(ctx, id, func() error {
@@ -207,6 +208,9 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			deleted = true
 			if err := s.removeAssistant(ctx, id); err != nil {
 				slog.Warn("sshd: member assistant cleanup failed", "member", id, "error", err)
+			}
+			if s.cfg.Signing != nil {
+				keyErr = s.cfg.Signing.Remove(id)
 			}
 			if s.cfg.Homes != nil {
 				if err := s.cfg.Homes.Remove(ctx, id); err != nil {
@@ -252,6 +256,9 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	s.closeMemberConns(id)
 	s.notifyDirectory()
 	s.publishDroppedDevices(ctx, member, ids, devs)
+	if keyErr != nil {
+		return nil, rpcError(fmt.Errorf("member.remove: the member is removed, but its signing key is not: %w", keyErr))
+	}
 	return struct{}{}, nil
 }
 

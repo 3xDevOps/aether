@@ -156,6 +156,7 @@ func newGitHubOAuthTestEnv(t *testing.T) (*testEnv, *githubOAuthTestRuntime, *at
 	e := newTestEnv(t, func(cfg *Config) {
 		rt = &githubOAuthTestRuntime{fakeRuntime: cfg.Runtime.(*fakeRuntime), started: make(chan *githubOAuthTestExec, 16)}
 		cfg.Runtime = rt
+		withSigning(t)(cfg)
 	})
 	status := &atomic.Value{}
 	status.Store(`{"hosts":{}}`)
@@ -437,8 +438,8 @@ func TestGitHubOAuthStatusIsReadOnlyAndUsesCurrentAccount(t *testing.T) {
 	if err != nil || result.State != "connected" || result.Login != "octocat" || result.Connection != nil {
 		t.Fatalf("native connection = %+v, %v", result, err)
 	}
-	if has, keyErr := e.cfg.Homes.HasSigningKey(e.member.ID); keyErr != nil || has {
-		t.Fatalf("status generated key: %v, %v", has, keyErr)
+	if key, keyErr := e.cfg.Signing.Key(e.member.ID); keyErr != nil || key != nil {
+		t.Fatalf("status generated key: %q, %v", key, keyErr)
 	}
 	auth.Store(strings.ReplaceAll(ghStatusLoggedIn, "octocat", "other-account"))
 	result, err = e.sched.GitHubOAuthStatus(t.Context(), e.member.ID, "")
@@ -503,14 +504,14 @@ func TestGitHubOAuthMissingScopeReauthorizesThroughOfficialLogin(t *testing.T) {
 	if err != nil || status.State != "failed" || status.Connection != nil || !strings.Contains(status.Error, "connect GitHub again") {
 		t.Fatalf("missing scope status = %+v, %v", status, err)
 	}
-	if has, keyErr := e.cfg.Homes.HasSigningKey(e.member.ID); keyErr != nil || has {
-		t.Fatalf("status generated key: %v, %v", has, keyErr)
+	if key, keyErr := e.cfg.Signing.Key(e.member.ID); keyErr != nil || key != nil {
+		t.Fatalf("status generated key: %q, %v", key, keyErr)
 	}
 	startGitHubOAuthTest(t, e, e.member.ID)
 	command := nextGitHubOAuthExec(t, rt)
 	publishGitHubDeviceCode(t, command)
-	if has, err := e.cfg.Homes.HasSigningKey(e.member.ID); err != nil || has {
-		t.Fatalf("key written before authorization: %v, %v", has, err)
+	if key, err := e.cfg.Signing.Key(e.member.ID); err != nil || key != nil {
+		t.Fatalf("key written before authorization: %q, %v", key, err)
 	}
 	auth.Store(ghStatusLoggedIn)
 	command.finish(0)

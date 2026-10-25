@@ -58,6 +58,6 @@ export function settingsLines(settings: MergeSettings, names: { member: (id: str
     settings.profile_heads.length > 0 && `Saved agent profiles: ${settings.profile_heads.map((p) => p.harness).join(', ')}`,
     settings.account_shared_with.length > 0 && `Agent account shared with ${settings.account_shared_with.map(names.member).join(', ')}`,
     settings.mirror_workspaces.length > 0 && `GitHub connection used by the mirror of ${settings.mirror_workspaces.map(names.workspace).join(', ')}`,
-    settings.home && 'Home on the server (agent logins, git signing key, files), archived on the server',
+    settings.home && 'Home on the server (agent logins, files) and git signing key, archived on the server',
   ].filter((line): line is string => Boolean(line))
 }

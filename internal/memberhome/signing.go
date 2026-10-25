@@ -2,31 +2,26 @@ package memberhome
 
 import (
 	"context"
-	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path"
 	"strings"
 
-	"golang.org/x/crypto/ssh"
-
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/rootfs"
 )
 
-// The container mounts the home as $HOME, so git and gh find the key at
-// ~/.ssh/aether_signing.
+// The container mounts the home as $HOME. Only the public half of the
+// signing key lives here; gh ssh-key add uploads it from this path.
 const (
 	sshDirName     = ".ssh"
 	signingKeyName = ".ssh/aether_signing"
-	signingPubName = ".ssh/aether_signing.pub"
+	signingPubName = "aether_signing.pub"
 	gitConfigName  = ".gitconfig"
 	// stagedGitConfigPrefix names ConfigureGit's temp files; nothing else in a home carries it.
 	stagedGitConfigPrefix = gitConfigName + ".aether-tmp"
@@ -39,77 +34,28 @@ const (
 	maxGitConfigBytes  = 256 << 10
 )
 
-// EnsureSigningKey returns the member's signing public key line, generating
-// the ed25519 pair on first call. The home is container-writable, so the line
-// is derived from the private key, and every call rewrites the .pub and
-// restores the key's 0600 mode.
-func (m *Manager) EnsureSigningKey(member domain.MemberID) (string, error) {
+// WriteSigningPublicKey replaces whatever occupies ~/.ssh/aether_signing.pub
+// with line.
+func (m *Manager) WriteSigningPublicKey(member domain.MemberID, line string) error {
 	root, err := m.openHome(member)
 	if err != nil {
-		return "", err
+		return err
 	}
 	defer func() { _ = root.Close() }()
-
-	existing, err := readRegularFile(root, signingKeyName, maxSigningKeyBytes)
-	if err != nil {
-		return "", fmt.Errorf("memberhome: read signing key for %q: %w", member, err)
+	if err = ensureDir(root, sshDirName); err != nil {
+		return fmt.Errorf("memberhome: prepare %s for %q: %w", sshDirName, member, err)
 	}
-	if existing != nil {
-		line, perr := publicKeyLine(existing, member)
-		if perr != nil {
-			return "", fmt.Errorf("memberhome: parse signing key for %q: %w", member, perr)
-		}
-		if perr := restrictKey(root); perr != nil {
-			return "", fmt.Errorf("memberhome: restrict signing key for %q: %w", member, perr)
-		}
-		if werr := installPublicKey(root, line); werr != nil {
-			return "", fmt.Errorf("memberhome: write signing public key for %q: %w", member, werr)
-		}
-		return line, nil
-	}
-
-	if dirErr := ensureDir(root, sshDirName); dirErr != nil {
-		return "", fmt.Errorf("memberhome: prepare %s for %q: %w", sshDirName, member, dirErr)
-	}
-	pub, priv, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		return "", fmt.Errorf("memberhome: generate signing key for %q: %w", member, err)
-	}
-	comment := signingComment(member)
-	block, err := ssh.MarshalPrivateKey(priv, comment)
-	if err != nil {
-		return "", fmt.Errorf("memberhome: encode signing key for %q: %w", member, err)
-	}
-	if writeErr := writeNew(root, signingKeyName, pem.EncodeToMemory(block), 0o600); writeErr != nil {
-		return "", fmt.Errorf("memberhome: write signing key for %q: %w", member, writeErr)
-	}
-	sshPub, err := ssh.NewPublicKey(pub)
-	if err != nil {
-		return "", fmt.Errorf("memberhome: encode signing public key for %q: %w", member, err)
-	}
-	line := authorizedLine(sshPub, comment)
-	if err := installPublicKey(root, line); err != nil {
-		return "", fmt.Errorf("memberhome: write signing public key for %q: %w", member, err)
-	}
-	if err := chownLikeHome(root, sshDirName); err != nil {
-		return "", fmt.Errorf("memberhome: hand signing directory to the home owner for %q: %w", member, err)
-	}
-	return line, nil
-}
-
-// installPublicKey replaces whatever occupies the .pub path with line.
-func installPublicKey(root *os.Root, line string) error {
 	sshRoot, err := rootfs.OpenRoot(root, sshDirName)
 	if err != nil {
-		return err
+		return fmt.Errorf("memberhome: open %s for %q: %w", sshDirName, member, err)
 	}
 	defer func() { _ = sshRoot.Close() }()
-	if err = sshRoot.RemoveAll("aether_signing.pub"); err != nil {
-		return err
+	if err = sshRoot.RemoveAll(signingPubName); err != nil {
+		return fmt.Errorf("memberhome: replace the signing public key for %q: %w", member, err)
 	}
-	pub, err := sshRoot.OpenFile("aether_signing.pub", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	pub, err := sshRoot.OpenFile(signingPubName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		return err
+		return fmt.Errorf("memberhome: write the signing public key for %q: %w", member, err)
 	}
 	if _, err = pub.Write([]byte(line + "\n")); err == nil {
 		err = chownFileLikeHome(root, pub)
@@ -117,76 +63,62 @@ func installPublicKey(root *os.Root, line string) error {
 	if closeErr := pub.Close(); err == nil {
 		err = closeErr
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("memberhome: write the signing public key for %q: %w", member, err)
+	}
+	return nil
 }
 
-// restrictKey chmods through the open descriptor so a symlink swapped in
-// mid-call cannot redirect it.
-func restrictKey(root *os.Root) error {
-	f, info, err := openRegular(root, signingKeyName)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	if info.Mode().Perm() == 0o600 {
-		return nil
-	}
-	return f.Chmod(0o600)
-}
-
-func (m *Manager) HasSigningKey(member domain.MemberID) (bool, error) {
-	root, err := m.openHome(member)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = root.Close() }()
-	parent, err := rootfs.OpenRoot(root, path.Dir(signingKeyName))
+// LegacySigningKey returns the private key releases before the server-held
+// key kept at ~/.ssh/aether_signing, or nil when there is none. It never
+// creates the home.
+func (m *Manager) LegacySigningKey(member domain.MemberID) ([]byte, error) {
+	root, err := m.openExistingHome(member)
 	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
+		return nil, nil
 	}
-	if err != nil {
-		return false, fmt.Errorf("memberhome: inspect signing key for %q: %w", member, err)
-	}
-	defer func() { _ = parent.Close() }()
-	info, err := parent.Lstat(path.Base(signingKeyName))
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("memberhome: inspect signing key for %q: %w", member, err)
-	}
-	return info.Mode().IsRegular() && !hasMultipleLinks(info), nil
-}
-
-// SigningKey returns the member's private signing key, or nil when they have
-// none. A key ssh cannot parse also counts as none: the container can
-// overwrite it, and the commit should go unsigned rather than fail.
-func (m *Manager) SigningKey(member domain.MemberID) ([]byte, error) {
-	root, err := m.openHome(member)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
 	key, err := readRegularFile(root, signingKeyName, maxSigningKeyBytes)
 	if err != nil {
-		return nil, fmt.Errorf("memberhome: read signing key for %q: %w", member, err)
-	}
-	if key == nil {
-		return nil, nil
-	}
-	if _, perr := ssh.ParsePrivateKey(key); perr != nil {
-		slog.Warn("memberhome: signing key cannot be parsed; commits stay unsigned",
-			"member", member, "error", perr)
-		return nil, nil
+		return nil, fmt.Errorf("memberhome: read %s for %q: %w", signingKeyName, member, err)
 	}
 	return key, nil
 }
 
+// RemoveLegacySigningKey deletes ~/.ssh/aether_signing. Removing an absent
+// key is a successful no-op.
+func (m *Manager) RemoveLegacySigningKey(member domain.MemberID) error {
+	root, err := m.openExistingHome(member)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	parent, err := rootfs.OpenRoot(root, path.Dir(signingKeyName))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("memberhome: open %s for %q: %w", sshDirName, member, err)
+	}
+	defer func() { _ = parent.Close() }()
+	if err := parent.Remove(path.Base(signingKeyName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("memberhome: remove %s for %q: %w", signingKeyName, member, err)
+	}
+	return nil
+}
+
 // ConfigureGit writes the member's git identity and signing settings into
-// .gitconfig, keeping sections other tools wrote. git --file follows
-// symlinks, so git edits a private temp copy and the result is renamed into
-// place through the root.
-func (m *Manager) ConfigureGit(ctx context.Context, member domain.MemberID, identity domain.GitIdentity) error {
+// .gitconfig, keeping sections other tools wrote. signingKey is the public
+// key line git hands ssh-keygen, which signs through the agent holding its
+// private half. git --file follows symlinks, so git edits a private temp
+// copy and the result is renamed into place through the root.
+func (m *Manager) ConfigureGit(ctx context.Context, member domain.MemberID, identity domain.GitIdentity, signingKey string) error {
 	root, err := m.openHome(member)
 	if err != nil {
 		return err
@@ -221,7 +153,7 @@ func (m *Manager) ConfigureGit(ctx context.Context, member domain.MemberID, iden
 		{"user.name", identity.Name},
 		{"user.email", identity.Email},
 		{"gpg.format", "ssh"},
-		{"user.signingkey", "~/" + signingKeyName},
+		{"user.signingkey", "key::" + signingKey},
 		{"commit.gpgsign", "true"},
 	} {
 		cmd := exec.CommandContext(ctx, "git", "config", "--file", path, setting[0], setting[1])
@@ -456,18 +388,4 @@ func clearStaged(root *os.Root) error {
 		}
 	}
 	return nil
-}
-
-func signingComment(member domain.MemberID) string { return "aether " + string(member) }
-
-func authorizedLine(key ssh.PublicKey, comment string) string {
-	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key))) + " " + comment
-}
-
-func publicKeyLine(privatePEM []byte, member domain.MemberID) (string, error) {
-	signer, err := ssh.ParsePrivateKey(privatePEM)
-	if err != nil {
-		return "", err
-	}
-	return authorizedLine(signer.PublicKey(), signingComment(member)), nil
 }

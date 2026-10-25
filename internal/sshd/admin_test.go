@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/signing"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -183,6 +184,47 @@ func TestMemberRemoveCleansTerminalAndHome(t *testing.T) {
 	want := "terminal-stop:" + string(target.ID)
 	if len(calls) == 0 || calls[len(calls)-1] != want {
 		t.Fatalf("RunController calls = %v, want final %q", calls, want)
+	}
+}
+
+// The member's private signing key goes with them. One the server cannot
+// delete is reported once the member is gone, not logged and forgotten.
+func TestMemberRemoveDeletesTheSigningKey(t *testing.T) {
+	t.Parallel()
+	homes, err := memberhome.New(t.TempDir(), t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := t.TempDir()
+	signer, err := signing.New(keys, t.TempDir(), homes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = signer.Close() })
+	e := newTestEnv(t, func(c *Config) { c.Homes, c.Signing = homes, signer })
+	_, removed := addMember(t, e, "Removed", domain.RoleCollaborator, false)
+	_, stuck := addMember(t, e, "Stuck", domain.RoleCollaborator, false)
+	if err = os.WriteFile(filepath.Join(keys, string(removed.ID)), []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A non-empty directory where the key belongs cannot be removed.
+	if err = os.MkdirAll(filepath.Join(keys, string(stuck.ID), "x"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c := controlClient(t, e)
+
+	if err = c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(removed.ID)}, nil); err != nil {
+		t.Fatalf("member.remove: %v", err)
+	}
+	if key, kerr := signer.Key(removed.ID); kerr != nil || key != nil {
+		t.Fatalf("signing key after member.remove = %q (%v), want none", key, kerr)
+	}
+	err = c.Call(protocol.MethodMemberRemove, protocol.MemberRemoveParams{MemberID: string(stuck.ID)}, nil)
+	if err == nil || !strings.Contains(err.Error(), "the member is removed, but its signing key is not") {
+		t.Fatalf("member.remove with an undeletable key = %v, want the leftover reported", err)
+	}
+	if _, gerr := e.store.GetMember(context.Background(), stuck.ID); gerr == nil {
+		t.Fatal("the member was not removed")
 	}
 }
 

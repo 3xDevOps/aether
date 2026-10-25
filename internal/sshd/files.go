@@ -201,8 +201,8 @@ func (s *Server) filesWrite(ctx context.Context, member domain.MemberID, params 
 		return nil, rpcError(err)
 	}
 	var signingKey []byte
-	if s.cfg.Homes != nil {
-		signingKey, err = s.cfg.Homes.SigningKey(member)
+	if s.cfg.Signing != nil {
+		signingKey, err = s.cfg.Signing.Key(member)
 		if err != nil {
 			return nil, rpcError(err)
 		}

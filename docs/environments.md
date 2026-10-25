@@ -281,10 +281,11 @@ aether workspace env unset NODE_ENV
 ```
 
 A name cannot be empty or contain `=`. The server sets some variables after the
-workspace's, including `HOME`, `TERM`, the `AETHER_*` identifiers and the
-`GIT_AUTHOR_*` and `GIT_COMMITTER_*` identity, so a workspace variable with one
-of those names has no effect. A `PATH` variable is kept, with `~/.local/bin`
-put in front.
+workspace's, including `HOME`, `TERM`, `SSH_AUTH_SOCK` (the commit signing
+agent, [security.md](security.md#github-credentials-and-signing-keys)), the
+`AETHER_*` identifiers and the `GIT_AUTHOR_*` and `GIT_COMMITTER_*` identity,
+so a workspace variable with one of those names has no effect. A `PATH`
+variable is kept, with `~/.local/bin` put in front.
 
 ### Secrets
 

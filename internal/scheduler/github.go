@@ -98,7 +98,7 @@ type ghAuthEntry struct {
 // ConnectGitHub finishes the GitHub connection the member started with
 // gh auth login in their environment terminal: it confirms the login,
 // hands git the gh credential helper, generates the member's commit
-// signing key in their home, writes the signing settings and their git
+// signing key on the server, writes the signing settings and their git
 // identity into the home's .gitconfig, and registers the public key on
 // the account.
 //
@@ -189,8 +189,8 @@ func (s *Scheduler) connectGitHubLocked(ctx context.Context, member domain.Membe
 	if _, lookErr := exec.LookPath("ssh-keygen"); lookErr != nil {
 		return domain.GitHubConnection{}, fmt.Errorf("scheduler: the server host needs ssh-keygen (openssh-client) to sign commits: %w", lookErr)
 	}
-	if s.cfg.Homes == nil {
-		return domain.GitHubConnection{}, errors.New("scheduler: member homes are not configured; github.connect needs one to keep the signing key")
+	if s.cfg.Signing == nil {
+		return domain.GitHubConnection{}, errors.New("scheduler: commit signing is not configured; github.connect needs it to keep the signing key")
 	}
 
 	code, _, said, err = gh("gh", "auth", "setup-git", "--hostname", "github.com")
@@ -201,12 +201,9 @@ func (s *Scheduler) connectGitHubLocked(ctx context.Context, member domain.Membe
 		return domain.GitHubConnection{}, fmt.Errorf("scheduler: gh auth setup-git exited %d: %s", code, said)
 	}
 
-	pub, err := s.cfg.Homes.EnsureSigningKey(member)
+	pub, err := s.cfg.Signing.Ensure(ctx, member, m.GitIdentity())
 	if err != nil {
-		return domain.GitHubConnection{}, fmt.Errorf("scheduler: prepare commit signing key: %w", err)
-	}
-	if cfgErr := s.cfg.Homes.ConfigureGit(ctx, member, m.GitIdentity()); cfgErr != nil {
-		return domain.GitHubConnection{}, fmt.Errorf("scheduler: configure git in the member home: %w", cfgErr)
+		return domain.GitHubConnection{}, fmt.Errorf("scheduler: prepare commit signing: %w", err)
 	}
 
 	title := "aether " + string(member)

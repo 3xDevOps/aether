@@ -2,11 +2,14 @@ package scheduler
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/memberhome"
@@ -63,6 +66,44 @@ func TestBuildEnvironmentPlanMountsOnePersistentHomeFirst(t *testing.T) {
 			t.Fatalf("cache defaults changed persistent environment: %#v", plan.Env)
 		}
 
+	}
+}
+
+// Runs and the environment terminal both reach the member's signing agent,
+// over a workspace that sets SSH_AUTH_SOCK itself.
+func TestBuildEnvironmentPlanMountsTheSigningAgent(t *testing.T) {
+	t.Parallel()
+	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "home-caches"), nil)
+	if err != nil {
+		t.Fatalf("memberhome.New: %v", err)
+	}
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "aether.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	cfg := Config{StandardImage: "standard:latest", Homes: homes, Store: db, StateDir: t.TempDir()}
+	withSigning(t)(&cfg)
+	s := &Scheduler{cfg: cfg}
+	ws := &domain.Workspace{ID: "ws", Environment: domain.WorkspaceEnvironment{
+		Variables: map[string]string{"SSH_AUTH_SOCK": "/tmp/workspace-agent.sock"},
+	}}
+	member := &domain.Member{ID: "member"}
+	for _, purpose := range []EnvironmentPurpose{EnvironmentPurposeRun, EnvironmentPurposeTerminal} {
+		plan, planErr := s.BuildEnvironmentPlan(t.Context(), nil, ws, member, harness.Profile{}, purpose)
+		if planErr != nil {
+			t.Fatalf("BuildEnvironmentPlan(%q): %v", purpose, planErr)
+		}
+		if got := plan.Env["SSH_AUTH_SOCK"]; got != coordtransport.SigningSocketPath {
+			t.Errorf("purpose %q SSH_AUTH_SOCK = %q, want %q", purpose, got, coordtransport.SigningSocketPath)
+		}
+		i := slices.IndexFunc(plan.Mounts, func(m runtime.Mount) bool { return m.ContainerPath == coordtransport.SigningMountDir })
+		if i < 0 || !plan.Mounts[i].ReadOnly {
+			t.Fatalf("purpose %q mounts = %+v, want the agent directory read-only at %s", purpose, plan.Mounts, coordtransport.SigningMountDir)
+		}
+		if _, statErr := os.Stat(filepath.Join(plan.Mounts[i].HostPath, "agent.sock")); statErr != nil {
+			t.Errorf("purpose %q agent socket: %v", purpose, statErr)
+		}
 	}
 }
 

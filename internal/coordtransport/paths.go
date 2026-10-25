@@ -13,6 +13,11 @@ const (
 	// AssistantMountDir is the read-only directory holding the assistant tool
 	// socket in a member's environment terminal.
 	AssistantMountDir = "/run/aether-assistant"
+	// SigningMountDir is the read-only directory holding the member's commit
+	// signing agent in their runs and environment terminal.
+	SigningMountDir = "/run/aether-signing"
+	// SigningSocketPath is the SSH_AUTH_SOCK every such container gets.
+	SigningSocketPath = SigningMountDir + "/agent.sock"
 	// BinaryPath is the staged server binary path. It serves the MCP entry
 	// point and harness lifecycle hooks.
 	BinaryPath = "/opt/aether/aether-server"

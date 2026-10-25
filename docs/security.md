@@ -22,10 +22,10 @@ credentials out of the report.
 | Surface | What it protects | What it does not protect |
 | --- | --- | --- |
 | [Run container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Runs and environments cannot connect to each other. | It is not a VM. Agents run as root and can read and change everything mounted into the run: your home, the checkout and the workspace secrets. |
-| [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own runs. | Every run you launch can read and replace your agent logins, gh token and signing key. |
+| [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own runs. | Every run you launch can read and replace your agent logins and gh token, and sign with your commit signing key. |
 | [Who can act on a run](#who-can-see-and-act-on-a-run) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your runs, which hold your home. |
 | [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
-| [GitHub credentials](#github-credentials-and-signing-keys) | The gh token and signing key stay in your home, out of the database and out of saved images. | Any of your runs can act as you on GitHub within the token's scopes, and replace your signing key. |
+| [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Runs sign through an agent and cannot copy the key. | Any of your runs can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
 | [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
 | [Assistant](#the-assistant) | Launching, messaging and stopping runs and saving the environment wait for your click. | Its shell runs any command in your environment without asking. Auto-approve removes the click. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the run. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the run can read a retained capture. |
@@ -167,23 +167,47 @@ After you first share a `claude` or `gemini` account, restart your environment
 
 Connecting GitHub, from the dashboard or with `gh auth login` and `aether
 github connect` in your environment
-([environment-home.md](environment-home.md#connect-github)), leaves three
-files in your home on the server. None is in the database, and `aether env
-save` never captures the home.
+([environment-home.md](environment-home.md#connect-github)), creates an
+ed25519 signing key and leaves three files in your home on the server. None is
+in the database, and `aether env save` never captures the home.
 
 | File | Holds |
 | --- | --- |
 | `~/.config/gh/hosts.yml` | The gh token, in plain text. |
-| `~/.ssh/aether_signing` and `.pub` | An ed25519 signing key. Only the public half is registered on GitHub. |
-| `~/.gitconfig` | gh's credential helper for `https://github.com` and the commit-signing settings. |
+| `~/.ssh/aether_signing.pub` | The public half of the signing key, the one registered on GitHub. |
+| `~/.gitconfig` | gh's credential helper for `https://github.com` and the commit-signing settings, with `user.signingkey = key::<public key>`. |
 
-Root in any of your runs can read and replace all three. The token carries
-gh's default scopes (`repo`, `read:org`, `gist`) plus the
-`admin:ssh_signing_key` scope Aether needs to register the key, so an agent
-can push to the workspace's origin, open pull requests, and add or remove
-signing keys on your account. It can also swap the signing key, so Aether
-signs its end-of-run commits with the agent's key, or plant `~/.local/bin/gh`,
-which then runs on your next `aether github connect`.
+The private key is never in your home. The server keeps it in
+`signing-keys/<member-id>` in its data directory (mode 0600) and lends it to
+your runs and environment through a read-only SSH agent mounted at
+`/run/aether-signing/agent.sock`, which `SSH_AUTH_SOCK` names. git signs
+through it with `ssh-keygen`. The agent lists and signs with your key and
+refuses to add, remove, lock or unlock keys. Aether signs its end-of-run
+commits with the same key, read from the data directory.
+
+Root in any of your runs can read and replace the token and `~/.gitconfig`, and
+can sign anything with your key while the run lives. It cannot copy the key or
+make Aether sign with another one. The token carries gh's default scopes
+(`repo`, `read:org`, `gist`) plus the `admin:ssh_signing_key` scope Aether
+needs to register the key, so an agent can push to the workspace's origin,
+open pull requests, and add or remove signing keys on your account: a key it
+registers signs commits that GitHub shows as Verified. It can also plant
+`~/.local/bin/gh`, which then runs on your next `aether github connect`.
+
+`SSH_AUTH_SOCK` names the signing agent in every run and environment. A
+workspace variable of that name has no effect, and neither `aether ssh` nor an
+editor's Remote-SSH session forwards your local agent. A shell that starts its
+own `ssh-agent` replaces it, and `git commit` there fails with `error: Couldn't
+find key in agent?`.
+
+Releases before the server-held key kept it at `~/.ssh/aether_signing`. On its
+first start after the upgrade the server moves each such key into
+`signing-keys/`, deletes it from the home and rewrites `user.signingkey`, so
+the key already registered on GitHub keeps signing. Runs and the environment
+started before the upgrade have no agent, so `git commit` in them fails with
+`error: Couldn't get agent socket?`. Restart the environment (`aether terminal
+stop`, then `aether terminal`); such a run's end-of-run commit is still
+signed.
 
 To revoke the connection:
 
@@ -191,11 +215,15 @@ To revoke the connection:
    [GitHub's application settings](https://github.com/settings/applications).
    `gh auth logout` alone does not revoke a copied token.
 2. Remove the signing key at
-   [github.com/settings/keys](https://github.com/settings/keys).
-3. Delete `~/.config/gh/hosts.yml`, `~/.ssh/aether_signing` and
-   `~/.ssh/aether_signing.pub` from your home.
-4. Clear the signing settings in your environment terminal, or every `git
-   commit` in a run fails with `Load key ...: No such file or directory`:
+   [github.com/settings/keys](https://github.com/settings/keys), and any
+   signing key there you did not add yourself.
+3. Delete `~/.config/gh/hosts.yml` and `~/.ssh/aether_signing.pub` from your
+   home. To retire the private key, a server admin deletes
+   `signing-keys/<member-id>` from the data directory; the next `aether github
+   connect` creates a new one.
+4. Clear the signing settings in your environment terminal. Without the
+   private key, every `git commit` in a run fails with `error: Couldn't find
+   key in agent?` until you do:
 
    ```sh
    git config --global --unset commit.gpgsign

@@ -22,6 +22,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/secretstore"
+	"github.com/3xDevOps/Aether/internal/signing"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -75,6 +76,10 @@ type Config struct {
 	// Homes owns the persistent per-member home directories. It is optional
 	// in narrow unit-test configurations.
 	Homes *memberhome.Manager
+
+	// Signing holds members' commit signing keys. Nil leaves the commits
+	// the server makes unsigned.
+	Signing *signing.Service
 
 	// Secrets holds workspace secret variables. Nil refuses to store one.
 	Secrets *secretstore.Store

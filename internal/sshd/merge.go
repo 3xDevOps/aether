@@ -348,7 +348,9 @@ func (s *Server) memberMergeAccept(ctx context.Context, member domain.MemberID, 
 		}
 	}
 	s.publishDroppedDevices(ctx, member, ids, before)
-	s.afterMerge(ctx, member, merge, devs)
+	if err := s.afterMerge(ctx, member, merge, devs); err != nil {
+		return nil, rpcError(fmt.Errorf("member.merge.accept: the members are merged, but %w", err))
+	}
 	return s.mergeResult(ctx, merge)
 }
 
@@ -377,13 +379,17 @@ func acceptable(pending []*store.PendingMerge, p protocol.MemberMergeAcceptParam
 
 // afterMerge closes the absorbed member's connections, the caller's once
 // it has the result, and publishes the merge and the devices that moved.
-func (s *Server) afterMerge(ctx context.Context, caller domain.MemberID, merge *store.MemberMerge, devs []*domain.Device) {
+func (s *Server) afterMerge(ctx context.Context, caller domain.MemberID, merge *store.MemberMerge, devs []*domain.Device) error {
 	closeAbsorbed := func() { s.closeMemberConns(merge.AbsorbedID) }
 	if caller != merge.AbsorbedID || !deferUntilResponded(ctx, closeAbsorbed) {
 		closeAbsorbed()
 	}
 	if err := s.removeAssistant(ctx, merge.AbsorbedID); err != nil {
 		slog.Warn("sshd: absorbed member's assistant cleanup failed", "merge", merge.ID, "error", err)
+	}
+	var agentErr error
+	if s.cfg.Signing != nil {
+		agentErr = s.cfg.Signing.StopAgent(merge.AbsorbedID)
 	}
 	s.notifyDirectory()
 	ev := events.Event{WorkspaceID: events.ServerScope, ActorID: merge.SurvivorID,
@@ -398,6 +404,10 @@ func (s *Server) afterMerge(ctx context.Context, caller domain.MemberID, merge *
 	}
 	slog.Info("sshd: members merged", "merge", merge.ID, "survivor", merge.SurvivorID, "absorbed", merge.AbsorbedID,
 		"role", merge.RoleAfter, "confirmed_by", merge.ConfirmedByKind, "archive", merge.ArchivePath)
+	if agentErr != nil {
+		return fmt.Errorf("the absorbed member's signing agent was not stopped: %w", agentErr)
+	}
+	return nil
 }
 
 func (s *Server) memberMergeCancel(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -417,14 +427,15 @@ func (s *Server) memberMergeCancel(ctx context.Context, member domain.MemberID, 
 }
 
 // archiveHome moves the absorbed member's home to <MergedDir>/<merge
-// id>/home, beside a file naming the member so RecoverMergeArchives can
-// put it back if the server stops before the merge commits.
-func (s *Server) archiveHome(mergeID string, absorbed domain.MemberID) (string, func(), error) {
+// id>/home and their signing key to <MergedDir>/<merge id>/signing-key,
+// beside a file naming the member so RecoverMergeArchives can put both back
+// if the server stops before the merge commits.
+func (s *Server) archiveHome(mergeID string, absorbed domain.MemberID) (string, func() error, error) {
 	if s.cfg.Homes == nil || s.cfg.MergedDir == "" {
 		return "", nil, nil
 	}
 	dir := filepath.Join(s.cfg.MergedDir, mergeID)
-	marker, home := filepath.Join(dir, mergeMemberFile), filepath.Join(dir, "home")
+	marker, home, key := filepath.Join(dir, mergeMemberFile), filepath.Join(dir, "home"), filepath.Join(dir, mergeKeyFile)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", nil, fmt.Errorf("sshd: merge archive: %w", err)
 	}
@@ -438,18 +449,36 @@ func (s *Server) archiveHome(mergeID string, absorbed domain.MemberID) (string, 
 		clear()
 		return "", nil, err
 	}
-	return dir, func() {
+	keyMoved := false
+	if s.cfg.Signing != nil {
+		if keyMoved, err = s.cfg.Signing.Archive(absorbed, key); err != nil {
+			if uerr := s.cfg.Homes.Unarchive(absorbed, home); uerr != nil {
+				return "", nil, errors.Join(err, fmt.Errorf("sshd: put back the archived home %s; aether-server restores it at its next start: %w", home, uerr))
+			}
+			clear()
+			return "", nil, err
+		}
+	}
+	return dir, func() error {
+		if keyMoved {
+			if err := s.cfg.Signing.Unarchive(absorbed, key); err != nil {
+				return fmt.Errorf("sshd: put back the archived signing key %s; aether-server restores it at its next start: %w", key, err)
+			}
+		}
 		if err := s.cfg.Homes.Unarchive(absorbed, home); err != nil {
-			slog.Error("sshd: merge failed and its archived home could not be put back; aether-server restores it at its next start",
-				"member", absorbed, "path", home, "error", err)
-			return
+			return fmt.Errorf("sshd: put back the archived home %s; aether-server restores it at its next start: %w", home, err)
 		}
 		clear()
+		return nil
 	}, nil
 }
 
-// mergeMemberFile names the absorbed member in a merge's archive.
-const mergeMemberFile = "member"
+// mergeMemberFile names the absorbed member in a merge's archive, and
+// mergeKeyFile holds their signing key.
+const (
+	mergeMemberFile = "member"
+	mergeKeyFile    = "signing-key"
+)
 
 // RecoverMergeArchives puts back the home of each merge that moved it and
 // never committed: the server stopped in between. Call it before Serve.
@@ -503,6 +532,12 @@ func (s *Server) RecoverMergeArchives(ctx context.Context) error {
 				return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
 			}
 			slog.Warn("sshd: put back the home of a merge that never committed", "member", string(member), "archive", dir)
+		}
+		key := filepath.Join(dir, mergeKeyFile)
+		if _, err := os.Lstat(key); err == nil && s.cfg.Signing != nil {
+			if err := s.cfg.Signing.Unarchive(domain.MemberID(member), key); err != nil {
+				return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
+			}
 		}
 		if err := os.Remove(filepath.Join(dir, mergeMemberFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("sshd: recover merge archive %s: %w", dir, err)
