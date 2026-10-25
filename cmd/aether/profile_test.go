@@ -102,6 +102,15 @@ func captureStdout(t *testing.T, run func() error) (string, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	type readResult struct {
+		out []byte
+		err error
+	}
+	done := make(chan readResult, 1)
+	go func() {
+		out, readErr := io.ReadAll(r)
+		done <- readResult{out, readErr}
+	}()
 	saved := os.Stdout
 	os.Stdout = w
 	runErr := run()
@@ -109,11 +118,11 @@ func captureStdout(t *testing.T, run func() error) (string, error) {
 	if err = w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
+	res := <-done
+	if res.err != nil {
+		t.Fatal(res.err)
 	}
-	return string(out), runErr
+	return string(res.out), runErr
 }
 
 // A flagged path is pasted into a shell, so the refusal has to hold it as

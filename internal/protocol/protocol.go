@@ -195,6 +195,11 @@ func (e *Error) Error() string {
 // UpdateCommand updates a CLI to the newest release.
 const UpdateCommand = "aether update"
 
+// FirstAdminRefusal opens the SSH banner a fresh server with an edge sends
+// when it refuses a first admin key from a remote address. The banner says
+// how to claim the server, so the CLI adds no SSH key advice after it.
+const FirstAdminRefusal = "this server has an edge and no admin yet"
+
 // UpgradeRequiredData is the Data of a CodeUpgradeRequired error.
 // ClientVersion is empty for a client whose SSH banner names no version.
 type UpgradeRequiredData struct {

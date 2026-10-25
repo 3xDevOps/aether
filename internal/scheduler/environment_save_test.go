@@ -13,12 +13,15 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-func TestSaveEnvironmentRequiresRunningTerminal(t *testing.T) {
+func TestSaveEnvironmentRefusesWithoutARunningTerminal(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
 	_, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
-	if !errors.Is(err, ErrTerminalNotRunning) {
-		t.Fatalf("SaveEnvironment error = %v, want %v", err, ErrTerminalNotRunning)
+	if !errors.Is(err, ErrTerminalNotRunning) || !strings.Contains(err.Error(), "open it with `aether terminal`") {
+		t.Fatalf("SaveEnvironment with no terminal open = %v, want ErrTerminalNotRunning naming aether terminal", err)
+	}
+	if calls := e.rt.commitCalls(); len(calls) != 0 {
+		t.Fatalf("commit calls = %+v, want none", calls)
 	}
 }
 

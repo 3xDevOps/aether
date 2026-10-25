@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -17,7 +16,10 @@ func init() {
 	register(command{
 		name:  "forward",
 		short: "forward a run or Environment port to localhost",
-		run:   runForward,
+		usage: "aether forward <run-id|terminal> <port> [--local <port>]",
+		example: "aether forward run-d6ay38tj8j 3000\n" +
+			"aether forward terminal 8080 --local 9090",
+		run: runForward,
 	})
 }
 
@@ -54,8 +56,7 @@ func runForward(args []string) error {
 }
 
 func parseForwardArgs(args []string) (string, int, int, error) {
-	fs := flag.NewFlagSet("forward", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("forward")
 	local := fs.Int("local", 0, "local loopback port (default: remote port)")
 	var positional, flags []string
 	for i := 0; i < len(args); i++ {
@@ -74,7 +75,10 @@ func parseForwardArgs(args []string) (string, int, int, error) {
 		}
 		positional = append(positional, arg)
 	}
-	if err := fs.Parse(flags); err != nil || len(positional) != 2 {
+	if err := fs.Parse(flags); err != nil {
+		return "", 0, 0, fmt.Errorf("%w\nusage: aether forward <run-id|terminal> <port> [--local <port>]", err)
+	}
+	if len(positional) != 2 {
 		return "", 0, 0, fmt.Errorf("usage: aether forward <run-id|terminal> <port> [--local <port>]")
 	}
 	port, err := strconv.Atoi(positional[1])

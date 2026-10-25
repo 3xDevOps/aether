@@ -5,24 +5,146 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/cli"
+	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
 func TestDispatchHelp(t *testing.T) {
-	if err := dispatch(nil); err != nil {
+	out, err := captureStdout(t, func() error { return dispatch(nil) })
+	if err != nil {
 		t.Fatalf("bare aether: %v", err)
 	}
-	help := helpText()
 	for _, name := range []string{"daemon", "version", "init", "link", "run", "attach", "terminal", "runs", "pull", "workspace", "member", "invite", "gui", "gui build", "profile", "kill", "delete", "archive", "unarchive", "pause", "resume", "message", "close", "reopen", "who", "handoff", "timeline", "cost", "budget", "template", "schedule", "protect", "unprotect"} {
-		if !strings.Contains(help, name) {
-			t.Errorf("help missing %q:\n%s", name, help)
+		if !strings.Contains(out, name) {
+			t.Errorf("help missing %q:\n%s", name, out)
 		}
 	}
-	if !strings.Contains(help, "reopen a finished run that still keeps its container") {
-		t.Errorf("relaunch help = %q, want the kept-container wording", help)
+	if !strings.Contains(out, "reopen a finished run that still keeps its container") {
+		t.Errorf("relaunch help = %q, want the kept-container wording", out)
+	}
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if tail := strings.Join(lines[len(lines)-2:], "\n"); !strings.Contains(tail, "aether status") || !strings.Contains(tail, "coding agents: aether help agents") {
+		t.Errorf("help ends with %q, want where to start and the agents guide", tail)
+	}
+}
+
+// Every command and subcommand form answers --help on stdout without
+// reaching the linked server, and aether help <command> prints the same.
+func TestEveryCommandAnswersHelp(t *testing.T) {
+	testhome.Isolate(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	var dials atomic.Int32
+	go func() {
+		for {
+			conn, aerr := ln.Accept()
+			if aerr != nil {
+				return
+			}
+			dials.Add(1)
+			_ = conn.Close()
+		}
+	}()
+	if err = cli.Save(cli.Config{Addr: ln.Addr().String()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range commands {
+		paths := []string{c.name}
+		for _, line := range strings.Split(c.usage, "\n") {
+			words := strings.Fields(line)
+			if len(words) < 2 || words[0] != "aether" {
+				continue
+			}
+			n := 1
+			for n < len(words) && !strings.ContainsAny(words[n][:1], "<[-|\"'.") {
+				n++
+			}
+			if path := strings.Join(words[1:n], " "); !slices.Contains(paths, path) {
+				paths = append(paths, path)
+			}
+		}
+		for _, path := range paths {
+			args := strings.Fields(path)
+			out, herr := captureStdout(t, func() error { return dispatch(append(args, "--help")) })
+			if herr != nil {
+				t.Errorf("aether %s --help: %v", path, herr)
+				continue
+			}
+			if !strings.HasPrefix(out, "usage: aether "+path) {
+				t.Errorf("aether %s --help prints %q, want its usage first", path, out)
+			}
+			if slices.Contains(flagSubcommands, path) && !strings.Contains(out, "\nflags:\n  -") {
+				t.Errorf("aether %s --help lists no flags:\n%s", path, out)
+			}
+			if path != c.name {
+				continue
+			}
+			for _, want := range append(strings.Split(c.usage, "\n"), c.short, "\nexample:\n  aether "+c.name) {
+				if !strings.Contains(out, want) {
+					t.Errorf("aether %s --help lacks %q:\n%s", c.name, want, out)
+				}
+			}
+			if c.flags && !strings.Contains(out, "\nflags:\n") {
+				t.Errorf("aether %s --help lists no flags:\n%s", c.name, out)
+			}
+			viaHelp, herr := captureStdout(t, func() error { return dispatch([]string{"help", c.name}) })
+			if herr != nil || viaHelp != out {
+				t.Errorf("aether help %s = %q, %v; want the --help output", c.name, viaHelp, herr)
+			}
+		}
+	}
+	if n := dials.Load(); n != 0 {
+		t.Errorf("--help dialed the linked server %d times", n)
+	}
+}
+
+func TestSubcommandHelpShowsFlagDefaults(t *testing.T) {
+	for path, wants := range map[string][]string{
+		"template save":              {"-mode string", `(default "background")`},
+		"workspace mirror configure": {"-auth string", `(default "public")`},
+	} {
+		out, err := captureStdout(t, func() error { return dispatch(append(strings.Fields(path), "--help")) })
+		if err != nil {
+			t.Fatalf("aether %s --help: %v", path, err)
+		}
+		for _, want := range wants {
+			if !strings.Contains(out, want) {
+				t.Errorf("aether %s --help lacks %q:\n%s", path, want, out)
+			}
+		}
+	}
+}
+
+func TestFlagSetHelpAndErrors(t *testing.T) {
+	out, err := captureStdout(t, func() error { return dispatch([]string{"runs", "--json", "-h"}) })
+	if err != nil || !strings.Contains(out, "\nflags:\n  -archived") {
+		t.Errorf("aether runs --json -h = %q, %v; want the flags and no error", out, err)
+	}
+	err = dispatch([]string{"runs", "--nope"})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined: -nope; see aether runs --help") {
+		t.Errorf("aether runs --nope = %v, want the flag error and the help command", err)
+	}
+	out, err = captureStdout(t, func() error { return dispatch([]string{"help", "agents"}) })
+	if err != nil || !strings.HasPrefix(out, "# ") {
+		t.Errorf("aether help agents = %q, %v; want docs/agents.md", out, err)
+	}
+}
+
+func TestFlagParseErrorKeepsCause(t *testing.T) {
+	err := dispatch([]string{"template", "save", "audit", "--agent", "claude", "--task", "fix", "--budget", "nope"})
+	if err == nil || !strings.Contains(err.Error(), `invalid value "nope" for flag -budget`) {
+		t.Errorf("template save --budget nope = %v, want the invalid value error", err)
 	}
 }
 

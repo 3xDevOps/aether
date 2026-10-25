@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -12,14 +11,17 @@ import (
 
 func init() {
 	register(command{
-		name:  "servers",
-		short: "list the servers your edge account can link",
-		run:   runServers,
+		name:    "servers",
+		short:   "list the servers your edge account can link",
+		usage:   "aether servers [--edge <url>]",
+		example: "aether servers",
+		flags:   true,
+		run:     runServers,
 	})
 }
 
 func runServers(args []string) error {
-	fs := flag.NewFlagSet("servers", flag.ExitOnError)
+	fs := newFlagSet("servers")
 	edgeURL := fs.String("edge", "", edgeFlagUsage)
 	if err := fs.Parse(args); err != nil {
 		return err

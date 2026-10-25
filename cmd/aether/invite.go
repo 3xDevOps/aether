@@ -14,6 +14,15 @@ func init() {
 	register(command{
 		name:  "invite",
 		short: "invite a GitHub account through the edge, or mint a one-time invite code",
+		usage: "aether invite [--ttl <seconds>]\n" +
+			"aether invite --github <login> [--role <viewer|collaborator|admin>]\n" +
+			"aether invite --email <address> [--role <viewer|collaborator|admin>]\n" +
+			"aether invite list\n" +
+			"aether invite revoke <invitation-id>",
+		example: "aether invite\n" +
+			"aether invite --github alice --role collaborator\n" +
+			"aether invite list",
+		flags: true,
 		run:   runInvite,
 	})
 }
@@ -69,7 +78,7 @@ const inviteUsage = "usage: aether invite [--ttl <seconds>]\n" +
 // account, or nil and the lifetime of a one-time invite code. A flag of
 // the other kind is refused rather than ignored.
 func parseInviteArgs(args []string) (*protocol.MemberInvitationCreateParams, int, error) {
-	fs := flag.NewFlagSet("invite", flag.ExitOnError)
+	fs := newFlagSet("invite")
 	ttl := fs.Int("ttl", 86400, "lifetime of a one-time invite code in seconds")
 	github := fs.String("github", "", "invite this GitHub login; prints the link they join with")
 	email := fs.String("email", "", "invite the GitHub account whose verified primary email this is")

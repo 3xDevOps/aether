@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/3xDevOps/Aether/internal/serversetup"
 )
 
 // Automation may install Docker after install, so a Docker that does not
@@ -42,5 +44,60 @@ func TestWriteInstallWarnsAndContinuesWithoutDocker(t *testing.T) {
 				t.Errorf("warned = %v, Sysbox installs = %d, want %d and next steps starting %q:\n%s", warned, *installs, tc.installs, tc.first, out.String())
 			}
 		})
+	}
+}
+
+// With the edge on, install shows the server id the claim names, and one
+// warning line for what the host lacks.
+func TestWriteInstallShowsTheServerAndWhatTheHostLacks(t *testing.T) {
+	fakeDocker(t, nil)
+	t.Setenv("PATH", t.TempDir())
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "data")
+	values := map[string]string{"data-dir": dataDir, "edge-url": "https://edge.example", "edge-access": "approved-devices"}
+	var out bytes.Buffer
+	if err := writeInstall(&out, filepath.Join(dir, "aether-server.service"), filepath.Join(dir, "server.conf"), values, false, false); err != nil {
+		t.Fatal(err)
+	}
+	id, err := serverID(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var warnings []string
+	for line := range strings.Lines(out.String()) {
+		if strings.HasPrefix(line, "warning: ") {
+			warnings = append(warnings, line)
+		}
+	}
+	if len(warnings) != 1 || !strings.HasPrefix(warnings[0], "warning: git is not installed; ssh-keygen is not installed") ||
+		!strings.HasSuffix(warnings[0], " (docs/install.md#server-prerequisites)\n") {
+		t.Errorf("want one warning line naming git and ssh-keygen, got %q:\n%s", warnings, out.String())
+	}
+	if !strings.Contains(out.String(), "\nserver id: "+id+"\n") {
+		t.Errorf("install does not show the server id %s:\n%s", id, out.String())
+	}
+}
+
+// A rerun that names an option the kept config sets otherwise writes
+// nothing and prints the command that applies it; naming what the file
+// already holds, even as a default it leaves out, goes through.
+func TestInstallRefusesToDropANamedOption(t *testing.T) {
+	t.Setenv("SUDO_USER", "ubuntu")
+	configPath := filepath.Join(t.TempDir(), "server.conf")
+	if err := serversetup.WriteConfig(configPath, map[string]string{"addr": ":2222", "edge-url": "https://edge.example", "edge-access": "account"}); err != nil {
+		t.Fatal(err)
+	}
+	same := map[string]string{"addr": ":2222", "edge-access": "account", "tailnet-auto-join": "false"}
+	if err := refuseKeptChanges(configPath, same); err != nil {
+		t.Errorf("rerun naming the kept values: %v", err)
+	}
+	err := refuseKeptChanges(configPath, map[string]string{"addr": ":2222", "edge-access": "approved-devices", "edge-url": ""})
+	want := "  sudo aether-server config set edge-access approved-devices --config " + configPath + "\n" +
+		"  sudo aether-server config set edge-url '' --config " + configPath + "\n"
+	if err == nil || !strings.Contains(err.Error(), "nothing was written") || !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), " addr ") {
+		t.Errorf("rerun naming other values = %v, want the config set commands:\n%s", err, want)
+	}
+	if err := refuseKeptChanges(filepath.Join(t.TempDir(), "none.conf"), same); err != nil {
+		t.Errorf("first install: %v", err)
 	}
 }

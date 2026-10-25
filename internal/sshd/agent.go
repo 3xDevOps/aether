@@ -201,6 +201,12 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 		if profile.ACPInstall != nil {
 			info.EnhancedInstallScript = profile.InstallCommand(true)
 		}
+		if info.LoginCommand = profile.LoginCommand; info.LoginCommand != "" {
+			info.LoginKind = "interactive"
+			if profile.DeviceLogin {
+				info.LoginKind = "device"
+			}
+		}
 	}
 	var err error
 	if info.Installed, info.EnhancedInstalled, err = s.agentInstalled(member, account, executable, profile); err != nil {

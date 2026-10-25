@@ -399,8 +399,8 @@ func TestControlCanceledRequestPreservesSiblingChannels(t *testing.T) {
 	_ = pipe.Close()
 	select {
 	case <-br.ctx.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("channel closure did not cancel its request")
+		t.Fatal("channel closure canceled a launch, which outlives its channel")
+	case <-time.After(200 * time.Millisecond):
 	}
 	for range 3 {
 		assertControlInfo(t, healthy, e.member.ID)

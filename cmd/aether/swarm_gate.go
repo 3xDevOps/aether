@@ -3,7 +3,6 @@ package main
 import (
 	"cmp"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -38,10 +37,13 @@ func parseSwarmAnswer(args []string, stdin io.Reader) (missionID, questionID, an
 	if err != nil {
 		return "", "", "", err
 	}
-	fs := flag.NewFlagSet("swarm answer", flag.ExitOnError)
+	fs := newFlagSet("swarm answer")
 	question := fs.String("question", "", "ID of the question to answer (from aether swarm show)")
 	answer, err = parseLeadingArg(fs, rest)
-	if err != nil || *question == "" {
+	if err != nil {
+		return "", "", "", fmt.Errorf("%w\n%s", err, swarmAnswerUsage)
+	}
+	if *question == "" {
 		return "", "", "", errors.New(swarmAnswerUsage)
 	}
 	answer, err = stdinText(answer, "answer", stdin)
@@ -107,7 +109,7 @@ func swarmReplaceIntegrator(args []string) error {
 	if err != nil {
 		return err
 	}
-	fs := flag.NewFlagSet("swarm replace-integrator", flag.ExitOnError)
+	fs := newFlagSet("swarm replace-integrator")
 	agent := fs.String("agent", "", "agent of the new integrator")
 	mode := fs.String("mode", "", "integrator mode: standard or enhanced (default: "+swarmModeDefault+")")
 	model := fs.String("model", "", "integrator "+modelHelp)

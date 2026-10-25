@@ -2,9 +2,9 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/url"
@@ -22,12 +22,22 @@ import (
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 func init() {
 	register(command{
 		name:  "link",
 		short: "connect to a server and save local config",
+		usage: "aether link <host:port> [--invite <code>] [--key <path>] [flags]\n" +
+			"aether link <server-id> [--addr <host[:port]>] [flags]\n" +
+			"aether link <join-link> [flags]\n" +
+			"aether link --from-edge <server-id> [--yes] [flags]\n" +
+			"aether link --claim <link|code> [flags]",
+		example: "aether link devbox.example.com:2222 --invite <code>\n" +
+			"aether link --claim <claim-link> --repo ~/src/app\n" +
+			"aether link --from-edge <server-id>",
+		flags: true,
 		run:   runLink,
 	})
 }
@@ -64,16 +74,16 @@ type linkOptions struct {
 const linkUsage = "usage: aether link <addr | server id> [--invite] [--key] [--name] [--repo] [--workspace] [--edge] [--addr]\n" +
 	"       aether link <join link> [--addr] [--name] [--repo] [--workspace]\n" +
 	"       aether link --from-edge <server id> [--yes] [--edge] [--addr] [--name] [--repo] [--workspace]\n" +
-	"       aether link --claim <code> [--edge] [--addr] [--name] [--repo] [--workspace]"
+	"       aether link --claim <code | claim link> [--edge] [--addr] [--name] [--repo] [--workspace]"
 
 func parseLinkArgs(args []string) (linkOptions, error) {
-	fs := flag.NewFlagSet("link", flag.ExitOnError)
+	fs := newFlagSet("link")
 	invite := fs.String("invite", "", "one-time invite code")
 	name := fs.String("name", "", "profile label for this link (also the display name when joining via invite)")
 	repo := fs.String("repo", "", "local git repository to add the aether remote to")
 	workspace := fs.String("workspace", "", "workspace name or id for the git remote")
 	keyFlag := fs.String("key", "", "SSH private key to authenticate with (default ~/.ssh/id_ed25519); saved in the config for later commands")
-	claim := fs.String("claim", "", "claim code printed by aether-server setup; claims the server through the edge and links it")
+	claim := fs.String("claim", "", "claim code or claim link printed by aether-server setup; claims the server through the edge and links it")
 	fromEdge := fs.String("from-edge", "", "server id from aether servers to link: shows its name and host key and asks before pinning it")
 	yes := fs.Bool("yes", false, "with --from-edge: skip the confirmation, having compared the id with the one the server's admin gave you")
 	edge := fs.String("edge", "", edgeFlagUsage)
@@ -85,18 +95,41 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 			return linkOptions{}, fmt.Errorf("link --from-edge: %q is not a server id; aether servers lists them", *fromEdge)
 		}
 		addr = *fromEdge
-	case err != nil || addr == "" || *claim != "" || *fromEdge != "":
+	case err != nil:
+		return linkOptions{}, fmt.Errorf("%w\n%s", err, linkUsage)
+	case addr == "" || *claim != "" || *fromEdge != "":
 		return linkOptions{}, errors.New(linkUsage)
 	}
 	var join string
-	if _, _, _, _, joinErr := edgeproto.ParseJoinLink(addr); joinErr == nil {
+	_, _, _, _, joinErr := edgeproto.ParseJoinLink(addr)
+	_, _, codeErr := edgeproto.ParseClaimCode(addr)
+	switch {
+	case joinErr == nil:
 		if *invite != "" || *keyFlag != "" || *edge != "" {
 			return linkOptions{}, errors.New("link: --invite, --key and --edge do not apply to a join link, which names its edge and authenticates with the device key from aether login")
 		}
 		join, addr = addr, ""
+	case strings.HasPrefix(strings.ToLower(addr), "aether://claim"):
+		return linkOptions{}, errors.New("link: a claim link goes after --claim: aether link --claim '<claim link>'")
+	case codeErr == nil:
+		return linkOptions{}, errors.New("link: that is a claim code, which goes after --claim: aether link --claim <code>")
+	case strings.Contains(addr, "://"):
+		return linkOptions{}, fmt.Errorf("link: %w; an address looks like host[:port], and a claim link goes after --claim", joinErr)
 	}
 	if *yes && *fromEdge == "" {
 		return linkOptions{}, errors.New("link: --yes applies to --from-edge only")
+	}
+	if strings.Contains(*claim, "://") {
+		linkEdge, code, claimErr := edgeproto.ParseClaimLink(*claim)
+		if claimErr != nil {
+			return linkOptions{}, fmt.Errorf("link --claim: %w", claimErr)
+		}
+		if *edge != "" {
+			if origin, originErr := edgeproto.Origin(*edge); originErr != nil || origin != linkEdge {
+				return linkOptions{}, fmt.Errorf("link --claim: the claim link names the edge %s; drop --edge %s", linkEdge, *edge)
+			}
+		}
+		*claim, *edge = code, linkEdge
 	}
 	if (*claim != "" || *fromEdge != "") && (*invite != "" || *keyFlag != "") {
 		return linkOptions{}, fmt.Errorf("link: --invite and --key do not apply to an edge link, which authenticates with the device key from aether login")
@@ -153,15 +186,25 @@ func runLink(args []string) error {
 	}
 	result, err := linkWaiting(linkOpts, prev)
 	if err != nil {
+		var (
+			edgeRefused *edgeclient.RefusedError
+			refused     *edgeproto.Refused
+		)
+		claimed := errors.As(err, &edgeRefused) && edgeproto.Refusal(edgeRefused.Message) == edgeproto.RefusalClaimed ||
+			errors.As(err, &refused) && refused.Kind == edgeproto.RefusedClaimed
+		if _, serverID, parseErr := edgeproto.ParseClaimCode(opts.claim); claimed && parseErr == nil {
+			return fmt.Errorf("%w; link it with: aether link %s", err, serverID)
+		}
 		return err
 	}
 	defer func() { _ = result.Conn.Close() }()
 	cfg := result.Config
-	cfg.Repo = opts.repo
-	if opts.name != "" {
+	if opts.repo != "" {
+		cfg = localops.KeepLegacyRepo(cfg)
+		cfg.Repo = opts.repo
 		for i := range cfg.Links {
-			if cfg.Links[i].Name == opts.name {
-				cfg.Links[i].Repo = cfg.Repo
+			if opts.name != "" && cfg.Links[i].Name == opts.name {
+				cfg.Links[i].Repo = opts.repo
 				break
 			}
 		}
@@ -169,25 +212,33 @@ func runLink(args []string) error {
 	if err = cli.Save(cfg); err != nil {
 		return err
 	}
-	who := result.Info.Member.DisplayName
+	member := result.Info.Member
+	who := member.DisplayName
 	if term.IsTerminal(int(os.Stdout.Fd())) {
-		who = attribution.Sprint(result.Info.Member.Color, who)
+		who = attribution.Sprint(member.Color, who)
+	}
+	if result.KeyGenerated != "" {
+		fmt.Printf("created %s\n", result.KeyGenerated)
 	}
 	switch {
 	case opts.claim != "":
 		fmt.Printf("claimed server %s\n", cfg.ServerID)
 	case opts.join != "":
-		fmt.Printf("joined server %s as %s (%s)\n", cfg.ServerID, who, result.Info.Member.Role)
+		fmt.Printf("joined server %s as %s (%s)\n", cfg.ServerID, who, member.Role)
 	}
-	fmt.Printf("linked to %s as %s (%s)\n", linkTarget(cfg), who, result.Info.Member.Role)
+	if member.Pending {
+		fmt.Printf("linked to %s as %s (%s, pending); an admin runs: aether member approve %s\n", linkTarget(cfg), who, member.Role, member.ID)
+	} else {
+		fmt.Printf("linked to %s as %s (%s)\n", linkTarget(cfg), who, member.Role)
+	}
 	if perr := cli.UpgradeRequired(result.Info); perr != nil {
-		if cfg.Repo != "" {
+		if opts.repo != "" {
 			fmt.Println("git remote not set; re-run aether link --repo after aether update")
 		}
 		return perr
 	}
 
-	if cfg.Repo == "" {
+	if opts.repo == "" {
 		return nil
 	}
 	c, err := result.Conn.Control()
@@ -217,12 +268,25 @@ func runLink(args []string) error {
 			return err
 		}
 	}
-	url := cli.GitURL(cfg.User, cfg.GitHost(), wsID)
-	if err := localops.GitRemote(cfg.Repo, url, os.Stdout, os.Stderr); err != nil {
+	if _, err = linkClone(cfg, wsID, opts.repo); err != nil {
 		return err
 	}
+	return recordWorkspaceOrigin(c, wl.Workspaces, wsID, opts.repo)
+}
+
+func linkClone(cfg cli.Config, workspaceID, repo string) (string, error) {
+	_, url, out, err := localops.LinkRepo(cfg, repo, workspaceID)
+	if err != nil {
+		return "", err
+	}
+	_, _ = fmt.Fprint(os.Stderr, out)
 	fmt.Printf("git remote aether -> %s\n", url)
-	return recordWorkspaceOrigin(c, wl.Workspaces, wsID, cfg.Repo)
+	return url, nil
+}
+
+func linkRepoCommand(cfg cli.Config, workspaceID, repo string) string {
+	return fmt.Sprintf("aether link %s --repo %s --workspace %s",
+		shellquote.Quote(cmp.Or(cfg.ServerID, cfg.Addr)), shellquote.Quote(repo), workspaceID)
 }
 
 // joinRetry is how often aether link tries a join again while the server

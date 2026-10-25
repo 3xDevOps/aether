@@ -42,9 +42,14 @@ flowchart LR
   newer; `docker version --format '{{.Server.Version}}'` prints yours.
 - git, and `ssh-keygen` (package `openssh-client` on Debian and Ubuntu), which
   git uses to sign the commits Aether makes for members who connected GitHub.
-- Disk for the images the server pulls on first use. New runs are refused
-  below 5% free space, at least 5 GiB and at most 20 GiB
+- At least 2.5 GiB of available memory and 6 GiB of free disk, plus disk for
+  the images the server pulls on first use. A run starts only while 2 GiB of
+  memory (a tenth of RAM above 20 GiB) plus 512 MiB per run starting stays
+  available, and while the data and Docker filesystems keep their reserve (5%
+  of the filesystem, at least 5 GiB, at most 20 GiB; `min-free-disk` overrides
+  it) plus 1 GiB per starting run free
   ([environments.md](environments.md#resource-limits-and-launch-admission)).
+  `aether-server install` warns below this.
 - Optional: Sysbox, so agents can run Docker inside their runs. Setup offers
   it on Ubuntu and Debian
   ([environments.md](environments.md#docker-inside-runs)).
@@ -76,6 +81,24 @@ If the directory is not on your `PATH`, the script prints the line to add (it
 never edits a profile), and it prints the `sudo rm -f` for an older `aether`
 in `/usr/local/bin` that would run first.
 
+- `--role server` with no terminal installs the binaries, then exits 1 with
+  the command that sets the server up from flags
+  ([First boot](#first-boot)):
+  `sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>`.
+- When `sudo` fails, for example because it needs a password and there is no
+  terminal, the script exits 1 and names the install that needs no `sudo`:
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client --role none --bin-dir "$HOME/.local/bin"
+  ```
+
+- When setup does not run on a host whose `aether-server` unit already exists,
+  `next:` says `sudo aether-server update`, which restarts the running server
+  onto the new binary.
+- When the desktop build fails, the script still exits 0 and its last line says
+  the CLI is installed and the app is not, with the exit status of
+  `aether gui build`.
+
 | Flag | Variable | Effect |
 | --- | --- | --- |
 | `--version <tag>` | `AETHER_VERSION` | Install exactly this release, or stop. |
@@ -103,7 +126,7 @@ then run it:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
-& "$env:TEMP\aether-install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 
 Windows runs only the client, so the script asks nothing. It downloads the
@@ -113,7 +136,8 @@ against `checksums.txt` and `aether-release.json`, installs it as
 user `PATH`. Then it runs `aether gui build`, which installs the
 [desktop app](#desktop-app) and adds **Aether** to the Start Menu. It does not
 ask for administrator rights or change the execution policy or Defender
-settings. Open a new terminal afterwards: open ones keep their old `PATH`.
+settings: `-ExecutionPolicy Bypass` applies to that one process only. Open a
+new terminal afterwards: open ones keep their old `PATH`.
 
 It takes `-Version <tag>`, `-BinDir <dir>` and `-Role client|none` (`none`
 installs only the CLI), or `AETHER_VERSION`, `AETHER_BIN_DIR`, `AETHER_ROLE`,
@@ -296,9 +320,11 @@ current value.
 
 With the edge on and no owner yet, setup prints a claim link holding a code
 valid for 30 minutes (`sudo aether-server edge claim-code` prints a new one).
-Setup starts nothing; it ends on `next:`: start the service, then link from
-your machine with the claim link, `aether link --claim <code>`, or
-`aether link <this-host>:2222`.
+Setup starts nothing; it ends on `next:`: start the service, then on your
+machine run `aether login` and `aether link --claim <code>` (or open the claim
+link), or `aether link <this-host>:2222` without the edge. When the edge is not
+`https://edge.onaether.dev`, both client commands carry `--edge <url>`, because
+a claim code names no edge.
 
 ```sh
 sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
@@ -309,21 +335,40 @@ On first start the server creates its database, repositories and SSH host
 key. Do not delete the key: clients pin it, and the edge knows the server by
 it. The first identity to link becomes the admin: the SSH key or tailnet login
 of whoever runs `aether link` first, or the account that uses the claim code.
+With the edge on, a first SSH key must come from the server itself or an SSH
+tunnel ([networking.md](networking.md#the-first-admin)).
 
 For automation, `aether-server install` writes the same files from flags,
 such as `--edge-url https://edge.onaether.dev --edge-access approved-devices`.
 It installs Sysbox unless you pass `--sysbox=false`, turns the edge on only
 with `--edge-url`, and issues no claim code. With Tailscale on the host, the
 first tailnet login becomes the admin unless you pass `--tailnet-require-key`.
+With the edge on, install also prints the edge, policy and server id. It
+prints one `warning:` line naming what the host lacks (git, ssh-keygen, a
+running systemd, or the memory and disk above), without failing, and ends on
+`next:` with `sudo aether-server edge claim-code`, then `aether login` and
+`aether link --claim <code>` on your computer.
+
+A rerun that names an option the kept config file sets differently exits 1,
+writes nothing, and prints `aether-server config set <key> <value>` for each
+such option (with `--config <file>` when not the default):
+
+```
+aether-server: /etc/aether/server.conf exists and sets other values than you named; install keeps an existing config file, so nothing was written. Apply them with:
+  sudo aether-server config set edge-access approved-devices
+or rewrite the file from these flags alone by adding --force
+```
 
 ### Server options
 
 Options live in `/etc/aether/server.conf`. Updates never rewrite it, and a
-rerun of `setup` or `install` keeps it unless you pass `--force`.
+rerun of `setup` keeps it unless you pass `--force`, and a rerun of `install`
+that names a different value fails as shown above.
 `aether-server config show` prints each option's value and source, and
 `aether-server serve -h` describes them. Change one with
 `sudo aether-server config set <key> <value>` (or `config edit`), then
-`sudo systemctl restart aether-server`.
+`sudo systemctl restart aether-server`. `--config <file>` may go before or
+after the key and value of `config set`.
 
 | Option | Default | What it does |
 | --- | --- | --- |
@@ -344,6 +389,24 @@ unit loads; subscription logins live in each member's home
 access is root-equivalent anyway. Its header comment explains how to run
 unprivileged; then every image needs a root user and self-update is off.
 
+## Client files and variables
+
+The `aether` CLI keeps these files on your computer and reads these
+variables. `<config dir>` is the directory that holds `config.json`.
+`aether status` prints its path.
+
+| File or variable | What it is |
+| --- | --- |
+| `config.json` | The server link `aether link` writes: `$AETHER_CONFIG_DIR/aether/config.json` when that variable is set, else `~/.config/aether/config.json` on Linux (honours `$XDG_CONFIG_HOME`), `~/Library/Application Support/aether/config.json` on macOS, `%AppData%\aether\config.json` on Windows. It also lists the linked clones, one per workspace (`repos`). |
+| `<config dir>/edge-device-key` | This computer's private key for edge links, created by the first `aether login`. |
+| `<config dir>/edge-tokens.json` | The device token for each edge you signed in to with `aether login`. Do not share or commit it. `aether logout` revokes the token at the edge and deletes it here. |
+| `~/.ssh/id_ed25519` | Your SSH key, which `aether link <host:port>` creates only when you have none. |
+| `~/.ssh/known_hosts` | Where `aether link` pins the server's host key. |
+| `~/.ssh/aether_config`, `~/.ssh/aether_known_hosts` | Written by `aether ssh-config` ([terminal.md](terminal.md)): the `<run>.aether` host block and its host key. |
+| `AETHER_CONFIG_DIR` | Replaces the platform config directory above. |
+| `AETHER_NO_UPDATE_CHECK` | Any non-empty value turns off release checks. |
+| `AETHER_BIN` | Path of the `aether` binary the desktop app starts and `aether gui build` requires. |
+
 ## The client-side sync daemon
 
 The sync daemon keeps a local clone current without `git fetch`: it fetches
@@ -352,15 +415,16 @@ mirror it pushes your local base branch to the server. It is optional and runs
 once per clone.
 
 ```sh
-aether daemon install --server <server-host>:2222 --repo ~/code/myproject
+aether daemon install --repo ~/code/myproject
 systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
 ```
 
 `daemon install` writes a user service (a systemd unit, a launchd agent
 `com.aether.daemon`, or the Scheduled Task `aether-daemon`) and prints the
-command that starts it; the second line is for Linux. Through the edge, pass
-`--server-id <id> --edge-url <edge>` instead of `--server`. `aether daemon run`
-runs in the foreground.
+command that starts it; the second line is for Linux. `--server` and
+`--server-id` default to the linked server, with its key. Pass
+`--server-id <id> --edge-url <edge>` (through the edge) or `--server` only for a
+different server. `aether daemon run` runs in the foreground.
 
 A workspace's base branch is whatever members push, unless an admin gives it
 a source mirror: a read-only repository the server fetches from, with a deploy
@@ -650,7 +714,8 @@ rundll32 'sysdm.cpl,EditEnvironmentVariables'
 
 ### Linked repositories
 
-Each linked repository has an `aether` remote and a branch per run you
+Each clone that `aether link --repo` or `aether workspace import` linked
+(`aether status` lists them) has an `aether` remote and a branch per run you
 pulled. Repoint the base branch, which `aether link` set to the `aether`
 remote, before removing it, or `git push` on it fails. This runs in PowerShell
 too:

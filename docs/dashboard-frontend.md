@@ -4813,8 +4813,8 @@ rest on the server; success names the account and the signing key's
 fingerprint, and **Close** returns to the page, whose **GitHub** disclosure
 then opens on "Connected in this session as `<login>`" - the connection is
 React state that a reload loses. Server refusals - most often `github: not
-logged in to github.com in the environment terminal; run gh auth login there
-first` - render verbatim in the same
+logged in to github.com in the environment terminal; run aether github
+connect` - render verbatim in the same
 monospace pane the Repository step gives git's output, because gh's answer
 runs to several lines, and leave the screen open to retry.
 

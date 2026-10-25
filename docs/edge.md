@@ -82,13 +82,18 @@ Until an account claims it, the edge relays nothing for a server except claim
 connections. Setup ends with a claim link,
 `aether://claim?edge=...&server=<server id>#<secret>`, and the claim code
 `<server id>-<secret>`, valid for 30 minutes and 5 attempts. `sudo aether-server
-edge claim-code` prints a new one. It is refused while the server has an owner,
+edge claim-code` prints a new one, with its expiry as `valid for 30 min, until
+2026-10-25 15:04 UTC`, and says when it replaces an earlier code that still
+worked, which then stops working. It is refused while the server has an owner,
 and without `--admin` while it has members.
 
 1. Start the server: `sudo systemctl daemon-reload && sudo systemctl enable
    --now aether-server`.
 2. On your computer, open the claim link (the desktop app's Connect step also
-   accepts it pasted), or run `aether link --claim <code>`.
+   accepts it pasted), or run `aether link --claim '<claim link>'`. The claim
+   link names its edge, so `--edge` is not needed; `aether link --claim <code>`
+   takes the bare code and claims through `--edge`, else the one edge you are
+   signed in to.
 
 The claiming account becomes the owner and an admin, and its device is approved
 under either policy, because the code came from the machine's console. A claim
@@ -109,7 +114,9 @@ This binds your GitHub account to your own member, changes no role, and adds the
 edge to the current link. If the server already has an owner it prints `this
 server is already connected to <edge url> as github <login>` and changes
 nothing. Any other claim on a server with members is refused with `server is
-already claimed`. Until the edge has recorded the server, `aether invite
+already claimed`. `aether link --claim` adds `; link it with: aether link
+<server id>`, which is also the answer when you run a claim again after it
+succeeded. Until the edge has recorded the server, `aether invite
 --github|--email`, the Invite dialog and `aether member link` are refused with
 `the edge has not recorded this server yet ... connect your GitHub account
 first`. If the edge cannot record a claim, `sudo aether-server edge status`
@@ -126,6 +133,22 @@ run `sudo systemctl status aether-server` and `sudo journalctl -u aether-server 
 50 --no-pager`. A connected server can still be unreachable for a client: only a
 connection opened through the edge tests the whole path.
 
+`edge status` exits 0 when `connection` reads `connected since <time>`, and 3
+when the edge is on but the server is not connected (never connected, stale or
+disconnected), so a script can wait on it:
+
+```sh
+timeout 300 sh -c 'until sudo aether-server edge status >/dev/null; do sleep 5; done'
+```
+
+It exits 1 on any other error, such as the edge being off or the state being
+unreadable because it ran without `sudo`:
+
+```
+the edge is off: edge-url is empty in /etc/aether/server.conf; turn it on with:
+  sudo aether-server config set edge-url https://edge.onaether.dev
+```
+
 When the edge's key changed, the server keeps retrying and logs this. Run `edge
 trust` only after the edge's operator confirms the new fingerprint:
 
@@ -140,7 +163,7 @@ claim-code --admin <member id>`, gives it an owner again.
 ### Signing in and linking
 
 ```sh
-aether login              # prints an address and a code; confirm the code in the browser
+aether login              # prints an address and a code; open the address, sign in with GitHub, enter the code
 aether servers            # servers your account reaches
 aether logout             # revokes this device's token at the edge and deletes it here
 ```
@@ -151,6 +174,18 @@ it commands use the one edge this machine is signed in to, else
 `edge-tokens.json` live in the client's config directory with mode 0600.
 `aether servers` shows the access policy the edge reports; the server enforces
 its own.
+
+`aether login --json` is for a script or a coding agent that relays the code to
+you: it opens no browser, prints one JSON line, then waits for you to confirm
+and prints a second:
+
+```
+{"state":"pending","edge":"https://edge.onaether.dev","signin_origin":"https://edge.onaether.dev","user_code":"<code>","verification_uri":"https://edge.onaether.dev/device","expires_at":"<RFC 3339 time>"}
+{"state":"signed_in",...,"account":{...},"device":{"id":"<device id>","label":"<label>","key":"<public key>"}}
+```
+
+The second line has `"state":"failed"` and `"error"` instead when the code is
+refused or expires, and the command exits 1. The token is never printed.
 
 Only a 26-character server id goes through the edge. Any other argument, such as
 `my-server`, is an SSH address. A link pins the server id: every later connection,

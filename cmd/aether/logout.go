@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -14,14 +13,17 @@ import (
 
 func init() {
 	register(command{
-		name:  "logout",
-		short: "revoke this device's edge sign-in, or show how to delete the edge account",
-		run:   runLogout,
+		name:    "logout",
+		short:   "revoke this device's edge sign-in, or show how to delete the edge account",
+		usage:   "aether logout [--edge <url>] [--delete-account]",
+		example: "aether logout",
+		flags:   true,
+		run:     runLogout,
 	})
 }
 
 func runLogout(args []string) error {
-	fs := flag.NewFlagSet("logout", flag.ExitOnError)
+	fs := newFlagSet("logout")
 	edgeURL := fs.String("edge", "", edgeFlagUsage)
 	deleteAccount := fs.Bool("delete-account", false, "list what deleting the signed-in account at the edge touches, and the edge page that deletes it")
 	if err := fs.Parse(args); err != nil {

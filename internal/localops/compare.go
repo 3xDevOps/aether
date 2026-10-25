@@ -186,6 +186,12 @@ func workspaceTip(ctx context.Context, repo, branch string) (string, error) {
 	return "", nil
 }
 
+func WorkspaceTip(repo, branch string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), pushTimeout)
+	defer cancel()
+	return workspaceTip(ctx, repo, branch)
+}
+
 // aheadBehind counts the commits each side carries that the other does
 // not, in one query: git prints them as "<ahead>\t<behind>".
 func aheadBehind(repo, branch string) (int, int, error) {

@@ -346,6 +346,11 @@ type Profile struct {
 	// InstallScript is the vendor's install command, run in the member's
 	// terminal. It must install into ~/.local/bin.
 	InstallScript string
+	// LoginCommand is the vendor's sign-in command, run in the member's
+	// terminal. DeviceLogin marks one that prints a URL and code and then
+	// waits for the browser, with nothing typed back.
+	LoginCommand string
+	DeviceLogin  bool
 	// UpdateScript updates the CLI in ~/.local/bin, is a cheap no-op when
 	// current, and never touches plugins, channel or configuration.
 	UpdateScript string
@@ -425,6 +430,7 @@ var profiles = map[string]Profile{
 		StatusArgs:    []string{"--settings", CoordPlaceholder + "/" + agentstatus.ClaudeSettingsName},
 		StatusFiles:   map[string][]byte{agentstatus.ClaudeSettingsName: agentstatus.ClaudeSettings},
 		InstallScript: "curl -fsSL https://claude.ai/install.sh | bash",
+		LoginCommand:  "claude auth login",
 		UpdateScript:  withAdapterUpdate("claude update", claudeACP),
 	},
 	"codex": {
@@ -450,6 +456,8 @@ var profiles = map[string]Profile{
 		InstructionsConfig: ".codex/config.toml",
 		// --prefix keeps the install inside the member's persistent home.
 		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @openai/codex; else echo \"npm is not in this environment's PATH, and codex installs through npm\" >&2; false; fi",
+		LoginCommand:  "codex login --device-auth",
+		DeviceLogin:   true,
 		// Not "codex update": it installs into the image's global npm
 		// prefix, outside the home.
 		UpdateScript: withAdapterUpdate(npmUpdateScript("@openai/codex", "codex", `*" $latest"`), codexACP),
@@ -473,6 +481,7 @@ var profiles = map[string]Profile{
 		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
 		// The vendor's install instruction adds --ignore-scripts.
 		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent; else echo \"npm is not in this environment's PATH, and pi installs through npm\" >&2; false; fi",
+		LoginCommand:  "pi",
 		// Not "pi update --self": it replaces files in place, under a
 		// running or starting pi.
 		UpdateScript: withAdapterUpdate(npmUpdateScript("@earendil-works/pi-coding-agent", "pi", `"$latest"`, "--ignore-scripts"), piACP),
@@ -501,6 +510,7 @@ var profiles = map[string]Profile{
 		StatusArgs:      []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
 		StatusFiles:     map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
 		InstallScript:   "curl -fsSL https://omp.sh/install | sh",
+		LoginCommand:    "omp",
 		UpdateScript:    "omp update",
 	},
 	"opencode": {
@@ -537,6 +547,7 @@ var profiles = map[string]Profile{
 		},
 		InstructionsFile: InstructionsFileName,
 		InstallScript:    "curl -fsSL https://opencode.ai/install | bash",
+		LoginCommand:     "opencode auth login",
 		// No UpdateScript: an upgrade can cross a major version that the
 		// managed OpenCode launch wrapper refuses.
 	},
@@ -564,7 +575,10 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".copilot/config.json"},
 		DenyNames:       []string{"config.json"},
 		InstallScript:   "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @github/copilot; else echo \"npm is not in this environment's PATH, and copilot installs through npm\" >&2; false; fi",
-		UpdateScript:    npmUpdateScript("@github/copilot", "copilot", `*" $latest."*`),
+		// Not DeviceLogin: with no keychain, copilot login asks y/N before
+		// it stores the token.
+		LoginCommand: "copilot login --device-code",
+		UpdateScript: npmUpdateScript("@github/copilot", "copilot", `*" $latest."*`),
 	},
 	"gemini": {
 		Name:         "gemini",
@@ -588,6 +602,7 @@ var profiles = map[string]Profile{
 		PinnedLogins:  []string{".gemini/oauth_creds.json"},
 		DenyNames:     []string{"oauth_creds.json"},
 		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @google/gemini-cli; else echo \"npm is not in this environment's PATH, and gemini installs through npm\" >&2; false; fi",
+		LoginCommand:  "NO_BROWSER=true gemini",
 		UpdateScript:  npmUpdateScript("@google/gemini-cli", "gemini", `"$latest"`),
 	},
 	// Cursor's CLI runs as agent.
@@ -605,6 +620,7 @@ var profiles = map[string]Profile{
 		// ~/.local/share/cursor-agent/versions/<version>.
 		InstallPaths:  []string{".local/share/cursor-agent"},
 		InstallScript: "curl -fsS https://cursor.com/install | bash",
+		LoginCommand:  "NO_OPEN_BROWSER=1 agent login",
 		UpdateScript:  "agent update",
 	},
 	// agy has no ACP mode, so Antigravity is Standard and Background only.
@@ -620,6 +636,7 @@ var profiles = map[string]Profile{
 		CredentialPaths: []string{".gemini/antigravity-cli/antigravity-oauth-token"},
 		DenyNames:       []string{"antigravity-oauth-token"},
 		InstallScript:   "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+		LoginCommand:    "agy",
 		UpdateScript:    "agy update",
 	},
 	"custom": {Name: "custom"},

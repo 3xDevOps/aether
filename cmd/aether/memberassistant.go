@@ -2,9 +2,7 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
-	"io"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -16,10 +14,12 @@ const memberAssistantUsage = "usage: aether member assistant [--auto-approve on|
 // assistant launches, messages and stops runs and saves the environment
 // without a card. A member sets only their own.
 func memberAssistant(args []string) error {
-	fs := flag.NewFlagSet("member assistant", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("member assistant")
 	auto := fs.String("auto-approve", "", "on or off")
-	if err := fs.Parse(args); err != nil || fs.NArg() > 0 {
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w\n%s", err, memberAssistantUsage)
+	}
+	if fs.NArg() > 0 {
 		return errors.New(memberAssistantUsage)
 	}
 	var p protocol.AssistantSettingsParams

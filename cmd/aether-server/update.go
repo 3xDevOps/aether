@@ -31,9 +31,6 @@ const (
 // does, then restarts the systemd unit onto it and waits for the new
 // binary to commit or be rolled back.
 func updateCmd(args []string) error {
-	if os.Geteuid() != 0 {
-		return errors.New("run it as root: sudo aether-server update")
-	}
 	fs := flag.NewFlagSet("update", flag.ExitOnError)
 	tag := fs.String("version", "", "release tag to install (default: the latest release)")
 	if err := fs.Parse(args); err != nil {
@@ -41,6 +38,9 @@ func updateCmd(args []string) error {
 	}
 	if fs.NArg() != 0 {
 		return errors.New("usage: aether-server update [--version <tag>]")
+	}
+	if os.Geteuid() != 0 {
+		return errors.New("run it as root: sudo aether-server update")
 	}
 	// Before Lock, so a refused host gets nothing created under its data
 	// directory with root's ownership.

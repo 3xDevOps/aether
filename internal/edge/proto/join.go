@@ -52,6 +52,27 @@ func ClaimLink(edgeURL, code string) (string, error) {
 	return "aether://claim?edge=" + url.QueryEscape(origin) + "&server=" + serverID + "#" + normalized[len(serverID)+1:], nil
 }
 
+// Errors never carry the link: its fragment is the code's secret.
+func ParseClaimLink(link string) (edgeURL, code string, err error) {
+	bad := fmt.Errorf("edgeproto: a claim link looks like aether://claim?edge=<edge origin>&server=<server id>#<%d-character secret>",
+		claimSecretLength)
+	u, err := url.Parse(strings.TrimSpace(link))
+	if err != nil || u.Scheme != "aether" || u.Host != "claim" || u.User != nil || (u.Path != "" && u.Path != "/") {
+		return "", "", bad
+	}
+	q := u.Query()
+	if len(q) != 2 {
+		return "", "", bad
+	}
+	if edgeURL, err = Origin(q.Get("edge")); err != nil {
+		return "", "", bad
+	}
+	if code, _, err = ParseClaimCode(q.Get("server") + "-" + u.Fragment); err != nil {
+		return "", "", bad
+	}
+	return edgeURL, code, nil
+}
+
 // ParseJoinLink also reads the aether://join deep link the edge's join
 // page opens.
 func ParseJoinLink(s string) (edgeURL, serverID, invitationID, secret string, err error) {

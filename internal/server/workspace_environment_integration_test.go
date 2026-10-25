@@ -153,9 +153,6 @@ exit 3`)
 		t.Fatalf("launch with a failing setup script = %v, want a protocol error", err)
 	}
 	const reason = "provisioning: start container: runtime: setup script exited 3"
-	if pe.Message != reason {
-		t.Errorf("launch error = %q, want %q", pe.Message, reason)
-	}
 	var failure protocol.SetupFailure
 	if err = json.Unmarshal(pe.Data, &failure); err != nil {
 		t.Fatalf("launch error data %s: %v", pe.Data, err)
@@ -180,7 +177,10 @@ exit 3`)
 		}
 	}
 	if failed == nil || failed.Status != string(domain.RunFailed) || failed.Reason != reason {
-		t.Errorf("failed run = %+v, want status failed and reason %q", failed, reason)
+		t.Fatalf("failed run = %+v, want status failed and reason %q", failed, reason)
+	}
+	if want := "run " + failed.ID + " failed: " + reason; pe.Message != want {
+		t.Errorf("launch error = %q, want %q", pe.Message, want)
 	}
 
 	stopServer()

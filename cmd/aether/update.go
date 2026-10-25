@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -29,12 +28,16 @@ func init() {
 	register(command{
 		name:  "update",
 		short: "update this binary (and aether-server beside it) to a release",
+		usage: "aether update [--check [--json]] [--version <tag>] [--no-app] [--force]",
+		example: "aether update --check --json\n" +
+			"aether update",
+		flags: true,
 		run:   runUpdate,
 	})
 }
 
 func runUpdate(args []string) error {
-	fs := flag.NewFlagSet("update", flag.ExitOnError)
+	fs := newFlagSet("update")
 	tag := fs.String("version", "", "release tag to install (default: latest)")
 	check := fs.Bool("check", false, "only report whether an update is available")
 	jsonOut := fs.Bool("json", false, "with --check, print the check as one JSON line")

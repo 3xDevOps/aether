@@ -293,7 +293,7 @@ func (s *Server) dispatch(ctx context.Context, member domain.MemberID, method st
 	if m.Pending && method != protocol.MethodServerInfo {
 		return nil, &protocol.Error{
 			Code:    protocol.CodeDenied,
-			Message: "membership pending admin approval; ask an admin to run member.approve " + string(member),
+			Message: "membership pending admin approval; ask an admin to run: aether member approve " + string(member),
 		}
 	}
 	result, rpcErr := handler(s, ctx, member, params)

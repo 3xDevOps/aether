@@ -1,9 +1,7 @@
 package main
 
 import (
-	"flag"
 	"fmt"
-	"io"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -17,12 +15,14 @@ type originChange struct {
 }
 
 func parseWorkspaceOriginArgs(args []string) (originChange, error) {
-	fs := flag.NewFlagSet("workspace origin", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("workspace origin")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	clear := fs.Bool("clear", false, "forget the workspace's upstream")
 	usage := fmt.Errorf("usage: aether workspace origin [--workspace <name-or-id>] [<url>|--clear]")
-	if err := fs.Parse(args); err != nil || fs.NArg() > 1 {
+	if err := fs.Parse(args); err != nil {
+		return originChange{}, fmt.Errorf("%w\n%s", err, usage)
+	}
+	if fs.NArg() > 1 {
 		return originChange{}, usage
 	}
 	change := originChange{workspace: *workspace, origin: fs.Arg(0), set: fs.NArg() == 1}

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"strings"
 
@@ -16,7 +15,13 @@ func init() {
 	register(command{
 		name:  "profile",
 		short: "push, status, or rollback an agent profile",
-		run:   runProfile,
+		usage: "aether profile push --agent <agent> [--workspace <name>] [--allow-secret <file>]... [--skip-secret <file>]...\n" +
+			"aether profile status --agent <agent>\n" +
+			"aether profile rollback --agent <agent> <snapshot-id>",
+		example: "aether profile push --agent claude\n" +
+			"aether profile status --agent claude\n" +
+			"aether profile rollback --agent claude <snapshot-id>",
+		run: runProfile,
 	})
 }
 
@@ -45,7 +50,7 @@ func (s *stringList) Set(v string) error {
 }
 
 func profilePush(args []string) error {
-	fs := flag.NewFlagSet("profile push", flag.ExitOnError)
+	fs := newFlagSet("profile push")
 	agent := fs.String("agent", "", "agent name")
 	workspace := fs.String("workspace", "", "optional workspace ID for --allow-secret audit")
 	var allow, skip stringList
@@ -98,7 +103,7 @@ func profilePush(args []string) error {
 }
 
 func profileStatus(args []string) error {
-	fs := flag.NewFlagSet("profile status", flag.ExitOnError)
+	fs := newFlagSet("profile status")
 	agent := fs.String("agent", "", "agent name")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -117,7 +122,7 @@ func profileStatus(args []string) error {
 }
 
 func profileRollback(args []string) error {
-	fs := flag.NewFlagSet("profile rollback", flag.ExitOnError)
+	fs := newFlagSet("profile rollback")
 	agent := fs.String("agent", "", "agent name")
 	if err := fs.Parse(args); err != nil {
 		return err

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -12,20 +11,47 @@ import (
 func init() {
 	register(command{
 		name:  "workspace",
-		short: "manage workspaces: init, add, delete, list, settings, origin, env, mirror",
-		run:   runWorkspace,
+		short: "manage workspaces: init, add, import, delete, list, settings, origin, env, mirror",
+		usage: "aether workspace init <name> [--base <branch>]\n" +
+			"aether workspace add <name> [--base <branch>]\n" +
+			"aether workspace import <path|url> [--name <name>]\n" +
+			"aether workspace delete <name> --yes\n" +
+			"aether workspace list\n" +
+			"aether workspace settings [--workspace <name>] [--message-others everyone|admins-only]\n" +
+			"aether workspace origin [--workspace <name>] [<url>|--clear]\n" +
+			"aether workspace env list [--workspace <name>]\n" +
+			"aether workspace env set [--workspace <name>] <NAME>=<value>...\n" +
+			"aether workspace env set [--workspace <name>] --secret <NAME>\n" +
+			"aether workspace env unset [--workspace <name>] <NAME>...\n" +
+			"aether workspace env import [--workspace <name>] [--plain] <file|->\n" +
+			"aether workspace env script [--workspace <name>] [--file <path|->|--clear]\n" +
+			"aether workspace mirror status [--workspace <name>]\n" +
+			"aether workspace mirror configure --source <url> [--workspace <name>] [--branch <branch>]\n" +
+			"    [--auth public|deploy-key|github] [--github-account-id <id>] [--known-hosts-file <path>]\n" +
+			"aether workspace mirror refresh --workspace <name>\n" +
+			"aether workspace mirror adopt --workspace <name> --generation <n> --commit <sha> --yes\n" +
+			"aether workspace mirror disable --workspace <name> --yes",
+		example: "aether workspace list\n" +
+			"aether workspace import ~/src/app\n" +
+			"aether workspace import https://github.com/acme/app\n" +
+			"aether workspace env set --workspace app API_URL=https://api.example.com\n" +
+			"aether workspace env set --workspace app --secret DATABASE_PASSWORD < secret.txt\n" +
+			"aether workspace mirror status --workspace app",
+		run: runWorkspace,
 	})
 }
 
 func runWorkspace(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether workspace <init|add|delete|list|settings|origin|env|mirror>")
+		return fmt.Errorf("usage: aether workspace <init|add|import|delete|list|settings|origin|env|mirror>")
 	}
 	switch args[0] {
 	case "init":
 		return workspaceInit(args[1:])
 	case "add":
 		return workspaceAdd(args[1:])
+	case "import":
+		return workspaceImport(args[1:])
 	case "delete":
 		return workspaceDelete(args[1:])
 	case "list":
@@ -77,20 +103,26 @@ type workspaceCreateOptions struct {
 }
 
 func workspaceInit(args []string) error {
-	fs := flag.NewFlagSet("workspace init", flag.ContinueOnError)
+	fs := newFlagSet("workspace init")
 	base := fs.String("base", "", "branch new run worktrees are cut from (default main)")
 	name, err := parseLeadingArg(fs, args)
-	if err != nil || name == "" {
+	if err != nil {
+		return fmt.Errorf("%w\nusage: aether workspace init <name> [--base <branch>]", err)
+	}
+	if name == "" {
 		return fmt.Errorf("usage: aether workspace init <name> [--base <branch>]")
 	}
 	return createWorkspace(workspaceCreateOptions{name: name, base: *base})
 }
 
 func workspaceAdd(args []string) error {
-	fs := flag.NewFlagSet("workspace add", flag.ContinueOnError)
+	fs := newFlagSet("workspace add")
 	base := fs.String("base", "", "branch new run worktrees are cut from (default main)")
 	name, err := parseLeadingArg(fs, args)
-	if err != nil || name == "" {
+	if err != nil {
+		return fmt.Errorf("%w\nusage: aether workspace add <name> [--base <branch>]", err)
+	}
+	if name == "" {
 		return fmt.Errorf("usage: aether workspace add <name> [--base <branch>]")
 	}
 	return createWorkspace(workspaceCreateOptions{name: name, base: *base})
@@ -99,6 +131,13 @@ func workspaceAdd(args []string) error {
 // createWorkspace is the wire call shared by init and add.
 func createWorkspace(opts workspaceCreateOptions) error {
 	return withControl(func(c *protocol.Client) error {
+		var list protocol.WorkspaceListResult
+		if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
+			return err
+		}
+		if ws, ok := workspaceNamed(list.Workspaces, opts.name); ok {
+			return fmt.Errorf("workspace %q already exists as %s; choose another name", opts.name, ws.ID)
+		}
 		var res protocol.WorkspaceAddResult
 		if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{
 			Name:        opts.name,
@@ -112,12 +151,23 @@ func createWorkspace(opts workspaceCreateOptions) error {
 	})
 }
 
+func workspaceNamed(list []protocol.Workspace, name string) (protocol.Workspace, bool) {
+	for _, ws := range list {
+		if ws.Name == name {
+			return ws, true
+		}
+	}
+	return protocol.Workspace{}, false
+}
+
 func workspaceDelete(args []string) error {
-	fs := flag.NewFlagSet("workspace delete", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("workspace delete")
 	yes := fs.Bool("yes", false, "confirm permanent deletion of the workspace and all its data")
 	name, err := parseLeadingArg(fs, args)
-	if err != nil || name == "" {
+	if err != nil {
+		return fmt.Errorf("%w\nusage: aether workspace delete <name-or-id> --yes", err)
+	}
+	if name == "" {
 		return fmt.Errorf("usage: aether workspace delete <name-or-id> --yes")
 	}
 	if !*yes {

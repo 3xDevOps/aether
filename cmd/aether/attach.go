@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -18,17 +17,23 @@ func init() {
 	register(command{
 		name:  "attach",
 		short: "attach to a run's PTY",
+		usage: "aether attach <run-id> [--read-only] [--shell <tab>]",
+		example: "aether attach run-d6ay38tj8j\n" +
+			"aether attach run-d6ay38tj8j --read-only",
+		flags: true,
 		run:   runAttach,
 	})
 }
 
 func runAttach(args []string) error {
-	fs := flag.NewFlagSet("attach", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("attach")
 	readOnly := fs.Bool("read-only", false, "watch the terminal without being able to type into it")
 	shell := fs.String("shell", "", "open a writable shell tab inside the run")
 	runID, err := parseLeadingArg(fs, args)
-	if err != nil || runID == "" {
+	if err != nil {
+		return fmt.Errorf("%w\nusage: aether attach [--read-only] [--shell <tab>] <run>", err)
+	}
+	if runID == "" {
 		return fmt.Errorf("usage: aether attach [--read-only] [--shell <tab>] <run>")
 	}
 	cfg, err := cli.Load()

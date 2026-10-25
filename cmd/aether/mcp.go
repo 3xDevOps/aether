@@ -15,7 +15,10 @@ func init() {
 	register(command{
 		name:  "mcp",
 		short: "add the linked server to ChatGPT or Claude as a custom connector, or revoke one",
-		run:   runMCP,
+		usage: "aether mcp\n" +
+			"aether mcp revoke <connector-id>",
+		example: "aether mcp",
+		run:     runMCP,
 	})
 }
 

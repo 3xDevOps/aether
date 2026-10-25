@@ -372,6 +372,65 @@ func TestKeyBootstrapAdminOnFreshServer(t *testing.T) {
 	}
 }
 
+type remoteConn struct {
+	net.Conn
+	addr net.Addr
+}
+
+func (c remoteConn) RemoteAddr() net.Addr { return c.addr }
+
+// With an edge, a fresh server takes its first admin key only from
+// loopback, and tells anyone else how to claim it instead.
+func TestKeyBootstrapWithAnEdgeNeedsLoopback(t *testing.T) {
+	t.Parallel()
+	public := &net.TCPAddr{IP: net.ParseIP("203.0.113.7"), Port: 50122}
+	dialFrom := func(e *testEnv, addr net.Addr) (*ssh.Client, string, error) {
+		return dialRelayed(t, func(nc net.Conn) {
+			if !e.srv.beginHandler() {
+				return
+			}
+			defer e.srv.wg.Done()
+			e.srv.handleConn(context.Background(), remoteConn{nc, addr})
+		}, e.signer, "ada")
+	}
+
+	noEdge := newFreshTestEnv(t, nil)
+	client, _, err := dialFrom(noEdge, public)
+	if err != nil {
+		t.Fatalf("first key from %s without an edge: %v", public, err)
+	}
+	if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleAdmin) {
+		t.Fatalf("first key without an edge joined as %q, want admin", m.Role)
+	}
+
+	e := newFreshTestEnv(t, nil)
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{})
+	_, banner, err := dialFrom(e, public)
+	if err == nil {
+		t.Fatalf("first key from %s with an edge was admitted", public)
+	}
+	for _, want := range []string{
+		"`sudo aether-server edge claim-code`",
+		"`aether login --edge https://edge.example`",
+		"`aether link --claim <code> --edge https://edge.example`",
+		"`aether link 127.0.0.1:",
+	} {
+		if !strings.Contains(banner, want) {
+			t.Errorf("banner = %q, want %s", banner, want)
+		}
+	}
+	if members, lerr := e.store.ListMembers(context.Background()); lerr != nil || len(members) != 0 {
+		t.Fatalf("members after the refused first key = %d, %v; want none", len(members), lerr)
+	}
+	client, _, err = dialFrom(e, &net.TCPAddr{IP: net.IPv6loopback, Port: 50122})
+	if err != nil {
+		t.Fatalf("first key from loopback with an edge: %v", err)
+	}
+	if m := serverInfoMember(t, controlClientOn(t, client)); m.Role != string(domain.RoleAdmin) {
+		t.Fatalf("first key from loopback joined as %q, want admin", m.Role)
+	}
+}
+
 // The publickey callback also fires for unsigned acceptability probes,
 // so on a fresh server it must not create the admin row - an attacker
 // could otherwise wedge bootstrap with a key nobody holds. The callback

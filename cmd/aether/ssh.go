@@ -13,12 +13,17 @@ func init() {
 	register(command{
 		name:  "ssh",
 		short: "open a shell or run a command in a run, through the system ssh",
-		run:   runSSH,
+		usage: "aether ssh [ssh options] <run-id> [command]",
+		example: "aether ssh run-d6ay38tj8j\n" +
+			"aether ssh run-d6ay38tj8j git status",
+		run: runSSH,
 	})
 	register(command{
-		name:  "ssh-config",
-		short: "let ssh, scp and editors reach every run as <run-id>" + cli.RunHostSuffix,
-		run:   runSSHConfig,
+		name:    "ssh-config",
+		short:   "let ssh, scp and editors reach every run as <run-id>" + cli.RunHostSuffix,
+		usage:   "aether ssh-config",
+		example: "aether ssh-config",
+		run:     runSSHConfig,
 	})
 }
 

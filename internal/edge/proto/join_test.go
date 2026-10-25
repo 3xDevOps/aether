@@ -61,6 +61,23 @@ func TestClaimLink(t *testing.T) {
 	if want := "aether://claim?edge=https%3A%2F%2Fedge.example&server=" + id + "#" + code[len(id)+1:]; err != nil || link != want {
 		t.Fatalf("ClaimLink = %q, %v; want %q", link, err, want)
 	}
+	if edge, got, err := ParseClaimLink(" " + link + "\n"); err != nil || edge != testOrigin || got != code {
+		t.Fatalf("ParseClaimLink(%q) = %q, %q, %v; want %q, %q", link, edge, got, err, testOrigin, code)
+	}
+	secret := code[len(id)+1:]
+	for _, bad := range []string{
+		code,
+		"aether://join?edge=https%3A%2F%2Fedge.example&server=" + id + "#" + secret,
+		"aether://claim?edge=https%3A%2F%2Fedge.example&server=" + id,
+		"aether://claim?edge=edge.example&server=" + id + "#" + secret,
+		"aether://claim?edge=https%3A%2F%2Fedge.example&server=" + id + "&x=1#" + secret,
+	} {
+		if _, _, err := ParseClaimLink(bad); err == nil {
+			t.Errorf("ParseClaimLink(%q) accepted", bad)
+		} else if strings.Contains(err.Error(), secret) {
+			t.Errorf("ParseClaimLink(%q) error carries the secret: %v", bad, err)
+		}
+	}
 	if _, err := ClaimLink(testOrigin, code[:len(code)-1]); err == nil {
 		t.Error("ClaimLink accepted a short code")
 	}

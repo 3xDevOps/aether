@@ -8,14 +8,18 @@ import (
 
 func init() {
 	register(command{
-		name:  "protect",
-		short: "let only a run's owner and admins message, control or kill it",
-		run:   func(args []string) error { return setProtected(args, true) },
+		name:    "protect",
+		short:   "let only a run's owner and admins message, control or kill it",
+		usage:   "aether protect <run-id>",
+		example: "aether protect run-d6ay38tj8j",
+		run:     func(args []string) error { return setProtected(args, true) },
 	})
 	register(command{
-		name:  "unprotect",
-		short: "lift a run's protection",
-		run:   func(args []string) error { return setProtected(args, false) },
+		name:    "unprotect",
+		short:   "lift a run's protection",
+		usage:   "aether unprotect <run-id>",
+		example: "aether unprotect run-d6ay38tj8j",
+		run:     func(args []string) error { return setProtected(args, false) },
 	})
 }
 

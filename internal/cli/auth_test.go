@@ -12,6 +12,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
@@ -142,6 +143,33 @@ func TestAuthFailureExplainsWhatWasTried(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error lacks %q:\n%v", want, err)
 		}
+	}
+}
+
+// A fresh server with an edge refuses a remote first admin key and says
+// how to claim it; SSH key advice after that would send the user the
+// wrong way.
+func TestFirstAdminRefusalHasNoKeyAdvice(t *testing.T) {
+	home := testhome.Isolate(t)
+	disableAgent(t)
+	testhome.WriteSSHKey(t, filepath.Join(home, ".ssh", "id_ed25519"), testhome.Ed25519Key(t), "")
+	banner := protocol.FirstAdminRefusal + ", so it takes its first admin by SSH key only from itself or through an SSH tunnel.\n"
+	addr, done := serveOnce(t, &ssh.ServerConfig{
+		PublicKeyCallback: func(ssh.ConnMetadata, ssh.PublicKey) (*ssh.Permissions, error) {
+			return nil, &ssh.BannerError{Err: errors.New("loopback only"), Message: banner}
+		},
+	})
+
+	_, err := Dial(Config{Addr: addr, KnownHosts: filepath.Join(home, "known_hosts")})
+	<-done
+	if err == nil {
+		t.Fatal("Dial succeeded against a server that refuses every key")
+	}
+	if !strings.Contains(err.Error(), "server said: "+protocol.FirstAdminRefusal) {
+		t.Errorf("error lacks the server's banner:\n%v", err)
+	}
+	if strings.Contains(err.Error(), "ssh-add") || strings.Contains(err.Error(), "--key") {
+		t.Errorf("error gives SSH key advice after the first-admin refusal:\n%v", err)
 	}
 }
 

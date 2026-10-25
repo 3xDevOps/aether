@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -203,6 +204,21 @@ func TestUpsertLink(t *testing.T) {
 	// base is untouched by either upsert.
 	if len(base.Links) != 1 || base.Links[0].Addr != "old:2222" {
 		t.Fatalf("UpsertLink mutated its input: %+v", base.Links)
+	}
+}
+
+func TestWithRepoKeepsOneClonePerWorkspace(t *testing.T) {
+	base := Config{Repos: []LinkedRepo{{WorkspaceID: "ws_1", Path: "/src/app"}, {WorkspaceID: "ws_2", Path: "/src/api"}}}
+	got := WithRepo(base, "ws_1", "/src/app2")
+	if want := []LinkedRepo{{"ws_2", "/src/api"}, {"ws_1", "/src/app2"}}; !slices.Equal(got.Repos, want) {
+		t.Fatalf("another clone of ws_1: Repos = %+v, want %+v", got.Repos, want)
+	}
+	got = WithRepo(got, "ws_3", "/src/api")
+	if want := []LinkedRepo{{"ws_1", "/src/app2"}, {"ws_3", "/src/api"}}; !slices.Equal(got.Repos, want) {
+		t.Fatalf("a clone moved to ws_3: Repos = %+v, want %+v", got.Repos, want)
+	}
+	if base.Repos[0].Path != "/src/app" || len(base.Repos) != 2 {
+		t.Fatalf("WithRepo mutated its input: %+v", base.Repos)
 	}
 }
 

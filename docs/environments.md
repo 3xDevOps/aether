@@ -104,7 +104,9 @@ pushed to a registry.
   Running containers keep theirs.
 - Each save replaces the previous one. To fix a bad save, repair it and save
   again, or reset.
-- Saving needs a running terminal. Open the environment first.
+- Saving needs a running terminal. If it is stopped, `aether env save` fails
+  with `environment terminal is not running`. Open it with `aether terminal`,
+  check your changes are there, then save.
 - The environment container survives a stop, a shell exit and a server
   restart, so unsaved changes stay until you reset. Aether recreates the
   container, and the unsaved changes are lost, when the next open finds
@@ -118,6 +120,12 @@ Open **Environment actions**, then **Reset to standard…** (offered once you
 have saved an image), or run `aether env reset`. Reset destroys the container,
 forgets your saved image and removes it from the server. Files outside your
 home are lost. The next open and all new runs use the standard image.
+
+On a terminal the command asks
+`This destroys your Environment's container, unsaved changes and saved image. Your home stays. Reset? [y/N]: `.
+Anything but `y` or `yes` prints `aether: aether env reset: nothing was reset`
+and exits 1. Without a terminal it needs `--yes`, or it fails with
+`aether: --yes is required because aether env reset destroys your Environment's container, unsaved changes and saved image: aether env reset --yes`.
 
 **Stop environment…** (`aether terminal stop`) only stops the container. Your
 home, saved image and unsaved changes stay.

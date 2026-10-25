@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -18,7 +17,30 @@ func init() {
 	register(command{
 		name:  "member",
 		short: "list, approve, color, set the git identity of, set your assistant's auto-approval, change the role of, link, list or unlink the edge accounts of, merge, transfer server ownership to, or remove members",
-		run:   runMember,
+		usage: "aether member list\n" +
+			"aether member approve <member-id>\n" +
+			"aether member remove <member-id>\n" +
+			"aether member color <#rrggbb> [<member-id>]\n" +
+			"aether member git [--name <name>] [--email <email>] [<member-id>]\n" +
+			"aether member assistant [--auto-approve <on|off>]\n" +
+			"aether member role <member-id> <viewer|collaborator|admin>\n" +
+			"aether member link --github <login>\n" +
+			"aether member link --email <address>\n" +
+			"aether member identities <member-id>\n" +
+			"aether member unlink <member-id> <provider>:<subject>\n" +
+			"aether member merge start\n" +
+			"aether member merge <code> [--keep <member-id>] [--keep-admin] [--yes]\n" +
+			"aether member merge accept [<proposal-id>] [--keep-admin] [--yes]\n" +
+			"aether member merge cancel\n" +
+			"aether member merges\n" +
+			"aether member transfer <member-id>",
+		example: "aether member list\n" +
+			"aether member approve mem-rbekp4h6fx\n" +
+			"aether member role mem-rbekp4h6fx collaborator\n" +
+			"aether member git --name \"Alice Doe\" --email alice@example.com\n" +
+			"aether member assistant --auto-approve on\n" +
+			"aether member identities mem-rbekp4h6fx",
+		run: runMember,
 	})
 }
 
@@ -116,7 +138,7 @@ func memberRemove(id string) error {
 // that account opens the join link: it then connects through the edge as
 // you, and an admin's can claim this server with a claim code.
 func memberLink(args []string) error {
-	fs := flag.NewFlagSet("member link", flag.ExitOnError)
+	fs := newFlagSet("member link")
 	github := fs.String("github", "", "your GitHub login")
 	email := fs.String("email", "", "the verified primary email of your GitHub account")
 	if err := fs.Parse(args); err != nil {
