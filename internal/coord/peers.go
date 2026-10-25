@@ -144,11 +144,11 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 			return
 		}
 		task, _, _ := boundStatusText(r.Task)
-		reason, _, _ := boundStatusText(r.Reason)
+		reason, _, reasonTrunc := boundStatusText(r.Reason)
 		peer := protocol.CoordPeer{
 			RunID: string(r.ID), MemberID: string(r.MemberID), Task: task, TaskBytes: r.TaskBytes,
 			TaskTruncated: r.TaskBytes > protocol.CoordMaxStatusTaskBytes, State: state,
-			Activity: string(r.Activity), Reason: reason, RunStatus: string(r.Status),
+			Activity: string(r.Activity), Reason: reason, ReasonTruncated: reasonTrunc, RunStatus: string(r.Status),
 		}
 		if overlap.state != "" {
 			peer.Files, peer.FileTotal, peer.FilesTruncated = boundStatusFiles(overlap.files)

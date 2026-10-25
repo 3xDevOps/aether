@@ -158,7 +158,7 @@ Status lists the reachable peers in route order: assignment peers with
 reports one; radar peers with `state: "active"` or `"grace"`; then workspace
 peers with `state: "workspace"`, most recently active first. Every peer
 carries its task summary, its `activity` (what it is doing) with its
-`reason`, and `run_status`. A `run_status` of `needs-attention` only means the
+`reason` (`reason_truncated` when cut at 512 bytes), and `run_status`. A `run_status` of `needs-attention` only means the
 agent is parked: read `activity` to tell waiting on agents, CI or a process
 from a request for a person. Each run appears once, under its first route,
 and status never lists a run the sender cannot message: finished runs, runs
