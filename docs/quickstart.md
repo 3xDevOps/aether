@@ -231,9 +231,9 @@ commands, what is left out and the errors.
 
 Runs push and open pull requests with the GitHub login in your home. If you
 connected GitHub in step 4, skip this. Otherwise click **Connect GitHub** under
-**Agents → GitHub**, or run `gh auth login --hostname github.com --git-protocol
-https --web --scopes admin:ssh_signing_key` in `aether terminal`, then `aether
-github connect` on your computer ([environment-home.md](environment-home.md)).
+**Agents → GitHub**, or run `aether github connect` on your computer. It prints
+a code, waits while you approve it at github.com/login/device, then finishes
+the setup ([environment-home.md](environment-home.md#from-the-cli)).
 
 ## 6. Launch a run
 
