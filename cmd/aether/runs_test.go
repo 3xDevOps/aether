@@ -2,9 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -91,5 +95,76 @@ func TestRunsRejectsNeedsYouAndArchivedTogether(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "--needs-you and --archived cannot be used together") {
 		t.Errorf("error = %v, want the exact combination message", err)
+	}
+}
+
+func permissionItem() protocol.AttentionItem {
+	return protocol.AttentionItem{Kind: protocol.AttentionKindPermission, RunID: "r1", WorkspaceID: "ws1", Reason: "Permission requested",
+		Request: &protocol.AttentionRequest{ID: "req-1", Kind: "permission", Title: "Run rm -rf build", Options: []protocol.AttentionOption{
+			{ID: "allow-1", Label: "Allow once", Kind: "allow_once"},
+			{ID: "always-1", Label: "Always allow", Kind: "allow_always"},
+			{ID: "reject-1", Label: "Reject", Kind: "reject_once"},
+		}}}
+}
+
+func reportEvent(t *testing.T, runID, outcome, summary string) protocol.Event {
+	t.Helper()
+	raw, err := json.Marshal(events.TimelinePayload{Kind: events.TimelineReport, Outcome: outcome, Summary: summary})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return protocol.Event{RunID: runID, Type: string(events.TypeTimeline), Payload: raw}
+}
+
+// A run's view carries the latest report and only the options aether
+// answer accepts, and its text form ends with the commands that answer it.
+func TestRunViewShowsReportAndAnswerableOptions(t *testing.T) {
+	c := fakeControlMethods(t, map[string]*fakeReply{
+		protocol.MethodWorkspaceList: {result: protocol.WorkspaceListResult{Workspaces: []protocol.Workspace{{ID: "ws1", Name: "demo"}}}},
+		protocol.MethodWorkspaceTimeline: {result: protocol.WorkspaceTimelineResult{Events: []protocol.Event{
+			reportEvent(t, "r1", "failure", "older"), reportEvent(t, "r1", "blocked", "no build dir"),
+		}}},
+	})
+	r := protocol.Run{ID: "r1", WorkspaceID: "ws1", Status: "needs-attention", Activity: "needs-you", Reason: "needs input: which build dir?",
+		Branch: "aether/run-x", PendingInputs: []domain.RunInputRequest{{ID: "req-1", Kind: "permission"}}}
+	items := []protocol.AttentionItem{permissionItem()}
+	v, err := runViewOf(c, r, items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := writeJSON(&buf, v); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"id": "r1", "workspace_id": "ws1", "workspace": "demo", "status": "Needs you", "state": "needs-attention",
+		"reason": "needs input: which build dir?", "branch": "aether/run-x",
+		"pending_inputs": []any{map[string]any{"kind": "permission", "request_id": "req-1", "options": []any{
+			map[string]any{"id": "allow-1", "label": "Allow once", "kind": "allow_once"},
+			map[string]any{"id": "reject-1", "label": "Reject", "kind": "reject_once"},
+		}}},
+		"report": map[string]any{"outcome": "blocked", "summary": "no build dir"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("runs <id> --json = %s\nwant %v", buf.String(), want)
+	}
+
+	buf.Reset()
+	if err := printRunView(&buf, v, items); err != nil {
+		t.Fatal(err)
+	}
+	text := buf.String()
+	for _, line := range []string{"status     Needs you\n", "report     blocked: no build dir\n", "pending    permission req-1\n",
+		"r1 permission req-1: Run rm -rf build\n", "  aether answer r1 req-1 allow-1    # Allow once\n", "  aether answer r1 req-1 reject-1    # Reject\n"} {
+		if !strings.Contains(text, line) {
+			t.Errorf("runs <id> = %q, want the line %q", text, line)
+		}
+	}
+	if strings.Contains(text, "always-1") {
+		t.Errorf("runs <id> offers an always option: %q", text)
 	}
 }

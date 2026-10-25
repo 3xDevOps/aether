@@ -21,7 +21,7 @@ func runReopen(args []string) error {
 	return withControl(func(c *protocol.Client) error {
 		var res protocol.RunResult
 		if err := c.Call(protocol.MethodRunRelaunch, protocol.RunIDParams{RunID: args[0]}, &res); err != nil {
-			return err
+			return runNotFound(args[0], err)
 		}
 		fmt.Printf("run %s %s\n", res.Run.ID, res.Run.Status)
 		return nil

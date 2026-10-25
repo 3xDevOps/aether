@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -19,6 +20,6 @@ func runKill(args []string) error {
 		return fmt.Errorf("usage: aether kill <run-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
-		return c.Call(protocol.MethodRunKill, protocol.RunIDParams{RunID: args[0]}, nil)
+		return actOnRun(c, os.Stdout, protocol.MethodRunKill, args[0])
 	})
 }

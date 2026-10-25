@@ -154,6 +154,9 @@ composer, one at a time (`1/N`). The composer stays shut until you answer.
 - An answered request stays in the timeline as one line, such as "Approved: run
   `go test`".
 - A subagent's request is the run's request, answered the same way.
+- From the CLI, `aether inbox` lists pending requests and `aether answer
+  <run-id> <request-id> <option-id>` answers one: allow once or reject once,
+  never always.
 - Answering needs permission to steer the run and control of it. The first
   answer wins. Cancelling the turn answers every pending request `cancelled`.
 

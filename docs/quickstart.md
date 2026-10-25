@@ -242,6 +242,10 @@ It prints `run run-d6ay38tj8j running`. `--mode` picks `enhanced` or
 The first run on a server pulls the environment image, so it starts slower. To
 give one objective to a group of agents, see swarms in [teams.md](teams.md).
 
+Every launch carries an idempotency key. If the call fails or you press
+Ctrl-C, the CLI prints the exact retry with `--idempotency-key`; running it
+returns the same run instead of starting another.
+
 It worked if the run is under **Working** on the **Board**, the dashboard's
 page of runs, and `aether runs` lists it.
 
@@ -292,7 +296,9 @@ Open a run to see its views:
 | **Files** | The run's checkout; **Save** writes your edit into it |
 | **Browser** | A Chromium on the server beside the run, where `localhost` is the run's own app |
 
-`aether message <run-id> "also update the README"` messages the agent, and
+`aether message <run-id> "also update the README"` messages the agent and
+prints the receipt (`delivered`, or `queued` for the member in control),
+`aether logs <run-id>` prints what the agent did as plain text, and
 `aether attach <run-id>` attaches your terminal to a Standard run's agent
 (detaching leaves it running). For VS Code, Cursor or Zed, run `aether
 ssh-config` once, then **Open in editor…** in the run's **More** menu
@@ -319,13 +325,35 @@ then shows the pull request number and its checks, such as **2 failing**; a
 failing check has **Send to agent**. Review and merge on GitHub as usual.
 
 When you are done, close the run: **Close run…** in its **More** menu, or
-`aether close <run-id> --outcome merged` (or `abandoned`). Closing commits the
+`aether close <run-id> --outcome merged` (or `abandoned`). `aether publish
+<run-id>` is the CLI form of **Publish…**. Closing commits the
 agent's latest work to the run's branch and keeps the container 7 days
 (`--run-container-ttl`); until then the **Relaunch** button where the message box
 sat, **Relaunch** in the **More** menu, or `aether reopen <run-id>` brings the
 run back with its chat and files. The 7 days stop counting while the run is
 live again and start over when you close it. In a clone linked with `--repo` (next section), `aether
 pull <run-id>` fetches the branch, `aether/run-<task>-<id>`, without merging.
+
+### From a script or agent
+
+```sh
+aether run - --workspace myproject --agent claude < task.md
+aether wait run-d6ay38tj8j --timeout 30m
+aether logs run-d6ay38tj8j
+aether inbox
+aether answer run-d6ay38tj8j req-7 allow-1
+aether publish run-d6ay38tj8j
+aether close run-d6ay38tj8j --outcome merged
+aether pull run-d6ay38tj8j
+```
+
+`aether wait` exits 0 when the run finished, 1 when it failed, 3 when it needs
+you (a question, a permission request, a `needs-input` or `blocked` report, or
+a turn that ended with no report), and 124 on timeout. `aether inbox` lists
+what waits on you, each with the command that answers it. `aether answer`
+allows a permission request once or denies it once, never always; approval
+requests stay on `aether inbox approve|deny <request-id>`. `--json` on `aether
+runs <run-id>` and `aether wait` prints the run as one JSON object.
 
 ## Prove the plumbing without an agent subscription
 
@@ -377,6 +405,7 @@ foreground server with Ctrl-C, then `sudo systemctl start aether-server`.
 | **The agent is not signed in** in an Enhanced run | Log the agent in from a terminal in the run, then send your message again. |
 | `scheduler: insufficient host memory headroom: ...` | The server keeps 2 GiB (or a tenth of its memory) free, plus 512 MiB for each run that is starting. Free memory, or wait for other runs to start. |
 | `runrepo: gh exited <n>: ...` in **Publish…** | The run's account has no working `gh` login. Connect GitHub as in step 5, then click **Refresh status**. |
+| `run <id> not found; aether runs lists runs` | Pass a run id that `aether runs` prints. |
 | `no linked repo; re-run aether link <addr> --repo <path>` | `aether pull` writes to the clone you linked with `--repo`, not the current directory. |
 
 Later failures, such as reboots, full disks and stalls, are in

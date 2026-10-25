@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -22,9 +23,23 @@ func fakeControl(t *testing.T, method string, result any, rpcErr *protocol.Error
 // fakeReply is one served method: what it answers and the params of the last
 // request it received.
 type fakeReply struct {
+	mu     sync.Mutex
 	result any
 	err    *protocol.Error
 	got    json.RawMessage
+}
+
+// answer sets what the method answers from its next request on.
+func (r *fakeReply) answer(result any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.result = result
+}
+
+func (r *fakeReply) params() json.RawMessage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.got
 }
 
 // fakeControlMethods serves every method in replies; any other method is
@@ -46,15 +61,16 @@ func fakeControlMethods(t *testing.T, replies map[string]*fakeReply) *protocol.C
 			}
 			resp := protocol.Response{JSONRPC: "2.0", ID: req.ID}
 			reply, served := replies[req.Method]
-			switch {
-			case !served:
+			if !served {
 				resp.Error = &protocol.Error{Code: protocol.CodeMethodNotFound, Message: "unexpected method " + req.Method}
-			case reply.err != nil:
+			} else {
+				reply.mu.Lock()
 				reply.got = append(json.RawMessage(nil), req.Params...)
 				resp.Error = reply.err
-			default:
-				reply.got = append(json.RawMessage(nil), req.Params...)
-				resp.Result, _ = json.Marshal(reply.result)
+				if reply.err == nil {
+					resp.Result, _ = json.Marshal(reply.result)
+				}
+				reply.mu.Unlock()
 			}
 			out, _ := json.Marshal(resp)
 			if _, err := server.Write(append(out, '\n')); err != nil {
@@ -121,6 +137,13 @@ func TestSwarmCreateSendsFallbackPolicy(t *testing.T) {
 	}
 	if params := missionCreateParams("ws1", "mem1", spec, "key-1"); !params.NoFallback || params.FallbackAccountMemberIDs != nil {
 		t.Errorf("--no-fallback params = %+v, want no_fallback only", params)
+	}
+}
+
+func TestSwarmCreateReusesAnIdempotencyKey(t *testing.T) {
+	spec, err := parseSwarmCreate([]string{"objective", "--agent", "claude", "--idempotency-key", "k-retry"}, strings.NewReader(""))
+	if err != nil || spec.key != "k-retry" {
+		t.Fatalf("parseSwarmCreate --idempotency-key = %q, %v; want k-retry", spec.key, err)
 	}
 }
 

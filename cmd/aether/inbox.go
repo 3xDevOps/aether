@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -13,7 +14,7 @@ import (
 func init() {
 	register(command{
 		name:  "inbox",
-		short: "list, approve, or deny pending approval requests",
+		short: "list pending approval requests and runs' questions, and approve or deny approvals",
 		run:   runInbox,
 	})
 }
@@ -35,7 +36,11 @@ func runInbox(args []string) error {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		list, err := inboxList(c, *workspace, *all)
+		wsID, err := resolveWorkspace(c, *workspace)
+		if err != nil {
+			return err
+		}
+		list, err := inboxList(c, wsID, *all)
 		if err != nil {
 			return err
 		}
@@ -45,8 +50,28 @@ func runInbox(args []string) error {
 			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 				a.ID, a.RunID, a.Action, a.Decision, a.DecidedBy, firstLine(a.Detail))
 		}
-		return tw.Flush()
+		if err = tw.Flush(); err != nil {
+			return err
+		}
+		items, err := attentionItems(c, wsID)
+		if err != nil {
+			return err
+		}
+		return printQuestions(os.Stdout, items)
 	})
+}
+
+func printQuestions(w io.Writer, items []protocol.AttentionItem) error {
+	for _, it := range items {
+		switch it.Kind {
+		case protocol.AttentionKindPermission, protocol.AttentionKindQuestion,
+			protocol.AttentionKindSwarmQuestion, protocol.AttentionKindRoomQuestion:
+			if _, err := fmt.Fprintf(w, "\n%s\n", strings.Join(needLines(it), "\n")); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func inboxDecide(approve bool, requestID string, args []string) error {
@@ -56,7 +81,11 @@ func inboxDecide(approve bool, requestID string, args []string) error {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		list, err := inboxList(c, *workspace, true)
+		wsID, err := resolveWorkspace(c, *workspace)
+		if err != nil {
+			return err
+		}
+		list, err := inboxList(c, wsID, true)
 		if err != nil {
 			return err
 		}
@@ -82,11 +111,7 @@ func inboxDecide(approve bool, requestID string, args []string) error {
 	})
 }
 
-func inboxList(c *protocol.Client, workspace string, all bool) ([]protocol.Approval, error) {
-	wsID, err := resolveWorkspace(c, workspace)
-	if err != nil {
-		return nil, err
-	}
+func inboxList(c *protocol.Client, wsID string, all bool) ([]protocol.Approval, error) {
 	var res protocol.ApprovalListResult
 	if err := c.Call(protocol.MethodApprovalList, protocol.ApprovalListParams{
 		WorkspaceID: wsID,

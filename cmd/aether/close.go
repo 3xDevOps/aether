@@ -28,7 +28,7 @@ func runClose(args []string) error {
 			RunID:   runID,
 			Outcome: *outcome,
 		}, &res); err != nil {
-			return err
+			return runNotFound(runID, err)
 		}
 		fmt.Printf("run %s %s\n", res.Run.ID, res.Run.Status)
 		return nil

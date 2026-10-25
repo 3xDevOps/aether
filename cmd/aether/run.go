@@ -1,13 +1,18 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"os"
+	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/shellquote"
 )
@@ -34,6 +39,7 @@ func runRun(args []string) error {
 	cachedBase := fs.String("cached-base", "", "retry a launch from an exact accepted base commit")
 	fallbackOrder := fs.String("fallback", "", fallbackHelp)
 	noFallback := fs.Bool("no-fallback", false, noFallbackHelp)
+	idempotencyKey := fs.String("idempotency-key", "", "the key a failed or interrupted launch printed: the retry returns that launch's run instead of starting another (default: a new key)")
 	var repos stringList
 	fs.Var(&repos, "repo", "also check out this workspace ID or name at /repos/<name> with its own run branch (repeatable)")
 	params := kvFlag{}
@@ -42,7 +48,7 @@ func runRun(args []string) error {
 	// A template launch carries no prompt, so the leading positional
 	// argument is optional here.
 	task := ""
-	if len(args) > 0 && args[0] != "--" && !strings.HasPrefix(args[0], "-") {
+	if len(args) > 0 && args[0] != "--" && (args[0] == "-" || !strings.HasPrefix(args[0], "-")) {
 		task, args = args[0], args[1:]
 	}
 	if err := fs.Parse(args); err != nil {
@@ -52,8 +58,8 @@ func runRun(args []string) error {
 		task = fs.Arg(0)
 	}
 	if *template != "" {
-		if task != "" || *agent != "" || *model != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback || len(repos) > 0 {
-			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --account, --cached-base, --fallback, --no-fallback, and --repo")
+		if task != "" || *agent != "" || *model != "" || *account != "" || *cachedBase != "" || *fallbackOrder != "" || *noFallback || len(repos) > 0 || *idempotencyKey != "" {
+			return fmt.Errorf("--template launches a saved definition: drop the task prompt, --agent, --model, --account, --cached-base, --fallback, --no-fallback, --repo, and --idempotency-key")
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
@@ -67,7 +73,12 @@ func runRun(args []string) error {
 		return err
 	}
 	if *agent == "" || fs.NArg() > 1 || (task == "" && *mode == "headless") {
-		return fmt.Errorf("usage: aether run [\"task\"] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...]\n   (a task is required with --mode background)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
+		return fmt.Errorf("usage: aether run [\"task\"|-] --agent <name> [--mode standard|enhanced|background] [--model <model>] [--workspace] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--cached-base <full-sha>] [--repo <workspace> ...] [--idempotency-key <key>]\n   (a task is required with --mode background; - reads it from stdin)\n   or: aether run --template <name> [--param k=v] [--workspace]\n   or: aether run switch <run-id> --mode standard|enhanced")
+	}
+	fromStdin := task == "-"
+	task, err = stdinText(task, "task", os.Stdin)
+	if err != nil {
+		return err
 	}
 	return withControl(func(c *protocol.Client) error {
 		var list protocol.WorkspaceListResult
@@ -87,9 +98,10 @@ func runRun(args []string) error {
 				return fmt.Errorf("--repo: server %s does not support runs with several repositories; update the server with aether server update", info.ServerVersion)
 			}
 		}
-		var res protocol.RunResult
+		var res protocol.RunLaunchResult
 		params := launchParams(wsID, task, *agent, *mode, *model, *account, *cachedBase)
 		params.FallbackAccountMemberIDs, params.NoFallback = fallbacks, *noFallback
+		params.IdempotencyKey = cmp.Or(*idempotencyKey, cli.NewControlSessionID())
 		for _, repo := range repos {
 			id, err := workspaceIDIn(list.Workspaces, repo)
 			if err != nil {
@@ -97,12 +109,80 @@ func runRun(args []string) error {
 			}
 			params.ExtraWorkspaceIDs = append(params.ExtraWorkspaceIDs, id)
 		}
-		if err := c.Call(protocol.MethodRunLaunch, params, &res); err != nil {
-			return cachedBaseLaunchError(err, params)
+		if err := callInterruptibly(c, protocol.MethodRunLaunch, params, &res); err != nil {
+			return launchError(err, params, fromStdin)
+		}
+		if res.Replayed {
+			_, _ = fmt.Fprintf(os.Stderr, "idempotency key %s already launched run %s; nothing new was launched\n", params.IdempotencyKey, res.Run.ID)
 		}
 		fmt.Printf("run %s %s\n", res.Run.ID, res.Run.Status)
 		return nil
 	})
+}
+
+var errInterrupted = errors.New("interrupted")
+
+// The server finishes a call the user interrupts, so callInterruptibly
+// does not wait for it.
+func callInterruptibly(c *protocol.Client, method string, params, result any) error {
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(interrupt)
+	done := make(chan error, 1)
+	go func() { done <- c.Call(method, params, result) }()
+	select {
+	case err := <-done:
+		return err
+	case <-interrupt:
+		return errInterrupted
+	}
+}
+
+// Without the server's answer the launch may be going on, so only then
+// does launchError name the retry.
+func launchError(err error, params protocol.RunLaunchParams, fromStdin bool) error {
+	var rpcErr *protocol.Error
+	switch {
+	case errors.Is(err, errInterrupted):
+		return &exitStatusError{code: 130, err: fmt.Errorf("interrupted; the launch continues on the server. aether runs lists it, and aether kill <run-id> stops it once it is listed.\nto get its run id without launching twice, run:\n  %s", launchCommand(params, fromStdin))}
+	case errors.As(err, &rpcErr):
+		return cachedBaseLaunchError(err, params, fromStdin)
+	}
+	return fmt.Errorf("%w\nthe launch may still be starting; aether runs lists it. To retry without launching twice, run:\n  %s", err, launchCommand(params, fromStdin))
+}
+
+// The server fingerprints every launch param but the key, so
+// launchCommand must reproduce params exactly or a retry with the same key
+// conflicts.
+func launchCommand(params protocol.RunLaunchParams, fromStdin bool) string {
+	args := []string{"aether", "run", "--agent", shellquote.Quote(params.Harness), "--mode", modeName(params.Mode)}
+	if params.Model != "" {
+		args = append(args, "--model", shellquote.Quote(params.Model))
+	}
+	args = append(args, "--workspace", shellquote.Quote(params.WorkspaceID))
+	if params.AccountMemberID != "" {
+		args = append(args, "--account", shellquote.Quote(params.AccountMemberID))
+	}
+	if len(params.FallbackAccountMemberIDs) > 0 {
+		args = append(args, "--fallback", shellquote.Quote(strings.Join(params.FallbackAccountMemberIDs, ",")))
+	}
+	if params.NoFallback {
+		args = append(args, "--no-fallback")
+	}
+	for _, id := range params.ExtraWorkspaceIDs {
+		args = append(args, "--repo", shellquote.Quote(id))
+	}
+	if params.CachedBase != "" {
+		args = append(args, "--cached-base", shellquote.Quote(params.CachedBase))
+	}
+	if params.IdempotencyKey != "" {
+		args = append(args, "--idempotency-key", shellquote.Quote(params.IdempotencyKey))
+	}
+	task := shellquote.Quote(params.Task)
+	if fromStdin {
+		task = "-"
+	}
+	return strings.Join(append(args, "--", task), " ")
 }
 
 func launchParams(workspace, task, agent, mode, model, account, cachedBase string) protocol.RunLaunchParams {
@@ -153,7 +233,8 @@ func setupOutput(err error) string {
 
 // cachedBaseLaunchError turns a structured base-capture refusal into an
 // explicit, copyable retry without changing ordinary RPC error handling.
-func cachedBaseLaunchError(err error, params protocol.RunLaunchParams) error {
+// The retry differs from the refused launch, so it takes a new key.
+func cachedBaseLaunchError(err error, params protocol.RunLaunchParams, fromStdin bool) error {
 	var rpcErr *protocol.Error
 	if !errors.As(err, &rpcErr) || rpcErr == nil || len(rpcErr.Data) == 0 {
 		return err
@@ -162,28 +243,7 @@ func cachedBaseLaunchError(err error, params protocol.RunLaunchParams) error {
 	if json.Unmarshal(rpcErr.Data, &failure) != nil || failure.AcceptedCommit == "" {
 		return err
 	}
-	args := []string{"aether", "run", "--agent", shellquote.Quote(params.Harness), "--mode", modeName(params.Mode)}
-	if params.Model != "" {
-		args = append(args, "--model", shellquote.Quote(params.Model))
-	}
-	args = append(args,
-		"--workspace", shellquote.Quote(params.WorkspaceID),
-		"--account", shellquote.Quote(params.AccountMemberID),
-	)
-	if len(params.FallbackAccountMemberIDs) > 0 {
-		args = append(args, "--fallback", shellquote.Quote(strings.Join(params.FallbackAccountMemberIDs, ",")))
-	}
-	if params.NoFallback {
-		args = append(args, "--no-fallback")
-	}
-	for _, id := range params.ExtraWorkspaceIDs {
-		args = append(args, "--repo", shellquote.Quote(id))
-	}
-	command := strings.Join(append(args,
-		"--cached-base", shellquote.Quote(failure.AcceptedCommit),
-		"--",
-		shellquote.Quote(params.Task),
-	), " ")
+	params.CachedBase, params.IdempotencyKey = failure.AcceptedCommit, ""
 	return fmt.Errorf("%s\nretry from cached %s with:\n  %s",
-		rpcErr.Message, failure.AcceptedCommit, command)
+		rpcErr.Message, failure.AcceptedCommit, launchCommand(params, fromStdin))
 }

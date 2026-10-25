@@ -490,6 +490,7 @@ aether swarm create "add a health check endpoint and document it" \
   --worker codex:background:gpt-5-codex
 ```
 
+`--idempotency-key <key>` makes a retried create return the same swarm.
 `--worker agent[:mode[:model]]` allows workers on an agent and repeats. The mode
 defaults to `standard`, and an empty model keeps the agent's default. `-` as the
 objective reads it from stdin. The integrator runs on your account, or the one

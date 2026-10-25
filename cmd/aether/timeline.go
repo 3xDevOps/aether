@@ -30,7 +30,7 @@ func init() {
 
 func runTimeline(args []string) error {
 	fs := flag.NewFlagSet("timeline", flag.ExitOnError)
-	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace, or the run's with --run)")
 	run := fs.String("run", "", "only events for this run")
 	member := fs.String("member", "", "only events by this member (ID or display name)")
 	types := fs.String("type", "", "comma-separated event types, e.g. run.status,workspace.timeline")
@@ -40,7 +40,7 @@ func runTimeline(args []string) error {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		wsID, err := resolveWorkspace(c, *workspace)
+		wsID, err := timelineWorkspace(c, *workspace, *run)
 		if err != nil {
 			return err
 		}
@@ -73,6 +73,17 @@ func runTimeline(args []string) error {
 		}
 		return printTimeline(c, params, *limit, byID)
 	})
+}
+
+func timelineWorkspace(c *protocol.Client, workspace, runID string) (string, error) {
+	if workspace != "" || runID == "" {
+		return resolveWorkspace(c, workspace)
+	}
+	r, err := getRun(c, runID)
+	if err != nil {
+		return "", err
+	}
+	return r.WorkspaceID, nil
 }
 
 func splitTypes(list string) []string {
@@ -183,6 +194,8 @@ func timelineDetail(ev protocol.Event, name func(string) string) string {
 	case events.TimelinePayload:
 		detail := string(v.Kind)
 		switch {
+		case v.Kind == events.TimelineReport:
+			detail = v.Outcome + ": " + firstLine(v.Summary)
 		case v.Kind == events.TimelineHandoff && v.Message != "":
 			detail += " to " + name(v.Message)
 		case v.Message != "":

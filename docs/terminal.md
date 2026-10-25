@@ -144,6 +144,9 @@ eight files per message.
   agent read it.
 - **Send to agent** in the **Changes** view sends your diff comments as one such
   message.
+- `aether message <run-id> "<text>"` (or `-` for stdin) prints the receipt:
+  `delivered`, `queued for the member in control` with when it is delivered,
+  or the denial reason.
 - If you cannot message the agent, the composer says why: **This run has
   finished.**, **The agent is still starting.**, **This run is protected: only
   its owner or an admin can message the agent.** or **You can watch this run but
@@ -379,7 +382,9 @@ layout, so some lines can appear on both sides of the boundary.
 The server keeps a run's terminal recording until you delete the run or
 terminal. Closing the container, reclaiming the checkout and archiving do not
 remove it. If earlier output has expired, history is marked truncated and
-cannot be recovered. `aether attach` is a raw stream that replays retained
+cannot be recovered. `aether logs <run-id> [--limit N]` prints the recorded
+terminal lines as plain text, and an Enhanced run's messages and tool calls,
+one line each. `aether attach` is a raw stream that replays retained
 output and discards keystrokes typed before the replay finishes.
 
 ## Reconnects and server updates

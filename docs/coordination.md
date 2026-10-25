@@ -1556,8 +1556,9 @@ What a report does depends on the run:
 - **Needs-input report.** `--outcome needs-input` asks the user a question.
   The summary is the question; ask one specific question, then end the turn.
   At turn end the run shows `needs input: <question>` as its **Needs you**
-  reason, separate from `blocked: <summary>`. The user's reply arrives as the
-  next prompt, and resuming work clears the reason. It is nonterminal and not
+  reason, separate from `blocked: <summary>`. The user's reply, such as
+  `aether message <run-id> "<reply>"`, arrives as the next prompt, and
+  resuming work clears the reason. It is nonterminal and not
   a durable report: it has no `report_id` or evidence, takes no
   `--evidence-ref`, and does not use the terminal slot. The latest report
   decides the turn's reason: a question after a success or failure in the
@@ -1638,6 +1639,11 @@ attempt outcomes; a blocked worker's report is additionally forwarded to its
 ordinary inbox with the worker's attribution. Use `inbox --wait 30` while
 actively coordinating, then refresh durable swarm/worker state before
 waiting again or declaring completion.
+
+People read reports from the CLI too: `aether timeline` prints one as
+`<outcome>: <summary>`, `aether runs <run-id>` shows the latest, and
+`aether wait <run-id>` exits 0 on success, 1 on failure and 3 on needs-input
+or blocked, and keeps waiting on a waiting report.
 
 Before accepting `coord.report`, Aether captures evidence for the run. The
 capture retains a private Git evidence commit and the PTY transcript up to

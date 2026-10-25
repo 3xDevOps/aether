@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -19,6 +21,22 @@ func runPause(args []string) error {
 		return fmt.Errorf("usage: aether pause <run-id>")
 	}
 	return withControl(func(c *protocol.Client) error {
-		return c.Call(protocol.MethodRunPause, protocol.RunIDParams{RunID: args[0]}, nil)
+		return actOnRun(c, os.Stdout, protocol.MethodRunPause, args[0])
 	})
+}
+
+func actOnRun(c *protocol.Client, w io.Writer, method, runID string) error {
+	if err := c.Call(method, protocol.RunIDParams{RunID: runID}, nil); err != nil {
+		return runNotFound(runID, err)
+	}
+	r, err := getRun(c, runID)
+	if err != nil {
+		return fmt.Errorf("%s run %s succeeded; reading its status failed: %w", method, runID, err)
+	}
+	status := r.Status
+	if r.Paused {
+		status = "paused"
+	}
+	_, err = fmt.Fprintf(w, "run %s %s\n", r.ID, status)
+	return err
 }
