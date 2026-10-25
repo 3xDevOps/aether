@@ -344,6 +344,24 @@ unit loads; subscription logins live in each member's home
 access is root-equivalent anyway. Its header comment explains how to run
 unprivileged; then every image needs a root user and self-update is off.
 
+## Client files and variables
+
+The `aether` CLI keeps these files on your computer and reads these
+variables. `<config dir>` is the directory that holds `config.json`.
+`aether status` prints its path.
+
+| File or variable | What it is |
+| --- | --- |
+| `config.json` | The server link `aether link` writes: `$AETHER_CONFIG_DIR/aether/config.json` when that variable is set, else `~/.config/aether/config.json` on Linux (honours `$XDG_CONFIG_HOME`), `~/Library/Application Support/aether/config.json` on macOS, `%AppData%\aether\config.json` on Windows. |
+| `<config dir>/edge-device-key` | This computer's private key for edge links, created by the first `aether login`. |
+| `<config dir>/edge-tokens.json` | The device token for each edge you signed in to with `aether login`. Do not share or commit it. `aether logout` revokes the token at the edge and deletes it here. |
+| `~/.ssh/id_ed25519` | Your SSH key, which `aether link <host:port>` creates only when you have none. |
+| `~/.ssh/known_hosts` | Where `aether link` pins the server's host key. |
+| `~/.ssh/aether_config`, `~/.ssh/aether_known_hosts` | Written by `aether ssh-config` ([terminal.md](terminal.md)): the `<run>.aether` host block and its host key. |
+| `AETHER_CONFIG_DIR` | Replaces the platform config directory above. |
+| `AETHER_NO_UPDATE_CHECK` | Any non-empty value turns off release checks. |
+| `AETHER_BIN` | Path of the `aether` binary the desktop app starts and `aether gui build` requires. |
+
 ## The client-side sync daemon
 
 The sync daemon keeps a local clone current without `git fetch`: it fetches
