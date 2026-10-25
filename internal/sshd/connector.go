@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -78,7 +79,6 @@ func (s *Server) UniversalConnectorURL() string {
 	return edge.Origin() + edgeproto.PathUniversalMCP
 }
 
-// EdgeAccess is the server's edge-access policy.
 func (s *Server) EdgeAccess() edgeproto.AccessPolicy { return s.cfg.EdgeAccess }
 
 // VerifyConnectorAssertion checks an edge's assertion that an account
@@ -136,10 +136,51 @@ func connectorCodeHash(code string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// connectorURLFor is the URL member adds as a connector: the universal
+// one while the edge speaks it and member has a GitHub account bound,
+// since the edge offers a server there only to the accounts it lists for
+// it, and the server's own URL otherwise.
+func (s *Server) connectorURLFor(ctx context.Context, member domain.MemberID) (string, error) {
+	universal := s.UniversalConnectorURL()
+	if universal == "" {
+		return s.ConnectorURL(), nil
+	}
+	ids, err := s.identityStore()
+	if err != nil {
+		return "", err
+	}
+	all, err := ids.ListIdentities(ctx)
+	if err != nil {
+		return "", fmt.Errorf("sshd: connector url: %w", err)
+	}
+	if slices.ContainsFunc(all, func(id *domain.Identity) bool {
+		return id.Member == member && id.Provider == edgeproto.ProviderGitHub
+	}) {
+		return universal, nil
+	}
+	return s.ConnectorURL(), nil
+}
+
+// refuseEdgeSignIn refuses method to a connector authorized by signing
+// in at the edge: a code or link it minted would outlive the checks that
+// cut the connector off.
+func refuseEdgeSignIn(ctx context.Context, method string) *protocol.Error {
+	id, _ := ctx.Value(connIdentityKey{}).(connIdentity)
+	if !id.edgeSignIn {
+		return nil
+	}
+	return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+		"%s needs a device, a member SSH key or a tailnet connection; %s was authorized by signing in at the edge, with no device",
+		method, ConnectorLabel(id.connectorClient, id.connector))}
+}
+
 // connectorCode mints the caller a pairing code, replacing any code of
 // theirs not yet spent, so a member holds at most one.
 func (s *Server) connectorCode(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
 	const method = protocol.MethodConnectorCode
+	if perr := refuseEdgeSignIn(ctx, method); perr != nil {
+		return nil, perr
+	}
 	if perr := s.requireApprovedCaller(ctx, method, false); perr != nil {
 		return nil, perr
 	}
@@ -163,6 +204,10 @@ func (s *Server) connectorCode(ctx context.Context, member domain.MemberID, _ js
 			"%s: edge %s speaks edge protocol %d and cannot forward connectors; its operator upgrades it",
 			method, edge.Origin(), version)}
 	}
+	connectorURL, err := s.connectorURLFor(ctx, member)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	code, err := store.RandomApprovalCode()
 	if err != nil {
 		return nil, rpcError(err)
@@ -180,7 +225,7 @@ func (s *Server) connectorCode(ctx context.Context, member domain.MemberID, _ js
 	s.connectorCodes[connectorCodeHash(code)] = connectorCode{grant: ConnectorGrant{Member: member, Device: id.device}, expires: expires}
 	s.connectorMu.Unlock()
 	slog.Info("sshd: connector code minted", "member", member, "device", id.device)
-	return protocol.ConnectorCodeResult{URL: cmp.Or(s.UniversalConnectorURL(), s.ConnectorURL()), Code: code,
+	return protocol.ConnectorCodeResult{URL: connectorURL, Code: code,
 		ExpiresAt: expires.UTC().Format(time.RFC3339)}, nil
 }
 

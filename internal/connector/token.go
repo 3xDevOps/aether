@@ -24,7 +24,7 @@ type tokenError struct {
 	Description string `json:"error_description"`
 }
 
-const reconnect = "; connect again with a new code from aether mcp"
+const reconnect = "; connect again from ChatGPT or Claude; aether mcp prints the URL and a code if the page asks for one"
 
 // token is the token endpoint: authorization_code with PKCE, and
 // refresh_token with rotation.

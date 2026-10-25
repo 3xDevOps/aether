@@ -106,8 +106,10 @@ type handler struct {
 	mu    sync.Mutex
 	codes map[string]authCode
 	// spent holds the nonces of the edge assertions consent forms
-	// spent, until each assertion expires.
+	// spent, until each assertion expires. It does not survive a restart,
+	// so assertions issued before started are refused.
 	spent       map[string]time.Time
+	started     time.Time
 	wrong       map[netip.Prefix]wrongCodes
 	wrongAll    wrongCodes
 	wrongSwept  time.Time
@@ -123,8 +125,11 @@ func New(cfg Config) (http.Handler, error) {
 		return nil, errors.New("connector: config requires Store, SSH and KeyPath")
 	}
 	u, err := url.Parse(cfg.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("connector: base URL %q: %w", cfg.BaseURL, err)
+	}
 	serverID, _ := strings.CutPrefix(u.Path, edgeproto.MCPPath(""))
-	if err != nil || u.Scheme == "" || u.Host == "" || !edgeproto.ValidServerID(serverID) || u.RawQuery != "" || u.Fragment != "" {
+	if u.Scheme == "" || u.Host == "" || !edgeproto.ValidServerID(serverID) || u.RawQuery != "" || u.Fragment != "" {
 		return nil, fmt.Errorf("connector: base URL %q is not <edge-url>/mcp/<server id>", cfg.BaseURL)
 	}
 	key, err := loadOrCreateKey(cfg.KeyPath)
@@ -143,7 +148,7 @@ func New(cfg Config) (http.Handler, error) {
 		fetch: &http.Client{Transport: cfg.Transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}},
-		mux: http.NewServeMux(), now: time.Now, codes: map[string]authCode{}, spent: map[string]time.Time{}, wrong: map[netip.Prefix]wrongCodes{},
+		mux: http.NewServeMux(), now: time.Now, started: time.Now(), codes: map[string]authCode{}, spent: map[string]time.Time{}, wrong: map[netip.Prefix]wrongCodes{},
 		writes: map[string]*rate.Limiter{}}
 
 	streamable := mcp.NewStreamableHTTPHandler(h.server, &mcp.StreamableHTTPOptions{

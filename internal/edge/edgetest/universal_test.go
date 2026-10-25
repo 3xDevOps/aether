@@ -322,6 +322,14 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 				if resp, body = bearer(rotated.AccessToken); resp.StatusCode != http.StatusUnauthorized || !strings.Contains(body, "github account 1002, which authorized it, is no longer bound to member "+string(bobID)) {
 					t.Fatalf("bob's connector once his GitHub account is unbound: %s %s", resp.Status, body)
 				}
+				s1.restart(edgeproto.PolicyAccount)
+				eventually(t, "server 1 to refuse, after restarting, the consent form it issued before", func() error {
+					if r, page := bobBrowser.send(t, http.MethodPost, consentURL, consentForm); r.StatusCode != http.StatusBadRequest ||
+						!strings.Contains(page, "before this server last started") {
+						return fmt.Errorf("%s %s", r.Status, page)
+					}
+					return nil
+				})
 				s2.restart(edgeproto.PolicyApprovedDevices)
 				eventually(t, "server 2 to refuse the connector authorized without a code", func() error {
 					if r, b := bearer(alices.AccessToken); r.StatusCode != http.StatusUnauthorized ||

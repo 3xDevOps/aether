@@ -104,10 +104,11 @@ type authRequest struct {
 }
 
 // asserted is the account a ConnectorAssertion named, its nonce, which
-// the consent form spends, and when the assertion expires.
+// the consent form spends, and when the assertion was issued and expires.
 type asserted struct {
 	Account edgeproto.Account `json:"a"`
 	Nonce   string            `json:"n"`
+	Issued  time.Time         `json:"i"`
 	Expires time.Time         `json:"e"`
 }
 
@@ -197,6 +198,9 @@ func (h *handler) assertion(ctx context.Context, signed string, req authRequest)
 	if err != nil {
 		return nil, "", fmt.Errorf("the edge's sign-in for it does not check out: %w", err)
 	}
+	if err = h.beforeStart(a.IssuedAt); err != nil {
+		return nil, "", err
+	}
 	if h.spentNonce(a.Nonce, now) {
 		return nil, "", errors.New("the edge's sign-in for it was already used")
 	}
@@ -204,10 +208,19 @@ func (h *handler) assertion(ctx context.Context, signed string, req authRequest)
 	if err != nil {
 		return nil, "", err
 	}
-	return &asserted{Account: a.Account, Nonce: a.Nonce, Expires: a.ExpiresAt.Add(edgeproto.ClockSkew)}, name, nil
+	return &asserted{Account: a.Account, Nonce: a.Nonce, Issued: a.IssuedAt, Expires: a.ExpiresAt.Add(edgeproto.ClockSkew)}, name, nil
 }
 
-// spentNonce reports whether a consent form spent nonce.
+// beforeStart refuses an assertion issued before the handler started,
+// whose nonce a consent form may have spent before a restart.
+func (h *handler) beforeStart(issued time.Time) error {
+	if issued.Before(h.started) {
+		return fmt.Errorf("the edge's sign-in for it was issued at %s, before this server last started at %s",
+			issued.UTC().Format(time.RFC3339), h.started.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
 func (h *handler) spentNonce(nonce string, now time.Time) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -228,7 +241,6 @@ func (h *handler) spendNonce(nonce string, expires, now time.Time) bool {
 	return true
 }
 
-// accountLabel names an edge account on the consent page: github dana.
 func accountLabel(a edgeproto.Account) string {
 	return a.Provider + " " + cmp.Or(a.Login, a.Email, a.Subject)
 }
@@ -268,7 +280,7 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 	grant, err := h.ssh.RedeemConnectorCode(r.PostFormValue("code"), now)
 	if errors.Is(err, sshd.ErrConnectorCode) {
 		h.recordWrong(from, now)
-		page.Error = "That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Aether app, or aether mcp, and paste it here."
+		page.Error = "That code is wrong, expired or already used. Run aether mcp for a new one and paste it here."
 		h.renderConsent(w, http.StatusForbidden, page)
 		return
 	}
@@ -284,6 +296,9 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 func (h *handler) assertedGrant(ctx context.Context, a *asserted, now time.Time) (sshd.ConnectorGrant, error) {
 	if !now.Before(a.Expires) {
 		return sshd.ConnectorGrant{}, fmt.Errorf("the edge's sign-in for it expired at %s", a.Expires.UTC().Format(time.RFC3339))
+	}
+	if err := h.beforeStart(a.Issued); err != nil {
+		return sshd.ConnectorGrant{}, err
 	}
 	if !h.spendNonce(a.Nonce, a.Expires, now) {
 		return sshd.ConnectorGrant{}, errors.New("the edge's sign-in for it was already used")
@@ -489,9 +504,10 @@ input[type=checkbox]{width:1.25rem;height:1.25rem;font-size:inherit;vertical-ali
 <p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Stop and approve</strong>: decide approvals and permission requests, stop and close runs, cancel swarms. Text an agent wrote that the assistant reads could then talk it into approving or ending work without asking you.</label></p>
 </fieldset>
 <p>To change these later, revoke the connector and connect again.</p>
+<p>Allow only if you started connecting {{.Client}} to Aether yourself just now.</p>
 {{if .Member}}<p>You signed in at the edge as {{.Account}}, which this server admits as {{.Member}}.</p>
 <p><button type="submit" autofocus><strong>Allow</strong></button></p>
-{{else}}<p><label for="code">Paste the code from Settings → ChatGPT and Claude in the Aether app, or <code>aether mcp</code>:</label></p>
+{{else}}<p><label for="code">Paste the code from <code>aether mcp</code>:</label></p>
 <p class="row"><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit"><strong>Allow</strong></button></p>{{end}}
 </form>
 {{end}}

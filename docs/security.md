@@ -551,7 +551,9 @@ there is no terminal, file, settings or git-writing tool.
   token from one server sent with another's prefix reaches that other server,
   which holds no hash for it and refuses it. The edge-signed assertion on the
   choose page names the GitHub account, the server, the client and its PKCE
-  challenge, lasts 5 minutes, and the server takes it once. Under
+  challenge, lasts 5 minutes, and the server takes it once. The server
+  remembers taken assertions only in memory, so it refuses one issued before
+  it last started, and with it any consent form carrying one. Under
   `edge-access account` it replaces the pairing code: the trust is the same as
   a GitHub sign-in admitting a new device, so a taken-over GitHub account or a
   compromised edge (or its key) can authorize a connector as that member.
@@ -560,7 +562,14 @@ there is no terminal, file, settings or git-writing tool.
   `approved-devices`, its GitHub account is unbound from the member
   (`member.identity.remove`, or deleting the account at the edge), or the
   member is removed. It has no device and is judged as an edge device no
-  person approved: a method that needs an approved device refuses it.
+  person approved: a method that needs an approved device refuses it, and it
+  cannot mint a pairing code or a Slack link code that would outlive these
+  cut-offs.
+- Under `edge-access account` the consent page has no code, so an
+  authorization link someone started in their own ChatGPT or Claude, opened
+  by a member signed in at the edge, is one **Allow** away from connecting
+  that person's assistant as the member. The page says to allow only a
+  connection you started yourself just now.
 - Refresh tokens rotate on every use and lapse after 30 days unused. A rotated
   refresh token used again a minute or more later deletes the connector.
 - Results contain text agents and other people wrote: run titles, reasons,

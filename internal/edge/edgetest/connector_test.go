@@ -123,7 +123,7 @@ func (c *connectorClient) consent(ctx context.Context, authURL, code string, sco
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusForbidden || resp.Header.Get("Content-Security-Policy") != connectorCSP ||
-		!strings.Contains(page, "That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Aether app, or aether mcp, and paste it here.") {
+		!strings.Contains(page, "That code is wrong, expired or already used. Run aether mcp for a new one and paste it here.") {
 		return nil, fmt.Errorf("wrong code: %s %v\n%s", resp.Status, resp.Header, page)
 	}
 	if resp, page, err = send(http.MethodPost, url.Values{"request": {m[1]}, "code": {code}, "scope": scopes}); err != nil {

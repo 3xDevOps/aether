@@ -121,11 +121,17 @@ server's consent page opens, depending on its
 - `approved-devices`: the page asks for the code. Paste the code from
   `aether mcp`.
 
+The sign-in page lists a server only to the GitHub accounts bound to its
+members. So `aether mcp` prints the universal URL only to a member with a
+GitHub account bound, and `<edge>/mcp/<server id>` to one with only a member
+SSH key or tailnet login. `sudo aether-server edge status` prints both.
+
 A connector added without a code stops working when the server switches to
 `approved-devices`, when its GitHub account is unbound from the member
 (`aether member identities`, or deleting the account at the edge), or when the
 member is removed. It has no device, so a method that needs an approved device
-refuses it, as it refuses a device no person approved. Connectors added at
+refuses it, as it refuses a device no person approved, and it cannot mint a
+pairing code or a Slack link code. Connectors added at
 `<edge>/mcp/<server id>` keep working there.
 
 ## Scopes
@@ -296,16 +302,18 @@ On the page that opens when you connect:
 
 | Message | Cause |
 | --- | --- |
-| `That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Aether app, or aether mcp, and paste it here.` | The code is not live. A server restart also forgets codes |
+| `That code is wrong, expired or already used. Run aether mcp for a new one and paste it here.` | The code is not live. A server restart also forgets codes |
 | `10 wrong codes came from your address in the last minute. Wait a minute, then paste the code again.` | 10 wrong codes in a minute from your address (your IPv6 /64). Other addresses are not affected |
 | `300 wrong codes came to this server from all addresses in the last minute. Wait a minute, then paste the code again.` | Someone is guessing codes from many addresses. Pairing resumes a minute after the guessing stops |
 | `Aether connectors work with ChatGPT and Claude; <host> is not one of them.` | Only `chatgpt.com` and `claude.ai` can connect |
 | `None of your servers can take this connection.` (edge sign-in page) | Each server listed under **Not available** says why: not connected, too old for the universal URL, or an invitation you have not joined |
+| The edge sign-in page does not list your server | Your GitHub account is not bound to a member there. Bind it (`aether member identities`) or use the `<edge>/mcp/<server id>` URL `aether mcp` prints |
 | `Cannot connect as your GitHub account: <account> is not a member of <server>; ...` | That GitHub account is not bound to a member. Sign in at the edge as the right account, or connect with a code |
-| `Cannot connect as your GitHub account: the edge's sign-in for it was already used.` or `... expired at <time>` | Start again from ChatGPT or Claude |
+| `Cannot connect as your GitHub account: the edge's sign-in for it was already used.`, `... expired at <time>` or `... was issued at <time>, before this server last started at <time>` | Start again from ChatGPT or Claude |
 
-If an app asks you to sign in again, the connector was revoked. Run `aether mcp`
-for a new code.
+If an app asks you to sign in again, the connector was revoked or cut off.
+Connect again from the app; `aether mcp` prints the URL and a code if the page
+asks for one.
 
 ## Security model
 

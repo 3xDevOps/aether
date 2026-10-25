@@ -107,7 +107,7 @@ func TestEdgeStatusReportsAStaleConnection(t *testing.T) {
 		{"fresh", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now.Add(-5 * time.Second)},
 			[]string{"connection   connected since", "the edge last answered 5s ago"}, nil},
 		{"universal connector", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now, Protocol: edgeproto.VersionUniversalMCP},
-			[]string{"connector    https://edge.onaether.dev/mcp  (add it to ChatGPT or Claude; get a code: aether mcp; this server's own URL https://edge.onaether.dev/mcp/"}, nil},
+			[]string{"connector    https://edge.onaether.dev/mcp/", "universal    https://edge.onaether.dev/mcp  (the connector URL for members with a GitHub account linked; aether mcp prints each member's)"}, nil},
 		{"hung", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now.Add(-3 * time.Minute)},
 			[]string{"connection   stale: reported connected since", "no answer from the edge for 3m0s (limit 40s)", "next         sudo systemctl status aether-server"}, errNotConnected},
 		{"killed", edgeagent.Status{Connected: true, Since: since, PID: gone.Process.Pid, Heartbeat: now},
