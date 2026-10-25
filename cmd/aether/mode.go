@@ -6,6 +6,8 @@ var launchModes = map[string]string{"standard": "tui", "enhanced": "acp", "backg
 
 const launchModeHelp = "standard, enhanced or background"
 
+const defaultModeHelp = "enhanced where it is installed, else standard"
+
 const modelHelp = "agent model, passed to the agent as is; empty keeps the agent's default"
 
 func parseLaunchMode(name string) (string, error) {

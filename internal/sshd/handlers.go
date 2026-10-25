@@ -144,10 +144,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 		return nil, invalidParams("workspace_id and harness are required")
 	}
 	mode := domain.LaunchMode(p.Mode)
-	if p.Mode == "" {
-		mode = domain.LaunchTUI
-	}
-	if !mode.Valid() {
+	if mode != "" && !mode.Valid() {
 		return nil, invalidParams("invalid mode: " + p.Mode)
 	}
 	if err := domain.ValidModel(p.Model); err != nil {
@@ -197,6 +194,11 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 		return nil, rpcError(err)
 	}
 	requested := admission.Account.ID
+	if mode == "" {
+		if mode, err = s.cfg.Runs.DefaultMode(ctx, member, requested, p.Harness); err != nil {
+			return nil, rpcError(err)
+		}
+	}
 	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, member, requested, policy, func(ctx context.Context, account domain.MemberID) (bool, error) {
 		return s.cfg.Runs.FallbackLaunchable(ctx, member, requested, account, p.Harness, mode)
 	})

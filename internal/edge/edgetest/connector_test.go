@@ -79,7 +79,10 @@ func (l launcher) Launch(ctx context.Context, ws domain.WorkspaceID, member, acc
 	return run, l.db.CreateRun(ctx, run)
 }
 
-func (launcher) Paused(domain.RunID) bool                            { return false }
+func (launcher) Paused(domain.RunID) bool { return false }
+func (launcher) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
+	return domain.LaunchACP, nil
+}
 func (launcher) PendingInputs(domain.RunID) []domain.RunInputRequest { return nil }
 func (launcher) Switching(domain.RunID) domain.LaunchMode            { return "" }
 func (launcher) Retention(*domain.Run) (scheduler.RetentionInfo, error) {

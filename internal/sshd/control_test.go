@@ -201,8 +201,8 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run.launch: %v", err)
 	}
-	if lr.Run.Mode != "tui" {
-		t.Errorf("launch mode defaulted to %q, want tui", lr.Run.Mode)
+	if lr.Run.Mode != "acp" {
+		t.Errorf("launch mode defaulted to %q, want the controller's acp", lr.Run.Mode)
 	}
 
 	for _, m := range []string{protocol.MethodRunKill, protocol.MethodRunPause, protocol.MethodRunResume} {
@@ -234,7 +234,7 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 	}
 
 	want := []string{
-		"launch:" + string(e.ws.ID) + ":" + string(e.member.ID) + ":build it:claude:tui",
+		"launch:" + string(e.ws.ID) + ":" + string(e.member.ID) + ":build it:claude:acp",
 		"kill:" + string(e.run.ID) + ":" + string(e.member.ID),
 		"pause:" + string(e.run.ID) + ":" + string(e.member.ID),
 		"resume:" + string(e.run.ID) + ":" + string(e.member.ID),
@@ -253,9 +253,9 @@ func TestControlRunLifecycleMethods(t *testing.T) {
 	}
 }
 
-// A taskless launch is accepted in the default tui mode (the member lands in
-// the agent's interactive TUI) and refused in headless mode, which has no
-// interactive surface to type into.
+// A taskless launch is accepted in an interactive mode (the member lands in
+// the agent's session) and refused in headless mode, which has no
+// interactive surface to type into. A named mode beats the default.
 func TestControlLaunchTaskOptionalOnlyInTUI(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
@@ -263,12 +263,12 @@ func TestControlLaunchTaskOptionalOnlyInTUI(t *testing.T) {
 
 	var lr protocol.RunResult
 	if err := c.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-		WorkspaceID: string(e.ws.ID), Harness: "claude",
+		WorkspaceID: string(e.ws.ID), Harness: "claude", Mode: "tui",
 	}, &lr); err != nil {
 		t.Fatalf("taskless tui launch: %v", err)
 	}
 	if lr.Run.Mode != "tui" {
-		t.Errorf("taskless launch mode = %q, want tui", lr.Run.Mode)
+		t.Errorf("taskless launch mode = %q, want the named tui", lr.Run.Mode)
 	}
 
 	var pe *protocol.Error

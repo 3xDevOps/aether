@@ -9,6 +9,7 @@ import { canLaunch } from '@/lib/commands'
 import { message } from '@/lib/format'
 import type { Workspace } from '@/lib/types'
 import { Step } from '@/routes/onboarding/layout'
+import { CONNECTORS_SECTION_ID } from '@/routes/settings/connectors'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin, useSelfRole } from '@/store/hooks'
 
@@ -109,7 +110,7 @@ export function FirstRunStep({
         workspace_id: workspace.id,
         harness,
         ...(task ? { task } : {}),
-        ...(mode === 'tui' ? {} : { mode }),
+        mode,
         ...(chosenModel ? { model: chosenModel } : {}),
       })
       rememberLaunch(harness, mode, chosenModel)
@@ -178,6 +179,13 @@ export function FirstRunStep({
       {!noAgents && (
         <p className="text-ui-sm text-muted">
           After Launch the run starts its container, pulls the image the first time this server uses it, then starts the agent (about 5 s in Enhanced).
+        </p>
+      )}
+      {caps.hasMethod('connector.list') && (
+        <p className="text-ui-sm text-muted">
+          Optional:{' '}
+          <Button variant="link" size="sm" onClick={() => navigate('settings', { section: CONNECTORS_SECTION_ID })}>Finish setup and connect ChatGPT or Claude</Button>
+          {' '}to launch runs and answer agents from a chat, on your phone too. Settings has it any time.
         </p>
       )}
     </Step>

@@ -581,6 +581,7 @@ describe('command palette', () => {
       expect(api.runLaunch).toHaveBeenCalledWith({
         workspace_id: workspace.id,
         harness: 'bob-agent',
+        mode: 'tui',
         account_member_id: bob.id,
       }),
     )
@@ -687,7 +688,7 @@ describe('command palette', () => {
     expect(screen.queryByText('Agents')).toBeNull()
   })
 
-  it('jumps to the activity feed and the files tree, and leaves retired pages out', async () => {
+  it('jumps to the activity feed, the files tree and the connectors section, and leaves retired pages out', async () => {
     useStore.setState({
       capabilities: {
         gateway: 'local',
@@ -711,6 +712,9 @@ describe('command palette', () => {
       fireEvent.click(await screen.findByText(label))
       expect(useStore.getState().route).toEqual({ name: route, params: {} })
     }
+    act(() => useStore.setState({ paletteOpen: true }))
+    fireEvent.click(await screen.findByText('Connect ChatGPT or Claude'))
+    expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'connectors' } })
   })
 
   it('pulls the focused run branch through the local gateway', async () => {

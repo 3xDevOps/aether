@@ -179,6 +179,7 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
   const self = useSelf()
   const holder = useStore((s) =>
     run.controller_member_id !== undefined ? run.controller_member_id || undefined : s.roomStatus[run.id]?.controller?.member_id)
+  const holderConnected = useStore((s) => s.roomStatus[run.id]?.controller?.connected !== false)
   const implicit = !agent.localControl && run.member_id === self.id && holder === undefined && agent.steerable && !agent.controlUnavailable
   const queued = useRef<(() => void) | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -198,5 +199,6 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
     timer.current = setTimeout(() => { queued.current = null }, implicitControlWindowMs)
     agent.session.takeControl()
   }
-  return { canAct: agent.localControl || implicit, withControl }
+  const canAct = agent.localControl || implicit
+  return { canAct, waits: !canAct && (holder !== self.id || !holderConnected), withControl }
 }

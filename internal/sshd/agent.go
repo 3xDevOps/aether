@@ -212,9 +212,8 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 	if info.Installed, info.EnhancedInstalled, err = s.agentInstalled(member, account, executable, profile); err != nil {
 		return protocol.AgentInfo{}, err
 	}
-	if profile.Capabilities.EnhancedDefault && info.EnhancedInstalled {
-		// The wire name of the enhanced launch mode.
-		info.DefaultMode = "acp"
+	if info.EnhancedInstalled {
+		info.DefaultMode = string(domain.LaunchACP)
 	}
 	// A definition whose login path is the whole home has no login file to
 	// look for; a launch on a shared account refuses it with that reason.

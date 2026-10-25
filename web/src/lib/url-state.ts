@@ -7,6 +7,7 @@ const pageIDs: Record<string, string> = {
   missions: 'missionId',
   workspace: 'workspaceId',
   insights: 'tab',
+  settings: 'section',
 }
 
 const keys = ['run', 'view', 'agent', 'repo', 'page', 'id']
