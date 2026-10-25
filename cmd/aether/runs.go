@@ -298,7 +298,7 @@ func displayStatus(r protocol.Run) string {
 			return "Ready for review"
 		}
 	}
-	if r.MissionRole == "worker" && r.Activity == string(domain.ActivityNeedsYou) && !needsYou(r) {
+	if r.MissionRole == "worker" && r.Activity == string(domain.ActivityNeedsYou) && !strings.HasPrefix(r.Reason, domain.BlockedReasonPrefix) {
 		return "Waiting for the integrator"
 	}
 	if label, ok := activityLabels[domain.RunActivity(r.Activity)]; ok {

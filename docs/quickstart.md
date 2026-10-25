@@ -406,8 +406,10 @@ aether pull run-d6ay38tj8j
 `aether wait` exits 0 when the run finished, 1 when it failed, 3 when it needs
 you by the [Needs you](failure-handling.md#needs-you) rule (a question, a
 permission request, a `needs-input` or `blocked` report, or a disconnected
-agent), 4 when its turn ended with no report and it waits for a message
-(`aether message <run-id> "<reply>"`), and 124 on timeout. It keeps waiting
+agent), 4 when it is parked with nothing pending, because its turn ended with
+no report or it went silent, and a message continues it (`aether message
+<run-id> "<reply>"`), and 124 on timeout. Before exiting it prints `run
+<run-id> <state>: <reason>`, with the state as `aether runs` labels it. It keeps waiting
 while the run waits on agents, CI or a process, and on a swarm worker's
 question, which its integrator answers. It also exits 1 on its
 own error, such as an unknown run id, with the error on stderr and nothing on

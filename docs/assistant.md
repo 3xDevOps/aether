@@ -165,7 +165,7 @@ ask for updates. You are told when the run:
 | --- | --- |
 | Finished | The run completed, merged, failed, stopped or was interrupted, or a live run's reported success is ready for review |
 | Needs input | The agent asks a question, a permission or a form |
-| Needs attention | The run [needs you](failure-handling.md#needs-you): it is blocked, disconnected or failed unseen. Waiting on agents, CI or a process never notifies. The reason is worded as in [push notifications](networking.md#notifications) |
+| Needs attention | The run [needs you](failure-handling.md#needs-you) with no question pending: it reports `needs-input` or `blocked`, hit a usage limit, had its turn interrupted, disconnected, or failed and you have not seen it. Waiting on agents, CI or a process never notifies. The reason is worded as in [push notifications](networking.md#notifications) |
 
 A notice appears in the assistant's transcript, as a toast with a badge on the
 **Assistant** button, as an OS notification in the desktop app, and as a phone

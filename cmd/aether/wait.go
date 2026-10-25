@@ -18,7 +18,7 @@ import (
 func init() {
 	register(command{
 		name:    "wait",
-		short:   "wait until a run finishes, needs you or ends its turn (exit 0 finished, 1 failed, 3 needs you, 4 waiting for a message, 124 timed out)",
+		short:   "wait until a run finishes, needs you or ends its turn (exit 0 finished, 1 failed, 3 needs you, 4 parked until a message, 124 timed out)",
 		usage:   "aether wait <run-id> [--timeout <duration>] [--json]",
 		example: "aether wait run-d6ay38tj8j --timeout 30m --json",
 		flags:   true,
@@ -133,7 +133,7 @@ func waitRun(c *protocol.Client, w io.Writer, runID string, asJSON bool, changed
 		if err != nil {
 			return err
 		}
-		code, done := waitOutcome(r)
+		code, done := waitOutcome(r, items)
 		timedOut := false
 		if !done {
 			select {
@@ -164,17 +164,18 @@ func waitRun(c *protocol.Client, w io.Writer, runID string, asJSON bool, changed
 		case code == waitNeedsYou:
 			return &exitStatusError{code: code, err: fmt.Errorf("run %s needs you", r.ID)}
 		case code == waitWaiting:
-			return &exitStatusError{code: code, err: fmt.Errorf("run %s ended its turn and waits for a message", r.ID)}
+			return &exitStatusError{code: code, err: fmt.Errorf("run %s is parked and waits for a message", r.ID)}
 		}
 		return nil
 	}
 }
 
-// A paused run waits for its resume. A run needs you by the rule aether runs
-// --needs-you shares; one whose turn ended with no report waits for a message,
-// which is not a request for a person. Waiting on agents, CI or a process, or
-// a swarm worker's request its integrator answers, keeps the wait going.
-func waitOutcome(r protocol.Run) (int, bool) {
+// A paused run waits for its resume. A run needs you when the Needs you list
+// holds one of its requests for you, or by the rule aether runs --needs-you
+// shares; one parked with nothing pending waits for a message, which is not a
+// request for a person. Waiting on agents, CI or a process, or a swarm
+// worker's request its integrator answers, keeps the wait going.
+func waitOutcome(r protocol.Run, items []protocol.AttentionItem) (int, bool) {
 	status := domain.RunStatus(r.Status)
 	switch {
 	case status == domain.RunFailed || status == domain.RunInterrupted:
@@ -183,6 +184,11 @@ func waitOutcome(r protocol.Run) (int, bool) {
 		return waitFinished, true
 	case !status.Live() || r.Paused:
 		return 0, false
+	}
+	for _, it := range items {
+		if it.RunID == r.ID && it.Kind != protocol.AttentionKindReady && it.Kind != protocol.AttentionKindFailed {
+			return waitNeedsYou, true
+		}
 	}
 	switch activity := domain.RunActivity(r.Activity); {
 	case activity == domain.ActivityFinished:
