@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -59,7 +60,8 @@ func TestLinkRepoSetsRemoteAndSavesConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load after LinkRepo: %v", err)
 	}
-	if saved.Repo != updated.Repo || saved.Addr != "host:2222" {
+	if saved.Repo != updated.Repo || saved.Addr != "host:2222" ||
+		!slices.Equal(saved.Repos, []cli.LinkedRepo{{WorkspaceID: "ws_1", Path: updated.Repo}}) {
 		t.Fatalf("saved config = %+v", saved)
 	}
 
@@ -72,6 +74,26 @@ func TestLinkRepoSetsRemoteAndSavesConfig(t *testing.T) {
 	}
 	if got := git(t, repo, "remote", "get-url", "aether"); got != url2 {
 		t.Fatalf("remote url after relink = %q, want %q", got, url2)
+	}
+}
+
+func TestRepoForReadsAnOldConfigsClone(t *testing.T) {
+	requireGit(t)
+	repo := t.TempDir()
+	git(t, repo, "init")
+	git(t, repo, "remote", "add", "aether", "ssh://aether@host:2222/ws_old.git")
+	cfg := cli.Config{Addr: "host:2222", Repo: repo, Repos: []cli.LinkedRepo{{WorkspaceID: "ws_new", Path: "/src/new"}}}
+	for workspace, want := range map[string]string{"ws_old": repo, "ws_new": "/src/new", "ws_other": ""} {
+		if got, err := RepoFor(cfg, workspace); err != nil || got != want {
+			t.Errorf("RepoFor(%s) = %q, %v; want %q", workspace, got, err, want)
+		}
+	}
+	cfg.Repo = filepath.Join(repo, "moved")
+	if got, err := RepoFor(cfg, "ws_new"); err != nil || got != "/src/new" {
+		t.Errorf("RepoFor(ws_new) with the old clone gone = %q, %v; want the recorded clone", got, err)
+	}
+	if _, err := RepoFor(cfg, "ws_old"); err == nil || !strings.Contains(err.Error(), "moved") {
+		t.Errorf("RepoFor(ws_old) with the old clone gone: err = %v, want git's error naming it", err)
 	}
 }
 

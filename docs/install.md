@@ -352,7 +352,7 @@ variables. `<config dir>` is the directory that holds `config.json`.
 
 | File or variable | What it is |
 | --- | --- |
-| `config.json` | The server link `aether link` writes: `$AETHER_CONFIG_DIR/aether/config.json` when that variable is set, else `~/.config/aether/config.json` on Linux (honours `$XDG_CONFIG_HOME`), `~/Library/Application Support/aether/config.json` on macOS, `%AppData%\aether\config.json` on Windows. |
+| `config.json` | The server link `aether link` writes: `$AETHER_CONFIG_DIR/aether/config.json` when that variable is set, else `~/.config/aether/config.json` on Linux (honours `$XDG_CONFIG_HOME`), `~/Library/Application Support/aether/config.json` on macOS, `%AppData%\aether\config.json` on Windows. It also lists the linked clones, one per workspace (`repos`). |
 | `<config dir>/edge-device-key` | This computer's private key for edge links, created by the first `aether login`. |
 | `<config dir>/edge-tokens.json` | The device token for each edge you signed in to with `aether login`. Do not share or commit it. `aether logout` revokes the token at the edge and deletes it here. |
 | `~/.ssh/id_ed25519` | Your SSH key, which `aether link <host:port>` creates only when you have none. |

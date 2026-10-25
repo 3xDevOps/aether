@@ -15,6 +15,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
+	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -38,6 +39,7 @@ type statusReport struct {
 	Config        string                     `json:"config"`
 	Edges         []statusEdge               `json:"edges"`
 	Link          *statusLink                `json:"link"`
+	Repos         []statusRepo               `json:"repos"`
 	Server        *protocol.ServerInfoResult `json:"server"`
 	Workspaces    []protocol.Workspace       `json:"workspaces"`
 	Agents        []protocol.AgentInfo       `json:"agents"`
@@ -49,6 +51,13 @@ type statusLink struct {
 	Addr     string `json:"addr,omitempty"`
 	ServerID string `json:"server_id,omitempty"`
 	Edge     string `json:"edge,omitempty"`
+}
+
+// statusRepo is a linked clone. Error is why the clone a config written
+// before per-workspace clones names could not be read.
+type statusRepo struct {
+	cli.LinkedRepo
+	Error string `json:"error,omitempty"`
 }
 
 // statusEdge mirrors an entry of the gateway's edge.status; it never
@@ -123,6 +132,14 @@ func gatherStatus() (statusReport, error) {
 		return r, err
 	}
 	r.Link = &statusLink{Addr: cfg.Addr, ServerID: cfg.ServerID, Edge: cfg.EdgeURL}
+	repos, repoErr := localops.LinkedRepos(cfg)
+	r.Repos = make([]statusRepo, 0, len(repos)+1)
+	for _, repo := range repos {
+		r.Repos = append(r.Repos, statusRepo{LinkedRepo: repo})
+	}
+	if repoErr != nil {
+		r.Repos = append(r.Repos, statusRepo{LinkedRepo: cli.LinkedRepo{Path: cfg.Repo}, Error: repoErr.Error()})
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
 	defer cancel()
@@ -229,6 +246,22 @@ func printStatus(w io.Writer, r statusReport) {
 	}
 	for _, ws := range r.Workspaces {
 		line("workspace", "%s (%s)", ws.Name, ws.ID)
+	}
+	if r.Repos != nil && len(r.Repos) == 0 {
+		line("repo", "none linked")
+	}
+	for _, repo := range r.Repos {
+		ws, onServer := workspaceByID(r.Workspaces, repo.WorkspaceID)
+		switch {
+		case repo.Error != "":
+			line("repo", "%s: %s", repo.Path, repo.Error)
+		case onServer:
+			line("repo", "%s -> workspace %s (%s)", repo.Path, ws.Name, ws.ID)
+		case r.Workspaces != nil:
+			line("repo", "%s -> workspace %s, not on this server", repo.Path, repo.WorkspaceID)
+		default:
+			line("repo", "%s -> workspace %s", repo.Path, repo.WorkspaceID)
+		}
 	}
 	for _, a := range r.Agents {
 		switch {

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -62,14 +63,55 @@ func LinkRepo(cfg cli.Config, repo, workspaceID string) (cli.Config, string, err
 	cfg.Repo = abs
 	if profile >= 0 {
 		saved.Links[profile].Repo = abs
-		cfg.Links = saved.Links
+		saved = cli.WithRepo(saved, workspaceID, abs)
+		cfg.Links, cfg.Repos = saved.Links, saved.Repos
 	} else {
+		cfg = cli.WithRepo(cfg, workspaceID, abs)
 		saved = cfg
 	}
 	if err := cli.Save(saved); err != nil {
 		return cfg, "", err
 	}
 	return cfg, url, nil
+}
+
+// LinkedRepos lists the clones cfg links. A config written before Repos
+// existed names its one clone in Repo, and that clone belongs to the
+// workspace its aether remote names. The error is that clone's alone: the
+// recorded entries come back with it.
+func LinkedRepos(cfg cli.Config) ([]cli.LinkedRepo, error) {
+	repos := cfg.Repos
+	if cfg.Repo == "" || slices.ContainsFunc(repos, func(r cli.LinkedRepo) bool { return r.Path == cfg.Repo }) {
+		return repos, nil
+	}
+	workspaceID, err := RemoteWorkspace(cfg.Repo)
+	if err != nil {
+		return repos, fmt.Errorf("localops: linked repo %s: %w", cfg.Repo, err)
+	}
+	if workspaceID == "" || slices.ContainsFunc(repos, func(r cli.LinkedRepo) bool { return r.WorkspaceID == workspaceID }) {
+		return repos, nil
+	}
+	return append(slices.Clip(repos), cli.LinkedRepo{WorkspaceID: workspaceID, Path: cfg.Repo}), nil
+}
+
+func RepoFor(cfg cli.Config, workspaceID string) (string, error) {
+	repos, err := LinkedRepos(cfg)
+	if i := slices.IndexFunc(repos, func(r cli.LinkedRepo) bool { return r.WorkspaceID == workspaceID }); i >= 0 {
+		return repos[i].Path, nil
+	}
+	return "", err
+}
+
+func RemoteWorkspace(repo string) (string, error) {
+	raw, err := AetherRemoteURL(repo)
+	if err != nil || raw == "" {
+		return "", err
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("localops: aether remote of %s: %w", repo, err)
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(u.Path, "/"), ".git"), nil
 }
 
 // OriginURL reports where repo's `origin` remote points, or "" when the

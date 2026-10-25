@@ -105,7 +105,10 @@ func linkConfig(cfg, prev Config, name string) Config {
 		prev.EdgeURL = cfg.EdgeURL
 		cfg = prev
 	}
-	cfg.Links = prev.Links
+	if cfg.ServerID == "" && prev.ServerID == "" && cfg.Addr == prev.Addr {
+		cfg.Repo = prev.Repo
+	}
+	cfg.Links, cfg.Repos = prev.Links, prev.Repos
 	// Git remotes of an edge link name only its server id, and edge-ssh
 	// finds the link by that id: a replaced edge default stays, named by
 	// its server id.

@@ -187,11 +187,11 @@ func runLink(args []string) error {
 	}
 	defer func() { _ = result.Conn.Close() }()
 	cfg := result.Config
-	cfg.Repo = opts.repo
-	if opts.name != "" {
+	if opts.repo != "" {
+		cfg.Repo = opts.repo
 		for i := range cfg.Links {
-			if cfg.Links[i].Name == opts.name {
-				cfg.Links[i].Repo = cfg.Repo
+			if opts.name != "" && cfg.Links[i].Name == opts.name {
+				cfg.Links[i].Repo = opts.repo
 				break
 			}
 		}
@@ -219,13 +219,13 @@ func runLink(args []string) error {
 		fmt.Printf("linked to %s as %s (%s)\n", linkTarget(cfg), who, member.Role)
 	}
 	if perr := cli.UpgradeRequired(result.Info); perr != nil {
-		if cfg.Repo != "" {
+		if opts.repo != "" {
 			fmt.Println("git remote not set; re-run aether link --repo after aether update")
 		}
 		return perr
 	}
 
-	if cfg.Repo == "" {
+	if opts.repo == "" {
 		return nil
 	}
 	c, err := result.Conn.Control()
@@ -255,12 +255,20 @@ func runLink(args []string) error {
 			return err
 		}
 	}
-	url := cli.GitURL(cfg.User, cfg.GitHost(), wsID)
-	if err := localops.GitRemote(cfg.Repo, url, os.Stdout, os.Stderr); err != nil {
+	if err = linkClone(cfg, wsID, opts.repo); err != nil {
+		return err
+	}
+	return recordWorkspaceOrigin(c, wl.Workspaces, wsID, opts.repo)
+}
+
+func linkClone(cfg cli.Config, workspaceID, repo string) error {
+	url := cli.GitURL(cfg.User, cfg.GitHost(), workspaceID)
+	if err := localops.GitRemote(repo, url, os.Stdout, os.Stderr); err != nil {
 		return err
 	}
 	fmt.Printf("git remote aether -> %s\n", url)
-	return recordWorkspaceOrigin(c, wl.Workspaces, wsID, cfg.Repo)
+	cfg.Repo = repo
+	return cli.Save(cli.WithRepo(cfg, workspaceID, repo))
 }
 
 // joinRetry is how often aether link tries a join again while the server

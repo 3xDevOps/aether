@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,17 @@ func TestLinkConfig(t *testing.T) {
 	got = linkConfig(fresh, prev, "prod")
 	if len(got.Links) != 1 || got.Links[0].Addr != "new:2222" {
 		t.Fatalf("re-link prod links = %+v", got.Links)
+	}
+}
+
+func TestLinkConfigKeepsLinkedClones(t *testing.T) {
+	repos := []LinkedRepo{{WorkspaceID: "ws_1", Path: "/src/app"}}
+	prev := Config{Addr: "host:2222", Repo: "/src/app", Repos: repos}
+	if got := linkConfig(Config{Addr: "host:2222", User: "aether"}, prev, ""); got.Repo != "/src/app" || !slices.Equal(got.Repos, repos) {
+		t.Fatalf("relink = %+v, want every clone kept", got)
+	}
+	if got := linkConfig(Config{Addr: "other:2222", User: "aether"}, prev, ""); got.Repo != "" || !slices.Equal(got.Repos, repos) {
+		t.Fatalf("link to another server = %+v, want no dashboard clone and every clone kept", got)
 	}
 }
 

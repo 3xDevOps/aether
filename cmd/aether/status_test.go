@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/testhome"
 )
@@ -48,6 +49,28 @@ func TestStatusNextStep(t *testing.T) {
 	} {
 		if got := nextStep(tc.member, tc.workspaces, tc.agents); got != tc.want {
 			t.Errorf("%s: next = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestStatusListsLinkedClones(t *testing.T) {
+	var out strings.Builder
+	printStatus(&out, statusReport{
+		Link:       &statusLink{Addr: "host:2222"},
+		Workspaces: []protocol.Workspace{{ID: "ws_app", Name: "app"}},
+		Repos: []statusRepo{
+			{LinkedRepo: cli.LinkedRepo{WorkspaceID: "ws_app", Path: "/src/app"}},
+			{LinkedRepo: cli.LinkedRepo{WorkspaceID: "ws_gone", Path: "/src/old"}},
+			{LinkedRepo: cli.LinkedRepo{Path: "/src/moved"}, Error: "git remote: exit status 128"},
+		},
+	})
+	for _, want := range []string{
+		"repo        /src/app -> workspace app (ws_app)\n",
+		"repo        /src/old -> workspace ws_gone, not on this server\n",
+		"repo        /src/moved: git remote: exit status 128\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("status lacks %q:\n%s", want, out.String())
 		}
 	}
 }
