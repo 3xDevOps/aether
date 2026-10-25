@@ -12,6 +12,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/collab"
+	"github.com/3xDevOps/Aether/internal/cost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/push"
@@ -122,8 +123,12 @@ func TestARunNeedIsAnsweredFromSlack(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = h.svc.Close() })
-	notices, err := push.New(push.Config{Store: h.db, Bus: bus, Runs: runs, Swarm: srv.SwarmAttention, KeyPath: filepath.Join(t.TempDir(), "vapid_key.pem"),
-		Quiet: time.Millisecond})
+	costs, err := cost.New(cost.Config{Store: h.db, Bus: bus})
+	if err != nil {
+		t.Fatalf("cost.New: %v", err)
+	}
+	notices, err := push.New(push.Config{Store: h.db, Bus: bus, Runs: runs, Swarm: srv.SwarmAttention, Budgets: costs,
+		KeyPath: filepath.Join(t.TempDir(), "vapid_key.pem"), Quiet: time.Millisecond})
 	if err != nil {
 		t.Fatalf("push.New: %v", err)
 	}

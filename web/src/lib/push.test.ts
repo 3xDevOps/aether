@@ -186,6 +186,15 @@ describe('watchPush', () => {
     expect(store.getState().route.params.runId).toBe('run-7k2m9q4xbd')
   })
 
+  it('opens the workspace a tapped budget notification names', () => {
+    const env = browser('granted')
+    const store = createRootStore()
+    const stop = watchPush(store, fakeApi())
+    env.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'aether:open-workspace', workspace: 'ws-b9gjv14p8h' } }))
+    expect(store.getState().route).toEqual({ name: 'workspace', params: { workspaceId: 'ws-b9gjv14p8h' } })
+    stop()
+  })
+
   it('tells the server a person is here, at most once every 20 seconds', () => {
     vi.useFakeTimers({ now: 1_800_000_000_000 })
     const store = createRootStore()

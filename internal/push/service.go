@@ -11,6 +11,9 @@
 // the event. A need is announced once, and only while it still stands.
 // While its member is using a dashboard the announcement waits, and is sent
 // once they have been away from it for DefaultQuiet.
+//
+// It also tells every admin, the same way, when a workspace's spend rises
+// past its budget's warning or its cap.
 package push
 
 import (
@@ -49,6 +52,8 @@ var (
 type Store interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	ListMissionRunIDs(ctx context.Context, id domain.MissionID) ([]domain.RunID, error)
+	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
+	ListMembers(ctx context.Context) ([]*domain.Member, error)
 	store.PushStore
 }
 
@@ -62,13 +67,14 @@ type Runs interface {
 // a run, nil when none does, and the member it waits on.
 type Swarm func(ctx context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error)
 
-// Config wires the service. Store, Bus, Runs, Swarm and KeyPath are
-// required.
+// Config wires the service. Store, Bus, Runs, Swarm, Budgets and KeyPath
+// are required.
 type Config struct {
-	Store Store
-	Bus   events.Bus
-	Runs  Runs
-	Swarm Swarm
+	Store   Store
+	Bus     events.Bus
+	Runs    Runs
+	Swarm   Swarm
+	Budgets Budgets
 	// KeyPath is the server's VAPID key file, created on first use.
 	KeyPath string
 	// Client replaces the public-addresses-only client, for tests.
@@ -90,27 +96,32 @@ type Need struct {
 // Sink is a second place a member hears of a run's needs, such as Slack.
 // Need is called when a need is announced, after the member's devices;
 // Clear whenever the run is read needing nothing. Either is called again
-// after retry while it fails and the run stays as it was.
+// after retry while it fails and the run stays as it was. Notice is a
+// member's news of a workspace, after their devices, called again after
+// retry while it fails and the news still stands.
 type Sink interface {
 	Need(ctx context.Context, run *domain.Run, n Need) error
 	Clear(ctx context.Context, run domain.RunID) error
+	Notice(ctx context.Context, member domain.MemberID, n Notice) error
 }
 
 type noSink struct{}
 
-func (noSink) Need(context.Context, *domain.Run, Need) error { return nil }
-func (noSink) Clear(context.Context, domain.RunID) error     { return nil }
+func (noSink) Need(context.Context, *domain.Run, Need) error         { return nil }
+func (noSink) Clear(context.Context, domain.RunID) error             { return nil }
+func (noSink) Notice(context.Context, domain.MemberID, Notice) error { return nil }
 
 // Service announces needs and manages subscriptions.
 type Service struct {
-	store  Store
-	bus    events.Bus
-	runs   Runs
-	swarm  Swarm
-	key    *vapidKey
-	client *http.Client
-	quiet  time.Duration
-	sink   Sink
+	store   Store
+	bus     events.Bus
+	runs    Runs
+	swarm   Swarm
+	budgets Budgets
+	key     *vapidKey
+	client  *http.Client
+	quiet   time.Duration
+	sink    Sink
 	// started is when Start ran. A run standing in a need it entered before
 	// then was announced, if at all, by the server before this one.
 	started time.Time
@@ -125,19 +136,23 @@ type Service struct {
 	// watched holds, for every run with a watcher, the signal that has it
 	// read the run again.
 	watched map[domain.RunID]chan struct{}
+	// notices holds, for every admin with a workspace's budget notice
+	// to send, what hands its watcher the state to announce.
+	notices map[budgetKey]chan budgetDue
 }
 
 type notification struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Run   string `json:"run,omitempty"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	Run       string `json:"run,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
 }
 
 // New loads the server's VAPID key, creating it on first use; call Start to
 // begin consuming events.
 func New(cfg Config) (*Service, error) {
-	if cfg.Store == nil || cfg.Bus == nil || cfg.Runs == nil || cfg.Swarm == nil || cfg.KeyPath == "" {
-		return nil, errors.New("push: Store, Bus, Runs, Swarm and KeyPath are required")
+	if cfg.Store == nil || cfg.Bus == nil || cfg.Runs == nil || cfg.Swarm == nil || cfg.Budgets == nil || cfg.KeyPath == "" {
+		return nil, errors.New("push: Store, Bus, Runs, Swarm, Budgets and KeyPath are required")
 	}
 	key, err := loadOrCreateKey(cfg.KeyPath)
 	if err != nil {
@@ -154,26 +169,28 @@ func New(cfg Config) (*Service, error) {
 		bus:     cfg.Bus,
 		runs:    cfg.Runs,
 		swarm:   cfg.Swarm,
+		budgets: cfg.Budgets,
 		key:     key,
 		client:  cfg.Client,
 		quiet:   cfg.Quiet,
 		sink:    noSink{},
 		active:  map[domain.MemberID]time.Time{},
 		watched: map[domain.RunID]chan struct{}{},
+		notices: map[budgetKey]chan budgetDue{},
 	}, nil
 }
 
 // UseSink announces every need to sink too. Call it before Start.
 func (s *Service) UseSink(sink Sink) { s.sink = sink }
 
-// Start subscribes to the events that can change a run's need; a pause, a
-// resume and a handoff are timeline entries. ctx bounds only the setup; the
-// service runs until Close.
+// Start subscribes to the events that can change a run's need, and to
+// workspace budgets; a pause, a resume and a handoff are timeline entries.
+// ctx bounds only the setup; the service runs until Close.
 func (s *Service) Start(ctx context.Context) error {
 	sub, err := s.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{
 		events.TypeRunStatus, events.TypeRunInput, events.TypeRunOutcomeSeen,
 		events.TypeRunReview, events.TypeRunMode, events.TypeTimeline, events.TypeRunDeleted,
-		events.TypeRunArchived, events.TypeMissionChanged,
+		events.TypeRunArchived, events.TypeMissionChanged, events.TypeBudget,
 	}}})
 	if err != nil {
 		return fmt.Errorf("push: subscribe: %w", err)
@@ -218,9 +235,12 @@ func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 			if !ok {
 				return
 			}
-			if p, mission := e.Payload.(events.MissionChangedPayload); mission {
+			switch p := e.Payload.(type) {
+			case events.MissionChangedPayload:
 				s.swarmChanged(ctx, p.MissionID)
-			} else {
+			case events.BudgetPayload:
+				s.budget(ctx, e, p)
+			default:
 				s.changed(ctx, e.RunID)
 			}
 		}
@@ -355,7 +375,7 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 			continue
 		}
 		offered[device] = true
-		if err := s.send(ctx, sub, payload, runTopic(run.ID), n.urgency); err != nil {
+		if err := s.send(ctx, sub, payload, topicOf(string(run.ID)), n.urgency); err != nil {
 			slog.Warn("push: notification not delivered", "member", n.member, "error", err)
 		}
 		return true
@@ -394,8 +414,8 @@ func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need
 	return run, n, nil
 }
 
-func runTopic(run domain.RunID) string {
-	digest := sha256.Sum256([]byte(run))
+func topicOf(id string) string {
+	digest := sha256.Sum256([]byte(id))
 	return b64.EncodeToString(digest[:])[:32]
 }
 
@@ -432,7 +452,7 @@ func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, bod
 	}
 	var errs []error
 	for _, sub := range subs {
-		errs = append(errs, s.send(ctx, sub, payload, runTopic(run), urgency))
+		errs = append(errs, s.send(ctx, sub, payload, topicOf(string(run)), urgency))
 	}
 	return errors.Join(errs...)
 }

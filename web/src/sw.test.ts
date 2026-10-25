@@ -73,6 +73,23 @@ describe('service worker', () => {
     expect(self.clients.openWindow).not.toHaveBeenCalled()
   })
 
+  it('keeps one notification per workspace budget and opens the workspace', async () => {
+    const { self, dispatch } = worker()
+    await dispatch('push', {
+      data: { json: () => ({ title: 'proj', body: 'Budget warning: $8.50 of $10.00 spent', workspace: 'ws-b9gjv14p8h' }) },
+    })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('proj', expect.objectContaining({
+      tag: 'budget:ws-b9gjv14p8h',
+      data: { workspace: 'ws-b9gjv14p8h' },
+    }))
+    await dispatch('notificationclick', { notification: { close: vi.fn(), data: { workspace: 'ws-b9gjv14p8h' } } })
+    expect(self.clients.openWindow).toHaveBeenCalledWith('/?page=workspace&id=ws-b9gjv14p8h')
+
+    const front = window(true)
+    await worker([front]).dispatch('notificationclick', { notification: { close: vi.fn(), data: { workspace: 'ws-b9gjv14p8h' } } })
+    expect(front.postMessage).toHaveBeenCalledWith({ type: 'aether:open-workspace', workspace: 'ws-b9gjv14p8h' })
+  })
+
   it('opens the dashboard itself from a test notification', async () => {
     const { self, dispatch } = worker()
     await dispatch('notificationclick', { notification: { close: vi.fn(), data: {} } })

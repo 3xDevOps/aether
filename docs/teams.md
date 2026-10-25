@@ -415,7 +415,9 @@ new runs are refused and running runs finish. Claude Code reports spend in
 Background and Enhanced runs, and OpenCode and omp in Enhanced runs and
 Background runs over ACP. An Enhanced run's spend counts as each turn ends.
 Every other run is unmetered, so totals are a floor. Deleting a run or a member
-keeps their spend in the totals. Only an admin sets a budget.
+keeps their spend in the totals. Only an admin sets a budget. Every admin is
+[notified](networking.md#notifications) once when spend reaches the warning and
+once at the cap; a budget change that puts spend back below either re-arms it.
 
 ### Team memory
 

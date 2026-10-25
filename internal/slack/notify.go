@@ -129,6 +129,35 @@ func (s *Service) Clear(ctx context.Context, id domain.RunID) error {
 	return s.cfg.Store.PutSlackMessage(ctx, last)
 }
 
+// Notice posts a new message, which Slack notifies of, to the member's
+// linked DM; a member with no link hears nothing. Like Need, it returns an
+// error only when trying again could deliver n.
+func (s *Service) Notice(ctx context.Context, member domain.MemberID, n push.Notice) error {
+	link, err := s.cfg.Store.GetSlackLink(ctx, member)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	c, err := s.local(ctx, link)
+	if err != nil {
+		logged("show a workspace notice", err, "member", member)
+		return nil
+	}
+	var info protocol.ServerInfoResult
+	if err = call(ctx, c, protocol.MethodServerInfo, nil, &info); err != nil {
+		return err
+	}
+	blocks := []block{section("mrkdwn", "*"+escape(n.Title)+"*\n"+escape(n.Body))}
+	if info.DashboardURL != "" {
+		open := "<" + info.DashboardURL + "/?page=workspace&id=" + url.QueryEscape(string(n.Workspace)) + "|Open in Aether>"
+		blocks = append(blocks, block{"type": "context", "elements": []block{{"type": "mrkdwn", "text": open}}})
+	}
+	_, err = s.post(ctx, message{Channel: link.Channel, Text: escape(n.Title + ": " + n.Body), Blocks: blocks})
+	return err
+}
+
 // retire leaves only text on a message, with nothing from its run, and
 // forgets the message once Slack has it, or will never let the bot edit
 // it, so a message from a replaced app cannot hold up the run's next one.

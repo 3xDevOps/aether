@@ -26,7 +26,11 @@ const (
 // true spend, and the budget is advisory: consumers must say so rather
 // than present the number as exact.
 type BudgetPayload struct {
-	State         BudgetState `json:"state"`
+	State BudgetState `json:"state"`
+	// From is the state before this event: the same as State when only the
+	// budget or the reason changed, and empty for a workspace the server
+	// had no state for.
+	From          BudgetState `json:"from,omitempty"`
 	SpendUSD      float64     `json:"spend_usd"`
 	LimitUSD      float64     `json:"limit_usd"`
 	WarnUSD       float64     `json:"warn_usd,omitempty"`

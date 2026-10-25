@@ -279,7 +279,9 @@ To hear about runs on Slack instead, including on Android, see
 [slack.md](slack.md).
 
 A notification goes to a run's owner when the run starts needing them, by the
-rule behind **Needs you** ([failure-handling.md](failure-handling.md#run-activity)):
+rule behind **Needs you** ([failure-handling.md](failure-handling.md#run-activity)),
+and to every admin when a workspace's spend rises past its
+[budget](teams.md#budgets):
 
 | The run | The notification says |
 | --- | --- |
@@ -294,15 +296,17 @@ rule behind **Needs you** ([failure-handling.md](failure-handling.md#run-activit
 | ends `failed` with a result nobody has seen | `Failed, review the result` |
 | is a swarm's integrator and asks with `aether-internal mission question ask` | `The integrator asks: <question>` |
 | is a swarm's integrator and stops or fails to launch | `Integrator stopped, replace it to continue` or `Integrator failed to launch, replace it to continue` |
+| *(admins, titled with the workspace)* spend reaches the budget's warning or cap | `Budget warning: $8.50 of $10.00 spent` or `Budget reached: $21.00 of $20.00 spent, new runs are refused` |
 
 The two integrator lines go to the swarm's accountable human
 ([coordination.md](coordination.md#mission-phases)), not the integrator's
 owner, once per question and once per stopped integrator. A working, waiting
 or stalled run does not notify. A Background run does not notify for a
-question, and a swarm worker notifies only when blocked. One
-notification per run: a newer one replaces the older, and tapping it opens the
-run. While you use a dashboard on any device, notifications wait until you have
-left every dashboard alone for a minute and the run still needs you. Runs the
+question, and a swarm worker notifies only when blocked. One notification per
+run or workspace budget: a newer one replaces the older, and tapping it opens
+the run or the workspace's budget. While you use a dashboard on any device,
+notifications wait until you have left every dashboard alone for a minute and
+the run still needs you, or the budget is still where it was. Runs the
 [assistant](assistant.md#notifications) launched for you also notify you when
 they finish.
 
