@@ -761,13 +761,21 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 	f := newFake(t)
 	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{DashboardURL: "https://aether.example", Member: protocol.Member{ID: "mem-bo"}})
 	f.answers[protocol.MethodMissionCreate] = returns(protocol.MissionCreateResult{Mission: protocol.Mission{ID: "mis-1", Phase: "planning", CurrentIntegratorRunID: "run-5"}})
+	f.answers[protocol.MethodAgentList] = returns(protocol.AgentListResult{Agents: []protocol.AgentInfo{
+		{Name: "claude", Enhanced: "adapter"}, {Name: "codex", Enhanced: "adapter", EnhancedInstalled: true},
+		{Name: "gemini", Enhanced: "native", SwarmStandardRefusal: "gemini in Standard mode has no idle wake; start it in Enhanced"},
+	}})
 	cs := connectorSession(t, f, ScopeWrite)
+	if text, _, failed := try(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "harness": "gemini"}); !failed ||
+		!strings.Contains(text, "gemini in Standard mode has no idle wake; start it in Enhanced, which is not installed: aether agent add gemini --enhanced") {
+		t.Fatalf("a gemini integrator with no mode and no Enhanced installed = %q", text)
+	}
 	if text, _, failed := try(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "harness": "claude", "mode": "headless"}); !failed ||
 		!strings.Contains(text, "mode") {
 		t.Fatalf("a headless integrator = %q", text)
 	}
 	text, out := run(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "Ship it", "harness": "claude",
-		"workers": []any{map[string]any{"harness": "claude"}, map[string]any{"harness": "codex", "mode": "acp"}}, "idempotency_key": "s1"})
+		"workers": []any{map[string]any{"harness": "claude"}, map[string]any{"harness": "codex"}}, "idempotency_key": "s1"})
 	if text != "Launched swarm mis-1 (planning); its integrator is run run-5." || out["url"] != "https://aether.example/?page=missions&id=mis-1" {
 		t.Fatalf("aether_launch_swarm = %q %v", text, out)
 	}
@@ -775,8 +783,16 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.IdempotencyKey != "s1" || p.AccountableHumanID != "" || len(p.ExecutionChoices) != 2 || p.ExecutionChoices[1].Harness != "codex" || p.Integrator.Mode != "tui" {
+	if p.IdempotencyKey != "s1" || p.AccountableHumanID != "" || len(p.ExecutionChoices) != 2 || p.ExecutionChoices[1] != (protocol.MissionExecutionChoice{Harness: "codex", Mode: "acp"}) || p.Integrator.Mode != "tui" {
 		t.Fatalf("mission.create = %+v", p)
+	}
+	f.calls = nil
+	run(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "Ship it with codex", "harness": "codex", "idempotency_key": "s2"})
+	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Integrator.Mode != "acp" {
+		t.Fatalf("a codex integrator with no mode and Enhanced installed = %+v, want acp", p.Integrator)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)

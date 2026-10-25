@@ -819,6 +819,23 @@ type AgentInfo struct {
 	Unavailable    string `json:"unavailable,omitempty"`
 }
 
+// SwarmMode is the mode a swarm starts agent in when none is given, read from
+// agents, an agent.list result: Enhanced where it is installed, since Aether
+// can wake any Enhanced run when mail arrives, and Standard otherwise.
+// Standard that Aether could not wake is refused with the install command.
+func SwarmMode(agents []AgentInfo, agent string) (string, error) {
+	for _, a := range agents {
+		switch {
+		case a.Name != agent:
+		case a.EnhancedInstalled:
+			return string(domain.LaunchACP), nil
+		case a.SwarmStandardRefusal != "" && a.Enhanced != "none":
+			return "", fmt.Errorf("%s, which is not installed: aether agent add %s --enhanced", a.SwarmStandardRefusal, agent)
+		}
+	}
+	return string(domain.LaunchTUI), nil
+}
+
 type AgentInstallParams struct {
 	Name     string `json:"name"`
 	Enhanced bool   `json:"enhanced,omitempty"`
