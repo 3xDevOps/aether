@@ -119,6 +119,12 @@ have saved an image), or run `aether env reset`. Reset destroys the container,
 forgets your saved image and removes it from the server. Files outside your
 home are lost. The next open and all new runs use the standard image.
 
+On a terminal the command asks
+`This destroys your Environment's container, unsaved changes and saved image. Your home stays. Reset? [y/N]: `.
+Anything but `y` or `yes` prints `aether: aether env reset: nothing was reset`
+and exits 1. Without a terminal it needs `--yes`, or it fails with
+`aether: --yes is required because aether env reset destroys your Environment's container, unsaved changes and saved image: aether env reset --yes`.
+
 **Stop environment…** (`aether terminal stop`) only stops the container. Your
 home, saved image and unsaved changes stay.
 
