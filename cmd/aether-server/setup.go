@@ -177,14 +177,7 @@ func reportEdge(w io.Writer, options *flag.FlagSet, claim bool) (string, error) 
 	if !claim {
 		return "", nil
 	}
-	code, expires, err := state.IssueClaimCode(id, "", time.Now())
-	if err != nil {
-		return "", err
-	}
-	if err := printClaimLink(w, edgeURL, code, expires); err != nil {
-		return "", err
-	}
-	return code, nil
+	return issueClaimCode(w, state, edgeURL, id, "", time.Now())
 }
 
 // askServerOptions walks the operator through the handful of options a

@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -51,12 +52,21 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(out.String(), "\n")
-	code := strings.TrimPrefix(lines[len(lines)-2], "  aether link --claim ")
-	if len(lines) != 4 || !strings.HasPrefix(code, id+"-") ||
-		!strings.HasPrefix(lines[0], "claim link: aether://claim?edge=https%3A%2F%2Fedge.example&server="+id+"#"+strings.TrimPrefix(code, id+"-")+" (valid until ") ||
-		!strings.HasSuffix(lines[0], ", 5 attempts)") ||
+	code := strings.TrimSuffix(strings.TrimPrefix(lines[len(lines)-2], "  aether link --claim "), " --edge https://edge.example")
+	zone, _ := time.Now().Zone()
+	if len(lines) != 5 || !strings.HasPrefix(code, id+"-") || lines[2] != "  aether login --edge https://edge.example" ||
+		!strings.HasPrefix(lines[0], "claim link: aether://claim?edge=https%3A%2F%2Fedge.example&server="+id+"#"+strings.TrimPrefix(code, id+"-")+" (valid for 30 min, until ") ||
+		!strings.HasSuffix(lines[0], " "+zone+", 5 attempts)") ||
 		lines[1] != "open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:" {
 		t.Errorf("claim-code output:\n%s", out.String())
+	}
+	out.Reset()
+	if err := edgeClaimCode(&out, dir, "https://edge.example", ""); err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(out.String(), "\n"); !strings.HasPrefix(lines[1], "it replaces the code issued earlier, which was valid for 30 min, until ") ||
+		!strings.HasSuffix(lines[1], " and no longer works") {
+		t.Errorf("a code replacing a valid one does not say so:\n%s", out.String())
 	}
 
 	pub, _, _ := ed25519.GenerateKey(rand.Reader)
@@ -64,10 +74,10 @@ func TestEdgeStatusAndClaimCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	if err := edgeStatus(&out, dir, edgeagent.DefaultURL, edgeproto.PolicyApprovedDevices, time.Now()); err != nil {
-		t.Fatal(err)
+	if err := edgeStatus(&out, dir, edgeagent.DefaultURL, edgeproto.PolicyApprovedDevices, time.Now()); !errors.Is(err, errNotConnected) {
+		t.Fatalf("status of a server that never connected = %v, want %v", err, errNotConnected)
 	}
-	for _, want := range []string{id, edgeproto.EdgeKeyFingerprint(pub), "5 attempts left", "edge access  approved-devices",
+	for _, want := range []string{id, edgeproto.EdgeKeyFingerprint(pub), "valid for 30 min, until ", "5 attempts left", "edge access  approved-devices",
 		"connector    https://edge.onaether.dev/mcp/" + id + "  (add it to ChatGPT or Claude; get a code: aether mcp)\n",
 		"connection   never connected: no server using " + dir + " has recorded an attempt to reach the edge\n",
 		"why          the service is not running, is still starting, exits during startup, or started before edge-url was set and needs a restart\n",
@@ -92,17 +102,18 @@ func TestEdgeStatusReportsAStaleConnection(t *testing.T) {
 		name   string
 		status edgeagent.Status
 		want   []string
+		err    error
 	}{
 		{"fresh", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now.Add(-5 * time.Second)},
-			[]string{"connection   connected since", "the edge last answered 5s ago"}},
+			[]string{"connection   connected since", "the edge last answered 5s ago"}, nil},
 		{"hung", edgeagent.Status{Connected: true, Since: since, PID: os.Getpid(), Heartbeat: now.Add(-3 * time.Minute)},
-			[]string{"connection   stale: reported connected since", "no answer from the edge for 3m0s (limit 40s)", "next         sudo systemctl status aether-server"}},
+			[]string{"connection   stale: reported connected since", "no answer from the edge for 3m0s (limit 40s)", "next         sudo systemctl status aether-server"}, errNotConnected},
 		{"killed", edgeagent.Status{Connected: true, Since: since, PID: gone.Process.Pid, Heartbeat: now},
-			[]string{"stale: reported connected since", fmt.Sprintf("server process %d is not running", gone.Process.Pid)}},
+			[]string{"stale: reported connected since", fmt.Sprintf("server process %d is not running", gone.Process.Pid)}, errNotConnected},
 		{"before heartbeats", edgeagent.Status{Connected: true, Since: since},
-			[]string{"connected since", "unchecked: the running server records no heartbeat", "next         sudo systemctl restart aether-server"}},
+			[]string{"connected since", "unchecked: the running server records no heartbeat", "next         sudo systemctl restart aether-server"}, nil},
 		{"stopped", edgeagent.Status{Error: "server stopped", Since: since},
-			[]string{"disconnected since", "server stopped"}},
+			[]string{"disconnected since", "server stopped"}, errNotConnected},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -121,8 +132,8 @@ func TestEdgeStatusReportsAStaleConnection(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out bytes.Buffer
-			if err := edgeStatus(&out, dir, edgeagent.DefaultURL, edgeproto.PolicyApprovedDevices, now); err != nil {
-				t.Fatal(err)
+			if err := edgeStatus(&out, dir, edgeagent.DefaultURL, edgeproto.PolicyApprovedDevices, now); err != tt.err {
+				t.Fatalf("status = %v, want %v", err, tt.err)
 			}
 			for _, want := range append(tt.want, "measures     the server->edge control connection; it does not prove clients can reach the server") {
 				if !strings.Contains(out.String(), want) {

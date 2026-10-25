@@ -5,12 +5,17 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/attribution"
+	"github.com/3xDevOps/Aether/internal/disk"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/serversetup"
@@ -34,7 +39,59 @@ func install(args []string) error {
 	if err := requireRoot(); err != nil {
 		return err
 	}
+	if !*force {
+		if err := refuseKeptChanges(*configPath, values); err != nil {
+			return err
+		}
+	}
 	return writeInstall(os.Stdout, *unitPath, *configPath, values, *force, *sysbox)
+}
+
+// Install keeps an existing config file, so an option a rerun names and
+// the file sets otherwise would be dropped without a word.
+func refuseKeptChanges(configPath string, values map[string]string) error {
+	if _, err := os.Stat(configPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	options, err := configuredOptions(configPath)
+	if err != nil {
+		return err
+	}
+	var sets []string
+	for _, key := range slices.Sorted(maps.Keys(values)) {
+		if options.Lookup(key).Value.String() != values[key] {
+			sets = append(sets, fmt.Sprintf("  %saether-server config set %s %s%s", sudoPrefix(), key, shellQuote(values[key]), configFlag(configPath)))
+		}
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s exists and sets other values than you named; install keeps an existing config file, so nothing was written. Apply them with:\n%s\nor rewrite the file from these flags alone by adding --force",
+		configPath, strings.Join(sets, "\n"))
+}
+
+// A command run through sudo prints commands its user can paste.
+func sudoPrefix() string {
+	if os.Getenv("SUDO_USER") != "" {
+		return "sudo "
+	}
+	return ""
+}
+
+func configFlag(configPath string) string {
+	if configPath == serversetup.DefaultConfigPath {
+		return ""
+	}
+	return " --config " + shellQuote(configPath)
+}
+
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:=,+@%") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // writeInstall carries on when Docker does not answer, since automation
@@ -57,7 +114,68 @@ func writeInstall(w io.Writer, unitPath, configPath string, values map[string]st
 	if err != nil {
 		return err
 	}
+	warnHost(w, options.Lookup("data-dir").Value.String())
+	if _, err := reportEdge(w, options, false); err != nil {
+		return err
+	}
 	return printNextSteps(w, configPath, options, "", docker)
+}
+
+// The least a run needs to start, from internal/scheduler/capacity.go: 2
+// GiB of memory kept free plus 512 MiB for the starting run, and the
+// smallest disk reserve, 5 GiB, plus 1 GiB. docs/install.md states them.
+const (
+	minAvailableMemory = 5 << 29
+	minFreeDisk        = 6 << 30
+)
+
+// warnHost warns rather than fails: automation may install what is missing
+// next.
+func warnHost(w io.Writer, dataDir string) {
+	var lacks []string
+	for _, tool := range []string{"git", "ssh-keygen"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			lacks = append(lacks, tool+" is not installed")
+		}
+	}
+	// sd_booted(3): systemd is the init system when this directory exists.
+	if _, err := os.Stat("/run/systemd/system"); err != nil {
+		lacks = append(lacks, "systemd is not running, so the unit cannot start")
+	}
+	if available, ok := memAvailable(); ok && available < minAvailableMemory {
+		lacks = append(lacks, fmt.Sprintf("%s of memory available, below the %s minimum", gib(available), gib(minAvailableMemory)))
+	}
+	dir := dataDir
+	for {
+		if _, err := os.Stat(dir); err == nil || filepath.Dir(dir) == dir {
+			break
+		}
+		dir = filepath.Dir(dir)
+	}
+	if free, err := disk.Free(dir); err == nil && free < minFreeDisk {
+		lacks = append(lacks, fmt.Sprintf("%s free disk for %s, below the %s minimum", gib(free), dataDir, gib(minFreeDisk)))
+	}
+	if len(lacks) > 0 {
+		_, _ = fmt.Fprintf(w, "\nwarning: %s (docs/install.md#server-prerequisites)\n", strings.Join(lacks, "; "))
+	}
+}
+
+func memAvailable() (uint64, bool) {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0, false
+	}
+	for line := range strings.Lines(string(data)) {
+		if rest, ok := strings.CutPrefix(line, "MemAvailable:"); ok {
+			kb, err := strconv.ParseUint(strings.TrimSuffix(strings.TrimSpace(rest), " kB"), 10, 64)
+			return kb << 10, err == nil
+		}
+	}
+	return 0, false
+}
+
+func gib(bytes uint64) string {
+	return strconv.FormatFloat(float64(bytes)/(1<<30), 'f', 1, 64) + " GiB"
 }
 
 // requireEdgeAccess refuses to turn the edge on without a policy: who
@@ -124,51 +242,50 @@ func configuredOptions(configPath string) (*flag.FlagSet, error) {
 // - render and tell). claimCode is the code reportEdge issued, or "";
 // docker is whether the Docker daemon answered.
 func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claimCode string, docker bool) error {
-	sudo := ""
-	if os.Getenv("SUDO_USER") != "" {
-		sudo = "sudo "
-	}
+	sudo := sudoPrefix()
 	show := func(s string) string { return s }
 	// NO_COLOR: https://no-color.org
 	if f, ok := w.(*os.File); ok && term.IsTerminal(int(f.Fd())) && os.Getenv("NO_COLOR") == "" {
 		show = func(s string) string { return "\x1b[1m" + attribution.Sprint("#f58231", s) }
 	}
-	edgeOn := options.Lookup("edge-url").Value.String() != ""
+	edgeURL := options.Lookup("edge-url").Value.String()
 	var owner *edgeproto.Account
-	if edgeOn && claimCode == "" {
+	if edgeURL != "" && claimCode == "" {
 		var err error
 		if owner, err = edgeagent.OpenState(options.Lookup("data-dir").Value.String()).Owner(); err != nil {
 			return err
 		}
 	}
-	var reach string
+	claim := func(code string) string {
+		commands := claimCommands(edgeURL, code)
+		return show(commands[0]) + "\n       " + show(commands[1])
+	}
+	var reach []string
 	switch {
 	case claimCode != "":
-		reach = "on your computer, open the claim link above with the Aether app, or paste it\n" +
-			"     into the app's Connect page; in a terminal:\n       " + show("aether link --claim "+claimCode)
-	case edgeOn && owner == nil:
-		claim := sudo + "aether-server edge claim-code"
-		if configPath != serversetup.DefaultConfigPath {
-			claim += " --config '" + strings.ReplaceAll(configPath, "'", `'\''`) + "'"
+		reach = []string{"on your computer, open the claim link above with the Aether app, or paste it\n" +
+			"     into the app's Connect page; in a terminal:\n       " + claim(claimCode)}
+	case edgeURL != "" && owner == nil:
+		reach = []string{
+			"on this machine, print a claim code:\n       " + show(sudo+"aether-server edge claim-code"+configFlag(configPath)),
+			"on your computer, sign in and claim the server with that code:\n       " + claim("<code>"),
 		}
-		reach = "on this machine, print a claim link to open on your computer:\n       " + show(claim)
 	default:
 		addr := options.Lookup("addr").Value.String()
 		_, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return fmt.Errorf("addr %q: %w", addr, err)
 		}
-		reach = "on your computer (the first link on a fresh server becomes admin):\n       " +
-			show("aether link <this-host>:"+port)
+		reach = []string{"on your computer (the first link on a fresh server becomes admin):\n       " +
+			show("aether link <this-host>:"+port)}
 	}
-	steps := []string{
+	steps := append([]string{
 		"start the server on this machine:\n       " + show(strings.ReplaceAll(serversetup.ActivateCommand, "systemctl", sudo+"systemctl")),
-		reach,
-	}
+	}, reach...)
 	if !docker {
 		steps = slices.Insert(steps, 0, "install or start Docker on this machine:\n       "+show(dockerInstall))
 	}
-	if edgeOn {
+	if edgeURL != "" {
 		steps = append(steps, "to run agents from ChatGPT or Claude, on that computer:\n       "+show("aether mcp"))
 	}
 	_, _ = fmt.Fprintf(w, "\n%s\n", show("next:"))
@@ -176,6 +293,16 @@ func printNextSteps(w io.Writer, configPath string, options *flag.FlagSet, claim
 		_, _ = fmt.Fprintf(w, "  %d. %s\n", i+1, step)
 	}
 	return nil
+}
+
+// A claim code names no edge, and the client falls back to the project's,
+// so a server on another edge needs --edge on both commands.
+func claimCommands(edgeURL, code string) []string {
+	edge := ""
+	if edgeURL != edgeagent.DefaultURL {
+		edge = " --edge " + edgeURL
+	}
+	return []string{"aether login" + edge, "aether link --claim " + code + edge}
 }
 
 // requireRoot refuses before anything is written rather than leaving a

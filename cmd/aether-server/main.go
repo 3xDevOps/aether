@@ -81,8 +81,11 @@ func exitOn(err error) {
 		return
 	}
 	_, _ = fmt.Fprintln(os.Stderr, "aether-server:", err)
-	if errors.Is(err, serverupdate.ErrRestartUnit) {
+	switch {
+	case errors.Is(err, serverupdate.ErrRestartUnit):
 		os.Exit(75)
+	case errors.Is(err, errNotConnected):
+		os.Exit(3)
 	}
 	os.Exit(1)
 }

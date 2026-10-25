@@ -65,13 +65,14 @@ turns it off.
 Setup ends with a claim link and the commands left for you:
 
 ```
-claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid until 3:04PM, 5 attempts)
+claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid for 30 min, until 2026-10-25 15:04 UTC, 5 attempts)
 
 next:
   1. start the server on this machine:
        sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
   2. on your computer, open the claim link above with the Aether app, or paste it
      into the app's Connect page; in a terminal:
+       aether login
        aether link --claim <server id>-<secret>
   3. to run agents from ChatGPT or Claude, on that computer:
        aether mcp
@@ -81,6 +82,21 @@ next:
 > Whoever uses the claim link first becomes the server's administrator. It is
 > valid for 30 minutes and 5 attempts. `sudo aether-server edge claim-code`
 > prints a new one until someone has joined.
+
+To drive setup from an agent over ssh, with no terminal on the server (`sudo`
+there must not ask for a password), run the steps non-interactively:
+
+```sh
+ssh <user>@<server> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --role none'
+ssh <user>@<server> 'sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>'
+ssh <user>@<server> 'sudo systemctl daemon-reload && sudo systemctl enable --now aether-server'
+ssh <user>@<server> 'sudo aether-server edge status'   # repeat until it exits 0: connected
+ssh <user>@<server> 'sudo aether-server edge claim-code'
+```
+
+The access policy is the owner's choice (`account` or `approved-devices`, as
+in the table above). The claim code goes to step 3: `aether login`, then
+`aether link --claim <code>`.
 
 Run the first command to start the server. Without the edge, the second is
 `aether link <this-host>:2222`. With the edge, linking by address before the

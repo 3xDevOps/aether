@@ -82,7 +82,9 @@ Until an account claims it, the edge relays nothing for a server except claim
 connections. Setup ends with a claim link,
 `aether://claim?edge=...&server=<server id>#<secret>`, and the claim code
 `<server id>-<secret>`, valid for 30 minutes and 5 attempts. `sudo aether-server
-edge claim-code` prints a new one. It is refused while the server has an owner,
+edge claim-code` prints a new one, with its expiry as `valid for 30 min, until
+2026-10-25 15:04 UTC`, and says when it replaces an earlier code that still
+worked, which then stops working. It is refused while the server has an owner,
 and without `--admin` while it has members.
 
 1. Start the server: `sudo systemctl daemon-reload && sudo systemctl enable
@@ -125,6 +127,22 @@ connected: ...` when the service has not started since `edge-url` was set. Then
 run `sudo systemctl status aether-server` and `sudo journalctl -u aether-server -n
 50 --no-pager`. A connected server can still be unreachable for a client: only a
 connection opened through the edge tests the whole path.
+
+`edge status` exits 0 when `connection` reads `connected since <time>`, and 3
+when the edge is on but the server is not connected (never connected, stale or
+disconnected), so a script can wait on it:
+
+```sh
+timeout 300 sh -c 'until sudo aether-server edge status >/dev/null; do sleep 5; done'
+```
+
+It exits 1 on any other error, such as the edge being off or the state being
+unreadable because it ran without `sudo`:
+
+```
+the edge is off: edge-url is empty in /etc/aether/server.conf; turn it on with:
+  sudo aether-server config set edge-url https://edge.onaether.dev
+```
 
 When the edge's key changed, the server keeps retrying and logs this. Run `edge
 trust` only after the edge's operator confirms the new fingerprint:

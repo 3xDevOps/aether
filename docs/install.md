@@ -42,9 +42,14 @@ flowchart LR
   newer; `docker version --format '{{.Server.Version}}'` prints yours.
 - git, and `ssh-keygen` (package `openssh-client` on Debian and Ubuntu), which
   git uses to sign the commits Aether makes for members who connected GitHub.
-- Disk for the images the server pulls on first use. New runs are refused
-  below 5% free space, at least 5 GiB and at most 20 GiB
+- At least 2.5 GiB of available memory and 6 GiB of free disk, plus disk for
+  the images the server pulls on first use. A run starts only while 2 GiB of
+  memory (a tenth of RAM above 20 GiB) plus 512 MiB per run starting stays
+  available, and while the data and Docker filesystems keep their reserve (5%
+  of the filesystem, at least 5 GiB, at most 20 GiB; `min-free-disk` overrides
+  it) plus 1 GiB per starting run free
   ([environments.md](environments.md#resource-limits-and-launch-admission)).
+  `aether-server install` warns below this.
 - Optional: Sysbox, so agents can run Docker inside their runs. Setup offers
   it on Ubuntu and Debian
   ([environments.md](environments.md#docker-inside-runs)).
@@ -296,9 +301,11 @@ current value.
 
 With the edge on and no owner yet, setup prints a claim link holding a code
 valid for 30 minutes (`sudo aether-server edge claim-code` prints a new one).
-Setup starts nothing; it ends on `next:`: start the service, then link from
-your machine with the claim link, `aether link --claim <code>`, or
-`aether link <this-host>:2222`.
+Setup starts nothing; it ends on `next:`: start the service, then on your
+machine run `aether login` and `aether link --claim <code>` (or open the claim
+link), or `aether link <this-host>:2222` without the edge. When the edge is not
+`https://edge.onaether.dev`, both client commands carry `--edge <url>`, because
+a claim code names no edge.
 
 ```sh
 sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
@@ -309,21 +316,40 @@ On first start the server creates its database, repositories and SSH host
 key. Do not delete the key: clients pin it, and the edge knows the server by
 it. The first identity to link becomes the admin: the SSH key or tailnet login
 of whoever runs `aether link` first, or the account that uses the claim code.
+With the edge on, a first SSH key must come from the server itself or an SSH
+tunnel ([networking.md](networking.md#the-first-admin)).
 
 For automation, `aether-server install` writes the same files from flags,
 such as `--edge-url https://edge.onaether.dev --edge-access approved-devices`.
 It installs Sysbox unless you pass `--sysbox=false`, turns the edge on only
 with `--edge-url`, and issues no claim code. With Tailscale on the host, the
 first tailnet login becomes the admin unless you pass `--tailnet-require-key`.
+With the edge on, install also prints the edge, policy and server id. It
+prints one `warning:` line naming what the host lacks (git, ssh-keygen, a
+running systemd, or the memory and disk above), without failing, and ends on
+`next:` with `sudo aether-server edge claim-code`, then `aether login` and
+`aether link --claim <code>` on your computer.
+
+A rerun that names an option the kept config file sets differently exits 1,
+writes nothing, and prints `aether-server config set <key> <value>` for each
+such option (with `--config <file>` when not the default):
+
+```
+aether-server: /etc/aether/server.conf exists and sets other values than you named; install keeps an existing config file, so nothing was written. Apply them with:
+  sudo aether-server config set edge-access approved-devices
+or rewrite the file from these flags alone by adding --force
+```
 
 ### Server options
 
 Options live in `/etc/aether/server.conf`. Updates never rewrite it, and a
-rerun of `setup` or `install` keeps it unless you pass `--force`.
+rerun of `setup` keeps it unless you pass `--force`, and a rerun of `install`
+that names a different value fails as shown above.
 `aether-server config show` prints each option's value and source, and
 `aether-server serve -h` describes them. Change one with
 `sudo aether-server config set <key> <value>` (or `config edit`), then
-`sudo systemctl restart aether-server`.
+`sudo systemctl restart aether-server`. `--config <file>` may go before or
+after the key and value of `config set`.
 
 | Option | Default | What it does |
 | --- | --- | --- |
