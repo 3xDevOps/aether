@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/codexapp"
 	"github.com/3xDevOps/Aether/internal/coordcli"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
@@ -48,6 +49,10 @@ func main() {
 		exitOn(mcp(args))
 	case "report":
 		report(args)
+	case "codex-app-server":
+		os.Exit(codexapp.Launch(args, os.Stderr))
+	case "codex-bridge":
+		exitOn(codexapp.Bridge(context.Background(), os.Stdin, os.Stdout))
 	case "package-exchange":
 		if len(args) != 2 {
 			exitOn(fmt.Errorf("usage: aether-server package-exchange <installed> <staged>"))

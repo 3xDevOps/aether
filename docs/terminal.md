@@ -145,6 +145,9 @@ eight files per message.
 - If the agent has turned on bracketed paste, the message arrives as one paste
   and Enter follows 200 ms later, so a multi-line message is sent whole and
   once. Otherwise it is typed as written, then Enter.
+- Standard Codex takes the message through its app-server instead, as a new
+  turn when idle or a steer added to the running turn
+  ([Codex](harnesses.md#codex)). **Sent** then means Codex accepted it.
 - **Send to agent** in the **Changes** view sends your diff comments as one such
   message.
 - If you cannot message the agent, the composer says why: **This run has

@@ -983,9 +983,14 @@ func (s *session) inject(ctx context.Context, actorName, actorColor, message, su
 	if err := s.writeStdinContextLocked(writeCtx, []byte(line)); err != nil {
 		return fmt.Errorf("ptyhost: inject: %w", err)
 	}
-	// The write above already accepted the full line: neither the caller
-	// leaving nor the session ending in this window may turn delivered input
-	// into a reported failure, which would invite a double-submitting retry.
+	return s.annotateDelivered(ctx, tr, actorName, actorColor, message)
+}
+
+// annotateDelivered draws the banner for a message the agent already has:
+// neither the caller leaving nor the session ending in this window may turn
+// delivered input into a reported failure, which would invite a
+// double-submitting retry.
+func (s *session) annotateDelivered(ctx context.Context, tr *castWriter, actorName, actorColor, message string) error {
 	if err := s.annotateInjection(context.WithoutCancel(ctx), actorName, actorColor, message); err != nil {
 		if errors.Is(err, ErrSessionEnded) || errors.Is(err, ErrNoSession) {
 			if tr != nil {

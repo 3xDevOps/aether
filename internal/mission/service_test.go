@@ -441,7 +441,7 @@ func TestReplaceIntegratorAcceptsAHeadlessChoiceAsTUI(t *testing.T) {
 
 func TestSwarmRefusesAgentsAetherCannotWake(t *testing.T) {
 	ctx := context.Background()
-	f := newMissionFixtureFor(t, "claude", domain.LaunchTUI, domain.MissionExecutionChoice{Harness: "codex", Mode: domain.LaunchTUI})
+	f := newMissionFixtureFor(t, "claude", domain.LaunchTUI, domain.MissionExecutionChoice{Harness: "copilot", Mode: domain.LaunchTUI})
 	choice := func(agent string, mode domain.LaunchMode) protocol.MissionExecutionChoice {
 		return protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: agent, Mode: string(mode)}
 	}
@@ -455,31 +455,31 @@ func TestSwarmRefusesAgentsAetherCannotWake(t *testing.T) {
 	replace := func(mode domain.LaunchMode) error {
 		_, err := f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
 			MissionID: string(f.mission.ID), ExpectedGeneration: f.reloadMission(t).IntegratorGeneration, IdempotencyKey: "replace-" + string(mode),
-			Integrator: protocol.MissionIntegrator(choice("codex", mode)),
+			Integrator: protocol.MissionIntegrator(choice("copilot", mode)),
 		})
 		return err
 	}
 	task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
 	_, startErr := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodWorkerStart, protocol.WorkerStartParams{
 		MissionID: string(f.mission.ID), TaskID: string(task.ID), TaskRevision: task.CurrentRevision,
-		DispatchKey: "codex", Harness: "codex", Mode: string(domain.LaunchTUI), AccountOwnerID: string(f.member.ID),
+		DispatchKey: "copilot", Harness: "copilot", Mode: string(domain.LaunchTUI), AccountOwnerID: string(f.member.ID),
 	})
 	for name, tc := range map[string]struct {
 		err  error
 		want string
 	}{
-		"standard codex integrator":         {create("codex-integrator", choice("codex", domain.LaunchTUI)), "integrator codex in Standard mode has no idle wake; start it in Enhanced"},
-		"standard codex worker":             {create("codex-worker", choice("claude", domain.LaunchTUI), choice("codex", domain.LaunchTUI)), "worker codex in Standard mode has no idle wake; start it in Enhanced"},
+		"standard copilot integrator":       {create("copilot-integrator", choice("copilot", domain.LaunchTUI)), "integrator copilot in Standard mode has no idle wake; start it in Enhanced"},
+		"standard copilot worker":           {create("copilot-worker", choice("claude", domain.LaunchTUI), choice("copilot", domain.LaunchTUI)), "worker copilot in Standard mode has no idle wake; start it in Enhanced"},
 		"standard antigravity worker":       {create("antigravity-worker", choice("claude", domain.LaunchACP), choice("antigravity", domain.LaunchTUI)), "worker antigravity in Standard mode has no idle wake, and it has no Enhanced mode; start it as a Background worker"},
-		"worker start of an older approval": {startErr, "worker codex in Standard mode has no idle wake; start it in Enhanced"},
-		"standard codex replacement":        {replace(domain.LaunchTUI), "integrator codex in Standard mode has no idle wake; start it in Enhanced"},
+		"worker start of an older approval": {startErr, "worker copilot in Standard mode has no idle wake; start it in Enhanced"},
+		"standard copilot replacement":      {replace(domain.LaunchTUI), "integrator copilot in Standard mode has no idle wake; start it in Enhanced"},
 	} {
 		var rpcErr *protocol.Error
 		if !errors.As(tc.err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != tc.want {
 			t.Errorf("%s = %v, want invalid params %q", name, tc.err, tc.want)
 		}
 	}
-	if err := create("wakeable", choice("codex", domain.LaunchACP), choice("claude", domain.LaunchTUI), choice("codex", domain.LaunchHeadless), choice("antigravity", domain.LaunchHeadless)); err != nil {
+	if err := create("wakeable", choice("copilot", domain.LaunchACP), choice("claude", domain.LaunchTUI), choice("codex", domain.LaunchTUI), choice("copilot", domain.LaunchHeadless), choice("antigravity", domain.LaunchHeadless)); err != nil {
 		t.Errorf("create with agents Aether can wake: %v", err)
 	}
 	if err := replace(domain.LaunchACP); err != nil {

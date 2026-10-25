@@ -1793,6 +1793,8 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		idleReportAt:        idleAt,
 		launchMode:          mode,
 		acp:                 acp,
+		appServer:           sc.AppServer,
+		serverTurn:          sc.ServerTurn,
 		missionAssigned:     sc.MissionAssigned,
 		status:              r.Status,
 		reason:              r.Reason,

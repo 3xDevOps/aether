@@ -154,8 +154,8 @@ type Config struct {
 	// WakeAdmission orders the final native wake frame with human control.
 	// An absent seam disables native dispatch without affecting legacy hooks.
 	WakeAdmission WakeAdmission
-	// Nil leaves enhanced runs to read mail on their own.
-	ACPWaker ACPWaker
+	// Nil leaves the runs it wakes to read mail on their own.
+	Waker SessionWaker
 	// Reports is where run.report lands: the scheduler. Leaving it unset
 	// makes run.report an internal error rather than a silent success -
 	// the agent's hook would otherwise be told its state was recorded.
@@ -206,6 +206,7 @@ type Service struct {
 	reportLocks       map[domain.RunID]*sync.Mutex
 	enhancedWoken     map[domain.RunID]map[string]struct{}
 	enhancedNotices   map[domain.RunID]missionNotice
+	enhancedOverlaps  map[domain.RunID]string
 	enhancedWakeLocks map[domain.RunID]*sync.Mutex
 	enhancedSweeps    map[domain.RunID]struct{}
 	reportPackets     map[string]protocol.EvidencePacket
@@ -273,6 +274,7 @@ func New(cfg Config) (*Service, error) {
 		reportLocks:       make(map[domain.RunID]*sync.Mutex),
 		enhancedWoken:     make(map[domain.RunID]map[string]struct{}),
 		enhancedNotices:   make(map[domain.RunID]missionNotice),
+		enhancedOverlaps:  make(map[domain.RunID]string),
 		enhancedWakeLocks: make(map[domain.RunID]*sync.Mutex),
 		enhancedSweeps:    make(map[domain.RunID]struct{}),
 		reportPackets:     make(map[string]protocol.EvidencePacket),

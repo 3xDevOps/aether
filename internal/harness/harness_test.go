@@ -187,7 +187,7 @@ func TestEnvPassthrough(t *testing.T) {
 func TestStatusReporters(t *testing.T) {
 	want := map[string]Reporter{
 		"claude":      ReporterFull,
-		"codex":       ReporterTurnEnd,
+		"codex":       ReporterFull,
 		"omp":         ReporterFull,
 		"pi":          ReporterFull,
 		"opencode":    ReporterFull,
@@ -213,7 +213,8 @@ func TestStatusReporters(t *testing.T) {
 			}
 			continue
 		}
-		if len(pointers) == 0 {
+		// The app-server reports for its terminal.
+		if len(pointers) == 0 && !p.Capabilities.Steer {
 			t.Errorf("%s reports but is launched with nothing", name)
 		}
 		for _, a := range pointers {
@@ -232,11 +233,6 @@ func TestStatusReporters(t *testing.T) {
 				t.Errorf("%s ships %s but its launch %v does not name it", name, file, pointers)
 			}
 		}
-	}
-	// Codex needs no file: the override carries the whole command.
-	codex, _ := Lookup("codex")
-	if len(codex.StatusFiles) != 0 {
-		t.Errorf("codex ships %d status files, want none", len(codex.StatusFiles))
 	}
 }
 

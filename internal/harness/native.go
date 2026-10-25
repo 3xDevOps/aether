@@ -22,7 +22,7 @@ type NativeLaunch struct {
 	DiscoveryFiles map[string]string
 	ReplacesStatus bool
 	// IdleWake is Capabilities.IdleWake for a launch that loaded the
-	// integration.
+	// integration, or that attached the terminal to the agent's app-server.
 	IdleWake bool
 }
 
@@ -85,8 +85,6 @@ func (p Profile) nativeLaunch(dir string, argv []string, env map[string]string) 
 		}, nil
 	case "claude":
 		return claudeNativeLaunch(dir)
-	case "codex":
-		return codexNativeLaunch()
 	case "copilot":
 		hooks, err := coordhooks.Files.ReadFile("copilot.json")
 		if err != nil {

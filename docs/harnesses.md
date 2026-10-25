@@ -19,7 +19,7 @@ agent once without input, commits the result and exits.
 | --- | --- | --- | --- |
 | `antigravity` | Antigravity CLI (runs as `agy`) | run `agy` | None known |
 | `claude` | Claude Code | `/login` inside `claude` | Set up suggests Standard: the Enhanced adapter runs on the Claude Agent SDK |
-| `codex` | OpenAI Codex CLI | `codex login`, device code | Trust prompt on the first Standard run; subagents do not nest in Enhanced |
+| `codex` | OpenAI Codex CLI | `codex login`, device code | Standard runs need Codex 0.131.0 or newer; subagents do not nest in Enhanced |
 | `copilot` | GitHub Copilot CLI | `copilot login --device-code` | Enhanced runs cannot take back `--allow-all` |
 | `cursor` | Cursor CLI (runs as `agent`) | `NO_OPEN_BROWSER=1 agent login` | A Cursor admin policy can bring back approval prompts |
 | `gemini` | Gemini CLI | API key, or `NO_BROWSER=true gemini` | Serves paid API keys and Code Assist only |
@@ -33,7 +33,7 @@ What each agent can do:
 | --- | --- | --- | --- | --- | --- | --- |
 | `antigravity` | none | none | none | no | no | Standard |
 | `claude` | turn start and end | hooks and idle wake | adapter | yes | yes | Standard |
-| `codex` | turn end only | hooks | adapter | no | no | Enhanced |
+| `codex` | turn start and end | idle wake and mid-turn steer | adapter | no | no | Enhanced |
 | `copilot` | none | hooks | built in | no | no | Enhanced |
 | `cursor` | none | hooks you install | built in | no | no | Enhanced |
 | `gemini` | none | hooks you install | built in | no | no | Enhanced |
@@ -50,7 +50,9 @@ What each agent can do:
   plus idle wake, which starts a turn in a waiting session
   ([Incoming coordination hooks](#incoming-coordination-hooks)). Enhanced runs
   need neither: the server prompts the idle session
-  ([Mail](enhanced-runs.md#mail)).
+  ([Mail](enhanced-runs.md#mail)). **Mid-turn steer** means mail and your
+  messages reach a working session as a steer instead of waiting for its turn
+  to end.
 - **Enhanced** is built into the agent's CLI, served by a separate
   [adapter](#enhanced-adapters), or missing.
 - **Mode switch** moves a running session between Standard and Enhanced
@@ -161,13 +163,34 @@ the server's environment signs in Background runs only. Codex ignores
 key** comes filled in with it. Codex reads no base-URL variable; for a gateway,
 set `openai_base_url` in `~/.codex/config.toml`.
 
-Your first Standard run opens Codex's **Hooks need review** screen for Aether's
-inbox hooks. Choose **Trust all and continue**, or open `/hooks` and press `t`.
-One approval covers every workspace until Aether's hook definitions change.
-**Continue without trusting** asks again at the next start. A swarm worker can
-be the first Standard Codex run: open its terminal to answer. If the list shows
-hooks you do not recognize, choose **Review hooks**. A copy of the hooks in
-`~/.codex/hooks.json` would run every hook twice in an Aether run, so remove it.
+A Standard Codex run starts `codex app-server` in the run's container and
+attaches the Codex terminal to it with `codex --remote`. Aether follows the same
+session through that app-server: Codex reports the start and end of each turn,
+and mail and your messages from the dashboard or `aether message` arrive as a
+new turn when Codex is idle, or as a steer added to the running turn. They show
+in the terminal as prompts, under Aether's attribution banner. Press Esc in the
+terminal to stop a turn. Aether loads no hooks into Standard Codex, so remove
+any copy of its hooks from `~/.codex/hooks.json`: it would announce mail twice.
+
+Standard runs need Codex 0.131.0 or newer. With an older one, the run's terminal
+prints:
+
+```text
+codex-cli 0.130.0 is too old: Aether attaches Codex's terminal to its app-server, which needs Codex 0.131.0 or newer.
+Update it here, then start a new run:
+  npm install -g --prefix "$HOME/.local" @openai/codex@latest
+```
+
+If the app-server exits before it listens, the terminal prints
+`codex app-server exited before listening on /tmp/aether-codex/app-server.sock:`
+with its exit status and the end of its log, `/tmp/aether-codex/app-server.log`.
+If Aether cannot reach the app-server, the run shows **Needs you** with a reason
+starting `codex app-server unavailable:` and the real error.
+
+The app-server ends with the Codex terminal. In the login shell that follows,
+`codex resume <session>` continues the session, but without Aether's status
+reports and message delivery. The `codex --remote ... resume` command Codex
+prints on exit no longer works.
 
 #### pi
 
@@ -275,8 +298,9 @@ Google sign-in inside a run container.
 
 ### Install hooks by hand
 
-Claude Code, Codex, Copilot, pi, oh-my-pi and OpenCode load Aether's inbox hooks
-for you on a Standard run that has a task. Gemini CLI and Cursor CLI do not.
+Claude Code, Copilot, pi, oh-my-pi and OpenCode load Aether's inbox hooks for
+you on a Standard run that has a task. Codex needs none: its app-server hands it
+mail. Gemini CLI and Cursor CLI do not load hooks.
 Without hooks, mail reaches those agents only when they run
 `aether-internal inbox`.
 
@@ -410,6 +434,9 @@ launches pass these flags:
 | `cursor` | `agent --force --trust {task}` | `agent -p --force --trust {task}` |
 | `antigravity` | `agy --dangerously-skip-permissions --prompt-interactive={task}` | `agy --dangerously-skip-permissions --print={task}` |
 
+A Standard Codex run attaches its command to `codex app-server`
+([Codex](#codex)).
+
 OpenCode has no such flag, so every OpenCode launch gets
 `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT`. Your workspace's own
 value of that variable is merged over it key by key, so a workspace that sets
@@ -462,7 +489,7 @@ reaches the agent depends on the agent:
 | Agent | Delivery |
 | --- | --- |
 | `claude`, `pi`, `omp` | `--append-system-prompt` |
-| `codex` | `-c developer_instructions=...`, which replaces any `developer_instructions` in your `config.toml`. Aether copies the top-level value of `~/.codex/config.toml` in first. A value in a Codex profile, a project `.codex/config.toml` or a workspace `CODEX_HOME` is replaced for that launch: put such instructions in `AGENTS.md` |
+| `codex` | `-c developer_instructions=...`, passed to `codex app-server`, which replaces any `developer_instructions` in your `config.toml`. Aether copies the top-level value of `~/.codex/config.toml` in first. A value in a Codex profile, a project `.codex/config.toml` or a workspace `CODEX_HOME` is replaced for that launch: put such instructions in `AGENTS.md` |
 | `opencode`, `copilot` | An instructions file the agent loads through its config or `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` |
 | `gemini`, `cursor`, `antigravity` | After the task prompt. A launch with no task gets none |
 | Enhanced runs | Over ACP ([Enhanced runs](enhanced-runs.md#instructions-and-the-session-log)) |
@@ -535,14 +562,17 @@ except where [Install hooks by hand](#install-hooks-by-hand) says otherwise.
 Hooks work only for a coordinated run that has a task, in Standard mode. A
 taskless launch, a Background run, a run with `--conflict-coordination=false`,
 and an agent whose command an administrator overrode do not get them. Enhanced
-runs do not use hooks: the server prompts the idle session instead. Without
-either, the agent reads mail only when it runs `aether-internal inbox`.
+runs do not use hooks: the server prompts the idle session instead. So does a
+Standard Codex run, through its app-server, with or without a task: the server
+prompts the session with the inbox notice, as a new turn when idle and as a
+steer mid-turn. Without any of these, the agent reads mail only when it runs
+`aether-internal inbox`.
 
 Claude Code is the one with a hook-based idle wake in Standard mode. Its wake
 starts a turn with no human input, and the terminal shows **Stop hook feedback**.
 That wording is Claude Code's own framing, not an error. After you press Esc, a
-wake pauses until a turn completes. Codex and Copilot have no idle wake, so mail
-waits for the next hook boundary. pi, oh-my-pi and OpenCode wake only their main
+wake pauses until a turn completes. Copilot has no idle wake, so mail waits for
+the next hook boundary. pi, oh-my-pi and OpenCode wake only their main
 session, and only while idle.
 
 Hooks that you installed yourself and Aether's managed ones do not double up for
@@ -556,11 +586,10 @@ launches but reports nothing, and is judged on silence.
 An agent with status reporting tells Aether when it is working and when it is
 waiting. The dashboard shows a waiting run as **Needs you**
 ([failure-handling.md](failure-handling.md#needs-you)). Standard runs of
-`claude`, `pi`, `omp` and `opencode` report both ends of a turn. `codex` reports
-only when a turn ends, so its run returns to `running` on agent output or a file
-change. That includes the echo of your own typing, so a long prompt typed into a
-parked `codex` run can read as `running` before you send it. Copilot, Gemini,
-Cursor and Antigravity have none.
+`claude`, `codex`, `pi`, `omp` and `opencode` report both ends of a turn.
+While Codex asks you a question in its terminal, the run waits with the reason
+`waiting for your answer in the terminal`. Copilot, Gemini, Cursor and
+Antigravity have none.
 
 Enhanced and Background-over-ACP runs need no reporter: the session reports both
 ends of each turn. Background runs without ACP are never reported.
@@ -580,9 +609,12 @@ mounts.
 - Only Claude Code and oh-my-pi can switch a running session between Standard
   and Enhanced ([Switching a running agent](enhanced-runs.md#switching-a-running-agent)).
 - Codex subagents do not nest in the Enhanced timeline.
-- No idle wake exists for Codex, Copilot, Gemini or Cursor, and Antigravity has
-  no hooks at all. A [swarm](teams.md#swarms) refuses them Standard, so they run
+- No idle wake exists for Copilot, Gemini or Cursor, and Antigravity has no
+  hooks at all. A [swarm](teams.md#swarms) refuses them Standard, so they run
   Enhanced there, or Background as workers.
+- Standard Codex needs Codex 0.131.0 or newer. Its app-server ends with its
+  terminal, so a `codex resume` in the shell runs without Aether's status and
+  message delivery.
 - Only Claude Code and Codex show subscription usage and can move to another
   account on a usage limit.
 - Sharing an `omp` account shares the whole `~/.omp/agent` directory. oh-my-pi

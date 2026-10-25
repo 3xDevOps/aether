@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/codexapp"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
@@ -259,10 +260,10 @@ func TestOpenCodeNativeAndStatusRegistration(t *testing.T) {
 }
 
 // TestReporterRegistrationPerHarness is the same contract for the three
-// harnesses that carry a reporter of their own. Codex needs no asset - the
-// whole command rides a configuration override - while pi and omp share
-// one extension file, so each has to be launched with what it was given
-// and recorded as what it can actually say.
+// harnesses that carry a reporter of their own. Codex needs no asset - its
+// app-server reports for the terminal attached to it - while pi and omp
+// share one extension file, so each has to be launched with what it was
+// given and recorded as what it can actually say.
 func TestReporterRegistrationPerHarness(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
@@ -278,11 +279,14 @@ func TestReporterRegistrationPerHarness(t *testing.T) {
 		t.Fatalf("launch codex run: %v", err)
 	}
 	argv := tuiHarnessCommand(t, e.rt.byName(string(codex.ID)).spec.Command)
-	if i := slices.Index(argv, "-c"); i < 0 || i+1 >= len(argv) || argv[i+1] != agentstatus.CodexNotifySetting {
-		t.Fatalf("interactive codex argv = %v, want -c %s in it", argv, agentstatus.CodexNotifySetting)
+	split := slices.Index(argv, "--")
+	if split < 0 || !slices.Equal(argv[:2], codexapp.LaunchCommand(nil, nil)[:2]) ||
+		!slices.Equal(argv[split+1:], []string{"codex", "--dangerously-bypass-approvals-and-sandbox", "review the diff"}) ||
+		!slices.ContainsFunc(argv[2:split], func(a string) bool { return strings.HasPrefix(a, "developer_instructions=") }) {
+		t.Fatalf("interactive codex argv = %v, want the terminal attached to an app-server that carries the instructions", argv)
 	}
-	if got := e.reporterOf(t, codex.ID); got != harness.ReporterTurnEnd {
-		t.Fatalf("interactive codex run recorded reporter %s, want %s", got, harness.ReporterTurnEnd)
+	if got := e.reporterOf(t, codex.ID); got != harness.ReporterFull {
+		t.Fatalf("interactive codex run recorded reporter %s, want %s", got, harness.ReporterFull)
 	}
 
 	extension := path.Join(coordtransport.MountDir, agentstatus.PiExtensionName)

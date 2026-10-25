@@ -54,6 +54,20 @@ func TestNativeCoordinationLaunchBoundaries(t *testing.T) {
 					asset = coord.file(run.ID, "opencode-v1.js")
 				}
 				settings := coord.file(run.ID, agentstatus.ClaudeSettingsName)
+				if name == "codex" {
+					attached := boundary == "interactive" || boundary == "taskless" || boundary == "disabled"
+					if got := len(argv) > 1 && argv[0] == coordtransport.BinaryPath && argv[1] == "codex-app-server"; got != attached {
+						t.Fatalf("%s codex argv = %v, attached to the app-server %v, want %v", boundary, argv, got, attached)
+					}
+					wakes := boundary == "interactive" || boundary == "taskless"
+					if (spec.Env[coordtransport.ManagedHooksEnv] == "1") != wakes || (spec.Env[coordtransport.WakeEnv] == "1") != wakes {
+						t.Fatalf("%s codex env = %v, want the managed inbox and idle wake %v", boundary, spec.Env, wakes)
+					}
+					if slices.ContainsFunc(argv, func(a string) bool { return strings.HasPrefix(a, "hooks.") || strings.HasPrefix(a, "notify=") }) {
+						t.Fatalf("%s codex argv = %v loads hooks or a notify reporter", boundary, argv)
+					}
+					return
+				}
 				if boundary != "interactive" {
 					if asset != nil || spec.Env["AETHER_MANAGED_NATIVE_WAKE"] != "" || spec.Env[coordtransport.ManagedHooksEnv] != "" {
 						t.Fatalf("%s acquired a native receiver", boundary)
@@ -63,9 +77,6 @@ func TestNativeCoordinationLaunchBoundaries(t *testing.T) {
 					}
 					if name == "claude" && boundary == "taskless" && (!bytes.Equal(settings, agentstatus.ClaudeSettings) || countOf(argv, "--settings") != 1) {
 						t.Fatalf("taskless claude settings = %s with argv %v, want the status reporter alone", settings, argv)
-					}
-					if name == "codex" && slices.ContainsFunc(argv, func(a string) bool { return strings.HasPrefix(a, "hooks.") }) {
-						t.Fatalf("%s loaded the codex hooks: %v", boundary, argv)
 					}
 					if boundary == "override" && !slices.Contains(argv, "--no-extensions") {
 						t.Fatalf("user disable argument lost: %v", argv)
@@ -102,18 +113,6 @@ func TestNativeCoordinationLaunchBoundaries(t *testing.T) {
 				}
 				if spec.Env[coordtransport.ManagedHooksEnv] != "1" {
 					t.Fatalf("%s run lacks %s", name, coordtransport.ManagedHooksEnv)
-				}
-				if name == "codex" {
-					hooks := 0
-					for i, a := range argv {
-						if i > 0 && argv[i-1] == "-c" && strings.HasPrefix(a, "hooks.") {
-							hooks++
-						}
-					}
-					if hooks != 4 || !slices.Contains(argv, agentstatus.CodexNotifySetting) {
-						t.Fatalf("codex argv = %v, want 4 hooks.* overrides next to the notify setting", argv)
-					}
-					return
 				}
 				want, err := coordhooks.Files.ReadFile(name + ".ts")
 				if err != nil {

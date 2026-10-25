@@ -245,6 +245,7 @@ type Scheduler struct {
 	githubOAuthClosed bool
 	githubOAuthWG     sync.WaitGroup
 	acp               *acpDriver
+	appServer         *appServerDriver
 	itemLogs          acphost.ReadOnlyLogCache
 	usageFallback     *UsageFallback
 }
@@ -379,6 +380,11 @@ type supervised struct {
 	// whose publish failed.
 	spendMu   sync.Mutex
 	uncharged events.RunCostPayload
+	// appServer marks a Standard run whose terminal is attached to the
+	// agent's app-server (appServerDriver). serverTurn marks a turn mail
+	// started there, which does not answer a shown question.
+	appServer  bool
+	serverTurn bool
 	// switching is the mode a mode switch is moving the run to, empty when
 	// none is in flight. The switch holds lifecycleMu throughout.
 	switching    domain.LaunchMode
@@ -605,6 +611,7 @@ func New(cfg Config) (*Scheduler, error) {
 		return nil, fmt.Errorf("scheduler: restore verification users: %w", err)
 	}
 	s.acp = newACPDriver(s)
+	s.appServer = newAppServerDriver(s)
 	return s, nil
 }
 
@@ -722,6 +729,7 @@ func (s *Scheduler) Close() error {
 	s.closeGitHubOAuth()
 	s.wg.Wait()
 	s.acp.shutdown()
+	s.appServer.shutdown()
 	s.flushPendingRunTitles()
 	return s.DetachDevelopmentTerminals(context.Background())
 }

@@ -53,6 +53,21 @@ func (e *testEnv) launchOn(t *testing.T, harnessName string) (*domain.Run, *fake
 	return run, c
 }
 
+// launchTurnEnd launches a run that reports turn ends only, as a Codex run
+// an older server launched does.
+func (e *testEnv) launchTurnEnd(t *testing.T) (*domain.Run, *fakeContainer) {
+	t.Helper()
+	run, c := e.launchOn(t, "pi")
+	e.sched.mu.Lock()
+	defer e.sched.mu.Unlock()
+	entry := e.sched.runs[run.ID]
+	entry.reporter = harness.ReporterTurnEnd
+	if err := e.sched.writeSidecar(entry.sidecar()); err != nil {
+		t.Fatal(err)
+	}
+	return run, c
+}
+
 // startStalls runs the scheduler's poll loop for the duration of the test.
 func (e *testEnv) startStalls(t *testing.T) {
 	t.Helper()
@@ -401,10 +416,7 @@ func TestTurnEndReportComesBackOnActivity(t *testing.T) {
 	})
 	sub := e.subscribe(t)
 	e.startStalls(t)
-	run, c := e.launchOn(t, "codex")
-	if got := e.reporterOf(t, run.ID); got != harness.ReporterTurnEnd {
-		t.Fatalf("codex run reporter = %s, want %s", got, harness.ReporterTurnEnd)
-	}
+	run, c := e.launchTurnEnd(t)
 
 	// The turn wrote its answer to the terminal, and only then did the
 	// harness report that it is over.

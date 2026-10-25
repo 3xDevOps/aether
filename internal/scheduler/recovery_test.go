@@ -2365,7 +2365,7 @@ func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
 		cfg.StallThreshold = time.Hour
 		cfg.PollInterval = 10 * time.Millisecond
 	})
-	run, c := e.launchOn(t, "codex")
+	run, c := e.launchTurnEnd(t)
 	waiting := agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 	if err := e.sched.ReportAgentState(t.Context(), run.ID, waiting); err != nil {
 		t.Fatalf("report waiting: %v", err)
@@ -2380,8 +2380,8 @@ func TestRecoveryKeepsATurnEndRunParkedThroughItsTail(t *testing.T) {
 	startScheduler(t, s2)
 	waitFor(t, "supervision resumed", func() bool { return pty2.session(run.ID) != nil })
 
-	// codex says nothing when a turn starts, so this soon after recovery the
-	// redraw is still the old turn.
+	// The agent says nothing when a turn starts, so this soon after recovery
+	// the redraw is still the old turn.
 	stop := pump(t, c)
 	defer stop()
 	time.Sleep(time.Second)

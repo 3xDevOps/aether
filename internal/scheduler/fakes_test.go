@@ -777,6 +777,7 @@ type fakePTY struct {
 	sessions       map[ptyhost.SessionKey]*fakePTYSession
 	nextGeneration uint64
 	injects        []fakeInject
+	annotations    []fakeInject
 	logDir         string
 }
 
@@ -927,6 +928,14 @@ func (p *fakePTY) LastLine(ctx context.Context, run domain.RunID, wait time.Dura
 		}
 	}
 	return "", nil
+}
+
+func (p *fakePTY) Annotate(_ context.Context, key ptyhost.SessionKey, actorName, actorColor, message string) error {
+	run, _ := key.Run()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.annotations = append(p.annotations, fakeInject{run: run, name: actorName, color: actorColor, message: message})
+	return nil
 }
 
 func (p *fakePTY) Inject(_ context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error {

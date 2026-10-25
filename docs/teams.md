@@ -520,7 +520,7 @@ workers** with a model on each, and **Worker mode** (Enhanced by default). A
 worker whose agent cannot use that mode runs in the mode its row names. Swarm
 agents run only in a mode Aether can wake when mail arrives, so an agent with no
 idle wake ([Agents](harnesses.md#supported-agents)) is refused Standard, with
-for example `codex in Standard mode has no idle wake; start it in Enhanced`. The
+for example `copilot in Standard mode has no idle wake; start it in Enhanced`. The
 CLI does the same:
 
 ```sh

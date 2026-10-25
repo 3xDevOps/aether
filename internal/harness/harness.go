@@ -44,7 +44,9 @@ type Reporter int
 const (
 	// ReporterNone: working or waiting is inferred from silence alone.
 	ReporterNone Reporter = iota
-	// ReporterTurnEnd: reports turn ends only, so activity still un-parks the run.
+	// ReporterTurnEnd: reports turn ends only, so activity still un-parks the
+	// run. No shipped profile reports this; a Codex run an older server
+	// launched does.
 	ReporterTurnEnd
 	// ReporterFull: only the agent's own "working" un-parks the run.
 	ReporterFull
@@ -426,18 +428,18 @@ var profiles = map[string]Profile{
 		UpdateScript:  withAdapterUpdate("claude update", claudeACP),
 	},
 	"codex": {
-		Name:        "codex",
-		DisplayName: "Codex",
-		// Codex notifies only when a turn completes, so the run comes back on
-		// the agent's own output.
-		Capabilities:    Capabilities{Status: ReporterTurnEnd, Hooks: HooksManaged, EnhancedDefault: true},
-		TUIArgs:         []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
-		HeadlessArgs:    []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
-		ACPArgs:         []string{codexACP.Binary},
-		ACPInstall:      codexACP,
-		ACPMode:         "agent-full-access",
-		ModelArgs:       []string{"--model", ModelPlaceholder},
-		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
+		Name:         "codex",
+		DisplayName:  "Codex",
+		Capabilities: Capabilities{Status: ReporterFull, IdleWake: true, Steer: true, EnhancedDefault: true},
+		TUIArgs:      []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
+		HeadlessArgs: []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
+		ACPArgs:      []string{codexACP.Binary},
+		ACPInstall:   codexACP,
+		ACPMode:      "agent-full-access",
+		ModelArgs:    []string{"--model", ModelPlaceholder},
+		// A terminal resuming through the app-server keeps the session's
+		// permissions and refuses permission flags.
+		ResumeArgs:      []string{"codex", "resume", SessionPlaceholder},
 		EnvPassthrough:  []string{"CODEX_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths: []string{".codex/auth.json"},
 		LocalRoot:       ".codex",
@@ -446,7 +448,6 @@ var profiles = map[string]Profile{
 		// model_instructions_file would replace its built-in ones.
 		InstructionArgs:    []string{"-c", "developer_instructions=" + QuotedInstructionsPlaceholder},
 		InstructionsConfig: ".codex/config.toml",
-		StatusArgs:         []string{"-c", agentstatus.CodexNotifySetting},
 		// --prefix keeps the install inside the member's persistent home.
 		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @openai/codex; else echo \"npm is not in this environment's PATH, and codex installs through npm\" >&2; false; fi",
 		// Not "codex update": it installs into the image's global npm
