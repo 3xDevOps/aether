@@ -48,13 +48,14 @@ real URL.
 
 | Action | Field or system |
 | --- | --- |
-| Publish a privacy policy page covering the plugin, using the [data inventory](#privacy-policy-data-inventory) below. [privacy.md](privacy.md) covers the Android app and the edge's sign-in but not connectors, and says the edge cannot read content inside SSH, which is not true of connector traffic | `privacyPolicyURL` |
+| Publish a privacy policy page covering the plugin, using the [data inventory](#privacy-policy-data-inventory) below. [privacy.md](privacy.md) covers the Android app and what an edge stores, but not what tool results return | `privacyPolicyURL` |
 | Publish terms of service | `termsOfServiceURL` |
 | Record a walkthrough of the five positive test cases on the demo server | `review.demo_recording_url` |
 | Serve the portal's challenge token as plain text at `https://edge.onaether.dev/.well-known/openai-apps-challenge`; aether-edge does not serve this path yet | aether-edge |
 | Deploy the universal `/mcp` URL on the project edge. Once submitted, its scheme, host and port cannot change without OpenAI support | aether-edge |
 | Complete business verification for 3xDevOps | OpenAI organization settings |
 | Set up the demo server and reviewer account below | Project edge |
+| Review needs the universal `/mcp` URL live on the project edge, signing a demo server's members in with GitHub and asking for no pairing code under `--edge-access account` (the universal-URL task) | aether-edge, `aether-server` |
 
 ## Submit in the portal
 
@@ -88,8 +89,9 @@ Later tool changes need no new ZIP: OpenAI rescans the server daily, or select
 OpenAI reviews each tool's three hints. `destructiveHint` is true when an
 effect cannot be taken back, even if a later call can undo its consequences;
 `openWorldHint` is true when an agent the tool starts or lets proceed can push
-branches and open pull requests. The read tools are all read-only, not
-destructive and closed-world: they read the user's own server.
+branches and open pull requests. The read tools are all read-only and not
+destructive. They read the user's own server, and `aether_pr_status` also
+reads GitHub.
 
 | Tool | Read-only | Destructive | Open world | Why |
 | --- | --- | --- | --- | --- |
@@ -112,8 +114,8 @@ codes, magic links or private network.
 
 - **Demo server.** An `aether-server` linked to the project edge with
   `--edge-access account`, so the reviewer's devices work without an admin
-  approving each one ([edge.md](edge.md), [connectors.md](connectors.md)). Install and sign
-  in Claude Code on it so test 4 can launch.
+  approving each one ([edge.md](edge.md), [connectors.md](connectors.md)).
+  Install and sign in Claude Code on it so test 4 can launch.
 - **Reviewer GitHub account.** A dedicated account that signs in to the edge
   with a password only. Sign it in once by hand to clear GitHub's device
   verification and new-account prompts, invite it to the demo server as a
@@ -176,25 +178,26 @@ plaintext in memory while relaying.
 
 | Where | What | Kept |
 | --- | --- | --- |
-| Edge | Nothing per connector request: no body, token or log line. Monthly egress byte counts; TLS handshake errors with the client IP in its log | Egress per month; log per operator retention |
+| Edge, nginx access log | One line per request: client IP, time, method, path with the server id, status, bytes, user agent. No body or token | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
+| Edge journal | A request the edge refuses before relaying, with its path and, from outside the trusted proxies, the client IP; an internal relay failure with its error; failed TLS handshakes with the client IP. No body or token | `MaxRetentionSec=` in journald, per [edge.md](edge.md) |
+| Edge database | Monthly egress byte counts per server | Per month |
 | Server, `connectors` table | Member, device, client id, client name, redirect host, scopes, created and last used times, SHA-256 hashes of the tokens | Until revoked, or the member or device is removed |
 | Server, tokens | Access token valid 1 hour; refresh token 30 days, rotated on each use; reusing a rotated token revokes the connector | Hashes only |
 | Server log | One line per write call: connector, member, method, target id, result. Lines when a connector is authorized, created or revoked. Read calls are not logged | Server operator's log retention |
 | Server records | Runs and messages created through the plugin record `via ChatGPT` | With the run |
 
 **Controls.** `aether mcp` lists a member's connectors and `aether mcp revoke
-<id>` revokes one; the consent page
-grants `write` and `control` separately ([connectors.md](connectors.md)).
-Edge account deletion is in [privacy.md](privacy.md#what-an-edge-stores).
+<id>` revokes one; the consent page grants `write` and `control` separately
+([connectors.md](connectors.md)). Edge account deletion is in
+[privacy.md](privacy.md#what-an-edge-stores).
 
 ## Who can use it
 
 OpenAI decides plan availability; check its help center
 ([Apps in ChatGPT](https://help.openai.com/en/articles/11487775-apps-in-chatgpt),
 [admin controls](https://help.openai.com/en/articles/11509118-admin-controls-security-and-compliance-for-plugins-and-apps))
-before publishing; those pages refuse scripted fetches, so the following is
-from search excerpts of them on 2026-10-25, not the pages themselves. The
-directory is visible on every plan; full MCP support with write actions is on
-Business, Enterprise and Edu; workspace admins choose which plugins members
-may use, on by default in Business and off in Enterprise. Every user also needs an Aether
-account on a server linked to the project edge.
+before publishing. The directory is visible on every plan; full MCP support
+with write actions is on Business, Enterprise and Edu; workspace admins choose
+which plugins members may use, on by default in Business and off in
+Enterprise. Every user also needs an Aether account on a server linked to the
+project edge.

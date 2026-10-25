@@ -266,15 +266,10 @@ reads the guides in `docs/`, which the server binary embeds. Without
 The tool definitions are one table, in `internal/mcpbridge/assistant.go`,
 that takes a call function rather than a socket. The assistant's call dials
 the socket. A [ChatGPT or Claude connector](connectors.md) calls the server
-in process as its member, and serves 8 of the tools: the read tools
-`aether_list_workspaces`, `aether_list_agents`, `aether_list_runs`,
-`aether_get_run` and `aether_run_history`, and `aether_launch_run`,
-`aether_message_run` and `aether_stop_run`. Its descriptions leave out the
-tier wording, because ChatGPT and Claude ask before each write themselves,
-and each tool has a title. The read tools carry `readOnlyHint` and a false
-`openWorldHint`; launch and message carry a false `destructiveHint` and a
-true `openWorldHint`; stop carries `destructiveHint` and `idempotentHint`
-and a false `openWorldHint`. The parameter shaping is the same on both
-paths: `mine`, the default history page of 20, and a fresh idempotency key
+in process as its member and serves its own tool set. Its descriptions leave
+out the tier wording, because ChatGPT and Claude ask before each write
+themselves, and each tool has a title and the hints in
+[chatgpt-plugin.md](chatgpt-plugin.md#tool-hints). The parameter shaping is
+the same on both paths: `mine`, the default history page of 20, and a fresh idempotency key
 on each message. A failed connector call returns the server's error message
 unchanged.
