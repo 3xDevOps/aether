@@ -83,7 +83,9 @@ next:
 > prints a new one until someone has joined.
 
 Run the first command to start the server. Without the edge, the second is
-`aether link <this-host>:2222`. The third is optional
+`aether link <this-host>:2222`. With the edge, linking by address before the
+claim works only on the server or through an SSH tunnel
+([networking.md](networking.md#the-first-admin)). The third is optional
 ([connectors.md](connectors.md)).
 
 It worked if `sudo aether-server edge status` shows `connection  connected since

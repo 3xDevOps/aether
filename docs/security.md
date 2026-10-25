@@ -439,6 +439,12 @@ is a member.
 
 - A server uses an edge only when its config names one. `aether-server setup`
   turns on the project's edge on a host without tailscaled, and says so.
+- Until it has a member, a server with an edge takes its first admin by SSH
+  key only from a loopback address: the server itself or an SSH tunnel.
+  Everyone else claims it with `sudo aether-server edge claim-code`, so a scan
+  that finds port 2222 open cannot take admin first. A forwarder on the host
+  that connects outside clients to `127.0.0.1:2222`, such as `socat`, defeats
+  this. Without an edge, the first key from any address becomes admin.
 - SSH is encrypted end to end. The edge cannot read it or pose as your server.
 - The server pins the edge's signing key. A different key is refused until you
   compare fingerprints and run `sudo aether-server edge trust`.

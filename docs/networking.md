@@ -152,6 +152,21 @@ The first key to link a fresh server becomes the admin. The CLI offers
 aether link 192.168.1.50:2222 --key ~/.ssh/aether_ed25519
 ```
 
+When the server has an edge, the first admin's key must come from a loopback
+address: the server itself, or an SSH tunnel to it. Anyone who can reach the
+port could otherwise take admin before the owner claims the server.
+
+```sh
+ssh -L 2222:127.0.0.1:2222 <user>@<server-host>   # keep it open
+aether link 127.0.0.1:2222                        # in another terminal
+```
+
+From any other address the handshake fails and the server's message names the
+claim instead: `sudo aether-server edge claim-code` on the server, then
+`aether login` and `aether link --claim <code>` on your machine
+([edge.md](edge.md#server-id-and-claiming)). Once you are admin, your key works
+from any address: `aether link <server-host>:2222`.
+
 `link` saves the path in the client's `config.json` (`~/.config/aether/` on
 Linux, `~/Library/Application Support/aether/` on macOS). `git push aether`
 calls the system `ssh` instead, so add an `IdentityFile` line for the server
