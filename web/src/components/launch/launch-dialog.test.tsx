@@ -108,6 +108,9 @@ describe('new run', () => {
     await open()
     expect(agentRow(/^Claude Code/).getAttribute('aria-checked')).toBe('true')
     expect(modeSegment('Enhanced').getAttribute('aria-checked')).toBe('true')
+    const [first] = within(screen.getByRole('radiogroup', { name: 'Mode' })).getAllByRole('radio')
+    expect(first).toBe(modeSegment('Enhanced'))
+    expect(within(first).getByText('Recommended')).toBeDefined()
     setTask('fix the flaky test')
     fireEvent.click(launchButton())
 
@@ -120,7 +123,7 @@ describe('new run', () => {
     await open()
     await userEvent.click(modeSegment('Standard'))
     fireEvent.click(launchButton())
-    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude' }))
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'tui' }))
     expect(useStore.getState().launchDefaults.claude.mode).toBe('tui')
     cleanup()
     await open()
@@ -131,6 +134,7 @@ describe('new run', () => {
     vi.mocked(api.agentList).mockResolvedValue([claude({ enhanced_installed: false })])
     await open()
     expect(modeSegment('Standard').getAttribute('aria-checked')).toBe('true')
+    expect(within(modeSegment('Enhanced')).queryByText('Recommended')).toBeNull()
   })
 
   it('sends a model picked from the agent\'s discovered list', async () => {
@@ -323,7 +327,7 @@ describe('new run', () => {
       expect(screen.getByText(/^Uses Bob's agent login and vendor quota/)).toBeDefined()
       fireEvent.click(launchButton())
 
-      await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'bob-agent', account_member_id: bob.id }))
+      await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'bob-agent', mode: 'tui', account_member_id: bob.id }))
       expect(api.agentList).toHaveBeenCalledWith(bob.id)
     })
 
@@ -461,6 +465,16 @@ describe('swarm', () => {
     await create('coordinate checkout work')
     await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
     expect(useStore.getState().launchDefaults.claude.mode).toBe('tui')
+  })
+
+  it('sends an Enhanced integrator and Enhanced workers for a never-launched agent', async () => {
+    useStore.setState({ launchDefaults: {} })
+    await openSwarm()
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+    expect(params.integrator).toEqual({ account_member_id: alice.id, harness: 'claude', mode: 'acp' })
+    expect(params.execution_choices).toEqual([{ account_member_id: alice.id, harness: 'claude', mode: 'acp' }])
   })
 
   it('authorizes the remembered Standard integrator and Enhanced workers by default', async () => {

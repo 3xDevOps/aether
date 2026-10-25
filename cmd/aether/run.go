@@ -39,7 +39,7 @@ func runRun(args []string) error {
 	}
 	fs := newFlagSet("run")
 	agent := fs.String("agent", "", "agent name")
-	mode := fs.String("mode", "standard", launchModeHelp)
+	mode := fs.String("mode", "", launchModeHelp+" (default: "+defaultModeHelp+")")
 	model := fs.String("model", "", modelHelp)
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	account := fs.String("account", "", "member ID whose shared agent account to use")
@@ -71,11 +71,13 @@ func runRun(args []string) error {
 		}
 		return launchTemplate(*workspace, *template, params)
 	}
-	wireMode, err := parseLaunchMode(*mode)
-	if err != nil {
-		return err
+	if *mode != "" {
+		wireMode, err := parseLaunchMode(*mode)
+		if err != nil {
+			return err
+		}
+		*mode = wireMode
 	}
-	*mode = wireMode
 	fallbacks, err := parseFallback(*fallbackOrder, *noFallback)
 	if err != nil {
 		return err
@@ -163,7 +165,10 @@ func launchError(err error, params protocol.RunLaunchParams, fromStdin bool) err
 // launchCommand must reproduce params exactly or a retry with the same key
 // conflicts.
 func launchCommand(params protocol.RunLaunchParams, fromStdin bool) string {
-	args := []string{"aether", "run", "--agent", shellquote.Quote(params.Harness), "--mode", modeName(params.Mode)}
+	args := []string{"aether", "run", "--agent", shellquote.Quote(params.Harness)}
+	if params.Mode != "" {
+		args = append(args, "--mode", modeName(params.Mode))
+	}
 	if params.Model != "" {
 		args = append(args, "--model", shellquote.Quote(params.Model))
 	}

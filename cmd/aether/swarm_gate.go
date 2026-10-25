@@ -111,7 +111,7 @@ func swarmReplaceIntegrator(args []string) error {
 	}
 	fs := newFlagSet("swarm replace-integrator")
 	agent := fs.String("agent", "", "agent of the new integrator")
-	mode := fs.String("mode", "", "integrator mode: standard or enhanced (default: "+swarmModeDefault+")")
+	mode := fs.String("mode", "", "integrator mode: standard or enhanced (default: "+defaultModeHelp+")")
 	model := fs.String("model", "", "integrator "+modelHelp)
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: the current integrator's)")
 	if err = fs.Parse(rest); err != nil {

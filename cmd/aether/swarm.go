@@ -108,7 +108,7 @@ func swarmCreate(args []string, stdin io.Reader) error {
 func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	fs := newFlagSet("swarm create")
 	agent := fs.String("agent", "", "integrator agent name")
-	mode := fs.String("mode", "", "integrator mode: standard or enhanced (default: "+swarmModeDefault+")")
+	mode := fs.String("mode", "", "integrator mode: standard or enhanced (default: "+defaultModeHelp+")")
 	model := fs.String("model", "", "integrator "+modelHelp)
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: yours)")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
@@ -116,7 +116,7 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	noFallback := fs.Bool("no-fallback", false, noFallbackHelp)
 	key := fs.String("idempotency-key", "", "the key a failed or interrupted create printed: the retry returns that swarm instead of starting another (default: a new key)")
 	var workers stringList
-	fs.Var(&workers, "worker", "allow workers on this agent, agent[:mode[:model]] with mode standard|enhanced|background; an omitted or empty mode is "+swarmModeDefault+" (repeatable)")
+	fs.Var(&workers, "worker", "allow workers on this agent, agent[:mode[:model]] with mode standard|enhanced|background; an omitted or empty mode is "+defaultModeHelp+" (repeatable)")
 	objective, err := parseLeadingArg(fs, args)
 	if err != nil {
 		return swarmSpec{}, fmt.Errorf("%w\n%s", err, swarmUsage)
@@ -152,8 +152,6 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	}
 	return spec, nil
 }
-
-const swarmModeDefault = "enhanced where it is installed, else standard"
 
 // parseIntegratorMode leaves an empty mode for fillSwarmModes.
 func parseIntegratorMode(name string) (string, error) {

@@ -1,6 +1,7 @@
 import { RadioGroup as RadioGroupPrimitive } from 'radix-ui'
 import { type ReactNode, useId } from 'react'
 import { modes, type Refusal } from '@/components/launch/modes'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -51,8 +52,11 @@ export function ModeControl({
                 'disabled:cursor-not-allowed disabled:opacity-50',
               )}
             >
-              <span id={`${id}-${mode.value}`} className="text-ui font-medium">
-                {mode.label}
+              <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                <span id={`${id}-${mode.value}`} className="text-ui font-medium">
+                  {mode.label}
+                </span>
+                {mode.value === 'acp' && !refusal && <Badge tone="review">Recommended</Badge>}
               </span>
               <span id={`${id}-${mode.value}-description`} className="text-ui-sm text-muted">
                 {mode.description}
