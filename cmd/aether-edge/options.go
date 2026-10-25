@@ -40,6 +40,9 @@ type options struct {
 	acmeDirectory  string
 	egressBudget   int64
 	github         *edge.OAuthApp
+	// openAIChallenge is OpenAI's domain verification token for the
+	// relay host, served at edgeproto.PathOpenAIChallenge.
+	openAIChallenge string
 }
 
 const maxSecretFileSize = 4 << 10
@@ -78,6 +81,8 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 		"ACME directory URL")
 	budget := fs.String("egress-budget", env("AETHER_EDGE_EGRESS_BUDGET", "0"),
 		"bytes the relay may send per calendar month (UTC) before it throttles every connection; 0 = no budget")
+	fs.StringVar(&o.openAIChallenge, "openai-challenge", env("AETHER_EDGE_OPENAI_CHALLENGE", ""),
+		"OpenAI's domain verification token for the relay host, served as text/plain at <relay origin>"+edgeproto.PathOpenAIChallenge+"; empty serves 404")
 	githubID := fs.String("github-client-id", env("AETHER_EDGE_GITHUB_CLIENT_ID", ""), "GitHub OAuth app client id")
 	githubSecretFile := fs.String("github-client-secret-file", env("AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE", ""),
 		"file holding the GitHub client secret, instead of AETHER_EDGE_GITHUB_CLIENT_SECRET")

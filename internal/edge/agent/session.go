@@ -314,7 +314,7 @@ func (a *Agent) ping(ctx context.Context, s *session) {
 // connected is the status of live session s whose edge last answered at
 // heartbeat.
 func (a *Agent) connected(s *session, heartbeat time.Time) Status {
-	return Status{Edge: a.origin, Connected: true, Since: s.since, PID: os.Getpid(), Heartbeat: heartbeat}
+	return Status{Edge: a.origin, Connected: true, Since: s.since, PID: os.Getpid(), Heartbeat: heartbeat, Protocol: s.protocol}
 }
 
 // answered queues the heartbeat at now for recordBeats, replacing one it
@@ -355,6 +355,17 @@ func (a *Agent) EdgeVersion() int {
 		return 0
 	}
 	return a.live.protocol
+}
+
+// EdgeKey is the key of the edge the control connection is enrolled
+// with, nil while there is none.
+func (a *Agent) EdgeKey() ed25519.PublicKey {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.live == nil {
+		return nil
+	}
+	return a.live.edgeKey
 }
 
 func (a *Agent) setLive(s *session) {

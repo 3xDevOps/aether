@@ -1,6 +1,7 @@
 package sshd
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -31,12 +32,16 @@ const ConnectorCodeTTL = 10 * time.Minute
 // or spent.
 var ErrConnectorCode = errors.New("sshd: no such connector code")
 
-// ConnectorGrant is whom a pairing code authorizes a connector for: the
-// member who minted it and the edge device they minted it on, empty over
-// a member SSH key or a tailnet connection.
+// ConnectorGrant is whom a connector is authorized for: the member who
+// minted its pairing code and the edge device they minted it on, empty
+// over a member SSH key or a tailnet connection; or, for a connector
+// authorized by signing in at the edge instead of a code, the member and
+// the edge account (Provider, Subject) that signed in.
 type ConnectorGrant struct {
-	Member domain.MemberID
-	Device domain.DeviceID
+	Member   domain.MemberID
+	Device   domain.DeviceID
+	Provider string
+	Subject  string
 }
 
 // connectorCode is a live pairing code, kept as the SHA-256 of its
@@ -60,6 +65,59 @@ func (s *Server) ConnectorURL() string {
 		return ""
 	}
 	return edge.Origin() + edgeproto.MCPPath(edgeproto.ServerID(s.hostKey.PublicKey()))
+}
+
+// UniversalConnectorURL is the one connector URL of every server on the
+// edge, <edge origin>/mcp, while the edge speaks
+// edgeproto.VersionUniversalMCP, and empty otherwise.
+func (s *Server) UniversalConnectorURL() string {
+	edge := s.currentEdgeOwner()
+	if edge == nil || edge.EdgeVersion() < edgeproto.VersionUniversalMCP {
+		return ""
+	}
+	return edge.Origin() + edgeproto.PathUniversalMCP
+}
+
+// EdgeAccess is the server's edge-access policy.
+func (s *Server) EdgeAccess() edgeproto.AccessPolicy { return s.cfg.EdgeAccess }
+
+// VerifyConnectorAssertion checks an edge's assertion that an account
+// chose this server for the authorization request of clientID with
+// challenge, against the key of the edge the server is connected to.
+func (s *Server) VerifyConnectorAssertion(signed, clientID, challenge string, now time.Time) (edgeproto.ConnectorAssertion, error) {
+	edge := s.currentEdgeOwner()
+	if edge == nil {
+		return edgeproto.ConnectorAssertion{}, errors.New("this server has no edge")
+	}
+	key := edge.EdgeKey()
+	if key == nil {
+		return edgeproto.ConnectorAssertion{}, fmt.Errorf("this server is not connected to its edge at %s", edge.Origin())
+	}
+	return edgeproto.VerifyConnectorAssertion(key, signed, edge.Origin(), edgeproto.ServerID(s.hostKey.PublicKey()), clientID, challenge, now)
+}
+
+// ConnectorAccountGrant is the grant of a connector authorized by
+// signing in at the edge as account, and the name of its member. Only
+// edge-access account admits one, as it admits a device by signing in
+// alone, and only for an account bound to a member.
+func (s *Server) ConnectorAccountGrant(ctx context.Context, account edgeproto.Account) (ConnectorGrant, string, error) {
+	if s.cfg.EdgeAccess != edgeproto.PolicyAccount {
+		return ConnectorGrant{}, "", fmt.Errorf("%s admits approved devices only (edge-access %s), so a connector needs a code from aether mcp",
+			cmp.Or(s.cfg.Name, "this server"), s.cfg.EdgeAccess)
+	}
+	ids, err := s.identityStore()
+	if err != nil {
+		return ConnectorGrant{}, "", err
+	}
+	m, err := ids.GetMemberByIdentity(ctx, account.Provider, account.Subject)
+	if errors.Is(err, store.ErrNotFound) {
+		return ConnectorGrant{}, "", fmt.Errorf("%s is not a member of %s; an admin invites it, or a member connects with a code from aether mcp",
+			accountName(account), cmp.Or(s.cfg.Name, "this server"))
+	}
+	if err != nil {
+		return ConnectorGrant{}, "", fmt.Errorf("sshd: connector account: %w", err)
+	}
+	return ConnectorGrant{Member: m.ID, Provider: account.Provider, Subject: account.Subject}, cmp.Or(m.DisplayName, string(m.ID)), nil
 }
 
 // Name is the server's host name.
@@ -122,7 +180,8 @@ func (s *Server) connectorCode(ctx context.Context, member domain.MemberID, _ js
 	s.connectorCodes[connectorCodeHash(code)] = connectorCode{grant: ConnectorGrant{Member: member, Device: id.device}, expires: expires}
 	s.connectorMu.Unlock()
 	slog.Info("sshd: connector code minted", "member", member, "device", id.device)
-	return protocol.ConnectorCodeResult{URL: s.ConnectorURL(), Code: code, ExpiresAt: expires.UTC().Format(time.RFC3339)}, nil
+	return protocol.ConnectorCodeResult{URL: cmp.Or(s.UniversalConnectorURL(), s.ConnectorURL()), Code: code,
+		ExpiresAt: expires.UTC().Format(time.RFC3339)}, nil
 }
 
 // RedeemConnectorCode spends code, as a person typed it: any case, the
@@ -146,9 +205,29 @@ func (s *Server) RedeemConnectorCode(code string, now time.Time) (ConnectorGrant
 // the member still exists and, when the code was minted on an edge
 // device, that device still admits a connection under the current
 // edge-access policy. A revoked device never does; under approved-devices
-// only an approved one does.
+// only an approved one does. A grant of an edge account holds only under
+// edge-access account and while the account is bound to the member.
 func (s *Server) CheckConnectorGrant(ctx context.Context, g ConnectorGrant) error {
-	return s.checkConnIdentity(ctx, connIdentity{member: g.Member, device: g.Device})
+	if g.Subject == "" {
+		return s.checkConnIdentity(ctx, connIdentity{member: g.Member, device: g.Device})
+	}
+	account := edgeproto.Account{Provider: g.Provider, Subject: g.Subject}
+	if s.cfg.EdgeAccess != edgeproto.PolicyAccount {
+		return fmt.Errorf("it was authorized by signing in at the edge as %s, which edge-access %s does not admit; connect again with a code from aether mcp",
+			accountName(account), s.cfg.EdgeAccess)
+	}
+	ids, err := s.identityStore()
+	if err != nil {
+		return err
+	}
+	m, err := ids.GetMemberByIdentity(ctx, g.Provider, g.Subject)
+	switch {
+	case errors.Is(err, store.ErrNotFound) || (err == nil && m.ID != g.Member):
+		return fmt.Errorf("%s, which authorized it, is no longer bound to member %s", accountName(account), g.Member)
+	case err != nil:
+		return fmt.Errorf("sshd: connector account: %w", err)
+	}
+	return nil
 }
 
 func connectorToWire(c *store.Connector) protocol.Connector {

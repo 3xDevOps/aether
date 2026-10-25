@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -503,6 +504,7 @@ func (f *fakeEdgeOwner) Origin() string                     { return "https://ed
 func (f *fakeEdgeOwner) Connected() bool                    { return true }
 func (f *fakeEdgeOwner) EdgeVersion() int                   { return edgeproto.Version }
 func (f *fakeEdgeOwner) EdgeState() string                  { return f.state }
+func (f *fakeEdgeOwner) EdgeKey() ed25519.PublicKey         { return nil }
 
 func (f *fakeEdgeOwner) TransferOwner(owner edgeproto.Account) error {
 	f.mu.Lock()

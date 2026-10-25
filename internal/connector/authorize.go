@@ -1,6 +1,7 @@
 package connector
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -88,13 +89,26 @@ func (h *handler) fetchClient(ctx context.Context, clientID string) (clientDoc, 
 }
 
 // authRequest is the authorization request the consent form carries,
-// signed, once its client and redirect URI checked out.
+// signed, once its client and redirect URI checked out. Resource is the
+// connector URL it is for. Asserted is set when the edge's assertion
+// names a member and the server's policy lets that replace the pairing
+// code.
 type authRequest struct {
-	ClientID    string `json:"c"`
-	ClientName  string `json:"n"`
-	RedirectURI string `json:"r"`
-	State       string `json:"s,omitempty"`
-	Challenge   string `json:"p"`
+	ClientID    string    `json:"c"`
+	ClientName  string    `json:"n"`
+	RedirectURI string    `json:"r"`
+	State       string    `json:"s,omitempty"`
+	Challenge   string    `json:"p"`
+	Resource    string    `json:"u"`
+	Asserted    *asserted `json:"a,omitempty"`
+}
+
+// asserted is the account a ConnectorAssertion named, its nonce, which
+// the consent form spends, and when the assertion expires.
+type asserted struct {
+	Account edgeproto.Account `json:"a"`
+	Nonce   string            `json:"n"`
+	Expires time.Time         `json:"e"`
 }
 
 // authCode is an issued authorization code, kept by the SHA-256 of its
@@ -117,8 +131,13 @@ type wrongCodes struct {
 // page. Until the client and redirect URI check out there is nowhere safe
 // to send an error, so it is shown on the page; later errors go back to
 // the client.
-func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request) {
+func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res resource) {
 	q := r.URL.Query()
+	if res == h.universal && q.Get(edgeproto.ParamServer) != h.serverID {
+		h.renderError(w, fmt.Sprintf("This request names server %q, not this server, %s. Start the connection again from ChatGPT or Claude.",
+			q.Get(edgeproto.ParamServer), h.serverID))
+		return
+	}
 	clientID, redirect := q.Get("client_id"), q.Get("redirect_uri")
 	u, err := url.Parse(clientID)
 	if err != nil || u.Scheme != "https" || !slices.Contains(h.clientHosts, u.Host) {
@@ -139,7 +158,8 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request) {
 		h.renderError(w, fmt.Sprintf("The redirect_uri %q is not an https URL on %s that %s lists.", redirect, u.Host, clientID))
 		return
 	}
-	req := authRequest{ClientID: clientID, ClientName: doc.ClientName, RedirectURI: redirect, State: q.Get("state"), Challenge: q.Get("code_challenge")}
+	req := authRequest{ClientID: clientID, ClientName: doc.ClientName, RedirectURI: redirect, State: q.Get("state"),
+		Challenge: q.Get("code_challenge"), Resource: res.base}
 	switch {
 	case q.Get("response_type") != "code":
 		h.redirectError(w, r, req, "unsupported_response_type", "response_type must be code")
@@ -147,27 +167,82 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request) {
 	case req.Challenge == "" || q.Get("code_challenge_method") != "S256":
 		h.redirectError(w, r, req, "invalid_request", "PKCE is required: send code_challenge with code_challenge_method S256")
 		return
-	case !h.sameResource(q.Get("resource")):
-		h.redirectError(w, r, req, "invalid_target", "resource must be "+h.base)
+	case !sameResource(q.Get("resource"), res.base):
+		h.redirectError(w, r, req, "invalid_target", "resource must be "+res.base)
 		return
+	}
+	page := consentPage{Client: clientLabel(req), Write: true}
+	if signed := q.Get(edgeproto.ParamAssertion); signed != "" && res == h.universal && h.ssh.EdgeAccess() == edgeproto.PolicyAccount {
+		a, name, aerr := h.assertion(r.Context(), signed, req)
+		if aerr != nil {
+			h.renderError(w, "Cannot connect as your GitHub account: "+aerr.Error()+". Start the connection again from ChatGPT or Claude.")
+			return
+		}
+		req.Asserted, page.Member, page.Account = a, name, accountLabel(a.Account)
 	}
 	payload, err := json.Marshal(req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.renderConsent(w, http.StatusOK, consentPage{Request: h.sign("consent", payload), Client: clientLabel(req), Write: true})
+	page.Request = h.sign("consent", payload)
+	h.renderConsent(w, http.StatusOK, page)
 }
 
-// authorizeAllow spends the pairing code the member pasted and sends the
-// client an authorization code bound to the member, the code's device,
-// the client, the redirect URI and the PKCE challenge.
-func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request) {
+// assertion checks the edge's assertion for req and maps its account to
+// a member, whose name it returns.
+func (h *handler) assertion(ctx context.Context, signed string, req authRequest) (*asserted, string, error) {
+	now := h.now()
+	a, err := h.ssh.VerifyConnectorAssertion(signed, req.ClientID, req.Challenge, now)
+	if err != nil {
+		return nil, "", fmt.Errorf("the edge's sign-in for it does not check out: %w", err)
+	}
+	if h.spentNonce(a.Nonce, now) {
+		return nil, "", errors.New("the edge's sign-in for it was already used")
+	}
+	_, name, err := h.ssh.ConnectorAccountGrant(ctx, a.Account)
+	if err != nil {
+		return nil, "", err
+	}
+	return &asserted{Account: a.Account, Nonce: a.Nonce, Expires: a.ExpiresAt.Add(edgeproto.ClockSkew)}, name, nil
+}
+
+// spentNonce reports whether a consent form spent nonce.
+func (h *handler) spentNonce(nonce string, now time.Time) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	expires, ok := h.spent[nonce]
+	return ok && now.Before(expires)
+}
+
+// spendNonce spends nonce, kept until expires, and reports whether it was
+// unspent.
+func (h *handler) spendNonce(nonce string, expires, now time.Time) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	maps.DeleteFunc(h.spent, func(_ string, e time.Time) bool { return !now.Before(e) })
+	if _, ok := h.spent[nonce]; ok {
+		return false
+	}
+	h.spent[nonce] = expires
+	return true
+}
+
+// accountLabel names an edge account on the consent page: github dana.
+func accountLabel(a edgeproto.Account) string {
+	return a.Provider + " " + cmp.Or(a.Login, a.Email, a.Subject)
+}
+
+// authorizeAllow spends the pairing code the member pasted, or the edge
+// assertion the form carries, and sends the client an authorization code
+// bound to the member, the code's device or the asserted account, the
+// client, the redirect URI and the PKCE challenge.
+func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res resource) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 	signed := r.PostFormValue("request")
 	payload, ok := h.open("consent", signed)
 	var req authRequest
-	if !ok || json.Unmarshal(payload, &req) != nil {
+	if !ok || json.Unmarshal(payload, &req) != nil || req.Resource != res.base {
 		h.renderError(w, "This form was not issued by this server. Start the connection again from ChatGPT or Claude.")
 		return
 	}
@@ -175,6 +250,15 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request) {
 	page := consentPage{Request: signed, Client: clientLabel(req),
 		Write: slices.Contains(scopes, string(mcpbridge.ScopeWrite)), Control: slices.Contains(scopes, string(mcpbridge.ScopeControl))}
 	now := h.now()
+	if req.Asserted != nil {
+		grant, err := h.assertedGrant(r.Context(), req.Asserted, now)
+		if err != nil {
+			h.renderError(w, "Cannot connect as your GitHub account: "+err.Error()+". Start the connection again from ChatGPT or Claude.")
+			return
+		}
+		h.issueCode(w, r, req, grant, scopes, now)
+		return
+	}
 	from := clientPrefix(r)
 	if refused := h.attemptRefused(from, now); refused != "" {
 		page.Error = refused
@@ -184,7 +268,7 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request) {
 	grant, err := h.ssh.RedeemConnectorCode(r.PostFormValue("code"), now)
 	if errors.Is(err, sshd.ErrConnectorCode) {
 		h.recordWrong(from, now)
-		page.Error = "That code is wrong, expired or already used. Run aether mcp for a new one and paste it here."
+		page.Error = "That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Aether app, or aether mcp, and paste it here."
 		h.renderConsent(w, http.StatusForbidden, page)
 		return
 	}
@@ -192,7 +276,26 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	code, hash, err := newToken()
+	h.issueCode(w, r, req, grant, scopes, now)
+}
+
+// assertedGrant spends the assertion a consent form carries and maps its
+// account to a member again, as the policy now stands.
+func (h *handler) assertedGrant(ctx context.Context, a *asserted, now time.Time) (sshd.ConnectorGrant, error) {
+	if !now.Before(a.Expires) {
+		return sshd.ConnectorGrant{}, fmt.Errorf("the edge's sign-in for it expired at %s", a.Expires.UTC().Format(time.RFC3339))
+	}
+	if !h.spendNonce(a.Nonce, a.Expires, now) {
+		return sshd.ConnectorGrant{}, errors.New("the edge's sign-in for it was already used")
+	}
+	grant, _, err := h.ssh.ConnectorAccountGrant(ctx, a.Account)
+	return grant, err
+}
+
+// issueCode sends the client an authorization code for req, bound to
+// grant and scopes.
+func (h *handler) issueCode(w http.ResponseWriter, r *http.Request, req authRequest, grant sshd.ConnectorGrant, scopes []string, now time.Time) {
+	code, hash, err := newToken(h.prefixOf(req.Resource))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -205,7 +308,8 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request) {
 	}
 	h.codes[hash] = authCode{grant: grant, request: req, scopes: scopes, expires: now.Add(authCodeTTL)}
 	h.mu.Unlock()
-	slog.Info("connector: authorized", "member", grant.Member, "device", grant.Device, "client", req.ClientID, "scopes", scopes)
+	slog.Info("connector: authorized", "member", grant.Member, "device", grant.Device, "subject", grant.Subject,
+		"resource", req.Resource, "client", req.ClientID, "scopes", scopes)
 	h.redirect(w, r, req, url.Values{"code": {code}})
 }
 
@@ -311,7 +415,7 @@ func (h *handler) redirect(w http.ResponseWriter, r *http.Request, req authReque
 	if req.State != "" {
 		q.Set("state", req.State)
 	}
-	q.Set("iss", h.base)
+	q.Set("iss", req.Resource)
 	u.RawQuery = q.Encode()
 	http.Redirect(w, r, u.String(), http.StatusSeeOther)
 }
@@ -341,6 +445,10 @@ type consentPage struct {
 	Server  string
 	Request string
 	Error   string
+	// Member and Account are the member and edge account an assertion
+	// named, which replace the pairing code.
+	Member  string
+	Account string
 	// Write and Control are whether those scopes' boxes are checked.
 	Write   bool
 	Control bool
@@ -353,15 +461,16 @@ var consentTemplate = template.Must(template.New("consent").Parse(`<!doctype htm
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{if .Failed}}Cannot connect{{else}}Connect {{.Client}} to {{.Server}}{{end}}</title>
+<title>{{if .Failed}}Cannot connect{{else}}Connect {{.Client}} to {{.Server}}{{if .Member}} as {{.Member}}{{end}}{{end}}</title>
 <style>
 body{font:16px/1.5 system-ui,sans-serif;max-width:34rem;margin:3rem auto;padding:0 1rem;color:#1a1a1a}
 h1{font-size:1.4rem;font-weight:500}
 .error{background:#fdecec;border:1px solid #e5a5a5;padding:.6rem .8rem;border-radius:6px}
 input{font:inherit;font-size:1.2rem;letter-spacing:.1em;width:10rem;padding:.4rem;text-transform:uppercase}
-button{font:inherit;padding:.45rem 1.4rem;margin-left:.4rem}
+button{font:inherit;padding:.45rem 1.4rem;min-height:2.75rem}
 fieldset{border:1px solid #ccc;border-radius:6px;padding:.2rem .9rem}
-input[type=checkbox]{width:auto;font-size:inherit}
+input[type=checkbox]{width:1.25rem;height:1.25rem;font-size:inherit;vertical-align:middle}
+.row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center}
 </style>
 </head>
 <body>
@@ -369,7 +478,7 @@ input[type=checkbox]{width:auto;font-size:inherit}
 <h1>Cannot connect to {{.Server}}</h1>
 <p class="error">{{.Error}}</p>
 {{else}}
-<h1>Connect <strong>{{.Client}}</strong> to <strong>{{.Server}}</strong></h1>
+<h1>Connect <strong>{{.Client}}</strong> to <strong>{{.Server}}</strong>{{if .Member}} as <strong>{{.Member}}</strong>{{end}}</h1>
 <p>It acts as you. It can always list workspaces, agents and runs and read run history; every member can read every run on this server, so it can read all of them.</p>
 {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
 <form method="post">
@@ -379,8 +488,11 @@ input[type=checkbox]{width:auto;font-size:inherit}
 <p><label><input type="checkbox" name="scope" value="write"{{if .Write}} checked{{end}}> <strong>Launch and message</strong>: launch runs and swarms, message runs, answer agents' questions, pause, resume and mark runs reviewed.</label></p>
 <p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Stop and approve</strong>: decide approvals and permission requests, stop and close runs, cancel swarms. Text an agent wrote that the assistant reads could then talk it into approving or ending work without asking you.</label></p>
 </fieldset>
-<p><label for="code">Paste the code from <code>aether mcp</code>:</label></p>
-<p><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit"><strong>Allow</strong></button></p>
+<p>To change these later, revoke the connector and connect again.</p>
+{{if .Member}}<p>You signed in at the edge as {{.Account}}, which this server admits as {{.Member}}.</p>
+<p><button type="submit" autofocus><strong>Allow</strong></button></p>
+{{else}}<p><label for="code">Paste the code from Settings → ChatGPT and Claude in the Aether app, or <code>aether mcp</code>:</label></p>
+<p class="row"><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit"><strong>Allow</strong></button></p>{{end}}
 </form>
 {{end}}
 </body>
@@ -401,9 +513,17 @@ func (h *handler) renderError(w http.ResponseWriter, message string) {
 	h.renderConsent(w, http.StatusBadRequest, consentPage{Failed: true, Error: message})
 }
 
-// sameResource reports whether resource names the base URL, ignoring a
-// trailing slash and the case of the scheme and host.
-func (h *handler) sameResource(resource string) bool {
+// prefixOf is the prefix of codes minted for the connector URL base.
+func (h *handler) prefixOf(base string) string {
+	if base == h.universal.base {
+		return h.universal.prefix
+	}
+	return ""
+}
+
+// sameResource reports whether resource names base, ignoring a trailing
+// slash and the case of the scheme and host.
+func sameResource(resource, base string) bool {
 	u, err := url.Parse(resource)
 	if err != nil {
 		return false
@@ -411,5 +531,5 @@ func (h *handler) sameResource(resource string) bool {
 	u.Host = strings.ToLower(u.Host)
 	u.Path = strings.TrimSuffix(u.Path, "/")
 	u.RawPath = ""
-	return u.String() == h.base
+	return u.String() == base
 }

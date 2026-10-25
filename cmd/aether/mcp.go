@@ -65,7 +65,7 @@ func printConnectors(w io.Writer, code protocol.ConnectorCodeResult, connectors 
 		return fmt.Errorf("connector.code: expires_at: %w", err)
 	}
 	_, _ = fmt.Fprintf(w, "Add this server to ChatGPT or Claude as a custom connector:\n  URL   %s\n", code.URL)
-	_, _ = fmt.Fprintf(w, "  Code  %s   one use, expires in %d minutes; paste it on the page that opens when you connect\n",
+	_, _ = fmt.Fprintf(w, "  Code  %s   one use, expires in %d minutes; paste it on the page that opens when you connect, if it asks\n",
 		code.Code, int(expires.Sub(now).Round(time.Minute)/time.Minute))
 	if len(connectors) == 0 {
 		return nil

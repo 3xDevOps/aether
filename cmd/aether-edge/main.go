@@ -123,7 +123,7 @@ func serve(args []string) (err error) {
 
 	svc, err := edge.New(edge.Config{
 		DataDir: o.dataDir, SigninOrigin: o.signinOrigin, RelayOrigin: o.relayOrigin,
-		GitHub: o.github,
+		GitHub: o.github, OpenAIChallenge: o.openAIChallenge,
 	})
 	if err != nil {
 		return err

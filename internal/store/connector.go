@@ -27,13 +27,17 @@ const RefreshReuseGrace = 60 * time.Second
 // Connector is a ChatGPT or Claude connector a member authorized: an
 // OAuth client whose tokens act as the member. Device is the edge device
 // its pairing code was minted on, empty for one minted over a member SSH
-// key or a tailnet connection. Resource is the connector URL its tokens
+// key or a tailnet connection. Provider and Subject are the edge account
+// whose sign-in authorized it instead of a pairing code, empty for one
+// authorized with a code. Resource is the connector URL its tokens
 // are good for. Scopes are the scopes the member granted it, such as
 // read and write. The expiries are those of its current tokens.
 type Connector struct {
 	ID               string
 	Member           domain.MemberID
 	Device           domain.DeviceID
+	Provider         string
+	Subject          string
 	ClientID         string
 	ClientName       string
 	RedirectHost     string
@@ -85,7 +89,7 @@ type ConnectorStore interface {
 
 var _ ConnectorStore = (*DB)(nil)
 
-const connectorCols = `id, member_id, device_id, client_id, client_name, redirect_host, resource, scopes,
+const connectorCols = `id, member_id, device_id, provider, subject, client_id, client_name, redirect_host, resource, scopes,
 	created_at, last_used_at, access_expires_at, refresh_expires_at`
 
 func scanConnector(row interface{ Scan(...any) error }) (*Connector, error) {
@@ -96,7 +100,7 @@ func scanConnector(row interface{ Scan(...any) error }) (*Connector, error) {
 		createdAt, accessExpires, refreshExpires int64
 		lastUsed                                 *int64
 	)
-	if err := row.Scan(&c.ID, &c.Member, &device, &c.ClientID, &c.ClientName, &c.RedirectHost, &c.Resource, &scopes,
+	if err := row.Scan(&c.ID, &c.Member, &device, &c.Provider, &c.Subject, &c.ClientID, &c.ClientName, &c.RedirectHost, &c.Resource, &scopes,
 		&createdAt, &lastUsed, &accessExpires, &refreshExpires); err != nil {
 		return nil, err
 	}
@@ -133,10 +137,10 @@ func (d *DB) CreateConnector(ctx context.Context, c *Connector, tokens Connector
 		return fmt.Errorf("store: delete lapsed connectors: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO connectors (id, member_id, device_id, client_id, client_name, redirect_host, resource, scopes, created_at,
-		   access_hash, access_expires_at, refresh_hash, refresh_expires_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, c.Member, device, c.ClientID, c.ClientName, c.RedirectHost, c.Resource, strings.Join(c.Scopes, " "), created,
+		`INSERT INTO connectors (id, member_id, device_id, provider, subject, client_id, client_name, redirect_host, resource, scopes,
+		   created_at, access_hash, access_expires_at, refresh_hash, refresh_expires_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, c.Member, device, c.Provider, c.Subject, c.ClientID, c.ClientName, c.RedirectHost, c.Resource, strings.Join(c.Scopes, " "), created,
 		tokens.Access, accessExpires, tokens.Refresh, refreshExpires); err != nil {
 		return fmt.Errorf("store: create connector: %w", mapConstraint(err, ErrNotFound))
 	}

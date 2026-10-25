@@ -19,8 +19,10 @@ server hosts the connector endpoint and signs you in.
 ## Prerequisites
 
 - A server connected to an edge. ChatGPT and Claude reach the connector at
-  `<edge-url>/mcp/<server id>`. A server reachable only on a tailnet cannot have
-  one. To turn the edge on, see [edge.md](edge.md#turning-it-on).
+  `<edge-url>/mcp`, the [universal URL](#the-universal-url) every server on
+  the edge shares, or at the server's own `<edge-url>/mcp/<server id>`. A
+  server reachable only on a tailnet cannot have one. To turn the edge on, see
+  [edge.md](edge.md#turning-it-on).
 - A server new enough to serve connectors. Otherwise the edge answers HTTP 501:
   `server <name> (<id>) runs aether-server <version>, which has no MCP endpoint; upgrade it: sudo aether-server update`.
 - A linked CLI (`aether link`) on an approved device, a member SSH key or a
@@ -47,16 +49,19 @@ aether mcp
 
 ```
 Add this server to ChatGPT or Claude as a custom connector:
-  URL   https://edge.onaether.dev/mcp/<server id>
-  Code  ABCD-EFGH   one use, expires in 10 minutes; paste it on the page that opens when you connect
+  URL   https://edge.onaether.dev/mcp
+  Code  ABCD-EFGH   one use, expires in 10 minutes; paste it on the page that opens when you connect, if it asks
 Connected:
   con-7k2m9q4xbd  ChatGPT (chatgpt.com)  scopes read,write  added 2026-10-18  last used 2h ago
 Remove one: aether mcp revoke <id>
 ```
 
-The URL is the same for both apps. On the server, `sudo aether-server edge
-status` also prints it. The code works once, within 10 minutes. Running
-`aether mcp` again replaces a code you have not used.
+The URL is the same for both apps and every server on the edge. On the
+server, `sudo aether-server edge status` also prints it. An edge or server
+older than edge protocol 3 prints the server's own URL,
+`https://edge.onaether.dev/mcp/<server id>`, instead. The code works once,
+within 10 minutes. Running `aether mcp` again replaces a code you have not
+used.
 
 ## Add it in ChatGPT
 
@@ -69,8 +74,9 @@ Custom MCP servers are added on the web only, at chatgpt.com
    choose **OAuth**.
 4. Select **Create as a plugin**, then install it.
 5. A page from your server opens: **Connect ChatGPT (chatgpt.com) to
-   <server>**. Paste the code, choose its [scopes](#scopes) and select
-   **Allow**.
+   <server>**, after the edge's sign-in page on the
+   [universal URL](#the-universal-url). Paste the code if it asks for one,
+   choose its [scopes](#scopes) and select **Allow**.
 
 As of October 2026, OpenAI says write tools need ChatGPT Business or
 Enterprise/Edu. Pro gets the read tools only
@@ -90,14 +96,41 @@ On claude.ai
    selects **Add**, **Custom**, then **Web**, and pastes the URL. Each member
    then selects **Connect** under **Customize → Connectors**.
 3. Select **Connect**. A page from your server opens: **Connect Claude
-   (claude.ai) to <server>**. Paste the code, choose its [scopes](#scopes)
-   and select **Allow**.
+   (claude.ai) to <server>**, after the edge's sign-in page on the
+   [universal URL](#the-universal-url). Paste the code if it asks for one,
+   choose its [scopes](#scopes) and select **Allow**.
 
 The connector then works in Claude on the web, desktop and mobile.
 
+## The universal URL
+
+`https://<edge>/mcp` is one URL for every Aether server, so one ChatGPT
+plugin can serve every Aether user. Once Aether is listed in ChatGPT's plugin
+directory ([chatgpt-plugin.md](chatgpt-plugin.md)), install it from there
+instead of adding a custom MCP server; connecting then works as described here.
+
+When you connect, the edge's sign-in page opens: sign in with GitHub if you
+have not. It lists your servers that are online and new enough, with why the
+others cannot be picked. Pick one; with only one, it goes straight on. That
+server's consent page opens, depending on its
+[`edge-access`](edge.md#access-policies) policy:
+
+- `account`: **Connect ChatGPT (chatgpt.com) to <server> as <member>**,
+  with the [scopes](#scopes) and no code. Signing in at the edge already
+  admits you there.
+- `approved-devices`: the page asks for the code. Paste the code from
+  `aether mcp`.
+
+A connector added without a code stops working when the server switches to
+`approved-devices`, when its GitHub account is unbound from the member
+(`aether member identities`, or deleting the account at the edge), or when the
+member is removed. It has no device, so a method that needs an approved device
+refuses it, as it refuses a device no person approved. Connectors added at
+`<edge>/mcp/<server id>` keep working there.
+
 ## Scopes
 
-The page you paste the code on also sets the connector's scopes. ChatGPT and
+The consent page also sets the connector's scopes. ChatGPT and
 Claude do not choose them; the server ignores any scope they request other
 than `offline_access`.
 
@@ -263,10 +296,13 @@ On the page that opens when you connect:
 
 | Message | Cause |
 | --- | --- |
-| `That code is wrong, expired or already used. Run aether mcp for a new one and paste it here.` | The code is not live. A server restart also forgets codes |
+| `That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Aether app, or aether mcp, and paste it here.` | The code is not live. A server restart also forgets codes |
 | `10 wrong codes came from your address in the last minute. Wait a minute, then paste the code again.` | 10 wrong codes in a minute from your address (your IPv6 /64). Other addresses are not affected |
 | `300 wrong codes came to this server from all addresses in the last minute. Wait a minute, then paste the code again.` | Someone is guessing codes from many addresses. Pairing resumes a minute after the guessing stops |
 | `Aether connectors work with ChatGPT and Claude; <host> is not one of them.` | Only `chatgpt.com` and `claude.ai` can connect |
+| `None of your servers can take this connection.` (edge sign-in page) | Each server listed under **Not available** says why: not connected, too old for the universal URL, or an invitation you have not joined |
+| `Cannot connect as your GitHub account: <account> is not a member of <server>; ...` | That GitHub account is not bound to a member. Sign in at the edge as the right account, or connect with a code |
+| `Cannot connect as your GitHub account: the edge's sign-in for it was already used.` or `... expired at <time>` | Start again from ChatGPT or Claude |
 
 If an app asks you to sign in again, the connector was revoked. Run `aether mcp`
 for a new code.
