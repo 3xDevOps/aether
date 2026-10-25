@@ -133,8 +133,6 @@ func connectorToolOf[In any](name, title string, scope Scope, idempotent bool, n
 	return t
 }
 
-// hints sets the tool's destructive and open-world hints, both false
-// unless set.
 func (t connectorTool) hints(destructive, openWorld bool) connectorTool {
 	t.destructive, t.openWorld = destructive, openWorld
 	return t

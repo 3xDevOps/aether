@@ -884,8 +884,8 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 	acted("aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Run rm -rf build"},
 		protocol.MethodRunInputRespond, `{"run_id":"run-4","request_id":"req-4","option_id":"once"}`)
 	if text, out := run(t, cs, "aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Run rm -rf build"}); text !=
-		"Allowed the request once on run run-4: answered." || out["answer_id"] != "req-4" {
-		t.Fatalf("a decided permission = %q %v, want its agent-chosen id only as answer_id", text, out)
+		"Allowed the request once on run run-4: answered." || out["run_id"] != "run-4" || out["answer_id"] != nil {
+		t.Fatalf("a decided permission = %q %v, want no answer_id", text, out)
 	}
 
 	for _, c := range []struct {

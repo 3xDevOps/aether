@@ -605,7 +605,7 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 			return "", nil, controlHeld(err)
 		}
 		return fmt.Sprintf("%s the request once on run %s: %s.", verb, in.RunID, res.Status),
-			map[string]any{"run_id": in.RunID, "answer_id": in.AnswerID, "option": want, "status": res.Status, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
+			map[string]any{"run_id": in.RunID, "option": want, "status": res.Status, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
 	}
 	return "", nil, invalid("this item is a %s, which is answered with %s", it.Kind, answerWith(it))
 }
