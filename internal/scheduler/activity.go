@@ -38,13 +38,6 @@ var waitingPrefixes = []struct {
 	{waitedProcessReasonPrefix, domain.ActivityWaitingTools, true},
 }
 
-// waitingOf is the activity a waiting outcome's reason shows, empty for any
-// other reason.
-func waitingOf(reason string) domain.RunActivity {
-	activity, _, _ := cutWaiting(reason)
-	return activity
-}
-
 // cutWaiting splits a waiting outcome's reason into the activity it shows,
 // whether it went stale, and the agent's summary.
 func cutWaiting(reason string) (domain.RunActivity, bool, string) {
@@ -142,7 +135,8 @@ func failedReason(reason string) bool {
 // waits reports whether the run's outcome is a waiting report. The caller
 // must hold s.mu.
 func (e *supervised) waits() bool {
-	return waitingOf(e.idleReason) != ""
+	activity, _, _ := cutWaiting(e.idleReason)
+	return activity != ""
 }
 
 // asksMember reports whether a pending input request waits on a member. A
