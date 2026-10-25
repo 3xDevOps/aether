@@ -126,7 +126,7 @@ then run it:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
-& "$env:TEMP\aether-install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 
 Windows runs only the client, so the script asks nothing. It downloads the
@@ -136,7 +136,8 @@ against `checksums.txt` and `aether-release.json`, installs it as
 user `PATH`. Then it runs `aether gui build`, which installs the
 [desktop app](#desktop-app) and adds **Aether** to the Start Menu. It does not
 ask for administrator rights or change the execution policy or Defender
-settings. Open a new terminal afterwards: open ones keep their old `PATH`.
+settings: `-ExecutionPolicy Bypass` applies to that one process only. Open a
+new terminal afterwards: open ones keep their old `PATH`.
 
 It takes `-Version <tag>`, `-BinDir <dir>` and `-Role client|none` (`none`
 installs only the CLI), or `AETHER_VERSION`, `AETHER_BIN_DIR`, `AETHER_ROLE`,

@@ -32,7 +32,7 @@ installs the CLI and the desktop app without administrator rights:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
-& "$env:TEMP\aether-install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 
 It worked if `aether version` prints the release on your computer, and

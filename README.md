@@ -81,7 +81,7 @@ then run it:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
-& "$env:TEMP\aether-install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 
 It installs `aether.exe` and the desktop app. `-Role none` installs only the
