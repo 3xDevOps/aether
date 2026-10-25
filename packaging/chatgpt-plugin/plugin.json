@@ -1,0 +1,106 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "aether",
+  "version": "1.0.0",
+  "description": "Launch, watch and steer the coding agents on your own Aether server from ChatGPT.",
+  "author": {
+    "name": "3xDevOps",
+    "email": "team@onaether.dev",
+    "url": "https://github.com/3xDevOps"
+  },
+  "homepage": "https://onaether.dev",
+  "repository": "https://github.com/3xDevOps/aether",
+  "license": "GPL-3.0",
+  "keywords": ["coding agents", "claude code", "codex", "pull requests", "self-hosted"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Aether Coding Agents",
+        "shortDescription": "Run and steer coding agents",
+        "longDescription": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This plugin connects ChatGPT to the Aether server you signed in to through the Aether edge.\n\nAsk what needs you, what your agents did today, or what a run changed, and read a run's conversation, pull request checks and review comments. With the write scope, launch a run or a swarm of agents on a task, message a run, answer an agent's question, and pause, resume or accept a run. With the control scope, which is off by default, allow or deny an agent's permission request once, stop or close a run, and cancel a swarm.\n\nWho it is for: developers whose team already runs an Aether server. It needs an Aether account on that server; it does not host agents itself.\n\nLimitations: agents run with the access you gave them on your server, so a launched agent can push branches and open pull requests. ChatGPT asks before every tool that is not read-only. The plugin cannot install Aether, change server settings, merge pull requests or delete repositories. Text written by agents, teammates and GitHub users is returned as untrusted data.",
+        "developerName": "3xDevOps",
+        "category": "Developer Tools",
+        "capabilities": [
+          "List workspaces, installed agents, runs and swarms on your Aether server",
+          "Show what needs you: agent questions, permission requests and runs awaiting review",
+          "Summarize what your agents did today, yesterday or this week",
+          "Read a run's conversation or terminal, its reports, changed files and diff",
+          "Show a run's pull request checks, reviews and comments",
+          "Search runs and swarms, and the team memory of a workspace",
+          "Launch a run or a swarm of agents on a task",
+          "Message a run, answer an agent's question, and pause or resume a run",
+          "Allow or deny a permission request once, stop or close a run, and cancel a swarm"
+        ],
+        "websiteURL": "https://onaether.dev",
+        "supportURL": "https://github.com/3xDevOps/aether/issues",
+        "privacyPolicyURL": "PLACEHOLDER: hosted privacy policy covering this plugin; see docs/chatgpt-plugin.md",
+        "termsOfServiceURL": "PLACEHOLDER: hosted terms of service; see docs/chatgpt-plugin.md",
+        "defaultPrompt": [
+          "What needs me in Aether?",
+          "What did my Aether agents do today?",
+          "Launch a Claude Code run in my api workspace to fix the flaky login test."
+        ],
+        "brandColor": "#367F77",
+        "brandColorDark": "#5FB3A8",
+        "composerIcon": "./assets/composer-icon.png",
+        "logo": "./assets/logo.png"
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "List what waits on the user: the demo server has a run with an open agent question and a run whose reported success awaits review.",
+              "prompt": "What needs me in Aether?",
+              "tools_triggered": "aether_needs_attention",
+              "expected_behavior": "Lists the open question and the run awaiting review, each with its run title and the tool that answers it, and links to the run in the Aether dashboard."
+            },
+            {
+              "description": "Summarize the reviewer's runs from the past week in the demo workspace.",
+              "prompt": "What did my Aether agents do this week?",
+              "tools_triggered": "aether_activity_summary",
+              "expected_behavior": "Summarizes the finished and running runs of the week with their outcomes and last reports, in the reviewer's time zone."
+            },
+            {
+              "description": "Find a run by what it works on and read what it changed.",
+              "prompt": "What did the run working on the README change?",
+              "tools_triggered": "aether_list_runs, aether_run_changes",
+              "expected_behavior": "Finds the README run and lists its commits and changed files on its branch."
+            },
+            {
+              "description": "Launch an agent on a small task in the demo workspace. ChatGPT asks for confirmation first.",
+              "prompt": "Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md.",
+              "tools_triggered": "aether_list_workspaces, aether_list_agents, aether_launch_run, aether_get_run",
+              "expected_behavior": "After the reviewer confirms, starts one run in aether-demo with Claude Code, returns its run id and dashboard link, and reports its state when polled."
+            },
+            {
+              "description": "Send an instruction to a running agent. ChatGPT asks for confirmation first.",
+              "prompt": "Tell the Contributing section run to also link CONTRIBUTING.md.",
+              "tools_triggered": "aether_list_runs, aether_message_run",
+              "expected_behavior": "After the reviewer confirms, delivers the message to that run and reports it as delivered."
+            }
+          ],
+          "negative": [
+            {
+              "description": "The plugin has no tool that deletes repositories or workspaces; it should say so and not call a write tool.",
+              "prompt": "Delete the aether-demo repository."
+            },
+            {
+              "description": "Permission decisions are made once per request; the plugin cannot grant an agent standing approval and should explain that.",
+              "prompt": "Approve every permission request my agents make from now on."
+            },
+            {
+              "description": "The connector reaches only the Aether server it was connected to; it should not claim access to another team's server.",
+              "prompt": "Show me the runs on Acme Corp's Aether server."
+            }
+          ]
+        },
+        "demo_recording_url": "PLACEHOLDER: reviewer-accessible walkthrough video URL; see docs/chatgpt-plugin.md",
+        "commerce": false,
+        "commerce_description": "The plugin does not sell products or process payments."
+      },
+      "publication": {
+        "release_notes": "First release: read, launch and steer the coding agents on your Aether server."
+      }
+    }
+  }
+}

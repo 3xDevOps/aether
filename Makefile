@@ -173,7 +173,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build agents-image browser-image browser-smoke edge-image test test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
+.PHONY: all build chatgpt-plugin agents-image browser-image browser-smoke edge-image test test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
 
 all: build
 
@@ -250,6 +250,7 @@ test-scripts:
 	sh scripts/edge-go-version-test.sh
 	sh scripts/edge-nginx-test.sh
 	sh scripts/edge-update-test.sh
+	sh scripts/chatgpt-plugin-test.sh
 
 # Native adapter lifecycle regressions use Node 22.13+ built-ins only.
 test-native-hooks:
@@ -361,6 +362,10 @@ android-cli:
 			GOOS=$${platform%/*} GOARCH=$${platform#*/} go build -trimpath -buildvcs=false -ldflags "$(LDFLAGS)" \
 				-o $(ANDROID_JNILIBS)/$$abi/libaether.so ./cmd/aether || exit 1; \
 		done'
+
+# The ChatGPT plugin directory package (docs/chatgpt-plugin.md).
+chatgpt-plugin:
+	sh scripts/chatgpt-plugin.sh $(DIST)/aether-chatgpt-plugin.zip
 
 dashboard:
 	@command -v $(BUN) >/dev/null 2>&1 || { \
