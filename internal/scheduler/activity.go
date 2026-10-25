@@ -230,7 +230,7 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 		inferred = swarm.Live()
 		f.waitingAgents = inferred
 		switch {
-		case inferred && (written == turnEndedReason || waitedOut || workersReasonPattern.MatchString(written)):
+		case inferred && (written == turnEndedReason || workersReasonPattern.MatchString(written)):
 			public = workersReason(swarm)
 		case !inferred && workersReasonPattern.MatchString(written):
 			public = turnEndedReason
@@ -279,11 +279,17 @@ func (s *Scheduler) refreshActivityLocked(ctx context.Context, entry *supervised
 	if s.runs[entry.runID] != entry || !entry.status.Live() || entry.finalizing || entry.exitObserved {
 		return nil
 	}
-	d, err := s.activityLocked(ctx, entry.runID, entry, entry.status, entry.reason)
-	if err != nil || (d.activity == entry.activity && d.reason == publicRunStatusReason(entry.reason)) {
+	// A shown wait's public reason is the agent's summary alone; deriving
+	// from it would read the summary as a reason.
+	reason := entry.reason
+	if entry.waits() && publicRunStatusReason(entry.idleReason) == reason {
+		reason = entry.idleReason
+	}
+	d, err := s.activityLocked(ctx, entry.runID, entry, entry.status, reason)
+	if err != nil || (d.activity == entry.activity && d.reason == entry.reason) {
 		return err
 	}
-	return s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, entry.status, entry.reason, "")
+	return s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, entry.status, reason, "")
 }
 
 // refreshActivities recomputes every live run's activity: after recovery,

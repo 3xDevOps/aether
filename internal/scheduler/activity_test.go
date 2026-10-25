@@ -139,7 +139,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		{"a worker started after the wait went stale", func() {
 			integrator.workers.Store(1)
 			e.sched.refreshActivities(ctx)
-		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 worker"},
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, waitedReasonPrefix},
 		{"waiting for CI reported", func() {
 			integrator.workers.Store(0)
 			report(working)
@@ -351,9 +351,26 @@ func TestAWaitGoesStaleOnlyWithNothingLive(t *testing.T) {
 	integrator.workers.Store(0)
 	quietFor(t, e)
 	expect("the last worker gone", domain.ActivityWaiting, events.CauseWaitExpired, waitedReasonPrefix, ": two workers on the parser")
+	integrator.workers.Store(1)
+	e.sched.refreshActivities(ctx)
+	expect("a worker live again", domain.ActivityWaitingAgents, events.CauseWorkers, waitedReasonPrefix, ": two workers on the parser")
+	integrator.workers.Store(0)
+	e.sched.refreshActivities(ctx)
+	expect("that worker gone", domain.ActivityWaiting, events.CauseWaitExpired, waitedReasonPrefix, ": two workers on the parser")
 
 	report(agentstatus.Report{State: agentstatus.Working})
 	expect("next turn", domain.ActivityWorking, events.CauseTurn, "", "")
+	// The summary is the agent's text, never a waiting kind.
+	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-2", "", waitingCIReasonPrefix+"the parser", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	report(idle)
+	expect("a summary shaped like a CI wait", domain.ActivityWaitingAgents, events.CauseReport, waitingCIReasonPrefix+"the parser", "")
+	e.sched.refreshActivities(ctx)
+	expectNoStatusEvent(t, sub, run.ID, "refreshing a wait whose summary reads like a reason")
+
+	report(agentstatus.Report{State: agentstatus.Working})
+	expect("the turn after", domain.ActivityWorking, events.CauseTurn, "", "")
 	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on PR 12", time.Now()); err != nil {
 		t.Fatal(err)
 	}

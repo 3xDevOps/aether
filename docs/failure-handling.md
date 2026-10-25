@@ -67,7 +67,8 @@ default) with no activity, unless the run still holds background tasks or,
 as a swarm integrator, has a live worker attempt or unread worker mail.
 Its reason becomes `no update for <duration>`, followed by `: <summary>`
 when the agent reported one. A CI or process wait keeps its state; any other wait shows
-`waiting`, and returns to `waiting-agents` if a worker becomes live again.
+`waiting`, and shows `waiting-agents` with the same reason while a worker
+is live again.
 A wait goes stale once; the next turn starts it over.
 
 Each `run.status` event carries a `cause` naming what chose the state:
