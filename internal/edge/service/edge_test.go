@@ -144,6 +144,22 @@ func (l *fakeLink) AccountDeleted(a edgeproto.Account, servers []string) {
 	l.deleted = append(l.deleted, deletion{a, servers})
 }
 
+func (l *fakeLink) Version(serverID string) int {
+	if l.Online(serverID) {
+		return edgeproto.Version
+	}
+	return 0
+}
+
+func (l *fakeLink) ReadMCPBody(_ http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	body, err := io.ReadAll(r.Body)
+	return body, err == nil
+}
+
+func (l *fakeLink) ForwardUniversal(w http.ResponseWriter, _ *http.Request, serverID string, _ []byte) {
+	io.WriteString(w, "forwarded to "+serverID) //nolint:errcheck // test server
+}
+
 type fakeClock struct {
 	mu sync.Mutex
 	t  time.Time

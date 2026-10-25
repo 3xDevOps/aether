@@ -1,0 +1,11 @@
+{{define "choose"}}{{template "top" .}}
+<p>Choose the Aether server to connect. The connector acts as you on it, with your role there; the server's own page asks what it may do.</p>
+{{if .Data.Ready}}<ul>
+{{range .Data.Ready}}<li><a href="{{.Link}}">{{.Name}}</a> <code>{{.ID}}</code>, {{.Role}}, {{if eq .AccessPolicy "account"}}signing in is enough{{else}}asks for a code from <code>aether mcp</code>{{end}}</li>
+{{end}}</ul>
+{{else}}<p class="error">None of your servers can take this connection.</p>{{end}}
+{{if .Data.Other}}<p>Not available:</p>
+<ul>
+{{range .Data.Other}}<li>{{.Name}} <code>{{.ID}}</code>: {{.Reason}}</li>
+{{end}}</ul>{{end}}
+{{template "bottom" .}}{{end}}

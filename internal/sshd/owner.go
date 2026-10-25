@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -35,6 +36,9 @@ type EdgeOwner interface {
 	// while there is none. Below edgeproto.VersionHTTP the edge forwards
 	// no connector requests.
 	EdgeVersion() int
+	// EdgeKey is the key of the edge the control connection is
+	// enrolled with, nil while there is none.
+	EdgeKey() ed25519.PublicKey
 	// EdgeState is the edge's last reported state for this server,
 	// edgeproto.StateClaimed or StateUnclaimed, empty until it answers.
 	EdgeState() string
@@ -143,16 +147,22 @@ func (s *Server) serverOwnerTransfer(ctx context.Context, member domain.MemberID
 // sign-in alone, and a later switch to approved-devices inherits nothing.
 // The other methods that raise privilege or admit a credential
 // need it under approved-devices, where signing in admits nothing. A
-// connector is judged by the device its pairing code was minted on. A
-// member SSH key, a tailnet identity, the tailnet dashboard and a
-// connector minted over either carry no device and pass.
+// connector is judged by the device its pairing code was minted on, and
+// one authorized by signing in at the edge as such a device. A member SSH
+// key, a tailnet identity, the tailnet dashboard and a connector minted
+// over either carry no device and pass.
 func (s *Server) requireApprovedCaller(ctx context.Context, method string, always bool) *protocol.Error {
 	id, ok := ctx.Value(connIdentityKey{}).(connIdentity)
-	if !ok || id.device == "" {
+	if !ok || (id.device == "" && !id.edgeSignIn) {
 		return nil
 	}
 	if !always && s.cfg.EdgeAccess == edgeproto.PolicyAccount {
 		return nil
+	}
+	if id.edgeSignIn {
+		return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+			"%s needs an approved device, a member SSH key or a tailnet connection; %s was authorized by signing in at the edge, with no device",
+			method, ConnectorLabel(id.connectorClient, id.connector))}
 	}
 	ids, perr := s.rpcIdentityStore()
 	if perr != nil {

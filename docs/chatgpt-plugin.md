@@ -51,8 +51,8 @@ real URL.
 | Publish a privacy policy page covering the plugin, using the [data inventory](#privacy-policy-data-inventory) below. [privacy.md](privacy.md) covers the Android app and what an edge stores, but not what tool results return | `privacyPolicyURL` |
 | Publish terms of service | `termsOfServiceURL` |
 | Record a walkthrough of the five positive test cases on the demo server | `review.demo_recording_url` |
-| Serve the portal's challenge token as plain text at `https://edge.onaether.dev/.well-known/openai-apps-challenge`; aether-edge does not serve this path yet | aether-edge |
-| Deploy the universal `/mcp` URL on the project edge. Once submitted, its scheme, host and port cannot change without OpenAI support | aether-edge |
+| Serve the portal's challenge token as plain text at `https://edge.onaether.dev/.well-known/openai-apps-challenge` with `aether-edge serve --openai-challenge <token>` or `AETHER_EDGE_OPENAI_CHALLENGE` | aether-edge |
+| Deploy an edge with protocol 3 to `edge.onaether.dev`. Once submitted, its scheme, host and port cannot change without OpenAI support | aether-edge |
 | Complete business verification for 3xDevOps | OpenAI organization settings |
 | Set up the demo server and reviewer account below | Project edge |
 | Review needs the universal `/mcp` URL live on the project edge, signing a demo server's members in with GitHub and asking for no pairing code under `--edge-access account` (the universal-URL task) | aether-edge, `aether-server` |
@@ -68,9 +68,9 @@ real URL.
 3. In **Metadata & Skills**, wait for the checks, then fix any **Issues** in
    the package and upload again.
 4. In **MCPs**, select `aether`, then **Connect**. Check the URL and that
-   authentication is OAuth with CIMD. Put the token the portal shows at
-   `/.well-known/openai-apps-challenge` on `edge.onaether.dev` and verify the
-   domain. Connect and sign in as the reviewer account.
+   authentication is OAuth with CIMD. Set the token the portal shows as
+   `AETHER_EDGE_OPENAI_CHALLENGE` (or `aether-edge serve --openai-challenge`)
+   on the `edge.onaether.dev` edge, restart it, and verify the domain. Connect and sign in as the reviewer account.
 5. Wait for **Scan Tools** to list the tools. Fix findings on the server,
    deploy, and select **Rescan**.
 6. In **Review information → Review details**, check the imported test cases

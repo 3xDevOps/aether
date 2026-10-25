@@ -14,10 +14,13 @@ import (
 // oldest version it still accepts. VersionHTTP is the first version whose
 // servers take KindHTTP opens: a server at an earlier version refuses an
 // open of a kind it does not know by dropping its control channel.
+// VersionUniversalMCP is the first version whose edges route the
+// universal connector paths and whose servers serve them.
 const (
-	Version     = 2
-	MinVersion  = 1
-	VersionHTTP = 2
+	Version             = 3
+	MinVersion          = 1
+	VersionHTTP         = 2
+	VersionUniversalMCP = 3
 )
 
 // CheckVersion refuses a peer older than MinVersion with
