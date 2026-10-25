@@ -5318,20 +5318,26 @@ through either gateway:
   which scrolls the section into view.
 - **ChatGPT and Claude** (`src/routes/settings/connectors.tsx`, element id
   and `section` param `connectors`): one exported `ConnectorsSection
-  {client}`. A ChatGPT / Claude segmented control picks numbered steps.
+  {client}`, remounted when `identityKey` changes so a code never outlives
+  its member. A ChatGPT / Claude segmented control picks numbered steps.
   **Get a code** calls `connector.code` and shows its `url` and code, the
   code with `useCountdown`; before that, `server.edge` only says whether the
-  server has an edge or is connected to it. While the code lives, `connector.list` is polled every 3 s;
-  a connector absent at mint time shows **<client> (<host>) connected**. Rows list
-  each connector's scopes, added and last-used times, **Reconnect**
-  (confirm, `connector.revoke`, then a new code on that client's tab) and
-  **Revoke** (confirm). Errors show verbatim with a fix: a server without
-  `connector.list` (`-32601`) gets the update command and hides the steps,
-  an edge error links `docs/edge.md`, anything else links the connector
-  troubleshooting. The palette's **Connect ChatGPT or Claude** and the first
-  run step's optional link navigate with `{section: "connectors"}`, which
-  scrolls the section into view; `?page=settings&id=<section>` carries the
-  param in the URL.
+  server has an edge or is connected to it. While the code lives,
+  `connector.list` is polled every 3 s, and once more when it expires; a
+  connector absent at mint time shows **<client> (<host>) connected** in the
+  section's one `role="status"` region and focuses its **Done** button. A
+  failed poll shows its error until the next one succeeds. Rows list each
+  connector's scopes, added and last-used times, **Reconnect** (confirm,
+  a new code on that client's tab, then `connector.revoke`; a failed mint
+  revokes nothing) and **Revoke** (confirm). Errors show verbatim with a fix:
+  a server without `connector.list` (`-32601`) gets the update command and
+  hides the steps, the no-edge and not-connected errors link `docs/edge.md`,
+  anything else links the connector troubleshooting. The palette's **Connect
+  ChatGPT or Claude** and the first run step's optional **Finish setup and
+  connect ChatGPT or Claude**, both shown only where the gateway serves
+  `connector.list`, navigate with `{section: "connectors"}`, which scrolls
+  the section into view; `?page=settings&id=<section>` carries the param in
+  the URL.
 - **This computer**, only on the local gateway: the linked **Server** and
   **Repository** (`link.status`) with **Link another server** (**Link a server**
 before any), **Saved servers** (the default link, then named ones) with

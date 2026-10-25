@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { ApiError, type Api } from '@/lib/api'
 import type { Connector, ServerEdge } from '@/lib/types'
-import { ConnectorsSection, CONNECTORS_SECTION_ID } from '@/routes/settings/connectors'
+import { ConnectorsSection } from '@/routes/settings/connectors'
 import { useStore } from '@/store'
 import { fakeApi } from '@/test/fixtures'
 
@@ -34,9 +34,9 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-it('lists connectors and revokes one after confirming', async () => {
+it('lists connectors and drops a revoked one even when the list then fails', async () => {
   const client = show({
-    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [chatgpt] }).mockResolvedValue({ connectors: [] }),
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [chatgpt] }).mockRejectedValue(new ApiError(500, 'connector.list: store is closed')),
   })
   expect(await screen.findByText('ChatGPT (chatgpt.com)')).toBeTruthy()
   expect(screen.getByText('Read, Launch and message')).toBeTruthy()
@@ -44,7 +44,8 @@ it('lists connectors and revokes one after confirming', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Revoke ChatGPT (chatgpt.com)' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Revoke' }))
   await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-7k2m9q4xbd'))
-  expect(await screen.findByText('No connectors yet')).toBeTruthy()
+  expect((await screen.findByRole('alert')).textContent).toContain('store is closed')
+  expect(screen.getByText('No connectors yet')).toBeTruthy()
   expect(screen.queryByText('ChatGPT (chatgpt.com)')).toBeNull()
 })
 
@@ -103,23 +104,43 @@ it('tells an admin to update a server too old for connectors', async () => {
   expect(screen.queryByRole('button', { name: 'Get a code' })).toBeNull()
 })
 
-it('reconnects by revoking and minting a code on the connector’s own tab', async () => {
+it('reconnects by minting a code on the connector’s own tab before revoking it', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
   const client = show({
-    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [claude] }).mockResolvedValue({ connectors: [] }),
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [claude] }).mockResolvedValueOnce({ connectors: [claude] }).mockResolvedValue({ connectors: [] }),
   })
   fireEvent.click(await screen.findByRole('button', { name: 'Reconnect Claude (claude.ai)' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }))
   expect(await screen.findByText('ABCD-EFGH')).toBeTruthy()
-  expect(client.connectorRevoke).toHaveBeenCalledWith('con-claude00001')
+  await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-claude00001'))
+  expect(vi.mocked(client.connectorCode).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.connectorRevoke).mock.invocationCallOrder[0])
   expect(screen.getByRole('tab', { name: 'Claude' }).getAttribute('aria-selected')).toBe('true')
-  expect(screen.getByRole('link', { name: 'Claude connectors' })).toBeTruthy()
+  expect(screen.getByText('Waiting for Claude to connect…')).toBeTruthy()
+  expect(await screen.findByText('No connectors yet')).toBeTruthy()
 })
 
-it('scrolls into view from a link', async () => {
-  const scroll = vi.mocked(Element.prototype.scrollIntoView)
-  scroll.mockClear()
-  show({}, { section: CONNECTORS_SECTION_ID })
+it('keeps the connector when reconnecting cannot get a code', async () => {
+  const client = show({
+    connectorList: vi.fn().mockResolvedValue({ connectors: [claude] }),
+    connectorCode: vi.fn().mockRejectedValue(new ApiError(503, 'connector.code: edge https://edge.example speaks edge protocol 1 and cannot forward connectors; its operator upgrades it')),
+  })
+  fireEvent.click(await screen.findByRole('button', { name: 'Reconnect Claude (claude.ai)' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }))
+  expect(await within(screen.getByRole('alertdialog')).findByText(/speaks edge protocol 1/)).toBeTruthy()
+  expect(client.connectorRevoke).not.toHaveBeenCalled()
+  expect(screen.getByText('Claude (claude.ai)')).toBeTruthy()
+})
+
+it('shows a failed check while waiting, and forgets the code when the member changes', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  show({
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [] }).mockResolvedValueOnce({ connectors: [] }).mockRejectedValue(new ApiError(502, 'gateway: server unreachable')),
+  })
   await screen.findByText('No connectors yet')
-  expect(scroll.mock.contexts.at(-1)).toBe(document.getElementById(CONNECTORS_SECTION_ID))
+  fireEvent.click(screen.getByRole('button', { name: 'Get a code' }))
+  expect(await screen.findByText('ABCD-EFGH')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(3000)
+  expect((await screen.findByRole('alert')).textContent).toContain('server unreachable')
+  act(() => useStore.setState({ identityKey: 'someone-else' }))
+  expect(screen.queryByText('ABCD-EFGH')).toBeNull()
 })

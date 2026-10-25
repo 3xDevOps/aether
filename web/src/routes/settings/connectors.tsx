@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Confirm } from '@/components/confirm'
 import { CopyableCommand } from '@/components/copyable-command'
@@ -43,7 +43,7 @@ function failure(err: unknown): Failure {
   if (err instanceof ApiError && err.code === codeMethodNotFound) {
     return { text, old: true, fix: <>This server is older than connectors. An admin updates it in <strong>Settings › Server</strong> or with <Code>sudo aether-server update</Code>.</> }
   }
-  if (/\bedge\b/.test(text)) return { text, fix: <Link href={`${docs}/edge.md#turning-it-on`}>Edge guide</Link> }
+  if (/has no edge|not connected to its edge/.test(text)) return { text, fix: <Link href={`${docs}/edge.md#turning-it-on`}>Edge guide</Link> }
   return { text, fix: <Link href={`${docs}/connectors.md#troubleshooting`}>Connector troubleshooting</Link> }
 }
 
@@ -58,10 +58,6 @@ function FailureCallout({ failure: { text, fix } }: { failure: Failure }) {
 
 function label(c: Connector): string {
   return `${c.client_name} (${c.redirect_host})`
-}
-
-function appOf(c: Connector): App {
-  return c.redirect_host === 'claude.ai' ? 'claude' : 'chatgpt'
 }
 
 function scopeList(c: Connector): string {
@@ -138,7 +134,7 @@ function Setup({
           {url ? <CopyableCommand command={url} /> : edgeNote ?? <p className="text-muted">The URL appears with the code.</p>}
         </Step>
         <Step n={3}>
-          <p>On the Aether page that opens, choose the connector's scopes, paste this code if the page asks for one, and select <strong>Allow</strong>.</p>
+          <p>On the Aether page that opens, paste this code, choose its scopes and select <strong>Allow</strong>.</p>
           <CodeStep code={code} busy={busy} expired={expired} onMint={onMint} />
         </Step>
       </ol>
@@ -147,7 +143,13 @@ function Setup({
   )
 }
 
+// Keyed by identity: a code and the connector list belong to the member who
+// was signed in when they were read.
 export function ConnectorsSection({ client }: { client: Api }) {
+  return <Connectors key={useStore((s) => s.identityKey)} client={client} />
+}
+
+function Connectors({ client }: { client: Api }) {
   const servesEdge = useCapability().hasMethod('server.edge')
   const route = useStore((s) => s.route)
   const [connectors, setConnectors] = useState<Connector[] | null>(null)
@@ -155,14 +157,20 @@ export function ConnectorsSection({ client }: { client: Api }) {
   const [edge, setEdge] = useState<ServerEdge | null>(null)
   const [edgeError, setEdgeError] = useState<string | null>(null)
   const [app, setApp] = useState<App>('chatgpt')
-  const [attempt, setAttempt] = useState<{ code: ConnectorCode; known: Set<string> } | null>(null)
+  const [attempt, setAttempt] = useState<{ code: ConnectorCode; app: App; known: Set<string> } | null>(null)
+  const [pollError, setPollError] = useState<Failure | null>(null)
   const [expired, setExpired] = useState(false)
   const [connected, setConnected] = useState<Connector | null>(null)
   const [busy, setBusy] = useState(false)
   const [mintError, setMintError] = useState<Failure | null>(null)
   const [confirming, setConfirming] = useState<{ connector: Connector; reconnect: boolean } | null>(null)
+  const done = useRef<HTMLButtonElement>(null)
 
   const read = useCallback(() => client.connectorList().then((r) => r.connectors), [client])
+  const refresh = () => read().then((next) => {
+    setConnectors(next)
+    setListError(null)
+  }, (err: unknown) => setListError(failure(err)))
 
   const loaded = connectors !== null || listError !== null
   useEffect(() => {
@@ -187,23 +195,40 @@ export function ConnectorsSection({ client }: { client: Api }) {
   }, [client, read, servesEdge])
 
   useEffect(() => {
+    if (connected) done.current?.focus()
+  }, [connected])
+
+  useEffect(() => {
     if (!attempt) return
     let live = true
     let polling = false
+    const settle = (next: Connector[], final: boolean) => {
+      if (!live) return
+      setPollError(null)
+      const added = next.find((c) => !attempt.known.has(c.id))
+      if (added || final) {
+        setConnectors(next)
+        setAttempt(null)
+      }
+      if (added) setConnected(added)
+      else if (final) setExpired(true)
+    }
+    const fail = (err: unknown, final: boolean) => {
+      if (!live) return
+      setPollError(failure(err))
+      if (final) {
+        setAttempt(null)
+        setExpired(true)
+      }
+    }
+    // A connector authorized just before the code expires still shows.
     const expiry = setTimeout(() => {
-      setAttempt(null)
-      setExpired(true)
+      read().then((next) => settle(next, true), (err: unknown) => fail(err, true))
     }, Date.parse(attempt.code.expires_at) - Date.now())
     const timer = setInterval(() => {
       if (polling) return
       polling = true
-      read().then((next) => {
-        const added = next.find((c) => !attempt.known.has(c.id))
-        if (!live || !added) return
-        setConnectors(next)
-        setAttempt(null)
-        setConnected(added)
-      }, () => {}).finally(() => {
+      read().then((next) => settle(next, false), (err: unknown) => fail(err, false)).finally(() => {
         polling = false
       })
     }, pollMs)
@@ -214,17 +239,23 @@ export function ConnectorsSection({ client }: { client: Api }) {
     }
   }, [attempt, read])
 
-  const mint = async () => {
-    setBusy(true)
+  const start = async (forApp: App) => {
     setMintError(null)
+    setPollError(null)
     setConnected(null)
     setExpired(false)
+    const fresh = await read()
+    setConnectors(fresh)
+    setListError(null)
+    const code = await client.connectorCode()
+    setApp(forApp)
+    setAttempt({ code, app: forApp, known: new Set(fresh.map((c) => c.id)) })
+  }
+
+  const mint = async () => {
+    setBusy(true)
     try {
-      const fresh = await read()
-      setConnectors(fresh)
-      setListError(null)
-      const code = await client.connectorCode()
-      setAttempt({ code, known: new Set(fresh.map((c) => c.id)) })
+      await start(app)
     } catch (err) {
       setMintError(failure(err))
     } finally {
@@ -239,7 +270,6 @@ export function ConnectorsSection({ client }: { client: Api }) {
   const offline = edge?.edge_url && !edge.connected
     ? <p className="text-muted">This server is not connected to its edge at {edge.edge_url}; an admin sees why with <Code>sudo aether-server edge status</Code>.</p>
     : null
-  const appName = app === 'chatgpt' ? 'ChatGPT' : 'Claude'
 
   return (
     <SettingsSection title="ChatGPT and Claude" id={CONNECTORS_SECTION_ID}>
@@ -260,25 +290,27 @@ export function ConnectorsSection({ client }: { client: Api }) {
               </TabsContent>
             ))}
             {offline}
-            {attempt && (
-              <p className="flex items-center gap-1.5 text-muted" role="status">
-                <Spinner />
-                Waiting for {appName} to connect…
-              </p>
-            )}
           </Tabs>
         )}
+        <div role="status" className="flex min-w-0 flex-col gap-2 text-ui-sm empty:hidden">
+          {attempt && (
+            <p className="flex items-center gap-1.5 text-muted">
+              <Spinner />
+              Waiting for {attempt.app === 'chatgpt' ? 'ChatGPT' : 'Claude'} to connect…
+            </p>
+          )}
+          {connected && (
+            <Callout
+              tone="done"
+              title={`${label(connected)} connected`}
+              actions={<Button ref={done} size="sm" variant="secondary" onClick={() => setConnected(null)}>Done</Button>}
+            >
+              With {scopeList(connected)}. Ask it “What needs me in Aether?”
+            </Callout>
+          )}
+        </div>
+        {pollError && <FailureCallout failure={pollError} />}
         {mintError && <FailureCallout failure={mintError} />}
-        {connected && (
-          <Callout
-            tone="done"
-            role="status"
-            title={`${label(connected)} connected`}
-            actions={<Button size="sm" variant="secondary" onClick={() => setConnected(null)}>Done</Button>}
-          >
-            With {scopeList(connected)}. Ask it “What needs me in Aether?”
-          </Callout>
-        )}
       </SettingRow>
       <SettingRow
         label="What a connector may do"
@@ -318,14 +350,18 @@ export function ConnectorsSection({ client }: { client: Api }) {
       {confirming && (confirming.reconnect ? (
         <Confirm
           title={`Reconnect ${label(confirming.connector)}?`}
-          description={`This revokes it now and gets a new code. Then connect Aether again in ${confirming.connector.client_name} and paste the code; you can choose other scopes.`}
+          description={`This gets a new code, then revokes the connector. Connect Aether again in ${confirming.connector.client_name} and paste the code; you can choose other scopes.`}
           action="Reconnect"
-          pending="Revoking…"
+          pending="Reconnecting…"
           onConfirm={async () => {
-            await client.connectorRevoke(confirming.connector.id)
-            setApp(appOf(confirming.connector))
+            try {
+              await start(confirming.connector.redirect_host === 'claude.ai' ? 'claude' : 'chatgpt')
+              await client.connectorRevoke(confirming.connector.id)
+            } finally {
+              void refresh()
+            }
           }}
-          onDone={() => void mint()}
+          onDone={() => {}}
           onClose={() => setConfirming(null)}
         />
       ) : (
@@ -334,13 +370,13 @@ export function ConnectorsSection({ client }: { client: Api }) {
           description={`Its next call fails, and ${confirming.connector.client_name} asks you to connect again with a new code. Removing it in ${confirming.connector.client_name} does not revoke it here.`}
           action="Revoke"
           pending="Revoking…"
-          onConfirm={() => client.connectorRevoke(confirming.connector.id)}
+          onConfirm={async () => {
+            await client.connectorRevoke(confirming.connector.id)
+            setConnectors((list) => list && list.filter((c) => c.id !== confirming.connector.id))
+          }}
           onDone={() => {
             toast.success(`${label(confirming.connector)} revoked`)
-            read().then((next) => {
-              setConnectors(next)
-              setListError(null)
-            }, (err: unknown) => setListError(failure(err)))
+            void refresh()
           }}
           onClose={() => setConfirming(null)}
         />

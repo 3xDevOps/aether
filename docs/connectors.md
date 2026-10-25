@@ -65,7 +65,8 @@ Custom MCP servers are added on the web only, at chatgpt.com
 
 1. Open [ChatGPT Plugins](https://chatgpt.com/plugins).
 2. Select the plus button, then **Add custom MCP server**.
-3. Paste the URL from `aether mcp`.
+3. Name it `Aether`, paste the URL from `aether mcp` as the server URL, and
+   choose **OAuth**.
 4. Select **Create as a plugin**, then install it.
 5. A page from your server opens: **Connect ChatGPT (chatgpt.com) to
    <server>**. Paste the code, choose its [scopes](#scopes) and select
@@ -82,7 +83,8 @@ On claude.ai
 ([Anthropic: add a custom connector](https://claude.com/docs/connectors/custom/add-unlisted)):
 
 1. Free, Pro and Max: open **Customize → Connectors**, select **Add custom
-   connector**, and paste the URL from `aether mcp`. Free allows one custom
+   connector**, name it `Aether`, paste the URL from `aether mcp`, leave
+   **Advanced settings** empty and select **Add**. Free allows one custom
    connector.
 2. Team and Enterprise: an Owner opens **Organization settings → Connectors**,
    selects **Add**, **Custom**, then **Web**, and pastes the URL. Each member
@@ -108,8 +110,8 @@ than `offline_access`.
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
 each connector's scopes. To change them, revoke the connector and connect
-again, or select **Reconnect** in Settings. It revokes the connector and gets
-a new code in one step. Connectors added before scopes existed have all three.
+again, or select **Reconnect** in Settings. It gets a new code, then revokes
+the connector. Connectors added before scopes existed have all three.
 
 ## What it can do
 

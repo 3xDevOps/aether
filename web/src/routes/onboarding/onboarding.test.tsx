@@ -1670,12 +1670,12 @@ describe('onboarding wizard', () => {
     })
   })
 
-  it('offers ChatGPT and Claude on the first run step without blocking it', async () => {
+  it('offers to finish setup and connect ChatGPT or Claude on the first run step', async () => {
     seed()
     render(<OnboardingRoute params={{}} client={fakeApi()} />)
     await toFirstRunStep()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Connect ChatGPT or Claude' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Finish setup and connect ChatGPT or Claude' }))
 
     expect(useStore.getState()).toMatchObject({ onboarded: true, route: { name: 'settings', params: { section: 'connectors' } } })
   })

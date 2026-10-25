@@ -181,11 +181,13 @@ export function FirstRunStep({
           After Launch the run starts its container, pulls the image the first time this server uses it, then starts the agent (about 5 s in Enhanced).
         </p>
       )}
-      <p className="text-ui-sm text-muted">
-        Optional, any time later:{' '}
-        <Button variant="link" size="sm" onClick={() => navigate('settings', { section: CONNECTORS_SECTION_ID })}>Connect ChatGPT or Claude</Button>
-        {' '}to launch runs and answer agents from a chat, on your phone too.
-      </p>
+      {caps.hasMethod('connector.list') && (
+        <p className="text-ui-sm text-muted">
+          Optional:{' '}
+          <Button variant="link" size="sm" onClick={() => navigate('settings', { section: CONNECTORS_SECTION_ID })}>Finish setup and connect ChatGPT or Claude</Button>
+          {' '}to launch runs and answer agents from a chat, on your phone too. Settings has it any time.
+        </p>
+      )}
     </Step>
   )
 }
