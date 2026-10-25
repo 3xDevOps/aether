@@ -354,10 +354,12 @@ function Connectors({ client }: { client: Api }) {
           action="Reconnect"
           pending="Reconnecting…"
           onConfirm={async () => {
+            setBusy(true)
             try {
               await start(confirming.connector.redirect_host === 'claude.ai' ? 'claude' : 'chatgpt')
               await client.connectorRevoke(confirming.connector.id)
             } finally {
+              setBusy(false)
               void refresh()
             }
           }}

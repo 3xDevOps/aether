@@ -106,13 +106,20 @@ it('tells an admin to update a server too old for connectors', async () => {
 
 it('reconnects by minting a code on the connector’s own tab before revoking it', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  let revoked = () => {}
   const client = show({
     connectorList: vi.fn().mockResolvedValueOnce({ connectors: [claude] }).mockResolvedValueOnce({ connectors: [claude] }).mockResolvedValue({ connectors: [] }),
+    connectorRevoke: vi.fn(() => new Promise<{ connector: Connector }>((resolve) => {
+      revoked = () => resolve({ connector: claude })
+    })),
   })
   fireEvent.click(await screen.findByRole('button', { name: 'Reconnect Claude (claude.ai)' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }))
   expect(await screen.findByText('ABCD-EFGH')).toBeTruthy()
   await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-claude00001'))
+  expect(screen.getByRole('button', { name: 'New code', hidden: true }).hasAttribute('disabled')).toBe(true)
+  act(() => revoked())
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
   expect(vi.mocked(client.connectorCode).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.connectorRevoke).mock.invocationCallOrder[0])
   expect(screen.getByRole('tab', { name: 'Claude' }).getAttribute('aria-selected')).toBe('true')
   expect(screen.getByText('Waiting for Claude to connect…')).toBeTruthy()
