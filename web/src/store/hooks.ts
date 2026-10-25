@@ -147,6 +147,7 @@ const LEGACY_REMOTE_METHODS: Record<string, true> = {
   'run.handoff': true,
   'presence.roster': true,
   'presence.heartbeat': true,
+  'presence.typing': true,
   'workspace.timeline': true,
   'cost.report': true,
   'budget.get': true,

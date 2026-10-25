@@ -6,6 +6,9 @@ const (
 	MethodPresenceHeartbeat = "presence.heartbeat"
 	// MethodPresenceRoster reports who is online and what they watch.
 	MethodPresenceRoster = "presence.roster"
+	// MethodPresenceTyping tells the watchers of a run that the caller is
+	// typing in its composer (Steer on the run).
+	MethodPresenceTyping = "presence.typing"
 )
 
 // PresenceHeartbeatParams refreshes the caller's presence in a workspace.
@@ -17,6 +20,13 @@ type PresenceHeartbeatParams struct {
 // further heartbeat, so clients pick an interval inside it.
 type PresenceHeartbeatResult struct {
 	TTLSeconds int `json:"ttl_seconds"`
+}
+
+// PresenceTypingParams names the run whose composer the caller is typing in.
+// Stopped reports that they sent or cleared their draft instead.
+type PresenceTypingParams struct {
+	RunID   string `json:"run_id"`
+	Stopped bool   `json:"stopped,omitempty"`
 }
 
 // PresenceRosterParams narrows the roster to a workspace, or to the

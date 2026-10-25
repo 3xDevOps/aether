@@ -384,6 +384,11 @@ export async function applyEvent(
   client: Api = api,
   signal?: AbortSignal,
 ): Promise<boolean> {
+  if (ev.type === 'run.typing') {
+    if ((ev.payload as { stopped?: boolean } | null)?.stopped) store.getState().clearTyping(ev.run_id, ev.actor_id)
+    else store.getState().noteTyping(ev.run_id, ev.actor_id)
+    return true
+  }
   if (ev.seq > 0 && ev.seq <= store.getState().lastSeq) {
     // Replay resumes strictly after the cursor, so equal is a duplicate. Below
     // it means the server's event log restarted (fresh or restored data dir):
@@ -749,6 +754,7 @@ export async function applyEvent(
       const runID = ev.run_id
       const workspaceID = ev.workspace_id
       const payload = (ev.payload ?? {}) as { kind?: string; message_id?: string; state?: string }
+      store.getState().clearTyping(runID, ev.actor_id)
       if (
         runID &&
         (payload.kind === 'question' || payload.kind === 'reply')

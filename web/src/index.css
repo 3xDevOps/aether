@@ -547,6 +547,29 @@
     animation: workflow-enter 120ms ease-out;
   }
 
+  .typing-dot {
+    animation: typing-dot 1.2s steps(1, end) infinite;
+  }
+
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  @keyframes typing-dot {
+    0%,
+    60%,
+    100% {
+      opacity: 1;
+    }
+    30% {
+      opacity: 0.3;
+    }
+  }
+
   @keyframes workflow-enter {
     from {
       opacity: 0;
@@ -564,7 +587,8 @@
       color: var(--text-muted);
     }
 
-    .workflow-enter {
+    .workflow-enter,
+    .typing-dot {
       animation: none;
     }
   }

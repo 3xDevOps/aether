@@ -106,3 +106,35 @@ func TestPresenceMethodsUnavailableWithoutService(t *testing.T) {
 		}
 	}
 }
+
+// A member typing in a run's composer reaches the run's watchers as a live
+// event attributed to them; a viewer cannot type into the run.
+func TestPresenceTypingPublishesEphemeralEvent(t *testing.T) {
+	t.Parallel()
+	e := inboxEnv(t)
+	ctx := context.Background()
+	bobSigner, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
+	viewerSigner, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
+
+	sub, err := e.bus.Subscribe(ctx, events.SubscribeOptions{
+		Filter: events.Filter{Types: []events.Type{events.TypeTyping}},
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Close() }()
+
+	params := protocol.PresenceTypingParams{RunID: string(e.run.ID)}
+	wantDenied(t, controlAs(t, e, viewerSigner).Call(protocol.MethodPresenceTyping, params, nil), "viewer presence.typing")
+	if err := controlAs(t, e, bobSigner).Call(protocol.MethodPresenceTyping, params, nil); err != nil {
+		t.Fatalf("presence.typing: %v", err)
+	}
+	select {
+	case ev := <-sub.Events():
+		if ev.ActorID != bob.ID || ev.RunID != e.run.ID || ev.Seq != 0 {
+			t.Fatalf("typing event = actor %s run %s seq %d, want Bob on Ada's run with no sequence", ev.ActorID, ev.RunID, ev.Seq)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the typing event")
+	}
+}

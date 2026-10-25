@@ -810,6 +810,8 @@ export const api = {
     call<{ ttl_seconds: number }>('presence.heartbeat', {
       workspace_id: workspaceID,
     }).then((r) => r.ttl_seconds),
+  presenceTyping: (runID: string, stopped = false) =>
+    call<Record<string, never>>('presence.typing', { run_id: runID, ...(stopped ? { stopped } : {}) }).then(() => undefined),
   budgetGet: (workspaceID: string) =>
     call<BudgetReport>('budget.get', { workspace_id: workspaceID }),
   templateList: (workspaceID: string) =>

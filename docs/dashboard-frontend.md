@@ -1998,6 +1998,18 @@ closed; each older page merges below the pages before it, so same-instant
 messages keep the server's order. It polls presence every ten seconds with an abortable 15-second
 deadline.
 
+While other members watch the run, the composer shows a line above the
+message box, in the space of its own fixed height: `Alice is typing...`,
+`Alice and Bob are typing...`, `Alice, Bob and Carol are typing...`, and
+`Several people are typing...` past three. The dots animate unless
+`prefers-reduced-motion` is set. Your own typing is never listed. Each
+keystroke in a draft calls `presence.typing` (Steer on the run), at most once
+every 3 seconds; clearing the draft, sending it or closing the composer calls
+it once more with `stopped: true`. A received entry lapses 6 seconds after its
+last signal, so a closed tab or lost connection stops showing. A restored draft
+signals nothing until it changes. Typing is held in memory only and feeds no
+count, chart or timeline.
+
 ### Header
 
 The header (`header.tsx`) is a 56px `PaneHeader size="run"`: the title (the
@@ -4091,6 +4103,11 @@ in **Needs you**.
     read succeeds, a budget event lands, or the stream leaves `live`.
   - `workspace.presence` names one transition, so it re-reads
     `presence.roster`.
+  - `run.typing` is ephemeral: the server sends it to live subscribers
+    only, with `seq` 0, so it is never stored, replayed, counted or added
+    to the live feed. It sets the actor's entry in `typing` (`src/store/typing.ts`)
+    and returns before the cursor check, so it cannot move `lastSeq`.
+    `stopped: true`, or that member's `workspace.room_message`, removes the entry.
   These reads start without holding up the events queued behind them (only a
   run fetch does, for the cursor rule), and each is coalesced in
   `src/store/coalesce.ts`: per workspace, one in flight and one queued, so a

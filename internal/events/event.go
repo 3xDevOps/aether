@@ -56,6 +56,12 @@ const (
 	// TypePresence signals a member coming online, going offline, or
 	// watching a run.
 	TypePresence Type = "workspace.presence"
+	// TypeTyping signals that the acting member is typing in a run's
+	// composer. It is ephemeral: never persisted and carries no sequence.
+	TypeTyping Type = "run.typing"
+	// TypeApproval carries approval-inbox activity: a permission request
+	// surfacing or a member deciding it.
+	TypeApproval Type = "workspace.approval"
 	// TypeTimeline carries workspace timeline entries, including steering
 	// acts (inject, pause, kill, handoff) and free-form notes.
 	TypeTimeline Type = "workspace.timeline"
@@ -337,6 +343,41 @@ type PresencePayload struct {
 
 func (PresencePayload) EventType() Type { return TypePresence }
 
+// TypingPayload reports that the actor is typing in the envelope's run, or,
+// when Stopped, that they stopped because they sent or cleared their draft.
+type TypingPayload struct {
+	Stopped bool `json:"stopped,omitempty"`
+}
+
+func (TypingPayload) EventType() Type { return TypeTyping }
+
+// Ephemeral marks a payload the bus fans out to live subscribers only: it
+// is never persisted, never replayed, and its event carries Seq zero.
+type Ephemeral interface {
+	Ephemeral()
+}
+
+func (TypingPayload) Ephemeral() {}
+
+// ApprovalDecision is the state of an approval-inbox request.
+type ApprovalDecision string
+
+const (
+	ApprovalRequested ApprovalDecision = "requested"
+	ApprovalApproved  ApprovalDecision = "approved"
+	ApprovalDenied    ApprovalDecision = "denied"
+)
+
+// ApprovalPayload carries approval-inbox activity. RequestID ties the
+// decision events back to the originating request.
+type ApprovalPayload struct {
+	RequestID string           `json:"request_id"`
+	Action    string           `json:"action"`
+	Decision  ApprovalDecision `json:"decision"`
+}
+
+func (ApprovalPayload) EventType() Type { return TypeApproval }
+
 // TimelineKind classifies a workspace timeline entry.
 type TimelineKind string
 
@@ -557,6 +598,8 @@ var payloadCodecs = map[Type]func([]byte) (Payload, error){
 	TypeRunDiff:        decodeAs[RunDiffPayload],
 	TypeRunCost:        decodeAs[RunCostPayload],
 	TypePresence:       decodeAs[PresencePayload],
+	TypeTyping:         decodeAs[TypingPayload],
+	TypeApproval:       decodeAs[ApprovalPayload],
 	TypeTimeline:       decodeAs[TimelinePayload],
 	TypeGitBranch:      decodeAs[GitBranchPayload],
 	TypeAgentEvent:     decodeAs[AgentEventPayload],
