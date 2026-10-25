@@ -99,6 +99,13 @@ func workspaceAdd(args []string) error {
 // createWorkspace is the wire call shared by init and add.
 func createWorkspace(opts workspaceCreateOptions) error {
 	return withControl(func(c *protocol.Client) error {
+		var list protocol.WorkspaceListResult
+		if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
+			return err
+		}
+		if ws, ok := workspaceNamed(list.Workspaces, opts.name); ok {
+			return fmt.Errorf("workspace %q already exists as %s; choose another name", opts.name, ws.ID)
+		}
 		var res protocol.WorkspaceAddResult
 		if err := c.Call(protocol.MethodWorkspaceAdd, protocol.WorkspaceAddParams{
 			Name:        opts.name,
@@ -110,6 +117,15 @@ func createWorkspace(opts workspaceCreateOptions) error {
 		fmt.Printf("workspace %s %s\n", res.Workspace.ID, res.Workspace.Name)
 		return nil
 	})
+}
+
+func workspaceNamed(list []protocol.Workspace, name string) (protocol.Workspace, bool) {
+	for _, ws := range list {
+		if ws.Name == name {
+			return ws, true
+		}
+	}
+	return protocol.Workspace{}, false
 }
 
 func workspaceDelete(args []string) error {
