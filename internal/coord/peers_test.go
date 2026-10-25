@@ -6,10 +6,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func wantDenied(t *testing.T, err *protocol.Error, reason string) {
@@ -175,6 +177,78 @@ func TestSendReceiptCarriesRecipientStatus(t *testing.T) {
 	asked, err := h.svc.Ask(ctx, a, protocol.CoordAskParams{ToRunID: string(b), Body: "ready?", IdempotencyKey: "ask-status"})
 	if err != nil || asked.RecipientStatus != string(domain.RunNeedsAttention) {
 		t.Fatalf("ask receipt = %+v (err %v), want recipient_status needs-attention", asked, err)
+	}
+}
+
+// TestStatusShowsWhatHappenedToTheLastMessageSent follows the newest message
+// a run sent each peer from sent through delivered to acked, back to sent
+// when a message stamped earlier commits later, and to retired for a peer
+// released before it acknowledged.
+func TestStatusShowsWhatHappenedToTheLastMessageSent(t *testing.T) {
+	h := newHarness(t, 4)
+	ctx := context.Background()
+	a, b, c, silent := h.run(0), h.run(1), h.run(2), h.run(3)
+	lastSent := func() map[string]*protocol.CoordSentMessage {
+		t.Helper()
+		st, err := h.svc.Status(ctx, a)
+		if err != nil {
+			t.Fatalf("Status: %v", err)
+		}
+		out := make(map[string]*protocol.CoordSentMessage, len(st.Peers))
+		for _, p := range st.Peers {
+			out[p.RunID] = p.LastSent
+		}
+		return out
+	}
+	if _, err := h.svc.Send(ctx, a, sendParams(b, "first")); err != nil {
+		t.Fatalf("send first: %v", err)
+	}
+	second, err := h.svc.Send(ctx, a, sendParams(b, "second"))
+	if err != nil {
+		t.Fatalf("send second: %v", err)
+	}
+	if _, err = h.svc.Send(ctx, b, sendParams(a, "the other direction")); err != nil {
+		t.Fatalf("send b -> a: %v", err)
+	}
+	got := lastSent()
+	if m := got[string(b)]; m == nil || m.MessageID != second.MessageID || m.State != protocol.CoordSentStateSent ||
+		m.CreatedAt == "" || m.DeliveredAt != "" || m.AckedAt != "" {
+		t.Fatalf("last_sent to b = %+v, want %s sent", m, second.MessageID)
+	}
+	if m := got[string(silent)]; m != nil {
+		t.Fatalf("last_sent to a peer never written to = %+v, want none", m)
+	}
+
+	batch, err := h.svc.Inbox(ctx, b, protocol.CoordInboxParams{})
+	if err != nil || len(batch.Messages) != 2 {
+		t.Fatalf("b inbox = %+v (err %v), want both messages", batch, err)
+	}
+	if m := lastSent()[string(b)]; m == nil || m.State != protocol.CoordSentStateDelivered || m.DeliveredAt == "" || m.AckedAt != "" {
+		t.Fatalf("last_sent after b read = %+v, want delivered", m)
+	}
+	if _, err = h.svc.Inbox(ctx, b, protocol.CoordInboxParams{AckToken: batch.AckToken}); err != nil {
+		t.Fatalf("b ack: %v", err)
+	}
+	if m := lastSent()[string(b)]; m == nil || m.State != protocol.CoordSentStateAcked || m.DeliveredAt == "" || m.AckedAt == "" {
+		t.Fatalf("last_sent after b acked = %+v, want acked", m)
+	}
+	late := &store.RunMessage{WorkspaceID: h.workspace, FromRun: a, ToRun: b, Body: "stamped before second, committed after",
+		CreatedAt: time.Now().Add(-time.Hour)}
+	if aerr := h.db.AppendRunMessage(ctx, late, protocol.CoordMaxUnread); aerr != nil {
+		t.Fatalf("AppendRunMessage: %v", aerr)
+	}
+	if m := lastSent()[string(b)]; m == nil || m.MessageID != late.ID || m.State != protocol.CoordSentStateSent {
+		t.Fatalf("last_sent after a late commit = %+v, want %s sent", m, late.ID)
+	}
+
+	if _, err = h.svc.Send(ctx, a, sendParams(c, "never read")); err != nil {
+		t.Fatalf("send c: %v", err)
+	}
+	if rerr := h.db.RetireRunMessages(ctx, c); rerr != nil {
+		t.Fatalf("RetireRunMessages: %v", rerr)
+	}
+	if m := lastSent()[string(c)]; m == nil || m.State != protocol.CoordSentStateRetired || m.DeliveredAt != "" || m.AckedAt != "" {
+		t.Fatalf("last_sent to released c = %+v, want retired", m)
 	}
 }
 
