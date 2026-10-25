@@ -65,13 +65,14 @@ func TestRoomImageReadFailureAllowsFreshKeyRetry(t *testing.T) {
 				WorkspaceID: e.ws.ID, RunID: run.ID, ActorID: e.member.ID,
 				Kind: store.RoomMessageSteerRequest, Attachments: []string{reference}, IdempotencyKey: "first-image",
 			}
-			// Without the lease the owner's post waits for its holder.
+			// A stale session's post waits for the lease holder.
 			lease, _, acquireErr := ctl.Acquire(string(run.ID), string(e.member.ID), "image-retry", false)
 			if acquireErr != nil {
 				t.Fatal(acquireErr)
 			}
-			if !delayed {
-				input.ControllerSessionID, input.ControllerGeneration = lease.SessionID, lease.Generation
+			input.ControllerSessionID, input.ControllerGeneration = lease.SessionID, lease.Generation
+			if delayed {
+				input.ControllerGeneration++
 			}
 			first, err := room.Post(t.Context(), input)
 			if err != nil {

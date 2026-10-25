@@ -74,6 +74,10 @@ run.
 
 Pausing and resuming run at once. The run's events name you as the actor.
 
+An approved message reaches the agent at once when you control the run, or
+when it is your own run and no one controls it. Otherwise it waits about 45
+seconds for the member in control to approve or deny it.
+
 Installing a toolchain or editing a file is not an Aether action. The assistant
 does it in its own shell in your environment, then offers to save the
 environment.

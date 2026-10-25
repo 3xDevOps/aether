@@ -386,7 +386,10 @@ func (s *Service) Post(ctx context.Context, in MessageInput) (Result, error) {
 		generation := in.ControllerGeneration
 		switch {
 		case hasController && current.Connected && current.MemberID == actor.ID &&
-			current.SessionID == session && current.Generation == generation:
+			(session == "" || current.SessionID == session && current.Generation == generation):
+			// A client that holds no lease (the assistant, aether message,
+			// connectors) speaks for the member in control, who has no one
+			// to wait for; a stale lease-holding session still waits.
 			proof := current
 			deliveryProof = &proof
 		case !hasController && actor.ID == run.MemberID:

@@ -742,6 +742,20 @@ func TestSteeringDelayAndControllerImmediateSend(t *testing.T) {
 	if pty.Calls() != 2 {
 		t.Fatalf("inject calls=%d, want 2", pty.Calls())
 	}
+	assistant, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID, Kind: store.RoomMessageSteerRequest, Body: "leaseless", IdempotencyKey: "leaseless"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assistant.Message.DeliverAfter != nil || assistant.Message.State != store.RoomMessageSent || pty.Calls() != 3 {
+		t.Fatalf("controller's lease-less client: deliver_after=%v state=%s inject calls=%d, want immediate", assistant.Message.DeliverAfter, assistant.Message.State, pty.Calls())
+	}
+	stale, err := service.Post(context.Background(), MessageInput{WorkspaceID: ws.ID, RunID: run.ID, ActorID: owner.ID, Kind: store.RoomMessageSteerRequest, Body: "stale", IdempotencyKey: "stale", ControllerSessionID: lease.SessionID, ControllerGeneration: lease.Generation + 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.Message.DeliverAfter == nil || pty.Calls() != 3 {
+		t.Fatalf("stale session: deliver_after=%v inject calls=%d, want queued", stale.Message.DeliverAfter, pty.Calls())
+	}
 }
 
 func TestOwnerImmediateSendCannotBypassANewController(t *testing.T) {
