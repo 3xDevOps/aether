@@ -144,11 +144,12 @@ function DaemonRow({ client }: { client: Api }) {
 
   useEffect(() => {
     let live = true
+    const saved = useStore.getState().daemonInstalled
     client.localDaemonStatus().then(
       (s) => {
         if (!live) return
         setStatus(s)
-        if (!s.installed) setInstalled(null)
+        if (!s.installed && useStore.getState().daemonInstalled === saved) setInstalled(null)
       },
       (err: unknown) => live && setError(message(err)),
     )

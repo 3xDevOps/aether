@@ -294,6 +294,32 @@ describe('settings view', () => {
     expect(await screen.findByRole('button', { name: 'Install' })).toBeDefined()
     expect(screen.queryByText('enable with systemctl --user enable --now aether-sync')).toBeNull()
   })
+
+  it('keeps a daemon install that lands while a stale read is in flight', async () => {
+    const client = fakeApi()
+    seed()
+    const { rerender } = render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
+    const install = await screen.findByRole('button', { name: 'Install' })
+    await vi.waitFor(() => expect((install as HTMLButtonElement).disabled).toBe(false))
+    let finishInstall!: () => void
+    vi.mocked(client.localDaemonInstall).mockReturnValueOnce(new Promise((resolve) => {
+      finishInstall = () => resolve({ unit_path: '/home/alice/.config/systemd/user/aether-sync.service', note: 'enable with systemctl --user enable --now aether-sync' })
+    }))
+    fireEvent.click(install)
+
+    let finishRead!: () => void
+    vi.mocked(client.localDaemonStatus).mockReturnValueOnce(new Promise((resolve) => {
+      finishRead = () => resolve({ installed: false, unit_path: '' })
+    }))
+    rerender(<SettingsRoute params={{ section: 'general' }} client={client} />)
+    rerender(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
+    await act(async () => finishInstall())
+    await act(async () => finishRead())
+
+    expect(screen.getByText('enable with systemctl --user enable --now aether-sync')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Install' })).toBeNull()
+  })
+
   it('opens a sync overlay without requesting unavailable daemon methods', async () => {
     const client = fakeApi()
     seed({
