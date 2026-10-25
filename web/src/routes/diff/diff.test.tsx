@@ -875,7 +875,7 @@ test('without the lease the message waits for the controller, and the bar says s
   expect(screen.getByRole('status').textContent).toContain('The controller declined your 1 comment. The text is in the session.')
 })
 
-test('while you control the run from another tab, the bar does not promise a 45 s wait', () => {
+test('while you control the run from another tab, the bar promises no 45 s wait unless that tab is reconnecting', () => {
   seed(ready)
   onTestFinished(() => {
     useStore.setState({ info: null })
@@ -886,6 +886,9 @@ test('while you control the run from another tab, the bar does not promise a 45 
   const bar = within(screen.getByRole('group', { name: 'Review' }))
   expect(bar.queryByText('Delivers in 45 s unless the controller decides sooner.')).toBeNull()
   expect(bar.getByRole('button', { name: 'Send to agent' })).toHaveProperty('disabled', false)
+
+  act(() => useStore.setState({ roomStatus: { [active.id]: { workspace_id: workspace.id, run_id: active.id, protected: false, controller: { member_id: alice.id, connected: false, acquired_at: '2026-08-14T10:00:00Z' }, watchers: [], queued_steers: 0 } } }))
+  expect(bar.getByText('Delivers in 45 s unless the controller decides sooner.')).toBeTruthy()
 })
 
 test('a run that cannot take a message disables send and says why', () => {
