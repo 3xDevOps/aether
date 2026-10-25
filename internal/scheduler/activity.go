@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
 	"strings"
 	"time"
 
@@ -54,10 +53,6 @@ const stalledReasonPrefix = "stalled: "
 // waitedFactor stall thresholds with no activity and nothing it waits on
 // live, followed by ": " and the agent's summary when it reported one.
 const waitedReasonPrefix = "no update for "
-
-// workersReasonPattern matches an integrator's reason while it waits on its
-// swarm with no waiting report, which replaces turnEndedReason.
-var workersReasonPattern = regexp.MustCompile(`^(?:waiting for \d+ workers?|\d+ unread worker messages?)$`)
 
 // waitedFactor is how many stall thresholds a run waits with no activity
 // before its wait counts as stale.

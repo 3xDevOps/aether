@@ -392,3 +392,56 @@ func TestAWaitGoesStaleOnlyWithNothingLive(t *testing.T) {
 	quietFor(t, e)
 	expectNoStatusEvent(t, sub, run.ID, "a CI wait that already went stale")
 }
+
+// TestAnIntegratorsWorkersReasonFollowsItsSwarm: the workers reason Aether
+// wrote keeps tracking the swarm across a question the member answers, and
+// the sidecar carries it over a restart.
+func TestAnIntegratorsWorkersReasonFollowsItsSwarm(t *testing.T) {
+	t.Parallel()
+	var integrator *integratorStore
+	e := newReportingEnv(t, func(cfg *Config) {
+		integrator = &integratorStore{Store: cfg.Store}
+		cfg.Store = integrator
+		cfg.StallThreshold = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := row.StatusSeq
+	sub := e.subscribe(t)
+	report := func(r agentstatus.Report) {
+		t.Helper()
+		if reportErr := e.sched.ReportAgentState(ctx, run.ID, r); reportErr != nil {
+			t.Fatalf("report %+v: %v", r, reportErr)
+		}
+	}
+	expect := func(what string, activity domain.RunActivity, reason string) {
+		t.Helper()
+		p := nextActivity(t, sub, run.ID, &seq)
+		if p.Activity != activity || p.Reason != reason {
+			t.Fatalf("%s: published %s %q, want %s %q", what, p.Activity, p.Reason, activity, reason)
+		}
+	}
+
+	integrator.workers.Store(1)
+	report(agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle})
+	expect("turn end with a live worker", domain.ActivityWaitingAgents, "waiting for 1 worker")
+	report(permissionInput("open"))
+	expect("a permission request", domain.ActivityNeedsYou, "waiting for 1 worker")
+	report(permissionInput("close"))
+	expect("the request answered", domain.ActivityWaitingAgents, "waiting for 1 worker")
+	integrator.workers.Store(2)
+	e.sched.refreshActivities(ctx)
+	expect("a second worker", domain.ActivityWaitingAgents, "waiting for 2 workers")
+	sc, err := e.sched.readSidecar(run.ID)
+	if err != nil || sc.WorkersReason != "waiting for 2 workers" {
+		t.Fatalf("sidecar workers reason = %q, %v", sc.WorkersReason, err)
+	}
+	integrator.workers.Store(0)
+	e.sched.refreshActivities(ctx)
+	expect("the swarm done", domain.ActivityWaiting, turnEndedReason)
+}

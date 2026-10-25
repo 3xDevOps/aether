@@ -312,6 +312,25 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		return err
 	}
 	public, activity := d.reason, d.activity
+	e := s.runs[run]
+	// The workers reason Aether wrote stays its own while the run shows it.
+	var workersReason string
+	if e != nil {
+		switch {
+		case d.workers:
+			workersReason = public
+		case public == e.workersReason:
+			workersReason = e.workersReason
+		}
+		// A stale marker is harmless: it only claims the reason it names.
+		if to.Live() && workersReason != e.workersReason {
+			next := e.sidecar()
+			next.WorkersReason = workersReason
+			if writeErr := s.writeSidecar(next); writeErr != nil {
+				return fmt.Errorf("scheduler: persist the workers reason: %w", writeErr)
+			}
+		}
+	}
 	write := s.cfg.Store.UpdateRunStatus
 	switch cause {
 	case causeReported:
@@ -328,12 +347,9 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		OutcomeUnseen: stamp.OutcomeUnseen, FinishUnopened: stamp.FinishUnopened,
 		Review: stamp.Review, ReviewChangedAt: stamp.ReviewChangedAt,
 	}
-	if e := s.runs[run]; e != nil {
+	if e != nil {
 		e.status, e.reason, e.activity = to, public, activity
-		e.workersReason = ""
-		if d.workers {
-			e.workersReason = public
-		}
+		e.workersReason = workersReason
 		if startedAt != nil {
 			e.startedAt = now
 		}
@@ -425,6 +441,7 @@ type sidecar struct {
 	IdleShown           bool                     `json:"blocked_shown,omitempty"`
 	IdleReportID        string                   `json:"blocked_report_id,omitempty"`
 	IdleReportAt        *time.Time               `json:"blocked_report_at,omitempty"`
+	WorkersReason       string                   `json:"workers_reason,omitempty"`
 	RelaunchedAt        *time.Time               `json:"relaunched_at,omitempty"`
 	ExitObserved        bool                     `json:"exit_observed"`
 	ExitCode            int                      `json:"exit_code"`
@@ -507,6 +524,7 @@ func (e *supervised) sidecar() sidecar {
 		IdleShown:           e.idleShown,
 		IdleReportID:        e.idleReportID,
 		IdleReportAt:        idleReportAt,
+		WorkersReason:       e.workersReason,
 		RelaunchedAt:        relaunchedAt,
 		ExitObserved:        e.exitObserved,
 		ExitCode:            e.exitCode,
