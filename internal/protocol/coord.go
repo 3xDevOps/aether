@@ -325,7 +325,7 @@ type CoordReportParams struct {
 	Outcome        string   `json:"outcome" jsonschema:"success, failure, blocked, needs-input or waiting"`
 	Summary        string   `json:"summary" jsonschema:"what you verified; for needs-input the question for the user; for blocked what a human must do; for waiting what you wait on"`
 	EvidenceRefs   []string `json:"evidence_refs,omitempty" jsonschema:"retained evidence packet ids; not for needs-input or waiting"`
-	IdempotencyKey string   `json:"idempotency_key" jsonschema:"a stable key you choose per outcome; retry an unchanged report with the same key"`
+	IdempotencyKey string   `json:"idempotency_key" jsonschema:"a fresh key you choose for each new report; reuse it only to retry the same report, since the same key with another outcome or summary is refused"`
 	WaitingFor     string   `json:"waiting_for,omitempty" jsonschema:"only with waiting: agents (the default), ci or process"`
 }
 

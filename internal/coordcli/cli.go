@@ -300,8 +300,10 @@ the summary is what you wait on, and your next turn clears it. Report it when
 Only Enhanced runs, managed Claude Code launches and native pi/omp/OpenCode
 integrations are resumed by mail while idle; elsewhere, and in Background
 runs, wait inside your turn with inbox --wait 30 instead.
-Use a fresh idempotency key for each new report. Retry the same request with
-the same key; a superseded report's key conflicts.
+Use a fresh idempotency key for each new report, including each new waiting
+or needs-input report. Only a retry of the same report reuses its key: the same
+key with another outcome, --for or summary is refused with a conflict, and so
+is a superseded report's key. Every accepted report appears in aether timeline.
 A summary file of "-" reads standard input.
 When live capabilities advertise artifact retain, deliberately retain reviewed
 captures before a terminal report can clean up the run; pass its packet_id as

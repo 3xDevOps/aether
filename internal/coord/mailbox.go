@@ -494,11 +494,8 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	if summary == "" {
 		return protocol.CoordReportResult{}, invalidParams(method, "summary is required")
 	}
-	switch p.Outcome {
-	case protocol.CoordOutcomeNeedsInput:
-		return s.reportNeedsInput(ctx, run, p, summary)
-	case protocol.CoordOutcomeWaiting:
-		return s.reportWaiting(ctx, run, p, summary)
+	if p.Outcome == protocol.CoordOutcomeNeedsInput || p.Outcome == protocol.CoordOutcomeWaiting {
+		return s.reportState(ctx, run, p, summary)
 	}
 	if len(p.EvidenceRefs) >= protocol.CoordMaxEvidenceRefs {
 		return protocol.CoordReportResult{}, invalidParams(method,
@@ -565,6 +562,11 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 		Summary: summary, NextAction: nextAction, EvidenceRefs: refs, IdempotencyKey: p.IdempotencyKey,
 	}
 	supersededMessage := fmt.Sprintf("%s: the report under idempotency_key %q was superseded; report again with a new idempotency key", method, p.IdempotencyKey)
+	if _, err := s.cfg.Mail.GetCoordStateReport(ctx, run, p.IdempotencyKey); err == nil {
+		return protocol.CoordReportResult{}, reusedKey(p.IdempotencyKey)
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return protocol.CoordReportResult{}, internalError(method, err)
+	}
 	_, err := s.cfg.Mail.ReserveCoordReport(ctx, report)
 	if errors.Is(err, store.ErrCoordReportConflict) ||
 		errors.Is(err, store.ErrCoordReportIdempotencyConflict) ||

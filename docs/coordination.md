@@ -78,7 +78,7 @@ line. The base coordination method set is:
 | `coord.inbox` | optional `ack_token`, optional `wait_seconds` | oldest-first `messages` and the `ack_token` for that batch |
 | `coord.ask` | `to_run_id`, `body`, `idempotency_key` | `question_id`, `recipient_status` |
 | `coord.reply` | `question_id`, `body`, `idempotency_key` | `message_id` |
-| `coord.report` | `outcome`, `summary`, optional `evidence_refs`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, and automatic `evidence_ref` |
+| `coord.report` | `outcome`, `summary`, optional `waiting_for` and `evidence_refs`, `idempotency_key` | outcome, summary and next action; for success, failure and blocked also the durable `report_id`, evidence references, and automatic `evidence_ref` |
 
 The six advertised coordination methods are unchanged. Native hooks use
 `coord.hook.status`, an internal endpoint with a separate request budget, not
@@ -1580,6 +1580,17 @@ Retrying the same key and inputs replays its receipt until it is superseded;
 a superseded key or capture fails with `CodeConflict` (`-32003`). Earlier
 reports and their evidence remain in history.
 
+**Every report takes a fresh idempotency key.** A key belongs to the first
+report that used it, whatever the outcome. Reusing it retries that report:
+the same outcome, `--for` and summary return the same receipt, and anything
+else fails with `CodeConflict` (`-32003`) (`idempotency_key "<key>" was used
+with different report inputs; use a new key for a new report`). A `waiting`
+or `needs-input` report that cannot take effect is refused with an error,
+never accepted and dropped, and one that never took effect does not keep
+its key. Every accepted report, `waiting` and `needs-input` included, is a
+`report` entry in `aether timeline <workspace>` with its outcome,
+`waiting_for` and summary.
+
 **Background runs and swarm workers have one terminal outcome per launch.**
 After success or failure, any new report key, including `blocked`, conflicts.
 Blocked is nonterminal and may repeat before the terminal outcome. Reopening
@@ -1619,18 +1630,20 @@ What a report does depends on the run:
   At turn end the run shows `needs input: <question>` as its **Needs you**
   reason, separate from `blocked: <summary>`. The user's reply, such as
   `aether message <run-id> "<reply>"`, arrives as the next prompt, and
-  resuming work clears the reason. It is nonterminal and not
-  a durable report: it has no `report_id` or evidence, takes no
-  `--evidence-ref`, and does not use the terminal slot. The latest report
-  decides the turn's reason: a question after a success or failure in the
-  same turn replaces `agent reported success` or `agent reported failure`,
-  and that report stays durable. Retrying the same key while its question is
-  the latest is a no-op; retrying an older key after a newer question asks
-  the older one again. The report is refused with `CodeInvalidParams` for a
-  Background run (`a Background run cannot ask its user; report blocked or
-  failure instead`), a swarm worker, which asks its integrator with
-  `aether-internal ask`, and a run that already finished (`the run already
-  finished; its reported outcome stands, so it cannot ask its user`).
+  resuming work clears the reason. It is nonterminal: it has no
+  `report_id` or evidence, takes no `--evidence-ref`, and does not use the
+  terminal slot. The latest report decides the turn's reason: a question
+  after a success or failure in the same turn replaces `agent reported
+  success` or `agent reported failure`, and that report stays durable.
+  Retrying the same key while its question is the latest is a no-op;
+  retrying it after a newer report fails with `CodeConflict` (`a newer
+  report or a relaunch of this run already replaced this report; report again
+  with a new idempotency key`). The report is refused with
+  `CodeInvalidParams` for a Background run (`a Background run cannot ask its
+  user; report blocked or failure instead`), a swarm worker, which asks its
+  integrator with `aether-internal ask`, and a run that already finished or
+  is being closed, killed or removed (`the run already finished or is
+  ending; its outcome stands, so this report cannot take effect`).
   The question shows whole, up to the 4 KiB summary limit.
 - **Waiting report.** `aether-internal report waiting --for <agents|ci|process>
   --summary '<why>'` says the turn ends while work the agent started goes
@@ -1643,8 +1656,12 @@ What a report does depends on the run:
   clears it, and with no activity for three times the stall threshold it
   becomes `waiting` with `no update for <duration>`. Every role may report
   it, and it may repeat; runs it starts report their own waits, and
-  subagents never report. Like needs-input it is nonterminal and not durable, and takes no
-  `--evidence-ref`. `--for` with another outcome, or an unknown `--for`
+  subagents never report. Like needs-input it is nonterminal, takes no
+  `--evidence-ref`, and is refused with the same errors for a run that
+  already finished or is ending and for a superseded key. It belongs to the
+  turn that reported it: a turn that fails, is cancelled or interrupted, or
+  stops short (for example on `max_tokens`) drops it, and the run shows that
+  turn's own reason. `--for` with another outcome, or an unknown `--for`
   value, is refused with `CodeInvalidParams`. Report it only where mail
   resumes the idle session (Enhanced runs, managed Claude Code launches and
   native pi, omp or OpenCode integrations); elsewhere nothing wakes the
