@@ -370,15 +370,16 @@ mirror it pushes your local base branch to the server. It is optional and runs
 once per clone.
 
 ```sh
-aether daemon install --server <server-host>:2222 --repo ~/code/myproject
+aether daemon install --repo ~/code/myproject
 systemctl --user daemon-reload && systemctl --user enable --now aether-daemon
 ```
 
 `daemon install` writes a user service (a systemd unit, a launchd agent
 `com.aether.daemon`, or the Scheduled Task `aether-daemon`) and prints the
-command that starts it; the second line is for Linux. Through the edge, pass
-`--server-id <id> --edge-url <edge>` instead of `--server`. `aether daemon run`
-runs in the foreground.
+command that starts it; the second line is for Linux. `--server` and
+`--server-id` default to the linked server, with its key. Pass
+`--server-id <id> --edge-url <edge>` (through the edge) or `--server` only for a
+different server. `aether daemon run` runs in the foreground.
 
 A workspace's base branch is whatever members push, unless an admin gives it
 a source mirror: a read-only repository the server fetches from, with a deploy
