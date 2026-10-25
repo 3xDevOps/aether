@@ -153,6 +153,15 @@ func runLink(args []string) error {
 	}
 	result, err := linkWaiting(linkOpts, prev)
 	if err != nil {
+		var (
+			edgeRefused *edgeclient.RefusedError
+			refused     *edgeproto.Refused
+		)
+		claimed := errors.As(err, &edgeRefused) && edgeproto.Refusal(edgeRefused.Message) == edgeproto.RefusalClaimed ||
+			errors.As(err, &refused) && refused.Kind == edgeproto.RefusedClaimed
+		if _, serverID, parseErr := edgeproto.ParseClaimCode(opts.claim); claimed && parseErr == nil {
+			return fmt.Errorf("%w; link it with: aether link %s", err, serverID)
+		}
 		return err
 	}
 	defer func() { _ = result.Conn.Close() }()
@@ -169,17 +178,25 @@ func runLink(args []string) error {
 	if err = cli.Save(cfg); err != nil {
 		return err
 	}
-	who := result.Info.Member.DisplayName
+	member := result.Info.Member
+	who := member.DisplayName
 	if term.IsTerminal(int(os.Stdout.Fd())) {
-		who = attribution.Sprint(result.Info.Member.Color, who)
+		who = attribution.Sprint(member.Color, who)
+	}
+	if result.KeyGenerated != "" {
+		fmt.Printf("created %s\n", result.KeyGenerated)
 	}
 	switch {
 	case opts.claim != "":
 		fmt.Printf("claimed server %s\n", cfg.ServerID)
 	case opts.join != "":
-		fmt.Printf("joined server %s as %s (%s)\n", cfg.ServerID, who, result.Info.Member.Role)
+		fmt.Printf("joined server %s as %s (%s)\n", cfg.ServerID, who, member.Role)
 	}
-	fmt.Printf("linked to %s as %s (%s)\n", linkTarget(cfg), who, result.Info.Member.Role)
+	if member.Pending {
+		fmt.Printf("linked to %s as %s (%s, pending); an admin runs: aether member approve %s\n", linkTarget(cfg), who, member.Role, member.ID)
+	} else {
+		fmt.Printf("linked to %s as %s (%s)\n", linkTarget(cfg), who, member.Role)
+	}
 	if perr := cli.UpgradeRequired(result.Info); perr != nil {
 		if cfg.Repo != "" {
 			fmt.Println("git remote not set; re-run aether link --repo after aether update")

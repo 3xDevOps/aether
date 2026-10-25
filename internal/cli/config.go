@@ -207,7 +207,7 @@ func Dir() (string, error) {
 }
 
 // ErrNotLinked reports that no local server link has been saved.
-var ErrNotLinked = errors.New("not linked; run aether link <addr>")
+var ErrNotLinked = errors.New("not linked; run aether link <host:port>, or aether login and then aether link --claim <code>")
 
 // Load reads the linked-server config. Missing files surface as a
 // "not linked" error.

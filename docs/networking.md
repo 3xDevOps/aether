@@ -74,9 +74,11 @@ connection, as Tailscale SSH does. The tailnet login becomes the member, and the
 part before the `@` becomes the display name.
 
 - The first tailnet identity to link a fresh server becomes its admin.
-- Everyone after that joins as a pending collaborator. They cannot act until an
-  admin runs `aether member approve <member-id>`; until then commands fail with
-  `membership pending admin approval`. Roles change with `aether member role`
+- Everyone after that joins as a pending collaborator. `aether link` prints
+  `linked to <server> as <name> (collaborator, pending); an admin runs: aether
+  member approve <member-id>`, and every other command fails with `membership
+  pending admin approval; ask an admin to run: aether member approve
+  <member-id>` until one does. Roles change with `aether member role`
   ([teams.md](teams.md)).
 - `--tailnet-auto-join` skips approval, for teams whose tailnet already is the
   team boundary.

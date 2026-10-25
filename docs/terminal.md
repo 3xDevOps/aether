@@ -292,7 +292,7 @@ by UNKNOWN port 65535`:
 | `... run <run-id> already has 16 SSH connections open, the most one run takes` | Close one, or ask a teammate to. |
 | `aether: "<host>" does not name a run: a run id holds only lowercase letters, digits and hyphens` | Use `<run-id>.aether`. |
 | `start the port forwarding relay: the helper exited 125: dev-exec: expected ...` | The run was created before this server version. Launch a new run. |
-| `aether: not linked; run aether link <addr>` | Link this computer first. |
+| `aether: not linked; run aether link <host:port>, or aether login and then aether link --claim <code>` | Link this computer first. |
 | `ssh: Could not resolve hostname <run-id>.aether` | Run `aether ssh-config`. |
 
 ### Swarm workers over SSH

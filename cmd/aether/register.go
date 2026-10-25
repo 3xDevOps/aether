@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -31,5 +33,10 @@ func withControl(fn func(*protocol.Client) error) error {
 		return err
 	}
 	defer func() { _ = c.Close() }()
-	return fn(c)
+	err = fn(c)
+	// mcp.go wraps its own calls with olderServer already.
+	if err != nil && strings.Contains(err.Error(), "aether server update") {
+		return err
+	}
+	return olderServer(err)
 }

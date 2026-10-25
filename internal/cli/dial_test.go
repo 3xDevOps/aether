@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 func TestDialAllowsKeylessNoneAuthenticationWithInvalidKey(t *testing.T) {
@@ -223,6 +224,50 @@ func TestDialAnnouncesNewlyPinnedHostKey(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("stderr = %q, want it to mention %q", got, want)
 		}
+	}
+}
+
+func TestDialHostKeyMismatchNamesTheFix(t *testing.T) {
+	disableAgent(t)
+	newSigner := func() ssh.Signer {
+		_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		signer, err := ssh.NewSignerFromKey(privateKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return signer
+	}
+	served, pinned := newSigner(), newSigner()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		serverConfig := &ssh.ServerConfig{NoClientAuth: true}
+		serverConfig.AddHostKey(served)
+		if serverConn, _, _, hsErr := ssh.NewServerConn(conn, serverConfig); hsErr == nil {
+			_ = serverConn.Close()
+		}
+	}()
+	addr := listener.Addr().String()
+	knownHosts := filepath.Join(t.TempDir(), "known_hosts")
+	if err = os.WriteFile(knownHosts, []byte(knownhosts.Line([]string{addr}, pinned.PublicKey())+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Dial(Config{Addr: addr, KnownHosts: knownHosts})
+	want := "knownhosts: key mismatch: the server's host key is not the one " + knownHosts + " holds for it. " +
+		"If the server was reinstalled, remove the old key with ssh-keygen -R '" + knownhosts.Normalize(addr) + "' -f " + knownHosts
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("Dial = %v, want it to contain %q", err, want)
 	}
 }
 

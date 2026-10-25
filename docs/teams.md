@@ -31,8 +31,10 @@ aether link my-server
 ```
 
 Tailscale proves who they are, and the server adds them as a pending
-collaborator. Until an admin approves them, their commands fail with
-`membership pending admin approval`.
+collaborator. `aether link` prints `linked to <server> as <name> (collaborator,
+pending); an admin runs: aether member approve <member-id>`. Until an admin
+does, their commands fail with `membership pending admin approval; ask an admin
+to run: aether member approve <member-id>`.
 
 ```sh
 aether member list              # the PENDING column marks who waits
@@ -97,9 +99,13 @@ sudo aether-server device review           # on the server
 
 `aether device approve` shows who the device would be admitted as and asks
 `approve it? [y/N]`. Check the member and role first: whoever holds an approved
-device gets that member's access. If the only admin has no approved device, the
-refusal includes a code, and the admin runs `sudo aether-server device approve
-<code>` on the server. At most 10 devices wait per account.
+device gets that member's access. There is no flag that skips the question.
+Any answer other than `y`, or no answer on stdin, fails with `device approve:
+not approved; a person must check the device shown above and confirm with y in
+their own terminal: aether device approve <code or device-id>, or approve it
+from the dashboard's Needs you card`. If the only admin has no approved device,
+the refusal includes a code, and the admin runs `sudo aether-server device
+approve <code>` on the server. At most 10 devices wait per account.
 
 ### By invite code
 

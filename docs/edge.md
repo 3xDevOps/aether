@@ -109,7 +109,9 @@ This binds your GitHub account to your own member, changes no role, and adds the
 edge to the current link. If the server already has an owner it prints `this
 server is already connected to <edge url> as github <login>` and changes
 nothing. Any other claim on a server with members is refused with `server is
-already claimed`. Until the edge has recorded the server, `aether invite
+already claimed`. `aether link --claim` adds `; link it with: aether link
+<server id>`, which is also the answer when you run a claim again after it
+succeeded. Until the edge has recorded the server, `aether invite
 --github|--email`, the Invite dialog and `aether member link` are refused with
 `the edge has not recorded this server yet ... connect your GitHub account
 first`. If the edge cannot record a claim, `sudo aether-server edge status`
