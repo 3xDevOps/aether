@@ -267,7 +267,7 @@ A launch is all or nothing. If any repo cannot be checked out, no run starts
 and the error names that repo:
 
 ```
-provisioning: create checkout: repo "api" (workspace 01m2xwb3es63c0cs0e7aewqpeq): gitengine: base commit "..." is unavailable
+run run-d6ay38tj8j failed: provisioning: create checkout: repo "api" (workspace 01m2xwb3es63c0cs0e7aewqpeq): gitengine: base commit "..." is unavailable
 ```
 
 Limits: extras must already exist as workspaces and cannot repeat or include the
