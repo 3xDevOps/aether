@@ -142,8 +142,17 @@ eight files per message.
 - The row ends as **Sent**, **Not sent**, **Delivery uncertain**, **Denied** or
   **Cancelled**. **Sent** means the terminal accepted the write, not that the
   agent read it.
+- If the agent has turned on bracketed paste, the message arrives as one paste
+  and Enter follows 200 ms later, so a multi-line message is sent whole and
+  once. Otherwise it is typed as written, then Enter.
+- Standard Codex takes the message through its app-server instead, as a new
+  turn when idle or a steer added to the running turn
+  ([Codex](harnesses.md#codex)). **Sent** then means Codex accepted it.
 - **Send to agent** in the **Changes** view sends your diff comments as one such
   message.
+- `aether message <run-id> "<text>"` (or `-` for stdin) prints the receipt:
+  `delivered`, `queued for the member in control` with when it is delivered,
+  or the denial reason.
 - If you cannot message the agent, the composer says why: **This run has
   finished.**, **The agent is still starting.**, **This run is protected: only
   its owner or an admin can message the agent.** or **You can watch this run but
@@ -292,7 +301,7 @@ by UNKNOWN port 65535`:
 | `... run <run-id> already has 16 SSH connections open, the most one run takes` | Close one, or ask a teammate to. |
 | `aether: "<host>" does not name a run: a run id holds only lowercase letters, digits and hyphens` | Use `<run-id>.aether`. |
 | `start the port forwarding relay: the helper exited 125: dev-exec: expected ...` | The run was created before this server version. Launch a new run. |
-| `aether: not linked; run aether link <addr>` | Link this computer first. |
+| `aether: not linked; run aether link <host:port>, or aether login and then aether link --claim <code>` | Link this computer first. |
 | `ssh: Could not resolve hostname <run-id>.aether` | Run `aether ssh-config`. |
 
 ### Swarm workers over SSH
@@ -379,7 +388,9 @@ layout, so some lines can appear on both sides of the boundary.
 The server keeps a run's terminal recording until you delete the run or
 terminal. Closing the container, reclaiming the checkout and archiving do not
 remove it. If earlier output has expired, history is marked truncated and
-cannot be recovered. `aether attach` is a raw stream that replays retained
+cannot be recovered. `aether logs <run-id> [--limit N]` prints the recorded
+terminal lines as plain text, and an Enhanced run's messages and tool calls,
+one line each. `aether attach` is a raw stream that replays retained
 output and discards keystrokes typed before the replay finishes.
 
 ## Reconnects and server updates

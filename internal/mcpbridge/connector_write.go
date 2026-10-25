@@ -31,7 +31,7 @@ type connectorLaunchInput struct {
 
 type swarmWorker struct {
 	Harness string `json:"harness"`
-	Mode    string `json:"mode,omitempty" jsonschema:"default tui"`
+	Mode    string `json:"mode,omitempty" jsonschema:"default acp where installed, else tui"`
 	Model   string `json:"model,omitempty"`
 }
 
@@ -39,7 +39,7 @@ type launchSwarmInput struct {
 	WorkspaceID    string        `json:"workspace_id"`
 	Objective      string        `json:"objective" jsonschema:"the goal, as a complete brief"`
 	Harness        string        `json:"harness" jsonschema:"the integrator's agent"`
-	Mode           string        `json:"mode,omitempty" jsonschema:"default tui"`
+	Mode           string        `json:"mode,omitempty" jsonschema:"default acp where installed, else tui"`
 	Model          string        `json:"model,omitempty"`
 	Workers        []swarmWorker `json:"workers,omitempty" jsonschema:"agents workers may use; default the integrator's"`
 	IdempotencyKey string        `json:"idempotency_key,omitempty"`
@@ -105,7 +105,7 @@ var writeTools = []connectorTool{
 
 var controlTools = []connectorTool{
 	connectorToolOf("aether_decide_approval", "Decide approval", ScopeControl, true, nextAttention,
-		"Use this when the user allows or denies an approval or permission item from aether_needs_attention. It allows once, never always.", decideApproval).
+		"Use this when the user allows or denies a permission item from aether_needs_attention. It allows once, never always.", decideApproval).
 		enum("decision", "allow", "deny"),
 	connectorToolOf("aether_stop_run", "Stop run", ScopeControl, true, nextRuns,
 		"Use this when the user wants a run stopped now.", stopRun),
@@ -328,11 +328,30 @@ func sameChoices(m protocol.Mission, p protocol.MissionCreateParams) bool {
 }
 
 func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any, error) {
-	mode := cmp.Or(in.Mode, "tui")
-	integrator := protocol.MissionExecutionChoice{Harness: in.Harness, Mode: mode, Model: in.Model}
+	var listed protocol.AgentListResult
+	if in.Mode == "" || slices.ContainsFunc(in.Workers, func(w swarmWorker) bool { return w.Mode == "" }) {
+		if err := c.read(ctx, protocol.MethodAgentList, nil, &listed); err != nil {
+			return "", nil, fmt.Errorf("list agents to choose their modes (or pass every mode): %w", err)
+		}
+	}
+	mode := func(agent, given string) (string, error) {
+		if given != "" {
+			return given, nil
+		}
+		return protocol.SwarmMode(listed.Agents, agent)
+	}
+	integratorMode, err := mode(in.Harness, in.Mode)
+	if err != nil {
+		return "", nil, err
+	}
+	integrator := protocol.MissionExecutionChoice{Harness: in.Harness, Mode: integratorMode, Model: in.Model}
 	choices := []protocol.MissionExecutionChoice{integrator}
 	for _, w := range in.Workers {
-		choice := protocol.MissionExecutionChoice{Harness: w.Harness, Mode: cmp.Or(w.Mode, "tui"), Model: w.Model}
+		workerMode, modeErr := mode(w.Harness, w.Mode)
+		if modeErr != nil {
+			return "", nil, modeErr
+		}
+		choice := protocol.MissionExecutionChoice{Harness: w.Harness, Mode: workerMode, Model: w.Model}
 		// The store refuses a choice listed twice.
 		if !slices.Contains(choices, choice) {
 			choices = append(choices, choice)
@@ -561,16 +580,6 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 	}
 	allow := in.Decision == "allow"
 	switch {
-	case it.Kind == protocol.AttentionKindApproval && it.Approval != nil:
-		if err := decidable(in, l, it.Approval.Action, it.Approval.Detail); err != nil {
-			return "", nil, err
-		}
-		var res protocol.ApprovalDecideResult
-		if err := c.act(ctx, protocol.MethodApprovalDecide, protocol.ApprovalDecideParams{RunID: in.RunID, RequestID: in.AnswerID, Approve: allow}, &res); err != nil {
-			return "", nil, err
-		}
-		return fmt.Sprintf("Approval on run %s: %s.", in.RunID, res.Approval.Decision),
-			map[string]any{"run_id": in.RunID, "answer_id": in.AnswerID, "decision": res.Approval.Decision, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
 	case it.Kind == protocol.AttentionKindPermission && it.Request != nil && len(it.Request.Options) > 0:
 		if err := decidable(in, l, it.Request.Title); err != nil {
 			return "", nil, err

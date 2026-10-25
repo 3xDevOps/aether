@@ -792,6 +792,19 @@ func (h *Host) Inject(ctx context.Context, key SessionKey, actorName, actorColor
 	return s.inject(ctx, actorName, actorColor, message, submit)
 }
 
+// Annotate shows the banner Inject draws for a message actorName sent the
+// agent by another route than its stdin.
+func (h *Host) Annotate(ctx context.Context, key SessionKey, actorName, actorColor, message string) error {
+	s := h.lookup(key)
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	tr := s.tr
+	s.mu.Unlock()
+	return s.annotateDelivered(ctx, tr, actorName, actorColor, message)
+}
+
 // ReplayWriter is implemented by an attach conn that needs the replay byte
 // count before streaming it. WriteReplay is called exactly once per attach,
 // before any other Write, and must consume replay before returning.

@@ -94,6 +94,9 @@ func TestAgentRegisterRoundTripsThroughList(t *testing.T) {
 			if a.Source != "member" {
 				t.Fatalf("registered agent source = %q, want member", a.Source)
 			}
+			if a.LoginCommand != "" || a.LoginKind != "" {
+				t.Fatalf("registered agent sign-in = %q %q, want none", a.LoginCommand, a.LoginKind)
+			}
 		}
 	}
 	if !found {
@@ -161,6 +164,13 @@ func TestAgentListFreshMemberReturnsShippedSet(t *testing.T) {
 		}
 		if p, ok := harness.Lookup(a.Name); ok && a.InstallScript != p.InstallScript {
 			t.Fatalf("shipped agent %q install script = %q, want %q", a.Name, a.InstallScript, p.InstallScript)
+		}
+		wantKind := "interactive"
+		if a.Name == "codex" {
+			wantKind = "device"
+		}
+		if a.LoginCommand == "" || a.LoginKind != wantKind {
+			t.Fatalf("shipped agent %q sign-in = %q %q, want a command of kind %q", a.Name, a.LoginCommand, a.LoginKind, wantKind)
 		}
 		got[a.Name] = true
 	}
@@ -412,7 +422,7 @@ func TestAgentListDescribesSharedAccountLaunches(t *testing.T) {
 			Enhanced: "native", Switchable: true, DefaultMode: "tui", EnhancedDefault: true, Unavailable: refusal},
 	} {
 		got := agents[name]
-		got.InstallScript, got.EnhancedInstallScript = "", ""
+		got.InstallScript, got.EnhancedInstallScript, got.LoginCommand, got.LoginKind = "", "", "", ""
 		if (got.LoginFound != nil) != (want.Source == "shipped") || got.LoginFound != nil && *got.LoginFound {
 			t.Fatalf("shared %s login_found = %v, want false for a shipped agent and none for a member's", name, got.LoginFound)
 		}

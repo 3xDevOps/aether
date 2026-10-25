@@ -21,8 +21,8 @@ type NativeLaunch struct {
 	// The scheduler gives each package a run-unique, read-only discovery path.
 	DiscoveryFiles map[string]string
 	ReplacesStatus bool
-	// IdleWake is true when the integration resumes the idle agent when mail
-	// arrives, rather than only announcing mail at its next boundary.
+	// IdleWake is Capabilities.IdleWake for a launch that loaded the
+	// integration, or that attached the terminal to the agent's app-server.
 	IdleWake bool
 }
 
@@ -50,11 +50,12 @@ func (p Profile) PrepareNativeLaunch(dir string, argv []string, env map[string]s
 		native.Env = make(map[string]string)
 	}
 	native.Env[coordtransport.ManagedHooksEnv] = "1"
+	native.IdleWake = p.Capabilities.IdleWake
 	return native, nil
 }
 
 func (p Profile) nativeLaunch(dir string, argv []string, env map[string]string) (NativeLaunch, error) {
-	if !p.NativeCoordination || dir == "" || len(argv) == 0 {
+	if p.Capabilities.Hooks != HooksManaged || dir == "" || len(argv) == 0 {
 		return NativeLaunch{}, nil
 	}
 	switch p.Name {
@@ -78,15 +79,12 @@ func (p Profile) nativeLaunch(dir string, argv []string, env map[string]string) 
 			extension = dir
 		}
 		return NativeLaunch{
-			Files:    map[string][]byte{"aether.ts": body},
-			Args:     []string{"-e", extension},
-			Env:      map[string]string{"AETHER_MANAGED_NATIVE_WAKE": path.Join(dir, "aether.ts")},
-			IdleWake: true,
+			Files: map[string][]byte{"aether.ts": body},
+			Args:  []string{"-e", extension},
+			Env:   map[string]string{"AETHER_MANAGED_NATIVE_WAKE": path.Join(dir, "aether.ts")},
 		}, nil
 	case "claude":
 		return claudeNativeLaunch(dir)
-	case "codex":
-		return codexNativeLaunch()
 	case "copilot":
 		hooks, err := coordhooks.Files.ReadFile("copilot.json")
 		if err != nil {

@@ -15,33 +15,57 @@ and shows messages, tool calls and permission prompts as dashboard controls
 ([Enhanced runs](enhanced-runs.md)). A third mode, **Background**, runs the
 agent once without input, commits the result and exits.
 
-| `--agent` | CLI | Sign in | Standard | Enhanced | Mail reaches the agent | Known limits |
+| `--agent` | CLI | Sign in | Known limits |
+| --- | --- | --- | --- |
+| `antigravity` | Antigravity CLI (runs as `agy`) | run `agy` | None known |
+| `claude` | Claude Code | `claude auth login`, or `/login` inside `claude` | Set up suggests Standard: the Enhanced adapter runs on the Claude Agent SDK |
+| `codex` | OpenAI Codex CLI | `codex login --device-auth` | Standard runs need Codex 0.131.0 or newer; subagents do not nest in Enhanced |
+| `copilot` | GitHub Copilot CLI | `copilot login --device-code` | Enhanced runs cannot take back `--allow-all` |
+| `cursor` | Cursor CLI (runs as `agent`) | `NO_OPEN_BROWSER=1 agent login` | A Cursor admin policy can bring back approval prompts |
+| `gemini` | Gemini CLI | API key, or `NO_BROWSER=true gemini` | Serves paid API keys and Code Assist only |
+| `omp` | oh-my-pi | log in inside `omp` | Sharing an account shares a whole directory |
+| `opencode` | OpenCode | `opencode auth login` | Never auto-updated; reports no usage |
+| `pi` | pi | `/login` inside `pi` | None known |
+
+What each agent can do:
+
+| `--agent` | Standard status | Standard mail | Enhanced | Mode switch | Background tasks | Set up suggests |
 | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `/login` inside `claude` | status reporting | yes, needs an adapter; can switch modes | hooks at turn boundaries, plus idle wake | Setup suggests Standard: the Enhanced adapter runs on the Claude Agent SDK |
-| `codex` | OpenAI Codex CLI | `codex login`, device code | status at turn end only | yes, needs an adapter | hooks at boundaries after you trust them once; no idle wake | Trust prompt on the first Standard run; subagents do not nest in Enhanced |
-| `pi` | pi | `/login` inside `pi` | status reporting | yes, needs an adapter | hooks at boundaries, plus idle wake | None known |
-| `omp` | oh-my-pi | log in inside `omp` | status reporting | yes, built in; can switch modes | hooks at boundaries, plus idle wake | Sharing an account shares a whole directory |
-| `opencode` | OpenCode | `opencode auth login` | status reporting | yes, built in | hooks at boundaries, plus idle wake | Never auto-updated; reports no usage |
-| `copilot` | GitHub Copilot CLI | `copilot login --device-code` | no status; stalls are judged on silence | yes, built in | hooks at boundaries; no idle wake | Enhanced runs cannot take back `--allow-all` |
-| `gemini` | Gemini CLI | API key, or `NO_BROWSER=true gemini` | no status | yes, built in | hooks only if you install them by hand | Serves paid API keys and Code Assist only |
-| `cursor` | Cursor CLI (runs as `agent`) | `NO_OPEN_BROWSER=1 agent login` | no status | yes, built in | hooks only if you install them by hand | A Cursor admin policy can bring back approval prompts |
-| `antigravity` | Antigravity CLI (runs as `agy`) | run `agy` | no status | none | none: the agent reads its inbox explicitly | No Enhanced mode, no packaged hooks |
+| `antigravity` | none | none | none | no | no | Standard |
+| `claude` | turn start and end | hooks and idle wake | adapter | yes | yes | Standard |
+| `codex` | turn start and end | idle wake and mid-turn steer | adapter | no | no | Enhanced |
+| `copilot` | none | hooks | built in | no | no | Enhanced |
+| `cursor` | none | hooks you install | built in | no | no | Enhanced |
+| `gemini` | none | hooks you install | built in | no | no | Enhanced |
+| `omp` | turn start and end | hooks and idle wake | built in | yes | no | Enhanced |
+| `opencode` | turn start and end | hooks and idle wake | built in | no | no | Enhanced |
+| `pi` | turn start and end | hooks and idle wake | adapter | no | no | Standard |
 
-Mail is a message to a run from a person or another run, which the agent reads
-from its inbox ([Incoming coordination hooks](#incoming-coordination-hooks)).
-In an Enhanced run, mail needs no hooks: when the agent is idle and mail is
-waiting, the server sends it one prompt ([Mail](enhanced-runs.md#mail)). The
-hooks and idle wake in the table apply to Standard runs.
-
-**Set up** suggests Enhanced for Codex, oh-my-pi, OpenCode, Copilot, Gemini and
-Cursor, and Standard for Claude Code, pi and Antigravity. The dashboard then
-remembers your choice per agent
-([Choose Enhanced](enhanced-runs.md#choose-enhanced)). `aether run` defaults to
-Standard.
-
-Agents with no status reporting in Standard mode are judged on silence alone: a
-run that goes quiet for `--stall-threshold` parks as **Needs you** with a
-reason starting `stalled:` ([failure-handling.md](failure-handling.md)).
+- **Standard status** is what a Standard run reports of its turns
+  ([Status reporting](#status-reporting)). With none, a run that goes quiet for
+  `--stall-threshold` parks as **Needs you** with a reason starting `stalled:`
+  ([failure-handling.md](failure-handling.md)).
+- **Standard mail** is how a Standard run learns that mail, a message from a
+  person or another run, is waiting in its inbox: hooks at turn boundaries,
+  plus idle wake, which starts a turn in a waiting session
+  ([Incoming coordination hooks](#incoming-coordination-hooks)). Enhanced runs
+  need neither: the server prompts the idle session
+  ([Mail](enhanced-runs.md#mail)). **Mid-turn steer** means mail and your
+  messages reach a working session as a steer instead of waiting for its turn
+  to end.
+- **Enhanced** is built into the agent's CLI, served by a separate
+  [adapter](#enhanced-adapters), or missing.
+- **Mode switch** moves a running session between Standard and Enhanced
+  ([Switching a running agent](enhanced-runs.md#switching-a-running-agent)).
+- **Background tasks**: an Enhanced run stays working while the agent's
+  background subagents and commands run
+  ([Background work](enhanced-runs.md#background-work)).
+- **Set up suggests** is the mode **Set up** picks first. The dashboard then
+  remembers your choice per agent
+  ([Choose Enhanced](enhanced-runs.md#choose-enhanced)), and `aether run`
+  defaults to Standard. A Background run of an agent it suggests Enhanced for
+  uses the agent's ACP server once it is installed
+  ([Background runs](enhanced-runs.md#background-runs)).
 
 Other CLIs work as [custom agents](#custom-and-unlisted-agents).
 
@@ -55,9 +79,14 @@ You do this once per agent, per person.
    aether agent add <name>
    ```
 
-   This opens your environment's terminal, the same shell `aether terminal`
-   opens, types the vendor's install command and leaves you in that shell. The
-   agent installs into `~/.local/bin`, which persists in your home. Add
+   On a terminal, this opens your environment's terminal, the same shell
+   `aether terminal` opens, types the vendor's install command and leaves you in
+   that shell. Without a terminal (an agent's shell, CI), it runs the install
+   on the server, waits up to 10 minutes, prints the end of the install log and
+   `installed <name>`, then `sign in with: aether agent login <name>`. A failed
+   install exits 1 after the log with
+   `aether: agent <name>: the install command exited <n>; its output is above`.
+   The agent installs into `~/.local/bin`, which persists in your home. Add
    `--enhanced` to install the Enhanced adapter too (see
    [Enhanced adapters](#enhanced-adapters)). In the dashboard, **Set up** on the
    **Agents** page or onboarding's **Agent** step does the same: it lets you
@@ -67,13 +96,18 @@ You do this once per agent, per person.
    The environment has no `aether` command (only `aether-internal`), so run
    `aether` commands on your computer, never in this shell.
 
-2. When the install finishes, sign in from the same environment shell with the
-   vendor's login, as described under [Per-agent setup](#per-agent-setup). To
-   sign in later, open the shell with `aether terminal`. The environment has no
-   browser: open the URL the CLI prints in your own browser. In the dashboard,
-   clicking an OAuth URL with a loopback redirect starts the callback forward
-   for you. From the CLI, start it yourself in a second terminal on your
-   computer before you finish the browser flow:
+2. Sign in:
+
+   ```sh
+   aether agent login <name>
+   ```
+
+   On a terminal, this opens the environment's terminal with the agent's
+   sign-in command typed (the **Sign in** column above); finish it there. The
+   environment has no browser: open the URL the CLI prints in your own browser.
+   In the dashboard, clicking an OAuth URL with a loopback redirect starts the
+   callback forward for you. From the CLI, start it yourself in a second
+   terminal on your computer before you finish the browser flow:
 
    ```sh
    aether forward terminal <callback-port>
@@ -81,9 +115,58 @@ You do this once per agent, per person.
 
    Device-code logins need no forward.
 
-3. Check the **Agents** page. It shows **Installed** or **Not installed** and
-   **Login found** or **No login found**. These checks look for the executable
-   and the login file. The agent itself verifies the login when it starts.
+   Without a terminal, only a device-code sign-in, which needs nothing typed
+   back, can run. Today that is Codex: `aether agent login codex` runs
+   `codex login --device-auth` in a new terminal tab, `login-codex-<id>`,
+   prints its output as plain text as it arrives, so the URL and code reach
+   you, and waits for it to end. It then prints
+   `codex: login file found; aether account usage checks that the vendor accepts it`,
+   or exits 1 naming Codex's exit status. Running it again starts a new
+   sign-in with a new code. Ctrl-C stops only the CLI; the sign-in runs on in
+   its tab until it ends or the code expires. The token stays in your home on
+   the server.
+
+   Every other agent's sign-in needs typed input (a pasted code, a picker, a
+   y/N), so without a terminal the command exits 1 at once:
+
+   ```text
+   aether: claude signs in with claude auth login, which needs typed input, so it needs a terminal. The human runs this in their own terminal:
+     aether agent login claude
+   An API key stored as a workspace secret works instead: docs/harnesses.md#use-an-api-key
+   ```
+
+3. Check the agent:
+
+   ```sh
+   aether agent list
+   ```
+
+   ```text
+   AGENT        SOURCE   INSTALLED  ENHANCED       LOGIN FILE
+   claude       shipped  yes        not installed  not found
+   codex        shipped  yes        installed      found
+   myagent      member   yes        none           -
+   ```
+
+   `LOGIN FILE` only looks for the login file in your home; `-` means the agent
+   declares none. `--json` prints the agents as `agent.list` returns them
+   ([local-gateway.md](local-gateway.md)). The **Agents** page shows the same
+   checks as **Installed** and **Login found**. The agent itself verifies the
+   login when it starts. For Claude Code and Codex, ask the vendor whether it
+   accepts the login:
+
+   ```sh
+   aether account usage
+   ```
+
+   ```text
+   PROVIDER  STATUS           DETAIL
+   claude    ok               5 hours: 12% used, 7 days: 40% used
+   codex     unauthenticated  Codex OAuth credential not found
+   ```
+
+   The statuses are those in [Subscription quota](#subscription-quota).
+   `--json` prints the `account.usage` result.
 
 The login and executable live in your home, so every container you launch sees
 them. If you skip the login, the agent's own login prompt appears in the run's
@@ -92,9 +175,30 @@ terminal. Attach with `aether attach <run>` and finish it there.
 Installing `codex`, `pi`, `copilot` or `gemini` needs `npm`. If `npm` is not on
 the environment's `PATH`, the install fails with, for example,
 `npm is not in this environment's PATH, and codex installs through npm`. The
-dashboard's **Set up** runs the install under `mktemp` and `timeout`, so the
-image must provide both. Without them it fails with `timeout: not found` and
-exit status 127.
+dashboard's **Set up** and `aether agent add` without a terminal run the
+install under `mktemp` and `timeout`, so the image must provide both. Without
+them it fails with `timeout: not found` and exit status 127.
+
+### Use an API key
+
+A key stored as a workspace secret replaces the agent's login in that
+workspace's runs. The human runs this on their own computer, for example:
+
+```sh
+aether workspace env set --secret ANTHROPIC_API_KEY
+```
+
+The value is read from stdin; on a terminal the command prompts with input
+hidden. Codex ignores `OPENAI_API_KEY` and reads `CODEX_API_KEY` in
+Background runs only; for every Codex mode, run `codex login --with-api-key`
+in `aether terminal`. Each agent's key is under
+[Per-agent setup](#per-agent-setup). Pick another workspace with `--workspace
+<name-or-id>`. Never pass a key as `NAME=value`: that puts it on the command
+line and stores a plain variable that `aether workspace env list` shows.
+
+> [!WARNING]
+> On a team server, anyone who can launch a run in the workspace or message one
+> can read the key ([environments.md](environments.md#secrets)).
 
 ### Enhanced adapters
 
@@ -110,47 +214,82 @@ tests against. The dashboard's **Set up** does the same when you pick Enhanced.
 Run each login in your environment's shell, which `aether terminal` opens from
 your computer. API keys set in the server's environment
 (`/etc/aether/aether-server.env` with the shipped systemd unit) replace the
-login.
+login. To send an agent through a model gateway such as LiteLLM or OpenRouter,
+also set the base-URL variable its section names. A variable Aether does not
+pass through, such as Claude Code's `ANTHROPIC_AUTH_TOKEN`, goes in a
+[workspace secret](environments.md#secrets).
 
 #### Claude Code
 
-Start `claude` and use `/login`. It prints a URL to open in your own browser and
-takes a code back. `/status` shows which credential is active. The login lands
-in `~/.claude/.credentials.json`.
+Run `claude auth login`, or start `claude` and use `/login`. Either prints a URL
+to open in your own browser and takes a code back. `/status` shows which
+credential is active. The login lands in `~/.claude/.credentials.json`.
 
-For an API key, set `ANTHROPIC_API_KEY` in the server's environment. Aether
-passes through `ANTHROPIC_API_KEY` only. A `CLAUDE_CODE_OAUTH_TOKEN` from
-`claude setup-token` is not passed, so use the terminal for subscription logins.
+For an API key, set `ANTHROPIC_API_KEY` in the server's environment, and
+`ANTHROPIC_BASE_URL` for a gateway. A `CLAUDE_CODE_OAUTH_TOKEN` from
+`claude setup-token` is not passed through, so use the terminal for
+subscription logins.
 
 Claude Code refuses `--dangerously-skip-permissions` as root, so every `claude`
 run gets `IS_SANDBOX=1`.
 
 #### Codex
 
-Run `codex login` and choose the device-code option. The login lands in
-`~/.codex/auth.json`. `OPENAI_API_KEY` in the server's environment is the
-API-key alternative.
+Run `codex login --device-auth`. It prints a URL and a one-time code and needs
+nothing typed back. Device code login must be on first: in ChatGPT's security
+settings for a personal account, or in the workspace permissions for a ChatGPT
+workspace ([OpenAI](https://learn.chatgpt.com/docs/auth)). The login lands in
+`~/.codex/auth.json`. For an API key, `codex login --with-api-key` reads one
+from stdin into the same file, which every run mode uses. `CODEX_API_KEY` in
+the server's environment signs in Background runs only. Codex ignores
+`OPENAI_API_KEY` there, except that its sign-in screen's **Use an OpenAI API
+key** comes filled in with it. Codex reads no base-URL variable; for a gateway,
+set `openai_base_url` in `~/.codex/config.toml`.
 
-Your first Standard run opens Codex's **Hooks need review** screen for Aether's
-inbox hooks. Choose **Trust all and continue**, or open `/hooks` and press `t`.
-One approval covers every workspace until Aether's hook definitions change.
-**Continue without trusting** asks again at the next start. A swarm worker can
-be the first Standard Codex run: open its terminal to answer. If the list shows
-hooks you do not recognize, choose **Review hooks**. A copy of the hooks in
-`~/.codex/hooks.json` would run every hook twice in an Aether run, so remove it.
+A Standard Codex run starts `codex app-server` in the run's container and
+attaches the Codex terminal to it with `codex --remote`. Aether follows the same
+session through that app-server: Codex reports the start and end of each turn,
+and mail and your messages from the dashboard or `aether message` arrive as a
+new turn when Codex is idle, or as a steer added to the running turn. They show
+in the terminal as prompts, under Aether's attribution banner. Press Esc in the
+terminal to stop a turn. Aether loads no hooks into Standard Codex, so remove
+any copy of its hooks from `~/.codex/hooks.json`: it would announce mail twice.
+
+Standard runs need Codex 0.131.0 or newer. With an older one, the run's terminal
+prints:
+
+```text
+codex-cli 0.130.0 is too old: Aether attaches Codex's terminal to its app-server, which needs Codex 0.131.0 or newer.
+Update it here, then start a new run:
+  npm install -g --prefix "$HOME/.local" @openai/codex@latest
+```
+
+If the app-server exits before it listens, the terminal prints
+`codex app-server exited before listening on /tmp/aether-codex/app-server.sock:`
+with its exit status and the end of its log, `/tmp/aether-codex/app-server.log`.
+If Aether cannot reach the app-server, the run shows **Needs you** with a reason
+starting `codex app-server unavailable:` and the real error.
+
+The app-server ends with the Codex terminal. In the login shell that follows,
+`codex resume <session>` continues the session, but without Aether's status
+reports and message delivery. The `codex --remote ... resume` command Codex
+prints on exit no longer works.
 
 #### pi
 
 Start `pi` and use `/login` to pick a provider. The login lands in
 `~/.pi/agent/auth.json`. `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the server's
-environment is the API-key alternative.
+environment is the API-key alternative. pi reads no base-URL variable; for a
+gateway, set the provider's `baseUrl` in `~/.pi/agent/models.json`.
 
 #### oh-my-pi (omp)
 
 oh-my-pi is a fork of pi with its own executable and home. The install command
 is `curl -fsSL https://omp.sh/install | sh`, which puts `omp` in
 `~/.local/bin`. Start `omp` and log in through its own flow. The login lands in
-the agent database under `~/.omp/agent/`.
+the agent database under `~/.omp/agent/`. `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY` in the server's environment is the API-key alternative, and
+`ANTHROPIC_BASE_URL` sends Anthropic requests to a gateway.
 
 `omp` is a shipped name, and a shipped name always wins over a definition you
 stored with `aether agent add omp`. To launch your own build, register it under
@@ -159,7 +298,9 @@ a name Aether does not ship.
 #### OpenCode
 
 Run `opencode auth login` and pick your provider. The login lands in
-`~/.local/share/opencode/auth.json`. OpenCode settings and plugins live in
+`~/.local/share/opencode/auth.json`. `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in
+the server's environment is the API-key alternative, with `ANTHROPIC_BASE_URL`
+or `OPENAI_BASE_URL` for a gateway. OpenCode settings and plugins live in
 `~/.config/opencode`, the root `aether config` and **Files** use. That root does
 not follow `XDG_CONFIG_HOME`, `OPENCODE_CONFIG_DIR` or `OPENCODE_CONFIG`.
 
@@ -177,7 +318,8 @@ before any login, so **Login found** only means Copilot has started once.
 `COPILOT_GITHUB_TOKEN` in the server's environment is the API-key alternative
 and takes precedence over a stored login. It must be a fine-grained personal
 access token with the "Copilot Requests" permission. Classic `ghp_` tokens do
-not work.
+not work. For an OpenAI-compatible gateway, set `COPILOT_PROVIDER_BASE_URL` and
+`COPILOT_PROVIDER_API_KEY` instead; Copilot then needs no GitHub login.
 
 Runs set `COPILOT_ALLOW_ALL=true`, which trusts the working directory, so
 Copilot loads that directory's skills, plugins, MCP servers and hooks. Enhanced
@@ -192,8 +334,11 @@ Antigravity CLI
 ([announcement](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)).
 
 With an API key, put `GEMINI_API_KEY=<key>` in `~/.gemini/.env`, or set it in the
-server's environment. Gemini reads only the first `.env` it finds walking up
-from the run's directory, so a `.env` in the checkout wins over
+server's environment. For a gateway, set `GOOGLE_GEMINI_BASE_URL` the same way
+and put `{"security":{"auth":{"selectedType":"gemini-api-key"}}}` in
+`~/.gemini/settings.json`; without it a Background run fails with
+`Invalid auth method selected.` Gemini reads only the first `.env` it finds
+walking up from the run's directory, so a `.env` in the checkout wins over
 `~/.gemini/.env`.
 
 With Code Assist, run `NO_BROWSER=true gemini`, choose Sign in with Google, open
@@ -226,9 +371,9 @@ is `agy`; pick `antigravity` at launch. The install command is
 `agy` has no login subcommand. Run `agy`, choose Google OAuth or a Google Cloud
 project, open the printed URL and paste the code back. The login lands in
 `~/.gemini/antigravity-cli/antigravity-oauth-token`. For an API key, set
-`GEMINI_API_KEY` and put `"modelProvider":"gemini"` in
-`~/.gemini/antigravity-cli/settings.json`. For Google Cloud application default
-credentials, set `AGY_ADC_AUTH=true`.
+`GEMINI_API_KEY` (and `GOOGLE_GEMINI_BASE_URL` for a gateway) and put
+`"modelProvider":"gemini"` in `~/.gemini/antigravity-cli/settings.json`. For
+Google Cloud application default credentials, set `AGY_ADC_AUTH=true`.
 
 Antigravity has no Enhanced mode, and an Enhanced launch is refused. `agy` has no
 ACP command, and Google's separate `antigravity-acp` package cannot finish its
@@ -236,8 +381,9 @@ Google sign-in inside a run container.
 
 ### Install hooks by hand
 
-Claude Code, Codex, Copilot, pi, oh-my-pi and OpenCode load Aether's inbox hooks
-for you on a Standard run that has a task. Gemini CLI and Cursor CLI do not.
+Claude Code, Copilot, pi, oh-my-pi and OpenCode load Aether's inbox hooks for
+you on a Standard run that has a task. Codex needs none: its app-server hands it
+mail. Gemini CLI and Cursor CLI do not load hooks.
 Without hooks, mail reaches those agents only when they run
 `aether-internal inbox`.
 
@@ -371,6 +517,9 @@ launches pass these flags:
 | `cursor` | `agent --force --trust {task}` | `agent -p --force --trust {task}` |
 | `antigravity` | `agy --dangerously-skip-permissions --prompt-interactive={task}` | `agy --dangerously-skip-permissions --print={task}` |
 
+A Standard Codex run attaches its command to `codex app-server`
+([Codex](#codex)).
+
 OpenCode has no such flag, so every OpenCode launch gets
 `{"permission":"allow"}` in `OPENCODE_CONFIG_CONTENT`. Your workspace's own
 value of that variable is merged over it key by key, so a workspace that sets
@@ -423,7 +572,7 @@ reaches the agent depends on the agent:
 | Agent | Delivery |
 | --- | --- |
 | `claude`, `pi`, `omp` | `--append-system-prompt` |
-| `codex` | `-c developer_instructions=...`, which replaces any `developer_instructions` in your `config.toml`. Aether copies the top-level value of `~/.codex/config.toml` in first. A value in a Codex profile, a project `.codex/config.toml` or a workspace `CODEX_HOME` is replaced for that launch: put such instructions in `AGENTS.md` |
+| `codex` | `-c developer_instructions=...`, passed to `codex app-server`, which replaces any `developer_instructions` in your `config.toml`. Aether copies the top-level value of `~/.codex/config.toml` in first. A value in a Codex profile, a project `.codex/config.toml` or a workspace `CODEX_HOME` is replaced for that launch: put such instructions in `AGENTS.md` |
 | `opencode`, `copilot` | An instructions file the agent loads through its config or `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` |
 | `gemini`, `cursor`, `antigravity` | After the task prompt. A launch with no task gets none |
 | Enhanced runs | Over ACP ([Enhanced runs](enhanced-runs.md#instructions-and-the-session-log)) |
@@ -496,14 +645,17 @@ except where [Install hooks by hand](#install-hooks-by-hand) says otherwise.
 Hooks work only for a coordinated run that has a task, in Standard mode. A
 taskless launch, a Background run, a run with `--conflict-coordination=false`,
 and an agent whose command an administrator overrode do not get them. Enhanced
-runs do not use hooks: the server prompts the idle session instead. Without
-either, the agent reads mail only when it runs `aether-internal inbox`.
+runs do not use hooks: the server prompts the idle session instead. So does a
+Standard Codex run, through its app-server, with or without a task: the server
+prompts the session with the inbox notice, as a new turn when idle and as a
+steer mid-turn. Without any of these, the agent reads mail only when it runs
+`aether-internal inbox`.
 
 Claude Code is the one with a hook-based idle wake in Standard mode. Its wake
 starts a turn with no human input, and the terminal shows **Stop hook feedback**.
 That wording is Claude Code's own framing, not an error. After you press Esc, a
-wake pauses until a turn completes. Codex and Copilot have no idle wake, so mail
-waits for the next hook boundary. pi, oh-my-pi and OpenCode wake only their main
+wake pauses until a turn completes. Copilot has no idle wake, so mail waits for
+the next hook boundary. pi, oh-my-pi and OpenCode wake only their main
 session, and only while idle.
 
 Hooks that you installed yourself and Aether's managed ones do not double up for
@@ -517,11 +669,10 @@ launches but reports nothing, and is judged on silence.
 An agent with status reporting tells Aether when it is working and when it is
 waiting. The dashboard shows a waiting run as **Needs you**
 ([failure-handling.md](failure-handling.md#needs-you)). Standard runs of
-`claude`, `pi`, `omp` and `opencode` report both ends of a turn. `codex` reports
-only when a turn ends, so its run returns to `running` on agent output or a file
-change. That includes the echo of your own typing, so a long prompt typed into a
-parked `codex` run can read as `running` before you send it. Copilot, Gemini,
-Cursor and Antigravity have none.
+`claude`, `codex`, `pi`, `omp` and `opencode` report both ends of a turn.
+While Codex asks you a question in its terminal, the run waits with the reason
+`waiting for your answer in the terminal`. Copilot, Gemini, Cursor and
+Antigravity have none.
 
 Enhanced and Background-over-ACP runs need no reporter: the session reports both
 ends of each turn. Background runs without ACP are never reported.
@@ -541,8 +692,12 @@ mounts.
 - Only Claude Code and oh-my-pi can switch a running session between Standard
   and Enhanced ([Switching a running agent](enhanced-runs.md#switching-a-running-agent)).
 - Codex subagents do not nest in the Enhanced timeline.
-- No idle wake exists for Codex, Copilot, Gemini or Cursor, and Antigravity has
-  no hooks at all.
+- No idle wake exists for Copilot, Gemini or Cursor, and Antigravity has no
+  hooks at all. A [swarm](teams.md#swarms) refuses them Standard, so they run
+  Enhanced there, or Background as workers.
+- Standard Codex needs Codex 0.131.0 or newer. Its app-server ends with its
+  terminal, so a `codex resume` in the shell runs without Aether's status and
+  message delivery.
 - Only Claude Code and Codex show subscription usage and can move to another
   account on a usage limit.
 - Sharing an `omp` account shares the whole `~/.omp/agent` directory. oh-my-pi

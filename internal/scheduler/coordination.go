@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -42,6 +43,7 @@ type Coordinator interface {
 	Release(run domain.RunID) error
 	WakeIdle(run domain.RunID)
 	EnhancedSessionOpened(ctx context.Context, run domain.RunID)
+	ProvisionalReport(ctx context.Context, run domain.RunID, since time.Time, message string) error
 }
 
 // coordination attaches the run transport and staged binaries. enabled controls
@@ -477,11 +479,11 @@ func newCoordinationLaunch(enabled bool, run *domain.Run, profile harness.Profil
 	maps.Copy(l.files, native.Files)
 	// Lifecycle reporting follows conflict policy; instructions only need the
 	// run transport. User-supplied MCP configuration is never rewritten.
-	if enabled && run.Mode == domain.LaunchTUI && profile.Reporter != harness.ReporterNone && !native.ReplacesStatus {
+	if enabled && run.Mode == domain.LaunchTUI && profile.Capabilities.Status != harness.ReporterNone && !native.ReplacesStatus {
 		maps.Copy(l.files, profile.StatusFiles)
 		l.args = append(l.args, profile.StatusLaunchArgs(coordtransport.MountDir)...)
 		l.env = profile.StatusLaunchEnv(coordtransport.MountDir)
-		l.reporter = profile.Reporter
+		l.reporter = profile.Capabilities.Status
 	}
 	if native.ReplacesStatus {
 		l.reporter = native.Reporter

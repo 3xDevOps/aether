@@ -1,6 +1,9 @@
 package protocol
 
-import "time"
+import (
+	"regexp"
+	"time"
+)
 
 const (
 	MethodWorkspaceImport   = "workspace.import"
@@ -386,4 +389,57 @@ type RunPRMergeResult struct {
 	AccountMemberID string               `json:"account_member_id"`
 	Output          RunRepoCommandOutput `json:"output"`
 	Error           string               `json:"error,omitempty"`
+}
+
+var githubRemote = regexp.MustCompile(`^(?:https://(?:[^@/]+@)?github\.com/|(?:ssh://)?git@github\.com[:/])([^/]+/[^/]+?)(?:\.git)?/?$`)
+
+// GitHubRemoteRepository is githubRepository in web/src/routes/diff/publish-target.ts:
+// the owner/name of a github.com remote URL, empty for any other URL.
+func GitHubRemoteRepository(url string) string {
+	if m := githubRemote.FindStringSubmatch(url); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// DefaultPushTarget is the dashboard's defaultPushTarget: the branch's
+// upstream, else origin when the workspace sets an Origin. Repository is
+// empty unless that remote has exactly one push URL.
+func DefaultPushTarget(remotes []RunGitRemote, upstream *RunGitUpstream, branch string, workspaceOrigin bool) RunGitPushTarget {
+	var tracked, origin *RunGitRemote
+	for i := range remotes {
+		if upstream != nil && remotes[i].Name == upstream.Remote {
+			tracked = &remotes[i]
+		}
+		if workspaceOrigin && remotes[i].Name == "origin" {
+			origin = &remotes[i]
+		}
+	}
+	remote, head := origin, branch
+	if tracked != nil {
+		remote, head = tracked, upstream.Branch
+	}
+	if remote == nil {
+		return RunGitPushTarget{HeadBranch: head}
+	}
+	target := RunGitPushTarget{Remote: remote.Name, HeadBranch: head}
+	if len(remote.PushURLs) == 1 {
+		target.Repository = remote.PushURLs[0]
+	}
+	return target
+}
+
+// DefaultPRTarget is the dashboard's defaultPRTarget: push into base on the
+// workspace source, which for a fork Origin is its upstream. It is zero when
+// push is not to a github.com repository.
+func DefaultPRTarget(push RunGitPushTarget, base, source string) RunPRTarget {
+	head := GitHubRemoteRepository(push.Repository)
+	if head == "" {
+		return RunPRTarget{}
+	}
+	repository := GitHubRemoteRepository(source)
+	if repository == "" {
+		repository = head
+	}
+	return RunPRTarget{Repository: repository, BaseBranch: base, HeadRepository: head, HeadBranch: push.HeadBranch}
 }

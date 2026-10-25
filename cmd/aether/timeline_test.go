@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/testhome"
 )
 
 // TestTimelineDetailIsPrintable pins that agent-authored event text is
@@ -37,6 +40,7 @@ func TestTimelineDetailNamesAgentMail(t *testing.T) {
 	}{
 		{events.CoordMessagePayload{MessageID: "m1", FromRunID: "r1", ToRunID: "r2", Kind: "question"}, "r1 -> r2 · question"},
 		{events.CoordMessageAckedPayload{MessageID: "m1", ToRunID: "r2"}, "r2 acknowledged m1"},
+		{events.TimelinePayload{Kind: events.TimelineReport, Outcome: "success", Summary: "added the check\nand its test"}, "success: added the check ..."},
 	} {
 		raw, err := json.Marshal(tc.payload)
 		if err != nil {
@@ -46,5 +50,17 @@ func TestTimelineDetailNamesAgentMail(t *testing.T) {
 		if got := timelineDetail(ev, func(id string) string { return id }); got != tc.want {
 			t.Fatalf("detail = %q, want %q", got, tc.want)
 		}
+	}
+}
+
+func TestTimelineTakesTheRunAsAnArgument(t *testing.T) {
+	testhome.Isolate(t)
+	for _, args := range [][]string{{"timeline", "run-1", "run-2"}, {"timeline", "run-1", "--run", "run-2"}} {
+		if err := dispatch(args); err == nil || !strings.Contains(err.Error(), "name the run once") {
+			t.Errorf("aether %s = %v, want the run named once", strings.Join(args, " "), err)
+		}
+	}
+	if err := dispatch([]string{"timeline", "run-1", "--jsonl"}); !errors.Is(err, cli.ErrNotLinked) {
+		t.Errorf("aether timeline run-1 --jsonl = %v, want it to reach the server", err)
 	}
 }

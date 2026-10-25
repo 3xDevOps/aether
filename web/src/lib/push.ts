@@ -98,14 +98,18 @@ const methodNotFound = -32601
 const denied = -32001
 
 /**
- * Opens the run a tapped notification names, which the worker posts to a
- * dashboard that is already open, and tells the server while a person is
- * using this one: it holds their notifications until they have left every
- * dashboard alone for a minute.
+ * Opens the run or workspace budget a tapped notification names, which the
+ * worker posts to a dashboard that is already open, and tells the server
+ * while a person is using this one: it holds their notifications until they
+ * have left every dashboard alone for a minute.
  */
 export function watchPush(store: RootStore, client: Api): () => void {
   const open = (event: MessageEvent) => {
-    const data = event.data as { type?: unknown; run?: unknown } | null
+    const data = event.data as { type?: unknown; run?: unknown; workspace?: unknown } | null
+    if (data?.type === 'aether:open-workspace' && typeof data.workspace === 'string') {
+      store.getState().navigate('workspace', { workspaceId: data.workspace })
+      return
+    }
     if (data?.type !== 'aether:open-run' || typeof data.run !== 'string') return
     const route = runRoute(data.run)
     store.getState().navigate(route.name, route.params)

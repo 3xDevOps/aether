@@ -152,8 +152,10 @@ hides it and frees nothing.
 `scheduler: host capacity unavailable: ...` means Aether could not measure a
 filesystem or host memory, for example a Docker daemon whose storage it cannot
 see or a probe that timed out. Fix what the error names; free space in `df`
-on a different machine does not count. If a filesystem cannot be read at all,
-the disk check lets the launch through.
+on a different machine does not count. When Docker does not answer, the error
+ends with `the server's operator can check Docker with: sudo systemctl status
+docker`. If a filesystem cannot be read at all, the disk check lets the launch
+through.
 
 ## Capture an unresponsive host
 
@@ -377,7 +379,7 @@ polling until it is reopened.
 
 | Action | Container | Checkout | Reopen |
 | --- | --- | --- | --- |
-| **Close** (`aether close <run-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the run ended: at 7 days with the defaults. | Yes, until the deadline: **Reopen run** or `aether reopen <run-id>`. |
+| **Close** (`aether close <run-id> --outcome merged` or `abandoned`) | Paused and kept for `--run-container-ttl` (7 days). It still holds its memory. | Kept while the container is kept. Removed after that, but no sooner than `--checkout-ttl` (72 hours) after the run ended: at 7 days with the defaults. | Yes, until the deadline: **Relaunch** or `aether reopen <run-id>`. The deadline is cleared while the run is live; the next close sets a new 7 days. |
 | A Background run finishes | Removed at once. | Kept for `--checkout-ttl` (72 hours) after the run ends. | No. |
 | A swarm worker reports | Paused and kept for `--run-container-ttl`. | Kept as for **Close**. | No. |
 | **Kill run** (`aether kill <run-id>`) | Stopped and removed. | Kept for `--checkout-ttl` after the run ends. | No. |
@@ -386,10 +388,11 @@ polling until it is reopened.
 
 The run branch is published before a checkout is removed, so cleanup never
 loses committed work. When disk runs low, Aether removes both sooner
-([Recover from disk pressure](#recover-from-disk-pressure)). Reopening resumes
+([Recover from disk pressure](#recover-from-disk-pressure)). Relaunching resumes
 the same container and checkout; it restarts no process that had stopped. When
 retention ends, a closed run's reason reads `retained container expired` or
-`retained container unavailable`.
+`retained container unavailable`; when low disk space removes the container
+early it reads `retained container reclaimed for disk space`.
 
 ## Tuning
 

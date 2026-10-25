@@ -39,6 +39,9 @@ type Deps struct {
 	Git     *gitengine.Engine
 	PTY     *ptyhost.Host
 	SSH     *sshd.Config
+	// SSHServer is the server sshd.New builds from SSH, for a service to
+	// call once started.
+	SSHServer func() *sshd.Server
 
 	// Control is the one process-wide controller lease table. It is shared
 	// by SSH and local attaches and by the room service.

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,14 +16,17 @@ import (
 
 func init() {
 	register(command{
-		name:  "init",
-		short: "prepare a server data directory (does not start the server)",
-		run:   runInit,
+		name:    "init",
+		short:   "prepare a server data directory (does not start the server)",
+		usage:   "aether init [--data-dir <path>]",
+		example: "aether init --data-dir /var/lib/aether",
+		flags:   true,
+		run:     runInit,
 	})
 }
 
 func runInit(args []string) error {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	fs := newFlagSet("init")
 	dataDir := fs.String("data-dir", "/var/lib/aether", "server data directory")
 	if err := fs.Parse(args); err != nil {
 		return err

@@ -13,9 +13,11 @@ import (
 
 func init() {
 	register(command{
-		name:  "handoff",
-		short: "transfer a run to another member",
-		run:   runHandoff,
+		name:    "handoff",
+		short:   "transfer a run to another member",
+		usage:   "aether handoff <run-id> <member>",
+		example: "aether handoff run-d6ay38tj8j alice",
+		run:     runHandoff,
 	})
 }
 

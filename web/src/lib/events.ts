@@ -23,7 +23,6 @@ export const eventLabel = {
   'run.cost': 'Usage',
   'run.overlap': 'Overlapping runs',
   'workspace.timeline': 'Messages and steering',
-  'workspace.approval': 'Approvals',
   'workspace.presence': 'Presence',
   'workspace.budget': 'Budget',
   'git.branch': 'Branch updates',

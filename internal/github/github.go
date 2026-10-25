@@ -189,7 +189,7 @@ func (s *Service) PullRequest(ctx context.Context, member domain.MemberID, fullN
 
 func parseCredential(data []byte) (string, string, error) {
 	if len(data) == 0 {
-		return "", "", errors.New("github: no native gh login found; connect GitHub")
+		return "", "", errors.New("github: no native gh login found; run aether github connect")
 	}
 	type user struct {
 		Token string `yaml:"oauth_token"`

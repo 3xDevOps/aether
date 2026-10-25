@@ -3,6 +3,8 @@
 This guide takes you from nothing to an agent's change published as a pull
 request, in eight steps. Each step ends with how you know it worked. Aether's
 terms are defined in the [glossary](README.md#concepts).
+A coding agent can do these steps from the CLI: paste the prompt in
+[agents.md](agents.md) into it.
 
 You need:
 
@@ -32,7 +34,7 @@ installs the CLI and the desktop app without administrator rights:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
-& "$env:TEMP\aether-install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 
 It worked if `aether version` prints the release on your computer, and
@@ -65,13 +67,14 @@ turns it off.
 Setup ends with a claim link and the commands left for you:
 
 ```
-claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid until 3:04PM, 5 attempts)
+claim link: aether://claim?edge=https%3A%2F%2Fedge.onaether.dev&server=<server id>#<secret> (valid for 30 min, until 2026-10-25 15:04 UTC, 5 attempts)
 
 next:
   1. start the server on this machine:
        sudo systemctl daemon-reload && sudo systemctl enable --now aether-server
   2. on your computer, open the claim link above with the Aether app, or paste it
      into the app's Connect page; in a terminal:
+       aether login
        aether link --claim <server id>-<secret>
   3. to run agents from ChatGPT or Claude, on that computer:
        aether mcp
@@ -83,11 +86,28 @@ next:
 > prints a new one until someone has joined.
 
 Run the first command to start the server. Without the edge, the second is
-`aether link <this-host>:2222`. The third is optional
+`aether link <this-host>:2222`. With the edge, linking by address before the
+claim works only on the server or through an SSH tunnel
+([networking.md](networking.md#the-first-admin)). The third is optional
 ([connectors.md](connectors.md)).
 
 It worked if `sudo aether-server edge status` shows `connection  connected since
 <time>`, or without the edge, `systemctl status aether-server` shows `active`.
+
+To drive setup from an agent over ssh, with no terminal on the server (`sudo`
+there must not ask for a password), run the steps non-interactively:
+
+```sh
+ssh <user>@<server> 'curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --role none'
+ssh <user>@<server> 'sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>'
+ssh <user>@<server> 'sudo systemctl daemon-reload && sudo systemctl enable --now aether-server'
+ssh <user>@<server> 'sudo aether-server edge status'   # repeat until it exits 0: connected
+ssh <user>@<server> 'sudo aether-server edge claim-code'
+```
+
+The access policy is the owner's choice (`account` or `approved-devices`, as
+in the table above). The claim code goes to step 3: `aether login`, then
+`aether link --claim <code>`.
 
 ## 3. Link from your machine
 
@@ -103,11 +123,21 @@ the desktop app:
    the code.
 4. Click **Claim and link**.
 
-Or in a terminal, run `aether login`, open the address it prints, confirm the
-code on GitHub, then run `aether link --claim <server id>-<secret>`.
+Or in a terminal, run `aether login`, open the address it prints, sign in with
+GitHub, and enter the code on that edge page. Then run `aether link --claim
+'<claim link>'`, or `aether link --claim <server id>-<secret>`.
 
 It worked if `aether link` ends with `linked to server <server id> through
 edge.onaether.dev as <your name> (admin)`.
+
+`aether status` shows what this computer is linked to, the edge it is signed in
+to, the server and your role, the workspaces, which agents your environment has
+installed and whether their login file is there, and the command for the next
+missing step, prefixed `an admin runs:` or `a human runs in a terminal:` when
+it is not yours or needs a terminal. `aether status --json` prints the same as
+one JSON object. It
+exits 1 when the server cannot be reached, after printing what this computer
+holds and the error.
 
 On a tailnet, or to an SSH port you can reach, link by address instead:
 `aether link <server-host>:2222`. On a tailnet the server knows you by your
@@ -163,12 +193,26 @@ repository** adds another repository later.
 | --- | --- |
 | Public Git URL | **From a Git URL → Import repository**, then **Public HTTPS**. |
 | Private Git URL | Same form with **Read-only deploy key**. Install the public key it shows at the Git host, then **Verify** and **Adopt candidate**. |
-| A clone on your computer | **From a local clone → Create from local clone**, then push the base branch. Needs the desktop app or `aether gui` on that computer. The [CLI version](#prove-the-plumbing-without-an-agent-subscription) is below. |
+| A clone on your computer | **From a local clone → Create from local clone**, then push the base branch. Needs the desktop app or `aether gui` on that computer. Or [from the CLI](#from-the-cli). |
 
 [teams.md](teams.md) covers each source. A workspace can also run a setup script
 (such as `npm ci`) and set variables in new runs: **Environment** on its
 **Repository** page, or `aether workspace env`
 ([environments.md](environments.md#workspace-environment)).
+
+### From the CLI
+
+```sh
+aether workspace import ~/code/myproject
+aether workspace import https://github.com/acme/myproject
+```
+
+A path creates a workspace named after the clone, with its checked-out branch as
+the base branch, adds the `aether` remote and pushes the base branch. A GitHub
+URL makes the server fetch the default branch with your GitHub connection and
+print the `aether workspace mirror adopt` command that makes the fetched commit
+the base; review the commit first. Both are safe to re-run: a clone already
+imported is linked to its existing workspace.
 
 ## 5. Set up your agent
 
@@ -195,12 +239,22 @@ It worked if the dialog shows **Installed** and **Login found**, and after
 **Done** the agent's button reads **Run**. Aether only looks for the login file;
 the agent proves the login when a run starts.
 
-From the CLI, run `aether agent add claude --enhanced` on your computer. It
-opens your environment's shell, installs the agent there and leaves you in that
-shell to log in. The environment has no `aether` command, so run `aether`
-commands on your computer. The first Standard Codex run opens Codex's **Hooks
-need review** screen: choose **Trust all and continue** once. Logins and limits
-per agent: [harnesses.md](harnesses.md).
+From the CLI, on your computer:
+
+```sh
+aether agent add codex
+aether agent login codex
+aether agent list
+aether account usage
+```
+
+Without a terminal (an agent's shell, CI), `agent add` installs the agent and
+prints the end of the install log. `agent login` prints a device code for
+Codex; Claude Code and the others need the human at a terminal, or an API key
+([harnesses.md](harnesses.md#use-an-api-key)). `aether account usage` asks the
+vendor whether the login works. The environment has no `aether` command, so run
+`aether` commands on your computer. Logins and limits per agent:
+[harnesses.md](harnesses.md).
 
 ### Upload agent configuration
 
@@ -220,9 +274,9 @@ commands, what is left out and the errors.
 
 Runs push and open pull requests with the GitHub login in your home. If you
 connected GitHub in step 4, skip this. Otherwise click **Connect GitHub** under
-**Agents → GitHub**, or run `gh auth login --hostname github.com --git-protocol
-https --web --scopes admin:ssh_signing_key` in `aether terminal`, then `aether
-github connect` on your computer ([environment-home.md](environment-home.md)).
+**Agents → GitHub**, or run `aether github connect` on your computer. It prints
+a code, waits while you approve it at github.com/login/device, then finishes
+the setup ([environment-home.md](environment-home.md#from-the-cli)).
 
 ## 6. Launch a run
 
@@ -241,6 +295,10 @@ It prints `run run-d6ay38tj8j running`. `--mode` picks `enhanced` or
 `background` (the CLI default is `standard`), and `--model` picks the model.
 The first run on a server pulls the environment image, so it starts slower. To
 give one objective to a group of agents, see swarms in [teams.md](teams.md).
+
+Every launch carries an idempotency key. If the call fails or you press
+Ctrl-C, the CLI prints the exact retry with `--idempotency-key`; running it
+returns the same run instead of starting another.
 
 It worked if the run is under **Working** on the **Board**, the dashboard's
 page of runs, and `aether runs` lists it.
@@ -267,14 +325,15 @@ A launch is all or nothing. If any repo cannot be checked out, no run starts
 and the error names that repo:
 
 ```
-provisioning: create checkout: repo "api" (workspace 01m2xwb3es63c0cs0e7aewqpeq): gitengine: base commit "..." is unavailable
+run run-d6ay38tj8j failed: provisioning: create checkout: repo "api" (workspace 01m2xwb3es63c0cs0e7aewqpeq): gitengine: base commit "..." is unavailable
 ```
 
 Limits: extras must already exist as workspaces and cannot repeat or include the
 primary one. The setup script, environment, agent account and budget are the
-primary workspace's. `aether pull <run>` fetches the primary repo's branch only,
-evidence packets cover the primary repo only, and the dashboard's Compare
-menu is the primary repo's.
+primary workspace's. `aether pull <run>` fetches each repo's branch into the
+clone linked for its workspace and skips, naming it, an extra repo with no
+linked clone. Evidence packets cover the primary repo only, and the dashboard's
+Compare menu is the primary repo's.
 Extra branches are published to their own workspaces; closing the run commits
 and publishes every repo. Each pull request is per repo; there is no cross-repo
 merge. Swarms and templates use one workspace.
@@ -292,7 +351,9 @@ Open a run to see its views:
 | **Files** | The run's checkout; **Save** writes your edit into it |
 | **Browser** | A Chromium on the server beside the run, where `localhost` is the run's own app |
 
-`aether message <run-id> "also update the README"` messages the agent, and
+`aether message <run-id> "also update the README"` messages the agent and
+prints the receipt (`delivered`, or `queued` for the member in control),
+`aether logs <run-id>` prints what the agent did as plain text, and
 `aether attach <run-id>` attaches your terminal to a Standard run's agent
 (detaching leaves it running). For VS Code, Cursor or Zed, run `aether
 ssh-config` once, then **Open in editor…** in the run's **More** menu
@@ -319,11 +380,38 @@ then shows the pull request number and its checks, such as **2 failing**; a
 failing check has **Send to agent**. Review and merge on GitHub as usual.
 
 When you are done, close the run: **Close run…** in its **More** menu, or
-`aether close <run-id> --outcome merged` (or `abandoned`). Closing commits the
+`aether close <run-id> --outcome merged` (or `abandoned`). `aether publish
+<run-id>` is the CLI form of **Publish…**. Closing commits the
 agent's latest work to the run's branch and keeps the container 7 days
-(`--run-container-ttl`); until then **Reopen run** or `aether reopen <run-id>`
-brings the run back. In a clone linked with `--repo` (next section), `aether
-pull <run-id>` fetches the branch, `aether/run-<task>-<id>`, without merging.
+(`--run-container-ttl`); until then the **Relaunch** button where the message box
+sat, **Relaunch** in the **More** menu, or `aether reopen <run-id>` brings the
+run back with its chat and files. The 7 days stop counting while the run is
+live again and start over when you close it. `aether pull <run-id>` fetches the
+branch, `aether/run-<task>-<id>`, into the clone linked for its workspace,
+without merging.
+
+### From a script or agent
+
+```sh
+aether run - --workspace myproject --agent claude < task.md
+aether wait run-d6ay38tj8j --timeout 30m
+aether logs run-d6ay38tj8j
+aether runs run-d6ay38tj8j
+aether answer run-d6ay38tj8j req-7 allow-1
+aether publish run-d6ay38tj8j
+aether close run-d6ay38tj8j --outcome merged
+aether pull run-d6ay38tj8j
+```
+
+`aether wait` exits 0 when the run finished, 1 when it failed, 3 when it needs
+you (a question, a permission request, a `needs-input` or `blocked` report, or
+a turn that ended with no report), and 124 on timeout. It also exits 1 on its
+own error, such as an unknown run id, with the error on stderr and nothing on
+stdout. `aether runs --needs-you` lists the runs waiting on you, and `aether
+runs <run-id>` shows what one needs with the command that answers it. `aether
+answer` allows a permission request once or denies it once, never always.
+`--json` on `aether runs <run-id>` and `aether wait` prints the run as one JSON
+object.
 
 ## Prove the plumbing without an agent subscription
 
@@ -363,7 +451,7 @@ foreground server with Ctrl-C, then `sudo systemctl start aether-server`.
 | `Docker does not answer: ...`, then `Continue without Docker` | Install or start Docker on the server (`sudo systemctl start docker`), then run setup again. |
 | `cli: dial <host>:2222: dial tcp <ip>:2222: connect: connection refused` | The server is not running, or the port is blocked. On the server, run `sudo systemctl enable --now aether-server` and check `systemctl status aether-server`. Open TCP 2222, or use the edge. |
 | `not signed in to edge.onaether.dev; run: aether login --edge https://edge.onaether.dev` | Run `aether login`, then link again. |
-| `edgeproto: claim code must look like <26-character server id>-xxxxxxxxxxxxxxxx` | `--claim` takes the code, `<server id>-<secret>`, not the `aether://claim` link. |
+| `edgeproto: claim code must look like <26-character server id>-xxxxxxxxxxxxxxxx` | The code was cut short. Copy the whole `<server id>-<secret>`, or pass the claim link in single quotes: `aether link --claim '<claim link>'`. |
 | `claim code is wrong`, `claim code expired` or `claim code has no attempts left` | On the server, `sudo aether-server edge claim-code` prints a new link. |
 | `... refused: server is not connected to the edge (HTTP 503)` | On the server, `sudo aether-server edge status` says why: the service is stopped, still starting, or cannot reach the edge. |
 | `device "<label>", signed in as <account>, is waiting for approval` | The server admits approved devices only. An admin approves it from its **Needs you** card, or runs the command the message prints. |
@@ -375,7 +463,8 @@ foreground server with Ctrl-C, then `sudo systemctl start aether-server`.
 | **The agent is not signed in** in an Enhanced run | Log the agent in from a terminal in the run, then send your message again. |
 | `scheduler: insufficient host memory headroom: ...` | The server keeps 2 GiB (or a tenth of its memory) free, plus 512 MiB for each run that is starting. Free memory, or wait for other runs to start. |
 | `runrepo: gh exited <n>: ...` in **Publish…** | The run's account has no working `gh` login. Connect GitHub as in step 5, then click **Refresh status**. |
-| `no linked repo; re-run aether link <addr> --repo <path>` | `aether pull` writes to the clone you linked with `--repo`, not the current directory. |
+| `run <id> not found; aether runs lists runs` | Pass a run id that `aether runs` prints. |
+| `no clone of workspace <id> is linked; in your clone of it run: aether link <server> --repo . --workspace <id>` | `aether pull` writes to the clone linked for the run's workspace, not the current directory. Run the printed command in your clone, or `aether workspace import <path>`. |
 
 Later failures, such as reboots, full disks and stalls, are in
 [failure-handling.md](failure-handling.md).

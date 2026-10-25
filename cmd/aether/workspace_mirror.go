@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net/url"
@@ -65,25 +64,29 @@ func workspaceMirror(args []string) error {
 }
 
 func parseWorkspaceMirrorStatusArgs(args []string) (string, error) {
-	fs := flag.NewFlagSet("workspace mirror status", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("workspace mirror status")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(args); err != nil {
+		return "", fmt.Errorf("%w\n%s", err, workspaceMirrorStatusUsage)
+	}
+	if fs.NArg() != 0 {
 		return "", errors.New(workspaceMirrorStatusUsage)
 	}
 	return *workspace, nil
 }
 
 func parseWorkspaceMirrorConfigureArgs(args []string) (workspaceMirrorConfigureOptions, error) {
-	fs := flag.NewFlagSet("workspace mirror configure", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("workspace mirror configure")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	source := fs.String("source", "", "upstream repository URL (github auth requires https://github.com/owner/repo.git)")
 	branch := fs.String("branch", "", "upstream branch (default: the workspace base branch)")
 	auth := fs.String("auth", "public", "upstream authentication: public, deploy-key, or github (your connected GitHub account)")
 	githubAccountID := fs.Int64("github-account-id", 0, "expected numeric GitHub account ID (github auth only)")
 	knownHostsFile := fs.String("known-hosts-file", "", "known_hosts text file for generic SSH deploy-key sources")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(args); err != nil {
+		return workspaceMirrorConfigureOptions{}, fmt.Errorf("%w\n%s", err, workspaceMirrorConfigureUsage)
+	}
+	if fs.NArg() != 0 {
 		return workspaceMirrorConfigureOptions{}, errors.New(workspaceMirrorConfigureUsage)
 	}
 	if *source == "" {
@@ -106,10 +109,12 @@ func parseWorkspaceMirrorConfigureArgs(args []string) (workspaceMirrorConfigureO
 }
 
 func parseWorkspaceMirrorRefreshArgs(args []string) (string, error) {
-	fs := flag.NewFlagSet("workspace mirror refresh", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("workspace mirror refresh")
 	workspace := fs.String("workspace", "", "workspace ID or name")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(args); err != nil {
+		return "", fmt.Errorf("%w\n%s", err, workspaceMirrorRefreshUsage)
+	}
+	if fs.NArg() != 0 {
 		return "", errors.New(workspaceMirrorRefreshUsage)
 	}
 	if *workspace == "" {
@@ -119,13 +124,15 @@ func parseWorkspaceMirrorRefreshArgs(args []string) (string, error) {
 }
 
 func parseWorkspaceMirrorAdoptArgs(args []string) (workspaceMirrorAdoptOptions, error) {
-	fs := flag.NewFlagSet("workspace mirror adopt", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("workspace mirror adopt")
 	workspace := fs.String("workspace", "", "workspace ID or name")
 	generation := fs.Int64("generation", 0, "candidate mirror generation to adopt")
 	commit := fs.String("commit", "", "full observed candidate commit explicitly reviewed for adoption")
 	yes := fs.Bool("yes", false, "confirm replacing the accepted base with the candidate")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(args); err != nil {
+		return workspaceMirrorAdoptOptions{}, fmt.Errorf("%w\n%s", err, workspaceMirrorAdoptUsage)
+	}
+	if fs.NArg() != 0 {
 		return workspaceMirrorAdoptOptions{}, errors.New(workspaceMirrorAdoptUsage)
 	}
 	if *workspace == "" {
@@ -151,11 +158,13 @@ func parseWorkspaceMirrorDisableArgs(args []string) (workspaceMirrorWorkspaceOpt
 }
 
 func parseWorkspaceMirrorWorkspaceArgs(args []string, name, usage string) (workspaceMirrorWorkspaceOptions, error) {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet(name)
 	workspace := fs.String("workspace", "", "workspace ID or name")
 	yes := fs.Bool("yes", false, "confirm disabling workspace mirroring")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(args); err != nil {
+		return workspaceMirrorWorkspaceOptions{}, fmt.Errorf("%w\n%s", err, usage)
+	}
+	if fs.NArg() != 0 {
 		return workspaceMirrorWorkspaceOptions{}, errors.New(usage)
 	}
 	if *workspace == "" {

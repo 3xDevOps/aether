@@ -16,7 +16,6 @@ const filterTypes: EventType[] = [
   'workspace.timeline',
   'workspace.room_message',
   'run.controller',
-  'workspace.approval',
   'workspace.presence',
   'workspace.budget',
   'run.cost',

@@ -214,11 +214,10 @@ func (s *Scheduler) commitAll(ctx context.Context, run domain.RunID, message str
 		slog.Warn("scheduler: resolve run for commit author", "run", run, "error", err)
 	} else {
 		// The run's owner is both who the commit is authored as and whose
-		// key signs it. A key the server cannot read, or cannot use,
-		// costs the signature, not the commit: SigningKey answers nil for
-		// an unparsable one, and a read error is logged here.
-		if s.cfg.Homes != nil {
-			key, kerr := s.cfg.Homes.SigningKey(r.MemberID)
+		// key signs it. A key the server cannot read costs the signature,
+		// not the commit.
+		if s.cfg.Signing != nil {
+			key, kerr := s.cfg.Signing.Key(r.MemberID)
 			if kerr != nil {
 				slog.Warn("scheduler: read commit signing key", "run", run, "error", kerr)
 			} else {

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { StreamState } from '@/lib/acp-stream'
+import { plainReason } from '@/lib/reasons'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useStore } from '@/store'
 import { isTerminal, pruneRuns, type RunRecord } from '@/store/runs'
@@ -102,8 +103,13 @@ export const pillHint: Record<Pill, string> = {
   resume: 'The run is paused. Resume it to continue.',
 }
 
+const releasedReason = /^retained container (?:expired|unavailable|reclaimed for disk space)$/
+
 export function composerBlock(run: RunRecord, maySteer: boolean, canReopen: boolean): string | null {
-  if (isTerminal(run.status)) return canReopen ? 'This run has finished. Reopen it from More to message the agent.' : 'This run has finished.'
+  if (isTerminal(run.status)) {
+    if (canReopen) return 'This run has finished. Relaunch it to continue the chat and files.'
+    return releasedReason.test(run.reason ?? '') ? `This run has finished. ${plainReason(run.reason!)}.` : 'This run has finished.'
+  }
   if (run.status === 'queued' || run.status === 'provisioning') return 'The agent is still starting.'
   if (!maySteer) return run.protected ? 'This run is protected: only its owner or an admin can message the agent.' : 'You can watch this run but not message the agent.'
   return null

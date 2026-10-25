@@ -103,8 +103,9 @@ func edgeCmd(args []string) error {
 		return errors.New(edgeUsage)
 	}
 	edgeURL := string(*o.edgeURL)
-	if edgeURL == "" && sub != "status" {
-		return fmt.Errorf("the edge is off: edge-url is empty in %s", configPath)
+	if edgeURL == "" {
+		return fmt.Errorf("the edge is off: edge-url is empty in %s; turn it on with:\n  %saether-server config set edge-url %s%s",
+			configPath, sudoPrefix(), edgeagent.DefaultURL, configFlag(configPath))
 	}
 	switch sub {
 	case "status":
@@ -136,11 +137,12 @@ func describeAccount(a edgeproto.Account) string {
 	return fmt.Sprintf("%s %s (subject %s)", a.Provider, name, a.Subject)
 }
 
+// errNotConnected makes edge status exit 3, as systemctl status does for a
+// unit that is not active, so a script can wait for the connection and
+// still tell it from an error.
+var errNotConnected = errors.New("the server is not connected to the edge")
+
 func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPolicy, now time.Time) error {
-	if edgeURL == "" {
-		_, _ = fmt.Fprintf(w, "edge: off\nturn it on with:\n  aether-server config set edge-url %s\n", edgeagent.DefaultURL)
-		return nil
-	}
 	id, err := serverID(dataDir)
 	if err != nil {
 		return err
@@ -181,7 +183,7 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	case owner != nil:
 		_, _ = fmt.Fprintf(tw, "owner\t%s\n", describeAccount(*owner))
 	case hasClaim && claim.Usable(now):
-		_, _ = fmt.Fprintf(tw, "owner\tnone; claim code valid until %s, %d attempts left\n", claim.ExpiresAt.Local().Format(time.Kitchen), claim.AttemptsLeft)
+		_, _ = fmt.Fprintf(tw, "owner\tnone; claim code %s, %d attempts left\n", validFor(claim.ExpiresAt, now), claim.AttemptsLeft)
 	default:
 		_, _ = fmt.Fprintln(tw, "owner\tnone; get a claim code with `aether-server edge claim-code`")
 	}
@@ -207,7 +209,13 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	if ran {
 		_, _ = fmt.Fprintln(tw, "measures\tthe server->edge control connection; it does not prove clients can reach the server")
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if !status.Connected || stale != nil {
+		return errNotConnected
+	}
+	return nil
 }
 
 // edgeClaimCode issues a claim code. With admin it is console recovery:
@@ -237,14 +245,12 @@ func edgeClaimCode(w io.Writer, dataDir, edgeURL string, admin domain.MemberID) 
 	if err != nil {
 		return err
 	}
-	code, expires, err := state.IssueClaimCode(id, string(admin), time.Now())
+	code, err := issueClaimCode(w, state, edgeURL, id, admin, time.Now())
 	if err != nil {
 		return err
 	}
-	if err := printClaimLink(w, edgeURL, code, expires); err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(w, "open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:\n  aether link --claim %s\n", code)
+	_, _ = fmt.Fprintf(w, "open it on your computer with the Aether app, or paste it into the app's Connect page; in a terminal:\n  %s\n",
+		strings.Join(claimCommands(edgeURL, code), "\n  "))
 	if m != nil {
 		_, _ = fmt.Fprintf(w, "the claim binds the claiming account to admin %s (%s) and approves the claiming device; it creates no member and changes no role\n",
 			m.DisplayName, m.ID)
@@ -310,13 +316,28 @@ func adminsOf(members []*domain.Member) string {
 	return strings.Join(admins, ", ")
 }
 
-func printClaimLink(w io.Writer, edgeURL, code string, expires time.Time) error {
+func issueClaimCode(w io.Writer, state *edgeagent.State, edgeURL, serverID string, admin domain.MemberID, now time.Time) (string, error) {
+	earlier, hadEarlier, err := state.ClaimCode()
+	if err != nil {
+		return "", err
+	}
+	code, expires, err := state.IssueClaimCode(serverID, string(admin), now)
+	if err != nil {
+		return "", err
+	}
 	link, err := edgeproto.ClaimLink(edgeURL, code)
 	if err != nil {
-		return err
+		return "", err
 	}
-	_, _ = fmt.Fprintf(w, "claim link: %s (valid until %s, %d attempts)\n", link, expires.Local().Format(time.Kitchen), edgeproto.ClaimCodeAttempts)
-	return nil
+	_, _ = fmt.Fprintf(w, "claim link: %s (%s, %d attempts)\n", link, validFor(expires, now), edgeproto.ClaimCodeAttempts)
+	if hadEarlier && earlier.Usable(now) {
+		_, _ = fmt.Fprintf(w, "it replaces the code issued earlier, which was %s and no longer works\n", validFor(earlier.ExpiresAt, now))
+	}
+	return code, nil
+}
+
+func validFor(expires, now time.Time) string {
+	return fmt.Sprintf("valid for %d min, until %s", int(expires.Sub(now).Round(time.Minute).Minutes()), expires.Local().Format("2006-01-02 15:04 MST"))
 }
 
 func edgeTrust(w io.Writer, in io.Reader, dataDir, edgeURL string) error {

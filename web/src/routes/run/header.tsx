@@ -19,7 +19,6 @@ import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
 import { runLabel, stateDetail, stateLabel, stateTitle } from '@/lib/status'
 import { cn } from '@/lib/utils'
-import { approveRequest } from '@/routes/board/card-action'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useModeSwitch } from '@/routes/run/mode-switch'
@@ -50,29 +49,17 @@ interface FrameAction {
 export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerminal, nav: RunNavigation): FrameAction | null {
   const now = useClock()
   const condition = useStore((s) => needsYou(run, stateContextOf(s, now)))
-  const approval = useStore((s) => s.approvalsByRun[run.id]?.[0])
   const room = useStore((s) => s.roomMessages[run.id])
   const navigate = useStore((s) => s.navigate)
   const selfID = useStore((s) => s.info?.member.id)
-  const [busy, setBusy] = useState(false)
   if (!condition) return null
 
-  const action = condition.action(run, approval)
+  const action = condition.action(run)
   const openTerminal = (): FrameAction | null =>
     !agent.hasAgentTerminal || view === 'terminal'
       ? null
       : { label: action.label, act: () => { nav.go('terminal'); if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl() } }
 
-  if (action.kind === 'approve' && approval) {
-    return {
-      label: action.label,
-      act: () => {
-        if (busy) return
-        setBusy(true)
-        void approveRequest(run.id, approval).finally(() => setBusy(false))
-      },
-    }
-  }
   if (action.kind === 'reply') return { label: action.label, act: nav.focusComposer }
   switch (condition.target) {
     case 'changes':

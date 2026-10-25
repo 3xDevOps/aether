@@ -31,8 +31,10 @@ aether link my-server
 ```
 
 Tailscale proves who they are, and the server adds them as a pending
-collaborator. Until an admin approves them, their commands fail with
-`membership pending admin approval`.
+collaborator. `aether link` prints `linked to <server> as <name> (collaborator,
+pending); an admin runs: aether member approve <member-id>`. Until an admin
+does, their commands fail with `membership pending admin approval; ask an admin
+to run: aether member approve <member-id>`.
 
 ```sh
 aether member list              # the PENDING column marks who waits
@@ -60,7 +62,7 @@ with **Copy link**. Send it to the teammate, who opens it and selects **Join** i
 the desktop app, or in a terminal runs:
 
 ```sh
-aether login
+aether login            # or aether login --json, for a script or coding agent
 aether link '<invite link>'
 ```
 
@@ -97,9 +99,13 @@ sudo aether-server device review           # on the server
 
 `aether device approve` shows who the device would be admitted as and asks
 `approve it? [y/N]`. Check the member and role first: whoever holds an approved
-device gets that member's access. If the only admin has no approved device, the
-refusal includes a code, and the admin runs `sudo aether-server device approve
-<code>` on the server. At most 10 devices wait per account.
+device gets that member's access. There is no flag that skips the question.
+Any answer other than `y`, or no answer on stdin, fails with `device approve:
+not approved; a person must check the device shown above and confirm with y in
+their own terminal: aether device approve <code or device-id>, or approve it
+from the dashboard's Needs you card`. If the only admin has no approved device,
+the refusal includes a code, and the admin runs `sudo aether-server device
+approve <code>` on the server. At most 10 devices wait per account.
 
 ### By invite code
 
@@ -129,15 +135,16 @@ run `aether member merge <code>` (options `--keep <member id>`, `--keep-admin`,
 `--yes`), then `aether member merge accept` back on the first. Both show what is
 discarded before you confirm. The survivor takes the other member's runs,
 schedules, devices and accounts, and the lower of the two roles. The absorbed
-member's home moves to `<data-dir>/merged/<merge id>/home` and still holds agent
-logins, so remove it with `sudo rm -r` once nothing in it is needed. A merge is
+member's home moves to `<data-dir>/merged/<merge id>/home` and their private
+signing key to `signing-key` beside it. Both hold credentials, so remove the
+directory with `sudo rm -r` once nothing in it is needed. A merge is
 refused, with the reason, when either member is pending or has an unfinished run,
 terminal or swarm role. Nothing undoes a merge.
 
 ### Remove access
 
-`aether member remove <id>` deletes a member and their environment and closes
-their connections. `aether device revoke <id>` refuses a device key everywhere.
+`aether member remove <id>` deletes a member, their environment and their
+private signing key, and closes their connections. `aether device revoke <id>` refuses a device key everywhere.
 `aether member unlink <member-id> github:<user id>` unbinds one GitHub account
 and revokes the devices that signed in with it. `aether invite revoke <id>` kills
 a link.
@@ -145,6 +152,36 @@ a link.
 `aether member remove` fails with `in use` while runs or schedules still belong
 to the member. Delete those first. `aether member transfer <member id>` makes
 another admin the server's owner at its edge.
+
+### Single sign-on
+
+Aether has no identity provider settings of its own: sign your tailnet in
+through yours, such as Okta, Google Workspace, Microsoft Entra ID or GitHub
+([Tailscale's providers](https://tailscale.com/docs/integrations/identity)), and
+have people join [over the tailnet](#over-a-tailnet). Each such member is a
+login from your provider, and the `tailnet-auto-join` setting
+([install.md](install.md#server-options)) admits them without approval. A user
+you [share](https://tailscale.com/docs/features/sharing) the server's machine
+with signs in through their own provider.
+
+Removing someone in your provider stops new sign-ins, not devices already
+signed in. Those reach the tailnet until the user is suspended in Tailscale or
+their keys expire. Suspend them in the Tailscale admin console, or let [user and
+group provisioning](https://tailscale.com/docs/features/user-group-provisioning)
+do it when you deactivate them in Okta, delete them in Microsoft Entra ID, or
+suspend them in Google Workspace.
+
+That closes the tailnet path only. Their SSH key, approved devices (which also
+work on the direct SSH port), GitHub sign-ins at the edge and ChatGPT or Claude
+connectors stay open. Remove the member to close them all:
+
+```sh
+aether member list                 # their member id
+aether member remove <member-id>   # deletes their SSH key, devices, GitHub sign-ins and connectors
+```
+
+It fails with `in use` until their runs and schedules are gone
+([Remove access](#remove-access)).
 
 ## Roles
 
@@ -155,7 +192,7 @@ another admin the server's owner at its edge.
 | admin | Everything | Everything | Also members, workspaces and their settings, budgets, saving templates, `aether server update` |
 
 Steering a run means typing into its terminal, messaging its agent, answering
-its approvals and pausing or resuming it. Pushing means writing to the
+its permission prompts and pausing or resuming it. Pushing means writing to the
 workspace's git repository. Everyone who joins is a collaborator, so teammates
 can message and stop each other's agents with no setup. Every such act is
 recorded in the workspace timeline with who did it. Change a role with
@@ -180,8 +217,8 @@ and admins`. `aether unprotect <run>` lifts a protection.
 
 ## Workspaces
 
-A workspace is a repository plus its settings. Runs, the activity feed, the
-approval inbox, templates, schedules, costs and the budget all belong to one. A
+A workspace is a repository plus its settings. Runs, the activity feed,
+templates, schedules, costs and the budget all belong to one. A
 run and its shells use the launching member's saved image, or the server's
 standard image ([environments.md](environments.md)).
 
@@ -190,19 +227,23 @@ the workspace selector, select **Add workspace**, choose **GitHub**, pick a
 repository you can read and accept its first revision. From the CLI:
 
 ```sh
-aether workspace init myproject [--base <branch>]
+aether workspace import ~/code/myproject
+aether workspace import https://github.com/acme/myproject
 aether workspace add myproject [--base <branch>]
 ```
 
-Each member links their own clone, which adds an `aether` git remote:
+`import` and `add` refuse a name already in use and print its id.
 
-```sh
-aether link my-server --repo ~/code/myproject
-```
+Each member links their own clone, which adds an `aether` git remote.
+`aether workspace import <path>` links a clone whose `origin` matches the
+workspace's publish destination; otherwise run
+`aether link my-server --repo ~/code/myproject --workspace myproject`. The
+client keeps one linked clone per workspace: linking another clone of it
+replaces the first, and `aether status` lists them.
 
 Branches named `aether/run-*` belong to the server and cannot be force-pushed or
-deleted. Every other branch behaves like a normal git remote. `aether pull`
-brings a run branch into your clone.
+deleted. Every other branch behaves like a normal git remote. `aether pull <run>`
+brings a run's branches into the linked clones.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -273,8 +314,8 @@ more than one workspace exists`. `aether runs` lists runs from every workspace.
 | `aether attach [--read-only] <run>` | Attach to a run's terminal. Several people can attach at once |
 | `aether message <run> "..."` | Message a run's agent. It shows as a banner in your color |
 | `aether pause`, `resume`, `kill <run>` | Suspend, thaw or stop a run. The checkout and transcript survive a kill |
-| `aether inbox` | The shared approval queue. `aether inbox approve\|deny <request-id>` decides |
-| `aether timeline` | The workspace history. Filter with `--run`, `--member`, `--type`, `--limit`. `--jsonl` exports |
+| `aether runs --needs-you` | Runs waiting on you. `aether runs <run-id>` shows what one needs and the command that answers it |
+| `aether timeline` | The workspace history. `aether timeline <run-id>` shows one run's. Filter with `--member`, `--type`, `--limit`. `--jsonl` exports |
 | `aether cost --runs` | Token spend per member and run |
 
 The dashboard shows each run as **Needs you**, **Working**, **Paused**, **Done**
@@ -282,6 +323,9 @@ or **Failed**. **Needs you** means something blocks the run that you can
 resolve, such as a permission or question, a stalled run of yours, an unreviewed
 finish or a swarm question. Everyone else sees that run as **Working** with
 "Waiting for Alice" ([failure-handling.md](failure-handling.md#needs-you)).
+
+Answer an agent's plan or permission prompt in the run's Session view
+(Enhanced) or its terminal (Standard).
 
 ### Hand off and finish runs
 
@@ -367,9 +411,13 @@ aether budget set --override=false             # and stop again
 ```
 
 An omitted flag keeps its value, and `--limit 0` clears the budget. At the cap,
-new runs are refused and running runs finish. Runs whose agent reports no token
-usage are unmetered, so totals are a floor. Deleting a run or a member keeps
-their spend in the totals. Only an admin sets a budget.
+new runs are refused and running runs finish. Claude Code reports spend in
+Background and Enhanced runs, and OpenCode and omp in Enhanced runs and
+Background runs over ACP. An Enhanced run's spend counts as each turn ends.
+Every other run is unmetered, so totals are a floor. Deleting a run or a member
+keeps their spend in the totals. Only an admin sets a budget. Every admin is
+[notified](networking.md#notifications) once when spend reaches the warning and
+once at the cap; a budget change that puts spend back below either re-arms it.
 
 ### Team memory
 
@@ -481,8 +529,12 @@ flowchart LR
 In the dashboard, open **New run** and use the **Swarm** tab. Set the objective,
 the **Integrator agent**, **Integrator mode** (Standard or Enhanced, since
 Background exits after one turn), the **Integrator model**, **Agents for
-workers** with a model on each, and **Worker mode** (Background by default). A
-worker whose agent cannot use that mode runs Standard. The CLI does the same:
+workers** with a model on each, and **Worker mode** (Enhanced by default). A
+worker whose agent cannot use that mode runs in the mode its row names. Swarm
+agents run only in a mode Aether can wake when mail arrives, so an agent with no
+idle wake ([Agents](harnesses.md#supported-agents)) is refused Standard, with
+for example `copilot in Standard mode has no idle wake; start it in Enhanced`. The
+CLI does the same:
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \
@@ -490,12 +542,14 @@ aether swarm create "add a health check endpoint and document it" \
   --worker codex:background:gpt-5-codex
 ```
 
-`--worker agent[:mode[:model]]` allows workers on an agent and repeats. The mode
-defaults to `standard`, and an empty model keeps the agent's default. `-` as the
-objective reads it from stdin. The integrator runs on your account, or the one
-named by `--account`, in `--mode standard` or `enhanced`
-([enhanced-runs.md](enhanced-runs.md)). If the server stored the swarm but could
-not start the integrator, the command prints the error
+`--idempotency-key <key>` makes a retried create return the same swarm.
+`--worker agent[:mode[:model]]` allows workers on an agent and repeats. An empty
+model keeps the agent's default. `-` as the objective reads it from stdin. The
+integrator runs on your account, or the one named by `--account`, in `--mode
+standard` or `enhanced` ([enhanced-runs.md](enhanced-runs.md)). A mode left out of
+`--mode` or a `--worker` is `enhanced` where the agent's Enhanced mode is
+installed on that account, and `standard` otherwise. If the server stored the
+swarm but could not start the integrator, the command prints the error
 ([failure-handling.md](failure-handling.md#integrator-launch-failures)).
 
 ### Follow a swarm
@@ -526,7 +580,7 @@ aether swarm replace-integrator <swarm-id> --agent codex
 
 `answer` takes `-` to read from stdin. `cancel` stops every run of a swarm in
 `planning` or `active`. `replace-integrator` starts a new integrator when the old
-run exited or reported failure. In the dashboard these are under **More swarm
+run exited or reported failure, and takes `--mode` as `create` does. In the dashboard these are under **More swarm
 actions**. The server rechecks your role and account grants on every action.
 
 ### Combine several runs into one result

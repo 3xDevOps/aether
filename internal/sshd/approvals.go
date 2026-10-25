@@ -6,18 +6,11 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/approvals"
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// ApprovalService is the seam for the shared approval inbox and the
-// presence roster. Satisfied by *approvals.Service.
+// ApprovalService is the seam for the presence roster. Satisfied by
+// *approvals.Service.
 type ApprovalService interface {
-	// List returns a workspace's inbox, pending requests only unless all.
-	List(ctx context.Context, workspace domain.WorkspaceID, all bool) ([]*store.Approval, error)
-	// Decide records by's decision on a pending request. run is the run
-	// the caller's steer capability was checked against; a request
-	// belonging to another run is refused.
-	Decide(ctx context.Context, id string, run domain.RunID, approve bool, by domain.MemberID) (*store.Approval, error)
 	// ConnectionOpened records an authenticated SSH connection.
 	ConnectionOpened(member domain.MemberID)
 	// ConnectionClosed releases an authenticated SSH connection.

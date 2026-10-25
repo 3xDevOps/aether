@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/codexapp"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
@@ -370,22 +371,21 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		reason := publicRunStatusReason("provisioning: " + err.Error())
 		var setup *runtime.SetupError
 		if errors.As(err, &setup) {
-			return &SetupFailure{reason: reason, Output: setup.Output}
+			return &SetupFailure{run: run.ID, reason: reason, Output: setup.Output}
 		}
-		return errors.New(reason)
+		return fmt.Errorf("run %s failed: %s", run.ID, reason)
 	}
 	return nil
 }
 
-// SetupFailure is a launch stopped by the workspace setup script. Its message
-// is the run's public status reason; Output is for the launching caller
-// alone, and is never stored or published.
+// Output is for the launching caller alone and is never stored or published.
 type SetupFailure struct {
+	run    domain.RunID
 	reason string
 	Output string
 }
 
-func (e *SetupFailure) Error() string { return e.reason }
+func (e *SetupFailure) Error() string { return fmt.Sprintf("run %s failed: %s", e.run, e.reason) }
 
 func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	checkout, branch, err := s.createCheckouts(ctx, run, ws)
@@ -417,6 +417,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	// its own co-author.
 	s.mu.Lock()
 	entry.gitAuthorEmail = actor.GitIdentity().Email
+	entry.egress = plan.Egress
 	s.mu.Unlock()
 	driver, err := s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, persistSupervisor, unlockCaches)
 	if err != nil {
@@ -472,13 +473,19 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 // unlockCaches once the sidecar publishes the container's cache ownership.
 func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, run *domain.Run, actor *domain.Member, argv []string, profile harness.Profile, plan *EnvironmentPlan, persistSupervisor bool, unlockCaches func()) (AgentDriver, error) {
 	var native harness.NativeLaunch
-	if coordination := s.coordinationSeam(); coordination != nil && coordination.enabled &&
-		run.Mode == domain.LaunchTUI && run.Task != "" {
+	coordination := s.coordinationSeam()
+	if coordination != nil && coordination.enabled && run.Mode == domain.LaunchTUI && run.Task != "" {
 		var err error
 		native, err = profile.PrepareNativeLaunch(coordtransport.MountDir, argv, plan.Env)
 		if err != nil {
 			return nil, fmt.Errorf("prepare native coordination: %w", err)
 		}
+	}
+	// The app-server wrapper is the staged binary, mounted with coordination.
+	appServer := coordination != nil && run.Mode == domain.LaunchTUI && profile.Capabilities.Steer
+	if appServer && coordination.enabled {
+		native.IdleWake = true
+		native.Env = map[string]string{coordtransport.ManagedHooksEnv: "1"}
 	}
 	// Staging errors fail provisioning: never create a container that lacks the CLI.
 	coordMounts, coordArgs, coordEnv, coordErr := s.coordinationMounts(ctx, entry, run, profile, native)
@@ -495,7 +502,11 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	if len(coordMounts) > 0 {
 		ensureCoordinationCLIPath(plan.Env)
 	}
-	argv = append(argv, coordArgs...)
+	if appServer {
+		argv = codexapp.LaunchCommand(coordArgs, argv)
+	} else {
+		argv = append(argv, coordArgs...)
+	}
 	argv = native.Command(argv)
 	// Last, so the server's value wins over the workspace's: what the server
 	// needs the container to have is not a preference.
@@ -503,6 +514,19 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 		return nil, err
 	}
 	maps.Copy(plan.Env, native.Env)
+	if plan.Egress {
+		if s.cfg.Egress == nil {
+			return nil, errors.New("workspace egress control needs the Docker runtime")
+		}
+		proxyEnv, err := s.cfg.Egress.Prepare(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("prepare the egress proxy: %w", err)
+		}
+		maps.Copy(plan.Env, proxyEnv)
+	}
+	s.mu.Lock()
+	entry.appServer = appServer
+	s.mu.Unlock()
 	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
 	if err != nil {
 		return nil, fmt.Errorf("create container: %w", err)
@@ -531,7 +555,7 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	if err != nil {
 		return nil, s.failContainer(ctx, entry, cid, "attach", err)
 	}
-	driver := s.driver(run.ACP)
+	driver := s.entryDriver(entry)
 	if perr := driver.Start(ctx, entry, att); perr != nil {
 		_ = att.Close()
 		return nil, s.failContainer(ctx, entry, cid, "start pty session", perr)

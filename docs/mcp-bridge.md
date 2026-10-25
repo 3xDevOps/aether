@@ -193,7 +193,8 @@ without tearing down the MCP session.
 
 The method set is closed. The bridge cannot invoke a control verb, type into a
 terminal, read Git, or access another run's transcript. Human messages still
-use Aether's host-side serialized PTY input path; MCP is not an inbound
+use Aether's host-side serialized PTY input path, except in Standard Codex, which
+receives them through its app-server; MCP is not an inbound
 terminal hook.
 
 ## `run.report` is not `coord.report`
@@ -206,7 +207,6 @@ agent lifecycle command:
 
 ```sh
 printf '%s\n' '{"hook_event_name":"Stop"}' | /opt/aether/aether-server report claude
-/opt/aether/aether-server report codex '{"type":"agent-turn-complete"}'
 /opt/aether/aether-server report pi --json '{"state":"waiting","reason":"agent idle"}'
 /opt/aether/aether-server report opencode --json '{"state":"working","input_updates":[{"operation":"replace","requests":[]}]}'
 ```

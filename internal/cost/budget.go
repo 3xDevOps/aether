@@ -55,10 +55,12 @@ func (s Status) Admits() bool {
 	return s.State != events.BudgetExceeded || (s.Budget != nil && s.Budget.Override)
 }
 
-// payload renders the status as the bus event, with reason attached.
-func (s Status) payload(reason string) events.BudgetPayload {
+// payload renders the status as the bus event, moving from from, with
+// reason attached.
+func (s Status) payload(from events.BudgetState, reason string) events.BudgetPayload {
 	p := events.BudgetPayload{
 		State:         s.State,
+		From:          from,
 		SpendUSD:      s.Spend.CostUSD,
 		UnmeteredRuns: s.Spend.Unmetered,
 		Reason:        reason,

@@ -380,13 +380,13 @@ func TestMissionWorkerOfAnAgentNamedApartFromItsCommand(t *testing.T) {
 // still cursor, the name coordination keys on.
 func TestMissionWorkerOfCursorRunsAgent(t *testing.T) {
 	e := newTestEnv(t, nil)
-	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchTUI, "gpt-5"); err != nil {
-		t.Fatalf("ValidateMissionLaunch of a Standard cursor worker with a model: %v", err)
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "cursor", domain.LaunchHeadless, "gpt-5"); err != nil {
+		t.Fatalf("ValidateMissionLaunch of a Background cursor worker with a model: %v", err)
 	}
 	run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
 		WorkspaceID: e.ws.ID, RunID: "cursor-worker", Actor: e.member.ID,
 		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "do the work",
-		Harness: "cursor", Mode: domain.LaunchTUI, Model: "gpt-5",
+		Harness: "cursor", Mode: domain.LaunchHeadless, Model: "gpt-5",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -399,43 +399,52 @@ func TestMissionWorkerOfCursorRunsAgent(t *testing.T) {
 		t.Fatalf("AETHER_HARNESS = %q, want cursor", got)
 	}
 	// The run supervisor's sh -c script comes first.
-	want := []string{"aether-run-supervisor", "agent", "--force", "--trust", "--model", "gpt-5", "do the work"}
+	want := []string{"aether-run-supervisor", "agent", "-p", "--force", "--trust", "--model", "gpt-5", "do the work"}
 	if cmd := container.spec.Command; len(cmd) < len(want) || !slices.Equal(cmd[len(cmd)-len(want):], want) {
 		t.Fatalf("worker command ends %q, want %q", cmd[max(0, len(cmd)-len(want)):], want)
 	}
 }
 
-func TestMissionWorkerOfAntigravityRunsAgy(t *testing.T) {
+func TestSwarmRefusalLeavesAServerWideDefinitionToItsCommand(t *testing.T) {
+	s := &Scheduler{harnesses: map[string]HarnessSpec{"codex": {TUIArgs: []string{"codex", harness.TaskPlaceholder}}}}
+	if err := s.SwarmRefusal("codex", domain.LaunchTUI); err != nil {
+		t.Errorf("Standard codex under a server-wide definition = %v, want no refusal", err)
+	}
+	if err := s.SwarmRefusal("copilot", domain.LaunchTUI); err == nil {
+		t.Error("Standard copilot with its shipped command = nil, want the wake refusal")
+	}
+}
+
+// Antigravity has no idle wake and no Enhanced mode, so a swarm runs it only
+// in Background.
+func TestMissionWorkerOfAntigravityRunsAgyInBackground(t *testing.T) {
 	e := newTestEnv(t, nil)
-	for _, mode := range []domain.LaunchMode{domain.LaunchTUI, domain.LaunchHeadless} {
-		t.Run(string(mode), func(t *testing.T) {
-			runID := domain.RunID("antigravity-worker-" + string(mode))
-			if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "antigravity", mode, "gemini-3-pro"); err != nil {
-				t.Fatalf("ValidateMissionLaunch of an antigravity worker with a model: %v", err)
-			}
-			run, err := e.sched.LaunchMission(t.Context(), MissionLaunchSpec{
-				WorkspaceID: e.ws.ID, RunID: runID, Actor: e.member.ID,
-				RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "do the work",
-				Harness: "antigravity", Mode: mode, Model: "gemini-3-pro",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			container := e.rt.byName(string(run.ID))
-			if container == nil {
-				t.Fatal("worker container not created")
-			}
-			if got := container.spec.Env["AETHER_HARNESS"]; got != "antigravity" {
-				t.Fatalf("AETHER_HARNESS = %q, want antigravity", got)
-			}
-			task := "--prompt-interactive=do the work"
-			if mode == domain.LaunchHeadless {
-				task = "--print=do the work"
-			}
-			want := []string{"aether-run-supervisor", "agy", "--dangerously-skip-permissions", "--model", "gemini-3-pro", task}
-			if cmd := container.spec.Command; len(cmd) < len(want) || !slices.Equal(cmd[len(cmd)-len(want):], want) {
-				t.Fatalf("worker command ends %q, want %q", cmd[max(0, len(cmd)-len(want)):], want)
-			}
-		})
+	spec := MissionLaunchSpec{
+		WorkspaceID: e.ws.ID, RunID: "antigravity-worker", Actor: e.member.ID,
+		RunOwner: e.member.ID, AccountOwner: e.member.ID, Task: "do the work",
+		Harness: "antigravity", Mode: domain.LaunchTUI, Model: "gemini-3-pro",
+	}
+	refused := "scheduler: antigravity in Standard mode has no idle wake, and it has no Enhanced mode; start it as a Background worker"
+	if _, err := e.sched.LaunchMission(t.Context(), spec); err == nil || err.Error() != refused {
+		t.Fatalf("Standard antigravity worker launch = %v, want %q", err, refused)
+	}
+	spec.Mode = domain.LaunchHeadless
+	if err := e.sched.ValidateMissionLaunch(t.Context(), e.member.ID, e.member.ID, "antigravity", spec.Mode, spec.Model); err != nil {
+		t.Fatalf("ValidateMissionLaunch of a Background antigravity worker with a model: %v", err)
+	}
+	run, err := e.sched.LaunchMission(t.Context(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	container := e.rt.byName(string(run.ID))
+	if container == nil {
+		t.Fatal("worker container not created")
+	}
+	if got := container.spec.Env["AETHER_HARNESS"]; got != "antigravity" {
+		t.Fatalf("AETHER_HARNESS = %q, want antigravity", got)
+	}
+	want := []string{"aether-run-supervisor", "agy", "--dangerously-skip-permissions", "--model", "gemini-3-pro", "--print=do the work"}
+	if cmd := container.spec.Command; len(cmd) < len(want) || !slices.Equal(cmd[len(cmd)-len(want):], want) {
+		t.Fatalf("worker command ends %q, want %q", cmd[max(0, len(cmd)-len(want)):], want)
 	}
 }

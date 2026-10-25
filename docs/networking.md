@@ -74,15 +74,18 @@ connection, as Tailscale SSH does. The tailnet login becomes the member, and the
 part before the `@` becomes the display name.
 
 - The first tailnet identity to link a fresh server becomes its admin.
-- Everyone after that joins as a pending collaborator. They cannot act until an
-  admin runs `aether member approve <member-id>`; until then commands fail with
-  `membership pending admin approval`. Roles change with `aether member role`
+- Everyone after that joins as a pending collaborator. `aether link` prints
+  `linked to <server> as <name> (collaborator, pending); an admin runs: aether
+  member approve <member-id>`, and every other command fails with `membership
+  pending admin approval; ask an admin to run: aether member approve
+  <member-id>` until one does. Roles change with `aether member role`
   ([teams.md](teams.md)).
 - `--tailnet-auto-join` skips approval, for teams whose tailnet already is the
   team boundary.
 - Removing someone from the tailnet, or denying them the server in your
-  Tailscale ACLs, locks them out. `aether member remove <member-id>` does the
-  same inside Aether.
+  Tailscale ACLs, locks them out of this path. Their other sign-ins stay until
+  `aether member remove <member-id>`. [Single sign-on](teams.md#single-sign-on)
+  covers signing the tailnet in through your identity provider.
 
 ### What an attacker can and cannot do
 
@@ -119,13 +122,16 @@ no tailscaled or you answer no to its tailnet question. You can also
 [run your own](edge.md#running-your-own-edge).
 
 ```sh
-aether login                      # sign in with GitHub
-aether link --claim <code>        # the owner, with the claim code aether-server setup printed
-aether link '<invite link>'       # anyone an admin invited, with the link the admin sent
+aether login                        # sign in with GitHub; --json prints the address and code as JSON
+aether link --claim '<claim link>'  # the owner, with the claim link or code aether-server setup printed
+aether link '<invite link>'         # anyone an admin invited, with the link the admin sent
+aether status                       # what this computer is linked to, and the next step
 ```
 
 A bare name such as `my-server` is always an SSH address. Only a server id, a
-claim code or a join link goes through the edge.
+claim code or link after `--claim`, or a join link goes through the edge. A
+claim link or code given without `--claim`, or any other value with `://`,
+fails with the form to use instead of being dialed as an address.
 
 The server's owner sets who is let in with `edge-access`: `account` (a GitHub
 sign-in is enough) or `approved-devices` (the default; each new device waits for
@@ -144,13 +150,31 @@ With no tailnet and no edge, SSH keys and invite codes identify people.
 aether link 192.168.1.50:2222
 ```
 
-The first key to link a fresh server becomes the admin. The CLI offers
-`~/.ssh/id_ed25519` and any key in your ssh-agent, and creates
+The first key to link a fresh server becomes the admin. Without an edge,
+until that first link any key that reaches port 2222 becomes admin, so link
+right after the server starts and keep the port closed to the internet.
+
+The CLI offers `~/.ssh/id_ed25519` and any key in your ssh-agent, and creates
 `~/.ssh/id_ed25519` if it finds none. For another key:
 
 ```sh
 aether link 192.168.1.50:2222 --key ~/.ssh/aether_ed25519
 ```
+
+When the server has an edge, the first admin's key must come from a loopback
+address: the server itself, or an SSH tunnel to it. Anyone who can reach the
+port could otherwise take admin before the owner claims the server.
+
+```sh
+ssh -L 2222:127.0.0.1:2222 <user>@<server-host>   # keep it open
+aether link 127.0.0.1:2222                        # in another terminal
+```
+
+From any other address the handshake fails and the server's message names the
+claim instead: `sudo aether-server edge claim-code` on the server, then
+`aether login` and `aether link --claim <code>` on your machine
+([edge.md](edge.md#server-id-and-claiming)). Once you are admin, your key works
+from any address: `aether link <server-host>:2222`.
 
 `link` saves the path in the client's `config.json` (`~/.config/aether/` on
 Linux, `~/Library/Application Support/aether/` on macOS). `git push aether`
@@ -251,9 +275,13 @@ The server-hosted dashboard can notify a device when a run of yours needs you.
 On that device open **Settings** and turn on **Notify this device when a run
 needs me**. The browser asks for permission once. **Send test notification**
 tests the whole path and shows the push service's own error when it fails.
+To hear about runs on Slack instead, including on Android, see
+[slack.md](slack.md).
 
 A notification goes to a run's owner when the run starts needing them, by the
-rule behind **Needs you** ([failure-handling.md](failure-handling.md#run-activity)):
+rule behind **Needs you** ([failure-handling.md](failure-handling.md#run-activity)),
+and to every admin when a workspace's spend rises past its
+[budget](teams.md#budgets):
 
 | The run | The notification says |
 | --- | --- |
@@ -266,12 +294,19 @@ rule behind **Needs you** ([failure-handling.md](failure-handling.md#run-activit
 | fails a turn or reports failure | `Turn failed: <error>`, `Agent failed` or `Agent reported failure, review the result` |
 | reports success | `Agent reported success, review the result` |
 | ends `failed` with a result nobody has seen | `Failed, review the result` |
+| is a swarm's integrator and asks with `aether-internal mission question ask` | `The integrator asks: <question>` |
+| is a swarm's integrator and stops or fails to launch | `Integrator stopped, replace it to continue` or `Integrator failed to launch, replace it to continue` |
+| *(admins, titled with the workspace)* spend reaches the budget's warning or cap | `Budget warning: $8.50 of $10.00 spent` or `Budget reached: $21.00 of $20.00 spent, new runs are refused` |
 
-A working, waiting or stalled run does not notify. A Background run does not
-notify for a question, and a swarm worker notifies only when blocked. One
-notification per run: a newer one replaces the older, and tapping it opens the
-run. While you use a dashboard on any device, notifications wait until you have
-left every dashboard alone for a minute and the run still needs you. Runs the
+The two integrator lines go to the swarm's accountable human
+([coordination.md](coordination.md#mission-phases)), not the integrator's
+owner, once per question and once per stopped integrator. A working, waiting
+or stalled run does not notify. A Background run does not notify for a
+question, and a swarm worker notifies only when blocked. One notification per
+run or workspace budget: a newer one replaces the older, and tapping it opens
+the run or the workspace's budget. While you use a dashboard on any device,
+notifications wait until you have left every dashboard alone for a minute and
+the run still needs you, or the budget is still where it was. Runs the
 [assistant](assistant.md#notifications) launched for you also notify you when
 they finish.
 

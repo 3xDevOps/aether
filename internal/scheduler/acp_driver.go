@@ -388,7 +388,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	d.stopStaleExec(ctx, entry)
 
 	d.s.mu.Lock()
-	paused, cid, coordDir, cachedSession, task := entry.paused, entry.containerID, entry.coordDir, entry.agentSessionID, entry.task
+	paused, cid, coordDir, cachedSession, cost, task := entry.paused, entry.containerID, entry.coordDir, entry.agentSessionID, entry.agentCost, entry.task
 	oneShot := entry.launchMode == domain.LaunchHeadless
 	marked := entry.usageLimit != ""
 	d.s.mu.Unlock()
@@ -473,7 +473,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		Logger:         slog.Default().With("run", runID),
 		AutoAllow:      oneShot,
 		SystemPrompt:   systemPrompt,
-		ClaudeCode:     profile.ACPClaudeCode,
+		ClaudeCode:     profile.Capabilities.BackgroundTasks,
 		AgentCommand:   adapter[0],
 		TitleLookup:    titleLookup,
 		OnState: func(st acphost.TurnState) {
@@ -499,6 +499,8 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		},
 		OnActivity: func(kind, target string) { d.activity(entry, kind, target) },
 		OnTitle:    func(title string) { d.s.setRunTitle(runID, title) },
+		Cost:       cost,
+		OnSpend:    func(sp acphost.Spend) { d.charge(entry, sp) },
 	})
 	if err != nil {
 		if stopErr := d.stopExec(exec); stopErr != nil {
@@ -791,6 +793,35 @@ func (d *acpDriver) record(entry *supervised, change func()) {
 	if err := d.s.writeSidecar(entry.sidecar()); err != nil {
 		slog.Warn("scheduler: persist enhanced session", "run", entry.runID, "error", err)
 	}
+}
+
+// charge publishes what the agent's running cost adds to the total the run was
+// last charged, and saves the new total only once it is published, so a failed
+// publish is charged with the next total. A session being replaced can report
+// after its successor; spendMu orders the two, and a total below the saved
+// one that does not count from zero adds nothing.
+func (d *acpDriver) charge(entry *supervised, sp acphost.Spend) {
+	entry.spendMu.Lock()
+	defer entry.spendMu.Unlock()
+	d.s.mu.Lock()
+	base := entry.agentCost
+	d.s.mu.Unlock()
+	if sp.FromZero {
+		base = 0
+	}
+	p := entry.uncharged
+	p.InputTokens += sp.InputTokens
+	p.OutputTokens += sp.OutputTokens
+	p.CostUSD, p.Metered, p.Increment = sp.Total-base, true, true
+	if p.CostUSD > 0 {
+		if _, err := d.s.cfg.Bus.Publish(context.Background(), events.Event{WorkspaceID: entry.workspaceID, RunID: entry.runID, Payload: p}); err != nil {
+			slog.Warn("scheduler: publish the agent's spend", "run", entry.runID, "error", err)
+			entry.uncharged = p
+		} else {
+			entry.uncharged, base = events.RunCostPayload{}, sp.Total
+		}
+	}
+	d.record(entry, func() { entry.agentCost = base })
 }
 
 // report hands the session's state to ReportAgentState.

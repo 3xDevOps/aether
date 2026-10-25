@@ -19,7 +19,7 @@ that runs coding agents for you and your team. If you are new, start with the
 | Workspace | One repository and its base branch (the branch new runs start from), plus the runs, notes and history that belong to it. | [teams.md](teams.md) |
 | Source mirror | A workspace imported from GitHub or another Git host follows that repository: the server's mirror fetches it read-only and moves the base branch forward. A workspace without one is local-only, and collaborators push its base branch. | [teams.md](teams.md#source-mirror) |
 | Publish destination | The repository runs push their branches to, shown as **Publish changes to**: the source repository, a fork, or none. | [teams.md](teams.md#workspaces) |
-| Run | One agent working on one task in its own container, with its own checkout of the workspace and optionally of other workspaces ([extra repos](quickstart.md#working-across-repos)). A closed run keeps its container for 7 days, so you can reopen it. | [quickstart.md](quickstart.md) |
+| Run | One agent working on one task in its own container, with its own checkout of the workspace and optionally of other workspaces ([extra repos](quickstart.md#working-across-repos)). A closed run keeps its container for 7 days, so you can relaunch it. | [quickstart.md](quickstart.md) |
 | Run branch | Each run commits to its own branch, `aether/run-<task>-<id>`, in the workspace's repository on the server. The run's **Changes** view shows its diff and has **Publish…**. | [quickstart.md](quickstart.md#8-review-and-publish-the-result) |
 | Board | The dashboard page that groups runs into **Needs you**, **Working** and **Finished**. | [quickstart.md](quickstart.md#7-watch-it) |
 | Environment | Your own container on the server, opened from **Environment** in the dashboard or with `aether terminal`. Your runs start from its image: agents you install reach them at once, other tools only after **Save environment**. | [environments.md](environments.md) |
@@ -50,41 +50,45 @@ flowchart LR
 
 1. [Quickstart](quickstart.md): install, link, add a repository and finish
    your first run.
+2. [Coding agents](agents.md): a prompt that lets Claude Code, Codex or
+   another coding agent set Aether up and drive it from the CLI.
 
 Daily use:
 
-2. [Agents](harnesses.md): which agent CLIs work, how to sign in to each, and
+3. [Agents](harnesses.md): which agent CLIs work, how to sign in to each, and
    what does not work.
-3. [Environments](environments.md): install tools, save your image, or reset
+4. [Environments](environments.md): install tools, save your image, or reset
    it. [Environment home](environment-home.md) covers what persists in your
    home and how to upload agent configuration.
-4. [Terminals](terminal.md): your environment shell, a run's terminal and extra
+5. [Terminals](terminal.md): your environment shell, a run's terminal and extra
    shells, and SSH or an editor into a run.
-5. [Enhanced runs](enhanced-runs.md): when you run agents in Enhanced mode and
+6. [Enhanced runs](enhanced-runs.md): when you run agents in Enhanced mode and
    want to know about permissions, restarts and the session log.
-6. [Teams](teams.md): when you invite people, change roles, share agent
+7. [Teams](teams.md): when you invite people, change roles, share agent
    accounts, set budgets or launch swarms.
-7. [Networking](networking.md) and [edge](edge.md): when you choose how
+8. [Networking](networking.md) and [edge](edge.md): when you choose how
    people reach the server, or host the dashboard for phones.
-8. [Assistant](assistant.md): when you want to ask Aether for things in plain
+9. [Assistant](assistant.md): when you want to ask Aether for things in plain
    language.
-9. [Team memory](memory.md): when runs should share what they learn.
-10. [Connectors](connectors.md): when you want to run agents from ChatGPT or
+10. [Team memory](memory.md): when runs should share what they learn.
+11. [Connectors](connectors.md): when you want to run agents from ChatGPT or
     Claude, including their phone apps.
-11. [Insights](insights.md): when you want statistics on runs, time, cost and
+12. [Slack](slack.md): when you want to hear about runs, and answer them,
+    in Slack, including on Android.
+13. [Insights](insights.md): when you want statistics on runs, time, cost and
     pull requests.
 
 Reference:
 
-12. [Install](install.md): every platform, the desktop and Android apps,
+14. [Install](install.md): every platform, the desktop and Android apps,
     upgrades and removal.
-13. [Security](security.md): what the container boundary protects and what it
+15. [Security](security.md): what the container boundary protects and what it
     does not.
-14. [Troubleshooting](failure-handling.md): reboots, full disks, stalled runs
+16. [Troubleshooting](failure-handling.md): reboots, full disks, stalled runs
     and dropped connections, and the server settings that tune them.
-15. [Privacy](privacy.md): what the Android app, the dashboard and the
+17. [Privacy](privacy.md): what the Android app, the dashboard and the
     project's edge store and send.
-16. [Notices](notices.md): the licence and what the release artifacts bundle.
+18. [Notices](notices.md): the licence and what the release artifacts bundle.
 
 ## Extend Aether
 

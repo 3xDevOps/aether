@@ -72,6 +72,12 @@ type Config struct {
 	// it thinks, at most once a second.
 	OnActivity func(kind, target string)
 	OnTitle    func(title string)
+	// OnSpend reports the agent's running cost at each turn's end, and at
+	// once for a report with no turn open or a new session.
+	OnSpend func(Spend)
+	// Cost is the running cost of session SessionID that the run was last
+	// charged up to. A restored total below it counts from zero.
+	Cost float64
 	// TitleLookup, when positive, asks session/list for the session's title
 	// that long after a turn starts while the agent has reported none. Claude
 	// Code titles a session at its first prompt, but its adapter sends
@@ -208,6 +214,8 @@ type Session struct {
 	actTimer   *time.Timer
 	// prompted is the latest prompt's text with whitespace collapsed.
 	prompted string
+	spend    Spend
+	spendDue bool
 
 	// autonomous is a turn the agent runs with no prompt from the host;
 	// resulted says the agent reported its result, origin what started it.
@@ -264,6 +272,7 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		tasks:      make(map[string]*liveTask),
 		taskCalls:  make(map[string]ToolCall),
 		endedTasks: make(map[string]string),
+		spend:      Spend{Total: cfg.Cost},
 	}
 	s.turnEnded = sync.NewCond(&s.mu)
 	s.ctx, s.stop = context.WithCancel(context.Background())
@@ -360,6 +369,10 @@ func (s *Session) open(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.cfg.SessionID == "" || restoreErr != nil {
+		s.spend, s.spendDue = Spend{FromZero: true}, true
+		s.reportSpendLocked()
+	}
 	if restoreErr != nil {
 		s.emitLocked(Item{Kind: KindReset})
 		s.emitLocked(Item{Kind: KindNotice, Notice: &Notice{
@@ -652,7 +665,7 @@ func forAgentOnly(b acp.ContentBlock) bool {
 }
 
 func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) {
-	stop, err := s.conn.prompt(s.ctx, blocks)
+	stop, spent, err := s.conn.prompt(s.ctx, blocks)
 	sent()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -691,6 +704,14 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 	if reason == "cancelled" {
 		s.endedInTurn = false
 		s.dismissLocked()
+	}
+	s.spend.InputTokens += spent.InputTokens
+	s.spend.OutputTokens += spent.OutputTokens
+	if err == nil && s.cfg.ClaudeCode && len(blocks) > 0 && blocks[0].Text != nil {
+		if words := strings.Fields(blocks[0].Text.Text); len(words) > 0 && slices.Contains(claudeCostResets, words[0]) {
+			s.reportSpendLocked()
+			s.spend, s.spendDue = Spend{FromZero: true}, true
+		}
 	}
 	s.emitLocked(Item{Kind: KindTurnEnd, StopReason: reason})
 	s.turnActive = false
@@ -845,6 +866,22 @@ func (s *Session) emitLocked(it Item) {
 		s.state.Auth = it.Auth
 	case KindUsage:
 		s.state.Usage = it.Usage
+		// Claude Code reports a zero total for a crashed turn and then
+		// continues from the total its transcript saved. A lower total counts
+		// from zero after a reset the session did not see, so the total before
+		// it is reported first.
+		if u := it.Usage; u.Cost != nil && *u.Cost > 0 && u.Currency == "USD" {
+			if *u.Cost < s.spend.Total {
+				s.reportSpendLocked()
+				s.spend.FromZero = true
+			}
+			s.spend.Total, s.spendDue = *u.Cost, true
+			if !s.turnActive && !s.autonomous {
+				s.reportSpendLocked()
+			}
+		}
+	case KindTurnEnd:
+		s.reportSpendLocked()
 	case KindSessionInfo:
 		if s.cfg.OnTitle != nil {
 			s.callback(func() { s.cfg.OnTitle(it.Title) })

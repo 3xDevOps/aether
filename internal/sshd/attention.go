@@ -30,7 +30,6 @@ type attentionRun struct {
 	controller domain.MemberID
 	inputs     []domain.RunInputRequest
 	pending    []acphost.Request
-	approval   *store.Approval
 	mission    *domain.Mission
 	// questions are the swarm's unanswered questions, for its current
 	// integrator.
@@ -83,10 +82,6 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 		if err != nil {
 			return nil, rpcError(err)
 		}
-		approvals, err := s.cfg.Store.ListApprovals(ctx, ws.ID, store.ApprovalRequested)
-		if err != nil {
-			return nil, rpcError(err)
-		}
 		owners := make(map[domain.RunID]domain.MemberID, len(runs))
 		for _, run := range runs {
 			owners[run.ID] = run.MemberID
@@ -96,7 +91,7 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 			if run.ArchivedAt != nil {
 				continue
 			}
-			r, err := s.attentionRun(ctx, run, approvals, owners, missions)
+			r, err := s.attentionRun(ctx, run, owners, missions)
 			if err != nil {
 				return nil, rpcError(err)
 			}
@@ -126,14 +121,8 @@ func compareSince(a, b string) int {
 	return at.Compare(bt)
 }
 
-func (s *Server) attentionRun(ctx context.Context, run *domain.Run, approvals []*store.Approval, owners map[domain.RunID]domain.MemberID, missions map[domain.MissionID]*domain.Mission) (*attentionRun, error) {
+func (s *Server) attentionRun(ctx context.Context, run *domain.Run, owners map[domain.RunID]domain.MemberID, missions map[domain.MissionID]*domain.Mission) (*attentionRun, error) {
 	r := &attentionRun{run: run, integratorOwner: owners[run.IntegratorRunID]}
-	for _, a := range approvals {
-		if a.RunID == run.ID {
-			r.approval = a
-			break
-		}
-	}
 	if !run.Status.Terminal() {
 		r.paused = s.cfg.Runs.Paused(run.ID)
 		r.inputs = s.cfg.Runs.PendingInputs(run.ID)
@@ -325,17 +314,6 @@ func (r *attentionRun) request(input *domain.RunInputRequest) *protocol.Attentio
 }
 
 var attentionRows = []attentionRow{
-	{
-		kind:       protocol.AttentionKindApproval,
-		background: true,
-		holds:      func(r *attentionRun) bool { return r.approval != nil },
-		resolvers:  ownerOrController,
-		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
-			a := r.approval
-			item.Reason, item.Since = "Permission: "+a.Action, since(&a.CreatedAt)
-			item.Approval = &protocol.AttentionApproval{ID: a.ID, Action: a.Action, Detail: a.Detail}
-		},
-	},
 	{
 		kind:       protocol.AttentionKindPermission,
 		background: true,
@@ -534,18 +512,42 @@ func (row attentionRow) applies(r *attentionRun, viewer attentionViewer) bool {
 	return row.admins && viewer.admin || slices.Contains(row.resolvers(r), viewer.id)
 }
 
+func (row attentionRow) item(r *attentionRun, viewer attentionViewer) protocol.AttentionItem {
+	run := r.run
+	item := protocol.AttentionItem{
+		Kind: row.kind, RunID: string(run.ID), MissionID: string(run.MissionID), WorkspaceID: string(run.WorkspaceID),
+		Title: push.RunTitle(run), Harness: run.Harness, Since: since(run.StatusChangedAt),
+	}
+	row.fill(r, viewer, &item)
+	return item
+}
+
 func attentionItem(r *attentionRun, viewer attentionViewer) (protocol.AttentionItem, bool) {
 	for _, row := range attentionRows {
-		if !row.applies(r, viewer) {
-			continue
+		if row.applies(r, viewer) {
+			return row.item(r, viewer), true
 		}
-		run := r.run
-		item := protocol.AttentionItem{
-			Kind: row.kind, RunID: string(run.ID), MissionID: string(run.MissionID), WorkspaceID: string(run.WorkspaceID),
-			Title: push.RunTitle(run), Harness: run.Harness, Since: since(run.StatusChangedAt),
-		}
-		row.fill(r, viewer, &item)
-		return item, true
 	}
 	return protocol.AttentionItem{}, false
+}
+
+// SwarmAttention is the first swarm row of the Needs you table that holds
+// for run, as the member it waits on sees it, and that member. Only a
+// swarm's current integrator carries one.
+func (s *Server) SwarmAttention(ctx context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
+	if run.MissionRole != "integrator" || run.ArchivedAt != nil {
+		return nil, "", nil
+	}
+	r, err := s.attentionRun(ctx, run, nil, map[domain.MissionID]*domain.Mission{})
+	if err != nil {
+		return nil, "", err
+	}
+	for _, row := range attentionRows {
+		if row.swarm && row.holds(r) {
+			viewer := attentionViewer{id: row.resolvers(r)[0]}
+			item := row.item(r, viewer)
+			return &item, viewer.id, nil
+		}
+	}
+	return nil, "", nil
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/signing"
 )
 
 func TestGitHubConnectIsMemberScoped(t *testing.T) {
@@ -96,13 +97,11 @@ func TestGitHubLoginProblemsMapToInvalidState(t *testing.T) {
 func TestMemberGitRefreshesTheHomeGitConfig(t *testing.T) {
 	t.Parallel()
 	homesRoot := filepath.Join(t.TempDir(), "homes")
-	homes, err := memberhome.New(homesRoot, t.TempDir(), nil)
-	if err != nil {
-		t.Fatalf("memberhome.New: %v", err)
-	}
-	e := newTestEnv(t, func(c *Config) { c.Homes = homes })
-	if _, keyErr := homes.EnsureSigningKey(e.member.ID); keyErr != nil {
-		t.Fatalf("EnsureSigningKey: %v", keyErr)
+	homes, signer := newSigningHomes(t, homesRoot)
+	e := newTestEnv(t, func(c *Config) { c.Homes, c.Signing = homes, signer })
+	line, keyErr := signer.Ensure(t.Context(), e.member.ID, e.member.GitIdentity())
+	if keyErr != nil {
+		t.Fatalf("Ensure: %v", keyErr)
 	}
 	c := controlClient(t, e)
 
@@ -115,7 +114,7 @@ func TestMemberGitRefreshesTheHomeGitConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read .gitconfig: %v", err)
 	}
-	for _, want := range []string{"name = Ada Lovelace", "email = ada@example.com", "signingkey = ~/.ssh/aether_signing"} {
+	for _, want := range []string{"name = Ada Lovelace", "email = ada@example.com", "signingkey = key::" + line} {
 		if !strings.Contains(string(config), want) {
 			t.Errorf(".gitconfig is missing %q:\n%s", want, config)
 		}
@@ -127,11 +126,8 @@ func TestMemberGitRefreshesTheHomeGitConfig(t *testing.T) {
 func TestMemberGitLeavesAHomeWithoutASigningKeyAlone(t *testing.T) {
 	t.Parallel()
 	homesRoot := filepath.Join(t.TempDir(), "homes")
-	homes, err := memberhome.New(homesRoot, t.TempDir(), nil)
-	if err != nil {
-		t.Fatalf("memberhome.New: %v", err)
-	}
-	e := newTestEnv(t, func(c *Config) { c.Homes = homes })
+	homes, signer := newSigningHomes(t, homesRoot)
+	e := newTestEnv(t, func(c *Config) { c.Homes, c.Signing = homes, signer })
 	c := controlClient(t, e)
 
 	if err := c.Call(protocol.MethodMemberGit, protocol.MemberGitParams{
@@ -142,4 +138,18 @@ func TestMemberGitLeavesAHomeWithoutASigningKeyAlone(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(homesRoot, string(e.member.ID), ".gitconfig")); !os.IsNotExist(err) {
 		t.Fatalf(".gitconfig stat = %v, want not exists", err)
 	}
+}
+
+func newSigningHomes(t *testing.T, homesRoot string) (*memberhome.Manager, *signing.Service) {
+	t.Helper()
+	homes, err := memberhome.New(homesRoot, t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("memberhome.New: %v", err)
+	}
+	signer, err := signing.New(t.TempDir(), t.TempDir(), homes)
+	if err != nil {
+		t.Fatalf("signing.New: %v", err)
+	}
+	t.Cleanup(func() { _ = signer.Close() })
+	return homes, signer
 }

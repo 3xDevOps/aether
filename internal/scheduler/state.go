@@ -308,7 +308,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		finishedAt = &now
 	}
 	public := publicRunStatusReason(reason)
-	activity, err := s.activityLocked(ctx, run, workspace, s.runs[run], to, reason)
+	activity, err := s.activityLocked(ctx, run, s.runs[run], to, reason)
 	if err != nil {
 		return err
 	}
@@ -390,6 +390,8 @@ type sidecar struct {
 	ContainerID     string            `json:"container_id"`
 	WorkspaceID     string            `json:"workspace_id"`
 	Mode            domain.LaunchMode `json:"mode,omitempty"`
+	AppServer       bool              `json:"app_server,omitempty"`
+	ServerTurn      bool              `json:"server_turn,omitempty"`
 	MissionAssigned bool              `json:"mission_assigned,omitempty"`
 	Paused          bool              `json:"paused"`
 	KillRequested   bool              `json:"kill_requested"`
@@ -404,6 +406,7 @@ type sidecar struct {
 	// mounts, empty when it mounts none.
 	LoginMember         string                   `json:"login_member,omitempty"`
 	Reporter            harness.Reporter         `json:"reporter,omitempty"`
+	Egress              bool                     `json:"egress,omitempty"`
 	AgentState          agentstatus.State        `json:"agent_state,omitempty"`
 	AgentReason         string                   `json:"agent_reason,omitempty"`
 	AgentTools          bool                     `json:"agent_tools,omitempty"`
@@ -427,10 +430,12 @@ type sidecar struct {
 	CoordDir            string                   `json:"coord_dir,omitempty"`
 	GitAuthorEmail      string                   `json:"git_author_email,omitempty"`
 	// AgentSessionID is the agent's own session, from the session host or
-	// the agent's status reports. AgentExec is the managed exec of a driver
-	// that hosts the agent outside the primary PTY, which every reattach
-	// stops before starting a fresh one.
+	// the agent's status reports, and AgentCost that session's running cost
+	// as of the latest spend the run was charged. AgentExec is the managed
+	// exec of a driver that hosts the agent outside the primary PTY, which
+	// every reattach stops before starting a fresh one.
 	AgentSessionID string                `json:"agent_session_id,omitempty"`
+	AgentCost      float64               `json:"agent_cost,omitempty"`
 	AgentExec      *runtime.ExecIdentity `json:"agent_exec,omitempty"`
 	Switch         *switchIntent         `json:"switch,omitempty"`
 	AccountSwap    *accountSwap          `json:"account_swap,omitempty"`
@@ -469,6 +474,8 @@ func (e *supervised) sidecar() sidecar {
 		ContainerID:         string(e.containerID),
 		WorkspaceID:         string(e.workspaceID),
 		Mode:                e.launchMode,
+		AppServer:           e.appServer,
+		ServerTurn:          e.serverTurn,
 		MissionAssigned:     e.missionAssigned,
 		Paused:              e.paused,
 		KillRequested:       e.killRequested,
@@ -481,6 +488,7 @@ func (e *supervised) sidecar() sidecar {
 		Home:                e.home,
 		LoginMember:         string(e.loginMember),
 		Reporter:            e.reporter,
+		Egress:              e.egress,
 		AgentState:          e.agentReport.State,
 		AgentReason:         e.agentReport.Reason,
 		AgentTools:          e.agentReport.Tools,
@@ -504,6 +512,7 @@ func (e *supervised) sidecar() sidecar {
 		CoordDir:            e.coordDir,
 		GitAuthorEmail:      e.gitAuthorEmail,
 		AgentSessionID:      e.agentSessionID,
+		AgentCost:           e.agentCost,
 		AgentExec:           e.agentExec,
 		Switch:              e.switchIntent,
 		AccountSwap:         swap,

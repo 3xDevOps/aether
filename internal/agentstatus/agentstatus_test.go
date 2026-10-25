@@ -132,18 +132,6 @@ func TestClaudeStopFailureUsageLimit(t *testing.T) {
 	}
 }
 
-func TestCodexNotifyOnlyReportsIdle(t *testing.T) {
-	got, ok := FromCodexNotify(`{"type":"agent-turn-complete","thread-id":"0199a1b2-c3d4","turn-id":"7","last-assistant-message":"What is your password?"}`)
-	if !ok || got.State != Idle || len(got.InputUpdates) != 0 || got.SessionID != "0199a1b2-c3d4" {
-		t.Fatalf("turn completion = %+v", got)
-	}
-	for _, payload := range []string{`{"type":"agent-turn-started"}`, `{}`, `invalid`} {
-		if _, mapped := FromCodexNotify(payload); mapped {
-			t.Errorf("unexpected mapping for %s", payload)
-		}
-	}
-}
-
 func TestParseState(t *testing.T) {
 	for _, state := range []State{Working, Idle} {
 		if got, ok := ParseState(string(state)); !ok || got != state {

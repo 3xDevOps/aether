@@ -27,21 +27,28 @@ type WorkspaceEnvironmentGetParams struct {
 
 // WorkspaceEnvironmentSetParams: Set adds or replaces variables, Unset
 // removes them, and a non-nil SetupScript replaces the script ("" clears
-// it). Everything not named is kept.
+// it). A non-nil Egress turns egress control on or off, EgressAllow adds
+// hosts and EgressDeny removes them. Everything not named is kept.
 type WorkspaceEnvironmentSetParams struct {
 	WorkspaceID string              `json:"workspace_id"`
 	SetupScript *string             `json:"setup_script,omitempty"`
 	Set         []WorkspaceVariable `json:"set,omitempty"`
 	Unset       []string            `json:"unset,omitempty"`
+	Egress      *bool               `json:"egress,omitempty"`
+	EgressAllow []string            `json:"egress_allow,omitempty"`
+	EgressDeny  []string            `json:"egress_deny,omitempty"`
 }
 
-// WorkspaceEnvironmentResult lists Variables sorted by name. Warning is set
-// when workspace.environment.set saved the change and could not record its
+// WorkspaceEnvironmentResult lists Variables sorted by name and EgressHosts,
+// egress.Defaults until an admin edits them, sorted. Warning is set when
+// workspace.environment.set saved the change and could not record its
 // timeline note.
 type WorkspaceEnvironmentResult struct {
 	WorkspaceID string              `json:"workspace_id"`
 	SetupScript string              `json:"setup_script"`
 	Variables   []WorkspaceVariable `json:"variables"`
+	Egress      bool                `json:"egress"`
+	EgressHosts []string            `json:"egress_hosts"`
 	Warning     string              `json:"warning,omitempty"`
 }
 

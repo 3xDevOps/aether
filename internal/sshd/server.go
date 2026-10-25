@@ -18,10 +18,13 @@ import (
 	"github.com/3xDevOps/Aether/internal/attribution"
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
+	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/memberhome"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/secretstore"
+	"github.com/3xDevOps/Aether/internal/signing"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/version"
 )
@@ -75,6 +78,10 @@ type Config struct {
 	// Homes owns the persistent per-member home directories. It is optional
 	// in narrow unit-test configurations.
 	Homes *memberhome.Manager
+
+	// Signing holds members' commit signing keys. Nil leaves the commits
+	// the server makes unsigned.
+	Signing *signing.Service
 
 	// Secrets holds workspace secret variables. Nil refuses to store one.
 	Secrets *secretstore.Store
@@ -328,6 +335,15 @@ func (s *Server) authenticate(cm ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Perm
 			return nil, ferr
 		}
 		if fresh {
+			// With an edge the claim code admits remote first admins, so a
+			// key needs a loopback address: anyone who can reach the port
+			// before the owner claims would otherwise become admin.
+			if edge := s.currentEdgeOwner(); edge != nil && !fromLoopback(cm) {
+				return nil, &ssh.BannerError{
+					Err:     errors.New("sshd: a fresh server with an edge takes its first admin key only from loopback"),
+					Message: firstAdminBanner(edge.Origin(), cm),
+				}
+			}
 			return &ssh.Permissions{Extensions: map[string]string{bootstrapKeyExtension: keyLine}}, nil
 		}
 		if cm != nil {
@@ -344,6 +360,26 @@ func (s *Server) authenticate(cm ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Perm
 		}
 	}
 	return &ssh.Permissions{Extensions: map[string]string{memberIDExtension: string(m.ID)}}, nil
+}
+
+func fromLoopback(cm ssh.ConnMetadata) bool {
+	addr, ok := cm.RemoteAddr().(*net.TCPAddr)
+	return ok && addr.IP.IsLoopback()
+}
+
+// The CLI folds a banner onto one line, so every command is quoted. A
+// claim code names no edge, so a server on another edge needs --edge on
+// both client commands.
+func firstAdminBanner(origin string, cm ssh.ConnMetadata) string {
+	edge := ""
+	if origin != edgeclient.DefaultURL {
+		edge = " --edge " + origin
+	}
+	_, port, _ := net.SplitHostPort(cm.LocalAddr().String())
+	return fmt.Sprintf("%[3]s, so it takes its first admin by SSH key only from itself or through an SSH tunnel.\n"+
+		"Claim it with a code instead: on the server run `sudo aether-server edge claim-code`; on this machine run `aether login%[1]s`, then `aether link --claim <code>%[1]s`.\n"+
+		"Or tunnel: run `ssh -L %[2]s:127.0.0.1:%[2]s <user>@<server>`, then in another terminal `aether link 127.0.0.1:%[2]s`.\n",
+		edge, port, protocol.FirstAdminRefusal)
 }
 
 // storeIsFresh reports whether no member exists yet (bootstrap window).

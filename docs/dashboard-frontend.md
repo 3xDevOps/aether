@@ -208,7 +208,7 @@ in the address bar (see [URL state](#url-state)).
 
 **Store slices** (`src/store/`). One Zustand store composed of slice creators,
 one file each (`server`, `agent-models`, `workspaces`, `runs`, `members`, `env-terminal`,
-`terminal`, `board`, `palette`, `approvals`, `presence`, `cost`, `timeline`,
+`terminal`, `board`, `palette`, `presence`, `cost`, `timeline`,
 `diff`, `files`, `collaboration`, `local`, `missions`, `messages`,
 `sessions`, `ui`). A new feature adds a slice file and one spread in
 `createRootStore`. Slices are typed against the whole root state, so a slice
@@ -225,19 +225,17 @@ write, and under React 19 can loop. Lists of IDs go through `useShallow`
 (`useRunIDs(workspace)` in `src/store/hooks.ts`); one entity is read by ID
 (`useRun(id)`); a row asks for a boolean (`selected`) or its own state
 (`useRunPresentation(run)`) rather than the whole `route` or run map. Derived
-maps live in the reducer that changes their inputs: `setInbox` rebuilds
-`approvalsByRun` (each run's pending requests, oldest first), so a row's
-approval count is one lookup. Run rows and board cards are `React.memo`
-components; reducers replace only the record of the run that changed, so an
-event about one run re-renders that run's row and card and leaves the rest
-alone.
+maps live in the reducer that changes their inputs. Run rows and board cards
+are `React.memo` components; reducers replace only the record of the run that
+changed, so an event about one run re-renders that run's row and card and
+leaves the rest alone.
 
 **Relative times tick on one shared clock.** `<RelativeTime at>`
 (`src/components/ui/relative-time.tsx`) renders a `<time>` whose text comes
 from `timeAgo` and subscribes to `useClock()` in `src/lib/clock.ts`: one
 30-second interval for the whole app, running only while something
 subscribes. Only the `<time>` re-renders on a tick, so "2 minutes ago" on a
-board card, a run list row, a feed entry, an approval, the members and
+board card, a run list row, a feed entry, the members and
 devices views or the Changes Compare menu keeps moving without re-rendering
 the row. `compact` renders `compactAge` instead: the same steps as `timeAgo`
 in a few characters ("now" under a minute, then "15m", "3h", "2d", "1w",
@@ -282,7 +280,7 @@ in `src/store/selectors.ts` as pure functions over a `StateContext`
 `src/store/hooks.ts`. Selectors that build new arrays must not be passed to
 `useStore` directly. A view that owns its own derived shape keeps it beside
 the view instead (`src/routes/board/selectors.ts`). `useRunInput` combines
-structured native requests, pending Aether approvals and unanswered teammate
+structured native requests and unanswered teammate
 questions for the request indicator; the run's state comes from
 [Run state](#run-state).
 
@@ -351,7 +349,7 @@ top to bottom:
    `src/lib/surfaces.ts`, which also feeds the palette's Navigate group; its
    `palette` entries (Members › Devices, Manage workspaces, and Members for a
    non-admin) are reached from the palette only, and its `link` entries
-   (Approvals, the board's Needs you; Onboarding, opened from **Settings ›
+   (the board's Needs you; Onboarding, opened from **Settings ›
    Onboarding**) only from a link.
 5. **One update notice row** when a server, CLI or desktop update exists, for
    example "Server 0.5.3 is available · Update"; see
@@ -422,9 +420,8 @@ you watching"). Its description is the exact time the age counts from.
 
 A Needs you row offers the condition's primary action on hover, focus and a
 coarse pointer, the same one its board card shows (see [Board](#board)):
-**Approve** resolves in place, **Reply** opens the run's Session view with
-the composer focused, and every other action and non-swarm rows go to the
-view the condition names. Run rows share one tab stop (roving `tabindex`);
+**Reply** opens the run's Session view with the composer focused, and every
+other action and non-swarm rows go to the view the condition names. Run rows share one tab stop (roving `tabindex`);
 Arrow keys, Home and End move within them. Swarm-control buttons are
 separate tab stops. `j` and `k` move from anywhere (starting at the open
 run), and `u` opens the next run that needs you, oldest first.
@@ -824,7 +821,7 @@ laptop with a trackpad keeps the desktop density. Under it the `Button`
 sizes, `Input`, `CommandItem`, `MenuItem`, the `CollapsibleTrigger`,
 the `Select` trigger and its options, the dialog close, the palette input,
 the top bar, the sidebar run and navigation rows and the sidebar's own
-buttons, the run-list title, the files tree rows and the approvals controls
+buttons, the run-list title and the files tree rows
 grow to 40-44px, and the terminal toolbar row grows with the buttons in it.
 Desktop density is untouched.
 Use this variant rather than a new breakpoint or a per-component pixel value.
@@ -1173,8 +1170,7 @@ where a resend is deduped or refused and the eventual result still shows:
 | Control | Pending label | Cancel past the deadline |
 | --- | --- | --- |
 | Question **Reply** (Details) | Replying… | Yes: a resend of the same text reuses the idempotency key, and the reply arrives as a room event |
-| Teammate message and permission **Approve** / **Deny** (Details, Approvals) | Approving… / Denying… | No: a second decision would race the first, and its "already decided" refusal would sit beside the first's success |
-| Board card **Approve** | Approving… | No, for the same reason |
+| Teammate message and permission **Approve** / **Deny** (Details) | Approving… / Denying… | No: a second decision would race the first, and its "already decided" refusal would sit beside the first's success |
 | Composer **Send** and the Enhanced pill's Send, Steer and Queue | Sending… | Yes: the draft keeps its idempotency key, so a resend delivers once |
 | Enhanced pill's **Interrupt** and **Resume**, and a session option | Sending… | No: these carry no key, so a late interrupt could stop the turn sent after it |
 | **Create workspace** | Creating… | No: `workspace.add` carries no idempotency key |
@@ -1230,7 +1226,6 @@ both show:
 
 | Condition | Action |
 | --- | --- |
-| Approval request (`approval.decide`) | **Approve**, resolved in place |
 | Enhanced turn interrupted or stopped short, or a `needs input:` question | **Reply**: on the card a popover composer whose message goes through `run.inject` (`Mod+Enter` sends); in the sidebar it opens the run's Session view with the composer focused |
 | Native permission or question on a Standard run; blocked, held, or an Enhanced failure | **Open terminal** |
 | Native permission or question on an Enhanced run, teammate or swarm question | **Answer** |
@@ -1244,7 +1239,7 @@ Every action but Approve and the card's Reply goes where the condition's
 (blocked, held, Enhanced failure), its Changes view for an unreviewed
 finish, or the swarm page.
 
-While a card has focus, `a` approves, `r` replies and `o` opens (the `card`
+While a card has focus, `r` replies and `o` opens (the `card`
 key scope, pushed only then and only for the actions that card offers, so
 the keys stay free elsewhere). Closing the reply composer returns focus to
 the card. A failed send keeps the draft and shows the server's error.
@@ -1427,7 +1422,7 @@ the swarm, which the run's `state` does not cover, so push and
 
 | Condition | Who it needs | Reason line |
 | --- | --- | --- |
-| Pending permission (approval or native) | owner or terminal controller | Permission: … (enhanced: Permission requested) |
+| Pending native permission | owner or terminal controller | Permission: … (enhanced: Permission requested) |
 | Pending native question | owner or terminal controller | Question: answer in the terminal (enhanced: Question from the agent) |
 | Queued message from another member | terminal controller | Bob sent a message, approve to deliver |
 | Teammate question to the owner | owner | Bob asked you: … |
@@ -1486,7 +1481,7 @@ doing ("Reading src/auth.ts", from `run.agent`), else "Agent working". A
 reported success, unreviewed or not, is Finished and never lists in Needs
 you.
 
-Needs you sorts oldest wait first (`waitingSince`: the approval's or
+Needs you sorts oldest wait first (`waitingSince`: the request's or
 message's time, else the state change); Working and Finished sort by latest
 change. Reason lines that name a wait re-read the shared clock, so "(12
 min)" keeps moving.
@@ -1594,7 +1589,7 @@ agent reported it, `stalled: ...` when the silence heuristic parked it.
 `toRecord` in `src/store/runs.ts` prefers the wire reason and falls back to
 the previously stored one only when the fetch omits it and the status has
 not changed (a legacy gateway); a live `run.status` event still overwrites
-it with the event payload's reason. A pending approval's action or unanswered
+it with the event payload's reason. An unanswered
 room question remains the card's actionable summary.
 
 **Needs you is an activity, not a new lifecycle.** The persisted/wire
@@ -1608,16 +1603,15 @@ contains native request identities (`id`, `session_id`, and `kind`: `question`,
 The durable `run.input` event replaces that set via `{pending_inputs: [...]}`;
 an empty list clears it immediately. Closing one request leaves the others
 visible. Run headers, cards, lists and sidebar rows combine this set with
-pending Aether approvals and unanswered teammate questions, including room
+unanswered teammate questions, including room
 questions after execution finishes. Counts and tooltips name the source.
 Native prompts are answered in the Terminal on a Standard run and in the
-Session view on an Enhanced one, Aether approvals in Approvals or the run's
-Details, and teammate questions in Details. Unsupported native integrations
-show no inferred request.
+Session view on an Enhanced one, and teammate questions in Details.
+Unsupported native integrations show no inferred request.
 
 A terminal lifecycle transition also clears native requests if its empty
 `run.input` event is lost. Later native input events cannot revive a request
-on a finished run. This does not clear Aether approvals or teammate questions.
+on a finished run. This does not clear teammate questions.
 
 Hydration is authoritative and queues live events until its snapshot lands.
 Ordinary run upserts preserve a known input set, including an empty one, so
@@ -1670,7 +1664,7 @@ capability gate, optional confirmation and call. Run verbs (`runCommands`):
 **Pause run** / **Resume run**, **Send a message to the agent…**, **Forward a
 port…** (local gateway), **Close run…**, **Kill run**, **Delete run**, **Free
 container…**, **Archive run** / **Restore run**, **Protect run** /
-**Unprotect run**, **Reopen run**, **Pull branch** (local gateway) and **Hand
+**Unprotect run**, **Relaunch**, **Pull branch** (local gateway) and **Hand
 off to <member>**. Pull branch fetches the run branch into the linked
 repository; unless you are already on that branch, its toast offers **Switch
 to it** (`pull.switch`, which refuses a dirty checkout with git's own
@@ -1766,9 +1760,16 @@ the server's events with an RPC response.
   `run.release`, the kill permission and a retained-container reason
   (`isRetainedRun`). A freed or expired run no longer offers it, and the
   server checks the lifecycle again if the run changed after the menu opened.
-- **Reopen run** resumes a retained Standard or Enhanced run after explicit
-  Close (`aether reopen` on the command line). Reported interactive completion
-  needs no reopening. Older agent-finished retained runs remain eligible.
+- **Relaunch** resumes a retained Standard or Enhanced run after explicit
+  Close (`aether reopen` on the command line). It is offered in **More** and
+  as the primary button in the composer slot of a finished run, which calls
+  `run.relaunch` and swaps the finished record for the live one the server
+  returns. A run is eligible while the server reports `container_retained_until`
+  (or, before that arrives, a retained-container reason), except a finished
+  swarm worker. Relaunch clears the deadline, the status event drops
+  `finished_at` and `started_at` restarts, and the next close sets a fresh
+  deadline. Reported interactive completion needs no relaunching. Older
+  agent-finished retained runs remain eligible.
 - **Hand off** and **Protect** need the run's owner or an admin. Before
   hydration the caller's own record has not arrived, and the mirror answers
   yes rather than making the shell's buttons appear a beat late. **Pull
@@ -2031,15 +2032,14 @@ The actions, in order:
 
 1. The state's one primary action, the only filled button on the frame. It is
    the label the condition names in `lib/needs-you.ts`, the same one the board
-   card and sidebar row show, performed inside the frame: **Approve**
-   resolves the approval in place, **Reply** focuses the Session composer,
-   **Open terminal** switches to Terminal and asks for the lease, **Answer**
-   focuses the docked request on Session or reveals the question's card in
-   Details, **Review message** reveals the queued message's card in Details,
-   **Review** opens Changes for a finish, and **Open swarm** opens the swarm
-   page. On the Terminal view there is no terminal action in the header; the
-   toolbar has **Take control**. Session rows and Details cards that send the
-   member elsewhere use secondary buttons.
+   card and sidebar row show, performed inside the frame: **Reply** focuses the
+   Session composer, **Open terminal** switches to Terminal and asks for the
+   lease, **Answer** focuses the docked request on Session or reveals the
+   question's card in Details, **Review message** reveals the queued message's
+   card in Details, **Review** opens Changes for a finish, and **Open swarm**
+   opens the swarm page. On the Terminal view there is no terminal action in
+   the header; the toolbar has **Take control**. Session rows and Details cards
+   that send the member elsewhere use secondary buttons.
 2. **Show details** / **Hide details** (`Mod+.`).
 3. **More** (`components/run-actions.tsx`, an icon button on a phone): every
    run verb from `lib/commands.ts` except **Send a message to the agent…**,
@@ -3641,13 +3641,12 @@ and comes back once there is room again. Narrower rows open it as a side sheet a
 phones as a bottom sheet, each a `dialog "Run details"` that returns focus to
 whatever opened it. Sections (`details.tsx`):
 
-- **Needs you**: `RequestCard`s for pending native inputs, Aether approvals
-  with **Approve** / **Deny**, teammate messages awaiting the controller with
-  **Approve** / **Deny** through `run.room.decide`, and teammate questions
-  with a reply field. A pending decision or reply locks only its own card
-  ([Actions](#actions)). With none of these, one card with the needs-you reason
-  and the header's action as a secondary button, or "Nothing is waiting on
-  you."
+- **Needs you**: `RequestCard`s for pending native inputs, teammate messages
+  awaiting the controller with **Approve** / **Deny** through
+  `run.room.decide`, and teammate questions with a reply field. A pending
+  decision or reply locks only its own card ([Actions](#actions)). With none of
+  these, one card with the needs-you reason and the header's action as a
+  secondary button, or "Nothing is waiting on you."
 - **Agent messages**: the run-scoped agent mail, which the Session view also
   shows inline, with **Show older** and **Show all**.
 - **Notes**: notes are `comment` room messages, human to human on the run,
@@ -3825,13 +3824,18 @@ an objective, the **Integrator agent** (the same picker as Run, on the
 account under Options), **Integrator mode** (the integrator agent's
 remembered mode, shared with Run and saved when the swarm is created, else
 Enhanced when the agent can use it and Standard otherwise; Background disabled with the reason
-`mission.create` gives: it exits after one turn), **Integrator model**
+`mission.create` gives: it exits after one turn; Standard disabled with
+`agent.list`'s `swarm_standard_refusal` for an agent Aether cannot wake; with no
+mode left, **Create swarm** is disabled), **Integrator model**
 (the same field as Run), **Agents for workers** (a checkbox row per
 installed agent and account, defaulting to the integrator account's first
 launchable agent; a ticked row has the same model picker, Agent default
-until changed) and **Worker mode**, which defaults to Background. Each worker choice is sent in the worker mode when its agent can
-use it and in Standard otherwise; the row says so ("Runs Standard: no
-Enhanced support"). Rows a shared account cannot launch are disabled with
+until changed) and **Worker mode**, which defaults to Enhanced and disables a
+mode no ticked worker can use. Each worker choice is sent in the worker mode
+when its agent can use it and otherwise in the first of Enhanced, Standard and
+Background it can; the row says so ("Runs Background: no idle wake in
+Standard"). A disabled mode shows its reason in a tooltip and below the
+control. Rows a shared account cannot launch are disabled with
 the same reasons as the Run picker, and a ticked worker whose agent stops
 being launchable when the lists are read again is dropped.
 
@@ -4009,7 +4013,9 @@ swarms show none of this; the server refuses a replacement there.
 **Replace integrator…** opens a dialog with the distinct accounts and
 agent-and-model pairs from `execution_choices` (each listed as
 "<agent> · <model>" when it has a model), sends the choice's model,
-always sends mode `tui`, pins
+sends the **Mode** control's mode (Enhanced where the agent can use it, with the
+integrator's refusals, judged from the selected account's `agent.list`; a failed
+list shows its error with **Retry** and no mode), pins
 `expected_generation`, and reuses one idempotency key across retries.
 **Cancel swarm…** confirms, then sends `mission.cancel` with a key minted
 when the confirmation opened. **Archive swarm…** and **Delete swarm…** use
@@ -4067,45 +4073,33 @@ show under their task and register into the run card's `card:meta` slot as
 a conflict count, so overlap warnings stay in the conflict experience
 rather than creating a second board or lock surface.
 
-## Activity, approvals and budgets
+## Activity and budgets
 
-`src/routes/team/` holds presence, the shared approval inbox and budgets, and
-`src/routes/activity/` the workspace activity feed - the readouts of the team
-features (`internal/approvals`, `internal/timeline`, `internal/cost`).
-Watchers show in the run view, presence and spend are the **Team** line in
-the sidebar footer menu, and the two full views are registry routes:
-**Activity** (`timeline`) is in the header navigation (or its overflow menu),
-and **Approvals** (`approvals`) is reached from the palette. Each is gated on
-the method it needs.
+`src/routes/team/` holds presence and budgets, and `src/routes/activity/` the
+workspace activity feed - the readouts of the team features
+(`internal/timeline`, `internal/cost`). Watchers show in the run view,
+presence and spend are the **Team** line in the sidebar footer menu, and the
+full view is a registry route: **Activity** (`timeline`) is in the header
+navigation (or its overflow menu), gated on the method it needs.
 
-The approval inbox is for agent permission and plan approvals. Teammate
-questions and queued messages stay contextual to their run, in its Details
-**Needs you** section. Unanswered questions to the owner put the run in
-**Needs you**, and neither creates a second action inbox.
+Teammate questions and queued messages stay contextual to their run, in its
+Details **Needs you** section. Unanswered questions to the owner put the run
+in **Needs you**.
 
 - **Events keep them current; a full read only fills gaps.**
   `useTeamRefresh` in `src/routes/team/sync.ts` reads everything once
   hydration has listed the workspaces, again whenever the event stream comes
   back live - a reconnect that re-hydrates does not replay what it missed -
-  and when the workspace set or **Show decided** changes. A read before
+  and when the workspace set changes. A read before
   hydration would find no workspaces and be repeated. Between those, `applyEvent` updates the store
   from the events that change these reads:
-  - `workspace.approval` names the request and its decision but not its text.
-    A request the inbox holds is decided in place (and dropped while decided
-    requests are hidden); an unknown one reads that one workspace's
-    `approval.list`. Each such event is counted per workspace, and a read that
-    started before it - full or single - does not overwrite its workspace;
-    that workspace is then read again on its own. A failed read, full or
-    single, sets the inbox error and retries that workspace after 5 s; while
-    the stream stays live it keeps retrying, doubling the wait up to 60 s,
-    until a read succeeds or a full read clears the error.
   - `workspace.budget` carries the state, cap and spend, applied as they
     are. It fires on threshold crossings, refusals and admin edits, not on
     every spend change, so `run.cost` re-reads that workspace's
     `budget.get` to keep the spend and unmetered count current, once 1.5 s
     pass without another result for it. Each budget event is counted per
     workspace, and a read that started before one is dropped. A failed
-    read retries with the inbox's backoff (5 s doubling to 60 s) until a
+    read retries after 5 s, doubling to 60 s, until a
     read succeeds, a budget event lands, or the stream leaves `live`.
   - `workspace.presence` names one transition, so it re-reads
     `presence.roster`.
@@ -4122,40 +4116,23 @@ questions and queued messages stay contextual to their run, in its Details
   disk gauge read beside it). It also reads and beats on `onWake`, because a
   backgrounded tab freezes its timers and drops its socket: a phone returns
   with its presence already expired server-side (the TTL is 45s) and may have
-  missed an approval. That read keeps a 2.5 s floor, so app switching cannot
+  missed events. That read keeps a 2.5 s floor, so app switching cannot
   turn into a request per workspace each time; the heartbeat is one request
   and always goes.
 - **One refresh covers every workspace, and there is only the one.** These
   reads are per workspace on the wire, and a workspace is a repo plus its
   team settings. A deployment has a handful of them and they outlive every
   run in them. So `refreshTeam` reads all of them each time rather than
-  splitting into a bounded recurring pass and a wide occasional one. Both
-  readouts it feeds ask a whole-deployment question anyway - the Team line
-  claims the worst budget state anywhere, and Needs you claims every pending
-  request - and a workspace does not stop being over its cap or holding an
-  undecided request when its last run finishes, so no subset could answer
-  either one. Failures leave the last good data in place.
-- **An unreadable queue says so.** `refreshInbox` keeps the first
-  per-workspace `approval.list` failure, and the inbox and the footer menu's
-  Team line report it rather than "Nothing is waiting on a decision.",
-  which over a failed read means "no agent is blocked". Workspaces that
-  answered are still listed. Each read is stamped, so a slow failure cannot
-  overwrite a newer good answer.
+  splitting into a bounded recurring pass and a wide occasional one. The
+  Team line asks a whole-deployment question anyway - it claims the worst
+  budget state anywhere - and a workspace does not stop being over its cap
+  when its last run finishes, so no subset could answer it. Failures leave
+  the last good data in place.
 - **The heartbeat is narrower.** It claims only the workspace in view -
   `focusedWorkspace` prefers the route's `workspaceId`, then the workspace of
   the run in view, then `activeWorkspace` - because presence is keyed on
   (member, workspace) and beating them all would report you online to
   teammates in workspaces you have never opened.
-- **The queue is every workspace's, in one list.** The inbox view reads them
-  all again when it opens, because it is the surface that shows the requests
-  themselves rather than a count. Each row names the workspace the request
-  belongs to, since the list crosses them. **Show decided** / **Hide
-  decided** sits in the view header's actions. Decisions go through
-  `approval.decide` with the run the request belongs to, so the server
-  attributes them and applies the steer permission check: a refusal is
-  rendered as the server's answer, never predicted by the form. A request the
-  user has just decided stays on screen reporting its outcome, laid over the
-  fetched queue, because the next fetch no longer returns it.
 - **The feed opens at the end of the log.** The feed reads
   `workspace.timeline` forward from a cursor, so the view first asks for a
   page past the end - that answer carries the log head - and opens a window
@@ -4853,8 +4830,8 @@ rest on the server; success names the account and the signing key's
 fingerprint, and **Close** returns to the page, whose **GitHub** disclosure
 then opens on "Connected in this session as `<login>`" - the connection is
 React state that a reload loses. Server refusals - most often `github: not
-logged in to github.com in the environment terminal; run gh auth login there
-first` - render verbatim in the same
+logged in to github.com in the environment terminal; run aether github
+connect` - render verbatim in the same
 monospace pane the Repository step gives git's output, because gh's answer
 runs to several lines, and leave the screen open to retry.
 
@@ -5255,7 +5232,7 @@ server-side permission; a member without it reads the same facts. The page
 lists no runs: the board does.
 
 **Environment** (`components/workspace-environment.tsx`) is the workspace's
-setup script and variables ([environments.md](environments.md#workspace-environment)),
+setup script, variables and egress control ([environments.md](environments.md#workspace-environment)),
 read with `workspace.environment.get` when the page opens. Opening the page
 through an **Environment** menu item passes `section: 'environment'`, and the
 section scrolls into view once it has loaded.
@@ -5278,6 +5255,11 @@ section scrolls into view once it has loaded.
   plain; over a saved secret it stays a secret with no value, which **Save**
   refuses, so the saved one is not removed unnoticed. **Add _n_ variables**
   puts them in the list; nothing is sent yet.
+- **Limit outbound traffic** is a checkbox. While it is ticked, the allowed
+  hosts show, each with **Remove**, over a field with **Allow** that refuses a
+  URL, a port or a repeat before anything is sent. Its help says that on and
+  off reach runs launched afterwards and the host list reaches limited runs at
+  once. A server from before egress control gets no such row.
 - **Save** sends one `workspace.environment.set` holding only what changed,
   so an untouched secret is never named. It is disabled until something
   differs; **Unsaved changes.** and **Discard** show while it does. Beside it
@@ -5287,8 +5269,8 @@ section scrolls into view once it has loaded.
   sends nothing. The server's refusal shows verbatim under **Not saved**, and
   the edits stay. A result's `warning` shows under **Saved**.
 - Any other member reads the script, each name and each plain value, with
-  **Secret** in place of a secret's value and **Only an admin can change
-  this.** A failed read shows the server's error with **Retry**.
+  **Secret** in place of a secret's value, whether egress is limited and to
+  which hosts, and **Only an admin can change this.** A failed read shows the server's error with **Retry**.
 
 When the setup script fails a launch, the New run and template launch
 dialogs show the server's reason and, under **Setup script output**, what
@@ -5454,11 +5436,13 @@ then in the browser. A failure of either, or of **Send test notification**
 (`push.test`), is shown as the error the browser or the server gave.
 
 `web/public/sw.js` is the whole worker. On `push` it shows the notification
-with the run's ID as its `tag`, so a newer one for a run replaces the older,
-and it shows a fallback for a message it cannot read, because Safari drops a
-subscription whose push shows nothing. On `notificationclick` it focuses a
-dashboard window that is already open and posts it
-`{type: 'aether:open-run', run}`, or opens `/?run=<id>` when none is.
+with the run's ID as its `tag`, or `budget:<workspace>` for a budget notice,
+so a newer one replaces the older, and it shows a fallback for a message it
+cannot read, because Safari drops a subscription whose push shows nothing. On
+`notificationclick` it focuses a dashboard window that is already open and
+posts it `{type: 'aether:open-run', run}` or
+`{type: 'aether:open-workspace', workspace}`, or opens `/?run=<id>` or
+`/?page=workspace&id=<id>` when none is.
 `watchPush`, started with the connection in `src/store/sync.ts`, navigates on
 that message. It also calls `push.active` at most every 20 seconds while the
 pointer, the keyboard or the wheel is in use, which is what makes the server
@@ -6137,7 +6121,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 A component answers its bindings with `useKeybindings(scope, handlers)`, which
 pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
 The scopes are `global`, `run`, `browser`, `card`, `request` and `composer`;
-`card` is the board's `a`/`r`/`o` on the focused card, `request` the option
+`card` is the board's `r`/`o` on the focused card, `request` the option
 digits on a focused Session request, `composer` the send keys while the
 Session composer has focus and `browser` the keys of a run's Browser
 while it is on screen. `Esc` is the run's, to leave it, and the table gives a
@@ -6169,7 +6153,7 @@ select it jumps to the option that starts with it. The guard finds a select by
 its `combobox` role, since the control is a button. **Settings > Appearance >
 Single-key shortcuts** (on by default, persisted with the other view
 preferences) turns off every character key: `n`, `?`, `u`, `j`, `k`, the `g`
-sequences and the board card's `a`, `r` and `o`. Escape and the chords stay
+sequences and the board card's `r` and `o`. Escape and the chords stay
 live. The `g` prefix waits 1.5s for the key that completes it, and any key
 that goes somewhere else ends the wait.
 
@@ -6487,8 +6471,8 @@ Notifications row, `src/lib/push.test.ts` the browser side behind it
 `src/sw.test.ts` runs `public/sw.js` against a stand-in for the worker scope.
 `src/components/workspace-environment.test.tsx` covers the workspace
 Environment section: the change a save sends, replacing a secret, the `.env`
-preview, rows that cannot be saved, the server's refusal and the read-only
-view.
+preview, rows that cannot be saved, egress control, the server's refusal and
+the read-only view.
 
 Use the browser workflow for real computed geometry, top bar and sidebar
 behavior, responsive overflow, keyboard focus and gateway-backed transitions.

@@ -439,6 +439,89 @@ func TestReplaceIntegratorAcceptsAHeadlessChoiceAsTUI(t *testing.T) {
 	}
 }
 
+func TestSwarmRefusesAgentsAetherCannotWake(t *testing.T) {
+	ctx := context.Background()
+	f := newMissionFixtureFor(t, "claude", domain.LaunchTUI, domain.MissionExecutionChoice{Harness: "copilot", Mode: domain.LaunchTUI})
+	choice := func(agent string, mode domain.LaunchMode) protocol.MissionExecutionChoice {
+		return protocol.MissionExecutionChoice{AccountMemberID: string(f.member.ID), Harness: agent, Mode: string(mode)}
+	}
+	create := func(key string, integrator protocol.MissionExecutionChoice, workers ...protocol.MissionExecutionChoice) error {
+		_, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
+			WorkspaceID: string(f.workspace.ID), Objective: "objective", IdempotencyKey: key,
+			Integrator: protocol.MissionIntegrator(integrator), ExecutionChoices: append([]protocol.MissionExecutionChoice{integrator}, workers...),
+		})
+		return err
+	}
+	replace := func(mode domain.LaunchMode) error {
+		_, err := f.svc.ReplaceIntegrator(ctx, f.member.ID, protocol.MissionReplaceIntegratorParams{
+			MissionID: string(f.mission.ID), ExpectedGeneration: f.reloadMission(t).IntegratorGeneration, IdempotencyKey: "replace-" + string(mode),
+			Integrator: protocol.MissionIntegrator(choice("copilot", mode)),
+		})
+		return err
+	}
+	task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
+	_, startErr := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+		MissionID: string(f.mission.ID), TaskID: string(task.ID), TaskRevision: task.CurrentRevision,
+		DispatchKey: "copilot", Harness: "copilot", Mode: string(domain.LaunchTUI), AccountOwnerID: string(f.member.ID),
+	})
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"standard copilot integrator":       {create("copilot-integrator", choice("copilot", domain.LaunchTUI)), "integrator copilot in Standard mode has no idle wake; start it in Enhanced"},
+		"standard copilot worker":           {create("copilot-worker", choice("claude", domain.LaunchTUI), choice("copilot", domain.LaunchTUI)), "worker copilot in Standard mode has no idle wake; start it in Enhanced"},
+		"standard antigravity worker":       {create("antigravity-worker", choice("claude", domain.LaunchACP), choice("antigravity", domain.LaunchTUI)), "worker antigravity in Standard mode has no idle wake, and it has no Enhanced mode; start it as a Background worker"},
+		"worker start of an older approval": {startErr, "worker copilot in Standard mode has no idle wake; start it in Enhanced"},
+		"standard copilot replacement":      {replace(domain.LaunchTUI), "integrator copilot in Standard mode has no idle wake; start it in Enhanced"},
+	} {
+		var rpcErr *protocol.Error
+		if !errors.As(tc.err, &rpcErr) || rpcErr.Code != protocol.CodeInvalidParams || rpcErr.Message != tc.want {
+			t.Errorf("%s = %v, want invalid params %q", name, tc.err, tc.want)
+		}
+	}
+	if err := create("wakeable", choice("copilot", domain.LaunchACP), choice("claude", domain.LaunchTUI), choice("codex", domain.LaunchTUI), choice("copilot", domain.LaunchHeadless), choice("antigravity", domain.LaunchHeadless)); err != nil {
+		t.Errorf("create with agents Aether can wake: %v", err)
+	}
+	if err := replace(domain.LaunchACP); err != nil {
+		t.Errorf("replace with an Enhanced integrator of a Standard choice: %v", err)
+	}
+}
+
+func TestSwarmReplaysCallsMadeBeforeTheWakeRule(t *testing.T) {
+	ctx := context.Background()
+	codex := domain.MissionExecutionChoice{Harness: "codex", Mode: domain.LaunchTUI}
+	f := newMissionFixtureFor(t, "codex", domain.LaunchTUI, codex)
+	choices := make([]protocol.MissionExecutionChoice, 0, len(f.mission.ExecutionChoices))
+	for _, c := range f.mission.ExecutionChoices {
+		choices = append(choices, protocol.MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(c.Mode), Model: c.Model})
+	}
+	replayed, err := f.svc.Create(ctx, f.member.ID, protocol.MissionCreateParams{
+		WorkspaceID: string(f.workspace.ID), Objective: f.mission.Objective, IdempotencyKey: f.mission.IdempotencyKey,
+		Integrator:       protocol.MissionIntegrator{AccountMemberID: string(f.member.ID), Harness: "codex", Mode: string(domain.LaunchTUI)},
+		ExecutionChoices: choices,
+	})
+	if err != nil || replayed.Mission.ID != string(f.mission.ID) {
+		t.Fatalf("create replay = %+v, %v, want mission %s", replayed.Mission, err, f.mission.ID)
+	}
+
+	task := f.activate(t, taskSpec{key: "worker", title: "worker"})[0]
+	if _, _, err = f.db.ReserveAttempt(ctx, &domain.AttemptReservation{
+		MissionID: f.mission.ID, TaskID: task.ID, TaskRevision: task.CurrentRevision, DispatchKey: "before-the-rule",
+		Harness: codex.Harness, Mode: codex.Mode, ActorRunID: f.mission.CurrentIntegratorRunID,
+		AuthorizingHumanID: f.member.ID, RunOwnerID: f.member.ID, AccountOwnerID: f.member.ID,
+		AuthorityGeneration: f.mission.IntegratorGeneration, IntegratorGeneration: f.mission.IntegratorGeneration,
+	}); err != nil {
+		t.Fatalf("reserve an attempt before the rule: %v", err)
+	}
+	out, err := f.call(t, f.mission.CurrentIntegratorRunID, protocol.MethodWorkerStart, protocol.WorkerStartParams{
+		MissionID: string(f.mission.ID), TaskID: string(task.ID), TaskRevision: task.CurrentRevision,
+		DispatchKey: "before-the-rule", Harness: codex.Harness, Mode: string(codex.Mode), AccountOwnerID: string(f.member.ID),
+	})
+	if err != nil || !out.(protocol.WorkerStartResult).Replayed {
+		t.Fatalf("worker start replay = %+v, %v, want the reserved attempt", out, err)
+	}
+}
+
 func TestCreateReplayLaunchesNothingForADeletedOrEndedIntegrator(t *testing.T) {
 	for name, tc := range map[string]struct {
 		first  Launcher

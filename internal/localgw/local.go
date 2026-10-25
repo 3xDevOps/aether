@@ -484,7 +484,7 @@ func (g *Gateway) localLinkRepo(r *http.Request, body []byte) (any, *protocol.Er
 		}
 	}
 	g.local.mu.Lock()
-	cfg, url, err := localops.LinkRepo(g.local.cfg, params.Repo, wsID)
+	cfg, url, _, err := localops.LinkRepo(g.local.cfg, params.Repo, wsID)
 	if err == nil {
 		g.local.cacheConfig(cfg)
 	}

@@ -209,28 +209,13 @@ func TestReportJSONDoesNotReadStdin(t *testing.T) {
 	}
 }
 
-// TestReportIgnoresUnmappedHarnessEvents: an event that says nothing about
-// the agent's state costs no round trip, whichever harness sent it.
-func TestReportIgnoresUnmappedHarnessEvents(t *testing.T) {
-	for _, args := range [][]string{
-		{"codex", `{"type":"agent-turn-started"}`},
-	} {
-		t.Run(args[0], func(t *testing.T) {
-			sock := newFakeCoordSocket(t)
-			report(append([]string{args[0], "--socket", sock.path}, args[1:]...))
-			wantNoReport(t, sock)
-		})
-	}
-}
-
 // TestReportRefusesAMalformedInvocation: the callback shapes are not
 // interchangeable, and a harness that got one wrong is told so rather than
 // reporting something nobody meant.
 func TestReportRefusesAMalformedInvocation(t *testing.T) {
 	for _, args := range [][]string{
 		{},
-		{"codex"},
-		{"codex", `{"type":"agent-turn-complete"}`, "extra"},
+		{"codex", `{"type":"agent-turn-complete"}`},
 		{"pi"},
 		{"pi", "agent_end"},
 		{"opencode"},

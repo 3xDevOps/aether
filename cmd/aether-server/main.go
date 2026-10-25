@@ -8,14 +8,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/codexapp"
 	"github.com/3xDevOps/Aether/internal/coordcli"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
@@ -37,17 +40,32 @@ func main() {
 		os.Exit(coordcli.Main(os.Args[1:]))
 	}
 	if len(os.Args) < 2 {
-		usage()
+		usage(os.Stderr)
 		os.Exit(2)
 	}
-	args := os.Args[2:]
-	switch os.Args[1] {
+	cmd, args := os.Args[1], os.Args[2:]
+	if cmd == "help" && len(args) > 0 {
+		cmd, args = args[0], append(args[1:], "--help")
+	}
+	if cmd == "help" || isHelpFlag(cmd) {
+		usage(os.Stdout)
+		return
+	}
+	if h, ok := subcommandHelp[cmd]; ok && slices.ContainsFunc(args, isHelpFlag) {
+		fmt.Print(h)
+		return
+	}
+	switch cmd {
 	case "version":
 		fmt.Println("aether-server", version.String())
 	case "mcp":
 		exitOn(mcp(args))
 	case "report":
 		report(args)
+	case "codex-app-server":
+		os.Exit(codexapp.Launch(args, os.Stderr))
+	case "codex-bridge":
+		exitOn(codexapp.Bridge(context.Background(), os.Stdin, os.Stdout))
 	case "package-exchange":
 		if len(args) != 2 {
 			exitOn(fmt.Errorf("usage: aether-server package-exchange <installed> <staged>"))
@@ -69,11 +87,68 @@ func main() {
 		exitOn(edgeCmd(args))
 	case "device":
 		exitOn(deviceCmd(args))
+	case "slack":
+		exitOn(slackCmd(args))
 	default:
-		_, _ = fmt.Fprintf(os.Stderr, "aether-server: unknown command %q\n", os.Args[1])
-		usage()
+		_, _ = fmt.Fprintf(os.Stderr, "aether-server: unknown command %q\n", cmd)
+		usage(os.Stderr)
 		os.Exit(2)
 	}
+}
+
+func isHelpFlag(arg string) bool {
+	return arg == "-h" || arg == "-help" || arg == "--help"
+}
+
+// These commands take a subcommand before their flags, so without this
+// --help would be read as the subcommand or a device code.
+var subcommandHelp = map[string]string{
+	"config": `usage: aether-server config show [--config <file>]
+       aether-server config path [--config <file>]
+       aether-server config set <key> <value> [--config <file>]
+       aether-server config edit [--config <file>]
+
+show or change the options file serve reads; set and edit need root
+
+example:
+  sudo aether-server config set edge-access approved-devices
+`,
+	"device": `usage: aether-server device approve <code> [--config <file>]
+       aether-server device review [--config <file>]
+
+approve a member's edge device by the code it shows, or review and revoke devices
+
+example:
+  sudo aether-server device approve <code>
+`,
+	"edge": `usage: aether-server edge status [--config <file>]
+       aether-server edge claim-code [--admin <member-id>] [--config <file>]
+       aether-server edge trust [--config <file>]
+       aether-server edge leave [--config <file>]
+
+status prints the edge, access policy, server id and connection; it exits 0
+when connected, 3 when not connected yet, and 1 on an error
+
+example:
+  sudo aether-server edge status
+`,
+	"slack": `usage: aether-server slack setup [--config <file>]
+       aether-server slack remove [--config <file>]
+
+store the Slack bot's tokens, which setup asks for with input hidden or reads
+from stdin, or remove them; restart the server to apply either (docs/slack.md)
+
+example:
+  sudo aether-server slack setup
+`,
+	"sysbox": `usage: aether-server sysbox status
+       aether-server sysbox install
+
+report or install the Sysbox runtime that lets runs start their own Docker daemon
+
+example:
+  sudo aether-server sysbox install
+`,
 }
 
 func exitOn(err error) {
@@ -81,14 +156,17 @@ func exitOn(err error) {
 		return
 	}
 	_, _ = fmt.Fprintln(os.Stderr, "aether-server:", err)
-	if errors.Is(err, serverupdate.ErrRestartUnit) {
+	switch {
+	case errors.Is(err, serverupdate.ErrRestartUnit):
 		os.Exit(75)
+	case errors.Is(err, errNotConnected):
+		os.Exit(3)
 	}
 	os.Exit(1)
 }
 
-func usage() {
-	_, _ = fmt.Fprintf(os.Stderr, `usage: aether-server <command>
+func usage(w io.Writer) {
+	_, _ = fmt.Fprintf(w, `usage: aether-server <command>
 
 commands:
   serve    run the server
@@ -99,6 +177,7 @@ commands:
   update   [--version <tag>]: replace the server and aether binaries and restart the service
   edge     status | claim-code | trust | leave
   device   approve <code> | review: approve or revoke members' edge devices
+  slack    setup | remove: store or remove the Slack bot's tokens (docs/slack.md)
   version  print the version
 
 serve and install options, which are also the config file keys:

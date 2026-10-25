@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"reflect"
 	"slices"
@@ -11,17 +12,73 @@ import (
 )
 
 func TestPrintAgents(t *testing.T) {
+	found, missing := true, false
 	var b strings.Builder
 	err := printAgents(&b, []protocol.AgentInfo{
-		{Name: "claude", Source: "shipped"},
-		{Name: "myagent", Source: "member"},
+		{Name: "claude", Source: "shipped", Installed: true, Enhanced: "adapter", LoginFound: &missing},
+		{Name: "codex", Source: "shipped", Installed: true, Enhanced: "adapter", EnhancedInstalled: true, LoginFound: &found},
+		{Name: "myagent", Source: "member", Enhanced: "none"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "agent claude shipped\nagent myagent member\n"
+	want := "AGENT    SOURCE   INSTALLED  ENHANCED       LOGIN FILE\n" +
+		"claude   shipped  yes        not installed  not found\n" +
+		"codex    shipped  yes        installed      found\n" +
+		"myagent  member   no         none           -\n"
 	if b.String() != want {
-		t.Fatalf("output = %q, want %q", b.String(), want)
+		t.Fatalf("output =\n%s\nwant\n%s", b.String(), want)
+	}
+}
+
+// loginTab stands in for a terminal tab: it records what is typed and
+// answers with what a PTY sends back.
+type loginTab struct {
+	io.Reader
+	typed strings.Builder
+}
+
+func (l *loginTab) Write(p []byte) (int, error) { return l.typed.Write(p) }
+
+func TestFollowLoginPassesPlainLinesAndTheExitStatus(t *testing.T) {
+	const command = "codex login --device-auth"
+	pty := "\x1b]0;root@env: ~\x07\x1b[?2004hroot@env:~# codex login --device-auth; echo aether-login-exit $?; exit\r\n\x1b[?2004l\r" +
+		"\x1b[1mWelcome to Codex\x1b[0m\r\n" +
+		"1. Open this link in your browser\r\n   \x1b[94mhttps://auth.openai.com/codex/device\x1b[0m\r\n" +
+		"2. Enter this one-time code \x1b[90m(expires in 15 minutes)\x1b[0m\r\n   \x1b[94mABCD-EFGH\x1b[0m\r\n" +
+		"⠋ Waiting\r⠙ Waiting\r\x1b[2K\x1b[1GSuccessfully logged in\r\n"
+	want := "root@env:~# codex login --device-auth; echo aether-login-exit $?; exit\n" +
+		"Welcome to Codex\n" +
+		"1. Open this link in your browser\n" +
+		"   https://auth.openai.com/codex/device\n" +
+		"2. Enter this one-time code (expires in 15 minutes)\n" +
+		"   ABCD-EFGH\n" +
+		"Successfully logged in\n" +
+		"logout\n"
+	typed := command + "; echo aether-login-exit $?; exit\n"
+	for _, tc := range []struct {
+		name string
+		tail string
+		exit int
+	}{
+		{name: "new sign-in", tail: "aether-login-exit 0\r\nlogout\r\n", exit: 0},
+		{name: "failed sign-in", tail: "aether-login-exit 1\r\nlogout\r\n", exit: 1},
+		{name: "tab ended early", tail: "logout", exit: -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tab := &loginTab{Reader: strings.NewReader(pty + tc.tail)}
+			var out strings.Builder
+			exit, err := followLogin(tab, command, &out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if exit != tc.exit || tab.typed.String() != typed {
+				t.Fatalf("exit %d, typed %q; want %d, %q", exit, tab.typed.String(), tc.exit, typed)
+			}
+			if out.String() != want {
+				t.Fatalf("output =\n%s\nwant\n%s", out.String(), want)
+			}
+		})
 	}
 }
 
@@ -35,7 +92,7 @@ func TestPrintAgentsEmpty(t *testing.T) {
 	}
 }
 
-func TestPrintAgentInstallGuidance(t *testing.T) {
+func TestAgentInstallGuidance(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		script   string
@@ -48,13 +105,10 @@ func TestPrintAgentInstallGuidance(t *testing.T) {
 		{name: "myagent", want: "install myagent into ~/.local/bin"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var out strings.Builder
 			agent := protocol.AgentInfo{Name: tc.name, InstallScript: tc.script, EnhancedInstallScript: tc.enhanced}
-			if err := printAgentInstallGuidance(&out, agentInstallScript(agent, true)); err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(out.String(), "aether terminal") || !strings.Contains(out.String(), tc.want) {
-				t.Fatalf("guidance = %q, want terminal and %q", out.String(), tc.want)
+			got := terminalGuidanceError("open the terminal", errors.New("dial: refused"), agentInstallScript(agent, true)).Error()
+			if !strings.Contains(got, "aether terminal") || !strings.Contains(got, tc.want) {
+				t.Fatalf("guidance = %q, want terminal and %q", got, tc.want)
 			}
 		})
 	}
@@ -177,5 +231,13 @@ func TestParseAgentAddLoginUnderLocalHome(t *testing.T) {
 	}
 	if want := []string{"~/.cursor/auth.json", "~/.config/x.json"}; !slices.Equal(opts.login, want) {
 		t.Fatalf("login = %v, want %v: a shell-expanded local home goes back to ~/", opts.login, want)
+	}
+}
+
+func TestTerminalGuidanceErrorKeepsTheCause(t *testing.T) {
+	cause := errors.New("start terminal: image pull failed")
+	err := terminalGuidanceError("open the environment terminal", cause, "npm install codex")
+	if !errors.Is(err, cause) || !strings.Contains(err.Error(), "image pull failed") || !strings.Contains(err.Error(), "aether terminal") || !strings.Contains(err.Error(), "npm install codex") {
+		t.Fatalf("err = %v, want the cause and the guidance", err)
 	}
 }

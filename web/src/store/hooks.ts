@@ -96,7 +96,6 @@ export function useRunIDs(workspace: string): string[] {
 }
 
 export function useRunInput(run: Run) {
-  const approvals = useStore((s) => s.approvalsByRun[run.id]?.length ?? 0)
   const questions = useStore((s) => run.unanswered_questions ??
     unansweredQuestions(s.roomMessages[run.id] ?? []).filter((m) => m.actor_id !== run.member_id).length)
   const requests = run.pending_inputs ?? []
@@ -111,13 +110,11 @@ export function useRunInput(run: Run) {
     const count = requests.filter((request) => request.kind === kind).length
     if (count > 0) parts.push(`${count} ${label}${count === 1 ? '' : 's'} in Terminal`)
   }
-  if (approvals > 0) parts.push(`${approvals} approval${approvals === 1 ? '' : 's'} in Approvals`)
   if (questions > 0) parts.push(`${questions} unanswered question${questions === 1 ? '' : 's'} in the run's notes`)
   return {
-    count: native + approvals + questions,
+    count: native + questions,
     questions,
     summary: parts.join('; '),
-    destination: native === 0 && approvals > 0 ? 'approvals' : 'run',
   }
 }
 
@@ -148,8 +145,6 @@ const LEGACY_REMOTE_METHODS: Record<string, true> = {
   'run.inject': true,
   'run.close': true,
   'run.handoff': true,
-  'approval.list': true,
-  'approval.decide': true,
   'presence.roster': true,
   'presence.heartbeat': true,
   'presence.typing': true,

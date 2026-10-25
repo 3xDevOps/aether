@@ -3,6 +3,7 @@ package adapter
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/events"
@@ -21,7 +22,7 @@ func fixturePayloads() []events.Payload {
 		events.AgentEventPayload{Kind: events.AgentToolResult, ToolUseID: "toolu_01Bash"},
 		events.AgentEventPayload{Kind: events.AgentSubagent, Tool: "Task", ToolUseID: "toolu_02Task", Detail: "Audit retry error handling"},
 		events.AgentEventPayload{Kind: events.AgentToolResult, ToolUseID: "toolu_02Task"},
-		events.AgentEventPayload{Kind: events.AgentPause, Tool: "ExitPlanMode", ToolUseID: "toolu_03Plan", Detail: "1. Fix the backoff reset in the retry loop\n2. Re-run the test suite"},
+		events.AgentEventPayload{Kind: events.AgentToolCall, Tool: "ExitPlanMode", ToolUseID: "toolu_03Plan", Detail: "1. Fix the backoff reset in the retry loop\n2. Re-run the test suite"},
 		events.AgentEventPayload{Kind: events.AgentToolResult, ToolUseID: "toolu_03Plan"},
 		events.AgentEventPayload{Kind: events.AgentToolCall, Tool: "Read", ToolUseID: "toolu_04Read", Detail: "/workspace/internal/retry/retry.go"},
 		events.AgentEventPayload{Kind: events.AgentToolResult, ToolUseID: "toolu_04Read", IsError: true},
@@ -94,6 +95,31 @@ func TestClaudeUsageLimit(t *testing.T) {
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
 			assertPayloads(t, consumeFixture(t, "testdata/"+tc.fixture+".jsonl", 0), tc.want)
+		})
+	}
+}
+
+func TestClaudeTakeResult(t *testing.T) {
+	for fixture, want := range map[string]string{
+		"claude_clean":        "Fixed the backoff reset; the test suite passes.",
+		"claude_rate_limited": "API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited",
+		"claude_usage_limit":  "",
+	} {
+		t.Run(fixture, func(t *testing.T) {
+			data, err := os.ReadFile("testdata/" + fixture + ".jsonl")
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			a, _ := ForHarness("claude")
+			for line := range strings.Lines(string(data)) {
+				a.ConsumeLine(strings.TrimSuffix(line, "\n"))
+			}
+			if got, ok := a.TakeResult(); got != want || ok != (want != "") {
+				t.Fatalf("TakeResult = %q, %v; want %q", got, ok, want)
+			}
+			if _, ok := a.TakeResult(); ok {
+				t.Fatal("TakeResult returned the result twice")
+			}
 		})
 	}
 }

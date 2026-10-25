@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/egress"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -44,7 +45,21 @@ func environmentResult(ws *domain.Workspace, secrets map[string]string) protocol
 		WorkspaceID: string(ws.ID),
 		SetupScript: ws.Environment.SetupPolicy.Script,
 		Variables:   variables,
+		Egress:      ws.Environment.Egress.On,
+		EgressHosts: append([]string{}, slices.Sorted(slices.Values(egress.Hosts(ws.Environment.Egress)))...),
 	}
+}
+
+func normalizeHosts(entries []string) ([]string, *protocol.Error) {
+	hosts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		host, err := egress.NormalizeHost(entry)
+		if err != nil {
+			return nil, invalidParams(err.Error())
+		}
+		hosts = append(hosts, host)
+	}
+	return hosts, nil
 }
 
 func (s *Server) workspaceEnvironmentGet(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
@@ -90,6 +105,14 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 		if v.Secret && s.cfg.Secrets == nil {
 			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "workspace secrets are not configured"}
 		}
+	}
+	allow, perr := normalizeHosts(p.EgressAllow)
+	if perr != nil {
+		return nil, perr
+	}
+	deny, perr := normalizeHosts(p.EgressDeny)
+	if perr != nil {
+		return nil, perr
 	}
 
 	s.environmentMu.Lock()
@@ -143,6 +166,42 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 		changes = append(changes, "removed "+strings.Join(removed, ", "))
 	}
 	ws.Environment.Variables = variables
+
+	policy := ws.Environment.Egress
+	if p.Egress != nil && *p.Egress != policy.On {
+		policy.On = *p.Egress
+		state := "off"
+		if policy.On {
+			state = "on"
+		}
+		changes = append(changes, "egress control "+state)
+	}
+	hosts := slices.Clone(egress.Hosts(policy))
+	var allowed []string
+	for _, host := range allow {
+		if !slices.Contains(hosts, host) {
+			hosts = append(hosts, host)
+			allowed = append(allowed, host)
+		}
+	}
+	for _, host := range deny {
+		i := slices.Index(hosts, host)
+		if i < 0 {
+			return nil, invalidParams(host + " is not on the egress host list")
+		}
+		hosts = slices.Delete(hosts, i, i+1)
+	}
+	if len(allowed) > 0 {
+		changes = append(changes, "egress allowed "+strings.Join(allowed, ", "))
+	}
+	if len(deny) > 0 {
+		changes = append(changes, "egress denied "+strings.Join(deny, ", "))
+	}
+	if len(allowed) > 0 || len(deny) > 0 {
+		slices.Sort(hosts)
+		policy.Hosts = hosts
+	}
+	ws.Environment.Egress = policy
 
 	if s.cfg.Secrets != nil {
 		// A launch reads the row and the secret file under this lock, so it

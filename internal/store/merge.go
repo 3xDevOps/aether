@@ -211,7 +211,8 @@ type PendingMerge struct {
 // server's owner at its edge, empty without one. Archive moves the
 // absorbed member's home aside for the merge and returns where it went,
 // empty when it had none; it runs in the transaction once every row is
-// merged, and undo puts the home back when the merge then fails.
+// merged, and undo puts the home back when the merge then fails, its error
+// joining the merge's.
 type MergeAccept struct {
 	ProposalID      string
 	Caller          domain.MemberID
@@ -223,7 +224,7 @@ type MergeAccept struct {
 	ConfirmedByKind string
 	ConfirmedBy     string
 	Now             time.Time
-	Archive         func(mergeID string, absorbed domain.MemberID) (path string, undo func(), err error)
+	Archive         func(mergeID string, absorbed domain.MemberID) (path string, undo func() error, err error)
 	// Demoted runs in the transaction when the merged member loses the
 	// admin role either had, to revoke what they issued outside the store;
 	// undo puts it back when the merge then fails, and its error joins the
@@ -759,14 +760,16 @@ func (d *DB) AcceptMerge(ctx context.Context, a MergeAccept) (_ *MemberMerge, er
 		}
 	}
 	if a.Archive != nil {
-		var undo func()
+		var undo func() error
 		if merge.ArchivePath, undo, err = a.Archive(merge.ID, absorbed.Member.ID); err != nil {
 			return nil, fmt.Errorf("store: merge: archive the absorbed member's home: %w", err)
 		}
 		if undo != nil {
 			defer func() {
 				if !committed {
-					undo()
+					if uerr := undo(); uerr != nil {
+						err = errors.Join(err, fmt.Errorf("store: merge: put back the absorbed member's home: %w", uerr))
+					}
 				}
 			}()
 		}

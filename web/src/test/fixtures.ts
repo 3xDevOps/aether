@@ -1,7 +1,6 @@
 import type { Api } from '@/lib/api'
 import type {
   AgentInfo,
-  Approval,
   BudgetReport,
   Device,
   DevController,
@@ -44,7 +43,6 @@ export function stateContext(over: Partial<StateContext> = {}): StateContext {
     mergedInto: {},
     runs: {},
     workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
-    approvalsByRun: {},
     roomMessages: {},
     roomStatus: {},
     missions: {},
@@ -203,19 +201,6 @@ export const serverInfo: ServerInfo = {
     database_bytes: 64 * 1024 * 1024,
     repo_bytes: 512 * 1024 * 1024,
   },
-}
-
-export function approval(over: Partial<Approval> = {}): Approval {
-  return {
-    id: 'apr_1',
-    workspace_id: workspace.id,
-    run_id: 'run_1',
-    action: 'write src/checkout.ts',
-    detail: 'the agent wants to edit a file outside its allowlist',
-    decision: 'requested',
-    created_at: '2026-08-14T10:03:00Z',
-    ...over,
-  }
 }
 
 /** A device waiting on an invitation that adds a new collaborator. */
@@ -725,8 +710,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     integrationDeliver: vi.fn(async () => ({ candidate: integrationCandidate })),
     integrationPatch: vi.fn(async () => ({ patch: '', truncated: false })),
     integrationDelete: vi.fn(async () => ({})),
-    approvalList: vi.fn(async () => []),
-    approvalDecide: vi.fn(async () => approval()),
     presenceRoster: vi.fn(async () => []),
     presenceHeartbeat: vi.fn(async () => 90),
     presenceTyping: vi.fn(async () => undefined),
@@ -842,7 +825,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     workspaceListFull: vi.fn(async () => [workspace, otherWorkspace]),
     workspaceDelete: vi.fn(async () => ({ ok: true as const })),
     workspaceSettings: vi.fn(async () => workspace),
-    workspaceEnvironment: vi.fn(async () => ({ workspace_id: workspace.id, setup_script: '', variables: [] })),
+    workspaceEnvironment: vi.fn(async () => ({ workspace_id: workspace.id, setup_script: '', variables: [], egress: false, egress_hosts: [] })),
     workspaceEnvironmentSet: vi.fn(async () => needsOverride('workspaceEnvironmentSet')),
     workspaceMirrorStatus: vi.fn(async () => ({ enabled: false })),
     workspaceMirrorConfigure: vi.fn(async () => ({ enabled: false })),
@@ -890,6 +873,9 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     pushUnsubscribe: vi.fn(async () => ({})),
     pushTest: vi.fn(async () => ({})),
     pushActive: vi.fn(async () => ({})),
+    slackStatus: vi.fn(async () => ({ configured: false, connected: false })),
+    slackLink: vi.fn(async () => ({ code: 'K7Q2-M9XD', expires_at: '2026-10-25T12:10:00Z' })),
+    slackUnlink: vi.fn(async () => ({ link: { user_id: 'U123', team_id: 'T123', linked_at: '2026-10-25T12:00:00Z' } })),
     localWorkspaceSelection: vi.fn(async () => ({ workspace_id: '' })),
     localLinkStatus: vi.fn(async () => ({
       server_configured: true,

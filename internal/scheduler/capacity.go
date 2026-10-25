@@ -101,7 +101,7 @@ func (s *Scheduler) measureCapacity(ctx context.Context) ([]runtime.FilesystemCa
 	}
 	capacity, err := provider.Capacity(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: runtime filesystems and host memory: %w", ErrCapacityUnknown, err)
+		return nil, nil, fmt.Errorf("%w: runtime filesystems and host memory: %w\nthe server's operator can check Docker with: sudo systemctl status docker", ErrCapacityUnknown, err)
 	}
 	if s.cfg.MinFreeBytes >= 0 && len(capacity.Filesystems) == 0 {
 		return nil, nil, fmt.Errorf("%w: runtime filesystems were not measured", ErrCapacityUnknown)

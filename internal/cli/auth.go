@@ -4,11 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
+
+	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 // discoveredKeys are the private-key files tried, in order, when no key
@@ -127,6 +130,9 @@ func (a *Auth) report(head string) error {
 	for _, msg := range a.banners {
 		b.WriteString("\n  server said: ")
 		b.WriteString(msg)
+	}
+	if slices.ContainsFunc(a.banners, func(msg string) bool { return strings.HasPrefix(msg, protocol.FirstAdminRefusal) }) {
+		return errors.New(b.String())
 	}
 	if a.explicit {
 		b.WriteString("\nunlock it with ssh-add <private-key>, choose another with --key <private-key>, or return to automatic discovery with aether link <addr> --key auto")

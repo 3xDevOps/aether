@@ -141,21 +141,6 @@ function reportLine(p: Payload): ReactNode {
   )
 }
 
-function approvalLine(p: Payload, actor: string): ReactNode {
-  const action = text(p.action)
-  const what = action ? <>“{bounded(action, 160)}”</> : 'the request'
-  switch (text(p.decision)) {
-    case 'requested':
-      return <>The agent asked to approve {what}</>
-    case 'approved':
-      return <><Who id={actor} /> approved {what}</>
-    case 'denied':
-      return <><Who id={actor} /> denied {what}</>
-    default:
-      return <>Approval for {what} changed</>
-  }
-}
-
 function agentLine(p: Payload): string {
   const detail = bounded(p.detail, 160)
   switch (text(p.kind)) {
@@ -165,8 +150,6 @@ function agentLine(p: Payload): string {
       return p.is_error ? 'A tool call failed' : 'A tool call finished'
     case 'subagent':
       return `Started a subagent${detail ? `: ${detail}` : ''}`
-    case 'pause':
-      return `Paused for your review${detail ? `: ${detail}` : ''}`
     case 'session':
       return 'The agent started its session'
     default:
@@ -300,7 +283,6 @@ const describers: Record<EventType, (p: Payload, event: Event) => ReactNode> = {
   },
   'run.overlap': (p) => overlapLine(p.with),
   'workspace.timeline': (p, e) => timelineLine(p, e.actor_id),
-  'workspace.approval': (p, e) => approvalLine(p, e.actor_id),
   'workspace.presence': (p, e) => <><Who id={e.actor_id} /> {presenceWords[text(p.state)] ?? 'changed presence'}</>,
   'workspace.budget': (p) => budgetLine(p),
   'git.branch': (p) => `Branch ${text(p.branch) || 'of the run'} moved${text(p.commit) ? ` to ${text(p.commit).slice(0, 7)}` : ''}`,

@@ -390,6 +390,9 @@ export interface WorkspaceEnvironment {
   workspace_id: string
   setup_script: string
   variables: WorkspaceVariable[]
+  /** Both absent from a server older than egress control. */
+  egress?: boolean
+  egress_hosts?: string[]
   /** From a save that took effect while its timeline note was not recorded. */
   warning?: string
 }
@@ -1102,20 +1105,6 @@ export interface CoordMessageAckedPayload {
   acked_at: string
 }
 
-export type ApprovalDecision = 'requested' | 'approved' | 'denied'
-
-export interface Approval {
-  id: string
-  workspace_id: string
-  run_id: string
-  action: string
-  detail?: string
-  decision: ApprovalDecision
-  decided_by?: string
-  created_at: string
-  decided_at?: string
-}
-
 /** One present member. `watching` holds the runs they have attached to. */
 export interface PresenceEntry {
   member_id: string
@@ -1337,6 +1326,8 @@ export interface AgentInfo {
   default_mode?: 'tui' | 'acp'
   /** Whether the agent prefers Enhanced, installed yet or not. */
   enhanced_default?: boolean
+  /** Why a swarm integrator or worker cannot run the agent in Standard: Aether could not wake it when mail arrives. */
+  swarm_standard_refusal?: string
   /** Whether a running run can switch between Standard and Enhanced. */
   switchable?: boolean
   /** Shared account: refused because its owner has no login for this agent. */
@@ -2222,4 +2213,30 @@ export interface SystemStatsResult {
   containers_error?: string
   containers: SystemContainer[]
   others?: SystemOthers
+}
+
+export interface SlackLink {
+  user_id: string
+  team_id: string
+  linked_at: string
+}
+
+export interface SlackStatusResult {
+  configured: boolean
+  connected: boolean
+  bot?: string
+  team?: string
+  error?: string
+  link?: SlackLink
+}
+
+export interface SlackLinkResult {
+  code: string
+  expires_at: string
+  bot?: string
+  team?: string
+}
+
+export interface SlackUnlinkResult {
+  link: SlackLink
 }

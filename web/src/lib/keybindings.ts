@@ -94,7 +94,6 @@ export const keybindings = [
   { id: 'request-option-2', keys: '2', scope: 'request', label: 'Pick option 2 of the focused request' },
   { id: 'request-option-3', keys: '3', scope: 'request', label: 'Pick option 3 of the focused request' },
   { id: 'request-option-4', keys: '4', scope: 'request', label: 'Pick option 4 of the focused request' },
-  { id: 'card-approve', keys: 'a', scope: 'card', label: "Approve the focused card's request" },
   { id: 'card-reply', keys: 'r', scope: 'card', label: "Reply to the focused card's agent" },
   { id: 'card-open', keys: 'o', scope: 'card', label: 'Open the focused card' },
 ] as const satisfies readonly Keybinding[]

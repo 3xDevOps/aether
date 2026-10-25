@@ -326,9 +326,9 @@ func TestFailedMergeRestoresTheArchivedHome(t *testing.T) {
 	mustExec(t, db, `CREATE TRIGGER fail_merge BEFORE INSERT ON member_merges BEGIN SELECT RAISE(ABORT, 'injected'); END`)
 	var moved, restored, revoked, reinstated bool
 	_, err = db.AcceptMerge(ctx, MergeAccept{ProposalID: pm.ProposalID, Caller: a.ID, Digest: plan.Digest, Now: now,
-		Archive: func(string, domain.MemberID) (string, func(), error) {
+		Archive: func(string, domain.MemberID) (string, func() error, error) {
 			moved = true
-			return "/merged/x", func() { restored = true }, nil
+			return "/merged/x", func() error { restored = true; return nil }, nil
 		},
 		Demoted: func(domain.MemberID, domain.MemberID) (func() error, error) {
 			revoked = true

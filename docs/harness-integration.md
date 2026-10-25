@@ -48,18 +48,19 @@ Inside a coordinated run:
 
 `skill` loads the role and assignment. `status` lists the run's peers and what it
 may do. `inbox --wait 30` is one server-side wait, not a polling loop. It returns
-the messages and an `ack_token`. After handling the batch, the agent acknowledges:
+the messages and an `ack_token`. The agent's next `inbox` read acknowledges that
+batch; to acknowledge it without reading on:
 
 ```sh
 /usr/local/bin/aether-internal ack <ack_token>
 ```
 
-The batch stays frozen until acknowledged. New mail, including mail from people,
-waits behind it, and reading again repeats the same batch. An unacknowledged
-batch can be delivered again after an error or restart. A successful send means
-the message is stored, not that the other agent read it
-([delivery](coordination.md#delivery-acknowledgement-and-retries)). Never
-acknowledge from a hook or on a send receipt.
+Until acknowledged, the batch stays frozen and new mail, including mail from
+people, waits behind it. An unacknowledged batch can be delivered again after an
+error or restart. A successful send means the message is stored, not that the
+other agent read it ([delivery](coordination.md#delivery-acknowledgement-and-retries)).
+Never run `inbox` or `ack` from a hook, since a read acknowledges the agent's
+last batch, and never acknowledge on a send receipt.
 
 ## Add a boundary hook
 

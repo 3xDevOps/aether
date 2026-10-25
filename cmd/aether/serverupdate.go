@@ -24,7 +24,10 @@ func init() {
 	register(command{
 		name:  "server",
 		short: "server administration: update",
-		run:   runServer,
+		usage: "aether server update [--status] [--version <tag>] [--when now|idle] [--allow-downgrade] [--cancel] [--yes]",
+		example: "aether server update --status\n" +
+			"aether server update --when idle --yes",
+		run: runServer,
 	})
 }
 
@@ -51,15 +54,17 @@ const serverUpdateUsage = "usage: aether server update [--status] [--version <ta
 // either with the flags that shape an actual update is refused rather than
 // silently picking a winner.
 func parseServerUpdate(args []string) (serverUpdateOptions, error) {
-	fs := flag.NewFlagSet("server update", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("server update")
 	status := fs.Bool("status", false, "report the server's update state")
 	version := fs.String("version", "", "release tag to install (default: latest)")
 	when := fs.String("when", protocol.ServerUpdateNow, `"now" or "idle"`)
 	cancel := fs.Bool("cancel", false, "cancel a pending update")
 	yes := fs.Bool("yes", false, "skip the confirmation")
 	allowDowngrade := fs.Bool("allow-downgrade", false, "install a release older than the server's")
-	if err := fs.Parse(args); err != nil || fs.NArg() > 0 {
+	if err := fs.Parse(args); err != nil {
+		return serverUpdateOptions{}, fmt.Errorf("%w\n%s", err, serverUpdateUsage)
+	}
+	if fs.NArg() > 0 {
 		return serverUpdateOptions{}, errors.New(serverUpdateUsage)
 	}
 	seen := map[string]bool{}

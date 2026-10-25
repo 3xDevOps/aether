@@ -24,11 +24,10 @@ import (
 )
 
 type fakeFollows struct {
-	mu       sync.Mutex
-	gone     bool
-	run      *domain.Run
-	approval *store.Approval
-	follows  map[domain.MemberID]*store.AssistantFollow
+	mu      sync.Mutex
+	gone    bool
+	run     *domain.Run
+	follows map[domain.MemberID]*store.AssistantFollow
 }
 
 func (f *fakeFollows) PutAssistantFollow(_ context.Context, m domain.MemberID, r domain.RunID) error {
@@ -107,15 +106,6 @@ func (f *fakeFollows) notified(m domain.MemberID) (string, bool) {
 	return fl.NotifiedKey, true
 }
 
-func (f *fakeFollows) ListApprovals(context.Context, domain.WorkspaceID, string) ([]*store.Approval, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.approval == nil {
-		return nil, nil
-	}
-	return []*store.Approval{f.approval}, nil
-}
-
 type fakeRunState struct {
 	inputs  []domain.RunInputRequest
 	pending []acphost.Request
@@ -170,7 +160,6 @@ func TestClassify(t *testing.T) {
 		run      *domain.Run
 		inputs   []domain.RunInputRequest
 		pending  []acphost.Request
-		approval *store.Approval
 		paused   bool
 		kind     string
 		severity string
@@ -198,10 +187,6 @@ func TestClassify(t *testing.T) {
 			name: "permission", run: newRun(domain.RunRunning, ""), inputs: []domain.RunInputRequest{{ID: "req-1", SessionID: "s1", Kind: "permission"}},
 			pending: []acphost.Request{{ID: "req-1", Kind: acphost.RequestPermission, Title: "Run rm -rf build"}},
 			kind:    "needs_input", severity: "warning", title: `Run "Fix login" needs your input`, body: "Permission: Run rm -rf build",
-		},
-		{
-			name: "approval", run: newRun(domain.RunRunning, ""), approval: &store.Approval{ID: "ap-1", Action: "ExitPlanMode"},
-			kind: "needs_approval", severity: "warning", title: `Run "Fix login" needs your approval`, body: "ExitPlanMode",
 		},
 		{
 			name: "attention", run: newRun(domain.RunNeedsAttention, "blocked: no credentials"),
@@ -232,7 +217,7 @@ func TestClassify(t *testing.T) {
 		},
 	}
 	for _, tc := range tests {
-		got := classify(tc.run, tc.inputs, tc.pending, tc.approval, tc.paused)
+		got := classify(tc.run, tc.inputs, tc.pending, tc.paused)
 		if tc.kind == "" {
 			if got != nil {
 				t.Errorf("%s: classified as %+v, want nothing", tc.name, got)
@@ -531,7 +516,7 @@ func TestNoNoticeIsWrittenForAMemberBeingRemoved(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	x := newServiceFixture(t, newRun(domain.RunCompleted, ""))
-	n := classify(x.fs.run, nil, nil, nil, false)
+	n := classify(x.fs.run, nil, nil, false)
 	n.member = "gone"
 	x.fs.gone = true
 	if x.svc.deliver(*n) {
@@ -585,9 +570,9 @@ func TestPushGoesToFinishesAndToOthersNeedsOnly(t *testing.T) {
 		calls = append(calls, call{member, current != nil, urgent})
 		return nil
 	})
-	needs := classify(x.fs.run, nil, nil, nil, false)
-	finished := classify(newRun(domain.RunCompleted, ""), nil, nil, nil, false)
-	parked := classify(unseen(withActivity(newRun(domain.RunNeedsAttention, "agent reported success"), domain.ActivityFinished)), nil, nil, nil, false)
+	needs := classify(x.fs.run, nil, nil, false)
+	finished := classify(newRun(domain.RunCompleted, ""), nil, nil, false)
+	parked := classify(unseen(withActivity(newRun(domain.RunNeedsAttention, "agent reported success"), domain.ActivityFinished)), nil, nil, false)
 	for _, c := range []struct {
 		n      *notice
 		member domain.MemberID
@@ -652,7 +637,7 @@ func TestANoticeReachesTheTranscriptWhetherOrNotTheSessionTakesIt(t *testing.T) 
 	m.sess = &session{acp: sess, ended: make(chan struct{})}
 	m.mu.Unlock()
 
-	n := *classify(x.fs.run, nil, nil, nil, false)
+	n := *classify(x.fs.run, nil, nil, false)
 	n.member = "m1"
 	if err := x.svc.transcribe(m, n); err != nil {
 		t.Fatalf("a live session: %v", err)

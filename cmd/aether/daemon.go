@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -11,9 +12,24 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/localops"
 	"github.com/3xDevOps/Aether/internal/syncd"
 )
+
+func init() {
+	register(command{
+		name:  "daemon",
+		short: "run or install the local git sync daemon",
+		usage: "aether daemon run [--repo <path>] [--workspace <name>] [--base <branch>] [--remote <name>]\n" +
+			"    [--server <host:port>] [--server-id <id>] [--edge-url <url>] [--key <file>] [--known-hosts <file>] [--user <name>]\n" +
+			"aether daemon install [--repo <path>] [--workspace <name>] [--base <branch>] [--remote <name>]\n" +
+			"    [--server <host:port>] [--server-id <id>] [--edge-url <url>] [--key <file>] [--known-hosts <file>] [--user <name>]",
+		example: "aether daemon run --repo ~/src/app --workspace app\n" +
+			"aether daemon install --repo ~/src/app --workspace app",
+		run: daemonCmd,
+	})
+}
 
 func daemonCmd(args []string) error {
 	if len(args) < 1 {
@@ -33,7 +49,7 @@ func daemonCmd(args []string) error {
 // `daemon install` on fs and returns the bound Config.
 func daemonFlags(fs *flag.FlagSet) *syncd.Config {
 	cfg := &syncd.Config{}
-	fs.StringVar(&cfg.Server, "server", "", "aether-server SSH address, host:port (required unless --server-id is set)")
+	fs.StringVar(&cfg.Server, "server", "", "aether-server SSH address, host:port (default: the linked server)")
 	fs.StringVar(&cfg.ServerID, "server-id", "", "server id of an edge link; pins the host key and authenticates with the device key from aether login")
 	fs.StringVar(&cfg.EdgeURL, "edge-url", "", "edge URL of an edge link, tried after --server when both are set")
 	fs.StringVar(&cfg.KeyPath, "key", "", "SSH private key file (default: ssh-agent, then ~/.ssh/id_ed25519, id_ecdsa, id_rsa)")
@@ -46,14 +62,34 @@ func daemonFlags(fs *flag.FlagSet) *syncd.Config {
 	return cfg
 }
 
+func daemonServer(cfg *syncd.Config) error {
+	if cfg.Server != "" || cfg.ServerID != "" {
+		return nil
+	}
+	linked, err := cli.Load()
+	if err != nil {
+		return fmt.Errorf("pass --server or --server-id, or link this computer first: %w", err)
+	}
+	cfg.Server, cfg.ServerID = linked.Addr, linked.ServerID
+	if linked.ServerID != "" {
+		cfg.EdgeURL = cmp.Or(cfg.EdgeURL, linked.EdgeURL)
+	}
+	cfg.KeyPath = cmp.Or(cfg.KeyPath, linked.Key)
+	cfg.KnownHostsPath = cmp.Or(cfg.KnownHostsPath, linked.KnownHosts)
+	return nil
+}
+
 func daemonRun(args []string) error {
-	fs := flag.NewFlagSet("daemon run", flag.ExitOnError)
+	fs := newFlagSet("daemon run")
 	cfg := daemonFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return &exitStatusError{code: 2, err: fmt.Errorf("unexpected argument %q", fs.Arg(0))}
+	}
+	if err := daemonServer(cfg); err != nil {
+		return fmt.Errorf("daemon run: %w", err)
 	}
 	repo, err := filepath.Abs(cfg.RepoPath)
 	if err != nil {
@@ -79,7 +115,7 @@ func daemonRun(args []string) error {
 }
 
 func daemonInstall(args []string) error {
-	fs := flag.NewFlagSet("daemon install", flag.ExitOnError)
+	fs := newFlagSet("daemon install")
 	cfg := daemonFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -87,8 +123,8 @@ func daemonInstall(args []string) error {
 	if fs.NArg() > 0 {
 		return fmt.Errorf("unexpected argument %q", fs.Arg(0))
 	}
-	if cfg.Server == "" && cfg.ServerID == "" {
-		return errors.New("daemon install: --server or --server-id is required")
+	if err := daemonServer(cfg); err != nil {
+		return fmt.Errorf("daemon install: %w", err)
 	}
 	if cfg.Server != "" {
 		if err := syncd.ValidateServerAddr(cfg.Server); err != nil {

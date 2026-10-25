@@ -40,7 +40,10 @@ swarm's runs are counted once, as the swarm, so a worker that is retried or an
 integrator that is replaced never adds a run. Two numbers include swarm runs:
 **Total tokens used** and the count of runs waiting for you.
 
-A run counts on the day it finished, even if it started before the 7 days.
+A run counts on the day it finished, even if it started before the 7 days. A
+relaunched run is one run: while it is live again it counts in no finished
+total, and after it closes again it counts once, on the day of its latest
+finish, with that outcome.
 
 How a run or swarm ended:
 
@@ -70,7 +73,7 @@ request status is read again. If GitHub cannot be read, the row shows
 
 Time covers runs that finished in the period.
 
-- Run time: from start to finish. **Slowest 10% take over** is the 90th
+- Run time: from the latest start (the relaunch, for a relaunched run) to finish. **Slowest 10% take over** is the 90th
   percentile.
 - Agent working: time the agent spent working, including waiting for other
   agents, CI or tools.
@@ -82,10 +85,21 @@ on you.
 
 ## Cost
 
-Cost adds up the usage of runs that finished in the period. Only Background
-Claude Code runs report cost and tokens. Every other run is listed as not reporting
-tokens, and its cost is unknown, not zero, so cost and token figures are a
-floor. When some runs are unmetered the page says `at least $X`.
+Cost adds up the usage of runs that finished in the period. These runs report
+cost and tokens:
+
+- Claude Code in Background and Enhanced runs.
+- OpenCode and omp in Enhanced runs, and in Background runs over ACP.
+
+Every other run, Standard runs included, is listed as not reporting tokens, and
+its cost is unknown, not zero, so cost and token figures are a floor. When some
+runs are unmetered the page says `at least $X`.
+
+An Enhanced agent reports the running cost of its session. Aether charges what
+each report adds, with the tokens of that turn. A restored session, a new
+session or Claude Code's `/clear` neither counts spend twice nor drops it, and
+spend the server had not recorded when it stopped counts with the agent's next
+report.
 
 If a run moved between accounts after a usage limit, its spend counts under
 the account that paid. The run's owner decides which person's statistics it

@@ -55,8 +55,11 @@ func (d tuiDriver) Deliver(ctx context.Context, run *domain.Run, member *domain.
 // Headless runs without Run.ACP host their one-shot agent on the primary PTY.
 func (s *Scheduler) entryDriver(entry *supervised) AgentDriver {
 	s.mu.Lock()
-	acp := entry.acp
+	acp, appServer := entry.acp, entry.appServer
 	s.mu.Unlock()
+	if appServer {
+		return s.appServer
+	}
 	return s.driver(acp)
 }
 

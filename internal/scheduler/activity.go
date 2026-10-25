@@ -10,7 +10,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // These mark a waiting outcome in the idle reason the sidecar keeps, by what
@@ -142,7 +141,7 @@ func (e *supervised) asksMember() bool {
 // activityLocked derives the activity of run moving to status to with
 // reason, raw or public. entry is the run's supervised state, nil when it
 // has none. Caller holds s.mu.
-func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, entry *supervised, to domain.RunStatus, reason string) (domain.RunActivity, error) {
+func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry *supervised, to domain.RunStatus, reason string) (domain.RunActivity, error) {
 	if !to.Live() {
 		return "", nil
 	}
@@ -178,15 +177,6 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, worksp
 		f.waitingCI = !waitedOut && f.waitingCI
 		f.waitingTools = (!waitedOut && f.waitingTools) || (held && entry.agentReport.Tools)
 	}
-	if !f.human {
-		approvals, err := s.cfg.Store.ListApprovals(ctx, workspace, store.ApprovalRequested)
-		if err != nil {
-			return "", fmt.Errorf("scheduler: read the run's approvals: %w", err)
-		}
-		for _, a := range approvals {
-			f.human = f.human || a.RunID == run
-		}
-	}
 	f.turn = to == domain.RunRunning && !f.waitingAgents && !f.waitingCI && !f.waitingTools
 	if parked && entry != nil && !stalled && !waitedOut && !f.disconnected && !f.human && !f.failed && !f.finished &&
 		!f.waitingAgents && !f.waitingCI && !f.waitingTools {
@@ -205,23 +195,11 @@ func (s *Scheduler) refreshActivityLocked(ctx context.Context, entry *supervised
 	if s.runs[entry.runID] != entry || !entry.status.Live() || entry.finalizing || entry.exitObserved {
 		return nil
 	}
-	activity, err := s.activityLocked(ctx, entry.runID, entry.workspaceID, entry, entry.status, entry.reason)
+	activity, err := s.activityLocked(ctx, entry.runID, entry, entry.status, entry.reason)
 	if err != nil || activity == entry.activity {
 		return err
 	}
 	return s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, entry.status, entry.reason, "")
-}
-
-// refreshRunActivity recomputes run's activity after a fact outside the
-// scheduler changed, such as an approval request raised or decided.
-func (s *Scheduler) refreshRunActivity(ctx context.Context, run domain.RunID) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry := s.runs[run]
-	if entry == nil {
-		return nil
-	}
-	return s.refreshActivityLocked(ctx, entry)
 }
 
 // refreshActivities recomputes every live run's activity: after recovery,

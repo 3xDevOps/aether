@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -12,7 +11,7 @@ const runSwitchUsage = "usage: aether run switch <run-id> --mode standard|enhanc
 
 func runSwitch(args []string) error {
 	runID := args[0]
-	fs := flag.NewFlagSet("run switch", flag.ExitOnError)
+	fs := newFlagSet("run switch")
 	mode := fs.String("mode", "", "standard or enhanced")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err

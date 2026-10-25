@@ -1,8 +1,7 @@
 import type { Event } from '@/lib/types'
-import { refreshInbox } from '@/routes/team/sync'
 import { createRootStore } from '@/store'
 import { applyEvent } from '@/store/sync'
-import { alice, approval, budget, fakeApi, otherWorkspace, run, workspace } from '@/test/fixtures'
+import { alice, budget, fakeApi, run, workspace } from '@/test/fixtures'
 
 function event(seq: number, type: string, payload: unknown, over: Partial<Event> = {}): Event {
   return {
@@ -26,153 +25,6 @@ function seeded() {
 }
 
 describe('team state from events', () => {
-  it('decides a known request in place and reads the list only for an unknown one', async () => {
-    const store = seeded()
-    store.getState().setInbox(workspace.id, [approval({ id: 'apr_1' })])
-    const approvalList = vi.fn(async () => [approval({ id: 'apr_1' }), approval({ id: 'apr_2' })])
-    const client = fakeApi({ approvalList })
-
-    await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'requested' }), client)
-    expect(approvalList).toHaveBeenCalledTimes(1)
-    await vi.waitFor(() => expect(store.getState().approvalsByRun.run_1.map((a) => a.id)).toEqual(['apr_1', 'apr_2']))
-
-    await applyEvent(
-      store,
-      event(2, 'workspace.approval', { request_id: 'apr_1', action: 'Bash', decision: 'approved' }, { actor_id: alice.id }),
-      client,
-    )
-    expect(approvalList).toHaveBeenCalledTimes(1)
-    expect(store.getState().inbox[workspace.id].map((a) => a.id)).toEqual(['apr_2'])
-    expect(store.getState().approvalsByRun.run_1.map((a) => a.id)).toEqual(['apr_2'])
-
-    // A decision about a request this client never held changes nothing it shows.
-    await applyEvent(store, event(3, 'workspace.approval', { request_id: 'apr_9', action: 'Bash', decision: 'denied' }), client)
-    expect(approvalList).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps a decided request on screen while decided requests are shown', async () => {
-    const store = seeded()
-    store.setState({ showDecided: true })
-    store.getState().setInbox(workspace.id, [approval({ id: 'apr_1' })])
-
-    await applyEvent(
-      store,
-      event(1, 'workspace.approval', { request_id: 'apr_1', action: 'Bash', decision: 'denied' }, { actor_id: alice.id }),
-      fakeApi(),
-    )
-    expect(store.getState().inbox[workspace.id][0]).toMatchObject({
-      decision: 'denied',
-      decided_by: alice.id,
-      decided_at: '2026-08-14T11:00:00Z',
-    })
-    expect(store.getState().approvalsByRun.run_1).toBeUndefined()
-  })
-
-  it('does not let a full read that started before an event overwrite it, and reads that workspace again', async () => {
-    const store = seeded()
-    store.getState().setInbox(workspace.id, [approval({ id: 'apr_1' })])
-    const stale = Promise.withResolvers<ReturnType<typeof approval>[]>()
-    const fresh = Promise.withResolvers<ReturnType<typeof approval>[]>()
-    const approvalList = vi
-      .fn()
-      .mockImplementationOnce(() => stale.promise)
-      .mockImplementation(() => fresh.promise)
-    const read = refreshInbox(store, fakeApi({ approvalList }))
-
-    await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_1', action: 'Bash', decision: 'approved' }), fakeApi())
-    stale.resolve([approval({ id: 'apr_1' })])
-    await read
-    expect(store.getState().inbox[workspace.id]).toEqual([])
-    fresh.resolve([approval({ id: 'apr_2' })])
-    await vi.waitFor(() => expect(store.getState().inbox[workspace.id].map((a) => a.id)).toEqual(['apr_2']))
-    expect(approvalList).toHaveBeenCalledTimes(2)
-  })
-
-  it('keeps retrying a failed list read with backoff while the stream is live', async () => {
-    vi.useFakeTimers()
-    try {
-      const store = seeded()
-      store.setState({ connection: 'live' })
-      const approvalList = vi.fn(async () => {
-        throw new Error('approval.list: database is locked')
-      })
-      const client = fakeApi({ approvalList })
-
-      await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'requested' }), client)
-      await vi.advanceTimersByTimeAsync(0)
-      expect(approvalList).toHaveBeenCalledTimes(1)
-      let calls = 1
-      for (const wait of [5000, 10_000, 20_000, 40_000, 60_000, 60_000]) {
-        await vi.advanceTimersByTimeAsync(wait - 1)
-        expect(approvalList).toHaveBeenCalledTimes(calls)
-        await vi.advanceTimersByTimeAsync(1)
-        expect(approvalList).toHaveBeenCalledTimes(++calls)
-      }
-
-      store.getState().setInboxError(workspace.id, null)
-      await vi.advanceTimersByTimeAsync(120_000)
-      expect(approvalList).toHaveBeenCalledTimes(calls)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('retries a failed full read while the stream stays live and quiet', async () => {
-    vi.useFakeTimers()
-    try {
-      const store = seeded()
-      store.setState({ connection: 'live' })
-      const approvalList = vi
-        .fn()
-        .mockRejectedValueOnce(new Error('approval.list: database is locked'))
-        .mockResolvedValue([approval({ id: 'apr_1' })])
-
-      await refreshInbox(store, fakeApi({ approvalList }))
-      expect(store.getState().inboxError).toContain('locked')
-
-      await vi.advanceTimersByTimeAsync(5000)
-      expect(approvalList).toHaveBeenCalledTimes(2)
-      expect(store.getState().approvalsByRun.run_1.map((a) => a.id)).toEqual(['apr_1'])
-      expect(store.getState().inboxError).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("keeps one workspace's failed read retrying when a full read succeeds elsewhere", async () => {
-    vi.useFakeTimers()
-    try {
-      const store = seeded()
-      store.setState({ connection: 'live', workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace } })
-      let answerFirst: (list: never[]) => void = () => {}
-      let firstRead = true
-      const approvalList = vi.fn((wsp: string) => {
-        if (wsp !== workspace.id) return Promise.resolve([])
-        if (firstRead) {
-          firstRead = false
-          return new Promise<never[]>((resolve) => { answerFirst = resolve })
-        }
-        return Promise.reject(new Error('approval.list: database is locked'))
-      })
-      const client = fakeApi({ approvalList })
-
-      const full = refreshInbox(store, client)
-      await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'requested' }), client)
-      await vi.advanceTimersByTimeAsync(0)
-      answerFirst([])
-      await full
-      await vi.advanceTimersByTimeAsync(0)
-      expect(store.getState().inboxError).toContain('locked')
-
-      const before = approvalList.mock.calls.filter(([wsp]) => wsp === workspace.id).length
-      await vi.advanceTimersByTimeAsync(5000 + 10_000)
-      expect(approvalList.mock.calls.filter(([wsp]) => wsp === workspace.id).length).toBeGreaterThan(before)
-      expect(store.getState().inboxError).toContain('locked')
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
   it('tracks who controls a run from run.controller events', async () => {
     const store = seeded()
     const client = fakeApi()
@@ -295,39 +147,6 @@ describe('team state from events', () => {
     } finally {
       vi.useRealTimers()
     }
-  })
-
-  it('reads the list again when an event lands while it is in flight', async () => {
-    const store = seeded()
-    const first = Promise.withResolvers<ReturnType<typeof approval>[]>()
-    const approvalList = vi
-      .fn()
-      .mockImplementationOnce(() => first.promise)
-      .mockImplementation(async () => [])
-    const client = fakeApi({ approvalList })
-
-    await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'requested' }), client)
-    await applyEvent(store, event(2, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'approved' }), client)
-    first.resolve([approval({ id: 'apr_2' })])
-
-    await vi.waitFor(() => expect(approvalList).toHaveBeenCalledTimes(2))
-    await vi.waitFor(() => expect(store.getState().inbox[workspace.id]).toEqual([]))
-  })
-
-  it('clears the error a failed list read set once a later read succeeds', async () => {
-    const store = seeded()
-    const approvalList = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('approval.list: database is locked'))
-      .mockImplementation(async () => [approval({ id: 'apr_3' })])
-    const client = fakeApi({ approvalList })
-
-    await applyEvent(store, event(1, 'workspace.approval', { request_id: 'apr_2', action: 'Bash', decision: 'requested' }), client)
-    await vi.waitFor(() => expect(store.getState().inboxError).toContain('locked'))
-
-    await applyEvent(store, event(2, 'workspace.approval', { request_id: 'apr_3', action: 'Bash', decision: 'requested' }), client)
-    await vi.waitFor(() => expect(store.getState().inboxError).toBeNull())
-    expect(store.getState().approvalsByRun.run_1.map((a) => a.id)).toEqual(['apr_3'])
   })
 
   it('re-reads the roster on a presence event', async () => {

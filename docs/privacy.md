@@ -204,6 +204,21 @@ app, it tells your server so at most every 20 seconds. Your server keeps the
 time of the latest such report in memory, to hold your notifications while
 you are there. It is not stored, and no other member sees it.
 
+## Slack
+
+Off until an admin runs `sudo aether-server slack setup`
+([slack.md](slack.md)) and a member links a Slack account. For each linked
+member the server sends Slack the titles of the runs that need them, the
+need lines (which can quote an agent's reason), the text and options of
+pending requests, run and swarm IDs and the dashboard's address, and, in the
+link confirmation, the member's Aether display name and the server's host name.
+Replies and button presses pass through Slack to the server. Nothing is sent
+to Slack for members who never linked.
+
+Slack keeps the messages under the workspace's retention settings. Unlinking
+or removing the bot does not delete messages already sent. The tokens stay in
+0600 files under `<data-dir>/slack` on the server.
+
 ## What an edge stores
 
 An **edge** is the relay and sign-in service that lets a computer running

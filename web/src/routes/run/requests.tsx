@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react'
-import { toast } from 'sonner'
 import { DecisionButtons } from '@/components/decision-buttons'
 import { Button } from '@/components/ui/button'
 import { RequestCard } from '@/components/ui/request-card'
 import { Textarea } from '@/components/ui/textarea'
-import { api } from '@/lib/api'
-import { errorSentence } from '@/lib/format'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { inputHint, inputTitle } from '@/lib/run-requests'
 import type { SessionRequest } from '@/lib/session-types'
-import type { Approval, RoomMessage } from '@/lib/types'
+import type { RoomMessage } from '@/lib/types'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
@@ -21,13 +18,11 @@ import type { RunRecord } from '@/store/runs'
 
 export const requestCardID = {
   input: (id: string) => `request-input-${id}`,
-  approval: (id: string) => `request-approval-${id}`,
   steer: (id: string) => `request-steer-${id}`,
   question: (id: string) => `request-question-${id}`,
 }
 
 const emptyMessages: RoomMessage[] = []
-const emptyApprovals: Approval[] = []
 const emptyRequests: SessionRequest[] = []
 
 function secondsUntil(at: string | undefined): number {
@@ -51,13 +46,11 @@ export function DeliveryCountdown({ deliverAfter }: { deliverAfter?: string }) {
 
 export function useRunRequests(run: RunRecord) {
   const room = useStore((s) => s.roomMessages[run.id] ?? emptyMessages)
-  const approvals = useStore((s) => s.approvalsByRun[run.id] ?? emptyApprovals)
   const selfID = useStore((s) => s.info?.member.id)
   const sessionRequests = useStore((s) => (run.acp ? s.acpSessions[run.id]?.pending : undefined)) ?? emptyRequests
   return {
     inputs: run.acp ? [] : run.pending_inputs ?? [],
     sessionRequests,
-    approvals,
     steers: queuedSteers(room).filter((m) => m.actor_id !== selfID),
     questions: unansweredQuestions(room).filter((m) => m.actor_id !== run.member_id),
   }
@@ -110,16 +103,12 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
 }) {
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
-  const { inputs, sessionRequests, approvals, steers, questions } = useRunRequests(run)
+  const { inputs, sessionRequests, steers, questions } = useRunRequests(run)
   const name = (id: string, snapshot?: string) => (resolveMember({ members, mergedInto }, id).member ? memberName({ members, mergedInto }, id) : snapshot ?? id)
   const openTerminal = () => {
     nav.go('terminal')
     if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl()
   }
-  const decideApproval = (approval: Approval, approve: boolean) => api.approvalDecide(run.id, approval.id, approve).then(
-    (decided) => useStore.getState().decideApproval(decided.workspace_id, decided.id, decided.decision, decided.decided_by ?? '', decided.decided_at ?? ''),
-    (err) => toast.error(`${approve ? 'Approve' : 'Deny'} failed: ${errorSentence(err)}`),
-  )
 
   return (
     <div className="flex flex-col gap-2">
@@ -138,16 +127,6 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
           actions={agent.hasAgentTerminal && <Button size="sm" variant="secondary" onClick={openTerminal}>Open terminal</Button>}
         >
           {inputHint(agent.hasAgentTerminal)}
-        </RequestCard>
-      ))}
-      {approvals.map((approval) => (
-        <RequestCard
-          key={approval.id}
-          id={requestCardID.approval(approval.id)}
-          title={`Permission: ${approval.action}`}
-          actions={<DecisionButtons decide={(approve) => decideApproval(approval, approve)} />}
-        >
-          {approval.detail}
         </RequestCard>
       ))}
       {steers.map((steer) => (

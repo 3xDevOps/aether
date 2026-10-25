@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -23,7 +22,7 @@ func memberMerge(args []string) error {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return errors.New(memberMergeUsage)
 	}
-	fs := flag.NewFlagSet("member merge", flag.ContinueOnError)
+	fs := newFlagSet("member merge")
 	keep := fs.String("keep", "", "the member id whose settings prevail")
 	keepAdmin := fs.Bool("keep-admin", false, "as the admin side, keep the merged member admin")
 	yes := fs.Bool("yes", false, "answer yes to the plan printed instead of asking")
@@ -31,7 +30,10 @@ func memberMerge(args []string) error {
 	if args[0] == "accept" && len(rest) > 0 && !strings.HasPrefix(rest[0], "-") {
 		proposalID, rest = rest[0], rest[1:]
 	}
-	if err := fs.Parse(rest); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(rest); err != nil {
+		return fmt.Errorf("%w\n%s", err, memberMergeUsage)
+	}
+	if fs.NArg() != 0 {
 		return errors.New(memberMergeUsage)
 	}
 	interactive := term.IsTerminal(int(os.Stdin.Fd()))

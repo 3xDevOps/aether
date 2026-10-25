@@ -201,6 +201,8 @@ type MessageStore interface {
 	// CountUnackedRunMessages returns how many live messages the run has not
 	// acknowledged yet, delivered or not.
 	CountUnackedRunMessages(ctx context.Context, to domain.RunID) (int, error)
+	// LastSentRunMessages returns the newest message from sent each recipient.
+	LastSentRunMessages(ctx context.Context, from domain.RunID) (map[domain.RunID]*RunMessage, error)
 	// DeliverRunMessages acknowledges ackToken's batch, then returns the
 	// run's next batch and the token binding it. An empty, unknown, or
 	// another run's token acknowledges nothing. A batch already delivered
@@ -211,6 +213,8 @@ type MessageStore interface {
 	DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, bool, error)
 	// RetireRunMessages retires a released run's unread inbound mail.
 	RetireRunMessages(ctx context.Context, to domain.RunID) error
+	CoordReportedSince(ctx context.Context, run domain.RunID, since time.Time) (bool, error)
+	RetireProvisionalReports(ctx context.Context, from, to domain.RunID, cutoff time.Time) error
 	AppendCoordReport(ctx context.Context, report *CoordReport) error
 	ReserveCoordReport(ctx context.Context, report *CoordReport) (bool, error)
 	FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool, error)

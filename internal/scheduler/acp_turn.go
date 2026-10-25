@@ -41,6 +41,15 @@ func heldByTasks(report agentstatus.Report) bool {
 }
 
 func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnState) {
+	switch acp.StopReason(st.Reason) {
+	case acp.StopReasonEndTurn, acp.StopReasonMaxTokens, acp.StopReasonMaxTurnRequests, acp.StopReasonRefusal, "error":
+		d.s.mu.Lock()
+		assigned := entry.missionAssigned
+		d.s.mu.Unlock()
+		if sess := d.session(entry.runID); assigned && sess != nil {
+			d.s.TurnEnded(entry.runID, acphost.LastMessage(sess.Log()))
+		}
+	}
 	if oneShot && !st.Working {
 		// An interrupted session is ended by its connection's end or
 		// resumed by startOneShot.

@@ -35,9 +35,14 @@ sha_of() {
 # --- the release assets the installer downloads --------------------------
 
 # GUI_INTERRUPTS signals the installer the way a terminal delivers Ctrl-C
-# during a long build, before the stub logs anything.
+# during a long build, before the stub logs anything. GUI_FAILS is a build
+# that errors.
 cat >"$fixtures/aether" <<'EOF'
 #!/bin/sh
+if [ "${GUI_FAILS:-0}" = 1 ] && [ "${1:-}" = gui ]; then
+	echo "aether: gui build: npm ci failed" >&2
+	exit 1
+fi
 if [ "${GUI_INTERRUPTS:-0}" = 1 ] && [ "${1:-}" = gui ]; then
 	kill -INT "$PPID"
 	exit 130
@@ -277,9 +282,14 @@ EOF
 # Logs, then runs the command as a real root would. STUB_ROOT_DIR names the
 # read-only stand-in for /usr/local/bin, whose permissions root would ignore;
 # chown is only logged, because no test runs as a user who could do it.
+# STUB_SUDO_FAILS is a sudo that cannot ask for a password.
 cat >"$bin/sudo" <<'EOF'
 #!/bin/sh
 printf 'sudo %s\n' "$*" >>"$CMD_LOG"
+if [ "${STUB_SUDO_FAILS:-0}" = 1 ]; then
+	echo "sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper" >&2
+	exit 1
+fi
 case "${1:-}" in chown) exit 0 ;; esac
 if [ -n "${STUB_ROOT_DIR:-}" ]; then
 	chmod u+w "$STUB_ROOT_DIR"
@@ -374,6 +384,12 @@ answer() {
 }
 
 answers="$tmp/answers"
+# An existing empty file opens as a terminal that answers nothing.
+faketty="$tmp/empty-tty"
+: >"$faketty"
+
+guard=""
+command -v timeout >/dev/null 2>&1 && guard="timeout 120"
 
 ran() { grep -Fq "$1" "$log" || fail "expected to run: $1"; }
 not_ran() { ! grep -Fq "$1" "$log" || fail "should not have run: $1"; }
@@ -397,7 +413,7 @@ quickstart="https://github.com/3xDevOps/Aether/blob/main/docs/quickstart.md"
 # Setup's next steps hold the one activation line, and only the guide
 # follows them.
 reset "--role server"
-sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
+AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether-server setup"
 not_ran "aether gui build"
 grep -q "^sudo .*aether-server setup$" "$log" || fail "setup did not go through sudo"
@@ -411,7 +427,7 @@ plain
 # --- a failing setup still lands on the docs, with the rerun command -----
 
 reset "--role server, setup fails"
-SETUP_FAILS=1 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
+SETUP_FAILS=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether-server setup"
 not_ran "aether gui build"
 printed "This machine is your Aether server"
@@ -423,7 +439,7 @@ plain
 # --- declining setup exits 0 but writes nothing: no activation line ------
 
 reset "--role server, setup declined"
-SETUP_DECLINES=1 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
+SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether-server setup"
 printed "sudo aether-server setup"
 [ "$(activations)" = 0 ] || fail "offered to activate a service that was never written"
@@ -436,14 +452,14 @@ printed "$quickstart"
 
 reset "--role server, declined but a unit is already installed"
 touch -t 200001010000 "$AETHER_UNIT_PATH"
-SETUP_DECLINES=1 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
+SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 printed "  sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
 [ "$(activations)" = 1 ] || fail "printed the activation line $(activations) times, want once"
 ends_with "  aether link <this-host>:2222   # from your own machine; the first link becomes admin"
 
 reset "--role server as root, declined but a unit is already installed"
 touch -t 200001010000 "$AETHER_UNIT_PATH"
-SUDO_USER="" STUB_UID=0 SETUP_DECLINES=1 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
+SUDO_USER="" STUB_UID=0 SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 ! grep -q "^sudo .*aether-server setup$" "$log" || fail "root ran setup through sudo"
 printed "  systemctl daemon-reload && systemctl enable --now aether-server"
 not_printed "sudo systemctl"
@@ -451,8 +467,18 @@ not_printed "sudo systemctl"
 # Piped to `sudo sh`, the installer is root but the person is not.
 reset "--role server through sudo, declined but a unit is already installed"
 touch -t 200001010000 "$AETHER_UNIT_PATH"
-SUDO_USER=ubuntu STUB_UID=0 SETUP_DECLINES=1 sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
+SUDO_USER=ubuntu STUB_UID=0 SETUP_DECLINES=1 AETHER_TTY="$faketty" sh "$script" --role server >"$out" 2>&1 || fail "installer exited non-zero"
 printed "  sudo systemctl daemon-reload && sudo systemctl enable --now aether-server"
+
+reset "--role server, no terminal"
+status=0
+# shellcheck disable=SC2086
+$guard env AETHER_TTY="$tmp/no-such-tty" sh "$script" --role server >"$out" 2>&1 || status=$?
+[ "$status" != 0 ] || fail "installer exited 0 without setting up the server"
+not_ran "aether-server setup"
+[ -x "$bindir/aether-server" ] || fail "the server binary was not installed"
+printed "sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>"
+not_printed "This machine is your Aether server"
 
 # --- --role client: aether gui build runs --------------------------------
 
@@ -465,6 +491,11 @@ printed "$quickstart"
 ends_with "  aether link <server-host>:2222 # the first link on a fresh server becomes admin"
 plain
 
+reset "--role client, gui build fails"
+GUI_FAILS=1 sh "$script" --role client >"$out" 2>&1 || fail "installer exited non-zero"
+ends_with "aether install: the aether CLI is installed in $bindir; the desktop app is not: \`aether gui build\` exited 1; its error is above"
+not_printed "The desktop app was not built"
+
 # --- --role none: binaries only ------------------------------------------
 
 reset "--role none"
@@ -475,6 +506,12 @@ printed "Nothing else was set up on this machine"
 printed "$quickstart"
 ends_with "  aether link <server>:2222      # from a client; the first link becomes admin"
 plain
+
+reset "--role none, unit already installed"
+touch "$AETHER_UNIT_PATH"
+sh "$script" --role none >"$out" 2>&1 || fail "installer exited non-zero"
+printed "sudo aether-server update --version v0.0.0-test"
+not_printed "sudo aether-server setup"
 
 # --- AETHER_ROLE=client is the same as --role client ---------------------
 
@@ -493,7 +530,7 @@ ran "aether gui build"
 # --- --server implies the server role ------------------------------------
 
 reset "--server"
-sh "$script" --server >"$out" 2>&1 || fail "installer exited non-zero"
+AETHER_TTY="$faketty" sh "$script" --server >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether-server setup"
 not_ran "aether gui build"
 
@@ -509,7 +546,7 @@ printed "$quickstart"
 # --- flags and answers are case-insensitive ------------------------------
 
 reset "--role SERVER"
-sh "$script" --role SERVER >"$out" 2>&1 || fail "installer exited non-zero"
+AETHER_TTY="$faketty" sh "$script" --role SERVER >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether-server setup"
 
 # --- the question itself, over a fake terminal ---------------------------
@@ -569,9 +606,6 @@ reset "prompt: answers are case-insensitive"
 answer CLIENT
 AETHER_TTY="$answers" sh "$script" >"$out" 2>&1 || fail "installer exited non-zero"
 ran "aether gui build"
-
-guard=""
-command -v timeout >/dev/null 2>&1 && guard="timeout 120"
 
 reset "prompt: a terminal that closes takes the default"
 answer
@@ -669,7 +703,7 @@ reset "server role installs into /usr/local/bin with sudo and root ownership"
 chmod 0555 "$sysbin"
 (
 	unset AETHER_BIN_DIR
-	STUB_ROOT_DIR="$sysbin" sh "$script" --role server
+	STUB_ROOT_DIR="$sysbin" AETHER_TTY="$faketty" sh "$script" --role server
 ) >"$out" 2>&1 || fail "installer exited non-zero"
 [ -x "$sysbin/aether-server" ] || fail "the server did not land in /usr/local/bin"
 [ ! -e "$home/.local/bin/aether-server" ] || fail "the server went to ~/.local/bin"
@@ -683,7 +717,7 @@ sh "$script" --role client --bin-dir "$bindir" >"$out" 2>&1 || fail "installer e
 [ ! -e "$home/.local/bin/aether" ] || fail "--bin-dir still used ~/.local/bin"
 
 reset "--bin-dir wins over the server role"
-sh "$script" --role server --bin-dir "$bindir" >"$out" 2>&1 || fail "installer exited non-zero"
+AETHER_TTY="$faketty" sh "$script" --role server --bin-dir "$bindir" >"$out" 2>&1 || fail "installer exited non-zero"
 [ -x "$bindir/aether-server" ] || fail "--bin-dir was ignored"
 [ ! -e "$sysbin/aether-server" ] || fail "--bin-dir still used /usr/local/bin"
 
@@ -695,6 +729,15 @@ reset "role none keeps /usr/local/bin"
 [ -x "$sysbin/aether" ] || fail "role none did not use /usr/local/bin"
 [ ! -e "$home/.local/bin/aether" ] || fail "role none used ~/.local/bin"
 not_printed "would shadow"
+
+reset "role none without a usable sudo points at the no-sudo client install"
+status=0
+(
+	unset AETHER_BIN_DIR
+	STUB_SUDO_FAILS=1 sh "$script" --role none
+) >"$out" 2>&1 || status=$?
+[ "$status" != 0 ] || fail "installer exited 0 though sudo failed"
+printed "sh -s -- --client --role none --bin-dir \"\$HOME/.local/bin\""
 
 # --- the PATH line, one per shell ----------------------------------------
 #

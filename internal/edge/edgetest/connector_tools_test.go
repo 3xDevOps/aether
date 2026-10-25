@@ -179,7 +179,7 @@ func TestConnectorToolsThroughTheEdge(t *testing.T) {
 	}
 
 	swarm := structured(t, session, "aether_launch_swarm", map[string]any{"workspace_id": string(ws.ID), "objective": "ship connectors",
-		"harness": "claude", "workers": []any{map[string]any{"harness": "codex", "mode": "acp"}}, "idempotency_key": "swarm-1"})
+		"harness": "claude", "mode": "tui", "workers": []any{map[string]any{"harness": "codex", "mode": "acp"}}, "idempotency_key": "swarm-1"})
 	missions.mu.Lock()
 	created := slices.Clone(missions.created)
 	missions.mu.Unlock()

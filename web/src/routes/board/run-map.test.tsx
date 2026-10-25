@@ -86,7 +86,7 @@ beforeEach(() => {
   frames.clear()
   useStore.setState({
     boardMapViewports: {}, workspaces: { [workspace.id]: workspace },
-    members: { [alice.id]: alice }, inbox: {}, runs: {}, pausedRuns: {}, overlaps: {},
+    members: { [alice.id]: alice }, runs: {}, pausedRuns: {}, overlaps: {},
     route: { name: 'board', params: {} },
   })
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {

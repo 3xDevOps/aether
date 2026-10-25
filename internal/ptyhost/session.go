@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -924,8 +926,17 @@ func (s *session) annotateInjection(ctx context.Context, actorName, actorColor, 
 	}
 }
 
+const (
+	pasteStart = "\x1b[200~"
+	pasteEnd   = "\x1b[201~"
+	// submitAfterPaste puts the submit sequence in a later read than the
+	// paste: Gemini CLI turns an Enter within 30 ms of input into a newline,
+	// and Cursor CLI folds one within 75 ms into the paste. inject holds
+	// stdinMu across the pause so no other input lands in between.
+	submitAfterPaste = 200 * time.Millisecond
+)
+
 func (s *session) inject(ctx context.Context, actorName, actorColor, message, submit string) error {
-	line := []byte(message + submit)
 	s.stdinMu.Lock()
 	defer s.stdinMu.Unlock()
 	s.mu.Lock()
@@ -937,15 +948,50 @@ func (s *session) inject(ctx context.Context, actorName, actorColor, message, su
 		s.mu.Unlock()
 		return ErrSessionEnded
 	}
+	// Output held behind a resize has not reached s.modes yet.
+	modes := modeScanner{state: s.modes.state, params: slices.Clone(s.modes.params), set: maps.Clone(s.modes.set)}
+	modes.scan(s.pendingScreen)
+	bracketed := modes.set[2004]
 	tr := s.tr
 	s.mu.Unlock()
-	if err := s.writeStdinContextLocked(ctx, line); err != nil {
+	writeCtx, line := ctx, message+submit
+	if bracketed {
+		// Removing one end marker can join the bytes around it into
+		// another, so each is dropped as soon as its last byte lands.
+		paste := make([]byte, 0, len(pasteStart)+len(message)+len(pasteEnd))
+		paste = append(paste, pasteStart...)
+		for i := 0; i < len(message); i++ {
+			paste = append(paste, message[i])
+			if n := len(paste) - len(pasteEnd); string(paste[n:]) == pasteEnd {
+				paste = paste[:n]
+			}
+		}
+		paste = append(paste, pasteEnd...)
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("ptyhost: inject: %w", err)
+		}
+		// Once a paste starts, the caller can no longer cut it short: a
+		// paste missing its end marker swallows later input, and one left
+		// unsubmitted would be pasted twice by a retry.
+		writeCtx = context.WithoutCancel(ctx)
+		if err := s.writeStdinContextLocked(writeCtx, paste); err != nil {
+			return fmt.Errorf("ptyhost: inject: %w", err)
+		}
+		time.Sleep(submitAfterPaste)
+		line = submit
+	}
+	if err := s.writeStdinContextLocked(writeCtx, []byte(line)); err != nil {
 		return fmt.Errorf("ptyhost: inject: %w", err)
 	}
-	if err := s.annotateInjection(ctx, actorName, actorColor, message); err != nil {
-		// The write above already accepted the full line: a session that
-		// ended in this window must not turn delivered input into a
-		// reported failure, which would invite a double-submitting retry.
+	return s.annotateDelivered(ctx, tr, actorName, actorColor, message)
+}
+
+// annotateDelivered draws the banner for a message the agent already has:
+// neither the caller leaving nor the session ending in this window may turn
+// delivered input into a reported failure, which would invite a
+// double-submitting retry.
+func (s *session) annotateDelivered(ctx context.Context, tr *castWriter, actorName, actorColor, message string) error {
+	if err := s.annotateInjection(context.WithoutCancel(ctx), actorName, actorColor, message); err != nil {
 		if errors.Is(err, ErrSessionEnded) || errors.Is(err, ErrNoSession) {
 			if tr != nil {
 				tr.lateMarker("inject by " + bannerText(actorName) + ": " + bannerText(message))

@@ -103,7 +103,7 @@ func WithLabels(labels map[string]string) DockerOption {
 	return func(d *Docker) { d.labels = maps.Clone(labels) }
 }
 
-// WithNetworkMode: empty means the daemon default.
+// WithNetworkMode replaces AgentNetwork; empty means the daemon default.
 func WithNetworkMode(mode string) DockerOption {
 	return func(d *Docker) { d.networkMode = mode }
 }
@@ -122,7 +122,7 @@ func NewDocker(opts ...DockerOption) (*Docker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("runtime: docker client: %w", err)
 	}
-	d := &Docker{cli: cli, waitClient: cli, namePrefix: defaultNamePrefix}
+	d := &Docker{cli: cli, waitClient: cli, namePrefix: defaultNamePrefix, networkMode: AgentNetwork}
 	for _, opt := range opts {
 		opt(d)
 	}
@@ -138,6 +138,16 @@ func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 	}
 	if slices.ContainsFunc(spec.Mounts, func(m Mount) bool { return m.Subpath != "" }) {
 		if err := d.CheckSubpathAPI(ctx); err != nil {
+			return "", err
+		}
+	}
+	switch {
+	case spec.Egress:
+		if _, err := d.ensureNetwork(ctx, EgressNetwork, true); err != nil {
+			return "", err
+		}
+	case d.networkMode == AgentNetwork:
+		if _, err := d.ensureNetwork(ctx, AgentNetwork, false); err != nil {
 			return "", err
 		}
 	}
@@ -306,12 +316,16 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 		}
 	}
 
+	networkMode := d.networkMode
+	if spec.Egress {
+		networkMode = EgressNetwork
+	}
 	initEnabled := true
 	hostCfg := &container.HostConfig{
 		// The agent can spawn descendants without waiting for them; Docker's
 		// init reaps the orphans.
 		Init:        &initEnabled,
-		NetworkMode: container.NetworkMode(d.networkMode),
+		NetworkMode: container.NetworkMode(networkMode),
 		OomScoreAdj: agentOOMScoreAdj,
 		Resources: container.Resources{
 			NanoCPUs:   nanoCPUs(spec.CPULimit),
@@ -858,8 +872,13 @@ func (d *Docker) ContainerIP(ctx context.Context, id ID) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("runtime: inspect container %q: %w", id, err)
 	}
-	if info.Container.NetworkSettings != nil {
-		for _, network := range info.Container.NetworkSettings.Networks {
+	if settings := info.Container.NetworkSettings; settings != nil {
+		if network := settings.Networks[d.networkMode]; network != nil && network.IPAddress.IsValid() {
+			return network.IPAddress.String(), nil
+		}
+		// A container created before AgentNetwork existed is on Docker's
+		// default bridge.
+		for _, network := range settings.Networks {
 			if network != nil && network.IPAddress.IsValid() {
 				return network.IPAddress.String(), nil
 			}

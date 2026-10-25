@@ -259,14 +259,15 @@ func unreachableError(err error) *protocol.Error {
 var callTimeout = 60 * time.Second
 
 // transferTimeout is the server's lifetime for one large control frame: a
-// 64 MiB file does not cross a slow link within callTimeout.
+// 64 MiB file does not cross a slow link within callTimeout, nor does
+// workspace.import's first fetch of a large repository.
 const transferTimeout = 15 * time.Minute
 
 func callBound(method string) time.Duration {
 	switch method {
 	case protocol.MethodAgentInstall:
 		return protocol.AgentInstallTimeout + callTimeout
-	case protocol.MethodHomeUpload, protocol.MethodHomeDownload, protocol.MethodTerminalFile:
+	case protocol.MethodHomeUpload, protocol.MethodHomeDownload, protocol.MethodTerminalFile, protocol.MethodWorkspaceImport:
 		return transferTimeout
 	case protocol.MethodTerminalExec:
 		return protocol.TerminalExecTimeout + callTimeout
@@ -380,6 +381,8 @@ var noReplay = map[string]bool{
 	protocol.MethodMemberMergeAccept:      true,
 	protocol.MethodConnectorCode:          true,
 	protocol.MethodConnectorRevoke:        true,
+	protocol.MethodSlackLink:              true,
+	protocol.MethodSlackUnlink:            true,
 
 	protocol.MethodServerUpdate:        true,
 	protocol.MethodServerOwnerTransfer: true,
@@ -405,7 +408,6 @@ var noReplay = map[string]bool{
 	protocol.MethodAssistantConfirm: true,
 	protocol.MethodAssistantReset:   true,
 
-	protocol.MethodApprovalDecide:    true,
 	protocol.MethodPushUnsubscribe:   true,
 	protocol.MethodPushTest:          true,
 	protocol.MethodGitHubConnect:     true,

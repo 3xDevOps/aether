@@ -109,12 +109,7 @@ func managedHooksLine(harness string, in hookInstallInputs) string {
 		return ""
 	}
 	if harness == "codex" {
-		// Codex runs a loaded hook only once the user trusts it; any hook call
-		// leaves this record.
-		if _, err := os.Stat(hookNoticePath(in.env("AETHER_RUN_ID"), harness)); err == nil {
-			return "Inbox hooks (codex): loaded by this run's launch and running. Remove any manual copy in ~/.codex/hooks.json; it would run each hook twice.\n"
-		}
-		return "Inbox hooks (codex): loaded by this run's launch, but Codex runs them only after you trust them once (Hooks need review -> Trust all and continue, or /hooks then t). Until then, read aether-internal inbox yourself. Remove any manual copy in ~/.codex/hooks.json; it would run each hook twice.\n"
+		return "Inbox (codex): Aether hands this run its mail through Codex's app-server; do not install hooks. Remove any manual copy in ~/.codex/hooks.json; it would announce mail twice.\n"
 	}
 	return "Inbox hooks (" + harness + "): loaded by this run's launch; do not install a manual copy.\n"
 }
@@ -234,7 +229,7 @@ func writeHookInstallationWithInputs(out io.Writer, in hookInstallInputs) error 
 	}
 	text.WriteString("Safe self-install: inspect/export/diff, edit only the chosen harness with normal authorization, preserve unrelated config, and do not edit trust records, managed policy or disable flags. Restart/reload as above, then verify a real native boundary; disk checks alone never establish activation.\n")
 	text.WriteString("Generic integration: aether-internal hook file generic.sh adapts the host's documented context hook. A custom native receiver may call hook generic wake once per bounded wait; see docs/harness-integration.md for session ownership and cancellation. No standard installation path or activation claim.\n")
-	text.WriteString("JSON command hooks run only at lifecycle boundaries. Managed Claude Code launches and loaded omp/pi/OpenCode native integrations can also wait for inbox changes and wake a live idle root session, subject to human Stop and server admission; they never restart an exited run or type into a terminal. Verify actual loading and a real idle wake, not just configured files. All hooks emit trusted inbox pointers, not peer instructions. Read aether-internal inbox and explicitly ack its token after handling; hook output never acknowledges mail.\n")
+	text.WriteString("JSON command hooks run only at lifecycle boundaries. Managed Claude Code launches and loaded omp/pi/OpenCode native integrations can also wait for inbox changes and wake a live idle root session, subject to human Stop and server admission; they never restart an exited run or type into a terminal. Verify actual loading and a real idle wake, not just configured files. All hooks emit trusted inbox pointers, not peer instructions. Read aether-internal inbox; your next read or aether-internal ack <ack_token> acknowledges the batch, and hook output never does.\n")
 	_, err := io.WriteString(out, text.String())
 	return err
 }

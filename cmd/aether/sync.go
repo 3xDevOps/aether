@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -21,14 +20,17 @@ import (
 
 func init() {
 	register(command{
-		name:  "sync",
-		short: "live-overlay a local directory onto a run's worktree",
-		run:   runSync,
+		name:    "sync",
+		short:   "live-overlay a local directory onto a run's worktree",
+		usage:   "aether sync --live [--force] <local-dir> <run-id>",
+		example: "aether sync --live ~/src/app run-d6ay38tj8j",
+		flags:   true,
+		run:     runSync,
 	})
 }
 
 func runSync(args []string) error {
-	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	fs := newFlagSet("sync")
 	live := fs.Bool("live", false, "bidirectional live overlay (required; the only mode)")
 	force := fs.Bool("force", false, "overlay even while the run is running (the agent may be mid-write)")
 	if err := fs.Parse(args); err != nil {

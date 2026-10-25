@@ -36,6 +36,11 @@ BROWSER_RUN = docker run --rm --init --user 1000:1000 \
 	--tmpfs /tmp:rw,nosuid,nodev,size=536870912,mode=1777 \
 	--entrypoint node '$(BROWSER_IMAGE)'
 
+# The pinned agent CLIs the real-agent suite runs, on the standard image.
+# docs/testing.md, "Real agents against a mock model".
+AGENTS_IMAGE ?= aether/agents:test
+AGENTS_BASE  ?= ghcr.io/3xdevops/aether-standard:latest
+
 # The aether-edge image, built for this machine's architecture with the
 # build arguments the release passes. docs/edge.md, "In a container".
 EDGE_IMAGE ?= aether/edge:test
@@ -168,7 +173,7 @@ ANDROID_AAB   := aether-android-unsigned.aab
 ANDROID_BUILT := app-release-unsigned.apk
 endif
 
-.PHONY: all build browser-image browser-smoke edge-image test test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
+.PHONY: all build agents-image browser-image browser-smoke edge-image test test-agents test-integration test-e2e test-edge-upgrade test-scripts test-native-hooks vet lint lint-workflows vulncheck fmt-check public-audit dashboard android android-cli android-debug release release-binaries deploy clean
 
 all: build
 
@@ -201,6 +206,15 @@ test-integration:
 	go test -race -timeout=30m -tags integration $(INTEGRATION_PKGS) \
 		$(if $(INTEGRATION_RUN),-run '$(INTEGRATION_RUN)') \
 		$(if $(INTEGRATION_SKIP_PATTERN),-skip '$(INTEGRATION_SKIP_PATTERN)')
+
+agents-image:
+	docker build --tag '$(AGENTS_IMAGE)' --build-arg 'BASE=$(AGENTS_BASE)' --file images/agents/Dockerfile .
+
+# Real Claude Code and Codex runs in AGENTS_IMAGE against a mock model. It
+# needs Docker and real git, and `make agents-image` first.
+test-agents:
+	AETHER_AGENTS_IMAGE='$(AGENTS_IMAGE)' go test -race -count=1 -timeout=12m -tags integration \
+		-run '^TestIntegrationRealAgents$$' -v ./internal/server
 
 # The dashboard end-to-end suite drives the built SPA in a real browser
 # against a real `aether gui` gateway and a real aether-server, so it runs on

@@ -850,6 +850,7 @@ func (s *Scheduler) replaceContainer(ctx context.Context, entry *supervised, f *
 	}
 	s.mu.Lock()
 	persistSupervisor := entry.missionAssigned
+	plan.Egress = entry.egress
 	s.mu.Unlock()
 	_, err = s.startRunContainer(ctx, entry, &next, home, argv, profile, plan, persistSupervisor, unlockCaches)
 	unlockCaches()

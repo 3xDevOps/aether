@@ -136,7 +136,7 @@ describe('propose a merge', () => {
     expect(discarded()).toEqual(['Display name Alice on GitHub', 'Colour #e6194b', 'Git name Alice G', 'Agent account shared with Bob'])
     expect(merge.disabled).toBe(true)
     fireEvent.click(screen.getByRole('radio', { name: 'Alice on GitHub (the other sign-in)' }))
-    expect(discarded()).toEqual(['Display name Alice', 'Colour #e6194b', 'Saved environment image aether/mem_alice:saved', 'Home on the server (agent logins, git signing key, files), archived on the server'])
+    expect(discarded()).toEqual(['Display name Alice', 'Colour #e6194b', 'Saved environment image aether/mem_alice:saved', 'Home on the server (agent logins, files) and git signing key, archived on the server'])
     fireEvent.click(screen.getByRole('checkbox', { name: 'Discard the listed settings' }))
     expect(merge.disabled).toBe(false)
     fireEvent.click(merge)

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -37,6 +38,8 @@ type fakeCoordinator struct {
 	onWake         func(domain.RunID)
 	released       []domain.RunID
 	idleWakes      []domain.RunID
+	provisional    []provisionalCall
+	opened         []domain.RunID
 	coAuthors      map[domain.RunID][]string
 	coAuthorWrites map[domain.RunID]int
 }
@@ -116,7 +119,30 @@ func (f *fakeCoordinator) WakeIdle(run domain.RunID) {
 	}
 }
 
-func (f *fakeCoordinator) EnhancedSessionOpened(context.Context, domain.RunID) {}
+func (f *fakeCoordinator) EnhancedSessionOpened(_ context.Context, run domain.RunID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.opened = append(f.opened, run)
+}
+
+func (f *fakeCoordinator) ProvisionalReport(_ context.Context, run domain.RunID, since time.Time, message string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.provisional = append(f.provisional, provisionalCall{run: run, since: since, message: message})
+	return nil
+}
+
+type provisionalCall struct {
+	run     domain.RunID
+	since   time.Time
+	message string
+}
+
+func (f *fakeCoordinator) provisionalReports() []provisionalCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.provisional)
+}
 
 func (f *fakeCoordinator) idleWakeRuns() []domain.RunID {
 	f.mu.Lock()
@@ -381,8 +407,8 @@ func TestArgvOverrideRespectsHarnessCommand(t *testing.T) {
 			if env := profile.StatusLaunchEnv(coordtransport.MountDir); len(env) != 0 {
 				t.Fatalf("override kept the registry status environment: %v", env)
 			}
-			if profile.Reporter != harness.ReporterNone || len(profile.StatusFiles) != 0 {
-				t.Fatalf("override kept reporter %s with %d status files", profile.Reporter, len(profile.StatusFiles))
+			if profile.Capabilities.Status != harness.ReporterNone || len(profile.StatusFiles) != 0 {
+				t.Fatalf("override kept reporter %s with %d status files", profile.Capabilities.Status, len(profile.StatusFiles))
 			}
 			if len(profile.CredentialPaths) == 0 {
 				t.Fatal("override lost the registry credential paths")
@@ -559,8 +585,10 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 					t.Fatalf("%s = %q in a %s launch", coordtransport.BackgroundEnv, env[coordtransport.BackgroundEnv], tc.mode)
 				}
 				g.Wake = env[coordtransport.WakeEnv] == "1"
-				// Codex and Copilot load inbox hooks too, but none of them wakes an idle session.
-				if native := profile.NativeCoordination && name != "codex" && name != "copilot" && tc.mode == domain.LaunchTUI && tc.task != ""; g.Wake != native {
+				// The server wakes a terminal attached to its app-server, with or
+				// without a task.
+				native := profile.Capabilities.IdleWake && tc.mode == domain.LaunchTUI && (tc.task != "" || profile.Capabilities.Steer)
+				if g.Wake != native {
 					t.Fatalf("%s = %q, want it only on a native launch (%v)", coordtransport.WakeEnv, env[coordtransport.WakeEnv], native)
 				}
 				if !profile.CarriesInstructions() {

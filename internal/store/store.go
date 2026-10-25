@@ -57,8 +57,8 @@ type Store interface {
 	// leaving every other field untouched. "" clears it.
 	SetWorkspaceOrigin(ctx context.Context, id domain.WorkspaceID, origin string) error
 
-	// SetWorkspaceEnvironment sets only the workspace's setup script and
-	// variables, leaving every other field untouched.
+	// SetWorkspaceEnvironment sets only the workspace's setup script,
+	// variables and egress policy, leaving every other field untouched.
 	SetWorkspaceEnvironment(ctx context.Context, id domain.WorkspaceID, environment domain.WorkspaceEnvironment) error
 
 	// GetWorkspaceMirror returns the configured upstream mirror, or
@@ -216,7 +216,6 @@ type Store interface {
 	ListHarnessDefinitions(ctx context.Context, member domain.MemberID) ([]*HarnessDefinition, error)
 	DeleteHarnessDefinition(ctx context.Context, member domain.MemberID, name string) error
 
-	ApprovalStore
 	TemplateStore
 	CostStore
 	ServerUpdateStore

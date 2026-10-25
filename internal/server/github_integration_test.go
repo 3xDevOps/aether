@@ -152,9 +152,9 @@ func TestIntegrationGitHubOAuthDisconnectedWithBudgetService(t *testing.T) {
 // TestIntegrationGitHubConnect drives the GitHub connection end to end
 // against real Docker: github.connect finishes the login the member began
 // in their environment terminal, and the run that follows pushes its own
-// branch to the workspace origin and signs with the key the connection
-// left in the member home. Aether's own end-of-run commit is signed with
-// the same key.
+// branch to the workspace origin and signs through the member's signing
+// agent, with no private key in the home or the container. Aether's own
+// end-of-run commit is signed with the same key.
 func TestIntegrationGitHubConnect(t *testing.T) {
 	requireBinary(t, "git")
 	// The server signs its end-of-run commit itself, on the host.
@@ -362,13 +362,17 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 		t.Errorf("fingerprint = %q, want a SHA256 fingerprint", conn.Fingerprint)
 	}
 
-	// What the connection left in the home on the host.
-	info, err := os.Stat(filepath.Join(home, ".ssh", "aether_signing"))
+	// What the connection left on the host: the private key in the data
+	// directory, and only the public half in the home.
+	info, err := os.Stat(filepath.Join(dataDir, "signing-keys", string(member.ID)))
 	if err != nil {
-		t.Fatalf("stat the signing key: %v", err)
+		t.Fatalf("stat the server-held signing key: %v", err)
 	}
 	if perm := info.Mode().Perm(); perm != 0o600 {
 		t.Errorf("signing key mode = %04o, want 0600", perm)
+	}
+	if _, err = os.Lstat(filepath.Join(home, ".ssh", "aether_signing")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("private key in the member home: stat = %v, want none", err)
 	}
 	pub := readHomeFile(t, home, ".ssh/aether_signing.pub")
 	if pub != conn.SigningKey+"\n" {
@@ -383,7 +387,7 @@ func TestIntegrationGitHubConnect(t *testing.T) {
 		"helper = !gh auth git-credential",
 		"name = Octo Cat",
 		"email = octo@example.com",
-		"signingkey = ~/.ssh/aether_signing",
+		"signingkey = key::" + conn.SigningKey,
 		"format = ssh",
 		"gpgsign = true",
 	} {

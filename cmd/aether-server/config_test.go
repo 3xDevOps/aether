@@ -85,6 +85,28 @@ func TestConfigSetValidatesKeyAgainstServeFlags(t *testing.T) {
 	}
 }
 
+// --config may follow the key and value, and a value such as -1 is never
+// read as a flag.
+func TestConfigSetTakesConfigAfterTheKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.conf")
+	for _, args := range [][]string{
+		{"set", "addr", ":2300", "--config", path},
+		{"set", "min-free-disk", "-1", "--config", path},
+		{"set", "--config", path, "run-pids", "7"},
+	} {
+		if err := configCmd(args); err != nil {
+			t.Fatalf("config %v: %v", args, err)
+		}
+	}
+	values, err := serversetup.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["addr"] != ":2300" || values["min-free-disk"] != "-1" || values["run-pids"] != "7" {
+		t.Errorf("config holds %v, want addr :2300, min-free-disk -1 and run-pids 7", values)
+	}
+}
+
 func TestConfigSetPreservesOtherKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.conf")
 	if err := serversetup.WriteConfig(path, map[string]string{"addr": ":2300", "data-dir": "/srv/aether"}); err != nil {

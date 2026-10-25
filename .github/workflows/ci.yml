@@ -278,6 +278,43 @@ jobs:
           mode: save
           save-modules: 'true'
 
+  # The pinned agent CLIs in real runs against a mock model. The standard
+  # image is built from the cache the smoke job writes on main and never
+  # written here, so this job does not wait for that job.
+  agents:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: ./.github/actions/go-cache
+        with:
+          mode: restore
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the standard environment image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/standard/Dockerfile
+          load: true
+          tags: aether-standard:ci
+          cache-from: type=gha,scope=standard-amd64-main
+      # The default builder is the one that sees the image loaded above.
+      - name: Build the pinned agents image
+        env:
+          BUILDX_BUILDER: default
+        run: make agents-image AGENTS_BASE=aether-standard:ci
+      # Root, like the integration jobs and an installed server.
+      - name: Real agents against a mock model (real Docker, real git)
+        run: sudo env "PATH=$PATH" "HOME=$HOME" make test-agents
+
   # Build the same Dockerfile on both supported server architectures. This
   # gate is display-free; browser libraries and Chromium exist only inside
   # the image, and no registry write credentials enter a PR job.

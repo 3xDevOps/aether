@@ -109,3 +109,28 @@ test('Mark complete closes a reported success as completed', async ({ page, aeth
   await expect(card('Needs you')).toHaveCount(0)
   await expect(card('Finished').getByRole('img', { name: 'Completed' })).toBeVisible()
 })
+
+test('a completed run inside its grace relaunches from the composer and its grace restarts at the next close', async ({ page, aether }) => {
+  const task = 'an agent that is relaunched after completion'
+  const { alice, run } = await launch(aether, task)
+  const read = async () => (await alice.api.rpc<{ run: Reviewed }>('run.get', { run_id: run.id })).run
+
+  await page.setViewportSize({ width: 1568, height: 1000 })
+  await page.goto(alice.url)
+  const card = (column: string) =>
+    page.getByRole('region', { name: column }).getByRole('article').filter({ hasText: task })
+  await expect(card('Needs you')).toBeVisible({ timeout: 180_000 })
+  await card('Needs you').click({ position: { x: 16, y: 12 } })
+  await page.getByRole('region', { name: 'Completion' }).getByRole('button', { name: 'Mark complete' }).click()
+  await expect.poll(async () => (await read()).status, { timeout: 60_000 }).toBe('completed')
+  const closed = await read()
+  expect(closed.container_retained_until).toBeTruthy()
+
+  await page.getByRole('tab', { name: 'Session', exact: true }).click()
+  await page.getByRole('button', { name: 'Relaunch', exact: true }).click()
+  await expect(page.getByRole('textbox', { name: 'Message the agent' })).toBeVisible({ timeout: 60_000 })
+  await expect.poll(async () => (await read()).status).toBe('running')
+  const live = await read()
+  expect(live.finished_at).toBeNull()
+  expect(live.container_retained_until).toBeUndefined()
+})

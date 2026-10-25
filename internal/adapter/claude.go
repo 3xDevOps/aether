@@ -22,6 +22,8 @@ type claude struct {
 	// rejected is set by a rate_limit_event that refused the request with no
 	// overage to fall back on, until the next result line.
 	rejected bool
+	result   string
+	resulted bool
 }
 
 func newClaude() Adapter { return &claude{} }
@@ -105,10 +107,6 @@ func (c *claude) ConsumeLine(line string) []events.Payload {
 			switch b.Name {
 			case "Task":
 				p.Kind = events.AgentSubagent
-			case "ExitPlanMode":
-				// The agent finished planning and is pausing for
-				// plan review/approval.
-				p.Kind = events.AgentPause
 			}
 			out = append(out, p)
 		}
@@ -143,13 +141,23 @@ func (c *claude) ConsumeLine(line string) []events.Payload {
 			CostUSD:      msg.TotalCostUSD,
 			Metered:      true,
 		}}
-		if c.rejected && msg.IsError && agentstatus.IsUsageLimitMessage(msg.Result) {
+		usageLimit := c.rejected && msg.IsError && agentstatus.IsUsageLimitMessage(msg.Result)
+		if usageLimit {
 			out = append(out, events.RunUsageLimitPayload{Message: msg.Result, SessionID: msg.SessionID})
 		}
 		c.rejected = false
+		if !usageLimit {
+			c.result, c.resulted = msg.Result, true
+		}
 		return out
 	}
 	return nil
+}
+
+func (c *claude) TakeResult() (string, bool) {
+	text, ok := c.result, c.resulted
+	c.result, c.resulted = "", false
+	return text, ok
 }
 
 // decodeBlocks decodes a message's content blocks; nil when content is

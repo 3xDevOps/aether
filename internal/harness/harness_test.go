@@ -140,7 +140,7 @@ func TestOmpProfile(t *testing.T) {
 	if !ok {
 		t.Fatal("omp profile missing")
 	}
-	if !slices.Equal(omp.EnvPassthrough, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}) {
+	if !slices.Equal(omp.EnvPassthrough, []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY"}) {
 		t.Errorf("omp env passthrough = %v", omp.EnvPassthrough)
 	}
 	// The credentials live in the agent database, write-ahead log included.
@@ -159,6 +159,26 @@ func TestOmpProfile(t *testing.T) {
 	}
 }
 
+// Codex, pi and Cursor read no base-URL variable from the environment.
+func TestEnvPassthrough(t *testing.T) {
+	for name, want := range map[string][]string{
+		"claude":      {"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"},
+		"codex":       {"CODEX_API_KEY", "OPENAI_API_KEY"},
+		"omp":         {"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"},
+		"opencode":    {"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL"},
+		"copilot":     {"COPILOT_PROVIDER_BASE_URL", "COPILOT_PROVIDER_API_KEY"},
+		"gemini":      {"GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"},
+		"antigravity": {"GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"},
+	} {
+		p, _ := Lookup(name)
+		for _, key := range want {
+			if !slices.Contains(p.EnvPassthrough, key) {
+				t.Errorf("%s env passthrough %v missing %q", name, p.EnvPassthrough, key)
+			}
+		}
+	}
+}
+
 // Which harnesses report their own state, and what each is pointed at. The
 // launch arguments and the launch environment are both appended to what the
 // CLI already carries, so a profile that names a file has to name it inside
@@ -167,7 +187,7 @@ func TestOmpProfile(t *testing.T) {
 func TestStatusReporters(t *testing.T) {
 	want := map[string]Reporter{
 		"claude":      ReporterFull,
-		"codex":       ReporterTurnEnd,
+		"codex":       ReporterFull,
 		"omp":         ReporterFull,
 		"pi":          ReporterFull,
 		"opencode":    ReporterFull,
@@ -182,8 +202,8 @@ func TestStatusReporters(t *testing.T) {
 		if !ok {
 			t.Fatalf("Lookup(%q) missing", name)
 		}
-		if p.Reporter != reporter {
-			t.Errorf("%s reporter = %s, want %s", name, p.Reporter, reporter)
+		if p.Capabilities.Status != reporter {
+			t.Errorf("%s reporter = %s, want %s", name, p.Capabilities.Status, reporter)
 		}
 		pointers := p.StatusLaunchArgs("/run/aether")
 		pointers = append(pointers, slices.Collect(maps.Values(p.StatusLaunchEnv("/run/aether")))...)
@@ -193,7 +213,8 @@ func TestStatusReporters(t *testing.T) {
 			}
 			continue
 		}
-		if len(pointers) == 0 {
+		// The app-server reports for its terminal.
+		if len(pointers) == 0 && !p.Capabilities.Steer {
 			t.Errorf("%s reports but is launched with nothing", name)
 		}
 		for _, a := range pointers {
@@ -212,11 +233,6 @@ func TestStatusReporters(t *testing.T) {
 				t.Errorf("%s ships %s but its launch %v does not name it", name, file, pointers)
 			}
 		}
-	}
-	// Codex needs no file: the override carries the whole command.
-	codex, _ := Lookup("codex")
-	if len(codex.StatusFiles) != 0 {
-		t.Errorf("codex ships %d status files, want none", len(codex.StatusFiles))
 	}
 }
 

@@ -61,6 +61,9 @@ Aether has two parts: `aether-server`, which runs agents on a Linux machine
 that stays on, and the `aether` CLI and desktop app, which you use from your
 own computer.
 
+To set up with a coding agent, paste the prompt in
+[docs/agents.md](docs/agents.md) into Claude Code, Codex or another one.
+
 ### Linux and macOS
 
 ```sh
@@ -81,7 +84,7 @@ then run it:
 
 ```powershell
 Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
-& "$env:TEMP\aether-install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
 ```
 
 It installs `aether.exe` and the desktop app. `-Role none` installs only the

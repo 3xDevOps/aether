@@ -21,11 +21,12 @@ credentials out of the report.
 
 | Surface | What it protects | What it does not protect |
 | --- | --- | --- |
-| [Run container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. | It is not a VM. Agents run as root and can read and change everything mounted into the run: your home, the checkout and the workspace secrets. |
-| [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own runs. | Every run you launch can read and replace your agent logins, gh token and signing key. |
+| [Run container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Runs and environments cannot connect to each other. | It is not a VM. Agents run as root and can read and change everything mounted into the run: your home, the checkout and the workspace secrets. |
+| [Egress control](environments.md#egress-control) | Off by default. When on, a workspace's runs reach only its listed hosts, through the server's proxy, and never a private, loopback or metadata address. | An allowed host receives whatever the agent sends: with `github.com` allowed, the launcher's gh token can push anywhere it can write. Runs still reach the server host. |
+| [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own runs. | Every run you launch can read and replace your agent logins and gh token, and sign with your commit signing key. |
 | [Who can act on a run](#who-can-see-and-act-on-a-run) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your runs, which hold your home. |
 | [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
-| [GitHub credentials](#github-credentials-and-signing-keys) | The gh token and signing key stay in your home, out of the database and out of saved images. | Any of your runs can act as you on GitHub within the token's scopes, and replace your signing key. |
+| [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Runs sign through an agent and cannot copy the key. | Any of your runs can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
 | [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
 | [Assistant](#the-assistant) | Launching, messaging and stopping runs and saving the environment wait for your click. | Its shell runs any command in your environment without asking. Auto-approve removes the click. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the run. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the run can read a retained capture. |
@@ -37,6 +38,7 @@ credentials out of the report.
 | [SSH into a run and port forwarding](#ssh-into-a-run) | Same admission as a run shell. Forwards reach only the run's own loopback. | Sessions are not recorded. Attaching an editor lets the run's agent reach your computer through the editor. |
 | [Edge](#edge-remote-access) | SSH stays end to end. The server decides membership. By default a person approves every new device. | Under `edge-access account`, a taken-over GitHub account or edge admits a device. The edge sees connection metadata. |
 | [Connectors](#chatgpt-and-claude-connectors) | A connector acts as one member through the tools of the scopes they granted, with that member's permissions. | TLS ends at the edge, so a compromised edge sees connector traffic and tokens. |
+| [Slack](#slack) | The bot connects out to Slack and acts as one linked member: it messages runs and answers requests once, with that member's permissions. | Whoever controls the linked Slack account acts as you on your runs. Slack keeps the messages it was sent. |
 | [Coordination](#coordination-between-runs) | Runs message only allowed peers in their workspace. A message grants no control. | Runs in one workspace share a repository and can influence each other through files. |
 | [Team memory](#team-memory) | Only members pin notes into briefs. Notes with secrets are refused. Agents cannot delete. | A note can be wrong or planted. It is data, never an instruction. |
 | [Sysbox](#the-agent-container) | Docker inside a run without the host socket. Container root maps to an unprivileged host user. | Installing it from the dashboard runs a root script on the host. |
@@ -56,6 +58,15 @@ shares the host's kernel, and Aether builds no second sandbox inside it.
   [Sysbox](environments.md#docker-inside-runs) installed, runs and
   environments get their own Docker daemon, and root in the container maps to
   an unprivileged host user. Without Sysbox a run has no Docker.
+- Runs and environments start on `aether-agents`, a Docker bridge network the
+  server creates with inter-container traffic off
+  (`com.docker.network.bridge.enable_icc=false`). They reach the host and the
+  internet but not each other. To set its subnet or MTU, create it yourself
+  with that option before the first launch; a launch fails on a network of
+  that name without it.
+- A run of a workspace with [egress control](environments.md#egress-control)
+  on starts on `aether-egress` instead: the same, but `--internal`, so its one
+  way out is the server's egress proxy on the network's gateway.
 - The packaged systemd unit runs `aether-server` as root. Docker socket access
   is root-equivalent anyway, and root lets the server hand checkouts to an
   image's non-root user. An unprivileged server can serve only root images.
@@ -161,23 +172,47 @@ After you first share a `claude` or `gemini` account, restart your environment
 
 Connecting GitHub, from the dashboard or with `gh auth login` and `aether
 github connect` in your environment
-([environment-home.md](environment-home.md#connect-github)), leaves three
-files in your home on the server. None is in the database, and `aether env
-save` never captures the home.
+([environment-home.md](environment-home.md#connect-github)), creates an
+ed25519 signing key and leaves three files in your home on the server. None is
+in the database, and `aether env save` never captures the home.
 
 | File | Holds |
 | --- | --- |
 | `~/.config/gh/hosts.yml` | The gh token, in plain text. |
-| `~/.ssh/aether_signing` and `.pub` | An ed25519 signing key. Only the public half is registered on GitHub. |
-| `~/.gitconfig` | gh's credential helper for `https://github.com` and the commit-signing settings. |
+| `~/.ssh/aether_signing.pub` | The public half of the signing key, the one registered on GitHub. |
+| `~/.gitconfig` | gh's credential helper for `https://github.com` and the commit-signing settings, with `user.signingkey = key::<public key>`. |
 
-Root in any of your runs can read and replace all three. The token carries
-gh's default scopes (`repo`, `read:org`, `gist`) plus the
-`admin:ssh_signing_key` scope Aether needs to register the key, so an agent
-can push to the workspace's origin, open pull requests, and add or remove
-signing keys on your account. It can also swap the signing key, so Aether
-signs its end-of-run commits with the agent's key, or plant `~/.local/bin/gh`,
-which then runs on your next `aether github connect`.
+The private key is never in your home. The server keeps it in
+`signing-keys/<member-id>` in its data directory (mode 0600) and lends it to
+your runs and environment through a read-only SSH agent mounted at
+`/run/aether-signing/agent.sock`, which `SSH_AUTH_SOCK` names. git signs
+through it with `ssh-keygen`. The agent lists and signs with your key and
+refuses to add, remove, lock or unlock keys. Aether signs its end-of-run
+commits with the same key, read from the data directory.
+
+Root in any of your runs can read and replace the token and `~/.gitconfig`, and
+can sign anything with your key while the run lives. It cannot copy the key or
+make Aether sign with another one. The token carries gh's default scopes
+(`repo`, `read:org`, `gist`) plus the `admin:ssh_signing_key` scope Aether
+needs to register the key, so an agent can push to the workspace's origin,
+open pull requests, and add or remove signing keys on your account: a key it
+registers signs commits that GitHub shows as Verified. It can also plant
+`~/.local/bin/gh`, which then runs on your next `aether github connect`.
+
+`SSH_AUTH_SOCK` names the signing agent in every run and environment. A
+workspace variable of that name has no effect, and neither `aether ssh` nor an
+editor's Remote-SSH session forwards your local agent. A shell that starts its
+own `ssh-agent` replaces it, and `git commit` there fails with `error: Couldn't
+find key in agent?`.
+
+Releases before the server-held key kept it at `~/.ssh/aether_signing`. On its
+first start after the upgrade the server moves each such key into
+`signing-keys/`, deletes it from the home and rewrites `user.signingkey`, so
+the key already registered on GitHub keeps signing. Runs and the environment
+started before the upgrade have no agent, so `git commit` in them fails with
+`error: Couldn't get agent socket?`. Restart the environment (`aether terminal
+stop`, then `aether terminal`); such a run's end-of-run commit is still
+signed.
 
 To revoke the connection:
 
@@ -185,11 +220,15 @@ To revoke the connection:
    [GitHub's application settings](https://github.com/settings/applications).
    `gh auth logout` alone does not revoke a copied token.
 2. Remove the signing key at
-   [github.com/settings/keys](https://github.com/settings/keys).
-3. Delete `~/.config/gh/hosts.yml`, `~/.ssh/aether_signing` and
-   `~/.ssh/aether_signing.pub` from your home.
-4. Clear the signing settings in your environment terminal, or every `git
-   commit` in a run fails with `Load key ...: No such file or directory`:
+   [github.com/settings/keys](https://github.com/settings/keys), and any
+   signing key there you did not add yourself.
+3. Delete `~/.config/gh/hosts.yml` and `~/.ssh/aether_signing.pub` from your
+   home. To retire the private key, a server admin deletes
+   `signing-keys/<member-id>` from the data directory; the next `aether github
+   connect` creates a new one.
+4. Clear the signing settings in your environment terminal. Without the
+   private key, every `git commit` in a run fails with `error: Couldn't find
+   key in agent?` until you do:
 
    ```sh
    git config --global --unset commit.gpgsign
@@ -439,6 +478,12 @@ is a member.
 
 - A server uses an edge only when its config names one. `aether-server setup`
   turns on the project's edge on a host without tailscaled, and says so.
+- Until it has a member, a server with an edge takes its first admin by SSH
+  key only from a loopback address: the server itself or an SSH tunnel.
+  Everyone else claims it with `sudo aether-server edge claim-code`, so a scan
+  that finds port 2222 open cannot take admin first. A forwarder on the host
+  that connects outside clients to `127.0.0.1:2222`, such as `socat`, defeats
+  this. Without an edge, the first key from any address becomes admin.
 - SSH is encrypted end to end. The edge cannot read it or pose as your server.
 - The server pins the edge's signing key. A different key is refused until you
   compare fingerprints and run `sudo aether-server edge trust`.
@@ -481,7 +526,7 @@ there is no terminal, file, settings or git-writing tool.
   is always granted, and every member can read every run on the server, so a
   connector can read all of them. `write` (launch runs and swarms, message,
   pause and resume runs, answer questions, mark runs reviewed) is checked by
-  default; `control` (decide approvals and permission requests, stop and close
+  default; `control` (decide permission requests, stop and close
   runs, cancel swarms) is not, because text an agent wrote could talk the
   assistant into approving or ending work. A connector serves only
   its scopes' tools. It can make 30 write calls at once, then one every 2
@@ -519,6 +564,29 @@ there is no terminal, file, settings or git-writing tool.
   accounts the member may launch on exactly as the member's own launches do.
 - `write` cannot end a live run: `aether_mark_reviewed` completes only a run
   whose agent reported success and awaits review.
+
+## Slack
+
+The [Slack bot](slack.md) acts as the member who linked a Slack account, the
+way a connector does: with that member's role checks, judged by the device
+`aether slack link` ran on, and with audit records naming
+`Slack connector <Slack user id>`.
+
+- It messages runs and answers requests once. It launches, stops and closes
+  nothing, posts in no channel, and never picks an "always" option. A request
+  longer than 600 characters gets no buttons, so a press never decides text
+  Slack cut.
+- Whoever controls the linked Slack account acts as you on your runs.
+  `aether slack unlink`, revoking the device the code was minted on, or
+  removing the member cuts the link off.
+- Linking takes a one-use 40-bit code, valid for 10 minutes, sent to the bot in
+  a direct message.
+- Agent text in its messages is escaped, so it cannot mention anyone or
+  disguise a link.
+- The tokens sit in 0600 files under `<data-dir>/slack`, readable by the server
+  administrator. The app holds `chat:write` and `im:history`, and reads no
+  channel.
+- A link makes 30 actions at once, then one every 2 seconds.
 
 ## Coordination between runs
 
@@ -614,9 +682,21 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 
 - Containers share the host kernel. A kernel or Docker escape reaches the
   host.
-- Runs use Docker's default network. Nothing in Aether limits their outbound
-  traffic, and on Docker's default bridge a run can reach ports that other runs
-  and environments listen on.
+- Outbound traffic is limited only for runs of a workspace with egress
+  control on. Other runs, environment terminals and verification containers
+  reach the internet, your network and ports the server host listens on.
+- An egress-limited run still reaches services on the server host, and every
+  allowed host can receive data. A client that ignores the proxy variables
+  cannot connect at all.
+- The egress proxy tells runs apart by source address. Root in a run with
+  Docker inside can claim another egress-limited run's address and get that
+  workspace's host list.
+- On Docker older than 26.0 (25.0.4 and 23.0.11 on older lines), an internal
+  network still resolves names through the host (CVE-2024-29018), so an
+  egress-limited run can send data out in DNS queries.
+- Containers created before the `aether-agents` network existed keep Docker's
+  default bridge, where they can reach each other's ports, until they are
+  removed.
 - Every run trusts `/workspace`, and each extra repo's `/repos/<name>`, for git
   through `GIT_CONFIG_COUNT`. An image
   with git older than 2.31 ignores that and can refuse the checkout when its

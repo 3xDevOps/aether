@@ -23,6 +23,7 @@ const (
 	retainedCompletionReason  = "worker finished; retained container"
 	retainedExpiredReason     = "retained container expired"
 	retainedUnavailableReason = "retained container unavailable"
+	retainedReclaimedReason   = "retained container reclaimed for disk space"
 	recoveryPTYRetryInitial   = 10 * time.Millisecond
 	recoveryPTYRetryMax       = 250 * time.Millisecond
 	// defaultExitProbeTimeout is the startup Wait window that learns whether a
@@ -1035,7 +1036,11 @@ func (s *Scheduler) finishDestroyPending(ctx context.Context, entry *supervised)
 		return err
 	}
 	if fresh.Status.Terminal() {
-		if released, ok := releasedReason(fresh.Status, fresh.Reason, retainedExpiredReason); entry.retained && ok {
+		expiry := retainedExpiredReason
+		if entry.reclaimed {
+			expiry = retainedReclaimedReason
+		}
+		if released, ok := releasedReason(fresh.Status, fresh.Reason, expiry); entry.retained && ok {
 			if err := s.relabelLocked(ctx, entry.runID, fresh.WorkspaceID, fresh.Status, released, ""); err != nil {
 				s.recordCleanupErrorLocked(entry, cleanupStateError)
 				s.mu.Unlock()
@@ -1788,6 +1793,8 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		idleReportAt:        idleAt,
 		launchMode:          mode,
 		acp:                 acp,
+		appServer:           sc.AppServer,
+		serverTurn:          sc.ServerTurn,
 		missionAssigned:     sc.MissionAssigned,
 		status:              r.Status,
 		reason:              r.Reason,
@@ -1805,6 +1812,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		cleanupError:        publicCleanupError(sc.CleanupError),
 		runUser:             sc.RunUser,
 		home:                sc.Home,
+		egress:              sc.Egress,
 		exitObserved:        sc.ExitObserved,
 		exitCode:            sc.ExitCode,
 		evidenceIdentity:    sc.EvidenceIdentity,
@@ -1813,6 +1821,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		coordDir:            sc.CoordDir,
 		gitAuthorEmail:      sc.GitAuthorEmail,
 		agentSessionID:      sc.AgentSessionID,
+		agentCost:           sc.AgentCost,
 		agentExec:           sc.AgentExec,
 		switchIntent:        sc.Switch,
 		accountSwap:         sc.AccountSwap,

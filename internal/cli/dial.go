@@ -7,12 +7,14 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	"github.com/3xDevOps/Aether/internal/shellquote"
 	"github.com/3xDevOps/Aether/internal/version"
 )
 
@@ -204,10 +206,22 @@ func hostKeyCallback(path string) (ssh.HostKeyCallback, error) {
 			return nil
 		}
 		var ke *knownhosts.KeyError
-		if errors.As(err, &ke) && len(ke.Want) == 0 {
+		if !errors.As(err, &ke) {
+			return err
+		}
+		if len(ke.Want) == 0 {
 			return appendKnownHost(path, hostname, remote, key)
 		}
-		return err
+		hosts := []string{knownhosts.Normalize(hostname)}
+		if remote != nil && knownhosts.Normalize(remote.String()) != hosts[0] {
+			hosts = append(hosts, knownhosts.Normalize(remote.String()))
+		}
+		fixes := make([]string, len(hosts))
+		for i, host := range hosts {
+			fixes[i] = "ssh-keygen -R " + shellquote.Quote(host) + " -f " + shellquote.Quote(path)
+		}
+		return fmt.Errorf("%w: the server's host key is not the one %s holds for it. If the server was reinstalled, remove the old key with %s, then link again; otherwise do not connect",
+			err, path, strings.Join(fixes, " and "))
 	}, nil
 }
 

@@ -24,6 +24,10 @@ type Adapter interface {
 	// data. It never fails: lines that do not parse are not errors, they
 	// are ordinary PTY output.
 	ConsumeLine(line string) []events.Payload
+	// TakeResult returns the text of a result that ended a turn since its
+	// last call, and whether there was one. A usage limit, which moves the
+	// run to another account, ends none.
+	TakeResult() (string, bool)
 }
 
 // adapters maps a run's Harness string to its adapter constructor.

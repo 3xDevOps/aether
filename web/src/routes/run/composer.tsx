@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type * as React from 'react'
-import { ArrowUp, CornerUpRight, ListPlus, Play, Square } from '@/components/icons'
+import { ArrowUp, CornerUpRight, ListPlus, Play, RefreshCw, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -18,7 +18,7 @@ import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhanced
 import type { RunRoom } from '@/routes/run/room'
 import { TypingIndicator, useTypingSignal } from '@/routes/run/typing'
 import { sessionColumn } from '@/routes/run/session-rows'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
@@ -57,6 +57,32 @@ function Closed({ runID, reason, action, dock, failure }: { runID: string; reaso
         {action}
       </div>
     </ComposerFrame>
+  )
+}
+
+function ClosedRun({ run, reason, dock }: { run: RunRecord; reason: string; dock?: React.ReactNode }) {
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string>()
+  const relaunch = async () => {
+    const same = sameIdentity()
+    setBusy(true)
+    setFailure(undefined)
+    try {
+      const relaunched = await api.runRelaunch(run.id)
+      if (same()) useStore.getState().upsertRun(relaunched)
+    } catch (err) {
+      setFailure(message(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Closed
+      reason={reason}
+      dock={dock}
+      failure={failure}
+      action={<Button variant="primary" disabled={busy} onClick={() => void relaunch()}><RefreshCw aria-hidden="true" />{busy ? 'Relaunching…' : 'Relaunch'}</Button>}
+    />
   )
 }
 
@@ -575,5 +601,12 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
 }
 
 export function Composer(props: ComposerProps) {
+  const { run, dock } = props
+  const self = useSelf()
+  const cap = useCapability()
+  const steerOthers = useStore((s) => s.workspaces[run.workspace_id]?.steer_others)
+  const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
+  const canReopen = maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run)
+  if (canReopen) return <ClosedRun key={run.id} run={run} reason={composerBlock(run, maySteer, true)!} dock={dock} />
   return props.run.acp ? <EnhancedComposer key={props.run.id} {...props} /> : <StandardComposer key={props.run.id} {...props} />
 }

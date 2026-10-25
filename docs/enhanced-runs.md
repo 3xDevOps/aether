@@ -37,7 +37,9 @@ the session to a mode that asks (Claude Code, Codex and Gemini offer one).
 modes before anything installs. Enhanced shows messages, tool activity, file
 changes and approvals as controls. It runs through an adapter, so some
 agent-specific commands and screens are missing, and it starts a few seconds
-slower. Both modes act without asking by default.
+slower. Enhanced runs of Claude Code, OpenCode and omp report their cost to
+[Insights](insights.md#cost) and budgets; Standard runs report none. Both modes
+act without asking by default.
 
 The dashboard remembers the mode you last chose for each agent, in **Set up**,
 in **New run** or in the **Default mode** select on the **Agents** page, and
@@ -154,6 +156,9 @@ composer, one at a time (`1/N`). The composer stays shut until you answer.
 - An answered request stays in the timeline as one line, such as "Approved: run
   `go test`".
 - A subagent's request is the run's request, answered the same way.
+- From the CLI, `aether runs <run-id>` lists pending requests and `aether
+  answer <run-id> <request-id> <option-id>` answers one: allow once or reject once,
+  never always.
 - Answering needs permission to steer the run and control of it. The first
   answer wins. Cancelling the turn answers every pending request `cancelled`.
 
@@ -207,10 +212,11 @@ the server sends the agent one prompt telling it to run
 share one prompt, and each set of new unread messages starts at most one turn.
 
 The prompt waits while a run is protected, a human holds a swarm worker, or the
-run is paused or switching modes. **Resume** offers a paused run the mail that
-arrived meanwhile. An Enhanced swarm integrator is also prompted when a human
-answers its question, a worker proposes a task or ends without a report, or a
-human cancels the swarm.
+run is paused or switching modes. Lifting protection, releasing control or
+**Resume** offers the mail that arrived meanwhile at once; otherwise the server
+retries a waiting prompt at least every 30 seconds. An Enhanced swarm
+integrator is also prompted when a human answers its question, a worker
+proposes a task or ends without a report, or a human cancels the swarm.
 
 ## Restarts and failures
 

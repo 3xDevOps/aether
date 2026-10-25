@@ -16,8 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/cost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -37,6 +39,10 @@ func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 }
 
 func (f *fakeRuns) Paused(domain.RunID) bool { return f.paused.Load() }
+
+func noSwarm(context.Context, *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
+	return nil, "", nil
+}
 
 func (f *fakeRuns) set(run domain.RunID, inputs ...domain.RunInputRequest) {
 	f.mu.Lock()
@@ -62,16 +68,18 @@ type device struct {
 func (d *device) endpoint() string { return d.service.URL + "/send/device" }
 
 type harness struct {
-	t    *testing.T
-	ctx  context.Context
-	db   *store.DB
-	bus  *events.InProc
-	runs *fakeRuns
-	svc  *Service
-	ws   *domain.Workspace
-	ada  *domain.Member
-	bob  *domain.Member
-	keys int
+	t     *testing.T
+	ctx   context.Context
+	db    *store.DB
+	bus   *events.InProc
+	runs  *fakeRuns
+	costs *cost.Service
+	svc   *Service
+	ws    *domain.Workspace
+	ada   *domain.Member
+	bob   *domain.Member
+	keys  int
+	sink  Sink
 
 	keyPath string
 }
@@ -97,8 +105,23 @@ func newHarness(t *testing.T) *harness {
 	h.ada, h.bob = h.member("Ada"), h.member("Bob")
 
 	h.keyPath = filepath.Join(t.TempDir(), "push", "vapid_key.pem")
+	h.startCosts()
 	h.start()
 	return h
+}
+
+// startCosts runs a new cost service, which push reads budgets from.
+func (h *harness) startCosts() {
+	h.t.Helper()
+	svc, err := cost.New(cost.Config{Store: h.db, Bus: h.bus})
+	if err != nil {
+		h.t.Fatalf("cost.New: %v", err)
+	}
+	if err = svc.Start(h.ctx); err != nil {
+		h.t.Fatalf("cost Start: %v", err)
+	}
+	h.t.Cleanup(func() { _ = svc.Close() })
+	h.costs = svc
 }
 
 // start runs a new Service on the harness's store, as a server start does.
@@ -109,9 +132,12 @@ func (h *harness) start() {
 	insecure := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test servers only
 	}}
-	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
+	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, Swarm: noSwarm, Budgets: h.costs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
 	if err != nil {
 		h.t.Fatalf("New: %v", err)
+	}
+	if h.sink != nil {
+		svc.UseSink(h.sink)
 	}
 	if err = svc.Start(h.ctx); err != nil {
 		h.t.Fatalf("Start: %v", err)
@@ -256,6 +282,96 @@ func TestOwnerIsNotifiedOnceWhileANeedStands(t *testing.T) {
 	phone.expectNone(t, testQuiet)
 }
 
+type sink struct {
+	heard chan string
+	// fail is how many of the next needs the sink refuses.
+	fail atomic.Int32
+}
+
+func (s *sink) Need(_ context.Context, run *domain.Run, n Need) error {
+	s.heard <- fmt.Sprintf("%s needs %q, answered by %q", run.ID, n.Body, n.Answer)
+	if s.fail.Add(-1) >= 0 {
+		return errors.New("slack is down")
+	}
+	return nil
+}
+
+func (s *sink) Clear(_ context.Context, run domain.RunID) error {
+	s.heard <- string(run) + " needs nothing"
+	return nil
+}
+
+func (s *sink) Notice(_ context.Context, member domain.MemberID, n Notice) error {
+	s.heard <- fmt.Sprintf("%s hears %q", member, n.Body)
+	return nil
+}
+
+// expect skips the clears a sink hears on every read of a run needing
+// nothing.
+func (s *sink) expect(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case got := <-s.heard:
+			if got == want {
+				return
+			}
+			if !strings.HasSuffix(got, " needs nothing") {
+				t.Fatalf("sink heard %q, want %q", got, want)
+			}
+		case <-deadline:
+			t.Fatalf("sink did not hear %q", want)
+		}
+	}
+}
+
+func TestASinkHearsNeedsWithoutDevicesUntilItTakesThem(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	heard := &sink{heard: make(chan string, 64)}
+	heard.fail.Store(1)
+	h.sink = heard
+	h.start()
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+
+	h.runs.set(run.ID, domain.RunInputRequest{ID: "q1", SessionID: "s1", Kind: "question"})
+	question := fmt.Sprintf("%s needs %q, answered by %q", run.ID, "Question from the agent", "q1")
+	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	heard.expect(t, question)
+	// Refused, so the next read offers it again.
+	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	heard.expect(t, question)
+
+	h.runs.set(run.ID)
+	h.publish(run, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
+	heard.expect(t, string(run.ID)+" needs nothing")
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
+	heard.expect(t, fmt.Sprintf("%s needs %q, answered by %q", run.ID, "Blocked: need the staging API key", ""))
+}
+
+// A need back after a request was answered is shown in the sink again,
+// since the sink showed the request last.
+func TestASinkShowsANeedAgainAfterARequestIsAnswered(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	heard := &sink{heard: make(chan string, 64)}
+	h.sink = heard
+	h.start()
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	blocked := fmt.Sprintf("%s needs %q, answered by %q", run.ID, "Blocked: need the staging API key", "")
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
+	heard.expect(t, blocked)
+	h.runs.set(run.ID, domain.RunInputRequest{ID: "p1", SessionID: "s1", Kind: "permission"})
+	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	heard.expect(t, fmt.Sprintf("%s needs %q, answered by %q", run.ID, "Permission requested", "p1"))
+	h.runs.set(run.ID)
+	h.publish(run, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
+	heard.expect(t, blocked)
+}
+
 func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -272,19 +388,6 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 	h.publish(run, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	phone.expect(t, notification{Title: "Upgrade the linter", Body: "which region?", Run: id})
-
-	approval := &store.Approval{WorkspaceID: h.ws.ID, RunID: run.ID, Action: "ExitPlanMode"}
-	if err := h.db.CreateApproval(h.ctx, approval); err != nil {
-		t.Fatalf("CreateApproval: %v", err)
-	}
-	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalRequested})
-	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Permission: ExitPlanMode", Run: id})
-	if err := h.db.DecideApproval(h.ctx, approval.ID, string(events.ApprovalApproved), h.ada.ID, time.Now()); err != nil {
-		t.Fatalf("DecideApproval: %v", err)
-	}
-	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalApproved})
-	// Deciding it leaves the idle park it interrupted, which was announced.
-	phone.expectNone(t, testQuiet)
 
 	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
 	finished := time.Now().UTC()
@@ -377,17 +480,14 @@ func TestANewerNeedIsNeverOvertakenByAnOlderOne(t *testing.T) {
 	slow.slow.Store(true)
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
 	idle := notification{Title: "Upgrade the linter", Body: "which region?", Run: string(run.ID)}
-	permission := notification{Title: "Upgrade the linter", Body: "Permission: ExitPlanMode", Run: string(run.ID)}
+	permission := notification{Title: "Upgrade the linter", Body: "Permission requested", Run: string(run.ID)}
 
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	slow.expect(t, idle)
 	// The first device's push service has not answered yet when the run
 	// asks for a permission.
-	approval := &store.Approval{WorkspaceID: h.ws.ID, RunID: run.ID, Action: "ExitPlanMode"}
-	if err := h.db.CreateApproval(h.ctx, approval); err != nil {
-		t.Fatalf("CreateApproval: %v", err)
-	}
-	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalRequested})
+	h.runs.set(run.ID, domain.RunInputRequest{ID: "p1", SessionID: "s1", Kind: "permission"})
+	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
 	phone.expectNone(t, testQuiet)
 	slow.slow.Store(false)
 	close(slow.release)
@@ -410,15 +510,10 @@ func TestANeedThatClearedBehindASlowSendIsNotSent(t *testing.T) {
 
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	slow.expect(t, idle)
-	approval := &store.Approval{WorkspaceID: h.ws.ID, RunID: run.ID, Action: "ExitPlanMode"}
-	if err := h.db.CreateApproval(h.ctx, approval); err != nil {
-		t.Fatalf("CreateApproval: %v", err)
-	}
-	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalRequested})
-	if err := h.db.DecideApproval(h.ctx, approval.ID, string(events.ApprovalDenied), h.ada.ID, time.Now()); err != nil {
-		t.Fatalf("DecideApproval: %v", err)
-	}
-	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalDenied})
+	h.runs.set(run.ID, domain.RunInputRequest{ID: "p1", SessionID: "s1", Kind: "permission"})
+	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.runs.set(run.ID)
+	h.publish(run, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
 	phone.expectNone(t, testQuiet)
 	slow.slow.Store(false)
 	close(slow.release)
@@ -638,14 +733,14 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	// The topic is the one needOf notifications use, so a device collapses them.
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	phone.expect(t, notification{Title: "Fix the login redirect", Body: "which region?", Run: string(run.ID)})
-	if got, want := phone.topic.Load(), runTopic(run.ID); got != want {
+	if got, want := phone.topic.Load(), topicOf(string(run.ID)); got != want {
 		t.Fatalf("needs topic = %v, want %v", got, want)
 	}
 	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	phone.expect(t, notification{Title: "Again", Body: "body", Run: string(run.ID)})
-	if got, want := phone.topic.Load(), runTopic(run.ID); got != want {
+	if got, want := phone.topic.Load(), topicOf(string(run.ID)); got != want {
 		t.Fatalf("notify topic = %v, want %v", got, want)
 	}
 }
@@ -705,4 +800,46 @@ func TestNotifyFlushEndsTheQuietWaitButKeepsTheRecheck(t *testing.T) {
 		t.Fatalf("flush took %v, want it to skip the %v quiet window", time.Since(start), testQuiet)
 	}
 	phone.expectNone(t, testQuiet/3)
+}
+
+type failingReads struct {
+	*store.DB
+	fail atomic.Bool
+}
+
+func (f *failingReads) GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error) {
+	if f.fail.Load() {
+		return nil, errors.New("database is locked")
+	}
+	return f.DB.GetRun(ctx, id)
+}
+
+// A run that could not be read is not taken for one that needs nothing.
+func TestAFailedReadDoesNotClearTheSink(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	reads := &failingReads{DB: h.db}
+	svc, err := New(Config{Store: reads, Bus: h.bus, Runs: h.runs, Swarm: noSwarm, Budgets: h.costs, KeyPath: h.keyPath, Quiet: testQuiet})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	heard := &sink{heard: make(chan string, 64)}
+	svc.UseSink(heard)
+	if err = svc.Start(h.ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+
+	h.runs.set(run.ID, domain.RunInputRequest{ID: "q1", SessionID: "s1", Kind: "question"})
+	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	heard.expect(t, fmt.Sprintf("%s needs %q, answered by %q", run.ID, "Question from the agent", "q1"))
+
+	reads.fail.Store(true)
+	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	select {
+	case got := <-heard.heard:
+		t.Fatalf("after a failed read the sink heard %q, want nothing", got)
+	case <-time.After(testQuiet):
+	}
 }

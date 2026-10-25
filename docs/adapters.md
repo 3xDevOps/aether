@@ -20,7 +20,7 @@ one entry to the `profiles` map:
 | `Name` | The value users pass to `--agent`. Match the map key. |
 | `TUIArgs` | Argv for the interactive TUI. Use `TaskPlaceholder` (`{task}`) where the prompt goes. |
 | `HeadlessArgs` | Argv for the machine-readable mode. Same placeholder. |
-| `EnvPassthrough` | Environment variables copied from the server process into run containers when set. API keys only. |
+| `EnvPassthrough` | Environment variables copied from the server process into run containers when set. Only API keys and the base URLs that point the CLI at a model gateway. |
 | `Env` | Fixed environment variables the CLI needs to start at all, applied after the workspace's own so a workspace cannot break the launch. Not for configuration - a variable belongs here only when the agent refuses to run without it. |
 | `ACPMode` | The session mode a new Enhanced session starts in: the adapter's mode that acts without asking (`bypassPermissions` for Claude Code). Empty keeps the agent's default. |
 | `PermissionEnv` | Variables that turn the agent's permission prompts off in every launch mode, for an agent with no flag for it. OpenCode's `OPENCODE_CONFIG_CONTENT` is merged key by key with the workspace's value. |
@@ -141,7 +141,6 @@ Most adapter output is `events.AgentEventPayload`:
 | `AgentToolCall` | The agent invoked a tool | `Tool`, `ToolUseID`, `Detail` |
 | `AgentToolResult` | A tool invocation finished | `ToolUseID`, `IsError` |
 | `AgentSubagent` | The agent spawned a subagent | `Tool`, `ToolUseID`, `Detail` |
-| `AgentPause` | The agent is waiting on plan review or approval | `Detail` |
 | `AgentSession` | The agent's own session ID, surfaced on the timeline | `HarnessSessionID` |
 
 Token usage is **not** an agent event: report it as `events.RunCostPayload` so

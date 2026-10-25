@@ -8,7 +8,6 @@ import type {
   AgentModelsResult,
   AgentRemoveResult,
   AgentInfo,
-  Approval,
   BudgetReport,
   CoordMessagesListResult,
   DaemonInstallResult,
@@ -78,6 +77,9 @@ import type {
   RoomMessageListResult,
   RoomPostResult,
   RoomStatusResult,
+  SlackLinkResult,
+  SlackStatusResult,
+  SlackUnlinkResult,
   RoomMessageAnchor,
   RoomMessageKind,
   UsageResult,
@@ -802,17 +804,6 @@ export const api = {
     call<IntegrationPatchResult>('integration.patch', params),
   integrationDelete: (params: IntegrationDeleteParams) =>
     call<IntegrationDeleteResult>('integration.delete', params),
-  approvalList: (workspaceID: string, all = false) =>
-    call<{ approvals: Approval[] }>('approval.list', {
-      workspace_id: workspaceID,
-      all,
-    }).then((r) => r.approvals),
-  approvalDecide: (runID: string, requestID: string, approve: boolean) =>
-    call<{ approval: Approval }>('approval.decide', {
-      run_id: runID,
-      request_id: requestID,
-      approve,
-    }).then((r) => r.approval),
   presenceRoster: () =>
     call<{ members: PresenceEntry[] }>('presence.roster').then((r) => r.members),
   presenceHeartbeat: (workspaceID: string) =>
@@ -939,6 +930,9 @@ export const api = {
     setup_script?: string
     set?: WorkspaceVariable[]
     unset?: string[]
+    egress?: boolean
+    egress_allow?: string[]
+    egress_deny?: string[]
   }) => call<WorkspaceEnvironment>('workspace.environment.set', params),
   workspaceMirrorStatus: (workspaceID: string) =>
     call<WorkspaceMirrorResult>('workspace.mirror.status', {
@@ -1036,6 +1030,9 @@ export const api = {
   pushUnsubscribe: (endpoint: string) => call<unknown>('push.unsubscribe', { endpoint }),
   pushTest: (endpoint: string) => call<unknown>('push.test', { endpoint }),
   pushActive: () => call<unknown>('push.active'),
+  slackStatus: () => call<SlackStatusResult>('slack.status'),
+  slackLink: () => call<SlackLinkResult>('slack.link'),
+  slackUnlink: () => call<SlackUnlinkResult>('slack.unlink'),
   // Not RPC methods; see docs/local-gateway.md. Without a range this is the
   // diff against the run's effective base; with `from`, everything since that
   // snapshot tree, and `base` is the `from` tree.
@@ -1141,8 +1138,8 @@ export const api = {
   envSave: () => call<EnvSaveResult>('env.save', {}),
   envReset: () => call<unknown>('env.reset', {}),
   /** Finishes the GitHub connection the member started with `gh auth login`
-   * in their environment terminal: git credentials there, a signing key in
-   * their environment home, and that key registered on the account. */
+   * in their environment terminal: git credentials there, a signing key the
+   * server keeps, and that key registered on the account. */
   githubConnect: () => call<GitHubConnectResult>('github.connect', {}),
   /** Answers only for an environment terminal that is already running. */
   githubProbe: () => call<GitHubProbeResult>('github.probe', {}),

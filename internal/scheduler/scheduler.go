@@ -30,6 +30,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/secretstore"
+	"github.com/3xDevOps/Aether/internal/signing"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -60,6 +61,10 @@ func (e *BaseCaptureError) Unwrap() error {
 	return e.Err
 }
 
+type EgressProxy interface {
+	Prepare(context.Context) (map[string]string, error)
+}
+
 type Config struct {
 	Store   store.Store
 	Runtime runtime.Runtime
@@ -75,6 +80,9 @@ type Config struct {
 	// callers may omit it to use StateDir.
 	DataDir string
 	Homes   *memberhome.Manager
+	// Signing holds members' commit signing keys and serves each member's
+	// agent into their containers; nil leaves commits unsigned.
+	Signing *signing.Service
 	// Memory supplies the brief that follows the run instructions; nil
 	// launches without one.
 	Memory TeamMemory
@@ -90,6 +98,9 @@ type Config struct {
 	DevelopmentTerminalTakeover func(context.Context, domain.RunID, domain.MemberID) error
 	// Secrets holds workspace secret variables; nil runs without any.
 	Secrets *secretstore.Store
+	// Egress points a run of a workspace with egress control on at the egress
+	// proxy; nil fails such a launch.
+	Egress EgressProxy
 	// DefaultStandardImage is this build's image; a server update moves the
 	// standard image only when StandardImage still equals it.
 	DefaultStandardImage string
@@ -234,6 +245,7 @@ type Scheduler struct {
 	githubOAuthClosed bool
 	githubOAuthWG     sync.WaitGroup
 	acp               *acpDriver
+	appServer         *appServerDriver
 	itemLogs          acphost.ReadOnlyLogCache
 	usageFallback     *UsageFallback
 }
@@ -288,6 +300,9 @@ type supervised struct {
 	// reporter is recovered from the sidecar, since only the launch or mode
 	// switch knew which command the container runs.
 	reporter harness.Reporter
+	// egress is the workspace's egress control when the run launched; an
+	// account move keeps it, since turning it off applies to new runs only.
+	egress bool
 	// Mutated only under Scheduler.mu. reason and activity are the row's
 	// since its last transition.
 	status        domain.RunStatus
@@ -358,8 +373,18 @@ type supervised struct {
 	// own commits apart from Aether's even after a handoff or identity edit.
 	gitAuthorEmail string
 	agentSessionID string
+	agentCost      float64
 	sessionMu      sync.Mutex
 	agentExec      *runtime.ExecIdentity
+	// spendMu orders charge calls; uncharged holds the tokens of a spend
+	// whose publish failed.
+	spendMu   sync.Mutex
+	uncharged events.RunCostPayload
+	// appServer marks a Standard run whose terminal is attached to the
+	// agent's app-server (appServerDriver). serverTurn marks a turn mail
+	// started there, which does not answer a shown question.
+	appServer  bool
+	serverTurn bool
 	// switching is the mode a mode switch is moving the run to, empty when
 	// none is in flight. The switch holds lifecycleMu throughout.
 	switching    domain.LaunchMode
@@ -403,6 +428,9 @@ type supervised struct {
 	moving   bool
 	moveFrom runtime.ID
 	noRetain bool
+	// reclaimed is set once disk reclaim picks the retained container, and
+	// stays through a failed removal so the retry says why.
+	reclaimed bool
 	// waitYielded is set when the wait for the container's exit returned
 	// because a move held the claim: nothing waits on the container until
 	// the move finalizes it or restarts supervision.
@@ -583,6 +611,7 @@ func New(cfg Config) (*Scheduler, error) {
 		return nil, fmt.Errorf("scheduler: restore verification users: %w", err)
 	}
 	s.acp = newACPDriver(s)
+	s.appServer = newAppServerDriver(s)
 	return s, nil
 }
 
@@ -638,17 +667,6 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		stopWatch()
 		<-watched
 	}()
-	// An approval request is a human request: its activity follows it at
-	// once, and the sweep covers an event a full subscription dropped.
-	approvals, subErr := s.cfg.Bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeApproval}}})
-	if errors.Is(subErr, events.ErrBusClosed) {
-		return nil
-	}
-	if subErr != nil {
-		return fmt.Errorf("scheduler: subscribe to approvals: %w", subErr)
-	}
-	defer func() { _ = approvals.Close() }()
-	approvalEvents := approvals.Events()
 	interval := s.cfg.PollInterval
 	if interval > time.Minute {
 		interval = time.Minute
@@ -668,14 +686,6 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			return nil
 		case <-s.superCtx.Done():
 			return nil
-		case e, ok := <-approvalEvents:
-			if !ok {
-				approvalEvents = nil
-				continue
-			}
-			if err := s.refreshRunActivity(ctx, e.RunID); err != nil {
-				slog.Warn("scheduler: refresh run activity after an approval", "run", e.RunID, "error", err)
-			}
 		case <-sweep.C:
 			s.checkStalls(ctx)
 			s.refreshActivities(ctx)
@@ -719,6 +729,7 @@ func (s *Scheduler) Close() error {
 	s.closeGitHubOAuth()
 	s.wg.Wait()
 	s.acp.shutdown()
+	s.appServer.shutdown()
 	s.flushPendingRunTitles()
 	return s.DetachDevelopmentTerminals(context.Background())
 }
@@ -785,7 +796,7 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 }
 
 func (s *Scheduler) backgroundACP(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) bool {
-	if !profile.ACPDefault || s.cfg.Homes == nil {
+	if !profile.Capabilities.EnhancedDefault || s.cfg.Homes == nil {
 		return false
 	}
 	installed, err := s.adapterInstalled(member, account, profile, argvs)
@@ -849,17 +860,14 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		}
 		// An explicit argv override is respected verbatim. Registry discovery
 		// and status assets belong to the shipped CLI, not an override.
-		profile.Reporter = harness.ReporterNone
+		profile.Capabilities = harness.Capabilities{EnhancedDefault: profile.Capabilities.EnhancedDefault}
 		profile.StatusArgs = nil
 		profile.StatusEnv = nil
 		profile.StatusFiles = nil
 		profile.InstructionArgs = nil
 		profile.InstructionEnv = nil
 		profile.ACPSystemPrompt = false
-		profile.ACPClaudeCode = false
-		profile.NativeCoordination = false
 		profile.UpdateScript = ""
-		profile.SwitchVerified = false
 		profile.HeadlessResumeArgs = nil
 	case inRegistry:
 		tui, headless, acp = profile.TUIArgs, profile.HeadlessArgs, profile.ACPArgs
@@ -914,7 +922,7 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, persistSupervisor bool) runtime.Spec {
 	env := make(map[string]string, len(plan.Env)+8)
 	maps.Copy(env, plan.Env)
-	env["AETHER_RUN_ID"] = string(run.ID)
+	env[coordtransport.RunIDEnv] = string(run.ID)
 	env["AETHER_WORKSPACE_ID"] = string(run.WorkspaceID)
 	env["AETHER_ACCOUNT_MEMBER_ID"] = string(run.AccountMember())
 	env["AETHER_HARNESS"] = run.Harness
@@ -956,6 +964,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		PidsLimit:         s.cfg.RunPidsLimit,
 		CreationKey:       string(run.ID),
 		NestedDocker:      true,
+		Egress:            plan.Egress,
 	}
 }
 

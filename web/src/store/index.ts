@@ -4,7 +4,6 @@ import { clampTerminalFontSize } from '@/lib/term-font'
 import { batched } from '@/store/batch'
 import { createAgentModelsSlice, type AgentModelsSlice } from '@/store/agent-models'
 import { createCollaborationSlice, type CollaborationSlice } from '@/store/collaboration'
-import { createApprovalsSlice, type ApprovalsSlice } from '@/store/approvals'
 import { createAssistantSlice, clampAssistantWidth, onPhone, type AssistantSlice } from '@/store/assistant'
 import { createBoardSlice, type BoardSlice } from '@/store/board'
 import { createCostSlice, type CostSlice } from '@/store/cost'
@@ -67,7 +66,6 @@ export type RootState = ServerSlice &
   EnvTerminalSlice &
   BoardSlice &
   PaletteSlice &
-  ApprovalsSlice &
   PresenceSlice &
   TypingSlice &
   CostSlice &
@@ -138,7 +136,6 @@ export function createRootStore() {
         ...createTerminalSlice(...a),
         ...createBoardSlice(...a),
         ...createPaletteSlice(...a),
-        ...createApprovalsSlice(...a),
         ...createPresenceSlice(...a),
         ...createTypingSlice(...a),
         ...createCostSlice(...a),

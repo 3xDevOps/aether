@@ -7,7 +7,6 @@ const TypeAssistantNotice Type = "assistant.notice"
 const (
 	AssistantNoticeFinished       = "finished"
 	AssistantNoticeNeedsInput     = "needs_input"
-	AssistantNoticeNeedsApproval  = "needs_approval"
 	AssistantNoticeNeedsAttention = "needs_attention"
 )
 

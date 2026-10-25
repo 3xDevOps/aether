@@ -39,12 +39,26 @@ func init() {
 	register(command{
 		name:  "memory",
 		short: "search, add, pin and remove the team memory notes runs read",
-		run:   runMemory,
+		usage: "aether memory ls [--workspace <name>] [--kind <kind>] [--file <path>] [--all] [--limit <n>]\n" +
+			"aether memory search [--workspace <name>] [--kind <kind>] [--file <path>] [--all] [--limit <n>] <words...>\n" +
+			"aether memory show [--workspace <name>] <id>\n" +
+			"aether memory add [--workspace <name>] --kind <kind> [--pin] [--me] [--file <path>]... [--supersedes <id>] <text...>\n" +
+			"aether memory pin [--workspace <name>] [--me] <id>\n" +
+			"aether memory unpin [--workspace <name>] <id>\n" +
+			"aether memory rm [--workspace <name>] <id>\n" +
+			"aether memory rm [--workspace <name>] --run <run-id>\n" +
+			"aether memory brief [--workspace <name>] [--member <member>]",
+		example: "aether memory ls\n" +
+			"aether memory search --workspace app migrations\n" +
+			"aether memory add --kind convention --file go.mod Run go mod tidy before committing\n" +
+			"aether memory show <id>\n" +
+			"aether memory brief",
+		run: runMemory,
 	})
 }
 
 func runMemory(args []string) error {
-	if len(args) == 1 && (args[0] == "help" || args[0] == "-h" || args[0] == "--help") {
+	if len(args) == 1 && args[0] == "help" {
 		fmt.Println(memoryUsage)
 		return nil
 	}
@@ -62,8 +76,7 @@ func parseMemory(args []string) (memoryCall, error) {
 		return nil, errors.New(memoryUsage)
 	}
 	name := args[0]
-	fs := flag.NewFlagSet("memory "+name, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("memory " + name)
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	usage := func(err error) error { return fmt.Errorf("memory %s: %w\n%s", name, err, memoryUsage) }
 	switch name {

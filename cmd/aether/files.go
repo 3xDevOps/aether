@@ -12,7 +12,11 @@ func init() {
 	register(command{
 		name:  "files",
 		short: "read workspace and run files",
-		run:   runFiles,
+		usage: "aether files ls <workspace|run-id> [path]\n" +
+			"aether files cat <workspace|run-id> <path>",
+		example: "aether files ls app\n" +
+			"aether files cat run-d6ay38tj8j README.md",
+		run: runFiles,
 	})
 }
 

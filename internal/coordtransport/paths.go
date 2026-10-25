@@ -13,6 +13,11 @@ const (
 	// AssistantMountDir is the read-only directory holding the assistant tool
 	// socket in a member's environment terminal.
 	AssistantMountDir = "/run/aether-assistant"
+	// SigningMountDir is the read-only directory holding the member's commit
+	// signing agent in their runs and environment terminal.
+	SigningMountDir = "/run/aether-signing"
+	// SigningSocketPath is the SSH_AUTH_SOCK every such container gets.
+	SigningSocketPath = SigningMountDir + "/agent.sock"
 	// BinaryPath is the staged server binary path. It serves the MCP entry
 	// point and harness lifecycle hooks.
 	BinaryPath = "/opt/aether/aether-server"
@@ -21,6 +26,8 @@ const (
 	// SocketPath is the run's v3 coordination socket inside a container.
 	SocketPath      = MountDir + "/" + SocketName
 	NextCommandName = "next-command"
+	// RunIDEnv holds the run's ID in its container.
+	RunIDEnv = "AETHER_RUN_ID"
 	// EnhancedEnv is "1" in an enhanced run's container. The server wakes
 	// such an agent itself, so inbox hooks the agent loads stay silent.
 	EnhancedEnv = "AETHER_ENHANCED"

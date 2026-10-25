@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -14,11 +13,13 @@ import (
 // policy over workspace.settings. Both methods are limited to admins by
 // the server.
 func workspaceSettings(args []string) error {
-	fs := flag.NewFlagSet("workspace settings", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("workspace settings")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	messageOthers := fs.String("message-others", "", "who may message, control and kill other members' runs: everyone or admins-only")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w\nusage: aether workspace settings [--workspace <name-or-id>] [--message-others everyone|admins-only]", err)
+	}
+	if fs.NArg() != 0 {
 		return fmt.Errorf("usage: aether workspace settings [--workspace <name-or-id>] [--message-others everyone|admins-only]")
 	}
 	change := false

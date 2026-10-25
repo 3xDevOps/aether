@@ -77,13 +77,36 @@ func newTestBus(t *testing.T) *events.InProc {
 	return bus
 }
 
-func startManager(t *testing.T, bus events.Bus, runs RunLookup, tap OutputTap) {
+type fakeResults struct {
+	mu    sync.Mutex
+	ended map[domain.RunID]string
+}
+
+func (f *fakeResults) TurnEnded(run domain.RunID, message string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ended == nil {
+		f.ended = make(map[domain.RunID]string)
+	}
+	f.ended[run] = message
+}
+
+func (f *fakeResults) result(run domain.RunID) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	message, ok := f.ended[run]
+	return message, ok
+}
+
+func startManager(t *testing.T, bus events.Bus, runs RunLookup, tap OutputTap) *fakeResults {
 	t.Helper()
-	m := NewManager(bus, runs, tap)
+	results := &fakeResults{}
+	m := NewManager(bus, runs, tap, results)
 	if err := m.Start(t.Context()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(func() { _ = m.Close() })
+	return results
 }
 
 func publishRunning(t *testing.T, bus events.Bus, run domain.RunID) {
@@ -159,6 +182,28 @@ func TestManagerEndToEnd(t *testing.T) {
 		payloads = append(payloads, e.Payload)
 	}
 	assertPayloads(t, payloads, want)
+}
+
+// A swarm worker's supervisor keeps the PTY open after the agent exits.
+func TestManagerHandsOverTheResultWhileThePTYStaysOpen(t *testing.T) {
+	data, err := os.ReadFile("testdata/claude_clean.jsonl")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	const run = domain.RunID("run_1")
+	output, input := io.Pipe()
+	t.Cleanup(func() { _ = input.Close() })
+	go func() { _, _ = input.Write(data) }()
+	bus := newTestBus(t)
+	runs := &fakeRuns{runs: map[domain.RunID]*domain.Run{
+		run: {ID: run, WorkspaceID: "ws_1", Harness: "claude", Mode: domain.LaunchHeadless, Status: domain.RunRunning},
+	}}
+	results := startManager(t, bus, runs, &pipeTap{r: output})
+	publishRunning(t, bus, run)
+	waitFor(t, "the run's result", func() bool {
+		message, ok := results.result(run)
+		return ok && message == "Fixed the backoff reset; the test suite passes."
+	})
 }
 
 // TestManagerGracefulDegradation: runs without an adapter (unknown
@@ -314,7 +359,7 @@ func TestManagerScanTapsTheReplacementAfterALostAccountEvent(t *testing.T) {
 		t.Fatalf("subscribe: %v", err)
 	}
 	defer func() { _ = sub.Close() }()
-	m := NewManager(bus, runs, tap)
+	m := NewManager(bus, runs, tap, &fakeResults{})
 	if err = m.Start(t.Context()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

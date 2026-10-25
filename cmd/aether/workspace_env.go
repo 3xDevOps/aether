@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	workspaceEnvUsage       = "usage: aether workspace env <list|set|unset|import|script>"
+	workspaceEnvUsage       = "usage: aether workspace env <list|set|unset|import|script|egress>"
 	workspaceEnvListUsage   = "usage: aether workspace env list [--workspace <name-or-id>]"
 	workspaceEnvSetUsage    = "usage: aether workspace env set [--workspace <name-or-id>] <NAME>=<value> [<NAME>=<value> ...]\n   or: aether workspace env set [--workspace <name-or-id>] --secret <NAME>   (the value is read from stdin)"
 	workspaceEnvUnsetUsage  = "usage: aether workspace env unset [--workspace <name-or-id>] <NAME> [<NAME> ...]"
@@ -39,20 +39,24 @@ func workspaceEnv(args []string) error {
 		return workspaceEnvImport(args[1:], os.Stdin)
 	case "script":
 		return workspaceEnvScript(args[1:], os.Stdin)
+	case "egress":
+		return workspaceEnvEgress(args[1:])
 	default:
 		return fmt.Errorf("unknown workspace env command %q", args[0])
 	}
 }
 
 func workspaceEnvFlags(name string) (*flag.FlagSet, *string) {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet(name)
 	return fs, fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 }
 
 func workspaceEnvList(args []string) error {
 	fs, workspace := workspaceEnvFlags("workspace env list")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w\n%s", err, workspaceEnvListUsage)
+	}
+	if fs.NArg() != 0 {
 		return errors.New(workspaceEnvListUsage)
 	}
 	return withControl(func(c *protocol.Client) error {
@@ -164,7 +168,10 @@ func workspaceEnvSet(args []string, stdin io.Reader) error {
 
 func workspaceEnvUnset(args []string) error {
 	fs, workspace := workspaceEnvFlags("workspace env unset")
-	if err := fs.Parse(args); err != nil || fs.NArg() == 0 {
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w\n%s", err, workspaceEnvUnsetUsage)
+	}
+	if fs.NArg() == 0 {
 		return errors.New(workspaceEnvUnsetUsage)
 	}
 	return changeWorkspaceEnv(*workspace, protocol.WorkspaceEnvironmentSetParams{Unset: fs.Args()})
@@ -173,7 +180,10 @@ func workspaceEnvUnset(args []string) error {
 func parseWorkspaceEnvImport(args []string, stdin io.Reader) (string, []protocol.WorkspaceVariable, error) {
 	fs, workspace := workspaceEnvFlags("workspace env import")
 	plain := fs.Bool("plain", false, "store the values as plain variables instead of secrets")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
+	if err := fs.Parse(args); err != nil {
+		return "", nil, fmt.Errorf("%w\n%s", err, workspaceEnvImportUsage)
+	}
+	if fs.NArg() != 1 {
 		return "", nil, errors.New(workspaceEnvImportUsage)
 	}
 	source := fs.Arg(0)
@@ -212,7 +222,10 @@ func workspaceEnvScript(args []string, stdin io.Reader) error {
 	fs, workspace := workspaceEnvFlags("workspace env script")
 	file := fs.String("file", "", "set the setup script from this file (- for stdin)")
 	clear := fs.Bool("clear", false, "remove the setup script")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || (*file != "" && *clear) {
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w\n%s", err, workspaceEnvScriptUsage)
+	}
+	if fs.NArg() != 0 || (*file != "" && *clear) {
 		return errors.New(workspaceEnvScriptUsage)
 	}
 	var script *string

@@ -755,6 +755,9 @@ func (s *Service) enqueueWorkerReport(ctx context.Context, report *store.CoordRe
 		Kind: store.RunMessageKindMessage, Body: report.Summary, CorrelationID: report.ID,
 		IdempotencyKey: "coord-report-" + string(report.Outcome) + ":" + report.ID + ":" + string(target.ID),
 	}
+	if err = s.cfg.Mail.RetireProvisionalReports(ctx, report.RunID, target.ID, report.CreatedAt); err != nil {
+		return fmt.Errorf("enqueue worker report: %w", err)
+	}
 	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, false)
 	if err != nil {
 		return fmt.Errorf("enqueue worker report: %w", err)
@@ -1272,15 +1275,11 @@ func (s *Service) releaseWaiter(run domain.RunID, ch chan struct{}) {
 func (s *Service) wakeInbox(run domain.RunID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for waiter := range s.hookWaiters[run] {
-		waiter.consumer = waiter.consumer || s.inboxConsumers[run] > 0
-		waiter.signal()
-	}
 	if waiter := s.inboxWaiters[run]; waiter != nil {
 		close(waiter.ch)
 		delete(s.inboxWaiters, run)
 	}
-	s.wakeEnhancedLocked(run)
+	s.offerWakeLocked(run)
 }
 
 type bucket struct {

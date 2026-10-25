@@ -17,7 +17,11 @@ func init() {
 	register(command{
 		name:  "device",
 		short: "list, approve, or revoke the devices members reach the server through an edge with",
-		run:   runDevice,
+		usage: "aether device list\n" +
+			"aether device approve <code|device-id>\n" +
+			"aether device revoke <device-id>",
+		example: "aether device list",
+		run:     runDevice,
 	})
 }
 
@@ -94,7 +98,7 @@ func deviceApprove(codeOrID string, in io.Reader, out io.Writer) error {
 			return err
 		}
 		if !ok {
-			return errors.New("device approve: not approved")
+			return fmt.Errorf("device approve: not approved; a person must check the device shown above and confirm with y in their own terminal: aether device approve %s, or approve it from the dashboard's Needs you card", codeOrID)
 		}
 		var res protocol.MemberDeviceResult
 		params := protocol.MemberDeviceApproveParams{Code: lookup.Code, DeviceID: found.Device.ID}

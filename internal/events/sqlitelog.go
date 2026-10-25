@@ -229,10 +229,13 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 	return query, append(args, limit)
 }
 
-// LastSeq implements EventLog.
+// LastSeq implements EventLog. It counts SQLite's AUTOINCREMENT high-water
+// mark, so a deleted newest row never has its seq handed out again.
 func (l *SQLiteLog) LastSeq(ctx context.Context) (uint64, error) {
 	var last uint64
-	err := l.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) FROM events`).Scan(&last)
+	err := l.db.QueryRowContext(ctx, `SELECT MAX(
+		COALESCE((SELECT MAX(seq) FROM events), 0),
+		COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'events'), 0))`).Scan(&last)
 	if err != nil {
 		return 0, fmt.Errorf("events: read last seq: %w", err)
 	}

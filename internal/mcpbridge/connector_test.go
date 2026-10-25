@@ -432,7 +432,8 @@ func TestConnectorReadTools(t *testing.T) {
 		}
 		from, _ := time.Parse(time.RFC3339, p.From)
 		to, _ := time.Parse(time.RFC3339, p.To)
-		if p.Scope != protocol.InsightsScopeMine || p.TimeZone != "Europe/Berlin" || to.Sub(from) != 7*24*time.Hour {
+		berlin, _ := time.LoadLocation("Europe/Berlin")
+		if p.Scope != protocol.InsightsScopeMine || p.TimeZone != "Europe/Berlin" || !from.In(berlin).AddDate(0, 0, 7).Equal(to) {
 			return nil, fmt.Errorf("insights params %+v", p)
 		}
 		return protocol.InsightsResult{Totals: protocol.InsightsTotals{Launched: 3, Completed: 2},
@@ -760,13 +761,21 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 	f := newFake(t)
 	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{DashboardURL: "https://aether.example", Member: protocol.Member{ID: "mem-bo"}})
 	f.answers[protocol.MethodMissionCreate] = returns(protocol.MissionCreateResult{Mission: protocol.Mission{ID: "mis-1", Phase: "planning", CurrentIntegratorRunID: "run-5"}})
+	f.answers[protocol.MethodAgentList] = returns(protocol.AgentListResult{Agents: []protocol.AgentInfo{
+		{Name: "claude", Enhanced: "adapter"}, {Name: "codex", Enhanced: "adapter", EnhancedInstalled: true},
+		{Name: "gemini", Enhanced: "native", SwarmStandardRefusal: "gemini in Standard mode has no idle wake; start it in Enhanced"},
+	}})
 	cs := connectorSession(t, f, ScopeWrite)
+	if text, _, failed := try(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "harness": "gemini"}); !failed ||
+		!strings.Contains(text, "gemini in Standard mode has no idle wake; start it in Enhanced, which is not installed: aether agent add gemini --enhanced") {
+		t.Fatalf("a gemini integrator with no mode and no Enhanced installed = %q", text)
+	}
 	if text, _, failed := try(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "harness": "claude", "mode": "headless"}); !failed ||
 		!strings.Contains(text, "mode") {
 		t.Fatalf("a headless integrator = %q", text)
 	}
 	text, out := run(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "Ship it", "harness": "claude",
-		"workers": []any{map[string]any{"harness": "claude"}, map[string]any{"harness": "codex", "mode": "acp"}}, "idempotency_key": "s1"})
+		"workers": []any{map[string]any{"harness": "claude"}, map[string]any{"harness": "codex"}}, "idempotency_key": "s1"})
 	if text != "Launched swarm mis-1 (planning); its integrator is run run-5." || out["url"] != "https://aether.example/?page=missions&id=mis-1" {
 		t.Fatalf("aether_launch_swarm = %q %v", text, out)
 	}
@@ -774,8 +783,16 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.IdempotencyKey != "s1" || p.AccountableHumanID != "" || len(p.ExecutionChoices) != 2 || p.ExecutionChoices[1].Harness != "codex" || p.Integrator.Mode != "tui" {
+	if p.IdempotencyKey != "s1" || p.AccountableHumanID != "" || len(p.ExecutionChoices) != 2 || p.ExecutionChoices[1] != (protocol.MissionExecutionChoice{Harness: "codex", Mode: "acp"}) || p.Integrator.Mode != "tui" {
 		t.Fatalf("mission.create = %+v", p)
+	}
+	f.calls = nil
+	run(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "Ship it with codex", "harness": "codex", "idempotency_key": "s2"})
+	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Integrator.Mode != "acp" {
+		t.Fatalf("a codex integrator with no mode and Enhanced installed = %+v, want acp", p.Integrator)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -827,8 +844,6 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 		{Kind: protocol.AttentionKindQuestion, RunID: "run-3", Request: &protocol.AttentionRequest{ID: "req-3", Options: []protocol.AttentionOption{{ID: "accept"}}}},
 		{Kind: protocol.AttentionKindPermission, RunID: "run-4", Request: &protocol.AttentionRequest{ID: "req-4", Title: "Run rm -rf build",
 			Options: []protocol.AttentionOption{{ID: "always", Kind: "allow_always"}, {ID: "once", Kind: "allow_once"}, {ID: "no", Kind: "reject_once"}}}},
-		{Kind: protocol.AttentionKindApproval, RunID: "run-5", Approval: &protocol.AttentionApproval{ID: "ap-5", Action: "git push --force"}},
-		{Kind: protocol.AttentionKindApproval, RunID: "run-6", Approval: &protocol.AttentionApproval{ID: "ap-6", Action: strings.Repeat("x", 600) + " && " + injection}},
 		{Kind: protocol.AttentionKindPermission, RunID: "run-7", Request: &protocol.AttentionRequest{ID: "req-7", Title: strings.Repeat("x", 600) + injection,
 			Options: []protocol.AttentionOption{{ID: "once", Kind: "allow_once"}}}},
 	}
@@ -837,7 +852,6 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 	f.answers[protocol.MethodMissionQuestionAnswer] = returns(protocol.MissionQuestionResult{Question: protocol.MissionQuestion{ID: "q-1"}})
 	f.answers[protocol.MethodRunRoomPost] = returns(protocol.RunRoomPostResult{Message: protocol.RoomMessage{ID: "msg-2"}})
 	f.answers[protocol.MethodRunInputRespond] = returns(protocol.RunInputRespondResult{Status: protocol.RunInputRespondAnswered})
-	f.answers[protocol.MethodApprovalDecide] = returns(protocol.ApprovalDecideResult{Approval: protocol.Approval{Decision: "denied"}})
 	cs := connectorSession(t, f, ScopeWrite, ScopeControl)
 	acted := func(name string, args map[string]any, method, params string) {
 		t.Helper()
@@ -859,12 +873,6 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 		"Allowed the request once on run run-4: answered." || out["answer_id"] != "req-4" {
 		t.Fatalf("a decided permission = %q %v, want its agent-chosen id only as answer_id", text, out)
 	}
-	acted("aether_decide_approval", map[string]any{"run_id": "run-5", "answer_id": "ap-5", "decision": "deny", "action": "git push --force"},
-		protocol.MethodApprovalDecide, `{"run_id":"run-5","request_id":"ap-5","approve":false}`)
-	if text, out := run(t, cs, "aether_decide_approval", map[string]any{"run_id": "run-5", "answer_id": "ap-5", "decision": "deny", "action": "git push --force"}); text !=
-		"Approval on run run-5: denied." || strings.Contains(trusted(t, out), "git push") {
-		t.Fatalf("a decided approval = %q %v, want the agent's text only under untrusted", text, out)
-	}
 
 	for _, c := range []struct {
 		name string
@@ -873,11 +881,9 @@ func TestConnectorAnswerAndDecide(t *testing.T) {
 	}{
 		{"aether_answer", map[string]any{"run_id": "run-4", "answer_id": "req-4", "option_id": "always"}, "this item is a permission, which is answered with aether_decide_approval"},
 		{"aether_answer", map[string]any{"run_id": "run-1", "answer_id": "gone", "answer": "x"}, "run run-1 has nothing pending for you with that answer_id; it may be answered already; call aether_needs_attention"},
-		{"aether_decide_approval", map[string]any{"run_id": "run-5", "answer_id": "ap-5", "decision": "allow", "action": "git push"}, "action is not the pending request's untrusted.text word for word; call aether_needs_attention"},
-		{"aether_decide_approval", map[string]any{"run_id": "run-6", "answer_id": "ap-6", "decision": "allow", "action": strings.Repeat("x", 600) + "…"},
-			"run run-6's request is longer than the connector shows; decide it in the Aether dashboard at https://aether.example/?run=run-6"},
+		{"aether_decide_approval", map[string]any{"run_id": "run-4", "answer_id": "req-4", "decision": "allow", "action": "Run rm"}, "action is not the pending request's untrusted.text word for word; call aether_needs_attention"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-7", "answer_id": "req-7", "decision": "allow", "action": strings.Repeat("x", 600) + "…"},
-			"run run-7's request is longer than the connector shows"},
+			"run run-7's request is longer than the connector shows; decide it in the Aether dashboard at https://aether.example/?run=run-7"},
 		{"aether_decide_approval", map[string]any{"run_id": "run-3", "answer_id": "req-3", "decision": "allow", "action": ""}, "this item is a question, which is answered with aether_answer"},
 	} {
 		f.calls = nil

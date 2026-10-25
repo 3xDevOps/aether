@@ -15,7 +15,7 @@ import { memberName, resolveMember } from '@/lib/member-name'
 import { needsYou, type StateContext } from '@/lib/needs-you'
 import { groupOf, runLabel, stateLabel, stateTone, type PresentationState } from '@/lib/status'
 import { cn } from '@/lib/utils'
-import { approveRequest, targetRoute } from '@/routes/board/card-action'
+import { targetRoute } from '@/routes/board/card-action'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
 import { useDeviceNeeds, useRun, useRunPeople, useSidebarGroups, useStateContext } from '@/store/hooks'
@@ -399,16 +399,14 @@ function AnswerButton({ run }: { run: RunRecord }) {
   const ctx = useStateContext()
   const condition = needsYou(run, ctx)
   if (!condition) return null
-  const approval = ctx.approvalsByRun[run.id]?.[0]
-  const action = condition.action(run, approval)
+  const action = condition.action(run)
   return (
     <Button
       variant="ghost"
       size="sm"
       tabIndex={-1}
       onClick={() => {
-        if (action.kind === 'approve' && approval) void approveRequest(run.id, approval)
-        else if (action.kind === 'reply') navigate('run', { runId: run.id, view: 'session', focus: 'composer' })
+        if (action.kind === 'reply') navigate('run', { runId: run.id, view: 'session', focus: 'composer' })
         else {
           const route = needsYouRoute(run, ctx)
           navigate(route.name, route.params)

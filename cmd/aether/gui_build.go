@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -51,7 +50,7 @@ func guiBuild(args []string) error {
 // guiBuildTo is guiBuild with its --json stream injected, so a test can
 // read the phase lines without taking over the process's stdout.
 func guiBuildTo(args []string, events io.Writer) error {
-	fs := flag.NewFlagSet("gui build", flag.ExitOnError)
+	fs := newFlagSet("gui build")
 	buildDir := fs.String("build-dir", "", "where to download the app, or unpack the shell sources and run npm (default: the user cache directory)")
 	jsonOut := fs.Bool("json", false, "print one JSON line per build phase on stdout; the build's own output goes to stderr")
 	source := fs.Bool("source", false, "build the app on this machine instead of downloading the release's prebuilt Windows app")

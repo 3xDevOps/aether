@@ -24,9 +24,11 @@ The home survives every stop, save, reset and server restart:
 - Agent logins and other files the agent writes.
 - Agent configuration, uploaded with `aether config push` or edited in
   **Files**.
-- The GitHub login in `~/.config/gh/hosts.yml`, the signing key
-  `~/.ssh/aether_signing` and `~/.ssh/aether_signing.pub`, and `~/.gitconfig`
-  (git identity, gh's credential helper, signing settings).
+- The GitHub login in `~/.config/gh/hosts.yml`, the public signing key
+  `~/.ssh/aether_signing.pub`, and `~/.gitconfig` (git identity, gh's
+  credential helper, signing settings). The private signing key stays on the
+  server, outside the home
+  ([security.md](security.md#github-credentials-and-signing-keys)).
 - The remote server an editor installs when it attaches over SSH
   (`~/.vscode-server`, `~/.cursor-server`, `~/.zed_server`), so it downloads
   once ([terminal.md](terminal.md#editors)).
@@ -64,10 +66,9 @@ yourself is never cleaned. Logins, CLIs and keys stay in the home.
 ## Set up an agent
 
 [harnesses.md](harnesses.md#set-up-an-agent) has the steps: **Set up** on the
-**Agents** page, or `aether agent add <name>` on your computer, which installs
-the agent and leaves you in your environment's shell for the vendor login. The
-agent, its login and its settings land in your home, so you do not save the
-environment afterwards.
+**Agents** page, or `aether agent add <name>` and `aether agent login <name>` on
+your computer. The agent, its login and its settings land in your home, so you
+do not save the environment afterwards.
 
 The launch form offers an agent only when its executable is in your
 `~/.local/bin`. Aether follows relative symlinks, and absolute ones under
@@ -103,44 +104,63 @@ device login in your browser, then select **I've logged in**.
 
 ### From the CLI
 
-Your environment needs `gh` 2.81.0 or newer (the standard image has one). Open
-it and log in:
+Run, on your computer:
 
 ```sh
-aether terminal
+aether github connect
 ```
+
+```text
+logged in to github.com as octocat
+signing key SHA256:2E3v9x... registered on GitHub
+```
+
+If your environment has no `gh` login, its login lacks the
+`admin:ssh_signing_key` scope, or the environment is stopped, an admin's
+`aether github connect` runs the dashboard's device flow first and prints:
+
+```text
+url: https://github.com/login/device
+code: ABCD-1234
+scopes: repo, read:org, gist, admin:ssh_signing_key
+expires: 2026-10-25T06:30:00Z
+open the URL in your browser and enter the code; waiting for approval...
+```
+
+Open the URL in your own browser and enter the code. The command waits for the
+approval, then prints the two lines above. The scopes are gh's own defaults
+plus `admin:ssh_signing_key`, which lets Aether register your signing key.
+After 15 minutes the code expires and the command fails with
+`github: authorization expired after 15 minutes; connect again`. Ctrl-C cancels
+the authorization. Running the command again while a code is pending shows the
+same code.
+
+A member who is not an admin gets `github.oauth.start requires the admin role`
+and logs in by hand instead. The environment needs `gh` 2.81.0 or newer (the
+standard image has one). In `aether terminal`, run:
 
 ```sh
 gh auth login --hostname github.com --git-protocol https --web \
   --scopes admin:ssh_signing_key
 ```
 
-`--web` is GitHub's device flow: gh prints a one-time code and a URL, and you
-finish in a browser on your own machine. gh may say it could not open a
-browser. That is expected in a container. Open the URL yourself. The
-`admin:ssh_signing_key` scope lets the next command register your signing key.
-
-Then, from your machine:
-
-```sh
-aether github connect
-```
-
-```
-logged in to github.com as octocat
-signing key SHA256:2E3v9x... registered on GitHub
-```
+gh prints a one-time code and a URL; finish in a browser on your own machine.
+gh may say it could not open a browser. That is expected in a container. Then
+run `aether github connect` again.
 
 This command, and the admin dashboard flow, confirm the `gh` login, write gh's
 credential helper and your identity into `~/.gitconfig`, create an ed25519
-signing key at `~/.ssh/aether_signing` if there is none, turn on commit signing
-(`gpg.format=ssh`, `commit.gpgsign=true`), and register the public key on your
-account. It is safe to run again. `aether member git` keeps the identity in
-`~/.gitconfig` in step with your name and address.
+signing key on the server if you have none, write its public half to
+`~/.ssh/aether_signing.pub`, turn on commit signing (`gpg.format=ssh`,
+`commit.gpgsign=true`), and register the public key on your account. git in
+your runs and environment signs through the server's signing agent at
+`SSH_AUTH_SOCK`. It is safe to run again. `aether member git` keeps the
+identity in `~/.gitconfig` in step with your name and address.
 
 > [!WARNING]
 > Container root in every run you launch can read and replace the GitHub
-> credential and the signing key. Read
+> credential and sign with your key, and the token can register a signing key
+> of its own on your account. Read
 > [security.md](security.md#github-credentials-and-signing-keys) before
 > connecting an account whose reach is wider than this workspace.
 
@@ -148,7 +168,7 @@ account. It is safe to run again. `aether member git` keeps the identity in
 
 | Error | Fix |
 | --- | --- |
-| `github: not logged in to github.com in the environment terminal; run gh auth login there first: HTTP 401: Bad credentials` | Log in again. The line ends with gh's own reason. |
+| `github: not logged in to github.com in the environment terminal; run aether github connect: HTTP 401: Bad credentials` | Run `aether github connect`. The line ends with gh's own reason. |
 | `github: the gh login on github.com lacks the admin:ssh_signing_key scope; run gh auth refresh -h github.com -s admin:ssh_signing_key in the environment terminal` | Run the command it names. Nothing in the home was changed. |
 | `github: the signing key registered on the account does not match this member's key (fingerprint SHA256:... not listed)` | Run `aether github connect` again. |
 | `github: gh is not on PATH in the environment terminal; ask a server admin to run aether server update, then run aether terminal stop and open the terminal again: ...` | See [No gh in the environment](#no-gh-in-the-environment). |

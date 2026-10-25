@@ -4,7 +4,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -16,11 +15,13 @@ const memberGitUsage = "usage: aether member git [--name <name>] [--email <email
 // shows the identity commits for that member are authored as; --name and
 // --email set it. Members set their own; anyone else's needs admin.
 func memberGit(args []string) error {
-	fs := flag.NewFlagSet("member git", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("member git")
 	name := fs.String("name", "", "git author name; empty restores the fallback")
 	email := fs.String("email", "", "git author email; empty restores the fallback")
-	if err := fs.Parse(args); err != nil || fs.NArg() > 1 {
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w\n%s", err, memberGitUsage)
+	}
+	if fs.NArg() > 1 {
 		return errors.New(memberGitUsage)
 	}
 	setName, setEmail := false, false

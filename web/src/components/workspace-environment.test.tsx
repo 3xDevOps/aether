@@ -12,6 +12,8 @@ const saved: WorkspaceEnvironment = {
     { name: 'NODE_ENV', value: 'test' },
     { name: 'NPM_TOKEN', secret: true },
   ],
+  egress: false,
+  egress_hosts: [],
 }
 
 function mount(over: Parameters<typeof fakeApi>[0] = {}, editable = true) {
@@ -216,8 +218,64 @@ describe('workspace environment', () => {
     expect(screen.queryByRole('button')).toBeNull()
   })
 
+  it('turns egress control on and edits the allowed hosts in the same save', async () => {
+    const limited: WorkspaceEnvironment = { ...saved, egress: true, egress_hosts: ['api.anthropic.com', 'github.com'] }
+    const client = mount({
+      workspaceEnvironment: vi.fn(async () => ({ ...limited, egress: false })),
+      workspaceEnvironmentSet: vi.fn(async () => limited),
+    })
+
+    const toggle = await screen.findByRole('checkbox', { name: 'Limit outbound traffic' })
+    expect(screen.getByText(/the host list applies at once to runs started with it on/)).toBeDefined()
+    expect(screen.queryByRole('list', { name: 'Allowed hosts' })).toBeNull()
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Remove github.com' }))
+    const host = screen.getByRole('textbox', { name: 'Host to allow' })
+    fireEvent.change(host, { target: { value: 'https://mirror.example.com' } })
+    fireEvent.keyDown(host, { key: 'Enter' })
+    expect(screen.getByText('Enter a host such as example.com or *.example.com, without https:// or a port.')).toBeDefined()
+    fireEvent.change(host, { target: { value: '*.Mirror.Example.com.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Allow' }))
+    const allowed = within(screen.getByRole('list', { name: 'Allowed hosts' })).getAllByRole('listitem').map((item) => item.textContent)
+    expect(allowed).toEqual(['*.mirror.example.com', 'api.anthropic.com'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.workspaceEnvironmentSet).toHaveBeenCalledWith({
+      workspace_id: workspace.id,
+      set: [],
+      unset: [],
+      egress: true,
+      egress_allow: ['*.mirror.example.com'],
+      egress_deny: ['github.com'],
+    }))
+  })
+
+  it('leaves egress control out for a server that predates it', async () => {
+    const { egress: _egress, egress_hosts: _hosts, ...older } = saved
+    const client = mount({ workspaceEnvironment: vi.fn(async () => older), workspaceEnvironmentSet: vi.fn(async () => older) })
+
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Setup script' }), { target: { value: 'make deps' } })
+    expect(screen.queryByRole('checkbox', { name: 'Limit outbound traffic' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.workspaceEnvironmentSet).toHaveBeenCalledWith({
+      workspace_id: workspace.id,
+      setup_script: 'make deps',
+      set: [],
+      unset: [],
+    }))
+  })
+
+  it('shows a member without the admin role whether egress is limited, read-only', async () => {
+    mount({ workspaceEnvironment: vi.fn(async () => ({ ...saved, egress: true, egress_hosts: ['github.com'] })) }, false)
+
+    expect(await screen.findByText('On.')).toBeDefined()
+    expect(within(screen.getByRole('list', { name: 'Allowed hosts' })).getByRole('listitem').textContent).toBe('github.com')
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
   it('says so when there is nothing set', async () => {
-    mount({ workspaceEnvironment: vi.fn(async () => ({ workspace_id: workspace.id, setup_script: '', variables: [] })) }, false)
+    mount({ workspaceEnvironment: vi.fn(async () => ({ workspace_id: workspace.id, setup_script: '', variables: [], egress: false, egress_hosts: [] })) }, false)
 
     expect(await screen.findByText('No setup script.')).toBeDefined()
     expect(screen.getByText('No variables.')).toBeDefined()

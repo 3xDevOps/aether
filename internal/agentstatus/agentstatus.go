@@ -217,23 +217,6 @@ func fromClaudeHook(hook claudeHook) (Report, bool) {
 	return Report{}, false
 }
 
-// Codex remains on the native CLI's legacy notify mechanism, not app-server.
-const CodexNotifySetting = `notify=["` + ReporterCommand + `","report","codex"]`
-
-func FromCodexNotify(arg string) (Report, bool) {
-	var notify struct {
-		Type     string `json:"type"`
-		ThreadID string `json:"thread-id"`
-	}
-	if err := json.Unmarshal([]byte(arg), &notify); err != nil {
-		return Report{}, false
-	}
-	if notify.Type == "agent-turn-complete" {
-		return Report{State: Idle, Reason: ReasonIdle, SessionID: notify.ThreadID}, true
-	}
-	return Report{}, false
-}
-
 const PiExtensionName = "status.ts"
 
 //go:embed status.ts

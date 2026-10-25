@@ -14,7 +14,6 @@ import { toRecord } from '@/store/runs'
 import { applyEvent } from '@/store/sync'
 import {
   alice,
-  approval,
   bob,
   fakeApi,
   mission,
@@ -50,8 +49,6 @@ function seed(runs: Run[], { active = workspace.id, self = alice } = {}) {
     runs: Object.fromEntries(runs.map((r) => [r.id, toRecord(r)])),
     agentList: null,
     pausedRuns: {},
-    inbox: {},
-    approvalsByRun: {},
     roomMessages: {},
     roomStatus: {},
     missions: {},
@@ -308,22 +305,6 @@ describe('board columns', () => {
 })
 
 describe('Needs you actions', () => {
-  it('approves in place and moves the card back to Working', async () => {
-    seed([working])
-    act(() => useStore.getState().setInbox(workspace.id, [approval({ run_id: working.id })]))
-    vi.mocked(api.approvalDecide).mockResolvedValueOnce(
-      approval({ run_id: working.id, decision: 'approved', decided_by: alice.id, decided_at: '2026-08-14T10:06:00Z' }),
-    )
-    renderBoard()
-    expect(cardOf('still going').getByText('Permission: write src/checkout.ts')).toBeDefined()
-
-    fireEvent.click(cardOf('still going').getByRole('button', { name: 'Approve' }))
-
-    await waitFor(() => expect(column('Working').getByText('still going')).toBeDefined())
-    expect(api.approvalDecide).toHaveBeenCalledWith(working.id, 'apr_1', true)
-    expect(toast.success).toHaveBeenCalledWith('Approved: write src/checkout.ts')
-  })
-
   it('approves a waiting device by its id, listed ahead of the runs', async () => {
     seed([stopped])
     useStore.setState({ devices: [pendingDevice()] })
@@ -355,34 +336,6 @@ describe('Needs you actions', () => {
       expect(within(card!).getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', true)
       act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
       expect(within(card!).getByRole('button', { name: 'Still waiting for the server…' })).toHaveProperty('disabled', true)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('shows Approving… on the card while the server decides', () => {
-    seed([working])
-    act(() => useStore.getState().setInbox(workspace.id, [approval({ run_id: working.id })]))
-    vi.mocked(api.approvalDecide).mockImplementationOnce(() => new Promise<never>(() => {}))
-    renderBoard()
-
-    fireEvent.click(cardOf('still going').getByRole('button', { name: 'Approve' }))
-
-    expect(cardOf('still going').getByRole('button', { name: 'Approving…' })).toHaveProperty('disabled', true)
-  })
-
-  it('keeps the card Approve locked past the deadline with no Cancel', () => {
-    seed([working])
-    act(() => useStore.getState().setInbox(workspace.id, [approval({ run_id: working.id })]))
-    vi.mocked(api.approvalDecide).mockImplementationOnce(() => new Promise<never>(() => {}))
-    renderBoard()
-
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    try {
-      fireEvent.click(cardOf('still going').getByRole('button', { name: 'Approve' }))
-      act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
-      expect(cardOf('still going').getByRole('button', { name: 'Still waiting for the server…' })).toHaveProperty('disabled', true)
-      expect(cardOf('still going').queryByRole('button', { name: 'Cancel' })).toBeNull()
     } finally {
       vi.useRealTimers()
     }
@@ -435,14 +388,9 @@ describe('Needs you actions', () => {
     expect(composer.getByRole('textbox')).toHaveProperty('value', 'hello')
   })
 
-  it('answers a, r and o on the focused card', async () => {
+  it('answers r and o on the focused card', async () => {
     seed([stopped, working])
-    act(() => useStore.getState().setInbox(workspace.id, [approval({ run_id: working.id })]))
     renderBoard()
-
-    screen.getByRole('button', { name: 'still going' }).focus()
-    await userEvent.keyboard('a')
-    await waitFor(() => expect(api.approvalDecide).toHaveBeenCalledWith(working.id, 'apr_1', true))
 
     screen.getByRole('button', { name: 'waiting on you' }).focus()
     await userEvent.keyboard('r')
@@ -455,13 +403,12 @@ describe('Needs you actions', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: stopped.id } })
   })
 
-  it('leaves a, r and o alone when no card has focus or the card has no such action', () => {
+  it('leaves r and o alone when no card has focus or the card has no such action', () => {
     seed([stopped, run({ ...merged, status: 'completed', outcome_unseen: true })])
     renderBoard()
 
-    expect(fireEvent.keyDown(document.body, { key: 'a' })).toBe(true)
+    expect(fireEvent.keyDown(document.body, { key: 'r' })).toBe(true)
     act(() => screen.getByRole('button', { name: 'landed already' }).focus())
-    expect(fireEvent.keyDown(document.activeElement!, { key: 'a' })).toBe(true)
     expect(fireEvent.keyDown(document.activeElement!, { key: 'r' })).toBe(true)
     expect(fireEvent.keyDown(document.activeElement!, { key: 'o' })).toBe(false)
   })

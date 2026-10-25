@@ -33,7 +33,6 @@ import type {
 import type { RootStore } from '@/store'
 import type { AgentPayload } from '@/store/activity'
 import { applyAssistantNotice, noteServerTime } from '@/store/assistant-notice'
-import { applyApprovalEvent } from '@/store/approvals'
 import { batchNotifications } from '@/store/batch'
 import { diffSnapshot } from '@/store/diff'
 import { coalesce } from '@/store/coalesce'
@@ -669,9 +668,6 @@ export async function applyEvent(
       else store.getState().noteDiffSnapshot(ev.run_id, diffSnapshot(ev.time, p))
       break
     }
-    case 'workspace.approval':
-      applyApprovalEvent(store, client, ev)
-      break
     case 'workspace.budget':
       if (ev.workspace_id) store.getState().applyBudgetEvent(ev.workspace_id, ev.payload as BudgetPayload)
       break

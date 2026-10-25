@@ -18,8 +18,6 @@ describe('useNeedsYouCount', () => {
       runs: {},
       roomMessages: {},
       members: { [alice.id]: alice, [bob.id]: bob },
-      inbox: {},
-      approvalsByRun: {},
     })
   })
 

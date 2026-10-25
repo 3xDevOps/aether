@@ -11,6 +11,11 @@ func init() {
 	register(command{
 		name:  "budget",
 		short: "show or set a workspace's spend cap",
+		usage: "aether budget [--workspace <name>]\n" +
+			"aether budget set [--workspace <name>] [--limit <usd>] [--warn <usd>] [--override]",
+		example: "aether budget --workspace app\n" +
+			"aether budget set --workspace app --limit 50 --warn 40",
+		flags: true,
 		run:   runBudget,
 	})
 }
@@ -19,7 +24,7 @@ func runBudget(args []string) error {
 	if len(args) > 0 && args[0] == "set" {
 		return budgetSet(args[1:])
 	}
-	fs := flag.NewFlagSet("budget", flag.ExitOnError)
+	fs := newFlagSet("budget")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -39,7 +44,7 @@ func runBudget(args []string) error {
 }
 
 func budgetSet(args []string) error {
-	fs := flag.NewFlagSet("budget set", flag.ExitOnError)
+	fs := newFlagSet("budget set")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	limit := fs.Float64("limit", 0, "hard cap in USD; new runs are refused at it (0 clears the budget, omitted keeps the current cap)")
 	warn := fs.Float64("warn", 0, "soft warning threshold in USD (0 for none, omitted keeps the current one)")

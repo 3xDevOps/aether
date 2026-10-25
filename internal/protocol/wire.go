@@ -91,6 +91,7 @@ type RunRepo struct {
 	Name        string `json:"name"`
 	Path        string `json:"path"`
 	Branch      string `json:"branch"`
+	BaseBranch  string `json:"base_branch,omitempty"`
 	Primary     bool   `json:"primary"`
 }
 
@@ -100,10 +101,10 @@ func RunRepos(r *domain.Run, primaryName string) []RunRepo {
 	}
 	repos := make([]RunRepo, 0, 1+len(r.Extras))
 	repos = append(repos, RunRepo{
-		WorkspaceID: string(r.WorkspaceID), Name: primaryName, Path: domain.PrimaryRepoPath, Branch: r.Branch, Primary: true,
+		WorkspaceID: string(r.WorkspaceID), Name: primaryName, Path: domain.PrimaryRepoPath, Branch: r.Branch, BaseBranch: r.BaseBranch, Primary: true,
 	})
 	for _, extra := range r.Extras {
-		repos = append(repos, RunRepo{WorkspaceID: string(extra.WorkspaceID), Name: extra.Name, Path: extra.Path, Branch: extra.Branch})
+		repos = append(repos, RunRepo{WorkspaceID: string(extra.WorkspaceID), Name: extra.Name, Path: extra.Path, Branch: extra.Branch, BaseBranch: extra.BaseBranch})
 	}
 	return repos
 }
@@ -805,15 +806,40 @@ type AgentInfo struct {
 	DefaultMode string `json:"default_mode"`
 	// EnhancedDefault: the agent prefers enhanced mode, installed or not.
 	EnhancedDefault bool `json:"enhanced_default"`
+	// SwarmStandardRefusal is why a swarm integrator or worker cannot run the
+	// agent in Standard mode; empty when it can.
+	SwarmStandardRefusal string `json:"swarm_standard_refusal,omitempty"`
 	// Empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`
 	// InstallScript followed by the pinned adapter's install.
 	EnhancedInstallScript string `json:"enhanced_install_script,omitempty"`
+	// LoginCommand is the vendor's sign-in command; empty for member-owned
+	// custom agents. LoginKind is "device" when it prints a URL and code and
+	// needs nothing typed back, else "interactive".
+	LoginCommand string `json:"login_command,omitempty"`
+	LoginKind    string `json:"login_kind,omitempty"`
 	// Why a launch on a shared account would be refused; at most one is set,
 	// and none for the caller's own account.
 	LoginMissing   bool   `json:"login_missing,omitempty"`
 	OwnAccountOnly bool   `json:"own_account_only,omitempty"`
 	Unavailable    string `json:"unavailable,omitempty"`
+}
+
+// SwarmMode is the mode a swarm starts agent in when none is given, read from
+// agents, an agent.list result: Enhanced where it is installed, since Aether
+// can wake any Enhanced run when mail arrives, and Standard otherwise.
+// Standard that Aether could not wake is refused with the install command.
+func SwarmMode(agents []AgentInfo, agent string) (string, error) {
+	for _, a := range agents {
+		switch {
+		case a.Name != agent:
+		case a.EnhancedInstalled:
+			return string(domain.LaunchACP), nil
+		case a.SwarmStandardRefusal != "" && a.Enhanced != "none":
+			return "", fmt.Errorf("%s, which is not installed: aether agent add %s --enhanced", a.SwarmStandardRefusal, agent)
+		}
+	}
+	return string(domain.LaunchTUI), nil
 }
 
 type AgentInstallParams struct {

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -21,9 +22,15 @@ type Config struct {
 	// under ~/.ssh (see ResolveAuth). `--key auto` clears it. Only
 	// Aether's own SSH connections use it; git commands run the system
 	// git over OpenSSH, which picks its own keys.
-	Key        string `json:"key,omitempty"`
-	Repo       string `json:"repo,omitempty"`
-	KnownHosts string `json:"known_hosts,omitempty"`
+	Key string `json:"key,omitempty"`
+	// Repo is the clone linked last, the one the dashboard's sync, push
+	// and pull use. A config written before Repos existed has only this.
+	Repo string `json:"repo,omitempty"`
+	// Repos are the linked clones, one per workspace, across every server
+	// this computer links: workspace ids are unique, so no link owns them
+	// and relinking keeps them.
+	Repos      []LinkedRepo `json:"repos,omitempty"`
+	KnownHosts string       `json:"known_hosts,omitempty"`
 	// EdgeURL and ServerID link the server through an edge. With ServerID
 	// set, the host key must derive it on every path, Addr (when set) is
 	// dialed before the edge, and the device key authenticates.
@@ -41,6 +48,21 @@ type Config struct {
 	// never persisted: the file's top-level fields are always the default
 	// link, whichever profile a given `aether gui --server` serves.
 	Active string `json:"-"`
+}
+
+type LinkedRepo struct {
+	WorkspaceID string `json:"workspace_id"`
+	Path        string `json:"path"`
+}
+
+// A clone has one aether remote, so the entry replaces any other for that
+// workspace or path; cfg's Repos slice is never mutated.
+func WithRepo(cfg Config, workspaceID, path string) Config {
+	repos := slices.DeleteFunc(slices.Clone(cfg.Repos), func(r LinkedRepo) bool {
+		return r.WorkspaceID == workspaceID || r.Path == path
+	})
+	cfg.Repos = append(repos, LinkedRepo{WorkspaceID: workspaceID, Path: path})
+	return cfg
 }
 
 // NamedLink is one saved server profile. Empty fields fall back to the
@@ -207,7 +229,7 @@ func Dir() (string, error) {
 }
 
 // ErrNotLinked reports that no local server link has been saved.
-var ErrNotLinked = errors.New("not linked; run aether link <addr>")
+var ErrNotLinked = errors.New("not linked; run aether link <host:port>, or aether login and then aether link --claim <code>")
 
 // Load reads the linked-server config. Missing files surface as a
 // "not linked" error.

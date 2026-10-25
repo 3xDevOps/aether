@@ -261,3 +261,41 @@ func TestAnswered(t *testing.T) {
 		})
 	}
 }
+
+func TestLastMessageIsTheMainAgentsLastMessageOfTheNewestTurn(t *testing.T) {
+	l, err := OpenLog(filepath.Join(t.TempDir(), "run.items.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	said := func(id, parent, text string) Item {
+		return Item{Kind: KindMessage, Message: &Message{Role: "assistant", MessageID: id, ParentID: parent, Text: text}}
+	}
+	for _, it := range []Item{
+		{Kind: KindTurnStart},
+		said("old", "", "an earlier turn"),
+		{Kind: KindTurnEnd, StopReason: "end_turn"},
+		{Kind: KindTurnStart},
+		said("a", "", "Looking."),
+		said("b", "", "Done: "),
+		said("sub", "tool-1", "a subagent"),
+		{Kind: KindThought, Message: &Message{Role: "assistant", MessageID: "t", Text: "thinking"}},
+		said("b", "", "PR #7"),
+		{Kind: KindTurnEnd, StopReason: "end_turn"},
+	} {
+		if err := l.Append(&it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := LastMessage(l); got != "Done: PR #7" {
+		t.Fatalf("LastMessage = %q, want %q", got, "Done: PR #7")
+	}
+	for _, it := range []Item{{Kind: KindTurnStart}, {Kind: KindTurnEnd, StopReason: "end_turn"}} {
+		if err := l.Append(&it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := LastMessage(l); got != "" {
+		t.Fatalf("LastMessage of a silent turn = %q, want empty", got)
+	}
+}
