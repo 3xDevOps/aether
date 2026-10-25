@@ -280,7 +280,7 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 	grant, err := h.ssh.RedeemConnectorCode(r.PostFormValue("code"), now)
 	if errors.Is(err, sshd.ErrConnectorCode) {
 		h.recordWrong(from, now)
-		page.Error = "That code is wrong, expired or already used. Run aether mcp for a new one and paste it here."
+		page.Error = "That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Aether app, or aether mcp, and paste it here."
 		h.renderConsent(w, http.StatusForbidden, page)
 		return
 	}
@@ -507,7 +507,7 @@ input[type=checkbox]{width:1.25rem;height:1.25rem;font-size:inherit;vertical-ali
 <p>Allow only if you started connecting {{.Client}} to Aether yourself just now.</p>
 {{if .Member}}<p>You signed in at the edge as {{.Account}}, which this server admits as {{.Member}}.</p>
 <p><button type="submit" autofocus><strong>Allow</strong></button></p>
-{{else}}<p><label for="code">Paste the code from <code>aether mcp</code>:</label></p>
+{{else}}<p><label for="code">Paste the code from Settings → ChatGPT and Claude in the Aether app, or <code>aether mcp</code>:</label></p>
 <p class="row"><input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" required autofocus><button type="submit"><strong>Allow</strong></button></p>{{end}}
 </form>
 {{end}}

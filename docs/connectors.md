@@ -119,10 +119,10 @@ server's consent page opens, depending on its
   with the [scopes](#scopes) and no code. Signing in at the edge already
   admits you there.
 - `approved-devices`: the page asks for the code. Paste the code from
-  `aether mcp`.
+  **Settings → ChatGPT and Claude** in the app, or `aether mcp`.
 
 The sign-in page lists a server only to the GitHub accounts bound to its
-members. So `aether mcp` prints the universal URL only to a member with a
+members. So the app and `aether mcp` show the universal URL only to a member with a
 GitHub account bound, and `<edge>/mcp/<server id>` to one with only a member
 SSH key or tailnet login. `sudo aether-server edge status` prints both.
 
@@ -302,7 +302,7 @@ On the page that opens when you connect:
 
 | Message | Cause |
 | --- | --- |
-| `That code is wrong, expired or already used. Run aether mcp for a new one and paste it here.` | The code is not live. A server restart also forgets codes |
+| `That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Aether app, or aether mcp, and paste it here.` | The code is not live. A server restart also forgets codes |
 | `10 wrong codes came from your address in the last minute. Wait a minute, then paste the code again.` | 10 wrong codes in a minute from your address (your IPv6 /64). Other addresses are not affected |
 | `300 wrong codes came to this server from all addresses in the last minute. Wait a minute, then paste the code again.` | Someone is guessing codes from many addresses. Pairing resumes a minute after the guessing stops |
 | `Aether connectors work with ChatGPT and Claude; <host> is not one of them.` | Only `chatgpt.com` and `claude.ai` can connect |
