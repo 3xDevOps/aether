@@ -40,6 +40,7 @@ export function SettingsNav({ shown, visible, current, phone }: {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return
             if (e.key === 'Enter' && hits?.[0]) open(hits[0])
             else if (e.key === 'ArrowDown') {
               e.preventDefault()
