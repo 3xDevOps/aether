@@ -1669,7 +1669,8 @@ off to <member>**. Pull branch fetches the run branch into the linked
 repository; unless you are already on that branch, its toast offers **Switch
 to it** (`pull.switch`, which refuses a dirty checkout with git's own
 reason) and **Copy command** (`git switch <branch>`). Board verbs (`boardCommands`): **Open the board**, **Open
-all workspaces**, **Ask Aether** (opens the assistant; offered when the server
+all workspaces**, **Connect ChatGPT or Claude** (these three in the Navigate
+group), **Ask Aether** (opens the assistant; offered when the server
 serves `assistant.status`), **New run…**, **New swarm…**, **Launch from a template…**,
 **Archive closed runs…**, **Free retained containers…** and the three theme
 commands. Each verb is offered only when the server would allow it: the gates
@@ -1847,11 +1848,12 @@ installed in your environment." with a **Set up an agent** button in place of
 the per-row links. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
 
-**Mode** is a segmented control with one line per mode: **Standard** (`tui`,
-"Your agent's own terminal"), **Enhanced** (`acp`, "Native messages,
-approvals and progress", see [enhanced-runs.md](enhanced-runs.md)) and
-**Background** (`headless`, "Runs the task once, no interaction"). Enhanced
-is disabled with the reason under the control when the agent reports
+**Mode** is a segmented control with one line per mode: **Enhanced** (`acp`,
+"Native messages, approvals and progress", see
+[enhanced-runs.md](enhanced-runs.md)) with a **Recommended** badge,
+**Standard** (`tui`, "Your agent's own terminal") and **Background**
+(`headless`, "Runs the task once, no interaction"). Enhanced is disabled,
+without the badge, with the reason under the control when the agent reports
 `enhanced: none` ("<agent> has no Enhanced support.") or the adapter is not
 installed ("The Enhanced adapter for <agent> is not installed.", with
 **Set up**). A launch never switches mode on its own: the mode sent is the
@@ -1865,8 +1867,9 @@ arrives after the dialog was closed shows as a toast. The task is
 optional in Standard and Enhanced - a taskless launch opens the agent with
 no prompt - and required in Background, which takes no input, so Launch
 stays disabled until one is written (`runLaunch` in
-`internal/sshd/handlers.go` is the same rule). Only what was chosen goes on
-the wire: an empty task and `tui` are the server's defaults.
+`internal/sshd/handlers.go` is the same rule). The mode always goes on the
+wire, since a `run.launch` without one starts Enhanced where it is
+installed; an empty task is left out.
 
 **Model**, under Mode, is a searchable picker (`ModelPicker` in
 `src/components/launch/model-picker.tsx`) whose choice is sent as `model` on
@@ -5315,6 +5318,28 @@ through either gateway:
   turning it off does not ask. A refusal stays in the dialog or under the
   row. Links from the assistant panel navigate with `{section: "assistant"}`,
   which scrolls the section into view.
+- **ChatGPT and Claude** (`src/routes/settings/connectors.tsx`, element id
+  and `section` param `connectors`): one exported `ConnectorsSection
+  {client}`, remounted when `identityKey` changes so a code never outlives
+  its member. A ChatGPT / Claude segmented control picks numbered steps.
+  **Get a code** calls `connector.code` and shows its `url` and code, the
+  code with `useCountdown`; before that, `server.edge` only says whether the
+  server has an edge or is connected to it. While the code lives,
+  `connector.list` is polled every 3 s, and once more when it expires; a
+  connector absent at mint time shows **<client> (<host>) connected** in the
+  section's one `role="status"` region and focuses its **Done** button. A
+  failed poll shows its error until the next one succeeds. Rows list each
+  connector's scopes, added and last-used times, **Reconnect** (confirm,
+  a new code on that client's tab, then `connector.revoke`; a failed mint
+  revokes nothing) and **Revoke** (confirm). Errors show verbatim with a fix:
+  a server without `connector.list` (`-32601`) gets the update command and
+  hides the steps, the no-edge and not-connected errors link `docs/edge.md`,
+  anything else links the connector troubleshooting. The palette's **Connect
+  ChatGPT or Claude** and the first run step's optional **Finish setup and
+  connect ChatGPT or Claude**, both shown only where the gateway serves
+  `connector.list`, navigate with `{section: "connectors"}`, which scrolls
+  the section into view; `?page=settings&id=<section>` carries the param in
+  the URL.
 - **This computer**, only on the local gateway: the linked **Server** and
   **Repository** (`link.status`) with **Link another server** (**Link a server**
 before any), **Saved servers** (the default link, then named ones) with

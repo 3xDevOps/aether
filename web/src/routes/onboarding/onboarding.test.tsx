@@ -1394,7 +1394,7 @@ describe('onboarding wizard', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', false))
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
     await waitFor(() => expect(client.runLaunch).toHaveBeenCalledWith({
-      workspace_id: workspace.id, task: 'Inspect the repository', harness: 'claude',
+      workspace_id: workspace.id, task: 'Inspect the repository', harness: 'claude', mode: 'tui',
     }))
   })
 
@@ -1623,6 +1623,7 @@ describe('onboarding wizard', () => {
         workspace_id: workspace.id,
         task: 'write a result file',
         harness: 'claude',
+        mode: 'tui',
         model: 'sonnet',
       })
     })
@@ -1668,6 +1669,16 @@ describe('onboarding wizard', () => {
       onboardingWorkspace: '',
       route: { name: 'board', params: {} },
     })
+  })
+
+  it('offers to finish setup and connect ChatGPT or Claude on the first run step', async () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toFirstRunStep()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Finish setup and connect ChatGPT or Claude' }))
+
+    expect(useStore.getState()).toMatchObject({ onboarded: true, route: { name: 'settings', params: { section: 'connectors' } } })
   })
 
   it('offers only the agents installed in this account', async () => {
@@ -1856,6 +1867,7 @@ describe('onboarding wizard', () => {
         workspace_id: workspace.id,
         task: 'write a result file',
         harness: 'claude',
+        mode: 'tui',
       })
     })
   })

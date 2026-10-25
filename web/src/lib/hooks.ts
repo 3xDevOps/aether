@@ -125,3 +125,17 @@ export function useReturnFocus() {
     },
   }
 }
+
+/** `expires in m:ss` until `until`, then `expired`, ticking each second. */
+export function useCountdown(until: string | undefined): string {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!until) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [until])
+  if (!until) return ''
+  const left = Math.max(0, Math.floor((Date.parse(until) - now) / 1000))
+  return left === 0 ? 'expired' : `expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
+}

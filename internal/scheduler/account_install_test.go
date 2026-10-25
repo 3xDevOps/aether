@@ -279,3 +279,28 @@ func TestFallbackLaunchableRefusesALoginHeldUnderAnotherUser(t *testing.T) {
 		t.Fatalf("FallbackLaunchable = %v, %v; want the free login a fallback", ok, err)
 	}
 }
+
+// A launch that names no mode starts in Enhanced once the agent's ACP server
+// sits next to its CLI in the launch's home, and in Standard before.
+func TestDefaultModeIsEnhancedOnceItsAdapterIsInstalled(t *testing.T) {
+	t.Parallel()
+	e := newShareEnv(t, func(cfg *Config) {
+		cfg.Harnesses["claude"] = HarnessSpec{TUIArgs: []string{"claude", "{task}"}, ACPArgs: []string{"claude-agent-acp"}}
+	})
+	installAgent(t, e.adaHome, "claude", ".local/bin/claude", "")
+	defaultMode := func() domain.LaunchMode {
+		t.Helper()
+		mode, err := e.sched.DefaultMode(t.Context(), e.member.ID, e.member.ID, "claude")
+		if err != nil {
+			t.Fatalf("DefaultMode: %v", err)
+		}
+		return mode
+	}
+	if mode := defaultMode(); mode != domain.LaunchTUI {
+		t.Fatalf("default mode without the adapter = %q, want tui", mode)
+	}
+	installAgent(t, e.adaHome, "claude-agent-acp", ".local/bin/claude-agent-acp", "")
+	if mode := defaultMode(); mode != domain.LaunchACP {
+		t.Fatalf("default mode with the adapter = %q, want acp", mode)
+	}
+}

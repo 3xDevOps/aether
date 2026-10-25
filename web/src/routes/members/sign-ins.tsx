@@ -15,6 +15,7 @@ import { SectionLabel } from '@/components/ui/section-label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Api } from '@/lib/api'
 import { copyText } from '@/lib/clipboard'
+import { useCountdown } from '@/lib/hooks'
 import { toastFailure } from '@/components/failure'
 import { message, providerName } from '@/lib/format'
 import type { InvitationResult, Member, MemberIdentities, MemberMerge, MergeCode, MergeMember, MergePlan, MergeProposal } from '@/lib/types'
@@ -300,18 +301,6 @@ function LinkDialog({ client, self, onClose }: { client: Api; self: Member; onCl
       </DialogContent>
     </Dialog>
   )
-}
-
-function useCountdown(until: string | undefined): string {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!until) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [until])
-  if (!until) return ''
-  const left = Math.max(0, Math.floor((Date.parse(until) - now) / 1000))
-  return left === 0 ? 'expired' : `expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
 }
 
 function MergeDialog({ client, self, onMerged, onClose }: { client: Api; self: Member; onMerged: (merge: MemberMerge) => void; onClose: () => void }) {

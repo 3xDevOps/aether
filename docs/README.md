@@ -108,6 +108,8 @@ Reference:
   `aether gui` and the server's tailnet dashboard serve.
 - [Coordination](coordination.md): how overlapping runs and swarm runs warn
   and message each other.
+- [ChatGPT plugin listing](chatgpt-plugin.md): build the directory package,
+  submit it to OpenAI and set up its review.
 - [Candidate integration](integration.md): how swarm results are verified
   and delivered.
 - [MCP bridge](mcp-bridge.md): the coordination and memory tools inside a run's

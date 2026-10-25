@@ -29,6 +29,18 @@ server hosts the connector endpoint and signs you in.
 
 ## Get the URL and a code
 
+In the app, open **Settings → ChatGPT and Claude**, or pick **Connect ChatGPT
+or Claude** in the command palette (Ctrl+K or ⌘K). The link
+`?page=settings&id=connectors` opens the same section, and the last onboarding
+step links to it. Pick **ChatGPT** or **Claude** for that app's steps. **Get a
+code** shows the URL and the code with a live countdown. The section checks
+every 3 seconds and shows **ChatGPT (chatgpt.com) connected** with its scopes
+once the app connects. It lists your connectors with their scopes, when each
+was added and last used, and **Reconnect** and **Revoke** buttons. Errors
+appear as `aether mcp` prints them, with a link to the fix.
+
+From a terminal:
+
 ```sh
 aether mcp
 ```
@@ -53,7 +65,8 @@ Custom MCP servers are added on the web only, at chatgpt.com
 
 1. Open [ChatGPT Plugins](https://chatgpt.com/plugins).
 2. Select the plus button, then **Add custom MCP server**.
-3. Paste the URL from `aether mcp`.
+3. Name it `Aether`, paste the URL from `aether mcp` as the server URL, and
+   choose **OAuth**.
 4. Select **Create as a plugin**, then install it.
 5. A page from your server opens: **Connect ChatGPT (chatgpt.com) to
    <server>**. Paste the code, choose its [scopes](#scopes) and select
@@ -70,7 +83,8 @@ On claude.ai
 ([Anthropic: add a custom connector](https://claude.com/docs/connectors/custom/add-unlisted)):
 
 1. Free, Pro and Max: open **Customize → Connectors**, select **Add custom
-   connector**, and paste the URL from `aether mcp`. Free allows one custom
+   connector**, name it `Aether`, paste the URL from `aether mcp`, leave
+   **Advanced settings** empty and select **Add**. Free allows one custom
    connector.
 2. Team and Enterprise: an Owner opens **Organization settings → Connectors**,
    selects **Add**, **Custom**, then **Web**, and pastes the URL. Each member
@@ -96,7 +110,8 @@ than `offline_access`.
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
 each connector's scopes. To change them, revoke the connector and connect
-again. Connectors added before scopes existed have all three.
+again, or select **Reconnect** in Settings. It gets a new code, then revokes
+the connector. Connectors added before scopes existed have all three.
 
 ## What it can do
 
@@ -172,7 +187,7 @@ identical launch still starting. A retried message without a key is sent again.
 `aether_mark_reviewed` completes only a run whose agent reported success and
 awaits your review; to end any other run, use `aether_stop_run` or
 `aether_close_run` under `control`. A message to your own run that no one
-controls in the dashboard reaches the agent at once. Any other message waits
+controls in the dashboard, or to a run you control, reaches the agent at once. Any other message waits
 about 45 seconds for the member in control to approve it. `aether_decide_approval` allows
 or denies a permission request once; it never picks an "always" option, so it
 cannot change what the agent may do next time. Any other tool call is cut off
@@ -206,6 +221,8 @@ connector: write call connector=con-7k2m9q4xbd member=mem-... method=run.launch 
 `confirmed_by`, name the connector: `ChatGPT connector con-7k2m9q4xbd of member mem-...`.
 
 ## Revoke a connector
+
+Select **Revoke** next to it in **Settings → ChatGPT and Claude**, or run:
 
 ```sh
 aether mcp revoke con-7k2m9q4xbd

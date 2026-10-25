@@ -28,8 +28,8 @@ export function useAgentSend(run: RunRecord, agent: AgentTerminal) {
 
   return {
     blocked,
-    waits: !control.canAct,
-    note: blocked ?? (control.canAct ? '' : 'Delivers in 45 s unless the controller decides sooner.'),
+    waits: control.waits,
+    note: blocked ?? (!control.waits ? '' : 'Delivers in 45 s unless the controller decides sooner.'),
     /** Control that has not arrived within `implicitControlWindowMs` drops `act` unrun. */
     dispatch: (act: () => void) => (control.canAct ? control.withControl(act) : act()),
     post: (body: string): Promise<RoomMessage> => {

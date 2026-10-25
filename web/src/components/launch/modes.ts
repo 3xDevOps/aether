@@ -1,8 +1,8 @@
 import type { AgentInfo, LaunchMode } from '@/lib/types'
 
 export const modes: { value: LaunchMode; label: string; description: string }[] = [
-  { value: 'tui', label: 'Standard', description: "Your agent's own terminal" },
   { value: 'acp', label: 'Enhanced', description: 'Native messages, approvals and progress' },
+  { value: 'tui', label: 'Standard', description: "Your agent's own terminal" },
   { value: 'headless', label: 'Background', description: 'Runs the task once, no interaction' },
 ]
 

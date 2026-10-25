@@ -71,6 +71,10 @@ type RunController interface {
 	// on account can stand in for one on requested as a usage fallback,
 	// which never borrows the owner's installation.
 	FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harness string, mode domain.LaunchMode) (bool, error)
+	// DefaultMode is the mode member's launch of harness on account starts
+	// in when it names none: Enhanced where the agent's ACP server is
+	// installed, else Standard.
+	DefaultMode(ctx context.Context, member, account domain.MemberID, harness string) (domain.LaunchMode, error)
 	// AgentModels lists the models harness offers on account, resolving the
 	// harness and the account owner's login as Launch does.
 	AgentModels(ctx context.Context, member, account domain.MemberID, harness string, refresh bool) (protocol.AgentModelsResult, error)

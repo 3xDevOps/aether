@@ -469,6 +469,10 @@ func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.M
 	return true, nil
 }
 
+func (f *fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
+	return domain.LaunchACP, nil
+}
+
 func (f *fakeRuns) SwarmRefusal(agent string, mode domain.LaunchMode) error {
 	return harness.SwarmRefusal(agent, mode)
 }

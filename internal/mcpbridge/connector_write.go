@@ -24,7 +24,7 @@ type connectorLaunchInput struct {
 	WorkspaceID    string `json:"workspace_id"`
 	Task           string `json:"task" jsonschema:"a complete brief"`
 	Harness        string `json:"harness" jsonschema:"agent name"`
-	Mode           string `json:"mode,omitempty" jsonschema:"acp is enhanced; default the agent's"`
+	Mode           string `json:"mode,omitempty" jsonschema:"acp is enhanced; default acp where installed, else tui"`
 	Model          string `json:"model,omitempty" jsonschema:"as the agent names it; default its own"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
@@ -81,39 +81,39 @@ const idempotencyRule = " Pass a new idempotency_key and reuse it on a retry; "
 
 var writeTools = []connectorTool{
 	connectorToolOf("aether_launch_run", "Launch run", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user asks to start an agent on a task. Take workspace_id and harness from aether_list_workspaces and aether_list_agents, then poll aether_get_run. "+
+		"Use this when the user asks to start an agent on a task; the agent can push branches and open pull requests. Take workspace_id and harness from aether_list_workspaces and aether_list_agents, then poll aether_get_run. "+
 			"For several independent tasks, call it once per task, each with its own idempotency_key."+
 			idempotencyRule+"without one, the same launch within 60s returns the first run.", launchRun).
-		enum("mode", "tui", "headless", "acp"),
+		enum("mode", "tui", "headless", "acp").hints(false, true),
 	connectorToolOf("aether_launch_swarm", "Launch swarm", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user asks for a swarm or for one goal to be split across agents: an integrator agent plans it into tasks for worker agents. Poll aether_get_swarm."+
+		"Use this when the user asks for a swarm or for one goal to be split across agents: an integrator agent plans it into tasks for worker agents, which can push branches and open pull requests. Poll aether_get_swarm."+
 			idempotencyRule+"without one, the same objective within 60s returns the first swarm.", launchSwarm).
-		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp"),
+		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").hints(false, true),
 	connectorToolOf("aether_message_run", "Message run", ScopeWrite, false, nextRuns,
-		"Use this when the user wants to tell a run's agent something. A message to a run someone else controls waits about 45s for them to approve it."+
-			idempotencyRule+"without one, a retry sends it again.", messageRun),
+		"Use this when the user wants to tell a run's agent something; the agent acts on it, and a sent message cannot be taken back. A message to a run someone else controls waits about 45s for them to approve it."+
+			idempotencyRule+"without one, a retry sends it again.", messageRun).hints(true, true),
 	connectorToolOf("aether_answer", "Answer question", ScopeWrite, true, nextAttention,
-		"Use this when an aether_needs_attention item's answer_with is aether_answer: an agent's question takes option_id (and values), a swarm or teammate question takes answer.", answer),
+		"Use this when an aether_needs_attention item's answer_with is aether_answer: an agent's question takes option_id (and values), a swarm or teammate question takes answer. The agent goes on with the answer, which cannot be taken back.", answer).hints(true, true),
 	connectorToolOf("aether_pause_run", "Pause run", ScopeWrite, true, nextRuns,
-		"Use this when the user wants a run paused; aether_resume_run continues it.", pauseRun(protocol.MethodRunPause, "Paused")),
+		"Use this when the user wants a run paused: its container freezes until aether_resume_run continues it.", pauseRun(protocol.MethodRunPause, "Paused")),
 	connectorToolOf("aether_resume_run", "Resume run", ScopeWrite, true, nextRuns,
-		"Use this when the user wants a paused run to continue.", pauseRun(protocol.MethodRunResume, "Resumed")),
+		"Use this when the user wants a paused run to continue; its agent goes on working.", pauseRun(protocol.MethodRunResume, "Resumed")).hints(false, true),
 	connectorToolOf("aether_mark_reviewed", "Mark run reviewed", ScopeWrite, true, nextRuns,
 		"Use this when the user has checked a run's reported success: complete accepts it and closes the run, later puts it off.", markReviewed).
-		enum("action", protocol.RunReviewComplete, protocol.RunReviewLater),
+		enum("action", protocol.RunReviewComplete, protocol.RunReviewLater).hints(true, false),
 }
 
 var controlTools = []connectorTool{
 	connectorToolOf("aether_decide_approval", "Decide approval", ScopeControl, true, nextAttention,
-		"Use this when the user allows or denies a permission item from aether_needs_attention. It allows once, never always.", decideApproval).
-		enum("decision", "allow", "deny"),
+		"Use this when the user allows or denies a permission item from aether_needs_attention. It allows once, never always; an allowed action, such as a push, cannot be taken back.", decideApproval).
+		enum("decision", "allow", "deny").hints(true, true),
 	connectorToolOf("aether_stop_run", "Stop run", ScopeControl, true, nextRuns,
-		"Use this when the user wants a run stopped now.", stopRun),
+		"Use this when the user wants a run stopped now: it kills the run's agent at once.", stopRun).hints(true, false),
 	connectorToolOf("aether_close_run", "Close run", ScopeControl, true, nextRuns,
 		"Use this when a run's work was merged or abandoned, to close the run with that outcome.", closeRun).
-		enum("outcome", "merged", "abandoned"),
+		enum("outcome", "merged", "abandoned").hints(true, false),
 	connectorToolOf("aether_cancel_swarm", "Cancel swarm", ScopeControl, true, nextSwarms,
-		"Use this when the user wants a swarm ended; it stops its integrator and workers.", cancelSwarm),
+		"Use this when the user wants a swarm ended; it stops its integrator and workers.", cancelSwarm).hints(true, false),
 }
 
 func launched(r protocol.Run, l links) map[string]any {
@@ -413,7 +413,7 @@ func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string,
 		return "", nil, err
 	}
 	m := res.Message
-	out := map[string]any{"run_id": in.RunID, "message_id": m.ID, "state": m.State, "outcome": res.Outcome, "url": l.run(in.RunID)}
+	out := map[string]any{"run_id": in.RunID, "state": m.State, "outcome": res.Outcome, "url": l.run(in.RunID)}
 	summary := fmt.Sprintf("Message to run %s is %s.", in.RunID, m.State)
 	if m.State == protocol.RoomMessageQueued && m.DeliverAfter != nil {
 		out["deliver_after"] = *m.DeliverAfter
@@ -472,7 +472,7 @@ func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 		if err := c.act(ctx, protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{QuestionID: in.AnswerID, Answer: in.Answer, IdempotencyKey: key}, &res); err != nil {
 			return "", nil, err
 		}
-		return fmt.Sprintf("Answered swarm %s's question.", it.MissionID), map[string]any{"run_id": in.RunID, "question_id": res.Question.ID, "answered": true}, nil
+		return fmt.Sprintf("Answered swarm %s's question.", it.MissionID), map[string]any{"run_id": in.RunID, "answered": true}, nil
 	case protocol.AttentionKindRoomQuestion:
 		if in.Answer == "" {
 			return "", nil, invalid("a teammate's question takes answer, the reply text")
@@ -482,7 +482,7 @@ func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 			Kind: protocol.RoomMessageReply, Body: in.Answer, CorrelationID: in.AnswerID, IdempotencyKey: key}, &res); err != nil {
 			return "", nil, err
 		}
-		return fmt.Sprintf("Replied on run %s.", in.RunID), map[string]any{"run_id": in.RunID, "message_id": res.Message.ID, "answered": true}, nil
+		return fmt.Sprintf("Replied on run %s.", in.RunID), map[string]any{"run_id": in.RunID, "answered": true}, nil
 	case protocol.AttentionKindQuestion:
 		if in.OptionID == "" {
 			return "", nil, invalid("an agent's question takes option_id, one of the item's options")
@@ -605,7 +605,7 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 			return "", nil, controlHeld(err)
 		}
 		return fmt.Sprintf("%s the request once on run %s: %s.", verb, in.RunID, res.Status),
-			map[string]any{"run_id": in.RunID, "answer_id": in.AnswerID, "option": want, "status": res.Status, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
+			map[string]any{"run_id": in.RunID, "option": want, "status": res.Status, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
 	}
 	return "", nil, invalid("this item is a %s, which is answered with %s", it.Kind, answerWith(it))
 }
