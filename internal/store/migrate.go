@@ -1982,6 +1982,7 @@ CREATE TABLE coord_state_reports (
 	waiting_for     TEXT NOT NULL DEFAULT '',
 	summary         TEXT NOT NULL,
 	created_at      INTEGER NOT NULL,
+	applied_at      INTEGER,
 	PRIMARY KEY (run_id, idempotency_key)
 );
 `,

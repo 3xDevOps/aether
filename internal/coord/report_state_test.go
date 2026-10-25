@@ -158,8 +158,8 @@ func TestStateReportThatDoesNotTakeEffectIsAnError(t *testing.T) {
 	}
 }
 
-// A report refused outright does not keep its key: the agent may follow the
-// refusal's advice under the same key.
+// A report refused outright does not keep its key, so the agent may follow
+// the refusal's advice under it; a key whose report took effect stays bound.
 func TestRefusedStateReportReleasesItsKey(t *testing.T) {
 	outcomes := &recordingOutcomes{}
 	h, _ := newStateReportHarness(t, outcomes)
@@ -175,4 +175,16 @@ func TestRefusedStateReportReleasesItsKey(t *testing.T) {
 	}
 	outcomes.fail(nil)
 	report(t, h, run, protocol.CoordOutcomeBlocked, "need the region", "k")
+
+	if rpcErr := stateReport(h, run, protocol.CoordOutcomeWaiting, "", "on 3 workers", "wait"); rpcErr != nil {
+		t.Fatalf("waiting: %v", rpcErr)
+	}
+	outcomes.fail(ErrRunFinished)
+	if rpcErr := stateReport(h, run, protocol.CoordOutcomeWaiting, "", "on 3 workers", "wait"); rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams {
+		t.Fatalf("retry on a finished run = %+v, want invalid params", rpcErr)
+	}
+	outcomes.fail(nil)
+	if rpcErr := stateReport(h, run, protocol.CoordOutcomeNeedsInput, "", "which region?", "wait"); rpcErr == nil || rpcErr.Code != protocol.CodeConflict {
+		t.Fatalf("reusing an applied key = %+v, want a conflict", rpcErr)
+	}
 }

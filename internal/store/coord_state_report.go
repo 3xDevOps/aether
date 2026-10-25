@@ -79,11 +79,23 @@ func (d *DB) GetCoordStateReport(ctx context.Context, run domain.RunID, key stri
 	return &report, nil
 }
 
-// DeleteCoordStateReport releases the key of a report that was refused.
-func (d *DB) DeleteCoordStateReport(ctx context.Context, run domain.RunID, key string) error {
+// MarkCoordStateReportApplied records that the scheduler accepted the report
+// stored under key, so its key is never released.
+func (d *DB) MarkCoordStateReportApplied(ctx context.Context, run domain.RunID, key string) error {
 	if _, err := d.db.ExecContext(ctx,
-		`DELETE FROM coord_state_reports WHERE run_id = ? AND idempotency_key = ?`, run, key); err != nil {
-		return fmt.Errorf("store: delete coord state report %s: %w", key, err)
+		`UPDATE coord_state_reports SET applied_at = ? WHERE run_id = ? AND idempotency_key = ? AND applied_at IS NULL`,
+		time.Now().UTC().UnixNano(), run, key); err != nil {
+		return fmt.Errorf("store: mark coord state report %s applied: %w", key, err)
+	}
+	return nil
+}
+
+// ReleaseCoordStateReport frees the key of a refused report that never took
+// effect.
+func (d *DB) ReleaseCoordStateReport(ctx context.Context, run domain.RunID, key string) error {
+	if _, err := d.db.ExecContext(ctx,
+		`DELETE FROM coord_state_reports WHERE run_id = ? AND idempotency_key = ? AND applied_at IS NULL`, run, key); err != nil {
+		return fmt.Errorf("store: release coord state report %s: %w", key, err)
 	}
 	return nil
 }

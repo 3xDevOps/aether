@@ -1581,9 +1581,10 @@ the same outcome, `--for` and summary return the same receipt, and anything
 else fails with `CodeConflict` (`-32003`) (`idempotency_key "<key>" was used
 with different report inputs; use a new key for a new report`). A `waiting`
 or `needs-input` report that cannot take effect is refused with an error,
-never accepted and dropped, and a refused one does not keep its key. Every
-accepted report, `waiting` and `needs-input` included, is a `report` entry in
-`aether timeline <workspace>` with its outcome, `waiting_for` and summary.
+never accepted and dropped, and one that never took effect does not keep
+its key. Every accepted report, `waiting` and `needs-input` included, is a
+`report` entry in `aether timeline <workspace>` with its outcome,
+`waiting_for` and summary.
 
 **Background runs and swarm workers have one terminal outcome per launch.**
 After success or failure, any new report key, including `blocked`, conflicts.

@@ -101,13 +101,16 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 		slog.Info("coord: state report did not take effect", "run", run, "report", id, "error", err)
 		switch {
 		case errors.Is(err, ErrCannotAsk), errors.Is(err, ErrRunFinished):
-			if releaseErr := s.cfg.Mail.DeleteCoordStateReport(ctx, run, p.IdempotencyKey); releaseErr != nil {
+			if releaseErr := s.cfg.Mail.ReleaseCoordStateReport(ctx, run, p.IdempotencyKey); releaseErr != nil {
 				return protocol.CoordReportResult{}, internalError(method, errors.Join(err, releaseErr))
 			}
 			return protocol.CoordReportResult{}, invalidParams(method, err.Error())
 		case errors.Is(err, ErrReportSuperseded):
 			return protocol.CoordReportResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: method + ": " + err.Error()}
 		}
+		return protocol.CoordReportResult{}, internalError(method, err)
+	}
+	if err := s.cfg.Mail.MarkCoordStateReportApplied(ctx, run, p.IdempotencyKey); err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
 	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
