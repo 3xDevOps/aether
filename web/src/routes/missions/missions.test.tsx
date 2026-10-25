@@ -513,6 +513,39 @@ describe('swarm detail', () => {
     })
   })
 
+  it('replaces an integrator in Enhanced where the agent has it, and never in a mode Aether cannot wake', async () => {
+    seed({ agentList: null, runs: { run_integrator: toRecord(integrator({ status: 'failed' })) } })
+    const client = showing({ integrator: { account_member_id: bob.id, harness: 'codex', mode: 'acp' }, execution_choices: [{ account_member_id: bob.id, harness: 'codex', mode: 'acp' }] })
+    vi.mocked(client.agentList).mockImplementation(async (account?: string) => [agentInfo({
+      name: 'codex', display_name: 'Codex', enhanced: 'adapter', enhanced_installed: account === bob.id,
+      swarm_standard_refusal: 'codex in Standard mode has no idle wake; start it in Enhanced',
+    })])
+    await mount(client)
+    await userEvent.click(within(screen.getByText('The integrator is not running').parentElement!).getByRole('button', { name: 'Replace integrator…' }))
+    const mode = (name: string) => within(screen.getByRole('radiogroup', { name: 'Mode' })).getByRole('radio', { name }) as HTMLButtonElement
+    await waitFor(() => expect(mode('Standard').disabled).toBe(true))
+    expect(screen.getByText('codex in Standard mode has no idle wake; start it in Enhanced')).toBeDefined()
+    expect(mode('Enhanced').getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Replace' }))
+    expect(client.agentList).toHaveBeenCalledWith(bob.id)
+    expect(vi.mocked(client.missionReplaceIntegrator).mock.calls[0][0].integrator).toEqual({ account_member_id: bob.id, harness: 'codex', mode: 'acp' })
+  })
+
+  it('offers a retry, and no mode, when the replacement account\'s agents cannot be listed', async () => {
+    seed({ agentList: null, runs: { run_integrator: toRecord(integrator({ status: 'failed' })) } })
+    const client = showing()
+    await mount(client)
+    vi.mocked(client.agentList).mockRejectedValueOnce(new Error('agent.list: server is restarting'))
+    await userEvent.click(within(screen.getByText('The integrator is not running').parentElement!).getByRole('button', { name: 'Replace integrator…' }))
+    const dialog = screen.getByRole('dialog')
+    expect((await within(dialog).findByRole('alert')).textContent).toContain('agent.list: server is restarting')
+    expect(within(dialog).queryByRole('radiogroup', { name: 'Mode' })).toBeNull()
+    expect((within(dialog).getByRole('button', { name: 'Replace' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Retry' }))
+    await within(dialog).findByRole('radiogroup', { name: 'Mode' })
+    expect((within(dialog).getByRole('button', { name: 'Replace' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
   it('says the integrator has not started once the server has no run for it', async () => {
     seed()
     const client = showing({ integrator_launch_error: 'image pull failed', integrator_launch_error_at: '2026-08-14T10:10:00Z' })

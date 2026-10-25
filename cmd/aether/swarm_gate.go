@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"errors"
 	"flag"
 	"fmt"
@@ -99,7 +100,7 @@ func cancelSwarm(c *protocol.Client, w io.Writer, missionID, key string) error {
 	return nil
 }
 
-const swarmReplaceUsage = "usage: aether swarm replace-integrator <swarm-id> --agent <agent> [--model <model>] [--account <member-id>]"
+const swarmReplaceUsage = "usage: aether swarm replace-integrator <swarm-id> --agent <agent> [--mode standard|enhanced] [--model <model>] [--account <member-id>]"
 
 func swarmReplaceIntegrator(args []string) error {
 	missionID, rest, err := swarmTarget(args, swarmReplaceUsage)
@@ -107,34 +108,46 @@ func swarmReplaceIntegrator(args []string) error {
 		return err
 	}
 	fs := flag.NewFlagSet("swarm replace-integrator", flag.ExitOnError)
-	agent := fs.String("agent", "", "agent of the new integrator (runs in Standard mode)")
+	agent := fs.String("agent", "", "agent of the new integrator")
+	mode := fs.String("mode", "", "integrator mode: standard or enhanced (default: "+swarmModeDefault+")")
 	model := fs.String("model", "", "integrator "+modelHelp)
 	account := fs.String("account", "", "member ID whose shared agent account to use (default: the current integrator's)")
-	if err := fs.Parse(rest); err != nil {
+	if err = fs.Parse(rest); err != nil {
 		return err
 	}
 	if *agent == "" || fs.NArg() != 0 {
 		return errors.New(swarmReplaceUsage)
 	}
+	integratorMode, err := parseIntegratorMode(*mode)
+	if err != nil {
+		return err
+	}
 	return withControl(func(c *protocol.Client) error {
-		return replaceSwarmIntegrator(c, os.Stdout, missionID, *agent, *model, *account, cli.NewControlSessionID())
+		return replaceSwarmIntegrator(c, os.Stdout, missionID, protocol.MissionIntegrator{AccountMemberID: *account, Harness: *agent, Mode: integratorMode, Model: *model}, cli.NewControlSessionID())
 	})
 }
 
 // replaceSwarmIntegrator replaces the integrator generation show reports, so
 // a replacement another human made in the meantime is not replaced again.
-func replaceSwarmIntegrator(c *protocol.Client, w io.Writer, missionID, agent, model, account, key string) error {
+func replaceSwarmIntegrator(c *protocol.Client, w io.Writer, missionID string, integrator protocol.MissionIntegrator, key string) error {
 	shown, err := showSwarm(c, missionID)
 	if err != nil {
 		return err
 	}
-	if account == "" {
-		account = shown.Mission.Integrator.AccountMemberID
+	integrator.AccountMemberID = cmp.Or(integrator.AccountMemberID, shown.Mission.Integrator.AccountMemberID)
+	if integrator.Mode == "" {
+		mode, modesErr := swarmModes(c, integrator.AccountMemberID)
+		if modesErr != nil {
+			return modesErr
+		}
+		if integrator.Mode, err = mode(integrator.Harness); err != nil {
+			return err
+		}
 	}
 	params := protocol.MissionReplaceIntegratorParams{
 		MissionID:          missionID,
 		ExpectedGeneration: shown.Mission.IntegratorGeneration,
-		Integrator:         protocol.MissionIntegrator{AccountMemberID: account, Harness: agent, Mode: "tui", Model: model},
+		Integrator:         integrator,
 		IdempotencyKey:     key,
 	}
 	var res protocol.MissionReplaceIntegratorResult

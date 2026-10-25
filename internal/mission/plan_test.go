@@ -53,8 +53,9 @@ func newMissionFixture(t *testing.T) *missionFixture {
 }
 
 // newMissionFixtureFor builds a planning mission around an integrator
-// run of the given harness and mode.
-func newMissionFixtureFor(t *testing.T, harnessName string, mode domain.LaunchMode) *missionFixture {
+// run of the given harness and mode. extra choices run on the fixture's
+// member.
+func newMissionFixtureFor(t *testing.T, harnessName string, mode domain.LaunchMode, extra ...domain.MissionExecutionChoice) *missionFixture {
 	t.Helper()
 	ctx := context.Background()
 	db := openMissionRegressionDB(t)
@@ -70,6 +71,10 @@ func newMissionFixtureFor(t *testing.T, harnessName string, mode domain.LaunchMo
 		},
 		IdempotencyKey:               "fixture-mission",
 		IntegratorAuthorizingHumanID: member.ID, IntegratorRunOwnerID: member.ID,
+	}
+	for _, c := range extra {
+		c.AccountMemberID = member.ID
+		m.ExecutionChoices = append(m.ExecutionChoices, c)
 	}
 	if err := db.CreateMission(ctx, m); err != nil {
 		t.Fatalf("create mission: %v", err)

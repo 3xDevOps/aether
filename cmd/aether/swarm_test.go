@@ -11,14 +11,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-// fakeControl serves one JSON-RPC method over a pipe and records the params
-// it received, standing in for aether-server behind withControl.
-func fakeControl(t *testing.T, method string, result any, rpcErr *protocol.Error) (*protocol.Client, *json.RawMessage) {
-	t.Helper()
-	reply := &fakeReply{result: result, err: rpcErr}
-	return fakeControlMethods(t, map[string]*fakeReply{method: reply}), &reply.got
-}
-
 // fakeReply is one served method: what it answers and the params of the last
 // request it received.
 type fakeReply struct {
@@ -77,13 +69,22 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 		t.Fatalf("parseSwarmCreate: %v", err)
 	}
 	mission := protocol.Mission{ID: "01MISSION", Phase: "planning", CurrentIntegratorRunID: "01INTEGRATOR"}
-	c, got := fakeControl(t, protocol.MethodMissionCreate, protocol.MissionCreateResult{Mission: mission}, nil)
+	created := &fakeReply{result: protocol.MissionCreateResult{Mission: mission}}
+	c := fakeControlMethods(t, map[string]*fakeReply{
+		protocol.MethodAgentList: {result: protocol.AgentListResult{Agents: []protocol.AgentInfo{
+			{Name: "claude", Enhanced: "adapter"}, {Name: "codex", Enhanced: "adapter", EnhancedInstalled: true},
+		}}},
+		protocol.MethodMissionCreate: created,
+	})
+	if err := fillSwarmModes(c, &spec); err != nil {
+		t.Fatalf("fillSwarmModes: %v", err)
+	}
 	var out bytes.Buffer
 	if err := createSwarm(c, &out, missionCreateParams("ws1", "mem1", spec, "key-1")); err != nil {
 		t.Fatalf("createSwarm: %v", err)
 	}
 	var sent protocol.MissionCreateParams
-	if err := json.Unmarshal(*got, &sent); err != nil {
+	if err := json.Unmarshal(created.got, &sent); err != nil {
 		t.Fatalf("decode sent params: %v", err)
 	}
 	want := protocol.MissionCreateParams{
@@ -95,7 +96,7 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 			{AccountMemberID: "mem1", Harness: "codex", Mode: "headless", Model: "gpt-5-codex"},
 			{AccountMemberID: "mem1", Harness: "claude", Mode: "tui"},
 			{AccountMemberID: "mem1", Harness: "codex", Mode: "headless"},
-			{AccountMemberID: "mem1", Harness: "codex", Mode: "tui", Model: "gpt-5-codex"},
+			{AccountMemberID: "mem1", Harness: "codex", Mode: "acp", Model: "gpt-5-codex"},
 		},
 		IdempotencyKey: "key-1",
 	}
@@ -104,6 +105,20 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	}
 	if wantOut := "swarm 01MISSION planning\nintegrator run 01INTEGRATOR\n"; out.String() != wantOut {
 		t.Errorf("output = %q, want %q", out.String(), wantOut)
+	}
+}
+
+func TestSwarmCreateNamesTheInstallWhenNoDefaultModeCanWake(t *testing.T) {
+	spec, err := parseSwarmCreate([]string{"objective", "--agent", "codex"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("parseSwarmCreate: %v", err)
+	}
+	c := fakeControlMethods(t, map[string]*fakeReply{protocol.MethodAgentList: {result: protocol.AgentListResult{Agents: []protocol.AgentInfo{
+		{Name: "codex", Enhanced: "adapter", SwarmStandardRefusal: "codex in Standard mode has no idle wake; start it in Enhanced"},
+	}}}})
+	want := "codex in Standard mode has no idle wake; start it in Enhanced, which is not installed: aether agent add codex --enhanced"
+	if err := fillSwarmModes(c, &spec); err == nil || err.Error() != want {
+		t.Errorf("fillSwarmModes = %v, want %q", err, want)
 	}
 }
 

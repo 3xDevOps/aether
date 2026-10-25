@@ -20,6 +20,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -466,6 +467,10 @@ func (f *fakeRuns) AgentModels(_ context.Context, member, account domain.MemberI
 
 func (f *fakeRuns) FallbackLaunchable(context.Context, domain.MemberID, domain.MemberID, domain.MemberID, string, domain.LaunchMode) (bool, error) {
 	return true, nil
+}
+
+func (f *fakeRuns) SwarmRefusal(agent string, mode domain.LaunchMode) error {
+	return harness.SwarmRefusal(agent, mode)
 }
 
 func (f *fakeRuns) AgentSwitchable(_ context.Context, _, _ domain.MemberID, harness string) (bool, error) {

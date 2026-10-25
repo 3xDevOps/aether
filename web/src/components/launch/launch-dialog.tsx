@@ -3,11 +3,11 @@ import { toast } from 'sonner'
 import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent-picker'
 import { AccountOptions, automaticFallback, fallbackParams, WorkspaceLine } from '@/components/launch/launch-options'
 import { ModeControl } from '@/components/launch/mode-control'
-import { modeRefusal, refusals, type Refusal } from '@/components/launch/modes'
+import { integratorModes } from '@/components/launch/modes'
 import { ExtraRepos } from '@/components/launch/extra-repos'
 import { ModelField, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
 import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
-import { sameWorker, WorkerAgents, type WorkerChoice } from '@/components/launch/worker-agents'
+import { sameWorker, WorkerAgents, type WorkerChoice, workerMode, workerRefusals } from '@/components/launch/worker-agents'
 import { LoaderCircle } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -36,12 +36,6 @@ function idempotencyKey(): string {
 // Outlives the dialog: a failed create may already have stored the mission,
 // and resending the same contents under the same key replays it.
 const swarmKeys = new Map<string, string>()
-
-const backgroundIntegrator: Refusal = {
-  reason: 'Background is not offered: it exits after one turn, so the integrator could not be asked or told.',
-  short: 'exits after one turn',
-  setUp: false,
-}
 
 export function LaunchDialog() {
   const returnFocus = useReturnFocus()
@@ -78,9 +72,10 @@ export function LaunchDialog() {
   const [agentsByAccount, setAgentsByAccount] = useState<Record<string, AgentInfo[]> | null>(null)
   const [workerError, setWorkerError] = useState<string | null>(null)
   const [workers, setWorkers] = useState<WorkerChoice[]>([])
-  const [workerMode, setWorkerMode] = useState<LaunchMode>('headless')
-  const integratorRefused = { ...refusals(agent, harness), headless: backgroundIntegrator }
-  const integratorMode = integratorRefused[mode] ? 'tui' : mode
+  const [chosenWorkerMode, setWorkerMode] = useState<LaunchMode>('acp')
+  const { refused: integratorRefused, mode: integratorMode } = integratorModes(agent, harness, mode)
+  const workerRefused = workerRefusals(workers, agentsByAccount)
+  const shownWorkerMode = ([chosenWorkerMode, 'acp', 'tui'] as const).find((next) => !workerRefused[next]) ?? 'headless'
   const [error, setError] = useState<string | null>(null)
   const [setup, setSetup] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
@@ -181,7 +176,7 @@ export function LaunchDialog() {
   const createSwarm = async () => {
     const trimmed = objective.trim()
     const accountableHumanID = self?.id ?? ''
-    if (!workspaceID || !accountableHumanID || !trimmed || !account || !harness) {
+    if (!workspaceID || !accountableHumanID || !trimmed || !account || !harness || !integratorMode) {
       throw new Error('Enter an objective and choose an integrator agent.')
     }
     const integratorModel = model.trim()
@@ -192,7 +187,7 @@ export function LaunchDialog() {
       return {
         account_member_id: choice.account_member_id,
         harness: choice.harness,
-        mode: modeRefusal(info, choice.harness, workerMode) ? 'tui' : workerMode,
+        mode: workerMode(info, choice.harness, shownWorkerMode),
         ...(workerModel ? { model: workerModel } : {}),
       }
     })
@@ -311,13 +306,14 @@ export function LaunchDialog() {
                 />
               )}
               {harness && <ModelField label="Integrator model" harness={harness} accountMemberID={choice.accountMemberID} value={model} onChange={(next) => { setError(null); choice.setModel(next) }} disabled={launching} />}
-              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={workerMode} ownAccountID={ownAccountID} onToggle={toggleWorker} onModel={setWorkerModel} />
+              <WorkerAgents accounts={accounts} agentsByAccount={agentsByAccount} error={workerError} choices={workers} mode={shownWorkerMode} ownAccountID={ownAccountID} onToggle={toggleWorker} onModel={setWorkerModel} />
               <ModeControl
                 label="Worker mode"
-                value={workerMode}
+                value={shownWorkerMode}
                 onChange={setWorkerMode}
+                refused={workerRefused}
                 onSetUp={setUp}
-                help="A worker whose agent cannot use the chosen mode runs in Standard."
+                help="A worker whose agent cannot use this mode runs in the mode its row names."
               />
             </TabsContent>
             {notes}
@@ -334,7 +330,7 @@ export function LaunchDialog() {
             type="submit"
             form="launch-form"
             aria-describedby={swarmUnavailable ? 'launch-swarm-unavailable' : undefined}
-            disabled={launching || !workspaceID || !account || !harness || taskMissing || swarmUnavailable !== null || (kind === 'swarm' && objective.trim() === '')}
+            disabled={launching || !workspaceID || !account || !harness || taskMissing || swarmUnavailable !== null || (kind === 'swarm' && (objective.trim() === '' || !integratorMode))}
           >
             {launching && <LoaderCircle className="animate-spin motion-reduce:animate-none" aria-hidden />}
             {late ? stillWaiting : launching ? (kind === 'swarm' ? 'Creating swarm…' : 'Launching…') : kind === 'swarm' ? 'Create swarm' : 'Launch'}

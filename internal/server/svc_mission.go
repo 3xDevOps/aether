@@ -131,6 +131,13 @@ func (l schedulerLauncher) ValidateMissionLaunch(ctx context.Context, member, ac
 	return l.runs.ValidateMissionLaunch(ctx, member, account, harnessName, mode, model)
 }
 
+func (l schedulerLauncher) SwarmRefusal(agent string, mode domain.LaunchMode) error {
+	if l.runs == nil {
+		return errors.New("mission: scheduler unavailable")
+	}
+	return l.runs.SwarmRefusal(agent, mode)
+}
+
 func (l schedulerLauncher) FallbackLaunchable(ctx context.Context, member, requested, account domain.MemberID, harnessName string, mode domain.LaunchMode) (bool, error) {
 	if l.runs == nil {
 		return false, errors.New("mission: scheduler unavailable")

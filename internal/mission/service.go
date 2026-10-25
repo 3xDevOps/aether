@@ -31,6 +31,11 @@ type launchValidator interface {
 	ValidateMissionLaunch(ctx context.Context, member, account domain.MemberID, harness string, mode domain.LaunchMode, model string) error
 }
 
+// swarmJudge refuses a mode in which Aether could not wake a swarm agent.
+type swarmJudge interface {
+	SwarmRefusal(agent string, mode domain.LaunchMode) error
+}
+
 // fallbackChecker refuses a usage fallback account the scheduler could not
 // launch on without borrowing the owner's installation.
 type fallbackChecker interface {
@@ -835,7 +840,15 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		}
 		choices = append(choices, domain.MissionExecutionChoice{AccountMemberID: domain.MemberID(c.AccountMemberID), Harness: c.Harness, Mode: mode, Model: c.Model})
 	}
-	validateErr := s.validateIntegratorLaunch(ctx, actor, admission.Account.ID, choice)
+	validateErr := s.swarmRefusal("integrator", choice.Harness, choice.Mode)
+	for _, c := range choices {
+		if validateErr == nil {
+			validateErr = s.swarmRefusal("worker", c.Harness, c.Mode)
+		}
+	}
+	if validateErr == nil {
+		validateErr = s.validateIntegratorLaunch(ctx, actor, admission.Account.ID, choice)
+	}
 	if validateErr == nil {
 		validateErr = s.validateModelChoices(ctx, domain.MemberID(p.AccountableHumanID), choices)
 	}
@@ -952,7 +965,11 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 	if err != nil {
 		return protocol.MissionReplaceIntegratorResult{}, err
 	}
-	if validateErr := s.validateIntegratorLaunch(ctx, actor, admission.Account.ID, choice); validateErr != nil {
+	validateErr := s.swarmRefusal("integrator", choice.Harness, choice.Mode)
+	if validateErr == nil {
+		validateErr = s.validateIntegratorLaunch(ctx, actor, admission.Account.ID, choice)
+	}
+	if validateErr != nil {
 		replay, receiptErr := s.cfg.Missions.IntegratorReplacementRecorded(ctx, m.ID, p.IdempotencyKey)
 		if receiptErr != nil {
 			return protocol.MissionReplaceIntegratorResult{}, receiptErr
@@ -1041,6 +1058,19 @@ func (s *Service) validateIntegratorLaunch(ctx context.Context, owner, account d
 	return nil
 }
 
+// swarmRefusal is why Aether could not wake the swarm's role, integrator or
+// worker, of agent in mode when mail arrives.
+func (s *Service) swarmRefusal(role, agent string, mode domain.LaunchMode) error {
+	judge, ok := s.cfg.Runs.(swarmJudge)
+	if !ok {
+		return nil
+	}
+	if err := judge.SwarmRefusal(agent, mode); err != nil {
+		return invalidMissionParams(role + " " + err.Error())
+	}
+	return nil
+}
+
 func (s *Service) validateModelChoices(ctx context.Context, owner domain.MemberID, choices []domain.MissionExecutionChoice) error {
 	v, ok := s.cfg.Runs.(launchValidator)
 	if !ok {
@@ -1058,13 +1088,15 @@ func (s *Service) validateModelChoices(ctx context.Context, owner domain.MemberI
 }
 
 // replacementChoices offers every execution choice's account, harness and
-// model as an interactive integrator, whatever the choice's own mode: a
-// mission created before integrators had to be interactive may list only
-// headless choices, and its integrator must still be replaceable.
+// model as an integrator in either interactive mode, whatever the choice's
+// own mode: a mission created before integrators had to be interactive may
+// list only headless choices, and its integrator must still be replaceable.
 func replacementChoices(m *domain.Mission) []protocol.MissionExecutionChoice {
-	out := make([]protocol.MissionExecutionChoice, 0, len(m.ExecutionChoices))
+	out := make([]protocol.MissionExecutionChoice, 0, 2*len(m.ExecutionChoices))
 	for _, c := range m.ExecutionChoices {
-		out = append(out, protocol.MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(domain.LaunchTUI), Model: c.Model})
+		for _, mode := range []domain.LaunchMode{domain.LaunchTUI, domain.LaunchACP} {
+			out = append(out, protocol.MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(mode), Model: c.Model})
+		}
 	}
 	return out
 }

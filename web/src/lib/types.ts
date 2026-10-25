@@ -1323,6 +1323,8 @@ export interface AgentInfo {
   default_mode?: 'tui' | 'acp'
   /** Whether the agent prefers Enhanced, installed yet or not. */
   enhanced_default?: boolean
+  /** Why a swarm integrator or worker cannot run the agent in Standard: Aether could not wake it when mail arrives. */
+  swarm_standard_refusal?: string
   /** Whether a running run can switch between Standard and Enhanced. */
   switchable?: boolean
   /** Shared account: refused because its owner has no login for this agent. */

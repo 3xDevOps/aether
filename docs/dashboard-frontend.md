@@ -3812,13 +3812,18 @@ an objective, the **Integrator agent** (the same picker as Run, on the
 account under Options), **Integrator mode** (the integrator agent's
 remembered mode, shared with Run and saved when the swarm is created, else
 Enhanced when the agent can use it and Standard otherwise; Background disabled with the reason
-`mission.create` gives: it exits after one turn), **Integrator model**
+`mission.create` gives: it exits after one turn; Standard disabled with
+`agent.list`'s `swarm_standard_refusal` for an agent Aether cannot wake; with no
+mode left, **Create swarm** is disabled), **Integrator model**
 (the same field as Run), **Agents for workers** (a checkbox row per
 installed agent and account, defaulting to the integrator account's first
 launchable agent; a ticked row has the same model picker, Agent default
-until changed) and **Worker mode**, which defaults to Background. Each worker choice is sent in the worker mode when its agent can
-use it and in Standard otherwise; the row says so ("Runs Standard: no
-Enhanced support"). Rows a shared account cannot launch are disabled with
+until changed) and **Worker mode**, which defaults to Enhanced and disables a
+mode no ticked worker can use. Each worker choice is sent in the worker mode
+when its agent can use it and otherwise in the first of Enhanced, Standard and
+Background it can; the row says so ("Runs Background: no idle wake in
+Standard"). A disabled mode shows its reason in a tooltip and below the
+control. Rows a shared account cannot launch are disabled with
 the same reasons as the Run picker, and a ticked worker whose agent stops
 being launchable when the lists are read again is dropped.
 
@@ -3996,7 +4001,9 @@ swarms show none of this; the server refuses a replacement there.
 **Replace integrator…** opens a dialog with the distinct accounts and
 agent-and-model pairs from `execution_choices` (each listed as
 "<agent> · <model>" when it has a model), sends the choice's model,
-always sends mode `tui`, pins
+sends the **Mode** control's mode (Enhanced where the agent can use it, with the
+integrator's refusals, judged from the selected account's `agent.list`; a failed
+list shows its error with **Retry** and no mode), pins
 `expected_generation`, and reuses one idempotency key across retries.
 **Cancel swarm…** confirms, then sends `mission.cancel` with a key minted
 when the confirmation opened. **Archive swarm…** and **Delete swarm…** use

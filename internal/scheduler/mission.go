@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -201,10 +202,23 @@ func (s *Scheduler) LaunchMission(ctx context.Context, spec MissionLaunchSpec) (
 	if spec.WorkspaceID == "" || spec.RunID == "" || spec.Actor == "" || spec.RunOwner == "" || spec.AccountOwner == "" || spec.Harness == "" || !spec.Mode.Valid() {
 		return nil, errors.New("scheduler: invalid mission launch")
 	}
+	if err := s.SwarmRefusal(spec.Harness, spec.Mode); err != nil {
+		return nil, fmt.Errorf("scheduler: %w", err)
+	}
 	return s.launchWithOptions(ctx, spec.WorkspaceID, spec.RunOwner, spec.AccountOwner, spec.Task, spec.Harness, spec.Mode, domain.LaunchOptions{
 		Model: spec.Model, CachedBase: spec.CachedBase, AssignedRunID: spec.RunID, RequestedAccount: spec.RequestedAccount, Fallback: spec.Fallback,
 		Admitted: spec.Admitted,
 	})
+}
+
+// SwarmRefusal is harness.SwarmRefusal for the command a launch of agent
+// runs. A server-wide definition replaces the shipped command and its
+// capabilities, so like a custom agent it is not judged.
+func (s *Scheduler) SwarmRefusal(agent string, mode domain.LaunchMode) error {
+	if _, defined := s.harnesses[agent]; defined {
+		return nil
+	}
+	return harness.SwarmRefusal(agent, mode)
 }
 
 // ValidateMissionLaunch reports whether member's launch of harnessName on

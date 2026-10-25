@@ -514,8 +514,12 @@ flowchart LR
 In the dashboard, open **New run** and use the **Swarm** tab. Set the objective,
 the **Integrator agent**, **Integrator mode** (Standard or Enhanced, since
 Background exits after one turn), the **Integrator model**, **Agents for
-workers** with a model on each, and **Worker mode** (Background by default). A
-worker whose agent cannot use that mode runs Standard. The CLI does the same:
+workers** with a model on each, and **Worker mode** (Enhanced by default). A
+worker whose agent cannot use that mode runs in the mode its row names. Swarm
+agents run only in a mode Aether can wake when mail arrives, so an agent with no
+idle wake ([Agents](harnesses.md#supported-agents)) is refused Standard, with
+for example `codex in Standard mode has no idle wake; start it in Enhanced`. The
+CLI does the same:
 
 ```sh
 aether swarm create "add a health check endpoint and document it" \
@@ -523,12 +527,13 @@ aether swarm create "add a health check endpoint and document it" \
   --worker codex:background:gpt-5-codex
 ```
 
-`--worker agent[:mode[:model]]` allows workers on an agent and repeats. The mode
-defaults to `standard`, and an empty model keeps the agent's default. `-` as the
-objective reads it from stdin. The integrator runs on your account, or the one
-named by `--account`, in `--mode standard` or `enhanced`
-([enhanced-runs.md](enhanced-runs.md)). If the server stored the swarm but could
-not start the integrator, the command prints the error
+`--worker agent[:mode[:model]]` allows workers on an agent and repeats. An empty
+model keeps the agent's default. `-` as the objective reads it from stdin. The
+integrator runs on your account, or the one named by `--account`, in `--mode
+standard` or `enhanced` ([enhanced-runs.md](enhanced-runs.md)). A mode left out of
+`--mode` or a `--worker` is `enhanced` where the agent's Enhanced mode is
+installed on that account, and `standard` otherwise. If the server stored the
+swarm but could not start the integrator, the command prints the error
 ([failure-handling.md](failure-handling.md#integrator-launch-failures)).
 
 ### Follow a swarm
@@ -559,7 +564,7 @@ aether swarm replace-integrator <swarm-id> --agent codex
 
 `answer` takes `-` to read from stdin. `cancel` stops every run of a swarm in
 `planning` or `active`. `replace-integrator` starts a new integrator when the old
-run exited or reported failure. In the dashboard these are under **More swarm
+run exited or reported failure, and takes `--mode` as `create` does. In the dashboard these are under **More swarm
 actions**. The server rechecks your role and account grants on every action.
 
 ### Combine several runs into one result

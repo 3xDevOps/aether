@@ -1,5 +1,11 @@
 package harness
 
+import (
+	"fmt"
+
+	"github.com/3xDevOps/Aether/internal/domain"
+)
+
 // Capabilities is what an agent can do in each launch mode beyond starting.
 // Whether it has an Enhanced mode at all follows from its ACP command
 // (EnhancedSupport). docs/harnesses.md's capability table is rendered from
@@ -39,3 +45,17 @@ const (
 	// HooksManaged: a coordinated Standard launch with a task loads them.
 	HooksManaged
 )
+
+// SwarmRefusal is why a swarm integrator or worker of agent in mode would
+// sit idle with unread mail, or nil. Only shipped agents declare
+// capabilities; a custom agent's own command decides when it reads mail.
+func SwarmRefusal(agent string, mode domain.LaunchMode) error {
+	p, shipped := profiles[agent]
+	if !shipped || agent == "custom" || mode != domain.LaunchTUI || p.Capabilities.IdleWake {
+		return nil
+	}
+	if p.EnhancedSupport() == EnhancedNone {
+		return fmt.Errorf("%s in Standard mode has no idle wake, and it has no Enhanced mode; start it as a Background worker", agent)
+	}
+	return fmt.Errorf("%s in Standard mode has no idle wake; start it in Enhanced", agent)
+}
