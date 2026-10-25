@@ -51,6 +51,7 @@ problems=$(jq -r '
 		(.brandColor, .brandColorDark | select(. != null and (test("^#[0-9A-Fa-f]{6}$") | not)) | "brand color \(.) is not #RRGGBB"),
 		(.logo, .composerIcon | select(. == null) | "logo and composerIcon are both required")),
 	(.extensions["com.openai"].review // {} |
+		(if has("demo_recording_url") then url("demo_recording_url") else empty end),
 		(if (.test_cases.positive | length) != 5 then "review needs exactly 5 positive test cases" else empty end),
 		(if (.test_cases.negative | length) != 3 then "review needs exactly 3 negative test cases" else empty end),
 		(.test_cases.positive[]? | select(.description == null or .prompt == null or .tools_triggered == null or .expected_behavior == null)
