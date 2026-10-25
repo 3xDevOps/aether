@@ -6,6 +6,7 @@ import { api, type Api } from '@/lib/api'
 import { OnboardingSection } from '@/routes/onboarding/settings-section'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { AssistantSection } from '@/routes/settings/assistant'
+import { ConnectorsSection } from '@/routes/settings/connectors'
 import { GitHubSection } from '@/routes/settings/github'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { NotificationsSection } from '@/routes/settings/notifications'
@@ -86,6 +87,7 @@ export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
           <NotificationsSection client={client} />
           <AssistantSection client={client} />
           <GitHubSection client={client} />
+          <ConnectorsSection client={client} />
           <ThisComputerSection client={client} />
           <ServerSection />
           <RemoteAccessSection client={client} />

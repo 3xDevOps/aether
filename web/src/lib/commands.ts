@@ -611,6 +611,15 @@ export function boardCommands(ctx: BoardCommandContext): Command[] {
       perform: (d) => d.navigate('overview'),
     },
   ]
+  if (ctx.cap.hasMethod('connector.list')) {
+    list.push({
+      id: 'connectors',
+      label: 'Connect ChatGPT or Claude',
+      Icon: Cable,
+      value: 'connect chatgpt claude connector mcp',
+      perform: (d) => d.navigate('settings', { section: 'connectors' }),
+    })
+  }
   if (ctx.cap.hasMethod('assistant.status') && canLaunch({ cap: ctx.cap, role })) {
     list.push({
       id: 'assistant',
