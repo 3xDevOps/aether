@@ -142,6 +142,9 @@ eight files per message.
 - The row ends as **Sent**, **Not sent**, **Delivery uncertain**, **Denied** or
   **Cancelled**. **Sent** means the terminal accepted the write, not that the
   agent read it.
+- If the agent has turned on bracketed paste, the message arrives as one paste
+  and Enter follows 200 ms later, so a multi-line message is sent whole and
+  once. Otherwise it is typed as written, then Enter.
 - **Send to agent** in the **Changes** view sends your diff comments as one such
   message.
 - If you cannot message the agent, the composer says why: **This run has

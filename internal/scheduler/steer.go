@@ -608,6 +608,8 @@ func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.M
 	return "", fmt.Errorf("%w: inject requires a running or needs-attention run", ptyhost.ErrNoSession)
 }
 
+const steerRecordTimeout = 10 * time.Second
+
 func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, actor domain.MemberID, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error) {
 	m, err := s.cfg.Store.GetMember(ctx, actor)
 	if err != nil {
@@ -621,8 +623,12 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	if err != nil {
 		return "", err
 	}
-	s.publishTimeline(ctx, workspace, run, actor, events.TimelineSteer, prompt.Text)
-	s.RecordSteer(ctx, run, actor)
+	// The agent already has the message, so crediting the steerer must not
+	// depend on the caller staying connected.
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), steerRecordTimeout)
+	defer cancel()
+	s.publishTimeline(recordCtx, workspace, run, actor, events.TimelineSteer, prompt.Text)
+	s.RecordSteer(recordCtx, run, actor)
 	return outcome, nil
 }
 

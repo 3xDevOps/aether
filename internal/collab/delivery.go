@@ -54,7 +54,11 @@ func (s *Service) deliverResult(ctx context.Context, msg *store.RoomMessage, act
 	if deliveryErr != nil {
 		return Result{}, deliveryErr
 	}
-	return s.settleResult(ctx, msg, receipt, outcome)
+	// The terminal may already hold the message, so recording it must not
+	// depend on the caller staying connected.
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), agentDeliveryTimeout)
+	defer cancel()
+	return s.settleResult(settleCtx, msg, receipt, outcome)
 }
 
 func (s *Service) settleResult(ctx context.Context, msg *store.RoomMessage, receipt Receipt, outcome string) (Result, error) {

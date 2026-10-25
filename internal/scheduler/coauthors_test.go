@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 )
 
 // countTimelineEvents drains what the subscription has already queued and
@@ -98,6 +100,37 @@ func TestSteeringByTypingIsRecordedOnce(t *testing.T) {
 	}
 	if got := countTimelineEvents(sub, events.TimelineCoAuthor); got != 0 {
 		t.Errorf("co-author events after the first = %d, want 0", got)
+	}
+}
+
+type cancelAfterInject struct {
+	PTYHost
+	cancel context.CancelFunc
+}
+
+func (p cancelAfterInject) Inject(ctx context.Context, key ptyhost.SessionKey, actorName, actorColor, message, submit string) error {
+	err := p.PTYHost.Inject(ctx, key, actorName, actorColor, message, submit)
+	p.cancel()
+	return err
+}
+
+func TestSteerOutlivingItsCallerStillCreditsTheSteerer(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	e := newTestEnv(t, func(c *Config) { c.PTY = cancelAfterInject{PTYHost: c.PTY, cancel: cancel} })
+	bob := newSteerer(t, e, "Bob", "Bob Steer", "bob@example.com")
+	run, _ := e.launchFake(t, "add OAuth login")
+
+	if _, err := e.sched.Inject(ctx, run.ID, bob.ID, domain.AgentPrompt{Text: "also add tests"}, false, nil); err != nil {
+		t.Fatalf("Inject: %v", err)
+	}
+	steerers, err := e.db.ListRunSteerers(t.Context(), run.ID)
+	if err != nil {
+		t.Fatalf("ListRunSteerers: %v", err)
+	}
+	if len(steerers) != 1 || steerers[0].ID != bob.ID {
+		t.Fatalf("steerers = %+v, want only %s", steerers, bob.ID)
 	}
 }
 
