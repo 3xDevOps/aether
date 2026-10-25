@@ -92,8 +92,8 @@ func TestNeedShowsButtonsThenEditsAndClears(t *testing.T) {
 	run := h.newRun("Fix auth")
 	h.local.setItems(permission(run, "Run rm -rf build?"))
 
-	h.need(run, push.Need{Key: "k1", Body: "Permission requested", Answer: "req1"})
-	h.need(run, push.Need{Key: "k1", Body: "Permission requested", Answer: "req1"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k1", Body: "Permission requested", Answer: "req1"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k1", Body: "Permission requested", Answer: "req1"})
 	posts := h.slack.posts()
 	if len(posts) != 1 || len(h.slack.calls("chat.update")) != 0 {
 		t.Fatalf("the same need twice made %d posts and %d updates, want 1 and 0", len(posts), len(h.slack.calls("chat.update")))
@@ -119,7 +119,7 @@ func TestNeedShowsButtonsThenEditsAndClears(t *testing.T) {
 		t.Fatalf("stored message = %+v, want need k1 in D1", first)
 	}
 
-	h.need(run, push.Need{Key: "k2", Body: "Still waiting", Answer: "req1"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k2", Body: "Still waiting", Answer: "req1"})
 	updates, posts := h.slack.calls("chat.update"), h.slack.posts()
 	if len(updates) != 1 || updates[0].TS != first.TS || len(posts) != 2 || posts[1].ThreadTS != first.TS || !strings.Contains(posts[1].Text, "Still waiting") {
 		t.Fatalf("a changed need made updates %+v and posts %+v, want an edit of %s and a thread reply", updates, posts, first.TS)
@@ -143,7 +143,7 @@ func TestNeedShowsButtonsThenEditsAndClears(t *testing.T) {
 	}
 
 	h.slack.refuseNext("chat.update", "message_not_found")
-	h.need(run, push.Need{Key: "k3", Body: "Back again", Answer: "req1"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k3", Body: "Back again", Answer: "req1"})
 	posts = h.slack.posts()
 	if len(posts) != 3 || len(layoutOf(t, posts[2]).buttons) != 2 {
 		t.Fatalf("after message_not_found posts = %+v, want a new message with buttons", posts)
@@ -168,9 +168,9 @@ func TestNeedWithoutButtons(t *testing.T) {
 		wide,
 	)
 
-	h.need(long, push.Need{Key: "k", Body: "Permission requested", Answer: "req1"})
-	h.need(form, push.Need{Key: "k", Body: "Question", Answer: "q1"})
-	h.need(escaped, push.Need{Key: "k", Body: "Permission requested", Answer: "req1"})
+	h.need(long, push.Need{Member: long.MemberID, Key: "k", Body: "Permission requested", Answer: "req1"})
+	h.need(form, push.Need{Member: form.MemberID, Key: "k", Body: "Question", Answer: "q1"})
+	h.need(escaped, push.Need{Member: escaped.MemberID, Key: "k", Body: "Permission requested", Answer: "req1"})
 	posts := h.slack.waitPosts(3)
 	if l := layoutOf(t, posts[2]); l.actions != 0 {
 		t.Fatalf("a request whose button value outgrows Slack's limit = %+v, want no buttons", l)
@@ -188,12 +188,35 @@ func TestNeedWithoutButtons(t *testing.T) {
 	}
 }
 
+func TestASwarmNeedReachesItsHumanWithTheSwarmLink(t *testing.T) {
+	h := newHarness(t)
+	h.link()
+	bob := &domain.Member{DisplayName: "Bob", TailnetLogin: "bob@example.com", Color: "#3cb44b", Role: domain.RoleCollaborator}
+	if err := h.db.CreateMember(bg, bob); err != nil {
+		t.Fatalf("CreateMember: %v", err)
+	}
+	run := &domain.Run{Title: "Ship the checkout", WorkspaceID: h.ws.ID, MemberID: bob.ID, Harness: "claude",
+		Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := h.db.CreateRun(bg, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+
+	h.need(run, push.Need{Member: h.ada.ID, Mission: "mis-1", Key: "k", Body: "The integrator asks: Which branch?"})
+	posts := h.slack.posts()
+	if len(posts) != 1 || posts[0].Channel != "D1" {
+		t.Fatalf("posts = %+v, want one in Ada's D1", posts)
+	}
+	if l := layoutOf(t, posts[0]); !strings.Contains(l.context, "<https://box.tail.ts.net/?page=missions&id=mis-1|Open in Aether>") {
+		t.Fatalf("context = %q, want the swarm's link", l.context)
+	}
+}
+
 func TestAgentTextIsEscaped(t *testing.T) {
 	h := newHarness(t)
 	h.link()
 	run := h.newRun("<!channel> & <https://evil|x>")
 
-	h.need(run, push.Need{Key: "k", Body: "ping <!here> & more"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k", Body: "ping <!here> & more"})
 	posts := h.slack.posts()
 	if len(posts) != 1 {
 		t.Fatalf("got %d posts, want 1", len(posts))
@@ -211,7 +234,7 @@ func TestThreadReplyReachesRun(t *testing.T) {
 	h := newHarness(t)
 	h.link()
 	run := h.newRun("Fix auth")
-	h.need(run, push.Need{Key: "k", Body: "Needs you"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k", Body: "Needs you"})
 	ts := h.message(run).TS
 
 	h.svc.handle(bg, eventEnvelope("e1", "Ev9", threadReply("U1", "a &lt;b&gt; &amp; c", ts)))
@@ -236,11 +259,11 @@ func TestRevokedGrantStopsActions(t *testing.T) {
 	h := newHarness(t)
 	h.link()
 	run := h.newRun("Fix auth")
-	h.need(run, push.Need{Key: "k", Body: "Needs you"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k", Body: "Needs you"})
 	ts := h.message(run).TS
 	h.local.setErr(errors.New("device revoked"))
 	other := h.newRun("Other work")
-	if err := h.svc.Need(bg, other, push.Need{Key: "k", Body: "Needs you"}); err != nil {
+	if err := h.svc.Need(bg, other, push.Need{Member: other.MemberID, Key: "k", Body: "Needs you"}); err != nil {
 		t.Fatalf("Need with a revoked link = %v, want nil: trying again cannot deliver it", err)
 	}
 	if _, err := h.db.GetSlackMessage(bg, other.ID); !errors.Is(err, store.ErrNotFound) {
@@ -262,7 +285,7 @@ func TestButtonPress(t *testing.T) {
 	h.link()
 	run := h.newRun("Fix auth")
 	h.local.setItems(permission(run, "Run rm -rf build?"))
-	h.need(run, push.Need{Key: "k", Body: "Permission requested", Answer: "req1"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k", Body: "Permission requested", Answer: "req1"})
 	ts, buttons := h.message(run).TS, layoutOf(t, h.slack.posts()[0]).buttons
 	reply := func() slackCall {
 		t.Helper()
@@ -303,7 +326,7 @@ func TestActionsAreRateLimited(t *testing.T) {
 	h := newHarness(t)
 	h.link()
 	run := h.newRun("Fix auth")
-	h.need(run, push.Need{Key: "k", Body: "Needs you"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k", Body: "Needs you"})
 	ts := h.message(run).TS
 	frozen := time.Now()
 	h.svc.now = func() time.Time { return frozen }
@@ -325,10 +348,10 @@ func TestNeedFailsWhileSlackRefusesIt(t *testing.T) {
 	h.link()
 	run := h.newRun("Fix auth")
 	h.slack.refuseNext("chat.postMessage", "internal_error")
-	if err := h.svc.Need(bg, run, push.Need{Key: "k", Body: "Needs you"}); err == nil || !strings.Contains(err.Error(), "internal_error") {
+	if err := h.svc.Need(bg, run, push.Need{Member: run.MemberID, Key: "k", Body: "Needs you"}); err == nil || !strings.Contains(err.Error(), "internal_error") {
 		t.Fatalf("Need while Slack refuses = %v, want Slack's error so push offers it again", err)
 	}
-	h.need(run, push.Need{Key: "k", Body: "Needs you"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k", Body: "Needs you"})
 	if got := h.message(run).NeedKey; got != "k" {
 		t.Fatalf("NeedKey after the retry = %q, want k", got)
 	}
@@ -339,7 +362,7 @@ func TestStaleMessagesAreRetiredWithNothingFromTheRun(t *testing.T) {
 	h.link()
 	kept, handed := h.newRun("Fix auth"), h.newRun("Handed off")
 	for _, run := range []*domain.Run{kept, handed} {
-		h.need(run, push.Need{Key: "k", Body: "Needs you"})
+		h.need(run, push.Need{Member: run.MemberID, Key: "k", Body: "Needs you"})
 	}
 	retired := func(run *domain.Run) {
 		t.Helper()
@@ -363,13 +386,13 @@ func TestStaleMessagesAreRetiredWithNothingFromTheRun(t *testing.T) {
 	// A message that no longer follows its run, as when the run changes
 	// hands, is forgotten only once Slack has taken its retirement.
 	h.slack.refuseNext("chat.update", "internal_error")
-	if err := h.svc.Need(bg, handed, push.Need{Key: "k2", Body: "Needs you"}); err == nil {
+	if err := h.svc.Need(bg, handed, push.Need{Member: handed.MemberID, Key: "k2", Body: "Needs you"}); err == nil {
 		t.Fatal("Need with a refused retirement = nil, want Slack's error so push tries again")
 	}
 	if got := h.message(handed); got.NeedKey != "k" {
 		t.Fatalf("message after a refused retirement = %+v, want it kept", got)
 	}
-	h.need(handed, push.Need{Key: "k2", Body: "Needs you"})
+	h.need(handed, push.Need{Member: handed.MemberID, Key: "k2", Body: "Needs you"})
 	retired(handed)
 }
 
@@ -377,7 +400,7 @@ func TestClearFailsWhileSlackRefusesIt(t *testing.T) {
 	h := newHarness(t)
 	h.link()
 	run := h.newRun("Fix auth")
-	h.need(run, push.Need{Key: "k", Body: "Needs you"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k", Body: "Needs you"})
 	h.slack.refuseNext("chat.update", "internal_error")
 	if err := h.svc.Clear(bg, run.ID); err == nil || !strings.Contains(err.Error(), "internal_error") {
 		t.Fatalf("Clear while Slack refuses = %v, want Slack's error so push tries again", err)
@@ -396,7 +419,7 @@ func TestRepliesReachTheRunInOrder(t *testing.T) {
 	h.link()
 	h.start()
 	run := h.newRun("Fix auth")
-	h.need(run, push.Need{Key: "k", Body: "Needs you"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k", Body: "Needs you"})
 	ts := h.message(run).TS
 
 	for i := range 5 {
@@ -415,13 +438,13 @@ func TestAMessageTheBotCannotEditDoesNotHoldUpTheNextOne(t *testing.T) {
 	h := newHarness(t)
 	h.link()
 	run := h.newRun("Fix auth")
-	h.need(run, push.Need{Key: "k", Body: "Needs you"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k", Body: "Needs you"})
 	// A new app's bot, in another DM, cannot edit the old app's message.
 	if err := h.db.PutSlackLink(bg, &store.SlackLink{Member: h.ada.ID, TeamID: "T1", UserID: "U1", Channel: "D2", CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("PutSlackLink: %v", err)
 	}
 	h.slack.refuseNext("chat.update", "cant_update_message")
-	h.need(run, push.Need{Key: "k2", Body: "Still needs you"})
+	h.need(run, push.Need{Member: run.MemberID, Key: "k2", Body: "Still needs you"})
 	posts := h.slack.posts()
 	if last := posts[len(posts)-1]; last.Channel != "D2" || !strings.Contains(last.Text, "Still needs you") {
 		t.Fatalf("last post = %+v, want the need in the new DM", last)

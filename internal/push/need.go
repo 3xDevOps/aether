@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 // These mirror the scheduler's reasons: acp*Reason in
@@ -33,16 +34,18 @@ const (
 	maxBodyRunes = 240
 )
 
-// need is one reason a run waits on its owner. key identifies the standing
+// need is one reason a run waits on member. key identifies the standing
 // state, so the same one is announced once. since is when the run entered a
-// standing status need, zero for a request. answer is the id of the
-// request a request need waits on.
+// standing need, zero for a request. answer is the id of the request a
+// request need waits on. mission is the swarm of a swarm's need.
 type need struct {
 	key     string
 	body    string
 	urgency string
 	since   time.Time
 	answer  string
+	member  domain.MemberID
+	mission domain.MissionID
 }
 
 // needOf is the owner's rows of the dashboard's Needs you table
@@ -83,6 +86,18 @@ func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused bool) *need
 		n.since = *run.StatusChangedAt
 	}
 	return n
+}
+
+// swarmNeed is a swarm row of the dashboard's Needs you table as a need of
+// human. Each question is a need of its own.
+func swarmNeed(item *protocol.AttentionItem, human domain.MemberID) *need {
+	key := item.Kind
+	if item.Message != nil {
+		key += ":" + item.Message.ID
+	}
+	since, _ := time.Parse(time.RFC3339Nano, item.Since)
+	return &need{key: key, body: clip(item.Reason, maxBodyRunes), urgency: urgencyHigh, since: since,
+		member: human, mission: domain.MissionID(item.MissionID)}
 }
 
 func AttentionBody(run *domain.Run) string {

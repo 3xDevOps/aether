@@ -269,9 +269,14 @@ rule behind **Needs you** ([failure-handling.md](failure-handling.md#run-activit
 | fails a turn or reports failure | `Turn failed: <error>`, `Agent failed` or `Agent reported failure, review the result` |
 | reports success | `Agent reported success, review the result` |
 | ends `failed` with a result nobody has seen | `Failed, review the result` |
+| is a swarm's integrator and asks with `aether-internal mission question ask` | `The integrator asks: <question>` |
+| is a swarm's integrator and stops or fails to launch | `Integrator stopped, replace it to continue` or `Integrator failed to launch, replace it to continue` |
 
-A working, waiting or stalled run does not notify. A Background run does not
-notify for a question, and a swarm worker notifies only when blocked. One
+The two integrator lines go to the swarm's accountable human
+([coordination.md](coordination.md#mission-phases)), not the integrator's
+owner, once per question and once per stopped integrator. A working, waiting
+or stalled run does not notify. A Background run does not notify for a
+question, and a swarm worker notifies only when blocked. One
 notification per run: a newer one replaces the older, and tapping it opens the
 run. While you use a dashboard on any device, notifications wait until you have
 left every dashboard alone for a minute and the run still needs you. Runs the

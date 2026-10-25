@@ -38,7 +38,7 @@ type answer struct {
 // Need returns an error only when trying again could deliver n: a link
 // that no longer works is not retried.
 func (s *Service) Need(ctx context.Context, run *domain.Run, n push.Need) error {
-	link, err := s.cfg.Store.GetSlackLink(ctx, run.MemberID)
+	link, err := s.cfg.Store.GetSlackLink(ctx, n.Member)
 	if errors.Is(err, store.ErrNotFound) {
 		err = nil
 	}
@@ -166,7 +166,11 @@ func render(run *domain.Run, n *push.Need, it *protocol.AttentionItem, dashboard
 	}
 	var notes []string
 	if dashboard != "" {
-		notes = append(notes, "<"+dashboard+"/?run="+url.QueryEscape(string(run.ID))+"|Open in Aether>")
+		page := "/?run=" + url.QueryEscape(string(run.ID))
+		if n != nil && n.Mission != "" {
+			page = "/?page=missions&id=" + url.QueryEscape(string(n.Mission))
+		}
+		notes = append(notes, "<"+dashboard+page+"|Open in Aether>")
 	}
 	switch {
 	case it != nil && len(buttons) == 0 && len([]rune(text)) > maxRequest:

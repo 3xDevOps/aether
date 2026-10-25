@@ -208,10 +208,10 @@ you are there. It is not stored, and no other member sees it.
 
 Off until an admin runs `sudo aether-server slack setup`
 ([slack.md](slack.md)) and a member links a Slack account. For each linked
-member the server sends Slack the titles of their runs that need them, the
+member the server sends Slack the titles of the runs that need them, the
 need lines (which can quote an agent's reason), the text and options of
-pending requests, run IDs and the dashboard's address, and, in the link
-confirmation, the member's Aether display name and the server's host name.
+pending requests, run and swarm IDs and the dashboard's address, and, in the
+link confirmation, the member's Aether display name and the server's host name.
 Replies and button presses pass through Slack to the server. Nothing is sent
 to Slack for members who never linked.
 

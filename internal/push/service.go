@@ -1,15 +1,16 @@
-// Package push tells a run's owner, on the devices they subscribed, that
-// the run started needing them. It is a Web Push application server (RFC
+// Package push tells a member, on the devices they subscribed, that a run
+// started needing them: the run's owner, or for a swarm's integrator the
+// swarm's accountable human. It is a Web Push application server (RFC
 // 8030, with RFC 8291 encryption and RFC 8292 VAPID): the browser vendor's
 // push service relays each message, and only the subscribed browser can
 // read it.
 //
-// The service is a bus consumer. Every event that can change whether a run
-// needs its owner makes it read the run again and decide from that, so what
-// it announces is the run's state, not the event. A need is announced once,
-// and only while it still stands. While the owner is using a dashboard the
-// announcement waits, and is sent once they have been away from it for
-// DefaultQuiet.
+// The service is a bus consumer. Every event that can change what a run
+// needs makes it read the run again, and a swarm's change every run of the
+// swarm, and decide from that, so what it announces is the run's state, not
+// the event. A need is announced once, and only while it still stands.
+// While its member is using a dashboard the announcement waits, and is sent
+// once they have been away from it for DefaultQuiet.
 package push
 
 import (
@@ -25,6 +26,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -46,6 +48,7 @@ var (
 // Store is the persistence the service reads and writes.
 type Store interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
+	ListMissionRunIDs(ctx context.Context, id domain.MissionID) ([]domain.RunID, error)
 	store.PushStore
 }
 
@@ -55,11 +58,17 @@ type Runs interface {
 	Paused(run domain.RunID) bool
 }
 
-// Config wires the service. Store, Bus, Runs and KeyPath are required.
+// Swarm is the swarm row of the dashboard's Needs you table that holds for
+// a run, nil when none does, and the member it waits on.
+type Swarm func(ctx context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error)
+
+// Config wires the service. Store, Bus, Runs, Swarm and KeyPath are
+// required.
 type Config struct {
 	Store Store
 	Bus   events.Bus
 	Runs  Runs
+	Swarm Swarm
 	// KeyPath is the server's VAPID key file, created on first use.
 	KeyPath string
 	// Client replaces the public-addresses-only client, for tests.
@@ -69,16 +78,19 @@ type Config struct {
 }
 
 // Need is a need as a Sink hears of it: Key identifies it, Body is the
-// notification's line, and Answer is the id of the request it waits on,
-// empty for the run's status.
+// notification's line, Member is who it waits on, and Answer is the id of
+// the request it waits on, empty for the run's status. Mission is the swarm
+// of a swarm's need, empty for the run's own.
 type Need struct {
 	Key, Body, Answer string
+	Member            domain.MemberID
+	Mission           domain.MissionID
 }
 
-// Sink is a second place a run's owner hears of its needs, such as Slack.
-// Need is called when a need is announced, after the owner's devices;
-// Clear whenever the run is read needing nothing of its owner. Either is
-// called again after retry while it fails and the run stays as it was.
+// Sink is a second place a member hears of a run's needs, such as Slack.
+// Need is called when a need is announced, after the member's devices;
+// Clear whenever the run is read needing nothing. Either is called again
+// after retry while it fails and the run stays as it was.
 type Sink interface {
 	Need(ctx context.Context, run *domain.Run, n Need) error
 	Clear(ctx context.Context, run domain.RunID) error
@@ -94,6 +106,7 @@ type Service struct {
 	store  Store
 	bus    events.Bus
 	runs   Runs
+	swarm  Swarm
 	key    *vapidKey
 	client *http.Client
 	quiet  time.Duration
@@ -123,8 +136,8 @@ type notification struct {
 // New loads the server's VAPID key, creating it on first use; call Start to
 // begin consuming events.
 func New(cfg Config) (*Service, error) {
-	if cfg.Store == nil || cfg.Bus == nil || cfg.Runs == nil || cfg.KeyPath == "" {
-		return nil, errors.New("push: Store, Bus, Runs and KeyPath are required")
+	if cfg.Store == nil || cfg.Bus == nil || cfg.Runs == nil || cfg.Swarm == nil || cfg.KeyPath == "" {
+		return nil, errors.New("push: Store, Bus, Runs, Swarm and KeyPath are required")
 	}
 	key, err := loadOrCreateKey(cfg.KeyPath)
 	if err != nil {
@@ -140,6 +153,7 @@ func New(cfg Config) (*Service, error) {
 		store:   cfg.Store,
 		bus:     cfg.Bus,
 		runs:    cfg.Runs,
+		swarm:   cfg.Swarm,
 		key:     key,
 		client:  cfg.Client,
 		quiet:   cfg.Quiet,
@@ -159,6 +173,7 @@ func (s *Service) Start(ctx context.Context) error {
 	sub, err := s.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{
 		events.TypeRunStatus, events.TypeRunInput, events.TypeRunOutcomeSeen,
 		events.TypeRunReview, events.TypeRunMode, events.TypeTimeline, events.TypeRunDeleted,
+		events.TypeRunArchived, events.TypeMissionChanged,
 	}}})
 	if err != nil {
 		return fmt.Errorf("push: subscribe: %w", err)
@@ -203,8 +218,32 @@ func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 			if !ok {
 				return
 			}
-			s.changed(ctx, e.RunID)
+			if p, mission := e.Payload.(events.MissionChangedPayload); mission {
+				s.swarmChanged(ctx, p.MissionID)
+			} else {
+				s.changed(ctx, e.RunID)
+			}
 		}
+	}
+}
+
+// swarmChanged has every run the swarm had read again, so an integrator
+// replaced since hears that it no longer needs anyone.
+func (s *Service) swarmChanged(ctx context.Context, id domain.MissionID) {
+	runs, err := s.store.ListMissionRunIDs(ctx, id)
+	if err != nil {
+		slog.Warn("push: list a swarm's runs; trying again later", "mission", id, "in", retry, "error", err)
+		s.wg.Go(func() {
+			select {
+			case <-ctx.Done():
+			case <-time.After(retry):
+				s.swarmChanged(ctx, id)
+			}
+		})
+		return
+	}
+	for _, run := range runs {
+		s.changed(ctx, run)
 	}
 }
 
@@ -235,6 +274,9 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 	// offered is every need a device was sent, as {need, endpoint}, so one
 	// that was interrupted goes on with the devices still without it.
 	offered := map[[2]string]bool{}
+	// shown is the need the sink last took, so one announced before and
+	// back after another is shown again.
+	var shown string
 	for {
 		run, n, err := s.read(ctx, id)
 		var wake <-chan time.Time
@@ -251,20 +293,21 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			}
 			clear(announced)
 			clear(offered)
+			shown = ""
 		}
 		if n != nil && !n.since.IsZero() && n.since.Before(s.startedAt()) {
 			announced[n.key] = true
 		}
-		if n != nil && !announced[n.key] {
-			if wait := time.Until(s.freeAt(run.MemberID)); wait > 0 {
+		if n != nil && (!announced[n.key] || shown != "" && shown != n.key) {
+			if wait := time.Until(s.freeAt(n.member)); wait > 0 {
 				wake = time.After(wait)
-			} else if s.offer(ctx, run, n, offered) {
+			} else if !announced[n.key] && s.offer(ctx, run, n, offered) {
 				continue
-			} else if err = s.sink.Need(ctx, run, Need{Key: n.key, Body: n.body, Answer: n.answer}); err != nil {
+			} else if err = s.sink.Need(ctx, run, Need{Key: n.key, Body: n.body, Answer: n.answer, Member: n.member, Mission: n.mission}); err != nil {
 				slog.Warn("push: the sink did not take a need; trying again later", "run", id, "in", retry, "error", err)
 				wake = time.After(retry)
 			} else {
-				announced[n.key] = true
+				announced[n.key], shown = true, n.key
 			}
 		}
 		select {
@@ -293,17 +336,17 @@ func (s *Service) unwatch(id domain.RunID, signal chan struct{}) bool {
 	return true
 }
 
-// offer sends n to the next device of the run's owner that has not had it,
-// and reports whether there was one.
+// offer sends n to the next device of its member that has not had it, and
+// reports whether there was one.
 func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered map[[2]string]bool) bool {
 	payload, err := json.Marshal(notification{Title: RunTitle(run), Body: n.body, Run: string(run.ID)})
 	if err != nil {
 		slog.Warn("push: encode notification", "run", run.ID, "error", err)
 		return false
 	}
-	subs, err := s.store.ListPushSubscriptions(ctx, run.MemberID)
+	subs, err := s.store.ListPushSubscriptions(ctx, n.member)
 	if err != nil {
-		slog.Warn("push: list subscriptions", "member", run.MemberID, "error", err)
+		slog.Warn("push: list subscriptions", "member", n.member, "error", err)
 		return false
 	}
 	for _, sub := range subs {
@@ -313,16 +356,17 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 		}
 		offered[device] = true
 		if err := s.send(ctx, sub, payload, runTopic(run.ID), n.urgency); err != nil {
-			slog.Warn("push: notification not delivered", "member", run.MemberID, "error", err)
+			slog.Warn("push: notification not delivered", "member", n.member, "error", err)
 		}
 		return true
 	}
 	return false
 }
 
-// read is the run as it stands and what it needs of its owner, if anything.
-// The need is keyed to that owner: a run handed to another member is theirs
-// to hear about.
+// read is the run as it stands and what it needs, if anything, in the
+// dashboard's order: its own requests, then its swarm's row, then its
+// status. The need is keyed to the member it waits on: a run handed to
+// another member is theirs to hear about.
 func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need, error) {
 	run, err := s.store.GetRun(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
@@ -333,7 +377,19 @@ func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need
 	}
 	n := needOf(run, s.runs.PendingInputs(id), s.runs.Paused(id))
 	if n != nil {
-		n.key = string(run.MemberID) + "|" + n.key
+		n.member = run.MemberID
+	}
+	if n == nil || n.answer == "" {
+		item, human, swarmErr := s.swarm(ctx, run)
+		if swarmErr != nil {
+			return nil, nil, fmt.Errorf("push: read the swarm of run %s: %w", id, swarmErr)
+		}
+		if item != nil {
+			n = swarmNeed(item, human)
+		}
+	}
+	if n != nil {
+		n.key = string(n.member) + "|" + n.key
 	}
 	return run, n, nil
 }
