@@ -271,7 +271,7 @@ export function Usage({ result }: { result: InsightsResult }) {
           )}
           <p className="text-ui-sm text-muted">
             Cost is reported, not enforced: nothing here stops a run.{' '}
-            <Button variant="quiet" onClick={() => navigate('settings')}>Subscription quota is in Settings › Usage</Button>
+            <Button variant="quiet" onClick={() => navigate('settings', { section: 'usage' })}>Subscription quota is in Settings › Usage</Button>
           </p>
         </div>
       </CollapsibleContent>

@@ -5396,7 +5396,9 @@ Categories:
   without asking?** with the warning that the assistant will launch runs,
   message and stop the member's runs and save the environment on its own;
   turning it off does not ask. A refusal stays in the dialog or under the
-  row. Links from the assistant panel navigate with `{section: "assistant"}`.
+  row. **Change in Settings** in the assistant panel opens
+  `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
+  Insights quota link opens `usage`.
 - **Usage**: the subscription usage of your account, or of an account
   shared with you. A provider that reports `unauthenticated` keeps the
   server's error and adds **Sign in on Agents**.

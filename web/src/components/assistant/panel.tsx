@@ -82,7 +82,7 @@ function AutoApproveLine() {
   const navigate = useStore((s) => s.navigate)
   const sheet = useContext(AssistantSheet)
   const open = () => {
-    navigate('settings', {})
+    navigate('settings', { section: 'auto-approve' })
     if (sheet) useStore.getState().setAssistantOpen(false)
   }
   return (
