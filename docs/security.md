@@ -21,7 +21,7 @@ credentials out of the report.
 
 | Surface | What it protects | What it does not protect |
 | --- | --- | --- |
-| [Run container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. | It is not a VM. Agents run as root and can read and change everything mounted into the run: your home, the checkout and the workspace secrets. |
+| [Run container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Runs and environments cannot connect to each other. | It is not a VM. Agents run as root and can read and change everything mounted into the run: your home, the checkout and the workspace secrets. |
 | [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own runs. | Every run you launch can read and replace your agent logins, gh token and signing key. |
 | [Who can act on a run](#who-can-see-and-act-on-a-run) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your runs, which hold your home. |
 | [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
@@ -56,6 +56,12 @@ shares the host's kernel, and Aether builds no second sandbox inside it.
   [Sysbox](environments.md#docker-inside-runs) installed, runs and
   environments get their own Docker daemon, and root in the container maps to
   an unprivileged host user. Without Sysbox a run has no Docker.
+- Runs and environments start on `aether-agents`, a Docker bridge network the
+  server creates with inter-container traffic off
+  (`com.docker.network.bridge.enable_icc=false`). They reach the host and the
+  internet but not each other. To set its subnet or MTU, create it yourself
+  with that option before the first launch; a launch fails on a network of
+  that name without it.
 - The packaged systemd unit runs `aether-server` as root. Docker socket access
   is root-equivalent anyway, and root lets the server hand checkouts to an
   image's non-root user. An unprivileged server can serve only root images.
@@ -614,9 +620,11 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 
 - Containers share the host kernel. A kernel or Docker escape reaches the
   host.
-- Runs use Docker's default network. Nothing in Aether limits their outbound
-  traffic, and on Docker's default bridge a run can reach ports that other runs
-  and environments listen on.
+- Nothing in Aether limits outbound traffic: runs and environments reach the
+  internet, your network and ports the server host listens on.
+- Containers created before the `aether-agents` network existed keep Docker's
+  default bridge, where they can reach each other's ports, until they are
+  removed.
 - Every run trusts `/workspace`, and each extra repo's `/repos/<name>`, for git
   through `GIT_CONFIG_COUNT`. An image
   with git older than 2.31 ignores that and can refuse the checkout when its
