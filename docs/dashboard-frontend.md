@@ -5306,7 +5306,7 @@ while one of its entries is visible, so the nav and search never disagree.
 | Group | Category (`id`) | Sections and rows (anchor ids) |
 |---|---|---|
 | You | General (`general`) | Appearance: Theme (`theme`), Text size (`text-size`); Keyboard (`keyboard`); Profile (`profile`); Setup guide (`setup-guide`) |
-| You | Connections (`connections`) | GitHub (`github`) |
+| You | Connections (`connections`) | ChatGPT and Claude (`connectors`); GitHub (`github`) |
 | You | Notifications (`notifications`) | Push notifications (`push`); Slack (`slack`) |
 | You | Assistant (`assistant`) | Approvals (`auto-approve`) |
 | You | Usage (`usage`) | Subscription usage (`subscription-usage`) |

@@ -43,6 +43,7 @@ export const entries: SettingEntry[] = [
   { id: 'keyboard', category: 'general', label: 'Single-key shortcuts', help: 'Keys such as n, ? and g b.', keywords: 'keyboard keys speech hotkeys' },
   { id: 'profile', category: 'general', label: 'Profile', help: 'Name, colour and git identity.', keywords: 'display name git email avatar account sharing', visible: (g) => g.member },
   { id: 'setup-guide', category: 'general', label: 'Setup guide', help: 'Link this computer, add a repository, set up an agent and start a first run.', keywords: 'onboarding wizard', visible: (g) => g.onboarding },
+  { id: 'connectors', category: 'connections', label: 'ChatGPT and Claude', help: 'Connect ChatGPT or Claude to Aether over MCP.', keywords: 'mcp connector chatgpt claude plugin oauth pairing code revoke' },
   { id: 'github', category: 'connections', label: 'GitHub', help: 'Connect GitHub to choose repositories and let runs publish changes.', keywords: 'github oauth repository import', visible: (g) => g.admin && g.cap.hasMethod('github.oauth.status') },
   { id: 'push', category: 'notifications', label: 'Notify this device when a run needs me', help: 'Push notifications on this device.', keywords: 'notification alert phone browser push' },
   { id: 'slack', category: 'notifications', label: 'Slack', help: 'Get a direct message in Slack when a run needs you.', keywords: 'slack dm message' },
