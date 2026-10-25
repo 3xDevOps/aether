@@ -506,4 +506,10 @@ test('V2 reports how the last turn ended', async t => {
     assert.equal(h.reports.at(-1).state, 'waiting')
     assert.equal(h.reports.at(-1).reason, reason)
   }
+  await h.emit('session.execution.started', { sessionID: 'root' })
+  await h.emit('session.execution.started', { sessionID: 'child' })
+  await h.emit('session.execution.succeeded', { sessionID: 'root' })
+  await h.emit('session.execution.failed', { sessionID: 'child' })
+  await h.drain()
+  assert.equal(h.reports.at(-1).reason, 'agent idle')
 })

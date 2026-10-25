@@ -20,6 +20,7 @@ export default {
     let child
     let warned = false
     let executionKnown = false
+    let turnSession
     let idleReason = 'agent idle'
     const warn = error => {
       if (warned || lifetime.signal.aborted) return
@@ -151,6 +152,9 @@ export default {
           case 'session.execution.started':
             if (!data.sessionID) break
             executionKnown = true
+            // The session that starts from idle is the turn's; subagent
+            // sessions it spawns do not decide how the turn ended.
+            if (busy.size === 0) [turnSession, idleReason] = [data.sessionID, 'agent idle']
             busy.add(data.sessionID)
             report()
             break
@@ -161,7 +165,9 @@ export default {
             executionKnown = true
             busy.delete(data.sessionID)
             // The scheduler reads a turn's end from its reason (agentstatus.go).
-            idleReason = { 'session.execution.failed': 'agent failed', 'session.execution.interrupted': 'turn cancelled' }[event.type] ?? 'agent idle'
+            if (data.sessionID === turnSession) {
+              idleReason = { 'session.execution.failed': 'agent failed', 'session.execution.interrupted': 'turn cancelled' }[event.type] ?? 'agent idle'
+            }
             reconcilePermissions(data.sessionID)
             report()
             break
