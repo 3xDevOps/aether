@@ -19,6 +19,11 @@ type Capabilities struct {
 	// IdleWake: mail starts a turn in an idle Standard session instead of
 	// waiting for the next hook boundary.
 	IdleWake bool
+	// Steer: a Standard run's terminal is attached to the agent's app-server,
+	// through which the server learns of its turns and hands it mail and
+	// messages, as a new turn when idle and as a steer mid-turn. The
+	// scheduler drives Codex's app-server only.
+	Steer bool
 	// EnhancedDefault makes Enhanced the suggested mode once the agent's ACP
 	// server is installed, and a Background run then uses it. Claude stays on
 	// its terminal: its adapter runs on the Claude Agent SDK, whose terms

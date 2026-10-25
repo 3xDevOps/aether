@@ -390,6 +390,8 @@ type sidecar struct {
 	ContainerID     string            `json:"container_id"`
 	WorkspaceID     string            `json:"workspace_id"`
 	Mode            domain.LaunchMode `json:"mode,omitempty"`
+	AppServer       bool              `json:"app_server,omitempty"`
+	ServerTurn      bool              `json:"server_turn,omitempty"`
 	MissionAssigned bool              `json:"mission_assigned,omitempty"`
 	Paused          bool              `json:"paused"`
 	KillRequested   bool              `json:"kill_requested"`
@@ -472,6 +474,8 @@ func (e *supervised) sidecar() sidecar {
 		ContainerID:         string(e.containerID),
 		WorkspaceID:         string(e.workspaceID),
 		Mode:                e.launchMode,
+		AppServer:           e.appServer,
+		ServerTurn:          e.serverTurn,
 		MissionAssigned:     e.missionAssigned,
 		Paused:              e.paused,
 		KillRequested:       e.killRequested,

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/codexapp"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/gitengine"
@@ -473,13 +474,19 @@ func (s *Scheduler) runPlan(ctx context.Context, entry *supervised, run *domain.
 // unlockCaches once the sidecar publishes the container's cache ownership.
 func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, run *domain.Run, actor *domain.Member, argv []string, profile harness.Profile, plan *EnvironmentPlan, persistSupervisor bool, unlockCaches func()) (AgentDriver, error) {
 	var native harness.NativeLaunch
-	if coordination := s.coordinationSeam(); coordination != nil && coordination.enabled &&
-		run.Mode == domain.LaunchTUI && run.Task != "" {
+	coordination := s.coordinationSeam()
+	if coordination != nil && coordination.enabled && run.Mode == domain.LaunchTUI && run.Task != "" {
 		var err error
 		native, err = profile.PrepareNativeLaunch(coordtransport.MountDir, argv, plan.Env)
 		if err != nil {
 			return nil, fmt.Errorf("prepare native coordination: %w", err)
 		}
+	}
+	// The app-server wrapper is the staged binary, mounted with coordination.
+	appServer := coordination != nil && run.Mode == domain.LaunchTUI && profile.Capabilities.Steer
+	if appServer && coordination.enabled {
+		native.IdleWake = true
+		native.Env = map[string]string{coordtransport.ManagedHooksEnv: "1"}
 	}
 	// Staging errors fail provisioning: never create a container that lacks the CLI.
 	coordMounts, coordArgs, coordEnv, coordErr := s.coordinationMounts(ctx, entry, run, profile, native)
@@ -496,7 +503,11 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	if len(coordMounts) > 0 {
 		ensureCoordinationCLIPath(plan.Env)
 	}
-	argv = append(argv, coordArgs...)
+	if appServer {
+		argv = codexapp.LaunchCommand(coordArgs, argv)
+	} else {
+		argv = append(argv, coordArgs...)
+	}
 	argv = native.Command(argv)
 	// Last, so the server's value wins over the workspace's: what the server
 	// needs the container to have is not a preference.
@@ -514,6 +525,9 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 		}
 		maps.Copy(plan.Env, proxyEnv)
 	}
+	s.mu.Lock()
+	entry.appServer = appServer
+	s.mu.Unlock()
 	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
 	if err != nil {
 		return nil, fmt.Errorf("create container: %w", err)
@@ -542,7 +556,7 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	if err != nil {
 		return nil, s.failContainer(ctx, entry, cid, "attach", err)
 	}
-	driver := s.driver(run.ACP)
+	driver := s.entryDriver(entry)
 	if perr := driver.Start(ctx, entry, att); perr != nil {
 		_ = att.Close()
 		return nil, s.failContainer(ctx, entry, cid, "start pty session", perr)

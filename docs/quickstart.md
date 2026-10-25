@@ -198,8 +198,7 @@ the agent proves the login when a run starts.
 From the CLI, run `aether agent add claude --enhanced` on your computer. It
 opens your environment's shell, installs the agent there and leaves you in that
 shell to log in. The environment has no `aether` command, so run `aether`
-commands on your computer. The first Standard Codex run opens Codex's **Hooks
-need review** screen: choose **Trust all and continue** once. Logins and limits
+commands on your computer. Logins and limits
 per agent: [harnesses.md](harnesses.md).
 
 ### Upload agent configuration

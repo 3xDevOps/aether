@@ -9,7 +9,7 @@ import (
 
 func TestCapabilityTable(t *testing.T) {
 	status := map[Reporter]string{ReporterFull: "turn start and end", ReporterTurnEnd: "turn end only", ReporterNone: "none"}
-	hooks := map[Hooks]string{HooksManaged: "hooks", HooksByHand: "hooks you install", HooksNone: "none"}
+	hooks := map[Hooks]string{HooksManaged: "hooks", HooksByHand: "hooks you install"}
 	enhanced := map[Enhanced]string{EnhancedAdapter: "adapter", EnhancedNative: "built in", EnhancedNone: "none"}
 	yes := map[bool]string{true: "yes", false: "no"}
 	suggests := map[bool]string{true: "Enhanced", false: "Standard"}
@@ -21,11 +21,20 @@ func TestCapabilityTable(t *testing.T) {
 			continue
 		}
 		c := p.Capabilities
-		mail := hooks[c.Hooks]
-		if c.IdleWake {
-			mail += " and idle wake"
+		var mail []string
+		if c.Hooks != HooksNone {
+			mail = append(mail, hooks[c.Hooks])
 		}
-		fmt.Fprintf(&want, "| `%s` | %s | %s | %s | %s | %s | %s |\n", p.Name, status[c.Status], mail,
+		if c.IdleWake {
+			mail = append(mail, "idle wake")
+		}
+		if c.Steer {
+			mail = append(mail, "mid-turn steer")
+		}
+		if len(mail) == 0 {
+			mail = []string{"none"}
+		}
+		fmt.Fprintf(&want, "| `%s` | %s | %s | %s | %s | %s | %s |\n", p.Name, status[c.Status], strings.Join(mail, " and "),
 			enhanced[p.EnhancedSupport()], yes[c.ModeSwitch], yes[c.BackgroundTasks], suggests[c.EnhancedDefault])
 	}
 	doc, err := os.ReadFile("../../docs/harnesses.md")
@@ -40,8 +49,8 @@ func TestCapabilityTable(t *testing.T) {
 func TestCapabilitiesNeedTheirLaunch(t *testing.T) {
 	for _, p := range Profiles() {
 		c := p.Capabilities
-		if c.IdleWake && c.Hooks != HooksManaged {
-			t.Errorf("%s: idle wake rides on the managed hooks", p.Name)
+		if c.IdleWake && c.Hooks != HooksManaged && !c.Steer {
+			t.Errorf("%s: idle wake rides on the managed hooks or the app-server", p.Name)
 		}
 		if (c.EnhancedDefault || c.ModeSwitch || c.BackgroundTasks) && p.EnhancedSupport() == EnhancedNone {
 			t.Errorf("%s: declares an Enhanced capability with no ACP command", p.Name)

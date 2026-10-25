@@ -28,7 +28,6 @@ var reportBudget = 4 * time.Second
 const maxHookPayload = 8 << 20
 
 const reportUsage = `report: usage: aether-server report claude   (hook JSON on stdin)
-                     aether-server report codex <notify JSON>
                      aether-server report pi --json <report JSON>
                      aether-server report opencode --json <report JSON>`
 
@@ -37,7 +36,7 @@ const reportUsage = `report: usage: aether-server report claude   (hook JSON on 
 // into a run container and the harness's own status callback calls it
 // there, against the coordination socket mounted beside it. Each harness
 // hands that callback a different shape, which is why the subcommand takes
-// four (docs/mcp-bridge.md).
+// two (docs/mcp-bridge.md).
 //
 // It never fails and never prints to stdout: a callback that breaks or
 // slows the agent is worse than a run card that is briefly wrong, so every
@@ -60,10 +59,12 @@ func report(args []string) {
 	if err := fs.Parse(args); err != nil {
 		return
 	}
-	// Whatever the harness put behind its flags. Only Codex has one: its
-	// notify payload. Every other shape is named below with none, so a
-	// stray argument is a malformed invocation rather than a silent report.
-	payload := fs.Args()
+	// No shape puts anything behind its flags, so a stray argument is a
+	// malformed invocation rather than a silent report.
+	if fs.NArg() != 0 {
+		warn(reportUsage)
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), reportBudget)
 	defer cancel()
 	var (
@@ -71,16 +72,14 @@ func report(args []string) {
 		mapped bool
 	)
 	switch {
-	case harness == "claude" && len(payload) == 0:
+	case harness == "claude":
 		hook, err := readHookPayload(ctx, os.Stdin)
 		if err != nil {
 			warn("report %s: read the hook payload: %v", harness, err)
 			return
 		}
 		rep, mapped = agentstatus.FromClaudeHook(hook)
-	case harness == "codex" && len(payload) == 1:
-		rep, mapped = agentstatus.FromCodexNotify(payload[0])
-	case (harness == "pi" || harness == "opencode") && len(payload) == 0 && *body != "":
+	case (harness == "pi" || harness == "opencode") && *body != "":
 		if len(*body) > maxHookPayload {
 			warn("report %s: report exceeds %d bytes", harness, maxHookPayload)
 			return

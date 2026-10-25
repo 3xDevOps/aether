@@ -548,7 +548,7 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 		s.mu.Unlock()
 		return fmt.Errorf("%w: run is not paused", ErrInvalidTransition)
 	}
-	workspace, cid, acp := entry.workspaceID, entry.containerID, entry.acp
+	workspace, cid, acp, appServer := entry.workspaceID, entry.containerID, entry.acp, entry.appServer
 	s.mu.Unlock()
 	if err := s.cfg.Runtime.Resume(ctx, cid); err != nil {
 		return err
@@ -559,6 +559,9 @@ func (s *Scheduler) Resume(ctx context.Context, run domain.RunID, actor domain.M
 	s.setPaused(entry, false)
 	if acp {
 		s.acp.resumeAfterPause(ctx, entry)
+	}
+	if appServer {
+		s.appServer.resumeAfterPause(entry)
 	}
 	s.publishTimeline(ctx, workspace, run, actor, events.TimelineResume, "")
 	return nil
@@ -597,7 +600,7 @@ func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.M
 	if entry != nil && (entry.status == domain.RunRunning || entry.status == domain.RunNeedsAttention) {
 		workspace := entry.workspaceID
 		s.mu.Unlock()
-		return s.injectLive(ctx, run, workspace, actor, prompt, steer, delivered)
+		return s.injectLive(ctx, entry, workspace, actor, prompt, steer, delivered)
 	}
 	s.mu.Unlock()
 
@@ -610,7 +613,8 @@ func (s *Scheduler) Inject(ctx context.Context, run domain.RunID, actor domain.M
 
 const steerRecordTimeout = 10 * time.Second
 
-func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace domain.WorkspaceID, actor domain.MemberID, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error) {
+func (s *Scheduler) injectLive(ctx context.Context, entry *supervised, workspace domain.WorkspaceID, actor domain.MemberID, prompt domain.AgentPrompt, steer bool, delivered func(error)) (string, error) {
+	run := entry.runID
 	m, err := s.cfg.Store.GetMember(ctx, actor)
 	if err != nil {
 		return "", err
@@ -619,7 +623,7 @@ func (s *Scheduler) injectLive(ctx context.Context, run domain.RunID, workspace 
 	if err != nil {
 		return "", err
 	}
-	outcome, err := s.driver(r.ACP).Deliver(ctx, r, m, prompt, steer, delivered)
+	outcome, err := s.entryDriver(entry).Deliver(ctx, r, m, prompt, steer, delivered)
 	if err != nil {
 		return "", err
 	}

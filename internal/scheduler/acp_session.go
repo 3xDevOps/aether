@@ -205,6 +205,42 @@ func (s *Scheduler) ACPSetOption(ctx context.Context, run domain.RunID, optionID
 
 var errACPBusy = errors.New("scheduler: the enhanced session is busy")
 
+// Wakeable reports whether the server can prompt run's agent session: an
+// idle enhanced session, or a Standard Codex terminal attached to its
+// app-server.
+func (s *Scheduler) Wakeable(run domain.RunID) bool {
+	if s.attachedAppServer(run) {
+		return s.appServer.connected(run) != nil
+	}
+	return s.IdleEnhanced(run)
+}
+
+func (s *Scheduler) Wake(ctx context.Context, run domain.RunID, prompt string) error {
+	if !s.attachedAppServer(run) {
+		return s.WakeEnhanced(ctx, run, prompt)
+	}
+	return s.appServer.wake(ctx, run, prompt)
+}
+
+// InTurn reports a Standard Codex terminal in a turn; an enhanced session
+// is woken only when idle.
+func (s *Scheduler) InTurn(run domain.RunID) bool {
+	if !s.attachedAppServer(run) {
+		return false
+	}
+	client := s.appServer.connected(run)
+	return client != nil && client.Busy()
+}
+
+// attachedAppServer reports a live, unpaused run whose terminal is attached
+// to its app-server.
+func (s *Scheduler) attachedAppServer(run domain.RunID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.runs[run]
+	return entry != nil && entry.appServer && !entry.paused
+}
+
 func (s *Scheduler) IdleEnhanced(run domain.RunID) bool {
 	s.mu.Lock()
 	entry := s.runs[run]

@@ -39,6 +39,7 @@ type fakeCoordinator struct {
 	released       []domain.RunID
 	idleWakes      []domain.RunID
 	provisional    []provisionalCall
+	opened         []domain.RunID
 	coAuthors      map[domain.RunID][]string
 	coAuthorWrites map[domain.RunID]int
 }
@@ -118,7 +119,11 @@ func (f *fakeCoordinator) WakeIdle(run domain.RunID) {
 	}
 }
 
-func (f *fakeCoordinator) EnhancedSessionOpened(context.Context, domain.RunID) {}
+func (f *fakeCoordinator) EnhancedSessionOpened(_ context.Context, run domain.RunID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.opened = append(f.opened, run)
+}
 
 func (f *fakeCoordinator) ProvisionalReport(_ context.Context, run domain.RunID, since time.Time, message string) error {
 	f.mu.Lock()
@@ -580,7 +585,10 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 					t.Fatalf("%s = %q in a %s launch", coordtransport.BackgroundEnv, env[coordtransport.BackgroundEnv], tc.mode)
 				}
 				g.Wake = env[coordtransport.WakeEnv] == "1"
-				if native := profile.Capabilities.IdleWake && tc.mode == domain.LaunchTUI && tc.task != ""; g.Wake != native {
+				// The server wakes a terminal attached to its app-server, with or
+				// without a task.
+				native := profile.Capabilities.IdleWake && tc.mode == domain.LaunchTUI && (tc.task != "" || profile.Capabilities.Steer)
+				if g.Wake != native {
 					t.Fatalf("%s = %q, want it only on a native launch (%v)", coordtransport.WakeEnv, env[coordtransport.WakeEnv], native)
 				}
 				if !profile.CarriesInstructions() {

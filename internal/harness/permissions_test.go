@@ -71,7 +71,12 @@ func TestEveryShippedAgentRunsWithoutPermissionPrompts(t *testing.T) {
 				t.Errorf("NoPermissionPrompt = %v, want %v", p.NoPermissionPrompt, want.optOut)
 			}
 			if want.flag != "" {
-				argvs := map[string][]string{"tui": p.TUIArgs, "headless": p.HeadlessArgs, "resume": p.ResumeArgs}
+				argvs := map[string][]string{"tui": p.TUIArgs, "headless": p.HeadlessArgs}
+				// A terminal resuming through the app-server keeps the
+				// session's permissions.
+				if !p.Capabilities.Steer {
+					argvs["resume"] = p.ResumeArgs
+				}
 				if want.inACP {
 					argvs["acp"] = p.ACPArgs
 				}

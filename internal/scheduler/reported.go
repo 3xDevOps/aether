@@ -503,9 +503,10 @@ func (e *supervised) outcomeDue() bool {
 // questionHeld reports whether a shown question outranks an Enhanced agent's
 // work: background tasks and turns the agent or its mail start go on until a
 // member's message reaches the agent (answerReached). A Standard run's next
-// working report is the user's answer. The caller must hold s.mu.
+// working report is the user's answer, unless mail started that turn
+// (serverTurn). The caller must hold s.mu.
 func (e *supervised) questionHeld(report agentstatus.Report) bool {
-	return e.idleShown && e.asks() && e.launchMode == domain.LaunchACP && report.State == agentstatus.Working
+	return e.idleShown && e.asks() && (e.launchMode == domain.LaunchACP || e.serverTurn) && report.State == agentstatus.Working
 }
 
 // answerReached clears the run's question once a member's message sent after

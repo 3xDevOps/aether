@@ -109,12 +109,7 @@ func managedHooksLine(harness string, in hookInstallInputs) string {
 		return ""
 	}
 	if harness == "codex" {
-		// Codex runs a loaded hook only once the user trusts it; any hook call
-		// leaves this record.
-		if _, err := os.Stat(hookNoticePath(in.env("AETHER_RUN_ID"), harness)); err == nil {
-			return "Inbox hooks (codex): loaded by this run's launch and running. Remove any manual copy in ~/.codex/hooks.json; it would run each hook twice.\n"
-		}
-		return "Inbox hooks (codex): loaded by this run's launch, but Codex runs them only after you trust them once (Hooks need review -> Trust all and continue, or /hooks then t). Until then, read aether-internal inbox yourself. Remove any manual copy in ~/.codex/hooks.json; it would run each hook twice.\n"
+		return "Inbox (codex): Aether hands this run its mail through Codex's app-server; do not install hooks. Remove any manual copy in ~/.codex/hooks.json; it would announce mail twice.\n"
 	}
 	return "Inbox hooks (" + harness + "): loaded by this run's launch; do not install a manual copy.\n"
 }

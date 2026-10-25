@@ -252,7 +252,7 @@ request may have succeeded; retry it with the same idempotency key and use the
 returned receipt.
 
 Aether does not type automated coordination messages into terminals. There
-are four ways to notice mail:
+are five ways to notice mail:
 
 1. **An active inbox wait wins.** An agent expecting a reply should use
    `aether-internal inbox --wait 30`. The current tool call receives the
@@ -265,13 +265,18 @@ are four ways to notice mail:
    turn. The server admits that wake only for the current eligible Standard
    run.
 3. **A boundary hook supplies context at the next native event.** A manually
-   installed Claude Code `claude.json` and the Codex, Copilot CLI, Gemini CLI,
-   and Cursor CLI command hooks do not watch an already-idle session. Mail
+   installed Claude Code `claude.json` and the Copilot CLI, Gemini CLI, and
+   Cursor CLI command hooks do not watch an already-idle session. Mail
    arriving after their last hook waits for the next supported boundary or
-   explicit inbox read. Managed Standard Codex runs load their hooks
-   automatically, but Codex runs them only after you [trust them
-   once](harnesses.md#codex).
-4. **An Enhanced run is prompted by the server.** When mail arrives or a
+   explicit inbox read.
+4. **A Standard Codex run is prompted through its app-server.** The server
+   prompts the session with the inbox notice, as a new turn when it is idle
+   and as a steer mid-turn, with or without a task. A working session also
+   hears once about each new set of overlapping edits, as the hooks below
+   announce them. Mail that an `aether-internal inbox --wait` is waiting for
+   goes to that call instead. Aether loads no Codex hooks; see
+   [Codex](harnesses.md#codex).
+5. **An Enhanced run is prompted by the server.** When mail arrives or a
    turn ends with mail unread, and the run's ACP session is idle with nothing
    queued, the server sends one `session/prompt` carrying the inbox
    instruction, under the same admission as a native wake. Each set of new
@@ -298,7 +303,7 @@ the last one it saw for a change it did not make itself, so a question asked
 and answered within one turn still prompts it. Those APIs remain
 authoritative; no terminal notice is required.
 
-Claude Code, Codex, Copilot CLI, Gemini CLI, and Cursor CLI keep hook context
+Claude Code, Copilot CLI, Gemini CLI, and Cursor CLI keep hook context
 in the transcript, so their hooks announce each notice once per state: the
 unread message IDs, the swarm state, and the overlapping files. A changed state is
 announced again; a Stop still blocks while mail is unread, except in a
@@ -555,8 +560,9 @@ capabilities lack `coord.report`, else the assignment's role, else
 else `interactive`. `AETHER_BACKGROUND=1` also drops needs-input and waiting
 for a mission role. The waiting line needs `AETHER_ENHANCED=1` or
 `AETHER_IDLE_WAKE=1`, which Aether sets on a Standard launch that loads a
-native integration file (Claude Code, pi, OMP and OpenCode; Codex's and
-Copilot CLI's hooks cannot wake it), and a status without `protected: true`.
+native integration file (Claude Code, pi, OMP and OpenCode; Copilot CLI's
+hooks cannot wake it) or attaches Codex to its app-server, and a status
+without `protected: true`.
 `AETHER_ROLE_CARD=1` marks a launch that already carries the card in its
 system prompt, so hooks and the bridge do not repeat it.
 
@@ -1221,7 +1227,7 @@ member's account, where it never runs. Workers may
 still run in Background. `mission.create`, `mission.replace-integrator` and
 `worker.start` refuse, with `-32602`, a shipped agent in Standard that has no
 idle wake, since its mail would wait unread:
-`integrator codex in Standard mode has no idle wake; start it in Enhanced`, or
+`integrator copilot in Standard mode has no idle wake; start it in Enhanced`, or
 `worker ...` for a worker choice. An agent run from a definition, including an
 `--agent-definitions` entry under a shipped name, is not judged. A retry of a
 call accepted before this rule replays its stored result, and the scheduler

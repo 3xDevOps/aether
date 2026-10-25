@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { AgentSetup } from '@/components/agents/agent-setup'
 import { ModeComparison } from '@/components/agents/mode-comparison'
 import type { Api } from '@/lib/api'
@@ -149,15 +149,6 @@ describe('agent setup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(onDone).toHaveBeenCalledTimes(1)
     expect(useStore.getState().launchDefaults.claude.mode).toBe('acp')
-  })
-
-  it("tells a Codex member to trust Aether's hooks once, and says nothing for Claude", () => {
-    setUp(codex)
-    expect(screen.getByText("Trust Aether's hooks once")).toBeDefined()
-    expect(screen.getByText(/choose Trust all and continue/)).toBeDefined()
-    cleanup()
-    setUp(claude)
-    expect(screen.queryByText("Trust Aether's hooks once")).toBeNull()
   })
 
   it('installs the agent alone for Standard', async () => {

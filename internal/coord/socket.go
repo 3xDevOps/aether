@@ -237,6 +237,7 @@ func (s *Service) Release(run domain.RunID) error {
 	delete(s.reportLocks, run)
 	delete(s.enhancedWoken, run)
 	delete(s.enhancedNotices, run)
+	delete(s.enhancedOverlaps, run)
 	delete(s.enhancedWakeLocks, run)
 	delete(s.runs, run)
 	s.mu.Unlock()
