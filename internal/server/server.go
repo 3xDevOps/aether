@@ -420,7 +420,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		return nil, err
 	}
 	s.sched.UseEvidence(s.evidence)
-	s.adapters = adapter.NewManager(s.bus, s.db, s.pty)
+	s.adapters = adapter.NewManager(s.bus, s.db, s.pty, s.sched)
 	whois := cfg.WhoIs
 	var node reachability.Node
 	tailscaled := reachability.NewTailscale("")

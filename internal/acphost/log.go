@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -440,6 +441,35 @@ func LastItem(log *Log, kind Kind) Item {
 		}
 		before = items[0].Seq
 	}
+}
+
+// LastMessage is the text of the main agent's last message in the log's
+// newest turn, empty when that turn has none or the log cannot be read.
+func LastMessage(log *Log) string {
+	var id string
+	var segments []string
+scan:
+	for before := int64(math.MaxInt64); ; {
+		items, err := log.ReadBefore(before, 512)
+		if err != nil || len(items) == 0 {
+			break
+		}
+		for i := len(items) - 1; i >= 0; i-- {
+			it := items[i]
+			if it.Kind == KindTurnStart || it.Kind == KindReset {
+				break scan
+			}
+			if it.Kind != KindMessage || it.Message.Role != "assistant" || it.Message.ParentID != "" ||
+				(id != "" && it.Message.MessageID != id) {
+				continue
+			}
+			id = it.Message.MessageID
+			segments = append(segments, it.Message.Text)
+		}
+		before = items[0].Seq
+	}
+	slices.Reverse(segments)
+	return strings.Join(segments, "")
 }
 
 // RunningTaskCalls returns, for every background task since the log's last

@@ -1168,12 +1168,24 @@ work needs no human step: propose or revise it, accept it, and dispatch it.
 Every worker report (success, failure, or blocked) reaches the integrator's
 inbox as an ordinary message: `from_run_id` is the worker, `body` is the
 report summary, and `correlation_id` is the report ID; `worker list` shows the
-outcome. A worker whose run ends without reporting sends nothing, so check
-`worker list` before declaring completion. The integrator's hooks announce a
+outcome. The integrator's hooks announce a
 changed swarm phase or open-question count once; an Enhanced integrator
 is prompted with each report as in [delivery](#delivery-acknowledgement-and-retries),
 and with the same swarm-update instruction, naming what changed, as in
 [enhanced-runs.md](enhanced-runs.md#mail).
+
+A worker whose turn ends without a report, and does not start another turn
+within 15 seconds, sends a **provisional report** instead: its last message,
+clipped to the 4 KiB body cap, as an ordinary message whose `correlation_id`
+starts with `provisional:` and whose body starts with `Provisional report:`.
+Each turn sends at most one; a turn that reported `waiting`, or that a human
+cancelled, sends none. A report the worker makes later supersedes it: the
+report arrives as usual, and a provisional report not yet read is retired
+unread. Only Enhanced workers
+and Background workers over ACP or `claude -p` send one
+([Background runs](enhanced-runs.md#background-runs)); a Standard worker's
+terminal has no reliable last message. A server restart or a full inbox during
+the wait drops it, so check `worker list` before declaring completion.
 
 A swarm carries `change_seq`, on `mission.show` and on every
 `mission.changed` event: a counter that every change an integrator reacts to

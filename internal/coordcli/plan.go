@@ -127,7 +127,9 @@ const activeFlow = `Next: dispatch accepted tasks and review their submissions.
 Each worker report arrives in your inbox as a message from the worker run
 whose correlation_id is the report ID; worker list shows its outcome. While
 waiting for workers, wait with aether-internal inbox --wait 30 instead of
-polling worker list. A worker that exits without reporting sends nothing.
+polling worker list. A worker whose turn ends without a report may send its
+last message as a provisional report, correlation_id provisional:<n>, which a
+later report supersedes; not every worker can, so check worker list.
 Use current task revisions, integrator generation, accepted-set version, and
 execution choices from live results; never guess IDs or generations.
 New or revised work needs no approval: propose or revise it, accept it with

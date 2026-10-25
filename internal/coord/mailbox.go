@@ -755,6 +755,9 @@ func (s *Service) enqueueWorkerReport(ctx context.Context, report *store.CoordRe
 		Kind: store.RunMessageKindMessage, Body: report.Summary, CorrelationID: report.ID,
 		IdempotencyKey: "coord-report-" + string(report.Outcome) + ":" + report.ID + ":" + string(target.ID),
 	}
+	if err = s.cfg.Mail.RetireProvisionalReports(ctx, report.RunID, target.ID, report.CreatedAt); err != nil {
+		return fmt.Errorf("enqueue worker report: %w", err)
+	}
 	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, false)
 	if err != nil {
 		return fmt.Errorf("enqueue worker report: %w", err)
