@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -16,20 +18,22 @@ import (
 func init() {
 	register(command{
 		name:  "agent",
-		short: "manage agents: add, list, remove",
+		short: "manage agents: add, list, login, remove",
 		run:   runAgent,
 	})
 }
 
 func runAgent(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("usage: aether agent <add|list|remove>")
+		return fmt.Errorf("usage: aether agent <add|list|login|remove>")
 	}
 	switch args[0] {
 	case "add":
 		return agentAdd(args[1:])
 	case "list":
 		return agentList(args[1:])
+	case "login":
+		return agentLogin(args[1:])
 	case "remove":
 		return agentRemove(args[1:])
 	default:
@@ -60,29 +64,67 @@ func agentRemove(args []string) error {
 }
 
 func agentList(args []string) error {
-	if len(args) > 0 {
-		return fmt.Errorf("usage: aether agent list")
+	jsonOut := len(args) == 1 && args[0] == "--json"
+	if len(args) > 0 && !jsonOut {
+		return fmt.Errorf("usage: aether agent list [--json]")
 	}
 	return withControl(func(c *protocol.Client) error {
 		var list protocol.AgentListResult
 		if err := c.Call(protocol.MethodAgentList, struct{}{}, &list); err != nil {
 			return err
 		}
+		if jsonOut {
+			if list.Agents == nil {
+				list.Agents = []protocol.AgentInfo{}
+			}
+			return json.NewEncoder(os.Stdout).Encode(list.Agents)
+		}
 		return printAgents(os.Stdout, list.Agents)
 	})
 }
 
+// printAgents labels the login column for what agent.list checks: a login
+// file in the home, not whether the vendor accepts it.
 func printAgents(w io.Writer, agents []protocol.AgentInfo) error {
 	if len(agents) == 0 {
 		_, err := fmt.Fprintln(w, "no agents")
 		return err
 	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "AGENT\tSOURCE\tINSTALLED\tENHANCED\tLOGIN FILE")
 	for _, a := range agents {
-		if _, err := fmt.Fprintf(w, "agent %s %s\n", a.Name, a.Source); err != nil {
-			return err
+		installed, enhanced, login := "no", "none", "-"
+		if a.Installed {
+			installed = "yes"
+		}
+		if a.Enhanced != "none" {
+			enhanced = "not installed"
+			if a.EnhancedInstalled {
+				enhanced = "installed"
+			}
+		}
+		if a.LoginFound != nil {
+			login = "not found"
+			if *a.LoginFound {
+				login = "found"
+			}
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", a.Name, a.Source, installed, enhanced, login)
+	}
+	return tw.Flush()
+}
+
+func lookupAgent(c *protocol.Client, name string) (protocol.AgentInfo, bool, error) {
+	var list protocol.AgentListResult
+	if err := c.Call(protocol.MethodAgentList, struct{}{}, &list); err != nil {
+		return protocol.AgentInfo{}, false, err
+	}
+	for _, agent := range list.Agents {
+		if agent.Name == name {
+			return agent, true, nil
 		}
 	}
-	return nil
+	return protocol.AgentInfo{}, false, nil
 }
 
 type agentAddOptions struct {
@@ -169,20 +211,13 @@ func agentAdd(args []string) error {
 	var selected protocol.AgentInfo
 	found := false
 	if listErr := withControl(func(c *protocol.Client) error {
-		var list protocol.AgentListResult
-		if callErr := c.Call(protocol.MethodAgentList, struct{}{}, &list); callErr != nil {
-			return callErr
-		}
-		for _, agent := range list.Agents {
-			if agent.Name == opts.name {
-				selected, found = agent, true
-				break
-			}
-		}
-		return nil
+		var lookupErr error
+		selected, found, lookupErr = lookupAgent(c, opts.name)
+		return lookupErr
 	}); listErr != nil {
 		return listErr
 	}
+	interactive := term.IsTerminal(int(os.Stdin.Fd()))
 	if found && selected.Source == "shipped" {
 		if opts.acp != "" {
 			return fmt.Errorf("agent %s is shipped; its ACP server is fixed, so --acp applies only to your own agent", opts.name)
@@ -190,11 +225,21 @@ func agentAdd(args []string) error {
 		if opts.enhanced && selected.Enhanced == "none" {
 			return fmt.Errorf("agent %s has no enhanced mode", opts.name)
 		}
-		if err = runShippedAgentInstall(selected, opts.enhanced); err != nil {
+		if interactive {
+			err = typeInTerminal(agentInstallScript(selected, opts.enhanced))
+		} else {
+			err = installShippedAgent(os.Stdout, selected, opts.enhanced)
+		}
+		if err != nil {
 			return err
 		}
 		if selected.Name == "codex" {
-			_, err = fmt.Fprintln(os.Stdout, codexHookNote)
+			if _, err = fmt.Fprintln(os.Stdout, codexHookNote); err != nil {
+				return err
+			}
+		}
+		if !interactive {
+			_, err = fmt.Fprintf(os.Stdout, "sign in with: aether agent login %s\n", selected.Name)
 		}
 		return err
 	}
@@ -202,7 +247,7 @@ func agentAdd(args []string) error {
 		return fmt.Errorf("--enhanced installs a shipped agent's adapter; name your agent's ACP server command with --acp")
 	}
 	var promptInput io.Reader
-	if term.IsTerminal(int(os.Stdin.Fd())) {
+	if interactive {
 		promptInput = os.Stdin
 	}
 	standardArgs, backgroundArgs, err := resolveAgentArgs(opts.name, opts.standard, opts.background, false, promptInput)
@@ -224,7 +269,8 @@ func agentAdd(args []string) error {
 		}, &result); err != nil {
 			return err
 		}
-		return nil
+		_, err := fmt.Fprintf(os.Stdout, "agent %s registered\n", opts.name)
+		return err
 	})
 }
 
@@ -235,15 +281,43 @@ asks again only if Aether's hooks change. If a swarm worker is your first Standa
 open its terminal to answer. If the list shows hooks you don't recognize, choose "Review hooks"
 instead.`
 
-func runShippedAgentInstall(agent protocol.AgentInfo, enhanced bool) error {
-	script := agentInstallScript(agent, enhanced)
+func installShippedAgent(w io.Writer, agent protocol.AgentInfo, enhanced bool) error {
+	var result protocol.AgentInstallResult
+	if err := withControl(func(c *protocol.Client) error {
+		return c.Call(protocol.MethodAgentInstall, protocol.AgentInstallParams{Name: agent.Name, Enhanced: enhanced}, &result)
+	}); err != nil {
+		return err
+	}
+	if tail := strings.TrimRight(result.LogTail, "\n"); tail != "" {
+		if _, err := fmt.Fprintln(w, tail); err != nil {
+			return err
+		}
+	}
+	switch {
+	case result.Error != "":
+		return fmt.Errorf("agent %s: %s; its output is above", agent.Name, result.Error)
+	case !result.Installed:
+		return fmt.Errorf("agent %s: the install command succeeded, but ~/.local/bin/%s is missing; its output is above", agent.Name, agent.Executable)
+	case enhanced && !result.EnhancedInstalled:
+		return fmt.Errorf("agent %s: installed, but its Enhanced adapter is missing from ~/.local/bin; its output is above", agent.Name)
+	case enhanced:
+		_, err := fmt.Fprintf(w, "installed %s and its Enhanced adapter\n", agent.Name)
+		return err
+	}
+	_, err := fmt.Fprintf(w, "installed %s\n", agent.Name)
+	return err
+}
+
+// typeInTerminal needs a person at this terminal: it leaves them in the
+// Environment's shell with command typed.
+func typeInTerminal(command string) error {
 	cfg, err := cli.Load()
 	if err != nil {
-		return printAgentInstallGuidance(os.Stdout, script)
+		return printTerminalGuidance(os.Stdout, command)
 	}
 	conn, err := cli.Dial(cfg)
 	if err != nil {
-		return printAgentInstallGuidance(os.Stdout, script)
+		return printTerminalGuidance(os.Stdout, command)
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -253,11 +327,11 @@ func runShippedAgentInstall(agent protocol.AgentInfo, enhanced bool) error {
 		Rows: rows,
 	})
 	if err != nil {
-		return printAgentInstallGuidance(os.Stdout, script)
+		return printTerminalGuidance(os.Stdout, command)
 	}
 	defer func() { _ = stream.Close() }()
 
-	if _, err := io.WriteString(stream, script+"\n"); err != nil {
+	if _, err := io.WriteString(stream, command+"\n"); err != nil {
 		return err
 	}
 	// A member terminal is the member's own and records no steerer, so
@@ -275,7 +349,7 @@ func agentInstallScript(agent protocol.AgentInfo, enhanced bool) string {
 	return fmt.Sprintf("install %s into ~/.local/bin", agent.Name)
 }
 
-func printAgentInstallGuidance(w io.Writer, script string) error {
-	_, err := fmt.Fprintf(w, "Run `aether terminal`, then paste:\n%s\n", script)
+func printTerminalGuidance(w io.Writer, command string) error {
+	_, err := fmt.Fprintf(w, "Run `aether terminal`, then paste:\n%s\n", command)
 	return err
 }

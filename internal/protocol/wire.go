@@ -809,6 +809,11 @@ type AgentInfo struct {
 	InstallScript string `json:"install_script,omitempty"`
 	// InstallScript followed by the pinned adapter's install.
 	EnhancedInstallScript string `json:"enhanced_install_script,omitempty"`
+	// LoginCommand is the vendor's sign-in command; empty for member-owned
+	// custom agents. LoginKind is "device" when it prints a URL and code and
+	// needs nothing typed back, else "interactive".
+	LoginCommand string `json:"login_command,omitempty"`
+	LoginKind    string `json:"login_kind,omitempty"`
 	// Why a launch on a shared account would be refused; at most one is set,
 	// and none for the caller's own account.
 	LoginMissing   bool   `json:"login_missing,omitempty"`

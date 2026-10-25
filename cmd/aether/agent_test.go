@@ -11,17 +11,75 @@ import (
 )
 
 func TestPrintAgents(t *testing.T) {
+	found, missing := true, false
 	var b strings.Builder
 	err := printAgents(&b, []protocol.AgentInfo{
-		{Name: "claude", Source: "shipped"},
-		{Name: "myagent", Source: "member"},
+		{Name: "claude", Source: "shipped", Installed: true, Enhanced: "adapter", LoginFound: &missing},
+		{Name: "codex", Source: "shipped", Installed: true, Enhanced: "adapter", EnhancedInstalled: true, LoginFound: &found},
+		{Name: "myagent", Source: "member", Enhanced: "none"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "agent claude shipped\nagent myagent member\n"
+	want := "AGENT    SOURCE   INSTALLED  ENHANCED       LOGIN FILE\n" +
+		"claude   shipped  yes        not installed  not found\n" +
+		"codex    shipped  yes        installed      found\n" +
+		"myagent  member   no         none           -\n"
 	if b.String() != want {
-		t.Fatalf("output = %q, want %q", b.String(), want)
+		t.Fatalf("output =\n%s\nwant\n%s", b.String(), want)
+	}
+}
+
+// loginTab stands in for a terminal tab: it records what is typed and
+// answers with what a PTY sends back.
+type loginTab struct {
+	io.Reader
+	typed strings.Builder
+}
+
+func (l *loginTab) Write(p []byte) (int, error) { return l.typed.Write(p) }
+
+func TestFollowLoginPassesPlainLinesAndTheExitStatus(t *testing.T) {
+	const command = "codex login --device-auth"
+	pty := "\x1b]0;root@env: ~\x07\x1b[?2004hroot@env:~# codex login --device-auth; echo aether-login-exit $?; exit\r\n\x1b[?2004l\r" +
+		"\x1b[1mWelcome to Codex\x1b[0m\r\n" +
+		"1. Open this link in your browser\r\n   \x1b[94mhttps://auth.openai.com/codex/device\x1b[0m\r\n" +
+		"2. Enter this one-time code \x1b[90m(expires in 15 minutes)\x1b[0m\r\n   \x1b[94mABCD-EFGH\x1b[0m\r\n" +
+		"⠋ Waiting\r⠙ Waiting\r\x1b[2K\x1b[1GSuccessfully logged in\r\n"
+	want := "root@env:~# codex login --device-auth; echo aether-login-exit $?; exit\n" +
+		"Welcome to Codex\n" +
+		"1. Open this link in your browser\n" +
+		"   https://auth.openai.com/codex/device\n" +
+		"2. Enter this one-time code (expires in 15 minutes)\n" +
+		"   ABCD-EFGH\n" +
+		"Successfully logged in\n" +
+		"logout\n"
+	for _, tc := range []struct {
+		name  string
+		start bool
+		tail  string
+		exit  int
+		typed string
+	}{
+		{name: "new sign-in", start: true, tail: "aether-login-exit 0\r\nlogout\r\n", exit: 0, typed: command + "; echo aether-login-exit $?; exit\n"},
+		{name: "failed sign-in", start: true, tail: "aether-login-exit 1\r\nlogout\r\n", exit: 1, typed: command + "; echo aether-login-exit $?; exit\n"},
+		{name: "followed sign-in", tail: "aether-login-exit 0\r\nlogout\r\n", exit: 0},
+		{name: "tab ended early", start: true, tail: "logout", exit: -1, typed: command + "; echo aether-login-exit $?; exit\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tab := &loginTab{Reader: strings.NewReader(pty + tc.tail)}
+			var out strings.Builder
+			exit, err := followLogin(tab, command, tc.start, &out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if exit != tc.exit || tab.typed.String() != tc.typed {
+				t.Fatalf("exit %d, typed %q; want %d, %q", exit, tab.typed.String(), tc.exit, tc.typed)
+			}
+			if out.String() != want {
+				t.Fatalf("output =\n%s\nwant\n%s", out.String(), want)
+			}
+		})
 	}
 }
 
@@ -50,7 +108,7 @@ func TestPrintAgentInstallGuidance(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var out strings.Builder
 			agent := protocol.AgentInfo{Name: tc.name, InstallScript: tc.script, EnhancedInstallScript: tc.enhanced}
-			if err := printAgentInstallGuidance(&out, agentInstallScript(agent, true)); err != nil {
+			if err := printTerminalGuidance(&out, agentInstallScript(agent, true)); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(out.String(), "aether terminal") || !strings.Contains(out.String(), tc.want) {

@@ -195,12 +195,23 @@ It worked if the dialog shows **Installed** and **Login found**, and after
 **Done** the agent's button reads **Run**. Aether only looks for the login file;
 the agent proves the login when a run starts.
 
-From the CLI, run `aether agent add claude --enhanced` on your computer. It
-opens your environment's shell, installs the agent there and leaves you in that
-shell to log in. The environment has no `aether` command, so run `aether`
-commands on your computer. The first Standard Codex run opens Codex's **Hooks
-need review** screen: choose **Trust all and continue** once. Logins and limits
-per agent: [harnesses.md](harnesses.md).
+From the CLI, on your computer:
+
+```sh
+aether agent add codex
+aether agent login codex
+aether agent list
+aether account usage
+```
+
+Without a terminal (an agent's shell, CI), `agent add` installs the agent and
+prints the end of the install log. `agent login` prints a device code for
+Codex; Claude Code and the others need the human at a terminal, or an API key
+([harnesses.md](harnesses.md#use-an-api-key)). `aether account usage` asks the
+vendor whether the login works. The environment has no `aether` command, so run
+`aether` commands on your computer. The first Standard Codex run opens Codex's
+**Hooks need review** screen: choose **Trust all and continue** once. Logins and
+limits per agent: [harnesses.md](harnesses.md).
 
 ### Upload agent configuration
 

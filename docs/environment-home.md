@@ -64,10 +64,9 @@ yourself is never cleaned. Logins, CLIs and keys stay in the home.
 ## Set up an agent
 
 [harnesses.md](harnesses.md#set-up-an-agent) has the steps: **Set up** on the
-**Agents** page, or `aether agent add <name>` on your computer, which installs
-the agent and leaves you in your environment's shell for the vendor login. The
-agent, its login and its settings land in your home, so you do not save the
-environment afterwards.
+**Agents** page, or `aether agent add <name>` and `aether agent login <name>` on
+your computer. The agent, its login and its settings land in your home, so you
+do not save the environment afterwards.
 
 The launch form offers an agent only when its executable is in your
 `~/.local/bin`. Aether follows relative symlinks, and absolute ones under
