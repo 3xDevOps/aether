@@ -196,19 +196,23 @@ the workspace selector, select **Add workspace**, choose **GitHub**, pick a
 repository you can read and accept its first revision. From the CLI:
 
 ```sh
-aether workspace init myproject [--base <branch>]
+aether workspace import ~/code/myproject
+aether workspace import https://github.com/acme/myproject
 aether workspace add myproject [--base <branch>]
 ```
 
-Each member links their own clone, which adds an `aether` git remote:
+`import` and `add` refuse a name already in use and print its id.
 
-```sh
-aether link my-server --repo ~/code/myproject
-```
+Each member links their own clone, which adds an `aether` git remote.
+`aether workspace import <path>` links a clone whose `origin` matches the
+workspace's publish destination; otherwise run
+`aether link my-server --repo ~/code/myproject --workspace myproject`. The
+client keeps one linked clone per workspace: linking another clone of it
+replaces the first, and `aether status` lists them.
 
 Branches named `aether/run-*` belong to the server and cannot be force-pushed or
-deleted. Every other branch behaves like a normal git remote. `aether pull`
-brings a run branch into your clone.
+deleted. Every other branch behaves like a normal git remote. `aether pull <run>`
+brings a run's branches into the linked clones.
 
 | Setting | Default | What it does |
 | --- | --- | --- |

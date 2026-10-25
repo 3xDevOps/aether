@@ -114,6 +114,20 @@ func RemoteWorkspace(repo string) (string, error) {
 	return strings.TrimSuffix(strings.TrimPrefix(u.Path, "/"), ".git"), nil
 }
 
+func CloneHead(path string) (root, branch string, err error) {
+	root, err = gitLine(path, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", "", err
+	}
+	if err = gitQuiet(root, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
+		return "", "", fmt.Errorf("%s has no commits yet; make your first commit, then try again", root)
+	}
+	if branch = currentBranch(root); branch == "" {
+		return "", "", fmt.Errorf("%s has no branch checked out; check out the branch runs should start from", root)
+	}
+	return root, branch, nil
+}
+
 // OriginURL reports where repo's `origin` remote points, or "" when the
 // repository has no origin. This is the upstream a workspace records so
 // that runs push and open pull requests against the same place the

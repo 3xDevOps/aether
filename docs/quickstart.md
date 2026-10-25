@@ -171,12 +171,26 @@ repository** adds another repository later.
 | --- | --- |
 | Public Git URL | **From a Git URL → Import repository**, then **Public HTTPS**. |
 | Private Git URL | Same form with **Read-only deploy key**. Install the public key it shows at the Git host, then **Verify** and **Adopt candidate**. |
-| A clone on your computer | **From a local clone → Create from local clone**, then push the base branch. Needs the desktop app or `aether gui` on that computer. The [CLI version](#prove-the-plumbing-without-an-agent-subscription) is below. |
+| A clone on your computer | **From a local clone → Create from local clone**, then push the base branch. Needs the desktop app or `aether gui` on that computer. Or [from the CLI](#from-the-cli). |
 
 [teams.md](teams.md) covers each source. A workspace can also run a setup script
 (such as `npm ci`) and set variables in new runs: **Environment** on its
 **Repository** page, or `aether workspace env`
 ([environments.md](environments.md#workspace-environment)).
+
+### From the CLI
+
+```sh
+aether workspace import ~/code/myproject
+aether workspace import https://github.com/acme/myproject
+```
+
+A path creates a workspace named after the clone, with its checked-out branch as
+the base branch, adds the `aether` remote and pushes the base branch. A GitHub
+URL makes the server fetch the default branch with your GitHub connection and
+print the `aether workspace mirror adopt` command that makes the fetched commit
+the base; review the commit first. Both are safe to re-run: a clone already
+imported is linked to its existing workspace.
 
 ## 5. Set up your agent
 

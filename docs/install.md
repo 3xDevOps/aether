@@ -667,7 +667,8 @@ rundll32 'sysdm.cpl,EditEnvironmentVariables'
 
 ### Linked repositories
 
-Each linked repository has an `aether` remote and a branch per run you
+Each clone that `aether link --repo` or `aether workspace import` linked
+(`aether status` lists them) has an `aether` remote and a branch per run you
 pulled. Repoint the base branch, which `aether link` set to the `aether`
 remote, before removing it, or `git push` on it fails. This runs in PowerShell
 too:
