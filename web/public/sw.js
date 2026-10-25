@@ -1,5 +1,6 @@
-// Shows push notifications and opens the run one is about. There is no fetch
-// handler: the dashboard is never served or cached from here.
+// Shows push notifications and opens the run, or the workspace budget, one is
+// about. There is no fetch handler: the dashboard is never served or cached
+// from here.
 
 self.addEventListener('install', () => {
   // The dashboard changes with the server binary, and so must this.
@@ -17,28 +18,32 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(message.title || 'Aether', {
       body: message.body || 'A run needs you.',
-      // One notification per run: a newer one replaces the older and alerts
-      // again.
-      tag: message.run || 'aether',
+      // One notification per run or workspace budget: a newer one replaces
+      // the older and alerts again.
+      tag: message.run || (message.workspace ? `budget:${message.workspace}` : 'aether'),
       renotify: true,
       icon: '/icons/icon-192.png',
-      data: { run: message.run },
+      data: { run: message.run, workspace: message.workspace },
     }),
   )
 })
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const run = event.notification.data?.run
+  const { run, workspace } = event.notification.data ?? {}
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
       const open = windows.find((client) => client.focused) ?? windows[0]
       if (!open) {
-        await self.clients.openWindow(run ? `/?run=${encodeURIComponent(run)}` : '/')
+        const path = run
+          ? `/?run=${encodeURIComponent(run)}`
+          : workspace ? `/?page=workspace&id=${encodeURIComponent(workspace)}` : '/'
+        await self.clients.openWindow(path)
         return
       }
       if (run) open.postMessage({ type: 'aether:open-run', run })
+      else if (workspace) open.postMessage({ type: 'aether:open-workspace', workspace })
       await open.focus()
     })(),
   )

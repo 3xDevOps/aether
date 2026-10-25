@@ -17,9 +17,10 @@ import (
 
 // Store is the persistence the service needs: the cost tables, plus the
 // run and member rows it attributes usage to and re-checks admission
-// against.
+// against, and the workspaces whose budget state it starts from.
 type Store interface {
 	store.CostStore
+	ListWorkspaces(ctx context.Context) ([]*domain.Workspace, error)
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	ListRunAccountSegments(ctx context.Context, id domain.RunID) ([]*store.RunAccountSegment, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
@@ -41,12 +42,16 @@ type Service struct {
 	wg   sync.WaitGroup
 	stop context.CancelFunc
 
+	// publishMu orders budget events as their states change, so each
+	// event's From is the State of the one before it.
+	publishMu sync.Mutex
+
 	mu      sync.Mutex
 	sub     events.Subscription
 	closed  bool
 	lastSeq uint64
-	// state is the last budget state published per workspace, so only
-	// transitions reach the bus.
+	// state is each workspace's budget state as Start read it or as last
+	// published, so only transitions reach the bus.
 	state map[domain.WorkspaceID]events.BudgetState
 }
 
@@ -62,12 +67,31 @@ func New(cfg Config) (*Service, error) {
 	}, nil
 }
 
-// Start subscribes to the cost and lifecycle streams. ctx bounds only the
-// setup; the service runs until Close.
+// Start subscribes to the cost and lifecycle streams, and reads where each
+// budget's spend sits so a restart announces no state already announced.
+// ctx bounds only the setup; the service runs until Close.
 func (s *Service) Start(ctx context.Context) error {
 	sub, err := s.subscribe(ctx, false)
 	if err != nil {
 		return err
+	}
+	workspaces, err := s.store.ListWorkspaces(ctx)
+	if err != nil {
+		_ = sub.Close()
+		return fmt.Errorf("cost: list workspaces: %w", err)
+	}
+	for _, w := range workspaces {
+		if _, budgetErr := s.store.GetWorkspaceBudget(ctx, w.ID); errors.Is(budgetErr, store.ErrNotFound) {
+			continue
+		}
+		st, statusErr := s.status(ctx, w.ID)
+		if statusErr != nil {
+			_ = sub.Close()
+			return fmt.Errorf("cost: budget %s: %w", w.ID, statusErr)
+		}
+		s.mu.Lock()
+		s.state[w.ID] = st.State
+		s.mu.Unlock()
 	}
 	s.mu.Lock()
 	s.sub = sub
@@ -441,12 +465,15 @@ func (s *Service) announce(ctx context.Context, workspace domain.WorkspaceID) {
 }
 
 func (s *Service) publish(ctx context.Context, st Status, reason string) {
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
 	s.mu.Lock()
+	from := s.state[st.Workspace]
 	s.state[st.Workspace] = st.State
 	s.mu.Unlock()
 	if _, err := s.bus.Publish(ctx, events.Event{
 		WorkspaceID: st.Workspace,
-		Payload:     st.payload(reason),
+		Payload:     st.payload(from, reason),
 	}); err != nil {
 		slog.Warn("cost: publish budget state failed", "workspace", st.Workspace, "error", err)
 	}

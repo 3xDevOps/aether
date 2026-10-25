@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/cost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -67,17 +68,18 @@ type device struct {
 func (d *device) endpoint() string { return d.service.URL + "/send/device" }
 
 type harness struct {
-	t    *testing.T
-	ctx  context.Context
-	db   *store.DB
-	bus  *events.InProc
-	runs *fakeRuns
-	svc  *Service
-	ws   *domain.Workspace
-	ada  *domain.Member
-	bob  *domain.Member
-	keys int
-	sink Sink
+	t     *testing.T
+	ctx   context.Context
+	db    *store.DB
+	bus   *events.InProc
+	runs  *fakeRuns
+	costs *cost.Service
+	svc   *Service
+	ws    *domain.Workspace
+	ada   *domain.Member
+	bob   *domain.Member
+	keys  int
+	sink  Sink
 
 	keyPath string
 }
@@ -103,8 +105,23 @@ func newHarness(t *testing.T) *harness {
 	h.ada, h.bob = h.member("Ada"), h.member("Bob")
 
 	h.keyPath = filepath.Join(t.TempDir(), "push", "vapid_key.pem")
+	h.startCosts()
 	h.start()
 	return h
+}
+
+// startCosts runs a new cost service, which push reads budgets from.
+func (h *harness) startCosts() {
+	h.t.Helper()
+	svc, err := cost.New(cost.Config{Store: h.db, Bus: h.bus})
+	if err != nil {
+		h.t.Fatalf("cost.New: %v", err)
+	}
+	if err = svc.Start(h.ctx); err != nil {
+		h.t.Fatalf("cost Start: %v", err)
+	}
+	h.t.Cleanup(func() { _ = svc.Close() })
+	h.costs = svc
 }
 
 // start runs a new Service on the harness's store, as a server start does.
@@ -115,7 +132,7 @@ func (h *harness) start() {
 	insecure := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test servers only
 	}}
-	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, Swarm: noSwarm, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
+	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, Swarm: noSwarm, Budgets: h.costs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
 	if err != nil {
 		h.t.Fatalf("New: %v", err)
 	}
@@ -281,6 +298,11 @@ func (s *sink) Need(_ context.Context, run *domain.Run, n Need) error {
 
 func (s *sink) Clear(_ context.Context, run domain.RunID) error {
 	s.heard <- string(run) + " needs nothing"
+	return nil
+}
+
+func (s *sink) Notice(_ context.Context, member domain.MemberID, n Notice) error {
+	s.heard <- fmt.Sprintf("%s hears %q", member, n.Body)
 	return nil
 }
 
@@ -711,14 +733,14 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	// The topic is the one needOf notifications use, so a device collapses them.
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	phone.expect(t, notification{Title: "Fix the login redirect", Body: "which region?", Run: string(run.ID)})
-	if got, want := phone.topic.Load(), runTopic(run.ID); got != want {
+	if got, want := phone.topic.Load(), topicOf(string(run.ID)); got != want {
 		t.Fatalf("needs topic = %v, want %v", got, want)
 	}
 	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
 	phone.expect(t, notification{Title: "Again", Body: "body", Run: string(run.ID)})
-	if got, want := phone.topic.Load(), runTopic(run.ID); got != want {
+	if got, want := phone.topic.Load(), topicOf(string(run.ID)); got != want {
 		t.Fatalf("notify topic = %v, want %v", got, want)
 	}
 }
@@ -797,7 +819,7 @@ func TestAFailedReadDoesNotClearTheSink(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	reads := &failingReads{DB: h.db}
-	svc, err := New(Config{Store: reads, Bus: h.bus, Runs: h.runs, Swarm: noSwarm, KeyPath: h.keyPath, Quiet: testQuiet})
+	svc, err := New(Config{Store: reads, Bus: h.bus, Runs: h.runs, Swarm: noSwarm, Budgets: h.costs, KeyPath: h.keyPath, Quiet: testQuiet})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

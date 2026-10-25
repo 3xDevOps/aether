@@ -453,3 +453,32 @@ func TestAMessageTheBotCannotEditDoesNotHoldUpTheNextOne(t *testing.T) {
 		t.Fatalf("stored message = %+v, want need k2 in D2", m)
 	}
 }
+
+func TestNoticeIsANewMessageInTheLinkedDM(t *testing.T) {
+	h := newHarness(t)
+	n := push.Notice{Workspace: h.ws.ID, Title: "<!channel> aether", Body: "Budget warning: $8.50 of $10.00 spent"}
+	if err := h.svc.Notice(bg, h.ada.ID, n); err != nil {
+		t.Fatalf("Notice without a link: %v", err)
+	}
+	if posts := h.slack.posts(); len(posts) != 0 {
+		t.Fatalf("an unlinked member got %d posts, want none", len(posts))
+	}
+
+	h.link()
+	for range 2 {
+		if err := h.svc.Notice(bg, h.ada.ID, n); err != nil {
+			t.Fatalf("Notice: %v", err)
+		}
+	}
+	posts := h.slack.posts()
+	if len(posts) != 2 || posts[1].Channel != "D1" {
+		t.Fatalf("posts = %+v, want two new messages in D1", posts)
+	}
+	l := layoutOf(t, posts[1])
+	if l.sections[0] != "*&lt;!channel&gt; aether*\nBudget warning: $8.50 of $10.00 spent" {
+		t.Fatalf("section = %q, want the escaped workspace and the line", l.sections[0])
+	}
+	if want := "<https://box.tail.ts.net/?page=workspace&id=" + string(h.ws.ID) + "|Open in Aether>"; l.context != want {
+		t.Fatalf("context = %q, want %q", l.context, want)
+	}
+}

@@ -100,9 +100,11 @@ SSH key or a tailnet connection has no device.
 ## What it sends
 
 Exactly what web push sends ([the table of needs and lines](networking.md#notifications)),
-to the same member, when the run starts needing them. The wait is the same:
+to the same member, when the run starts needing them, and to every admin when
+a workspace's spend reaches its budget's warning or cap. The wait is the same:
 while you use a dashboard, nothing is sent until you have left every dashboard
-alone for a minute.
+alone for a minute. A budget notice is a new direct message with a link to the
+workspace's budget.
 
 Each run gets one direct message with:
 

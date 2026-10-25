@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/cost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -31,8 +32,12 @@ func TestPushSubscriptionsBelongToTheCaller(t *testing.T) {
 	t.Parallel()
 	var e *testEnv
 	e = newTestEnv(t, func(c *Config) {
+		costs, err := cost.New(cost.Config{Store: c.Store, Bus: c.Bus})
+		if err != nil {
+			t.Fatalf("cost.New: %v", err)
+		}
 		svc, err := push.New(push.Config{
-			Store: c.Store.(*store.DB), Bus: c.Bus, Runs: c.Runs,
+			Store: c.Store.(*store.DB), Bus: c.Bus, Runs: c.Runs, Budgets: costs,
 			Swarm: func(ctx context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
 				return e.srv.SwarmAttention(ctx, run)
 			},
@@ -118,6 +123,8 @@ func (s swarmSink) Clear(context.Context, domain.RunID) error {
 	return nil
 }
 
+func (swarmSink) Notice(context.Context, domain.MemberID, push.Notice) error { return nil }
+
 // expect skips the clears of reads that found no need, unless it waits for
 // one.
 func (s swarmSink) expect(t *testing.T, want string) {
@@ -166,7 +173,11 @@ func TestPushTellsOnlyTheSwarmsHuman(t *testing.T) {
 	insecure := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test servers only
 	}}
-	svc, err := push.New(push.Config{Store: db, Bus: e.bus, Runs: e.runs, Swarm: e.srv.SwarmAttention,
+	costs, err := cost.New(cost.Config{Store: db, Bus: e.bus})
+	if err != nil {
+		t.Fatalf("cost.New: %v", err)
+	}
+	svc, err := push.New(push.Config{Store: db, Bus: e.bus, Runs: e.runs, Swarm: e.srv.SwarmAttention, Budgets: costs,
 		KeyPath: filepath.Join(t.TempDir(), "vapid_key.pem"), Client: insecure, Quiet: time.Millisecond})
 	if err != nil {
 		t.Fatalf("push.New: %v", err)
