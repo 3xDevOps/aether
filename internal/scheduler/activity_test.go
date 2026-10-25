@@ -17,17 +17,18 @@ import (
 // integratorStore stands in for a swarm's live workers.
 type integratorStore struct {
 	store.Store
-	workers atomic.Bool
+	workers atomic.Int64
 }
 
-func (s *integratorStore) IntegratorWaiting(context.Context, domain.RunID, time.Time) (bool, error) {
-	return s.workers.Load(), nil
+func (s *integratorStore) IntegratorWaiting(context.Context, domain.RunID, time.Time) (store.IntegratorWait, error) {
+	return store.IntegratorWait{Workers: int(s.workers.Load())}, nil
 }
 
-// quietFor makes checkStalls see run as quiet for longer than limit: the
-// stall threshold becomes a fraction of the time since its last activity.
-func quietFor(t *testing.T, e *testEnv, limit time.Duration) {
+// quietFor makes checkStalls see run as quiet for six stall thresholds: the
+// threshold becomes a fraction of the time since its last activity.
+func quietFor(t *testing.T, e *testEnv) {
 	t.Helper()
+	const limit = 20 * time.Millisecond
 	time.Sleep(6 * limit)
 	e.sched.mu.Lock()
 	saved := e.sched.cfg.StallThreshold
@@ -108,11 +109,11 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		{"permission mid-turn", func() { report(permissionInput("open")) }, domain.RunRunning, domain.ActivityNeedsYou, agentstatus.ReasonResumed},
 		{"permission answered", func() { report(permissionInput("close")) }, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
 		{"integrator turn end with a live worker", func() {
-			integrator.workers.Store(true)
+			integrator.workers.Store(1)
 			report(idle)
-		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, turnEndedReason},
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 worker"},
 		{"the last worker finished", func() {
-			integrator.workers.Store(false)
+			integrator.workers.Store(0)
 			e.sched.refreshActivities(ctx)
 		}, domain.RunNeedsAttention, domain.ActivityWaiting, turnEndedReason},
 		{"needs-input asked at the turn end", func() {
@@ -133,12 +134,14 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			report(idle)
 		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "blocked: on 3 workers"},
 		{"the wait outlived three stall thresholds", func() {
-			// A live worker would hold the run in waiting-agents again.
-			integrator.workers.Store(true)
-			quietFor(t, e, 20*time.Millisecond)
+			quietFor(t, e)
 		}, domain.RunNeedsAttention, domain.ActivityWaiting, waitedReasonPrefix},
+		{"a worker started after the wait went stale", func() {
+			integrator.workers.Store(1)
+			e.sched.refreshActivities(ctx)
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 worker"},
 		{"waiting for CI reported", func() {
-			integrator.workers.Store(false)
+			integrator.workers.Store(0)
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
 			if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on PR 12", time.Now()); err != nil {
@@ -147,8 +150,8 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			report(idle)
 		}, domain.RunNeedsAttention, domain.ActivityWaitingCI, "CI on PR 12"},
 		{"the CI wait went stale", func() {
-			quietFor(t, e, 20*time.Millisecond)
-		}, domain.RunNeedsAttention, domain.ActivityWaiting, waitedReasonPrefix},
+			quietFor(t, e)
+		}, domain.RunNeedsAttention, domain.ActivityWaitingCI, waitedReasonPrefix},
 		{"waiting for a process reported", func() {
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)
@@ -177,7 +180,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			report(agentstatus.Report{State: agentstatus.Working, Reason: agentstatus.BackgroundReason(1), Tools: true})
 		}, domain.RunRunning, domain.ActivityWaitingTools, agentstatus.BackgroundReason(1)},
 		{"the held run stalled", func() {
-			quietFor(t, e, 20*time.Millisecond)
+			quietFor(t, e)
 		}, domain.RunNeedsAttention, domain.ActivityWaiting, stalledReasonPrefix},
 		{"an Enhanced turn interrupted", func() {
 			report(agentstatus.Report{State: agentstatus.Idle, Reason: acpInterruptedReason})
@@ -299,4 +302,65 @@ func TestAStallIsWaitingNotNeedsYou(t *testing.T) {
 	if !strings.HasPrefix(p.Reason, "stalled: ") || p.Activity != domain.ActivityWaiting {
 		t.Fatalf("stall published %q with activity %q, want a stalled reason and waiting", p.Reason, p.Activity)
 	}
+}
+
+// TestAWaitGoesStaleOnlyWithNothingLive: a reported wait holds while a
+// worker attempt is live however long it lasts, and once nothing is live it
+// goes stale once, keeping the agent's summary; a CI wait stays a CI wait.
+func TestAWaitGoesStaleOnlyWithNothingLive(t *testing.T) {
+	t.Parallel()
+	var integrator *integratorStore
+	e := newReportingEnv(t, func(cfg *Config) {
+		integrator = &integratorStore{Store: cfg.Store}
+		cfg.Store = integrator
+		cfg.StallThreshold = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	row, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := row.StatusSeq
+	sub := e.subscribe(t)
+	report := func(r agentstatus.Report) {
+		t.Helper()
+		if err := e.sched.ReportAgentState(ctx, run.ID, r); err != nil {
+			t.Fatalf("report %+v: %v", r, err)
+		}
+	}
+	expect := func(what string, activity domain.RunActivity, cause events.RunStatusCause, prefix, suffix string) {
+		t.Helper()
+		p := nextActivity(t, sub, run.ID, &seq)
+		if p.Activity != activity || p.Cause != cause || !strings.HasPrefix(p.Reason, prefix) || !strings.HasSuffix(p.Reason, suffix) {
+			t.Fatalf("%s: published %s by %s %q, want %s by %s %q...%q", what, p.Activity, p.Cause, p.Reason, activity, cause, prefix, suffix)
+		}
+	}
+	idle := agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
+
+	integrator.workers.Store(1)
+	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-1", "", "two workers on the parser", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	report(idle)
+	expect("waiting reported", domain.ActivityWaitingAgents, events.CauseReport, "two workers on the parser", "")
+	quietFor(t, e)
+	expectNoStatusEvent(t, sub, run.ID, "a wait past three stall thresholds with a live worker")
+
+	integrator.workers.Store(0)
+	quietFor(t, e)
+	expect("the last worker gone", domain.ActivityWaiting, events.CauseWaitExpired, waitedReasonPrefix, ": two workers on the parser")
+
+	report(agentstatus.Report{State: agentstatus.Working})
+	expect("next turn", domain.ActivityWorking, events.CauseTurn, "", "")
+	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on PR 12", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	report(idle)
+	expect("waiting for CI reported", domain.ActivityWaitingCI, events.CauseReport, "CI on PR 12", "")
+	quietFor(t, e)
+	expect("the CI wait went stale", domain.ActivityWaitingCI, events.CauseWaitExpired, waitedReasonPrefix, ": CI on PR 12")
+	quietFor(t, e)
+	expectNoStatusEvent(t, sub, run.ID, "a CI wait that already went stale")
 }

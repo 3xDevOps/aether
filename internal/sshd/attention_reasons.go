@@ -51,7 +51,8 @@ var plainReasons = []struct {
 		return "Its container had stopped with exit code " + g[0] + " when the server restarted"
 	}},
 	{regexp.MustCompile(`^(?:agent idle|turn ended without a report)$`), func([]string) string { return "Turn ended without a report" }},
-	{regexp.MustCompile(`^no update for (\S+)$`), func(g []string) string { return "No update for " + g[0] }},
+	{regexp.MustCompile(`(?s)^no update for ([^\s:]+)(: .*)?$`), func(g []string) string { return "No update for " + g[0] + g[1] }},
+	{regexp.MustCompile(`^waiting for (\d+ workers?)$`), func(g []string) string { return "Waiting for " + g[0] }},
 	{regexp.MustCompile(`^agent resumed$`), func([]string) string { return "Agent resumed" }},
 	{regexp.MustCompile(`^agent failed$`), func([]string) string { return "Agent failed" }},
 	{regexp.MustCompile(`^stalled: no output or file changes for (.+)$`), func(g []string) string { return "No output or file changes for " + g[0] }},

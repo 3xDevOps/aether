@@ -675,28 +675,37 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	return &domain.Acceptance{SubmissionID: id, MissionID: missionID, TaskID: taskID, TaskRevision: taskRevision, AcceptedSetVersion: newVersion, IntegratorGeneration: generation, AcceptedByRunID: acceptedBy, ScopeDisposition: scopeDisposition, AcceptedAt: now}, nil
 }
 
-func (d *DB) IntegratorWaiting(ctx context.Context, run domain.RunID, since time.Time) (bool, error) {
+// IntegratorWait is what an integrator's swarm still owes it.
+type IntegratorWait struct {
+	Workers int
+	Unread  int
+}
+
+// Live reports whether the integrator waits on its swarm.
+func (w IntegratorWait) Live() bool { return w.Workers > 0 || w.Unread > 0 }
+
+func (d *DB) IntegratorWaiting(ctx context.Context, run domain.RunID, since time.Time) (IntegratorWait, error) {
 	var after int64
 	if !since.IsZero() {
 		var err error
 		if after, err = encodeTime(since); err != nil {
-			return false, fmt.Errorf("store: integrator waiting: %w", err)
+			return IntegratorWait{}, fmt.Errorf("store: integrator waiting: %w", err)
 		}
 	}
-	var waiting bool
-	err := d.db.QueryRowContext(ctx, `SELECT EXISTS (
-		SELECT 1 FROM missions m JOIN mission_attempts a ON a.mission_id = m.id
+	var w IntegratorWait
+	err := d.db.QueryRowContext(ctx, `SELECT (
+		SELECT COUNT(*) FROM missions m JOIN mission_attempts a ON a.mission_id = m.id
 		WHERE m.current_integrator_run_id = ?1 AND m.phase NOT IN ('completed', 'cancelled')
 		  AND a.state IN ('reserved', 'launching', 'running', 'unknown')
-	) OR EXISTS (
-		SELECT 1 FROM missions m JOIN mission_attempts a ON a.mission_id = m.id
+	), (
+		SELECT COUNT(DISTINCT run_messages.id) FROM missions m JOIN mission_attempts a ON a.mission_id = m.id
 		JOIN run_messages ON run_messages.from_run = a.run_id
 		WHERE m.current_integrator_run_id = ?1 AND m.phase NOT IN ('completed', 'cancelled')
 		  AND run_messages.to_run = ?1 AND run_messages.created_at > ?2
 		  AND run_messages.acked_at IS NULL AND run_messages.retired_at IS NULL
-	)`, run, after).Scan(&waiting)
+	)`, run, after).Scan(&w.Workers, &w.Unread)
 	if err != nil {
-		return false, fmt.Errorf("store: integrator waiting: %w", err)
+		return IntegratorWait{}, fmt.Errorf("store: integrator waiting: %w", err)
 	}
-	return waiting, nil
+	return w, nil
 }

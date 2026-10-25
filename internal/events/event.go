@@ -138,10 +138,27 @@ type RunStatusPayload struct {
 	// one it holds; an event stored before status_seq existed carries 0.
 	Activity  domain.RunActivity `json:"state,omitempty"`
 	StatusSeq int64              `json:"status_seq"`
+	// Cause is what chose Activity; empty on a run that is not live.
+	Cause RunStatusCause `json:"cause,omitempty"`
 	// Review and ReviewChangedAt are the run's after this transition.
 	Review          domain.RunReview `json:"review,omitempty"`
 	ReviewChangedAt *time.Time       `json:"review_changed_at,omitempty"`
 }
+
+// RunStatusCause names what a live run's state was derived from.
+type RunStatusCause string
+
+const (
+	CauseTurn        RunStatusCause = "turn"
+	CauseReport      RunStatusCause = "report"
+	CauseTurnEnd     RunStatusCause = "turn-end"
+	CauseStall       RunStatusCause = "stall"
+	CauseWaitExpired RunStatusCause = "wait-expired"
+	CauseWorkers     RunStatusCause = "workers"
+	CauseTasksHeld   RunStatusCause = "tasks-held"
+	CauseHuman       RunStatusCause = "human"
+	CauseDisconnect  RunStatusCause = "disconnect"
+)
 
 // RunRetentionPayload replaces the runtime retention metadata. Omitted fields
 // clear their previous values; this event never changes the execution outcome.

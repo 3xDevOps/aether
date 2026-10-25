@@ -242,6 +242,8 @@ describe('plainReason', () => {
     ['turn ended: refusal', 'Stopped: the agent refused'],
     ['turn ended: something_new', "The agent's turn ended (something_new)"],
     ['working in background: 1 task', 'Working in background: 1 task'],
+    ['no update for 30m: CI on PR 12', 'No update for 30m: CI on PR 12'],
+    ['waiting for 1 worker', 'Waiting for 1 worker'],
     ['review retained evidence', "Review the worker's saved results"],
     ['killed', 'Stopped'],
     ['disk quota exceeded', 'disk quota exceeded'],

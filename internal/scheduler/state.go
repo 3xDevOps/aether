@@ -307,11 +307,11 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 	if to.Terminal() && !from.Terminal() {
 		finishedAt = &now
 	}
-	public := publicRunStatusReason(reason)
-	activity, err := s.activityLocked(ctx, run, s.runs[run], to, reason)
+	d, err := s.activityLocked(ctx, run, s.runs[run], to, reason)
 	if err != nil {
 		return err
 	}
+	public, activity := d.reason, d.activity
 	write := s.cfg.Store.UpdateRunStatus
 	switch cause {
 	case causeReported:
@@ -324,7 +324,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		return err
 	}
 	payload := events.RunStatusPayload{
-		From: from, To: to, Reason: public, Activity: activity, StatusSeq: stamp.StatusSeq,
+		From: from, To: to, Reason: public, Activity: activity, Cause: d.cause, StatusSeq: stamp.StatusSeq,
 		OutcomeUnseen: stamp.OutcomeUnseen, FinishUnopened: stamp.FinishUnopened,
 		Review: stamp.Review, ReviewChangedAt: stamp.ReviewChangedAt,
 	}

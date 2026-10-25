@@ -51,10 +51,10 @@ A live run carries a state that says what it is doing. The dashboard and
 | State | Label | Meaning |
 | --- | --- | --- |
 | `working` | Working | A turn or tool is running. |
-| `waiting-agents` | Waiting for agents | No turn runs, but the run waits on its own subagents, swarm workers, or a `waiting --for agents` report. |
+| `waiting-agents` | Waiting for agents | No turn runs, but the run waits on its own subagents, swarm workers (`waiting for <n> workers`), or a `waiting --for agents` report. |
 | `waiting-ci` | Waiting for CI | The agent reported `waiting --for ci`. |
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
-| `waiting` | Waiting | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait went stale (`no update for <duration>`). |
+| `waiting` | Waiting | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). |
 | `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, or an Enhanced turn that waits for a reply. |
 | `finished` | Ready for review | An interactive run reported `success`. |
 | `failed` | Failed | The run reported `failure`, or its turn failed. |
@@ -62,9 +62,20 @@ A live run carries a state that says what it is doing. The dashboard and
 
 When several apply, the first in this order wins: disconnected, needs-you,
 working, failed, finished, waiting-agents, waiting-ci, waiting-tools, waiting.
-A waiting state with no activity for three times `--stall-threshold`
-(30 minutes by default) falls back to `waiting` with `no update for
-<duration>`.
+A wait goes stale after three times `--stall-threshold` (30 minutes by
+default) with no activity, unless the run still holds background tasks or,
+as a swarm integrator, has a live worker attempt or unread worker mail.
+Its reason becomes `no update for <duration>`, followed by `: <summary>`
+when the agent reported one. A CI or process wait keeps its state; any other wait shows
+`waiting`, and returns to `waiting-agents` if a worker becomes live again.
+A wait goes stale once; the next turn starts it over.
+
+Each `run.status` event carries a `cause` naming what chose the state:
+`turn`, `report` (the agent's own report), `turn-end`, `stall`,
+`wait-expired`, `workers`, `tasks-held`, `human`, or `disconnect`.
+`aether timeline <run-id>` prints it after the state, for example
+`running -> needs-attention (waiting for 2 workers) · waiting-agents by
+workers`.
 
 An agent's `blocked` report reads `blocked: <summary>`, and its question reads
 `needs input: <question>`.
