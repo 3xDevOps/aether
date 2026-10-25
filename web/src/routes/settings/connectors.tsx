@@ -134,7 +134,7 @@ function Setup({
           {url ? <CopyableCommand command={url} /> : edgeNote ?? <p className="text-muted">The URL appears with the code.</p>}
         </Step>
         <Step n={3}>
-          <p>On the Aether page that opens, paste this code, choose its scopes and select <strong>Allow</strong>.</p>
+          <p>On the Aether page that opens, choose its scopes, paste this code if the page asks for one, and select <strong>Allow</strong>.</p>
           <CodeStep code={code} busy={busy} expired={expired} onMint={onMint} />
         </Step>
       </ol>

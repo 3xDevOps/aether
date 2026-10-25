@@ -36,7 +36,7 @@ func (s *Server) Local(member domain.MemberID) *Local {
 // connector.
 func (s *Server) ConnectorLocal(grant ConnectorGrant, connectorID, client string) *Local {
 	return &Local{s: s, member: grant.Member, id: &connIdentity{member: grant.Member, device: grant.Device,
-		connector: connectorID, connectorClient: client}}
+		connector: connectorID, connectorClient: client, edgeSignIn: grant.Subject != ""}}
 }
 
 // Call applies the SSH control channel's request payload budget, which the

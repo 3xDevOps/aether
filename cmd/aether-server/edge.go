@@ -173,7 +173,12 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	_, _ = fmt.Fprintf(tw, "edge\t%s\n", edgeURL)
 	_, _ = fmt.Fprintf(tw, "edge access\t%s\n", policy)
 	_, _ = fmt.Fprintf(tw, "server id\t%s\n", id)
+	stale := status.Stale(now)
 	_, _ = fmt.Fprintf(tw, "connector\t%s  (add it to ChatGPT or Claude; get a code: aether mcp)\n", origin+edgeproto.MCPPath(id))
+	if status.Connected && stale == nil && status.Protocol >= edgeproto.VersionUniversalMCP {
+		_, _ = fmt.Fprintf(tw, "universal\t%s  (the connector URL for members with a GitHub account linked; aether mcp prints each member's)\n",
+			origin+edgeproto.PathUniversalMCP)
+	}
 	if pinned != nil {
 		_, _ = fmt.Fprintf(tw, "edge key\t%s\n", edgeproto.EdgeKeyFingerprint(pinned))
 	} else {
@@ -187,7 +192,6 @@ func edgeStatus(w io.Writer, dataDir, edgeURL string, policy edgeproto.AccessPol
 	default:
 		_, _ = fmt.Fprintln(tw, "owner\tnone; get a claim code with `aether-server edge claim-code`")
 	}
-	stale := status.Stale(now)
 	switch {
 	case !ran:
 		_, _ = fmt.Fprintf(tw, "connection\tnever connected: no server using %s has recorded an attempt to reach the edge\n", dataDir)

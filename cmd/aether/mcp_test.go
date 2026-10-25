@@ -22,7 +22,7 @@ func TestPrintConnectors(t *testing.T) {
 	}
 	want := `Add this server to ChatGPT or Claude as a custom connector:
   URL   https://edge.onaether.dev/mcp/abc
-  Code  ABCD-EFGH   one use, expires in 10 minutes; paste it on the page that opens when you connect
+  Code  ABCD-EFGH   one use, expires in 10 minutes; paste it on the page that opens when you connect, if it asks
 Connected:
   con-1  ChatGPT (chatgpt.com)  scopes read,write  added 2026-10-18  last used 2h ago
   con-2  Claude (claude.ai)  scopes read,write,control  added 2026-10-18  never used

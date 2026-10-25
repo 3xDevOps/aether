@@ -1972,7 +1972,14 @@ CREATE TABLE slack_messages (
 	UNIQUE (channel_id, ts)
 );
 `,
-	// v83: the receipt of each waiting or needs-input report, so a reused
+	// v83: the edge account whose sign-in authorized a connector on the
+	// universal connector URL instead of a pairing code, '' for one
+	// authorized with a code.
+	`
+ALTER TABLE connectors ADD COLUMN provider TEXT NOT NULL DEFAULT '';
+ALTER TABLE connectors ADD COLUMN subject TEXT NOT NULL DEFAULT '';
+`,
+	// v84: the receipt of each waiting or needs-input report, so a reused
 	// idempotency key with different inputs is refused instead of dropped.
 	`
 CREATE TABLE coord_state_reports (

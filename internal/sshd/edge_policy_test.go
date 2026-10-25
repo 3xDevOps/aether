@@ -2,6 +2,7 @@ package sshd
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -400,6 +401,44 @@ func TestPrivilegedMethodsRefuseAnUnapprovedDevice(t *testing.T) {
 	}
 }
 
+// connector.code gives the universal connector URL only to a member the
+// edge can offer the server to, one with a GitHub account bound, and
+// mints nothing for a connector authorized by signing in at the edge.
+func TestConnectorCodeURLAndEdgeSignIn(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	e.srv.SetEdgeOwner(&fakeEdgeOwner{})
+	ctx := context.Background()
+	code := func() protocol.ConnectorCodeResult {
+		t.Helper()
+		raw, perr := e.srv.dispatch(ctx, e.member.ID, protocol.MethodConnectorCode, json.RawMessage(`{}`))
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		var out protocol.ConnectorCodeResult
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if got, want := code().URL, "https://edge.example"+edgeproto.MCPPath(edgeproto.ServerID(e.srv.hostKey.PublicKey())); got != want {
+		t.Fatalf("connector.code url for a member with no GitHub account = %s, want %s", got, want)
+	}
+	if err := identities(t, e).BindIdentity(ctx, &domain.Identity{Member: e.member.ID, Provider: octo.Provider, Subject: octo.Subject, Login: octo.Login}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := code().URL, "https://edge.example"+edgeproto.PathUniversalMCP; got != want {
+		t.Fatalf("connector.code url for a member with a GitHub account = %s, want %s", got, want)
+	}
+	signIn := context.WithValue(ctx, connIdentityKey{}, connIdentity{member: e.member.ID, connector: "con-x", connectorClient: "ChatGPT", edgeSignIn: true})
+	for _, method := range []string{protocol.MethodConnectorCode, protocol.MethodSlackLink} {
+		_, perr := e.srv.dispatch(signIn, e.member.ID, method, json.RawMessage(`{}`))
+		if want := method + " needs a device, a member SSH key or a tailnet connection; ChatGPT connector con-x was authorized by signing in at the edge, with no device"; perr == nil || perr.Message != want {
+			t.Errorf("%s from a connector authorized by signing in = %v, want %q", method, perr, want)
+		}
+	}
+}
+
 // No control method reaches the access policy: every registered method is
 // called as an admin with parameters naming the setting, and a new device
 // still waits for approval afterwards.
@@ -503,6 +542,7 @@ func (f *fakeEdgeOwner) Origin() string                     { return "https://ed
 func (f *fakeEdgeOwner) Connected() bool                    { return true }
 func (f *fakeEdgeOwner) EdgeVersion() int                   { return edgeproto.Version }
 func (f *fakeEdgeOwner) EdgeState() string                  { return f.state }
+func (f *fakeEdgeOwner) EdgeKey() ed25519.PublicKey         { return nil }
 
 func (f *fakeEdgeOwner) TransferOwner(owner edgeproto.Account) error {
 	f.mu.Lock()
