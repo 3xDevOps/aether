@@ -129,15 +129,16 @@ run `aether member merge <code>` (options `--keep <member id>`, `--keep-admin`,
 `--yes`), then `aether member merge accept` back on the first. Both show what is
 discarded before you confirm. The survivor takes the other member's runs,
 schedules, devices and accounts, and the lower of the two roles. The absorbed
-member's home moves to `<data-dir>/merged/<merge id>/home` and still holds agent
-logins, so remove it with `sudo rm -r` once nothing in it is needed. A merge is
+member's home moves to `<data-dir>/merged/<merge id>/home` and their private
+signing key to `signing-key` beside it. Both hold credentials, so remove the
+directory with `sudo rm -r` once nothing in it is needed. A merge is
 refused, with the reason, when either member is pending or has an unfinished run,
 terminal or swarm role. Nothing undoes a merge.
 
 ### Remove access
 
-`aether member remove <id>` deletes a member and their environment and closes
-their connections. `aether device revoke <id>` refuses a device key everywhere.
+`aether member remove <id>` deletes a member, their environment and their
+private signing key, and closes their connections. `aether device revoke <id>` refuses a device key everywhere.
 `aether member unlink <member-id> github:<user id>` unbinds one GitHub account
 and revokes the devices that signed in with it. `aether invite revoke <id>` kills
 a link.

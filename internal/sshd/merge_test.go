@@ -20,6 +20,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
+	"github.com/3xDevOps/Aether/internal/signing"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -125,8 +126,13 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	signer, err := signing.New(t.TempDir(), t.TempDir(), homes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = signer.Close() })
 	merged := filepath.Join(t.TempDir(), "merged")
-	e, whois := mergeEnv(t, func(c *Config) { c.Homes, c.MergedDir = homes, merged })
+	e, whois := mergeEnv(t, func(c *Config) { c.Homes, c.Signing, c.MergedDir = homes, signer, merged })
 	ctx := context.Background()
 	tina := addTailnetMember(t, e, "octo@example.com", domain.RoleCollaborator)
 	tailnet := tailnetDial(t, e, whois, tina.TailnetLogin)
@@ -141,6 +147,10 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = os.WriteFile(filepath.Join(ghHome, "notes.txt"), []byte("kept"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agentDir, err := signer.Serve(domain.MemberID(gh.ID))
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,6 +206,9 @@ func TestMergeTailnetMemberWithEdgeMember(t *testing.T) {
 	if res.Member.ID != string(tina.ID) || res.Merge.AbsorbedID != gh.ID || res.Merge.Discarded.DisplayName != "Octo Cat" ||
 		res.Merge.ConfirmedByKind != "ssh" || res.Merge.ArchivePath != filepath.Join(merged, res.Merge.ID) {
 		t.Fatalf("merge = %+v", res)
+	}
+	if _, serr := os.Stat(agentDir); !errors.Is(serr, os.ErrNotExist) {
+		t.Fatalf("absorbed member's signing agent after the merge: stat = %v, want it stopped", serr)
 	}
 	if data, gerr := os.ReadFile(filepath.Join(res.Merge.ArchivePath, "home", "notes.txt")); gerr != nil || string(data) != "kept" {
 		t.Fatalf("archived home: %q, %v", data, gerr)
@@ -443,16 +456,23 @@ func TestInviteCodeDiesWithItsIssuersAdminRole(t *testing.T) {
 	}
 }
 
-// A merge that moved a home aside and never committed, because the server
-// stopped, gets the home back at the next start.
+// A merge that moved a home and signing key aside and never committed,
+// because the server stopped, gets both back at the next start; one that
+// fails while the server runs puts them back at once.
 func TestRecoverMergeArchivesPutsBackAnUncommittedHome(t *testing.T) {
 	t.Parallel()
 	homes, err := memberhome.New(filepath.Join(t.TempDir(), "homes"), filepath.Join(t.TempDir(), "caches"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	keys := t.TempDir()
+	signer, err := signing.New(keys, t.TempDir(), homes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = signer.Close() })
 	merged := filepath.Join(t.TempDir(), "merged")
-	e := newTestEnv(t, func(c *Config) { c.Homes, c.MergedDir = homes, merged })
+	e := newTestEnv(t, func(c *Config) { c.Homes, c.Signing, c.MergedDir = homes, signer, merged })
 	home, err := homes.Path(e.member.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -460,16 +480,40 @@ func TestRecoverMergeArchivesPutsBackAnUncommittedHome(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(home, "notes.txt"), []byte("kept"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	dir, _, err := e.srv.archiveHome("mrg-unfinished", e.member.ID)
+	keyPath := filepath.Join(keys, string(e.member.ID))
+	if err = os.WriteFile(keyPath, []byte("the member's key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	assertKept := func(when string) {
+		t.Helper()
+		if data, rerr := os.ReadFile(filepath.Join(home, "notes.txt")); rerr != nil || string(data) != "kept" {
+			t.Fatalf("home %s: %q, %v", when, data, rerr)
+		}
+		if data, rerr := os.ReadFile(keyPath); rerr != nil || string(data) != "the member's key" {
+			t.Fatalf("signing key %s: %q, %v", when, data, rerr)
+		}
+	}
+
+	dir, rollback, err := e.srv.archiveHome("mrg-failed", e.member.ID)
+	if err != nil || dir == "" {
+		t.Fatalf("archive = %q, %v", dir, err)
+	}
+	if _, serr := os.Stat(filepath.Join(dir, "signing-key")); serr != nil {
+		t.Fatalf("archived signing key: %v", serr)
+	}
+	if err = rollback(); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	assertKept("after a rollback")
+
+	dir, _, err = e.srv.archiveHome("mrg-unfinished", e.member.ID)
 	if err != nil || dir == "" {
 		t.Fatalf("archive = %q, %v", dir, err)
 	}
 	if err = e.srv.RecoverMergeArchives(context.Background()); err != nil {
 		t.Fatalf("RecoverMergeArchives: %v", err)
 	}
-	if data, rerr := os.ReadFile(filepath.Join(home, "notes.txt")); rerr != nil || string(data) != "kept" {
-		t.Fatalf("home after recovery: %q, %v", data, rerr)
-	}
+	assertKept("after recovery")
 	if _, serr := os.Stat(dir); !errors.Is(serr, os.ErrNotExist) {
 		t.Fatalf("archive left behind: %v", serr)
 	}

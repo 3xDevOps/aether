@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -202,6 +203,17 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	var roots []string
 	if s.cfg.Homes != nil {
 		roots = []string{s.cfg.Homes.Root(), s.cfg.Homes.CacheRoot(), s.scratchRoot()}
+	}
+	if s.cfg.Signing != nil {
+		agentDir, err := s.cfg.Signing.Serve(member.ID)
+		if err != nil {
+			return nil, fmt.Errorf("scheduler: serve the commit signing agent: %w", err)
+		}
+		plan.Mounts = append(plan.Mounts, runtime.Mount{HostPath: agentDir, ContainerPath: coordtransport.SigningMountDir, ReadOnly: true})
+		roots = append(roots, agentDir)
+		// Wins over a workspace variable: the home's git signs through this
+		// agent, and commit.gpgsign fails every commit it cannot sign.
+		env["SSH_AUTH_SOCK"] = coordtransport.SigningSocketPath
 	}
 	var worktrees []runtime.Mount
 	if run != nil {

@@ -28,68 +28,70 @@ func newSigningManager(t *testing.T) (*Manager, string) {
 	return manager, home
 }
 
-func TestEnsureSigningKeyGeneratesOnceAndIsStable(t *testing.T) {
+const testPublicLine = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl aether member-1"
+
+// The .pub is what gh ssh-key add uploads, and the container can replace
+// it, so every write replaces whatever is there instead of writing through.
+func TestWriteSigningPublicKeyReplacesAPlantedFile(t *testing.T) {
 	manager, home := newSigningManager(t)
-
-	has, err := manager.HasSigningKey("member-1")
-	if err != nil || has {
-		t.Fatalf("HasSigningKey before generation = (%v, %v), want (false, nil)", has, err)
+	if err := manager.WriteSigningPublicKey("member-1", testPublicLine); err != nil {
+		t.Fatalf("WriteSigningPublicKey: %v", err)
 	}
-	key, err := manager.SigningKey("member-1")
-	if err != nil || key != nil {
-		t.Fatalf("SigningKey before generation = (%q, %v), want (nil, nil)", key, err)
+	pubPath := filepath.Join(home, ".ssh", "aether_signing.pub")
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.WriteFile(elsewhere, []byte("untouched\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-
-	pub, err := manager.EnsureSigningKey("member-1")
-	if err != nil {
-		t.Fatalf("EnsureSigningKey: %v", err)
+	if err := os.Remove(pubPath); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.HasPrefix(pub, "ssh-ed25519 ") || !strings.HasSuffix(pub, " aether member-1") {
-		t.Fatalf("public key line = %q, want an ssh-ed25519 line commented aether member-1", pub)
+	if err := os.Symlink(elsewhere, pubPath); err != nil {
+		t.Fatal(err)
 	}
 
+	if err := manager.WriteSigningPublicKey("member-1", testPublicLine); err != nil {
+		t.Fatalf("second WriteSigningPublicKey: %v", err)
+	}
 	for path, want := range map[string]os.FileMode{
-		filepath.Join(home, ".ssh"):                       0o700,
-		filepath.Join(home, ".ssh", "aether_signing"):     0o600,
-		filepath.Join(home, ".ssh", "aether_signing.pub"): 0o644,
+		filepath.Join(home, ".ssh"): 0o700,
+		pubPath:                     0o644,
 	} {
-		info, statErr := os.Lstat(path)
-		if statErr != nil {
-			t.Fatalf("stat %s: %v", path, statErr)
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
 		}
-		if info.Mode().Perm() != want {
-			t.Errorf("%s mode = %v, want %v", path, info.Mode().Perm(), want)
+		if info.Mode().Perm() != want || info.Mode()&os.ModeSymlink != 0 {
+			t.Errorf("%s mode = %v, want %v", path, info.Mode(), want)
 		}
 	}
-	pubFile, err := os.ReadFile(filepath.Join(home, ".ssh", "aether_signing.pub"))
-	if err != nil {
-		t.Fatalf("read public key file: %v", err)
+	if got, err := os.ReadFile(pubPath); err != nil || string(got) != testPublicLine+"\n" {
+		t.Errorf("public key file = %q (%v), want %q", got, err, testPublicLine)
 	}
-	if strings.TrimSpace(string(pubFile)) != pub {
-		t.Errorf("public key file = %q, want %q", pubFile, pub)
+	if got, err := os.ReadFile(elsewhere); err != nil || string(got) != "untouched\n" {
+		t.Errorf("symlink target = %q (%v), want it untouched", got, err)
 	}
+}
 
-	private, err := manager.SigningKey("member-1")
-	if err != nil {
-		t.Fatalf("SigningKey: %v", err)
+func TestRemoveLegacySigningKey(t *testing.T) {
+	manager, home := newSigningManager(t)
+	if err := manager.RemoveLegacySigningKey("member-1"); err != nil {
+		t.Fatalf("RemoveLegacySigningKey without a .ssh: %v", err)
 	}
-	if !strings.HasPrefix(string(private), "-----BEGIN OPENSSH PRIVATE KEY-----") {
-		t.Fatalf("private key = %q, want an OpenSSH PEM block", private)
+	if err := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
 	}
-	if has, herr := manager.HasSigningKey("member-1"); err != nil || !has {
-		t.Fatalf("HasSigningKey after generation = (%v, %v), want (true, nil)", has, herr)
+	keyPath := filepath.Join(home, ".ssh", "aether_signing")
+	if err := os.WriteFile(keyPath, []byte("key\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-
-	again, err := manager.EnsureSigningKey("member-1")
-	if err != nil {
-		t.Fatalf("second EnsureSigningKey: %v", err)
+	if err := manager.RemoveLegacySigningKey("member-1"); err != nil {
+		t.Fatalf("RemoveLegacySigningKey: %v", err)
 	}
-	if again != pub {
-		t.Errorf("second EnsureSigningKey = %q, want the first key %q", again, pub)
+	if _, err := os.Lstat(keyPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("legacy key stat = %v, want it gone", err)
 	}
-	second, err := manager.SigningKey("member-1")
-	if err != nil || string(second) != string(private) {
-		t.Errorf("private key changed on the second call")
+	if err := manager.RemoveLegacySigningKey("member-1"); err != nil {
+		t.Fatalf("RemoveLegacySigningKey on an absent key: %v", err)
 	}
 }
 
@@ -97,7 +99,7 @@ func TestEnsureSigningKeyGeneratesOnceAndIsStable(t *testing.T) {
 // key belongs must stop the server rather than lead it somewhere else.
 // The link points inside the home, where os.Root would follow it happily:
 // only the regular-file checks can refuse this one.
-func TestSigningKeyRefusesASymlink(t *testing.T) {
+func TestLegacySigningKeyRefusesASymlink(t *testing.T) {
 	manager, home := newSigningManager(t)
 	if err := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); err != nil {
 		t.Fatal(err)
@@ -109,15 +111,8 @@ func TestSigningKeyRefusesASymlink(t *testing.T) {
 	if err := os.Symlink("planted", filepath.Join(home, ".ssh", "aether_signing")); err != nil {
 		t.Fatal(err)
 	}
-
-	if _, err := manager.EnsureSigningKey("member-1"); err == nil {
-		t.Fatal("EnsureSigningKey accepted a symlinked key path")
-	}
-	if _, err := manager.SigningKey("member-1"); err == nil {
-		t.Fatal("SigningKey accepted a symlinked key path")
-	}
-	if has, err := manager.HasSigningKey("member-1"); err != nil || has {
-		t.Fatalf("HasSigningKey on a symlink = (%v, %v), want (false, nil)", has, err)
+	if _, err := manager.LegacySigningKey("member-1"); err == nil {
+		t.Fatal("LegacySigningKey accepted a symlinked key path")
 	}
 }
 
@@ -134,7 +129,7 @@ func TestConfigureGitWritesSigningSettingsAndKeepsOtherSections(t *testing.T) {
 	}
 
 	identity := domain.GitIdentity{Name: "Ada Lovelace", Email: "ada@example.com"}
-	if err := manager.ConfigureGit(t.Context(), "member-1", identity); err != nil {
+	if err := manager.ConfigureGit(t.Context(), "member-1", identity, testPublicLine); err != nil {
 		t.Fatalf("ConfigureGit: %v", err)
 	}
 
@@ -151,7 +146,7 @@ func TestConfigureGitWritesSigningSettingsAndKeepsOtherSections(t *testing.T) {
 		"user.name=Ada Lovelace",
 		"user.email=ada@example.com",
 		"gpg.format=ssh",
-		"user.signingkey=~/.ssh/aether_signing",
+		"user.signingkey=key::" + testPublicLine,
 		"commit.gpgsign=true",
 	}
 	slices.Sort(got)
@@ -161,7 +156,7 @@ func TestConfigureGitWritesSigningSettingsAndKeepsOtherSections(t *testing.T) {
 	}
 
 	// A second call rewrites the same five keys rather than appending.
-	if err := manager.ConfigureGit(t.Context(), "member-1", identity); err != nil {
+	if err := manager.ConfigureGit(t.Context(), "member-1", identity, testPublicLine); err != nil {
 		t.Fatalf("second ConfigureGit: %v", err)
 	}
 	if again := gitConfigList(t, config); len(again) != len(want) {
@@ -178,37 +173,13 @@ func TestConfigureGitRefusesASymlinkedConfig(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(home, ".gitconfig")); err != nil {
 		t.Fatal(err)
 	}
-	err := manager.ConfigureGit(t.Context(), "member-1", domain.GitIdentity{Name: "Ada", Email: "ada@example.com"})
+	err := manager.ConfigureGit(t.Context(), "member-1", domain.GitIdentity{Name: "Ada", Email: "ada@example.com"}, testPublicLine)
 	if err == nil {
 		t.Fatal("ConfigureGit accepted a symlinked .gitconfig")
 	}
 	contents, readErr := os.ReadFile(target)
 	if readErr != nil || len(contents) != 0 {
 		t.Fatalf("symlink target = %q (%v), want it untouched", contents, readErr)
-	}
-}
-
-// The generated key has to be one the system ssh-keygen can sign with;
-// that, not its wire shape, is what git needs at commit time.
-func TestGeneratedSigningKeySignsWithSSHKeygen(t *testing.T) {
-	if _, err := exec.LookPath("ssh-keygen"); err != nil {
-		t.Skip("ssh-keygen is not on PATH")
-	}
-	manager, home := newSigningManager(t)
-	if _, err := manager.EnsureSigningKey("member-1"); err != nil {
-		t.Fatalf("EnsureSigningKey: %v", err)
-	}
-	payload := filepath.Join(t.TempDir(), "payload")
-	if err := os.WriteFile(payload, []byte("commit object\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.CommandContext(t.Context(), "ssh-keygen", "-Y", "sign",
-		"-f", filepath.Join(home, ".ssh", "aether_signing"), "-n", "git", payload)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("ssh-keygen -Y sign: %v: %s", err, out)
-	}
-	if _, err := os.Stat(payload + ".sig"); err != nil {
-		t.Fatalf("stat signature: %v", err)
 	}
 }
 
@@ -221,22 +192,6 @@ func gitConfigList(t *testing.T, path string) []string {
 		t.Fatalf("git config --list: %v", err)
 	}
 	return strings.Split(strings.TrimSpace(string(out)), "\n")
-}
-
-// A container can overwrite its own member's key. Signing a commit with
-// the result would fail the commit, so an unparsable key reads as no key.
-func TestSigningKeyIgnoresAnUnparsableKey(t *testing.T) {
-	manager, home := newSigningManager(t)
-	if err := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".ssh", "aether_signing"), []byte("not a key at all\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	key, err := manager.SigningKey("member-1")
-	if err != nil || key != nil {
-		t.Fatalf("SigningKey with garbage bytes = (%q, %v), want (nil, nil)", key, err)
-	}
 }
 
 // The home is agent-writable, so both reads are capped: a huge file
@@ -261,62 +216,19 @@ func TestReadsRefuseAnOversizeFile(t *testing.T) {
 	plant(t, filepath.Join(home, ".gitconfig"))
 
 	start := time.Now()
-	if _, err := manager.SigningKey("member-1"); err == nil || !strings.Contains(err.Error(), "16384 byte limit") {
-		t.Errorf("SigningKey on a 2 GiB key = %v, want the 16384 byte cap", err)
+	if _, err := manager.LegacySigningKey("member-1"); err == nil || !strings.Contains(err.Error(), "16384 byte limit") {
+		t.Errorf("LegacySigningKey on a 2 GiB key = %v, want the 16384 byte cap", err)
 	}
-	if _, err := manager.EnsureSigningKey("member-1"); err == nil || !strings.Contains(err.Error(), "16384 byte limit") {
-		t.Errorf("EnsureSigningKey on a 2 GiB key = %v, want the 16384 byte cap", err)
-	}
-	err := manager.ConfigureGit(t.Context(), "member-1", domain.GitIdentity{Name: "Ada", Email: "ada@example.com"})
+	err := manager.ConfigureGit(t.Context(), "member-1", domain.GitIdentity{Name: "Ada", Email: "ada@example.com"}, testPublicLine)
 	if err == nil || !strings.Contains(err.Error(), "262144 byte limit") {
 		t.Errorf("ConfigureGit on a 2 GiB .gitconfig = %v, want the 262144 byte cap", err)
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
-		t.Errorf("the three capped reads took %v, want a refusal without reading 2 GiB", elapsed)
+		t.Errorf("the two capped reads took %v, want a refusal without reading 2 GiB", elapsed)
 	}
 	staged, err := filepath.Glob(filepath.Join(home, ".gitconfig.aether-tmp*"))
 	if err != nil || len(staged) != 0 {
 		t.Errorf("staged files = %v (%v), want none", staged, err)
-	}
-}
-
-// An agent that replaces its own .pub gets it rewritten from the private
-// key on the next call, and a key it left world-readable tightened.
-func TestEnsureSigningKeyRewritesThePublicKeyAndMode(t *testing.T) {
-	manager, home := newSigningManager(t)
-	pub, err := manager.EnsureSigningKey("member-1")
-	if err != nil {
-		t.Fatalf("EnsureSigningKey: %v", err)
-	}
-	pubPath := filepath.Join(home, ".ssh", "aether_signing.pub")
-	keyPath := filepath.Join(home, ".ssh", "aether_signing")
-	if werr := os.WriteFile(pubPath, []byte("ssh-ed25519 AAAAsomeoneelse agent\n"), 0o644); werr != nil {
-		t.Fatal(werr)
-	}
-	if cerr := os.Chmod(keyPath, 0o644); cerr != nil {
-		t.Fatal(cerr)
-	}
-
-	again, err := manager.EnsureSigningKey("member-1")
-	if err != nil {
-		t.Fatalf("second EnsureSigningKey: %v", err)
-	}
-	if again != pub {
-		t.Errorf("second EnsureSigningKey = %q, want the stored key %q", again, pub)
-	}
-	written, err := os.ReadFile(pubPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(string(written)) != pub {
-		t.Errorf("public key file = %q, want it rewritten to %q", written, pub)
-	}
-	info, err := os.Lstat(keyPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("private key mode = %v, want 0600", info.Mode().Perm())
 	}
 }
 
@@ -336,7 +248,7 @@ func TestConfigureGitClearsAStaleStagedConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := manager.ConfigureGit(t.Context(), "member-1", domain.GitIdentity{Name: "Ada", Email: "ada@example.com"}); err != nil {
+	if err := manager.ConfigureGit(t.Context(), "member-1", domain.GitIdentity{Name: "Ada", Email: "ada@example.com"}, testPublicLine); err != nil {
 		t.Fatalf("ConfigureGit: %v", err)
 	}
 	if _, err := os.Lstat(stale); !os.IsNotExist(err) {

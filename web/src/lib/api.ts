@@ -1133,8 +1133,8 @@ export const api = {
   envSave: () => call<EnvSaveResult>('env.save', {}),
   envReset: () => call<unknown>('env.reset', {}),
   /** Finishes the GitHub connection the member started with `gh auth login`
-   * in their environment terminal: git credentials there, a signing key in
-   * their environment home, and that key registered on the account. */
+   * in their environment terminal: git credentials there, a signing key the
+   * server keeps, and that key registered on the account. */
   githubConnect: () => call<GitHubConnectResult>('github.connect', {}),
   /** Answers only for an environment terminal that is already running. */
   githubProbe: () => call<GitHubProbeResult>('github.probe', {}),

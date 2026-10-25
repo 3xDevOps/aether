@@ -141,12 +141,15 @@ test('administrator onboards a private read-only repository, then adds another i
   await screenshot(page, 'github-onboarding-ready')
 
   // The native signing setup and credential helper are real; this is not a
-  // canned successful connect response from a mocked browser request.
-  expect(existsSync(path.join(home, '.ssh/aether_signing'))).toBe(true)
-  expect(readFileSync(path.join(home, 'gh-registered-key'), 'utf8')).toBe(readFileSync(path.join(home, '.ssh/aether_signing.pub'), 'utf8'))
+  // canned successful connect response from a mocked browser request. The
+  // private key stays in the server's data directory, out of the home.
+  expect(existsSync(path.join(home, '.ssh/aether_signing'))).toBe(false)
+  expect(existsSync(path.join(aether.server.dataDir, 'signing-keys', id))).toBe(true)
+  const publicKey = readFileSync(path.join(home, '.ssh/aether_signing.pub'), 'utf8')
+  expect(readFileSync(path.join(home, 'gh-registered-key'), 'utf8')).toBe(publicKey)
   const config = readFileSync(path.join(home, '.gitconfig'), 'utf8')
   expect(config).toContain('helper = !gh auth git-credential')
-  expect(config).toContain('signingkey = ~/.ssh/aether_signing')
+  expect(config).toContain(`signingkey = key::${publicKey.trim()}`)
   expect(config).toContain('gpgsign = true')
 
   await settings(page, alice)

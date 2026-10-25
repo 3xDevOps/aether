@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/pem"
 	"errors"
 	"os"
 	"os/exec"
@@ -11,7 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/ssh"
+
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/signing"
 )
 
 const ghStatusLoggedIn = `{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"gist, read:org, repo, admin:ssh_signing_key"}]}}`
@@ -39,6 +44,24 @@ func asksWhereGhIs(argv []string) bool {
 	return slices.Equal(argv, []string{"sh", "-c", `printf '%s\n%s\n' "$HOME" "$(command -v gh || true)"`})
 }
 
+// withSigning gives the scheduler a signing service in a short directory,
+// because the agent's unix socket path is capped at 107 bytes.
+func withSigning(t *testing.T) func(*Config) {
+	return func(cfg *Config) {
+		dir, err := os.MkdirTemp("", "sign")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		s, err := signing.New(filepath.Join(dir, "keys"), filepath.Join(dir, "sock"), cfg.Homes)
+		if err != nil {
+			t.Fatalf("signing.New: %v", err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		cfg.Signing = s
+	}
+}
+
 func requireSSHKeygen(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
@@ -48,7 +71,7 @@ func requireSSHKeygen(t *testing.T) {
 
 func TestConnectGitHubNeedsARunningTerminal(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	_, err := e.sched.ConnectGitHub(t.Context(), e.member.ID)
 	if !errors.Is(err, ErrTerminalNotRunning) {
 		t.Fatalf("ConnectGitHub error = %v, want %v", err, ErrTerminalNotRunning)
@@ -57,7 +80,7 @@ func TestConnectGitHubNeedsARunningTerminal(t *testing.T) {
 
 func TestConnectGitHubReportsAnUnfinishedLogin(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	const output = `{"hosts":{"github.com":[{"state":"timeout","active":true,"login":"octocat"}]}}`
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		if slices.Contains(argv, "--version") {
@@ -79,15 +102,15 @@ func TestConnectGitHubReportsAnUnfinishedLogin(t *testing.T) {
 	if !strings.Contains(err.Error(), output) {
 		t.Errorf("error %q does not carry gh's own output", err)
 	}
-	if has, herr := e.cfg.Homes.HasSigningKey(e.member.ID); herr != nil || has {
-		t.Errorf("signing key after a failed login = (%v, %v), want none", has, herr)
+	if key, kerr := e.cfg.Signing.Key(e.member.ID); kerr != nil || key != nil {
+		t.Errorf("signing key after a failed login = (%q, %v), want none", key, kerr)
 	}
 }
 
 func TestConnectGitHubSurfacesSetupGitFailure(t *testing.T) {
 	t.Parallel()
 	requireSSHKeygen(t)
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		if slices.Contains(argv, "--version") {
 			return 0, ghVersionCurrent, nil
@@ -104,15 +127,15 @@ func TestConnectGitHubSurfacesSetupGitFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no credential helper") {
 		t.Fatalf("ConnectGitHub error = %v, want gh's setup-git output", err)
 	}
-	if has, herr := e.cfg.Homes.HasSigningKey(e.member.ID); herr != nil || has {
-		t.Errorf("signing key after a failed setup-git = (%v, %v), want none", has, herr)
+	if key, kerr := e.cfg.Signing.Key(e.member.ID); kerr != nil || key != nil {
+		t.Errorf("signing key after a failed setup-git = (%q, %v), want none", key, kerr)
 	}
 }
 
 func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
 	t.Parallel()
 	requireSSHKeygen(t)
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	if err := e.db.UpdateMemberGitIdentity(t.Context(), e.member.ID, "Ada Lovelace", "ada@example.com"); err != nil {
 		t.Fatalf("UpdateMemberGitIdentity: %v", err)
 	}
@@ -177,8 +200,11 @@ func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
 	if strings.TrimSpace(string(pub)) != conn.SigningKey {
 		t.Errorf("public key file = %q, want %q", pub, conn.SigningKey)
 	}
-	if _, statErr := os.Stat(filepath.Join(home, ".ssh", "aether_signing")); statErr != nil {
-		t.Fatalf("stat private key: %v", statErr)
+	if _, statErr := os.Lstat(filepath.Join(home, ".ssh", "aether_signing")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("private key in the home: stat = %v, want none", statErr)
+	}
+	if key, kerr := e.cfg.Signing.Key(e.member.ID); kerr != nil || key == nil {
+		t.Fatalf("server-held key = (%q, %v), want one", key, kerr)
 	}
 	config, err := os.ReadFile(filepath.Join(home, ".gitconfig"))
 	if err != nil {
@@ -186,7 +212,7 @@ func TestConnectGitHubRegistersTheSigningKey(t *testing.T) {
 	}
 	for _, want := range []string{
 		"name = Ada Lovelace", "email = ada@example.com",
-		"format = ssh", "signingkey = ~/.ssh/aether_signing", "gpgsign = true",
+		"format = ssh", "signingkey = key::" + conn.SigningKey, "gpgsign = true",
 	} {
 		if !strings.Contains(string(config), want) {
 			t.Errorf(".gitconfig is missing %q:\n%s", want, config)
@@ -223,7 +249,7 @@ func homeKeyMaterial(t *testing.T, e *testEnv) string {
 // JSON it arrived in.
 func TestConnectGitHubReportsTheAccountsOwnError(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	const output = `{"hosts":{"github.com":[{"state":"error","active":true,"login":"octocat","error":"HTTP 401: Bad credentials"}]}}`
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		if slices.Contains(argv, "--version") {
@@ -255,7 +281,7 @@ func TestConnectGitHubReportsTheAccountsOwnError(t *testing.T) {
 // command that fixes it.
 func TestConnectGitHubRefusesALoginWithoutTheSigningScope(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	const output = `{"hosts":{"github.com":[{"state":"success","active":true,"login":"octocat","scopes":"gist, read:org, repo"}]}}`
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		if slices.Contains(argv, "--version") {
@@ -297,7 +323,7 @@ func TestConnectGitHubRefusesALoginWithoutTheSigningScope(t *testing.T) {
 func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
 	t.Parallel()
 	requireSSHKeygen(t)
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
 		case slices.Contains(argv, "--version"):
@@ -332,7 +358,7 @@ func TestConnectGitHubRefusesAKeyTheAccountDoesNotList(t *testing.T) {
 // the admin's and their own - and keeps the container's own line.
 func TestConnectGitHubReportsAMissingGh(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
 		case slices.Contains(argv, "--version"):
@@ -371,7 +397,7 @@ func TestConnectGitHubReportsAMissingGh(t *testing.T) {
 // that was already good.
 func TestConnectGitHubReportsAGhTooOldForTheLoginCheck(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
 		case slices.Contains(argv, "--version"):
@@ -405,7 +431,7 @@ func TestConnectGitHubReportsAGhTooOldForTheLoginCheck(t *testing.T) {
 func TestConnectGitHubAcceptsTheOnlyAccountOnTheHost(t *testing.T) {
 	t.Parallel()
 	requireSSHKeygen(t)
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	const output = `{"hosts":{"github.com":[{"state":"success","login":"octocat","scopes":"repo, admin:ssh_signing_key"}]}}`
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
@@ -435,7 +461,7 @@ func TestConnectGitHubAcceptsTheOnlyAccountOnTheHost(t *testing.T) {
 // as one would be the same lie in a narrower place.
 func TestConnectGitHubDoesNotReadAFatalStatusAsNoLogin(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	const output = "error connecting to api.github.com"
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		if slices.Contains(argv, "--version") {
@@ -460,7 +486,7 @@ func TestConnectGitHubDoesNotReadAFatalStatusAsNoLogin(t *testing.T) {
 func TestConnectGitHubTrustsAGhWithAnUnreadableVersion(t *testing.T) {
 	t.Parallel()
 	requireSSHKeygen(t)
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
 		case slices.Contains(argv, "--version"):
@@ -484,7 +510,7 @@ func TestConnectGitHubTrustsAGhWithAnUnreadableVersion(t *testing.T) {
 // under with the same one-step answer the probe gives, not the admin's.
 func TestConnectGitHubSendsAStaleContainerToReopen(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
 		switch {
 		case slices.Contains(argv, "--version"):
@@ -518,7 +544,7 @@ func TestConnectGitHubSendsAStaleContainerToReopen(t *testing.T) {
 // refusal offers the way out that keeps it first.
 func TestConnectGitHubKeepsASavedEnvironmentOnOffer(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	if err := e.db.UpdateMemberImage(t.Context(), e.member.ID, "aether/member-test:1"); err != nil {
 		t.Fatalf("UpdateMemberImage: %v", err)
 	}
@@ -553,7 +579,7 @@ func TestConnectGitHubKeepsASavedEnvironmentOnOffer(t *testing.T) {
 // command that never returns. The connect holds that member's terminal
 // lock, so it has to give up on its own.
 func TestConnectGitHubStopsAtItsDeadline(t *testing.T) {
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	released := make(chan struct{})
 	t.Cleanup(func() { close(released) })
 	e.rt.execHandler = func(_ runtime.ID, _ []string) (int, string, error) {
@@ -581,7 +607,7 @@ func TestConnectGitHubStopsAtItsDeadline(t *testing.T) {
 // one, and stays unsigned before that.
 func TestCommitAllSignsWithTheRunOwnersKey(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	run, _ := e.launchFake(t, "add OAuth login")
 
 	if _, err := e.sched.commitAll(t.Context(), run.ID, "wip: before a key"); err != nil {
@@ -591,8 +617,8 @@ func TestCommitAllSignsWithTheRunOwnersKey(t *testing.T) {
 		t.Fatalf("signings before a key = %v, want [false]", got)
 	}
 
-	if _, err := e.cfg.Homes.EnsureSigningKey(e.member.ID); err != nil {
-		t.Fatalf("EnsureSigningKey: %v", err)
+	if _, err := e.cfg.Signing.Ensure(t.Context(), e.member.ID, e.member.GitIdentity()); err != nil {
+		t.Fatalf("Ensure: %v", err)
 	}
 	if _, err := e.sched.commitAll(t.Context(), run.ID, "wip: after a key"); err != nil {
 		t.Fatalf("second commitAll: %v", err)
@@ -602,24 +628,32 @@ func TestCommitAllSignsWithTheRunOwnersKey(t *testing.T) {
 	}
 }
 
-// A key the agent has corrupted from inside its own run costs the
-// signature, not the commit.
-func TestCommitAllCommitsWithAnUnusableKey(t *testing.T) {
+// A run can write a key of its own where earlier releases kept the
+// member's. Aether never signs with it.
+func TestCommitAllIgnoresAKeyPlantedInTheHome(t *testing.T) {
 	t.Parallel()
-	e := newTestEnv(t, nil)
+	e := newTestEnv(t, withSigning(t))
 	run, _ := e.launchFake(t, "add OAuth login")
 	home, err := e.cfg.Homes.Path(e.member.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, planted, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(planted, "planted")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if derr := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); derr != nil {
 		t.Fatal(derr)
 	}
-	if werr := os.WriteFile(filepath.Join(home, ".ssh", "aether_signing"), []byte("not a key\n"), 0o600); werr != nil {
+	if werr := os.WriteFile(filepath.Join(home, ".ssh", "aether_signing"), pem.EncodeToMemory(block), 0o600); werr != nil {
 		t.Fatal(werr)
 	}
 
-	commit, err := e.sched.commitAll(t.Context(), run.ID, "wip: with a corrupt key")
+	commit, err := e.sched.commitAll(t.Context(), run.ID, "wip: with a planted key")
 	if err != nil || commit == "" {
 		t.Fatalf("commitAll = (%q, %v), want the work committed", commit, err)
 	}

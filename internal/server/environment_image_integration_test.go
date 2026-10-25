@@ -16,7 +16,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/memberhome"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -134,20 +133,10 @@ func TestIntegrationMemberEnvironmentImage(t *testing.T) {
 
 	// Everything the GitHub connection keeps in the member home, plus a
 	// gh token, all of it inside the running container's $HOME mount.
-	homes, err := memberhome.New(filepath.Join(dataDir, "homes"), t.TempDir(), nil)
-	if err != nil {
-		t.Fatalf("open the member homes: %v", err)
-	}
-	if _, err = homes.EnsureSigningKey(memberA.ID); err != nil {
+	if _, err = srv.signing.Ensure(ctx, memberA.ID, memberA.GitIdentity()); err != nil {
 		t.Fatalf("generate the signing key: %v", err)
 	}
-	if err = homes.ConfigureGit(ctx, memberA.ID, memberA.GitIdentity()); err != nil {
-		t.Fatalf("configure git in the member home: %v", err)
-	}
-	homeA, err := homes.Path(memberA.ID)
-	if err != nil {
-		t.Fatalf("resolve the member home: %v", err)
-	}
+	homeA := filepath.Join(dataDir, "homes", string(memberA.ID))
 	if err = os.MkdirAll(filepath.Join(homeA, ".config", "gh"), 0o700); err != nil {
 		t.Fatalf("create the gh config directory: %v", err)
 	}
@@ -253,7 +242,7 @@ func assertImageExcludesHome(ctx context.Context, t *testing.T, rt runtime.Runti
 	if serr := rt.Start(ctx, id); serr != nil {
 		t.Fatalf("start a container from the saved image: %v", serr)
 	}
-	const scan = `for p in /root/.ssh/aether_signing /root/.gitconfig /root/.config/gh/hosts.yml; do
+	const scan = `for p in /root/.ssh/aether_signing.pub /root/.gitconfig /root/.config/gh/hosts.yml; do
 	[ -e "$p" ] && echo "present:$p"
 done
 grep -rls fake-token /root /home /etc /opt /tmp /var

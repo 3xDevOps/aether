@@ -30,6 +30,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/profile"
 	"github.com/3xDevOps/Aether/internal/runtime"
 	"github.com/3xDevOps/Aether/internal/secretstore"
+	"github.com/3xDevOps/Aether/internal/signing"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -75,6 +76,9 @@ type Config struct {
 	// callers may omit it to use StateDir.
 	DataDir string
 	Homes   *memberhome.Manager
+	// Signing holds members' commit signing keys and serves each member's
+	// agent into their containers; nil leaves commits unsigned.
+	Signing *signing.Service
 	// Memory supplies the brief that follows the run instructions; nil
 	// launches without one.
 	Memory TeamMemory

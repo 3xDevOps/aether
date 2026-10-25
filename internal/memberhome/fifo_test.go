@@ -45,14 +45,14 @@ func TestOpenRegularRefusesAFIFOPromptly(t *testing.T) {
 	}
 }
 
-func TestSigningKeySurvivesASwapToAFIFO(t *testing.T) {
+func TestLegacySigningKeySurvivesASwapToAFIFO(t *testing.T) {
 	manager, home := newSigningManager(t)
-	if _, err := manager.EnsureSigningKey("member-1"); err != nil {
-		t.Fatalf("EnsureSigningKey: %v", err)
+	if err := os.Mkdir(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
 	}
 	path := filepath.Join(home, ".ssh", "aether_signing")
-	key, err := os.ReadFile(path)
-	if err != nil {
+	key := []byte("a key from an earlier release\n")
+	if err := os.WriteFile(path, key, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -78,13 +78,13 @@ func TestSigningKeySurvivesASwapToAFIFO(t *testing.T) {
 		for time.Now().Before(deadline) {
 			// Every answer is acceptable except a hang: the key, no key
 			// (removed at that instant), or a refusal of the FIFO.
-			_, _ = manager.SigningKey("member-1")
+			_, _ = manager.LegacySigningKey("member-1")
 		}
 	}()
 	select {
 	case <-done:
 	case <-time.After(20 * time.Second):
-		t.Fatal("SigningKey blocked on a FIFO swapped in under it")
+		t.Fatal("LegacySigningKey blocked on a FIFO swapped in under it")
 	}
 	cancel()
 	<-swapped

@@ -523,7 +523,8 @@ The server keeps all its state in `/var/lib/aether`, or the `data-dir` you set.
 | `repos/` | One bare git repository per workspace. |
 | `checkouts/` | One git worktree per run, and each run's recorded diff history in `<run-id>.diffsnap/`. |
 | `transcripts/` | Terminal recordings and Enhanced conversation logs, kept until you delete the run. |
-| `homes/<member>/` | Each member's persistent home: installed agents, agent logins, uploaded configuration, and their GitHub token and commit signing key. |
+| `homes/<member>/` | Each member's persistent home: installed agents, agent logins, uploaded configuration, and their GitHub token. |
+| `signing-keys/` | Each member's private commit signing key, which no container mounts. Without a backup, each member runs `aether github connect` again for a new key. |
 | `workspace-secrets/` | Secret workspace variables in plain text, readable only by the server's user. |
 | `mirrors/`, `profiles/` | Source mirror settings and deploy keys, and agent profile snapshots. |
 | `server-update/` | Update state, and the database copy taken before an update that changes its schema. |
@@ -531,7 +532,7 @@ The server keeps all its state in `/var/lib/aether`, or the `data-dir` you set.
 
 The other directories hold internal server state. To recover a server, back
 up `aether.db`, `repos/`, `checkouts/*.diffsnap/`, `transcripts/`, `homes/`,
-`profiles/`, `mirrors/` and `workspace-secrets/`.
+`signing-keys/`, `profiles/`, `mirrors/` and `workspace-secrets/`.
 
 > [!WARNING]
 > These backups hold every member's agent logins, GitHub tokens and signing

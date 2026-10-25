@@ -24,9 +24,11 @@ The home survives every stop, save, reset and server restart:
 - Agent logins and other files the agent writes.
 - Agent configuration, uploaded with `aether config push` or edited in
   **Files**.
-- The GitHub login in `~/.config/gh/hosts.yml`, the signing key
-  `~/.ssh/aether_signing` and `~/.ssh/aether_signing.pub`, and `~/.gitconfig`
-  (git identity, gh's credential helper, signing settings).
+- The GitHub login in `~/.config/gh/hosts.yml`, the public signing key
+  `~/.ssh/aether_signing.pub`, and `~/.gitconfig` (git identity, gh's
+  credential helper, signing settings). The private signing key stays on the
+  server, outside the home
+  ([security.md](security.md#github-credentials-and-signing-keys)).
 - The remote server an editor installs when it attaches over SSH
   (`~/.vscode-server`, `~/.cursor-server`, `~/.zed_server`), so it downloads
   once ([terminal.md](terminal.md#editors)).
@@ -133,14 +135,17 @@ signing key SHA256:2E3v9x... registered on GitHub
 
 This command, and the admin dashboard flow, confirm the `gh` login, write gh's
 credential helper and your identity into `~/.gitconfig`, create an ed25519
-signing key at `~/.ssh/aether_signing` if there is none, turn on commit signing
-(`gpg.format=ssh`, `commit.gpgsign=true`), and register the public key on your
-account. It is safe to run again. `aether member git` keeps the identity in
-`~/.gitconfig` in step with your name and address.
+signing key on the server if you have none, write its public half to
+`~/.ssh/aether_signing.pub`, turn on commit signing (`gpg.format=ssh`,
+`commit.gpgsign=true`), and register the public key on your account. git in
+your runs and environment signs through the server's signing agent at
+`SSH_AUTH_SOCK`. It is safe to run again. `aether member git` keeps the
+identity in `~/.gitconfig` in step with your name and address.
 
 > [!WARNING]
 > Container root in every run you launch can read and replace the GitHub
-> credential and the signing key. Read
+> credential and sign with your key, and the token can register a signing key
+> of its own on your account. Read
 > [security.md](security.md#github-credentials-and-signing-keys) before
 > connecting an account whose reach is wider than this workspace.
 
