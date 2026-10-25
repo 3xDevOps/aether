@@ -81,6 +81,24 @@ If the directory is not on your `PATH`, the script prints the line to add (it
 never edits a profile), and it prints the `sudo rm -f` for an older `aether`
 in `/usr/local/bin` that would run first.
 
+- `--role server` with no terminal installs the binaries, then exits 1 with
+  the command that sets the server up from flags
+  ([First boot](#first-boot)):
+  `sudo aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>`.
+- When `sudo` fails, for example because it needs a password and there is no
+  terminal, the script exits 1 and names the install that needs no `sudo`:
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh -s -- --client --role none --bin-dir "$HOME/.local/bin"
+  ```
+
+- When setup does not run on a host whose `aether-server` unit already exists,
+  `next:` says `sudo aether-server update`, which restarts the running server
+  onto the new binary.
+- When the desktop build fails, the script still exits 0 and its last line says
+  the CLI is installed and the app is not, with the exit status of
+  `aether gui build`.
+
 | Flag | Variable | Effect |
 | --- | --- | --- |
 | `--version <tag>` | `AETHER_VERSION` | Install exactly this release, or stop. |

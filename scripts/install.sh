@@ -100,7 +100,7 @@ usage: install.sh [--version <tag>] [--bin-dir <dir>] [--client | --server]
   --server    install the aether-server binary only (Linux)
   --role      what this machine is, skipping the question:
                 server  both binaries into /usr/local/bin, then
-                        `aether-server setup`
+                        `aether-server setup`, which needs a terminal
                 client  the CLI alone into ~/.local/bin, then
                         `aether gui build`
                 none    install into /usr/local/bin and stop
@@ -284,7 +284,13 @@ else
 		fi
 	fi
 fi
-$sudo mkdir -p "$BIN_DIR" || die "cannot create ${BIN_DIR}"
+if ! $sudo mkdir -p "$BIN_DIR"; then
+	if [ -n "$sudo" ] && [ "$ROLE" != server ]; then
+		die "cannot create ${BIN_DIR} with sudo. To install only the aether CLI, without sudo, run:
+  curl -fsSL https://raw.githubusercontent.com/${REPO}/main/scripts/install.sh | sh -s -- --client --role none --bin-dir \"\$HOME/.local/bin\""
+	fi
+	die "cannot create ${BIN_DIR}"
+fi
 
 # --- download and verify -----------------------------------------------
 
@@ -709,6 +715,7 @@ replacing=no staged=no
 setup_ran=no
 setup_wrote=no
 gui_built=no
+gui_failure=""
 
 # Once `aether-server setup` writes the unit it ends on the commands that
 # start the service, so this script must print nothing after them that
@@ -726,6 +733,10 @@ run_server_setup() {
 			say "server setup must run as root and sudo is not installed"
 			return 1
 		fi
+	fi
+	if [ "$have_tty" = no ]; then
+		die "installed ${replaced}, but did not set up the server: aether-server setup asks questions and there is no terminal. Set it up with flags instead:
+  ${setup_sudo:+sudo }aether-server install --edge-url https://edge.onaether.dev --edge-access <account|approved-devices>"
 	fi
 	echo
 	say "running aether-server setup"
@@ -753,7 +764,10 @@ run_gui_build() {
 	fi
 	echo
 	say "building the desktop app - this downloads Electron and takes a few minutes"
-	run_interactive "${BIN_DIR}/aether" gui build || return 1
+	run_interactive "${BIN_DIR}/aether" gui build || {
+		gui_failure="\`aether gui build\` exited ${interactive_status}; its error is above"
+		return 1
+	}
 }
 
 # --- PATH, and an older CLI that would shadow this one -----------------
@@ -847,12 +861,7 @@ next_step() {
 echo
 case "$ROLE" in
 server) echo "This machine is your Aether server: agents run here." ;;
-client)
-	echo "This machine is a client: you work here and connect to a server."
-	if [ "$gui_built" != yes ]; then
-		echo "The desktop app was not built; the message above says why."
-	fi
-	;;
+client) echo "This machine is a client: you work here and connect to a server." ;;
 *) echo "The binaries are installed. Nothing else was set up on this machine." ;;
 esac
 echo
@@ -873,6 +882,8 @@ server)
 			as_root="sudo "
 		fi
 		next_step "${as_root}systemctl daemon-reload && ${as_root}systemctl enable --now aether-server"
+	elif [ -f "$UNIT_PATH" ]; then
+		next_step "sudo aether-server update" "restart the running server onto this binary"
 	else
 		next_step "sudo aether-server setup" "config, systemd unit, and how to start it"
 	fi
@@ -883,9 +894,15 @@ client)
 	if [ "$gui_built" != yes ]; then
 		next_step "aether gui build" "the desktop app, or run \`aether gui\` for a browser tab"
 	fi
+	if [ -n "$gui_failure" ]; then
+		echo
+		say "the aether CLI is installed in ${BIN_DIR}; the desktop app is not: ${gui_failure}"
+	fi
 	;;
 *)
-	if [ "$COMPONENTS" != "client" ]; then
+	if [ "$COMPONENTS" != "client" ] && [ -f "$UNIT_PATH" ]; then
+		next_step "sudo aether-server update" "restart the running server onto this binary"
+	elif [ "$COMPONENTS" != "client" ]; then
 		next_step "sudo aether-server setup" "on the server box: config, systemd unit, activation line"
 	fi
 	next_step "aether link <server>:2222" "from a client; the first link becomes admin"
