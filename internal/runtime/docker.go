@@ -141,8 +141,13 @@ func (d *Docker) Create(ctx context.Context, spec Spec) (ID, error) {
 			return "", err
 		}
 	}
-	if d.networkMode == AgentNetwork {
-		if err := d.ensureAgentNetwork(ctx); err != nil {
+	switch {
+	case spec.Egress:
+		if _, err := d.ensureNetwork(ctx, EgressNetwork, true); err != nil {
+			return "", err
+		}
+	case d.networkMode == AgentNetwork:
+		if _, err := d.ensureNetwork(ctx, AgentNetwork, false); err != nil {
 			return "", err
 		}
 	}
@@ -311,12 +316,16 @@ func (d *Docker) containerConfig(spec Spec, containerRuntime string) (*container
 		}
 	}
 
+	networkMode := d.networkMode
+	if spec.Egress {
+		networkMode = EgressNetwork
+	}
 	initEnabled := true
 	hostCfg := &container.HostConfig{
 		// The agent can spawn descendants without waiting for them; Docker's
 		// init reaps the orphans.
 		Init:        &initEnabled,
-		NetworkMode: container.NetworkMode(d.networkMode),
+		NetworkMode: container.NetworkMode(networkMode),
 		OomScoreAdj: agentOOMScoreAdj,
 		Resources: container.Resources{
 			NanoCPUs:   nanoCPUs(spec.CPULimit),

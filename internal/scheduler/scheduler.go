@@ -61,6 +61,10 @@ func (e *BaseCaptureError) Unwrap() error {
 	return e.Err
 }
 
+type EgressProxy interface {
+	Prepare(context.Context) (map[string]string, error)
+}
+
 type Config struct {
 	Store   store.Store
 	Runtime runtime.Runtime
@@ -94,6 +98,9 @@ type Config struct {
 	DevelopmentTerminalTakeover func(context.Context, domain.RunID, domain.MemberID) error
 	// Secrets holds workspace secret variables; nil runs without any.
 	Secrets *secretstore.Store
+	// Egress points a run of a workspace with egress control on at the egress
+	// proxy; nil fails such a launch.
+	Egress EgressProxy
 	// DefaultStandardImage is this build's image; a server update moves the
 	// standard image only when StandardImage still equals it.
 	DefaultStandardImage string
@@ -292,6 +299,9 @@ type supervised struct {
 	// reporter is recovered from the sidecar, since only the launch or mode
 	// switch knew which command the container runs.
 	reporter harness.Reporter
+	// egress is the workspace's egress control when the run launched; an
+	// account move keeps it, since turning it off applies to new runs only.
+	egress bool
 	// Mutated only under Scheduler.mu. reason and activity are the row's
 	// since its last transition.
 	status        domain.RunStatus
@@ -941,6 +951,7 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		PidsLimit:         s.cfg.RunPidsLimit,
 		CreationKey:       string(run.ID),
 		NestedDocker:      true,
+		Egress:            plan.Egress,
 	}
 }
 

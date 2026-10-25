@@ -390,6 +390,9 @@ export interface WorkspaceEnvironment {
   workspace_id: string
   setup_script: string
   variables: WorkspaceVariable[]
+  /** Both absent from a server older than egress control. */
+  egress?: boolean
+  egress_hosts?: string[]
   /** From a save that took effect while its timeline note was not recorded. */
   warning?: string
 }

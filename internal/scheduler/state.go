@@ -404,6 +404,7 @@ type sidecar struct {
 	// mounts, empty when it mounts none.
 	LoginMember         string                   `json:"login_member,omitempty"`
 	Reporter            harness.Reporter         `json:"reporter,omitempty"`
+	Egress              bool                     `json:"egress,omitempty"`
 	AgentState          agentstatus.State        `json:"agent_state,omitempty"`
 	AgentReason         string                   `json:"agent_reason,omitempty"`
 	AgentTools          bool                     `json:"agent_tools,omitempty"`
@@ -481,6 +482,7 @@ func (e *supervised) sidecar() sidecar {
 		Home:                e.home,
 		LoginMember:         string(e.loginMember),
 		Reporter:            e.reporter,
+		Egress:              e.egress,
 		AgentState:          e.agentReport.State,
 		AgentReason:         e.agentReport.Reason,
 		AgentTools:          e.agentReport.Tools,

@@ -5208,7 +5208,7 @@ server-side permission; a member without it reads the same facts. The page
 lists no runs: the board does.
 
 **Environment** (`components/workspace-environment.tsx`) is the workspace's
-setup script and variables ([environments.md](environments.md#workspace-environment)),
+setup script, variables and egress control ([environments.md](environments.md#workspace-environment)),
 read with `workspace.environment.get` when the page opens. Opening the page
 through an **Environment** menu item passes `section: 'environment'`, and the
 section scrolls into view once it has loaded.
@@ -5231,6 +5231,11 @@ section scrolls into view once it has loaded.
   plain; over a saved secret it stays a secret with no value, which **Save**
   refuses, so the saved one is not removed unnoticed. **Add _n_ variables**
   puts them in the list; nothing is sent yet.
+- **Limit outbound traffic** is a checkbox. While it is ticked, the allowed
+  hosts show, each with **Remove**, over a field with **Allow** that refuses a
+  URL, a port or a repeat before anything is sent. Its help says that on and
+  off reach runs launched afterwards and the host list reaches limited runs at
+  once. A server from before egress control gets no such row.
 - **Save** sends one `workspace.environment.set` holding only what changed,
   so an untouched secret is never named. It is disabled until something
   differs; **Unsaved changes.** and **Discard** show while it does. Beside it
@@ -5240,8 +5245,8 @@ section scrolls into view once it has loaded.
   sends nothing. The server's refusal shows verbatim under **Not saved**, and
   the edits stay. A result's `warning` shows under **Saved**.
 - Any other member reads the script, each name and each plain value, with
-  **Secret** in place of a secret's value and **Only an admin can change
-  this.** A failed read shows the server's error with **Retry**.
+  **Secret** in place of a secret's value, whether egress is limited and to
+  which hosts, and **Only an admin can change this.** A failed read shows the server's error with **Retry**.
 
 When the setup script fails a launch, the New run and template launch
 dialogs show the server's reason and, under **Setup script output**, what
@@ -6440,8 +6445,8 @@ Notifications row, `src/lib/push.test.ts` the browser side behind it
 `src/sw.test.ts` runs `public/sw.js` against a stand-in for the worker scope.
 `src/components/workspace-environment.test.tsx` covers the workspace
 Environment section: the change a save sends, replacing a secret, the `.env`
-preview, rows that cannot be saved, the server's refusal and the read-only
-view.
+preview, rows that cannot be saved, egress control, the server's refusal and
+the read-only view.
 
 Use the browser workflow for real computed geometry, top bar and sidebar
 behavior, responsive overflow, keyboard focus and gateway-backed transitions.

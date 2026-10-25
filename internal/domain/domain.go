@@ -25,9 +25,19 @@ type SetupPolicy struct {
 	Script string `json:"script,omitempty"`
 }
 
+// EgressPolicy limits which hosts a workspace's runs reach. On applies to runs
+// launched afterwards; Hosts applies at once to every run started with On set.
+// A host is an exact name or "*." and a domain, which matches its subdomains.
+// Hosts is nil until an admin edits the list, and egress.Defaults applies.
+type EgressPolicy struct {
+	On    bool     `json:"on,omitempty"`
+	Hosts []string `json:"hosts"`
+}
+
 type WorkspaceEnvironment struct {
 	Variables   map[string]string `json:"variables,omitempty"`
 	SetupPolicy SetupPolicy       `json:"setup_policy,omitempty"`
+	Egress      EgressPolicy      `json:"egress,omitzero"`
 }
 
 func (e WorkspaceEnvironment) Valid() bool {

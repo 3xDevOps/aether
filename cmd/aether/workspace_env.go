@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	workspaceEnvUsage       = "usage: aether workspace env <list|set|unset|import|script>"
+	workspaceEnvUsage       = "usage: aether workspace env <list|set|unset|import|script|egress>"
 	workspaceEnvListUsage   = "usage: aether workspace env list [--workspace <name-or-id>]"
 	workspaceEnvSetUsage    = "usage: aether workspace env set [--workspace <name-or-id>] <NAME>=<value> [<NAME>=<value> ...]\n   or: aether workspace env set [--workspace <name-or-id>] --secret <NAME>   (the value is read from stdin)"
 	workspaceEnvUnsetUsage  = "usage: aether workspace env unset [--workspace <name-or-id>] <NAME> [<NAME> ...]"
@@ -39,6 +39,8 @@ func workspaceEnv(args []string) error {
 		return workspaceEnvImport(args[1:], os.Stdin)
 	case "script":
 		return workspaceEnvScript(args[1:], os.Stdin)
+	case "egress":
+		return workspaceEnvEgress(args[1:])
 	default:
 		return fmt.Errorf("unknown workspace env command %q", args[0])
 	}

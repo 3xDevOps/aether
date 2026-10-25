@@ -13,28 +13,33 @@ import (
 	"github.com/moby/moby/client"
 )
 
-func TestCheckAgentNetwork(t *testing.T) {
+func TestCheckNetwork(t *testing.T) {
+	isolated := map[string]string{iccOption: "false"}
 	for _, tc := range []struct {
-		name string
-		net  network.Network
-		ok   bool
+		name     string
+		net      network.Network
+		internal bool
+		ok       bool
 	}{
-		{"isolated bridge", network.Network{Driver: "bridge", Options: map[string]string{iccOption: "false"}}, true},
-		{"operator MTU", network.Network{Driver: "bridge", Options: map[string]string{iccOption: "false", "com.docker.network.driver.mtu": "1400"}}, true},
-		{"icc on", network.Network{Driver: "bridge", Options: map[string]string{iccOption: "true"}}, false},
-		{"icc unset", network.Network{Driver: "bridge"}, false},
-		{"macvlan", network.Network{Driver: "macvlan", Options: map[string]string{iccOption: "false"}}, false},
+		{"isolated bridge", network.Network{Driver: "bridge", Options: isolated}, false, true},
+		{"operator MTU", network.Network{Driver: "bridge", Options: map[string]string{iccOption: "false", "com.docker.network.driver.mtu": "1400"}}, false, true},
+		{"icc on", network.Network{Driver: "bridge", Options: map[string]string{iccOption: "true"}}, false, false},
+		{"icc unset", network.Network{Driver: "bridge"}, false, false},
+		{"macvlan", network.Network{Driver: "macvlan", Options: isolated}, false, false},
+		{"internal bridge", network.Network{Driver: "bridge", Options: isolated, Internal: true}, true, true},
+		{"bridge with a route out", network.Network{Driver: "bridge", Options: isolated}, true, false},
+		{"internal with icc on", network.Network{Driver: "bridge", Internal: true}, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := checkAgentNetwork(tc.net)
+			err := checkNetwork("aether-test", tc.net, tc.internal)
 			if tc.ok {
 				if err != nil {
-					t.Fatalf("checkAgentNetwork = %v, want nil", err)
+					t.Fatalf("checkNetwork = %v, want nil", err)
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), "`docker network rm "+AgentNetwork+"`") {
-				t.Fatalf("checkAgentNetwork = %v, want the docker network rm fix", err)
+			if err == nil || !strings.Contains(err.Error(), "`docker network rm aether-test`") {
+				t.Fatalf("checkNetwork = %v, want the docker network rm fix", err)
 			}
 		})
 	}
