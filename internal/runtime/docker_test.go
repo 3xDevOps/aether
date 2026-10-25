@@ -37,6 +37,9 @@ func TestNewDockerDefaults(t *testing.T) {
 	if d.labels != nil {
 		t.Errorf("labels = %v, want nil", d.labels)
 	}
+	if d.networkMode != AgentNetwork {
+		t.Errorf("networkMode = %q, want %q", d.networkMode, AgentNetwork)
+	}
 }
 
 func TestNewDockerOptions(t *testing.T) {
