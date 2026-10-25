@@ -24,7 +24,7 @@ type connectorLaunchInput struct {
 	WorkspaceID    string `json:"workspace_id"`
 	Task           string `json:"task" jsonschema:"a complete brief"`
 	Harness        string `json:"harness" jsonschema:"agent name"`
-	Mode           string `json:"mode,omitempty" jsonschema:"acp is enhanced; default the agent's"`
+	Mode           string `json:"mode,omitempty" jsonschema:"acp is enhanced; default acp where installed, else tui"`
 	Model          string `json:"model,omitempty" jsonschema:"as the agent names it; default its own"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }

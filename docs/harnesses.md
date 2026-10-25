@@ -63,7 +63,7 @@ What each agent can do:
 - **Set up suggests** is the mode **Set up** picks first. The dashboard then
   remembers your choice per agent
   ([Choose Enhanced](enhanced-runs.md#choose-enhanced)), and `aether run`
-  defaults to Standard. A Background run of an agent it suggests Enhanced for
+  defaults to Enhanced where it is installed, else Standard. A Background run of an agent it suggests Enhanced for
   uses the agent's ACP server once it is installed
   ([Background runs](enhanced-runs.md#background-runs)).
 
@@ -487,7 +487,9 @@ error instead of moving.
 
 ### Modes and what the run container does
 
-`aether run` takes `--mode standard` (the default), `enhanced` or `background`.
+`aether run` takes `--mode enhanced`, `standard` or `background`. Without
+`--mode`, the server starts Enhanced where the agent's Enhanced mode is
+installed on the launch's account, and Standard otherwise.
 
 - Standard runs the agent's terminal UI in a persistent PTY. `aether attach
   <run>` puts you in it. After the agent exits, the container opens a login

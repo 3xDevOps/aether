@@ -379,7 +379,9 @@ type RunLaunchParams struct {
 	WorkspaceID string `json:"workspace_id"`
 	Task        string `json:"task,omitempty"`
 	Harness     string `json:"harness"`
-	Mode        string `json:"mode,omitempty"`
+	// Empty is "acp" where the agent's enhanced mode is installed on the
+	// account, else "tui".
+	Mode string `json:"mode,omitempty"`
 	// Model is passed to the agent as is; empty keeps the agent's default.
 	Model string `json:"model,omitempty"`
 	// Empty means the caller's own account.
@@ -802,9 +804,11 @@ type AgentInfo struct {
 	// LoginFound checks the launch home for login paths, not for a working
 	// session. Nil when the agent declares no login path.
 	LoginFound *bool `json:"login_found,omitempty"`
-	// "acp" when enhanced mode is installed and preferred, else "tui".
+	// "acp" when enhanced mode is installed, else "tui": the mode a launch
+	// that names none starts in.
 	DefaultMode string `json:"default_mode"`
-	// EnhancedDefault: the agent prefers enhanced mode, installed or not.
+	// EnhancedDefault: setup offers the enhanced install, and a background
+	// run uses it once installed.
 	EnhancedDefault bool `json:"enhanced_default"`
 	// SwarmStandardRefusal is why a swarm integrator or worker cannot run the
 	// agent in Standard mode; empty when it can.

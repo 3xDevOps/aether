@@ -266,6 +266,17 @@ func workerStart(ctx context.Context, socket string, args []string) (protocol.Wo
 				matches = append(matches, choice)
 			}
 		}
+		if *mode == "" && len(matches) > 1 {
+			var enhanced []protocol.MissionExecutionChoice
+			for _, choice := range matches {
+				if choice.Mode == "acp" {
+					enhanced = append(enhanced, choice)
+				}
+			}
+			if len(enhanced) == 1 {
+				matches = enhanced
+			}
+		}
 		if len(matches) != 1 {
 			var listed []string
 			for _, choice := range assignment.ExecutionChoices {

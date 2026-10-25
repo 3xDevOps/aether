@@ -610,6 +610,24 @@ func (s *Scheduler) CheckSharedLaunch(ctx context.Context, member, account domai
 	return SharedLaunchable, "", err
 }
 
+// DefaultMode implements sshd.RunController.
+func (s *Scheduler) DefaultMode(ctx context.Context, member, account domain.MemberID, harnessName string) (domain.LaunchMode, error) {
+	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
+	if err != nil {
+		return "", err
+	}
+	installed := len(argvs[domain.LaunchACP]) > 0
+	if s.cfg.Homes != nil {
+		if installed, err = s.adapterInstalled(member, account, profile, argvs); err != nil {
+			return "", err
+		}
+	}
+	if installed {
+		return domain.LaunchACP, nil
+	}
+	return domain.LaunchTUI, nil
+}
+
 // FallbackLaunchable reports whether a launch in member's home of harnessName
 // in mode on account can stand in for one on requested as a usage fallback:
 // the owner's login is there to share, an enhanced launch finds its ACP

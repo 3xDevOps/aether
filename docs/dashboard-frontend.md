@@ -1847,11 +1847,12 @@ installed in your environment." with a **Set up an agent** button in place of
 the per-row links. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
 
-**Mode** is a segmented control with one line per mode: **Standard** (`tui`,
-"Your agent's own terminal"), **Enhanced** (`acp`, "Native messages,
-approvals and progress", see [enhanced-runs.md](enhanced-runs.md)) and
-**Background** (`headless`, "Runs the task once, no interaction"). Enhanced
-is disabled with the reason under the control when the agent reports
+**Mode** is a segmented control with one line per mode: **Enhanced** (`acp`,
+"Native messages, approvals and progress", see
+[enhanced-runs.md](enhanced-runs.md)) with a **Recommended** badge,
+**Standard** (`tui`, "Your agent's own terminal") and **Background**
+(`headless`, "Runs the task once, no interaction"). Enhanced is disabled,
+without the badge, with the reason under the control when the agent reports
 `enhanced: none` ("<agent> has no Enhanced support.") or the adapter is not
 installed ("The Enhanced adapter for <agent> is not installed.", with
 **Set up**). A launch never switches mode on its own: the mode sent is the
@@ -1865,8 +1866,9 @@ arrives after the dialog was closed shows as a toast. The task is
 optional in Standard and Enhanced - a taskless launch opens the agent with
 no prompt - and required in Background, which takes no input, so Launch
 stays disabled until one is written (`runLaunch` in
-`internal/sshd/handlers.go` is the same rule). Only what was chosen goes on
-the wire: an empty task and `tui` are the server's defaults.
+`internal/sshd/handlers.go` is the same rule). The mode always goes on the
+wire, since a `run.launch` without one starts Enhanced where it is
+installed; an empty task is left out.
 
 **Model**, under Mode, is a searchable picker (`ModelPicker` in
 `src/components/launch/model-picker.tsx`) whose choice is sent as `model` on

@@ -109,7 +109,7 @@ export function FirstRunStep({
         workspace_id: workspace.id,
         harness,
         ...(task ? { task } : {}),
-        ...(mode === 'tui' ? {} : { mode }),
+        mode,
         ...(chosenModel ? { model: chosenModel } : {}),
       })
       rememberLaunch(harness, mode, chosenModel)

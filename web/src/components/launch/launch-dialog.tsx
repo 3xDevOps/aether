@@ -160,7 +160,7 @@ export function LaunchDialog() {
       workspace_id: workspaceID,
       harness,
       ...(trimmed ? { task: trimmed } : {}),
-      ...(mode === 'tui' ? {} : { mode }),
+      mode,
       ...(chosenModel ? { model: chosenModel } : {}),
       ...(sharedAccount ? { account_member_id: account } : {}),
       ...fallbackParams(fallback, accounts, account),

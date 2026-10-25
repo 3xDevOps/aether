@@ -352,7 +352,8 @@ request after an uncertain outcome; do not invent another delivery request.
 
 Start a worker on an accepted task. Pick one approved execution choice with
 any of --harness, --mode, --model, and --account-owner-id; with a single
-choice none is needed. The task revision defaults to the current one, and the dispatch
+choice none is needed. Without --mode, a single matching enhanced (acp)
+choice is picked over standard and background ones. The task revision defaults to the current one, and the dispatch
 key to <task-id>-r<revision>, so repeating the same start replays it.
 The mission, run owner, and integrator generation come from this run's
 assignment; --mission-id, --run-owner-id, and

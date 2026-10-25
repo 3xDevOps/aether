@@ -1394,7 +1394,7 @@ describe('onboarding wizard', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Launch' })).toHaveProperty('disabled', false))
     fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
     await waitFor(() => expect(client.runLaunch).toHaveBeenCalledWith({
-      workspace_id: workspace.id, task: 'Inspect the repository', harness: 'claude',
+      workspace_id: workspace.id, task: 'Inspect the repository', harness: 'claude', mode: 'tui',
     }))
   })
 
@@ -1623,6 +1623,7 @@ describe('onboarding wizard', () => {
         workspace_id: workspace.id,
         task: 'write a result file',
         harness: 'claude',
+        mode: 'tui',
         model: 'sonnet',
       })
     })
@@ -1856,6 +1857,7 @@ describe('onboarding wizard', () => {
         workspace_id: workspace.id,
         task: 'write a result file',
         harness: 'claude',
+        mode: 'tui',
       })
     })
   })
