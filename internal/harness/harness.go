@@ -438,7 +438,7 @@ var profiles = map[string]Profile{
 		ACPMode:         "agent-full-access",
 		ModelArgs:       []string{"--model", ModelPlaceholder},
 		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
-		EnvPassthrough:  []string{"OPENAI_API_KEY"},
+		EnvPassthrough:  []string{"CODEX_API_KEY", "OPENAI_API_KEY"},
 		CredentialPaths: []string{".codex/auth.json"},
 		LocalRoot:       ".codex",
 		DenyNames:       []string{"auth.json", "keychain", "token.json"},
