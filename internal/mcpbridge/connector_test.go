@@ -432,7 +432,8 @@ func TestConnectorReadTools(t *testing.T) {
 		}
 		from, _ := time.Parse(time.RFC3339, p.From)
 		to, _ := time.Parse(time.RFC3339, p.To)
-		if p.Scope != protocol.InsightsScopeMine || p.TimeZone != "Europe/Berlin" || to.Sub(from) != 7*24*time.Hour {
+		berlin, _ := time.LoadLocation("Europe/Berlin")
+		if p.Scope != protocol.InsightsScopeMine || p.TimeZone != "Europe/Berlin" || !from.In(berlin).AddDate(0, 0, 7).Equal(to) {
 			return nil, fmt.Errorf("insights params %+v", p)
 		}
 		return protocol.InsightsResult{Totals: protocol.InsightsTotals{Launched: 3, Completed: 2},
