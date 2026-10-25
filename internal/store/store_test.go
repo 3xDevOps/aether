@@ -695,13 +695,6 @@ func TestDeleteRunCleansRunOwnedData(t *testing.T) {
 	run := mustCreateRun(t, db, w.ID, m.ID, domain.RunFailed)
 	other := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
 
-	if err := db.CreateApproval(ctx, &Approval{
-		WorkspaceID: w.ID,
-		RunID:       run.ID,
-		Action:      "Bash",
-	}); err != nil {
-		t.Fatalf("CreateApproval: %v", err)
-	}
 	if err := db.PutRunCost(ctx, &RunCost{
 		RunID: run.ID, WorkspaceID: w.ID, MemberID: m.ID, CostUSD: 1.25,
 	}); err != nil {
@@ -753,7 +746,6 @@ func TestDeleteRunCleansRunOwnedData(t *testing.T) {
 		where string
 		args  []any
 	}{
-		{"approvals", "run_id = ?", []any{run.ID}},
 		{"run_costs", "run_id = ?", []any{run.ID}},
 		{"run_messages", "from_run = ? OR to_run = ?", []any{run.ID, run.ID}},
 	} {

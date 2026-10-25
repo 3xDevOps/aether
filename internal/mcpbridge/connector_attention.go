@@ -39,14 +39,12 @@ type attentionText struct {
 	Title   string                     `json:"title,omitempty"`
 	Reason  string                     `json:"reason,omitempty"`
 	Text    string                     `json:"text,omitempty"`
-	Detail  string                     `json:"detail,omitempty"`
 	Options []protocol.AttentionOption `json:"options,omitempty"`
 	LinkURL string                     `json:"link_url,omitempty"`
 	Schema  json.RawMessage            `json:"schema,omitempty"`
 }
 
 var attentionLabels = map[string]string{
-	protocol.AttentionKindApproval:       "An action awaits your approval",
 	protocol.AttentionKindPermission:     "The agent asks permission",
 	protocol.AttentionKindQuestion:       "The agent asks a question",
 	protocol.AttentionKindQueuedMessage:  "A message awaits your approval to deliver",
@@ -70,9 +68,6 @@ func attentionRowOf(it protocol.AttentionItem, l links) attentionRow {
 	row := attentionRow{Kind: it.Kind, Reason: attentionLabel(it.Kind), RunID: it.RunID, MissionID: it.MissionID, WorkspaceID: it.WorkspaceID,
 		Harness: it.Harness, Since: it.Since, URL: l.run(it.RunID), Untrusted: text}
 	switch {
-	case it.Approval != nil:
-		row.AnswerID = it.Approval.ID
-		text.Text, text.Detail = clip(it.Approval.Action, maxText), clip(it.Approval.Detail, maxText)
 	case it.Request != nil:
 		row.AnswerID = it.Request.ID
 		text.Text, text.LinkURL, text.Schema = clip(it.Request.Title, maxText), it.Request.URL, it.Request.Schema
@@ -88,8 +83,6 @@ func attentionRowOf(it protocol.AttentionItem, l links) attentionRow {
 func answerWith(it protocol.AttentionItem) string {
 	const dashboard = "the run in the Aether dashboard"
 	switch it.Kind {
-	case protocol.AttentionKindApproval:
-		return "aether_decide_approval"
 	case protocol.AttentionKindPermission:
 		if it.Request != nil && len(it.Request.Options) > 0 {
 			return "aether_decide_approval"

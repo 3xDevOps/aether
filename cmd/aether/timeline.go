@@ -193,8 +193,6 @@ func timelineDetail(ev protocol.Event, name func(string) string) string {
 		return fmt.Sprintf("%s -> %s · %s", v.FromRunID, v.ToRunID, v.Kind)
 	case events.CoordMessageAckedPayload:
 		return fmt.Sprintf("%s acknowledged %s", v.ToRunID, v.MessageID)
-	case events.ApprovalPayload:
-		return string(v.Decision) + " " + v.Action
 	case events.PresencePayload:
 		return string(v.State)
 	case events.RunCostPayload:
@@ -204,4 +202,13 @@ func timelineDetail(ev protocol.Event, name func(string) string) string {
 		return fmt.Sprintf("%d in / %d out tokens, $%.4f", v.InputTokens, v.OutputTokens, v.CostUSD)
 	}
 	return string(ev.Payload)
+}
+
+// firstLine keeps multi-line text from breaking a table row.
+func firstLine(s string) string {
+	line, _, cut := strings.Cut(s, "\n")
+	if cut {
+		line += " ..."
+	}
+	return line
 }

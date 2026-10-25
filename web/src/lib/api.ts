@@ -8,7 +8,6 @@ import type {
   AgentModelsResult,
   AgentRemoveResult,
   AgentInfo,
-  Approval,
   BudgetReport,
   CoordMessagesListResult,
   DaemonInstallResult,
@@ -802,17 +801,6 @@ export const api = {
     call<IntegrationPatchResult>('integration.patch', params),
   integrationDelete: (params: IntegrationDeleteParams) =>
     call<IntegrationDeleteResult>('integration.delete', params),
-  approvalList: (workspaceID: string, all = false) =>
-    call<{ approvals: Approval[] }>('approval.list', {
-      workspace_id: workspaceID,
-      all,
-    }).then((r) => r.approvals),
-  approvalDecide: (runID: string, requestID: string, approve: boolean) =>
-    call<{ approval: Approval }>('approval.decide', {
-      run_id: runID,
-      request_id: requestID,
-      approve,
-    }).then((r) => r.approval),
   presenceRoster: () =>
     call<{ members: PresenceEntry[] }>('presence.roster').then((r) => r.members),
   presenceHeartbeat: (workspaceID: string) =>

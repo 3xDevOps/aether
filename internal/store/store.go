@@ -216,7 +216,6 @@ type Store interface {
 	ListHarnessDefinitions(ctx context.Context, member domain.MemberID) ([]*HarnessDefinition, error)
 	DeleteHarnessDefinition(ctx context.Context, member domain.MemberID, name string) error
 
-	ApprovalStore
 	TemplateStore
 	CostStore
 	ServerUpdateStore

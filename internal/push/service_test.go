@@ -273,19 +273,6 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	phone.expect(t, notification{Title: "Upgrade the linter", Body: "which region?", Run: id})
 
-	approval := &store.Approval{WorkspaceID: h.ws.ID, RunID: run.ID, Action: "ExitPlanMode"}
-	if err := h.db.CreateApproval(h.ctx, approval); err != nil {
-		t.Fatalf("CreateApproval: %v", err)
-	}
-	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalRequested})
-	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Permission: ExitPlanMode", Run: id})
-	if err := h.db.DecideApproval(h.ctx, approval.ID, string(events.ApprovalApproved), h.ada.ID, time.Now()); err != nil {
-		t.Fatalf("DecideApproval: %v", err)
-	}
-	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalApproved})
-	// Deciding it leaves the idle park it interrupted, which was announced.
-	phone.expectNone(t, testQuiet)
-
 	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
 	finished := time.Now().UTC()
 	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, &finished); err != nil {
@@ -377,17 +364,14 @@ func TestANewerNeedIsNeverOvertakenByAnOlderOne(t *testing.T) {
 	slow.slow.Store(true)
 	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
 	idle := notification{Title: "Upgrade the linter", Body: "which region?", Run: string(run.ID)}
-	permission := notification{Title: "Upgrade the linter", Body: "Permission: ExitPlanMode", Run: string(run.ID)}
+	permission := notification{Title: "Upgrade the linter", Body: "Permission requested", Run: string(run.ID)}
 
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	slow.expect(t, idle)
 	// The first device's push service has not answered yet when the run
 	// asks for a permission.
-	approval := &store.Approval{WorkspaceID: h.ws.ID, RunID: run.ID, Action: "ExitPlanMode"}
-	if err := h.db.CreateApproval(h.ctx, approval); err != nil {
-		t.Fatalf("CreateApproval: %v", err)
-	}
-	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalRequested})
+	h.runs.set(run.ID, domain.RunInputRequest{ID: "p1", SessionID: "s1", Kind: "permission"})
+	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
 	phone.expectNone(t, testQuiet)
 	slow.slow.Store(false)
 	close(slow.release)
@@ -410,15 +394,10 @@ func TestANeedThatClearedBehindASlowSendIsNotSent(t *testing.T) {
 
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	slow.expect(t, idle)
-	approval := &store.Approval{WorkspaceID: h.ws.ID, RunID: run.ID, Action: "ExitPlanMode"}
-	if err := h.db.CreateApproval(h.ctx, approval); err != nil {
-		t.Fatalf("CreateApproval: %v", err)
-	}
-	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalRequested})
-	if err := h.db.DecideApproval(h.ctx, approval.ID, string(events.ApprovalDenied), h.ada.ID, time.Now()); err != nil {
-		t.Fatalf("DecideApproval: %v", err)
-	}
-	h.publish(run, events.ApprovalPayload{RequestID: approval.ID, Action: approval.Action, Decision: events.ApprovalDenied})
+	h.runs.set(run.ID, domain.RunInputRequest{ID: "p1", SessionID: "s1", Kind: "permission"})
+	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.runs.set(run.ID)
+	h.publish(run, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
 	phone.expectNone(t, testQuiet)
 	slow.slow.Store(false)
 	close(slow.release)

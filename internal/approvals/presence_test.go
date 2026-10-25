@@ -7,25 +7,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/store"
 )
-
-// nopStore satisfies the inbox's persistence seam; the presence roster
-// never touches it.
-type nopStore struct{}
-
-func (nopStore) CreateApproval(context.Context, *store.Approval) error { return nil }
-func (nopStore) GetApproval(context.Context, string) (*store.Approval, error) {
-	return nil, store.ErrNotFound
-}
-
-func (nopStore) ListApprovals(context.Context, domain.WorkspaceID, string) ([]*store.Approval, error) {
-	return nil, nil
-}
-
-func (nopStore) DecideApproval(context.Context, string, string, domain.MemberID, time.Time) error {
-	return nil
-}
 
 // testMember is the single member every presence-transition test drives.
 const testMember = domain.MemberID("ada")
@@ -41,7 +23,7 @@ func TestStaleHeartbeatGoesOfflineWatcherStays(t *testing.T) {
 	}
 	defer func() { _ = bus.Close() }()
 
-	svc, err := New(Config{Store: nopStore{}, Bus: bus, TTL: 60 * time.Millisecond})
+	svc, err := New(Config{Bus: bus, TTL: 60 * time.Millisecond})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -108,7 +90,7 @@ func TestWatchingSurvivesSecondAttachAndOtherWorkspace(t *testing.T) {
 	}
 	defer func() { _ = bus.Close() }()
 
-	svc, err := New(Config{Store: nopStore{}, Bus: bus})
+	svc, err := New(Config{Bus: bus})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -165,7 +147,7 @@ func TestConnectionClosedPublishesOfflineWhenLastConnectionCloses(t *testing.T) 
 	}
 	defer func() { _ = bus.Close() }()
 
-	svc, err := New(Config{Store: nopStore{}, Bus: bus})
+	svc, err := New(Config{Bus: bus})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -205,7 +187,7 @@ func TestSecondConnectionKeepsMemberOnline(t *testing.T) {
 	}
 	defer func() { _ = bus.Close() }()
 
-	svc, err := New(Config{Store: nopStore{}, Bus: bus})
+	svc, err := New(Config{Bus: bus})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -247,7 +229,7 @@ func TestHeartbeatWithNoConnectionIsIgnored(t *testing.T) {
 	}
 	defer func() { _ = bus.Close() }()
 
-	svc, err := New(Config{Store: nopStore{}, Bus: bus})
+	svc, err := New(Config{Bus: bus})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -267,7 +249,7 @@ func TestLastConnectionCloseWithLiveWatcherUnwatchPublishesOffline(t *testing.T)
 	}
 	defer func() { _ = bus.Close() }()
 
-	svc, err := New(Config{Store: nopStore{}, Bus: bus})
+	svc, err := New(Config{Bus: bus})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -324,7 +306,7 @@ func TestLateWatchAfterConnectionClosedDoesNotResurrectMember(t *testing.T) {
 	}
 	defer func() { _ = bus.Close() }()
 
-	svc, err := New(Config{Store: nopStore{}, Bus: bus})
+	svc, err := New(Config{Bus: bus})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

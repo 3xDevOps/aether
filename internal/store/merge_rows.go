@@ -36,7 +36,6 @@ var memberRefs = map[string]bool{
 	"assistant_prompt_keys.member_id":                      false,
 	"assistant_follows.member_id":                          true,
 	"assistant_settings.member_id":                         false,
-	"approvals.decided_by":                                 false,
 	"events.actor_id":                                      false,
 	"evidence_packets.origin_id":                           false,
 	"evidence_packets.owner_id":                            false,

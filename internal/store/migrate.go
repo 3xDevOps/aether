@@ -1944,6 +1944,12 @@ CREATE TABLE run_repos (
 CREATE INDEX idx_run_repos_workspace ON run_repos(workspace_id);
 ALTER TABLE run_pull_requests ADD COLUMN repo_workspace_id TEXT NOT NULL DEFAULT '';
 `,
+	// v81: the approval inbox is gone. Its events go too: the log refuses to
+	// decode an event type it does not know.
+	`
+DROP TABLE approvals;
+DELETE FROM events WHERE type = 'workspace.approval';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

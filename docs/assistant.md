@@ -165,7 +165,6 @@ ask for updates. You are told when the run:
 | --- | --- |
 | Finished | The run completed, merged, failed, stopped or was interrupted, or a live run's reported success is ready for review |
 | Needs input | The agent asks a question, a permission or a form |
-| Needs approval | An approval is requested for the run |
 | Needs attention | The run reaches `needs-attention`; the reason is worded as in [push notifications](networking.md#notifications) |
 
 A notice appears in the assistant's transcript, as a toast with a badge on the

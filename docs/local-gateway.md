@@ -206,7 +206,7 @@ whose second run creates a duplicate (`run.launch`, `template.launch`,
 `workspace.add`, `member.invite`), repeats an external side effect
 (`server.update`, `terminal.exec`, `github.connect`, `run.git.*`,
 `run.pr.*`, `dev.*`), or fails where the first succeeded (`run.delete`,
-`run.pause`, `agent.remove`, `home.rename`, `approval.decide`). The full list is `noReplay`
+`run.pause`, `agent.remove`, `home.rename`). The full list is `noReplay`
 in `internal/localgw/backend.go`. Their lost response may follow a committed write,
 so uncertainty surfaces immediately. A subsequent explicit request can
 reconnect. A call with no answer after 60 seconds fails with `-32004`
@@ -934,11 +934,10 @@ These serve a client with no dashboard and no stream, such as the
 
 An `AttentionItem` is `{kind, run_id, mission_id, workspace_id, title,
 harness, reason, since}` plus what answering it needs. `kind` is one of
-`approval`, `permission`, `question`, `queued-message`, `room-question`,
+`permission`, `question`, `queued-message`, `room-question`,
 `swarm-question`, `integrator-down`, `control-hold`, `disconnected`,
 `blocked`, `needs-input`, `ready` or `failed`; `control-hold` is a swarm
-worker whose control the caller holds. `approval` carries
-`approval: {id, action, detail}` for `approval.decide`. `permission` and
+worker whose control the caller holds. `permission` and
 `question` carry `request: {id, kind, title, options, schema}`; an enhanced
 run's `options` are `{id, label, kind}`, `kind` being `allow_once`,
 `allow_always`, `reject_once` or `reject_always` for a permission, and a
@@ -2431,7 +2430,7 @@ workspace receives it; a client shows it only to the member in `member_id`.
  "body":"Question: Which database should the test use?"}}
 ```
 
-`kind` is `finished`, `needs_input`, `needs_approval` or `needs_attention`.
+`kind` is `finished`, `needs_input` or `needs_attention`.
 The event is published once per announced state.
 
 ### Branch, pull request and swarm events

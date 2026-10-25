@@ -133,6 +133,17 @@ func TestSQLiteLogLastSeq(t *testing.T) {
 	if last != 7 {
 		t.Fatalf("last seq = %d, want 7", last)
 	}
+
+	if _, err = log.db.ExecContext(ctx, `DELETE FROM events WHERE seq = 7`); err != nil {
+		t.Fatalf("delete the newest event: %v", err)
+	}
+	last, err = log.LastSeq(ctx)
+	if err != nil {
+		t.Fatalf("last seq: %v", err)
+	}
+	if last != 7 {
+		t.Fatalf("last seq after deleting the newest event = %d, want 7", last)
+	}
 }
 
 func TestSQLiteLogPersistsAcrossReopen(t *testing.T) {

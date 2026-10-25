@@ -8,7 +8,6 @@ import {
 } from '@/store/selectors'
 import {
   alice,
-  approval,
   bob,
   mission,
   otherWorkspace,
@@ -60,15 +59,6 @@ describe('runGroups', () => {
     expect(outside.workspaceName).toBe(otherWorkspace.name)
     expect(inside.workspaceName).toBeUndefined()
     expect(runGroups(input([elsewhere], { workspace: '' }))['needs-you'][0].workspaceName).toBeUndefined()
-  })
-
-  it('sorts Needs you oldest wait first, from when the request was made', () => {
-    const asked = record({ id: 'asked', started_at: '2026-08-14T10:00:00Z' })
-    const groups = runGroups(
-      input([stopped, asked], {}, { approvalsByRun: { asked: [approval({ run_id: 'asked', created_at: '2026-08-14T10:15:00Z' })] } }),
-    )
-    expect(ids(groups['needs-you'])).toEqual(['stopped', 'asked'])
-    expect(groups['needs-you'][1].waitingSince).toBe('2026-08-14T10:15:00Z')
   })
 
   it('sorts Working by latest change and Finished with failures and interruptions first', () => {

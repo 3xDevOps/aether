@@ -179,28 +179,6 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		{"the held run stalled", func() {
 			quietFor(t, e, 20*time.Millisecond)
 		}, domain.RunNeedsAttention, domain.ActivityWaiting, stalledReasonPrefix},
-		{"an approval requested mid-turn", func() {
-			report(working)
-			nextActivity(t, sub, run.ID, &seq)
-			if err := e.db.CreateApproval(ctx, &store.Approval{WorkspaceID: e.ws.ID, RunID: run.ID, SourceID: "tool-1", Action: "ExitPlanMode"}); err != nil {
-				t.Fatal(err)
-			}
-			if err := e.sched.refreshRunActivity(ctx, run.ID); err != nil {
-				t.Fatal(err)
-			}
-		}, domain.RunRunning, domain.ActivityNeedsYou, agentstatus.ReasonResumed},
-		{"the approval decided", func() {
-			requested, err := e.db.ListApprovals(ctx, e.ws.ID, store.ApprovalRequested)
-			if err != nil || len(requested) != 1 {
-				t.Fatalf("approvals = %v, %v", requested, err)
-			}
-			if err := e.db.DecideApproval(ctx, requested[0].ID, "approved", e.member.ID, time.Now()); err != nil {
-				t.Fatal(err)
-			}
-			if err := e.sched.refreshRunActivity(ctx, run.ID); err != nil {
-				t.Fatal(err)
-			}
-		}, domain.RunRunning, domain.ActivityWorking, agentstatus.ReasonResumed},
 		{"an Enhanced turn interrupted", func() {
 			report(agentstatus.Report{State: agentstatus.Idle, Reason: acpInterruptedReason})
 		}, domain.RunNeedsAttention, domain.ActivityNeedsYou, acpInterruptedReason},

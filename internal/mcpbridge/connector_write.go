@@ -105,7 +105,7 @@ var writeTools = []connectorTool{
 
 var controlTools = []connectorTool{
 	connectorToolOf("aether_decide_approval", "Decide approval", ScopeControl, true, nextAttention,
-		"Use this when the user allows or denies an approval or permission item from aether_needs_attention. It allows once, never always.", decideApproval).
+		"Use this when the user allows or denies a permission item from aether_needs_attention. It allows once, never always.", decideApproval).
 		enum("decision", "allow", "deny"),
 	connectorToolOf("aether_stop_run", "Stop run", ScopeControl, true, nextRuns,
 		"Use this when the user wants a run stopped now.", stopRun),
@@ -561,16 +561,6 @@ func decideApproval(ctx context.Context, c calls, in decideInput) (string, any, 
 	}
 	allow := in.Decision == "allow"
 	switch {
-	case it.Kind == protocol.AttentionKindApproval && it.Approval != nil:
-		if err := decidable(in, l, it.Approval.Action, it.Approval.Detail); err != nil {
-			return "", nil, err
-		}
-		var res protocol.ApprovalDecideResult
-		if err := c.act(ctx, protocol.MethodApprovalDecide, protocol.ApprovalDecideParams{RunID: in.RunID, RequestID: in.AnswerID, Approve: allow}, &res); err != nil {
-			return "", nil, err
-		}
-		return fmt.Sprintf("Approval on run %s: %s.", in.RunID, res.Approval.Decision),
-			map[string]any{"run_id": in.RunID, "answer_id": in.AnswerID, "decision": res.Approval.Decision, "url": l.run(in.RunID), "untrusted": map[string]any{"action": in.Action}}, nil
 	case it.Kind == protocol.AttentionKindPermission && it.Request != nil && len(it.Request.Options) > 0:
 		if err := decidable(in, l, it.Request.Title); err != nil {
 			return "", nil, err

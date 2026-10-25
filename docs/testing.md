@@ -133,7 +133,7 @@ script committed to the test repository).
 | Test | Covers |
 | --- | --- |
 | `TestIntegrationEndToEnd` | One member: push, launch, attach, detach, steer, finish, pull |
-| `TestIntegrationMultiMember` | Joining, roles, handoff, approvals, budget caps, an agent crash |
+| `TestIntegrationMultiMember` | Joining, roles, handoff, budget caps, an agent crash |
 | `TestIntegrationChaos*` | The server killed mid-run, disk pressure, a stalled agent |
 | `TestIntegrationCoordination*`, `TestIntegrationMission*` | Messages between runs, swarms |
 | `TestIntegrationServerUpdate*` | `aether-server update`: preflight, rollback, downgrade guards |

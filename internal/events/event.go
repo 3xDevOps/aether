@@ -1,5 +1,5 @@
 // Package events is the in-process pub/sub backbone: every state change in
-// Aether (run status, diffs, presence, approvals, costs, timeline entries)
+// Aether (run status, diffs, presence, costs, timeline entries)
 // is published here and all features are consumers. The Bus interface is a
 // deliberate seam - in-process today, externalizable if a control plane ever
 // splits out. Workspace-scoped events are additionally persisted append-only
@@ -56,9 +56,6 @@ const (
 	// TypePresence signals a member coming online, going offline, or
 	// watching a run.
 	TypePresence Type = "workspace.presence"
-	// TypeApproval carries approval-inbox activity: a permission request
-	// surfacing or a member deciding it.
-	TypeApproval Type = "workspace.approval"
 	// TypeTimeline carries workspace timeline entries, including steering
 	// acts (inject, pause, kill, handoff) and free-form notes.
 	TypeTimeline Type = "workspace.timeline"
@@ -68,10 +65,10 @@ const (
 	TypeGitBranch Type = "git.branch"
 	// TypeAgentEvent carries structured agent activity translated from a
 	// harness's machine-readable output by its run adapter: tool calls,
-	// tool results, subagent spawns, plan/approval pauses, and session
-	// metadata for timeline observability. Only headless runs whose harness
-	// has an adapter emit it; runs without one degrade to the PTY + diff
-	// timeline and no feature may hard-require these events.
+	// tool results, subagent spawns, and session metadata for timeline
+	// observability. Only headless runs whose harness has an adapter emit
+	// it; runs without one degrade to the PTY + diff timeline and no
+	// feature may hard-require these events.
 	TypeAgentEvent Type = "run.agent"
 	// TypeProfile records a member+harness profile snapshot change
 	// (put, rollback, or pin). Publishing still requires a WorkspaceID;
@@ -337,25 +334,6 @@ type PresencePayload struct {
 
 func (PresencePayload) EventType() Type { return TypePresence }
 
-// ApprovalDecision is the state of an approval-inbox request.
-type ApprovalDecision string
-
-const (
-	ApprovalRequested ApprovalDecision = "requested"
-	ApprovalApproved  ApprovalDecision = "approved"
-	ApprovalDenied    ApprovalDecision = "denied"
-)
-
-// ApprovalPayload carries approval-inbox activity. RequestID ties the
-// decision events back to the originating request.
-type ApprovalPayload struct {
-	RequestID string           `json:"request_id"`
-	Action    string           `json:"action"`
-	Decision  ApprovalDecision `json:"decision"`
-}
-
-func (ApprovalPayload) EventType() Type { return TypeApproval }
-
 // TimelineKind classifies a workspace timeline entry.
 type TimelineKind string
 
@@ -422,8 +400,6 @@ const (
 	AgentToolResult AgentEventKind = "tool_result"
 	// AgentSubagent is the agent spawning a subagent.
 	AgentSubagent AgentEventKind = "subagent"
-	// AgentPause is the agent pausing for plan review or approval.
-	AgentPause AgentEventKind = "pause"
 	// AgentSession carries the harness-native session identifier reported by
 	// the agent. It is retained as timeline observability for operators.
 	AgentSession AgentEventKind = "session"
@@ -578,7 +554,6 @@ var payloadCodecs = map[Type]func([]byte) (Payload, error){
 	TypeRunDiff:        decodeAs[RunDiffPayload],
 	TypeRunCost:        decodeAs[RunCostPayload],
 	TypePresence:       decodeAs[PresencePayload],
-	TypeApproval:       decodeAs[ApprovalPayload],
 	TypeTimeline:       decodeAs[TimelinePayload],
 	TypeGitBranch:      decodeAs[GitBranchPayload],
 	TypeAgentEvent:     decodeAs[AgentEventPayload],

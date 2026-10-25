@@ -234,7 +234,7 @@ func TestLocalTerminalRunsTheTerminalHandler(t *testing.T) {
 // in-process streams stand in for one.
 func TestLocalStreamsCountAsPresenceConnections(t *testing.T) {
 	t.Parallel()
-	e := inboxEnv(t)
+	e := presenceEnv(t)
 	ctx := context.Background()
 	_, cm := addMember(t, e, "Cody", domain.RoleCollaborator, false)
 	l := e.srv.Local(cm.ID)

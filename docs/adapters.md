@@ -141,7 +141,6 @@ Most adapter output is `events.AgentEventPayload`:
 | `AgentToolCall` | The agent invoked a tool | `Tool`, `ToolUseID`, `Detail` |
 | `AgentToolResult` | A tool invocation finished | `ToolUseID`, `IsError` |
 | `AgentSubagent` | The agent spawned a subagent | `Tool`, `ToolUseID`, `Detail` |
-| `AgentPause` | The agent is waiting on plan review or approval | `Detail` |
 | `AgentSession` | The agent's own session ID, surfaced on the timeline | `HarnessSessionID` |
 
 Token usage is **not** an agent event: report it as `events.RunCostPayload` so

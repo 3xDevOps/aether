@@ -91,7 +91,7 @@ than `offline_access`.
 | --- | --- | --- |
 | `read` | Always granted | Every read-only tool |
 | `write` | **Launch and message**, checked by default | Launching runs and swarms; messaging, pausing and resuming runs; answering agents' and teammates' questions; marking runs reviewed |
-| `control` | **Stop and approve**, unchecked by default | Deciding approvals and permission requests, stopping and closing runs, cancelling swarms. Text an agent wrote could talk the assistant into approving or ending work without asking you |
+| `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing runs, cancelling swarms. Text an agent wrote could talk the assistant into approving or ending work without asking you |
 
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
@@ -118,7 +118,7 @@ others:
 | `aether_launch_run`, `aether_launch_swarm` | Start a run, or a swarm with you as its accountable human | `write` |
 | `aether_message_run`, `aether_answer` | Message a run; answer an agent's, the integrator's or a teammate's question | `write` |
 | `aether_pause_run`, `aether_resume_run`, `aether_mark_reviewed` | Pause or resume a run; accept a reported success, which closes the run, or put it off | `write` |
-| `aether_decide_approval` | Allow or deny an approval or permission request, once | `control` |
+| `aether_decide_approval` | Allow or deny a permission request, once | `control` |
 | `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | Stop a run; close it as merged or abandoned; cancel a swarm | `control` |
 
 Things to ask:
@@ -143,11 +143,11 @@ server's own errors. Untrusted text is cut to 200 characters for titles, check
 names, commit subjects, a swarm task's blockers, a list row's reason, last
 report or swarm goal; 300 for each pull request review or comment; 2000 for a
 conversation item; 12000 for a diff; and 600 for everything else, such as
-tasks, reports, questions, request and approval text, terminal lines and memory
+tasks, reports, questions, permission request text, terminal lines and memory
 notes. `search` and `fetch` keep OpenAI's shapes, with no `untrusted` field:
 their descriptions say titles and text are data, `fetch`'s text marks where
 agent text begins, and it returns a run's title, task and reason and a swarm's
-goal whole. An approval or permission request longer than 600 characters is
+goal whole. A permission request longer than 600 characters is
 decided only in the dashboard, never by `aether_decide_approval`. Lists return
 20 rows by default, at most 100, and say how many matched when they cut rows;
 `aether_needs_attention` returns at most 30 items. Tools that take a `run_id`

@@ -47,7 +47,6 @@ import {
   Compass as LucideCompass,
   FolderTree as LucideFolderTree,
   MonitorSmartphone as LucideMonitorSmartphone,
-  ShieldQuestion as LucideShieldQuestion,
   SlidersHorizontal as LucideSlidersHorizontal,
   ChevronsUpDown as LucideChevronsUpDown,
   User as LucideUser,
@@ -197,7 +196,6 @@ export const LayoutGrid = icon(LucideLayoutGrid)
 export const Compass = icon(LucideCompass)
 export const FolderTree = icon(LucideFolderTree)
 export const MonitorSmartphone = icon(LucideMonitorSmartphone)
-export const ShieldQuestion = icon(LucideShieldQuestion)
 export const SlidersHorizontal = icon(LucideSlidersHorizontal)
 export const ChevronsUpDown = icon(LucideChevronsUpDown)
 export const User = icon(LucideUser)

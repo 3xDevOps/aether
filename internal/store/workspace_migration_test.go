@@ -111,14 +111,6 @@ func TestSessionCollapseMigrationRehomesEveryRow(t *testing.T) {
 		}
 	}
 
-	approvals, err := db.ListApprovals(ctx, "w1", "")
-	if err != nil {
-		t.Fatalf("ListApprovals: %v", err)
-	}
-	if len(approvals) != 1 || approvals[0].WorkspaceID != "w1" || approvals[0].RunID != "r2" {
-		t.Fatalf("approvals after migration = %+v", approvals)
-	}
-
 	costs, _, err := db.ListWorkspaceCosts(ctx, "w1")
 	if err != nil {
 		t.Fatalf("ListWorkspaceCosts: %v", err)
@@ -237,9 +229,10 @@ func TestSessionCollapseMigrationRewritesEventScope(t *testing.T) {
 	}
 
 	// The four session-scoped type strings were renamed with the scope
-	// they name. Verify the migrated rows directly so this same-package
-	// test does not import the events package (which imports protocol and
-	// would create a cycle back to store).
+	// they name, and the approval one was later deleted with the inbox.
+	// Verify the migrated rows directly so this same-package test does not
+	// import the events package (which imports protocol and would create a
+	// cycle back to store).
 	rows, err := db.db.QueryContext(context.Background(),
 		`SELECT type, workspace_id FROM events ORDER BY seq`)
 	if err != nil {
@@ -261,13 +254,12 @@ func TestSessionCollapseMigrationRewritesEventScope(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read migrated history: %v", err)
 	}
-	if len(got) != 5 {
-		t.Fatalf("migrated history = %d events, want 5", len(got))
+	if len(got) != 4 {
+		t.Fatalf("migrated history = %d events, want 4", len(got))
 	}
 	want := []string{
 		"run.status",
 		"workspace.timeline",
-		"workspace.approval",
 		"workspace.presence",
 		"workspace.budget",
 	}
@@ -278,6 +270,46 @@ func TestSessionCollapseMigrationRewritesEventScope(t *testing.T) {
 		if ev.workspace != "w1" {
 			t.Errorf("event %d workspace = %q, want w1", i, ev.workspace)
 		}
+	}
+}
+
+// TestApprovalInboxMigrationKeepsTheIssuedSeq pins v81: the approvals table
+// and its events go, and the newest event's seq stays issued when that event
+// is the one deleted.
+func TestApprovalInboxMigrationKeepsTheIssuedSeq(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "aether.db")
+	raw := openLegacy(t, path, 80)
+	if _, err := raw.Exec(`
+		INSERT INTO events (seq, id, ts, workspace_id, run_id, actor_id, type, payload)
+			VALUES (41, 'e1', 1, 'w1', 'r1', 'm1', 'run.status', '{"status":"running"}'),
+			       (42, 'e2', 2, 'w1', 'r1', 'm1', 'workspace.approval', '{"decision":"requested"}');
+	`); err != nil {
+		t.Fatalf("seed v80 events: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw: %v", err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open (v81 migration): %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	ctx := context.Background()
+	var left, tables int
+	var issued uint64
+	if err := db.db.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM events WHERE type = 'workspace.approval'),
+		(SELECT COUNT(*) FROM sqlite_master WHERE name = 'approvals'),
+		(SELECT seq FROM sqlite_sequence WHERE name = 'events')`).Scan(&left, &tables, &issued); err != nil {
+		t.Fatalf("read migrated state: %v", err)
+	}
+	if left != 0 || tables != 0 {
+		t.Errorf("after v81: %d approval events, %d approvals tables; want none", left, tables)
+	}
+	if issued != 42 {
+		t.Errorf("issued seq = %d, want 42 kept after deleting the newest event", issued)
 	}
 }
 

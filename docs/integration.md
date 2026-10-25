@@ -298,8 +298,7 @@ request on a swarm candidate still waits for a decision.
 `integration.decide` is human-only: its actor must have no `RunID`. It takes
 `request_id`, the exact `request_version`, and `approve`; it decides a
 `pending` request and uses optimistic version fencing. Agent actors cannot
-approve or deny. This integration decision is separate from the existing
-`approval.decide` flow; that flow's contract is unchanged. `integration.deliver`
+approve or deny. `integration.deliver`
 takes the exact request/version and
 rechecks current membership, push permission, candidate ownership, all
 selected evidence, verification validity, the approver's current Push

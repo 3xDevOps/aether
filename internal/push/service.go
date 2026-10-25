@@ -42,7 +42,6 @@ var (
 // Store is the persistence the service reads and writes.
 type Store interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
-	ListApprovals(ctx context.Context, workspace domain.WorkspaceID, decision string) ([]*store.Approval, error)
 	store.PushStore
 }
 
@@ -128,7 +127,7 @@ func New(cfg Config) (*Service, error) {
 // service runs until Close.
 func (s *Service) Start(ctx context.Context) error {
 	sub, err := s.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{
-		events.TypeRunStatus, events.TypeRunInput, events.TypeApproval, events.TypeRunOutcomeSeen,
+		events.TypeRunStatus, events.TypeRunInput, events.TypeRunOutcomeSeen,
 		events.TypeRunReview, events.TypeRunMode, events.TypeTimeline, events.TypeRunDeleted,
 	}}})
 	if err != nil {
@@ -286,24 +285,13 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 // to hear about.
 func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need) {
 	run, err := s.store.GetRun(ctx, id)
-	var requested []*store.Approval
-	if err == nil {
-		requested, err = s.store.ListApprovals(ctx, run.WorkspaceID, store.ApprovalRequested)
-	}
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
 			slog.Warn("push: read run", "run", id, "error", err)
 		}
 		return nil, nil
 	}
-	var approval *store.Approval
-	for _, a := range requested {
-		if a.RunID == id {
-			approval = a
-			break
-		}
-	}
-	n := needOf(run, approval, s.runs.PendingInputs(id), s.runs.Paused(id))
+	n := needOf(run, s.runs.PendingInputs(id), s.runs.Paused(id))
 	if n != nil {
 		n.key = string(run.MemberID) + "|" + n.key
 	}

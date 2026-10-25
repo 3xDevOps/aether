@@ -1,7 +1,6 @@
 import type { Api } from '@/lib/api'
 import type {
   AgentInfo,
-  Approval,
   BudgetReport,
   Device,
   DevController,
@@ -44,7 +43,6 @@ export function stateContext(over: Partial<StateContext> = {}): StateContext {
     mergedInto: {},
     runs: {},
     workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
-    approvalsByRun: {},
     roomMessages: {},
     roomStatus: {},
     missions: {},
@@ -203,19 +201,6 @@ export const serverInfo: ServerInfo = {
     database_bytes: 64 * 1024 * 1024,
     repo_bytes: 512 * 1024 * 1024,
   },
-}
-
-export function approval(over: Partial<Approval> = {}): Approval {
-  return {
-    id: 'apr_1',
-    workspace_id: workspace.id,
-    run_id: 'run_1',
-    action: 'write src/checkout.ts',
-    detail: 'the agent wants to edit a file outside its allowlist',
-    decision: 'requested',
-    created_at: '2026-08-14T10:03:00Z',
-    ...over,
-  }
 }
 
 /** A device waiting on an invitation that adds a new collaborator. */
@@ -725,8 +710,6 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     integrationDeliver: vi.fn(async () => ({ candidate: integrationCandidate })),
     integrationPatch: vi.fn(async () => ({ patch: '', truncated: false })),
     integrationDelete: vi.fn(async () => ({})),
-    approvalList: vi.fn(async () => []),
-    approvalDecide: vi.fn(async () => approval()),
     presenceRoster: vi.fn(async () => []),
     presenceHeartbeat: vi.fn(async () => 90),
     budgetGet: vi.fn(async (workspaceID: string) => budget(workspaceID)),

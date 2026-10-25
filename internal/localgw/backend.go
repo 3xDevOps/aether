@@ -405,7 +405,6 @@ var noReplay = map[string]bool{
 	protocol.MethodAssistantConfirm: true,
 	protocol.MethodAssistantReset:   true,
 
-	protocol.MethodApprovalDecide:    true,
 	protocol.MethodPushUnsubscribe:   true,
 	protocol.MethodPushTest:          true,
 	protocol.MethodGitHubConnect:     true,

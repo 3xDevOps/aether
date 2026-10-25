@@ -7,7 +7,6 @@ import { api, type Api } from '@/lib/api'
 import { onWake } from '@/lib/stream'
 import type { DiskUsage, TimelineQuery } from '@/lib/types'
 import { useStore, type RootState, type RootStore } from '@/store'
-import { inboxReadFailed, readInbox } from '@/store/approvals'
 import type { FeedFilters } from '@/store/timeline'
 
 /** Presence expires after 45s server-side; a third of it keeps us online. */
@@ -45,34 +44,10 @@ export async function refreshTeam(store: RootStore, client: Api = api): Promise<
   await Promise.all([
     client.presenceRoster().then(store.getState().setPresence).catch(ignore),
     readDisk(client),
-    refreshInbox(store, client),
     ...Object.keys(store.getState().workspaces).map((id) =>
       client.budgetGet(id).then(store.getState().setBudget).catch(ignore),
     ),
   ])
-}
-
-/** Reads every workspace: a request against a finished run still needs deciding. */
-export async function refreshInbox(store: RootStore, client: Api = api): Promise<void> {
-  const s = store.getState()
-  const id = s.startInboxRead()
-  await Promise.all(
-    Object.keys(s.workspaces).map((wsp) =>
-      client.approvalList(wsp, s.showDecided).then(
-        (list) => {
-          const now = store.getState()
-          if (now.inboxRequest !== id) return
-          // An approval event applied meanwhile is newer than this answer.
-          if (now.inboxEvents[wsp] !== s.inboxEvents[wsp]) return readInbox(store, client, wsp)
-          now.setInbox(wsp, list)
-          now.setInboxError(wsp, null)
-        },
-        (err) => {
-          if (store.getState().inboxRequest === id) inboxReadFailed(store, client, wsp, err)
-        },
-      ),
-    ),
-  )
 }
 
 export async function heartbeat(store: RootStore, client: Api = api): Promise<void> {
@@ -118,7 +93,6 @@ export function useTeamRefresh(client: Api = api): void {
   const route = useStore((s) => s.route)
   const offline = useStore((s) => s.connection !== 'live')
   const hydrated = useStore((s) => s.hydrated)
-  const showDecided = useStore((s) => s.showDecided)
   const workspaceIDs = useStore((s) => Object.keys(s.workspaces).sort().join(','))
   const lastRun = useRef(0)
 
@@ -129,7 +103,7 @@ export function useTeamRefresh(client: Api = api): void {
     if (!hydrated || (offline && lastRun.current > 0)) return
     lastRun.current = Date.now()
     void refreshTeam(useStore, client)
-  }, [hydrated, offline, showDecided, workspaceIDs, client])
+  }, [hydrated, offline, workspaceIDs, client])
 
   useEffect(() => {
     void heartbeat(useStore, client)

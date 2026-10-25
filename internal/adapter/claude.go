@@ -105,10 +105,6 @@ func (c *claude) ConsumeLine(line string) []events.Payload {
 			switch b.Name {
 			case "Task":
 				p.Kind = events.AgentSubagent
-			case "ExitPlanMode":
-				// The agent finished planning and is pausing for
-				// plan review/approval.
-				p.Kind = events.AgentPause
 			}
 			out = append(out, p)
 		}

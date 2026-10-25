@@ -1,7 +1,6 @@
 import { memberName as storeMemberName } from '@/lib/member-name'
 import { needsInputPrefix, plainReason } from '@/lib/reasons'
 import type {
-  Approval,
   Device,
   Member,
   Mission,
@@ -22,7 +21,6 @@ export interface StateContext {
   mergedInto: Record<string, string>
   runs: Record<string, RunRecord>
   workspaces: Record<string, Workspace>
-  approvalsByRun: Record<string, Approval[]>
   roomMessages: Record<string, RoomMessage[]>
   roomStatus: Record<string, RoomStatusResult | undefined>
   missions: Record<string, Mission>
@@ -48,7 +46,7 @@ export type NeedsYouID =
   | 'failed'
 
 export interface PrimaryAction {
-  kind: 'approve' | 'reply' | 'open'
+  kind: 'reply' | 'open'
   label: string
 }
 
@@ -65,7 +63,7 @@ export interface NeedsYouCondition {
   reason: (run: RunRecord, ctx: StateContext) => string
   since: (run: RunRecord, ctx: StateContext) => string
   target: NeedsYouTarget
-  action: (run: RunRecord, approval: Approval | undefined) => PrimaryAction
+  action: (run: RunRecord) => PrimaryAction
 }
 
 interface Spec {
@@ -84,7 +82,7 @@ interface Spec {
   reason: (run: RunRecord, ctx: StateContext) => string
   since?: (run: RunRecord, ctx: StateContext) => string | undefined
   target: NeedsYouTarget
-  action: (run: RunRecord, approval: Approval | undefined) => PrimaryAction
+  action: (run: RunRecord) => PrimaryAction
 }
 
 const isLive = (run: Pick<Run, 'status'>) => run.status === 'running' || run.status === 'needs-attention'
@@ -235,16 +233,10 @@ export const needsYouConditions: NeedsYouCondition[] = [
     id: 'permission',
     target: 'request',
     background: true,
-    holds: (run, ctx) =>
-      nativeRequests(run, ['permission']).length > 0 || (ctx.approvalsByRun[run.id]?.length ?? 0) > 0,
+    holds: (run) => nativeRequests(run, ['permission']).length > 0,
     resolvers: (run, ctx) => [run.member_id, controller(run, ctx)],
-    reason: (run, ctx) => {
-      const approval = ctx.approvalsByRun[run.id]?.[0]
-      if (approval) return `Permission: ${approval.action}`
-      return isEnhanced(run) ? 'Permission requested' : 'Permission: answer in the terminal'
-    },
-    action: (run, approval) => (approval ? { kind: 'approve', label: 'Approve' } : answerIn(run, 'Answer')),
-    since: (run, ctx) => ctx.approvalsByRun[run.id]?.[0]?.created_at,
+    reason: (run) => (isEnhanced(run) ? 'Permission requested' : 'Permission: answer in the terminal'),
+    action: (run) => answerIn(run, 'Answer'),
   }),
   condition({
     id: 'question',

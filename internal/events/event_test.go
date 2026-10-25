@@ -32,7 +32,6 @@ func TestPayloadCodecRoundtrip(t *testing.T) {
 		RunAccountPayload{Account: "mem_b", Previous: "mem_a", Requested: "mem_a"},
 		RunDiffPayload{Files: []FileDiffStat{{Path: "main.go", Additions: 10, Deletions: 2}}},
 		PresencePayload{State: PresenceWatching},
-		ApprovalPayload{RequestID: "req_1", Action: "rm -rf build", Decision: ApprovalDenied},
 		TimelinePayload{Kind: TimelineSteer, Message: "focus on the failing test"},
 		GitBranchPayload{WorkspaceID: "ws_1", Branch: "aether/run-r1-fix", Commit: "abc123"},
 		AgentEventPayload{Kind: AgentToolCall, Tool: "Bash", ToolUseID: "toolu_1", Detail: "go test ./..."},

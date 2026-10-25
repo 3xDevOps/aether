@@ -28,13 +28,12 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
 }) {
   const { run } = card
   const navigate = useStore((s) => s.navigate)
-  const approval = useStore((s) => s.approvalsByRun[run.id]?.[0])
   const mission = useStore((s) => (card.swarm && run.mission_id ? s.missions[run.mission_id] : undefined))
   const snapshot = useStore((s) => s.diffs[run.id]?.snapshots[0])
   const totals = useMemo(() => diffTotals(snapshot?.files), [snapshot])
   const [replying, setReplying] = useState(false)
   const cardRef = useRef<HTMLElement>(null)
-  const action = cardAction(card, approval)
+  const action = cardAction(card)
   const needsYou = card.group === 'needs-you'
   const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
   const state = needsYou && !card.needsYou ? 'needs-you' : card.state
@@ -82,7 +81,7 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
             </CardControls>
             {action && (
               <CardControls className="invisible ml-auto group-focus-within/card:visible group-hover/card:visible coarse:visible">
-                <CardActionButton card={card} action={action} approval={approval} onReply={() => setReplying(true)} />
+                <CardActionButton card={card} action={action} onReply={() => setReplying(true)} />
               </CardControls>
             )}
           </div>

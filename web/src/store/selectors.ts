@@ -69,7 +69,6 @@ export function stateContextOf(s: RootState, now: number): StateContext {
     mergedInto: s.mergedInto,
     runs: s.runs,
     workspaces: s.workspaces,
-    approvalsByRun: s.approvalsByRun,
     roomMessages: s.roomMessages,
     roomStatus: s.roomStatus,
     missions: s.missions,

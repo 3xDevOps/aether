@@ -12,7 +12,7 @@ import '@/routes/run'
 import { useStore } from '@/store'
 import { optimisticDeadlineMs } from '@/store/optimistic'
 import { applyEvent } from '@/store/sync'
-import { agentInfo, alice, approval, bob, fakeApi, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
+import { agentInfo, alice, bob, fakeApi, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
 import { ApiError } from '@/lib/api'
 import { StubSocket } from '@/test/stub-socket'
 
@@ -59,7 +59,6 @@ beforeEach(() => {
     failedNotes: {},
     roomStatus: {},
     roomStatusControl: {},
-    approvalsByRun: {},
     runViewMemory: {},
     browserBeside: false,
     browserBesideWidth: null,
@@ -548,18 +547,6 @@ describe('run details', () => {
     } finally {
       vi.useRealTimers()
     }
-  })
-
-  it('shows Approving… on one permission request and leaves the others live', async () => {
-    useStore.setState({ approvalsByRun: { run_1: [approval({ id: 'ap_1', action: 'push' }), approval({ id: 'ap_2', action: 'deploy' })] } })
-    vi.mocked(api.approvalDecide).mockImplementationOnce(never)
-    open()
-    const panel = await details()
-    const card = (action: string) => within(panel.getByText(`Permission: ${action}`).closest('[data-slot=request-card]') as HTMLElement)
-    fireEvent.click(card('push').getByRole('button', { name: 'Approve' }))
-    expect(card('push').getByRole('button', { name: 'Approving…' })).toHaveProperty('disabled', true)
-    expect(card('push').getByRole('button', { name: 'Deny' })).toHaveProperty('disabled', true)
-    expect(card('deploy').getByRole('button', { name: 'Approve' })).toHaveProperty('disabled', false)
   })
 
   type Posted = { message: ReturnType<typeof roomMessage> }

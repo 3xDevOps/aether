@@ -308,7 +308,7 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		finishedAt = &now
 	}
 	public := publicRunStatusReason(reason)
-	activity, err := s.activityLocked(ctx, run, workspace, s.runs[run], to, reason)
+	activity, err := s.activityLocked(ctx, run, s.runs[run], to, reason)
 	if err != nil {
 		return err
 	}

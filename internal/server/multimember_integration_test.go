@@ -74,9 +74,9 @@ func (s *stubWhoIs) WhoIs(context.Context, string) (sshd.WhoIsIdentity, error) {
 // fallback (key members connect, tailnet-only members are refused with the
 // banner). The workspace is administered over the control channel, then the
 // members collaborate through the fake agent: Cam steers Bo's run, Bo
-// hands it off to Cam, the approval inbox round-trips a pause, the budget
-// cap refuses a launch until Ada overrides it, and a crashing agent lands
-// failed with its partial work committed as wip.
+// hands it off to Cam, the budget cap refuses a launch until Ada overrides
+// it, and a crashing agent lands failed with its partial work committed as
+// wip.
 func TestIntegrationMultiMember(t *testing.T) {
 	requireBinary(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -326,29 +326,6 @@ func TestIntegrationMultiMember(t *testing.T) {
 		t.Fatalf("steerers after handoff = %v, want the outgoing owner %s credited", credited, bo.ID)
 	}
 
-	// Approval inbox: an adapter-surfaced pause (the inbox's one source,
-	// published on the same bus seam adapters use) reaches every client's
-	// inbox, and a steer-holder's decision is attributed.
-	if _, err := srv.Bus().Publish(ctx, events.Event{
-		WorkspaceID: domain.WorkspaceID(wsID),
-		RunID:       domain.RunID(collab.ID),
-		Payload: events.AgentEventPayload{
-			Kind: events.AgentPause, Tool: "Bash", ToolUseID: "tu-e2e-1", Detail: "rm -rf build/",
-		},
-	}); err != nil {
-		t.Fatalf("publish agent pause: %v", err)
-	}
-	requestID := waitApproval(t, boCtrl, wsID)
-	var decided protocol.ApprovalDecideResult
-	if err := boCtrl.Call(protocol.MethodApprovalDecide, protocol.ApprovalDecideParams{
-		RunID: collab.ID, RequestID: requestID, Approve: true,
-	}, &decided); err != nil {
-		t.Fatalf("approval.decide: %v", err)
-	}
-	if decided.Approval.Decision != "approved" || decided.Approval.DecidedBy != bo.ID {
-		t.Fatalf("decision = %+v, want approved by Bo", decided.Approval)
-	}
-
 	// Budget cap: Ada caps the workspace, the adapter meters the running run
 	// past it, and the next launch is refused before the scheduler is
 	// asked - while the running run is untouched. Ada's override admits
@@ -552,25 +529,6 @@ func waitRoster(t *testing.T, ctrl *protocol.Client, workspace string, ok func([
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("roster never settled; last = %+v", last.Members)
-}
-
-// waitApproval polls the approval inbox until the raised request appears,
-// returning its ID.
-func waitApproval(t *testing.T, ctrl *protocol.Client, workspace string) string {
-	t.Helper()
-	deadline := time.Now().Add(time.Minute)
-	for time.Now().Before(deadline) {
-		var inbox protocol.ApprovalListResult
-		if err := ctrl.Call(protocol.MethodApprovalList, protocol.ApprovalListParams{WorkspaceID: workspace}, &inbox); err != nil {
-			t.Fatalf("approval.list: %v", err)
-		}
-		if len(inbox.Approvals) == 1 && inbox.Approvals[0].Decision == "requested" {
-			return inbox.Approvals[0].ID
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatal("the pause never reached the approval inbox")
-	return ""
 }
 
 // waitBudgetState polls budget.get until the workspace reaches state;
