@@ -212,7 +212,8 @@ so uncertainty surfaces immediately. A subsequent explicit request can
 reconnect. A call with no answer after 60 seconds fails with `-32004`
 `server did not answer <method> within 1m0s` and is not retried;
 `home.upload`, `home.download` and `terminal.file`, which carry up to
-64 MiB, get 15 minutes. Only that call's channel closes: a slow server
+64 MiB, and `workspace.import`, whose first fetch of a large repository is
+slow, get 15 minutes. Only that call's channel closes: a slow server
 handler is not a dead connection, so the connection, its streams and its
 other calls stay up. The keepalive below drops a dead one. A server refusal passes through untouched as that `protocol.Error`;
 in particular, busy retention admission requires an explicit retry, not
