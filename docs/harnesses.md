@@ -15,33 +15,55 @@ and shows messages, tool calls and permission prompts as dashboard controls
 ([Enhanced runs](enhanced-runs.md)). A third mode, **Background**, runs the
 agent once without input, commits the result and exits.
 
-| `--agent` | CLI | Sign in | Standard | Enhanced | Mail reaches the agent | Known limits |
+| `--agent` | CLI | Sign in | Known limits |
+| --- | --- | --- | --- |
+| `antigravity` | Antigravity CLI (runs as `agy`) | run `agy` | None known |
+| `claude` | Claude Code | `/login` inside `claude` | Set up suggests Standard: the Enhanced adapter runs on the Claude Agent SDK |
+| `codex` | OpenAI Codex CLI | `codex login`, device code | Trust prompt on the first Standard run; subagents do not nest in Enhanced |
+| `copilot` | GitHub Copilot CLI | `copilot login --device-code` | Enhanced runs cannot take back `--allow-all` |
+| `cursor` | Cursor CLI (runs as `agent`) | `NO_OPEN_BROWSER=1 agent login` | A Cursor admin policy can bring back approval prompts |
+| `gemini` | Gemini CLI | API key, or `NO_BROWSER=true gemini` | Serves paid API keys and Code Assist only |
+| `omp` | oh-my-pi | log in inside `omp` | Sharing an account shares a whole directory |
+| `opencode` | OpenCode | `opencode auth login` | Never auto-updated; reports no usage |
+| `pi` | pi | `/login` inside `pi` | None known |
+
+What each agent can do:
+
+| `--agent` | Standard status | Standard mail | Enhanced | Mode switch | Background tasks | Set up suggests |
 | --- | --- | --- | --- | --- | --- | --- |
-| `claude` | Claude Code | `/login` inside `claude` | status reporting | yes, needs an adapter; can switch modes | hooks at turn boundaries, plus idle wake | Setup suggests Standard: the Enhanced adapter runs on the Claude Agent SDK |
-| `codex` | OpenAI Codex CLI | `codex login`, device code | status at turn end only | yes, needs an adapter | hooks at boundaries after you trust them once; no idle wake | Trust prompt on the first Standard run; subagents do not nest in Enhanced |
-| `pi` | pi | `/login` inside `pi` | status reporting | yes, needs an adapter | hooks at boundaries, plus idle wake | None known |
-| `omp` | oh-my-pi | log in inside `omp` | status reporting | yes, built in; can switch modes | hooks at boundaries, plus idle wake | Sharing an account shares a whole directory |
-| `opencode` | OpenCode | `opencode auth login` | status reporting | yes, built in | hooks at boundaries, plus idle wake | Never auto-updated; reports no usage |
-| `copilot` | GitHub Copilot CLI | `copilot login --device-code` | no status; stalls are judged on silence | yes, built in | hooks at boundaries; no idle wake | Enhanced runs cannot take back `--allow-all` |
-| `gemini` | Gemini CLI | API key, or `NO_BROWSER=true gemini` | no status | yes, built in | hooks only if you install them by hand | Serves paid API keys and Code Assist only |
-| `cursor` | Cursor CLI (runs as `agent`) | `NO_OPEN_BROWSER=1 agent login` | no status | yes, built in | hooks only if you install them by hand | A Cursor admin policy can bring back approval prompts |
-| `antigravity` | Antigravity CLI (runs as `agy`) | run `agy` | no status | none | none: the agent reads its inbox explicitly | No Enhanced mode, no packaged hooks |
+| `antigravity` | none | none | none | no | no | Standard |
+| `claude` | turn start and end | hooks and idle wake | adapter | yes | yes | Standard |
+| `codex` | turn end only | hooks | adapter | no | no | Enhanced |
+| `copilot` | none | hooks | built in | no | no | Enhanced |
+| `cursor` | none | hooks you install | built in | no | no | Enhanced |
+| `gemini` | none | hooks you install | built in | no | no | Enhanced |
+| `omp` | turn start and end | hooks and idle wake | built in | yes | no | Enhanced |
+| `opencode` | turn start and end | hooks and idle wake | built in | no | no | Enhanced |
+| `pi` | turn start and end | hooks and idle wake | adapter | no | no | Standard |
 
-Mail is a message to a run from a person or another run, which the agent reads
-from its inbox ([Incoming coordination hooks](#incoming-coordination-hooks)).
-In an Enhanced run, mail needs no hooks: when the agent is idle and mail is
-waiting, the server sends it one prompt ([Mail](enhanced-runs.md#mail)). The
-hooks and idle wake in the table apply to Standard runs.
-
-**Set up** suggests Enhanced for Codex, oh-my-pi, OpenCode, Copilot, Gemini and
-Cursor, and Standard for Claude Code, pi and Antigravity. The dashboard then
-remembers your choice per agent
-([Choose Enhanced](enhanced-runs.md#choose-enhanced)). `aether run` defaults to
-Standard.
-
-Agents with no status reporting in Standard mode are judged on silence alone: a
-run that goes quiet for `--stall-threshold` parks as **Needs you** with a
-reason starting `stalled:` ([failure-handling.md](failure-handling.md)).
+- **Standard status** is what a Standard run reports of its turns
+  ([Status reporting](#status-reporting)). With none, a run that goes quiet for
+  `--stall-threshold` parks as **Needs you** with a reason starting `stalled:`
+  ([failure-handling.md](failure-handling.md)).
+- **Standard mail** is how a Standard run learns that mail, a message from a
+  person or another run, is waiting in its inbox: hooks at turn boundaries,
+  plus idle wake, which starts a turn in a waiting session
+  ([Incoming coordination hooks](#incoming-coordination-hooks)). Enhanced runs
+  need neither: the server prompts the idle session
+  ([Mail](enhanced-runs.md#mail)).
+- **Enhanced** is built into the agent's CLI, served by a separate
+  [adapter](#enhanced-adapters), or missing.
+- **Mode switch** moves a running session between Standard and Enhanced
+  ([Switching a running agent](enhanced-runs.md#switching-a-running-agent)).
+- **Background tasks**: an Enhanced run stays working while the agent's
+  background subagents and commands run
+  ([Background work](enhanced-runs.md#background-work)).
+- **Set up suggests** is the mode **Set up** picks first. The dashboard then
+  remembers your choice per agent
+  ([Choose Enhanced](enhanced-runs.md#choose-enhanced)), and `aether run`
+  defaults to Standard. A Background run of an agent it suggests Enhanced for
+  uses the agent's ACP server once it is installed
+  ([Background runs](enhanced-runs.md#background-runs)).
 
 Other CLIs work as [custom agents](#custom-and-unlisted-agents).
 

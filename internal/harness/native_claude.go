@@ -56,7 +56,6 @@ func claudeNativeLaunch(dir string) (NativeLaunch, error) {
 		Args:           []string{"--settings", path.Join(dir, agentstatus.ClaudeSettingsName)},
 		ReplacesStatus: true,
 		Reporter:       ReporterFull,
-		IdleWake:       true,
 	}, nil
 }
 

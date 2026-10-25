@@ -64,7 +64,7 @@ func newBackgroundEnv(t *testing.T, agent string, installed bool) (*testEnv, *ac
 	return e, rt
 }
 
-// enhancedAgent is a shipped agent whose profile sets ACPDefault.
+// enhancedAgent is a shipped agent whose profile sets EnhancedDefault.
 const enhancedAgent = "opencode"
 
 func (e *testEnv) launchBackground(t *testing.T, agent, task string) *domain.Run {

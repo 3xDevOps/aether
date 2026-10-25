@@ -788,7 +788,7 @@ func validateHarnessSpec(name string, spec HarnessSpec) error {
 }
 
 func (s *Scheduler) backgroundACP(member, account domain.MemberID, profile harness.Profile, argvs map[domain.LaunchMode][]string) bool {
-	if !profile.ACPDefault || s.cfg.Homes == nil {
+	if !profile.Capabilities.EnhancedDefault || s.cfg.Homes == nil {
 		return false
 	}
 	installed, err := s.adapterInstalled(member, account, profile, argvs)
@@ -852,17 +852,14 @@ func (s *Scheduler) launchProfile(ctx context.Context, member, account domain.Me
 		}
 		// An explicit argv override is respected verbatim. Registry discovery
 		// and status assets belong to the shipped CLI, not an override.
-		profile.Reporter = harness.ReporterNone
+		profile.Capabilities = harness.Capabilities{EnhancedDefault: profile.Capabilities.EnhancedDefault}
 		profile.StatusArgs = nil
 		profile.StatusEnv = nil
 		profile.StatusFiles = nil
 		profile.InstructionArgs = nil
 		profile.InstructionEnv = nil
 		profile.ACPSystemPrompt = false
-		profile.ACPClaudeCode = false
-		profile.NativeCoordination = false
 		profile.UpdateScript = ""
-		profile.SwitchVerified = false
 		profile.HeadlessResumeArgs = nil
 	case inRegistry:
 		tui, headless, acp = profile.TUIArgs, profile.HeadlessArgs, profile.ACPArgs

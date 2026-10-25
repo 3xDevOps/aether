@@ -51,10 +51,6 @@ func (p Profile) EnhancedSupport() Enhanced {
 	return EnhancedNone
 }
 
-func (p Profile) Switchable() bool {
-	return p.ACPSessionShared && p.SwitchVerified && len(p.ResumeArgs) > 0 && len(p.ACPArgs) > 0
-}
-
 func (p Profile) ResumeCommand(session, model string) []string {
 	out := make([]string, len(p.ResumeArgs))
 	for i, a := range p.ResumeArgs {

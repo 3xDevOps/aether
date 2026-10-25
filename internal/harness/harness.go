@@ -246,8 +246,9 @@ func (d Definition) Profile() Profile {
 }
 
 type Profile struct {
-	Name        string
-	DisplayName string
+	Name         string
+	DisplayName  string
+	Capabilities Capabilities
 	// TaskPlaceholder is substituted with the task prompt.
 	TUIArgs      []string
 	HeadlessArgs []string
@@ -256,9 +257,6 @@ type Profile struct {
 	ACPArgs []string
 	// ACPInstall is the adapter package for an agent whose CLI does not serve ACP itself.
 	ACPInstall *ACPInstall
-	// ACPSessionShared means the ACP server and the TUI keep one session
-	// store, so a session started in one resumes in the other.
-	ACPSessionShared bool
 	// ACPMode is the session mode a new enhanced session starts in: the
 	// agent's mode that acts without asking. Empty keeps the agent's default.
 	ACPMode string
@@ -266,18 +264,10 @@ type Profile struct {
 	// session/resume and session/load _meta.systemPrompt.append to the
 	// agent's system prompt, so run instructions need no prompt of their own.
 	ACPSystemPrompt bool
-	// ACPClaudeCode marks Claude's ACP adapter, which forwards Claude Code's
-	// background task frames when session meta asks and runs a turn of its
-	// own, with no prompt open, when a background task ends.
-	ACPClaudeCode bool
 	// ACPTitleLookup marks an agent that titles a session at its first
 	// prompt, sends session_info_update only when that turn ends, and reports
 	// the title in session/list meanwhile.
 	ACPTitleLookup bool
-	// ACPDefault makes an enhanced run the agent's default once its ACP
-	// server is installed. Claude stays on its terminal by default: its
-	// adapter runs on the Claude Agent SDK, whose terms favour API keys.
-	ACPDefault bool
 	// ResumeArgs reopens a stored session, SessionPlaceholder being its id.
 	// Empty when the CLI cannot target one session.
 	ResumeArgs []string
@@ -285,9 +275,6 @@ type Profile struct {
 	// SessionPlaceholder being its id and TaskPlaceholder the next prompt.
 	// Empty when Aether cannot continue the agent's headless run.
 	HeadlessResumeArgs []string
-	// SwitchVerified records that the live switch test (ACP_LIVE=1,
-	// switch_live_test.go) passed in both directions for this agent.
-	SwitchVerified bool
 	// EnvPassthrough names server environment variables copied into run
 	// containers when set; keys are never baked into images.
 	EnvPassthrough []string
@@ -345,18 +332,14 @@ type Profile struct {
 	// developer_instructions InstructionArgs would replace; a launch carries
 	// that value ahead of the run's instructions.
 	InstructionsConfig string
-	// NativeCoordination enables the run-scoped mailbox for coordinated
-	// interactive runs with a task. Overrides never inherit it.
-	NativeCoordination bool
-	Reporter           Reporter
 	// StatusArgs make the harness run the reporter on its lifecycle events.
 	// Interactive runs only: a headless agent never waits for anyone.
 	StatusArgs []string
 	// StatusEnv is the environment alternative to StatusArgs. It is applied
 	// after the workspace's variables, so the server's value wins.
 	StatusEnv map[string]string
-	// StatusFiles are the assets StatusArgs and StatusEnv point at. Reporter,
-	// not this map, declares a reporter.
+	// StatusFiles are the assets StatusArgs and StatusEnv point at.
+	// Capabilities.Status, not this map, declares a reporter.
 	StatusFiles map[string][]byte
 	// InstallScript is the vendor's install command, run in the member's
 	// terminal. It must install into ~/.local/bin.
@@ -401,10 +384,11 @@ npm install -g --prefix "$stage"{extra} "{pkg}@$latest" || exit 1
 // deployment configuration and declares no credentials or key passthrough.
 var profiles = map[string]Profile{
 	"claude": {
-		Name:               "claude",
-		DisplayName:        "Claude Code",
-		NativeCoordination: true,
-		TUIArgs:            []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
+		Name:        "claude",
+		DisplayName: "Claude Code",
+		Capabilities: Capabilities{Status: ReporterFull, Hooks: HooksManaged, IdleWake: true,
+			ModeSwitch: true, BackgroundTasks: true},
+		TUIArgs: []string{"claude", "--dangerously-skip-permissions", TaskPlaceholder},
 		// Claude Code refuses stream-json in print mode without --verbose.
 		HeadlessArgs:    []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", TaskPlaceholder},
 		ACPArgs:         []string{claudeACP.Binary},
@@ -412,14 +396,11 @@ var profiles = map[string]Profile{
 		ACPMode:         "bypassPermissions",
 		ACPTitleLookup:  true,
 		ACPSystemPrompt: true,
-		ACPClaudeCode:   true,
 		ModelArgs:       []string{"--model", ModelPlaceholder},
 		ResumeArgs:      []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
 		HeadlessResumeArgs: []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
 			"--resume", SessionPlaceholder, TaskPlaceholder},
-		ACPSessionShared: true,
-		SwitchVerified:   true,
-		EnvPassthrough:   []string{"ANTHROPIC_API_KEY"},
+		EnvPassthrough: []string{"ANTHROPIC_API_KEY"},
 		// Claude Code refuses --dangerously-skip-permissions as root unless the
 		// environment declares a sandbox; the run container is one.
 		Env:             map[string]string{"IS_SANDBOX": "1"},
@@ -439,36 +420,33 @@ var profiles = map[string]Profile{
 		InstructionArgs: []string{"--append-system-prompt", InstructionsPlaceholder},
 		// --settings merges a settings document registering the reporter over
 		// the member's own, for this launch alone.
-		Reporter:      ReporterFull,
 		StatusArgs:    []string{"--settings", CoordPlaceholder + "/" + agentstatus.ClaudeSettingsName},
 		StatusFiles:   map[string][]byte{agentstatus.ClaudeSettingsName: agentstatus.ClaudeSettings},
 		InstallScript: "curl -fsSL https://claude.ai/install.sh | bash",
 		UpdateScript:  withAdapterUpdate("claude update", claudeACP),
 	},
 	"codex": {
-		Name:               "codex",
-		DisplayName:        "Codex",
-		NativeCoordination: true,
-		TUIArgs:            []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
-		HeadlessArgs:       []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
-		ACPArgs:            []string{codexACP.Binary},
-		ACPInstall:         codexACP,
-		ACPMode:            "agent-full-access",
-		ACPDefault:         true,
-		ModelArgs:          []string{"--model", ModelPlaceholder},
-		ResumeArgs:         []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
-		EnvPassthrough:     []string{"OPENAI_API_KEY"},
-		CredentialPaths:    []string{".codex/auth.json"},
-		LocalRoot:          ".codex",
-		DenyNames:          []string{"auth.json", "keychain", "token.json"},
+		Name:        "codex",
+		DisplayName: "Codex",
+		// Codex notifies only when a turn completes, so the run comes back on
+		// the agent's own output.
+		Capabilities:    Capabilities{Status: ReporterTurnEnd, Hooks: HooksManaged, EnhancedDefault: true},
+		TUIArgs:         []string{"codex", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
+		HeadlessArgs:    []string{"codex", "exec", "--json", "--dangerously-bypass-approvals-and-sandbox", TaskPlaceholder},
+		ACPArgs:         []string{codexACP.Binary},
+		ACPInstall:      codexACP,
+		ACPMode:         "agent-full-access",
+		ModelArgs:       []string{"--model", ModelPlaceholder},
+		ResumeArgs:      []string{"codex", "resume", "--dangerously-bypass-approvals-and-sandbox", SessionPlaceholder},
+		EnvPassthrough:  []string{"OPENAI_API_KEY"},
+		CredentialPaths: []string{".codex/auth.json"},
+		LocalRoot:       ".codex",
+		DenyNames:       []string{"auth.json", "keychain", "token.json"},
 		// developer_instructions adds to Codex's instructions;
 		// model_instructions_file would replace its built-in ones.
 		InstructionArgs:    []string{"-c", "developer_instructions=" + QuotedInstructionsPlaceholder},
 		InstructionsConfig: ".codex/config.toml",
-		// Codex notifies only when a turn completes, so the run comes back on
-		// the agent's own output.
-		Reporter:   ReporterTurnEnd,
-		StatusArgs: []string{"-c", agentstatus.CodexNotifySetting},
+		StatusArgs:         []string{"-c", agentstatus.CodexNotifySetting},
 		// --prefix keeps the install inside the member's persistent home.
 		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" @openai/codex; else echo \"npm is not in this environment's PATH, and codex installs through npm\" >&2; false; fi",
 		// Not "codex update": it installs into the image's global npm
@@ -489,10 +467,9 @@ var profiles = map[string]Profile{
 		LocalRoot:          ".pi",
 		DenyNames:          []string{"auth.json", "oauth.json"},
 		InstructionArgs:    []string{"--append-system-prompt", InstructionsPlaceholder},
-		Reporter:           ReporterFull,
+		Capabilities:       Capabilities{Status: ReporterFull, Hooks: HooksManaged, IdleWake: true},
 		StatusArgs:         []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
 		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
-		NativeCoordination: true,
 		// The vendor's install instruction adds --ignore-scripts.
 		InstallScript: "if command -v npm >/dev/null 2>&1; then npm install -g --prefix \"$HOME/.local\" --ignore-scripts @earendil-works/pi-coding-agent; else echo \"npm is not in this environment's PATH, and pi installs through npm\" >&2; false; fi",
 		// Not "pi update --self": it replaces files in place, under a
@@ -508,25 +485,22 @@ var profiles = map[string]Profile{
 		HeadlessArgs: []string{"omp", "-p", "--auto-approve", TaskPlaceholder},
 		ACPArgs:      []string{"omp", "acp", "--auto-approve"},
 		// omp acp and the TUI read and write one session store.
-		ACPSessionShared: true,
-		ACPDefault:       true,
-		ModelArgs:        []string{"--model=" + ModelPlaceholder},
-		ResumeArgs:       []string{"omp", "--auto-approve", "--resume=" + SessionPlaceholder},
-		SwitchVerified:   true,
-		EnvPassthrough:   []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+		Capabilities: Capabilities{Status: ReporterFull, Hooks: HooksManaged, IdleWake: true,
+			EnhancedDefault: true, ModeSwitch: true},
+		ModelArgs:      []string{"--model=" + ModelPlaceholder},
+		ResumeArgs:     []string{"omp", "--auto-approve", "--resume=" + SessionPlaceholder},
+		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
 		// omp keeps its login in a SQLite WAL database beside its config,
 		// and a WAL database cannot be shared file by file.
 		CredentialPaths: []string{".omp/agent"},
 		LocalRoot:       ".omp",
 		// The WAL and shm files hold provider keys too.
-		DenyNames:          []string{"agent.db", "agent.db-wal", "agent.db-shm"},
-		InstructionArgs:    []string{"--append-system-prompt", InstructionsPlaceholder},
-		Reporter:           ReporterFull,
-		StatusArgs:         []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
-		StatusFiles:        map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
-		NativeCoordination: true,
-		InstallScript:      "curl -fsSL https://omp.sh/install | sh",
-		UpdateScript:       "omp update",
+		DenyNames:       []string{"agent.db", "agent.db-wal", "agent.db-shm"},
+		InstructionArgs: []string{"--append-system-prompt", InstructionsPlaceholder},
+		StatusArgs:      []string{"-e", CoordPlaceholder + "/" + agentstatus.PiExtensionName},
+		StatusFiles:     map[string][]byte{agentstatus.PiExtensionName: agentstatus.PiExtension},
+		InstallScript:   "curl -fsSL https://omp.sh/install | sh",
+		UpdateScript:    "omp update",
 	},
 	"opencode": {
 		Name:            "opencode",
@@ -534,7 +508,7 @@ var profiles = map[string]Profile{
 		TUIArgs:         []string{"opencode", "--prompt=" + TaskPlaceholder},
 		HeadlessArgs:    []string{"opencode", "run", TaskPlaceholder},
 		ACPArgs:         []string{"opencode", "acp"},
-		ACPDefault:      true,
+		Capabilities:    Capabilities{Status: ReporterFull, Hooks: HooksManaged, IdleWake: true, EnhancedDefault: true},
 		ResumeArgs:      []string{"opencode", "--session=" + SessionPlaceholder},
 		PermissionEnv:   map[string]string{"OPENCODE_CONFIG_CONTENT": `{"permission":"allow"}`},
 		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
@@ -551,12 +525,10 @@ var profiles = map[string]Profile{
 		// opencode has no plugin flag, but it merges OPENCODE_CONFIG_CONTENT over
 		// the member's config and concatenates plugin lists, so this adds the
 		// reporter to whatever the member already loads.
-		Reporter: ReporterFull,
 		StatusEnv: map[string]string{
 			"OPENCODE_CONFIG_CONTENT": `{"plugin":["file://` + CoordPlaceholder + "/" + agentstatus.OpenCodePluginName + `"]}`,
 		},
-		StatusFiles:        map[string][]byte{agentstatus.OpenCodePluginName: agentstatus.OpenCodePlugin},
-		NativeCoordination: true,
+		StatusFiles: map[string][]byte{agentstatus.OpenCodePluginName: agentstatus.OpenCodePlugin},
 		// Instructions must work without the reporter; the scheduler merges
 		// this overlay with StatusEnv when both apply.
 		InstructionEnv: map[string]string{
@@ -575,17 +547,16 @@ var profiles = map[string]Profile{
 		TUIArgs:      []string{"copilot", "--allow-all", "--interactive=" + TaskPlaceholder},
 		HeadlessArgs: []string{"copilot", "--allow-all", "--prompt=" + TaskPlaceholder},
 		ACPArgs:      []string{"copilot", "--acp", "--allow-all"},
-		ACPDefault:   true,
+		Capabilities: Capabilities{Hooks: HooksManaged, EnhancedDefault: true},
 		ModelArgs:    []string{"--model", ModelPlaceholder},
 		// --allow-all leaves the TUI's folder trust dialog up; exactly "true"
 		// here trusts the working directory as well.
 		Env: map[string]string{"COPILOT_ALLOW_ALL": "true"},
 		// Copilot puts every *.instructions.md in these directories into its
 		// system prompt, after the repository's own instructions.
-		InstructionEnv:     map[string]string{"COPILOT_CUSTOM_INSTRUCTIONS_DIRS": CoordPlaceholder},
-		InstructionsFile:   "aether.instructions.md",
-		NativeCoordination: true,
-		EnvPassthrough:     []string{"COPILOT_GITHUB_TOKEN"},
+		InstructionEnv:   map[string]string{"COPILOT_CUSTOM_INSTRUCTIONS_DIRS": CoordPlaceholder},
+		InstructionsFile: "aether.instructions.md",
+		EnvPassthrough:   []string{"COPILOT_GITHUB_TOKEN"},
 		// With no system keychain, as in a run container, copilot login keeps
 		// the token in config.json. Copilot replaces it by rename, but it is
 		// not pinned: whether Copilot can write it as a mount is unverified.
@@ -601,7 +572,7 @@ var profiles = map[string]Profile{
 		HeadlessArgs: []string{"gemini", "--approval-mode=yolo", "--prompt=" + TaskPlaceholder},
 		ACPArgs:      []string{"gemini", "--acp"},
 		ACPMode:      "yolo",
-		ACPDefault:   true,
+		Capabilities: Capabilities{Hooks: HooksByHand, EnhancedDefault: true},
 		ModelArgs:    []string{"--model", ModelPlaceholder},
 		// In a folder it does not trust, Gemini drops yolo to default and
 		// skips ~/.gemini/.env.
@@ -625,7 +596,7 @@ var profiles = map[string]Profile{
 		TUIArgs:         []string{"agent", "--force", "--trust", TaskPlaceholder},
 		HeadlessArgs:    []string{"agent", "-p", "--force", "--trust", TaskPlaceholder},
 		ACPArgs:         []string{"agent", "--force", "acp"},
-		ACPDefault:      true,
+		Capabilities:    Capabilities{Hooks: HooksByHand, EnhancedDefault: true},
 		ModelArgs:       []string{"--model", ModelPlaceholder},
 		EnvPassthrough:  []string{"CURSOR_API_KEY"},
 		CredentialPaths: []string{".config/cursor/auth.json"},

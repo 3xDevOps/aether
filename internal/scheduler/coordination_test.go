@@ -381,8 +381,8 @@ func TestArgvOverrideRespectsHarnessCommand(t *testing.T) {
 			if env := profile.StatusLaunchEnv(coordtransport.MountDir); len(env) != 0 {
 				t.Fatalf("override kept the registry status environment: %v", env)
 			}
-			if profile.Reporter != harness.ReporterNone || len(profile.StatusFiles) != 0 {
-				t.Fatalf("override kept reporter %s with %d status files", profile.Reporter, len(profile.StatusFiles))
+			if profile.Capabilities.Status != harness.ReporterNone || len(profile.StatusFiles) != 0 {
+				t.Fatalf("override kept reporter %s with %d status files", profile.Capabilities.Status, len(profile.StatusFiles))
 			}
 			if len(profile.CredentialPaths) == 0 {
 				t.Fatal("override lost the registry credential paths")
@@ -559,8 +559,7 @@ func TestEveryLaunchCarriesTheRoleCard(t *testing.T) {
 					t.Fatalf("%s = %q in a %s launch", coordtransport.BackgroundEnv, env[coordtransport.BackgroundEnv], tc.mode)
 				}
 				g.Wake = env[coordtransport.WakeEnv] == "1"
-				// Codex and Copilot load inbox hooks too, but none of them wakes an idle session.
-				if native := profile.NativeCoordination && name != "codex" && name != "copilot" && tc.mode == domain.LaunchTUI && tc.task != ""; g.Wake != native {
+				if native := profile.Capabilities.IdleWake && tc.mode == domain.LaunchTUI && tc.task != ""; g.Wake != native {
 					t.Fatalf("%s = %q, want it only on a native launch (%v)", coordtransport.WakeEnv, env[coordtransport.WakeEnv], native)
 				}
 				if !profile.CarriesInstructions() {

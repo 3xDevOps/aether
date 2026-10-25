@@ -54,7 +54,7 @@ func (s *Scheduler) AgentSwitchable(ctx context.Context, member, account domain.
 	if err != nil {
 		return false, err
 	}
-	return profile.Switchable(), nil
+	return profile.Capabilities.ModeSwitch, nil
 }
 
 // SwitchMode moves a live run's agent between its terminal (tui) and its ACP
@@ -74,7 +74,7 @@ func (s *Scheduler) SwitchMode(ctx context.Context, run domain.RunID, actor doma
 	if err != nil {
 		return err
 	}
-	if !profile.Switchable() {
+	if !profile.Capabilities.ModeSwitch {
 		return fmt.Errorf("%w: %s", ErrNotSwitchable, r.Harness)
 	}
 	if mode == domain.LaunchACP && s.cfg.Homes != nil {

@@ -182,8 +182,8 @@ func TestStatusReporters(t *testing.T) {
 		if !ok {
 			t.Fatalf("Lookup(%q) missing", name)
 		}
-		if p.Reporter != reporter {
-			t.Errorf("%s reporter = %s, want %s", name, p.Reporter, reporter)
+		if p.Capabilities.Status != reporter {
+			t.Errorf("%s reporter = %s, want %s", name, p.Capabilities.Status, reporter)
 		}
 		pointers := p.StatusLaunchArgs("/run/aether")
 		pointers = append(pointers, slices.Collect(maps.Values(p.StatusLaunchEnv("/run/aether")))...)

@@ -73,7 +73,7 @@ var liveAgents = map[string]liveAgent{
 	"cursor":  {acp: profiles["cursor"].ACPArgs},
 }
 
-// TestLiveSwitch is the check behind Profile.SwitchVerified: a session
+// TestLiveSwitch is the check behind Capabilities.ModeSwitch: a session
 // started over the agent's ACP server resumes in its terminal, and one
 // started in its terminal resumes over ACP. It runs the CLIs and adapters on
 // this host's PATH with their own logins and sends four short prompts per
