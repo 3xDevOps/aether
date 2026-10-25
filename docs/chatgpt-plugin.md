@@ -124,7 +124,9 @@ codes, magic links or private network.
 - **Sample data.** A workspace `aether-demo` from a public sample repository
   with: a finished run whose success awaits review, a run asking the agent
   question, a run that changed `README.md`, and runs spread over the past
-  week. Keep it for later reviews.
+  week. Create the runs as the reviewer's member, not a maintainer's:
+  `aether_activity_summary` counts only the caller's own runs. Keep it for
+  later reviews.
 - **Scopes.** On the consent page the reviewer keeps **Launch and message**
   checked. Leave **Stop and approve** unchecked unless a case needs it.
 
@@ -180,7 +182,7 @@ plaintext in memory while relaying.
 | --- | --- | --- |
 | Edge, nginx access log | One line per request: client IP, time, method, path with the server id, status, bytes, user agent. No body or token | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
 | Edge journal | A request the edge refuses before relaying, with its path and, from outside the trusted proxies, the client IP; an internal relay failure with its error; failed TLS handshakes with the client IP. No body or token | `MaxRetentionSec=` in journald, per [edge.md](edge.md) |
-| Edge database | Monthly egress byte counts per server | Per month |
+| Edge database | One edge-wide total of relayed bytes per month, with no server, member or request detail | Never deleted |
 | Server, `connectors` table | Member, device, client id, client name, redirect host, scopes, created and last used times, SHA-256 hashes of the tokens | Until revoked, or the member or device is removed |
 | Server, tokens | Access token valid 1 hour; refresh token 30 days, rotated on each use; reusing a rotated token revokes the connector | Hashes only |
 | Server log | One line per write call: connector, member, method, target id, result. Lines when a connector is authorized, created or revoked. Read calls are not logged | Server operator's log retention |
