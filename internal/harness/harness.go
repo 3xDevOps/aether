@@ -400,7 +400,7 @@ var profiles = map[string]Profile{
 		ResumeArgs:      []string{"claude", "--dangerously-skip-permissions", "--resume", SessionPlaceholder},
 		HeadlessResumeArgs: []string{"claude", "-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions",
 			"--resume", SessionPlaceholder, TaskPlaceholder},
-		EnvPassthrough: []string{"ANTHROPIC_API_KEY"},
+		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"},
 		// Claude Code refuses --dangerously-skip-permissions as root unless the
 		// environment declares a sandbox; the run container is one.
 		Env:             map[string]string{"IS_SANDBOX": "1"},
@@ -489,7 +489,7 @@ var profiles = map[string]Profile{
 			EnhancedDefault: true, ModeSwitch: true},
 		ModelArgs:      []string{"--model=" + ModelPlaceholder},
 		ResumeArgs:     []string{"omp", "--auto-approve", "--resume=" + SessionPlaceholder},
-		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+		EnvPassthrough: []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY"},
 		// omp keeps its login in a SQLite WAL database beside its config,
 		// and a WAL database cannot be shared file by file.
 		CredentialPaths: []string{".omp/agent"},
@@ -511,7 +511,7 @@ var profiles = map[string]Profile{
 		Capabilities:    Capabilities{Status: ReporterFull, Hooks: HooksManaged, IdleWake: true, EnhancedDefault: true},
 		ResumeArgs:      []string{"opencode", "--session=" + SessionPlaceholder},
 		PermissionEnv:   map[string]string{"OPENCODE_CONFIG_CONTENT": `{"permission":"allow"}`},
-		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"},
+		EnvPassthrough:  []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL"},
 		CredentialPaths: []string{".local/share/opencode/auth.json"},
 		LocalRoot:       ".config/opencode",
 		DenyNames:       []string{"auth.json", "token.json", "tokens.json"},
@@ -556,7 +556,7 @@ var profiles = map[string]Profile{
 		// system prompt, after the repository's own instructions.
 		InstructionEnv:   map[string]string{"COPILOT_CUSTOM_INSTRUCTIONS_DIRS": CoordPlaceholder},
 		InstructionsFile: "aether.instructions.md",
-		EnvPassthrough:   []string{"COPILOT_GITHUB_TOKEN"},
+		EnvPassthrough:   []string{"COPILOT_GITHUB_TOKEN", "COPILOT_PROVIDER_BASE_URL", "COPILOT_PROVIDER_API_KEY"},
 		// With no system keychain, as in a run container, copilot login keeps
 		// the token in config.json. Copilot replaces it by rename, but it is
 		// not pinned: whether Copilot can write it as a mount is unverified.
@@ -580,7 +580,7 @@ var profiles = map[string]Profile{
 		// No InstructionArgs: the interactive UI asks to trust every
 		// --include-directories entry, and GEMINI_CLI_TRUST_WORKSPACE covers
 		// only the working directory.
-		EnvPassthrough:  []string{"GEMINI_API_KEY"},
+		EnvPassthrough:  []string{"GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"},
 		CredentialPaths: []string{".gemini/oauth_creds.json", ".gemini/.env"},
 		// Gemini writes oauth_creds.json to a temporary file and renames it
 		// over the old one, and rewrites it in place when that rename fails.
@@ -615,7 +615,7 @@ var profiles = map[string]Profile{
 		ModelArgs:    []string{"--model", ModelPlaceholder},
 		// An API key also needs "modelProvider":"gemini" in
 		// ~/.gemini/antigravity-cli/settings.json.
-		EnvPassthrough:  []string{"GEMINI_API_KEY"},
+		EnvPassthrough:  []string{"GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"},
 		CredentialPaths: []string{".gemini/antigravity-cli/antigravity-oauth-token"},
 		DenyNames:       []string{"antigravity-oauth-token"},
 		InstallScript:   "curl -fsSL https://antigravity.google/cli/install.sh | bash",
