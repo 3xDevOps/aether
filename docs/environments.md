@@ -104,7 +104,8 @@ pushed to a registry.
   Running containers keep theirs.
 - Each save replaces the previous one. To fix a bad save, repair it and save
   again, or reset.
-- Saving needs a running terminal. Open the environment first.
+- `aether env save` starts the environment terminal if it is stopped. The
+  container survives a stop, so the save keeps unsaved changes.
 - The environment container survives a stop, a shell exit and a server
   restart, so unsaved changes stay until you reset. Aether recreates the
   container, and the unsaved changes are lost, when the next open finds

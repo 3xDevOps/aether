@@ -22,8 +22,12 @@ func memberImageRepo(member domain.MemberID) string {
 	return "aether/member-" + string(member)
 }
 
-// SaveEnvironment snapshots the running environment terminal and records its image for the member.
+// SaveEnvironment snapshots the environment terminal, starting it if needed,
+// and records its image for the member.
 func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error) {
+	if _, err := s.EnsureTerminal(ctx, member); err != nil {
+		return "", err
+	}
 	lock := s.terminalLock(member)
 	lock.Lock()
 	defer lock.Unlock()

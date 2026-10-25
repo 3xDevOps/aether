@@ -13,12 +13,20 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-func TestSaveEnvironmentRequiresRunningTerminal(t *testing.T) {
+func TestSaveEnvironmentStartsTheTerminal(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, nil)
-	_, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
-	if !errors.Is(err, ErrTerminalNotRunning) {
-		t.Fatalf("SaveEnvironment error = %v, want %v", err, ErrTerminalNotRunning)
+	saved, err := e.sched.SaveEnvironment(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("SaveEnvironment with no terminal open: %v", err)
+	}
+	terminal, err := e.db.GetTerminal(t.Context(), e.member.ID)
+	if err != nil {
+		t.Fatalf("GetTerminal after save: %v", err)
+	}
+	calls := e.rt.commitCalls()
+	if len(calls) != 1 || calls[0].id != runtime.ID(terminal.ContainerID) || calls[0].tag != saved {
+		t.Fatalf("commit calls = %+v, want the started terminal %q as %q", calls, terminal.ContainerID, saved)
 	}
 }
 
