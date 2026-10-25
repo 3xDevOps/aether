@@ -167,6 +167,11 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	}
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
+	// Cancelling a launch mid-provisioning fails the run it is creating, so
+	// it outlives the caller's channel; a server shutdown still stops it.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancel()
+	defer context.AfterFunc(s.authCtx(), cancel)()
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
 		return s.launchRun(ctx, member, p, mode, policy, created)
 	})

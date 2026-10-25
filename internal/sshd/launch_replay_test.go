@@ -165,3 +165,31 @@ func TestRunLaunchReceiptOutlivesAFailedLaunch(t *testing.T) {
 		t.Fatalf("launch whose receipt write failed = %v, want the write error naming the started run", perr)
 	}
 }
+
+// A launch whose caller goes away keeps provisioning: cancelling it would
+// fail the run it is creating.
+func TestRunLaunchOutlivesItsCaller(t *testing.T) {
+	e := newTestEnv(t, nil)
+	started, release := e.runs.blockLaunch()
+	raw, err := json.Marshal(protocol.RunLaunchParams{WorkspaceID: string(e.ws.ID), Task: "slow image", Harness: "claude", IdempotencyKey: "k-gone"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan *protocol.Error, 1)
+	go func() {
+		_, perr := e.srv.Local(e.member.ID).Call(ctx, protocol.MethodRunLaunch, raw)
+		done <- perr
+	}()
+	<-started
+	cancel()
+	select {
+	case perr := <-done:
+		t.Fatalf("launch ended with %v when its caller went away, before provisioning finished", perr)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(release)
+	if perr := <-done; perr != nil {
+		t.Fatalf("launch whose caller went away = %v, want the run", perr)
+	}
+}
