@@ -145,7 +145,7 @@ claim-code --admin <member id>`, gives it an owner again.
 ### Signing in and linking
 
 ```sh
-aether login              # prints an address and a code; confirm the code in the browser
+aether login              # prints an address and a code; open the address, sign in with GitHub, enter the code
 aether servers            # servers your account reaches
 aether logout             # revokes this device's token at the edge and deletes it here
 ```
@@ -156,6 +156,18 @@ it commands use the one edge this machine is signed in to, else
 `edge-tokens.json` live in the client's config directory with mode 0600.
 `aether servers` shows the access policy the edge reports; the server enforces
 its own.
+
+`aether login --json` is for a script or a coding agent that relays the code to
+you: it opens no browser, prints one JSON line, then waits for you to confirm
+and prints a second:
+
+```
+{"state":"pending","edge":"https://edge.onaether.dev","signin_origin":"https://edge.onaether.dev","user_code":"<code>","verification_uri":"https://edge.onaether.dev/device","expires_at":"<RFC 3339 time>"}
+{"state":"signed_in",...,"account":{...},"device":{"id":"<device id>","label":"<label>","key":"<public key>"}}
+```
+
+The second line has `"state":"failed"` and `"error"` instead when the code is
+refused or expires, and the command exits 1. The token is never printed.
 
 Only a 26-character server id goes through the edge. Any other argument, such as
 `my-server`, is an SSH address. A link pins the server id: every later connection,

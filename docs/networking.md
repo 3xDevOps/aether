@@ -121,7 +121,7 @@ no tailscaled or you answer no to its tailnet question. You can also
 [run your own](edge.md#running-your-own-edge).
 
 ```sh
-aether login                        # sign in with GitHub
+aether login                        # sign in with GitHub; --json prints the address and code as JSON
 aether link --claim '<claim link>'  # the owner, with the claim link or code aether-server setup printed
 aether link '<invite link>'         # anyone an admin invited, with the link the admin sent
 ```

@@ -62,7 +62,7 @@ with **Copy link**. Send it to the teammate, who opens it and selects **Join** i
 the desktop app, or in a terminal runs:
 
 ```sh
-aether login
+aether login            # or aether login --json, for a script or coding agent
 aether link '<invite link>'
 ```
 

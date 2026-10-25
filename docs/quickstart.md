@@ -103,9 +103,9 @@ the desktop app:
    the code.
 4. Click **Claim and link**.
 
-Or in a terminal, run `aether login`, open the address it prints, confirm the
-code on GitHub, then run `aether link --claim '<claim link>'`, or `aether link
---claim <server id>-<secret>`.
+Or in a terminal, run `aether login`, open the address it prints, sign in with
+GitHub, and enter the code on that edge page. Then run `aether link --claim
+'<claim link>'`, or `aether link --claim <server id>-<secret>`.
 
 It worked if `aether link` ends with `linked to server <server id> through
 edge.onaether.dev as <your name> (admin)`.
