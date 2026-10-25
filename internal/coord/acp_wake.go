@@ -16,8 +16,12 @@ import (
 
 const enhancedWakeTimeout = 20 * time.Second
 
-// enhancedWakeRetries spaces the retries of a wake that run control or a
-// mission lock refused, neither of which announces its release.
+// wakeSweepInterval bounds how long an idle Enhanced session waits for a
+// wake it is owed when no event retries it.
+const wakeSweepInterval = 30 * time.Second
+
+// enhancedWakeRetries spaces the retries of a wake that admission refused,
+// such as for busy run control, which announces no release.
 var enhancedWakeRetries = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}
 
 type ACPWaker interface {
@@ -29,10 +33,52 @@ type ACPWaker interface {
 	WakeEnhanced(ctx context.Context, run domain.RunID, prompt string) error
 }
 
+// WakeIdle retries the run's owed wake: its hook observers rerun
+// admission and an idle Enhanced session is offered a turn.
 func (s *Service) WakeIdle(run domain.RunID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.offerWakeLocked(run)
+}
+
+func (s *Service) offerWakeLocked(run domain.RunID) {
+	for waiter := range s.hookWaiters[run] {
+		waiter.consumer = waiter.consumer || s.inboxConsumers[run] > 0
+		waiter.signal()
+	}
 	s.wakeEnhancedLocked(run)
+}
+
+func (s *Service) sweepEnhancedWakes() {
+	if s.cfg.ACPWaker == nil || s.cfg.WakeAdmission == nil {
+		return
+	}
+	ticker := time.NewTicker(s.cfg.wakeSweep)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.serveCtx.Done():
+			return
+		case <-ticker.C:
+		}
+		s.mu.Lock()
+		for key := range s.listeners {
+			run := key.run
+			if _, pending := s.enhancedSweeps[run]; pending {
+				continue
+			}
+			s.enhancedSweeps[run] = struct{}{}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				s.wakeEnhanced(run)
+				s.mu.Lock()
+				delete(s.enhancedSweeps, run)
+				s.mu.Unlock()
+			}()
+		}
+		s.mu.Unlock()
+	}
 }
 
 func (s *Service) wakeEnhancedLocked(run domain.RunID) {
@@ -68,7 +114,7 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	lock := s.enhancedWakeLock(run)
 	lock.Lock()
 	defer lock.Unlock()
-	ctx, cancel := context.WithTimeout(s.serveCtx, enhancedWakeTimeout)
+	ctx, cancel := s.wakeContext(s.serveCtx, run, enhancedWakeTimeout)
 	defer cancel()
 	ids, err := mail.ListUnackedRunMessageIDs(ctx, run, protocol.CoordMaxUnread)
 	if err != nil {
@@ -89,7 +135,11 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 		prompt.WriteString(protocol.CoordMissionUpdateContext(notice.mission, changes))
 	}
 	err = s.cfg.WakeAdmission(ctx, run, func() error {
-		return s.cfg.ACPWaker.WakeEnhanced(ctx, run, prompt.String())
+		// Admission may have spent ctx waiting for a lock; a turn that starts
+		// but times out unconfirmed goes unrecorded, and its mail wakes again.
+		promptCtx, cancel := s.wakeContext(s.serveCtx, run, enhancedWakeTimeout)
+		defer cancel()
+		return s.cfg.ACPWaker.WakeEnhanced(promptCtx, run, prompt.String())
 	})
 	if err != nil {
 		slog.Debug("coord: enhanced wake suppressed", "run", run, "error", err)

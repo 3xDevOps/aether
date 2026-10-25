@@ -177,6 +177,8 @@ type Config struct {
 	now func() time.Time
 	// idle overrides idleTimeout in tests.
 	idle time.Duration
+	// wakeSweep overrides wakeSweepInterval in tests.
+	wakeSweep time.Duration
 }
 
 // Service is the coordination mailbox plus the per-run socket listeners.
@@ -205,6 +207,7 @@ type Service struct {
 	enhancedWoken     map[domain.RunID]map[string]struct{}
 	enhancedNotices   map[domain.RunID]missionNotice
 	enhancedWakeLocks map[domain.RunID]*sync.Mutex
+	enhancedSweeps    map[domain.RunID]struct{}
 	reportPackets     map[string]protocol.EvidencePacket
 	runs              map[domain.RunID]*runLifecycle
 	reportCursor      store.CoordOutboxCursor
@@ -225,6 +228,9 @@ type runLifecycle struct {
 	closing    bool
 	done       chan struct{}
 	doneClosed bool
+	// ctx ends when the run starts closing.
+	ctx    context.Context
+	cancel context.CancelFunc
 	// Serializes Inbox registration with the final native wake frame, never
 	// the mailbox query or long poll. Callers retain a run reference.
 	inboxAdmission sync.Mutex
@@ -244,6 +250,9 @@ func New(cfg Config) (*Service, error) {
 	}
 	if cfg.idle <= 0 {
 		cfg.idle = idleTimeout
+	}
+	if cfg.wakeSweep <= 0 {
+		cfg.wakeSweep = wakeSweepInterval
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
@@ -265,6 +274,7 @@ func New(cfg Config) (*Service, error) {
 		enhancedWoken:     make(map[domain.RunID]map[string]struct{}),
 		enhancedNotices:   make(map[domain.RunID]missionNotice),
 		enhancedWakeLocks: make(map[domain.RunID]*sync.Mutex),
+		enhancedSweeps:    make(map[domain.RunID]struct{}),
 		reportPackets:     make(map[string]protocol.EvidencePacket),
 		runs:              make(map[domain.RunID]*runLifecycle),
 		outboxKick:        make(chan struct{}, 1),
@@ -283,10 +293,10 @@ func (s *Service) Start(ctx context.Context) error {
 		return nil
 	}
 	sub, err := s.cfg.Bus.Subscribe(ctx, events.SubscribeOptions{
-		Filter: events.Filter{Types: []events.Type{events.TypeRunOverlap, events.TypeMissionChanged}},
+		Filter: events.Filter{Types: []events.Type{events.TypeRunOverlap, events.TypeMissionChanged, events.TypeRunProtected, events.TypeRunController}},
 	})
 	if err != nil {
-		return fmt.Errorf("coord: subscribe to overlap and mission changes: %w", err)
+		return fmt.Errorf("coord: subscribe to overlap, mission, protection and control changes: %w", err)
 	}
 	s.mu.Lock()
 	if s.closed {
@@ -295,7 +305,7 @@ func (s *Service) Start(ctx context.Context) error {
 		return ErrClosed
 	}
 	s.sub = sub
-	s.wg.Add(2)
+	s.wg.Add(3)
 	s.mu.Unlock()
 
 	go func() {
@@ -305,6 +315,10 @@ func (s *Service) Start(ctx context.Context) error {
 	go func() {
 		defer s.wg.Done()
 		s.retryOutbox()
+	}()
+	go func() {
+		defer s.wg.Done()
+		s.sweepEnhancedWakes()
 	}()
 	return nil
 }
@@ -342,14 +356,20 @@ func (s *Service) Close() error {
 	return errors.Join(errs...)
 }
 
-// consume folds the radar's overlap changes into grace bookkeeping and
-// offers changed missions to their enhanced integrators. Authorization
+// consume folds the radar's overlap changes into grace bookkeeping, offers
+// changed missions to their enhanced integrators, and retries a run's owed
+// wake when its protection or controller changes. Authorization
 // also re-reads the live index, so a dropped event cannot extend a grace
 // window beyond the last observed overlap.
 func (s *Service) consume(ctx context.Context, sub events.Subscription) {
 	for e := range sub.Events() {
 		if p, ok := e.Payload.(events.MissionChangedPayload); ok {
 			s.wakeMissionIntegrators(p.MissionID)
+			continue
+		}
+		switch e.Payload.(type) {
+		case events.RunProtectedPayload, events.RunControllerPayload:
+			s.WakeIdle(e.RunID)
 			continue
 		}
 		p, ok := e.Payload.(events.OverlapPayload)
@@ -379,11 +399,7 @@ func (s *Service) enterRun(run domain.RunID) bool {
 	if s.closed {
 		return false
 	}
-	state := s.runs[run]
-	if state == nil {
-		state = &runLifecycle{done: make(chan struct{})}
-		s.runs[run] = state
-	}
+	state := s.runLifecycleLocked(run)
 	if state.closing {
 		return false
 	}
@@ -408,18 +424,40 @@ func (s *Service) leaveRun(run domain.RunID) {
 func (s *Service) closeRun(run domain.RunID) <-chan struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	state := s.runs[run]
-	if state == nil {
-		state = &runLifecycle{done: make(chan struct{})}
-		s.runs[run] = state
-	}
+	state := s.runLifecycleLocked(run)
 	state.closing = true
+	state.cancel()
 	s.cancelHookWaitersLocked(run)
 	if state.refs == 0 && !state.doneClosed {
 		close(state.done)
 		state.doneClosed = true
 	}
 	return state.done
+}
+
+func (s *Service) runLifecycleLocked(run domain.RunID) *runLifecycle {
+	state := s.runs[run]
+	if state == nil {
+		ctx, cancel := context.WithCancel(s.serveCtx)
+		state = &runLifecycle{done: make(chan struct{}), ctx: ctx, cancel: cancel}
+		s.runs[run] = state
+	}
+	return state
+}
+
+// wakeContext bounds one wake admission, which may wait for a busy lock. It
+// ends when the run starts closing, so the run's synchronous cleanup never
+// waits for the reference the caller holds.
+func (s *Service) wakeContext(parent context.Context, run domain.RunID, timeout time.Duration) (context.Context, context.CancelFunc) {
+	s.mu.Lock()
+	closing := s.runs[run].ctx
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	stop := context.AfterFunc(closing, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
 }
 
 func runClosing(method string) *protocol.Error {

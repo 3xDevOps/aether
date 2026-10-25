@@ -364,6 +364,50 @@ func TestHookWaitAppendDuringInitialSnapshotIsNotLost(t *testing.T) {
 	}
 }
 
+func TestHookWaitReleaseCancelsTheAdmittedMailRead(t *testing.T) {
+	gate := &snapshotGateMail{snapshot: make(chan struct{}), resume: make(chan struct{})}
+	t.Cleanup(func() { close(gate.resume) })
+	h := newHarness(t, 2, func(c *Config) {
+		gate.MessageStore = c.Mail
+		gate.ids = c.Mail.(store.UnackedRunMessageIDsStore)
+		c.Mail = gate
+		c.WakeAdmission = func(_ context.Context, _ domain.RunID, dispatch func() error) error {
+			gate.pause.Store(true)
+			return dispatch()
+		}
+	})
+	a, b := h.run(0), h.run(1)
+	h.peers.pair(a, b, "shared.go")
+	provisionHookRun(t, h, b)
+	if _, err := h.svc.Send(t.Context(), a, sendParams(b, "stalled read")); err != nil {
+		t.Fatal(err)
+	}
+	done := startHookCall(t, h, b, protocol.CoordHookStatusParams{})
+	select {
+	case <-gate.snapshot:
+	case <-time.After(3 * time.Second):
+		t.Fatal("admitted mail read not reached")
+	}
+	released := make(chan error, 1)
+	go func() { released <- h.svc.Release(b) }()
+	select {
+	case reply := <-done:
+		if reply.err != nil || reply.status.WakeAdmitted {
+			t.Fatalf("wake after release = %+v, %v", reply.status, reply.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("release did not cancel the admitted mail read")
+	}
+	select {
+	case err := <-released:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("release waited for the hook wait")
+	}
+}
+
 func TestHookWaitConsumerDuringAdmissionSnapshotKeepsPriority(t *testing.T) {
 	gate := &snapshotGateMail{snapshot: make(chan struct{}), resume: make(chan struct{})}
 	resume := sync.OnceFunc(func() { close(gate.resume) })

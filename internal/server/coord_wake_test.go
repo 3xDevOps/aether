@@ -478,6 +478,35 @@ func TestCoordWakeMissionMutationAfterValidationOrdersFrame(t *testing.T) {
 	}
 }
 
+func TestCoordWakeWaitsForMissionAuthorizationHeldByPrepare(t *testing.T) {
+	f := newWakeServerFixture(t, true)
+	// Integration prepare holds the shared authorization while it assembles a candidate.
+	f.authorizationMu.Lock()
+	release := sync.OnceFunc(f.authorizationMu.Unlock)
+	defer release()
+	waiting := make(chan struct{})
+	client := f.client(t, func(ctx context.Context, run domain.RunID, dispatch func() error) error {
+		close(waiting)
+		return f.admission.Admit(ctx, run, dispatch)
+	})
+	done := wakeSocketCall(client)
+	awaitWakeBarrier(t, waiting)
+	select {
+	case reply := <-done:
+		t.Fatalf("wake answered while authorization was held: %+v, %v", reply.status, reply.err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	release()
+	select {
+	case reply := <-done:
+		if reply.err != nil || !reply.status.WakeAdmitted || len(reply.status.UnreadMessageIDs) != 1 {
+			t.Fatalf("wake after prepare released authorization = %+v, %v", reply.status, reply.err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("admitted frame missing")
+	}
+}
+
 func TestCoordWakeOrdinaryRunDoesNotRequireMissionAuthorization(t *testing.T) {
 	for _, missing := range []bool{false, true} {
 		name := "locked"
@@ -578,15 +607,16 @@ func TestCoordWakeDefersToWorkerCancellationBeforeSynchronousCleanup(t *testing.
 		t.Fatal(err)
 	}
 	resumeWake()
+	// The wake waits for cancellation's authorization until cleanup closes the run.
+	close(canceller.cleanup)
 	select {
 	case reply := <-wake:
 		if reply.err != nil || reply.status.WakeAdmitted || len(reply.status.UnreadMessageIDs) != 1 {
 			t.Fatalf("wake during cancellation = %+v, %v", reply.status, reply.err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("wake retained its run reference while waiting for cancellation's authorization")
+		t.Fatal("wake retained its run reference after cleanup started")
 	}
-	close(canceller.cleanup)
 	select {
 	case err := <-cancelled:
 		if err != nil {

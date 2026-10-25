@@ -15,6 +15,10 @@ import (
 
 const hookWriteTimeout = 3 * time.Second
 
+// hookWakeAdmissionTimeout keeps admission, including a wait for a busy
+// mission lock, inside the client's margin past the observer wait.
+const hookWakeAdmissionTimeout = 2 * time.Second
+
 func hookWaitRequest(req protocol.Request) bool {
 	raw := bytes.TrimSpace(req.Params)
 	return req.Method == protocol.MethodCoordHookStatus && len(raw) != 0 && !bytes.Equal(raw, []byte("null"))
@@ -62,15 +66,17 @@ func (s *Service) serveHookWait(ctx context.Context, conn net.Conn, run domain.R
 	if status.WaitSupported && len(status.UnreadMessageIDs) > 0 && s.cfg.WakeAdmission != nil {
 		attempted := false
 		var writeErr error
+		admitCtx, cancel := s.wakeContext(ctx, run, hookWakeAdmissionTimeout)
+		defer cancel()
 		// Admission failures suppress native action, not durable mail. If the
 		// callback starts a write, never append a second (false) response after
 		// a partial frame or an admission implementation's late error.
-		_ = s.cfg.WakeAdmission(ctx, run, func() error {
-			if ctx.Err() != nil || s.isRunClosing(run) {
+		_ = s.cfg.WakeAdmission(admitCtx, run, func() error {
+			if admitCtx.Err() != nil || s.isRunClosing(run) {
 				return errWakeSuppressed
 			}
 			mail := s.cfg.Mail.(store.UnackedRunMessageIDsStore)
-			ids, err := mail.ListUnackedRunMessageIDs(ctx, run, protocol.CoordMaxUnread)
+			ids, err := mail.ListUnackedRunMessageIDs(admitCtx, run, protocol.CoordMaxUnread)
 			if err != nil {
 				return err
 			}
@@ -78,7 +84,7 @@ func (s *Service) serveHookWait(ctx context.Context, conn net.Conn, run domain.R
 			admission := s.inboxAdmissionLock(run)
 			admission.Lock()
 			defer admission.Unlock()
-			if ctx.Err() != nil || s.isRunClosing(run) || s.hookConsumerWon(run, observed.waiter) {
+			if admitCtx.Err() != nil || s.isRunClosing(run) || s.hookConsumerWon(run, observed.waiter) {
 				return errWakeSuppressed
 			}
 			if len(ids) == 0 {

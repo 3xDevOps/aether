@@ -29,8 +29,15 @@ func claudeWakePath(run string) string {
 	return filepath.Join(os.TempDir(), "aether-hook-"+run+"-claude-wake")
 }
 
+// claudeWokenPath records, as its mail, the IDs the waiter last started a
+// turn for. Only the waiter writes it: a boundary hook's deferred write to
+// the shared record could otherwise erase a wake recorded meanwhile.
+func claudeWokenPath(run string) string {
+	return filepath.Join(os.TempDir(), "aether-hook-"+run+"-claude-woken.json")
+}
+
 // claudeWake waits, for one idle Claude Code session, until the server admits
-// a wake for mail its hooks have not announced.
+// a wake for mail no earlier wake started a turn for.
 func claudeWake(ctx context.Context, cfg Config, input hookEvent) (code int, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -48,6 +55,7 @@ func claudeWake(ctx context.Context, cfg Config, input hookEvent) (code int, err
 		return ExitFailure, fmt.Errorf("hook claude wake: %w", err)
 	}
 	record := hookNoticePath(status.RunID, "claude")
+	wokenRecord := claudeWokenPath(status.RunID)
 	claim := claudeWakePath(status.RunID)
 	pid := strconv.Itoa(os.Getpid())
 	if err := claimClaudeWake(claim, pid); err != nil {
@@ -57,9 +65,10 @@ func claudeWake(ctx context.Context, cfg Config, input hookEvent) (code int, err
 		data, err := os.ReadFile(claim)
 		return err == nil && string(data) == pid
 	}
-	// On SessionStart all unread mail is unannounced, so a resumed idle
-	// session with mail waiting wakes at once.
-	var notified []string
+	// On SessionStart no unread mail has had a turn, so a resumed idle
+	// session with mail waiting wakes at once. At Stop, mail a hook only
+	// announced mid-turn still wakes.
+	var woken []string
 
 	ctx, cancel := context.WithTimeout(ctx, claudeWakeLifetime)
 	defer cancel()
@@ -103,9 +112,10 @@ func claudeWake(ctx context.Context, cfg Config, input hookEvent) (code int, err
 		failures = 0
 		ids := wake.UnreadMessageIDs
 		if input.Name == "Stop" {
-			notified = readHookNotices(record).Mail
+			woken = readHookNotices(wokenRecord).Mail
 		}
-		if wake.WakeAdmitted && hasNewMail(hookNotices{Unread: len(ids), Mail: ids}, notified) && owns() {
+		if wake.WakeAdmitted && hasNewMail(hookNotices{Unread: len(ids), Mail: ids}, woken) && owns() {
+			writeHookNotices(wokenRecord, hookNotices{Mail: ids})
 			notices := readHookNotices(record)
 			notices.Mail = ids
 			writeHookNotices(record, notices)
