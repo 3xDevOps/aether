@@ -154,9 +154,12 @@ run gets `IS_SANDBOX=1`.
 #### Codex
 
 Run `codex login` and choose the device-code option. The login lands in
-`~/.codex/auth.json`. `OPENAI_API_KEY` in the server's environment is the
-API-key alternative. Codex reads no base-URL variable; for a gateway, set
-`openai_base_url` in `~/.codex/config.toml`.
+`~/.codex/auth.json`. For an API key, `codex login --with-api-key` reads one
+from stdin into the same file, which every run mode uses. `CODEX_API_KEY` in
+the server's environment signs in Background runs only. Codex ignores
+`OPENAI_API_KEY` there, except that its sign-in screen's **Use an OpenAI API
+key** comes filled in with it. Codex reads no base-URL variable; for a gateway,
+set `openai_base_url` in `~/.codex/config.toml`.
 
 Your first Standard run opens Codex's **Hooks need review** screen for Aether's
 inbox hooks. Choose **Trust all and continue**, or open `/hooks` and press `t`.
