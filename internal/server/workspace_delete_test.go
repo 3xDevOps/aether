@@ -65,9 +65,6 @@ func TestWorkspaceDeletePopulatedInactiveWorkspace(t *testing.T) {
 	if err := s.db.CreateRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.CreateApproval(ctx, &store.Approval{WorkspaceID: ws.ID, RunID: run.ID, Action: "Bash"}); err != nil {
-		t.Fatal(err)
-	}
 	if err := s.db.PutRunCost(ctx, &store.RunCost{RunID: run.ID, WorkspaceID: ws.ID, MemberID: member.ID, CostUSD: 2}); err != nil {
 		t.Fatal(err)
 	}

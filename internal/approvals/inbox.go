@@ -1,12 +1,4 @@
-// Package approvals is the shared approval inbox and the presence roster.
-//
-// The inbox is a workspace-wide queue of permission requests. Its source is
-// the agent adapters: a run that pauses for a plan review or a permission
-// prompt surfaces as a run.agent pause record, which this service turns
-// into a stored request. Any member holding the steer capability decides
-// it; the decision is attributed to that member and stamped into the
-// timeline as a workspace.approval event. Auto mode is the default, so the
-// queue is normally empty.
+// Package approvals is the presence roster.
 //
 // The roster is presence: members are online while their heartbeats keep
 // arriving and watching while they hold an attach, and they fall offline when
@@ -24,32 +16,24 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // DefaultTTL is how long a member stays online after their last
 // heartbeat. Clients heartbeat well inside it.
 const DefaultTTL = 45 * time.Second
 
-// ErrRunMismatch is returned when a decision names a run the request does
-// not belong to. The capability check is made against the named run, so a
-// mismatch is a denial risk, not a typo to be forgiven.
-var ErrRunMismatch = errors.New("approvals: request belongs to a different run")
-
-// Config wires the service. Store and Bus are required.
+// Config wires the service. Bus is required.
 type Config struct {
-	Store store.ApprovalStore
-	Bus   events.Bus
+	Bus events.Bus
 	// TTL overrides DefaultTTL; the expiry sweep runs at a third of it.
 	TTL time.Duration
 	// now overrides the clock in tests.
 	now func() time.Time
 }
 
-// Service is the approval inbox plus the presence roster. It consumes the
-// event bus for the requests it raises and for attach-derived watching.
+// Service is the presence roster. It consumes the event bus for
+// attach-derived watching.
 type Service struct {
-	store  store.ApprovalStore
 	bus    events.Bus
 	roster *roster
 	ttl    time.Duration
@@ -66,8 +50,8 @@ type Service struct {
 
 // New builds the service; call Start to begin consuming events.
 func New(cfg Config) (*Service, error) {
-	if cfg.Store == nil || cfg.Bus == nil {
-		return nil, errors.New("approvals: Store and Bus are required")
+	if cfg.Bus == nil {
+		return nil, errors.New("approvals: Bus is required")
 	}
 	if cfg.TTL <= 0 {
 		cfg.TTL = DefaultTTL
@@ -76,7 +60,6 @@ func New(cfg Config) (*Service, error) {
 		cfg.now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Service{
-		store:  cfg.Store,
 		bus:    cfg.Bus,
 		roster: newRoster(cfg.TTL, cfg.now),
 		ttl:    cfg.TTL,
@@ -84,7 +67,7 @@ func New(cfg Config) (*Service, error) {
 	}, nil
 }
 
-// Start subscribes to the agent and presence streams and begins the
+// Start subscribes to the presence stream and begins the
 // presence expiry sweep. ctx bounds only the setup; the service runs
 // until Close.
 func (s *Service) Start(ctx context.Context) error {
@@ -133,7 +116,7 @@ func (s *Service) Close() error {
 
 func (s *Service) subscribe(ctx context.Context, replay bool, afterSeq uint64) (events.Subscription, error) {
 	opts := events.SubscribeOptions{
-		Filter: events.Filter{Types: []events.Type{events.TypeAgentEvent, events.TypePresence}},
+		Filter: events.Filter{Types: []events.Type{events.TypePresence}},
 		Replay: replay,
 	}
 	if replay {
@@ -147,10 +130,9 @@ func (s *Service) subscribe(ctx context.Context, replay bool, afterSeq uint64) (
 }
 
 // consume dispatches bus events until the service is closed. A subscriber
-// that falls behind loses the oldest buffered events, which could drop an
-// approval pause, so a detected drop resubscribes with replay from the
-// cursor the gap opened at instead of ignoring it. The events the replay
-// redelivers are handled again; raise is idempotent, so that costs nothing.
+// that falls behind loses the oldest buffered events, so a detected drop
+// resubscribes with replay from the cursor the gap opened at instead of
+// ignoring it.
 func (s *Service) consume(ctx context.Context) {
 	for {
 		sub := s.subscription()
@@ -186,7 +168,7 @@ func (s *Service) consume(ctx context.Context) {
 		next, err := s.subscribe(ctx, true, from)
 		if err != nil {
 			// Without an event log there is nothing to replay; a plain
-			// resubscription still keeps presence and future requests live.
+			// resubscription still keeps presence live.
 			if next, err = s.subscribe(ctx, false, 0); err != nil {
 				if !errors.Is(err, events.ErrBusClosed) {
 					slog.Warn("approvals: resubscribe failed; stopping consumer", "error", err)
@@ -206,15 +188,7 @@ func (s *Service) consume(ctx context.Context) {
 }
 
 func (s *Service) handle(ctx context.Context, e events.Event) {
-	switch p := e.Payload.(type) {
-	case events.AgentEventPayload:
-		if p.Kind == events.AgentPause {
-			s.raise(ctx, e, p)
-		}
-	case events.PresencePayload:
-		if e.ActorID == "" {
-			break
-		}
+	if p, ok := e.Payload.(events.PresencePayload); ok && e.ActorID != "" {
 		switch p.State {
 		case events.PresenceWatching:
 			s.roster.watch(e.ActorID, e.WorkspaceID, e.RunID)
@@ -231,44 +205,6 @@ func (s *Service) handle(ctx context.Context, e events.Event) {
 		s.lastSeq = e.Seq
 	}
 	s.mu.Unlock()
-}
-
-// raise stores the request a paused run is asking for and announces it.
-// The pause's tool-use id is the request's identity within the run, so a
-// pause delivered twice - a gap replay, a restart - resolves to the one
-// stored request rather than a second entry in the inbox.
-func (s *Service) raise(ctx context.Context, e events.Event, p events.AgentEventPayload) {
-	action := p.Tool
-	if action == "" {
-		action = string(events.AgentPause)
-	}
-	a := &store.Approval{
-		WorkspaceID: e.WorkspaceID,
-		RunID:       e.RunID,
-		SourceID:    p.ToolUseID,
-		Action:      action,
-		Detail:      p.Detail,
-	}
-	if err := s.store.CreateApproval(ctx, a); err != nil {
-		slog.Warn("approvals: store request failed", "run", e.RunID, "error", err)
-		return
-	}
-	s.publish(ctx, a, e.ActorID)
-}
-
-func (s *Service) publish(ctx context.Context, a *store.Approval, actor domain.MemberID) {
-	if _, err := s.bus.Publish(ctx, events.Event{
-		WorkspaceID: a.WorkspaceID,
-		RunID:       a.RunID,
-		ActorID:     actor,
-		Payload: events.ApprovalPayload{
-			RequestID: a.ID,
-			Action:    a.Action,
-			Decision:  events.ApprovalDecision(a.Decision),
-		},
-	}); err != nil {
-		slog.Warn("approvals: publish failed", "request", a.ID, "error", err)
-	}
 }
 
 // sweep drops members whose heartbeat went stale, publishing one offline
@@ -324,44 +260,6 @@ func (s *Service) isClosed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.closed
-}
-
-// List returns a workspace's inbox, pending requests only unless all is set.
-func (s *Service) List(ctx context.Context, workspace domain.WorkspaceID, all bool) ([]*store.Approval, error) {
-	decision := store.ApprovalRequested
-	if all {
-		decision = ""
-	}
-	list, err := s.store.ListApprovals(ctx, workspace, decision)
-	if err != nil {
-		return nil, fmt.Errorf("approvals: list: %w", err)
-	}
-	return list, nil
-}
-
-// Decide approves or denies a pending request on behalf of by. run is the
-// run the caller's capability was checked against and must be the
-// request's own run.
-func (s *Service) Decide(ctx context.Context, id string, run domain.RunID, approve bool, by domain.MemberID) (*store.Approval, error) {
-	a, err := s.store.GetApproval(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("approvals: decide %s: %w", id, err)
-	}
-	if a.RunID != run {
-		return nil, ErrRunMismatch
-	}
-	decision := events.ApprovalDenied
-	if approve {
-		decision = events.ApprovalApproved
-	}
-	if derr := s.store.DecideApproval(ctx, id, string(decision), by, s.now()); derr != nil {
-		return nil, fmt.Errorf("approvals: decide %s: %w", id, derr)
-	}
-	if a, err = s.store.GetApproval(ctx, id); err != nil {
-		return nil, fmt.Errorf("approvals: decide %s: %w", id, err)
-	}
-	s.publish(ctx, a, by)
-	return a, nil
 }
 
 // ConnectionOpened records an authenticated SSH connection for member.

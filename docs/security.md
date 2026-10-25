@@ -487,7 +487,7 @@ there is no terminal, file, settings or git-writing tool.
   is always granted, and every member can read every run on the server, so a
   connector can read all of them. `write` (launch runs and swarms, message,
   pause and resume runs, answer questions, mark runs reviewed) is checked by
-  default; `control` (decide approvals and permission requests, stop and close
+  default; `control` (decide permission requests, stop and close
   runs, cancel swarms) is not, because text an agent wrote could talk the
   assistant into approving or ending work. A connector serves only
   its scopes' tools. It can make 30 write calls at once, then one every 2

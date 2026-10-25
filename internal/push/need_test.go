@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func TestNeedOf(t *testing.T) {
@@ -26,27 +25,23 @@ func TestNeedOf(t *testing.T) {
 	review := func(state domain.RunReview) func(*domain.Run) { return func(r *domain.Run) { r.Review = state } }
 	question := []domain.RunInputRequest{{ID: "q1", SessionID: "s1", Kind: "question"}}
 	permission := []domain.RunInputRequest{{ID: "q1", SessionID: "s1", Kind: "question"}, {ID: "p1", SessionID: "s1", Kind: "permission"}}
-	approval := &store.Approval{ID: "appr-1", Action: "ExitPlanMode"}
 	waiting, needsYou := domain.ActivityWaiting, domain.ActivityNeedsYou
 
 	for _, tc := range []struct {
-		name     string
-		run      *domain.Run
-		approval *store.Approval
-		inputs   []domain.RunInputRequest
-		paused   bool
-		want     string
+		name   string
+		run    *domain.Run
+		inputs []domain.RunInputRequest
+		paused bool
+		want   string
 	}{
 		{name: "working", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunRunning, Activity: domain.ActivityWorking}},
-		{name: "approval", run: &domain.Run{Mode: domain.LaunchHeadless, Status: domain.RunRunning}, approval: approval, want: "Permission: ExitPlanMode"},
-		{name: "approval before a native request", run: parked(needsYou, "turn ended without a report"), approval: approval, inputs: question, want: "Permission: ExitPlanMode"},
 		{name: "permission before question", run: parked(needsYou, "turn ended without a report", enhanced), inputs: permission, want: "Permission requested"},
 		{name: "terminal permission", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunRunning, Activity: needsYou}, inputs: permission, want: "Permission: answer in the terminal"},
 		{name: "enhanced question while working", run: &domain.Run{Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning, Activity: needsYou}, inputs: question, want: "Question from the agent"},
 		{name: "terminal question", run: parked(needsYou, "turn ended without a report"), inputs: question, want: "Question: answer in the terminal"},
 		{name: "background question", run: parked(waiting, "turn ended without a report", background), inputs: question},
 		{name: "background turn failed", run: parked(domain.ActivityFailed, "enhanced turn failed: overloaded", background, unseen), want: "Turn failed: overloaded"},
-		{name: "worker request", run: parked(needsYou, "turn ended without a report", worker), approval: approval, inputs: permission},
+		{name: "worker request", run: parked(needsYou, "turn ended without a report", worker), inputs: permission},
 		{name: "waiting", run: parked(waiting, "turn ended without a report")},
 		{name: "legacy idle", run: parked(domain.ActivityIdle, "agent idle")},
 		{name: "enhanced turn ended", run: parked(waiting, "turn ended without a report", enhanced)},
@@ -59,7 +54,7 @@ func TestNeedOf(t *testing.T) {
 		{name: "agent failed", run: parked(domain.ActivityFailed, "agent failed", unseen), want: "Agent failed"},
 		{name: "failure seen", run: parked(domain.ActivityFailed, "agent failed")},
 		{name: "usage limit", run: parked(needsYou, "Usage limit reached on Ada's account; no fallback has usage left"), want: "Usage limit reached on Ada's account; no fallback has usage left"},
-		{name: "paused", run: parked(needsYou, "blocked: need the staging API key"), approval: approval, paused: true},
+		{name: "paused", run: parked(needsYou, "blocked: need the staging API key"), paused: true},
 		{name: "integrator waiting on workers", run: parked(domain.ActivityWaitingAgents, "turn ended without a report", integrator)},
 		{name: "reported waiting", run: parked(domain.ActivityWaitingAgents, "waiting on 3 workers", enhanced)},
 		{name: "waiting for CI", run: parked(domain.ActivityWaitingCI, "CI on PR 12", enhanced)},
@@ -87,7 +82,7 @@ func TestNeedOf(t *testing.T) {
 		{name: "closed by a member", run: &domain.Run{Mode: domain.LaunchTUI, Status: domain.RunAbandoned}},
 		{name: "worker finished", run: &domain.Run{Mode: domain.LaunchHeadless, Status: domain.RunCompleted, OutcomeUnseen: true, MissionRole: "worker"}},
 	} {
-		got := needOf(tc.run, tc.approval, tc.inputs, tc.paused)
+		got := needOf(tc.run, tc.inputs, tc.paused)
 		switch {
 		case got == nil && tc.want != "":
 			t.Errorf("%s: no need, want %q", tc.name, tc.want)
@@ -115,20 +110,20 @@ func TestNeedKeyFollowsTheStandingState(t *testing.T) {
 	first := []domain.RunInputRequest{{ID: "q1", SessionID: "s1", Kind: "question"}}
 	second := []domain.RunInputRequest{{ID: "q2", SessionID: "s1", Kind: "question"}}
 
-	same := needOf(blocked, nil, nil, false).key
+	same := needOf(blocked, nil, false).key
 	for name, other := range map[string]*need{
-		"blocked again after working": needOf(&again, nil, nil, false),
-		"a question":                  needOf(&asked, nil, nil, false),
-		"a native question":           needOf(blocked, nil, first, false),
+		"blocked again after working": needOf(&again, nil, false),
+		"a question":                  needOf(&asked, nil, false),
+		"a native question":           needOf(blocked, first, false),
 	} {
 		if other.key == same {
 			t.Errorf("%s has the key of the first block, %q", name, same)
 		}
 	}
-	if repeat := needOf(&opened, nil, nil, false).key; repeat != same {
+	if repeat := needOf(&opened, nil, false).key; repeat != same {
 		t.Errorf("opening the block changed its key from %q to %q", same, repeat)
 	}
-	if needOf(blocked, nil, first, false).key == needOf(blocked, nil, second, false).key {
+	if needOf(blocked, first, false).key == needOf(blocked, second, false).key {
 		t.Error("two different questions share a key")
 	}
 
@@ -140,7 +135,7 @@ func TestNeedKeyFollowsTheStandingState(t *testing.T) {
 		run  *domain.Run
 		want string
 	}{{blocked, urgencyHigh}, {&failed, urgencyHigh}, {&finished, urgencyNormal}} {
-		if got := needOf(tc.run, nil, nil, false).urgency; got != tc.want {
+		if got := needOf(tc.run, nil, false).urgency; got != tc.want {
 			t.Errorf("%s: urgency = %q, want %q", tc.run.Activity, got, tc.want)
 		}
 	}

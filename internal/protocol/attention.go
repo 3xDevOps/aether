@@ -22,7 +22,6 @@ const (
 // Attention item kinds, in the order a run is checked: a run is listed
 // under the first kind that holds for it.
 const (
-	AttentionKindApproval       = "approval"
 	AttentionKindPermission     = "permission"
 	AttentionKindQuestion       = "question"
 	AttentionKindQueuedMessage  = "queued-message"
@@ -50,20 +49,19 @@ type AttentionListResult struct {
 // AttentionItem is one run that needs the caller. Reason is worded as the
 // dashboard's Needs you row. Since is RFC 3339, empty when unknown. The
 // field matching Kind carries what answering needs: Request for permission
-// and question, Approval for approval, Message for swarm-question,
-// room-question and queued-message.
+// and question, Message for swarm-question, room-question and
+// queued-message.
 type AttentionItem struct {
-	Kind        string             `json:"kind"`
-	RunID       string             `json:"run_id"`
-	MissionID   string             `json:"mission_id,omitempty"`
-	WorkspaceID string             `json:"workspace_id"`
-	Title       string             `json:"title"`
-	Harness     string             `json:"harness"`
-	Reason      string             `json:"reason"`
-	Since       string             `json:"since,omitempty"`
-	Request     *AttentionRequest  `json:"request,omitempty"`
-	Approval    *AttentionApproval `json:"approval,omitempty"`
-	Message     *AttentionMessage  `json:"message,omitempty"`
+	Kind        string            `json:"kind"`
+	RunID       string            `json:"run_id"`
+	MissionID   string            `json:"mission_id,omitempty"`
+	WorkspaceID string            `json:"workspace_id"`
+	Title       string            `json:"title"`
+	Harness     string            `json:"harness"`
+	Reason      string            `json:"reason"`
+	Since       string            `json:"since,omitempty"`
+	Request     *AttentionRequest `json:"request,omitempty"`
+	Message     *AttentionMessage `json:"message,omitempty"`
 }
 
 // AttentionRequest is an enhanced run's pending request, answered with
@@ -87,13 +85,6 @@ type AttentionOption struct {
 	ID    string `json:"id"`
 	Label string `json:"label"`
 	Kind  string `json:"kind,omitempty"`
-}
-
-// AttentionApproval is decided with approval.decide.
-type AttentionApproval struct {
-	ID     string `json:"id"`
-	Action string `json:"action"`
-	Detail string `json:"detail,omitempty"`
 }
 
 // AttentionMessage is a swarm question (answered with

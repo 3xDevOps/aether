@@ -73,7 +73,6 @@ const rules: Rule[] = [
       'components/run-input-indicator.tsx',
       'components/run-list.tsx',
       'routes/diff/conflict-chips.tsx',
-      'routes/team/approvals.tsx',
     ],
   },
   {

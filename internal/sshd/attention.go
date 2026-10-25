@@ -30,7 +30,6 @@ type attentionRun struct {
 	controller domain.MemberID
 	inputs     []domain.RunInputRequest
 	pending    []acphost.Request
-	approval   *store.Approval
 	mission    *domain.Mission
 	// questions are the swarm's unanswered questions, for its current
 	// integrator.
@@ -83,10 +82,6 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 		if err != nil {
 			return nil, rpcError(err)
 		}
-		approvals, err := s.cfg.Store.ListApprovals(ctx, ws.ID, store.ApprovalRequested)
-		if err != nil {
-			return nil, rpcError(err)
-		}
 		owners := make(map[domain.RunID]domain.MemberID, len(runs))
 		for _, run := range runs {
 			owners[run.ID] = run.MemberID
@@ -96,7 +91,7 @@ func (s *Server) attentionList(ctx context.Context, member domain.MemberID, raw 
 			if run.ArchivedAt != nil {
 				continue
 			}
-			r, err := s.attentionRun(ctx, run, approvals, owners, missions)
+			r, err := s.attentionRun(ctx, run, owners, missions)
 			if err != nil {
 				return nil, rpcError(err)
 			}
@@ -126,14 +121,8 @@ func compareSince(a, b string) int {
 	return at.Compare(bt)
 }
 
-func (s *Server) attentionRun(ctx context.Context, run *domain.Run, approvals []*store.Approval, owners map[domain.RunID]domain.MemberID, missions map[domain.MissionID]*domain.Mission) (*attentionRun, error) {
+func (s *Server) attentionRun(ctx context.Context, run *domain.Run, owners map[domain.RunID]domain.MemberID, missions map[domain.MissionID]*domain.Mission) (*attentionRun, error) {
 	r := &attentionRun{run: run, integratorOwner: owners[run.IntegratorRunID]}
-	for _, a := range approvals {
-		if a.RunID == run.ID {
-			r.approval = a
-			break
-		}
-	}
 	if !run.Status.Terminal() {
 		r.paused = s.cfg.Runs.Paused(run.ID)
 		r.inputs = s.cfg.Runs.PendingInputs(run.ID)
@@ -325,17 +314,6 @@ func (r *attentionRun) request(input *domain.RunInputRequest) *protocol.Attentio
 }
 
 var attentionRows = []attentionRow{
-	{
-		kind:       protocol.AttentionKindApproval,
-		background: true,
-		holds:      func(r *attentionRun) bool { return r.approval != nil },
-		resolvers:  ownerOrController,
-		fill: func(r *attentionRun, _ attentionViewer, item *protocol.AttentionItem) {
-			a := r.approval
-			item.Reason, item.Since = "Permission: "+a.Action, since(&a.CreatedAt)
-			item.Approval = &protocol.AttentionApproval{ID: a.ID, Action: a.Action, Detail: a.Detail}
-		},
-	},
 	{
 		kind:       protocol.AttentionKindPermission,
 		background: true,

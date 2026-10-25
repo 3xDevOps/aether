@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // These mirror the scheduler's reasons: acp*Reason in
@@ -48,16 +47,13 @@ type need struct {
 // (web/src/lib/needs-you.ts), in its order, from what the server knows about
 // the run alone. A swarm worker's integrator answers for it, so a worker
 // counts only when it reports itself blocked (domain.Run.NeedsAttention).
-func needOf(run *domain.Run, approval *store.Approval, inputs []domain.RunInputRequest, paused bool) *need {
+func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused bool) *need {
 	if paused {
 		return nil
 	}
 	worker := run.MissionRole == "worker"
 	background := run.Mode == domain.LaunchHeadless
 	if !worker {
-		if approval != nil {
-			return &need{key: "approval:" + approval.ID, body: clip("Permission: "+approval.Action, maxBodyRunes), urgency: urgencyHigh}
-		}
 		if request := firstInput(inputs, "permission"); request != nil {
 			body := "Permission: answer in the terminal"
 			if run.ACP {

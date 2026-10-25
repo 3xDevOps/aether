@@ -8,7 +8,7 @@ import "github.com/3xDevOps/Aether/internal/fallback"
 // Each interface is declared in the file of the feature that owns it, so
 // features extend this seam set without contending for one file.
 type Services struct {
-	// Approvals is the shared approval inbox and presence roster ().
+	// Approvals is the presence roster ().
 	Approvals ApprovalService
 	// Overlaps is the cross-run file overlap index ().
 	Overlaps OverlapIndex

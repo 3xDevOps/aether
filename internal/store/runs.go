@@ -739,7 +739,6 @@ func deleteRunRows(ctx context.Context, tx *sql.Tx, id domain.RunID) error {
 		query string
 		args  []any
 	}{
-		{`DELETE FROM approvals WHERE run_id = ?`, []any{id}},
 		// Fold the run's cost into its workspace/member accumulator before
 		// the row it came from is gone; see foldDeletedRunCostSQL.
 		{foldDeletedRunCostSQL, []any{id}},

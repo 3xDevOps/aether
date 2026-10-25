@@ -1102,20 +1102,6 @@ export interface CoordMessageAckedPayload {
   acked_at: string
 }
 
-export type ApprovalDecision = 'requested' | 'approved' | 'denied'
-
-export interface Approval {
-  id: string
-  workspace_id: string
-  run_id: string
-  action: string
-  detail?: string
-  decision: ApprovalDecision
-  decided_by?: string
-  created_at: string
-  decided_at?: string
-}
-
 /** One present member. `watching` holds the runs they have attached to. */
 export interface PresenceEntry {
   member_id: string

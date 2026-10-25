@@ -22,7 +22,6 @@ type FollowStore interface {
 	store.AssistantFollowStore
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
-	ListApprovals(ctx context.Context, workspace domain.WorkspaceID, decision string) ([]*store.Approval, error)
 }
 
 type RunState interface {
@@ -72,18 +71,7 @@ func (f *follower) read(ctx context.Context, id domain.RunID) (*notice, error) {
 		}
 		return nil, fmt.Errorf("read followed run: %w", err)
 	}
-	approvals, err := f.store.ListApprovals(ctx, run.WorkspaceID, store.ApprovalRequested)
-	if err != nil {
-		return nil, fmt.Errorf("list approvals: %w", err)
-	}
-	var approval *store.Approval
-	for _, a := range approvals {
-		if a.RunID == id {
-			approval = a
-			break
-		}
-	}
-	return classify(run, f.runs.PendingInputs(id), f.runs.ACPPending(id), approval, f.runs.Paused(id)), nil
+	return classify(run, f.runs.PendingInputs(id), f.runs.ACPPending(id), f.runs.Paused(id)), nil
 }
 
 func (f *follower) check(ctx context.Context, id domain.RunID, finishedOnly bool) {
@@ -161,7 +149,7 @@ func (f *follower) finish(n notice, announced bool) {
 	f.mu.Unlock()
 }
 
-func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphost.Request, approval *store.Approval, paused bool) *notice {
+func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphost.Request, paused bool) *notice {
 	n := &notice{run: run, severity: "warning"}
 	label := fmt.Sprintf("Run %q", push.RunTitle(run))
 	// A swarm worker's integrator answers its requests (domain.Run.NeedsAttention).
@@ -180,9 +168,6 @@ func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphos
 		n.kind, n.title = events.AssistantNoticeNeedsInput, label+" needs your input"
 		n.key = "input:" + inputs[0].SessionID + "|" + inputs[0].Kind + "|" + inputs[0].ID
 		n.body = inputBody(inputs[0], pending)
-	case approval != nil && !worker:
-		n.kind, n.title = events.AssistantNoticeNeedsApproval, label+" needs your approval"
-		n.key, n.body = "approval:"+approval.ID, approval.Action
 	case run.Activity == domain.ActivityFinished && run.Review == domain.ReviewReady && !worker:
 		n.kind, n.severity, n.title = events.AssistantNoticeFinished, "info", label+" finished"
 		n.key, n.body = "finished:"+run.NeedKey(), run.Reason
@@ -198,7 +183,7 @@ func classify(run *domain.Run, inputs []domain.RunInputRequest, pending []acphos
 	default:
 		return nil
 	}
-	if !run.Status.Terminal() && n.kind != events.AssistantNoticeNeedsInput && n.kind != events.AssistantNoticeNeedsApproval && run.StatusChangedAt != nil {
+	if !run.Status.Terminal() && n.kind != events.AssistantNoticeNeedsInput && run.StatusChangedAt != nil {
 		n.since = *run.StatusChangedAt
 	}
 	n.body = truncate(n.body, maxNoticeBodyRunes)
@@ -237,7 +222,7 @@ func (s *Service) StartFollowing(ctx context.Context) error {
 		return nil
 	}
 	sub, err := s.cfg.Bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{
-		events.TypeRunStatus, events.TypeRunInput, events.TypeApproval, events.TypeTimeline,
+		events.TypeRunStatus, events.TypeRunInput, events.TypeTimeline,
 	}}})
 	if err != nil {
 		return fmt.Errorf("assistant: subscribe to run events: %w", err)

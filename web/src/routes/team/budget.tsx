@@ -11,7 +11,6 @@ export function TeamSummary({ heading }: { heading?: ReactNode }) {
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const budgets = useStore((s) => s.budgets)
-  const inboxError = useStore((s) => s.inboxError)
   const online = onlineMembers(presence)
   const parts: string[] = []
   if (online.length > 0) parts.push(`${online.length} online`)
@@ -22,13 +21,12 @@ export function TeamSummary({ heading }: { heading?: ReactNode }) {
       : `${totals.advisory ? 'at least ' : ''}${money.format(totals.costUSD)} spent`
     parts.push(totals.state === 'ok' ? spend : `${spend}, ${budgetStateLabel[totals.state]}`)
   }
-  if (parts.length === 0 && !inboxError) return null
+  if (parts.length === 0) return null
   const names = online.map((id) => memberName({ members, mergedInto }, id))
   return (
     <div className="pb-1 text-ui-sm text-muted">
       {heading}
       {parts.length > 0 && <p className="px-2" title={names.length ? `Online: ${names.join(', ')}` : undefined}>{parts.join(' · ')}</p>}
-      {inboxError && <p role="alert" className="break-words px-2 text-state-failed">{inboxError}</p>}
     </div>
   )
 }

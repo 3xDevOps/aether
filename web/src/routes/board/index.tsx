@@ -144,7 +144,6 @@ function CardKeys({ card }: { card: Element }) {
   const control = (selector: string) => card.querySelector<HTMLElement>(selector)
   const press = (selector: string) => () => control(selector)?.click()
   useKeybindings('card', {
-    ...(control('[data-card-action="approve"]') && { 'card-approve': press('[data-card-action="approve"]') }),
     ...(control('[data-card-action="reply"]') && { 'card-reply': press('[data-card-action="reply"]') }),
     'card-open': press('[data-card-open]'),
   })

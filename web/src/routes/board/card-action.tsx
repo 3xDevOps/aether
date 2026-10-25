@@ -5,21 +5,19 @@ import { Button } from '@/components/ui/button'
 import { PopoverContent } from '@/components/ui/popover'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
-import { errorSentence, message } from '@/lib/format'
+import { message } from '@/lib/format'
 import { needsYouConditions, openAction, type NeedsYouTarget, type PrimaryAction } from '@/lib/needs-you'
-import type { Approval } from '@/lib/types'
 import type { BoardCard } from '@/routes/board/selectors'
 import { runRoute, type RunView } from '@/routes/run/views'
 import { useStore } from '@/store'
-import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 import type { Route } from '@/store/ui'
 
 const conditionOf = (card: BoardCard) => needsYouConditions.find((c) => c.id === card.needsYou)
 
-export function cardAction(card: BoardCard, approval: Approval | undefined): PrimaryAction | undefined {
+export function cardAction(card: BoardCard): PrimaryAction | undefined {
   if (card.group !== 'needs-you') return undefined
-  return conditionOf(card)?.action(card.run, approval) ?? openAction
+  return conditionOf(card)?.action(card.run) ?? openAction
 }
 
 const targetView: Partial<Record<NeedsYouTarget, RunView>> = { changes: 'changes', terminal: 'terminal' }
@@ -34,48 +32,28 @@ export function openCard(card: BoardCard, navigate: (name: string, params?: Reco
   navigate(route.name, route.params)
 }
 
-export async function approveRequest(runID: string, approval: Approval) {
-  try {
-    const done = await api.approvalDecide(runID, approval.id, true)
-    useStore
-      .getState()
-      .decideApproval(done.workspace_id, done.id, done.decision, done.decided_by ?? '', done.decided_at ?? new Date().toISOString())
-    toast.success(`Approved: ${approval.action}`)
-  } catch (err) {
-    toast.error(`Approve failed: ${errorSentence(err)}`)
-  }
-}
-
 export function CardActionButton({
   card,
   action,
-  approval,
   onReply,
 }: {
   card: BoardCard
   action: PrimaryAction
-  approval: Approval | undefined
   onReply: () => void
 }) {
   const navigate = useStore((s) => s.navigate)
-  const [busy, setBusy] = useState(false)
-  const late = usePastDeadline(busy)
 
   return (
     <Button
       variant="secondary"
       size="sm"
       data-card-action={action.kind}
-      disabled={busy}
       onClick={() => {
-        if (action.kind === 'approve' && approval) {
-          setBusy(true)
-          void approveRequest(card.run.id, approval).finally(() => setBusy(false))
-        } else if (action.kind === 'reply') onReply()
+        if (action.kind === 'reply') onReply()
         else openCard(card, navigate)
       }}
     >
-      {late ? stillWaiting : busy ? 'Approving…' : action.label}
+      {action.label}
     </Button>
   )
 }

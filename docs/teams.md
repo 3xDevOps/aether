@@ -185,7 +185,7 @@ It fails with `in use` until their runs and schedules are gone
 | admin | Everything | Everything | Also members, workspaces and their settings, budgets, saving templates, `aether server update` |
 
 Steering a run means typing into its terminal, messaging its agent, answering
-its approvals and pausing or resuming it. Pushing means writing to the
+its permission prompts and pausing or resuming it. Pushing means writing to the
 workspace's git repository. Everyone who joins is a collaborator, so teammates
 can message and stop each other's agents with no setup. Every such act is
 recorded in the workspace timeline with who did it. Change a role with
@@ -210,8 +210,8 @@ and admins`. `aether unprotect <run>` lifts a protection.
 
 ## Workspaces
 
-A workspace is a repository plus its settings. Runs, the activity feed, the
-approval inbox, templates, schedules, costs and the budget all belong to one. A
+A workspace is a repository plus its settings. Runs, the activity feed,
+templates, schedules, costs and the budget all belong to one. A
 run and its shells use the launching member's saved image, or the server's
 standard image ([environments.md](environments.md)).
 
@@ -303,7 +303,6 @@ more than one workspace exists`. `aether runs` lists runs from every workspace.
 | `aether attach [--read-only] <run>` | Attach to a run's terminal. Several people can attach at once |
 | `aether message <run> "..."` | Message a run's agent. It shows as a banner in your color |
 | `aether pause`, `resume`, `kill <run>` | Suspend, thaw or stop a run. The checkout and transcript survive a kill |
-| `aether inbox` | The shared approval queue. `aether inbox approve\|deny <request-id>` decides |
 | `aether timeline` | The workspace history. Filter with `--run`, `--member`, `--type`, `--limit`. `--jsonl` exports |
 | `aether cost --runs` | Token spend per member and run |
 
@@ -312,6 +311,9 @@ or **Failed**. **Needs you** means something blocks the run that you can
 resolve, such as a permission or question, a stalled run of yours, an unreviewed
 finish or a swarm question. Everyone else sees that run as **Working** with
 "Waiting for Alice" ([failure-handling.md](failure-handling.md#needs-you)).
+
+Answer an agent's plan or permission prompt in the run's Session view
+(Enhanced) or its terminal (Standard).
 
 ### Hand off and finish runs
 

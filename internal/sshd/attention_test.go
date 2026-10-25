@@ -58,11 +58,6 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 	}}}
 	e.runs.mu.Unlock()
 
-	approved := newRun(e.member.ID, domain.LaunchTUI, domain.RunNeedsAttention, "", domain.ActivityNeedsYou)
-	approval := &store.Approval{WorkspaceID: e.ws.ID, RunID: approved.ID, Action: "Bash", Detail: "rm -rf build"}
-	if err := e.store.CreateApproval(ctx, approval); err != nil {
-		t.Fatal(err)
-	}
 	asks := newRun(e.member.ID, domain.LaunchTUI, domain.RunNeedsAttention, "needs input: which database?", domain.ActivityNeedsYou)
 	interrupted := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "turn interrupted", domain.ActivityNeedsYou)
 	disconnected := newRun(e.member.ID, domain.LaunchACP, domain.RunNeedsAttention, "enhanced session ended: eof", domain.ActivityDisconnected)
@@ -83,7 +78,6 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 	got := attentionItems(t, e, e.member.ID, protocol.AttentionListParams{})
 	want := map[domain.RunID][2]string{
 		permission.ID:   {protocol.AttentionKindPermission, "Permission requested"},
-		approved.ID:     {protocol.AttentionKindApproval, "Permission: Bash"},
 		asks.ID:         {protocol.AttentionKindNeedsInput, "Agent asks: which database?"},
 		interrupted.ID:  {protocol.AttentionKindNeedsInput, "Turn interrupted · reply to continue"},
 		disconnected.ID: {protocol.AttentionKindDisconnected, "Agent disconnected: eof"},
@@ -106,9 +100,6 @@ func TestAttentionListWordsTheNeedsYouRows(t *testing.T) {
 		p.Request.ID != "req-1" || p.Request.Title != "Run npm test" ||
 		!slices.Equal(p.Request.Options, []protocol.AttentionOption{{ID: "a1", Label: "Allow", Kind: "allow_once"}, {ID: "a2", Label: "Always allow", Kind: "allow_always"}}) {
 		t.Errorf("permission item = %+v request %+v", p, p.Request)
-	}
-	if a := got[approved.ID].Approval; a == nil || a.ID != approval.ID || a.Detail != "rm -rf build" {
-		t.Errorf("approval item = %+v", got[approved.ID])
 	}
 
 	forBob := attentionItems(t, e, bob.ID, protocol.AttentionListParams{WorkspaceID: string(e.ws.ID)})

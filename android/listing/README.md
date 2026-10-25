@@ -23,7 +23,8 @@ So before the first submission there must be:
 3. A member on that server for the review account, approved, with a role that
    can see runs ([docs/teams.md](../../docs/teams.md)).
 4. A workspace with a few runs in different states, including one with a diff
-   and one waiting on an approval, so the reviewer sees the app working.
+   and one waiting on a permission request, so the reviewer sees the app
+   working.
 
 Keep it running until the review clears. Fill the account's sign-in details
 and the server's MagicDNS name into [app-access.md](app-access.md)'s
@@ -68,7 +69,7 @@ in this order, so the listing reads as a tour:
 
 1. The board, with a few runs in different buckets.
 2. A run's terminal with the key bar showing.
-3. The approval inbox with a pending request.
+3. An Enhanced run's Session view with a pending permission request.
 4. A run's diff.
 5. The first screen, **Connect to Aether**, with its two choices.
 
@@ -86,7 +87,7 @@ beside each upload, in the same order as the lists above.
 | Feature graphic | The Aether mark and wordmark on a blue gradient, above the line "Your coding agents, on your own server" |
 | Screenshot 1 | The Aether board on a phone, runs in columns by what needs attention |
 | Screenshot 2 | A run's terminal filling the phone screen, with the key bar above the keyboard |
-| Screenshot 3 | The approval inbox with one pending request from an agent |
+| Screenshot 3 | An Enhanced run's Session view on a phone, with a pending permission request from the agent |
 | Screenshot 4 | A run's diff on the phone, added lines green and removed lines red |
 | Screenshot 5 | The app's first screen, "Connect to Aether", with the Aether Edge and Tailscale choices |
 

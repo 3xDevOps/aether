@@ -21,7 +21,7 @@ func fixturePayloads() []events.Payload {
 		events.AgentEventPayload{Kind: events.AgentToolResult, ToolUseID: "toolu_01Bash"},
 		events.AgentEventPayload{Kind: events.AgentSubagent, Tool: "Task", ToolUseID: "toolu_02Task", Detail: "Audit retry error handling"},
 		events.AgentEventPayload{Kind: events.AgentToolResult, ToolUseID: "toolu_02Task"},
-		events.AgentEventPayload{Kind: events.AgentPause, Tool: "ExitPlanMode", ToolUseID: "toolu_03Plan", Detail: "1. Fix the backoff reset in the retry loop\n2. Re-run the test suite"},
+		events.AgentEventPayload{Kind: events.AgentToolCall, Tool: "ExitPlanMode", ToolUseID: "toolu_03Plan", Detail: "1. Fix the backoff reset in the retry loop\n2. Re-run the test suite"},
 		events.AgentEventPayload{Kind: events.AgentToolResult, ToolUseID: "toolu_03Plan"},
 		events.AgentEventPayload{Kind: events.AgentToolCall, Tool: "Read", ToolUseID: "toolu_04Read", Detail: "/workspace/internal/retry/retry.go"},
 		events.AgentEventPayload{Kind: events.AgentToolResult, ToolUseID: "toolu_04Read", IsError: true},

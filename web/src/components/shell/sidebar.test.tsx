@@ -23,7 +23,6 @@ beforeEach(async () => {
     sidebarWidth: 260,
     activeWorkspace: '',
     mineOnly: false,
-    inbox: {},
     roomMessages: {},
     presence: [],
     route: { name: 'board', params: {} },

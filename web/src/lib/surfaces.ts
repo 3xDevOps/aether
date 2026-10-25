@@ -11,7 +11,6 @@ import {
   Waypoints,
   MonitorSmartphone,
   Settings,
-  ShieldQuestion,
   SquareTerminal,
   Users,
   type LucideIcon,
@@ -53,8 +52,6 @@ export function surfaces(cap: Capability, admin = false): Surface[] {
   if (cap.hasMethod('member.list'))
     list.push({ name: 'members', label: 'Members', Icon: Users, place: admin ? 'admin' : 'palette', tabs: ['devices'] })
   list.push({ name: 'settings', label: 'Settings', Icon: Settings, place: 'admin' })
-  if (cap.hasMethod('approval.list'))
-    list.push({ name: 'approvals', label: 'Approvals', Icon: ShieldQuestion, place: 'link' })
   if (cap.hasMethod('member.device.list'))
     list.push({ name: 'devices', label: 'Members › Devices', Icon: MonitorSmartphone, place: 'palette', keywords: 'Devices' })
   if (cap.hasMethod('workspace.list'))

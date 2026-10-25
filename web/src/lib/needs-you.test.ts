@@ -5,7 +5,6 @@ import type { MissionDetail } from '@/store/missions'
 import { toRecord, type RunRecord } from '@/store/runs'
 import {
   alice,
-  approval,
   bob,
   mission,
   missionQuestion,
@@ -24,9 +23,9 @@ it.each(['tui', 'acp'] as const)('keeps actual requests ahead of a reported %s o
     reason: 'agent reported failure', outcome_unseen: true,
   })
   expect(needsYou(parked, stateContext())?.id).toBe('failed')
-  expect(needsYou(parked, stateContext({
-    approvalsByRun: { [parked.id]: [approval()] },
-  }))?.id).toBe('permission')
+  expect(needsYou({
+    ...parked, pending_inputs: [{ id: 'permission_1', session_id: 'session_1', kind: 'permission' }],
+  }, stateContext())?.id).toBe('permission')
   expect(needsYou({
     ...parked, pending_inputs: [{ id: 'question_1', session_id: 'session_1', kind: 'question' }],
   }, stateContext())?.id).toBe('question')
@@ -88,9 +87,9 @@ const rows: {
 }[] = [
   {
     id: 'permission',
-    run: record(),
-    ctx: { approvalsByRun: { run_1: [approval({ action: 'run `go test ./...`' })] } },
-    reason: 'Permission: run `go test ./...`',
+    run: record({ pending_inputs: [{ id: 'request_1', session_id: 's', kind: 'permission' }] }),
+    ctx: {},
+    reason: 'Permission: answer in the terminal',
   },
   {
     id: 'question',
@@ -268,7 +267,7 @@ describe('needs you conditions', () => {
     const parked = record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason })
     const presented = presentRun(parked, stateContext())
     expect(presented).toMatchObject({ state: 'needs-you', reason: shown })
-    expect(presented.needsYou?.action(parked, undefined)).toEqual({ kind: 'reply', label: 'Reply' })
+    expect(presented.needsYou?.action(parked)).toEqual({ kind: 'reply', label: 'Reply' })
   })
 
   it("labels a disconnected agent with the server's reason", () => {
@@ -310,7 +309,7 @@ describe('needs you conditions', () => {
     const background = record({ mode: 'headless', acp: true, pending_inputs: [{ id: 'r1', session_id: 's1', kind: 'permission' }] })
     const shown = presentRun(background, stateContext())
     expect(shown.reason).toBe('Permission requested')
-    expect(shown.needsYou?.action(background, undefined)).toEqual({ kind: 'open', label: 'Answer' })
+    expect(shown.needsYou?.action(background)).toEqual({ kind: 'open', label: 'Answer' })
   })
 
   it.each([
@@ -322,14 +321,14 @@ describe('needs you conditions', () => {
     [{ status: 'needs-attention', state: 'failed', outcome_unseen: true }, 'Review'],
   ] satisfies [Partial<Run>, string][])('gives %o the primary action %s', (fields, label) => {
     const shown = record(fields)
-    expect(needsYou(shown, stateContext())?.action(shown, undefined).label).toBe(label)
+    expect(needsYou(shown, stateContext())?.action(shown).label).toBe(label)
   })
 
-  it('shows a request whose approval has not loaded as a plain Needs you', () => {
+  it('shows a request that has not loaded as a plain Needs you', () => {
     const parked = record({ status: 'needs-attention', state: 'needs-you', reason: 'agent idle' })
     const shown = presentRun(parked, stateContext())
     expect(shown).toMatchObject({ state: 'needs-you', reason: 'Open the run to see its request' })
-    expect(shown.needsYou?.action(parked, undefined)).toEqual({ kind: 'open', label: 'Open' })
+    expect(shown.needsYou?.action(parked)).toEqual({ kind: 'open', label: 'Open' })
   })
 })
 
@@ -358,7 +357,6 @@ describe('viewer scoping', () => {
   it('needs the terminal controller for a permission on a run they hold', () => {
     const ctx = stateContext({
       ...bobViewing,
-      approvalsByRun: { run_1: [approval()] },
       roomStatus: {
         run_1: {
           workspace_id: 'wsp_1',
@@ -370,7 +368,7 @@ describe('viewer scoping', () => {
         },
       },
     })
-    expect(needsYou(record(), ctx)?.id).toBe('permission')
+    expect(needsYou(record({ pending_inputs: [{ id: 'request_1', session_id: 's', kind: 'permission' }] }), ctx)?.id).toBe('permission')
   })
 
   it("shows a controller the requests on another member's run before the room loads", () => {
@@ -487,11 +485,6 @@ describe('stopped integrators', () => {
 })
 
 describe('background runs', () => {
-  it('reach Needs you on a pending Aether approval', () => {
-    const ctx = stateContext({ approvalsByRun: { run_1: [approval()] } })
-    expect(needsYou(record({ mode: 'headless' }), ctx)?.id).toBe('permission')
-  })
-
   it('leave an unreviewed finished run in its group, labelled by its outcome', () => {
     const failed = record({ mode: 'headless', status: 'failed', state: '', reason: 'exit status 1', outcome_unseen: true })
     expect(presentRun(failed, stateContext())).toEqual({ state: 'failed', reason: 'Failed: exit status 1' })
