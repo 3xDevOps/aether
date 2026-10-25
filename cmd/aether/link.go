@@ -64,7 +64,7 @@ type linkOptions struct {
 const linkUsage = "usage: aether link <addr | server id> [--invite] [--key] [--name] [--repo] [--workspace] [--edge] [--addr]\n" +
 	"       aether link <join link> [--addr] [--name] [--repo] [--workspace]\n" +
 	"       aether link --from-edge <server id> [--yes] [--edge] [--addr] [--name] [--repo] [--workspace]\n" +
-	"       aether link --claim <code> [--edge] [--addr] [--name] [--repo] [--workspace]"
+	"       aether link --claim <code | claim link> [--edge] [--addr] [--name] [--repo] [--workspace]"
 
 func parseLinkArgs(args []string) (linkOptions, error) {
 	fs := flag.NewFlagSet("link", flag.ExitOnError)
@@ -73,7 +73,7 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 	repo := fs.String("repo", "", "local git repository to add the aether remote to")
 	workspace := fs.String("workspace", "", "workspace name or id for the git remote")
 	keyFlag := fs.String("key", "", "SSH private key to authenticate with (default ~/.ssh/id_ed25519); saved in the config for later commands")
-	claim := fs.String("claim", "", "claim code printed by aether-server setup; claims the server through the edge and links it")
+	claim := fs.String("claim", "", "claim code or claim link printed by aether-server setup; claims the server through the edge and links it")
 	fromEdge := fs.String("from-edge", "", "server id from aether servers to link: shows its name and host key and asks before pinning it")
 	yes := fs.Bool("yes", false, "with --from-edge: skip the confirmation, having compared the id with the one the server's admin gave you")
 	edge := fs.String("edge", "", edgeFlagUsage)
@@ -89,14 +89,35 @@ func parseLinkArgs(args []string) (linkOptions, error) {
 		return linkOptions{}, errors.New(linkUsage)
 	}
 	var join string
-	if _, _, _, _, joinErr := edgeproto.ParseJoinLink(addr); joinErr == nil {
+	_, _, _, _, joinErr := edgeproto.ParseJoinLink(addr)
+	_, _, codeErr := edgeproto.ParseClaimCode(addr)
+	switch {
+	case joinErr == nil:
 		if *invite != "" || *keyFlag != "" || *edge != "" {
 			return linkOptions{}, errors.New("link: --invite, --key and --edge do not apply to a join link, which names its edge and authenticates with the device key from aether login")
 		}
 		join, addr = addr, ""
+	case strings.HasPrefix(strings.ToLower(addr), "aether://claim"):
+		return linkOptions{}, errors.New("link: a claim link goes after --claim: aether link --claim '<claim link>'")
+	case codeErr == nil:
+		return linkOptions{}, errors.New("link: that is a claim code, which goes after --claim: aether link --claim <code>")
+	case strings.Contains(addr, "://"):
+		return linkOptions{}, fmt.Errorf("link: %w; an address looks like host[:port], and a claim link goes after --claim", joinErr)
 	}
 	if *yes && *fromEdge == "" {
 		return linkOptions{}, errors.New("link: --yes applies to --from-edge only")
+	}
+	if strings.Contains(*claim, "://") {
+		linkEdge, code, claimErr := edgeproto.ParseClaimLink(*claim)
+		if claimErr != nil {
+			return linkOptions{}, fmt.Errorf("link --claim: %w", claimErr)
+		}
+		if *edge != "" {
+			if origin, originErr := edgeproto.Origin(*edge); originErr != nil || origin != linkEdge {
+				return linkOptions{}, fmt.Errorf("link --claim: the claim link names the edge %s; drop --edge %s", linkEdge, *edge)
+			}
+		}
+		*claim, *edge = code, linkEdge
 	}
 	if (*claim != "" || *fromEdge != "") && (*invite != "" || *keyFlag != "") {
 		return linkOptions{}, fmt.Errorf("link: --invite and --key do not apply to an edge link, which authenticates with the device key from aether login")

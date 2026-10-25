@@ -121,13 +121,15 @@ no tailscaled or you answer no to its tailnet question. You can also
 [run your own](edge.md#running-your-own-edge).
 
 ```sh
-aether login                      # sign in with GitHub
-aether link --claim <code>        # the owner, with the claim code aether-server setup printed
-aether link '<invite link>'       # anyone an admin invited, with the link the admin sent
+aether login                        # sign in with GitHub
+aether link --claim '<claim link>'  # the owner, with the claim link or code aether-server setup printed
+aether link '<invite link>'         # anyone an admin invited, with the link the admin sent
 ```
 
 A bare name such as `my-server` is always an SSH address. Only a server id, a
-claim code or a join link goes through the edge.
+claim code or link after `--claim`, or a join link goes through the edge. A
+claim link or code given without `--claim`, or any other value with `://`,
+fails with the form to use instead of being dialed as an address.
 
 The server's owner sets who is let in with `edge-access`: `account` (a GitHub
 sign-in is enough) or `approved-devices` (the default; each new device waits for
