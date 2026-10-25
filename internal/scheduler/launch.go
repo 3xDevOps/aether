@@ -417,6 +417,7 @@ func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *
 	// its own co-author.
 	s.mu.Lock()
 	entry.gitAuthorEmail = actor.GitIdentity().Email
+	entry.egress = plan.Egress
 	s.mu.Unlock()
 	driver, err := s.startRunContainer(ctx, entry, run, actor, argv, profile, plan, persistSupervisor, unlockCaches)
 	if err != nil {
@@ -503,6 +504,16 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 		return nil, err
 	}
 	maps.Copy(plan.Env, native.Env)
+	if plan.Egress {
+		if s.cfg.Egress == nil {
+			return nil, errors.New("workspace egress control needs the Docker runtime")
+		}
+		proxyEnv, err := s.cfg.Egress.Prepare(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("prepare the egress proxy: %w", err)
+		}
+		maps.Copy(plan.Env, proxyEnv)
+	}
 	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
 	if err != nil {
 		return nil, fmt.Errorf("create container: %w", err)

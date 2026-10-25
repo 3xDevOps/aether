@@ -928,6 +928,9 @@ export const api = {
     setup_script?: string
     set?: WorkspaceVariable[]
     unset?: string[]
+    egress?: boolean
+    egress_allow?: string[]
+    egress_deny?: string[]
   }) => call<WorkspaceEnvironment>('workspace.environment.set', params),
   workspaceMirrorStatus: (workspaceID: string) =>
     call<WorkspaceMirrorResult>('workspace.mirror.status', {

@@ -133,6 +133,9 @@ type Spec struct {
 	// when that is sysbox-runc, starts dockerd inside it before the main
 	// process, so the image's docker CLI works without the host socket.
 	NestedDocker bool
+	// Egress starts the container on a network with no route out; the
+	// caller points Env at a proxy it can reach.
+	Egress bool
 	// SecretEnv names the Env entries whose values are masked wherever the
 	// setup script's output is logged or returned.
 	SecretEnv []string

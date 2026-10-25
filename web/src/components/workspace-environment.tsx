@@ -30,6 +30,17 @@ const scriptHelp = (
 const variablesHelp =
   'Set in every new run’s container. Anyone who can launch a run here can print them inside it, secrets included. A secret’s value is never shown on this page again.'
 
+const egressHelp = (
+  <>
+    Runs launched while this is on reach the internet only through Aether&apos;s proxy, and only the hosts listed
+    here, which start as the ones agents and package managers need. Turning it on or off applies to runs launched
+    afterwards; the host list applies at once to runs started with it on. <Code>*.example.com</Code> allows every
+    subdomain of example.com.
+  </>
+)
+
+const hostPattern = /^(\*\.)?([a-z0-9_-]+\.)*[a-z0-9_-]+$/
+
 interface Row {
   id: number
   name: string
@@ -72,7 +83,7 @@ function problems(rows: Row[]): Map<number, Problem> {
   return found
 }
 
-function changes(environment: WorkspaceEnvironment, script: string, rows: Row[]) {
+function changes(environment: WorkspaceEnvironment, script: string, rows: Row[], egress: boolean, hosts: string[]) {
   const listed = rows.filter((row) => !untouched(row))
   const names = new Set(listed.map((row) => row.name))
   const set = listed
@@ -82,10 +93,16 @@ function changes(environment: WorkspaceEnvironment, script: string, rows: Row[])
       return !(from && from.name === row.name && !from.secret && !row.secret && (from.value ?? '') === row.value)
     })
     .map((row): WorkspaceVariable => (row.secret ? { name: row.name, value: row.value, secret: true } : { name: row.name, value: row.value }))
+  const saved = environment.egress_hosts ?? []
+  const allow = hosts.filter((host) => !saved.includes(host))
+  const deny = saved.filter((host) => !hosts.includes(host))
   return {
     ...(script === environment.setup_script ? {} : { setup_script: script }),
     set,
     unset: environment.variables.map((variable) => variable.name).filter((name) => !names.has(name)),
+    ...(egress === (environment.egress ?? false) ? {} : { egress }),
+    ...(allow.length > 0 ? { egress_allow: allow } : {}),
+    ...(deny.length > 0 ? { egress_deny: deny } : {}),
   }
 }
 
@@ -173,8 +190,31 @@ function ReadOnly({ environment }: { environment: WorkspaceEnvironment }) {
               </ul>
             )}
       </SettingRow>
+      {environment.egress_hosts && (
+        <SettingRow label="Limit outbound traffic" help={egressHelp}>
+          <p className="text-ui-sm text-muted">{environment.egress ? 'On.' : 'Off.'}</p>
+          {environment.egress && environment.egress_hosts.length > 0 && <HostList hosts={environment.egress_hosts} />}
+        </SettingRow>
+      )}
       <p className="px-4 py-3 text-ui-sm text-muted">Only an admin can change this.</p>
     </>
+  )
+}
+
+function HostList({ hosts, disabled, onRemove }: { hosts: string[]; disabled?: boolean; onRemove?: (host: string) => void }) {
+  return (
+    <ul aria-label="Allowed hosts" className="flex min-w-0 flex-wrap gap-1.5">
+      {hosts.map((host) => (
+        <li key={host} className="flex min-w-0 items-center gap-0.5">
+          <Code>{host}</Code>
+          {onRemove && (
+            <Button variant="ghost" size="icon-sm" label={`Remove ${host}`} disabled={disabled} onClick={() => onRemove(host)}>
+              <X />
+            </Button>
+          )}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -185,11 +225,16 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
   const [error, setError] = useState<string | null>(null)
   const [checked, setChecked] = useState(false)
   const [importing, setImporting] = useState(false)
+  const [egress, setEgress] = useState(environment.egress ?? false)
+  const [hosts, setHosts] = useState(environment.egress_hosts ?? [])
+  const [draft, setDraft] = useState('')
+  const [draftProblem, setDraftProblem] = useState<string | null>(null)
   const list = useRef<HTMLUListElement>(null)
   const focusNext = useRef<{ id: number; field: Problem['field'] } | null>(null)
 
-  const change = changes(environment, script, rows)
-  const dirty = change.setup_script !== undefined || change.set.length > 0 || change.unset.length > 0
+  const change = changes(environment, script, rows, egress, hosts)
+  const dirty = change.setup_script !== undefined || change.set.length > 0 || change.unset.length > 0 ||
+    change.egress !== undefined || change.egress_allow !== undefined || change.egress_deny !== undefined
   const wrong = problems(rows)
 
   const focus = (id: number, field: Problem['field']) =>
@@ -251,8 +296,23 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
   const discard = () => {
     setScript(environment.setup_script)
     setRows(environment.variables.map(savedRow))
+    setEgress(environment.egress ?? false)
+    setHosts(environment.egress_hosts ?? [])
+    setDraft('')
+    setDraftProblem(null)
     setError(null)
     setChecked(false)
+  }
+
+  const allow = () => {
+    const host = draft.trim().toLowerCase().replace(/\.$/, '')
+    if (!hostPattern.test(host)) setDraftProblem('Enter a host such as example.com or *.example.com, without https:// or a port.')
+    else if (hosts.includes(host)) setDraftProblem(`${host} is already allowed.`)
+    else {
+      setHosts([...hosts, host].sort())
+      setDraft('')
+      setDraftProblem(null)
+    }
   }
 
   return (
@@ -306,6 +366,46 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
               </ul>
             )}
       </SettingRow>
+      {environment.egress_hosts && (
+        <SettingRow
+          label="Limit outbound traffic"
+          labelFor="workspace-egress"
+          help={egressHelp}
+          control={<Checkbox id="workspace-egress" checked={egress} disabled={busy} onCheckedChange={(next) => setEgress(next === true)} />}
+        >
+          {egress && (
+            <>
+              {hosts.length === 0
+                ? <p className="text-ui-sm text-muted">No host is allowed.</p>
+                : <HostList hosts={hosts} disabled={busy} onRemove={(host) => setHosts(hosts.filter((other) => other !== host))} />}
+              <div className="flex min-w-0 flex-col gap-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Input
+                    aria-label="Host to allow"
+                    aria-invalid={draftProblem ? true : undefined}
+                    aria-describedby={draftProblem ? 'workspace-egress-problem' : undefined}
+                    className="font-code text-ui-sm"
+                    placeholder="example.com"
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    value={draft}
+                    disabled={busy}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter') return
+                      event.preventDefault()
+                      allow()
+                    }}
+                  />
+                  <Button size="sm" variant="secondary" disabled={busy || draft.trim() === ''} onClick={allow}>Allow</Button>
+                </div>
+                {draftProblem && <p id="workspace-egress-problem" className="text-ui-sm text-state-failed">{draftProblem}</p>}
+              </div>
+            </>
+          )}
+        </SettingRow>
+      )}
       {error && (
         <div className="px-4 py-3">
           <Callout tone="failed" role="alert" title="Not saved">{error}</Callout>

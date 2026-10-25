@@ -22,6 +22,7 @@ credentials out of the report.
 | Surface | What it protects | What it does not protect |
 | --- | --- | --- |
 | [Run container](#the-agent-container) | Keeps agents off the host, out of the host Docker daemon and out of other members' homes. Runs and environments cannot connect to each other. | It is not a VM. Agents run as root and can read and change everything mounted into the run: your home, the checkout and the workspace secrets. |
+| [Egress control](environments.md#egress-control) | Off by default. When on, a workspace's runs reach only its listed hosts, through the server's proxy, and never a private, loopback or metadata address. | An allowed host receives whatever the agent sends: with `github.com` allowed, the launcher's gh token can push anywhere it can write. Runs still reach the server host. |
 | [Member home and environment](#the-agent-container) | Your home is mounted only into your own environment and your own runs. | Every run you launch can read and replace your agent logins and gh token, and sign with your commit signing key. |
 | [Who can act on a run](#who-can-see-and-act-on-a-run) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your runs, which hold your home. |
 | [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
@@ -63,6 +64,9 @@ shares the host's kernel, and Aether builds no second sandbox inside it.
   internet but not each other. To set its subnet or MTU, create it yourself
   with that option before the first launch; a launch fails on a network of
   that name without it.
+- A run of a workspace with [egress control](environments.md#egress-control)
+  on starts on `aether-egress` instead: the same, but `--internal`, so its one
+  way out is the server's egress proxy on the network's gateway.
 - The packaged systemd unit runs `aether-server` as root. Docker socket access
   is root-equivalent anyway, and root lets the server hand checkouts to an
   image's non-root user. An unprivileged server can serve only root images.
@@ -672,8 +676,18 @@ vulnerability it reports gets a fix, and `go.mod` pins a patched Go
 
 - Containers share the host kernel. A kernel or Docker escape reaches the
   host.
-- Nothing in Aether limits outbound traffic: runs and environments reach the
-  internet, your network and ports the server host listens on.
+- Outbound traffic is limited only for runs of a workspace with egress
+  control on. Other runs, environment terminals and verification containers
+  reach the internet, your network and ports the server host listens on.
+- An egress-limited run still reaches services on the server host, and every
+  allowed host can receive data. A client that ignores the proxy variables
+  cannot connect at all.
+- The egress proxy tells runs apart by source address. Root in a run with
+  Docker inside can claim another egress-limited run's address and get that
+  workspace's host list.
+- On Docker older than 26.0 (25.0.4 and 23.0.11 on older lines), an internal
+  network still resolves names through the host (CVE-2024-29018), so an
+  egress-limited run can send data out in DNS queries.
 - Containers created before the `aether-agents` network existed keep Docker's
   default bridge, where they can reach each other's ports, until they are
   removed.

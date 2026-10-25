@@ -1810,6 +1810,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		cleanupError:        publicCleanupError(sc.CleanupError),
 		runUser:             sc.RunUser,
 		home:                sc.Home,
+		egress:              sc.Egress,
 		exitObserved:        sc.ExitObserved,
 		exitCode:            sc.ExitCode,
 		evidenceIdentity:    sc.EvidenceIdentity,

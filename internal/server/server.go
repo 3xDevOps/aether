@@ -24,6 +24,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeagent "github.com/3xDevOps/Aether/internal/edge/agent"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/egress"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/fallback"
@@ -189,6 +190,7 @@ type Server struct {
 	bus       *events.InProc
 	rt        runtime.Runtime
 	docker    *runtime.Docker // set only when the server constructed it
+	egress    *egress.Proxy   // set with docker
 	git       *gitengine.Engine
 	pty       *ptyhost.Host
 	sched     *scheduler.Scheduler
@@ -368,10 +370,16 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("server: build team memory: %w", err)
 	}
+	var egressProxy scheduler.EgressProxy
+	if s.docker != nil {
+		s.egress = egress.New(s.docker, s.db, s.bus)
+		egressProxy = s.egress
+	}
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:         s.db,
 		Runtime:       s.rt,
 		Bus:           s.bus,
+		Egress:        egressProxy,
 		EventSeq:      s.log.LastSeq,
 		Git:           lazyGit{s.git},
 		PTY:           s.pty,
@@ -666,6 +674,13 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := s.assistant.StartFollowing(ctx); err != nil {
 		return errors.Join(err, s.Close())
 	}
+	if s.egress != nil {
+		// Not fatal: only egress-limited runs need the proxy, and the next
+		// launch of one tries again.
+		if err := s.egress.Resume(ctx); err != nil {
+			slog.Warn("server: resume the egress proxy", "error", err)
+		}
+	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -748,6 +763,9 @@ func (s *Server) Close() error {
 		}
 		// Registered services publish events, so they stop before the bus.
 		closeAll = append(closeAll, s.closeServices()...)
+		if s.egress != nil {
+			closeAll = append(closeAll, s.egress.Close)
+		}
 		if s.git != nil {
 			closeAll = append(closeAll, s.git.Close)
 		}

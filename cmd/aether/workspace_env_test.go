@@ -165,3 +165,30 @@ func TestPrintWorkspaceVariablesHidesNothingButSecretValues(t *testing.T) {
 		t.Errorf("empty output = %q, %v", b.String(), err)
 	}
 }
+
+func TestWorkspaceEnvEgress(t *testing.T) {
+	var b strings.Builder
+	ws := protocol.Workspace{ID: "ws-1", Name: "app"}
+	if err := printWorkspaceEgress(&b, ws, protocol.WorkspaceEnvironmentResult{Egress: true, EgressHosts: []string{"*.example.com", "github.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	if want := "workspace ws-1 app\negress control on\nallowed hosts:\n  *.example.com\n  github.com\n"; b.String() != want {
+		t.Errorf("output = %q, want %q", b.String(), want)
+	}
+	b.Reset()
+	if err := printWorkspaceEgress(&b, ws, protocol.WorkspaceEnvironmentResult{}); err != nil || b.String() != "workspace ws-1 app\negress control off\nno allowed hosts\n" {
+		t.Errorf("empty output = %q, %v", b.String(), err)
+	}
+
+	for name, args := range map[string][]string{
+		"no command":        {},
+		"allow nothing":     {"allow"},
+		"deny nothing":      {"deny", "--workspace", "app"},
+		"on with a host":    {"on", "github.com"},
+		"flag after a host": {"allow", "github.com", "--workspace", "app"},
+	} {
+		if err := workspaceEnvEgress(args); err == nil || err.Error() != workspaceEnvEgressUsage {
+			t.Errorf("%s: err = %v, want the usage", name, err)
+		}
+	}
+}

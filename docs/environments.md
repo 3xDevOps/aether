@@ -174,6 +174,10 @@ What to expect:
   and `aether env save` does not keep them.
 - A port published by an inner container is on the run's own network. Reach it
   at `127.0.0.1`.
+- Inner containers resolve names through `8.8.8.8`: the run's own resolver,
+  `127.0.0.11`, answers only inside the run. Where `8.8.8.8` is blocked, pass
+  `docker run --dns <your resolver>`. With [egress control](#egress-control)
+  on, inner containers need the proxy variables instead.
 - If `dockerd` cannot start, the launch fails with `runtime: dockerd did not
   become ready (exit 1): <last lines of the log>`. The full log is
   `/var/log/aether-dockerd.log` in the container.
@@ -226,8 +230,9 @@ covers Close, Kill, **Free container…** and Delete.
 
 A workspace is a repository you run agents against. Its environment applies
 to every new run in it, whoever launches it: a **setup script** that runs
-before the agent, and **variables** set in the run's container. A variable can
-be marked **secret**.
+before the agent, **variables** set in the run's container, and optional
+**egress control**, which limits the hosts runs can reach. A variable can be
+marked **secret**.
 
 An admin edits both under **Environment** on the workspace's Repository page
 (workspace switcher → **Environment**), or with `aether workspace env`. Every
@@ -235,7 +240,8 @@ member can read the script, the variable names and the non-secret values.
 
 A change applies to runs launched afterwards. An existing container keeps its
 variables and never reruns the script, so pausing, reopening or switching the
-mode of a run changes nothing. Candidate verification containers
+mode of a run changes nothing. The egress host list is the exception: it
+applies at once. Candidate verification containers
 ([integration.md](integration.md)) also get it. Your own environment terminal
 does not.
 
@@ -313,3 +319,85 @@ aether workspace env import --plain .env
 > is an ordinary environment variable, so the agent can read it, and so can
 > anyone who can launch a run in the workspace or message one.
 > [security.md](security.md#workspace-secrets) lists where the value is kept.
+
+### Egress control
+
+Off by default. When an admin turns it on, the workspace's new runs reach only
+the hosts on its list, which starts as the hosts agents need (below):
+
+```sh
+aether workspace env egress on
+aether workspace env egress allow pypi.example.com '*.mirror.example.com'
+aether workspace env egress deny raw.githubusercontent.com
+aether workspace env egress list
+aether workspace env egress off
+```
+
+The dashboard has the same switch and list under **Environment**. A host is an
+exact name, or `*.` and a domain, which matches every subdomain but not the
+domain itself. On and off apply to runs launched afterwards; the host list
+applies at once to runs started with egress control on, and their open
+connections to a removed host close within 10 seconds. Agent runs are the only
+containers it limits: environment terminals, candidate verification and agent
+installs connect directly.
+
+Such a run starts on `aether-egress`, a Docker network with no route out. Its
+one way out is a proxy inside `aether-server` on that network's gateway, port
+3128, which the run finds in `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy`,
+`https_proxy`, `NO_PROXY` and `no_proxy` (`localhost,127.0.0.1,::1`), plus
+`NODE_USE_ENV_PROXY=1` for Node's `fetch`. These replace workspace variables of
+the same names, and the setup script gets them too. HTTPS passes through
+`CONNECT` untouched; plain HTTP, such as apt, is forwarded. A tool that ignores
+the proxy variables cannot connect, and the run's browser companion, which
+shares its network without a proxy, reaches only the run's own servers.
+
+The proxy resolves each name itself and never connects to a loopback, private,
+link-local, tailnet (`100.64.0.0/10`) or cloud metadata address, or to the
+server's own, so an allowed name cannot lead to the host or your LAN. A refused
+request gets a 403 that reads, in its body and, for `CONNECT`, its status line:
+
+```
+aether: egress to example.org denied; allow it with aether workspace env egress allow --workspace <workspace-id> example.org
+```
+
+The run's timeline gets the same line once per host, for up to 20 hosts.
+
+Until an admin edits it, the list is the hosts below. Agent telemetry, update
+checks and error reports are left out. pi, oh-my-pi and OpenCode need the host
+of whichever provider they sign in to. A
+[model gateway](harnesses.md#per-agent-setup) needs its host allowed, and one
+on a private or tailnet address is out of reach.
+
+| For | Hosts |
+| --- | --- |
+| Claude Code | `api.anthropic.com`, `claude.ai`, `claude.com`, `platform.claude.com` |
+| Codex | `api.openai.com`, `auth.openai.com`, `chatgpt.com` |
+| GitHub Copilot CLI | `api.githubcopilot.com`, `*.individual.githubcopilot.com`, `*.business.githubcopilot.com`, `*.enterprise.githubcopilot.com`, `copilot-proxy.githubusercontent.com` |
+| Gemini CLI, Antigravity CLI | `generativelanguage.googleapis.com`, `cloudcode-pa.googleapis.com`, `accounts.google.com`, `oauth2.googleapis.com`, `www.googleapis.com` |
+| Cursor CLI | `*.cursor.sh`, `cursor.com` |
+| OpenCode | `opencode.ai`, `models.dev` |
+| GitHub | `github.com`, `api.github.com`, `codeload.github.com`, `objects.githubusercontent.com`, `release-assets.githubusercontent.com`, `raw.githubusercontent.com` |
+| npm | `registry.npmjs.org` |
+| PyPI | `pypi.org`, `files.pythonhosted.org` |
+| Go modules and toolchains | `proxy.golang.org`, `sum.golang.org`, `storage.googleapis.com` |
+| crates.io | `crates.io`, `index.crates.io`, `static.crates.io` |
+| Docker Hub | `registry-1.docker.io`, `auth.docker.io`, `production.cloudflare.docker.com`, `production.cloudfront.docker.com`, `docker-images-prod.6aa30f8b08e16409b46e0173d6de2f56.r2.cloudflarestorage.com` |
+| Ubuntu packages | `archive.ubuntu.com`, `security.ubuntu.com`, `ports.ubuntu.com` |
+
+With [Docker inside runs](#docker-inside-runs), the run's `dockerd` has the
+proxy variables, so image pulls work. Containers and builds you start need
+them passed in:
+
+```sh
+docker run -e http_proxy -e https_proxy -e no_proxy ubuntu apt-get update
+docker build --build-arg http_proxy --build-arg https_proxy --build-arg no_proxy .
+```
+
+Without them they have no way out, and apt fails with `Temporary failure
+resolving 'archive.ubuntu.com'`.
+
+> [!WARNING]
+> An allowed host receives whatever the agent sends it. With `github.com`
+> allowed, the agent can push anything to any repository your gh token can
+> write. [security.md](security.md#limits) lists what else egress control does
+> not stop.

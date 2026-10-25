@@ -48,6 +48,7 @@ type EnvironmentPlan struct {
 	LoginMember domain.MemberID
 	// SecretEnv names the workspace secrets in Env.
 	SecretEnv []string
+	Egress    bool
 }
 
 // BuildEnvironmentPlan mounts the member's home. A run on another member's
@@ -122,6 +123,7 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 		SetupScript: setupScript,
 		SecretEnv:   slices.Sorted(maps.Keys(secrets)),
 		User:        user, Home: home, Path: env["PATH"],
+		Egress: purpose == EnvironmentPurposeRun && ws.Environment.Egress.On,
 	}
 	var nestings map[string]string
 	if s.cfg.Homes != nil {

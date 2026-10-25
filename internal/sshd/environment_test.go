@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/egress"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
@@ -147,6 +148,85 @@ func TestWorkspaceEnvironmentRefusals(t *testing.T) {
 	err := admin.Call(protocol.MethodWorkspaceEnvironmentGet, protocol.WorkspaceEnvironmentGetParams{WorkspaceID: "ws_missing"}, nil)
 	if !errors.As(err, &pe) || pe.Code != protocol.CodeNotFound {
 		t.Errorf("unknown workspace = %v, want CodeNotFound", err)
+	}
+}
+
+func TestWorkspaceEgress(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	collab, _ := addMember(t, e, "Cody", domain.RoleCollaborator, false)
+	admin := controlAs(t, e, e.signer)
+	sub, err := e.bus.Subscribe(ctx, events.SubscribeOptions{
+		Filter: events.Filter{Types: []events.Type{events.TypeTimeline}},
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Close() //nolint:errcheck
+	ws := string(e.ws.ID)
+	on := true
+	set := func(change protocol.WorkspaceEnvironmentSetParams) (protocol.WorkspaceEnvironmentResult, error) {
+		change.WorkspaceID = ws
+		var res protocol.WorkspaceEnvironmentResult
+		callErr := admin.Call(protocol.MethodWorkspaceEnvironmentSet, change, &res)
+		return res, callErr
+	}
+
+	var fresh protocol.WorkspaceEnvironmentResult
+	if err = admin.Call(protocol.MethodWorkspaceEnvironmentGet, protocol.WorkspaceEnvironmentGetParams{WorkspaceID: ws}, &fresh); err != nil {
+		t.Fatal(err)
+	}
+	defaults := slices.Sorted(slices.Values(egress.Defaults))
+	if fresh.Egress || !slices.Equal(fresh.EgressHosts, defaults) {
+		t.Fatalf("a new workspace: egress %t, hosts %q; want off and the defaults", fresh.Egress, fresh.EgressHosts)
+	}
+
+	wantDenied(t, controlAs(t, e, collab).Call(protocol.MethodWorkspaceEnvironmentSet,
+		protocol.WorkspaceEnvironmentSetParams{WorkspaceID: ws, Egress: &on}, nil), "collaborator turning egress control on")
+	res, err := set(protocol.WorkspaceEnvironmentSetParams{Egress: &on, EgressAllow: []string{"Mirror.Example.com."}})
+	if err != nil {
+		t.Fatalf("turn egress control on: %v", err)
+	}
+	if !res.Egress || len(res.EgressHosts) != len(defaults)+1 || !slices.IsSorted(res.EgressHosts) || !slices.Contains(res.EgressHosts, "mirror.example.com") {
+		t.Fatalf("after turning it on: egress %t, hosts %q; want on, the defaults and mirror.example.com, sorted", res.Egress, res.EgressHosts)
+	}
+	if note, want := waitTimelineNote(t, sub), "workspace environment: egress control on; egress allowed mirror.example.com"; note != want {
+		t.Fatalf("timeline note = %q, want %q", note, want)
+	}
+
+	off := false
+	if res, err = set(protocol.WorkspaceEnvironmentSetParams{Egress: &off, EgressDeny: []string{"mirror.example.com", "*.cursor.sh"}}); err != nil {
+		t.Fatalf("turn egress control off: %v", err)
+	}
+	if res.Egress || len(res.EgressHosts) != len(defaults)-1 || slices.Contains(res.EgressHosts, "*.cursor.sh") {
+		t.Fatalf("after turning it off: egress %t, hosts %q; want off and the list kept without the denied hosts", res.Egress, res.EgressHosts)
+	}
+	if res, err = set(protocol.WorkspaceEnvironmentSetParams{Egress: &on, EgressDeny: res.EgressHosts}); err != nil || len(res.EgressHosts) != 0 {
+		t.Fatalf("denying every host = %q, %v; want an empty list", res.EgressHosts, err)
+	}
+	var emptied json.RawMessage
+	if err = admin.Call(protocol.MethodWorkspaceEnvironmentGet, protocol.WorkspaceEnvironmentGetParams{WorkspaceID: ws}, &emptied); err != nil || !strings.Contains(string(emptied), `"egress_hosts":[]`) {
+		t.Fatalf("reading an emptied list = %s, %v; want \"egress_hosts\":[], not the defaults or null", emptied, err)
+	}
+
+	for name, change := range map[string]protocol.WorkspaceEnvironmentSetParams{
+		"URL":           {EgressAllow: []string{"https://example.com"}},
+		"absent host":   {EgressDeny: []string{"absent.example.com"}},
+		"inner star":    {EgressAllow: []string{"a.*.example.com"}},
+		"host and port": {EgressAllow: []string{"example.com:443"}},
+	} {
+		var pe *protocol.Error
+		if _, err = set(change); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
+			t.Errorf("%s = %v, want CodeInvalidParams", name, err)
+		}
+	}
+	stored, err := e.store.GetWorkspace(ctx, e.ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.Environment.Egress.On || !slices.Equal(stored.Environment.Egress.Hosts, res.EgressHosts) {
+		t.Fatalf("stored egress policy = %+v, want what the last change returned", stored.Environment.Egress)
 	}
 }
 
