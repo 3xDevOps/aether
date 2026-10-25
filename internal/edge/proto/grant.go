@@ -103,20 +103,54 @@ func SignGrant(edgeKey ed25519.PrivateKey, g Grant) (string, error) {
 	if err := g.validate(); err != nil {
 		return "", fmt.Errorf("edgeproto: sign grant: %w", err)
 	}
-	payload, err := json.Marshal(g)
+	return signPayload(edgeKey, grantContext, "grant", g)
+}
+
+// signPayload encodes v as JSON and signs it with the edge key under
+// context: base64url(payload) "." base64url(signature), where the
+// signature covers context || payload.
+func signPayload(edgeKey ed25519.PrivateKey, context, what string, v any) (string, error) {
+	payload, err := json.Marshal(v)
 	if err != nil {
-		return "", fmt.Errorf("edgeproto: encode grant: %w", err)
+		return "", fmt.Errorf("edgeproto: encode %s: %w", what, err)
 	}
-	sig := ed25519.Sign(edgeKey, grantMessage(payload))
+	sig := ed25519.Sign(edgeKey, append([]byte(context), payload...))
 	signed := base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(sig)
 	if len(signed) > MaxGrantSize {
-		return "", fmt.Errorf("edgeproto: signed grant is %d bytes, limit %d", len(signed), MaxGrantSize)
+		return "", fmt.Errorf("edgeproto: signed %s is %d bytes, limit %d", what, len(signed), MaxGrantSize)
 	}
 	return signed, nil
 }
 
-func grantMessage(payload []byte) []byte {
-	return append([]byte(grantContext), payload...)
+// openPayload checks signed against the edge key under context, then
+// decodes its payload into v. The signature is checked before the payload
+// is parsed.
+func openPayload(edgeKey ed25519.PublicKey, context, signed string, v any) error {
+	if len(edgeKey) != ed25519.PublicKeySize {
+		return fmt.Errorf("edgeproto: edge key is %d bytes, want %d", len(edgeKey), ed25519.PublicKeySize)
+	}
+	if len(signed) > MaxGrantSize {
+		return fmt.Errorf("%w: %d bytes, limit %d", ErrGrantMalformed, len(signed), MaxGrantSize)
+	}
+	encPayload, encSig, ok := strings.Cut(signed, ".")
+	if !ok {
+		return fmt.Errorf("%w: no signature", ErrGrantMalformed)
+	}
+	payload, err := base64.RawURLEncoding.Strict().DecodeString(encPayload)
+	if err != nil {
+		return fmt.Errorf("%w: payload: %v", ErrGrantMalformed, err)
+	}
+	sig, err := base64.RawURLEncoding.Strict().DecodeString(encSig)
+	if err != nil {
+		return fmt.Errorf("%w: signature: %v", ErrGrantMalformed, err)
+	}
+	if len(sig) != ed25519.SignatureSize || !ed25519.Verify(edgeKey, append([]byte(context), payload...), sig) {
+		return ErrGrantSignature
+	}
+	if err := json.Unmarshal(payload, v); err != nil {
+		return fmt.Errorf("%w: %v", ErrGrantMalformed, err)
+	}
+	return nil
 }
 
 // GrantScope is what the verifier expects a grant to be for. Issuer is the
@@ -132,30 +166,9 @@ type GrantScope struct {
 // validity window at now, allowing ClockSkew at both ends. The signature is
 // checked before the payload is parsed.
 func VerifyGrant(edgeKey ed25519.PublicKey, signed string, want GrantScope, now time.Time) (Grant, error) {
-	if len(edgeKey) != ed25519.PublicKeySize {
-		return Grant{}, fmt.Errorf("edgeproto: edge key is %d bytes, want %d", len(edgeKey), ed25519.PublicKeySize)
-	}
-	if len(signed) > MaxGrantSize {
-		return Grant{}, fmt.Errorf("%w: %d bytes, limit %d", ErrGrantMalformed, len(signed), MaxGrantSize)
-	}
-	encPayload, encSig, ok := strings.Cut(signed, ".")
-	if !ok {
-		return Grant{}, fmt.Errorf("%w: no signature", ErrGrantMalformed)
-	}
-	payload, err := base64.RawURLEncoding.Strict().DecodeString(encPayload)
-	if err != nil {
-		return Grant{}, fmt.Errorf("%w: payload: %v", ErrGrantMalformed, err)
-	}
-	sig, err := base64.RawURLEncoding.Strict().DecodeString(encSig)
-	if err != nil {
-		return Grant{}, fmt.Errorf("%w: signature: %v", ErrGrantMalformed, err)
-	}
-	if len(sig) != ed25519.SignatureSize || !ed25519.Verify(edgeKey, grantMessage(payload), sig) {
-		return Grant{}, ErrGrantSignature
-	}
 	var g Grant
-	if err := json.Unmarshal(payload, &g); err != nil {
-		return Grant{}, fmt.Errorf("%w: %v", ErrGrantMalformed, err)
+	if err := openPayload(edgeKey, grantContext, signed, &g); err != nil {
+		return Grant{}, err
 	}
 	if err := g.validate(); err != nil {
 		return Grant{}, fmt.Errorf("%w: %v", ErrGrantMalformed, err)

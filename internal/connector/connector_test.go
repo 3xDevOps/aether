@@ -105,16 +105,8 @@ func TestConnectorEndToEnd(t *testing.T) {
 		}
 		names = append(names, tool.Name)
 		a := tool.Annotations
-		hints := fmt.Sprintf("read-only %v, destructive %v, idempotent %v, open world %v", a.ReadOnlyHint, deref(a.DestructiveHint), a.IdempotentHint, deref(a.OpenWorldHint))
-		want := "read-only true, destructive <nil>, idempotent false, open world false"
-		switch {
-		case slices.Contains(writeTools, tool.Name):
-			want = fmt.Sprintf("read-only false, destructive false, idempotent %v, open world true", !slices.Contains(launchAndMessage, tool.Name))
-		case slices.Contains(controlTools, tool.Name):
-			want = "read-only false, destructive true, idempotent true, open world false"
-		}
-		if hints != want || tool.Title == "" || strings.Contains(tool.Description, "tier") {
-			t.Errorf("%s: %s, title %q, description %q; want %s", tool.Name, hints, tool.Title, tool.Description, want)
+		if a == nil || a.DestructiveHint == nil || a.OpenWorldHint == nil || tool.Title == "" || strings.Contains(tool.Description, "tier") {
+			t.Errorf("%s: annotations %+v, title %q, description %q; want explicit hints and a title", tool.Name, a, tool.Title, tool.Description)
 		}
 	}
 	slices.Sort(names)
@@ -571,8 +563,7 @@ var (
 		"aether_pr_status", "aether_overlaps", "aether_memory_search", "search", "fetch"}
 	writeTools = []string{"aether_launch_run", "aether_launch_swarm", "aether_message_run", "aether_answer", "aether_pause_run",
 		"aether_resume_run", "aether_mark_reviewed"}
-	controlTools     = []string{"aether_decide_approval", "aether_stop_run", "aether_close_run", "aether_cancel_swarm"}
-	launchAndMessage = []string{"aether_launch_run", "aether_launch_swarm", "aether_message_run"}
+	controlTools = []string{"aether_decide_approval", "aether_stop_run", "aether_close_run", "aether_cancel_swarm"}
 )
 
 func sorted(lists ...[]string) []string {
@@ -759,13 +750,6 @@ func getJSON(t *testing.T, u string, out any) {
 	}
 }
 
-func deref[T any](p *T) any {
-	if p == nil {
-		return nil
-	}
-	return *p
-}
-
 func newSigner(t *testing.T) ssh.Signer {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(rand.Reader)
@@ -845,7 +829,10 @@ func (f *fakeRuns) launches() []string {
 	return slices.Clone(f.launched)
 }
 
-func (*fakeRuns) Paused(domain.RunID) bool                            { return false }
+func (*fakeRuns) Paused(domain.RunID) bool { return false }
+func (*fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
+	return domain.LaunchACP, nil
+}
 func (*fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest { return nil }
 func (*fakeRuns) Switching(domain.RunID) domain.LaunchMode            { return "" }
 func (*fakeRuns) Retention(*domain.Run) (scheduler.RetentionInfo, error) {

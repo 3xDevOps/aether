@@ -24,9 +24,9 @@ type Capabilities struct {
 	// messages, as a new turn when idle and as a steer mid-turn. The
 	// scheduler drives Codex's app-server only.
 	Steer bool
-	// EnhancedDefault makes Enhanced the suggested mode once the agent's ACP
-	// server is installed, and a Background run then uses it. Claude stays on
-	// its terminal: its adapter runs on the Claude Agent SDK, whose terms
+	// EnhancedDefault makes setup offer the agent's ACP server, and a
+	// Background run then uses it. Claude's Background runs stay on its
+	// command line: its adapter runs on the Claude Agent SDK, whose terms
 	// favour API keys.
 	EnhancedDefault bool
 	// ModeSwitch: a running session moves between Standard and Enhanced. It

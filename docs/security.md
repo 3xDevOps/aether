@@ -37,7 +37,7 @@ credentials out of the report.
 | [Agent configuration and Files](#agent-configuration-and-files) | `aether config push` skips credential files and leaves out files with secrets. Files will not show a known credential file. | Files acts on your whole home. A credential under an unrecognized name is not locked. |
 | [SSH into a run and port forwarding](#ssh-into-a-run) | Same admission as a run shell. Forwards reach only the run's own loopback. | Sessions are not recorded. Attaching an editor lets the run's agent reach your computer through the editor. |
 | [Edge](#edge-remote-access) | SSH stays end to end. The server decides membership. By default a person approves every new device. | Under `edge-access account`, a taken-over GitHub account or edge admits a device. The edge sees connection metadata. |
-| [Connectors](#chatgpt-and-claude-connectors) | A connector acts as one member through the tools of the scopes they granted, with that member's permissions. | TLS ends at the edge, so a compromised edge sees connector traffic and tokens. |
+| [Connectors](#chatgpt-and-claude-connectors) | A connector acts as one member through the tools of the scopes they granted, with that member's permissions. | TLS ends at the edge, so a compromised edge sees connector traffic and tokens. Under `edge-access account` a GitHub sign-in at the edge authorizes one without a code. |
 | [Slack](#slack) | The bot connects out to Slack and acts as one linked member: it messages runs and answers requests once, with that member's permissions. | Whoever controls the linked Slack account acts as you on your runs. Slack keeps the messages it was sent. |
 | [Coordination](#coordination-between-runs) | Runs message only allowed peers in their workspace. A message grants no control. | Runs in one workspace share a repository and can influence each other through files. |
 | [Team memory](#team-memory) | Only members pin notes into briefs. Notes with secrets are refused. Agents cannot delete. | A note can be wrong or planted. It is data, never an instruction. |
@@ -545,6 +545,31 @@ there is no terminal, file, settings or git-writing tool.
   reach to pause pairing for everyone while they guess. Revoking that device,
   removing the member or tightening `edge-access` cuts off their connectors.
   Only clients on `chatgpt.com` and `claude.ai` can connect.
+- The universal URL `https://<relay host>/mcp` is one OAuth issuer for every
+  server on the edge, but each server still mints, stores and checks its own
+  codes and tokens. The edge only routes by their `<server id>.` prefix, so a
+  token from one server sent with another's prefix reaches that other server,
+  which holds no hash for it and refuses it. The edge-signed assertion on the
+  choose page names the GitHub account, the server, the client and its PKCE
+  challenge, lasts 5 minutes, and the server takes it once. The server
+  remembers taken assertions only in memory, so it refuses one issued before
+  it last started, and with it any consent form carrying one. Under
+  `edge-access account` it replaces the pairing code: the trust is the same as
+  a GitHub sign-in admitting a new device, so a taken-over GitHub account or a
+  compromised edge (or its key) can authorize a connector as that member.
+  Under `approved-devices` the server ignores it and requires the code. A
+  connector authorized this way is cut off when `edge-access` becomes
+  `approved-devices`, its GitHub account is unbound from the member
+  (`member.identity.remove`, or deleting the account at the edge), or the
+  member is removed. It has no device and is judged as an edge device no
+  person approved: a method that needs an approved device refuses it, and it
+  cannot mint a pairing code or a Slack link code that would outlive these
+  cut-offs.
+- Under `edge-access account` the consent page has no code, so an
+  authorization link someone started in their own ChatGPT or Claude, opened
+  by a member signed in at the edge, is one **Allow** away from connecting
+  that person's assistant as the member. The page says to allow only a
+  connection you started yourself just now.
 - Refresh tokens rotate on every use and lapse after 30 days unused. A rotated
   refresh token used again a minute or more later deletes the connector.
 - Results contain text agents and other people wrote: run titles, reasons,

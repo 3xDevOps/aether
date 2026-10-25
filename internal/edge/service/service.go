@@ -43,6 +43,9 @@ type Config struct {
 	GitHub *OAuthApp
 	// Clock is time.Now when nil.
 	Clock func() time.Time
+	// OpenAIChallenge is the token the relay origin serves at
+	// edgeproto.PathOpenAIChallenge; empty serves 404.
+	OpenAIChallenge string
 }
 
 // OAuthApp is a GitHub OAuth app. AuthURL, TokenURL and APIURL, the base
@@ -74,6 +77,15 @@ type ServerLink interface {
 	// sends each connected server among servers the deletions it is
 	// owed.
 	AccountDeleted(account edgeproto.Account, servers []string)
+	// Version is the protocol version negotiated with the claimed server
+	// serverID, 0 when it holds no control channel.
+	Version(serverID string) int
+	// ReadMCPBody reads a connector request's body, or answers the
+	// request and returns false.
+	ReadMCPBody(w http.ResponseWriter, r *http.Request) ([]byte, bool)
+	// ForwardUniversal forwards a universal connector request, whose body
+	// ReadMCPBody read, to serverID.
+	ForwardUniversal(w http.ResponseWriter, r *http.Request, serverID string, body []byte)
 }
 
 // Service is the edge's sign-in service.
@@ -93,7 +105,8 @@ type Service struct {
 	pages      *template.Template
 	client     *http.Client
 	// githubErrors counts calls to GitHub that failed.
-	githubErrors atomic.Uint64
+	githubErrors    atomic.Uint64
+	openAIChallenge string
 
 	signinLimit *limiter[netip.Prefix]
 	startLimit  *limiter[netip.Prefix]
@@ -109,6 +122,11 @@ type Service struct {
 	claimLimit        *limiter[netip.Prefix]
 	claimAccountLimit *limiter[edgeproto.Principal]
 	claimServerLimit  *limiter[string]
+	// chooseLimit limits the universal connector's choose page and its
+	// hand-off to a server per address; tokenLimit its token requests
+	// per address and server.
+	chooseLimit *limiter[netip.Prefix]
+	tokenLimit  *limiter[serverBlock]
 }
 
 // New opens the edge's store and signing key in cfg.DataDir, creating both
@@ -149,7 +167,11 @@ func New(cfg Config) (*Service, error) {
 		claimLimit:        newAddrLimiter(5, time.Minute, now),
 		claimAccountLimit: newLimiter[edgeproto.Principal](5, time.Minute, now),
 		claimServerLimit:  newLimiter[string](10, 30*time.Second, now),
+		chooseLimit:       newAddrLimiter(20, 3*time.Second, now),
+		tokenLimit:        newLimiter[serverBlock](60, time.Second, now),
+		openAIChallenge:   cfg.OpenAIChallenge,
 	}
+	s.tokenLimit.scale = func(k serverBlock) int { return edgeproto.RateLimitScale(k.block) }
 	if cfg.GitHub == nil {
 		return nil, errors.New("edge: no GitHub OAuth app is configured; set --github-client-id and its client secret")
 	}
@@ -226,6 +248,7 @@ func (s *Service) Handler() http.Handler {
 	pages.HandleFunc("POST /devices/revoke", s.signedIn(s.deviceRevoke))
 	pages.HandleFunc("GET /account", s.signedIn(s.accountPage))
 	pages.HandleFunc("POST /account/delete", s.signedIn(s.accountDelete))
+	pages.HandleFunc("GET "+edgeproto.PathMCPChoose, s.signedIn(s.mcpChoose))
 
 	api := http.NewServeMux()
 	api.HandleFunc("POST "+edgeproto.PathDeviceStart, s.api(s.apiDeviceStart))
@@ -246,6 +269,7 @@ func (s *Service) Handler() http.Handler {
 
 	relay := http.NewServeMux()
 	s.link.Register(relay)
+	s.registerUniversal(relay)
 	relay.HandleFunc("GET "+edgeproto.PathEdgeInfo, s.api(s.apiEdgeInfo))
 
 	routes := func(mux *http.ServeMux, r *http.Request) bool {

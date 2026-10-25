@@ -89,9 +89,9 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 	check(own, map[string]state{
 		"codex": {true, true, "acp", true},
 		"omp":   {true, false, "acp", true},
-		// Claude stays on its terminal by default, and its adapter is the
-		// owner's, not the grantee's. OpenCode prefers enhanced before it
-		// is installed.
+		// Claude's adapter is the owner's, not the grantee's. OpenCode
+		// prefers enhanced before it is installed, and defaults to it only
+		// after.
 		"claude":   {false, false, "tui", false},
 		"opencode": {false, false, "tui", true},
 	})
@@ -111,8 +111,9 @@ func TestAgentListReportsEnhancedModeAndLogin(t *testing.T) {
 		// on the launch's PATH.
 		"claude": {false, true, "tui", false},
 		// The grantee has no pi, so the launch borrows the owner's pi and
-		// its adapter together.
-		"pi": {true, false, "tui", false},
+		// its adapter together, and an installed adapter is the default
+		// whether or not the agent prefers it.
+		"pi": {true, false, "acp", false},
 		// The grantee's own codex and adapter run, but the login is the
 		// owner's, who has none.
 		"codex": {true, false, "acp", true},

@@ -189,7 +189,7 @@ func TestGrantContentRules(t *testing.T) {
 			t.Fatal(err)
 		}
 		raw := base64.RawURLEncoding.EncodeToString(payload) + "." +
-			base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, grantMessage(payload)))
+			base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, append([]byte(grantContext), payload...)))
 		_, err = VerifyGrant(pub, raw, scopeOf(g), now)
 		if !errors.Is(err, ErrGrantMalformed) {
 			t.Errorf("%s: VerifyGrant of edge-signed invalid grant = %v", tt.name, err)

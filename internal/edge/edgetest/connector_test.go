@@ -79,7 +79,10 @@ func (l launcher) Launch(ctx context.Context, ws domain.WorkspaceID, member, acc
 	return run, l.db.CreateRun(ctx, run)
 }
 
-func (launcher) Paused(domain.RunID) bool                            { return false }
+func (launcher) Paused(domain.RunID) bool { return false }
+func (launcher) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
+	return domain.LaunchACP, nil
+}
 func (launcher) PendingInputs(domain.RunID) []domain.RunInputRequest { return nil }
 func (launcher) Switching(domain.RunID) domain.LaunchMode            { return "" }
 func (launcher) Retention(*domain.Run) (scheduler.RetentionInfo, error) {
@@ -123,7 +126,7 @@ func (c *connectorClient) consent(ctx context.Context, authURL, code string, sco
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusForbidden || resp.Header.Get("Content-Security-Policy") != connectorCSP ||
-		!strings.Contains(page, "That code is wrong, expired or already used. Run aether mcp for a new one and paste it here.") {
+		!strings.Contains(page, "That code is wrong, expired or already used. Get a new one from Settings → ChatGPT and Claude in the Aether app, or aether mcp, and paste it here.") {
 		return nil, fmt.Errorf("wrong code: %s %v\n%s", resp.Status, resp.Header, page)
 	}
 	if resp, page, err = send(http.MethodPost, url.Values{"request": {m[1]}, "code": {code}, "scope": scopes}); err != nil {
@@ -174,8 +177,8 @@ type tokenAnswer struct {
 	Description  string `json:"error_description"`
 }
 
-// TestConnectorThroughTheEdge adds a server as a custom connector the way
-// ChatGPT does, over HTTP with go-sdk's MCP and OAuth client, through a
+// TestConnectorThroughTheEdge adds a server as a custom connector at its
+// own URL, <edge>/mcp/<server id>, the way ChatGPT does, over HTTP with go-sdk's MCP and OAuth client, through a
 // real edge to a server serving the real connector handler, under both
 // policies. A tokenless call gets a 401 naming the metadata, which the
 // edge relays; the client registers by a metadata document served over
@@ -228,8 +231,8 @@ func TestConnectorThroughTheEdge(t *testing.T) {
 
 			bctl := h.control(bo, s)
 			code := call[protocol.ConnectorCodeResult](t, bctl, protocol.MethodConnectorCode, struct{}{})
-			if code.URL != base {
-				t.Fatalf("connector.code url = %s, want %s", code.URL, base)
+			if want := h.relayURL + edgeproto.PathUniversalMCP; code.URL != want {
+				t.Fatalf("connector.code url = %s, want the universal %s", code.URL, want)
 			}
 			var token *oauth2.Token
 			handler, err := auth.NewAuthorizationCodeHandler(&auth.AuthorizationCodeHandlerConfig{

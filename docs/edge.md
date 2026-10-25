@@ -125,7 +125,8 @@ shows `ownership report refused: <reason>`.
 ### Checking the connection
 
 `sudo aether-server edge status` prints the edge, policy, server id, the
-[connector](#mcp-connectors) URL, the pinned edge key, the owner and the
+[connector](#mcp-connectors) URL (the universal one while the server is connected
+at edge protocol 3), the pinned edge key, the owner and the
 connection. `connection` reads `connected since <time>`, `stale: ...` when the
 server process is gone or the edge has not answered for 40 seconds, or `never
 connected: ...` when the service has not started since `edge-url` was set. Then
@@ -427,26 +428,55 @@ reaches a dashboard over a tailnet
 ### MCP connectors
 
 A server's MCP connector lets ChatGPT or Claude list, launch, message and stop
-runs as a member ([connectors.md](connectors.md)). The edge forwards requests at
-`https://<relay host>/mcp/<server id>`, which `aether mcp` and `sudo
-aether-server edge status` print, and the server authenticates each one.
+runs as a member ([connectors.md](connectors.md)). The edge forwards it at two
+URLs, and the server authenticates every request:
+
+- `https://<relay host>/mcp`, the universal URL every server on the edge
+  shares. `aether mcp` and `sudo aether-server edge status` print it once the
+  server and the edge both speak edge protocol 3.
+- `https://<relay host>/mcp/<server id>`, the server's own URL. Connectors
+  added there keep working.
+
+On the universal URL, each server prefixes the authorization codes and tokens
+it mints with `<server id>.`. The edge forwards `/mcp` by the bearer token's
+prefix and `/mcp/token` by the code's or refresh token's. It mints and stores
+no token, and serves the OAuth metadata itself: issuer, resource and
+authorization server are all `https://<relay host>/mcp`. `/mcp/authorize` sends
+the browser to `https://<sign-in host>/connectors/choose`. That page lists the
+signed-in account's servers that can take the connection, skips the list when
+only one can, and sends the browser to that server's consent page. With it goes
+an assertion that the edge signs with the key servers pin: the GitHub account,
+the server, the client and its PKCE challenge, valid 5 minutes and used once.
+Under `account` the assertion replaces the pairing code
+([connectors.md](connectors.md#the-universal-url)). Under `approved-devices`
+the server ignores it and asks for the code.
 
 TLS ends at the edge, because ChatGPT and Claude connect only to a host with a
 public certificate. A compromised edge, while it runs, can read and alter every
 connector request and answer, including tokens and the pairing code typed on the
-consent page, and act as that connector's member under either policy.
+consent page, and act as that connector's member under either policy. Under
+`account`, its key can also sign an assertion for any member, as it can sign a
+grant.
 
 The edge answers `404 unknown server`, `503 server is not connected to the edge`,
 `409 server is connected to the edge but not claimed` (retry), `501 server <name>
 (<id>) runs aether-server <version>, which has no MCP endpoint; upgrade it: sudo
 aether-server update`, `403 this server does not serve MCP connectors`, `503 this
 server already has 8 MCP connector requests in progress through the edge; retry
-shortly` and `413 request body is over the edge's limit of 1048576 bytes`.
+shortly` and `413 request body is over the edge's limit of 1048576 bytes`. On the
+universal URL it also answers `401` with `WWW-Authenticate` naming the metadata
+for a request without a token or whose token names no server, `400
+invalid_grant` for a code or refresh token that names none, and `501 server
+<name> (<id>) runs aether-server <version>, which does not serve the connector
+at https://<relay host>/mcp; upgrade it ...` for a server at protocol 2.
 
 ### Limits
 
 - 48 concurrent SSH connections and 8 MCP connector requests per server, and 16
   connections per device.
+- Universal connector URL: 20 server choices and consent pages at once, then 1
+  every 3 seconds per address; 60 token requests at once, then 1 a second per
+  address and server.
 - 3 unclaimed servers per client address, each dropped after 30 minutes. Claim
   connections: 5 at once, then 1 a minute per address and per account.
 - 1000 members and open invitations per server.
@@ -681,6 +711,7 @@ and names the problem, such as `no GitHub OAuth app is configured; set
 | `--egress-budget` | `AETHER_EDGE_EGRESS_BUDGET` | `0`: bytes per UTC month, a plain integer. 0 means none |
 | `--github-client-id` | `AETHER_EDGE_GITHUB_CLIENT_ID` | Required |
 | `--github-client-secret-file` | `AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE` | None; the unit sets it |
+| `--openai-challenge` | `AETHER_EDGE_OPENAI_CHALLENGE` | None. OpenAI's domain verification token, served as `text/plain` at `https://<relay host>/.well-known/openai-apps-challenge`; unset answers 404 |
 | `--dev-listen` | `AETHER_EDGE_DEV_LISTEN` | None. Plain HTTP on a loopback address for local testing |
 | none | `AETHER_EDGE_GITHUB_CLIENT_SECRET` | None. The secret itself, instead of a file; setting both is refused |
 

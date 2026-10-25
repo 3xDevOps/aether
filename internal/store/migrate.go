@@ -1972,6 +1972,13 @@ CREATE TABLE slack_messages (
 	UNIQUE (channel_id, ts)
 );
 `,
+	// v83: the edge account whose sign-in authorized a connector on the
+	// universal connector URL instead of a pairing code, '' for one
+	// authorized with a code.
+	`
+ALTER TABLE connectors ADD COLUMN provider TEXT NOT NULL DEFAULT '';
+ALTER TABLE connectors ADD COLUMN subject TEXT NOT NULL DEFAULT '';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

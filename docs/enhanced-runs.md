@@ -43,11 +43,15 @@ act without asking by default.
 
 The dashboard remembers the mode you last chose for each agent, in **Set up**,
 in **New run** or in the **Default mode** select on the **Agents** page, and
-**New run** starts on it. For an agent with no remembered mode, **New run**
-starts on Enhanced when the agent's Enhanced mode is installed, and on Standard
-otherwise. **Set up** suggests Enhanced for Codex, oh-my-pi, OpenCode, Copilot,
-Gemini and Cursor, and Standard for the rest. It suggests Standard for Claude
-Code because its adapter runs on the Claude Agent SDK.
+**New run** starts on it. For an agent with no remembered mode, **New run** and
+**New swarm** start on Enhanced when the agent's Enhanced mode is installed, and on Standard
+otherwise; `aether run`, `aether swarm create` and the connector do so
+whenever no mode is named. **New run** lists Enhanced first and marks it
+**Recommended**. Before an agent's Enhanced mode is installed, **Set up**
+suggests Enhanced for Codex, oh-my-pi, OpenCode, Copilot, Gemini and Cursor,
+and Standard for the rest; it suggests Standard for Claude Code because its
+adapter runs on the Claude Agent SDK. Once it is installed, Set up starts on
+Enhanced.
 
 ## Launch an Enhanced run
 

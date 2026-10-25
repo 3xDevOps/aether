@@ -581,6 +581,7 @@ describe('command palette', () => {
       expect(api.runLaunch).toHaveBeenCalledWith({
         workspace_id: workspace.id,
         harness: 'bob-agent',
+        mode: 'tui',
         account_member_id: bob.id,
       }),
     )

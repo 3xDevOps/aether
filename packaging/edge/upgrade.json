@@ -2,12 +2,12 @@
   "store_schema": 1,
   "store_compat_floor": 1,
   "protocol": {
-    "version": 2,
+    "version": 3,
     "min_version": 1
   },
   "files": {
     "images/edge/Dockerfile": "14d7c502c2cffdfcf5ecb7d301a26e36b0b23eeb37ee03a07e66632dd496da76",
-    "packaging/edge/aether-edge.env.example": "e26f9d56b36b1c94c9b52c816f8448172461b23fcaf7de621d81477c4ac12980",
+    "packaging/edge/aether-edge.env.example": "ad850e814cd9bff89db9ab79344ebd4473a7d84cd3eb05595925d4c8d713a76a",
     "packaging/systemd/aether-edge.service": "b52874c3db752d911ca613deff45200a28165c1b86331fe00dee457605c8e20e"
   },
   "min_upgrade_from": "v0.5.2-alpha.4",

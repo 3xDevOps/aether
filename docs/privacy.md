@@ -224,9 +224,15 @@ or removing the bot does not delete messages already sent. The tokens stay in
 An **edge** is the relay and sign-in service that lets a computer running
 `aether` reach a server over SSH without Tailscale ([edge.md](edge.md)). The
 Android app uses it only in Edge mode. Whoever runs an edge, the publisher for
-`auth.onaether.dev` and `edge.onaether.dev`, holds the following. The edge cannot read terminal,
-agent, file or dashboard content: all of it travels inside SSH, which is
-encrypted end to end between your computer and your server.
+`auth.onaether.dev` and `edge.onaether.dev`, holds the following. The edge
+cannot read terminal, agent, file or dashboard content you reach over SSH,
+which is encrypted end to end between your computer and your server. An MCP
+connector's traffic is different: TLS ends at the edge, which decrypts each
+request, answer and token in memory to relay it ([edge.md](edge.md#mcp-connectors))
+and keeps none of them. Its journal logs requests it refuses before relaying,
+with the path and, from outside its trusted proxies, the client address, and
+internal relay failures; the nginx in front of it logs every request's client
+address, path, status and user agent.
 
 | What | Why | Kept |
 | --- | --- | --- |
