@@ -157,3 +157,18 @@ func TestStateReportThatDoesNotTakeEffectIsAnError(t *testing.T) {
 		t.Fatalf("timeline reports = %+v, want the retried report", got)
 	}
 }
+
+// A report refused outright does not keep its key: the agent may follow the
+// refusal's advice under the same key.
+func TestRefusedStateReportReleasesItsKey(t *testing.T) {
+	outcomes := &recordingOutcomes{}
+	h, _ := newStateReportHarness(t, outcomes)
+	run := h.run(0)
+
+	outcomes.fail(ErrCannotAsk)
+	if rpcErr := stateReport(h, run, protocol.CoordOutcomeNeedsInput, "", "which region?", "k"); rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams {
+		t.Fatalf("needs-input = %+v, want invalid params", rpcErr)
+	}
+	outcomes.fail(nil)
+	report(t, h, run, protocol.CoordOutcomeBlocked, "need the region", "k")
+}

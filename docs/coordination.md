@@ -1579,8 +1579,9 @@ reports and their evidence remain in history.
 report that used it, whatever the outcome. Reusing it retries that report:
 the same outcome, `--for` and summary return the same receipt, and anything
 else fails with `CodeConflict` (`-32003`) (`idempotency_key "<key>" was used
-with different report inputs; use a new key for a new report`). A report that
-cannot take effect is refused with an error, never accepted and dropped. Every
+with different report inputs; use a new key for a new report`). A `waiting`
+or `needs-input` report that cannot take effect is refused with an error,
+never accepted and dropped, and a refused one does not keep its key. Every
 accepted report, `waiting` and `needs-input` included, is a `report` entry in
 `aether timeline <workspace>` with its outcome, `waiting_for` and summary.
 
@@ -1650,7 +1651,8 @@ What a report does depends on the run:
   becomes `waiting` with `no update for <duration>`. Every role may report
   it, and it may repeat; runs it starts report their own waits, and
   subagents never report. Like needs-input it is nonterminal, takes no
-  `--evidence-ref`, and is refused with the same errors. It belongs to the
+  `--evidence-ref`, and is refused with the same errors for a run that
+  already finished or is ending and for a superseded key. It belongs to the
   turn that reported it: a turn that fails, is cancelled or interrupted, or
   stops short (for example on `max_tokens`) drops it, and the run shows that
   turn's own reason. `--for` with another outcome, or an unknown `--for`

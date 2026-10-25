@@ -114,8 +114,10 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 		showsIdle = !entry.idleShown
 	case report.State == agentstatus.Working && entry.idleShown && !held:
 		clearsIdle = true
-	case report.State == agentstatus.Idle && !turnEnd(execution) && entry.waits() && !entry.idleShown:
-		// The wait belonged to the turn that just failed or was cut off.
+	case report.State == agentstatus.Idle && !turnEnd(execution) && execution.Reason != appServerAskingReason &&
+		entry.waits() && !entry.idleShown:
+		// The wait belonged to the turn that just failed or was cut off. A
+		// Codex turn waiting on an approval has not ended.
 		clearsIdle = true
 	}
 	// The question already shows; the agent's own idle repeats it.

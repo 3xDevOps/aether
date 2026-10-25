@@ -78,3 +78,12 @@ func (d *DB) GetCoordStateReport(ctx context.Context, run domain.RunID, key stri
 	report.CreatedAt = decodeTime(createdAt)
 	return &report, nil
 }
+
+// DeleteCoordStateReport releases the key of a report that was refused.
+func (d *DB) DeleteCoordStateReport(ctx context.Context, run domain.RunID, key string) error {
+	if _, err := d.db.ExecContext(ctx,
+		`DELETE FROM coord_state_reports WHERE run_id = ? AND idempotency_key = ?`, run, key); err != nil {
+		return fmt.Errorf("store: delete coord state report %s: %w", key, err)
+	}
+	return nil
+}

@@ -225,6 +225,7 @@ type MessageStore interface {
 	MarkCoordReportPublished(ctx context.Context, id, eventID string) error
 	RecordCoordStateReport(ctx context.Context, report *CoordStateReport) (bool, error)
 	GetCoordStateReport(ctx context.Context, run domain.RunID, key string) (*CoordStateReport, error)
+	DeleteCoordStateReport(ctx context.Context, run domain.RunID, key string) error
 }
 
 // CoordTerminalReportStore frees a run's terminal report slot and reads a

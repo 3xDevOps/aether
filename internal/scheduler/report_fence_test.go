@@ -36,6 +36,13 @@ func TestDirectReportFencesAreErrors(t *testing.T) {
 	}
 
 	e.sched.mu.Lock()
+	e.sched.runs[run.ID].relaunchedAt = at.Add(time.Millisecond)
+	e.sched.mu.Unlock()
+	if err := e.sched.ReportWaiting(ctx, run.ID, "waiting-1", "", "on 3 workers", at); !errors.Is(err, coord.ErrReportSuperseded) {
+		t.Fatalf("retried ReportWaiting after a relaunch = %v, want %v", err, coord.ErrReportSuperseded)
+	}
+
+	e.sched.mu.Lock()
 	e.sched.runs[run.ID].killRequested = true
 	e.sched.mu.Unlock()
 	if err := e.sched.ReportWaiting(ctx, run.ID, "waiting-2", "", "on 2 workers", at.Add(time.Second)); !errors.Is(err, coord.ErrRunFinished) {
@@ -70,6 +77,11 @@ func TestAbnormalTurnEndDropsAPendingWait(t *testing.T) {
 	if err := e.sched.ReportWaiting(ctx, run.ID, "waiting-1", "", "on 3 workers", time.Now()); err != nil {
 		t.Fatalf("ReportWaiting: %v", err)
 	}
+	report(agentstatus.Report{State: agentstatus.Idle, Reason: appServerAskingReason})
+	if sc, err := e.sched.readSidecar(run.ID); err != nil || sc.IdleReason != waitingReasonPrefix+"on 3 workers" {
+		t.Fatalf("sidecar while the turn asks = %+v, %v, want the wait pending", sc, err)
+	}
+	report(agentstatus.Report{State: agentstatus.Working})
 	report(agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonFailed})
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	if r, err := e.db.GetRun(ctx, run.ID); err != nil || r.Reason != agentstatus.ReasonFailed {

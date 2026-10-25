@@ -295,11 +295,13 @@ func outboxFenced(run domain.RunID, id string, err error) error {
 // carries the same inputs.
 func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervised, id, reason string, at time.Time) error {
 	switch {
+	case at.Before(entry.relaunchedAt):
+		return coord.ErrReportSuperseded
 	case entry.idleReportID == id:
 		return nil
 	case entry.killRequested || entry.finalizing || entry.destroyPending:
 		return coord.ErrRunFinished
-	case !at.After(entry.idleReportAt) || at.Before(entry.relaunchedAt):
+	case !at.After(entry.idleReportAt):
 		return coord.ErrReportSuperseded
 	}
 	old := entry.sidecar()

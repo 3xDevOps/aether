@@ -80,14 +80,17 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
 	receipt := &store.CoordStateReport{RunID: run, IdempotencyKey: p.IdempotencyKey, Outcome: p.Outcome, WaitingFor: p.WaitingFor, Summary: summary}
-	if _, err := s.cfg.Mail.RecordCoordStateReport(ctx, receipt); errors.Is(err, store.ErrCoordReportIdempotencyConflict) {
+	created, err := s.cfg.Mail.RecordCoordStateReport(ctx, receipt)
+	if errors.Is(err, store.ErrCoordReportIdempotencyConflict) {
 		return protocol.CoordReportResult{}, reusedKey(p.IdempotencyKey)
 	} else if err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
+	// A client that disconnects after the hand-off must not cancel the
+	// timeline entry of a report that took effect.
+	ctx = context.WithoutCancel(ctx)
 	id := fmt.Sprintf("%s:%s:%s", p.Outcome, run, p.IdempotencyKey)
 	nextAction := "end your turn; the next prompt or mail resumes you"
-	var err error
 	if p.Outcome == protocol.CoordOutcomeNeedsInput {
 		nextAction = "answer the agent's question"
 		err = s.cfg.Outcomes.ReportNeedsInput(ctx, run, id, reportText(summary), receipt.CreatedAt)
@@ -98,6 +101,11 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 		slog.Info("coord: state report did not take effect", "run", run, "report", id, "error", err)
 		switch {
 		case errors.Is(err, ErrCannotAsk), errors.Is(err, ErrRunFinished):
+			if created {
+				if releaseErr := s.cfg.Mail.DeleteCoordStateReport(ctx, run, p.IdempotencyKey); releaseErr != nil {
+					return protocol.CoordReportResult{}, internalError(method, errors.Join(err, releaseErr))
+				}
+			}
 			return protocol.CoordReportResult{}, invalidParams(method, err.Error())
 		case errors.Is(err, ErrReportSuperseded):
 			return protocol.CoordReportResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: method + ": " + err.Error()}
