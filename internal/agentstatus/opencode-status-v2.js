@@ -20,7 +20,6 @@ export default {
     let child
     let warned = false
     let executionKnown = false
-    let turnSession
     let idleReason = 'agent idle'
     const warn = error => {
       if (warned || lifetime.signal.aborted) return
@@ -40,7 +39,7 @@ export default {
       const working = busy.size > 0
       const body = JSON.stringify({
         ...(executionKnown ? { state: working ? 'working' : 'waiting' } : {}),
-        ...(executionKnown && !working ? { reason: idleReason } : {}),
+        ...(executionKnown && !working ? { reason: idleReason ?? 'agent idle' } : {}),
         input_updates: [{ operation: 'replace', requests: [...pending.values()] }],
       })
       // Concurrent execution starts still refresh liveness when this body is unchanged.
@@ -152,9 +151,7 @@ export default {
           case 'session.execution.started':
             if (!data.sessionID) break
             executionKnown = true
-            // The session that starts from idle is the turn's; subagent
-            // sessions it spawns do not decide how the turn ended.
-            if (busy.size === 0) [turnSession, idleReason] = [data.sessionID, 'agent idle']
+            if (busy.size === 0) idleReason = undefined
             busy.add(data.sessionID)
             report()
             break
@@ -165,7 +162,9 @@ export default {
             executionKnown = true
             busy.delete(data.sessionID)
             // The scheduler reads a turn's end from its reason (agentstatus.go).
-            if (data.sessionID === turnSession) {
+            // Events do not say which session is the turn's own, so any session
+            // that succeeded makes the turn's end a clean one.
+            if (idleReason !== 'agent idle') {
               idleReason = { 'session.execution.failed': 'agent failed', 'session.execution.interrupted': 'turn cancelled' }[event.type] ?? 'agent idle'
             }
             reconcilePermissions(data.sessionID)
