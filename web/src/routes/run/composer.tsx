@@ -78,6 +78,7 @@ function ClosedRun({ run, reason, dock }: { run: RunRecord; reason: string; dock
   }
   return (
     <Closed
+      runID={run.id}
       reason={reason}
       dock={dock}
       failure={failure}

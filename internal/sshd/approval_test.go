@@ -111,7 +111,7 @@ func TestPresenceMethodsUnavailableWithoutService(t *testing.T) {
 // event attributed to them; a viewer cannot type into the run.
 func TestPresenceTypingPublishesEphemeralEvent(t *testing.T) {
 	t.Parallel()
-	e := inboxEnv(t)
+	e := presenceEnv(t)
 	ctx := context.Background()
 	bobSigner, bob := addMember(t, e, "Bob", domain.RoleCollaborator, false)
 	viewerSigner, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
