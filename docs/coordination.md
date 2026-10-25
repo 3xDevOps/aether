@@ -234,9 +234,12 @@ run's container and coordination data are retained.
 
 The batch is frozen until acknowledged. New arrivals can increase `status`
 unread counts or native observer IDs without changing the current inbox batch.
-Handle that batch, then pass its exact token to `inbox --ack`; the returned
-next batch includes later arrivals. Re-reading without `--ack`, including with
-`--wait`, does not advance past an outstanding batch.
+`aether-internal inbox` saves each batch's token in
+`$TMPDIR/aether-inbox-<run>-ack` after printing the batch and sends it on the
+next read, so reading again acknowledges the batch and returns the next one,
+as `aether_inbox` does. `inbox --ack <token>` and `ack <token>` acknowledge a
+batch explicitly. A read that fails before printing saves no token, so its
+batch is delivered again.
 
 `coord.send`, `coord.ask`, `coord.reply`, and `coord.report` are mutations and
 require an explicit idempotency key on the wire. Repeating a mutation with the
@@ -380,8 +383,8 @@ Accepted messages, questions, and replies retain their originating run (see
 [Seeing agent messages](#seeing-agent-messages)). **Durable acceptance**, **an admitted wake**, and
 **explicit acknowledgement** are different events: neither a send receipt,
 hook execution, nor native API acceptance proves model receipt or processing.
-Only the agent's later `inbox --ack` acknowledges the returned batch; there is
-no terminal-delivery stamp.
+Only the agent's next inbox read or `ack` acknowledges the returned batch;
+there is no terminal-delivery stamp.
 
 For a native-trigger investigation, retain separate evidence of the send
 receipt/message ID, helper wake admission, native follow-up acceptance, the
@@ -992,11 +995,12 @@ and integrator. Messaging grants no control over the peer.
 /usr/local/bin/aether-internal ack ack-example-1
 ```
 
-After handling the batch, pass its `ack_token` to `ack`. `ack` refuses with
-exit 3 and names the current batch's token when the token is stale or
+Handle a batch before reading again: the next `inbox` acknowledges it. To
+acknowledge it without reading on, pass its `ack_token` to `ack`. `ack` refuses
+with exit 3 and names the current batch's token when the token is stale or
 mistyped, and returns `waiting`, the number of messages queued for the next
-read. `inbox --ack <token> --wait 30` acknowledges and reads the next batch in
-one call. `--wait` asks the server to wait once for up to 30 seconds
+read. `inbox --ack <token>` acknowledges that token instead of the saved one.
+`--wait` asks the server to wait once for up to 30 seconds
 when no message is ready; it is not a client polling loop. If the process or
 connection ends before the result is consumed, do not acknowledge the token
 and read again.

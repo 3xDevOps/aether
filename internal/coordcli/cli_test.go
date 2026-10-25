@@ -389,6 +389,7 @@ func TestCLIIntegrationErrorCodesMapToExitStatuses(t *testing.T) {
 }
 
 func TestCLIMutationsBodiesWaitAckAndReceipts(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	const ack = "ack-1"
 	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
 		switch req.Method {
@@ -506,6 +507,7 @@ func TestCLIDeniedExitAndGeneratedIdempotency(t *testing.T) {
 }
 
 func TestCLIInboxMaximumWaitReturnsEmptyResult(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
 	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
 		if req.Method != protocol.MethodCoordInbox {
 			return protocol.Response{Error: &protocol.Error{Code: protocol.CodeMethodNotFound}}

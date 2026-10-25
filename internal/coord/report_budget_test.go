@@ -37,6 +37,7 @@ func TestLifecycleReportsPreserveForegroundAndHookBudgets(t *testing.T) {
 		t.Fatal("lifecycle flood escaped its per-run budget")
 	}
 	socket := filepath.Join(dir, coordtransport.SocketName)
+	t.Setenv("TMPDIR", t.TempDir())
 	if code, err := runContextHook(t, socket); err != nil || code != coordcli.ExitOK {
 		t.Fatalf("context hook after lifecycle burst: exit %d, error %v", code, err)
 	}
