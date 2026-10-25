@@ -1165,8 +1165,9 @@ swarm:
 `question ask` and `start` require an explicit `--idempotency-key`; unlike
 `send` and `ask --to`, the CLI never generates one for them. `--body-file`
 accepts a path or `-` for standard input, and the body is capped at 4 KiB.
-`mission question ask` asks the accountable human, who answers on the swarm
-page or with `aether swarm answer`; `ask --to <run-id>` asks a peer agent run,
+`mission question ask` asks the accountable human, who is
+[notified](networking.md#notifications) and answers on the swarm page or with
+`aether swarm answer`; `ask --to <run-id>` asks a peer agent run,
 which answers with `reply`. They are separate mailboxes. Questions are allowed
 only in `planning`.
 

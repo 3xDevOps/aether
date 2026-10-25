@@ -18,6 +18,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -37,6 +38,10 @@ func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 }
 
 func (f *fakeRuns) Paused(domain.RunID) bool { return f.paused.Load() }
+
+func noSwarm(context.Context, *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
+	return nil, "", nil
+}
 
 func (f *fakeRuns) set(run domain.RunID, inputs ...domain.RunInputRequest) {
 	f.mu.Lock()
@@ -110,7 +115,7 @@ func (h *harness) start() {
 	insecure := &http.Client{Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test servers only
 	}}
-	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
+	svc, err := New(Config{Store: h.db, Bus: h.bus, Runs: h.runs, Swarm: noSwarm, KeyPath: h.keyPath, Client: insecure, Quiet: testQuiet})
 	if err != nil {
 		h.t.Fatalf("New: %v", err)
 	}
@@ -322,6 +327,27 @@ func TestASinkHearsNeedsWithoutDevicesUntilItTakesThem(t *testing.T) {
 
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
 	heard.expect(t, fmt.Sprintf("%s needs %q, answered by %q", run.ID, "Blocked: need the staging API key", ""))
+}
+
+// A need back after a request was answered is shown in the sink again,
+// since the sink showed the request last.
+func TestASinkShowsANeedAgainAfterARequestIsAnswered(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	heard := &sink{heard: make(chan string, 64)}
+	h.sink = heard
+	h.start()
+	run := h.run(h.ada, "Upgrade the linter", domain.LaunchACP)
+	blocked := fmt.Sprintf("%s needs %q, answered by %q", run.ID, "Blocked: need the staging API key", "")
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
+	heard.expect(t, blocked)
+	h.runs.set(run.ID, domain.RunInputRequest{ID: "p1", SessionID: "s1", Kind: "permission"})
+	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	heard.expect(t, fmt.Sprintf("%s needs %q, answered by %q", run.ID, "Permission requested", "p1"))
+	h.runs.set(run.ID)
+	h.publish(run, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
+	heard.expect(t, blocked)
 }
 
 func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
@@ -771,7 +797,7 @@ func TestAFailedReadDoesNotClearTheSink(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	reads := &failingReads{DB: h.db}
-	svc, err := New(Config{Store: reads, Bus: h.bus, Runs: h.runs, KeyPath: h.keyPath, Quiet: testQuiet})
+	svc, err := New(Config{Store: reads, Bus: h.bus, Runs: h.runs, Swarm: noSwarm, KeyPath: h.keyPath, Quiet: testQuiet})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

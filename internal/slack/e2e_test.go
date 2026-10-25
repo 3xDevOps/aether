@@ -122,7 +122,7 @@ func TestARunNeedIsAnsweredFromSlack(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(func() { _ = h.svc.Close() })
-	notices, err := push.New(push.Config{Store: h.db, Bus: bus, Runs: runs, KeyPath: filepath.Join(t.TempDir(), "vapid_key.pem"),
+	notices, err := push.New(push.Config{Store: h.db, Bus: bus, Runs: runs, Swarm: srv.SwarmAttention, KeyPath: filepath.Join(t.TempDir(), "vapid_key.pem"),
 		Quiet: time.Millisecond})
 	if err != nil {
 		t.Fatalf("push.New: %v", err)

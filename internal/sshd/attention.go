@@ -512,18 +512,42 @@ func (row attentionRow) applies(r *attentionRun, viewer attentionViewer) bool {
 	return row.admins && viewer.admin || slices.Contains(row.resolvers(r), viewer.id)
 }
 
+func (row attentionRow) item(r *attentionRun, viewer attentionViewer) protocol.AttentionItem {
+	run := r.run
+	item := protocol.AttentionItem{
+		Kind: row.kind, RunID: string(run.ID), MissionID: string(run.MissionID), WorkspaceID: string(run.WorkspaceID),
+		Title: push.RunTitle(run), Harness: run.Harness, Since: since(run.StatusChangedAt),
+	}
+	row.fill(r, viewer, &item)
+	return item
+}
+
 func attentionItem(r *attentionRun, viewer attentionViewer) (protocol.AttentionItem, bool) {
 	for _, row := range attentionRows {
-		if !row.applies(r, viewer) {
-			continue
+		if row.applies(r, viewer) {
+			return row.item(r, viewer), true
 		}
-		run := r.run
-		item := protocol.AttentionItem{
-			Kind: row.kind, RunID: string(run.ID), MissionID: string(run.MissionID), WorkspaceID: string(run.WorkspaceID),
-			Title: push.RunTitle(run), Harness: run.Harness, Since: since(run.StatusChangedAt),
-		}
-		row.fill(r, viewer, &item)
-		return item, true
 	}
 	return protocol.AttentionItem{}, false
+}
+
+// SwarmAttention is the first swarm row of the Needs you table that holds
+// for run, as the member it waits on sees it, and that member. Only a
+// swarm's current integrator carries one.
+func (s *Server) SwarmAttention(ctx context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
+	if run.MissionRole != "integrator" || run.ArchivedAt != nil {
+		return nil, "", nil
+	}
+	r, err := s.attentionRun(ctx, run, nil, map[domain.MissionID]*domain.Mission{})
+	if err != nil {
+		return nil, "", err
+	}
+	for _, row := range attentionRows {
+		if row.swarm && row.holds(r) {
+			viewer := attentionViewer{id: row.resolvers(r)[0]}
+			item := row.item(r, viewer)
+			return &item, viewer.id, nil
+		}
+	}
+	return nil, "", nil
 }

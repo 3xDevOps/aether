@@ -100,15 +100,15 @@ SSH key or a tailnet connection has no device.
 ## What it sends
 
 Exactly what web push sends ([the table of needs and lines](networking.md#notifications)),
-to the run's owner, when the run starts needing them. The wait is the same:
+to the same member, when the run starts needing them. The wait is the same:
 while you use a dashboard, nothing is sent until you have left every dashboard
 alone for a minute.
 
 Each run gets one direct message with:
 
 - the run's title and the need line;
-- a link to the run in the dashboard, when the server serves one
-  (`web-port`);
+- a link to the run in the dashboard, or to the swarm for an integrator's
+  question or stop, when the server serves one (`web-port`);
 - buttons, when the need can be answered there.
 
 The message is edited in place as the need changes and says
