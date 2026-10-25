@@ -57,9 +57,9 @@ export const entries: SettingEntry[] = [
   { id: 'disk', category: 'server', label: 'Disk and performance', help: 'CPU, memory, disk and Docker storage.', keywords: 'disk storage cpu memory insights system' },
   { id: 'docker', category: 'server', label: 'Docker inside runs', help: 'Lets agents build and run containers inside their runs.', keywords: 'sysbox docker compose buildx container', visible: (g) => g.admin && g.cap.hasMethod('server.sysbox.status') },
   { id: 'retained-containers', category: 'server', label: 'Retained containers', help: 'Remove containers that finished runs keep.', keywords: 'cleanup free disk release', visible: (g) => g.admin && g.cap.hasMethod('run.release') },
-  { id: 'edge', category: 'remote-access', label: 'Remote access', help: 'Edge, server id, access policy and owner.', keywords: 'edge owner claim server id policy tunnel', visible: (g) => g.cap.hasMethod('server.edge') },
   { id: 'workspace-settings', category: 'server', label: 'Workspace settings and budget', help: "The active workspace's settings, on its page.", keywords: 'budget limit workspace repository', link: { name: 'workspace', params: (active) => ({ workspaceId: active }) }, visible: (g) => g.workspace && g.cap.hasMethod('workspace.settings') },
   { id: 'members', category: 'server', label: 'Members and devices', help: 'Invite members and approve devices, on the Members page.', keywords: 'invite member device approve', link: { name: 'members' }, visible: (g) => g.admin && g.cap.hasMethod('member.list') },
+  { id: 'edge', category: 'remote-access', label: 'Remote access', help: 'Edge, server id, access policy and owner.', keywords: 'edge owner claim server id policy tunnel', visible: (g) => g.cap.hasMethod('server.edge') },
 ]
 
 export function visibleEntries(g: Gates): SettingEntry[] {

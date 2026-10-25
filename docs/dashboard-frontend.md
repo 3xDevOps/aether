@@ -349,8 +349,8 @@ top to bottom:
    `src/lib/surfaces.ts`, which also feeds the palette's Navigate group; its
    `palette` entries (Members › Devices, Manage workspaces, and Members for a
    non-admin) are reached from the palette only, and its `link` entries
-   (the board's Needs you; Onboarding, opened from **Settings ›
-   Onboarding**) only from a link.
+   (the board's Needs you; Onboarding, opened from **Settings › General ›
+   Setup guide**) only from a link.
 5. **One update notice row** when a server, CLI or desktop update exists, for
    example "Server 0.5.3 is available · Update"; see
    [Update prompts](#update-prompts).

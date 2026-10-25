@@ -138,7 +138,7 @@ export function WorkspaceEnvironmentSection({ workspaceID, client, editable, rev
 
   return (
     <div ref={section} className="scroll-mt-6">
-      <SettingsSection title="Environment">
+      <SettingsSection title="Environment" heading="h2">
         {environment === null && (
           <div className="px-4 py-3">
             {loading && <Skeleton className="h-24" />}
