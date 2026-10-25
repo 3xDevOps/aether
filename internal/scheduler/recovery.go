@@ -1770,6 +1770,10 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 	if sc.IdleShown && (r.Status != domain.RunNeedsAttention || r.Reason != publicRunStatusReason(sc.IdleReason)) {
 		sc.IdleShown = false
 	}
+	var workersReason string
+	if r.MissionRole == "integrator" && workersReasonPattern.MatchString(r.Reason) {
+		workersReason = r.Reason
+	}
 	return &supervised{
 		runID: r.ID,
 		// Older sidecars have no workspace scope; the row is the source of truth.
@@ -1798,6 +1802,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		missionAssigned:     sc.MissionAssigned,
 		status:              r.Status,
 		reason:              r.Reason,
+		workersReason:       workersReason,
 		activity:            r.Activity,
 		startedAt:           started,
 		relaunchedAt:        relaunched,

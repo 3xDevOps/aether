@@ -12,7 +12,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // These mark a waiting outcome in the idle reason the sidecar keeps, by what
@@ -65,21 +64,8 @@ const stalledReasonPrefix = "stalled: "
 // live, followed by ": " and the agent's summary when it reported one.
 const waitedReasonPrefix = "no update for "
 
-// workersReason is an integrator's reason while it waits on its swarm with
-// no waiting report, in place of turnEndedReason.
-func workersReason(w store.IntegratorWait) string {
-	if w.Workers == 1 {
-		return "waiting for 1 worker"
-	}
-	if w.Workers > 1 {
-		return fmt.Sprintf("waiting for %d workers", w.Workers)
-	}
-	if w.Unread == 1 {
-		return "1 unread worker message"
-	}
-	return fmt.Sprintf("%d unread worker messages", w.Unread)
-}
-
+// workersReasonPattern matches an integrator's reason while it waits on its
+// swarm with no waiting report, which replaces turnEndedReason.
 var workersReasonPattern = regexp.MustCompile(`^(?:waiting for \d+ workers?|\d+ unread worker messages?)$`)
 
 // waitedFactor is how many stall thresholds a run waits with no activity
@@ -172,11 +158,13 @@ func (e *supervised) asksMember() bool {
 }
 
 // derived is a live run's activity, the public reason it shows, and what
-// chose the activity.
+// chose the activity. workers marks reason as the workers reason Aether
+// wrote.
 type derived struct {
 	activity domain.RunActivity
 	reason   string
 	cause    events.RunStatusCause
+	workers  bool
 }
 
 // activityLocked derives the activity of run moving to status to with
@@ -220,7 +208,7 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 		f.waitingTools = (!waitedOut && f.waitingTools) || (held && entry.agentReport.Tools)
 	}
 	f.turn = to == domain.RunRunning && !f.waitingAgents && !f.waitingCI && !f.waitingTools
-	inferred := false
+	inferred, workers := false, false
 	if parked && entry != nil && !stalled && !f.disconnected && !f.human && !f.failed && !f.finished &&
 		!f.waitingAgents && !f.waitingCI && !f.waitingTools {
 		swarm, err := s.cfg.Store.IntegratorWaiting(ctx, run, entry.turnStartedAt)
@@ -229,14 +217,25 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 		}
 		inferred = swarm.Live()
 		f.waitingAgents = inferred
+		ours := entry.workersReason != "" && written == entry.workersReason
 		switch {
-		case inferred && (written == turnEndedReason || workersReasonPattern.MatchString(written)):
-			public = workersReason(swarm)
-		case !inferred && workersReasonPattern.MatchString(written):
+		case inferred && (written == turnEndedReason || ours):
+			workers = true
+			switch {
+			case swarm.Workers == 1:
+				public = "waiting for 1 worker"
+			case swarm.Workers > 1:
+				public = fmt.Sprintf("waiting for %d workers", swarm.Workers)
+			case swarm.Unread == 1:
+				public = "1 unread worker message"
+			default:
+				public = fmt.Sprintf("%d unread worker messages", swarm.Unread)
+			}
+		case !inferred && ours:
 			public = turnEndedReason
 		}
 	}
-	d := derived{activity: deriveActivity(f), reason: public}
+	d := derived{activity: deriveActivity(f), reason: public, workers: workers}
 	switch d.activity {
 	case domain.ActivityDisconnected:
 		d.cause = events.CauseDisconnect

@@ -405,6 +405,9 @@ type supervised struct {
 	idleShown    bool
 	idleReportID string
 	idleReportAt time.Time
+	// workersReason is the reason Aether wrote for an integrator waiting on
+	// its swarm, so a hook's reason that reads the same is never rewritten.
+	workersReason string
 	// betweenTurns says an Enhanced agent works only on background tasks
 	// with no turn running, which settles a needs-input outcome's turn.
 	betweenTurns bool

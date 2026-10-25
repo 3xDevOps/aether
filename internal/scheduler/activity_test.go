@@ -339,6 +339,14 @@ func TestAWaitGoesStaleOnlyWithNothingLive(t *testing.T) {
 	}
 	idle := agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}
 
+	// A hook's reason that reads like the workers reason is the hook's.
+	report(agentstatus.Report{State: agentstatus.Idle, Reason: "waiting for 2 workers"})
+	expect("a hook's reason", domain.ActivityWaiting, events.CauseTurnEnd, "waiting for 2 workers", "")
+	e.sched.refreshActivities(ctx)
+	expectNoStatusEvent(t, sub, run.ID, "refreshing a hook's reason")
+	report(agentstatus.Report{State: agentstatus.Working})
+	expect("the first turn", domain.ActivityWorking, events.CauseTurn, "", "")
+
 	integrator.workers.Store(1)
 	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-1", "", "two workers on the parser", time.Now()); err != nil {
 		t.Fatal(err)

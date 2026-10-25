@@ -330,6 +330,10 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 	}
 	if e := s.runs[run]; e != nil {
 		e.status, e.reason, e.activity = to, public, activity
+		e.workersReason = ""
+		if d.workers {
+			e.workersReason = public
+		}
 		if startedAt != nil {
 			e.startedAt = now
 		}

@@ -71,7 +71,8 @@ when the agent reported one. A CI or process wait keeps its state; any other wai
 is live again.
 A wait goes stale once; the next turn starts it over.
 
-Each `run.status` event carries a `cause` naming what chose the state:
+Each `run.status` event for a live run carries a `cause` naming what chose
+its state:
 `turn`, `report` (the agent's own report), `turn-end`, `stall`,
 `wait-expired`, `workers`, `tasks-held`, `human`, or `disconnect`.
 `aether timeline <run-id>` prints it after the state, for example
