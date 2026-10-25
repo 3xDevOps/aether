@@ -58,7 +58,9 @@ export function hrefFor(href: string, route: Route): string {
 export function initialRoute(): Route {
   if (typeof window === 'undefined') return boardRoute
   if (handedLink()) return { name: 'onboarding', params: {} }
-  return routeFromQuery(new URLSearchParams(window.location.search))
+  const route = routeFromQuery(new URLSearchParams(window.location.search))
+  const hash = window.location.hash.slice(1)
+  return route.name === 'settings' && !route.params.section && hash ? { name: 'settings', params: { section: hash } } : route
 }
 
 export type HandedLink = { kind: 'join' | 'claim'; link: string }

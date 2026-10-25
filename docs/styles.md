@@ -49,7 +49,7 @@ The type scale, in `web/src/index.css`:
 | `text-title` | 16/24, Saira 600 | Pane, dialog, step and empty-state headings |
 
 `text-avatar` (10px) is reserved for avatar initials. **Settings >
-Appearance > Text size** (Default, Large, Larger) sets `data-text-size` on
+General > Text size** (Default, Large, Larger) sets `data-text-size` on
 the root, which raises every step of the scale and the title size;
 terminals keep their own zoom.
 
@@ -305,7 +305,7 @@ in the header on desktop and under the top bar on a phone.
 
 The command palette is mounted exactly once in `AppShell` and opened from the
 **Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with
-compact rows. Theme is in **Settings > Appearance** and the footer menu, with
+compact rows. Theme is in **Settings > General** and the footer menu, with
 explicit **System**, **Light** and **Dark** choices and matching palette
 commands.
 

@@ -13,19 +13,27 @@ import { linkTarget, message } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import type { DaemonInstallResult, DaemonStatusResult } from '@/lib/types'
 import { SyncPanel } from '@/routes/run-sync'
-import { SettingRow, SettingsSection } from '@/routes/settings/layout'
+import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 
-export function ThisComputerSection({ client }: { client: Api }) {
+export function ThisComputerSections({ client }: { client: Api }) {
   const caps = useCapability()
-  if (!caps.hasLocal('link.status') && !caps.hasLocal('daemon.status') && !caps.hasLocal('sync.status')) return null
   return (
-    <SettingsSection title="This computer">
-      {caps.hasLocal('link.status') && <LinkRows client={client} />}
-      {caps.hasLocal('daemon.status') && <DaemonRow client={client} />}
-      {caps.hasLocal('sync.status') && <MirrorRow client={client} />}
-    </SettingsSection>
+    <>
+      {caps.hasLocal('link.status') && (
+        <SettingsSection title="Link" id="link">
+          <LinkRows client={client} />
+        </SettingsSection>
+      )}
+      {(caps.hasLocal('daemon.status') || caps.hasLocal('sync.status')) && (
+        <SettingsSection title="Syncing">
+          {caps.hasLocal('daemon.status') && <DaemonRow client={client} />}
+          {caps.hasLocal('sync.status') && <MirrorRow client={client} />}
+        </SettingsSection>
+      )}
+      <ResetSection client={client} />
+    </>
   )
 }
 
@@ -38,6 +46,7 @@ function LinkRows({ client }: { client: Api }) {
   const [error, setError] = useState<string | null>(null)
   const [switchError, setSwitchError] = useState<string | null>(null)
   const [switching, setSwitching] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   const configured = link?.server_configured === true
 
   useEffect(() => {
@@ -49,7 +58,7 @@ function LinkRows({ client }: { client: Api }) {
     return () => {
       live = false
     }
-  }, [client, setLinkStatus])
+  }, [client, setLinkStatus, attempt])
 
   const switchTo = async (name: string) => {
     setSwitchError(null)
@@ -67,10 +76,10 @@ function LinkRows({ client }: { client: Api }) {
   return (
     <>
       <SettingRow
-        label="Server"
+        label="Linked server"
         help={
           !link
-            ? 'Checking the link…'
+            ? error ? null : 'Reading the link…'
             : configured
               ? (
                   <>
@@ -92,6 +101,7 @@ function LinkRows({ client }: { client: Api }) {
         )}
       >
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
+        {error && !link && <TryAgain onClick={() => { setError(null); setAttempt((n) => n + 1) }} />}
       </SettingRow>
       {configured && (
         <SettingRow
@@ -129,6 +139,7 @@ function DaemonRow({ client }: { client: Api }) {
   const [changing, setChanging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let live = true
@@ -139,7 +150,7 @@ function DaemonRow({ client }: { client: Api }) {
     return () => {
       live = false
     }
-  }, [client])
+  }, [client, attempt])
 
   useEffect(() => {
     if (!link?.linked) return
@@ -164,8 +175,9 @@ function DaemonRow({ client }: { client: Api }) {
   const editable = changing || !link?.linked
   return (
     <SettingRow
+      id="sync-daemon"
       label="Sync daemon"
-      help="Fetches each run's branch into your clone as the agent commits."
+      help={status || error ? "Fetches each run's branch into your clone as the agent commits." : 'Reading the daemon…'}
       control={offered && (
         <Button size="sm" variant="secondary" type="submit" form="daemon-install" disabled={busy || !server || !repo}>
           {busy ? 'Installing…' : 'Install'}
@@ -174,6 +186,7 @@ function DaemonRow({ client }: { client: Api }) {
     >
       {unit && <p className="text-ui-sm text-muted">Installed at <Code className="break-all">{unit}</Code>.</p>}
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
+      {error && !status && <TryAgain onClick={() => { setError(null); setAttempt((n) => n + 1) }} />}
       {installed && <CopyableCommand command={installed.note} />}
       {offered && (
         <form
@@ -219,10 +232,12 @@ function MirrorRow({ client }: { client: Api }) {
 
   return (
     <SettingRow
+      id="mirror"
       label="Mirror run files"
       labelFor={changing ? 'settings-mirror-run' : undefined}
-      help="Copies a run's files into your linked repository as the agent works, so you can open them in your editor."
-      control={!shown && <span className="text-ui-sm text-muted">No active runs</span>}
+      help={shown
+        ? "Copies a run's files into your linked repository as the agent works, so you can open them in your editor."
+        : 'No active runs to mirror.'}
     >
       {shown && (
         changing ? (
@@ -256,12 +271,12 @@ function MirrorRow({ client }: { client: Api }) {
   )
 }
 
-export function ResetSection({ client }: { client: Api }) {
+function ResetSection({ client }: { client: Api }) {
   const caps = useCapability()
   const [open, setOpen] = useState(false)
   if (!caps.hasLocal('link.reset')) return null
   return (
-    <SettingsSection title="Danger zone">
+    <SettingsSection title="Danger zone" id="danger-zone" tone="danger">
       <SettingRow
         label="Disconnect and clear local state"
         help="Forgets every server, edge sign-in and device key on this computer so you can connect to a different machine and set up again."

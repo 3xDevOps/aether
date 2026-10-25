@@ -81,7 +81,12 @@ function ProviderRow({ name, provider, now }: { name: UsageProviderName; provide
         .filter(Boolean).join('. ') || undefined
     : provider?.error ?? statusText[status]
   return (
-    <SettingRow label={label} help={help}>
+    <SettingRow
+      label={label}
+      help={status === 'unauthenticated'
+        ? <>{help} <Button variant="link" size="sm" onClick={() => useStore.getState().navigate('agents')}>Sign in on Agents</Button></>
+        : help}
+    >
       {windows.length > 0 ? (
         <ul className="flex min-w-0 flex-col gap-3">
           {windows.map((window) => {
@@ -197,7 +202,7 @@ export function UsageSection({ client = api }: { client?: UsageClient }) {
   if (!selfID) return null
 
   return (
-    <SettingsSection title="Usage">
+    <SettingsSection title="Subscription usage" id="subscription-usage" scope="Your account">
       <SettingRow
         label="Account"
         labelFor="usage-account"
@@ -205,7 +210,7 @@ export function UsageSection({ client = api }: { client?: UsageClient }) {
         control={(
           <>
             <Select value={selectedID ?? undefined} onValueChange={setSelectedID}>
-              <SelectTrigger id="usage-account" className="w-44 max-w-full">
+              <SelectTrigger id="usage-account" className="w-full min-w-0 sm:w-44">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

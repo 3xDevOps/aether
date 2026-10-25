@@ -1,100 +1,115 @@
-import { Checkbox } from '@/components/ui/checkbox'
-import { Kbd } from '@/components/ui/kbd'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { type ReactNode, useEffect, useId, useMemo, useRef } from 'react'
+import { useAssistantAvailable } from '@/components/assistant/button'
+import { ChevronLeft } from '@/components/icons'
+import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
-import { OnboardingSection } from '@/routes/onboarding/settings-section'
+import { useIsMobile } from '@/lib/breakpoints'
+import { surfaces } from '@/lib/surfaces'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { AssistantSection } from '@/routes/settings/assistant'
 import { ConnectorsSection } from '@/routes/settings/connectors'
+import { GeneralSections } from '@/routes/settings/general'
 import { GitHubSection } from '@/routes/settings/github'
-import { SettingRow, SettingsSection } from '@/routes/settings/layout'
-import { NotificationsSection } from '@/routes/settings/notifications'
+import { SettingsNav } from '@/routes/settings/nav'
+import { PushSection, SlackSection } from '@/routes/settings/notifications'
+import { type CategoryID, categoryOf, visibleCategories, visibleEntries } from '@/routes/settings/registry'
 import { RemoteAccessSection } from '@/routes/settings/remote-access'
 import { ServerSection } from '@/routes/settings/server'
-import { ResetSection, ThisComputerSection } from '@/routes/settings/this-computer'
+import { ThisComputerSections } from '@/routes/settings/this-computer'
 import { UsageSection } from '@/routes/settings/usage'
 import { useStore } from '@/store'
-import type { TextSize, Theme } from '@/store/ui'
+import { useCapability, useIsAdmin } from '@/store/hooks'
 
-const themes: { value: Theme; label: string }[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-]
-
-const textSizes: { value: TextSize; label: string }[] = [
-  { value: 'default', label: 'Default' },
-  { value: 'large', label: 'Large' },
-  { value: 'larger', label: 'Larger' },
-]
-
-function AppearanceSection() {
-  const theme = useStore((s) => s.theme)
-  const setTheme = useStore((s) => s.setTheme)
-  const textSize = useStore((s) => s.textSize)
-  const setTextSize = useStore((s) => s.setTextSize)
-  const singleKeys = useStore((s) => s.singleKeyShortcuts)
-  const setSingleKeys = useStore((s) => s.setSingleKeyShortcuts)
-  return (
-    <SettingsSection title="Appearance">
-      <SettingRow
-        label="Theme"
-        labelFor="settings-theme"
-        control={(
-          <Select value={theme} onValueChange={(value) => setTheme(value as Theme)}>
-            <SelectTrigger id="settings-theme" className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {themes.map(({ value, label }) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-      />
-      <SettingRow
-        label="Text size"
-        labelFor="settings-text-size"
-        help="Interface text. Terminals keep their own zoom."
-        control={(
-          <Select value={textSize} onValueChange={(value) => setTextSize(value as TextSize)}>
-            <SelectTrigger id="settings-text-size" className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {textSizes.map(({ value, label }) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-      />
-      <SettingRow
-        label="Single-key shortcuts"
-        labelFor="settings-single-keys"
-        help={<>Keys such as <Kbd>n</Kbd>, <Kbd>?</Kbd> and <Kbd>g</Kbd> <Kbd>b</Kbd>. Turn off if speech input or a stray key triggers them.</>}
-        control={<Checkbox id="settings-single-keys" checked={singleKeys} onCheckedChange={(checked) => setSingleKeys(checked === true)} />}
-      />
-    </SettingsSection>
-  )
+const bodies: Record<CategoryID, (client: Api) => ReactNode> = {
+  general: () => <GeneralSections />,
+  connections: (client) => <><ConnectorsSection client={client} /><GitHubSection client={client} /></>,
+  notifications: (client) => <><PushSection client={client} /><SlackSection client={client} /></>,
+  assistant: (client) => <AssistantSection client={client} />,
+  usage: (client) => <UsageSection client={client} />,
+  'this-computer': (client) => <ThisComputerSections client={client} />,
+  server: (client) => <ServerSection client={client} />,
+  'remote-access': (client) => <RemoteAccessSection client={client} />,
 }
 
-export function SettingsRoute({ client = api }: RouteProps & { client?: Api }) {
+const highlightMs = 1500
+
+function reveal(target: HTMLElement) {
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  target.scrollIntoView?.({ block: 'start', behavior: reduced ? 'auto' : 'smooth' })
+  const control = target.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], textarea:not(:disabled)')
+  ;(control ?? target.closest('section')?.querySelector<HTMLElement>('h3'))?.focus({ preventScroll: true })
+  target.setAttribute('data-highlight', '')
+  setTimeout(() => target.removeAttribute('data-highlight'), highlightMs)
+}
+
+export function SettingsRoute({ params, client = api }: RouteProps & { client?: Api }) {
+  const phone = useIsMobile()
+  const cap = useCapability()
+  const admin = useIsAdmin()
+  const assistant = useAssistantAvailable()
+  const member = useStore((s) => s.info?.member !== undefined)
+  const navigate = useStore((s) => s.navigate)
+  const onboarding = surfaces(cap).some((surface) => surface.name === 'onboarding')
+  const shown = useMemo(() => visibleEntries({ cap, admin, assistant, onboarding, member }), [cap, admin, assistant, onboarding, member])
+  const visible = visibleCategories(shown)
+  const target = params.section
+  const linked = target ? categoryOf(target, shown) : undefined
+  const current = linked ?? (phone ? undefined : visible[0])
+  const heading = useRef<HTMLHeadingElement>(null)
+  const left = useRef<string | null>(null)
+  const headingID = useId()
+
+  useEffect(() => {
+    if (!target || !linked) return
+    const element = target === linked.id ? null : document.getElementById(target)
+    if (element) reveal(element)
+    else heading.current?.focus()
+  }, [params, linked?.id])
+
+  useEffect(() => {
+    if (current || !left.current) return
+    document.querySelector<HTMLElement>(`[data-settings-category="${left.current}"]`)?.focus()
+    left.current = null
+  }, [current])
+
+  const notice = target && !linked && <Callout tone="neutral">That setting is not available here.</Callout>
   return (
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader title="Settings" />
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-8 px-4 py-6 sm:px-6">
-          <AppearanceSection />
-          <NotificationsSection client={client} />
-          <AssistantSection client={client} />
-          <GitHubSection client={client} />
-          <ConnectorsSection client={client} />
-          <ThisComputerSection client={client} />
-          <ServerSection />
-          <RemoteAccessSection client={client} />
-          <UsageSection client={client} />
-          <OnboardingSection />
-          <ResetSection client={client} />
-        </div>
+      <div className="flex min-h-0 flex-1">
+        {!(phone && current) && (
+          <div className={phone ? 'min-w-0 flex-1 overflow-y-auto' : 'w-56 shrink-0 overflow-y-auto border-r border-seam'}>
+            {phone && notice && <div className="px-3 pt-3">{notice}</div>}
+            <SettingsNav shown={shown} visible={visible} current={current?.id} phone={phone} />
+          </div>
+        )}
+        {current && (
+          <section aria-labelledby={headingID} className="min-w-0 flex-1 overflow-y-auto">
+            <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-8 px-4 py-6 sm:px-6">
+              <div className="flex min-w-0 flex-col items-start gap-1">
+                {phone && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="-ml-2 mb-2"
+                    onClick={() => {
+                      left.current = current.id
+                      navigate('settings')
+                    }}
+                  >
+                    <ChevronLeft />Settings
+                  </Button>
+                )}
+                {notice}
+                <h2 ref={heading} id={headingID} tabIndex={-1} className="text-title text-text outline-none">{current.title}</h2>
+                <p className="text-ui text-muted">{current.purpose}</p>
+              </div>
+              {bodies[current.id](client)}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   )

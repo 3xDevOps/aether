@@ -5,15 +5,14 @@ import { AssistantSection, autoApproveLabel, autoApproveWarning } from '@/routes
 import { useStore } from '@/store'
 import { alice, fakeApi, serverInfo } from '@/test/fixtures'
 
-function show(methods = ['*'], params: Record<string, string> = {}) {
+function show(methods = ['*'], over: Parameters<typeof fakeApi>[0] = {}) {
   useStore.setState({
     ...useStore.getInitialState(),
-    route: { name: 'settings', params },
     info: serverInfo,
     members: { [alice.id]: alice },
     capabilities: { gateway: 'remote', methods, ws: [] },
   }, true)
-  const client = fakeApi()
+  const client = fakeApi(over)
   render(<AssistantSection client={client} />)
   return client
 }
@@ -84,15 +83,23 @@ describe('assistant settings', () => {
     expect(toggle().getAttribute('aria-checked')).toBe('false')
   })
 
-  it('lists what auto-approval covers and scrolls into view from a link', async () => {
-    const scroll = vi.mocked(Element.prototype.scrollIntoView)
-    scroll.mockClear()
-    show(['*'], { section: 'assistant' })
+  it('lists what auto-approval covers', () => {
+    show()
     const scope = screen.getByLabelText('What auto-approval covers')
     for (const text of ['Without a card', 'Always asks', 'Not affected', 'Messaging or stopping another member’s run.', /shell and file tools/]) {
       expect(within(scope).getByText(text)).toBeDefined()
     }
-    expect(scroll).toHaveBeenCalled()
-    expect(scroll.mock.contexts.at(-1)).toBe(document.getElementById('settings-assistant'))
+  })
+
+  it('shows a failed read verbatim and reads again on Try again', async () => {
+    const user = userEvent.setup()
+    const client = show(['*'], {
+      assistantSettings: vi.fn().mockRejectedValueOnce(new Error('database is locked')).mockResolvedValue({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false, share_view: true }),
+    })
+    expect((await screen.findByRole('alert')).textContent).toContain('database is locked')
+    expect(toggle()).toHaveProperty('disabled', true)
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(toggle().getAttribute('aria-checked')).toBe('true'))
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })

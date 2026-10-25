@@ -2,12 +2,14 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { ThemeEffect } from '@/components/theme'
 import type { GatewayCapabilities } from '@/lib/types'
 import { SettingsRoute } from '@/routes/settings'
+import { categories, entries } from '@/routes/settings/registry'
 import { ServerSection } from '@/routes/settings/server'
 import { createRootStore, useStore, type RootState } from '@/store'
 import { runLabel } from '@/lib/status'
 import { toRecord } from '@/store/runs'
 import { alice, bob, fakeApi, run, serverInfo, updateStatus, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
+import { atViewport } from '@/test/viewport'
 
 const active = run({ id: 'run_1', task: 'rewrite the checkout flow' })
 
@@ -49,7 +51,7 @@ describe('settings view', () => {
     const newer = { ...active, created_at: '2026-02-01T00:00:00Z' }
     const client = fakeApi()
     seed({ runs: { [older.id]: toRecord(older), [newer.id]: toRecord(newer) } })
-    render(<SettingsRoute params={{}} client={client} />)
+    render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
 
     expect(screen.getByText(runLabel(newer))).toBeDefined()
     expect(screen.getByRole('region', { name: 'Sync' })).toBeDefined()
@@ -171,7 +173,7 @@ describe('settings view', () => {
       capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'update.check'] },
       update: updateStatus(),
     })
-    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    render(<SettingsRoute params={{ section: 'server' }} client={fakeApi()} />)
 
     const server = screen.getByRole('region', { name: 'Server' })
     fireEvent.click(within(server).getByRole('button', { name: 'Update…' }))
@@ -186,7 +188,7 @@ describe('settings view', () => {
       capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'update.check'] },
       update: { ...status, cli: { ...status.cli, packaged: 'Android app', update_available: false, latest: '' } },
     })
-    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    render(<SettingsRoute params={{ section: 'server' }} client={fakeApi()} />)
 
     const server = screen.getByRole('region', { name: 'Server' })
     expect(within(server).getByText(/Updates come from the Android app: install its new version to update Aether\./)).toBeDefined()
@@ -196,7 +198,7 @@ describe('settings view', () => {
   it("shows why the server's tailnet dashboard is not serving, verbatim", () => {
     const refusal = 'servergw: HTTPS certificate for box.tail.ts.net: cert box.tail.ts.net: status 500: your Tailscale account does not support getting TLS certs; enable MagicDNS and HTTPS certificates for the tailnet in the Tailscale admin console (DNS page), or set web-port to 0'
     seed({ info: { ...serverInfo, tailnet_dashboard_error: refusal } })
-    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    render(<SettingsRoute params={{ section: 'server' }} client={fakeApi()} />)
     const server = screen.getByRole('region', { name: 'Server' })
     expect(within(server).getByText('Tailnet dashboard')).toBeDefined()
     expect(within(server).getByText(refusal)).toBeDefined()
@@ -218,7 +220,7 @@ describe('settings view', () => {
 
   it('keeps the server admin rows from a collaborator', () => {
     seed({ info: { ...serverInfo, member: bob } })
-    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    render(<SettingsRoute params={{ section: 'server' }} client={fakeApi()} />)
     const server = screen.getByRole('region', { name: 'Server' })
     expect(within(server).getByText('Version')).toBeDefined()
     expect(within(server).queryByText('Retained containers')).toBeNull()
@@ -226,7 +228,7 @@ describe('settings view', () => {
 
   it('leaves disk figures to Insights › System and links there', () => {
     seed()
-    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    render(<SettingsRoute params={{ section: 'server' }} client={fakeApi()} />)
     const server = screen.getByRole('region', { name: 'Server' })
     expect(within(server).queryByLabelText('Disk usage')).toBeNull()
     expect(within(server).queryByText('Largest storage owners')).toBeNull()
@@ -238,7 +240,7 @@ describe('settings view', () => {
 
   it('shows the linked server and repository read-only until Change', async () => {
     seed()
-    render(<SettingsRoute params={{}} client={fakeApi()} />)
+    render(<SettingsRoute params={{ section: 'this-computer' }} client={fakeApi()} />)
 
     const form = await screen.findByRole('form', { name: 'Install sync daemon' })
     await within(form).findByText('/src/repo')
@@ -252,7 +254,7 @@ describe('settings view', () => {
   it('installs the daemon and shows the unit path and enable note', async () => {
     const client = fakeApi()
     seed()
-    render(<SettingsRoute params={{}} client={client} />)
+    render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
 
     const install = await screen.findByRole('button', { name: 'Install' })
     expect(
@@ -278,7 +280,7 @@ describe('settings view', () => {
       },
       runs: { [active.id]: toRecord(active) },
     })
-    render(<SettingsRoute params={{}} client={client} />)
+    render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
 
     expect(screen.getByRole('region', { name: 'Sync' })).toBeDefined()
     expect(client.localDaemonStatus).not.toHaveBeenCalled()
@@ -297,9 +299,9 @@ describe('settings view', () => {
     it('is the last section and resets only after confirmation', async () => {
       const client = fakeApi()
       seed({ capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'link.reset'] } })
-      render(<SettingsRoute params={{}} client={client} />)
+      render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
 
-      const headings = screen.getAllByRole('heading', { level: 2 })
+      const headings = screen.getAllByRole('heading', { level: 3 })
       expect(headings[headings.length - 1].textContent).toBe('Danger zone')
       fireEvent.click(screen.getByRole('button', { name: 'Clear local state' }))
       expect(client.localLinkReset).not.toHaveBeenCalled()
@@ -316,7 +318,7 @@ describe('settings view', () => {
         }),
       })
       seed({ capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'link.reset'] } })
-      render(<SettingsRoute params={{}} client={client} />)
+      render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
 
       fireEvent.click(screen.getByRole('button', { name: 'Clear local state' }))
       fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Clear local state' }))
@@ -326,7 +328,7 @@ describe('settings view', () => {
 
     it('is absent without the link.reset verb', () => {
       seed()
-      render(<SettingsRoute params={{}} client={fakeApi()} />)
+      render(<SettingsRoute params={{ section: 'this-computer' }} client={fakeApi()} />)
       expect(screen.queryByRole('button', { name: 'Clear local state' })).toBeNull()
     })
   })
@@ -356,7 +358,7 @@ describe('settings view', () => {
     it('lists the default and named servers, marks the active one, and reloads after a switch', async () => {
       const client = fakeApi({ localLinkStatus: vi.fn(async () => status) })
       seed()
-      render(<SettingsRoute params={{}} client={client} />)
+      render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
 
       expect(await screen.findByText('Default')).toBeDefined()
       expect(screen.getByText('prod')).toBeDefined()
@@ -377,7 +379,7 @@ describe('settings view', () => {
         }),
       })
       seed()
-      render(<SettingsRoute params={{}} client={client} />)
+      render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
 
       fireEvent.click((await screen.findAllByRole('button', { name: 'Switch' }))[1])
       expect(await screen.findByText('server staging:2222 refused the key')).toBeDefined()
@@ -387,7 +389,7 @@ describe('settings view', () => {
     it('opens onboarding on the server picker from Link another server', async () => {
       const client = fakeApi({ localLinkStatus: vi.fn(async () => ({ ...status, active: '' })) })
       seed({ capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'edge.link'] } })
-      render(<SettingsRoute params={{}} client={client} />)
+      render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Link another server' }))
       expect(useStore.getState().route).toEqual({ name: 'onboarding', params: { link: 'another' } })
@@ -396,7 +398,7 @@ describe('settings view', () => {
     it('keeps Link another server available on a named server, so an offline Default cannot block it', async () => {
       const client = fakeApi({ localLinkStatus: vi.fn(async () => status) })
       seed({ capabilities: { ...localCaps, local: [...(localCaps.local ?? []), 'edge.link'] } })
-      render(<SettingsRoute params={{}} client={client} />)
+      render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
 
       const button = await screen.findByRole('button', { name: 'Link another server' })
       expect((button as HTMLButtonElement).disabled).toBe(false)
@@ -415,11 +417,89 @@ describe('settings view', () => {
       })),
     })
     seed()
-    render(<SettingsRoute params={{}} client={client} />)
+    render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
 
     expect(await screen.findByText('host:2222')).toBeDefined()
     expect(screen.getByText(/as alice/)).toBeDefined()
     expect(screen.getByText('No clone linked to this server.')).toBeDefined()
     expect(screen.queryByText(/No server yet/)).toBeNull()
+  })
+
+  describe('navigation', () => {
+    const everything: GatewayCapabilities = { ...localCaps, local: [...(localCaps.local ?? []), 'link.reset'] }
+
+    it('renders an anchor for every entry its category lists, and lists every anchored section', () => {
+      for (const category of categories) {
+        seed({ capabilities: everything })
+        const view = render(<SettingsRoute params={{ section: category.id }} client={fakeApi()} />)
+        for (const entry of entries.filter((e) => e.category === category.id && !e.link)) {
+          expect(document.getElementById(entry.id), entry.id).not.toBeNull()
+        }
+        for (const section of view.container.querySelectorAll('section[id]')) {
+          expect(entries.some((e) => e.id === section.id), section.id).toBe(true)
+        }
+        view.unmount()
+      }
+    })
+
+    it('lands on General and moves to the category a nav item names', () => {
+      seed()
+      const { rerender } = render(<SettingsRoute params={{}} client={fakeApi()} />)
+      const nav = screen.getByRole('navigation', { name: 'Settings' })
+      expect(within(nav).getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBe('page')
+      expect(screen.getByRole('heading', { level: 2, name: 'General' })).toBeDefined()
+
+      fireEvent.click(within(nav).getByRole('button', { name: 'Server' }))
+      expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'server' } })
+      rerender(<SettingsRoute params={{ section: 'server' }} client={fakeApi()} />)
+      expect(document.activeElement).toBe(screen.getByRole('heading', { level: 2, name: 'Server' }))
+    })
+
+    it('finds a setting by keyword and opens it at its control', () => {
+      seed()
+      render(<SettingsRoute params={{}} client={fakeApi()} />)
+      const search = screen.getByRole('searchbox', { name: 'Search settings' })
+      fireEvent.change(search, { target: { value: 'dm' } })
+      expect(screen.getByRole('status').textContent).toBe('1 setting')
+      fireEvent.change(search, { target: { value: 'nothing like this' } })
+      expect(screen.getByRole('status').textContent).toBe('No settings match “nothing like this”')
+      fireEvent.change(search, { target: { value: 'dark' } })
+      fireEvent.keyDown(search, { key: 'Enter' })
+      expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'theme' } })
+      expect((search as HTMLInputElement).value).toBe('')
+    })
+
+    it('scrolls a deep-linked setting into view and focuses its control', () => {
+      const scroll = vi.mocked(Element.prototype.scrollIntoView)
+      scroll.mockClear()
+      seed()
+      render(<SettingsRoute params={{ section: 'keyboard' }} client={fakeApi()} />)
+      expect(scroll.mock.contexts.at(-1)).toBe(document.getElementById('keyboard'))
+      expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Single-key shortcuts' }))
+    })
+
+    it('says when a linked setting is not available and shows the default', () => {
+      seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events'] } })
+      render(<SettingsRoute params={{ section: 'danger-zone' }} client={fakeApi()} />)
+      expect(screen.getByText('That setting is not available here.')).toBeDefined()
+      expect(screen.getByRole('heading', { level: 2, name: 'General' })).toBeDefined()
+      expect(within(screen.getByRole('navigation', { name: 'Settings' })).queryByRole('button', { name: 'This computer' })).toBeNull()
+    })
+
+    it('shows the category list on a phone and one category with a way back', () => {
+      atViewport(390, { pointer: 'coarse' })
+      seed()
+      const { rerender } = render(<SettingsRoute params={{}} client={fakeApi()} />)
+      expect(screen.queryByRole('heading', { level: 2 })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Notifications' }))
+      expect(useStore.getState().route.params).toEqual({ section: 'notifications' })
+
+      rerender(<SettingsRoute params={{ section: 'notifications' }} client={fakeApi()} />)
+      expect(screen.queryByRole('navigation', { name: 'Settings' })).toBeNull()
+      fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+      expect(useStore.getState().route).toEqual({ name: 'settings', params: {} })
+      rerender(<SettingsRoute params={{}} client={fakeApi()} />)
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Notifications' }))
+    })
   })
 })

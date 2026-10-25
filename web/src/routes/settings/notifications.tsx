@@ -7,7 +7,7 @@ import type { Api } from '@/lib/api'
 import type { SlackLinkResult, SlackStatusResult } from '@/lib/types'
 import { errorSentence } from '@/lib/format'
 import { disablePush, enablePush, readPush, testPush, type PushState } from '@/lib/push'
-import { SettingRow, SettingsSection } from '@/routes/settings/layout'
+import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 
 const docs = 'https://github.com/3xDevOps/Aether/blob/main/docs'
@@ -23,7 +23,7 @@ function Guide({ page = 'networking', to, children }: { page?: string; to?: stri
 const hosted = <Guide to="the-dashboard">the dashboard your server hosts</Guide>
 
 function help(state: PushState | null): ReactNode {
-  if (!state) return 'Checking this device…'
+  if (!state) return 'Reading this device…'
   if (state.kind === 'blocked') {
     return 'This browser blocks notifications from this dashboard. Allow them in its site settings, then reload.'
   }
@@ -42,11 +42,12 @@ function help(state: PushState | null): ReactNode {
   }
 }
 
-function SlackRow({ client }: { client: Api }) {
+export function SlackSection({ client }: { client: Api }) {
   const [status, setStatus] = useState<SlackStatusResult | null>(null)
   const [code, setCode] = useState<SlackLinkResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
 
   const read = () => client.slackStatus().then(setStatus)
   useEffect(() => {
@@ -58,7 +59,7 @@ function SlackRow({ client }: { client: Api }) {
     return () => {
       live = false
     }
-  }, [client])
+  }, [client, attempt])
 
   const act = (work: Promise<unknown>) => {
     setBusy(true)
@@ -73,7 +74,7 @@ function SlackRow({ client }: { client: Api }) {
 
   const bot = code?.bot || status?.bot || 'the Aether bot'
   const team = code?.team || status?.team
-  let help: ReactNode = error ? null : 'Checking Slack…'
+  let help: ReactNode = error ? null : 'Reading Slack…'
   let control: ReactNode
   if (status && !status.configured) {
     help = <>This server has no Slack bot. An admin sets one up with <Code>sudo aether-server slack setup</Code>. <Guide page="slack">Slack guide</Guide></>
@@ -91,21 +92,24 @@ function SlackRow({ client }: { client: Api }) {
   }
 
   return (
-    <SettingRow label="Slack" help={help} control={control}>
-      {status?.configured && !status.connected && status.error && (
-        <Callout tone="failed">The server is not connected to Slack: {status.error}</Callout>
-      )}
-      {code && !status?.link && (
-        <p className="text-ui-sm text-muted">
-          Send this code to {bot} in Slack{team ? ` (${team})` : ''} within 10 minutes: <Code>{code.code}</Code>
-        </p>
-      )}
-      {error && <Callout tone="failed" role="alert">{error}</Callout>}
-    </SettingRow>
+    <SettingsSection title="Slack" id="slack" scope="Your account">
+      <SettingRow label="Direct messages" help={help} control={control}>
+        {status?.configured && !status.connected && status.error && (
+          <Callout tone="failed">The server is not connected to Slack: {status.error}</Callout>
+        )}
+        {code && !status?.link && (
+          <p className="text-ui-sm text-muted">
+            Send this code to {bot} in Slack{team ? ` (${team})` : ''} within 10 minutes: <Code>{code.code}</Code>
+          </p>
+        )}
+        {error && <Callout tone="failed" role="alert">{error}</Callout>}
+        {error && !status && <TryAgain onClick={() => { setError(null); setAttempt((n) => n + 1) }} />}
+      </SettingRow>
+    </SettingsSection>
   )
 }
 
-export function NotificationsSection({ client }: { client: Api }) {
+export function PushSection({ client }: { client: Api }) {
   const gateway = useStore((s) => s.capabilities?.gateway)
   const [state, setState] = useState<PushState | null>(null)
   const [busy, setBusy] = useState(false)
@@ -152,7 +156,7 @@ export function NotificationsSection({ client }: { client: Api }) {
 
   const on = state?.kind === 'on'
   return (
-    <SettingsSection title="Notifications">
+    <SettingsSection title="Push notifications" id="push" scope="This device">
       <SettingRow
         label="Notify this device when a run needs me"
         labelFor="settings-push"
@@ -174,7 +178,6 @@ export function NotificationsSection({ client }: { client: Api }) {
         )}
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
       </SettingRow>
-      <SlackRow client={client} />
     </SettingsSection>
   )
 }

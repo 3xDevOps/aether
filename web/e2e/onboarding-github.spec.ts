@@ -63,9 +63,10 @@ async function workspaces(member: Member) {
   return (await member.api.rpc<{ workspaces: Workspace[] }>('workspace.list')).workspaces
 }
 
-async function settings(page: Page, member: Member) {
+async function settings(page: Page, member: Member, id = 'github') {
   const url = new URL(member.url)
   url.searchParams.set('page', 'settings')
+  url.searchParams.set('id', id)
   await page.goto(url.toString())
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible()
 }
@@ -280,7 +281,7 @@ test('collaborators have no repository connection controls and forged administra
   await wizard.expectStep('Repository')
   await expect(wizard.repository.button('Add GitHub repository')).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'GitHub connection' })).toHaveCount(0)
-  await settings(page, bob)
+  await settings(page, bob, 'connections')
   await expect(page.getByRole('region', { name: 'GitHub connection' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Add repository', exact: true })).toHaveCount(0)
   for (const method of ['github.oauth.start', 'github.oauth.status', 'github.oauth.cancel', 'github.repositories.list']) {

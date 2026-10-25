@@ -3,6 +3,7 @@ import { useCheckForUpdates, useUpdateNotice, useUpdateTargets } from '@/compone
 import { checkedTime, packagedLine, verbatim } from '@/components/update-banner-shared'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { CodeBlock } from '@/components/ui/code'
 import { Spinner } from '@/components/ui/spinner'
 import { releaseFinishedPlan } from '@/lib/commands'
@@ -20,6 +21,7 @@ const tailnetDashboardRecheckMs = 30_000
 export function ServerSection({ client = api }: { client?: Api } = {}) {
   const info = useStore((s) => s.info)
   const admin = useIsAdmin()
+  const caps = useCapability()
   const update = useUpdateNotice(true)
   const { server, client: cli } = useUpdateTargets()
   const packaged = useStore((s) => s.update?.cli.packaged)
@@ -49,67 +51,83 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
   const checkedLine =
     current && !update && checkedTime(current.checkedAt) ? `Up to date. Checked ${checkedTime(current.checkedAt)}.` : ''
   return (
-    <SettingsSection title="Server">
-      <SettingRow
-        label="Version"
-        help={[
-          `Aether ${info.server_version}, protocol ${info.protocol_version}.`,
-          update && `${update.text}.`,
-          checking ? 'Checking for updates…' : checkedLine,
-          packaged && packagedLine(packaged),
-        ].filter(Boolean).join(' ')}
-        control={
-          <div className="flex flex-wrap gap-1">
-            {update?.action && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  clearDismissed()
-                  openUpdates(true)
-                }}
-              >
-                Update…
+    <>
+      <SettingsSection title="Status">
+        <SettingRow
+          id="version"
+          label="Version"
+          help={[
+            `Aether ${info.server_version}, protocol ${info.protocol_version}.`,
+            update && `${update.text}.`,
+            checking ? 'Checking for updates…' : checkedLine,
+            packaged && packagedLine(packaged),
+          ].filter(Boolean).join(' ')}
+          control={
+            <div className="flex flex-wrap gap-1">
+              {update?.action && (
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    clearDismissed()
+                    openUpdates(true)
+                  }}
+                >
+                  Update…
+                </Button>
+              )}
+              <Button size="sm" variant="secondary" disabled={checking} onClick={checkForUpdates}>
+                {failed ? 'Check now' : 'Check for updates…'}
               </Button>
-            )}
-            <Button size="sm" variant="secondary" disabled={checking} onClick={checkForUpdates}>
-              {failed ? 'Check now' : 'Check for updates…'}
-            </Button>
-          </div>
-        }
-      >
-        {failed?.state === 'check_failed' && (
-          <div className="space-y-1">
-            <p className="text-ui-sm text-muted">
-              {failed !== server
-                ? 'This computer could not check for a new release:'
-                : failed.unread
-                  ? "Could not read the server's update status:"
-                  : 'The server could not check for a new release:'}
-            </p>
-            <p className={cn(verbatim, 'text-state-failed')}>{failed.error}</p>
-          </div>
-        )}
-      </SettingRow>
-      {info.tailnet_dashboard_error && (
-        <SettingRow label="Tailnet dashboard" help="Not serving. The server keeps retrying; restart it after a config change.">
-          <p className={cn(verbatim, 'text-state-failed')}>{info.tailnet_dashboard_error}</p>
-          <CopyableCommand command="sudo systemctl restart aether-server" />
+            </div>
+          }
+        >
+          {failed?.state === 'check_failed' && (
+            <div className="space-y-1">
+              <p className="text-ui-sm text-muted">
+                {failed !== server
+                  ? 'This computer could not check for a new release:'
+                  : failed.unread
+                    ? "Could not read the server's update status:"
+                    : 'The server could not check for a new release:'}
+              </p>
+              <p className={cn(verbatim, 'text-state-failed')}>{failed.error}</p>
+            </div>
+          )}
         </SettingRow>
+        {info.tailnet_dashboard_error && (
+          <SettingRow label="Tailnet dashboard" help="Not serving. The server keeps retrying; restart it after a config change.">
+            <p className={cn(verbatim, 'text-state-failed')}>{info.tailnet_dashboard_error}</p>
+            <CopyableCommand command="sudo systemctl restart aether-server" />
+          </SettingRow>
+        )}
+        <SettingRow
+          id="disk"
+          label="Disk and performance"
+          help="CPU, memory, disk and Docker storage, and which runs use them."
+          control={<Button size="sm" variant="secondary" onClick={() => navigate('insights', { tab: 'system' })}>Open Insights › System</Button>}
+        />
+      </SettingsSection>
+      {admin && (caps.hasMethod('server.sysbox.status') || caps.hasMethod('run.release')) && (
+        <SettingsSection title="Admin" scope="Server · admins">
+          <DockerInRunsRow client={client} />
+          <RetainedContainersRow />
+        </SettingsSection>
       )}
-      <DockerInRunsRow client={client} />
-      <SettingRow
-        label="Disk and performance"
-        help="CPU, memory, disk and Docker storage, and which runs use them."
-        control={<Button size="sm" variant="secondary" onClick={() => navigate('insights', { tab: 'system' })}>Open Insights › System</Button>}
-      />
-      {admin && <RetainedContainersRow />}
-    </SettingsSection>
+    </>
   )
 }
 
 function DockerInRunsRow({ client }: { client: Api }) {
+  const caps = useCapability()
   const { status, error, justInstalled, install } = useSysbox(client)
-  if (!status) return null
+  if (!caps.hasMethod('server.sysbox.status')) return null
+  if (!status) {
+    return (
+      <SettingRow id="docker" label="Docker inside runs" help={error ? null : 'Reading Docker support…'}>
+        {error && <Callout tone="failed" role="alert">{error}</Callout>}
+      </SettingRow>
+    )
+  }
   const { state, reason, log } = status
   const installing = state === 'installing'
   const command = rootCommand(status)
@@ -123,6 +141,7 @@ function DockerInRunsRow({ client }: { client: Api }) {
   const [title, detail] = states[state]
   return (
     <SettingRow
+      id="docker"
       label="Docker inside runs"
       help={(
         <>
@@ -164,6 +183,7 @@ function RetainedContainersRow() {
   const where = workspaceName ? ` in ${workspaceName}` : ''
   return (
     <SettingRow
+      id="retained-containers"
       label="Retained containers"
       help={count > 0
         ? `${count} finished ${count === 1 ? 'run keeps its' : 'runs keep their'} container${where}. Removing containers prevents reopening those runs; it does not delete all run data, homes, repositories or history.`
