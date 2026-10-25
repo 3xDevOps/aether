@@ -473,7 +473,7 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 		Logger:         slog.Default().With("run", runID),
 		AutoAllow:      oneShot,
 		SystemPrompt:   systemPrompt,
-		ClaudeCode:     profile.ACPClaudeCode,
+		ClaudeCode:     profile.Capabilities.BackgroundTasks,
 		AgentCommand:   adapter[0],
 		TitleLookup:    titleLookup,
 		OnState: func(st acphost.TurnState) {

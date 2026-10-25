@@ -187,9 +187,9 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 		Executable:      executable,
 		Source:          source,
 		Enhanced:        string(profile.EnhancedSupport()),
-		Switchable:      profile.Switchable(),
+		Switchable:      profile.Capabilities.ModeSwitch,
 		DefaultMode:     string(domain.LaunchTUI),
-		EnhancedDefault: profile.ACPDefault,
+		EnhancedDefault: profile.Capabilities.EnhancedDefault,
 	}
 	if source == "member" {
 		info.Glyph = "custom"
@@ -203,7 +203,7 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 	if info.Installed, info.EnhancedInstalled, err = s.agentInstalled(member, account, executable, profile); err != nil {
 		return protocol.AgentInfo{}, err
 	}
-	if profile.ACPDefault && info.EnhancedInstalled {
+	if profile.Capabilities.EnhancedDefault && info.EnhancedInstalled {
 		// The wire name of the enhanced launch mode.
 		info.DefaultMode = "acp"
 	}

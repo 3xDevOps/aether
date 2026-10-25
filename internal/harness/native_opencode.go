@@ -105,6 +105,5 @@ func prepareOpenCodeNativeLaunch(dir string, env map[string]string) (NativeLaunc
 			"aether-mailbox": "opencode-v2.js",
 			"aether-status":  agentstatus.OpenCodeV2PluginName,
 		},
-		IdleWake: true,
 	}, nil
 }
