@@ -132,7 +132,10 @@ tests against. The dashboard's **Set up** does the same when you pick Enhanced.
 Run each login in your environment's shell, which `aether terminal` opens from
 your computer. API keys set in the server's environment
 (`/etc/aether/aether-server.env` with the shipped systemd unit) replace the
-login.
+login. To send an agent through a model gateway such as LiteLLM or OpenRouter,
+also set the base-URL variable its section names. A variable Aether does not
+pass through, such as Claude Code's `ANTHROPIC_AUTH_TOKEN`, goes in a
+[workspace secret](environments.md#secrets).
 
 #### Claude Code
 
@@ -140,9 +143,10 @@ Start `claude` and use `/login`. It prints a URL to open in your own browser and
 takes a code back. `/status` shows which credential is active. The login lands
 in `~/.claude/.credentials.json`.
 
-For an API key, set `ANTHROPIC_API_KEY` in the server's environment. Aether
-passes through `ANTHROPIC_API_KEY` only. A `CLAUDE_CODE_OAUTH_TOKEN` from
-`claude setup-token` is not passed, so use the terminal for subscription logins.
+For an API key, set `ANTHROPIC_API_KEY` in the server's environment, and
+`ANTHROPIC_BASE_URL` for a gateway. A `CLAUDE_CODE_OAUTH_TOKEN` from
+`claude setup-token` is not passed through, so use the terminal for
+subscription logins.
 
 Claude Code refuses `--dangerously-skip-permissions` as root, so every `claude`
 run gets `IS_SANDBOX=1`.
@@ -151,7 +155,8 @@ run gets `IS_SANDBOX=1`.
 
 Run `codex login` and choose the device-code option. The login lands in
 `~/.codex/auth.json`. `OPENAI_API_KEY` in the server's environment is the
-API-key alternative.
+API-key alternative. Codex reads no base-URL variable; for a gateway, set
+`openai_base_url` in `~/.codex/config.toml`.
 
 Your first Standard run opens Codex's **Hooks need review** screen for Aether's
 inbox hooks. Choose **Trust all and continue**, or open `/hooks` and press `t`.
@@ -165,14 +170,17 @@ hooks you do not recognize, choose **Review hooks**. A copy of the hooks in
 
 Start `pi` and use `/login` to pick a provider. The login lands in
 `~/.pi/agent/auth.json`. `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in the server's
-environment is the API-key alternative.
+environment is the API-key alternative. pi reads no base-URL variable; for a
+gateway, set the provider's `baseUrl` in `~/.pi/agent/models.json`.
 
 #### oh-my-pi (omp)
 
 oh-my-pi is a fork of pi with its own executable and home. The install command
 is `curl -fsSL https://omp.sh/install | sh`, which puts `omp` in
 `~/.local/bin`. Start `omp` and log in through its own flow. The login lands in
-the agent database under `~/.omp/agent/`.
+the agent database under `~/.omp/agent/`. `ANTHROPIC_API_KEY` or
+`OPENAI_API_KEY` in the server's environment is the API-key alternative, and
+`ANTHROPIC_BASE_URL` sends Anthropic requests to a gateway.
 
 `omp` is a shipped name, and a shipped name always wins over a definition you
 stored with `aether agent add omp`. To launch your own build, register it under
@@ -181,7 +189,9 @@ a name Aether does not ship.
 #### OpenCode
 
 Run `opencode auth login` and pick your provider. The login lands in
-`~/.local/share/opencode/auth.json`. OpenCode settings and plugins live in
+`~/.local/share/opencode/auth.json`. `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` in
+the server's environment is the API-key alternative, with `ANTHROPIC_BASE_URL`
+or `OPENAI_BASE_URL` for a gateway. OpenCode settings and plugins live in
 `~/.config/opencode`, the root `aether config` and **Files** use. That root does
 not follow `XDG_CONFIG_HOME`, `OPENCODE_CONFIG_DIR` or `OPENCODE_CONFIG`.
 
@@ -199,7 +209,8 @@ before any login, so **Login found** only means Copilot has started once.
 `COPILOT_GITHUB_TOKEN` in the server's environment is the API-key alternative
 and takes precedence over a stored login. It must be a fine-grained personal
 access token with the "Copilot Requests" permission. Classic `ghp_` tokens do
-not work.
+not work. For an OpenAI-compatible gateway, set `COPILOT_PROVIDER_BASE_URL` and
+`COPILOT_PROVIDER_API_KEY` instead; Copilot then needs no GitHub login.
 
 Runs set `COPILOT_ALLOW_ALL=true`, which trusts the working directory, so
 Copilot loads that directory's skills, plugins, MCP servers and hooks. Enhanced
@@ -214,8 +225,11 @@ Antigravity CLI
 ([announcement](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/)).
 
 With an API key, put `GEMINI_API_KEY=<key>` in `~/.gemini/.env`, or set it in the
-server's environment. Gemini reads only the first `.env` it finds walking up
-from the run's directory, so a `.env` in the checkout wins over
+server's environment. For a gateway, set `GOOGLE_GEMINI_BASE_URL` the same way
+and put `{"security":{"auth":{"selectedType":"gemini-api-key"}}}` in
+`~/.gemini/settings.json`; without it a Background run fails with
+`Invalid auth method selected.` Gemini reads only the first `.env` it finds
+walking up from the run's directory, so a `.env` in the checkout wins over
 `~/.gemini/.env`.
 
 With Code Assist, run `NO_BROWSER=true gemini`, choose Sign in with Google, open
@@ -248,9 +262,9 @@ is `agy`; pick `antigravity` at launch. The install command is
 `agy` has no login subcommand. Run `agy`, choose Google OAuth or a Google Cloud
 project, open the printed URL and paste the code back. The login lands in
 `~/.gemini/antigravity-cli/antigravity-oauth-token`. For an API key, set
-`GEMINI_API_KEY` and put `"modelProvider":"gemini"` in
-`~/.gemini/antigravity-cli/settings.json`. For Google Cloud application default
-credentials, set `AGY_ADC_AUTH=true`.
+`GEMINI_API_KEY` (and `GOOGLE_GEMINI_BASE_URL` for a gateway) and put
+`"modelProvider":"gemini"` in `~/.gemini/antigravity-cli/settings.json`. For
+Google Cloud application default credentials, set `AGY_ADC_AUTH=true`.
 
 Antigravity has no Enhanced mode, and an Enhanced launch is refused. `agy` has no
 ACP command, and Google's separate `antigravity-acp` package cannot finish its

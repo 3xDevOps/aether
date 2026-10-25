@@ -140,7 +140,7 @@ func TestOmpProfile(t *testing.T) {
 	if !ok {
 		t.Fatal("omp profile missing")
 	}
-	if !slices.Equal(omp.EnvPassthrough, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}) {
+	if !slices.Equal(omp.EnvPassthrough, []string{"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY"}) {
 		t.Errorf("omp env passthrough = %v", omp.EnvPassthrough)
 	}
 	// The credentials live in the agent database, write-ahead log included.
@@ -155,6 +155,25 @@ func TestOmpProfile(t *testing.T) {
 	for _, p := range SetupHarnesses() {
 		if p.Name == "omp" {
 			t.Error("SetupHarnesses() must not offer omp: it runs no local profile scan")
+		}
+	}
+}
+
+// Codex, pi and Cursor read no base-URL variable from the environment.
+func TestGatewayPassthrough(t *testing.T) {
+	for name, want := range map[string][]string{
+		"claude":      {"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"},
+		"omp":         {"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"},
+		"opencode":    {"ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL"},
+		"copilot":     {"COPILOT_PROVIDER_BASE_URL", "COPILOT_PROVIDER_API_KEY"},
+		"gemini":      {"GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"},
+		"antigravity": {"GEMINI_API_KEY", "GOOGLE_GEMINI_BASE_URL"},
+	} {
+		p, _ := Lookup(name)
+		for _, key := range want {
+			if !slices.Contains(p.EnvPassthrough, key) {
+				t.Errorf("%s env passthrough %v missing %q", name, p.EnvPassthrough, key)
+			}
 		}
 	}
 }
