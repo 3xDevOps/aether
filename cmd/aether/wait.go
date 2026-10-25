@@ -18,7 +18,7 @@ import (
 func init() {
 	register(command{
 		name:    "wait",
-		short:   "wait until a run finishes or needs you (exit 0 finished, 1 failed, 3 needs you, 124 timed out)",
+		short:   "wait until a run finishes, needs you or ends its turn (exit 0 finished, 1 failed, 3 needs you, 4 waiting for a message, 124 timed out)",
 		usage:   "aether wait <run-id> [--timeout <duration>] [--json]",
 		example: "aether wait run-d6ay38tj8j --timeout 30m --json",
 		flags:   true,
@@ -30,6 +30,7 @@ const (
 	waitFinished = 0
 	waitFailed   = 1
 	waitNeedsYou = 3
+	waitWaiting  = 4
 	waitTimedOut = 124
 )
 
@@ -132,7 +133,7 @@ func waitRun(c *protocol.Client, w io.Writer, runID string, asJSON bool, changed
 		if err != nil {
 			return err
 		}
-		code, done := waitOutcome(r, items)
+		code, done := waitOutcome(r)
 		timedOut := false
 		if !done {
 			select {
@@ -162,14 +163,18 @@ func waitRun(c *protocol.Client, w io.Writer, runID string, asJSON bool, changed
 			return &exitStatusError{code: code, err: fmt.Errorf("run %s failed", r.ID)}
 		case code == waitNeedsYou:
 			return &exitStatusError{code: code, err: fmt.Errorf("run %s needs you", r.ID)}
+		case code == waitWaiting:
+			return &exitStatusError{code: code, err: fmt.Errorf("run %s ended its turn and waits for a message", r.ID)}
 		}
 		return nil
 	}
 }
 
-// A paused run waits for its resume. A live run whose turn ended with no
-// report waits for a message, so it needs you too.
-func waitOutcome(r protocol.Run, items []protocol.AttentionItem) (int, bool) {
+// A paused run waits for its resume. A run needs you by the rule aether runs
+// --needs-you shares; one whose turn ended with no report waits for a message,
+// which is not a request for a person. Waiting on agents, CI or a process, or
+// a swarm worker's request its integrator answers, keeps the wait going.
+func waitOutcome(r protocol.Run) (int, bool) {
 	status := domain.RunStatus(r.Status)
 	switch {
 	case status == domain.RunFailed || status == domain.RunInterrupted:
@@ -179,18 +184,15 @@ func waitOutcome(r protocol.Run, items []protocol.AttentionItem) (int, bool) {
 	case !status.Live() || r.Paused:
 		return 0, false
 	}
-	for _, it := range items {
-		if it.RunID == r.ID && it.Kind != protocol.AttentionKindReady && it.Kind != protocol.AttentionKindFailed {
-			return waitNeedsYou, true
-		}
-	}
-	switch domain.RunActivity(r.Activity) {
-	case domain.ActivityFinished:
+	switch activity := domain.RunActivity(r.Activity); {
+	case activity == domain.ActivityFinished:
 		return waitFinished, true
-	case domain.ActivityFailed:
+	case activity == domain.ActivityFailed:
 		return waitFailed, true
-	case domain.ActivityNeedsYou, domain.ActivityDisconnected, domain.ActivityWaiting, domain.ActivityIdle:
+	case needsYou(r):
 		return waitNeedsYou, true
+	case activity == domain.ActivityWaiting, activity == domain.ActivityIdle:
+		return waitWaiting, true
 	}
 	return 0, false
 }
@@ -202,18 +204,18 @@ func printWaited(w io.Writer, v runView, r protocol.Run, items []protocol.Attent
 	if _, err := fmt.Fprintln(w, statusLine(v)); err != nil {
 		return err
 	}
-	if code != waitNeedsYou {
-		return nil
-	}
-	for _, it := range items {
-		if it.RunID == r.ID {
-			return printNeeds(w, r.ID, items)
+	switch code {
+	case waitWaiting:
+		_, err := fmt.Fprintf(w, "  aether message %s \"<reply>\"\n", r.ID)
+		return err
+	case waitNeedsYou:
+		for _, it := range items {
+			if it.RunID == r.ID {
+				return printNeeds(w, r.ID, items)
+			}
 		}
+		_, err := fmt.Fprintf(w, "  it waits on another member; aether runs %s shows its state\n", r.ID)
+		return err
 	}
-	next := fmt.Sprintf("  it waits on another member; aether runs %s shows its state", r.ID)
-	if a := domain.RunActivity(r.Activity); a == domain.ActivityWaiting || a == domain.ActivityIdle {
-		next = fmt.Sprintf("  aether message %s \"<reply>\"", r.ID)
-	}
-	_, err := fmt.Fprintln(w, next)
-	return err
+	return nil
 }

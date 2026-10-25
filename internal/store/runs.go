@@ -260,6 +260,8 @@ type RunSummary struct {
 	ID        domain.RunID
 	MemberID  domain.MemberID
 	Status    domain.RunStatus
+	Activity  domain.RunActivity
+	Reason    string
 	Protected bool
 	Task      string
 	TaskBytes int
@@ -270,7 +272,7 @@ type RunSummary struct {
 func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.WorkspaceID, taskBytes int) ([]*RunSummary, error) {
 	placeholders, statuses := liveStatusArgs()
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT id, member_id, status, protected,
+		`SELECT id, member_id, status, activity, reason, protected,
 		     COALESCE(CAST(substr(CAST(task AS BLOB), 1, ?) AS TEXT), ''), length(CAST(task AS BLOB))
 		 FROM runs WHERE workspace_id = ? AND status IN (`+placeholders+`)
 		 ORDER BY max(COALESCE(status_changed_at, created_at), created_at) DESC, rowid DESC`,
@@ -280,7 +282,7 @@ func (d *DB) ListLiveRunSummaries(ctx context.Context, workspace domain.Workspac
 	}
 	return collect(rows, func(row interface{ Scan(...any) error }) (*RunSummary, error) {
 		var r RunSummary
-		return &r, row.Scan(&r.ID, &r.MemberID, &r.Status, &r.Protected, &r.Task, &r.TaskBytes)
+		return &r, row.Scan(&r.ID, &r.MemberID, &r.Status, &r.Activity, &r.Reason, &r.Protected, &r.Task, &r.TaskBytes)
 	})
 }
 

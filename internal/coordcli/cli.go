@@ -184,7 +184,10 @@ in the v3 JSON envelope. --json is optional; output is always JSON.
 peers lists up to 32 runs you may message (peer_total and peers_truncated
 report omissions), each with its state (mission: same swarm;
 active or grace: overlapping edits, with files; workspace: same workspace),
-task summary and, for workspace peers, run_status. A peer you wrote to has
+task summary and what it is doing: activity (working, waiting-agents,
+waiting-ci, waiting-tools, waiting, needs-you, finished, failed or
+disconnected) with its reason, then the raw run_status, where needs-attention
+only means parked. A peer you wrote to has
 last_sent: your newest message to it, sent, delivered, acked or retired. Use
 a peer's run_id with send --to or ask --to. A viewer-owned run has no peers;
 it can only reply to questions it was asked. At the 8-peer cap, only swarm
@@ -478,7 +481,8 @@ current authority; help describes syntax, not permission.
 const skillWorkflow = `Coordination and completion:
 Stay within your assignment. aether-internal status lists the peers you may
 message with state mission (same swarm), active or grace (overlapping edits,
-with files) or workspace (same workspace, with run_status), and each task.
+with files) or workspace (same workspace), each task, and its activity and
+reason; run_status needs-attention only means parked, not needing a person.
 A viewer-owned run has no peers; at the 8-peer cap only swarm peers and
 existing conversations are listed. An overlap notice can appear without a
 matching peer in status; message only listed peers.

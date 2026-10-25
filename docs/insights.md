@@ -38,7 +38,8 @@ none. The sections below the tiles cover only your runs.
 Run counts include only top-level runs: runs that are not part of a swarm. A
 swarm's runs are counted once, as the swarm, so a worker that is retried or an
 integrator that is replaced never adds a run. Two numbers include swarm runs:
-**Total tokens used** and the count of runs waiting for you.
+**Total tokens used** and the count of runs that need you, which follows the
+[Needs you](failure-handling.md#needs-you) rule.
 
 A run counts on the day it finished, even if it started before the 7 days. A
 relaunched run is one run: while it is live again it counts in no finished

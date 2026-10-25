@@ -156,10 +156,13 @@ No route crosses a workspace boundary, and a finished run cannot be messaged.
 Status lists the reachable peers in route order: assignment peers with
 `state: "mission"`, carrying the overlapping files when the radar also
 reports one; radar peers with `state: "active"` or `"grace"`; then workspace
-peers with `state: "workspace"`, their task summary and `run_status`, most
-recently active first. Each run appears once, under its first route, and
-status never lists a run the sender cannot message: finished runs, runs in
-another workspace, every peer of a viewer's run, and, once the sender has
+peers with `state: "workspace"`, most recently active first. Every peer
+carries its task summary, its `activity` (what it is doing) with its
+`reason`, and `run_status`. A `run_status` of `needs-attention` only means the
+agent is parked: read `activity` to tell waiting on agents, CI or a process
+from a request for a person. Each run appears once, under its first route,
+and status never lists a run the sender cannot message: finished runs, runs
+in another workspace, every peer of a viewer's run, and, once the sender has
 reached the peer cap, every radar or workspace run it has no conversation
 with are left out, and `peer_total` counts what remains. A question reply is the
 one correlation exception: `coord.reply` identifies its destination from the
@@ -1698,8 +1701,9 @@ waiting again or declaring completion.
 
 People read reports from the CLI too: `aether timeline` prints one as
 `<outcome>: <summary>`, `aether runs <run-id>` shows the latest, and
-`aether wait <run-id>` returns on a terminal, needs-input or blocked report and
-keeps waiting on a waiting one ([exit codes](quickstart.md#from-a-script-or-agent)).
+`aether wait <run-id>` returns on a terminal report and on a needs-input or
+blocked one (a swarm worker's only when blocked), and keeps waiting on a
+waiting one ([exit codes](quickstart.md#from-a-script-or-agent)).
 
 Before accepting `coord.report`, Aether captures evidence for the run. The
 capture retains a private Git evidence commit and the PTY transcript up to

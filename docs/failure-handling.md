@@ -84,9 +84,12 @@ Any new turn clears the review, and a later success report asks again.
 ### Needs you
 
 One rule decides whether a run needs a person. The **Needs you** list,
-`aether runs --needs-you`, `attention.list`
+`aether runs --needs-you`, `aether wait` exit 3, the Insights count of runs
+that need you, `attention.list`
 ([local-gateway.md](local-gateway.md#methods-for-an-external-assistant)), push
-notifications and the assistant's notices all use it.
+notifications and the assistant's notices all use it. The run status
+`needs-attention` alone does not: it means the agent is parked, which includes
+waiting on agents, CI or a process and a reported success.
 
 | Run | Needs you | Notifies |
 | --- | --- | --- |

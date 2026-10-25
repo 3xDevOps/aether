@@ -256,7 +256,8 @@ aether message <run-id> "<reply>"
 ```
 
 `aether wait` exits 0 when the run finished, 1 when it failed, 3 when it needs
-you and 124 on timeout. `aether runs <run-id>` shows what a run needs, each
+you, 4 when its turn ended without a report and it waits for a message, and
+124 on timeout. `aether runs <run-id>` shows what a run needs, each
 with the command that answers it.
 
 A permission request is the human's: show it with its options, and run the

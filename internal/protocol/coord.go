@@ -166,6 +166,8 @@ type CoordPeer struct {
 	FilesTruncated bool              `json:"files_truncated,omitempty"`
 	State          string            `json:"state"`
 	ExpiresAt      string            `json:"expires_at,omitempty"`
+	Activity       string            `json:"activity,omitempty"`
+	Reason         string            `json:"reason,omitempty"`
 	RunStatus      string            `json:"run_status,omitempty"`
 	LastSent       *CoordSentMessage `json:"last_sent,omitempty"`
 }
