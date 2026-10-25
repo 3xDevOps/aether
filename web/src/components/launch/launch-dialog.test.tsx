@@ -467,6 +467,16 @@ describe('swarm', () => {
     expect(useStore.getState().launchDefaults.claude.mode).toBe('tui')
   })
 
+  it('sends an Enhanced integrator and Enhanced workers for a never-launched agent', async () => {
+    useStore.setState({ launchDefaults: {} })
+    await openSwarm()
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    const params = vi.mocked(api.missionCreate).mock.calls[0][0]
+    expect(params.integrator).toEqual({ account_member_id: alice.id, harness: 'claude', mode: 'acp' })
+    expect(params.execution_choices).toEqual([{ account_member_id: alice.id, harness: 'claude', mode: 'acp' }])
+  })
+
   it('authorizes the remembered Standard integrator and Enhanced workers by default', async () => {
     await openSwarm()
     expect(screen.getByRole('heading', { name: 'New swarm' })).toBeDefined()
