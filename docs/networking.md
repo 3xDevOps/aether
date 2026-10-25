@@ -124,6 +124,7 @@ no tailscaled or you answer no to its tailnet question. You can also
 aether login                        # sign in with GitHub; --json prints the address and code as JSON
 aether link --claim '<claim link>'  # the owner, with the claim link or code aether-server setup printed
 aether link '<invite link>'         # anyone an admin invited, with the link the admin sent
+aether status                       # what this computer is linked to, and the next step
 ```
 
 A bare name such as `my-server` is always an SSH address. Only a server id, a

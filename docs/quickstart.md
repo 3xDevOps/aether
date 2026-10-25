@@ -110,6 +110,13 @@ GitHub, and enter the code on that edge page. Then run `aether link --claim
 It worked if `aether link` ends with `linked to server <server id> through
 edge.onaether.dev as <your name> (admin)`.
 
+`aether status` shows what this computer is linked to, the edge it is signed in
+to, the server and your role, the workspaces, which agents your environment has
+installed and whether their login file is there, and the command for the next
+missing step. `aether status --json` prints the same as one JSON object. It
+exits 1 when the server cannot be reached, after printing what this computer
+holds and the error.
+
 On a tailnet, or to an SSH port you can reach, link by address instead:
 `aether link <server-host>:2222`. On a tailnet the server knows you by your
 tailnet login. Elsewhere it registers your SSH key: `~/.ssh/id_ed25519` (created
