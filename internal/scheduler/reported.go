@@ -231,7 +231,7 @@ func (s *Scheduler) FinishReported(ctx context.Context, run domain.RunID, report
 		return err
 	}
 	if entry.launchMode.Interactive() {
-		return s.recordIdleReportLocked(ctx, entry, reportID, reportedClose(outcome).reason, reportedAt)
+		return outboxFenced(run, reportID, s.recordIdleReportLocked(ctx, entry, reportID, reportedClose(outcome).reason, reportedAt))
 	}
 	if entry.reported == outcome {
 		return nil
@@ -279,12 +279,28 @@ func idleCause(reason string) finishCause {
 	return causeUnattended
 }
 
-// recordIdleReportLocked shares the blocked-report watermark and park machinery
-// with interactive outcomes. No native execution report is synthesized.
-func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervised, id, reason string, at time.Time) error {
-	if entry.killRequested || entry.finalizing || entry.destroyPending ||
-		entry.idleReportID == id || !at.After(entry.idleReportAt) || at.Before(entry.relaunchedAt) {
+// outboxFenced settles an outbox hand-off that can never apply, so the
+// outbox stops retrying it. The agent already has its receipt.
+func outboxFenced(run domain.RunID, id string, err error) error {
+	if errors.Is(err, coord.ErrRunFinished) || errors.Is(err, coord.ErrReportSuperseded) {
+		slog.Info("scheduler: reported outcome no longer applies", "run", run, "report", id, "error", err)
 		return nil
+	}
+	return err
+}
+
+// recordIdleReportLocked shares the blocked-report watermark and park machinery
+// with interactive outcomes. No native execution report is synthesized. Only
+// id's own retry is accepted without effect: the coord receipt guarantees it
+// carries the same inputs.
+func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervised, id, reason string, at time.Time) error {
+	switch {
+	case entry.idleReportID == id:
+		return nil
+	case entry.killRequested || entry.finalizing || entry.destroyPending:
+		return coord.ErrRunFinished
+	case !at.After(entry.idleReportAt) || at.Before(entry.relaunchedAt):
+		return coord.ErrReportSuperseded
 	}
 	old := entry.sidecar()
 	entry.idleReason, entry.idleShown = reason, false
@@ -382,7 +398,7 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 // Same-turn Working callbacks do not erase it; the first resume after it is
 // shown does. The shared watermark fences replays, older reports and relaunches.
 func (s *Scheduler) ReportBlocked(ctx context.Context, run domain.RunID, reportID, summary string, reportedAt time.Time) error {
-	return s.reportIdle(ctx, run, reportID, blockedReasonPrefix+summary, reportedAt, "blocked report", nil)
+	return outboxFenced(run, reportID, s.reportIdle(ctx, run, reportID, blockedReasonPrefix+summary, reportedAt, "blocked report", nil))
 }
 
 // ReportNeedsInput records an agent's question for its user like

@@ -41,6 +41,7 @@ func TestTimelineDetailNamesAgentMail(t *testing.T) {
 		{events.CoordMessagePayload{MessageID: "m1", FromRunID: "r1", ToRunID: "r2", Kind: "question"}, "r1 -> r2 · question"},
 		{events.CoordMessageAckedPayload{MessageID: "m1", ToRunID: "r2"}, "r2 acknowledged m1"},
 		{events.TimelinePayload{Kind: events.TimelineReport, Outcome: "success", Summary: "added the check\nand its test"}, "success: added the check ..."},
+		{events.TimelinePayload{Kind: events.TimelineReport, Outcome: "waiting", WaitingFor: "ci", Summary: "CI on PR 12"}, "waiting for ci: CI on PR 12"},
 	} {
 		raw, err := json.Marshal(tc.payload)
 		if err != nil {

@@ -174,7 +174,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 			"waiting means " + coordhooks.WaitingUse + " The next turn clears it. It takes no evidence_refs. " +
 			"success and failure end the work you own: a worker's success submits its attempt and stops it, an integrator's completes the mission, a Background run has one per launch, and an interactive session stays open for follow-up. " +
 			"blocked means a human must intervene and shows the summary as the Needs you reason at turn end. " +
-			"The shell command `aether-internal skill` lists your role's rules. An explicit stable idempotency_key is required; the server captures evidence before accepting it.",
+			"The shell command `aether-internal skill` lists your role's rules. An explicit idempotency_key is required: choose a fresh one for each new report, waiting and needs-input included, and reuse it only to retry the same report; the same key with another outcome or summary is refused. The server captures evidence for success, failure and blocked before accepting them.",
 		InputSchema: report,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordReportParams) (*mcp.CallToolResult, protocol.CoordReportResult, error) {
 		var out protocol.CoordReportResult

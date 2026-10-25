@@ -11,6 +11,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -42,16 +43,19 @@ type OutcomeSink interface {
 	ReportWaiting(ctx context.Context, run domain.RunID, id, waitingFor, summary string, at time.Time) error
 }
 
-// reportNeedsInput hands the question straight to the scheduler. It is not a
-// durable report: nothing is reserved, no evidence is captured, and the
-// terminal slot stays free. The id is derived from the idempotency key so a
-// retry is fenced by the scheduler.
-func (s *Service) reportNeedsInput(ctx context.Context, run domain.RunID, p protocol.CoordReportParams, question string) (protocol.CoordReportResult, *protocol.Error) {
+// reportState hands a needs-input or waiting report straight to the
+// scheduler: nothing is reserved, no evidence is captured, and the terminal
+// slot stays free. Its receipt binds the idempotency key to the report's
+// inputs before the hand-off, so only a retry of the same report reuses a
+// key; the timeline entry follows the hand-off, so it records only reports
+// that took effect. A retry repeats the hand-off and the entry, both of which
+// are idempotent.
+func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.CoordReportParams, summary string) (protocol.CoordReportResult, *protocol.Error) {
 	const method = protocol.MethodCoordReport
 	if len(p.EvidenceRefs) > 0 {
-		return protocol.CoordReportResult{}, invalidParams(method, "needs-input takes no evidence_refs")
+		return protocol.CoordReportResult{}, invalidParams(method, p.Outcome+" takes no evidence_refs")
 	}
-	if s.cfg.Mission != nil {
+	if p.Outcome == protocol.CoordOutcomeNeedsInput && s.cfg.Mission != nil {
 		assignment, err := s.cfg.Mission.Assignment(ctx, run)
 		if err != nil {
 			return protocol.CoordReportResult{}, missionRPCError(method, err)
@@ -63,36 +67,59 @@ func (s *Service) reportNeedsInput(ctx context.Context, run domain.RunID, p prot
 	if s.cfg.Outcomes == nil {
 		return protocol.CoordReportResult{}, internalError(method, ErrNoOutcomeSink)
 	}
-	id := fmt.Sprintf("needs-input:%s:%s", run, p.IdempotencyKey)
-	if err := s.cfg.Outcomes.ReportNeedsInput(ctx, run, id, reportText(question), time.Now().UTC()); errors.Is(err, ErrCannotAsk) || errors.Is(err, ErrRunFinished) {
-		return protocol.CoordReportResult{}, invalidParams(method, err.Error())
+	self, rpcErr := s.resolveRun(ctx, method, run)
+	if rpcErr != nil {
+		return protocol.CoordReportResult{}, rpcErr
+	}
+	lock := s.reportLock(run)
+	lock.Lock()
+	defer lock.Unlock()
+	if _, err := s.cfg.Mail.GetCoordReportByIdempotency(ctx, run, p.IdempotencyKey); err == nil {
+		return protocol.CoordReportResult{}, reusedKey(p.IdempotencyKey)
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return protocol.CoordReportResult{}, internalError(method, err)
+	}
+	receipt := &store.CoordStateReport{RunID: run, IdempotencyKey: p.IdempotencyKey, Outcome: p.Outcome, WaitingFor: p.WaitingFor, Summary: summary}
+	if _, err := s.cfg.Mail.RecordCoordStateReport(ctx, receipt); errors.Is(err, store.ErrCoordReportIdempotencyConflict) {
+		return protocol.CoordReportResult{}, reusedKey(p.IdempotencyKey)
 	} else if err != nil {
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
-	return protocol.CoordReportResult{
-		Outcome: protocol.CoordOutcomeNeedsInput, Summary: question, NextAction: "answer the agent's question",
-	}, nil
+	id := fmt.Sprintf("%s:%s:%s", p.Outcome, run, p.IdempotencyKey)
+	nextAction := "end your turn; the next prompt or mail resumes you"
+	var err error
+	if p.Outcome == protocol.CoordOutcomeNeedsInput {
+		nextAction = "answer the agent's question"
+		err = s.cfg.Outcomes.ReportNeedsInput(ctx, run, id, reportText(summary), receipt.CreatedAt)
+	} else {
+		err = s.cfg.Outcomes.ReportWaiting(ctx, run, id, p.WaitingFor, reportReason(summary), receipt.CreatedAt)
+	}
+	if err != nil {
+		slog.Info("coord: state report did not take effect", "run", run, "report", id, "error", err)
+		switch {
+		case errors.Is(err, ErrCannotAsk), errors.Is(err, ErrRunFinished):
+			return protocol.CoordReportResult{}, invalidParams(method, err.Error())
+		case errors.Is(err, ErrReportSuperseded):
+			return protocol.CoordReportResult{}, &protocol.Error{Code: protocol.CodeConflict, Message: method + ": " + err.Error()}
+		}
+		return protocol.CoordReportResult{}, internalError(method, err)
+	}
+	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
+		ID: "coord-state-report:" + id, Time: receipt.CreatedAt, WorkspaceID: self.WorkspaceID, RunID: run,
+		Payload: events.TimelinePayload{
+			Kind: events.TimelineReport, ReportID: id, Outcome: p.Outcome, WaitingFor: p.WaitingFor,
+			Summary: summary, NextAction: nextAction,
+		},
+	}); err != nil && !errors.Is(err, events.ErrEventAlreadyExists) {
+		return protocol.CoordReportResult{}, internalError(method, fmt.Errorf("publish report timeline: %w", err))
+	}
+	return protocol.CoordReportResult{Outcome: p.Outcome, Summary: summary, NextAction: nextAction}, nil
 }
 
-// reportWaiting hands the summary straight to the scheduler like
-// reportNeedsInput. Every role may report it.
-func (s *Service) reportWaiting(ctx context.Context, run domain.RunID, p protocol.CoordReportParams, summary string) (protocol.CoordReportResult, *protocol.Error) {
-	const method = protocol.MethodCoordReport
-	if len(p.EvidenceRefs) > 0 {
-		return protocol.CoordReportResult{}, invalidParams(method, "waiting takes no evidence_refs")
-	}
-	if s.cfg.Outcomes == nil {
-		return protocol.CoordReportResult{}, internalError(method, ErrNoOutcomeSink)
-	}
-	id := fmt.Sprintf("waiting:%s:%s", run, p.IdempotencyKey)
-	if err := s.cfg.Outcomes.ReportWaiting(ctx, run, id, p.WaitingFor, reportReason(summary), time.Now().UTC()); errors.Is(err, ErrRunFinished) {
-		return protocol.CoordReportResult{}, invalidParams(method, err.Error())
-	} else if err != nil {
-		return protocol.CoordReportResult{}, internalError(method, err)
-	}
-	return protocol.CoordReportResult{
-		Outcome: protocol.CoordOutcomeWaiting, Summary: summary, NextAction: "end your turn; the next prompt or mail resumes you",
-	}, nil
+// reusedKey refuses a report whose key another report of the run used.
+func reusedKey(key string) *protocol.Error {
+	return &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
+		"%s: idempotency_key %q was used with different report inputs; use a new key for a new report", protocol.MethodCoordReport, key)}
 }
 
 // applyRunOutcome hands a run's report to the scheduler before the

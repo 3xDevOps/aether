@@ -1972,6 +1972,19 @@ CREATE TABLE slack_messages (
 	UNIQUE (channel_id, ts)
 );
 `,
+	// v83: the receipt of each waiting or needs-input report, so a reused
+	// idempotency key with different inputs is refused instead of dropped.
+	`
+CREATE TABLE coord_state_reports (
+	run_id          TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	idempotency_key TEXT NOT NULL,
+	outcome         TEXT NOT NULL CHECK (outcome IN ('needs-input', 'waiting')),
+	waiting_for     TEXT NOT NULL DEFAULT '',
+	summary         TEXT NOT NULL,
+	created_at      INTEGER NOT NULL,
+	PRIMARY KEY (run_id, idempotency_key)
+);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

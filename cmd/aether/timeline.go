@@ -208,6 +208,8 @@ func timelineDetail(ev protocol.Event, name func(string) string) string {
 	case events.TimelinePayload:
 		detail := string(v.Kind)
 		switch {
+		case v.Kind == events.TimelineReport && v.WaitingFor != "":
+			detail = v.Outcome + " for " + v.WaitingFor + ": " + firstLine(v.Summary)
 		case v.Kind == events.TimelineReport:
 			detail = v.Outcome + ": " + firstLine(v.Summary)
 		case v.Kind == events.TimelineHandoff && v.Message != "":
