@@ -380,6 +380,8 @@ var noReplay = map[string]bool{
 	protocol.MethodMemberMergeAccept:      true,
 	protocol.MethodConnectorCode:          true,
 	protocol.MethodConnectorRevoke:        true,
+	protocol.MethodSlackLink:              true,
+	protocol.MethodSlackUnlink:            true,
 
 	protocol.MethodServerUpdate:        true,
 	protocol.MethodServerOwnerTransfer: true,

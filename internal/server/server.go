@@ -479,6 +479,7 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		Git:        s.git,
 		PTY:        s.pty,
 		SSH:        &sshCfg,
+		SSHServer:  func() *sshd.Server { return s.ssh },
 		Control:    s.control,
 		Evidence:   s.evidence,
 		Workspaces: workspaces,

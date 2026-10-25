@@ -4,16 +4,17 @@ import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Code } from '@/components/ui/code'
 import type { Api } from '@/lib/api'
+import type { SlackLinkResult, SlackStatusResult } from '@/lib/types'
 import { errorSentence } from '@/lib/format'
 import { disablePush, enablePush, readPush, testPush, type PushState } from '@/lib/push'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 
-const guide = 'https://github.com/3xDevOps/Aether/blob/main/docs/networking.md'
+const docs = 'https://github.com/3xDevOps/Aether/blob/main/docs'
 
-function Guide({ to, children }: { to: string; children: ReactNode }) {
+function Guide({ page = 'networking', to, children }: { page?: string; to?: string; children: ReactNode }) {
   return (
-    <a href={`${guide}#${to}`} target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">
+    <a href={`${docs}/${page}.md${to ? `#${to}` : ''}`} target="_blank" rel="noreferrer" className="text-accent underline-offset-2 hover:underline">
       {children}
     </a>
   )
@@ -39,6 +40,69 @@ function help(state: PushState | null): ReactNode {
     case 'browser':
       return <>This browser cannot receive push notifications. On a phone, open this dashboard in Chrome or Safari and <Guide to="add-it-to-your-home-screen">add it to your home screen</Guide>.</>
   }
+}
+
+function SlackRow({ client }: { client: Api }) {
+  const [status, setStatus] = useState<SlackStatusResult | null>(null)
+  const [code, setCode] = useState<SlackLinkResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const read = () => client.slackStatus().then(setStatus)
+  useEffect(() => {
+    let live = true
+    client.slackStatus().then(
+      (next) => live && setStatus(next),
+      (err: unknown) => live && setError(errorSentence(err)),
+    )
+    return () => {
+      live = false
+    }
+  }, [client])
+
+  const act = (work: Promise<unknown>) => {
+    setBusy(true)
+    setError(null)
+    work.catch((err: unknown) => setError(errorSentence(err))).finally(() => setBusy(false))
+  }
+  const link = () => act(client.slackLink().then(setCode))
+  const unlink = () => act(client.slackUnlink().then(() => {
+    setCode(null)
+    return read()
+  }))
+
+  const bot = code?.bot || status?.bot || 'the Aether bot'
+  const team = code?.team || status?.team
+  let help: ReactNode = error ? null : 'Checking Slack…'
+  let control: ReactNode
+  if (status && !status.configured) {
+    help = <>This server has no Slack bot. An admin sets one up with <Code>sudo aether-server slack setup</Code>. <Guide page="slack">Slack guide</Guide></>
+  } else if (status?.link) {
+    help = `Linked to Slack user ${status.link.user_id}. Runs that need you arrive as direct messages from ${bot}.`
+    control = <Button size="sm" variant="secondary" disabled={busy} onClick={unlink}>Unlink</Button>
+  } else if (status) {
+    help = 'Get a direct message in Slack when a run needs you, and answer it there.'
+    control = (
+      <div className="flex gap-2">
+        {code && <Button size="sm" variant="secondary" disabled={busy} onClick={() => act(read())}>Check again</Button>}
+        <Button size="sm" variant="secondary" disabled={busy} onClick={link}>{code ? 'New code' : 'Link Slack'}</Button>
+      </div>
+    )
+  }
+
+  return (
+    <SettingRow label="Slack" help={help} control={control}>
+      {status?.configured && !status.connected && status.error && (
+        <Callout tone="failed">The server is not connected to Slack: {status.error}</Callout>
+      )}
+      {code && !status?.link && (
+        <p className="text-ui-sm text-muted">
+          Send this code to {bot} in Slack{team ? ` (${team})` : ''} within 10 minutes: <Code>{code.code}</Code>
+        </p>
+      )}
+      {error && <Callout tone="failed" role="alert">{error}</Callout>}
+    </SettingRow>
+  )
 }
 
 export function NotificationsSection({ client }: { client: Api }) {
@@ -110,6 +174,7 @@ export function NotificationsSection({ client }: { client: Api }) {
         )}
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
       </SettingRow>
+      <SlackRow client={client} />
     </SettingsSection>
   )
 }

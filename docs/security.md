@@ -37,6 +37,7 @@ credentials out of the report.
 | [SSH into a run and port forwarding](#ssh-into-a-run) | Same admission as a run shell. Forwards reach only the run's own loopback. | Sessions are not recorded. Attaching an editor lets the run's agent reach your computer through the editor. |
 | [Edge](#edge-remote-access) | SSH stays end to end. The server decides membership. By default a person approves every new device. | Under `edge-access account`, a taken-over GitHub account or edge admits a device. The edge sees connection metadata. |
 | [Connectors](#chatgpt-and-claude-connectors) | A connector acts as one member through the tools of the scopes they granted, with that member's permissions. | TLS ends at the edge, so a compromised edge sees connector traffic and tokens. |
+| [Slack](#slack) | The bot connects out to Slack and acts as one linked member: it messages runs and answers requests once, with that member's permissions. | Whoever controls the linked Slack account acts as you on your runs. Slack keeps the messages it was sent. |
 | [Coordination](#coordination-between-runs) | Runs message only allowed peers in their workspace. A message grants no control. | Runs in one workspace share a repository and can influence each other through files. |
 | [Team memory](#team-memory) | Only members pin notes into briefs. Notes with secrets are refused. Agents cannot delete. | A note can be wrong or planted. It is data, never an instruction. |
 | [Sysbox](#the-agent-container) | Docker inside a run without the host socket. Container root maps to an unprivileged host user. | Installing it from the dashboard runs a root script on the host. |
@@ -525,6 +526,29 @@ there is no terminal, file, settings or git-writing tool.
   accounts the member may launch on exactly as the member's own launches do.
 - `write` cannot end a live run: `aether_mark_reviewed` completes only a run
   whose agent reported success and awaits review.
+
+## Slack
+
+The [Slack bot](slack.md) acts as the member who linked a Slack account, the
+way a connector does: with that member's role checks, judged by the device
+`aether slack link` ran on, and with audit records naming
+`Slack connector <Slack user id>`.
+
+- It messages runs and answers requests once. It launches, stops and closes
+  nothing, posts in no channel, and never picks an "always" option. A request
+  longer than 600 characters gets no buttons, so a press never decides text
+  Slack cut.
+- Whoever controls the linked Slack account acts as you on your runs.
+  `aether slack unlink`, revoking the device the code was minted on, or
+  removing the member cuts the link off.
+- Linking takes a one-use 40-bit code, valid for 10 minutes, sent to the bot in
+  a direct message.
+- Agent text in its messages is escaped, so it cannot mention anyone or
+  disguise a link.
+- The tokens sit in 0600 files under `<data-dir>/slack`, readable by the server
+  administrator. The app holds `chat:write` and `im:history`, and reads no
+  channel.
+- A link makes 30 actions at once, then one every 2 seconds.
 
 ## Coordination between runs
 

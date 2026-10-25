@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
+import type { SlackStatusResult } from '@/lib/types'
 import { disablePush, enablePush, readPush, testPush, type PushState } from '@/lib/push'
 import { NotificationsSection } from '@/routes/settings/notifications'
 import { useStore } from '@/store'
@@ -15,10 +16,11 @@ vi.mock('@/lib/push', () => ({
 
 const label = 'Notify this device when a run needs me'
 
-function show(state: PushState) {
+function show(state: PushState, slack?: SlackStatusResult) {
   vi.mocked(readPush).mockResolvedValue(state)
   useStore.setState({ capabilities: { gateway: 'server', methods: ['*'], ws: [] } })
   const client = fakeApi()
+  if (slack) vi.mocked(client.slackStatus).mockResolvedValue(slack)
   render(<NotificationsSection client={client} />)
   return client
 }
@@ -49,7 +51,7 @@ describe('notification settings', () => {
     expect(await screen.findByText(reason, { exact: false })).toBeDefined()
     expect(toggle()).toHaveProperty('disabled', true)
     expect(toggle().getAttribute('aria-checked')).toBe('false')
-    const link = screen.queryByRole('link')
+    const link = screen.queryAllByRole('link').find((a) => a.getAttribute('href')?.includes('networking.md'))
     expect(link?.getAttribute('href')).toBe(
       anchor && `https://github.com/3xDevOps/Aether/blob/main/docs/networking.md${anchor}`,
     )
@@ -125,5 +127,52 @@ describe('notification settings', () => {
     await user.click(test)
     await waitFor(() => expect(toggle().getAttribute('aria-checked')).toBe('false'))
     expect(screen.getByRole('alert').textContent).toContain('the push service no longer has this subscription')
+  })
+
+  describe('Slack', () => {
+    const link = { user_id: 'U123', team_id: 'T123', linked_at: '2026-10-25T12:00:00Z' }
+
+    it('points to the admin command when the server has no bot', async () => {
+      show({ kind: 'off' })
+      expect(screen.getByText('Checking Slack…')).toBeDefined()
+      expect(await screen.findByText('sudo aether-server slack setup')).toBeDefined()
+      expect(screen.getByRole('link', { name: 'Slack guide' }).getAttribute('href')).toBe(
+        'https://github.com/3xDevOps/Aether/blob/main/docs/slack.md',
+      )
+      expect(screen.queryByRole('button', { name: 'Link Slack' })).toBeNull()
+    })
+
+    it('shows the code to send the bot, then the link once it is made', async () => {
+      const user = userEvent.setup()
+      const client = show({ kind: 'off' }, { configured: true, connected: true, bot: 'Aether', team: 'Acme' })
+      vi.mocked(client.slackLink).mockResolvedValue({ code: 'K7Q2-M9XD', expires_at: '2026-10-25T12:10:00Z', bot: 'Aether', team: 'Acme' })
+
+      await user.click(await screen.findByRole('button', { name: 'Link Slack' }))
+      expect((await screen.findByText('K7Q2-M9XD')).parentElement?.textContent).toBe(
+        'Send this code to Aether in Slack (Acme) within 10 minutes: K7Q2-M9XD',
+      )
+
+      vi.mocked(client.slackLink).mockResolvedValue({ code: 'P4WN-8RTZ', expires_at: '2026-10-25T12:20:00Z', bot: 'Aether', team: 'Acme' })
+      await user.click(screen.getByRole('button', { name: 'New code' }))
+      expect(await screen.findByText('P4WN-8RTZ')).toBeDefined()
+
+      vi.mocked(client.slackStatus).mockResolvedValue({ configured: true, connected: true, bot: 'Aether', team: 'Acme', link })
+      await user.click(screen.getByRole('button', { name: 'Check again' }))
+      expect(await screen.findByText('Linked to Slack user U123.', { exact: false })).toBeDefined()
+      expect(screen.queryByText('P4WN-8RTZ')).toBeNull()
+    })
+
+    it('unlinks and shows the server error when it is not connected', async () => {
+      const user = userEvent.setup()
+      const client = show({ kind: 'off' }, { configured: true, connected: false, error: 'invalid_auth', link })
+
+      expect((await screen.findByText('Linked to Slack user U123.', { exact: false })).textContent).toContain('the Aether bot')
+      expect(screen.getByText('The server is not connected to Slack: invalid_auth')).toBeDefined()
+
+      vi.mocked(client.slackStatus).mockResolvedValue({ configured: true, connected: false, error: 'invalid_auth' })
+      await user.click(screen.getByRole('button', { name: 'Unlink' }))
+      expect(client.slackUnlink).toHaveBeenCalled()
+      expect(await screen.findByRole('button', { name: 'Link Slack' })).toBeDefined()
+    })
   })
 })

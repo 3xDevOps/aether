@@ -60,6 +60,9 @@ type Services struct {
 	Assistant AssistantService
 	// Push notifies a run's owner on their subscribed devices.
 	Push PushService
+	// Slack is the server's Slack bot, which members link their Slack
+	// accounts to.
+	Slack SlackService
 	// Memory is team memory: notes, pins and the launch brief.
 	Memory MemoryService
 }

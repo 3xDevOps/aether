@@ -69,6 +69,8 @@ func main() {
 		exitOn(edgeCmd(args))
 	case "device":
 		exitOn(deviceCmd(args))
+	case "slack":
+		exitOn(slackCmd(args))
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "aether-server: unknown command %q\n", os.Args[1])
 		usage()
@@ -99,6 +101,7 @@ commands:
   update   [--version <tag>]: replace the server and aether binaries and restart the service
   edge     status | claim-code | trust | leave
   device   approve <code> | review: approve or revoke members' edge devices
+  slack    setup | remove: store or remove the Slack bot's tokens (docs/slack.md)
   version  print the version
 
 serve and install options, which are also the config file keys:
