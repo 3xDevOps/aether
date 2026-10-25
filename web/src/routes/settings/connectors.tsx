@@ -47,6 +47,7 @@ function Steps({ code }: { code: ConnectorCode }) {
           <li>Paste the URL and select <strong>Connect</strong>.</li>
           <li>On the page that opens, paste the code, choose scopes and select <strong>Allow</strong>.</li>
         </ol>
+        <p className="text-muted">On Team and Enterprise, an Owner adds the URL under <strong>Organization settings → Connectors</strong>; you then select <strong>Connect</strong> on it and paste the code.</p>
       </div>
     </div>
   )
@@ -54,7 +55,7 @@ function Steps({ code }: { code: ConnectorCode }) {
 
 export function ConnectorsSection({ client }: { client: Api }) {
   const [connectors, setConnectors] = useState<Connector[] | null>(null)
-  const [code, setCode] = useState<ConnectorCode | null>(null)
+  const [attempt, setAttempt] = useState<{ code: ConnectorCode; known: Set<string> } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [revoking, setRevoking] = useState<Connector | null>(null)
@@ -73,28 +74,41 @@ export function ConnectorsSection({ client }: { client: Api }) {
   }, [read])
 
   useEffect(() => {
-    if (!code || connectors === null) return
-    const known = new Set(connectors.map((c) => c.id))
+    if (!attempt) return
+    let live = true
+    let polling = false
+    const expiry = setTimeout(() => setAttempt(null), Date.parse(attempt.code.expires_at) - Date.now())
     const timer = setInterval(() => {
-      if (Date.parse(code.expires_at) <= Date.now()) {
-        setCode(null)
-        return
-      }
+      if (polling) return
+      polling = true
       read().then((next) => {
-        const added = next.find((c) => !known.has(c.id))
-        if (!added) return
+        const added = next.find((c) => !attempt.known.has(c.id))
+        if (!live || !added) return
         setConnectors(next)
-        setCode(null)
+        setAttempt(null)
         toast.success(`${label(added)} connected`)
-      }, () => {})
+      }, () => {}).finally(() => {
+        polling = false
+      })
     }, pollMs)
-    return () => clearInterval(timer)
-  }, [code, connectors, read])
+    return () => {
+      live = false
+      clearTimeout(expiry)
+      clearInterval(timer)
+    }
+  }, [attempt, read])
 
   const mint = () => {
     setBusy(true)
     setError(null)
-    client.connectorCode().then(setCode, (err: unknown) => setError(errorSentence(err))).finally(() => setBusy(false))
+    read()
+      .then(async (fresh) => {
+        setConnectors(fresh)
+        const code = await client.connectorCode()
+        setAttempt({ code, known: new Set(fresh.map((c) => c.id)) })
+      })
+      .catch((err: unknown) => setError(errorSentence(err)))
+      .finally(() => setBusy(false))
   }
 
   return (
@@ -102,9 +116,9 @@ export function ConnectorsSection({ client }: { client: Api }) {
       <SettingRow
         label="Connect ChatGPT or Claude"
         help={<>Launch runs, see what needs you and answer agents from a chat. The connector acts as you. <Link href="https://github.com/3xDevOps/Aether/blob/main/docs/connectors.md">Connector guide</Link></>}
-        control={<Button size="sm" variant="secondary" disabled={busy} onClick={mint}>{code ? 'New code' : 'Get a code'}</Button>}
+        control={<Button size="sm" variant="secondary" disabled={busy} onClick={mint}>{attempt ? 'New code' : 'Get a code'}</Button>}
       >
-        {code && <Steps code={code} />}
+        {attempt && <Steps code={attempt.code} />}
         {error && <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{error}</Callout>}
       </SettingRow>
       {connectors?.map((c) => (

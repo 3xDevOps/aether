@@ -16,7 +16,10 @@ const chatgpt: Connector = {
   created_at: '2026-10-18T10:00:00Z',
 }
 
-afterEach(() => vi.useRealTimers())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.clearAllMocks()
+})
 
 it('lists connectors and revokes one after confirming', async () => {
   const client = fakeApi({
@@ -35,7 +38,7 @@ it('lists connectors and revokes one after confirming', async () => {
 it('shows the URL and code, then notices the new connector', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
   const client = fakeApi({
-    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [] }).mockResolvedValue({ connectors: [chatgpt] }),
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [] }).mockResolvedValueOnce({ connectors: [] }).mockResolvedValue({ connectors: [chatgpt] }),
   })
   render(<ConnectorsSection client={client} />)
   await waitFor(() => expect(client.connectorList).toHaveBeenCalledTimes(1))
@@ -47,6 +50,23 @@ it('shows the URL and code, then notices the new connector', async () => {
   await waitFor(() => expect(toast.success).toHaveBeenCalledWith('ChatGPT (chatgpt.com) connected'))
   expect(screen.queryByText('ABCD-EFGH')).toBeNull()
   expect(screen.getByText('ChatGPT (chatgpt.com)')).toBeTruthy()
+})
+
+it('counts a connector added before the code as already there', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const client = fakeApi({
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [] }).mockResolvedValue({ connectors: [chatgpt] }),
+  })
+  render(<ConnectorsSection client={client} />)
+  await waitFor(() => expect(client.connectorList).toHaveBeenCalledTimes(1))
+  fireEvent.click(screen.getByRole('button', { name: 'Get a code' }))
+  expect(await screen.findByText('ABCD-EFGH')).toBeTruthy()
+  expect(screen.getByText('ChatGPT (chatgpt.com)')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(6000)
+  expect(toast.success).not.toHaveBeenCalled()
+  expect(screen.getByText('ABCD-EFGH')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(600_000)
+  await waitFor(() => expect(screen.queryByText('ABCD-EFGH')).toBeNull())
 })
 
 it('shows the server error when no code can be minted', async () => {
