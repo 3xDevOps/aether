@@ -191,6 +191,9 @@ func (s *Server) describeAgent(member, account domain.MemberID, profile harness.
 		DefaultMode:     string(domain.LaunchTUI),
 		EnhancedDefault: profile.Capabilities.EnhancedDefault,
 	}
+	if err := s.cfg.Runs.SwarmRefusal(profile.Name, domain.LaunchTUI); err != nil {
+		info.SwarmStandardRefusal = err.Error()
+	}
 	if source == "member" {
 		info.Glyph = "custom"
 	} else {

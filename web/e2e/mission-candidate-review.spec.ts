@@ -29,9 +29,10 @@ test('launches a mission, controls a worker, and shows its candidate without a h
   await expect(launch).toBeVisible()
   await launch.getByLabel('Objective').fill(missionObjective)
   await expect(launch.getByRole('radio', { name: /^Claude Code/ })).toBeChecked()
-  // The worker the fixture starts below needs a Background choice, the
-  // default worker mode.
-  await expect(launch.getByRole('radiogroup', { name: 'Worker mode' }).getByRole('radio', { name: 'Background' })).toBeChecked()
+  // The worker the fixture starts below needs a Background choice.
+  const background = launch.getByRole('radiogroup', { name: 'Worker mode' }).getByRole('radio', { name: 'Background' })
+  await background.click()
+  await expect(background).toBeChecked()
   await launch.getByRole('checkbox', { name: /Claude Code/ }).check()
   await launch.getByRole('button', { name: 'Create swarm', exact: true }).click()
   await expect(page.getByText('Swarm created', { exact: true })).toBeVisible()

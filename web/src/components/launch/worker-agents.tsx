@@ -1,5 +1,5 @@
 import { launchable } from '@/components/launch/agent-picker'
-import { agentLabel, modeRefusal } from '@/components/launch/modes'
+import { agentLabel, modeLabel, modes, type Refusal, swarmRefusal } from '@/components/launch/modes'
 import { ModelPicker } from '@/components/launch/model-picker'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Callout } from '@/components/ui/callout'
@@ -12,6 +12,22 @@ export type WorkerChoice = { account_member_id: string; harness: string; model?:
 
 export function sameWorker(a: WorkerChoice, b: WorkerChoice): boolean {
   return a.account_member_id === b.account_member_id && a.harness === b.harness && (a.model ?? '') === (b.model ?? '')
+}
+
+/** The mode a worker of `agent` runs in: `chosen` if it can, else the first of Enhanced, Standard and Background it can. */
+export function workerMode(agent: AgentInfo | undefined, name: string, chosen: LaunchMode): LaunchMode {
+  return ([chosen, 'acp', 'tui'] as const).find((mode) => !swarmRefusal(agent, name, mode)) ?? 'headless'
+}
+
+/** The modes no chosen worker can run in, each with every worker's reason. */
+export function workerRefusals(choices: WorkerChoice[], agentsByAccount: Record<string, AgentInfo[]> | null): Partial<Record<LaunchMode, Refusal>> {
+  if (!choices.length) return {}
+  return Object.fromEntries(modes.flatMap(({ value }) => {
+    const each = choices.map((choice) => swarmRefusal(agentsByAccount?.[choice.account_member_id]?.find((item) => item.name === choice.harness), choice.harness, value))
+    if (each.some((refusal) => refusal === null)) return []
+    const refused = each as Refusal[]
+    return [[value, { reason: [...new Set(refused.map((refusal) => refusal.reason))].join(' '), short: refused[0].short, setUp: refused.some((refusal) => refusal.setUp) }]]
+  }))
 }
 
 function refusal(member: Member, agent: AgentInfo): string | null {
@@ -57,7 +73,8 @@ export function WorkerAgents({
             const picked = choices.find((item) => item.account_member_id === member.id && item.harness === agent.name)
             const checked = picked !== undefined
             const refused = refusal(member, agent)
-            const fallback = checked ? modeRefusal(agent, agent.name, mode) : null
+            const runs = checked ? workerMode(agent, agent.name, mode) : mode
+            const fallback = runs === mode ? null : swarmRefusal(agent, agent.name, mode)
             const name = accounts.length > 1 ? `${member.display_name} · ${agentLabel(agent, agent.name)}` : agentLabel(agent, agent.name)
             return (
               <li key={`${member.id}:${agent.name}`}>
@@ -67,7 +84,7 @@ export function WorkerAgents({
                   <span className="shrink-0">{name}</span>
                   {(refused || fallback) && (
                     <span className="ml-auto min-w-0 py-1 text-right text-ui-sm break-words text-muted">
-                      {refused ?? `Runs Standard: ${fallback?.short}`}
+                      {refused ?? `Runs ${modeLabel(runs)}: ${fallback?.short}`}
                     </span>
                   )}
                 </label>

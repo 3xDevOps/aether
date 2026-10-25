@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -79,6 +80,16 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	}
 	if !found {
 		return nil, errors.New("mission: worker choice is not authorized")
+	}
+	if wakeErr := s.swarmRefusal("worker", choice.Harness, choice.Mode); wakeErr != nil {
+		attempts, listErr := s.cfg.Missions.ListAttempts(ctx, m.ID, task.ID)
+		if listErr != nil {
+			return nil, listErr
+		}
+		// A retry of a start reserved before this refusal replays it.
+		if !slices.ContainsFunc(attempts, func(a *domain.Attempt) bool { return a.DispatchKey == p.DispatchKey }) {
+			return nil, wakeErr
+		}
 	}
 	if p.ExpectedIntegratorGeneration != 0 && p.ExpectedIntegratorGeneration != m.IntegratorGeneration {
 		return nil, fmt.Errorf("%w: stale integrator authority", store.ErrMissionStale)

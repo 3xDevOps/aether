@@ -463,20 +463,61 @@ describe('swarm', () => {
     expect(useStore.getState().launchDefaults.claude.mode).toBe('tui')
   })
 
-  it('authorizes a Standard integrator and Background workers by default', async () => {
+  it('authorizes the remembered Standard integrator and Enhanced workers by default', async () => {
     await openSwarm()
     expect(screen.getByRole('heading', { name: 'New swarm' })).toBeDefined()
     expect(screen.getByText('The integrator plans the work, starts a worker run per task, and combines the results.')).toBeDefined()
     expect(screen.queryByRole('radiogroup', { name: 'Mode' })).toBeNull()
-    expect(workerMode('Background').getAttribute('aria-checked')).toBe('true')
+    expect(workerMode('Enhanced').getAttribute('aria-checked')).toBe('true')
 
     await create('coordinate checkout work')
     await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
     const params = vi.mocked(api.missionCreate).mock.calls[0][0]
     expect(params.integrator).toEqual({ account_member_id: alice.id, harness: 'claude', mode: 'tui' })
     expect(params.execution_choices).toEqual([
-      { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+      { account_member_id: alice.id, harness: 'claude', mode: 'acp' },
       { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+    ])
+  })
+
+  it('disables Standard for an agent Aether cannot wake, with the reason in a tooltip', async () => {
+    const reason = 'codex in Standard mode has no idle wake; start it in Enhanced'
+    const codex = (over: Parameters<typeof agentInfo>[0] = {}) =>
+      agentInfo({ name: 'codex', display_name: 'Codex', enhanced: 'adapter', enhanced_installed: true, swarm_standard_refusal: reason, ...over })
+    vi.mocked(api.agentList).mockResolvedValue([claude(), codex(), codex({ name: 'antigravity', display_name: 'Antigravity', enhanced: 'none', enhanced_installed: false })])
+    useStore.setState({ launchDefaults: { codex: { mode: 'tui', at: 2 } } })
+    render(<LaunchDialog />)
+    await waitFor(() => expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true'))
+    const integratorMode = (name: string) =>
+      within(screen.getByRole('radiogroup', { name: 'Integrator mode' })).getByRole('radio', { name }) as HTMLButtonElement
+    expect(integratorMode('Standard').disabled).toBe(true)
+    expect(integratorMode('Enhanced').getAttribute('aria-checked')).toBe('true')
+    await userEvent.hover(integratorMode('Standard').parentElement!)
+    expect((await screen.findByRole('tooltip')).textContent).toBe(reason)
+
+    const worker = (name: RegExp) => screen.getByRole('checkbox', { name })
+    await waitFor(() => expect(worker(/^Claude Code/).getAttribute('aria-checked')).toBe('true'))
+    fireEvent.click(worker(/^Codex/))
+    fireEvent.click(worker(/^Claude Code/))
+    expect(workerMode('Standard').hasAttribute('disabled')).toBe(true)
+    fireEvent.click(worker(/^Claude Code/))
+    fireEvent.click(worker(/^Antigravity/))
+    await userEvent.click(workerMode('Standard'))
+    expect(worker(/^Codex/).closest('label')?.textContent).toBe('CodexRuns Enhanced: no idle wake in Standard')
+    expect(worker(/^Antigravity/).closest('label')?.textContent).toBe('AntigravityRuns Background: no idle wake in Standard')
+
+    setObjective('coordinate checkout work')
+    await userEvent.click(agentRow(/^Antigravity/))
+    for (const name of ['Standard', 'Enhanced', 'Background']) expect(integratorMode(name).disabled).toBe(true)
+    expect(createButton().disabled).toBe(true)
+
+    await userEvent.click(agentRow(/^Codex/))
+    await create('coordinate checkout work')
+    await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(api.missionCreate).mock.calls[0][0].execution_choices).toEqual([
+      { account_member_id: alice.id, harness: 'antigravity', mode: 'headless' },
+      { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
+      { account_member_id: alice.id, harness: 'codex', mode: 'acp' },
     ])
   })
 
@@ -602,9 +643,9 @@ describe('swarm', () => {
     expect(second.idempotency_key).toBe(first.idempotency_key)
     expect(second.execution_choices).toEqual(first.execution_choices)
     expect(first.execution_choices).toEqual([
-      { account_member_id: alice.id, harness: 'claude', mode: 'headless' },
+      { account_member_id: alice.id, harness: 'claude', mode: 'acp' },
       { account_member_id: alice.id, harness: 'claude', mode: 'tui' },
-      { account_member_id: alice.id, harness: 'codex', mode: 'headless' },
+      { account_member_id: alice.id, harness: 'codex', mode: 'tui' },
     ])
   })
 

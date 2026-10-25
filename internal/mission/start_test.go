@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -33,6 +34,10 @@ func (l *recordingLauncher) LaunchMission(ctx context.Context, req MissionLaunch
 		return nil, err
 	}
 	return r, nil
+}
+
+func (l *recordingLauncher) SwarmRefusal(agent string, mode domain.LaunchMode) error {
+	return harness.SwarmRefusal(agent, mode)
 }
 
 type taskSpec struct {

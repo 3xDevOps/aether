@@ -578,7 +578,8 @@ mounts.
   and Enhanced ([Switching a running agent](enhanced-runs.md#switching-a-running-agent)).
 - Codex subagents do not nest in the Enhanced timeline.
 - No idle wake exists for Codex, Copilot, Gemini or Cursor, and Antigravity has
-  no hooks at all.
+  no hooks at all. A [swarm](teams.md#swarms) refuses them Standard, so they run
+  Enhanced there, or Background as workers.
 - Only Claude Code and Codex show subscription usage and can move to another
   account on a usage limit.
 - Sharing an `omp` account shares the whole `~/.omp/agent` directory. oh-my-pi

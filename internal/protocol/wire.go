@@ -805,6 +805,9 @@ type AgentInfo struct {
 	DefaultMode string `json:"default_mode"`
 	// EnhancedDefault: the agent prefers enhanced mode, installed or not.
 	EnhancedDefault bool `json:"enhanced_default"`
+	// SwarmStandardRefusal is why a swarm integrator or worker cannot run the
+	// agent in Standard mode; empty when it can.
+	SwarmStandardRefusal string `json:"swarm_standard_refusal,omitempty"`
 	// Empty for member-owned custom agents.
 	InstallScript string `json:"install_script,omitempty"`
 	// InstallScript followed by the pinned adapter's install.

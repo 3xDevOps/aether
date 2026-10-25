@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   AlertDialog,
@@ -18,9 +18,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { useReturnFocus } from '@/lib/hooks'
-import { agentLabel } from '@/components/launch/modes'
+import { ModeControl } from '@/components/launch/mode-control'
+import { agentLabel, integratorModes } from '@/components/launch/modes'
 import { memberName } from '@/lib/member-name'
-import type { AgentInfo, Mission, MissionExecutionChoice } from '@/lib/types'
+import type { AgentInfo, LaunchMode, Mission, MissionExecutionChoice } from '@/lib/types'
 import { useStore } from '@/store'
 
 function agentKey(choice: MissionExecutionChoice): string {
@@ -33,7 +34,7 @@ function newKey(): string {
     : `mission-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
-/** mission.replace-integrator takes any execution choice's account and agent and runs it Standard. */
+/** mission.replace-integrator takes any execution choice's account and agent, in Standard or Enhanced. */
 export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced }: {
   mission: Mission
   agents: AgentInfo[] | null
@@ -43,6 +44,8 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
 }) {
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
+  const navigate = useStore((s) => s.navigate)
+  const ownID = useStore((s) => s.info?.member?.id)
   const choices = mission.execution_choices.filter(
     (choice, index, all) =>
       all.findIndex((other) => other.account_member_id === choice.account_member_id && agentKey(other) === agentKey(choice)) === index,
@@ -56,7 +59,22 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
   const [agent, setAgent] = useState(current ? agentKey(current) : '')
   const options = choices.filter((choice) => choice.account_member_id === account)
   const chosen = options.find((choice) => agentKey(choice) === agent)
+  const [preferredMode, setPreferredMode] = useState<LaunchMode>('acp')
   const [error, setError] = useState<string | null>(null)
+  const [accountAgents, setAccountAgents] = useState<{ account: string; agents?: AgentInfo[]; error?: string } | null>(null)
+  const [listAttempt, setListAttempt] = useState(0)
+  useEffect(() => {
+    let live = true
+    setAccountAgents(null)
+    client.agentList(account === ownID ? undefined : account).then(
+      (list) => { if (live) setAccountAgents({ account, agents: list }) },
+      (err: unknown) => { if (live) setAccountAgents({ account, error: message(err) }) },
+    )
+    return () => { live = false }
+  }, [account, ownID, client, listAttempt])
+  const looked = accountAgents?.account === account ? accountAgents : null
+  const listed = looked?.agents ?? null
+  const { refused, mode } = integratorModes(listed?.find((info) => info.name === chosen?.harness), chosen?.harness ?? '', preferredMode)
   const [saving, setSaving] = useState(false)
   const returnFocus = useReturnFocus()
   const key = useRef(newKey())
@@ -70,13 +88,14 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
   }
 
   const submit = async () => {
+    if (!chosen || !listed || !mode) return
     setSaving(true)
     setError(null)
     try {
       await client.missionReplaceIntegrator({
         mission_id: mission.id,
         expected_generation: mission.integrator_generation,
-        integrator: { account_member_id: account, harness: chosen?.harness ?? '', mode: 'tui', ...(chosen?.model ? { model: chosen.model } : {}) },
+        integrator: { account_member_id: account, harness: chosen.harness, mode, ...(chosen.model ? { model: chosen.model } : {}) },
         idempotency_key: key.current,
       })
       toast.success('Integrator replaced')
@@ -93,7 +112,7 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
         <DialogHeader>
           <DialogTitle>Replace integrator</DialogTitle>
           <DialogDescription>
-            Starts a new integrator run in Standard from one of this swarm&apos;s agents. It picks up the tasks, workers and agent messages where the old one stopped.
+            Starts a new integrator run from one of this swarm&apos;s agents. It picks up the tasks, workers and agent messages where the old one stopped.
           </DialogDescription>
         </DialogHeader>
         <FormField label="Account">
@@ -120,10 +139,16 @@ export function ReplaceIntegrator({ mission, agents, client, onClose, onReplaced
             </SelectContent>
           </Select>
         </FormField>
+        {looked?.error && (
+          <Callout tone="failed" role="alert" actions={<Button type="button" size="sm" onClick={() => setListAttempt((n) => n + 1)}>Retry</Button>}>
+            Listing {memberName({ members, mergedInto }, account)}&apos;s agents failed, so the integrator&apos;s mode cannot be chosen: {looked.error}
+          </Callout>
+        )}
+        {chosen && listed && <ModeControl label="Mode" value={mode} onChange={setPreferredMode} refused={refused} onSetUp={() => { onClose(); navigate('agents') }} />}
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => void submit()} disabled={saving || !account || !chosen}>Replace</Button>
+          <Button onClick={() => void submit()} disabled={saving || !account || !chosen || !listed || !mode}>Replace</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

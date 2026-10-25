@@ -1198,14 +1198,23 @@ account, agent, mode, and model among the execution choices (the run may
 still launch on another account; see the usage fallback note under `worker
 start`); `mission.replace-integrator` accepts any listed account, agent and
 model in Standard or Enhanced, so a swarm whose choices are all Background can
-still get an interactive integrator; `aether swarm replace-integrator` always
-asks for Standard (`tui`) and sends the model `--model` names, empty for the
-agent's default. Both refuse, with `-32602` and `integrator harness <name> cannot
-launch in <mode> mode: <cause>`, an agent the integrator's run owner cannot
+still get an interactive integrator; `aether swarm replace-integrator` sends
+`--mode`, Enhanced by default where the agent's Enhanced mode is installed, and
+the model `--model` names, empty for the agent's default. Both refuse, with
+`-32602` and `integrator harness <name> cannot launch in <mode> mode: <cause>`,
+an agent the integrator's run owner cannot
 start in that mode on that account, such as one whose definition the run owner no
 longer has, or the run owner's own member-defined agent on another
 member's account, where it never runs. Workers may
-still run in Background. If the integrator's
+still run in Background. `mission.create`, `mission.replace-integrator` and
+`worker.start` refuse, with `-32602`, a shipped agent in Standard that has no
+idle wake, since its mail would wait unread:
+`integrator codex in Standard mode has no idle wake; start it in Enhanced`, or
+`worker ...` for a worker choice. An agent run from a definition, including an
+`--agent-definitions` entry under a shipped name, is not judged. A retry of a
+call accepted before this rule replays its stored result, and the scheduler
+refuses to launch any such run that was reserved but never started. If the
+integrator's
 agent has already exited, the line lands in the shell left on its terminal
 and is read as a command line there.
 

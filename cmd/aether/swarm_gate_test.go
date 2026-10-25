@@ -67,17 +67,22 @@ func TestSwarmCancelPrintsPhaseOrRefusal(t *testing.T) {
 
 func TestSwarmReplaceIntegratorSendsTheShownGeneration(t *testing.T) {
 	replace := &fakeReply{result: protocol.MissionReplaceIntegratorResult{Mission: protocol.Mission{ID: "m1", Phase: "planning"}, RunID: "r9"}}
+	listed := &fakeReply{result: protocol.AgentListResult{Agents: []protocol.AgentInfo{{Name: "codex", Enhanced: "adapter", EnhancedInstalled: true}}}}
 	c := fakeControlMethods(t, map[string]*fakeReply{
 		protocol.MethodMissionShow:              {result: shownSwarm},
+		protocol.MethodAgentList:                listed,
 		protocol.MethodMissionReplaceIntegrator: replace,
 	})
 	var out bytes.Buffer
-	if err := replaceSwarmIntegrator(c, &out, "m1", "codex", "gpt-5-codex", "", "key-1"); err != nil {
+	if err := replaceSwarmIntegrator(c, &out, "m1", protocol.MissionIntegrator{Harness: "codex", Model: "gpt-5-codex"}, "key-1"); err != nil {
 		t.Fatalf("replaceSwarmIntegrator: %v", err)
+	}
+	if got, wantJSON := string(listed.got), mustJSON(t, protocol.AgentListParams{AccountMemberID: "mem1"}); got != wantJSON {
+		t.Errorf("agent.list params = %s, want the shown integrator's account %s", got, wantJSON)
 	}
 	want := protocol.MissionReplaceIntegratorParams{
 		MissionID: "m1", ExpectedGeneration: 2,
-		Integrator:     protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "codex", Mode: "tui", Model: "gpt-5-codex"},
+		Integrator:     protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "codex", Mode: "acp", Model: "gpt-5-codex"},
 		IdempotencyKey: "key-1",
 	}
 	if got, wantJSON := string(replace.got), mustJSON(t, want); got != wantJSON {
@@ -87,15 +92,15 @@ func TestSwarmReplaceIntegratorSendsTheShownGeneration(t *testing.T) {
 		t.Errorf("output = %q, want %q", out.String(), wantOut)
 	}
 
-	if err := replaceSwarmIntegrator(c, &out, "m1", "codex", "", "mem2", "key-2"); err != nil {
-		t.Fatalf("replaceSwarmIntegrator with --account: %v", err)
+	if err := replaceSwarmIntegrator(c, &out, "m1", protocol.MissionIntegrator{AccountMemberID: "mem2", Harness: "codex", Mode: "tui"}, "key-2"); err != nil {
+		t.Fatalf("replaceSwarmIntegrator with --account and --mode: %v", err)
 	}
 	var sent protocol.MissionReplaceIntegratorParams
 	if err := json.Unmarshal(replace.got, &sent); err != nil {
 		t.Fatal(err)
 	}
-	if sent.Integrator.AccountMemberID != "mem2" {
-		t.Errorf("--account sent %q, want mem2", sent.Integrator.AccountMemberID)
+	if sent.Integrator.AccountMemberID != "mem2" || sent.Integrator.Mode != "tui" {
+		t.Errorf("--account mem2 --mode standard sent %+v", sent.Integrator)
 	}
 }
 
