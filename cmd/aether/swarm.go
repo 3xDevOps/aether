@@ -182,18 +182,7 @@ func swarmModes(c *protocol.Client, account string) (func(agent string) (string,
 	if err := c.Call(protocol.MethodAgentList, protocol.AgentListParams{AccountMemberID: account}, &listed); err != nil {
 		return nil, fmt.Errorf("list agents to choose their modes (or pass every mode): %w", err)
 	}
-	return func(agent string) (string, error) {
-		for _, a := range listed.Agents {
-			switch {
-			case a.Name != agent:
-			case a.EnhancedInstalled:
-				return string(domain.LaunchACP), nil
-			case a.SwarmStandardRefusal != "" && a.Enhanced != "none":
-				return "", fmt.Errorf("%s, which is not installed: aether agent add %s --enhanced", a.SwarmStandardRefusal, agent)
-			}
-		}
-		return string(domain.LaunchTUI), nil
-	}, nil
+	return func(agent string) (string, error) { return protocol.SwarmMode(listed.Agents, agent) }, nil
 }
 
 func stdinText(value, what string, stdin io.Reader) (string, error) {
