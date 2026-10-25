@@ -59,7 +59,7 @@ export function RemoteAccessSection({ client }: { client: Api }) {
   const local = caps.hasLocal('edge.status') && caps.hasLocal('edge.login') && caps.hasLocal('edge.claim')
   return (
     <SettingsSection title="Edge" id="edge">
-      <SettingRow label="Edge" help={edge.edge_url || 'Off'} />
+      <SettingRow label="Edge URL" help={edge.edge_url || 'Off'} />
       <SettingRow label="Server id">
         <CopyableCommand command={edge.server_id} />
       </SettingRow>

@@ -4,21 +4,22 @@ import { Button } from '@/components/ui/button'
 import { SectionLabel } from '@/components/ui/section-label'
 import { cn } from '@/lib/utils'
 
-export function SettingsSection({ title, id: sectionID, scope, tone, children }: {
+export function SettingsSection({ title, id: sectionID, heading = 'h3', scope, tone, children }: {
   title: string
   id?: string
+  heading?: 'h2' | 'h3'
   scope?: string
   tone?: 'danger'
   children: ReactNode
 }) {
   const id = useId()
   return (
-    <section id={sectionID} aria-labelledby={id} className="flex min-w-0 scroll-mt-4 flex-col gap-2">
+    <section id={sectionID} aria-labelledby={id} className="group/section flex min-w-0 scroll-mt-4 flex-col gap-2">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <SectionLabel as="h3" id={id} tabIndex={-1} className="outline-none">{title}</SectionLabel>
+        <SectionLabel as={heading} id={id} tabIndex={-1} className="outline-none">{title}</SectionLabel>
         {scope && <Badge>{scope}</Badge>}
       </div>
-      <div className={cn('flex min-w-0 flex-col divide-y divide-seam rounded-panel border', tone === 'danger' ? 'border-state-failed/40' : 'border-seam')}>{children}</div>
+      <div className={cn('flex min-w-0 flex-col divide-y divide-seam rounded-panel border transition-colors group-data-highlight/section:bg-selection motion-reduce:transition-none', tone === 'danger' ? 'border-state-failed/40' : 'border-seam')}>{children}</div>
     </section>
   )
 }

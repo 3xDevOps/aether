@@ -1,6 +1,3 @@
-// Settings on a phone: the category list is the page, a category opens on
-// its own with a way back, and the browser's Back button agrees with it.
-
 import { expect, test } from './mobile'
 
 test('a phone moves between the settings list and one category, and search opens a setting', async ({ page, aether }) => {
@@ -23,7 +20,7 @@ test('a phone moves between the settings list and one category, and search opens
   await page.goBack()
   await expect(page.getByRole('heading', { level: 2, name: 'Notifications' })).toBeVisible()
   await page.goBack()
-  await expect(nav).toBeVisible()
+  await expect(nav.getByRole('button', { name: 'Notifications', exact: true })).toBeFocused()
 
   await nav.getByRole('searchbox', { name: 'Search settings' }).fill('slack')
   await expect(nav.getByRole('status')).toHaveText('1 setting')

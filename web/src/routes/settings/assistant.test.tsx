@@ -93,7 +93,7 @@ describe('assistant settings', () => {
 
   it('shows a failed read verbatim and reads again on Try again', async () => {
     const user = userEvent.setup()
-    const client = show(['*'], {
+    show(['*'], {
       assistantSettings: vi.fn().mockRejectedValueOnce(new Error('database is locked')).mockResolvedValue({ auto_approve: true, suggest_auto_approve: false, suggestion_off: false, share_view: true }),
     })
     expect((await screen.findByRole('alert')).textContent).toContain('database is locked')

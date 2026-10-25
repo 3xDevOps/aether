@@ -101,7 +101,7 @@ function LinkRows({ client }: { client: Api }) {
         )}
       >
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
-        {error && !link && <TryAgain onClick={() => { setError(null); setAttempt((n) => n + 1) }} />}
+        {error && <TryAgain onClick={() => { setError(null); setAttempt((n) => n + 1) }} />}
       </SettingRow>
       {configured && (
         <SettingRow

@@ -50,9 +50,10 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
   const admin = useIsAdmin()
   const assistant = useAssistantAvailable()
   const member = useStore((s) => s.info?.member !== undefined)
+  const workspace = useStore((s) => s.activeWorkspace !== '')
   const navigate = useStore((s) => s.navigate)
   const onboarding = surfaces(cap).some((surface) => surface.name === 'onboarding')
-  const shown = useMemo(() => visibleEntries({ cap, admin, assistant, onboarding, member }), [cap, admin, assistant, onboarding, member])
+  const shown = useMemo(() => visibleEntries({ cap, admin, assistant, onboarding, member, workspace }), [cap, admin, assistant, onboarding, member, workspace])
   const visible = visibleCategories(shown)
   const target = params.section
   const linked = target ? categoryOf(target, shown) : undefined
@@ -69,7 +70,11 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
   }, [params, linked?.id])
 
   useEffect(() => {
-    if (current || !left.current) return
+    if (current) {
+      left.current = current.id
+      return
+    }
+    if (!left.current) return
     document.querySelector<HTMLElement>(`[data-settings-category="${left.current}"]`)?.focus()
     left.current = null
   }, [current])
@@ -94,10 +99,7 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
                     variant="ghost"
                     size="sm"
                     className="-ml-2 mb-2"
-                    onClick={() => {
-                      left.current = current.id
-                      navigate('settings')
-                    }}
+                    onClick={() => navigate('settings')}
                   >
                     <ChevronLeft />Settings
                   </Button>

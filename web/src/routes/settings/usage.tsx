@@ -72,7 +72,7 @@ const fill: Record<MeterTone, string> = {
   done: 'bg-state-done',
 }
 
-function ProviderRow({ name, provider, now }: { name: UsageProviderName; provider: UsageProvider | undefined; now: number }) {
+function ProviderRow({ name, provider, now, own }: { name: UsageProviderName; provider: UsageProvider | undefined; now: number; own: boolean }) {
   const label = providerLabels[name]
   const status = provider?.status ?? 'unavailable'
   const windows = currentWindows(provider, now)
@@ -83,7 +83,7 @@ function ProviderRow({ name, provider, now }: { name: UsageProviderName; provide
   return (
     <SettingRow
       label={label}
-      help={status === 'unauthenticated'
+      help={status === 'unauthenticated' && own
         ? <>{help} <Button variant="link" size="sm" onClick={() => useStore.getState().navigate('agents')}>Sign in on Agents</Button></>
         : help}
     >
@@ -234,7 +234,7 @@ export function UsageSection({ client = api }: { client?: UsageClient }) {
         )}
         {!providers && !failure && <p role="status" className="text-ui-sm text-muted">{loading ? 'Reading usage…' : 'No usage measured yet.'}</p>}
       </SettingRow>
-      {providers && providerOrder.map((name) => <ProviderRow key={name} name={name} provider={byName.get(name)} now={now} />)}
+      {providers && providerOrder.map((name) => <ProviderRow key={name} name={name} provider={byName.get(name)} now={now} own={providers.accountID === selfID} />)}
     </SettingsSection>
   )
 }
