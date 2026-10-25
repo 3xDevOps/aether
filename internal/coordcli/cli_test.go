@@ -649,7 +649,7 @@ func TestCLIWorkerStartDefaultsFromAssignment(t *testing.T) {
 	s := newCLISocket(t, func(req protocol.Request) protocol.Response {
 		switch req.Method {
 		case protocol.MethodCoordStatus:
-			return protocol.Response{Result: json.RawMessage(`{"run_id":"run-1","assignment":{"mission_id":"mission-1","role":"integrator","integrator_generation":4,"execution_choices":[{"account_member_id":"member-1","harness":"omp","mode":"tui"},{"account_member_id":"member-2","harness":"claude","mode":"tui"},{"account_member_id":"member-2","harness":"claude","mode":"tui","model":"opus"},{"account_member_id":"member-1","harness":"omp","mode":"acp"}]}}`)}
+			return protocol.Response{Result: json.RawMessage(`{"run_id":"run-1","assignment":{"mission_id":"mission-1","role":"integrator","integrator_generation":4,"execution_choices":[{"account_member_id":"member-1","harness":"omp","mode":"tui"},{"account_member_id":"member-2","harness":"claude","mode":"tui"},{"account_member_id":"member-2","harness":"claude","mode":"tui","model":"opus"},{"account_member_id":"member-1","harness":"omp","mode":"acp"},{"account_member_id":"member-2","harness":"codex","mode":"tui"},{"account_member_id":"member-1","harness":"codex","mode":"acp"}]}}`)}
 		case protocol.MethodTaskShow:
 			return protocol.Response{Result: json.RawMessage(`{"task":{"id":"task-1","current_revision":3}}`)}
 		case protocol.MethodWorkerStart:
@@ -674,6 +674,9 @@ func TestCLIWorkerStartDefaultsFromAssignment(t *testing.T) {
 	sent = protocol.WorkerStartParams{}
 	if code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--harness", "omp"}, ""); code != ExitOK || sent.Mode != "acp" {
 		t.Fatalf("worker start --harness omp = code %d, mode %q, envelope %s; want the enhanced choice", code, sent.Mode, raw)
+	}
+	if code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--harness", "codex"}, ""); code != ExitUsage {
+		t.Fatalf("worker start --harness codex across accounts = code %d, envelope %s; want it refused as ambiguous", code, raw)
 	}
 	code, raw := runCLI(t, s.path, []string{"worker", "start", "--task-id", "task-1", "--mode", "tui"}, "")
 	if envelope := decodeEnvelope(t, raw); code != ExitUsage || envelope.OK || !strings.Contains(envelope.Error.Message, `--harness omp --mode tui --account-owner-id member-1 --model ""; --harness claude --mode tui --account-owner-id member-2 --model ""; --harness claude --mode tui --account-owner-id member-2 --model opus`) {

@@ -1413,9 +1413,9 @@ above states: `propose`, `revise`, and `abandon` in `planning` and `active`;
 An execution choice is the tuple account, agent, mode, and model.
 `--harness`, `--mode`, `--account-owner-id`, and `--model` select one
 approved execution choice and may be omitted when only one choice matches.
-Without `--mode`, a single matching Enhanced (`acp`) choice wins over
-Standard and Background ones; any other ambiguous selection is refused with
-every choice listed. The worker runs
+Without `--mode`, matches that differ only in mode start the Enhanced
+(`acp`) one; any other ambiguous selection is refused with every choice
+listed. The worker runs
 the chosen choice's model, passed to the agent as is; an empty model keeps
 the agent's default. The mission, integrator generation, and
 current task revision are read from the assignment, and the dispatch key

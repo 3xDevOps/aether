@@ -18,7 +18,7 @@ agent once without input, commits the result and exits.
 | `--agent` | CLI | Sign in | Known limits |
 | --- | --- | --- | --- |
 | `antigravity` | Antigravity CLI (runs as `agy`) | run `agy` | None known |
-| `claude` | Claude Code | `claude auth login`, or `/login` inside `claude` | Set up suggests Standard: the Enhanced adapter runs on the Claude Agent SDK |
+| `claude` | Claude Code | `claude auth login`, or `/login` inside `claude` | Set up suggests Standard until the Enhanced adapter is installed: it runs on the Claude Agent SDK |
 | `codex` | OpenAI Codex CLI | `codex login --device-auth` | Standard runs need Codex 0.131.0 or newer; subagents do not nest in Enhanced |
 | `copilot` | GitHub Copilot CLI | `copilot login --device-code` | Enhanced runs cannot take back `--allow-all` |
 | `cursor` | Cursor CLI (runs as `agent`) | `NO_OPEN_BROWSER=1 agent login` | A Cursor admin policy can bring back approval prompts |
