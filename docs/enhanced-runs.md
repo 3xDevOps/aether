@@ -207,10 +207,11 @@ the server sends the agent one prompt telling it to run
 share one prompt, and each set of new unread messages starts at most one turn.
 
 The prompt waits while a run is protected, a human holds a swarm worker, or the
-run is paused or switching modes. **Resume** offers a paused run the mail that
-arrived meanwhile. An Enhanced swarm integrator is also prompted when a human
-answers its question, a worker proposes a task or ends without a report, or a
-human cancels the swarm.
+run is paused or switching modes. Lifting protection, releasing control or
+**Resume** offers the mail that arrived meanwhile at once; otherwise the server
+retries a waiting prompt at least every 30 seconds. An Enhanced swarm
+integrator is also prompted when a human answers its question, a worker
+proposes a task or ends without a report, or a human cancels the swarm.
 
 ## Restarts and failures
 

@@ -278,6 +278,12 @@ are four ways to notice mail:
    unread messages starts at most one such turn. Hooks stay silent in these runs
    (`AETHER_ENHANCED=1`); see [enhanced-runs.md](enhanced-runs.md#mail).
 
+A run owes a wake while it has unread mail, or, for an integrator, a swarm
+change, that no wake has yet started a turn for. Announcing mail inside a turn
+does not settle it. The server retries an owed wake when mail arrives, a turn
+ends, a paused run resumes, protection or control changes, and at least every
+30 seconds, until a turn starts or the mail is acknowledged.
+
 See [per-agent setup and limits](harnesses.md#incoming-coordination-hooks).
 All integrations add only a trusted instruction to read the inbox. They
 never acknowledge a batch or promote a peer's body into system/developer
@@ -300,9 +306,11 @@ managed Claude Code launch, whose idle-wake waiter starts a new turn for it
 instead. The hook records
 what it announced in `$TMPDIR/aether-hook-<run>-<harness>.json`; a missing
 record repeats the notice. Claude's idle-wake waiter claims its session in
-`$TMPDIR/aether-hook-<run>-claude-wake` and adds the IDs it wakes for to the
-record. pi, OMP, and OpenCode add context per model call without keeping it,
-so their notices repeat.
+`$TMPDIR/aether-hook-<run>-claude-wake` and records the IDs it wakes for in
+`$TMPDIR/aether-hook-<run>-claude-woken.json`, which no other hook writes. At
+Stop it wakes for unread mail not in that record, even mail a hook announced
+during the turn. pi, OMP, and OpenCode add context per model call without
+keeping it, so their notices repeat.
 
 Every swarm worker's report, whatever its outcome, is forwarded to the
 current integrator as an ordinary inbox message: `from_run_id` is the
@@ -325,10 +333,12 @@ wake-frame dispatch as well; checking authority once before writing is not
 enough. Inbox-consumer registration is also ordered against that final write:
 an earlier registered consumer keeps priority, but a consumer registered
 after an admitted frame cannot revoke the already-accepted wake.
-Swarm/control admission is nonblocking for this optional action: if either
-boundary is busy, wake is suppressed rather than queued behind its holder.
-The receiver updates observed IDs without adding notified IDs, so a later
-bounded observation can reconsider mail without losing or acknowledging it.
+A wake waits for a busy swarm authorization lock, for example while
+integration prepare assembles a candidate: up to 2 seconds for a native wake
+and 20 for an Enhanced one, and no longer once the run starts closing. Busy
+run control refuses it at once. A refused wake stays owed; the receiver
+updates observed IDs without adding notified IDs, so a later bounded
+observation can reconsider mail without losing or acknowledging it.
 
 Opening a swarm worker's terminal in the dashboard defaults to read-only
 viewing; viewing alone does not acquire human control. Use **Take control** to

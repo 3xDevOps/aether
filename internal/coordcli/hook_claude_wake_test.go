@@ -91,12 +91,17 @@ func TestClaudeWakeStartsATurnForNewMail(t *testing.T) {
 	if recorded := readHookNotices(hookNoticePath(string(run), "claude")).Mail; !slices.Equal(recorded, ids) {
 		t.Fatalf("record = %v; want the woken mail %v", recorded, ids)
 	}
-	// The woken turn ends with a Stop; announced mail does not wake it again.
+	if woken := readHookNotices(claudeWokenPath(string(run))).Mail; !slices.Equal(woken, ids) {
+		t.Fatalf("woken record = %v; want %v", woken, ids)
+	}
+	// A boundary hook that read the shared record before the wake writes it back afterwards.
+	writeHookNotices(hookNoticePath(string(run), "claude"), hookNotices{})
+	// The woken turn ends with a Stop; mail that already had a turn does not wake it again.
 	ctx, cancel := context.WithTimeout(t.Context(), 1500*time.Millisecond)
 	defer cancel()
 	again := waitClaudeWaiter(t, startClaudeWaiter(ctx, socket, `{"hook_event_name":"Stop","stop_hook_active":true}`), 5*time.Second)
 	if again.code != ExitOK || again.err != nil || again.stderr != "" {
-		t.Fatalf("announced mail woke again: %d, %v, %q", again.code, again.err, again.stderr)
+		t.Fatalf("woken mail woke again: %d, %v, %q", again.code, again.err, again.stderr)
 	}
 }
 
@@ -112,17 +117,22 @@ func TestClaudeWakeOnSessionStartAnnouncesWaitingMail(t *testing.T) {
 	}
 }
 
-func TestClaudeWakeWaitsPastAnnouncedMail(t *testing.T) {
+func TestClaudeWakeAtStopForMailAnnouncedMidTurn(t *testing.T) {
 	service, _, socket, run := hookMailbox(t)
 	var out bytes.Buffer
 	if code, err := Run(t.Context(), []string{"hook", "claude", "PostToolBatch"}, Config{Socket: socket, In: strings.NewReader("{}"), Out: &out}); err != nil || code != ExitOK || out.Len() == 0 {
 		t.Fatalf("announcing hook = %d, %v, %q", code, err, out.String())
 	}
-	// The agent was told about the mail and stopped without reading it.
+	// The agent was told about the mail mid-turn and stopped without reading it.
+	result := waitClaudeWaiter(t, startClaudeWaiter(t.Context(), socket, `{"hook_event_name":"Stop","stop_hook_active":false}`), 5*time.Second)
+	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(1) {
+		t.Fatalf("announced, unread mail at Stop = %d, %v, %q; want a wake", result.code, result.err, result.stderr)
+	}
+	// The woken turn also stops without reading it; only newer mail wakes again.
 	done := startClaudeWaiter(t.Context(), socket, `{"hook_event_name":"Stop","stop_hook_active":false}`)
 	waitClaimed(t, run)
 	sendHookMail(t, service, run, "newer-mail")
-	result := waitClaudeWaiter(t, done, 5*time.Second)
+	result = waitClaudeWaiter(t, done, 5*time.Second)
 	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(2) {
 		t.Fatalf("newer mail = %d, %v, %q; want a wake", result.code, result.err, result.stderr)
 	}

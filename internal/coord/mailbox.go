@@ -1272,15 +1272,11 @@ func (s *Service) releaseWaiter(run domain.RunID, ch chan struct{}) {
 func (s *Service) wakeInbox(run domain.RunID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for waiter := range s.hookWaiters[run] {
-		waiter.consumer = waiter.consumer || s.inboxConsumers[run] > 0
-		waiter.signal()
-	}
 	if waiter := s.inboxWaiters[run]; waiter != nil {
 		close(waiter.ch)
 		delete(s.inboxWaiters, run)
 	}
-	s.wakeEnhancedLocked(run)
+	s.offerWakeLocked(run)
 }
 
 type bucket struct {

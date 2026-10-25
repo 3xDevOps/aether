@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -64,8 +65,16 @@ func (a coordWakeAdmission) Admit(ctx context.Context, run domain.RunID, dispatc
 		}
 		// Mission cancellation/reconciliation already takes authorization
 		// before Control. Keep that order through the complete wake frame.
-		if !a.authorizationMu.TryLock() {
-			return errors.New("coord wake: mission authorization is busy")
+		// sync.Mutex cannot wait on ctx, which coord ends when the run
+		// starts closing so its cleanup never waits on this wake.
+		poll := time.NewTicker(20 * time.Millisecond)
+		defer poll.Stop()
+		for !a.authorizationMu.TryLock() {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("coord wake: wait for mission authorization: %w", ctx.Err())
+			case <-poll.C:
+			}
 		}
 		defer a.authorizationMu.Unlock()
 	}
