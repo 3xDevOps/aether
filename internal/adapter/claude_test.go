@@ -3,6 +3,7 @@ package adapter
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/events"
@@ -94,6 +95,31 @@ func TestClaudeUsageLimit(t *testing.T) {
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
 			assertPayloads(t, consumeFixture(t, "testdata/"+tc.fixture+".jsonl", 0), tc.want)
+		})
+	}
+}
+
+func TestClaudeTakeResult(t *testing.T) {
+	for fixture, want := range map[string]string{
+		"claude_clean":        "Fixed the backoff reset; the test suite passes.",
+		"claude_rate_limited": "API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited",
+		"claude_usage_limit":  "",
+	} {
+		t.Run(fixture, func(t *testing.T) {
+			data, err := os.ReadFile("testdata/" + fixture + ".jsonl")
+			if err != nil {
+				t.Fatalf("read fixture: %v", err)
+			}
+			a, _ := ForHarness("claude")
+			for line := range strings.Lines(string(data)) {
+				a.ConsumeLine(strings.TrimSuffix(line, "\n"))
+			}
+			if got, ok := a.TakeResult(); got != want || ok != (want != "") {
+				t.Fatalf("TakeResult = %q, %v; want %q", got, ok, want)
+			}
+			if _, ok := a.TakeResult(); ok {
+				t.Fatal("TakeResult returned the result twice")
+			}
 		})
 	}
 }

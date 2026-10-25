@@ -13,6 +13,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -37,6 +38,7 @@ type fakeCoordinator struct {
 	onWake         func(domain.RunID)
 	released       []domain.RunID
 	idleWakes      []domain.RunID
+	provisional    []provisionalCall
 	coAuthors      map[domain.RunID][]string
 	coAuthorWrites map[domain.RunID]int
 }
@@ -117,6 +119,25 @@ func (f *fakeCoordinator) WakeIdle(run domain.RunID) {
 }
 
 func (f *fakeCoordinator) EnhancedSessionOpened(context.Context, domain.RunID) {}
+
+func (f *fakeCoordinator) ProvisionalReport(_ context.Context, run domain.RunID, since time.Time, message string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.provisional = append(f.provisional, provisionalCall{run: run, since: since, message: message})
+	return nil
+}
+
+type provisionalCall struct {
+	run     domain.RunID
+	since   time.Time
+	message string
+}
+
+func (f *fakeCoordinator) provisionalReports() []provisionalCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.provisional)
+}
 
 func (f *fakeCoordinator) idleWakeRuns() []domain.RunID {
 	f.mu.Lock()

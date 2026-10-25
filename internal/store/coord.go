@@ -211,6 +211,8 @@ type MessageStore interface {
 	DeliverRunMessages(ctx context.Context, to domain.RunID, ackToken string, limit int) ([]*RunMessage, string, bool, error)
 	// RetireRunMessages retires a released run's unread inbound mail.
 	RetireRunMessages(ctx context.Context, to domain.RunID) error
+	CoordReportedSince(ctx context.Context, run domain.RunID, since time.Time) (bool, error)
+	RetireProvisionalReports(ctx context.Context, from, to domain.RunID, cutoff time.Time) error
 	AppendCoordReport(ctx context.Context, report *CoordReport) error
 	ReserveCoordReport(ctx context.Context, report *CoordReport) (bool, error)
 	FinalizeCoordReport(ctx context.Context, report *CoordReport) (bool, error)

@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -42,6 +43,7 @@ type Coordinator interface {
 	Release(run domain.RunID) error
 	WakeIdle(run domain.RunID)
 	EnhancedSessionOpened(ctx context.Context, run domain.RunID)
+	ProvisionalReport(ctx context.Context, run domain.RunID, since time.Time, message string) error
 }
 
 // coordination attaches the run transport and staged binaries. enabled controls

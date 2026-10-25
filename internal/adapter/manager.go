@@ -23,6 +23,12 @@ type OutputTap interface {
 	TapOutput(run domain.RunID) (io.ReadCloser, error)
 }
 
+// ResultSink receives the result a run's output ended with; satisfied by
+// *scheduler.Scheduler.
+type ResultSink interface {
+	TurnEnded(run domain.RunID, message string)
+}
+
 // Manager attaches adapters to running headless runs. It subscribes to
 // run-status events on the bus; when a headless run whose harness has an
 // adapter enters running, it taps the run's PTY output and pumps it
@@ -31,9 +37,10 @@ type OutputTap interface {
 // without an adapter (or non-headless runs) are left alone: layer-1
 // observability (PTY + diffs) is always sufficient.
 type Manager struct {
-	bus  events.Bus
-	runs RunLookup
-	pty  OutputTap
+	bus     events.Bus
+	runs    RunLookup
+	pty     OutputTap
+	results ResultSink
 
 	mu     sync.Mutex
 	active map[domain.RunID]io.Closer
@@ -47,8 +54,8 @@ type Manager struct {
 }
 
 // NewManager builds a Manager; call Start to begin consuming events.
-func NewManager(bus events.Bus, runs RunLookup, pty OutputTap) *Manager {
-	return &Manager{bus: bus, runs: runs, pty: pty,
+func NewManager(bus events.Bus, runs RunLookup, pty OutputTap, results ResultSink) *Manager {
+	return &Manager{bus: bus, runs: runs, pty: pty, results: results,
 		active: make(map[domain.RunID]io.Closer), tapped: make(map[domain.RunID]domain.MemberID)}
 }
 
@@ -218,16 +225,26 @@ func (m *Manager) pump(workspace domain.WorkspaceID, run domain.RunID, a Adapter
 		n, err := tap.Read(buf)
 		if n > 0 {
 			for _, line := range norm.Feed(buf[:n]) {
-				m.publish(workspace, run, a.ConsumeLine(line))
+				m.consume(workspace, run, a, line)
 			}
 		}
 		if err != nil {
 			// The final line of a run may lack a terminator.
 			if line, ok := norm.Flush(); ok {
-				m.publish(workspace, run, a.ConsumeLine(line))
+				m.consume(workspace, run, a, line)
 			}
 			return
 		}
+	}
+}
+
+// consume publishes what the adapter makes of line and hands a result it
+// ended a turn with to results: a swarm worker's supervisor keeps the PTY
+// open after the agent exits.
+func (m *Manager) consume(workspace domain.WorkspaceID, run domain.RunID, a Adapter, line string) {
+	m.publish(workspace, run, a.ConsumeLine(line))
+	if text, ok := a.TakeResult(); ok {
+		m.results.TurnEnded(run, text)
 	}
 }
 
