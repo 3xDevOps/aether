@@ -81,8 +81,9 @@ part before the `@` becomes the display name.
 - `--tailnet-auto-join` skips approval, for teams whose tailnet already is the
   team boundary.
 - Removing someone from the tailnet, or denying them the server in your
-  Tailscale ACLs, locks them out. `aether member remove <member-id>` does the
-  same inside Aether.
+  Tailscale ACLs, locks them out of this path. Their other sign-ins stay until
+  `aether member remove <member-id>`. [Single sign-on](teams.md#single-sign-on)
+  covers signing the tailnet in through your identity provider.
 
 ### What an attacker can and cannot do
 

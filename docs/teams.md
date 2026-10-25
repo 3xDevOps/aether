@@ -146,6 +146,36 @@ a link.
 to the member. Delete those first. `aether member transfer <member id>` makes
 another admin the server's owner at its edge.
 
+### Single sign-on
+
+Aether has no identity provider settings of its own: sign your tailnet in
+through yours, such as Okta, Google Workspace, Microsoft Entra ID or GitHub
+([Tailscale's providers](https://tailscale.com/docs/integrations/identity)), and
+have people join [over the tailnet](#over-a-tailnet). Each such member is a
+login from your provider, and the `tailnet-auto-join` setting
+([install.md](install.md#server-options)) admits them without approval. A user
+you [share](https://tailscale.com/docs/features/sharing) the server's machine
+with signs in through their own provider.
+
+Removing someone in your provider stops new sign-ins, not devices already
+signed in. Those reach the tailnet until the user is suspended in Tailscale or
+their keys expire. Suspend them in the Tailscale admin console, or let [user and
+group provisioning](https://tailscale.com/docs/features/user-group-provisioning)
+do it when you deactivate them in Okta, delete them in Microsoft Entra ID, or
+suspend them in Google Workspace.
+
+That closes the tailnet path only. Their SSH key, approved devices (which also
+work on the direct SSH port), GitHub sign-ins at the edge and ChatGPT or Claude
+connectors stay open. Remove the member to close them all:
+
+```sh
+aether member list                 # their member id
+aether member remove <member-id>   # deletes their SSH key, devices, GitHub sign-ins and connectors
+```
+
+It fails with `in use` until their runs and schedules are gone
+([Remove access](#remove-access)).
+
 ## Roles
 
 | Role | Own runs | Other members' runs | Workspace |
