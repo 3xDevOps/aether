@@ -2230,6 +2230,24 @@ export interface SlackStatusResult {
   link?: SlackLink
 }
 
+export interface ConnectorCode {
+  url: string
+  code: string
+  expires_at: string
+}
+
+/** A ChatGPT or Claude connector acting as the member (docs/connectors.md). */
+export interface Connector {
+  id: string
+  member_id: string
+  client_name: string
+  redirect_host: string
+  device_id?: string
+  scopes: string[]
+  created_at: string
+  last_used_at?: string
+}
+
 export interface SlackLinkResult {
   code: string
   expires_at: string

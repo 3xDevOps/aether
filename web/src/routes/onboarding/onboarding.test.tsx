@@ -1670,6 +1670,16 @@ describe('onboarding wizard', () => {
     })
   })
 
+  it('offers to finish setup and connect ChatGPT or Claude on the first run step', async () => {
+    seed()
+    render(<OnboardingRoute params={{}} client={fakeApi()} />)
+    await toFirstRunStep()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Finish setup and connect ChatGPT or Claude' }))
+
+    expect(useStore.getState()).toMatchObject({ onboarded: true, route: { name: 'settings', params: { section: 'connectors' } } })
+  })
+
   it('offers only the agents installed in this account', async () => {
     const client = fakeApi({
       agentList: vi.fn(async () => [
