@@ -304,21 +304,13 @@ func (s *Scheduler) refreshActivities(ctx context.Context) {
 	}
 }
 
-// waitExpires reports whether a parked run's wait goes stale after
-// waitedFactor stall thresholds with no activity: a wait on its own agents,
-// or one the agent reported that has not gone stale yet. Background tasks
-// it holds stall on their own limit. Caller holds s.mu.
+// waitExpires reports whether a parked run shows a wait the agent reported
+// that goes stale after waitedFactor stall thresholds with no activity and
+// has not yet. A wait on its swarm or background tasks follows those
+// (refreshActivities). Caller holds s.mu.
 func (e *supervised) waitExpires() bool {
-	if _, stale, _ := cutWaiting(e.idleReason); stale {
-		return false
-	}
-	switch e.activity {
-	case domain.ActivityWaitingAgents, domain.ActivityWaitingCI:
-		return true
-	case domain.ActivityWaitingTools:
-		return e.waits()
-	}
-	return false
+	activity, stale, _ := cutWaiting(e.idleReason)
+	return activity != "" && !stale && e.activity == activity
 }
 
 // expireWaitLocked marks a run's wait stale (waitExpires) once nothing

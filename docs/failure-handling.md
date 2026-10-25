@@ -62,18 +62,17 @@ A live run carries a state that says what it is doing. The dashboard and
 
 When several apply, the first in this order wins: disconnected, needs-you,
 working, failed, finished, waiting-agents, waiting-ci, waiting-tools, waiting.
-A wait goes stale after three times `--stall-threshold` (30 minutes by
-default) with no activity, unless the run still holds background tasks or,
-as a swarm integrator, has a live worker attempt or unread worker mail.
-Its reason becomes `no update for <duration>`, followed by `: <summary>`
-when the agent reported one. A CI or process wait keeps its state; any other wait shows
-`waiting`, and shows `waiting-agents` with the same reason while a worker
-is live again.
-A wait goes stale once; the next turn starts it over.
+A wait the agent reported goes stale after three times `--stall-threshold`
+(30 minutes by default) with no activity, unless the run still holds
+background tasks or, as a swarm integrator, has a live worker attempt or
+unread worker mail. Its reason becomes `no update for <duration>: <summary>`.
+A CI or process wait keeps its state; an agents wait shows `waiting`, or
+`waiting-agents` while a worker is live again. A wait goes stale once; the
+next turn starts it over. A wait Aether infers from a swarm or background
+tasks lasts exactly as long as they do.
 
 Each `run.status` event for a live run carries a `cause` naming what chose
-its state:
-`turn`, `report` (the agent's own report), `turn-end`, `stall`,
+its state: `turn`, `report` (the agent's own report), `turn-end`, `stall`,
 `wait-expired`, `workers`, `tasks-held`, `human`, or `disconnect`.
 `aether timeline <run-id>` prints it after the state, for example
 `running -> needs-attention (waiting for 2 workers) · waiting-agents by

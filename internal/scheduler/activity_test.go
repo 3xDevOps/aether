@@ -114,6 +114,7 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "waiting for 1 worker"},
 		{"the last worker finished", func() {
 			integrator.workers.Store(0)
+			quietFor(t, e)
 			e.sched.refreshActivities(ctx)
 		}, domain.RunNeedsAttention, domain.ActivityWaiting, turnEndedReason},
 		{"needs-input asked at the turn end", func() {
@@ -362,7 +363,9 @@ func TestAWaitGoesStaleOnlyWithNothingLive(t *testing.T) {
 	integrator.workers.Store(1)
 	e.sched.refreshActivities(ctx)
 	expect("a worker live again", domain.ActivityWaitingAgents, events.CauseWorkers, waitedReasonPrefix, ": two workers on the parser")
+	// The poll checks stalls before it refreshes activities.
 	integrator.workers.Store(0)
+	quietFor(t, e)
 	e.sched.refreshActivities(ctx)
 	expect("that worker gone", domain.ActivityWaiting, events.CauseWaitExpired, waitedReasonPrefix, ": two workers on the parser")
 
