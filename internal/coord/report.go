@@ -80,7 +80,7 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 		return protocol.CoordReportResult{}, internalError(method, err)
 	}
 	receipt := &store.CoordStateReport{RunID: run, IdempotencyKey: p.IdempotencyKey, Outcome: p.Outcome, WaitingFor: p.WaitingFor, Summary: summary}
-	created, err := s.cfg.Mail.RecordCoordStateReport(ctx, receipt)
+	_, err := s.cfg.Mail.RecordCoordStateReport(ctx, receipt)
 	if errors.Is(err, store.ErrCoordReportIdempotencyConflict) {
 		return protocol.CoordReportResult{}, reusedKey(p.IdempotencyKey)
 	} else if err != nil {
@@ -101,10 +101,8 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 		slog.Info("coord: state report did not take effect", "run", run, "report", id, "error", err)
 		switch {
 		case errors.Is(err, ErrCannotAsk), errors.Is(err, ErrRunFinished):
-			if created {
-				if releaseErr := s.cfg.Mail.DeleteCoordStateReport(ctx, run, p.IdempotencyKey); releaseErr != nil {
-					return protocol.CoordReportResult{}, internalError(method, errors.Join(err, releaseErr))
-				}
+			if releaseErr := s.cfg.Mail.DeleteCoordStateReport(ctx, run, p.IdempotencyKey); releaseErr != nil {
+				return protocol.CoordReportResult{}, internalError(method, errors.Join(err, releaseErr))
 			}
 			return protocol.CoordReportResult{}, invalidParams(method, err.Error())
 		case errors.Is(err, ErrReportSuperseded):

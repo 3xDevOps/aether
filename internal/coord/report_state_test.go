@@ -165,6 +165,10 @@ func TestRefusedStateReportReleasesItsKey(t *testing.T) {
 	h, _ := newStateReportHarness(t, outcomes)
 	run := h.run(0)
 
+	outcomes.fail(errors.New("the run is provisioning and has no live container yet"))
+	if rpcErr := stateReport(h, run, protocol.CoordOutcomeNeedsInput, "", "which region?", "k"); rpcErr == nil || rpcErr.Code != protocol.CodeInternal {
+		t.Fatalf("needs-input = %+v, want an internal error", rpcErr)
+	}
 	outcomes.fail(ErrCannotAsk)
 	if rpcErr := stateReport(h, run, protocol.CoordOutcomeNeedsInput, "", "which region?", "k"); rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams {
 		t.Fatalf("needs-input = %+v, want invalid params", rpcErr)

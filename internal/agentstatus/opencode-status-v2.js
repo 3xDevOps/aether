@@ -20,6 +20,7 @@ export default {
     let child
     let warned = false
     let executionKnown = false
+    let idleReason = 'agent idle'
     const warn = error => {
       if (warned || lifetime.signal.aborted) return
       warned = true
@@ -38,7 +39,7 @@ export default {
       const working = busy.size > 0
       const body = JSON.stringify({
         ...(executionKnown ? { state: working ? 'working' : 'waiting' } : {}),
-        ...(executionKnown && !working ? { reason: 'agent idle' } : {}),
+        ...(executionKnown && !working ? { reason: idleReason } : {}),
         input_updates: [{ operation: 'replace', requests: [...pending.values()] }],
       })
       // Concurrent execution starts still refresh liveness when this body is unchanged.
@@ -159,6 +160,8 @@ export default {
             if (!data.sessionID) break
             executionKnown = true
             busy.delete(data.sessionID)
+            // The scheduler reads a turn's end from its reason (agentstatus.go).
+            idleReason = { 'session.execution.failed': 'agent failed', 'session.execution.interrupted': 'turn cancelled' }[event.type] ?? 'agent idle'
             reconcilePermissions(data.sessionID)
             report()
             break

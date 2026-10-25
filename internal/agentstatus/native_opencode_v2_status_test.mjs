@@ -491,3 +491,19 @@ test('V2 deleting one failed session does not cancel another session recovery', 
   assert.deepEqual(h.listCalls.map(call => call.sessionID), ['root', 'child', 'child'])
   assert.equal(h.retryCount, 0)
 })
+
+test('V2 reports how the last turn ended', async t => {
+  const h = await reporter()
+  t.after(h.dispose)
+  for (const [type, reason] of [
+    ['session.execution.failed', 'agent failed'],
+    ['session.execution.interrupted', 'turn cancelled'],
+    ['session.execution.succeeded', 'agent idle'],
+  ]) {
+    await h.emit('session.execution.started', { sessionID: 'root' })
+    await h.emit(type, { sessionID: 'root' })
+    await h.drain()
+    assert.equal(h.reports.at(-1).state, 'waiting')
+    assert.equal(h.reports.at(-1).reason, reason)
+  }
+})
