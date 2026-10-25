@@ -124,8 +124,9 @@ no longer follows the run.
 
 **Reply in a run's thread.** The reply goes to the run as a message from you,
 shown as `<member> via Slack` in the dashboard. The usual rules apply: to your
-own run that no one controls in the dashboard it reaches the agent at once;
-otherwise it waits about 45 seconds for the member in control to approve it.
+own run that no one controls, or to a run you control, it reaches the agent at
+once; otherwise it waits about 45 seconds for the member in control to approve
+it.
 The bot answers in the thread with what happened, or the server's error.
 
 **Press a button.** Each answers once:

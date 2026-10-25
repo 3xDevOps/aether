@@ -280,7 +280,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const images = useComposerImages(run.id, !block && cap.hasMethod('terminal.file'))
   const { uploading, uploadError } = images
   const control = useImplicitControl(run, agent)
-  const hint = control.canAct
+  const hint = !control.waits
     ? 'Sends to the agent’s terminal.'
     : 'Delivers in 45 s unless the controller decides sooner.'
   const error = uploadError ?? (room.errorFromComposer ? room.error : undefined)
@@ -513,7 +513,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   }
 
   const pillDisabled = busy || images.uploading || (pill !== 'interrupt' && pill !== 'stop-waiting' && pill !== 'resume' && (!images.ready || !hasContent || refusedImages))
-  const hintText = moderated ? 'Delivers in 45 s unless the controller decides sooner.' : turnRunning || pill === 'stop-waiting' || pill === 'resume' ? pillHint[pill] : ''
+  const hintText = moderated ? (control.waits ? 'Delivers in 45 s unless the controller decides sooner.' : '') : turnRunning || pill === 'stop-waiting' || pill === 'resume' ? pillHint[pill] : ''
   const keyHint = coarse || pill === 'stop-waiting' ? undefined : pill === 'steer' ? `${shortcutLabel('composer-send')}; ${shortcutLabel('composer-queue')} queues` : shortcutLabel(pill === 'queue' && state?.steering ? 'composer-queue' : 'composer-send')
 
   return (

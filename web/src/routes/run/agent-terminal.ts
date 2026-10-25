@@ -198,5 +198,6 @@ export function useImplicitControl(run: RunRecord, agent: AgentTerminal) {
     timer.current = setTimeout(() => { queued.current = null }, implicitControlWindowMs)
     agent.session.takeControl()
   }
-  return { canAct: agent.localControl || implicit, withControl }
+  const canAct = agent.localControl || implicit
+  return { canAct, waits: !canAct && holder !== self.id, withControl }
 }

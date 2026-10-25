@@ -875,6 +875,19 @@ test('without the lease the message waits for the controller, and the bar says s
   expect(screen.getByRole('status').textContent).toContain('The controller declined your 1 comment. The text is in the session.')
 })
 
+test('while you control the run from another tab, the bar does not promise a 45 s wait', () => {
+  seed(ready)
+  onTestFinished(() => {
+    useStore.setState({ info: null })
+  })
+  useStore.setState({ runs: { [active.id]: toRecord({ ...active, controller_member_id: alice.id }) }, info: serverInfo })
+  renderDiff({ localControl: false, roomControl: undefined, controlUnavailable: true })
+  comment('cmd/main.go', '+new line', 'use the helper')
+  const bar = within(screen.getByRole('group', { name: 'Review' }))
+  expect(bar.queryByText('Delivers in 45 s unless the controller decides sooner.')).toBeNull()
+  expect(bar.getByRole('button', { name: 'Send to agent' })).toHaveProperty('disabled', false)
+})
+
 test('a run that cannot take a message disables send and says why', () => {
   seed(ready)
   useStore.setState({ runs: { [active.id]: toRecord(run({ id: active.id, status: 'completed' })) } })
