@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/http/httptrace"
 	"net/netip"
 	"net/textproto"
@@ -230,5 +231,28 @@ func TestHTTPRefusals(t *testing.T) {
 	}
 	if !e.r.Online(old.id) {
 		t.Fatal("version-1 server went offline")
+	}
+}
+
+// A universal connector request for a server whose protocol predates the
+// universal URL is refused with 501, naming the server's own URL, and
+// never reaches it.
+func TestUniversalRefusesAnOlderServer(t *testing.T) {
+	e := newEnv(t)
+	signer := newSigner(t)
+	e.dir.mu.Lock()
+	e.dir.owners[edgeproto.ServerID(signer.PublicKey())] = true
+	e.dir.mu.Unlock()
+	old := enrollAt(t, e, signer, edgeproto.VersionHTTP)
+	go old.run()
+	if v := e.r.Version(old.id); v != edgeproto.VersionHTTP {
+		t.Fatalf("Version = %d, want %d", v, edgeproto.VersionHTTP)
+	}
+	w := httptest.NewRecorder()
+	e.r.ForwardUniversal(w, httptest.NewRequest(http.MethodPost, edgeproto.PathUniversalMCP, nil), old.id, nil)
+	want := "server devbox (" + old.id + ") runs aether-server test, which does not serve the connector at " + e.origin + "/mcp; " +
+		"upgrade it: sudo aether-server update, or use its own connector URL " + e.origin + edgeproto.MCPPath(old.id)
+	if w.Code != http.StatusNotImplemented || strings.TrimSpace(w.Body.String()) != want {
+		t.Fatalf("universal request to a protocol-2 server: %d %q, want 501 %q", w.Code, w.Body.String(), want)
 	}
 }

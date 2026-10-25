@@ -51,6 +51,9 @@ func (s *Server) slackStatus(ctx context.Context, member domain.MemberID, _ json
 
 func (s *Server) slackLink(ctx context.Context, member domain.MemberID, _ json.RawMessage) (any, *protocol.Error) {
 	const method = protocol.MethodSlackLink
+	if perr := refuseEdgeSignIn(ctx, method); perr != nil {
+		return nil, perr
+	}
 	if perr := s.requireApprovedCaller(ctx, method, false); perr != nil {
 		return nil, perr
 	}

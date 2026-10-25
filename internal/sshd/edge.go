@@ -40,6 +40,10 @@ type connIdentity struct {
 	legacyClient    bool
 	connector       string
 	connectorClient string
+	// edgeSignIn marks a connector authorized by signing in at the edge
+	// instead of a pairing code: it has no device, and is judged as an
+	// edge device no person approved.
+	edgeSignIn bool
 }
 
 // connIdentityKey carries a connection's connIdentity in the context of its

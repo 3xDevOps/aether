@@ -62,6 +62,8 @@ type Status struct {
 	Since     time.Time `json:"since"`
 	PID       int       `json:"pid,omitempty"`
 	Heartbeat time.Time `json:"heartbeat,omitzero"`
+	// Protocol is the edge protocol version of the connection.
+	Protocol int `json:"protocol,omitempty"`
 }
 
 // HeartbeatMaxAge is how old the heartbeat of a live control connection

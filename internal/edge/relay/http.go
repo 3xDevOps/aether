@@ -89,8 +89,18 @@ func (r *Relay) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		r.refuseHTTP(w, req, serverID, edgeproto.RefusalUnknownServer)
 		return
 	}
-	// The body is read whole before a connection is taken, so a slow
-	// client holds none of the server's few.
+	body, ok := r.ReadMCPBody(w, req)
+	if !ok {
+		return
+	}
+	r.forward(w, req, serverID, body)
+}
+
+// ReadMCPBody reads a relayed request's body whole, before a connection
+// is taken, so a slow client holds none of the server's few. It answers
+// the request itself and returns false when the body is too large or
+// cannot be read.
+func (r *Relay) ReadMCPBody(w http.ResponseWriter, req *http.Request) ([]byte, bool) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, req.Body, edgeproto.MaxHTTPBodySize))
 	var tooLarge *http.MaxBytesError
 	switch {
@@ -98,11 +108,56 @@ func (r *Relay) serveHTTP(w http.ResponseWriter, req *http.Request) {
 		r.countRefusal("MCP request too large")
 		http.Error(w, fmt.Sprintf("request body is over the edge's limit of %d bytes", edgeproto.MaxHTTPBodySize),
 			http.StatusRequestEntityTooLarge)
-		return
+		return nil, false
 	case err != nil:
 		http.Error(w, "read request body: "+err.Error(), http.StatusBadRequest)
+		return nil, false
+	}
+	return body, true
+}
+
+// ForwardUniversal forwards req, a request on a universal connector path
+// whose body ReadMCPBody read, to serverID, as serveHTTP forwards one on
+// the server's own path. A connected server whose protocol predates
+// edgeproto.VersionUniversalMCP is refused with 501.
+func (r *Relay) ForwardUniversal(w http.ResponseWriter, req *http.Request, serverID string, body []byte) {
+	r.mu.Lock()
+	reg := r.servers[serverID]
+	var old error
+	if reg != nil && reg.version < edgeproto.VersionUniversalMCP {
+		old = noUniversalEndpoint{name: reg.name, id: reg.id, agentVersion: reg.agentVersion, origin: r.origin}
+	}
+	r.mu.Unlock()
+	if old != nil {
+		r.countRefusal("no universal MCP endpoint")
+		http.Error(w, old.Error(), http.StatusNotImplemented)
 		return
 	}
+	r.forward(w, req, serverID, body)
+}
+
+// noUniversalEndpoint refuses a universal connector request to a server
+// whose protocol version predates edgeproto.VersionUniversalMCP.
+type noUniversalEndpoint struct{ name, id, agentVersion, origin string }
+
+func (e noUniversalEndpoint) Error() string {
+	return fmt.Sprintf("server %s (%s) runs aether-server %s, which does not serve the connector at %s%s; upgrade it: sudo aether-server update, "+
+		"or use its own connector URL %s%s", e.name, e.id, e.agentVersion, e.origin, edgeproto.PathUniversalMCP, e.origin, edgeproto.MCPPath(e.id))
+}
+
+// Version is the protocol version negotiated with the claimed server
+// serverID, 0 when it holds no control channel.
+func (r *Relay) Version(serverID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reg := r.servers[serverID]
+	if reg == nil || !reg.claimed || reg.ctx.Err() != nil {
+		return 0
+	}
+	return reg.version
+}
+
+func (r *Relay) forward(w http.ResponseWriter, req *http.Request, serverID string, body []byte) {
 	req.Body = io.NopCloser(bytes.NewReader(body))
 	req.ContentLength = int64(len(body))
 	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
