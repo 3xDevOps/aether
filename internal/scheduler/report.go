@@ -254,7 +254,7 @@ func (s *Scheduler) recordReportedSessionLocked(entry *supervised, session strin
 	if session == "" || entry.launchMode != domain.LaunchTUI || session == entry.agentSessionID {
 		return false
 	}
-	entry.agentSessionID = session
+	entry.agentSessionID, entry.agentCost = session, 0
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		slog.Warn("scheduler: persist the agent's session", "run", entry.runID, "error", err)
 	}

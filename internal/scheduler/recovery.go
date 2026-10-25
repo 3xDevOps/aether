@@ -1818,6 +1818,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		coordDir:            sc.CoordDir,
 		gitAuthorEmail:      sc.GitAuthorEmail,
 		agentSessionID:      sc.AgentSessionID,
+		agentCost:           sc.AgentCost,
 		agentExec:           sc.AgentExec,
 		switchIntent:        sc.Switch,
 		accountSwap:         sc.AccountSwap,

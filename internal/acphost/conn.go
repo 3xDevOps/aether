@@ -461,13 +461,23 @@ func nonNil(mcp []acp.McpServer) []acp.McpServer {
 	return mcp
 }
 
-// prompt runs one turn and returns its stop reason. It returns only when
-// the turn ends.
-func (c *Conn) prompt(ctx context.Context, blocks []acp.ContentBlock) (string, error) {
+// prompt runs one turn and returns its stop reason and the tokens the agent
+// reports for it, cache reads and writes as input and thought tokens as
+// output. A malformed usage counts no tokens rather than failing the turn. It
+// returns only when the turn ends.
+func (c *Conn) prompt(ctx context.Context, blocks []acp.ContentBlock) (string, Spend, error) {
 	res, err := call[struct {
-		StopReason string `json:"stopReason"`
+		StopReason string          `json:"stopReason"`
+		Usage      json.RawMessage `json:"usage"`
 	}](c, ctx, acp.AgentMethodSessionPrompt, acp.PromptRequest{SessionId: acp.SessionId(c.SessionID()), Prompt: blocks})
-	return res.StopReason, err
+	var u acp.Usage
+	if len(res.Usage) == 0 || json.Unmarshal(res.Usage, &u) != nil {
+		return res.StopReason, Spend{}, err
+	}
+	return res.StopReason, Spend{
+		InputTokens:  int64(u.InputTokens + deref(u.CachedReadTokens) + deref(u.CachedWriteTokens)),
+		OutputTokens: int64(u.OutputTokens + deref(u.ThoughtTokens)),
+	}, err
 }
 
 // steer adds input to the running turn. idleBehavior promptRequired makes

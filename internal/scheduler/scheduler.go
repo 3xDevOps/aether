@@ -362,8 +362,13 @@ type supervised struct {
 	// own commits apart from Aether's even after a handoff or identity edit.
 	gitAuthorEmail string
 	agentSessionID string
+	agentCost      float64
 	sessionMu      sync.Mutex
 	agentExec      *runtime.ExecIdentity
+	// spendMu orders charge calls; uncharged holds the tokens of a spend
+	// whose publish failed.
+	spendMu   sync.Mutex
+	uncharged events.RunCostPayload
 	// switching is the mode a mode switch is moving the run to, empty when
 	// none is in flight. The switch holds lifecycleMu throughout.
 	switching    domain.LaunchMode

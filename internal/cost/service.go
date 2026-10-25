@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -190,9 +191,10 @@ func (s *Service) handle(ctx context.Context, e events.Event) {
 
 // record stores a metered result in the account segment the run was in when
 // the result was published, under that segment's account, and re-evaluates
-// the workspace's budget. A run counts on segment 0, so a result for a later
-// segment of a run with no segment 0 record also records segment 0 as
-// unmetered: what the run spent there was never measured.
+// the workspace's budget. An increment adds to the segment's metered record.
+// A run counts on segment 0, so a result for a later segment of a run with no
+// segment 0 record also records segment 0 as unmetered: what the run spent
+// there was never measured.
 func (s *Service) record(ctx context.Context, run domain.RunID, at time.Time, p events.RunCostPayload) {
 	r, err := s.store.GetRun(ctx, run)
 	if err != nil {
@@ -218,13 +220,19 @@ func (s *Service) record(ctx context.Context, run domain.RunID, at time.Time, p 
 			c.Segment, c.MemberID = segment.Seq, segment.AccountMemberID
 		}
 	}
-	if c.Segment > 0 {
+	if c.Segment > 0 || p.Increment {
 		records, err := s.store.ListRunCosts(ctx, run)
 		if err != nil {
 			slog.Warn("cost: read usage failed", "run", run, "error", err)
 			return
 		}
-		if len(records) == 0 || records[0].Segment != 0 {
+		i := slices.IndexFunc(records, func(prev *store.RunCost) bool { return prev.Segment == c.Segment && prev.Metered })
+		if p.Increment && i >= 0 {
+			c.InputTokens += records[i].InputTokens
+			c.OutputTokens += records[i].OutputTokens
+			c.CostUSD += records[i].CostUSD
+		}
+		if c.Segment > 0 && (len(records) == 0 || records[0].Segment != 0) {
 			if err := s.store.PutRunCost(ctx, &store.RunCost{
 				RunID: r.ID, WorkspaceID: r.WorkspaceID, MemberID: segments[0].AccountMemberID,
 			}); err != nil {

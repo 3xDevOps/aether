@@ -400,9 +400,11 @@ aether budget set --override=false             # and stop again
 ```
 
 An omitted flag keeps its value, and `--limit 0` clears the budget. At the cap,
-new runs are refused and running runs finish. Runs whose agent reports no token
-usage are unmetered, so totals are a floor. Deleting a run or a member keeps
-their spend in the totals. Only an admin sets a budget.
+new runs are refused and running runs finish. Claude Code reports spend in
+Background and Enhanced runs, and OpenCode and omp in Enhanced runs and
+Background runs over ACP. An Enhanced run's spend counts as each turn ends.
+Every other run is unmetered, so totals are a floor. Deleting a run or a member
+keeps their spend in the totals. Only an admin sets a budget.
 
 ### Team memory
 

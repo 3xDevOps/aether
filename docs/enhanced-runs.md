@@ -37,7 +37,9 @@ the session to a mode that asks (Claude Code, Codex and Gemini offer one).
 modes before anything installs. Enhanced shows messages, tool activity, file
 changes and approvals as controls. It runs through an adapter, so some
 agent-specific commands and screens are missing, and it starts a few seconds
-slower. Both modes act without asking by default.
+slower. Enhanced runs of Claude Code, OpenCode and omp report their cost to
+[Insights](insights.md#cost) and budgets; Standard runs report none. Both modes
+act without asking by default.
 
 The dashboard remembers the mode you last chose for each agent, in **Set up**,
 in **New run** or in the **Default mode** select on the **Agents** page, and
