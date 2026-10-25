@@ -478,6 +478,17 @@ describe('settings view', () => {
       expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: 'Single-key shortcuts' }))
     })
 
+    it('reveals a linked row that mounts once the server info arrives', async () => {
+      const scroll = vi.mocked(Element.prototype.scrollIntoView)
+      scroll.mockClear()
+      seed({ info: null })
+      render(<SettingsRoute params={{ section: 'disk' }} client={fakeApi()} />)
+      expect(document.getElementById('disk')).toBeNull()
+      act(() => useStore.setState({ info: serverInfo }))
+      await waitFor(() => expect(scroll.mock.contexts.at(-1)).toBe(document.getElementById('disk')))
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Open Insights › System' }))
+    })
+
     it('says when a linked setting is not available and shows the default', () => {
       seed({ capabilities: { gateway: 'remote', methods: ['*'], ws: ['events'] } })
       render(<SettingsRoute params={{ section: 'danger-zone' }} client={fakeApi()} />)

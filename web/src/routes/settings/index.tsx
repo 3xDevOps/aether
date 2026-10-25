@@ -52,6 +52,7 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
   const member = useStore((s) => s.info?.member !== undefined)
   const workspace = useStore((s) => s.activeWorkspace !== '')
   const navigate = useStore((s) => s.navigate)
+  const hydrated = useStore((s) => s.hydrated)
   const onboarding = surfaces(cap).some((surface) => surface.name === 'onboarding')
   const shown = useMemo(() => visibleEntries({ cap, admin, assistant, onboarding, member, workspace }), [cap, admin, assistant, onboarding, member, workspace])
   const visible = visibleCategories(shown)
@@ -64,9 +65,24 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
 
   useEffect(() => {
     if (!target || !linked) return
-    const element = target === linked.id ? null : document.getElementById(target)
-    if (element) reveal(element)
-    else heading.current?.focus()
+    if (target === linked.id) {
+      heading.current?.focus()
+      return
+    }
+    const element = document.getElementById(target)
+    if (element) {
+      reveal(element)
+      return
+    }
+    // A row whose data is still loading mounts later.
+    const observer = new MutationObserver(() => {
+      const mounted = document.getElementById(target)
+      if (!mounted) return
+      observer.disconnect()
+      reveal(mounted)
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
   }, [params, linked?.id])
 
   useEffect(() => {
@@ -79,7 +95,7 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
     left.current = null
   }, [current])
 
-  const notice = target && !linked && <Callout tone="neutral">That setting is not available here.</Callout>
+  const notice = hydrated && target && !linked && <Callout tone="neutral">That setting is not available here.</Callout>
   return (
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader title="Settings" />
