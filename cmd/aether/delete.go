@@ -8,9 +8,11 @@ import (
 
 func init() {
 	register(command{
-		name:  "delete",
-		short: "delete a run, its transcript, and its captures; a published branch stays",
-		run:   runDelete,
+		name:    "delete",
+		short:   "delete a run, its transcript, and its captures; a published branch stays",
+		usage:   "aether delete <run-id>",
+		example: "aether delete run-d6ay38tj8j",
+		run:     runDelete,
 	})
 }
 

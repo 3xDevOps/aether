@@ -371,22 +371,21 @@ func (s *Scheduler) provision(ctx context.Context, run *domain.Run, ws *domain.W
 		reason := publicRunStatusReason("provisioning: " + err.Error())
 		var setup *runtime.SetupError
 		if errors.As(err, &setup) {
-			return &SetupFailure{reason: reason, Output: setup.Output}
+			return &SetupFailure{run: run.ID, reason: reason, Output: setup.Output}
 		}
-		return errors.New(reason)
+		return fmt.Errorf("run %s failed: %s", run.ID, reason)
 	}
 	return nil
 }
 
-// SetupFailure is a launch stopped by the workspace setup script. Its message
-// is the run's public status reason; Output is for the launching caller
-// alone, and is never stored or published.
+// Output is for the launching caller alone and is never stored or published.
 type SetupFailure struct {
+	run    domain.RunID
 	reason string
 	Output string
 }
 
-func (e *SetupFailure) Error() string { return e.reason }
+func (e *SetupFailure) Error() string { return fmt.Sprintf("run %s failed: %s", e.run, e.reason) }
 
 func (s *Scheduler) provisionSteps(ctx context.Context, entry *supervised, run *domain.Run, ws *domain.Workspace, actor *domain.Member, argv []string, profile harness.Profile, persistSupervisor bool) error {
 	checkout, branch, err := s.createCheckouts(ctx, run, ws)

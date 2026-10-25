@@ -74,9 +74,11 @@ connection, as Tailscale SSH does. The tailnet login becomes the member, and the
 part before the `@` becomes the display name.
 
 - The first tailnet identity to link a fresh server becomes its admin.
-- Everyone after that joins as a pending collaborator. They cannot act until an
-  admin runs `aether member approve <member-id>`; until then commands fail with
-  `membership pending admin approval`. Roles change with `aether member role`
+- Everyone after that joins as a pending collaborator. `aether link` prints
+  `linked to <server> as <name> (collaborator, pending); an admin runs: aether
+  member approve <member-id>`, and every other command fails with `membership
+  pending admin approval; ask an admin to run: aether member approve
+  <member-id>` until one does. Roles change with `aether member role`
   ([teams.md](teams.md)).
 - `--tailnet-auto-join` skips approval, for teams whose tailnet already is the
   team boundary.
@@ -120,13 +122,16 @@ no tailscaled or you answer no to its tailnet question. You can also
 [run your own](edge.md#running-your-own-edge).
 
 ```sh
-aether login                      # sign in with GitHub
-aether link --claim <code>        # the owner, with the claim code aether-server setup printed
-aether link '<invite link>'       # anyone an admin invited, with the link the admin sent
+aether login                        # sign in with GitHub; --json prints the address and code as JSON
+aether link --claim '<claim link>'  # the owner, with the claim link or code aether-server setup printed
+aether link '<invite link>'         # anyone an admin invited, with the link the admin sent
+aether status                       # what this computer is linked to, and the next step
 ```
 
 A bare name such as `my-server` is always an SSH address. Only a server id, a
-claim code or a join link goes through the edge.
+claim code or link after `--claim`, or a join link goes through the edge. A
+claim link or code given without `--claim`, or any other value with `://`,
+fails with the form to use instead of being dialed as an address.
 
 The server's owner sets who is let in with `edge-access`: `account` (a GitHub
 sign-in is enough) or `approved-devices` (the default; each new device waits for
@@ -145,13 +150,31 @@ With no tailnet and no edge, SSH keys and invite codes identify people.
 aether link 192.168.1.50:2222
 ```
 
-The first key to link a fresh server becomes the admin. The CLI offers
-`~/.ssh/id_ed25519` and any key in your ssh-agent, and creates
+The first key to link a fresh server becomes the admin. Without an edge,
+until that first link any key that reaches port 2222 becomes admin, so link
+right after the server starts and keep the port closed to the internet.
+
+The CLI offers `~/.ssh/id_ed25519` and any key in your ssh-agent, and creates
 `~/.ssh/id_ed25519` if it finds none. For another key:
 
 ```sh
 aether link 192.168.1.50:2222 --key ~/.ssh/aether_ed25519
 ```
+
+When the server has an edge, the first admin's key must come from a loopback
+address: the server itself, or an SSH tunnel to it. Anyone who can reach the
+port could otherwise take admin before the owner claims the server.
+
+```sh
+ssh -L 2222:127.0.0.1:2222 <user>@<server-host>   # keep it open
+aether link 127.0.0.1:2222                        # in another terminal
+```
+
+From any other address the handshake fails and the server's message names the
+claim instead: `sudo aether-server edge claim-code` on the server, then
+`aether login` and `aether link --claim <code>` on your machine
+([edge.md](edge.md#server-id-and-claiming)). Once you are admin, your key works
+from any address: `aether link <server-host>:2222`.
 
 `link` saves the path in the client's `config.json` (`~/.config/aether/` on
 Linux, `~/Library/Application Support/aether/` on macOS). `git push aether`

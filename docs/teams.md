@@ -31,8 +31,10 @@ aether link my-server
 ```
 
 Tailscale proves who they are, and the server adds them as a pending
-collaborator. Until an admin approves them, their commands fail with
-`membership pending admin approval`.
+collaborator. `aether link` prints `linked to <server> as <name> (collaborator,
+pending); an admin runs: aether member approve <member-id>`. Until an admin
+does, their commands fail with `membership pending admin approval; ask an admin
+to run: aether member approve <member-id>`.
 
 ```sh
 aether member list              # the PENDING column marks who waits
@@ -60,7 +62,7 @@ with **Copy link**. Send it to the teammate, who opens it and selects **Join** i
 the desktop app, or in a terminal runs:
 
 ```sh
-aether login
+aether login            # or aether login --json, for a script or coding agent
 aether link '<invite link>'
 ```
 
@@ -97,9 +99,13 @@ sudo aether-server device review           # on the server
 
 `aether device approve` shows who the device would be admitted as and asks
 `approve it? [y/N]`. Check the member and role first: whoever holds an approved
-device gets that member's access. If the only admin has no approved device, the
-refusal includes a code, and the admin runs `sudo aether-server device approve
-<code>` on the server. At most 10 devices wait per account.
+device gets that member's access. There is no flag that skips the question.
+Any answer other than `y`, or no answer on stdin, fails with `device approve:
+not approved; a person must check the device shown above and confirm with y in
+their own terminal: aether device approve <code or device-id>, or approve it
+from the dashboard's Needs you card`. If the only admin has no approved device,
+the refusal includes a code, and the admin runs `sudo aether-server device
+approve <code>` on the server. At most 10 devices wait per account.
 
 ### By invite code
 
@@ -221,19 +227,23 @@ the workspace selector, select **Add workspace**, choose **GitHub**, pick a
 repository you can read and accept its first revision. From the CLI:
 
 ```sh
-aether workspace init myproject [--base <branch>]
+aether workspace import ~/code/myproject
+aether workspace import https://github.com/acme/myproject
 aether workspace add myproject [--base <branch>]
 ```
 
-Each member links their own clone, which adds an `aether` git remote:
+`import` and `add` refuse a name already in use and print its id.
 
-```sh
-aether link my-server --repo ~/code/myproject
-```
+Each member links their own clone, which adds an `aether` git remote.
+`aether workspace import <path>` links a clone whose `origin` matches the
+workspace's publish destination; otherwise run
+`aether link my-server --repo ~/code/myproject --workspace myproject`. The
+client keeps one linked clone per workspace: linking another clone of it
+replaces the first, and `aether status` lists them.
 
 Branches named `aether/run-*` belong to the server and cannot be force-pushed or
-deleted. Every other branch behaves like a normal git remote. `aether pull`
-brings a run branch into your clone.
+deleted. Every other branch behaves like a normal git remote. `aether pull <run>`
+brings a run's branches into the linked clones.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -304,7 +314,8 @@ more than one workspace exists`. `aether runs` lists runs from every workspace.
 | `aether attach [--read-only] <run>` | Attach to a run's terminal. Several people can attach at once |
 | `aether message <run> "..."` | Message a run's agent. It shows as a banner in your color |
 | `aether pause`, `resume`, `kill <run>` | Suspend, thaw or stop a run. The checkout and transcript survive a kill |
-| `aether timeline` | The workspace history. Filter with `--run`, `--member`, `--type`, `--limit`. `--jsonl` exports |
+| `aether runs --needs-you` | Runs waiting on you. `aether runs <run-id>` shows what one needs and the command that answers it |
+| `aether timeline` | The workspace history. `aether timeline <run-id>` shows one run's. Filter with `--member`, `--type`, `--limit`. `--jsonl` exports |
 | `aether cost --runs` | Token spend per member and run |
 
 The dashboard shows each run as **Needs you**, **Working**, **Paused**, **Done**
@@ -529,6 +540,7 @@ aether swarm create "add a health check endpoint and document it" \
   --worker codex:background:gpt-5-codex
 ```
 
+`--idempotency-key <key>` makes a retried create return the same swarm.
 `--worker agent[:mode[:model]]` allows workers on an agent and repeats. An empty
 model keeps the agent's default. `-` as the objective reads it from stdin. The
 integrator runs on your account, or the one named by `--account`, in `--mode

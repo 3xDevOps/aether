@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -25,11 +26,11 @@ func pickWorkspace(list []protocol.Workspace, idOrName string) (string, error) {
 	if idOrName == "" {
 		switch len(list) {
 		case 0:
-			return "", fmt.Errorf("no workspaces; create one with aether workspace init")
+			return "", errors.New("no workspaces; add one with aether workspace import <path|url>")
 		case 1:
 			return list[0].ID, nil
 		default:
-			return "", fmt.Errorf("--workspace is required when more than one workspace exists")
+			return "", errors.New("--workspace is required when more than one workspace exists; aether workspace list shows them")
 		}
 	}
 	return workspaceIDIn(list, idOrName)

@@ -28,6 +28,14 @@ func configCmd(args []string) error {
 		return err
 	}
 	rest := fs.Args()
+	// Only what follows the key and value is parsed as flags, so a value
+	// such as -1 is never read as one.
+	if sub == "set" && len(rest) > 2 {
+		if err := fs.Parse(rest[2:]); err != nil {
+			return err
+		}
+		rest = append(rest[:2:2], fs.Args()...)
+	}
 	switch sub {
 	case "show":
 		return configShow(os.Stdout, *path)

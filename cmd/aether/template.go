@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"maps"
 	"os"
@@ -16,7 +15,14 @@ func init() {
 	register(command{
 		name:  "template",
 		short: "list, save, or delete a workspace's task templates",
-		run:   runTemplate,
+		usage: "aether template list [--workspace <name>]\n" +
+			"aether template save <name> --agent <agent> --task \"<task>\" [--param <name=value>]... [--workspace <name>]\n" +
+			"    [--mode standard|enhanced|background] [--model <model>] [--budget <usd>]\n" +
+			"aether template delete <name> [--workspace <name>]",
+		example: "aether template list\n" +
+			"aether template save nightly-audit --agent claude --task \"audit {{area}} for bugs\" --param area=api\n" +
+			"aether template delete nightly-audit",
+		run: runTemplate,
 	})
 }
 
@@ -45,7 +51,7 @@ func runTemplate(args []string) error {
 			args = args[1:]
 		}
 	}
-	fs := flag.NewFlagSet("template list", flag.ExitOnError)
+	fs := newFlagSet("template list")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -78,7 +84,7 @@ func runTemplate(args []string) error {
 }
 
 func templateSave(args []string) error {
-	fs := flag.NewFlagSet("template save", flag.ExitOnError)
+	fs := newFlagSet("template save")
 	agent := fs.String("agent", "", "agent name")
 	task := fs.String("task", "", "task prompt; {{name}} marks a parameter")
 	mode := fs.String("mode", "background", launchModeHelp)
@@ -88,7 +94,10 @@ func templateSave(args []string) error {
 	params := kvFlag{}
 	fs.Var(params, "param", "default for a task parameter, name=value (repeatable)")
 	name, err := parseLeadingArg(fs, args)
-	if err != nil || name == "" || *task == "" || *agent == "" {
+	if err != nil {
+		return fmt.Errorf("%w\nusage: aether template save <name> --agent <name> --task \"...\" [--mode] [--model] [--param k=v] [--budget] [--workspace]", err)
+	}
+	if name == "" || *task == "" || *agent == "" {
 		return fmt.Errorf("usage: aether template save <name> --agent <name> --task \"...\" [--mode] [--model] [--param k=v] [--budget] [--workspace]")
 	}
 	wireMode, err := parseLaunchMode(*mode)
@@ -124,10 +133,13 @@ func templateSave(args []string) error {
 }
 
 func templateDelete(args []string) error {
-	fs := flag.NewFlagSet("template delete", flag.ExitOnError)
+	fs := newFlagSet("template delete")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	name, err := parseLeadingArg(fs, args)
-	if err != nil || name == "" {
+	if err != nil {
+		return fmt.Errorf("%w\nusage: aether template delete <name> [--workspace]", err)
+	}
+	if name == "" {
 		return fmt.Errorf("usage: aether template delete <name> [--workspace]")
 	}
 	return withControl(func(c *protocol.Client) error {

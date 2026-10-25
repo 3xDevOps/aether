@@ -50,43 +50,45 @@ flowchart LR
 
 1. [Quickstart](quickstart.md): install, link, add a repository and finish
    your first run.
+2. [Coding agents](agents.md): a prompt that lets Claude Code, Codex or
+   another coding agent set Aether up and drive it from the CLI.
 
 Daily use:
 
-2. [Agents](harnesses.md): which agent CLIs work, how to sign in to each, and
+3. [Agents](harnesses.md): which agent CLIs work, how to sign in to each, and
    what does not work.
-3. [Environments](environments.md): install tools, save your image, or reset
+4. [Environments](environments.md): install tools, save your image, or reset
    it. [Environment home](environment-home.md) covers what persists in your
    home and how to upload agent configuration.
-4. [Terminals](terminal.md): your environment shell, a run's terminal and extra
+5. [Terminals](terminal.md): your environment shell, a run's terminal and extra
    shells, and SSH or an editor into a run.
-5. [Enhanced runs](enhanced-runs.md): when you run agents in Enhanced mode and
+6. [Enhanced runs](enhanced-runs.md): when you run agents in Enhanced mode and
    want to know about permissions, restarts and the session log.
-6. [Teams](teams.md): when you invite people, change roles, share agent
+7. [Teams](teams.md): when you invite people, change roles, share agent
    accounts, set budgets or launch swarms.
-7. [Networking](networking.md) and [edge](edge.md): when you choose how
+8. [Networking](networking.md) and [edge](edge.md): when you choose how
    people reach the server, or host the dashboard for phones.
-8. [Assistant](assistant.md): when you want to ask Aether for things in plain
+9. [Assistant](assistant.md): when you want to ask Aether for things in plain
    language.
-9. [Team memory](memory.md): when runs should share what they learn.
-10. [Connectors](connectors.md): when you want to run agents from ChatGPT or
+10. [Team memory](memory.md): when runs should share what they learn.
+11. [Connectors](connectors.md): when you want to run agents from ChatGPT or
     Claude, including their phone apps.
-11. [Slack](slack.md): when you want to hear about runs, and answer them,
+12. [Slack](slack.md): when you want to hear about runs, and answer them,
     in Slack, including on Android.
-12. [Insights](insights.md): when you want statistics on runs, time, cost and
+13. [Insights](insights.md): when you want statistics on runs, time, cost and
     pull requests.
 
 Reference:
 
-13. [Install](install.md): every platform, the desktop and Android apps,
+14. [Install](install.md): every platform, the desktop and Android apps,
     upgrades and removal.
-14. [Security](security.md): what the container boundary protects and what it
+15. [Security](security.md): what the container boundary protects and what it
     does not.
-15. [Troubleshooting](failure-handling.md): reboots, full disks, stalled runs
+16. [Troubleshooting](failure-handling.md): reboots, full disks, stalled runs
     and dropped connections, and the server settings that tune them.
-16. [Privacy](privacy.md): what the Android app, the dashboard and the
+17. [Privacy](privacy.md): what the Android app, the dashboard and the
     project's edge store and send.
-17. [Notices](notices.md): the licence and what the release artifacts bundle.
+18. [Notices](notices.md): the licence and what the release artifacts bundle.
 
 ## Extend Aether
 

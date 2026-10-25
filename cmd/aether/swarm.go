@@ -1,8 +1,8 @@
 package main
 
 import (
+	"cmp"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -12,17 +12,32 @@ import (
 	"github.com/3xDevOps/Aether/internal/cli"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 func init() {
 	register(command{
 		name:  "swarm",
 		short: "create, follow, and cancel swarms (an integrator run and its workers)",
-		run:   runSwarm,
+		usage: "aether swarm create <objective>|- --agent <agent> [--worker <agent>[:<mode>[:<model>]]]... [--workspace <name>]\n" +
+			"    [--mode standard|enhanced] [--model <model>] [--account <member-id>] [--fallback <member-id>,...|--no-fallback]\n" +
+			"    [--idempotency-key <key>]\n" +
+			"aether swarm list [--workspace <name>]\n" +
+			"aether swarm show <swarm-id>\n" +
+			"aether swarm answer <swarm-id> --question <question-id> \"<answer>\"\n" +
+			"aether swarm answer <swarm-id> --question <question-id> -\n" +
+			"aether swarm cancel <swarm-id>\n" +
+			"aether swarm replace-integrator <swarm-id> --agent <agent> [--model <model>] [--account <member-id>]",
+		example: "aether swarm create \"split the parser rewrite across workers\" --agent claude --worker codex\n" +
+			"aether swarm list\n" +
+			"aether swarm show swarm-1\n" +
+			"aether swarm answer swarm-1 --question q-1 \"use the v2 schema\"\n" +
+			"aether swarm cancel swarm-1",
+		run: runSwarm,
 	})
 }
 
-const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--model <model>] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--worker <agent>[:standard|enhanced|background[:<model>]]]... [--workspace]\n" +
+const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--model <model>] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--worker <agent>[:standard|enhanced|background[:<model>]]]... [--workspace] [--idempotency-key <key>]\n" +
 	"   or: aether swarm list [--workspace]\n" +
 	"   or: aether swarm show <swarm-id>\n" +
 	"   or: aether swarm answer <swarm-id> --question <question-id> \"<answer>\"|-\n" +
@@ -60,6 +75,7 @@ type swarmSpec struct {
 	workers    []protocol.MissionExecutionChoice
 	fallbacks  []string
 	noFallback bool
+	key        string
 }
 
 func swarmCreate(args []string, stdin io.Reader) error {
@@ -83,14 +99,14 @@ func swarmCreate(args []string, stdin io.Reader) error {
 			}
 			accountID = info.Member.ID
 		}
-		return createSwarm(c, os.Stdout, missionCreateParams(wsID, accountID, spec, cli.NewControlSessionID()))
+		return createSwarm(c, os.Stdout, missionCreateParams(wsID, accountID, spec, cmp.Or(spec.key, cli.NewControlSessionID())))
 	})
 }
 
 // parseSwarmCreate rejects what the server would refuse before any RPC, so
 // a typo never costs a round trip or a stored mission.
 func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
-	fs := flag.NewFlagSet("swarm create", flag.ExitOnError)
+	fs := newFlagSet("swarm create")
 	agent := fs.String("agent", "", "integrator agent name")
 	mode := fs.String("mode", "", "integrator mode: standard or enhanced (default: "+swarmModeDefault+")")
 	model := fs.String("model", "", "integrator "+modelHelp)
@@ -98,10 +114,14 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	fallbackOrder := fs.String("fallback", "", fallbackHelp)
 	noFallback := fs.Bool("no-fallback", false, noFallbackHelp)
+	key := fs.String("idempotency-key", "", "the key a failed or interrupted create printed: the retry returns that swarm instead of starting another (default: a new key)")
 	var workers stringList
 	fs.Var(&workers, "worker", "allow workers on this agent, agent[:mode[:model]] with mode standard|enhanced|background; an omitted or empty mode is "+swarmModeDefault+" (repeatable)")
 	objective, err := parseLeadingArg(fs, args)
-	if err != nil || *agent == "" {
+	if err != nil {
+		return swarmSpec{}, fmt.Errorf("%w\n%s", err, swarmUsage)
+	}
+	if *agent == "" {
 		return swarmSpec{}, errors.New(swarmUsage)
 	}
 	objective, err = stdinText(objective, "objective", stdin)
@@ -121,7 +141,7 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	}
 	spec := swarmSpec{
 		objective: objective, agent: *agent, mode: integratorMode, model: *model, account: *account, workspace: *workspace,
-		fallbacks: fallbacks, noFallback: *noFallback,
+		fallbacks: fallbacks, noFallback: *noFallback, key: *key,
 	}
 	for _, w := range workers {
 		choice, parseErr := parseWorker(w)
@@ -249,8 +269,16 @@ func missionCreateParams(workspaceID, accountID string, spec swarmSpec, key stri
 
 func createSwarm(c *protocol.Client, w io.Writer, params protocol.MissionCreateParams) error {
 	var res protocol.MissionCreateResult
-	if err := c.Call(protocol.MethodMissionCreate, params, &res); err != nil {
-		return err
+	if err := callInterruptibly(c, protocol.MethodMissionCreate, params, &res); err != nil {
+		var rpcErr *protocol.Error
+		retry := "add --idempotency-key " + shellquote.Quote(params.IdempotencyKey) + " to the same aether swarm create command"
+		switch {
+		case errors.Is(err, errInterrupted):
+			return &exitStatusError{code: 130, err: fmt.Errorf("%w; the swarm may have been created. aether swarm list shows it; to get it without starting another, %s", errInterrupted, retry)}
+		case errors.As(err, &rpcErr):
+			return err
+		}
+		return fmt.Errorf("%w\nthe swarm may have been created; aether swarm list shows it. To retry without starting another, %s", err, retry)
 	}
 	if _, err := fmt.Fprintf(w, "swarm %s %s\nintegrator run %s\n", res.Mission.ID, res.Mission.Phase, res.Mission.CurrentIntegratorRunID); err != nil {
 		return fmt.Errorf("write swarm result: %w", err)
@@ -259,7 +287,7 @@ func createSwarm(c *protocol.Client, w io.Writer, params protocol.MissionCreateP
 }
 
 func swarmList(args []string) error {
-	fs := flag.NewFlagSet("swarm list", flag.ExitOnError)
+	fs := newFlagSet("swarm list")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	if err := fs.Parse(args); err != nil {
 		return err

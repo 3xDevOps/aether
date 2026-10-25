@@ -15,7 +15,11 @@ func init() {
 	register(command{
 		name:  "slack",
 		short: "link your Slack account to the server's Slack bot, or unlink it",
-		run:   runSlack,
+		usage: "aether slack\n" +
+			"aether slack link\n" +
+			"aether slack unlink",
+		example: "aether slack link",
+		run:     runSlack,
 	})
 }
 

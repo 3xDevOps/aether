@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -49,7 +50,7 @@ func TestCachedBaseLaunchErrorPrintsExactRetry(t *testing.T) {
 		Code:    protocol.CodeUnavailable,
 		Message: "base capture failed: mirror offline",
 		Data:    data,
-	}, params)
+	}, params, false)
 	want := "base capture failed: mirror offline\nretry from cached " + accepted + " with:\n" +
 		"  aether run --agent claude --mode background --model opus --workspace 'ws 1' --account mem_2 --fallback mem_3,mem_4 --cached-base " + accepted + " -- " +
 		`'-fix API'\''s cache'`
@@ -57,7 +58,7 @@ func TestCachedBaseLaunchErrorPrintsExactRetry(t *testing.T) {
 		t.Fatalf("retry error = %v, want %q", got, want)
 	}
 	params.FallbackAccountMemberIDs, params.NoFallback = nil, true
-	if got := cachedBaseLaunchError(&protocol.Error{Message: "offline", Data: data}, params); got == nil ||
+	if got := cachedBaseLaunchError(&protocol.Error{Message: "offline", Data: data}, params, false); got == nil ||
 		!strings.Contains(got.Error(), " --account mem_2 --no-fallback --cached-base ") {
 		t.Fatalf("retry error = %v, want --no-fallback carried", got)
 	}
@@ -65,7 +66,7 @@ func TestCachedBaseLaunchErrorPrintsExactRetry(t *testing.T) {
 
 func TestCachedBaseLaunchErrorLeavesUnstructuredErrorUntouched(t *testing.T) {
 	original := &protocol.Error{Code: protocol.CodeUnavailable, Message: "base capture failed"}
-	if got := cachedBaseLaunchError(original, launchParams("ws_1", "task", "claude", "tui", "", "", "")); got != original {
+	if got := cachedBaseLaunchError(original, launchParams("ws_1", "task", "claude", "tui", "", "", ""), false); got != original {
 		t.Fatalf("error without accepted commit = %v, want original error", got)
 	}
 
@@ -74,7 +75,7 @@ func TestCachedBaseLaunchErrorLeavesUnstructuredErrorUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	original.Data = data
-	if got := cachedBaseLaunchError(original, launchParams("ws_1", "task", "claude", "tui", "", "", "")); got != original {
+	if got := cachedBaseLaunchError(original, launchParams("ws_1", "task", "claude", "tui", "", "", ""), false); got != original {
 		t.Fatalf("failure without accepted commit = %v, want original error", got)
 	}
 }
@@ -94,5 +95,28 @@ func TestFormatTemplateBaseProvenance(t *testing.T) {
 	local := formatTemplateBase(protocol.TemplateLaunchResult{BaseBranch: "main", BaseCommit: "abc", BaseCheckedAt: "now"})
 	if want := "base main abc from local (checked now)\n"; local != want {
 		t.Fatalf("local template base = %q, want %q", local, want)
+	}
+}
+
+// A launch call with no answer from the server may still be starting, so
+// the error names the retry that returns its run instead of a second one.
+func TestLaunchErrorNamesTheRetryWithTheKey(t *testing.T) {
+	params := launchParams("ws_1", "fix it", "claude", "tui", "", "", "")
+	params.IdempotencyKey = "k-1"
+	err := launchError(errors.New("protocol: read response: EOF"), params, false)
+	want := "protocol: read response: EOF\nthe launch may still be starting; aether runs lists it. To retry without launching twice, run:\n" +
+		"  aether run --agent claude --mode standard --workspace ws_1 --idempotency-key k-1 -- 'fix it'"
+	if err == nil || err.Error() != want {
+		t.Fatalf("launch error = %v\nwant %q", err, want)
+	}
+	err = launchError(errInterrupted, params, true)
+	var status *exitStatusError
+	if !errors.As(err, &status) || status.code != 130 || !errors.Is(err, errInterrupted) ||
+		!strings.Contains(err.Error(), "the launch continues on the server") || !strings.HasSuffix(err.Error(), "--idempotency-key k-1 -- - < <the same task file>") {
+		t.Fatalf("interrupted launch error = %v", err)
+	}
+	refused := &protocol.Error{Code: protocol.CodeUnavailable, Message: "scheduler: host capacity unavailable"}
+	if got := launchError(refused, params, false); got != refused {
+		t.Fatalf("server refusal = %v, want it unchanged", got)
 	}
 }

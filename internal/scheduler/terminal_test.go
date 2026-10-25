@@ -206,8 +206,8 @@ func assertCleanupPendingTerminalIsNotLive(t *testing.T, e *testEnv) {
 	if _, err := e.sched.TerminalContainerAddr(t.Context(), e.member.ID); err == nil || err.Error() != "environment terminal is not running" {
 		t.Fatalf("TerminalContainerAddr for pending terminal = %v, want not running", err)
 	}
-	if _, err := e.sched.SaveEnvironment(t.Context(), e.member.ID); !errors.Is(err, ErrTerminalNotRunning) {
-		t.Fatalf("SaveEnvironment for pending terminal = %v, want %v", err, ErrTerminalNotRunning)
+	if _, err := e.sched.SaveEnvironment(t.Context(), e.member.ID); err == nil || len(e.rt.commitCalls()) != 0 {
+		t.Fatalf("SaveEnvironment for pending terminal = %v, commits %+v, want a refusal and no commit", err, e.rt.commitCalls())
 	}
 	if _, err := e.sched.SaveTerminalImage(t.Context(), e.member.ID, "", ".png", []byte("pending terminal image")); err == nil || !strings.Contains(err.Error(), "environment terminal is not running") {
 		t.Fatalf("SaveTerminalImage for pending terminal = %v, want not running", err)

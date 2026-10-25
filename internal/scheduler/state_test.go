@@ -63,10 +63,10 @@ func TestSetupFailureOutputReachesOnlyTheLauncher(t *testing.T) {
 		t.Fatalf("Launch error = %#v, want a SetupFailure carrying the script's output", launchErr)
 	}
 	const reason = "provisioning: start container: runtime: setup script exited 17"
-	if launchErr.Error() != reason {
-		t.Fatalf("Launch error message = %q, want %q", launchErr, reason)
-	}
 	prov := waitStatusEvent(t, sub, "", domain.RunProvisioning)
+	if want := "run " + string(prov.RunID) + " failed: " + reason; launchErr.Error() != want {
+		t.Fatalf("Launch error message = %q, want %q", launchErr, want)
+	}
 	failed := waitStatusEvent(t, sub, prov.RunID, domain.RunFailed)
 	if got := failed.Payload.(events.RunStatusPayload).Reason; got != reason {
 		t.Fatalf("published reason = %q, want %q", got, reason)

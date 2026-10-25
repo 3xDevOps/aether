@@ -150,6 +150,18 @@ func AetherRemoteURL(repo string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// AetherPushURLs lists every URL a push to repo's aether remote goes to: a
+// remote can carry several pushurl entries, and git pushes to each.
+func AetherPushURLs(repo string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "git", "-C", repo, "remote", "get-url", "--push", "--all", "aether").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("git remote get-url --push --all aether: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return strings.Fields(string(out)), nil
+}
+
 // remoteEnv is the environment of a git command that dials repo's aether
 // remote: no credential prompt, since nothing here can answer one, and
 // aether edge-ssh when the remote is an edge link.

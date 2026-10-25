@@ -14,8 +14,10 @@ import (
 
 func init() {
 	register(command{
-		name:  "edge-ssh",
-		short: "ssh for git: reaches edge-linked servers, runs ssh for every other host",
+		name:    "edge-ssh",
+		short:   "ssh for git: reaches edge-linked servers, runs ssh for every other host",
+		usage:   "aether edge-ssh [ssh-options] <host> [command]",
+		example: "aether edge-ssh git@github.com git-upload-pack acme/app",
 		run: func(args []string) error {
 			os.Exit(edgeSSH(args, os.Stdin, os.Stdout, os.Stderr))
 			return nil

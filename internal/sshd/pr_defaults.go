@@ -4,21 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
-
-// githubRemote matches githubRepository in web/src/routes/diff/publish-target.ts.
-var githubRemote = regexp.MustCompile(`^(?:https://(?:[^@/]+@)?github\.com/|(?:ssh://)?git@github\.com[:/])([^/]+/[^/]+?)(?:\.git)?/?$`)
-
-func githubRepository(url string) string {
-	if m := githubRemote.FindStringSubmatch(url); m != nil {
-		return m[1]
-	}
-	return ""
-}
 
 // prDefaults fills a zero expected with the checkout's branch and head, and
 // a zero target with the pull request the dashboard proposes
@@ -59,34 +48,14 @@ func (s *Server) prDefaults(ctx context.Context, call runRepoCall, expected *pro
 	case !errors.Is(err, store.ErrNotFound):
 		return rpcError(fmt.Errorf("default pr target: %w", err)), nil
 	}
-	var tracked, origin *protocol.RunGitRemote
-	for i := range remotes {
-		if upstream != nil && remotes[i].Name == upstream.Remote {
-			tracked = &remotes[i]
-		}
-		if workspace.Origin != "" && remotes[i].Name == "origin" {
-			origin = &remotes[i]
-		}
-	}
-	remote, headBranch := origin, state.Branch
-	if tracked != nil {
-		remote, headBranch = tracked, upstream.Branch
-	}
-	head := ""
-	if remote != nil && len(remote.PushURLs) == 1 {
-		head = githubRepository(remote.PushURLs[0])
-	}
-	if head == "" || headBranch == "" {
-		return nil, fmt.Errorf("the checkout's branch %q has no GitHub push remote; pass target", state.Branch)
-	}
 	base := call.repo.BaseBranch
 	if base == "" {
 		base = workspace.BaseBranch
 	}
-	repository := githubRepository(source)
-	if repository == "" {
-		repository = head
+	pr := protocol.DefaultPRTarget(protocol.DefaultPushTarget(remotes, upstream, state.Branch, workspace.Origin != ""), base, source)
+	if pr.HeadRepository == "" || pr.HeadBranch == "" {
+		return nil, fmt.Errorf("the checkout's branch %q has no GitHub push remote; pass target", state.Branch)
 	}
-	*target = protocol.RunPRTarget{Repository: repository, BaseBranch: base, HeadRepository: head, HeadBranch: headBranch}
+	*target = pr
 	return nil, nil
 }

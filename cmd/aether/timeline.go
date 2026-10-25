@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -22,25 +22,39 @@ const timelinePageSize = 200
 
 func init() {
 	register(command{
-		name:  "timeline",
-		short: "show a workspace's history, filterable and exportable as JSONL",
-		run:   runTimeline,
+		name:    "timeline",
+		short:   "show a workspace's history, filterable and exportable as JSONL",
+		usage:   "aether timeline [<run-id>] [--workspace <name>] [--member <member>] [--type <types>] [--limit <n>] [--jsonl]",
+		example: "aether timeline run-d6ay38tj8j --limit 50",
+		flags:   true,
+		run:     runTimeline,
 	})
 }
 
 func runTimeline(args []string) error {
-	fs := flag.NewFlagSet("timeline", flag.ExitOnError)
-	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
+	fs := newFlagSet("timeline")
+	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace, or the run's with --run)")
 	run := fs.String("run", "", "only events for this run")
 	member := fs.String("member", "", "only events by this member (ID or display name)")
 	types := fs.String("type", "", "comma-separated event types, e.g. run.status,workspace.timeline")
 	limit := fs.Int("limit", 200, "stop after this many entries (0 for the whole history)")
 	jsonl := fs.Bool("jsonl", false, "write one JSON event per line instead of a table")
+	var positional []string
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		positional, args = args[:1], args[1:]
+	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	positional = append(positional, fs.Args()...)
+	switch {
+	case len(positional) > 1, len(positional) == 1 && *run != "":
+		return errors.New("usage: aether timeline [<run-id>] [flags]; name the run once, as an argument or with --run")
+	case len(positional) == 1:
+		*run = positional[0]
+	}
 	return withControl(func(c *protocol.Client) error {
-		wsID, err := resolveWorkspace(c, *workspace)
+		wsID, err := timelineWorkspace(c, *workspace, *run)
 		if err != nil {
 			return err
 		}
@@ -73,6 +87,17 @@ func runTimeline(args []string) error {
 		}
 		return printTimeline(c, params, *limit, byID)
 	})
+}
+
+func timelineWorkspace(c *protocol.Client, workspace, runID string) (string, error) {
+	if workspace != "" || runID == "" {
+		return resolveWorkspace(c, workspace)
+	}
+	r, err := getRun(c, runID)
+	if err != nil {
+		return "", err
+	}
+	return r.WorkspaceID, nil
 }
 
 func splitTypes(list string) []string {
@@ -183,6 +208,8 @@ func timelineDetail(ev protocol.Event, name func(string) string) string {
 	case events.TimelinePayload:
 		detail := string(v.Kind)
 		switch {
+		case v.Kind == events.TimelineReport:
+			detail = v.Outcome + ": " + firstLine(v.Summary)
 		case v.Kind == events.TimelineHandoff && v.Message != "":
 			detail += " to " + name(v.Message)
 		case v.Message != "":

@@ -150,3 +150,36 @@ func TestParseLinkArgsFromEdge(t *testing.T) {
 		}
 	}
 }
+
+func TestParseLinkArgsClaimLink(t *testing.T) {
+	code := testServerID + "-abcdefghijklmnop"
+	link := "aether://claim?edge=https%3A%2F%2Fedge.example&server=" + testServerID + "#abcdefghijklmnop"
+	for _, args := range [][]string{
+		{"--claim", link},
+		{"--claim", link, "--edge", "https://EDGE.example/"},
+	} {
+		opts, err := parseLinkArgs(args)
+		if err != nil || opts.claim != code || opts.edge != "https://edge.example" {
+			t.Errorf("parseLinkArgs(%q) = %+v, %v; want the code and the link's edge", args, opts, err)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--claim", link, "--edge", "https://other.example"}, "the claim link names the edge https://edge.example; drop --edge"},
+		{[]string{"--claim", "aether://claim?server=" + testServerID + "#abcdefghijklmnop"}, "a claim link looks like aether://claim?edge="},
+		{[]string{link}, "a claim link goes after --claim: aether link --claim '<claim link>'"},
+		{[]string{code}, "that is a claim code, which goes after --claim: aether link --claim <code>"},
+		{[]string{"https://edge.example/join/" + testServerID}, "a join link looks like https://<edge host>/join/"},
+		{[]string{"aether://nothing"}, "an address looks like host[:port], and a claim link goes after --claim"},
+	} {
+		_, err := parseLinkArgs(tc.args)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("parseLinkArgs(%q) = %v, want an error containing %q", tc.args, err, tc.want)
+		}
+		if err != nil && strings.Contains(err.Error(), "abcdefghijklmnop") {
+			t.Errorf("parseLinkArgs(%q) error carries the claim secret: %v", tc.args, err)
+		}
+	}
+}

@@ -24,7 +24,16 @@ func init() {
 	register(command{
 		name:  "config",
 		short: "list and upload agent configuration",
-		run:   runConfig,
+		usage: "aether config ls\n" +
+			"aether config ls [-r] <agent> [path]\n" +
+			"aether config cat <agent> <path>\n" +
+			"aether config push [--dry-run] [--overwrite] <agent> <path>...\n" +
+			"aether config push [--dry-run] [--overwrite] <agent> <path> --from <file>",
+		example: "aether config ls\n" +
+			"aether config ls -r claude\n" +
+			"aether config cat claude settings.json\n" +
+			"aether config push --dry-run claude settings.json",
+		run: runConfig,
 	})
 }
 
@@ -56,7 +65,7 @@ func runConfig(args []string) error {
 		return errors.New(configUsage)
 	}
 	switch args[0] {
-	case "help", "-h", "--help":
+	case "help":
 		fmt.Println(configUsage)
 		return nil
 	case "ls":

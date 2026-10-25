@@ -24,7 +24,7 @@ func TestLinkRepoPointsEdgeLinkAtLogicalHostAndSetsSSHCommand(t *testing.T) {
 	repo := t.TempDir()
 	git(t, repo, "init")
 	cfg := cli.Config{User: "aether", EdgeURL: "https://edge.example", ServerID: testServerID}
-	_, url, err := LinkRepo(cfg, repo, "ws_1")
+	_, url, _, err := LinkRepo(cfg, repo, "ws_1")
 	if err != nil {
 		t.Fatal(err)
 	}

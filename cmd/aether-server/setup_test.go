@@ -700,8 +700,9 @@ func TestWriteSetupWithoutDockerStartsNextOnDocker(t *testing.T) {
 	}
 	want := "  1. install or start Docker on this machine:\n       https://docs.docker.com/engine/install/\n" +
 		"  2. start the server on this machine:\n       sudo systemctl daemon-reload && sudo systemctl enable --now aether-server\n" +
-		"  3. on this machine, print a claim link to open on your computer:\n       sudo aether-server edge claim-code --config '" + configPath + "'\n" +
-		mcpStep(4)
+		"  3. on this machine, print a claim code:\n       sudo aether-server edge claim-code --config " + configPath + "\n" +
+		"  4. on your computer, sign in and claim the server with that code:\n       aether login\n       aether link --claim <code>\n" +
+		mcpStep(5)
 	if got := nextSteps(t, out.String()); got != want {
 		t.Errorf("next steps:\n%s\nwant:\n%s", got, want)
 	}
@@ -761,6 +762,7 @@ func TestWriteSetupEndsOnNextSteps(t *testing.T) {
 	if !strings.HasSuffix(got, "\n       "+serversetup.ActivateCommand+"\n"+
 		"  2. on your computer, open the claim link above with the Aether app, or paste it\n"+
 		"     into the app's Connect page; in a terminal:\n"+
+		"       aether login\n"+
 		"       aether link --claim "+code+"\n"+mcpStep(3)) {
 		t.Errorf("output does not end on starting the server, claiming it and adding it to ChatGPT or Claude:\n%s", got)
 	}
@@ -808,24 +810,35 @@ func TestPrintNextStepsPrefixesSudoForASudoUser(t *testing.T) {
 }
 
 // `aether-server install --edge-url` issues no claim code, so on a server
-// without an owner step 2 is the command that issues one.
+// without an owner step 2 is the command that issues one, and step 3
+// signs in before claiming, on the server's edge: a claim code names none.
 func TestPrintNextStepsSendsAnUnclaimedEdgeServerToClaimCode(t *testing.T) {
 	t.Setenv("SUDO_USER", "ubuntu")
+	claim := "  3. on your computer, sign in and claim the server with that code:\n       aether login\n       aether link --claim <code>\n"
 	var out bytes.Buffer
 	o := optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": edgeagent.DefaultURL})
 	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out.String(), "\n       sudo aether-server edge claim-code\n"+mcpStep(3)) {
-		t.Errorf("want step 2 to issue a claim code:\n%s", out.String())
+	if !strings.HasSuffix(out.String(), "\n       sudo aether-server edge claim-code\n"+claim+mcpStep(4)) {
+		t.Errorf("want step 2 to issue a claim code and step 3 to use it:\n%s", out.String())
 	}
 
 	out.Reset()
 	if err := printNextSteps(&out, "/srv/it's here/server.conf", o, "", true); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out.String(), `sudo aether-server edge claim-code --config '/srv/it'\''s here/server.conf'`+"\n"+mcpStep(3)) {
+	if !strings.HasSuffix(out.String(), `sudo aether-server edge claim-code --config '/srv/it'\''s here/server.conf'`+"\n"+claim+mcpStep(4)) {
 		t.Errorf("want the claim command to name the config install wrote, shell-quoted:\n%s", out.String())
+	}
+
+	out.Reset()
+	o = optionsOf(t, map[string]string{"data-dir": t.TempDir(), "edge-url": "https://edge.example"})
+	if err := printNextSteps(&out, serversetup.DefaultConfigPath, o, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "\n       aether login --edge https://edge.example\n       aether link --claim <code> --edge https://edge.example\n") {
+		t.Errorf("want both client commands on the server's edge:\n%s", out.String())
 	}
 }
 

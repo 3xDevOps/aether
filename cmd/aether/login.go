@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
-	"flag"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/cli"
 	edgeclient "github.com/3xDevOps/Aether/internal/edge/client"
@@ -15,9 +17,12 @@ import (
 
 func init() {
 	register(command{
-		name:  "login",
-		short: "sign in to an edge to reach servers without SSH or network setup",
-		run:   runLogin,
+		name:    "login",
+		short:   "sign in to an edge to reach servers without SSH or network setup",
+		usage:   "aether login [--edge <url>] [--label <name>] [--json]",
+		example: "aether login --json",
+		flags:   true,
+		run:     runLogin,
 	})
 }
 
@@ -34,14 +39,15 @@ func edgeClient(edgeURL string) (*edgeclient.Client, error) {
 }
 
 func runLogin(args []string) error {
-	fs := flag.NewFlagSet("login", flag.ExitOnError)
+	fs := newFlagSet("login")
 	edgeURL := fs.String("edge", "", edgeFlagUsage)
 	label := fs.String("label", "", "name of this device on the edge's Devices page (default: this machine's host name)")
+	jsonOut := fs.Bool("json", false, "print the sign-in address and code as one JSON line, then the result as another; opens no browser")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("usage: aether login [--edge <url>] [--label <name>]")
+		return fmt.Errorf("usage: aether login [--edge <url>] [--label <name>] [--json]")
 	}
 	client, err := edgeClient(*edgeURL)
 	if err != nil {
@@ -58,6 +64,9 @@ func runLogin(args []string) error {
 	if err != nil {
 		return err
 	}
+	if *jsonOut {
+		return loginJSON(ctx, os.Stdout, client, login)
+	}
 	fmt.Printf("%s signs you in for the edge %s\n", edgeclient.HostOf(login.SigninOrigin), client.Host())
 	fmt.Printf("open %s and enter the code %s\n", login.VerificationURI, login.UserCode)
 	openBrowser(login.VerificationURI)
@@ -73,6 +82,42 @@ func runLogin(args []string) error {
 	}
 	fmt.Print(credentialLifetimes(filepath.Join(dir, edgeclient.TokensFile)))
 	return nil
+}
+
+// loginLine's fields are those of the gateway's edge.login answer, plus
+// ExpiresAt and Device.
+type loginLine struct {
+	State           string                 `json:"state"`
+	Edge            string                 `json:"edge"`
+	SigninOrigin    string                 `json:"signin_origin"`
+	UserCode        string                 `json:"user_code"`
+	VerificationURI string                 `json:"verification_uri"`
+	ExpiresAt       string                 `json:"expires_at"`
+	Account         *edgeproto.AccountInfo `json:"account,omitempty"`
+	Device          *edgeproto.Device      `json:"device,omitempty"`
+	Error           string                 `json:"error,omitempty"`
+}
+
+func loginJSON(ctx context.Context, w io.Writer, client *edgeclient.Client, login *edgeclient.Login) error {
+	line := loginLine{
+		State: "pending", Edge: client.URL(), SigninOrigin: login.SigninOrigin, UserCode: login.UserCode,
+		VerificationURI: login.VerificationURI, ExpiresAt: login.Expires.UTC().Format(time.RFC3339),
+	}
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(line); err != nil {
+		return err
+	}
+	session, waitErr := client.Wait(ctx, login)
+	if waitErr != nil {
+		line.State, line.Error = "failed", waitErr.Error()
+	} else {
+		line.State, line.Account, line.Device = "signed_in", &session.Account, &session.Device
+	}
+	if err := enc.Encode(line); err != nil {
+		return err
+	}
+	return waitErr
 }
 
 // credentialLifetimes says how long what aether login leaves on this

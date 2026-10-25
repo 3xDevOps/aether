@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +18,14 @@ func init() {
 	register(command{
 		name:  "terminal",
 		short: "open or manage your Environment terminal, or run one command in it",
-		run:   runTerminal,
+		usage: "aether terminal [--tab <name>]\n" +
+			"aether terminal status\n" +
+			"aether terminal stop\n" +
+			"aether terminal exec <command>...",
+		example: "aether terminal\n" +
+			"aether terminal status\n" +
+			"aether terminal exec git status",
+		run: runTerminal,
 	})
 }
 
@@ -39,10 +45,12 @@ func runTerminal(args []string) error {
 		}
 	}
 
-	fs := flag.NewFlagSet("terminal", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs := newFlagSet("terminal")
 	tab := fs.String("tab", "main", "terminal tab name")
-	if err := fs.Parse(args); err != nil || fs.NArg() != 0 {
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%w\n%s", err, terminalUsage())
+	}
+	if fs.NArg() != 0 {
 		return terminalUsage()
 	}
 	if !terminalTabName.MatchString(*tab) {

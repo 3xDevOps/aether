@@ -18,8 +18,8 @@ agent once without input, commits the result and exits.
 | `--agent` | CLI | Sign in | Known limits |
 | --- | --- | --- | --- |
 | `antigravity` | Antigravity CLI (runs as `agy`) | run `agy` | None known |
-| `claude` | Claude Code | `/login` inside `claude` | Set up suggests Standard: the Enhanced adapter runs on the Claude Agent SDK |
-| `codex` | OpenAI Codex CLI | `codex login`, device code | Standard runs need Codex 0.131.0 or newer; subagents do not nest in Enhanced |
+| `claude` | Claude Code | `claude auth login`, or `/login` inside `claude` | Set up suggests Standard: the Enhanced adapter runs on the Claude Agent SDK |
+| `codex` | OpenAI Codex CLI | `codex login --device-auth` | Standard runs need Codex 0.131.0 or newer; subagents do not nest in Enhanced |
 | `copilot` | GitHub Copilot CLI | `copilot login --device-code` | Enhanced runs cannot take back `--allow-all` |
 | `cursor` | Cursor CLI (runs as `agent`) | `NO_OPEN_BROWSER=1 agent login` | A Cursor admin policy can bring back approval prompts |
 | `gemini` | Gemini CLI | API key, or `NO_BROWSER=true gemini` | Serves paid API keys and Code Assist only |
@@ -79,9 +79,14 @@ You do this once per agent, per person.
    aether agent add <name>
    ```
 
-   This opens your environment's terminal, the same shell `aether terminal`
-   opens, types the vendor's install command and leaves you in that shell. The
-   agent installs into `~/.local/bin`, which persists in your home. Add
+   On a terminal, this opens your environment's terminal, the same shell
+   `aether terminal` opens, types the vendor's install command and leaves you in
+   that shell. Without a terminal (an agent's shell, CI), it runs the install
+   on the server, waits up to 10 minutes, prints the end of the install log and
+   `installed <name>`, then `sign in with: aether agent login <name>`. A failed
+   install exits 1 after the log with
+   `aether: agent <name>: the install command exited <n>; its output is above`.
+   The agent installs into `~/.local/bin`, which persists in your home. Add
    `--enhanced` to install the Enhanced adapter too (see
    [Enhanced adapters](#enhanced-adapters)). In the dashboard, **Set up** on the
    **Agents** page or onboarding's **Agent** step does the same: it lets you
@@ -91,13 +96,18 @@ You do this once per agent, per person.
    The environment has no `aether` command (only `aether-internal`), so run
    `aether` commands on your computer, never in this shell.
 
-2. When the install finishes, sign in from the same environment shell with the
-   vendor's login, as described under [Per-agent setup](#per-agent-setup). To
-   sign in later, open the shell with `aether terminal`. The environment has no
-   browser: open the URL the CLI prints in your own browser. In the dashboard,
-   clicking an OAuth URL with a loopback redirect starts the callback forward
-   for you. From the CLI, start it yourself in a second terminal on your
-   computer before you finish the browser flow:
+2. Sign in:
+
+   ```sh
+   aether agent login <name>
+   ```
+
+   On a terminal, this opens the environment's terminal with the agent's
+   sign-in command typed (the **Sign in** column above); finish it there. The
+   environment has no browser: open the URL the CLI prints in your own browser.
+   In the dashboard, clicking an OAuth URL with a loopback redirect starts the
+   callback forward for you. From the CLI, start it yourself in a second
+   terminal on your computer before you finish the browser flow:
 
    ```sh
    aether forward terminal <callback-port>
@@ -105,9 +115,58 @@ You do this once per agent, per person.
 
    Device-code logins need no forward.
 
-3. Check the **Agents** page. It shows **Installed** or **Not installed** and
-   **Login found** or **No login found**. These checks look for the executable
-   and the login file. The agent itself verifies the login when it starts.
+   Without a terminal, only a device-code sign-in, which needs nothing typed
+   back, can run. Today that is Codex: `aether agent login codex` runs
+   `codex login --device-auth` in a new terminal tab, `login-codex-<id>`,
+   prints its output as plain text as it arrives, so the URL and code reach
+   you, and waits for it to end. It then prints
+   `codex: login file found; aether account usage checks that the vendor accepts it`,
+   or exits 1 naming Codex's exit status. Running it again starts a new
+   sign-in with a new code. Ctrl-C stops only the CLI; the sign-in runs on in
+   its tab until it ends or the code expires. The token stays in your home on
+   the server.
+
+   Every other agent's sign-in needs typed input (a pasted code, a picker, a
+   y/N), so without a terminal the command exits 1 at once:
+
+   ```text
+   aether: claude signs in with claude auth login, which needs typed input, so it needs a terminal. The human runs this in their own terminal:
+     aether agent login claude
+   An API key stored as a workspace secret works instead: docs/harnesses.md#use-an-api-key
+   ```
+
+3. Check the agent:
+
+   ```sh
+   aether agent list
+   ```
+
+   ```text
+   AGENT        SOURCE   INSTALLED  ENHANCED       LOGIN FILE
+   claude       shipped  yes        not installed  not found
+   codex        shipped  yes        installed      found
+   myagent      member   yes        none           -
+   ```
+
+   `LOGIN FILE` only looks for the login file in your home; `-` means the agent
+   declares none. `--json` prints the agents as `agent.list` returns them
+   ([local-gateway.md](local-gateway.md)). The **Agents** page shows the same
+   checks as **Installed** and **Login found**. The agent itself verifies the
+   login when it starts. For Claude Code and Codex, ask the vendor whether it
+   accepts the login:
+
+   ```sh
+   aether account usage
+   ```
+
+   ```text
+   PROVIDER  STATUS           DETAIL
+   claude    ok               5 hours: 12% used, 7 days: 40% used
+   codex     unauthenticated  Codex OAuth credential not found
+   ```
+
+   The statuses are those in [Subscription quota](#subscription-quota).
+   `--json` prints the `account.usage` result.
 
 The login and executable live in your home, so every container you launch sees
 them. If you skip the login, the agent's own login prompt appears in the run's
@@ -116,9 +175,30 @@ terminal. Attach with `aether attach <run>` and finish it there.
 Installing `codex`, `pi`, `copilot` or `gemini` needs `npm`. If `npm` is not on
 the environment's `PATH`, the install fails with, for example,
 `npm is not in this environment's PATH, and codex installs through npm`. The
-dashboard's **Set up** runs the install under `mktemp` and `timeout`, so the
-image must provide both. Without them it fails with `timeout: not found` and
-exit status 127.
+dashboard's **Set up** and `aether agent add` without a terminal run the
+install under `mktemp` and `timeout`, so the image must provide both. Without
+them it fails with `timeout: not found` and exit status 127.
+
+### Use an API key
+
+A key stored as a workspace secret replaces the agent's login in that
+workspace's runs. The human runs this on their own computer, for example:
+
+```sh
+aether workspace env set --secret ANTHROPIC_API_KEY
+```
+
+The value is read from stdin; on a terminal the command prompts with input
+hidden. Codex ignores `OPENAI_API_KEY` and reads `CODEX_API_KEY` in
+Background runs only; for every Codex mode, run `codex login --with-api-key`
+in `aether terminal`. Each agent's key is under
+[Per-agent setup](#per-agent-setup). Pick another workspace with `--workspace
+<name-or-id>`. Never pass a key as `NAME=value`: that puts it on the command
+line and stores a plain variable that `aether workspace env list` shows.
+
+> [!WARNING]
+> On a team server, anyone who can launch a run in the workspace or message one
+> can read the key ([environments.md](environments.md#secrets)).
 
 ### Enhanced adapters
 
@@ -141,9 +221,9 @@ pass through, such as Claude Code's `ANTHROPIC_AUTH_TOKEN`, goes in a
 
 #### Claude Code
 
-Start `claude` and use `/login`. It prints a URL to open in your own browser and
-takes a code back. `/status` shows which credential is active. The login lands
-in `~/.claude/.credentials.json`.
+Run `claude auth login`, or start `claude` and use `/login`. Either prints a URL
+to open in your own browser and takes a code back. `/status` shows which
+credential is active. The login lands in `~/.claude/.credentials.json`.
 
 For an API key, set `ANTHROPIC_API_KEY` in the server's environment, and
 `ANTHROPIC_BASE_URL` for a gateway. A `CLAUDE_CODE_OAUTH_TOKEN` from
@@ -155,7 +235,10 @@ run gets `IS_SANDBOX=1`.
 
 #### Codex
 
-Run `codex login` and choose the device-code option. The login lands in
+Run `codex login --device-auth`. It prints a URL and a one-time code and needs
+nothing typed back. Device code login must be on first: in ChatGPT's security
+settings for a personal account, or in the workspace permissions for a ChatGPT
+workspace ([OpenAI](https://learn.chatgpt.com/docs/auth)). The login lands in
 `~/.codex/auth.json`. For an API key, `codex login --with-api-key` reads one
 from stdin into the same file, which every run mode uses. `CODEX_API_KEY` in
 the server's environment signs in Background runs only. Codex ignores

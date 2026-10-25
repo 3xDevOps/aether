@@ -8,14 +8,18 @@ import (
 
 func init() {
 	register(command{
-		name:  "archive",
-		short: "hide a finished run from the board without deleting its history",
-		run:   func(args []string) error { return setArchived(args, true) },
+		name:    "archive",
+		short:   "hide a finished run from the board without deleting its history",
+		usage:   "aether archive <run-id>",
+		example: "aether archive run-d6ay38tj8j",
+		run:     func(args []string) error { return setArchived(args, true) },
 	})
 	register(command{
-		name:  "unarchive",
-		short: "restore an archived run to the board and default aether runs",
-		run:   func(args []string) error { return setArchived(args, false) },
+		name:    "unarchive",
+		short:   "restore an archived run to the board and default aether runs",
+		usage:   "aether unarchive <run-id>",
+		example: "aether unarchive run-d6ay38tj8j",
+		run:     func(args []string) error { return setArchived(args, false) },
 	})
 }
 

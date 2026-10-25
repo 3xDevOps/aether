@@ -16,9 +16,11 @@ import (
 
 func init() {
 	register(command{
-		name:  "edge",
-		short: "connect your GitHub account to the linked server's edge",
-		run:   runEdge,
+		name:    "edge",
+		short:   "connect your GitHub account to the linked server's edge",
+		usage:   "aether edge connect",
+		example: "aether edge connect",
+		run:     runEdge,
 	})
 }
 

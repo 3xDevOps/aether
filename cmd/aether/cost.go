@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -11,14 +10,17 @@ import (
 
 func init() {
 	register(command{
-		name:  "cost",
-		short: "report token usage and cost per member and per run",
-		run:   runCost,
+		name:    "cost",
+		short:   "report token usage and cost per member and per run",
+		usage:   "aether cost [--workspace <name>] [--runs]",
+		example: "aether cost --workspace app --runs",
+		flags:   true,
+		run:     runCost,
 	})
 }
 
 func runCost(args []string) error {
-	fs := flag.NewFlagSet("cost", flag.ExitOnError)
+	fs := newFlagSet("cost")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	runs := fs.Bool("runs", false, "list every run's usage, not just the per-member split")
 	if err := fs.Parse(args); err != nil {

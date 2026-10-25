@@ -22,7 +22,7 @@ import (
 
 // ErrGitHubNotLoggedIn reports that gh in the member's environment
 // terminal is not logged in to github.com yet.
-var ErrGitHubNotLoggedIn = errors.New("github: not logged in to github.com in the environment terminal; run gh auth login there first")
+var ErrGitHubNotLoggedIn = errors.New("github: not logged in to github.com in the environment terminal; run aether github connect")
 
 // ErrGitHubScopeMissing reports that the login is good but was granted
 // without the scope the last step of the connect needs.

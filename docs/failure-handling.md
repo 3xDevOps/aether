@@ -152,8 +152,10 @@ hides it and frees nothing.
 `scheduler: host capacity unavailable: ...` means Aether could not measure a
 filesystem or host memory, for example a Docker daemon whose storage it cannot
 see or a probe that timed out. Fix what the error names; free space in `df`
-on a different machine does not count. If a filesystem cannot be read at all,
-the disk check lets the launch through.
+on a different machine does not count. When Docker does not answer, the error
+ends with `the server's operator can check Docker with: sudo systemctl status
+docker`. If a filesystem cannot be read at all, the disk check lets the launch
+through.
 
 ## Capture an unresponsive host
 

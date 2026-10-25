@@ -22,7 +22,6 @@ func memberImageRepo(member domain.MemberID) string {
 	return "aether/member-" + string(member)
 }
 
-// SaveEnvironment snapshots the running environment terminal and records its image for the member.
 func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID) (string, error) {
 	lock := s.terminalLock(member)
 	lock.Lock()
@@ -37,7 +36,7 @@ func (s *Scheduler) SaveEnvironment(ctx context.Context, member domain.MemberID)
 
 	sup := s.lookupLiveTerminal(member)
 	if sup == nil {
-		return "", ErrTerminalNotRunning
+		return "", fmt.Errorf("%w: open it with `aether terminal` (or the dashboard), check your changes are there, then save", ErrTerminalNotRunning)
 	}
 	if _, err := s.cfg.Store.GetMember(ctx, member); err != nil {
 		return "", fmt.Errorf("scheduler: get member to save environment: %w", err)

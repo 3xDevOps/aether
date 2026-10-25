@@ -13,7 +13,13 @@ func init() {
 	register(command{
 		name:  "schedule",
 		short: "list, set, or delete the cron rules that fire task templates",
-		run:   runSchedule,
+		usage: "aether schedule list [--workspace <name>]\n" +
+			"aether schedule set <template> \"<cron>\" [--workspace <name>]\n" +
+			"aether schedule delete <template> [--workspace <name>]",
+		example: "aether schedule list\n" +
+			"aether schedule set nightly-audit \"0 3 * * *\"\n" +
+			"aether schedule delete nightly-audit",
+		run: runSchedule,
 	})
 }
 
@@ -28,7 +34,7 @@ func runSchedule(args []string) error {
 			args = args[1:]
 		}
 	}
-	fs := flag.NewFlagSet("schedule list", flag.ExitOnError)
+	fs := newFlagSet("schedule list")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -58,7 +64,7 @@ func runSchedule(args []string) error {
 }
 
 func scheduleSet(args []string) error {
-	fs := flag.NewFlagSet("schedule set", flag.ExitOnError)
+	fs := newFlagSet("schedule set")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	rest, err := parseTwoArgs(fs, args)
 	if err != nil {
@@ -83,10 +89,13 @@ func scheduleSet(args []string) error {
 }
 
 func scheduleDelete(args []string) error {
-	fs := flag.NewFlagSet("schedule delete", flag.ExitOnError)
+	fs := newFlagSet("schedule delete")
 	workspace := fs.String("workspace", "", "workspace ID or name (default: the only workspace)")
 	template, err := parseLeadingArg(fs, args)
-	if err != nil || template == "" {
+	if err != nil {
+		return fmt.Errorf("%w\nusage: aether schedule delete <template> [--workspace]", err)
+	}
+	if template == "" {
 		return fmt.Errorf("usage: aether schedule delete <template> [--workspace]")
 	}
 	return withControl(func(c *protocol.Client) error {

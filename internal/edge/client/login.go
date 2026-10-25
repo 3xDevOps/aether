@@ -23,17 +23,16 @@ const (
 // pollUnit is one second of the edge's polling interval; tests shorten it.
 var pollUnit = time.Second
 
-// Login is a device sign-in waiting for the person to confirm UserCode at
-// VerificationURI, a page on SigninOrigin, the sign-in origin the edge's
+// VerificationURI is a page on SigninOrigin, the sign-in origin the edge's
 // metadata named.
 type Login struct {
 	UserCode        string
 	VerificationURI string
 	SigninOrigin    string
+	Expires         time.Time
 	deviceCode      string
 	key             string
 	interval        time.Duration
-	deadline        time.Time
 }
 
 // StartLogin creates the device key if needed, reads the sign-in origin
@@ -79,8 +78,8 @@ func (c *Client) StartLogin(ctx context.Context, label string) (*Login, error) {
 		SigninOrigin:    signin,
 		deviceCode:      resp.DeviceCode,
 		key:             req.Key,
+		Expires:         time.Now().Add(wait),
 		interval:        time.Duration(interval) * pollUnit,
-		deadline:        time.Now().Add(wait),
 	}, nil
 }
 
@@ -96,7 +95,7 @@ func onOrigin(raw, origin string) bool {
 // edge keeps the pending sign-in, and the person may already have
 // confirmed it.
 func (c *Client) Wait(ctx context.Context, l *Login) (Session, error) {
-	ctx, cancel := context.WithDeadline(ctx, l.deadline)
+	ctx, cancel := context.WithDeadline(ctx, l.Expires)
 	defer cancel()
 	interval := l.interval
 	timer := time.NewTimer(interval)
