@@ -159,11 +159,12 @@ export interface UiSlice {
   /** A version, not a boolean: dismissing v1.3.0 still shows v1.3.1. */
   dismissedUpdates: Record<UpdateKind, string>
   sysboxNudgeDismissed: boolean
-  /** The last Docker-inside-runs state read, so an install that finishes
-   * while no row shows it still announces itself. Never persisted. */
+  /** The last Docker-inside-runs state read from the current server, so an
+   * install that finishes while no row shows it still announces itself.
+   * Never persisted. */
   sysboxState: SysboxStatus['state'] | null
   /** Keeps the command that starts the daemon while Settings shows another
-   * category. Never persisted. */
+   * category, until a read finds no daemon. Never persisted. */
   daemonInstalled: DaemonInstallResult | null
   updatesOpen: boolean
   shortcutsOpen: boolean

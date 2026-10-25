@@ -5413,7 +5413,8 @@ Categories:
   its target read-only: the daemon the linked server and repository, the
   mirror the newest live run (or the one already mirroring). **Change** edits
   the target; **Install** and **Start mirroring** are secondary buttons.
-  The daemon's enable command stays until reload, across category changes.
+  The daemon's enable command stays across category changes until a read
+  finds no daemon.
   **Danger zone** comes last, with a red **Clear local state** button. Its
   confirmation dialog names what goes - `config.json`, the edge device key
   and tokens, and the dashboard's saved settings - and what stays: the SSH
@@ -5441,9 +5442,9 @@ Categories:
   seconds while the state is `installing`. Reaching **On** from an install
   announces `New runs get it now. Reopen your Environment to use it there.`
   in a polite status region, because an existing Environment keeps its old
-  container. The last state read lives in the store, so an install that
-  finishes while another category is open still announces itself on
-  return. On the board, an admin whose server reports `off` sees a
+  container. The last state read lives in the store until the dashboard
+  follows another server, so an install that finishes while another
+  category is open still announces itself on return. On the board, an admin whose server reports `off` sees a
   neutral callout, `Let agents use Docker in their runs`, with **Install**
   and **Dismiss** (`src/components/sysbox-nudge.tsx`). It stays through
   `installing` and `failed`, and shows `unsupported` (with the reason) only

@@ -146,6 +146,28 @@ describe('Docker inside runs row', () => {
     expect(screen.queryByText(/Installing…/)).toBeNull()
   })
 
+  test('an install that finishes while the row is away announces on return, but not on another server', async () => {
+    seed()
+    const api = client([{ state: 'off' }, { state: 'on' }])
+    const first = render(<ServerSection client={api} />)
+    await settle()
+    fireEvent.click(screen.getByRole('button', { name: 'Install' }))
+    await settle()
+    first.unmount()
+
+    const second = render(<ServerSection client={api} />)
+    await settle()
+    expect(screen.getByRole('status').textContent).toBe('New runs get it now. Reopen your Environment to use it there.')
+    second.unmount()
+
+    act(() => useStore.setState({ sysboxState: 'installing' }))
+    act(() => useStore.getState().reconnect())
+    render(<ServerSection client={api} />)
+    await settle()
+    expect(screen.getByText('On')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe('')
+  })
+
   test('failed shows the reason, the log and Try again', async () => {
     seed()
     const api = client([{ state: 'failed', reason: 'apt exited 100', log: 'E: unable to locate package' }])

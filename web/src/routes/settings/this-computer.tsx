@@ -145,13 +145,17 @@ function DaemonRow({ client }: { client: Api }) {
   useEffect(() => {
     let live = true
     client.localDaemonStatus().then(
-      (s) => live && setStatus(s),
+      (s) => {
+        if (!live) return
+        setStatus(s)
+        if (!s.installed) setInstalled(null)
+      },
       (err: unknown) => live && setError(message(err)),
     )
     return () => {
       live = false
     }
-  }, [client, attempt])
+  }, [client, attempt, setInstalled])
 
   useEffect(() => {
     if (!link?.linked) return
