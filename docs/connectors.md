@@ -29,10 +29,15 @@ server hosts the connector endpoint and signs you in.
 
 ## Get the URL and a code
 
-In the app, open **Settings → ChatGPT and Claude** and select **Get a code**.
-It shows the URL, the code and the steps below, notices when the connector
-connects, and lists your connectors with a **Revoke** button for each. It shows
-the same errors as `aether mcp`.
+In the app, open **Settings → ChatGPT and Claude**, or pick **Connect ChatGPT
+or Claude** in the command palette (Ctrl+K or ⌘K). The link
+`?page=settings&id=connectors` opens the same section, and the last onboarding
+step links to it. Pick **ChatGPT** or **Claude** for that app's steps. **Get a
+code** shows the URL and the code with a live countdown. The section checks
+every 3 seconds and shows **ChatGPT (chatgpt.com) connected** with its scopes
+once the app connects. It lists your connectors with their scopes, when each
+was added and last used, and **Reconnect** and **Revoke** buttons. Errors
+appear as `aether mcp` prints them, with a link to the fix.
 
 From a terminal:
 
@@ -103,7 +108,8 @@ than `offline_access`.
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
 each connector's scopes. To change them, revoke the connector and connect
-again. Connectors added before scopes existed have all three.
+again, or select **Reconnect** in Settings. It revokes the connector and gets
+a new code in one step. Connectors added before scopes existed have all three.
 
 ## What it can do
 

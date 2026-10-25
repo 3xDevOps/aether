@@ -305,6 +305,7 @@ export type ApiErrorData = { refusal?: EdgeRefusal; edge_path?: EdgePath } & Rec
 export const codeNotFound = -32000
 export const codeInvalidState = -32002
 export const codeUpgradeRequired = -32005
+export const codeMethodNotFound = -32601
 
 /** The data of a -32005: this client is older than the server's release.
  * Its `command` is dropped: a server must not choose what the dashboard

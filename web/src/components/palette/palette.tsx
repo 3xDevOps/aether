@@ -28,6 +28,7 @@ const browseRunLimit = 50
 const destinationCommandIDs: Record<string, true> = {
   board: true,
   overview: true,
+  connectors: true,
   assistant: true,
   launch: true,
   swarm: true,
@@ -36,6 +37,8 @@ const destinationCommandIDs: Record<string, true> = {
   forward: true,
   close: true,
 }
+
+const navigationCommandIDs = new Set(['board', 'overview', 'connectors'])
 
 /** Rendered inside CommandDialog, which supplies the cmdk root. */
 export function PaletteBody({
@@ -77,8 +80,8 @@ export function PaletteBody({
     value: `${surface.label} ${surface.name} ${surface.keywords ?? ''}`,
   }))
   const board = boardCommands({ cap, self })
-  const navigationCommands = board.filter((command) => command.id === 'board' || command.id === 'overview')
-  const boardActions = board.filter((command) => command.id !== 'board' && command.id !== 'overview')
+  const navigationCommands = board.filter((command) => navigationCommandIDs.has(command.id))
+  const boardActions = board.filter((command) => !navigationCommandIDs.has(command.id))
   // The value is what cmdk scores: the label the row shows, never the full
   // task text. The id keeps two otherwise identical rows distinct.
   const runItems = (search ? runs : runs.slice(0, browseRunLimit)).map(({ run, state }) => ({

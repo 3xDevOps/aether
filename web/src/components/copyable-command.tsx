@@ -24,7 +24,7 @@ export function CopyableCommand({ command }: { command: string }) {
         hint="Copy command"
         variant="ghost"
         size="icon"
-        className="size-[22px] shrink-0"
+        className="size-[22px] shrink-0 coarse:size-11"
         label={`Copy ${command}`}
         onClick={() => {
           void copyText(command, codeRef.current)
