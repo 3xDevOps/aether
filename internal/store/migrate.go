@@ -1950,6 +1950,28 @@ ALTER TABLE run_pull_requests ADD COLUMN repo_workspace_id TEXT NOT NULL DEFAULT
 DROP TABLE approvals;
 DELETE FROM events WHERE type = 'workspace.approval';
 `,
+	// v82: the Slack account each member linked to the server's bot, and
+	// the one direct message the bot keeps per run, which a reply in its
+	// thread or a click on its buttons names.
+	`
+CREATE TABLE slack_links (
+	member_id  TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+	device_id  TEXT REFERENCES member_devices(id) ON DELETE CASCADE,
+	team_id    TEXT NOT NULL,
+	user_id    TEXT NOT NULL,
+	channel_id TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	UNIQUE (team_id, user_id)
+);
+CREATE INDEX idx_slack_links_device ON slack_links(device_id);
+CREATE TABLE slack_messages (
+	run_id     TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+	channel_id TEXT NOT NULL,
+	ts         TEXT NOT NULL,
+	need_key   TEXT NOT NULL,
+	UNIQUE (channel_id, ts)
+);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

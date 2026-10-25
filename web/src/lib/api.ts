@@ -77,6 +77,9 @@ import type {
   RoomMessageListResult,
   RoomPostResult,
   RoomStatusResult,
+  SlackLinkResult,
+  SlackStatusResult,
+  SlackUnlinkResult,
   RoomMessageAnchor,
   RoomMessageKind,
   UsageResult,
@@ -1022,6 +1025,9 @@ export const api = {
   pushUnsubscribe: (endpoint: string) => call<unknown>('push.unsubscribe', { endpoint }),
   pushTest: (endpoint: string) => call<unknown>('push.test', { endpoint }),
   pushActive: () => call<unknown>('push.active'),
+  slackStatus: () => call<SlackStatusResult>('slack.status'),
+  slackLink: () => call<SlackLinkResult>('slack.link'),
+  slackUnlink: () => call<SlackUnlinkResult>('slack.unlink'),
   // Not RPC methods; see docs/local-gateway.md. Without a range this is the
   // diff against the run's effective base; with `from`, everything since that
   // snapshot tree, and `base` is the `from` tree.

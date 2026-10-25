@@ -252,6 +252,8 @@ The server-hosted dashboard can notify a device when a run of yours needs you.
 On that device open **Settings** and turn on **Notify this device when a run
 needs me**. The browser asks for permission once. **Send test notification**
 tests the whole path and shows the push service's own error when it fails.
+To hear about runs on Slack instead, including on Android, see
+[slack.md](slack.md).
 
 A notification goes to a run's owner when the run starts needing them, by the
 rule behind **Needs you** ([failure-handling.md](failure-handling.md#run-activity)):

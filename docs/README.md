@@ -71,20 +71,22 @@ Daily use:
 9. [Team memory](memory.md): when runs should share what they learn.
 10. [Connectors](connectors.md): when you want to run agents from ChatGPT or
     Claude, including their phone apps.
-11. [Insights](insights.md): when you want statistics on runs, time, cost and
+11. [Slack](slack.md): when you want to hear about runs, and answer them,
+    in Slack, including on Android.
+12. [Insights](insights.md): when you want statistics on runs, time, cost and
     pull requests.
 
 Reference:
 
-12. [Install](install.md): every platform, the desktop and Android apps,
+13. [Install](install.md): every platform, the desktop and Android apps,
     upgrades and removal.
-13. [Security](security.md): what the container boundary protects and what it
+14. [Security](security.md): what the container boundary protects and what it
     does not.
-14. [Troubleshooting](failure-handling.md): reboots, full disks, stalled runs
+15. [Troubleshooting](failure-handling.md): reboots, full disks, stalled runs
     and dropped connections, and the server settings that tune them.
-15. [Privacy](privacy.md): what the Android app, the dashboard and the
+16. [Privacy](privacy.md): what the Android app, the dashboard and the
     project's edge store and send.
-16. [Notices](notices.md): the licence and what the release artifacts bundle.
+17. [Notices](notices.md): the licence and what the release artifacts bundle.
 
 ## Extend Aether
 

@@ -2209,3 +2209,29 @@ export interface SystemStatsResult {
   containers: SystemContainer[]
   others?: SystemOthers
 }
+
+export interface SlackLink {
+  user_id: string
+  team_id: string
+  linked_at: string
+}
+
+export interface SlackStatusResult {
+  configured: boolean
+  connected: boolean
+  bot?: string
+  team?: string
+  error?: string
+  link?: SlackLink
+}
+
+export interface SlackLinkResult {
+  code: string
+  expires_at: string
+  bot?: string
+  team?: string
+}
+
+export interface SlackUnlinkResult {
+  link: SlackLink
+}

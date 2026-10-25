@@ -32,6 +32,10 @@ import (
 // before a notification is sent to their devices.
 const DefaultQuiet = time.Minute
 
+// retry is how long a watcher waits to try again what failed: reading
+// its run, or telling the sink.
+const retry = time.Minute
+
 var (
 	// ErrInvalid marks a subscription a browser could not have produced.
 	ErrInvalid = errors.New("push: invalid subscription")
@@ -64,6 +68,27 @@ type Config struct {
 	Quiet time.Duration
 }
 
+// Need is a need as a Sink hears of it: Key identifies it, Body is the
+// notification's line, and Answer is the id of the request it waits on,
+// empty for the run's status.
+type Need struct {
+	Key, Body, Answer string
+}
+
+// Sink is a second place a run's owner hears of its needs, such as Slack.
+// Need is called when a need is announced, after the owner's devices;
+// Clear whenever the run is read needing nothing of its owner. Either is
+// called again after retry while it fails and the run stays as it was.
+type Sink interface {
+	Need(ctx context.Context, run *domain.Run, n Need) error
+	Clear(ctx context.Context, run domain.RunID) error
+}
+
+type noSink struct{}
+
+func (noSink) Need(context.Context, *domain.Run, Need) error { return nil }
+func (noSink) Clear(context.Context, domain.RunID) error     { return nil }
+
 // Service announces needs and manages subscriptions.
 type Service struct {
 	store  Store
@@ -72,6 +97,7 @@ type Service struct {
 	key    *vapidKey
 	client *http.Client
 	quiet  time.Duration
+	sink   Sink
 	// started is when Start ran. A run standing in a need it entered before
 	// then was announced, if at all, by the server before this one.
 	started time.Time
@@ -117,10 +143,14 @@ func New(cfg Config) (*Service, error) {
 		key:     key,
 		client:  cfg.Client,
 		quiet:   cfg.Quiet,
+		sink:    noSink{},
 		active:  map[domain.MemberID]time.Time{},
 		watched: map[domain.RunID]chan struct{}{},
 	}, nil
 }
+
+// UseSink announces every need to sink too. Call it before Start.
+func (s *Service) UseSink(sink Sink) { s.sink = sink }
 
 // Start subscribes to the events that can change a run's need; a pause, a
 // resume and a handoff are timeline entries. ctx bounds only the setup; the
@@ -206,9 +236,17 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 	// that was interrupted goes on with the devices still without it.
 	offered := map[[2]string]bool{}
 	for {
-		run, n := s.read(ctx, id)
-		if n == nil {
-			if s.unwatch(id, signal) {
+		run, n, err := s.read(ctx, id)
+		var wake <-chan time.Time
+		switch {
+		case err != nil:
+			slog.Warn("push: read run; trying again later", "run", id, "in", retry, "error", err)
+			wake = time.After(retry)
+		case n == nil:
+			if err = s.sink.Clear(ctx, id); err != nil {
+				slog.Warn("push: the sink did not clear a need; trying again later", "run", id, "in", retry, "error", err)
+				wake = time.After(retry)
+			} else if s.unwatch(id, signal) {
 				return
 			}
 			clear(announced)
@@ -217,12 +255,14 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 		if n != nil && !n.since.IsZero() && n.since.Before(s.startedAt()) {
 			announced[n.key] = true
 		}
-		var free <-chan time.Time
 		if n != nil && !announced[n.key] {
 			if wait := time.Until(s.freeAt(run.MemberID)); wait > 0 {
-				free = time.After(wait)
+				wake = time.After(wait)
 			} else if s.offer(ctx, run, n, offered) {
 				continue
+			} else if err = s.sink.Need(ctx, run, Need{Key: n.key, Body: n.body, Answer: n.answer}); err != nil {
+				slog.Warn("push: the sink did not take a need; trying again later", "run", id, "in", retry, "error", err)
+				wake = time.After(retry)
 			} else {
 				announced[n.key] = true
 			}
@@ -231,7 +271,7 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 		case <-ctx.Done():
 			return
 		case <-signal:
-		case <-free:
+		case <-wake:
 		}
 	}
 }
@@ -283,19 +323,19 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 // read is the run as it stands and what it needs of its owner, if anything.
 // The need is keyed to that owner: a run handed to another member is theirs
 // to hear about.
-func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need) {
+func (s *Service) read(ctx context.Context, id domain.RunID) (*domain.Run, *need, error) {
 	run, err := s.store.GetRun(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil, nil
+	}
 	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			slog.Warn("push: read run", "run", id, "error", err)
-		}
-		return nil, nil
+		return nil, nil, err
 	}
 	n := needOf(run, s.runs.PendingInputs(id), s.runs.Paused(id))
 	if n != nil {
 		n.key = string(run.MemberID) + "|" + n.key
 	}
-	return run, n
+	return run, n, nil
 }
 
 func runTopic(run domain.RunID) string {

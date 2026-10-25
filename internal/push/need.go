@@ -35,12 +35,14 @@ const (
 
 // need is one reason a run waits on its owner. key identifies the standing
 // state, so the same one is announced once. since is when the run entered a
-// standing status need, zero for a request.
+// standing status need, zero for a request. answer is the id of the
+// request a request need waits on.
 type need struct {
 	key     string
 	body    string
 	urgency string
 	since   time.Time
+	answer  string
 }
 
 // needOf is the owner's rows of the dashboard's Needs you table
@@ -59,14 +61,14 @@ func needOf(run *domain.Run, inputs []domain.RunInputRequest, paused bool) *need
 			if run.ACP {
 				body = "Permission requested"
 			}
-			return &need{key: inputKey(request), body: body, urgency: urgencyHigh}
+			return &need{key: inputKey(request), body: body, urgency: urgencyHigh, answer: request.ID}
 		}
 		if request := firstInput(inputs, "question", "form", "extension_ui"); request != nil && !background {
 			body := "Question: answer in the terminal"
 			if run.ACP {
 				body = "Question from the agent"
 			}
-			return &need{key: inputKey(request), body: body, urgency: urgencyHigh}
+			return &need{key: inputKey(request), body: body, urgency: urgencyHigh, answer: request.ID}
 		}
 	}
 	body := statusBody(run, worker)

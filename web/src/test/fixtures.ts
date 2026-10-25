@@ -872,6 +872,9 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     pushUnsubscribe: vi.fn(async () => ({})),
     pushTest: vi.fn(async () => ({})),
     pushActive: vi.fn(async () => ({})),
+    slackStatus: vi.fn(async () => ({ configured: false, connected: false })),
+    slackLink: vi.fn(async () => ({ code: 'K7Q2-M9XD', expires_at: '2026-10-25T12:10:00Z' })),
+    slackUnlink: vi.fn(async () => ({ link: { user_id: 'U123', team_id: 'T123', linked_at: '2026-10-25T12:00:00Z' } })),
     localWorkspaceSelection: vi.fn(async () => ({ workspace_id: '' })),
     localLinkStatus: vi.fn(async () => ({
       server_configured: true,
