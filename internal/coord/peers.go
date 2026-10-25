@@ -123,6 +123,10 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 	if err != nil {
 		return nil, 0, err
 	}
+	sent, err := s.cfg.Mail.LastSentRunMessages(ctx, self.ID)
+	if err != nil {
+		return nil, 0, err
+	}
 	overlaps := make(map[domain.RunID]authorizedPeer, len(radarPeers))
 	for _, p := range radarPeers {
 		overlaps[p.run] = p
@@ -149,6 +153,21 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 		}
 		if state == protocol.CoordPeerGrace {
 			peer.ExpiresAt = overlap.expiry.UTC().Format(time.RFC3339)
+		}
+		if m := sent[r.ID]; m != nil {
+			last := &protocol.CoordSentMessage{
+				MessageID: m.ID, State: protocol.CoordSentStateSent, CreatedAt: m.CreatedAt.UTC().Format(time.RFC3339),
+			}
+			if m.DeliveredAt != nil {
+				last.State, last.DeliveredAt = protocol.CoordSentStateDelivered, m.DeliveredAt.UTC().Format(time.RFC3339)
+			}
+			if m.RetiredAt != nil {
+				last.State = protocol.CoordSentStateRetired
+			}
+			if m.AckedAt != nil {
+				last.State, last.AckedAt = protocol.CoordSentStateAcked, m.AckedAt.UTC().Format(time.RFC3339)
+			}
+			peer.LastSent = last
 		}
 		peers = append(peers, peer)
 	}

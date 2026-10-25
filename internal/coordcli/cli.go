@@ -184,10 +184,11 @@ in the v3 JSON envelope. --json is optional; output is always JSON.
 peers lists up to 32 runs you may message (peer_total and peers_truncated
 report omissions), each with its state (mission: same swarm;
 active or grace: overlapping edits, with files; workspace: same workspace),
-task summary and, for workspace peers, run_status. Use a peer's run_id with
-send --to or ask --to. A viewer-owned run has no peers; it can only reply to
-questions it was asked. At the 8-peer cap, only swarm peers and existing
-conversations are listed.
+task summary and, for workspace peers, run_status. A peer you wrote to has
+last_sent: your newest message to it, sent, delivered, acked or retired. Use
+a peer's run_id with send --to or ask --to. A viewer-owned run has no peers;
+it can only reply to questions it was asked. At the 8-peer cap, only swarm
+peers and existing conversations are listed.
 `,
 	"skill": `usage: aether-internal skill [terminal|browser|git]
        aether-internal skill --hooks

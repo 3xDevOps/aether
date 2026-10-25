@@ -156,18 +156,38 @@ const (
 // set only in the grace state and is RFC3339. RunStatus is the peer run's
 // lifecycle status.
 type CoordPeer struct {
-	RunID          string   `json:"run_id"`
-	MemberID       string   `json:"member_id"`
-	Task           string   `json:"task,omitempty"`
-	TaskBytes      int      `json:"task_bytes,omitempty"`
-	TaskTruncated  bool     `json:"task_truncated,omitempty"`
-	Files          []string `json:"files,omitempty"`
-	FileTotal      int      `json:"file_total,omitempty"`
-	FilesTruncated bool     `json:"files_truncated,omitempty"`
-	State          string   `json:"state"`
-	ExpiresAt      string   `json:"expires_at,omitempty"`
-	RunStatus      string   `json:"run_status,omitempty"`
+	RunID          string            `json:"run_id"`
+	MemberID       string            `json:"member_id"`
+	Task           string            `json:"task,omitempty"`
+	TaskBytes      int               `json:"task_bytes,omitempty"`
+	TaskTruncated  bool              `json:"task_truncated,omitempty"`
+	Files          []string          `json:"files,omitempty"`
+	FileTotal      int               `json:"file_total,omitempty"`
+	FilesTruncated bool              `json:"files_truncated,omitempty"`
+	State          string            `json:"state"`
+	ExpiresAt      string            `json:"expires_at,omitempty"`
+	RunStatus      string            `json:"run_status,omitempty"`
+	LastSent       *CoordSentMessage `json:"last_sent,omitempty"`
 }
+
+// CoordSentMessage is the newest message the caller sent one peer and how
+// far it got in the peer's inbox.
+type CoordSentMessage struct {
+	MessageID   string `json:"message_id"`
+	State       string `json:"state"`
+	CreatedAt   string `json:"created_at"`
+	DeliveredAt string `json:"delivered_at,omitempty"`
+	AckedAt     string `json:"acked_at,omitempty"`
+}
+
+// CoordSentMessage states. Retired mail left the recipient's inbox
+// unacknowledged, as when its container was released.
+const (
+	CoordSentStateSent      = "sent"
+	CoordSentStateDelivered = "delivered"
+	CoordSentStateAcked     = "acked"
+	CoordSentStateRetired   = "retired"
+)
 
 // CoordStatusResult is the result of coord.status: who the caller is,
 // exactly the peers it may message, and how many messages are waiting.

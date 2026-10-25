@@ -97,6 +97,25 @@ func (d *DB) ListRunMessages(ctx context.Context, f RunMessageFilter) (*RunMessa
 	return page, nil
 }
 
+func (d *DB) LastSentRunMessages(ctx context.Context, from domain.RunID) (map[domain.RunID]*RunMessage, error) {
+	// rowid, not created_at: created_at is stamped before the write lock, so
+	// concurrent sends can commit out of timestamp order.
+	rows, err := d.db.QueryContext(ctx, `SELECT `+runMessageCols+` FROM run_messages
+		WHERE rowid IN (SELECT MAX(rowid) FROM run_messages WHERE from_run = ? GROUP BY to_run)`, from)
+	if err != nil {
+		return nil, fmt.Errorf("store: last sent run messages for %s: %w", from, err)
+	}
+	msgs, err := collect(rows, scanRunMessage)
+	if err != nil {
+		return nil, fmt.Errorf("store: last sent run messages for %s: %w", from, err)
+	}
+	byPeer := make(map[domain.RunID]*RunMessage, len(msgs))
+	for _, m := range msgs {
+		byPeer[m.ToRun] = m
+	}
+	return byPeer, nil
+}
+
 func scanListedRunMessage(row interface{ Scan(...any) error }) (*ListedRunMessage, error) {
 	var (
 		m                               ListedRunMessage
