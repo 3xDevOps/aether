@@ -3,10 +3,12 @@ import { clampTerminalFontSize, defaultTerminalFontSize } from '@/lib/term-font'
 import { initialRoute } from '@/lib/url-state'
 import { isRunView, type RunView } from '@/routes/run/views'
 import type {
+  DaemonInstallResult,
   LaunchMode,
   LinkRepoResult,
   RepoFastForwardResult,
   RepoPushResult,
+  SysboxStatus,
 } from '@/lib/types'
 import type { SliceCreator } from '@/store/slice'
 
@@ -157,6 +159,12 @@ export interface UiSlice {
   /** A version, not a boolean: dismissing v1.3.0 still shows v1.3.1. */
   dismissedUpdates: Record<UpdateKind, string>
   sysboxNudgeDismissed: boolean
+  /** The last Docker-inside-runs state read, so an install that finishes
+   * while no row shows it still announces itself. Never persisted. */
+  sysboxState: SysboxStatus['state'] | null
+  /** Keeps the command that starts the daemon while Settings shows another
+   * category. Never persisted. */
+  daemonInstalled: DaemonInstallResult | null
   updatesOpen: boolean
   shortcutsOpen: boolean
   profileOpen: boolean
@@ -188,6 +196,8 @@ export interface UiSlice {
   dismissUpdate: (kind: UpdateKind, version: string) => void
   clearDismissedUpdates: () => void
   dismissSysboxNudge: () => void
+  setSysboxState: (state: SysboxStatus['state'] | null) => void
+  setDaemonInstalled: (result: DaemonInstallResult | null) => void
   setUpdatesOpen: (open: boolean) => void
   setShortcutsOpen: (open: boolean) => void
   setProfileOpen: (open: boolean) => void
@@ -241,6 +251,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   browserRequests: {},
   dismissedUpdates: { cli: '', server: '', shell: '' },
   sysboxNudgeDismissed: false,
+  sysboxState: null,
+  daemonInstalled: null,
   updatesOpen: false,
   shortcutsOpen: false,
   profileOpen: false,
@@ -322,6 +334,8 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   clearDismissedUpdates: () =>
     set({ dismissedUpdates: { cli: '', server: '', shell: '' } }),
   dismissSysboxNudge: () => set({ sysboxNudgeDismissed: true }),
+  setSysboxState: (sysboxState) => set({ sysboxState }),
+  setDaemonInstalled: (daemonInstalled) => set({ daemonInstalled }),
   setUpdatesOpen: (updatesOpen) => set({ updatesOpen }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   setProfileOpen: (profileOpen) => set({ profileOpen }),

@@ -5337,7 +5337,8 @@ devices** opens Members.
 
 **Phone.** Below 768px the category list is the page. A category shows on its
 own, under a **Settings** back button that returns to the list and focuses
-the category it left; browser Back does the same.
+the category it left; browser Back does the same. `/` in a category returns
+to the list and focuses the search field.
 
 **Sections.** `SettingsSection` (`layout.tsx`) is an `h3` with an optional
 neutral scope badge (`This browser`, `This device`, `Your account`,
@@ -5347,7 +5348,7 @@ full width under its label; checkboxes and icon buttons stay on the right.
 While a row's first read is pending its help reads `Reading …` and its
 controls are disabled. A failed read shows the error verbatim in a
 `role="alert"` callout with **Try again**, which reads again (Slack,
-Assistant, Linked server, Sync daemon, Remote access).
+Assistant, Linked server, Sync daemon, Docker inside runs, Remote access).
 
 Categories:
 
@@ -5412,6 +5413,7 @@ Categories:
   its target read-only: the daemon the linked server and repository, the
   mirror the newest live run (or the one already mirroring). **Change** edits
   the target; **Install** and **Start mirroring** are secondary buttons.
+  The daemon's enable command stays until reload, across category changes.
   **Danger zone** comes last, with a red **Clear local state** button. Its
   confirmation dialog names what goes - `config.json`, the edge device key
   and tokens, and the dashboard's saved settings - and what stays: the SSH
@@ -5439,7 +5441,9 @@ Categories:
   seconds while the state is `installing`. Reaching **On** from an install
   announces `New runs get it now. Reopen your Environment to use it there.`
   in a polite status region, because an existing Environment keeps its old
-  container. On the board, an admin whose server reports `off` sees a
+  container. The last state read lives in the store, so an install that
+  finishes while another category is open still announces itself on
+  return. On the board, an admin whose server reports `off` sees a
   neutral callout, `Let agents use Docker in their runs`, with **Install**
   and **Dismiss** (`src/components/sysbox-nudge.tsx`). It stays through
   `installing` and `failed`, and shows `unsupported` (with the reason) only

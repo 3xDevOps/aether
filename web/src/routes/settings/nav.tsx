@@ -1,13 +1,13 @@
-import { useId, useRef, useState } from 'react'
+import { type RefObject, useId, useRef, useState } from 'react'
 import { ChevronRight } from '@/components/icons'
 import { Input } from '@/components/ui/input'
 import { ListRow } from '@/components/ui/list-row'
 import { SectionLabel } from '@/components/ui/section-label'
-import { useKeybindings } from '@/lib/keybindings'
 import { type Category, categories, groups, search, type SettingEntry } from '@/routes/settings/registry'
 import { useStore } from '@/store'
 
-export function SettingsNav({ shown, visible, current, phone }: {
+export function SettingsNav({ input, shown, visible, current, phone }: {
+  input: RefObject<HTMLInputElement | null>
   shown: SettingEntry[]
   visible: Category[]
   current?: string
@@ -15,12 +15,10 @@ export function SettingsNav({ shown, visible, current, phone }: {
 }) {
   const navigate = useStore((s) => s.navigate)
   const [query, setQuery] = useState('')
-  const input = useRef<HTMLInputElement>(null)
   const results = useRef<HTMLDivElement>(null)
   const id = useId()
   const hits = query.trim() ? search(query, shown) : null
   const titles = new Map(categories.map((category) => [category.id, category.title]))
-  useKeybindings('global', { 'settings-search': () => input.current?.focus() })
 
   const open = (entry: SettingEntry) => {
     setQuery('')

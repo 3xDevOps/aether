@@ -11,7 +11,7 @@ import { api, type Api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { rootCommand, useSysbox } from '@/lib/use-sysbox'
 import { workspaceRuns } from '@/routes/board/selectors'
-import { SettingRow, SettingsSection } from '@/routes/settings/layout'
+import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin, useSelf, useStateContext } from '@/store/hooks'
 
@@ -119,12 +119,13 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
 
 function DockerInRunsRow({ client }: { client: Api }) {
   const caps = useCapability()
-  const { status, error, justInstalled, install } = useSysbox(client)
+  const { status, error, justInstalled, install, read } = useSysbox(client)
   if (!caps.hasMethod('server.sysbox.status')) return null
   if (!status) {
     return (
       <SettingRow id="docker" label="Docker inside runs" help={error ? null : 'Reading Docker support…'}>
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
+        {error && <TryAgain onClick={read} />}
       </SettingRow>
     )
   }

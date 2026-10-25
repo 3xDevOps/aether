@@ -19,6 +19,7 @@ function seed(member = alice, capabilities: GatewayCapabilities | null = withMet
     hydrated: true,
     capabilities,
     sysboxNudgeDismissed: false,
+    sysboxState: null,
   })
 }
 

@@ -41,6 +41,7 @@ function seed(extra: Partial<RootState> = {}) {
     hydrationError: null,
     route: { name: 'settings', params: {} },
     theme: 'system',
+    daemonInstalled: null,
     ...extra,
   })
 }
@@ -270,6 +271,22 @@ describe('settings view', () => {
     ).toBeDefined()
     expect(screen.getByText('enable with systemctl --user enable --now aether-sync')).toBeDefined()
     expect(client.localDaemonInstall).toHaveBeenCalledWith('host:2222', '/src/repo')
+  })
+
+  it('keeps the daemon enable note after visiting another category', async () => {
+    const client = fakeApi()
+    seed()
+    const { rerender } = render(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
+    const install = await screen.findByRole('button', { name: 'Install' })
+    await vi.waitFor(() => expect((install as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(install)
+    await screen.findByText('enable with systemctl --user enable --now aether-sync')
+
+    rerender(<SettingsRoute params={{ section: 'general' }} client={client} />)
+    expect(screen.queryByText('enable with systemctl --user enable --now aether-sync')).toBeNull()
+    rerender(<SettingsRoute params={{ section: 'this-computer' }} client={client} />)
+
+    expect(await screen.findByText('enable with systemctl --user enable --now aether-sync')).toBeDefined()
   })
   it('opens a sync overlay without requesting unavailable daemon methods', async () => {
     const client = fakeApi()
@@ -511,6 +528,17 @@ describe('settings view', () => {
       expect(useStore.getState().route).toEqual({ name: 'settings', params: {} })
       rerender(<SettingsRoute params={{}} client={fakeApi()} />)
       expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Notifications' }))
+    })
+
+    it('returns from a phone category to the list and searches on /', () => {
+      atViewport(390, { pointer: 'coarse' })
+      seed()
+      const { rerender } = render(<SettingsRoute params={{ section: 'notifications' }} client={fakeApi()} />)
+      fireEvent.keyDown(document.body, { key: '/' })
+      expect(useStore.getState().route).toEqual({ name: 'settings', params: {} })
+
+      rerender(<SettingsRoute params={{}} client={fakeApi()} />)
+      expect(document.activeElement).toBe(screen.getByRole('searchbox', { name: 'Search settings' }))
     })
   })
 })

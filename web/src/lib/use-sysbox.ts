@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { SysboxStatus } from '@/lib/types'
+import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 
 export const SYSBOX_POLL_MS = 2000
@@ -24,11 +25,12 @@ export function useSysbox(client: Api = api) {
   const [error, setError] = useState<string | null>(null)
   const [attempted, setAttempted] = useState(false)
   const [justInstalled, setJustInstalled] = useState(false)
-  const previous = useRef<SysboxStatus['state'] | null>(null)
+  const [attempt, setAttempt] = useState(0)
 
   const apply = useCallback((next: SysboxStatus) => {
-    if (previous.current === 'installing' && next.state === 'on') setJustInstalled(true)
-    previous.current = next.state
+    const { sysboxState, setSysboxState } = useStore.getState()
+    if (sysboxState === 'installing' && next.state === 'on') setJustInstalled(true)
+    setSysboxState(next.state)
     setStatus(next)
     setError(null)
   }, [])
@@ -43,7 +45,12 @@ export function useSysbox(client: Api = api) {
     return () => {
       live = false
     }
-  }, [enabled, client, apply])
+  }, [enabled, client, apply, attempt])
+
+  const read = useCallback(() => {
+    setError(null)
+    setAttempt((n) => n + 1)
+  }, [])
 
   const installing = status?.state === 'installing'
   useEffect(() => {
@@ -65,13 +72,13 @@ export function useSysbox(client: Api = api) {
     setError(null)
     setAttempted(true)
     setJustInstalled(false)
-    const before = previous.current
-    previous.current = 'installing'
+    const { sysboxState: before, setSysboxState } = useStore.getState()
+    setSysboxState('installing')
     client.sysboxInstall().then(apply, (installErr) => {
-      previous.current = before
+      setSysboxState(before)
       client.sysboxStatus().then(apply, () => setError(message(installErr)))
     })
   }, [client, apply])
 
-  return { status: enabled ? status : null, error, justInstalled, attempted, install }
+  return { status: enabled ? status : null, error, justInstalled, attempted, install, read }
 }

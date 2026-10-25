@@ -28,4 +28,8 @@ test('a phone moves between the settings list and one category, and search opens
   await expect(page).toHaveURL(/[?&]id=slack\b/)
   await expect(page.getByRole('heading', { level: 2, name: 'Notifications' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Slack' })).toBeInViewport()
+
+  await page.getByRole('heading', { level: 2, name: 'Notifications' }).click()
+  await page.keyboard.press('/')
+  await expect(nav.getByRole('searchbox', { name: 'Search settings' })).toBeFocused()
 })

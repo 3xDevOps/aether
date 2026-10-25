@@ -6,6 +6,7 @@ import { Callout } from '@/components/ui/callout'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
+import { useKeybindings } from '@/lib/keybindings'
 import { surfaces } from '@/lib/surfaces'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { AssistantSection } from '@/routes/settings/assistant'
@@ -61,7 +62,17 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
   const current = linked ?? (phone ? undefined : visible[0])
   const heading = useRef<HTMLHeadingElement>(null)
   const left = useRef<string | null>(null)
+  const search = useRef<HTMLInputElement>(null)
+  const searchOnReturn = useRef(false)
   const headingID = useId()
+
+  useKeybindings('global', {
+    'settings-search': () => {
+      if (search.current) return search.current.focus()
+      searchOnReturn.current = true
+      navigate('settings')
+    },
+  })
 
   useEffect(() => {
     if (!target || !linked) return
@@ -90,8 +101,9 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
       left.current = current.id
       return
     }
-    if (!left.current) return
-    document.querySelector<HTMLElement>(`[data-settings-category="${left.current}"]`)?.focus()
+    if (searchOnReturn.current) search.current?.focus()
+    else if (left.current) document.querySelector<HTMLElement>(`[data-settings-category="${left.current}"]`)?.focus()
+    searchOnReturn.current = false
     left.current = null
   }, [current])
 
@@ -103,7 +115,7 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
         {!(phone && current) && (
           <div className={phone ? 'min-w-0 flex-1 overflow-y-auto' : 'w-56 shrink-0 overflow-y-auto border-r border-seam'}>
             {phone && notice && <div className="px-3 pt-3">{notice}</div>}
-            <SettingsNav shown={shown} visible={visible} current={current?.id} phone={phone} />
+            <SettingsNav input={search} shown={shown} visible={visible} current={current?.id} phone={phone} />
           </div>
         )}
         {current && (

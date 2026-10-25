@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { Api } from '@/lib/api'
 import { linkTarget, message } from '@/lib/format'
 import { runLabel } from '@/lib/status'
-import type { DaemonInstallResult, DaemonStatusResult } from '@/lib/types'
+import type { DaemonStatusResult } from '@/lib/types'
 import { SyncPanel } from '@/routes/run-sync'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
@@ -133,7 +133,8 @@ function LinkRows({ client }: { client: Api }) {
 function DaemonRow({ client }: { client: Api }) {
   const link = useStore((s) => s.linkStatus)
   const [status, setStatus] = useState<DaemonStatusResult | null>(null)
-  const [installed, setInstalled] = useState<DaemonInstallResult | null>(null)
+  const installed = useStore((s) => s.daemonInstalled)
+  const setInstalled = useStore((s) => s.setDaemonInstalled)
   const [server, setServer] = useState('')
   const [repo, setRepo] = useState('')
   const [changing, setChanging] = useState(false)
