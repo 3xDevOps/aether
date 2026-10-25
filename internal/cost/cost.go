@@ -2,7 +2,8 @@
 //
 // Metering is honest before it is complete. A run whose harness has an
 // adapter reports real token counts once, at the adapter's final result
-// record (events.RunCostPayload with Metered set). A run without one -
+// record (events.RunCostPayload with Metered set), and an ACP run whose
+// agent reports cost adds an increment as each turn ends. Any other run -
 // every PTY-only run - is recorded as unmetered when it reaches a
 // terminal status: zero tokens because nobody measured them, never zero
 // because the run was free. Rollups carry that distinction through, so a

@@ -497,3 +497,63 @@ func TestCostStaysWithTheAccountThatSpentIt(t *testing.T) {
 	}
 	check("deleted", 0)
 }
+
+// TestIncrementsAddUpPerAccount covers spend an Enhanced agent reports turn
+// by turn: each increment adds to the account segment it was published in,
+// and the first one replaces the unmetered marker a closed run got.
+func TestIncrementsAddUpPerAccount(t *testing.T) {
+	ctx := context.Background()
+	db, err := storetest.Open(filepath.Join(t.TempDir(), "cost.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	bus, err := events.NewInProc(ctx, nil)
+	if err != nil {
+		t.Fatalf("NewInProc: %v", err)
+	}
+	defer func() { _ = bus.Close() }()
+	svc, err := New(Config{Store: db, Bus: bus})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ws := &domain.Workspace{Name: "one"}
+	if err = db.CreateWorkspace(ctx, ws); err != nil {
+		t.Fatal(err)
+	}
+	ada := &domain.Member{DisplayName: "Ada", TailnetLogin: "ada@example", Role: domain.RoleCollaborator}
+	grace := &domain.Member{DisplayName: "Grace", TailnetLogin: "grace@example", Role: domain.RoleCollaborator}
+	for _, m := range []*domain.Member{ada, grace} {
+		if err = db.CreateMember(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := &domain.Run{WorkspaceID: ws.ID, MemberID: ada.ID, Task: "task", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
+	if err = db.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	svc.handle(ctx, events.Event{WorkspaceID: ws.ID, RunID: run.ID, Payload: events.RunStatusPayload{From: domain.RunRunning, To: domain.RunCompleted}})
+	moved := time.Now().UTC().Add(time.Minute)
+	if _, err = db.SetRunAccount(ctx, run.ID, grace.ID, "usage limit", moved); err != nil {
+		t.Fatal(err)
+	}
+	spend := func(at time.Time, in, out int64, usd float64) {
+		svc.handle(ctx, events.Event{WorkspaceID: ws.ID, RunID: run.ID, Time: at, Payload: events.RunCostPayload{InputTokens: in, OutputTokens: out, CostUSD: usd, Metered: true, Increment: true}})
+	}
+	spend(moved.Add(-2*time.Second), 100, 10, 1)
+	spend(moved.Add(-time.Second), 200, 20, 2)
+	spend(moved.Add(time.Second), 50, 5, 4)
+
+	rep, err := svc.Report(ctx, ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[domain.MemberID]Rollup{
+		ada.ID:   {Runs: 1, Metered: 1, InputTokens: 300, OutputTokens: 30, CostUSD: 3},
+		grace.ID: {InputTokens: 50, OutputTokens: 5, CostUSD: 4},
+	}
+	if rep.Total != (Rollup{Runs: 1, Metered: 1, InputTokens: 350, OutputTokens: 35, CostUSD: 7}) || len(rep.Members) != 2 ||
+		rep.Members[0].Rollup != want[rep.Members[0].Member] || rep.Members[1].Rollup != want[rep.Members[1].Member] {
+		t.Fatalf("report total %+v members %+v", rep.Total, rep.Members)
+	}
+}

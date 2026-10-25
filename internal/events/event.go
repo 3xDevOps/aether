@@ -308,11 +308,14 @@ func (RunDiffPayload) EventType() Type { return TypeRunDiff }
 
 // RunCostPayload reports token usage for a run. Metered is false for
 // PTY-only runs where counts are best-effort estimates or unavailable.
+// Increment marks usage spent since the run's previous report, which adds
+// to the recorded usage instead of replacing it.
 type RunCostPayload struct {
 	InputTokens  int64   `json:"input_tokens"`
 	OutputTokens int64   `json:"output_tokens"`
 	CostUSD      float64 `json:"cost_usd"`
 	Metered      bool    `json:"metered"`
+	Increment    bool    `json:"increment,omitempty"`
 }
 
 func (RunCostPayload) EventType() Type { return TypeRunCost }
