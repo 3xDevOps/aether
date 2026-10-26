@@ -635,6 +635,29 @@ func TestQuietHoursHoldPushesAndSendOneWhenTheyEnd(t *testing.T) {
 	}
 }
 
+func TestADeletedWatchDoesNotCostAnotherItsPush(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	h.push.Active(h.ada.ID)
+	a, b := h.run(h.ada, "Kept"), h.run(h.ada, "Deleted")
+	wa, wb := h.watch(h.ada, runTarget(a)).Watch, h.watch(h.ada, runTarget(b)).Watch
+	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
+	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")
+	h.eventually("both notices", func() bool { return len(h.notices(wa.ID)) == 1 && len(h.notices(wb.ID)) == 1 })
+	batch := []*store.WatchNotification{h.notices(wb.ID)[0], h.notices(wa.ID)[0]}
+	watches := map[string]*store.Watch{wa.ID: h.watchState(wa.ID), wb.ID: h.watchState(wb.ID)}
+	if err := h.svc.Delete(h.ctx, h.ada.ID, wb.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.svc.send(h.ctx, h.ada.ID, push.Message{Title: "2 watch notices", URL: WatchesLink()}, batch, watches); err != nil {
+		t.Fatal(err)
+	}
+	if s := h.pushStatus(wa.ID); s != protocol.WatchStatusDelivered || phone.received.Load() != 1 {
+		t.Fatalf("kept watch push = %s, %d sent; want delivered once", s, phone.received.Load())
+	}
+}
+
 func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

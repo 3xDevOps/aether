@@ -212,7 +212,9 @@ func (s *Service) currentNeeds(ctx context.Context, w *store.Watch) ([]need, err
 // attempt is counted and its retry scheduled before the push goes out, so
 // a crash before the result is saved repeats it at most that many times.
 func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Message, notes []*store.WatchNotification, watches map[string]*store.Watch) error {
+	var errs []error
 	retryAt := make(map[string]time.Time, len(notes))
+	reserved := make([]*store.WatchNotification, 0, len(notes))
 	for _, n := range notes {
 		attempts := n.PushAttempts + 1
 		retryAt[n.ID] = s.now().Add(backoff(attempts))
@@ -220,14 +222,22 @@ func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Messa
 		if attempts >= maxPushAttempts {
 			next = s.now().Add(maxBackoff)
 		}
+		// A notice that cannot be reserved, such as one whose watch was
+		// just deleted, is left out; the ones reserved are still sent.
 		if err := s.store.SetWatchPush(ctx, n.ID, n.PushState, attempts, &next, nil); err != nil {
-			return err
+			if !errors.Is(err, store.ErrNotFound) {
+				errs = append(errs, fmt.Errorf("notice %s: %w", n.ID, err))
+			}
+			continue
 		}
+		reserved = append(reserved, n)
+	}
+	if len(reserved) == 0 {
+		return errors.Join(errs...)
 	}
 	results, err := s.push.Deliver(ctx, member, m)
 	status, detail := pushOutcome(results, err)
-	var errs []error
-	for _, n := range notes {
+	for _, n := range reserved {
 		attempts := n.PushAttempts + 1
 		state, next, rowStatus, rowDetail := store.WatchPushNone, (*time.Time)(nil), status, detail
 		if status == protocol.WatchStatusFailed {
