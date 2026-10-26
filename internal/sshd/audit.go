@@ -115,7 +115,7 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		} `json:"link"`
 	}
 	_ = json.Unmarshal(result, &made)
-	target := cmp.Or(ids.RunID, ids.MissionID, ids.QuestionID, made.Run.ID, made.Mission.ID)
+	target := cmp.Or(made.Run.ID, made.Mission.ID, ids.RunID, ids.MissionID, ids.QuestionID)
 	switch method {
 	case protocol.MethodConnectorRevoke:
 		target = ids.ConnectorID
