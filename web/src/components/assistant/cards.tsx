@@ -14,7 +14,6 @@ import { message } from '@/lib/format'
 import { useSecondsUntil } from '@/lib/hooks'
 import type { SessionRequest } from '@/lib/session-types'
 import { AcpRequestCard } from '@/routes/run/session-requests'
-import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
 
@@ -105,7 +104,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
             {launch.map(([key, value]) => (
               <div key={key} className="flex min-w-0 gap-3 py-0.5">
                 <dt className="w-24 shrink-0 text-muted">{key}</dt>
-                <dd className={cn('min-w-0 flex-1 break-words whitespace-pre-wrap', key === 'Task' || key === 'Objective' ? 'line-clamp-4' : undefined)}>{value}</dd>
+                <dd className="max-h-32 min-w-0 flex-1 overflow-y-auto break-words whitespace-pre-wrap">{value}</dd>
               </div>
             ))}
           </dl>
