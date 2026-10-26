@@ -549,15 +549,22 @@ func (s *Service) Prefs(ctx context.Context, member domain.MemberID) (protocol.N
 	if err != nil {
 		return protocol.NotifyPrefs{}, err
 	}
-	return prefsProto(p), nil
+	return s.prefsProto(ctx, member, p)
 }
 
-func prefsProto(p store.NotifyPrefs) protocol.NotifyPrefs {
+func (s *Service) prefsProto(ctx context.Context, member domain.MemberID, p store.NotifyPrefs) (protocol.NotifyPrefs, error) {
 	out := protocol.NotifyPrefs{Push: p.Push}
 	if p.QuietTZ != "" {
 		out.QuietHours = &protocol.QuietHours{Start: p.QuietStart, End: p.QuietEnd, TZ: p.QuietTZ}
 	}
-	return out
+	if s.push != nil {
+		devices, err := s.push.Devices(ctx, member)
+		if err != nil {
+			return protocol.NotifyPrefs{}, err
+		}
+		out.Destinations.PushDevices = devices
+	}
+	return out, nil
 }
 
 // SetPrefs replaces member's notification preferences.
@@ -584,5 +591,5 @@ func (s *Service) SetPrefs(ctx context.Context, member domain.MemberID, p protoc
 		return protocol.NotifyPrefs{}, err
 	}
 	s.wake()
-	return prefsProto(rec), nil
+	return s.prefsProto(ctx, member, rec)
 }

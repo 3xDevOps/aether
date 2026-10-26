@@ -21,7 +21,9 @@ func (s *Service) deliverDue(ctx context.Context) {
 	}
 	due, err := s.store.DueWatchPushes(ctx, s.now())
 	if err != nil {
-		slog.Warn("watch: list due pushes", "error", err)
+		if ctx.Err() == nil {
+			slog.Warn("watch: list due pushes", "error", err)
+		}
 		return
 	}
 	var order []domain.MemberID
@@ -228,14 +230,13 @@ func pushOutcome(results []push.DeviceResult, err error) (string, string) {
 			failures = append(failures, r.Err.Error())
 		}
 	}
-	detail := fmt.Sprintf("%d of %d devices", delivered, len(results))
-	if len(failures) > 0 {
-		detail += ": " + strings.Join(failures, "; ")
+	switch delivered {
+	case 0:
+		return protocol.WatchStatusFailed, strings.Join(failures, "; ")
+	case 1:
+		return protocol.WatchStatusDelivered, "1 device"
 	}
-	if delivered == 0 {
-		return protocol.WatchStatusFailed, detail
-	}
-	return protocol.WatchStatusDelivered, detail
+	return protocol.WatchStatusDelivered, fmt.Sprintf("%d devices", delivered)
 }
 
 func (s *Service) settle(ctx context.Context, n *store.WatchNotification, state string, attempts int, next *time.Time, status, detail string) error {

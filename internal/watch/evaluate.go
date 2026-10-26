@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -59,6 +60,7 @@ func (s *Service) evaluate(ctx context.Context, id string) error {
 func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 	now := s.now()
 	before := *w
+	before.Fired = maps.Clone(w.Fired)
 	var prev protocol.WatchObserved
 	_ = json.Unmarshal(w.Observed, &prev)
 	w.LastCheckAt, w.UpdatedAt = &now, now
@@ -94,6 +96,9 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 			w.State, w.EndedAt, w.NextCheckAt = protocol.WatchDone, &now, nil
 		}
 	}
+	if len(notes) == 0 && !visiblyChanged(&before, w) && maps.Equal(before.Fired, w.Fired) && sameTime(before.NextCheckAt, w.NextCheckAt) {
+		return nil
+	}
 	recorded, err := s.store.CommitWatchEvaluation(ctx, w, notes)
 	if err != nil {
 		return err
@@ -104,10 +109,19 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 			s.wake()
 		}
 	}
-	if len(recorded) == 0 && (w.State != before.State || w.Error != before.Error || string(w.Observed) != string(before.Observed)) {
+	if len(recorded) == 0 && visiblyChanged(&before, w) {
 		s.changed(ctx, w, "")
 	}
 	return nil
+}
+
+func visiblyChanged(before, after *store.Watch) bool {
+	return before.State != after.State || before.Error != after.Error || before.TargetTitle != after.TargetTitle ||
+		string(before.Observed) != string(after.Observed)
+}
+
+func sameTime(a, b *time.Time) bool {
+	return a == nil && b == nil || a != nil && b != nil && a.Equal(*b)
 }
 
 func backoff(failures int) time.Duration {

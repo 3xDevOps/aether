@@ -188,4 +188,11 @@ type QuietHours struct {
 type NotifyPrefs struct {
 	Push       bool        `json:"push"`
 	QuietHours *QuietHours `json:"quiet_hours,omitempty"`
+	// Destinations is read-only: notify.prefs.set ignores it.
+	Destinations NotifyDestinations `json:"destinations"`
+}
+
+// NotifyDestinations counts where a member's notices can go.
+type NotifyDestinations struct {
+	PushDevices int `json:"push_devices"`
 }

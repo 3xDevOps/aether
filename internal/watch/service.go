@@ -332,14 +332,18 @@ func (s *Service) housekeep(ctx context.Context) {
 	now := s.now()
 	expired, err := s.store.ExpireWatches(ctx, now)
 	if err != nil {
-		slog.Warn("watch: expire watches", "error", err)
+		if ctx.Err() == nil {
+			slog.Warn("watch: expire watches", "error", err)
+		}
 	}
 	for _, w := range expired {
 		s.changed(ctx, w, "")
 	}
 	due, err := s.store.DueWatchIDs(ctx, now, false)
 	if err != nil {
-		slog.Warn("watch: list due watches", "error", err)
+		if ctx.Err() == nil {
+			slog.Warn("watch: list due watches", "error", err)
+		}
 	}
 	for _, id := range due {
 		if err := s.evaluate(ctx, id); err != nil && ctx.Err() == nil {
@@ -348,7 +352,9 @@ func (s *Service) housekeep(ctx context.Context) {
 	}
 	s.deliverDue(ctx)
 	if _, err := s.store.PurgeWatches(ctx, now.Add(-Retention)); err != nil {
-		slog.Warn("watch: purge ended watches", "error", err)
+		if ctx.Err() == nil {
+			slog.Warn("watch: purge ended watches", "error", err)
+		}
 	}
 }
 
