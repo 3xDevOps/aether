@@ -123,7 +123,7 @@ describe('watches in settings', () => {
             ...notice,
             id: 'not-0',
             title: 'Held one',
-            deliveries: [at('push', 'held_quiet_hours', 'Until 07:00 CET'), at('desktop', 'failed', 'socket closed')],
+            deliveries: [at('push', 'held_quiet_hours', 'Until 07:00 CET')],
           },
           { ...notice, id: 'not-a', title: 'No device', deliveries: [at('push', 'no_destination')] },
           { ...notice, id: 'not-b', title: 'Off', deliveries: [at('push', 'disabled', 'Push is off in your notification settings')] },
@@ -140,7 +140,6 @@ describe('watches in settings', () => {
     expect(within(dialog).getByText('Working: editing auth.go')).toBeDefined()
     await within(dialog).findByText('Push delivered to 2 devices')
     expect(within(dialog).getByText('Held for quiet hours: Until 07:00 CET')).toBeDefined()
-    expect(within(dialog).getByText('Desktop app failed: socket closed')).toBeDefined()
     expect(within(dialog).getByText('No push device - in-app only')).toBeDefined()
     expect(within(dialog).getByText('Push off: Push is off in your notification settings')).toBeDefined()
     expect(within(dialog).getByText('Push pending: you are active at a dashboard')).toBeDefined()

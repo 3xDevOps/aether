@@ -86,24 +86,6 @@ export function deliveryText(delivery: WatchDelivery): string {
           return detail ? `Push pending: ${detail}` : 'Push pending'
       }
       break
-    case 'desktop':
-      switch (delivery.status) {
-        case 'delivered':
-          return 'Shown by the desktop app'
-        case 'no_destination':
-          return 'Desktop app not open'
-        case 'disabled':
-          return detail ? `Desktop app notifications off: ${detail}` : 'Desktop app notifications off'
-        case 'held_quiet_hours':
-          return detail ? `Desktop app held for quiet hours: ${detail}` : 'Desktop app held for quiet hours'
-        case 'failed':
-          return `Desktop app failed: ${detail || 'no reason given'}`
-        case 'cleared':
-          return 'Desktop app not shown: resolved before delivery'
-        case 'pending':
-          return detail ? `Desktop app pending: ${detail}` : 'Desktop app pending'
-      }
-      break
     case 'in_app':
       return delivery.status === 'failed' ? `In-app failed: ${detail || 'no reason given'}` : 'In-app'
   }
