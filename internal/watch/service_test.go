@@ -742,3 +742,38 @@ func TestPullRequestFailureKeepsTheRunsOwnNotices(t *testing.T) {
 		t.Fatalf("notices = %q, want the need once", bodies(got))
 	}
 }
+
+func TestTurningQuietHoursOffReleasesHeldPushesExceptPausedOnes(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	now := h.clock.now().UTC()
+	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Push: true, QuietHours: &protocol.QuietHours{
+		Start: now.Add(-time.Hour).Format("15:04"), End: now.Add(time.Hour).Format("15:04"), TZ: "UTC",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	a, b := h.run(h.ada, "Kept"), h.run(h.ada, "Paused")
+	wa, wb := h.watch(h.ada, runTarget(a)).Watch, h.watch(h.ada, runTarget(b)).Watch
+	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
+	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")
+	h.eventually("both held", func() bool {
+		na, nb := h.notices(wa.ID), h.notices(wb.ID)
+		return len(na) == 1 && len(nb) == 1 && len(pushStatuses(na[0])) == 1 && len(pushStatuses(nb[0])) == 1
+	})
+	paused := true
+	if _, err := h.svc.Update(h.ctx, h.ada.ID, protocol.WatchUpdateParams{WatchID: wb.ID, Paused: &paused}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Push: true}); err != nil {
+		t.Fatal(err)
+	}
+	h.eventually("the released push", func() bool { return phone.received.Load() == 1 })
+	settle()
+	if s := pushStatuses(h.notices(wa.ID)[0]); len(s) != 2 || s[1] != protocol.WatchStatusDelivered {
+		t.Fatalf("kept watch push = %v, want held then delivered", s)
+	}
+	if s := pushStatuses(h.notices(wb.ID)[0]); len(s) != 1 || phone.received.Load() != 1 {
+		t.Fatalf("paused watch push = %v, want it still held", s)
+	}
+}

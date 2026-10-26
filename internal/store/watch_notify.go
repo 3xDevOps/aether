@@ -61,7 +61,7 @@ func (d *DB) DueWatchPushes(ctx context.Context, now time.Time) ([]*WatchNotific
 	}
 	rows, err := d.db.QueryContext(ctx,
 		`SELECT `+watchNotificationColumns+` FROM watch_notifications n JOIN watches w ON w.id = n.watch_id
-		 WHERE n.push_state <> 'none' AND n.push_next_at <= ? ORDER BY n.created_at, n.rowid`, at)
+		 WHERE n.push_state <> 'none' AND n.push_next_at <= ? AND w.state <> 'paused' ORDER BY n.created_at, n.rowid`, at)
 	if err != nil {
 		return nil, fmt.Errorf("store: due watch pushes: %w", err)
 	}
@@ -99,6 +99,19 @@ func (d *DB) loadWatchDeliveries(ctx context.Context, notes []*WatchNotification
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("store: list watch deliveries: %w", err)
+	}
+	return nil
+}
+
+func (d *DB) ReleaseHeldWatchPushes(ctx context.Context, member domain.MemberID, now time.Time) error {
+	at, err := encodeTime(now)
+	if err != nil {
+		return fmt.Errorf("store: release held watch pushes: %w", err)
+	}
+	if _, err := d.db.ExecContext(ctx,
+		`UPDATE watch_notifications SET push_next_at = ?
+		 WHERE push_state = 'held' AND watch_id IN (SELECT id FROM watches WHERE member_id = ?)`, at, member); err != nil {
+		return fmt.Errorf("store: release held watch pushes: %w", err)
 	}
 	return nil
 }

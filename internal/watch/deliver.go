@@ -203,6 +203,9 @@ func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Messa
 			if attempts < maxPushAttempts {
 				at := s.now().Add(backoff(attempts))
 				state, next = store.WatchPushPending, &at
+				if n.PushState == store.WatchPushHeld {
+					state = store.WatchPushHeld
+				}
 			} else {
 				detail += fmt.Sprintf("; gave up after %d attempts", attempts)
 			}

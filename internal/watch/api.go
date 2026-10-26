@@ -590,6 +590,9 @@ func (s *Service) SetPrefs(ctx context.Context, member domain.MemberID, p protoc
 	if err := s.store.PutNotifyPrefs(ctx, member, rec); err != nil {
 		return protocol.NotifyPrefs{}, err
 	}
+	if err := s.store.ReleaseHeldWatchPushes(ctx, member, s.now()); err != nil {
+		return protocol.NotifyPrefs{}, err
+	}
 	s.wake()
 	return s.prefsProto(ctx, member, rec)
 }

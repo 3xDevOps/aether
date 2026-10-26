@@ -130,8 +130,11 @@ type WatchStore interface {
 	ListWatchNotifications(ctx context.Context, watch string, limit int) ([]*WatchNotification, error)
 	GetWatchNotification(ctx context.Context, id string) (*WatchNotification, error)
 	// DueWatchPushes lists the notifications whose push is pending or held
-	// until now or earlier, oldest first.
+	// until now or earlier, oldest first, leaving out paused watches'.
 	DueWatchPushes(ctx context.Context, now time.Time) ([]*WatchNotification, error)
+	// ReleaseHeldWatchPushes makes member's held pushes due at now, for
+	// their quiet hours to be applied again.
+	ReleaseHeldWatchPushes(ctx context.Context, member domain.MemberID, now time.Time) error
 	// SetWatchPush records a notification's push state and appends d when
 	// it is not nil.
 	SetWatchPush(ctx context.Context, id, state string, attempts int, next *time.Time, d *WatchDelivery) error
