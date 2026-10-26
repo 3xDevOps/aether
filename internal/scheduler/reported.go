@@ -433,7 +433,9 @@ func (s *Scheduler) ReportWaiting(ctx context.Context, run domain.RunID, id, wai
 
 // ReportAnswered records a turn that replied with nothing pending like
 // ReportBlocked: at its turn end the run shows the summary as answered,
-// which asks nothing of a member.
+// which asks nothing of a member. It never replaces a question or blocker
+// the agent reported: that stays shown until a member deals with it
+// (reportIdle).
 func (s *Scheduler) ReportAnswered(ctx context.Context, run domain.RunID, id, summary string, at time.Time) error {
 	return s.reportIdle(ctx, run, id, answeredReasonPrefix+summary, at, "answered report", coord.ErrRunFinished)
 }
@@ -447,6 +449,9 @@ func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason
 		defer s.mu.Unlock()
 		if entry.status.Terminal() || entry.reported != "" {
 			return finished
+		}
+		if strings.HasPrefix(reason, answeredReasonPrefix) && humanReason(entry.idleReason) {
+			return nil
 		}
 		return s.recordIdleReportLocked(ctx, entry, id, reason, at)
 	}

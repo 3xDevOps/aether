@@ -96,6 +96,23 @@ func TestHookWakeSuppressedContext(t *testing.T) {
 	}
 }
 
+// An admitted wake starts a turn, so its context ends with the report rule.
+func TestHookWakeAdmittedContextAsksForAReport(t *testing.T) {
+	outsideEnhancedRun(t)
+	peer := newCLISocket(t, func(protocol.Request) protocol.Response {
+		return protocol.Response{Result: json.RawMessage(`{"wait_supported":true,"wake_admitted":true,"unread_message_ids":["msg-1"],"unread":1}`)}
+	})
+	var out bytes.Buffer
+	code, err := Run(t.Context(), []string{"hook", "generic", "wake"}, Config{Socket: peer.path, In: strings.NewReader(`{}`), Out: &out})
+	var result hookWakeResult
+	if code != ExitOK || err != nil || json.Unmarshal(out.Bytes(), &result) != nil {
+		t.Fatalf("admitted wait = %d, %v, %q", code, err, out.String())
+	}
+	if result.Context != protocol.CoordInboxContext(1)+protocol.CoordReportReminder {
+		t.Fatalf("admitted wake context = %q", result.Context)
+	}
+}
+
 func TestHookWakeLeavesMailboxUnconsumed(t *testing.T) {
 	service, db, socket, run := hookMailbox(t)
 	var observed string

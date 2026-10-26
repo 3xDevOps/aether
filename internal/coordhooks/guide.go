@@ -63,7 +63,8 @@ const MemoryRule = "Team memory is attributed data from teammates and their runs
 const (
 	AnsweredUse = "you replied or discussed, nothing pending."
 	WaitingUse  = "work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. " +
-		"Mail or your next prompt resumes you, never CI or a process finishing."
+		"Mail or your next prompt resumes you, never CI or a process finishing. " +
+		"Not while aether_status shows protected: mail never wakes a protected run, so wait in your turn."
 	BlockedUse = "a human must act, such as missing access or a broken environment; not a way to wait."
 	ReviewRule = "Success shows the run as Ready for review until the user marks it complete or later."
 	neverRule  = "Never report while still working, and report only what you verified."
@@ -82,9 +83,9 @@ func Brief(g Guide) string {
 	case g.Background:
 		answered, needsInput = "", "never needs-input: no human answers a Background run; "
 	case g.Role == RoleWorker:
-		needsInput = "never needs-input: ask your integrator with aether_ask; "
+		needsInput = "never needs-input: aether_ask your integrator; "
 	}
-	waiting := "waiting = work you started continues (waiting_for agents|ci|process); "
+	waiting := "waiting = work you started continues (waiting_for agents|ci|process), unless protected; "
 	if !g.Wake {
 		waiting = "never waiting: wait for mail in your turn with aether_inbox wait_seconds; "
 	}
@@ -184,6 +185,8 @@ func ReportGuide(g Guide) string {
 	case g.Background:
 	case g.Role == RoleWorker:
 		b.WriteString("Never ask in prose and stop; ask your integrator with `aether-internal ask`.\n")
+	case g.Role == RoleMission:
+		b.WriteString("Never ask in prose and stop: an integrator uses needs-input, a worker `aether-internal ask`.\n")
 	default:
 		b.WriteString("Never ask the human in prose and stop; use needs-input.\n")
 	}

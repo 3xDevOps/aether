@@ -138,6 +138,12 @@ func (e *supervised) waits() bool {
 	return activity != ""
 }
 
+// answered reports whether the run's outcome is an answered report. The
+// caller must hold s.mu.
+func (e *supervised) answered() bool {
+	return strings.HasPrefix(e.idleReason, answeredReasonPrefix)
+}
+
 // asksMember reports whether a pending input request waits on a member. A
 // Background run has no terminal to answer a question in. The caller must
 // hold s.mu.
@@ -306,7 +312,7 @@ func (s *Scheduler) refreshActivities(ctx context.Context) {
 // (refreshActivities). Caller holds s.mu.
 func (e *supervised) waitExpires() bool {
 	activity, stale, _ := cutWaiting(e.idleReason)
-	return activity != "" && activity != domain.ActivityAnswered && !stale && e.activity == activity
+	return activity != "" && !e.answered() && !stale && e.activity == activity
 }
 
 // expireWaitLocked marks a run's wait stale (waitExpires) once nothing

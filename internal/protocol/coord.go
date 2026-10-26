@@ -328,9 +328,9 @@ type CoordInboxResult struct {
 
 // CoordReportParams submits a durable task outcome for the calling run.
 type CoordReportParams struct {
-	Outcome        string   `json:"outcome" jsonschema:"success, failure, blocked, needs-input or waiting"`
-	Summary        string   `json:"summary" jsonschema:"what you verified; for needs-input the question for the user; for blocked what a human must do; for waiting what you wait on"`
-	EvidenceRefs   []string `json:"evidence_refs,omitempty" jsonschema:"retained evidence packet ids; not for needs-input or waiting"`
+	Outcome        string   `json:"outcome" jsonschema:"success, failure, blocked, needs-input, waiting or answered"`
+	Summary        string   `json:"summary" jsonschema:"what you verified; for needs-input the question for the user; for blocked what a human must do; for waiting what you wait on; for answered what you replied"`
+	EvidenceRefs   []string `json:"evidence_refs,omitempty" jsonschema:"retained evidence packet ids; not for needs-input, waiting or answered"`
 	IdempotencyKey string   `json:"idempotency_key" jsonschema:"a fresh key you choose for each new report; reuse it only to retry the same report, since the same key with another outcome or summary is refused"`
 	WaitingFor     string   `json:"waiting_for,omitempty" jsonschema:"only with waiting: agents (the default), ci or process"`
 }

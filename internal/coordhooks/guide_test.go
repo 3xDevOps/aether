@@ -29,7 +29,9 @@ func TestGuidanceOffersOnlyUsableOutcomes(t *testing.T) {
 			[]string{"END EVERY TURN WITH EXACTLY ONE REPORT", "[--for agents|ci|process]", "- answered: ", "- needs-input: not for workers", "- waiting: ", "ask your integrator"},
 			[]string{"never report waiting", "use needs-input"}},
 		{"enhanced interactive", Guide{Role: RoleInteractive, Wake: true},
-			[]string{"- answered: ", "- waiting: ", "use needs-input"}, []string{"without a report"}},
+			[]string{"- answered: ", "- waiting: ", "use needs-input", "Not while aether_status shows protected"}, []string{"without a report"}},
+		{"mission", Guide{Role: RoleMission},
+			[]string{"an integrator uses needs-input, a worker `aether-internal ask`"}, []string{"stop; use needs-input"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			card := RoleCard(tc.g)

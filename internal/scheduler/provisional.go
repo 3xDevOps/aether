@@ -16,7 +16,8 @@ var provisionalGrace = 15 * time.Second
 // TurnEnded hands a swarm worker's last message to coordination, which
 // forwards it to the integrator as a provisional report unless the turn
 // reported. A turn that started within provisionalGrace or a waiting outcome
-// keeps it back.
+// keeps it back; an answered one does not, so the integrator hears from a
+// worker whose attempt stays open.
 func (s *Scheduler) TurnEnded(run domain.RunID, message string) {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -28,7 +29,7 @@ func (s *Scheduler) TurnEnded(run domain.RunID, message string) {
 	s.mu.Unlock()
 	time.AfterFunc(provisionalGrace, func() {
 		s.mu.Lock()
-		current := s.runs[run] == entry && entry.turnStartedAt.Equal(started) && !entry.waits()
+		current := s.runs[run] == entry && entry.turnStartedAt.Equal(started) && (!entry.waits() || entry.answered())
 		s.mu.Unlock()
 		c := s.coordinationSeam()
 		if !current || c == nil || s.superCtx.Err() != nil {

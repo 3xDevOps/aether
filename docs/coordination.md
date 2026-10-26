@@ -538,7 +538,7 @@ run's card:
 You are Aether run <run-id> (role: interactive). Before acting, run the shell command `aether-internal skill` (not a harness skill) for your live identity, capabilities, assignment and rules; `aether-internal status` or aether_status shows live state. Your own shell tool's sessions never appear in the Aether dashboard; to start a terminal people can see there, run `aether-internal skill terminal`. Use only available capabilities.
 END EVERY TURN WITH EXACTLY ONE REPORT, as your last action: `aether-internal report --outcome <o> [--for agents|ci|process] --summary "<one line>"` (or aether_report with a new idempotency_key each turn).
 - answered: you replied or discussed, nothing pending.
-- waiting: work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. Mail or your next prompt resumes you, never CI or a process finishing.
+- waiting: work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. Mail or your next prompt resumes you, never CI or a process finishing. Not while aether_status shows protected: mail never wakes a protected run, so wait in your turn.
 - needs-input: only a question a human must answer; the reply comes as your next prompt.
 - blocked: a human must act, such as missing access or a broken environment; not a way to wait.
 - success | failure: the work you own is verified done or cannot be done; the session stays open for follow-up. Success shows the run as Ready for review until the user marks it complete or later.
@@ -666,7 +666,9 @@ available. Message, question, reply, and report bodies read from flags, files,
 or standard input are capped at 4 KiB before a request is sent.
 
 `skill` prints one line with the inbox hook state for this run's agent,
-named by `AETHER_HARNESS`. `skill --hooks` checks the standard hook
+named by `AETHER_HARNESS`. In an Enhanced run, which gets its mail as a
+session prompt, both print only that hooks are not used. Elsewhere
+`skill --hooks` checks the standard hook
 configuration locations for every agent without changing them. It
 reports configured, missing, invalid, disabled, or unverified installations and prints
 the matching file-export command, destination, merge instructions, and
@@ -1211,8 +1213,8 @@ A worker whose turn ends without a report, and does not start another turn
 within 15 seconds, sends a **provisional report** instead: its last message,
 clipped to the 4 KiB body cap, as an ordinary message whose `correlation_id`
 starts with `provisional:` and whose body starts with `Provisional report:`.
-Each turn sends at most one; a turn that reported `waiting` or `answered`, or
-that a human cancelled, sends none. A report the worker makes later supersedes it: the
+Each turn sends at most one; a turn that reported `waiting`, or that a human
+cancelled, sends none. A report the worker makes later supersedes it: the
 report arrives as usual, and a provisional report not yet read is retired
 unread. Only Enhanced workers
 and Background workers over ACP or `claude -p` send one
@@ -1687,8 +1689,10 @@ What a report does depends on the run:
   (**Answered**). It never makes the run **Needs you**, sends no push,
   assistant or Slack notification, and never goes stale; a live worker
   attempt or held background task outranks it with the matching waiting
-  state. Every role may report it: a swarm worker's answered submits
-  nothing and leaves its attempt open. Like waiting it is nonterminal,
+  state. It never replaces a needs-input or blocked report that is still
+  open: that reason stays shown. Every role may report it: a swarm worker's
+  answered submits nothing, leaves its attempt open, and still forwards its
+  provisional report. Like waiting it is nonterminal,
   takes no `--evidence-ref` or `--for`, belongs to the turn that reported
   it, is refused with the same errors for a run that already finished or is
   ending and for a superseded key, and the next turn clears it. A
