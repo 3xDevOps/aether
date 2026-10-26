@@ -69,43 +69,50 @@ export function board(s: RunsInput): BoardData {
   }
 }
 
-export function mapRuns(s: RunsInput): { cards: BoardCard[]; archivedCards: BoardCard[] } {
-  const individual = (row: RunRow): BoardCard => ({
+/** A map card; `visiting` marks a Needs you run shown only because Needs you ignores scope and Mine. */
+export interface MapCard extends BoardCard {
+  visiting: boolean
+}
+
+export function mapRuns(s: RunsInput): { cards: MapCard[]; archivedCards: MapCard[] } {
+  const inScope = (run: RunRecord) =>
+    (!s.workspace || run.workspace_id === s.workspace) && (!s.mineOnly || run.member_id === s.ctx.viewerID)
+  const individual = (row: RunRow): MapCard => ({
     ...row,
     children: [],
     workspaceName: !s.workspace || row.run.workspace_id !== s.workspace || extraRepoCount(row.run) > 0
       ? repoLabel(s.ctx.workspaces[row.run.workspace_id]?.name ?? row.run.workspace_id, row.run)
       : undefined,
+    visiting: !inScope(row.run),
   })
   return {
-    cards: runRows(s.ctx)
-      .filter((row) => row.group === 'needs-you' || (
-        (!s.workspace || row.run.workspace_id === s.workspace) &&
-        (!s.mineOnly || row.run.member_id === s.ctx.viewerID)
-      ))
-      .map(individual),
+    cards: runRows(s.ctx).filter((row) => row.group === 'needs-you' || inScope(row.run)).map(individual),
     archivedCards: archivedRows(s).map(individual),
   }
+}
+
+// Unchanged cards keep their previous object so a memoized card skips them.
+function reuseCards(previous: Map<string, BoardCard>) {
+  const next = new Map<string, BoardCard>()
+  const keep = <T extends BoardCard>(card: T): T => {
+    const old = previous.get(card.run.id) as T | undefined
+    const kept = old && dequal(old, card) ? old : card
+    next.set(card.run.id, kept)
+    return kept
+  }
+  return { next, keep }
 }
 
 export function useMapRuns(workspace: string) {
   const ctx = useStateContext()
   const mineOnly = useStore((s) => s.mineOnly)
-  return useMemo(() => mapRuns({ workspace, mineOnly, ctx }), [workspace, mineOnly, ctx])
-}
-
-// Unchanged cards keep their previous object so the memoized RunCard skips them.
-function reuseCards(data: BoardData, previous: Map<string, BoardCard>): Map<string, BoardCard> {
-  const next = new Map<string, BoardCard>()
-  const keep = (card: BoardCard) => {
-    const old = previous.get(card.run.id)
-    const kept = old && dequal(old, card) ? old : card
-    next.set(card.run.id, kept)
-    return kept
-  }
-  for (const column of data.columns) column.cards = column.cards.map(keep)
-  data.archivedCards = data.archivedCards.map(keep)
-  return next
+  const cards = useRef(new Map<string, BoardCard>())
+  return useMemo(() => {
+    const data = mapRuns({ workspace, mineOnly, ctx })
+    const { next, keep } = reuseCards(cards.current)
+    cards.current = next
+    return { cards: data.cards.map(keep), archivedCards: data.archivedCards.map(keep) }
+  }, [workspace, mineOnly, ctx])
 }
 
 export function useBoard(): BoardData {
@@ -115,7 +122,10 @@ export function useBoard(): BoardData {
   const cards = useRef(new Map<string, BoardCard>())
   return useMemo(() => {
     const data = board({ workspace, mineOnly, ctx })
-    cards.current = reuseCards(data, cards.current)
+    const { next, keep } = reuseCards(cards.current)
+    for (const column of data.columns) column.cards = column.cards.map(keep)
+    data.archivedCards = data.archivedCards.map(keep)
+    cards.current = next
     return data
   }, [workspace, mineOnly, ctx])
 }

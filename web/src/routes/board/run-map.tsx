@@ -1,17 +1,20 @@
 import { Minus, Plus } from '@/components/icons'
 import { useCallback, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
-import { Avatar } from '@/components/ui/avatar'
+import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
-import { runLabel } from '@/lib/status'
+import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { cn, focusRing } from '@/lib/utils'
-import { layoutRunMap, type RunMapLayout } from '@/routes/board/map-layout'
-import { RunCard } from '@/routes/board/run-card'
-import type { BoardCard } from '@/routes/board/selectors'
+import { MapHeader } from '@/routes/board/map-header'
+import { layoutRunMap, mapMetrics, runKey, type RunMapLayout } from '@/routes/board/map-layout'
+import { MapWorld } from '@/routes/board/map-world'
+import type { MapCard } from '@/routes/board/selectors'
+import { useMapMotion } from '@/routes/board/use-map-motion'
 import { useStore } from '@/store'
 import { maxBoardMapZoom, minBoardMapZoom, normalizeBoardMapViewport, type BoardMapViewport } from '@/store/ui'
 
 const controls = 'button:not([data-card-open]), a, input, select, textarea, [role="button"], [contenteditable], [data-slot="card-controls"]'
+// Below this fit zoom cards are unreadable, so a first visit starts at 100% on the newest runs instead.
+const legibleZoom = 0.5
 
 type MapProps = {
   scope: string
@@ -20,32 +23,38 @@ type MapProps = {
   empty?: ReactNode
 }
 
-export function RunMap({ cards, ...props }: MapProps & { cards: BoardCard[] }) {
+export function RunMap({ cards, ...props }: MapProps & { cards: MapCard[] }) {
+  const viewerID = useStore((s) => s.info?.member.id ?? null)
+  const folded = useStore((s) => s.boardMapFolded)
+  const textSize = useStore((s) => s.textSize)
+  const coarse = useMediaQuery(coarsePointer)
+  const metrics = useMemo(() => mapMetrics(textSize, coarse), [textSize, coarse])
   const previous = useRef<RunMapLayout | undefined>(undefined)
   const layout = useMemo(() => {
-    const next = layoutRunMap(cards, previous.current)
+    const next = layoutRunMap(cards, { viewerID, folded, metrics }, previous.current)
     previous.current = next
     return next
-  }, [cards])
-  return <MapViewport key={props.scope} layout={layout} {...props} />
+  }, [cards, viewerID, folded, metrics])
+  return <MapViewport key={props.scope} layout={layout} cards={cards} {...props} />
 }
 
-function MapViewport({ layout, scope, agentNames, actions, empty }: MapProps & { layout: RunMapLayout }) {
+function MapViewport({ layout, cards, scope, agentNames, actions, empty }: MapProps & { layout: RunMapLayout; cards: MapCard[] }) {
   const setSavedViewport = useStore((s) => s.setBoardMapViewport)
+  const setFolded = useStore((s) => s.setBoardMapFolded)
   const [viewport, setViewport] = useState<BoardMapViewport>(() =>
     normalizeBoardMapViewport(useStore.getState().boardMapViewports[scope]) ?? { x: 0, y: 0, zoom: 1 },
   )
   const camera = useRef(viewport)
   const initialized = useRef(Boolean(normalizeBoardMapViewport(useStore.getState().boardMapViewports[scope])))
   const canvas = useRef<HTMLDivElement>(null)
+  const world = useRef<HTMLDivElement>(null)
   const saveFrame = useRef<number | null>(null)
   const dirty = useRef(false)
   const pointers = useRef(new Map<number, { x: number; y: number; startX: number; startY: number; pan: boolean }>())
   const suppressClick = useRef(false)
+  const revealing = useRef<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const instructionsId = useId()
-  const arrowId = useId().replace(/:/g, '')
-  const nodesByKey = useMemo(() => new Map(layout.nodes.map((node) => [node.key, node])), [layout])
 
   const commit = useCallback((candidate: BoardMapViewport) => {
     const next = normalizeBoardMapViewport(candidate)
@@ -63,19 +72,34 @@ function MapViewport({ layout, scope, agentNames, actions, empty }: MapProps & {
     }
   }, [scope, setSavedViewport])
 
-  const fit = useCallback(() => {
+  const follow = useCallback((dx: number, dy: number) => {
+    const current = camera.current
+    commit({ ...current, x: current.x - dx * current.zoom, y: current.y - dy * current.zoom })
+  }, [commit])
+  const { ghosts, fadeGhost, fold } = useMapMotion(world, layout, setFolded, follow)
+
+  const fit = useCallback((first = false) => {
     const element = canvas.current
-    if (!element?.clientWidth || !element.clientHeight || !layout.nodes.length) return
+    const newest = layout.nodes[0]
+    if (!element?.clientWidth || !element.clientHeight || !newest) return
     const zoom = Math.max(minBoardMapZoom, Math.min(1,
       (element.clientWidth - 24) / layout.width,
       (element.clientHeight - 24) / layout.height,
     ))
+    if (first && zoom < legibleZoom) {
+      commit({
+        x: Math.min(0, element.clientWidth - 12 - newest.x - newest.width),
+        y: Math.min(0, element.clientHeight - 12 - newest.y - newest.height),
+        zoom: 1,
+      })
+      return
+    }
     commit({
       x: (element.clientWidth - layout.width * zoom) / 2,
       y: (element.clientHeight - layout.height * zoom) / 2,
       zoom,
     })
-  }, [commit, layout.width, layout.height, layout.nodes.length])
+  }, [commit, layout.width, layout.height, layout.nodes])
 
   const zoomAt = useCallback((factor: number, x?: number, y?: number) => {
     const element = canvas.current
@@ -91,8 +115,8 @@ function MapViewport({ layout, scope, agentNames, actions, empty }: MapProps & {
   useLayoutEffect(() => {
     // Live events never reset a chosen camera, even if every card moves offscreen.
     if (initialized.current) return
-    fit()
-    const observer = new ResizeObserver(() => { if (!initialized.current) fit() })
+    fit(true)
+    const observer = new ResizeObserver(() => { if (!initialized.current) fit(true) })
     if (canvas.current) observer.observe(canvas.current)
     return () => observer.disconnect()
   }, [fit])
@@ -124,6 +148,38 @@ function MapViewport({ layout, scope, agentNames, actions, empty }: MapProps & {
       }
     }
   }, [commit, scope, setSavedViewport, zoomAt])
+
+  const show = useCallback((key: string) => {
+    const node = layout.nodes.find((entry) => entry.key === key)
+    const element = canvas.current
+    if (!node || !element) return false
+    const zoom = camera.current.zoom < legibleZoom ? 1 : camera.current.zoom
+    commit({
+      x: element.clientWidth / 2 - (node.x + node.width / 2) * zoom,
+      y: element.clientHeight / 2 - (node.y + node.height / 2) * zoom,
+      zoom,
+    })
+    const card = [...element.querySelectorAll<HTMLElement>('[data-map-node]')].find((el) => el.dataset.glideKey === `n:${key}`)
+    card?.querySelector<HTMLElement>('[data-card-open]')?.focus({ preventScroll: true })
+    return true
+  }, [commit, layout.nodes])
+
+  // A run in a folded swarm is shown once the unfold has repacked it in.
+  useLayoutEffect(() => {
+    if (revealing.current && show(revealing.current)) revealing.current = null
+  }, [show])
+
+  // A worker always goes through the unfold, which also cancels a fold still fading out.
+  const reveal = useCallback((key: string) => {
+    const unit = layout.units.find((entry) => entry.kind === 'swarm' && (entry.hidden.some((card) => runKey(card) === key)
+      || entry.nodes.some((node) => node.key === key && node.role === 'worker')))
+    if (!unit) {
+      show(key)
+      return
+    }
+    revealing.current = key
+    fold(unit.key, false)
+  }, [fold, layout.units, show])
 
   function pointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0 || !event.currentTarget.contains(event.target as Node)) return
@@ -214,22 +270,28 @@ function MapViewport({ layout, scope, agentNames, actions, empty }: MapProps & {
     event.stopPropagation()
   }
 
+  const labelScale = Math.min(8, Math.max(1, 0.9 / viewport.zoom))
+
   return (
     <section aria-label="Workspace run map" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header className="flex flex-wrap items-center gap-2 border-b border-seam px-4 py-2">
-        <h2 className="text-ui-sm font-medium">Runs <span className="text-muted tabular-nums">{layout.nodes.length}</span></h2>
-        {actions}
-        <div role="group" aria-label="Map camera" className="ml-auto flex items-center gap-1">
-          <Button variant="ghost" size="icon-sm" label="Zoom out" disabled={viewport.zoom <= minBoardMapZoom} onClick={() => zoomAt(1 / 1.2)}><Minus /></Button>
-          <output aria-label="Map zoom" className="min-w-10 text-center text-ui-sm text-muted tabular-nums">{Math.round(viewport.zoom * 100)}%</output>
-          <Button variant="ghost" size="icon-sm" label="Zoom in" disabled={viewport.zoom >= maxBoardMapZoom} onClick={() => zoomAt(1.2)}><Plus /></Button>
-          <Button variant="ghost" size="sm" onClick={fit} aria-label="Fit map to view">Fit</Button>
-        </div>
-      </header>
+      <MapHeader
+        cards={cards}
+        actions={actions}
+        onReveal={reveal}
+        camera={
+          <div role="group" aria-label="Map camera" className="flex items-center gap-1">
+            <Button variant="ghost" size="icon-sm" label="Zoom out" disabled={viewport.zoom <= minBoardMapZoom} onClick={() => zoomAt(1 / 1.2)}><Minus /></Button>
+            <output aria-label="Map zoom" className="min-w-10 text-center text-ui-sm text-muted tabular-nums">{Math.round(viewport.zoom * 100)}%</output>
+            <Button variant="ghost" size="icon-sm" label="Zoom in" disabled={viewport.zoom >= maxBoardMapZoom} onClick={() => zoomAt(1.2)}><Plus /></Button>
+            <Button variant="ghost" size="sm" onClick={() => fit()} aria-label="Fit map to view">Fit</Button>
+          </div>
+        }
+      />
       <p id={instructionsId} className="sr-only">
         Drag the canvas or use the arrow keys to pan. Scroll to pan; Control or Command plus scroll zooms around the pointer.
         On touch screens, drag to pan or pinch to zoom. Plus and minus zoom; Home or zero fits all runs. Tab reaches each run and its controls.
-        Needs you includes runs from every workspace, even with Mine selected. Dashed arrows connect different owners.
+        Runs read newest first; a swarm's workers sit under its integrator, whose fold button hides or shows them.
+        The needs you and failed counts open lists that bring a run into view. Needs you includes runs from every workspace, even with Mine selected.
       </p>
       <div
         ref={canvas}
@@ -238,7 +300,7 @@ function MapViewport({ layout, scope, agentNames, actions, empty }: MapProps & {
         aria-label="Map canvas"
         aria-describedby={instructionsId}
         tabIndex={0}
-        className={cn(focusRing, 'relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden bg-canvas outline-offset-[-2px]', dragging ? 'cursor-grabbing select-none' : 'cursor-grab')}
+        className={cn(focusRing, 'relative min-h-0 min-w-0 flex-1 touch-none overflow-hidden bg-chrome outline-offset-[-2px]', dragging ? 'cursor-grabbing select-none' : 'cursor-grab')}
         onPointerDownCapture={pointerDown}
         onPointerMoveCapture={pointerMove}
         onPointerUpCapture={pointerEnd}
@@ -269,43 +331,18 @@ function MapViewport({ layout, scope, agentNames, actions, empty }: MapProps & {
         }}
       >
         {layout.nodes.length === 0 && (empty ?? <p className="p-4 text-ui-sm text-muted">No runs in this view.</p>)}
-        <div data-run-map-world className="absolute top-0 left-0 origin-top-left" style={{ width: layout.width, height: layout.height, transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})` }}>
-          {layout.groups.map((group) => (
-            <section key={group.key} aria-label={`${group.label}'s runs`} className="absolute rounded-panel border border-seam bg-chrome" style={{ left: group.x, top: group.y, width: group.width, height: group.height }}>
-              <header className="flex h-9 min-w-0 items-center gap-2 px-8">
-                <Avatar name={group.label} color={group.member?.color} />
-                <h3 className="truncate text-ui font-medium">{group.label}</h3>
-                <span className="ml-auto text-ui-sm text-muted tabular-nums">{group.count} {group.count === 1 ? 'run' : 'runs'}</span>
-              </header>
-            </section>
-          ))}
-          <svg aria-hidden className="pointer-events-none absolute inset-0" width={layout.width} height={layout.height}>
-            <defs>
-              <marker id={arrowId} viewBox="0 0 8 8" refX="8" refY="4" markerWidth={Math.max(8, 6 / viewport.zoom)} markerHeight={Math.max(8, 6 / viewport.zoom)} orient="auto" markerUnits="userSpaceOnUse">
-                <path d="M 0 0 L 8 4 L 0 8 Z" fill="var(--text-muted)" />
-              </marker>
-            </defs>
-            {layout.connectors.map((connector) => (
-              <polyline key={connector.to} points={connector.points.map((point) => `${point.x},${point.y}`).join(' ')} fill="none" stroke="var(--text-muted)" strokeWidth={1.25} vectorEffect="non-scaling-stroke" strokeDasharray={connector.crossMember ? '5 3' : undefined} markerEnd={`url(#${arrowId})`} />
-            ))}
-          </svg>
-          {layout.groups.flatMap((group) => group.units.filter((unit) => unit.nodes.some((node) => node.role !== 'standalone')).map((unit) => (
-            <div key={`${group.key}:${unit.key}`} className="pointer-events-none absolute truncate text-ui-sm text-muted" style={{ left: unit.x, top: unit.y, width: unit.width }} title={unit.missionId}>
-              {unit.label}{unit.missionId && <span className="ml-2 font-code">{unit.missionId}</span>}
-            </div>
-          )))}
-          {layout.nodes.map((node) => {
-            const parent = node.parentKey ? nodesByKey.get(node.parentKey) : undefined
-            const description = node.role === 'worker'
-              ? parent ? `Worker coordinated by ${runLabel(parent.card.run)}` : 'Worker; integrator not visible in this map'
-              : node.role === 'integrator' ? 'Swarm integrator' : 'Standalone run'
-            return (
-              <div key={node.key} role="group" aria-label={description} className="absolute cursor-default rounded-panel bg-canvas" style={{ left: node.x, top: node.y, width: node.width, height: node.height }}>
-                {node.role !== 'standalone' && <span className={cn('pointer-events-none absolute -top-5 text-ui-xs font-medium text-muted', node.role === 'worker' ? 'right-0' : 'left-0')}>{node.role === 'integrator' ? 'Integrator' : 'Worker'}</span>}
-                <RunCard card={node.card} agentName={agentNames[node.card.run.harness]} variant="map" />
-              </div>
-            )
-          })}
+        <div
+          ref={world}
+          data-run-map-world
+          className="absolute top-0 left-0 origin-top-left"
+          style={{
+            width: layout.width,
+            height: layout.height,
+            transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+            '--map-label-scale': labelScale,
+          } as CSSProperties}
+        >
+          <MapWorld layout={layout} agentNames={agentNames} ghosts={ghosts} onFold={fold} fadeGhost={fadeGhost} />
         </div>
       </div>
     </section>

@@ -15,7 +15,7 @@ import { useStore } from '@/store'
 import { diffTotals } from '@/store/diff'
 import type { SwarmSummary } from '@/store/selectors'
 
-const phaseWord: Record<MissionPhase, string> = {
+export const phaseWord: Record<MissionPhase, string> = {
   planning: 'Swarm planning',
   active: 'Swarm active',
   completed: 'Swarm completed',
@@ -25,10 +25,9 @@ const phaseWord: Record<MissionPhase, string> = {
 /** Indents a wide card's description and footer under its title, past the 14px glyph and 12px gap. */
 export const wideIndent = '@min-[365px]:pl-6.5'
 
-export const RunCard = memo(function RunCard({ card, agentName, variant = 'board' }: {
+export const RunCard = memo(function RunCard({ card, agentName }: {
   card: BoardCard
   agentName?: string
-  variant?: 'board' | 'map'
 }) {
   const { run } = card
   const navigate = useStore((s) => s.navigate)
@@ -54,17 +53,16 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
         <Card
           ref={cardRef}
           data-run-id={run.id}
-          raised={variant === 'board'}
+          raised
           selected={replying}
           className="@container"
-          style={variant === 'map' ? { height: '100%' } : undefined}
         >
           <div className="flex items-start gap-3">
             <AgentGlyph agent={run.harness} colored className="mt-0.75" />
-            <CardTitle onOpen={() => variant === 'map' ? navigate('run', { runId: run.id }) : openCard(card, navigate)}>{title}</CardTitle>
+            <CardTitle onOpen={() => openCard(card, navigate)}>{title}</CardTitle>
           </div>
           {description && (
-            <p className={cn('mt-0.5 text-ui-sm break-words', wideIndent, needsYou ? 'text-text' : 'text-muted', card.group === 'working' || variant === 'map' ? 'line-clamp-1' : 'line-clamp-2')}>
+            <p className={cn('mt-0.5 text-ui-sm break-words', wideIndent, needsYou ? 'text-text' : 'text-muted', card.group === 'working' ? 'line-clamp-1' : 'line-clamp-2')}>
               {description}
             </p>
           )}

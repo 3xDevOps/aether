@@ -398,7 +398,7 @@ describe('a persisted store from an older release', () => {
       'aether.ui',
       JSON.stringify({
         state: { onboardingStep: 'Agent', onboardingFurthest: 'First run' },
-        version: 8,
+        version: 9,
       }),
     )
 
@@ -430,7 +430,7 @@ describe('scoped Board preferences', () => {
 
   it('rejects corrupt cameras and unknown views instead of losing the canvas on reload', () => {
     window.localStorage.setItem('aether.ui', JSON.stringify({
-      version: 8,
+      version: 9,
       state: {
         boardViews: { good: 'map', listed: 'list', bad: 'unknown' },
         boardMapViewports: {
@@ -445,5 +445,31 @@ describe('scoped Board preferences', () => {
     expect(restored.boardMapViewports).toEqual({ valid: { x: 10, y: 20, zoom: 2 } })
     restored.setBoardMapViewport('valid', { x: Infinity, y: 0, zoom: 1 })
     expect(createRootStore().getState().boardMapViewports.valid).toEqual({ x: 10, y: 20, zoom: 2 })
+  })
+
+  it('drops cameras saved for the old map geometry but keeps the other Board choices', () => {
+    window.localStorage.setItem('aether.ui', JSON.stringify({
+      version: 8,
+      state: { boardViews: { first: 'map' }, boardMapAllWorkspaces: true, boardMapViewports: { first: { x: 1, y: 2, zoom: 1 } } },
+    }))
+    const restored = createRootStore().getState()
+    expect(restored.boardViews).toEqual({ first: 'map' })
+    expect(restored.boardMapAllWorkspaces).toBe(true)
+    expect(restored.boardMapViewports).toEqual({})
+  })
+
+  it('keeps folded swarms across reloads and prunes folds of runs that are gone', () => {
+    const keyOf = (id: string) => JSON.stringify(['wsp_1', id])
+    const store = createRootStore()
+    store.setState({ runs: { kept: { id: 'kept', workspace_id: 'wsp_1' }, other: { id: 'other', workspace_id: 'wsp_1' } } as never })
+    store.getState().setBoardMapFolded(keyOf('kept'), true)
+    store.getState().setBoardMapFolded(keyOf('gone'), true)
+    expect(store.getState().boardMapFolded).toEqual({ [keyOf('kept')]: true, [keyOf('gone')]: true })
+    store.getState().setBoardMapFolded(keyOf('other'), true)
+    expect(store.getState().boardMapFolded).toEqual({ [keyOf('kept')]: true, [keyOf('other')]: true })
+    store.getState().setBoardMapFolded(keyOf('kept'), false)
+    expect(createRootStore().getState().boardMapFolded).toEqual({ [keyOf('other')]: true })
+    window.localStorage.setItem('aether.ui', JSON.stringify({ version: 9, state: { boardMapFolded: { a: true, b: 'yes', c: null } } }))
+    expect(createRootStore().getState().boardMapFolded).toEqual({ a: true })
   })
 })

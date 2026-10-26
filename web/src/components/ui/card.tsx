@@ -29,10 +29,12 @@ export function CardTitle({
   children,
   onOpen,
   label,
+  className,
 }: {
   children: React.ReactNode
   onOpen: () => void
   label?: string
+  className?: string
 }) {
   return (
     <h3 className="min-w-0 text-ui font-medium text-text">
@@ -41,7 +43,7 @@ export function CardTitle({
         data-card-open
         aria-label={label}
         onClick={onOpen}
-        className="line-clamp-2 cursor-pointer text-left break-words outline-none after:absolute after:inset-0 after:rounded-panel focus-visible:after:outline-2 focus-visible:after:-outline-offset-1 focus-visible:after:outline-accent"
+        className={cn('line-clamp-2 cursor-pointer text-left break-words outline-none after:absolute after:inset-0 after:rounded-panel focus-visible:after:outline-2 focus-visible:after:-outline-offset-1 focus-visible:after:outline-accent', className)}
       >
         {children}
       </button>

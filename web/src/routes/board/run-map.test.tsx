@@ -1,23 +1,26 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { type Run } from '@/lib/types'
 import { RunMap } from '@/routes/board/run-map'
-import { type BoardCard } from '@/routes/board/selectors'
+import { type MapCard } from '@/routes/board/selectors'
 import '@/routes/diff/conflict-chips'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
 import { type BoardMapViewport } from '@/store/ui'
-import { alice, run, workspace } from '@/test/fixtures'
+import { alice, bob, run, workspace } from '@/test/fixtures'
 
-const width = 956
+let width = 956
 const height = 588
 const origin = { x: 40, y: 60 }
 const frames = new Map<number, FrameRequestCallback>()
 let frameId = 0
 
 
-function card(overrides: Partial<Run> = {}): BoardCard {
+function card(overrides: Partial<Run> = {}): MapCard {
   const record = toRecord(run(overrides))
-  return { run: record, owner: alice, state: 'working', group: 'working', reason: 'Agent working', since: record.stateChangedAt, waitingSince: record.stateChangedAt, children: [] }
+  return {
+    run: record, owner: [alice, bob].find((member) => member.id === record.member_id), state: 'working', group: 'working',
+    reason: 'Agent working', since: record.stateChangedAt, waitingSince: record.stateChangedAt, children: [], visiting: false,
+  }
 }
 
 function canvas() {
@@ -83,10 +86,11 @@ function expectAllCardsInView() {
 }
 
 beforeEach(() => {
+  width = 956
   frames.clear()
   useStore.setState({
-    boardMapViewports: {}, workspaces: { [workspace.id]: workspace },
-    members: { [alice.id]: alice }, runs: {}, pausedRuns: {}, overlaps: {},
+    boardMapViewports: {}, boardMapFolded: {}, workspaces: { [workspace.id]: workspace },
+    members: { [alice.id]: alice, [bob.id]: bob }, runs: {}, pausedRuns: {}, overlaps: {},
     route: { name: 'board', params: {} },
   })
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -104,11 +108,18 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     if (this.hasAttribute('data-run-map-canvas')) return new DOMRect(origin.x, origin.y, width, height)
     if (this.tagName === 'ARTICLE' && this.closest('[data-run-map-world]')) {
+      // Nodes sit inside unit and section containers; their offsets add up to world coordinates.
       const node = this.parentElement!
+      let left = 0
+      let top = 0
+      for (let el: HTMLElement | null = node; el && !el.hasAttribute('data-run-map-world'); el = el.parentElement) {
+        left += Number.parseFloat(el.style.left) || 0
+        top += Number.parseFloat(el.style.top) || 0
+      }
       const view = camera()
       return new DOMRect(
-        origin.x + view.x + Number.parseFloat(node.style.left) * view.zoom,
-        origin.y + view.y + Number.parseFloat(node.style.top) * view.zoom,
+        origin.x + view.x + left * view.zoom,
+        origin.y + view.y + top * view.zoom,
         Number.parseFloat(node.style.width) * view.zoom,
         Number.parseFloat(node.style.height) * view.zoom,
       )
@@ -205,17 +216,18 @@ it('keeps a visible camera through card replacement and substantive layout chang
 
 it('does not refit an intentional blank pan for new arrays or live status and metadata updates', () => {
   const original = card({ id: 'stable' })
-  const view = render(<RunMap cards={[original]} scope={workspace.id} agentNames={{}} />)
+  const teammate = card({ id: 'teammate', member_id: bob.id })
+  const view = render(<RunMap cards={[original, teammate]} scope={workspace.id} agentNames={{}} />)
   fireEvent.wheel(canvas(), { deltaX: 5000, deltaY: 5000 })
   const blank = camera()
   expect(visibleCards()).toEqual([])
   saveCamera()
-  view.rerender(<RunMap cards={[original]} scope={workspace.id} agentNames={{}} />)
+  view.rerender(<RunMap cards={[original, teammate]} scope={workspace.id} agentNames={{}} />)
   expect(camera()).toEqual(blank)
   view.rerender(<RunMap cards={[{
     ...card({ id: 'stable', status: 'completed', task: 'Updated live task' }), state: 'completed',
     owner: { ...alice, display_name: 'Renamed member' },
-  }]} scope={workspace.id} agentNames={{}} />)
+  }, teammate]} scope={workspace.id} agentNames={{}} />)
   expect(screen.getByRole('button', { name: 'Updated live task' })).toBeDefined()
   expect(screen.getByRole('heading', { name: 'Renamed member' })).toBeDefined()
   expect(camera()).toEqual(blank)
@@ -306,3 +318,102 @@ it('keeps the world under the pinch midpoint, suppresses its click, and stops af
   expect(useStore.getState().route.name).toBe('board')
 })
 
+
+const at = (minute: number) => new Date(Date.UTC(2026, 7, 14, 10, minute)).toISOString()
+
+it('opens a map too large to read whole at 100% on its newest runs, while Home still fits everything', () => {
+  const cards = Array.from({ length: 40 }, (_, index) => card({ id: `run-${index}`, task: `task ${index}`, created_at: at(index) }))
+  render(<RunMap cards={cards} scope={workspace.id} agentNames={{}} />)
+  expect(camera()).toEqual({ x: 0, y: 0, zoom: 1 })
+  expect(visibleCards()[0].getAttribute('data-run-id')).toBe('run-39')
+  fireEvent.keyDown(canvas(), { key: 'Home' })
+  expect(camera().zoom).toBeLessThan(0.5)
+  expectAllCardsInView()
+})
+
+it('opens a wide swarm on a phone at 100% with its integrator in view', () => {
+  width = 390
+  render(<RunMap cards={[
+    card({ id: 'root', mission_id: 'mission', mission_role: 'integrator' }),
+    ...[1, 2, 3, 4, 5].map((n) => card({ id: `worker-${n}`, mission_id: 'mission', mission_role: 'worker', integrator_run_id: 'root', created_at: at(n) })),
+  ]} scope={workspace.id} agentNames={{}} />)
+  expect(camera().zoom).toBe(1)
+  const bounds = canvas().getBoundingClientRect()
+  const root = document.querySelector('[data-run-id="root"]')!.getBoundingClientRect()
+  expect(root.left).toBeGreaterThanOrEqual(bounds.left)
+  expect(root.right).toBeLessThanOrEqual(bounds.right)
+})
+
+it('shows the empty message with no runs, including after a filter removes every run', () => {
+  const view = render(<RunMap cards={[]} scope={workspace.id} agentNames={{}} />)
+  expect(screen.getByText('No runs in this view.')).toBeDefined()
+  view.rerender(<RunMap cards={[card()]} scope={workspace.id} agentNames={{}} />)
+  expect(screen.queryByText('No runs in this view.')).toBeNull()
+  view.rerender(<RunMap cards={[]} scope={workspace.id} agentNames={{}} />)
+  expect(screen.getByText('No runs in this view.')).toBeDefined()
+})
+
+function swarm() {
+  return [
+    card({ id: 'root', task: 'coordinate checkout', mission_id: 'mission', mission_role: 'integrator' }),
+    { ...card({ id: 'asking', task: 'ask about tax', mission_id: 'mission', mission_role: 'worker', integrator_run_id: 'root', created_at: at(2) }), group: 'needs-you' as const, state: 'needs-you' as const, reason: 'Which tax table?' },
+    card({ id: 'building', task: 'build cart', mission_id: 'mission', mission_role: 'worker', integrator_run_id: 'root', created_at: at(3) }),
+  ]
+}
+const rootKey = JSON.stringify([workspace.id, 'root'])
+
+it('folds a swarm to its integrator, keeps the fold, and marks hidden workers that need you', async () => {
+  seedCamera({ x: 0, y: 0, zoom: 1 })
+  render(<RunMap cards={swarm()} scope={workspace.id} agentNames={{}} />)
+  expect(screen.getAllByRole('article')).toHaveLength(3)
+  const rootBox = () => document.querySelector('[data-run-id="root"]')!.getBoundingClientRect()
+  const before = rootBox()
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse the workers of coordinate checkout' }))
+  })
+  expect(screen.getAllByRole('article').map((article) => article.dataset.runId)).toEqual(['root'])
+  // The repack re-centres the integrator in a narrower unit; the camera follows so it stays put.
+  expect(camera().x).not.toBe(0)
+  expect(rootBox().left).toBeCloseTo(before.left, 6)
+  expect(rootBox().top).toBeCloseTo(before.top, 6)
+  expect(useStore.getState().boardMapFolded).toEqual({ [rootKey]: true })
+  const expand = screen.getByRole('button', { name: 'Expand the workers of coordinate checkout, 2 hidden' })
+  expect(expand.textContent).toBe('+2 · 1 need you')
+  expect(screen.getByRole('heading', { name: 'Runs 3' })).toBeDefined()
+  fireEvent.click(expand)
+  expect(screen.getAllByRole('article')).toHaveLength(3)
+  expect(useStore.getState().boardMapFolded).toEqual({})
+})
+
+it('reveals a folded worker from the Needs you chip by unfolding its swarm and centring it', async () => {
+  seedCamera({ x: -4000, y: -4000, zoom: 0.3 })
+  useStore.setState({ boardMapFolded: { [rootKey]: true } })
+  render(<RunMap cards={swarm()} scope={workspace.id} agentNames={{}} />)
+  expect(screen.queryByRole('button', { name: 'ask about tax' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
+  await act(async () => {
+    fireEvent.click(await screen.findByRole('button', { name: /ask about tax/ }))
+  })
+  const title = screen.getByRole('button', { name: 'ask about tax' })
+  expect(document.activeElement).toBe(title)
+  expect(useStore.getState().boardMapFolded).toEqual({})
+  expect(camera().zoom).toBe(1)
+  const bounds = canvas().getBoundingClientRect()
+  const rect = title.closest('article')!.getBoundingClientRect()
+  expect(rect.left + rect.width / 2).toBeCloseTo(bounds.left + bounds.width / 2, 6)
+  expect(rect.top + rect.height / 2).toBeCloseTo(bounds.top + bounds.height / 2, 6)
+})
+
+it('reveals a visible worker from the Needs you chip through the unfold path without folding anything', async () => {
+  seedCamera({ x: -4000, y: -4000, zoom: 0.3 })
+  render(<RunMap cards={swarm()} scope={workspace.id} agentNames={{}} />)
+  fireEvent.click(screen.getByRole('button', { name: /1 needs you/ }))
+  await act(async () => {
+    fireEvent.click(within(await screen.findByLabelText('Runs that need you')).getByRole('button', { name: /ask about tax/ }))
+  })
+  const title = screen.getByRole('button', { name: 'ask about tax' })
+  expect(document.activeElement).toBe(title)
+  expect(useStore.getState().boardMapFolded).toEqual({})
+  expect(camera().zoom).toBe(1)
+  expect(screen.getAllByRole('article')).toHaveLength(3)
+})
