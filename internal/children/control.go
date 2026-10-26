@@ -231,6 +231,8 @@ func (s *Service) Limits(ctx context.Context, ws domain.WorkspaceID) (protocol.C
 
 // SetLimits changes the given limits within 1 and domain.MaxChildLimits.
 func (s *Service) SetLimits(ctx context.Context, p protocol.WorkspaceChildLimitsParams) (protocol.ChildLimits, error) {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
 	ws := domain.WorkspaceID(p.WorkspaceID)
 	l, err := s.cfg.Store.WorkspaceChildLimits(ctx, ws)
 	if err != nil {

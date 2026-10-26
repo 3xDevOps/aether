@@ -83,7 +83,8 @@ type Service struct {
 
 	mu   sync.Mutex
 	mail Mailer
-	// settingsMu serializes read-modify-write of member settings.
+	// settingsMu serializes read-modify-write of member settings and
+	// workspace limits.
 	settingsMu sync.Mutex
 	cancel     context.CancelFunc
 	done       chan struct{}

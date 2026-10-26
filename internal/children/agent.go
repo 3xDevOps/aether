@@ -317,7 +317,18 @@ func (s *Service) ownChild(ctx context.Context, run domain.RunID, id, method str
 }
 
 func (s *Service) cancelChild(ctx context.Context, c *domain.ChildReservation) (protocol.Child, error) {
-	if err := s.stop(ctx, c, ""); err != nil {
+	// A handoff detaches under this lock, so the relation read here is the
+	// one the kill acts on.
+	s.cfg.AuthorizationMu.Lock()
+	defer s.cfg.AuthorizationMu.Unlock()
+	fresh, err := s.cfg.Store.GetChild(ctx, c.RunID)
+	if err != nil {
+		return protocol.Child{}, rpcErr(protocol.MethodChildCancel, err)
+	}
+	if fresh.Detached {
+		return protocol.Child{}, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: child %s is detached and runs on its own", protocol.MethodChildCancel, c.RunID)}
+	}
+	if err := s.stop(ctx, fresh, ""); err != nil {
 		return protocol.Child{}, rpcErr(protocol.MethodChildCancel, err)
 	}
 	return s.wireOrErr(ctx, c.RunID, protocol.MethodChildCancel)
