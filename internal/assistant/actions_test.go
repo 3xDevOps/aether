@@ -17,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -32,7 +33,12 @@ func (f *actionServer) Call(_ context.Context, method string, params json.RawMes
 	f.mu.Unlock()
 	switch method {
 	case protocol.MethodRunGet:
+		if strings.Contains(string(params), "run-2") {
+			return json.RawMessage(`{"run":{"id":"run-2","member_id":"m2","workspace_id":"ws-1","title":"Docs"}}`), nil
+		}
 		return json.RawMessage(`{"run":{"id":"run-1","member_id":"m1","workspace_id":"ws-1","title":"Fix login"}}`), nil
+	case protocol.MethodMemberList:
+		return json.RawMessage(`{"members":[{"id":"m1","display_name":"Ari"},{"id":"m2","display_name":"Dana"}]}`), nil
 	case protocol.MethodWorkspaceGet:
 		return json.RawMessage(`{"workspace":{"id":"ws-1","name":"api"}}`), nil
 	case protocol.MethodRunLaunch:
@@ -266,7 +272,6 @@ func TestCreatedNamesOnlyNewIDs(t *testing.T) {
 		want   *protocol.AssistantActionTarget
 	}{
 		{`{"run":{"id":"run-2","workspace_id":"ws-1"}}`, &protocol.AssistantActionTarget{RunID: "run-2", WorkspaceID: "ws-1"}},
-		{`{"mission_id":"mis-1"}`, &protocol.AssistantActionTarget{MissionID: "mis-1"}},
 		{`{"run_id":"run-1","pr_url":"https://example.com/pr/4"}`, nil},
 		{`{"run":{"id":"run-1"}}`, nil},
 		{`null`, nil},
@@ -278,10 +283,82 @@ func TestCreatedNamesOnlyNewIDs(t *testing.T) {
 	}
 }
 
-func TestUnlistedConfirmedMethodIsStillRecorded(t *testing.T) {
+func TestReversibleCallOnAnotherMembersRunNamesTheOwner(t *testing.T) {
 	svc, m, _ := newActionService(t)
-	c := protocol.AssistantConfirmation{Method: "mission.create", Summary: "Launch a swarm", Params: json.RawMessage(`{"workspace_id":"ws-1"}`), CreatedAt: time.Now()}
+	sock, _ := serveTools(t, svc, m)
+	if err := callTool(t, sock, m, protocol.MethodRunResume, protocol.RunIDParams{RunID: "run-2"}, false, false); err != nil {
+		t.Fatal(err)
+	}
+	got := actions(t, svc, m)
+	if len(got) != 1 || got[0][0].OtherOwner != "Dana" || got[0][0].Summary != "Resume run run-2, owned by Dana" {
+		t.Fatalf("records = %+v, want the resume naming Dana as the owner", got)
+	}
+}
+
+// failingSettings fails reading or writing the assistant settings.
+type failingSettings struct {
+	*memStore
+	read, write error
+}
+
+func (f *failingSettings) AssistantSettings(ctx context.Context, id domain.MemberID) (store.AssistantSettings, error) {
+	if f.read != nil {
+		return store.AssistantSettings{}, f.read
+	}
+	return f.memStore.AssistantSettings(ctx, id)
+}
+
+func (f *failingSettings) PutAssistantSettings(ctx context.Context, id domain.MemberID, st store.AssistantSettings) error {
+	if f.write != nil {
+		return f.write
+	}
+	return f.memStore.PutAssistantSettings(ctx, id, st)
+}
+
+func TestAnApprovalThatCannotBeReadOrCountedIsRecordedAsFailed(t *testing.T) {
+	db := &failingSettings{memStore: newMemStore()}
+	svc := New(Config{Dir: t.TempDir(), Store: db})
+	t.Cleanup(func() { _ = svc.Close() })
+	m := svc.member("m1")
+	sock, fake := serveTools(t, svc, m)
+	stop := protocol.RunIDParams{RunID: "run-1"}
+
+	db.write = errors.New("database is locked")
+	if err := callTool(t, sock, m, protocol.MethodRunKill, stop, true, true); err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("a stop whose approval was not counted = %v, want the store's error", err)
+	}
+	db.write, db.read = nil, errors.New("disk I/O error")
+	if err := callTool(t, sock, m, protocol.MethodRunKill, stop, false, false); err == nil || !strings.Contains(err.Error(), "disk I/O error") {
+		t.Fatalf("a stop whose setting was not read = %v, want the store's error", err)
+	}
+	if fake.ran(protocol.MethodRunKill) {
+		t.Fatal("a call whose approval failed ran")
+	}
+	got := actions(t, svc, m)
+	if len(got) != 2 {
+		t.Fatalf("records = %+v, want both failures", got)
+	}
+	for i, want := range []string{"count the approval: database is locked", "read the auto-approval setting: disk I/O error"} {
+		a := got[i][0]
+		if len(got[i]) != 1 || a.Outcome != protocol.AssistantActionFailed || !strings.Contains(a.Error, want) || a.Target.RunID != "run-1" || a.FinishedAt.IsZero() {
+			t.Fatalf("action %d = %+v, want one failed record with %q", i, got[i], want)
+		}
+	}
+	if got[0][0].ConfirmationID == "" || got[1][0].ConfirmationID != "" {
+		t.Fatalf("records = %+v, want the card only on the first", got)
+	}
+}
+
+func TestAResetBetweenApprovalAndCallKeepsItsRecordsOutOfTheNewConversation(t *testing.T) {
+	svc, m, _ := newActionService(t)
+	c := protocol.AssistantConfirmation{Method: protocol.MethodEnvSave, Summary: "Save your environment", Params: json.RawMessage(`{}`), CreatedAt: time.Now()}
 	if err := answerCard(t, svc, m, c, true); err != nil {
+		t.Fatal(err)
+	}
+	m.op.Lock()
+	err := svc.resetLocked(t.Context(), m)
+	m.op.Unlock()
+	if err != nil {
 		t.Fatal(err)
 	}
 	fake := &actionServer{}
@@ -289,11 +366,22 @@ func TestUnlistedConfirmedMethodIsStillRecorded(t *testing.T) {
 	if _, err := call.Call(t.Context(), c.Method, c.Params); err != nil {
 		t.Fatal(err)
 	}
-	if got := actions(t, svc, m); len(got) != 1 || !slices.Equal(outcomes(got[0]), []string{protocol.AssistantActionApproved, protocol.AssistantActionSucceeded}) {
-		t.Fatalf("records = %+v, want approved, then succeeded", got)
+	if got := actions(t, svc, m); len(got) != 0 {
+		t.Fatalf("records after the reset = %+v, want none in the new conversation", got)
+	}
+
+	if err := answerCard(t, svc, m, c, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := call.Call(t.Context(), c.Method, c.Params); err != nil {
+		t.Fatal(err)
+	}
+	got := actions(t, svc, m)
+	if len(got) != 1 || !slices.Equal(outcomes(got[0]), []string{protocol.AssistantActionApproved, protocol.AssistantActionSucceeded}) {
+		t.Fatalf("records = %+v, want the new conversation's approval, then success", got)
 	}
 	if _, ok := m.actions.take(c.Method, c.Params); ok {
-		t.Fatal("the approval is still held after its call")
+		t.Fatal("an approval is still held after its call")
 	}
 }
 

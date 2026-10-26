@@ -802,9 +802,7 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	if seen {
 		return true, nil
 	}
-	// Only a prompt that is sent now holds its view: a retry of one sent
-	// earlier must not replace a newer view.
-	if view, err = s.keepView(ctx, m, view, viewFromPrompt, time.Now()); err != nil {
+	if view, err = s.sharedView(ctx, m, view); err != nil {
 		return false, err
 	}
 	live, err := s.ensureLocked(ctx, m, "")
@@ -831,8 +829,11 @@ func (s *Service) send(ctx context.Context, m *member, text, key string, view *p
 	case err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded):
 		return false, err
 	}
-	// A caller that left while waiting for the agent's acceptance may have
-	// started the turn, so its key is saved all the same.
+	// Only a prompt dispatched now holds its view: one refused, or a retry
+	// of one sent earlier, must not replace a newer view. A caller that left
+	// while waiting for the agent's acceptance may have started the turn, so
+	// its view and key are kept all the same.
+	m.holdView(view, viewFromPrompt, time.Now())
 	if saveErr := s.cfg.Store.AddAssistantPromptKey(context.WithoutCancel(ctx), m.id, row.Generation, key); saveErr != nil {
 		return true, errors.Join(err, fmt.Errorf("assistant: %w", saveErr))
 	}

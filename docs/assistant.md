@@ -126,11 +126,13 @@ follows when the call returns:
 | `Auto-approved: <summary>` | [Auto-approval](#auto-approval) passed it |
 | `Declined`, `Expired`, `Withdrawn: <summary>` | You declined, did not answer in 10 minutes, or the turn ended first. Nothing ran |
 | `Done: <summary>` | It succeeded, with the run it launched |
-| `Failed: <summary>` | The server refused it, with its exact error |
+| `Failed: <summary>` | The server refused it, or the approval could not be read or counted, with the exact error. In the second case nothing ran |
 
 Pausing and resuming are recorded as `Done` or `Failed` without an approval.
-Each record carries the target's run, workspace or swarm id; the
-[protocol reference](local-gateway.md) gives the fields.
+Each record carries the target's run and workspace id, and the owner when the
+run is another member's; the [protocol reference](local-gateway.md) gives the
+fields. Resetting the conversation drops the records of actions still in
+flight instead of writing them into the new one.
 
 ## Auto-approval
 

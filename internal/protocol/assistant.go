@@ -21,7 +21,8 @@ const (
 	MethodAssistantSettings = "assistant.settings"
 	// MethodAssistantDocs is served only on the assistant tool socket.
 	MethodAssistantDocs = "assistant.docs"
-	// MethodAssistantView replaces the caller's latest view context.
+	// MethodAssistantView offers a navigation update as the caller's held
+	// view context.
 	MethodAssistantView = "assistant.view"
 	// MethodAssistantViewContext is served only on the assistant tool socket.
 	MethodAssistantViewContext = "assistant.view_context"
@@ -141,8 +142,10 @@ type AssistantViewFile struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
-// AssistantViewContextResult is the member's held view context. Several
-// dashboards share one: the one captured last wins.
+// AssistantViewContextResult is the member's held view context, shared by
+// all their dashboards. A sent prompt's view always becomes it. A navigation
+// update captured before the held view is dropped while that view is under
+// 10 seconds old; otherwise the last one received wins.
 type AssistantViewContextResult struct {
 	ViewContext *AssistantViewContext `json:"view_context"`
 	// Source is "prompt" when the member's last prompt carried the view,
@@ -205,7 +208,8 @@ const SubsystemAssistant = "aether-assistant"
 
 // Outcomes of an assistant action. Approved and auto-approved are written
 // before the call runs; succeeded or failed follows under the same action
-// id. A declined, expired or withdrawn card is the action's only record.
+// id. A declined, expired or withdrawn card, or a failure to read or count
+// the approval, is the action's only record.
 const (
 	AssistantActionApproved     = "approved"
 	AssistantActionAutoApproved = "auto_approved"
@@ -233,7 +237,8 @@ type AssistantAction struct {
 	// ConfirmationID is the card's id, when the action showed one.
 	ConfirmationID string `json:"confirmation_id,omitempty"`
 	OtherOwner     string `json:"other_owner,omitempty"`
-	// Error is the failure's text as the server returned it.
+	// Error is the failure's text: the server's error, or why the approval
+	// could not be read or counted.
 	Error string `json:"error,omitempty"`
 	// Result names what the action created, such as a launched run.
 	Result     *AssistantActionTarget `json:"result,omitempty"`
@@ -245,6 +250,4 @@ type AssistantAction struct {
 type AssistantActionTarget struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	RunID       string `json:"run_id,omitempty"`
-	MissionID   string `json:"mission_id,omitempty"`
-	PR          string `json:"pr,omitempty"`
 }

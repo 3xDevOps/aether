@@ -375,6 +375,11 @@ func (s *Service) transcribe(m *member, n notice) error {
 func (s *Service) record(ctx context.Context, m *member, n acphost.Notice) error {
 	m.op.Lock()
 	defer m.op.Unlock()
+	return s.recordLocked(ctx, m, n)
+}
+
+// recordLocked is record for a caller that holds m.op.
+func (s *Service) recordLocked(ctx context.Context, m *member, n acphost.Notice) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

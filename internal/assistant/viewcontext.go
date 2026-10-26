@@ -140,12 +140,9 @@ const (
 // device whose clock runs slow still moves the view.
 const viewRace = 10 * time.Second
 
-// keepView returns v while the member shares their view and is not fenced,
-// else nil; the caller holds m.share. A prompt's view always becomes the held
-// one. A navigation update replaces it unless it was captured before the
-// held view, which arrived within viewRace: the update was in flight when
-// the newer view was sent.
-func (s *Service) keepView(ctx context.Context, m *member, v *protocol.AssistantViewContext, source string, now time.Time) (*protocol.AssistantViewContext, error) {
+// sharedView returns v while the member shares their view and is not
+// fenced, else nil; the caller holds m.share.
+func (s *Service) sharedView(ctx context.Context, m *member, v *protocol.AssistantViewContext) (*protocol.AssistantViewContext, error) {
 	if v == nil {
 		return nil, nil
 	}
@@ -158,11 +155,23 @@ func (s *Service) keepView(ctx context.Context, m *member, v *protocol.Assistant
 	if !st.ShareView || m.removing {
 		return nil, nil
 	}
+	return v, nil
+}
+
+// holdView makes v, from sharedView under the same m.share, the held view.
+// A prompt's view always does. A navigation update does unless it was
+// captured before the held view, which arrived within viewRace: the update
+// was in flight when the newer view was sent.
+func (m *member) holdView(v *protocol.AssistantViewContext, source string, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if v == nil || m.removing {
+		return
+	}
 	stale := m.view != nil && v.CapturedAt.Before(m.view.CapturedAt) && now.Sub(m.viewAt) < viewRace
 	if source == viewFromPrompt || !stale {
 		m.view, m.viewAt, m.viewSource = v, now, source
 	}
-	return v, nil
 }
 
 // SetView offers a navigation update as the member's held view context. It
@@ -171,8 +180,12 @@ func (s *Service) SetView(ctx context.Context, id domain.MemberID, v *protocol.A
 	m := s.member(id)
 	m.share.RLock()
 	defer m.share.RUnlock()
-	_, err := s.keepView(ctx, m, v, viewFromNavigation, time.Now())
-	return err
+	v, err := s.sharedView(ctx, m, v)
+	if err != nil {
+		return err
+	}
+	m.holdView(v, viewFromNavigation, time.Now())
+	return nil
 }
 
 // SetShareView stores whether the member shares their view context; off

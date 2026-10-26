@@ -2834,11 +2834,13 @@ does not run its agent over ACP`. Every frame is JSON text.
 
    `outcome` is `approved` or `auto_approved`, written before the call
    runs, then `succeeded` or `failed` under the same `id`; or `declined`,
-   `expired` or `withdrawn` alone. The latest record of an `id` replaces
-   the earlier ones. `approval` is `card`, `auto`, or absent for a pause or
-   resume. `target` has `workspace_id`, `run_id`, `mission_id` and `pr` as
-   the call named them; `error` is the server's error text; `result` holds
-   only ids the call created.
+   `expired`, `withdrawn`, or `failed` when the approval could not be read
+   or counted, alone. The latest record of an `id` replaces the earlier
+   ones. `approval` is `card`, `auto`, or absent for a pause or resume.
+   `target` has the `workspace_id` and `run_id` the call named, none for
+   `env.save`; `other_owner` names the run's owner when it is another
+   member's; `error` is the failure's exact text; `result` holds the
+   `run_id` and `workspace_id` of a launched run.
 4. Lease frames are the attach's: the client sends
    `{"type":"control","request_id":1,"write":true}` to take control or
    `{"type":"control","request_id":2,"control_generation":7}` to release it,

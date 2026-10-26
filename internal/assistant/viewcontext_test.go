@@ -1,8 +1,10 @@
 package assistant
 
 import (
+	"context"
 	"encoding/json"
-	"errors"
+	"io"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +12,10 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
+	"github.com/3xDevOps/Aether/internal/assistant/tools"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -75,7 +81,7 @@ func TestViewIsPerMemberAndOptOutHolds(t *testing.T) {
 	if got := s.View("m1", now); got.ViewContext != nil {
 		t.Fatalf("View after sharing was turned off and a late update = %+v, want none", got.ViewContext)
 	}
-	if kept, err := s.keepView(ctx, s.member("m1"), v, viewFromPrompt, now); kept != nil || err != nil {
+	if kept, err := s.sharedView(ctx, s.member("m1"), v); kept != nil || err != nil {
 		t.Fatalf("a prompt's context with sharing off = %+v, %v, want it dropped", kept, err)
 	}
 
@@ -93,11 +99,18 @@ func TestViewIsPerMemberAndOptOutHolds(t *testing.T) {
 	}
 }
 
-func TestPromptViewHoldsUntilANewerNavigation(t *testing.T) {
+// noAgents fails the agent list, so no session can start.
+type noAgents struct{}
+
+func (noAgents) Call(context.Context, string, json.RawMessage) (json.RawMessage, *protocol.Error) {
+	return nil, &protocol.Error{Code: protocol.CodeInternal, Message: "agent list unavailable"}
+}
+
+func TestPromptViewHoldsOnceSentUntilANewerNavigation(t *testing.T) {
 	db := newMemStore()
 	db.settings["m1"] = store.AssistantSettings{ShareView: true}
-	s := New(Config{Store: db})
-	s.cancel()
+	s := New(Config{Dir: t.TempDir(), Store: db, Caller: func(domain.MemberID) tools.Caller { return noAgents{} }})
+	t.Cleanup(func() { _ = s.Close() })
 	ctx := t.Context()
 	m := s.member("m1")
 	t0 := time.Now()
@@ -109,46 +122,69 @@ func TestPromptViewHoldsUntilANewerNavigation(t *testing.T) {
 		defer m.mu.Unlock()
 		return protocol.AssistantViewContextResult{ViewContext: m.view, Source: m.viewSource, AgeSeconds: int64(at.Sub(m.viewAt) / time.Second)}
 	}
-	keep := func(v *protocol.AssistantViewContext, source string, at time.Time) {
-		t.Helper()
-		if kept, err := s.keepView(ctx, m, v, source, at); kept != v || err != nil {
-			t.Fatalf("keepView = %+v, %v, want it passed on", kept, err)
-		}
+
+	first := view("run-a", t0)
+	m.holdView(first, viewFromNavigation, t0)
+	if err := s.Prompt(ctx, "m1", "fix this", "k0", view("run-b", t0.Add(2*time.Second))); err == nil || !strings.Contains(err.Error(), "agent list unavailable") {
+		t.Fatalf("Prompt = %v, want the failed session start", err)
+	}
+	if got := held(t0); got.ViewContext != first || got.Source != viewFromNavigation {
+		t.Fatalf("held after a prompt that never started = %+v, want the navigation update", got)
 	}
 
-	keep(view("run-a", t0), viewFromNavigation, t0)
-	prompt := view("run-b", t0.Add(2*time.Second))
-	if err := s.Prompt(ctx, "m1", "fix this", "k1", prompt); !errors.Is(err, ErrClosed) {
-		t.Fatalf("Prompt = %v, want ErrClosed from the stopped service", err)
+	fix, err := acpmock.Load("claude")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := held(t0.Add(2 * time.Second)); got.ViewContext != prompt || got.Source != viewFromPrompt {
+	agentIn, hostOut := io.Pipe()
+	hostIn, agentOut := io.Pipe()
+	go acpmock.New(fix).Serve(agentIn, agentOut)
+	sess, err := acphost.Start(ctx, hostIn, hostOut, acphost.Config{LogPath: s.logPath("m1"), Cwd: t.TempDir(), Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		m.mu.Lock()
+		m.sess = nil
+		m.mu.Unlock()
+		_ = sess.Close()
+		_ = agentOut.Close()
+		_ = agentIn.Close()
+	})
+	m.mu.Lock()
+	m.sess = &session{acp: sess, ended: make(chan struct{})}
+	m.mu.Unlock()
+
+	prompt := view("run-b", t0.Add(2*time.Second))
+	if err := s.Prompt(ctx, "m1", "fix this", "k1", prompt); err != nil {
+		t.Fatal(err)
+	}
+	sent := time.Now()
+	if got := held(sent); got.ViewContext != prompt || got.Source != viewFromPrompt {
 		t.Fatalf("held after the prompt = %+v, want the prompt's view", got)
 	}
 
-	keep(view("run-a", t0.Add(time.Second)), viewFromNavigation, t0.Add(3*time.Second))
-	if got := held(t0.Add(3 * time.Second)); got.ViewContext != prompt {
+	m.holdView(view("run-a", t0.Add(time.Second)), viewFromNavigation, sent.Add(time.Second))
+	if got := held(sent); got.ViewContext != prompt {
 		t.Fatalf("held after an update captured before the prompt = %+v, want the prompt's view", got.ViewContext.Route)
 	}
 
 	newer := view("run-c", t0.Add(4*time.Second))
-	keep(newer, viewFromNavigation, t0.Add(4*time.Second))
-	if got := held(t0.Add(9 * time.Second)); got.ViewContext != newer || got.Source != viewFromNavigation || got.AgeSeconds != 5 {
+	m.holdView(newer, viewFromNavigation, sent.Add(2*time.Second))
+	if got := held(sent.Add(7 * time.Second)); got.ViewContext != newer || got.Source != viewFromNavigation || got.AgeSeconds != 5 {
 		t.Fatalf("held after a newer navigation = %+v, want it, 5s old", got)
 	}
 
 	slow := view("run-d", t0.Add(-time.Hour))
-	keep(slow, viewFromNavigation, t0.Add(4*time.Second+viewRace))
-	if got := held(t0.Add(4*time.Second + viewRace)); got.ViewContext != slow {
+	m.holdView(slow, viewFromNavigation, sent.Add(2*time.Second+viewRace))
+	if got := held(sent); got.ViewContext != slow {
 		t.Fatalf("held after a slow device's update past the race = %+v, want it", got.ViewContext.Route)
 	}
 
-	if err := db.AddAssistantPromptKey(ctx, "m1", 0, "sent"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Prompt(ctx, "m1", "fix this", "sent", view("run-old", t0)); err != nil {
+	if err := s.Prompt(ctx, "m1", "fix this", "k1", view("run-old", t0)); err != nil {
 		t.Fatalf("a prompt sent before = %v, want it skipped", err)
 	}
-	if got := held(t0); got.ViewContext != slow {
+	if got := held(sent); got.ViewContext != slow {
 		t.Fatalf("held after a retried prompt = %+v, want it unchanged", got.ViewContext.Route)
 	}
 }
