@@ -2,6 +2,8 @@ package github
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,6 +23,7 @@ type fakeGitHub struct {
 	links    map[string]string
 	requests []string
 	notMod   int
+	omitETag bool
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
@@ -37,7 +40,8 @@ func (f *fakeGitHub) serve(r *http.Request) (*http.Response, error) {
 	if !ok {
 		return jsonResponse(http.StatusNotFound, `{"message":"Not Found"}`), nil
 	}
-	etag := `"` + strconv.Itoa(len(body)) + "-" + strconv.Itoa(int(hash(body))) + `"`
+	sum := sha256.Sum256([]byte(body))
+	etag := `"` + hex.EncodeToString(sum[:8]) + `"`
 	if r.Header.Get("If-None-Match") == etag {
 		f.notMod++
 		response := jsonResponse(http.StatusNotModified, "")
@@ -45,19 +49,13 @@ func (f *fakeGitHub) serve(r *http.Request) (*http.Response, error) {
 		return response, nil
 	}
 	response := jsonResponse(http.StatusOK, body)
-	response.Header.Set("ETag", etag)
+	if !f.omitETag {
+		response.Header.Set("ETag", etag)
+	}
 	if link := f.links[key]; link != "" {
 		response.Header.Set("Link", link)
 	}
 	return response, nil
-}
-
-func hash(s string) uint32 {
-	var h uint32 = 2166136261
-	for i := 0; i < len(s); i++ {
-		h = (h ^ uint32(s[i])) * 16777619
-	}
-	return h
 }
 
 func pullBody(state, merged string) string {
@@ -174,6 +172,48 @@ func TestPullRequestSnapshotReusesNotModifiedPages(t *testing.T) {
 	other, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 8, &third)
 	if !errors.Is(err, ErrNotFound) || other.Repo != "" {
 		t.Fatalf("snapshot of another pull request reused cached pages: %v", err)
+	}
+}
+
+func TestPullRequestSnapshotFindsPageAfterUnchangedFullPage(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	reviews := make([]string, 0, 101)
+	for i := range 101 {
+		reviews = append(reviews, `{"id":`+strconv.Itoa(i+1)+`,"state":"COMMENTED","html_url":"https://github.com/acme/app/pull/7","user":{"login":"mona"}}`)
+	}
+	f.bodies[reviewsPage1] = "[" + strings.Join(reviews[:100], ",") + "]"
+	s := snapshotService(t, f)
+	first, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	if err != nil || len(first.Reviews) != 100 {
+		t.Fatalf("first poll: %d %v", len(first.Reviews), err)
+	}
+	f.bodies[pullPath+"/reviews?per_page=100&page=2"] = "[" + reviews[100] + "]"
+	second, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, &first)
+	if err != nil || len(second.Reviews) != 101 || second.Reviews[100].ID != 101 {
+		t.Fatalf("review on a new page missed behind an unchanged full page: %d %v", len(second.Reviews), err)
+	}
+}
+
+func TestPullRequestSnapshotDropsETagWhenFreshBodyHasNone(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	s := snapshotService(t, f)
+	first, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.bodies[pullPath] = pullBody("closed", "null")
+	f.omitETag = true
+	second, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, &first)
+	if err != nil || second.State != "closed" {
+		t.Fatalf("changed pull request: %+v %v", second, err)
+	}
+	if second.Pages[0].ETag != "" {
+		t.Fatal("fresh body kept the ETag of the previous body")
+	}
+	if second.Pages[1].ETag != first.Pages[1].ETag {
+		t.Fatal("304 without an ETag lost the tag that matched")
 	}
 }
 

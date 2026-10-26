@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strconv"
 	"strings"
@@ -118,7 +119,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 			snap.State = "merged"
 		}
 	}
-	snap.Pages = append(snap.Pages, Page{Path: pullPath, ETag: etagOf(header.Get("ETag"), etag)})
+	snap.Pages = append(snap.Pages, Page{Path: pullPath, ETag: etagOf(header, etag, notModified)})
 
 	commit := "/repos/" + repo + "/commits/" + snap.HeadSHA
 	var prevRuns []CheckRun
@@ -226,22 +227,22 @@ func paginate[R, T any](ctx context.Context, s *Service, token, base string, pre
 			return nil, nil, err
 		}
 		var got []T
-		more := false
+		_, more := nextLink(header.Values("Link"))
 		if notModified {
 			got = cached[offset : offset+old.Count]
-			_, more = prev.page(base + "per_page=" + strconv.Itoa(pageSize) + "&page=" + strconv.Itoa(number+1))
+			// An unchanged full page says nothing about items added after it.
+			more = more || old.Count == pageSize
 		} else {
 			got = items(record)
 			if len(got) > pageSize {
 				return nil, nil, fmt.Errorf("github: API returned too many %s in one page", what)
 			}
-			_, more = nextLink(header.Values("Link"))
 		}
 		if reusable {
 			offset += old.Count
 		}
 		out = append(out, got...)
-		pages = append(pages, Page{Path: path, ETag: etagOf(header.Get("ETag"), etag), Count: len(got)})
+		pages = append(pages, Page{Path: path, ETag: etagOf(header, etag, notModified), Count: len(got)})
 		if !more {
 			return out, pages, nil
 		}
@@ -260,9 +261,10 @@ func (s *Snapshot) page(path string) (Page, bool) {
 	return Page{}, false
 }
 
-// etagOf keeps the ETag that matched when a 304 omits it.
-func etagOf(received, sent string) string {
-	if received != "" {
+// etagOf keeps the ETag that matched when a 304 omits it. A 200 without an
+// ETag records none, so its body is never paired with an older tag.
+func etagOf(header http.Header, sent string, notModified bool) string {
+	if received := header.Get("ETag"); received != "" || !notModified {
 		return received
 	}
 	return sent
