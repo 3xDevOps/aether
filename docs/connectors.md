@@ -148,7 +148,29 @@ than `offline_access`.
 
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
-each connector's scopes. To change them, revoke the connector and connect
+each connector's scopes.
+
+The server also checks the scope of every call a connector makes, whatever the
+member's role. Reads such as `run.get`, `workspace.timeline`, `member.list`,
+`memory.show` and `integration.show` need `read`; `run.launch`,
+`mission.create`, `run.inject`, `run.room.post`, `run.pause`, `run.resume`,
+`run.review`, `run.relaunch`, `run.protect`, `run.archive`, `memory.add`,
+`memory.pin` and `memory.unpin` need `write`; `run.kill`, `run.close`,
+`run.mode.switch` (it discards a turn in progress), `run.handoff`,
+`mission.cancel`, `mission.worker.release`, `mission.archive`,
+`mission.unarchive`, `mission.replace-integrator`, `integration.decide`,
+`integration.deliver`, `run.pr.create` and `run.pr.merge` need `control`. `run.input.respond` needs `control` to decide a permission request
+and `write` to answer a question. `run.review` with `complete` needs `control`
+for a live run unless its agent reported success and the run awaits review,
+since completing any other live run ends it. Every other method, such as `member.role` or
+`connector.revoke`, is refused to every connector:
+
+```
+run.kill needs the control scope, which ChatGPT connector con-7k2m9q4xbd was not granted; select Reconnect next to it in Settings → ChatGPT and Claude and check Stop and approve on the consent page
+member.role: ChatGPT connector con-7k2m9q4xbd cannot call this method; no connector can, so use the Aether app or the aether CLI
+```
+
+To change scopes, revoke the connector and connect
 again, or select **Reconnect** in Settings. It gets a new code, then revokes
 the connector. Connectors added before scopes existed have all three.
 
@@ -342,8 +364,9 @@ Select **Revoke** next to it in **Settings → ChatGPT and Claude**, or run:
 aether mcp revoke con-7k2m9q4xbd
 ```
 
-The connector's next call fails, and the app asks you to connect again with a
-new code. You can revoke your own connectors, and an admin can revoke anyone's.
+The connector's next call fails, including one in a session the app already
+has open, and so does its refresh token; the app asks you to connect again
+with a new code. You can revoke your own connectors, and an admin can revoke anyone's.
 Removing the connector in ChatGPT or Claude does not revoke it on the server.
 Revoke it here too.
 
@@ -372,6 +395,13 @@ with `aether mcp revoke`.
 | `connector.code needs an approved device, a member SSH key or a tailnet connection; this connection signed in with device "<label>", which is registered` | An admin approves your device, or run `aether mcp` from an approved one |
 | `method not found: connector.code; the server is older than this CLI, and an admin updates it with aether server update` | Update the server |
 | `connector.revoke: no connector <id>; aether mcp lists yours` | The id is wrong or already revoked |
+
+A tool call can fail with:
+
+| Message | Fix |
+| --- | --- |
+| `<method> needs the <scope> scope, which <client> connector <id> was not granted; ...` | Select **Reconnect** next to the connector and check the box the message names |
+| `<method>: <client> connector <id> cannot call this method; ...` | No connector can. Use the app or the CLI |
 
 On the page that opens when you connect:
 

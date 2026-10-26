@@ -172,9 +172,10 @@ func TestConnectorIsJudgedByItsDevice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connector := e.srv.ConnectorLocal(ConnectorGrant{Member: dev.Member, Device: dev.ID}, "con-test", "ChatGPT")
+	connector := e.srv.ConnectorLocal(ConnectorGrant{Member: dev.Member, Device: dev.ID}, "con-test", "ChatGPT",
+		[]string{ConnectorScopeRead, ConnectorScopeWrite, ConnectorScopeControl})
 	_, perr := connector.Call(context.Background(), protocol.MethodMemberInvite, json.RawMessage(`{}`))
-	if perr == nil || perr.Code != protocol.CodeDenied || !strings.Contains(perr.Message, "ChatGPT connector con-test was minted on device \"laptop\", which is registered") {
+	if perr == nil || perr.Code != protocol.CodeDenied || !strings.Contains(perr.Message, "ChatGPT connector con-test cannot call this method") {
 		t.Fatalf("invite code from a connector minted on a registered device = %v, want CodeDenied", perr)
 	}
 	if left, _ := os.ReadDir(dir); len(left) != 0 {
@@ -433,7 +434,7 @@ func TestConnectorCodeURLAndEdgeSignIn(t *testing.T) {
 	signIn := context.WithValue(ctx, connIdentityKey{}, connIdentity{member: e.member.ID, connector: "con-x", connectorClient: "ChatGPT", edgeSignIn: true})
 	for _, method := range []string{protocol.MethodConnectorCode, protocol.MethodSlackLink} {
 		_, perr := e.srv.dispatch(signIn, e.member.ID, method, json.RawMessage(`{}`))
-		if want := method + " needs a device, a member SSH key or a tailnet connection; ChatGPT connector con-x was authorized by signing in at the edge, with no device"; perr == nil || perr.Message != want {
+		if want := method + ": ChatGPT connector con-x cannot call this method; no connector can, so use the Aether app or the aether CLI"; perr == nil || perr.Message != want {
 			t.Errorf("%s from a connector authorized by signing in = %v, want %q", method, perr, want)
 		}
 	}

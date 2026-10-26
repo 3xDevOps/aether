@@ -458,6 +458,9 @@ func (s *Server) runReview(ctx context.Context, member domain.MemberID, params j
 	if p.Action != protocol.RunReviewComplete && p.Action != protocol.RunReviewLater {
 		return nil, invalidParams(`action must be "complete" or "later"`)
 	}
+	if perr := s.connectorReviewRefusal(ctx, domain.RunID(p.RunID), p.Action); perr != nil {
+		return nil, perr
+	}
 	run, err := s.cfg.Runs.Review(ctx, domain.RunID(p.RunID), member, p.Action)
 	if err != nil {
 		return nil, rpcError(err)
