@@ -75,7 +75,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodRunInject:             `Send to run run-1 ("Fix login"), owned by Grace: "hi"`,
 		protocol.MethodRunKill:               `Stop run run-1 ("Fix login"), owned by Grace`,
 		protocol.MethodEnvSave:               `Save your environment as a new image; new runs and terminals start from it`,
-		protocol.MethodRunInputRespond:       `Allow run run-1's request ("Fix login"), owned by Grace: "Run git push", choosing "Allow once"`,
+		protocol.MethodRunInputRespond:       `Allow once run run-1's request ("Fix login"), owned by Grace: "Run git push", choosing "Allow once"`,
 		protocol.MethodMissionQuestionAnswer: `Answer swarm mis-1 ("Ship the billing page"), owned by Grace, which asked "Which branch?": "main"`,
 		protocol.MethodRunRoomPost:           `Reply on run run-1 ("Fix login"), owned by Grace: "yes"`,
 	}

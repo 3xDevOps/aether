@@ -161,7 +161,7 @@ func opOf[In any](name, title string, scope Scope, idempotent bool, next, does s
 				return failed(err), nil, nil
 			}
 			for field, d := range defaults {
-				if _, given := args[field]; !given {
+				if raw, given := args[field]; !given || string(raw) == "null" {
 					b, _ := json.Marshal(map[string]any{field: d.value})
 					if err = json.Unmarshal(b, &in); err != nil {
 						return failed(fmt.Errorf("default %s: %w", field, err)), nil, nil

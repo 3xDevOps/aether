@@ -193,7 +193,7 @@ func TestAssistantTools(t *testing.T) {
 	callOK(t, cs, "aether_decide_approval", map[string]any{"run_id": "run-1", "answer_id": "req-1", "decision": "allow", "action": "Run git push"})
 	want := []string{
 		`Answer swarm mis-1 ("Ship billing"), owned by Grace, which asked "Which branch? ` + injection + `": "main"`,
-		`Allow run run-1's request ("Fix login ` + injection + `"), owned by Grace: "Run git push", choosing "Allow once"`,
+		`Allow once run run-1's request ("Fix login ` + injection + `"), owned by Grace: "Run git push", choosing "Allow once"`,
 	}
 	if len(confirmed) != 2 || confirmed[0].Summary != want[0] || confirmed[1].Summary != want[1] || !confirmed[0].OtherMember {
 		t.Fatalf("confirmations = %+v, want %q", confirmed, want)

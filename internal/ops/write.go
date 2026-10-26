@@ -3,6 +3,7 @@ package ops
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -439,8 +440,11 @@ type sentKey struct {
 
 // messageKey is the key of a keyless message: an identical message's from
 // within duplicateWindow, which the server delivers once, else a new one.
-func messageKey(member string, p protocol.RunInjectParams, now time.Time) string {
-	fingerprint := fmt.Sprintf("%s\x00%s\x00%t\x00%s", member, p.RunID, p.Steer, p.Message)
+// sent restarts the window when the call returns, since an assistant call
+// waits for the member's approval first.
+func messageKey(member string, p protocol.RunInjectParams, now time.Time) (key string, sent func()) {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s\x00%s\x00%t\x00%s", member, p.RunID, p.Steer, p.Message))
+	fingerprint := string(sum[:])
 	sentKeys.Lock()
 	defer sentKeys.Unlock()
 	for f, k := range sentKeys.keys {
@@ -448,12 +452,17 @@ func messageKey(member string, p protocol.RunInjectParams, now time.Time) string
 			delete(sentKeys.keys, f)
 		}
 	}
-	if k, ok := sentKeys.keys[fingerprint]; ok {
-		return k.key
+	k, ok := sentKeys.keys[fingerprint]
+	if !ok {
+		k = sentKey{key: uuid.NewString()}
 	}
-	key := uuid.NewString()
-	sentKeys.keys[fingerprint] = sentKey{key: key, at: now}
-	return key
+	k.at = now
+	sentKeys.keys[fingerprint] = k
+	return k.key, func() {
+		sentKeys.Lock()
+		defer sentKeys.Unlock()
+		sentKeys.keys[fingerprint] = sentKey{key: k.key, at: time.Now()}
+	}
 }
 
 func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string, any, error) {
@@ -464,7 +473,9 @@ func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string,
 	l := links(info.DashboardURL)
 	params := protocol.RunInjectParams{RunID: in.RunID, Message: in.Message, Steer: in.Steer, IdempotencyKey: in.IdempotencyKey}
 	if params.IdempotencyKey == "" {
-		params.IdempotencyKey = messageKey(info.Member.ID, params, time.Now())
+		var sent func()
+		params.IdempotencyKey, sent = messageKey(info.Member.ID, params, time.Now())
+		defer sent()
 	}
 	var res protocol.RunRoomPostResult
 	if err := c.act(ctx, protocol.MethodRunInject, params, &res); err != nil {

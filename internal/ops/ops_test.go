@@ -118,6 +118,7 @@ func TestAssistantSurface(t *testing.T) {
 	run(t, cs, "aether_list_runs", nil)
 	run(t, cs, "aether_list_runs", map[string]any{"mine": true})
 	lists := called(f, protocol.MethodRunList)
+	run(t, cs, "aether_list_runs", map[string]any{"mine": nil})
 	if len(lists) != 2 || strings.Contains(lists[0].params, `"mine"`) || !strings.Contains(lists[1].params, `"mine":true`) {
 		t.Fatalf("run.list = %+v, want everyone's runs by default and the member's with mine", lists)
 	}

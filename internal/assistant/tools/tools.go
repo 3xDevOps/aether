@@ -295,7 +295,7 @@ func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protoco
 		}
 		verb := "Reply on"
 		if p.Kind != protocol.RoomMessageReply {
-			verb = fmt.Sprintf("Post a %s message on", p.Kind)
+			verb = fmt.Sprintf("Post a %q message on", truncate(string(p.Kind)))
 		}
 		c.Summary = fmt.Sprintf("%s run %s (%q)%s: %q", verb, p.RunID, runLabel(run), ownedBy(c), truncate(p.Body))
 		return nil
@@ -322,19 +322,29 @@ func (s *Server) summarizeRespond(ctx context.Context, req protocol.Request, c *
 		if it.RunID != p.RunID || it.Request == nil || it.Request.ID != p.RequestID {
 			continue
 		}
+		// The option's label is the agent's own; its kind is what the
+		// answer grants, so the card names it, "always" included.
 		verb, option := "Answer", p.OptionID
 		for _, o := range it.Request.Options {
 			if o.ID == p.OptionID {
-				option = cmp.Or(o.Label, o.Kind, o.ID)
-				switch {
-				case strings.HasPrefix(o.Kind, "allow"):
-					verb = "Allow"
-				case strings.HasPrefix(o.Kind, "reject"):
-					verb = "Deny"
+				option = truncate(cmp.Or(o.Label, o.ID))
+				switch o.Kind {
+				case "allow_once":
+					verb = "Allow once"
+				case "allow_always":
+					verb = "Allow always"
+				case "reject_once":
+					verb = "Deny once"
+				case "reject_always":
+					verb = "Deny always"
 				}
 			}
 		}
 		c.Summary = fmt.Sprintf("%s run %s's request (%q)%s: %q, choosing %q", verb, p.RunID, runLabel(run), ownedBy(c), truncate(it.Request.Title), option)
+		if len(p.Values) > 0 {
+			values, _ := json.Marshal(p.Values)
+			c.Summary += fmt.Sprintf(" with %q", truncate(string(values)))
+		}
 		return nil
 	}
 	return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: run %s has no pending request %s", req.Method, p.RunID, p.RequestID)}
