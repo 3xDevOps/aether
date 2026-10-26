@@ -1,6 +1,6 @@
 // The Brief panel prints what the real server's memory.brief answers, so a
-// note pinned from the form shows there only once the server stored it and
-// fitted the pin into its budget.
+// note pinned from the composer shows there only once the server stored it
+// and fitted the pin into its budget.
 
 import { expect, test } from './fixtures'
 import { seedWorkspace } from './harness/setup'
@@ -17,11 +17,10 @@ test('a note added and pinned on the Memory page enters the brief', async ({ pag
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'Memory', exact: true }).click()
 
   const title = 'Use bun in web/; never npm.'
-  await page.getByRole('toolbar', { name: 'Memory actions' }).getByRole('button', { name: 'Add note' }).click()
-  const form = page.getByRole('dialog', { name: 'Add a note' })
-  await form.getByLabel('Kind').click()
-  await page.getByRole('option', { name: 'Convention' }).click()
-  await form.getByLabel('Note').fill(`${title}\nThe lockfile is bun.lock.`)
+  await page.getByRole('button', { name: 'Add note' }).click()
+  const form = page.getByRole('region', { name: 'Add a note' })
+  await form.getByRole('radiogroup', { name: 'Kind' }).getByRole('radio', { name: 'Convention' }).click()
+  await form.getByLabel('Note', { exact: true }).fill(`${title}\nThe lockfile is bun.lock.`)
   await form.getByRole('checkbox', { name: 'Pin' }).check()
   await form.getByRole('button', { name: 'Add note' }).click()
   await expect(form).toBeHidden()

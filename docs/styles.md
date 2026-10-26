@@ -126,14 +126,15 @@ Identity colour never replaces run-state colour.
 `Textarea`, `Select`, `Checkbox`, `Radio`, `Label`, `FormField`, `Menu`,
 `Popover`, `Tooltip`, `Dialog`, `AlertDialog`, `Command`, `Tabs`,
 `SlidingIndicator`, `Collapsible`, `Card`, `ListRow`, `PaneHeader`,
-`SectionLabel`, `EmptyState`, `Callout`, `Badge`, `CountBadge`,
-`RequestCard`, `StatusDot` and `StateLine`, `Avatar`, `AgentGlyph`, `Code`
-and `CodeBlock`, `Kbd`, `Markdown`, `RelativeTime`, `Spinner`, `Skeleton`,
-`ProgressBar`, `DropZone`, `TextSwap` and `IconSwap`, `CopyButton`,
-`Separator`, `Toaster`, `LineGutter` (a code line's clickable number gutter,
-for the Changes view's comments) and the Session view's timeline rows, step
-rail (`steps.tsx`) and blocks. Reach for one before writing markup, and pass
-its `variant`, `size` or `tone` rather than restyling it.
+`SectionLabel`, `EmptyState`, `Callout`, `Badge`, `CountBadge`, `RadioPills`,
+`FadeStrip`, `RequestCard`, `StatusDot` and `StateLine`, `Avatar`,
+`AgentGlyph`, `Code` and `CodeBlock`, `Kbd`, `Markdown`, `RelativeTime`,
+`Spinner`, `Skeleton`, `ProgressBar`, `DropZone`, `TextSwap` and `IconSwap`,
+`CopyButton`, `Separator`, `Toaster`, `LineGutter` (a code line's clickable
+number gutter, for the Changes view's comments) and the Session view's
+timeline rows, step rail (`steps.tsx`) and blocks. Reach for one before
+writing markup, and pass its `variant`, `size` or `tone` rather than restyling
+it.
 
 `Button` variants:
 
@@ -170,6 +171,12 @@ The other primitives with motion or a fixed size:
   by the state word, never by a ticking value. `IconSwap` does the same for
   an icon; `useTimedFlag` in `web/src/lib/hooks.ts` holds a confirmation
   such as Copied.
+- `RadioPills` is a single choice as a row of 28px pills with seam borders,
+  one tab stop: arrows move and select, Home and End select the ends, and the
+  checked pill sits on a `SlidingIndicator` (`bg-hover-chrome`, seam ring).
+  A pill may carry a muted count. Memory's filters and kinds use it.
+- `FadeStrip` scrolls a row sideways with no scrollbar and masks whichever
+  edge hides content over 22px, so the fade matches any surface.
 - `CountBadge` is an 18px chip of tabular figures; a count changes at once.
 - `ProgressBar` is a 4px track whose fill glides to its value. With
   `role="meter"` or `role="progressbar"` it reports `value` of `max`;
@@ -599,6 +606,9 @@ literal time or curve.
   landed file's check and disc `animate-pop-in` (scale 0.5 to 1 on
   `--ease-pop`, 250ms), a failed row `animate-shake`s once (360ms) and a
   dragged-over drop zone's arrow `animate-bob`s 3px (450ms, alternating).
+- A list the viewer refilters keeps its old rows at half opacity until the
+  answer lands, then fades in rising 3px. Rows arriving from elsewhere enter
+  one by one only when five or fewer arrive together; more just appear.
 - Row selection, focus outlines and exits change at once, except the
   template library's selected row, whose `bg-hover-chrome` highlight is a
   `SlidingIndicator`. Its detail fades in over 220ms on `--ease-standard`

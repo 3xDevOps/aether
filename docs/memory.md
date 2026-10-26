@@ -131,11 +131,12 @@ collaborator or admin role ([teams.md](teams.md#roles)).
 | `aether memory rm ID` / `rm --run RUN` | Delete one note, or every note a run wrote |
 | `aether memory brief [--member M]` | The brief your next run (or member M's) would get |
 
-The dashboard's **Memory** page has the same operations. Its **Add note** form
-takes cited files one per line, and **Replace…** on a live note opens that form
-filled from the note and saves it as `--supersedes` does. Each change appears
-in **Activity** and in `aether timeline --type memory.change`, naming who made
-it.
+The dashboard's **Memory** page has the same operations. Its **Add note**
+composer takes cited files one per line, and **Replace** on a live note opens
+that composer filled from the note and saves it as `--supersedes` does.
+**Remove** waits five seconds, with **Undo**, before it sends `memory.rm`. Each
+change appears in **Activity** and in `aether timeline --type memory.change`,
+naming who made it.
 
 ## Limits
 

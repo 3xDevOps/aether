@@ -4800,59 +4800,99 @@ and the chart says nothing ended.
 write, and the brief a new run starts with. It is in the header navigation
 after **Insights** when the gateway offers `memory.search`. It reads
 `memory.search`, `memory.show` and `memory.brief`, writes with `memory.add`,
-`memory.pin`, `memory.unpin` and `memory.rm`, and re-reads the list and the
-brief after each write, on each `memory.change` event for the workspace, and
-when the event stream comes back live, dropping answers to an older request.
+`memory.pin`, `memory.unpin` and `memory.rm`, and re-reads the list, the tab
+counts and the brief after each write, 250 ms after the last of a burst of
+`memory.change` events for the workspace, and when the event stream comes
+back live, dropping answers to an older request.
 
-- **Controls.** **Workspace** (shown with more than one, opening on
-  `activeWorkspace` or the first; notes belong to one workspace, so there is
-  no "all") and **Add note**. A search box sends its words to
-  `memory.search` 250 ms after typing stops. **Show** picks one of **All**,
-  **Pinned**, **Agent notes**, **Outcomes**, **Answers** and **Superseded**,
-  which `memory.search` applies as `pinned: true`, `source: agent`,
-  `kind: outcome`, `source: answer` and `replaced: true`, so a match older
-  than the newest 100 notes is still listed.
-- **List.** Two reads with the same words and filter: the 100 newest
-  pinned notes or best pinned matches (`pinned: true`), and the 100 newest
-  notes or best matches, which **Pinned** skips. **Superseded** makes only the second read, since a
-  replaced note is never pinned. Each note is listed once, pinned first,
-  each group in the server's order, so a pin older than the newest 100
-  still leads the list. A row shows the title, a pin badge
-  ("Pinned by Dana", or "Pinned for you" or "Pinned for Dana" on a pin for
-  one member's briefs),
-  **Superseded**, the kind, the source (Agent note, Member note, Run report,
-  Swarm answer), the author with the agent's display name, the run as a link,
-  the pull request, the first cited file and how many more, and the age.
-  When a read returns 100 notes the page says what the list holds: every
-  pinned note, or the 100 newest pinned notes or best pinned matches, then
-  the 100 newest notes or best matches. Each member's own pins have their
-  own budget, so a workspace can hold more than 100 pins; there is no
-  paging, and an older pin is found by searching. While a new search or filter
-  is read, the previous list stays on screen as it was.
-- **Detail.** A row opens `memory.show`: the note's text, its provenance
-  (author, run and its ID, commit, pull request, files, the report or
-  question it came from, when it was written and pinned, what replaced it)
-  and the supersede chain in replacement order, each other note a link.
-  A member who may push gets **Pin for me only** (`scope: member`, as
-  `aether memory pin --me`), **Pin** on a workspace-scope note (no `scope`,
-  so the note keeps its own, as `aether memory pin`), **Unpin**,
-  **Replace…** and **Remove…**, which asks before `memory.rm`; a replaced
-  note offers no pin and no **Replace…**.
-- **Add note.** Kind (decision, convention, gotcha or preference), the text,
+The header holds **Workspace** (shown with more than one, opening on
+`activeWorkspace` or the first; notes belong to one workspace, so there is no
+"all") and **Brief**, which shows the brief's size against the 3072-byte cap
+and opens it at the top of the page: the bytes `memory.brief` returns for the
+viewing member, in a code block. On a phone both sit in a row at the top of
+the panel instead, which wraps. Below sits one bounded panel, at most 768px
+wide and as tall as the page, bordered from 640px and full-bleed on a phone.
+Top to bottom:
+
+- **Show**, a radio group of pills: **All**, **Pinned**, **Agent notes**,
+  **Outcomes**, **Answers** and **Superseded**, which `memory.search` applies
+  as `pinned: true`, `source: agent`, `kind: outcome`, `source: answer` and
+  `replaced: true`, so a match older than the newest 100 notes is still
+  listed. Arrows move the choice; Home and End pick the first and last. Each
+  pill counts from the unfiltered pair of reads, and only while the count is
+  exact: "100+" when a read stopped at 100, no count for Agent notes,
+  Outcomes and Answers once the newest read stopped, and none for Superseded.
+  **Search notes** swaps the pills for a search field whose placeholder names
+  the filter; its words go to `memory.search` 250 ms after typing stops, with
+  the filter kept. Escape or **Close search** clears them and brings the
+  pills back.
+- **Notes.** Two reads with the same words and filter: the 100 newest pinned
+  notes or best pinned matches (`pinned: true`), and the 100 newest notes or
+  best matches, which **Pinned** skips. **Superseded** makes only the second
+  read, since a replaced note is never pinned. Each note is listed once,
+  pinned first, each group in the server's order, so a pin older than the
+  newest 100 still leads; **Pinned** and **Newest** (**Best matches** while
+  searching) head the groups when both have notes. A row is the title, at
+  most two lines, and one line of kind, source (Agent note, Member note, Run
+  report, Swarm answer), the author with the agent's display name, the pull
+  request or else the run as a link (not on a phone, where the detail lists
+  them), the age, the pin badge ("Pinned by
+  Dana", or "Pinned for you" or "Pinned for Dana" on a pin for one member's
+  briefs) and **Superseded**; cited files are in the detail. Under a mouse,
+  hover or focus shows **Pin for every new run** or **Pin for your new runs**
+  (no `scope`, so the note keeps its own, as `aether memory pin`), **Unpin**,
+  **Replace** and **Remove**; a replaced note offers only **Remove**. On a
+  touch screen a tap opens the detail instead. A pin or unpin glides the row
+  into its group. While a new search or filter is read, the previous list
+  stays on screen, dimmed.
+- **Add note**, which opens the composer in place: the text (first line is the
+  title), **Kind** as pills (decision, convention, gotcha or preference),
   **Files** (cited repository paths, one per line, sent as `files` trimmed
-  and without blank lines), **Only me** (`scope: member`) and **Pin**. A
-  duplicate answers with the live note already holding the text and says
-  so.
-- **Replace…** opens the same form, as `aether memory add --supersedes`:
-  the note's text, its kind (an outcome note's becomes decision), its files
-  and **Only me** for a member-scope note. It sends `supersedes` with the
-  note's ID and, on success, opens the replacement. For a pinned note the
-  server moves the pin to the replacement in its own scope, so **Pin** is
-  hidden and **Only me** is disabled at the note's scope.
-- **Brief**, collapsed, with its size against the 3072-byte cap: the bytes
-  `memory.brief` returns for the viewing member, in a code block.
+  and without blank lines), **Only me** (`scope: member`) and **Pin**.
+  `Mod+Enter` anywhere in the composer adds and Escape cancels; focus returns
+  to **Add note**. On a short screen the composer scrolls. While it holds an
+  edit to any field, **Replace** on another note leaves it open and says to
+  finish or cancel it first. A duplicate answers with the live note already
+  holding the text; its row scrolls into view and flashes.
+- The footer line, a live region: **Undo** after a removal, the composer's
+  keys and byte count against 1024, then the last result ("Added
+  note-…", "Replaced note-… with note-…", "Already kept as note-…") for four
+  seconds, then what the hovered or focused row does for new runs ("Pinned
+  by Dana · in every new run's brief", "Not pinned · runs find it by
+  searching"), and otherwise the count of listed notes and pins, or matches.
+  When a read returns 100 notes it says what the list holds instead: every
+  pinned note, or the 100 newest pinned notes or best pinned matches, then
+  the 100 newest notes or best matches. Each member's own pins have their own
+  budget, so a workspace can hold more than 100 pins; there is no paging, and
+  an older pin is found by searching. With nothing to say, such as on an
+  empty list, the line folds away.
 
-Every refusal shows the server's text unchanged, method included:
+**Remove** hides the note at once and offers **Undo** for five seconds before
+it sends `memory.rm`, which cannot be undone. A second removal, a workspace
+switch and leaving the page or tab send the waiting one at once; if the tab
+closes before that request lands, the note stays. Adding the waiting note's
+text again answers with that note, so the removal is dropped. A refusal comes
+back as a toast with the server's text and the note returns. Focus that was
+on the removed note moves to the next note, else the previous one, else **Add
+note**.
+
+A row opens `memory.show`: the note's text, its provenance (author, run and
+its ID, commit, pull request, files, the report or question it came from,
+when it was written and pinned, what replaced it) and the supersede chain in
+replacement order, each other note a link. A member who may push gets **Pin
+for me only** (`scope: member`, as `aether memory pin --me`), **Pin** on a
+workspace-scope note, **Unpin**, **Replace…** and **Remove**, which closes the
+detail and offers **Undo** in the footer; a replaced note offers no pin and
+no **Replace…**. **Replace**, from a row or the detail, opens the composer as
+`aether memory add --supersedes`: the note's text, its kind (an outcome
+note's becomes decision), its files and **Only me** for a member-scope note.
+It sends `supersedes` with the note's ID; from the detail it then opens the
+replacement. For a pinned note the server moves the pin to the replacement in
+its own scope, so **Pin** is hidden and **Only me** is disabled at the note's
+scope.
+
+Every refusal shows the server's text unchanged, method included, in the
+composer, the detail or, for a row's pin, a toast:
 `memory.add: rejected, gitleaks rule github-pat at 0:22; remove the secret
 and retry`, or `memory.pin: pinned workspace notes use 980 of 1024 bytes;
 this note needs 120; unpin one first`. A pin refused after an add

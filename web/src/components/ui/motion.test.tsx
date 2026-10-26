@@ -177,7 +177,7 @@ describe('text swap', () => {
     expect(animate).toHaveBeenCalled()
   })
 
-  it('keeps the outgoing copy from assistive technology while it fades, then drops it', async () => {
+  it('keeps the outgoing copy from assistive technology and input while it fades, then drops it', async () => {
     let finish!: () => void
     const finished = new Promise<void>((resolve) => (finish = resolve))
     vi.spyOn(Element.prototype, 'animate').mockImplementation(() => ({ finished, cancel() {} }) as unknown as Animation)
@@ -186,7 +186,9 @@ describe('text swap', () => {
     const [outgoing, incoming] = container.querySelectorAll('[data-slot="swap"] > span')
     expect(outgoing.textContent).toBe('Copy')
     expect(outgoing.getAttribute('aria-hidden')).toBe('true')
+    expect(outgoing.hasAttribute('inert')).toBe(true)
     expect(incoming.hasAttribute('aria-hidden')).toBe(false)
+    expect(incoming.hasAttribute('inert')).toBe(false)
     await act(async () => finish())
     expect(container.textContent).toBe('Copied')
   })
