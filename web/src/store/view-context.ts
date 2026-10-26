@@ -1,4 +1,5 @@
 import { ApiError, type Api } from '@/lib/api'
+import { message } from '@/lib/format'
 import type { LaunchDefault, ViewAttachment, ViewContext, ViewEntry } from '@/lib/assistant-types'
 import { isRunView, type RunView } from '@/routes/run/views'
 import type { RootState, RootStore } from '@/store'
@@ -241,7 +242,8 @@ const syncs = new WeakMap<RootStore, () => Promise<void>>()
 /**
  * Sends the view context now, once any send in flight lands, so a prompt
  * sent next cannot reach an agent that still reads a page the member just
- * removed. Resolves at once while no sync runs.
+ * removed. Rejects with the server's error when it is not sent. Resolves at
+ * once while no sync runs.
  */
 export function flushViewSync(store: RootStore): Promise<void> {
   return syncs.get(store)?.() ?? Promise.resolve()
@@ -252,6 +254,7 @@ export function syncViewContext(store: RootStore, client: Pick<Api, 'assistantVi
   let sent = ''
   let refused = ''
   let failures = 0
+  let failure = ''
   let sending: Promise<void> | null = null
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -272,6 +275,7 @@ export function syncViewContext(store: RootStore, client: Pick<Api, 'assistantVi
       sent = key
       failures = 0
     }, (err: unknown) => {
+      failure = message(err)
       if (permanent(err)) refused = key
       else failures++
     }).finally(() => {
@@ -282,7 +286,13 @@ export function syncViewContext(store: RootStore, client: Pick<Api, 'assistantVi
     })
     return sending
   }
-  syncs.set(store, flush)
+  const settled = async () => {
+    await flush()
+    const s = store.getState()
+    const context = assistantShareView(s) ? syncedViewContext(s) : undefined
+    if (context && viewContextKey(context) !== sent) throw new Error(`assistant.view: ${failure}`)
+  }
+  syncs.set(store, settled)
   schedule()
   const stop = store.subscribe((s, prior) => {
     // A prompt may leave its own, older context on the server; send the current one again.
@@ -293,7 +303,7 @@ export function syncViewContext(store: RootStore, client: Pick<Api, 'assistantVi
   return () => {
     stopped = true
     stop()
-    if (syncs.get(store) === flush) syncs.delete(store)
+    if (syncs.get(store) === settled) syncs.delete(store)
     if (timer !== undefined) clearTimeout(timer)
   }
 }

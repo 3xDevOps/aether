@@ -71,7 +71,10 @@ export function AssistantComposer({ textarea, running, dock }: {
         now.setAssistantAttempt(attempt)
       }
       // The prompt keeps the held page; only the sync forgets one the member removed.
-      if (useStore.getState().assistantPageRemoved) await flushViewSync(useStore)
+      if (useStore.getState().assistantPageRemoved) {
+        await flushViewSync(useStore)
+        if (useStore.getState().assistantGeneration !== generation) return
+      }
       try {
         await api.assistantPrompt(text, attempt.key, assistantShareView(useStore.getState()) ? attempt.viewContext : unsharedPart(attempt.viewContext))
       } finally {
@@ -91,15 +94,18 @@ export function AssistantComposer({ textarea, running, dock }: {
   const stop = async () => {
     const state = useStore.getState()
     if (state.assistantStopping) return
+    const generation = state.assistantGeneration
     state.setAssistantStopping(true)
     state.setAssistantError(null)
     try {
       await api.assistantCancel(AbortSignal.timeout(stopTimeout))
     } catch (err) {
       const timedOut = err instanceof DOMException && err.name === 'TimeoutError'
-      useStore.getState().setAssistantError(timedOut ? `assistant.cancel got no answer within ${stopTimeout / 1000} seconds` : message(err))
+      if (useStore.getState().assistantGeneration === generation) {
+        useStore.getState().setAssistantError(timedOut ? `assistant.cancel got no answer within ${stopTimeout / 1000} seconds` : message(err))
+      }
     } finally {
-      useStore.getState().setAssistantStopping(false)
+      if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantStopping(false)
     }
   }
 

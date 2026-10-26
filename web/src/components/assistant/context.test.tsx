@@ -178,6 +178,20 @@ describe('attachments', () => {
     vi.mocked(api.assistantView).mockImplementation(async () => ({}))
   })
 
+  it('sends nothing and shows the error when the server cannot forget a removed page', async () => {
+    vi.mocked(api.assistantView).mockImplementation(async (context) => {
+      if (!context.route) throw new Error('connection reset')
+      return {}
+    })
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
+    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    await userEvent.type(box(aside), '{Enter}')
+    expect(await within(aside).findByRole('alert')).toHaveProperty('textContent', 'assistant.view: connection reset')
+    expect(api.assistantPrompt).not.toHaveBeenCalled()
+    vi.mocked(api.assistantView).mockImplementation(async () => ({}))
+  })
+
   it('drops a removed attachment from the payload and keeps the member\'s own draft', async () => {
     const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
     await userEvent.type(await within(aside).findByRole('textbox', { name: 'Message the assistant' }), 'my own words')
