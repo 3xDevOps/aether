@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/overlap"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -44,6 +45,13 @@ func init() {
 			Mission:         lazyMission{ssh: d.SSH, runs: d.Runs},
 			WakeAdmission:   newCoordWakeAdmission(d),
 			Waker:           d.Runs,
+			Controlled: func(run domain.RunID) bool {
+				if d.Control == nil {
+					return false
+				}
+				_, held := d.Control.Status(string(run))
+				return held
+			},
 		})
 		if err != nil {
 			return nil, err

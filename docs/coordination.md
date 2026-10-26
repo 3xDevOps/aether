@@ -1841,7 +1841,8 @@ arrived since the turn started. A Standard Claude Code `Stop` hook marks its
 a subagent sent it, or background tasks hold the turn. For a turn that owes
 a report, the server does not apply that stop and answers with `continue`;
 the reporter prints Claude Code's
-`{"decision":"block","reason":"Report your state with aether-internal report before ending the turn. <the role's reporting rules>"}`
+`{"decision":"block","reason":"Report your state with aether-internal report (answered, waiting, needs-input, blocked, success or failure) before ending the turn."}`,
+naming only the outcomes the run's role may use,
 and the agent goes on. The next stop of that turn is applied whatever it
 reported. If the server cannot check, the stop is applied. If no hook
 arrives within a minute of the hold, as when the answer never reached Claude

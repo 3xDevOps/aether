@@ -70,10 +70,21 @@ const (
 	neverRule  = "Never report while still working, and report only what you verified."
 )
 
+// ReportReminderLead starts ReportReminder.
+const ReportReminderLead = "Report your state with aether-internal report"
+
 // ReportReminder is what Aether tells an agent of g whose turn is ending
-// without a report.
+// without a report, naming only the outcomes g may report.
 func ReportReminder(g Guide) string {
-	return "Report your state with aether-internal report before ending the turn. " + Brief(g)
+	outcomes := []string{"answered"}
+	if g.Wake {
+		outcomes = append(outcomes, "waiting")
+	}
+	if g.Role != RoleWorker && g.Role != RoleMission {
+		outcomes = append(outcomes, "needs-input")
+	}
+	outcomes = append(outcomes, "blocked", "success or failure")
+	return ReportReminderLead + " (" + strings.Join(outcomes, ", ") + ") before ending the turn."
 }
 
 // Brief is the reporting rule set for g, or nothing for a run whose server

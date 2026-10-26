@@ -260,6 +260,12 @@ func (d *acpDriver) askReport(entry *supervised, st acphost.TurnState, forward b
 	if st.Failed != nil || acp.StopReason(st.Reason) != acp.StopReasonEndTurn {
 		return false, nil
 	}
+	// Any later turn start, such as a member's prompt while the check runs,
+	// reports its own end.
+	before := acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq
+	d.s.mu.Lock()
+	heldTurn := entry.turnStartedAt
+	d.s.mu.Unlock()
 	c := d.s.coordinationSeam()
 	if c == nil {
 		return false, nil
@@ -277,7 +283,6 @@ func (d *acpDriver) askReport(entry *supervised, st acphost.TurnState, forward b
 	d.mu.Lock()
 	r.asked = turn
 	d.mu.Unlock()
-	before := acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), acpSteerTimeout)
 		defer cancel()
@@ -293,7 +298,7 @@ func (d *acpDriver) askReport(entry *supervised, st acphost.TurnState, forward b
 		}
 		// A turn that started, whether the reminder the agent refused or
 		// another prompt, reports its own end.
-		if started > before {
+		if started > before || sess.State().TurnInFlight {
 			return
 		}
 		d.mu.Lock()
@@ -309,7 +314,12 @@ func (d *acpDriver) askReport(entry *supervised, st acphost.TurnState, forward b
 		if turn.forward {
 			d.s.TurnEnded(entry.runID, turn.message)
 		}
-		d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle})
+		// Under the scheduler lock, so a member's prompt that started a turn
+		// meanwhile is never reported idle.
+		ended := func(e *supervised) bool { return e.turnStartedAt.Equal(heldTurn) }
+		if _, err := d.s.applyAgentReportIf(context.Background(), entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}, ended); err != nil {
+			slog.Debug("scheduler: enhanced session report not applied", "run", entry.runID, "error", err)
+		}
 		d.wakeIdle(entry.runID)
 	}()
 	return true, nil

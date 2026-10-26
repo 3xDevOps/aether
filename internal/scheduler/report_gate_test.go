@@ -12,6 +12,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -37,7 +38,7 @@ func waitNote(t *testing.T, sub events.Subscription, want string) {
 	}
 }
 
-const reminderPrefix = "Report your state with aether-internal report before ending the turn. "
+const reminderPrefix = coordhooks.ReportReminderLead
 
 func userMessages(items []acphost.Item) []string {
 	var texts []string
@@ -63,7 +64,7 @@ func TestEnhancedTurnWithoutAReportIsAskedOnce(t *testing.T) {
 	waitNote(t, sub, "run instructions: first message")
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	items := waitItems(t, e.sched, run.ID, "the settled log", func([]acphost.Item) bool { return true })
-	if got := userMessages(items); len(got) != 2 || !strings.HasPrefix(got[1], reminderPrefix) || !strings.Contains(got[1], "answered = ") {
+	if got := userMessages(items); len(got) != 2 || !strings.HasPrefix(got[1], reminderPrefix) || got[1] != reminderPrefix+" (answered, waiting, needs-input, blocked, success or failure) before ending the turn." {
 		t.Fatalf("prompts %q, want the task and one reminder", got)
 	}
 

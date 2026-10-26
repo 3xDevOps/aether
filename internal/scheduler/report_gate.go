@@ -55,14 +55,14 @@ func (s *Scheduler) HoldTurnEnd(ctx context.Context, run domain.RunID) (string, 
 
 // applyHeldStop ends a held Standard turn that sent no hook since heldAt.
 func (s *Scheduler) applyHeldStop(entry *supervised, started, heldAt time.Time) {
-	s.mu.Lock()
-	quiet := s.runs[entry.runID] == entry && entry.turnStartedAt.Equal(started) && entry.reportAsked.Equal(started) &&
-		entry.agentReport.State == agentstatus.Working && !entry.lastWorking.After(heldAt)
-	s.mu.Unlock()
-	if !quiet || s.superCtx.Err() != nil {
+	if s.superCtx.Err() != nil {
 		return
 	}
-	if err := s.ReportAgentState(s.superCtx, entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
+	quiet := func(e *supervised) bool {
+		return e == entry && e.turnStartedAt.Equal(started) && e.reportAsked.Equal(started) &&
+			e.agentReport.State == agentstatus.Working && !e.lastWorking.After(heldAt)
+	}
+	if _, err := s.applyAgentReportIf(s.superCtx, entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}, quiet); err != nil {
 		slog.Warn("scheduler: end a held turn that went quiet", "run", entry.runID, "error", err)
 	}
 }

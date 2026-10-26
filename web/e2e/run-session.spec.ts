@@ -25,7 +25,7 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
 
   await page.goto(`${alice.url}&run=${run.id}`)
   const log = page.getByRole('log', { name: 'Session' })
-  await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
+  await expect(log.getByText('pong').first()).toBeVisible({ timeout: 60_000 })
   const box = page.getByRole('combobox', { name: 'Message the agent' })
 
   await box.fill('ask permission')
@@ -142,7 +142,7 @@ test('an Enhanced run holding background work stays working, asks while it waits
   const runs = page.getByRole('navigation', { name: 'Aether' }).getByRole('region', { name: 'Runs' })
   const header = page.locator('[data-slot="pane-header"]')
   const box = page.getByRole('combobox', { name: 'Message the agent' })
-  await expect(log.getByText(/^Finished/)).toBeVisible({ timeout: 60_000 })
+  await expect(log.getByText(/^Finished/).first()).toBeVisible({ timeout: 60_000 })
 
   await box.fill('hold in background')
   await box.press('Enter')
@@ -196,7 +196,7 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
 
   await page.goto(`${alice.url}&run=${run.id}`)
   const log = page.getByRole('log', { name: 'Session' })
-  await expect(log.getByText('pong')).toBeVisible({ timeout: 60_000 })
+  await expect(log.getByText('pong').first()).toBeVisible({ timeout: 60_000 })
   const box = page.getByRole('combobox', { name: 'Message the agent' })
 
   await box.fill('subagents')
@@ -306,7 +306,7 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
   const bobPage = await bobContext.newPage()
   try {
     await page.goto(`${alice.url}&run=${run.id}`)
-    await expect(page.getByRole('log', { name: 'Session' }).getByText('pong')).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByRole('log', { name: 'Session' }).getByText('pong').first()).toBeVisible({ timeout: 60_000 })
     const aliceControls = page.getByRole('group', { name: 'Multiplayer controls' })
     await expect(aliceControls.getByRole('button', { name: 'Release', exact: true })).toBeVisible()
     const aliceBorder = page.locator('svg[data-control-appearance]')
