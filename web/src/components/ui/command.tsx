@@ -21,7 +21,7 @@ function Command({
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        'flex min-h-0 h-auto w-full flex-col overflow-hidden rounded-[4px] bg-raised text-text',
+        'flex min-h-0 h-auto w-full flex-col overflow-hidden rounded-panel bg-raised text-text',
         className,
       )}
       {...props}
@@ -62,7 +62,7 @@ function CommandDialog({
         }}
         onCloseAutoFocus={onCloseAutoFocus}
         className={cn(
-          'top-[calc(var(--app-header-bottom,var(--top-bar-height))_+_8px)] min-h-0 max-h-[calc(100dvh_-_var(--app-header-bottom,var(--top-bar-height))_-_16px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-seam/90 bg-raised p-0 shadow-overlay data-[state=closed]:animate-none data-[state=open]:animate-none sm:top-[calc(var(--app-header-bottom,var(--top-bar-height))_+_8px)] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
+          'top-[calc(var(--app-header-bottom,var(--top-bar-height))_+_8px)] min-h-0 max-h-[calc(100dvh_-_var(--app-header-bottom,var(--top-bar-height))_-_16px)] max-w-[min(600px,calc(100%-1rem))] translate-y-0 grid-rows-[auto_auto] gap-0 overflow-hidden border-seam/90 bg-raised p-0 origin-top animate-overlay-in data-[state=closed]:animate-none sm:top-[calc(var(--app-header-bottom,var(--top-bar-height))_+_8px)] sm:max-w-[min(600px,calc(100%-1rem))] sm:translate-y-0',
           className,
         )}
         showCloseButton={showCloseButton}
@@ -94,7 +94,7 @@ function CommandInput({
         data-slot="command-input"
         className={cn(
           fieldFocus,
-          'flex h-[26px] w-full rounded-[2px] bg-transparent px-1 text-ui leading-6 placeholder:text-muted coarse:h-10 disabled:cursor-not-allowed disabled:opacity-50',
+          'flex h-7 w-full rounded-control bg-transparent px-1 text-ui leading-6 placeholder:text-muted coarse:h-10 disabled:cursor-not-allowed disabled:opacity-50',
           className,
         )}
         {...props}
@@ -139,7 +139,7 @@ function CommandGroup({
     <CommandPrimitive.Group
       data-slot="command-group"
       className={cn(
-        'overflow-hidden p-1 text-text [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-ui-sm [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted',
+        'overflow-hidden p-1 text-text [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-ui-sm [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted',
         className,
       )}
       {...props}
@@ -169,7 +169,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        'relative flex min-h-[22px] coarse:min-h-11 cursor-default items-center gap-2 rounded-[2px] px-2 py-0 text-ui leading-5 outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-selection data-[selected=true]:text-text [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4 [&_svg:not([class*="text-"])]:text-muted',
+        'relative flex min-h-8 coarse:min-h-11 cursor-default items-center gap-2 rounded-control px-2 py-0 text-ui leading-5 outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-selection data-[selected=true]:text-text [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4 [&_svg:not([class*="text-"])]:text-muted',
         className,
       )}
       {...props}

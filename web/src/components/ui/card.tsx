@@ -11,7 +11,7 @@ export function Card({
       data-slot="card"
       data-selected={selected || undefined}
       className={cn(
-        'group/card relative flex min-w-0 flex-col gap-1 rounded-panel border p-3 hover:bg-hover',
+        'group/card relative flex min-w-0 flex-col gap-1 rounded-panel border p-3 shadow-card transition-[background-color,box-shadow] motion-reduce:transition-none hover:bg-hover hover:shadow-card-hover',
         selected ? 'border-accent' : 'border-seam',
         className,
       )}

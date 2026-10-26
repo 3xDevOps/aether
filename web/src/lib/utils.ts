@@ -3,11 +3,31 @@ import { extendTailwindMerge } from 'tailwind-merge'
 
 // Without the custom names, tailwind-merge reads `text-ui` as a text colour
 // and drops it when a colour class follows, and keeps both of
-// `rounded-control rounded-control`.
+// `rounded-control rounded-panel` or `animate-overlay-in animate-none`.
 const twMerge = extendTailwindMerge({
   extend: {
-    theme: { radius: ['control', 'panel', 'composer'], shadow: ['overlay', 'field-focus'] },
-    classGroups: { 'font-size': [{ text: ['ui-xs', 'ui-sm', 'ui', 'prose', 'title', 'avatar'] }] },
+    theme: {
+      radius: ['chip', 'control', 'panel', 'composer'],
+      shadow: ['card', 'card-hover', 'button', 'button-hover', 'overlay', 'dialog', 'field-focus'],
+      ease: ['hover', 'standard', 'enter', 'glide', 'press', 'pop', 'sheet', 'pulse'],
+      animate: [
+        'overlay-in',
+        'dialog-in',
+        'scrim-in',
+        'sheet-up',
+        'sheet-left',
+        'sheet-right',
+        'expand-right',
+        'collapsible-down',
+        'collapsible-up',
+        'entrance',
+        'skeleton-sweep',
+      ],
+    },
+    classGroups: {
+      'font-size': [{ text: ['ui-xs', 'ui-sm', 'ui', 'prose', 'title', 'avatar'] }],
+      duration: [{ duration: ['instant', 'hover', 'press', 'release', 'popover', 'glide', 'expand', 'pulse'] }],
+    },
   },
 })
 

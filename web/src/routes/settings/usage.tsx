@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { ProgressBar } from '@/components/ui/progress-bar'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { Tone } from '@/components/ui/status-dot'
 import { api, ApiError, type Api } from '@/lib/api'
 import { useClock } from '@/lib/clock'
 import type { AccountAccess, Member, UsageProvider, UsageProviderName, UsageProviderStatus, UsageWindow } from '@/lib/types'
-import { cn } from '@/lib/utils'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 
@@ -99,16 +99,12 @@ function ProviderRow({ name, provider, now, own }: { name: UsageProviderName; pr
                     {Math.round(window.used_percent)}% used{reset && ` · ${reset}`}
                   </span>
                 </div>
-                <span
+                <ProgressBar
                   role="progressbar"
                   aria-label={`${label} ${window.label} usage`}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={window.used_percent}
-                  className="block h-1.5 overflow-hidden rounded-full bg-chrome"
-                >
-                  <span className={cn('block h-full', fill[tone(window.used_percent)])} style={{ width: `${window.used_percent}%` }} />
-                </span>
+                  value={window.used_percent}
+                  fillClassName={fill[tone(window.used_percent)]}
+                />
               </li>
             )
           })}

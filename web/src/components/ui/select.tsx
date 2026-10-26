@@ -81,7 +81,7 @@ export function SelectContent({
         position="popper"
         className={cn(
           surface,
-          'relative z-50 max-h-[min(320px,calc(var(--radix-select-content-available-height,100dvh)-4px),calc(100dvh-16px))] min-w-32 animate-overlay-in overflow-hidden outline-none motion-reduce:animate-none',
+          'relative z-50 max-h-[min(320px,calc(var(--radix-select-content-available-height,100dvh)-4px),calc(100dvh-16px))] min-w-32 origin-(--radix-select-content-transform-origin) animate-overlay-in overflow-hidden outline-none motion-reduce:animate-none',
           'data-[side=bottom]:translate-y-1 data-[side=top]:-translate-y-1',
           className,
         )}
@@ -107,7 +107,7 @@ export function SelectItem({
       data-slot="select-item"
       className={cn(
         focusRingInset,
-        'relative flex h-7 cursor-default items-center gap-2 rounded-control pr-8 pl-2 text-ui text-text select-none coarse:h-11 data-[highlighted]:bg-hover-chrome data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+        'relative flex h-7 cursor-default items-center gap-2 rounded-control pr-8 pl-2 text-ui text-text transition-colors duration-100 select-none motion-reduce:transition-none coarse:h-11 data-[highlighted]:bg-hover-chrome data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         className,
       )}
       {...props}

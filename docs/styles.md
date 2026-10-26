@@ -3,8 +3,9 @@
 ## Workbench language
 
 The dashboard is a dense developer workbench on graphite surfaces with one
-teal accent. Adjoining panes are flat and quiet: do not add saturated colours,
-gradients, blurred cards or elevated nested panels.
+teal accent. Adjoining panes are flat and quiet. Elevation is restrained:
+cards and secondary buttons carry a light shadow, floating surfaces a deeper
+one, panes none. Do not add saturated colours, gradients or backdrop blur.
 The desktop launch splash is an intentional original-animation exception;
 see [Run state and motion](#run-state-and-motion).
 
@@ -54,10 +55,13 @@ the root, which raises every step of the scale and the title size;
 terminals keep their own zoom.
 
 Weights are 400 and 500, 600 for titles. Times, counts and `+a -d` use
-`tabular-nums`. Labels are sentence case; nothing is uppercase. `cn()` in
-`web/src/lib/utils.ts` knows the scale, so `cn('text-ui', 'text-muted')`
-keeps both classes. `text-title` sets its own family and weight; do not pair
-it with `font-*` classes.
+`tabular-nums`. Labels are sentence case; nothing is uppercase, and no
+letter-spacing is added. `cn()` in `web/src/lib/utils.ts` knows the scale,
+so `cn('text-ui', 'text-muted')` keeps both classes. It also knows the
+radius, shadow, easing, animation and duration names below, so a later
+`rounded-panel` replaces `rounded-control` and `animate-none` replaces
+`animate-overlay-in`. `text-title` sets its own family and weight; do not
+pair it with `font-*` classes.
 
 ## Semantic palette
 
@@ -86,8 +90,9 @@ follows `prefers-color-scheme` live.
 `bg-accent-hover` darkens the fill for a hovered primary button. The accent
 marks selection, focus, the one primary button per view and links, nothing
 else. Inside a selected row, secondary text uses `text-text`. A floating
-surface is `bg-raised`, a 1px seam and `shadow-overlay` (`0 8px 24px -12px`,
-black 18% light, 60% dark). Dialogs sit over `bg-scrim`.
+surface is `bg-raised`, a 1px seam and `shadow-overlay`; dialogs, the
+palette and sheets take `shadow-dialog` and sit over `bg-scrim`.
+[Geometry](#geometry-and-responsive-behavior) lists every shadow.
 
 The five run states (see
 [dashboard-frontend.md](dashboard-frontend.md#run-state)), used on dots,
@@ -120,10 +125,11 @@ Identity colour never replaces run-state colour.
 `web/src/components/ui/` holds the shared primitives: `Button`, `Input`,
 `Textarea`, `Select`, `Checkbox`, `Radio`, `Label`, `FormField`, `Menu`,
 `Popover`, `Tooltip`, `Dialog`, `AlertDialog`, `Command`, `Tabs`,
-`Collapsible`, `Card`, `ListRow`, `PaneHeader`, `SectionLabel`,
-`EmptyState`, `Callout`, `Badge`, `RequestCard`, `StatusDot` and
-`StateLine`, `Avatar`, `AgentGlyph`, `Code` and `CodeBlock`, `Kbd`,
-`Markdown`, `RelativeTime`, `Spinner`, `Skeleton`, `Separator`, `Toaster`,
+`SlidingIndicator`, `Collapsible`, `Card`, `ListRow`, `PaneHeader`,
+`SectionLabel`, `EmptyState`, `Callout`, `Badge`, `CountBadge`,
+`RequestCard`, `StatusDot` and `StateLine`, `Avatar`, `AgentGlyph`, `Code`
+and `CodeBlock`, `Kbd`, `Markdown`, `RelativeTime`, `Spinner`, `Skeleton`,
+`ProgressBar`, `TextSwap` and `IconSwap`, `Separator`, `Toaster`,
 `LineGutter` (a code line's clickable number gutter, for the Changes view's
 comments) and the Session view's timeline rows and blocks. Reach for one
 before writing markup, and pass its `variant`, `size` or `tone` rather than
@@ -134,7 +140,7 @@ restyling it.
 | Variant | Look | Use |
 | --- | --- | --- |
 | `primary` (default) | `bg-accent`, `text-on-accent` | The one primary action in a view |
-| `secondary` | Seam border on `bg-raised` | Other actions |
+| `secondary` | Seam border on `bg-raised`, `shadow-button` | Other actions |
 | `ghost` | Muted text, `bg-hover-chrome` on hover | Toolbar and icon buttons |
 | `danger` | `bg-state-failed`, `text-on-failed` | Confirming a destructive action |
 | `link` | Accent text, underline on hover | Inline actions that read as links |
@@ -146,11 +152,38 @@ circle) and `pill` (28px, fully rounded); each grows to 44px on a coarse
 pointer. `link` and `quiet` have no height or padding of their own and widen
 their touch target to 44px. An `icon`, `icon-sm` or `round` button requires
 `label`, which becomes its accessible name and tooltip; `hint` puts a tooltip
-on any button.
+on any button. Colour, fill, border and shadow fade on the hover tokens. Under
+a fine pointer every variant but `link` and `quiet` presses in to
+`--scale-press` (0.97); a finger darkens it instead. Joined buttons and the
+terminal's hold-to-take control never scale.
+
+The other primitives with motion or a fixed size:
+
+- `Tabs` draws one `SlidingIndicator` per list: the underline look slides a
+  2px accent bar, the segmented look a `bg-raised` pill with a seam ring. It
+  follows keyboard selection and stays attached in a scrolling strip.
+  `SlidingIndicator` serves any other set the same way: items carry
+  `data-indicator-key`, and the indicator's parent is the positioned
+  container.
+- `TextSwap` replaces a word in place, the new copy fading in from a 2px
+  blur, and exposes only the incoming copy to assistive technology. Key it
+  by the state word, never by a ticking value. `IconSwap` does the same for
+  an icon; `useTimedFlag` in `web/src/lib/hooks.ts` holds a confirmation
+  such as Copied.
+- `CountBadge` is an 18px chip of tabular figures; a count changes at once.
+- `ProgressBar` is a 4px track whose fill glides to its value. With
+  `role="meter"` or `role="progressbar"` it reports `value` of `max`;
+  without one it only draws, for a parent that carries the role.
+- `Kbd` is an outlined keycap, 20px (`md`) or 16px (`sm`).
+- `Spinner` draws a ring: a track at `--opacity-track` under a quarter arc
+  turning every 900ms.
+- `Skeleton` sweeps a `bg-hover-chrome` band across `bg-chrome`.
 
 ## Charts
 
-Charts are hand-drawn SVG; the dashboard has no chart library. Marks use
+The Insights activity charts, heatmap and sparklines are hand-drawn SVG; the
+Insights > System charts use recharts through `ChartContainer` in
+`web/src/components/ui/chart.tsx`, with recharts' animation off. Marks use
 `fill-*` and `stroke-*` token utilities or `currentColor`, never inline
 colours. Outcomes use the run state tokens (`state-done`, `state-failed`,
 `state-paused`). A neutral count such as runs launched is outlined in
@@ -178,11 +211,10 @@ with `preserveAspectRatio="none"` draws strokes with
 | One name per icon | lucide aliases such as `XIcon`, `Loader2`, `AlertTriangle` or `MoreHorizontal` |
 | No bare buttons | `<button` outside `components/ui/`; use `Button` |
 | No opacity on rows | `opacity-*` in `components/shell/` and `routes/board/`; a receding row uses `text-muted` |
-| Primitives are not restyled | A primitive given `text-`, `bg-`, `border-`, `rounded-`, `h-`, `min-h-` or padding classes through `className`, which is for layout only |
 | Token names | Colour names that are not tokens and render nothing: `background`, `foreground`, `card`, `popover`, `sidebar`, `primary`, `secondary`, `muted-foreground`, `destructive`, `input`, `ring`, `border`, `toolbar-hover`, `field`, and `state-attention`, `-success`, `-warn`, `-waiting`, `-needs-attention`, `-idle` |
 
 A rule can carry a legacy list of files that predate it; only no bare
-buttons and primitives are not restyled still have one. The test also fails
+buttons still has one. The test also fails
 when a listed file already complies, so the lists only shrink.
 
 The same file checks contrast in both themes: `text` and `text-muted` on
@@ -213,14 +245,25 @@ Use compact workbench geometry rather than landing-page ornament:
   coarse pointer), 12px form gaps, 4px label gaps, 16px content gutters and
   12px compact gutters. `Label` captions are block-level, so stacked
   caption-to-field spacing measures 4px, including wrapped fields.
-- Two radii: `--radius-control` 4px (`rounded-sm`, `rounded-control`) for
-  buttons, fields, chips, rows, code and keys; `--radius-panel` 6px
-  (`rounded-md`, `rounded-lg`, `rounded-panel`) for cards, dialogs, menus,
-  popovers and callouts. The run composer alone uses `--radius-composer`
-  14px (`rounded-composer`). `rounded-full` is for dots, radios, avatars,
-  meters and the composer's send control only.
-- Only floating surfaces cast `shadow-overlay`; content panels have none.
-  Headers stay at `text-title` or smaller.
+- Four radii: `--radius-chip` 5px (`rounded-chip`) for badges, counts,
+  keys, inline code and checkboxes; `--radius-control` 8px (`rounded-sm`,
+  `rounded-control`) for buttons, fields, rows, menu items and tooltips;
+  `--radius-panel` 12px (`rounded-md` and up, `rounded-panel`) for cards,
+  callouts, dialogs, menus, popovers, toasts and the palette; and the run
+  composer's `--radius-composer` 14px (`rounded-composer`). A radius nested
+  in another is the outer one minus the inset: a 12px menu with 4px padding
+  holds 8px items. Edges that meet another surface stay square: sheets at the
+  screen edge, a run's details box where it docks, joined buttons and dock
+  tabs. `rounded-full` is for dots, radios, avatars, meters and the
+  composer's send control only.
+- Elevation: panes and headers have none; cards `shadow-card`, lifting to
+  `shadow-card-hover` on hover; secondary buttons `shadow-button`; menus,
+  popovers, selects, tooltips, toasts and the run details box
+  `shadow-overlay`; dialogs, the palette and sheets `shadow-dialog`. Values
+  differ per theme in `web/src/index.css`. Every shadow sits over a seam
+  border, which forced-colors mode keeps when it drops shadows. A shadow
+  that must read as none is written `0 0 #0000`, never `none`, so it still
+  composes with ring utilities. Headers stay at `text-title` or smaller.
 - Scrollbars are 8px with an `--icon-faint` thumb.
 - A board card is three lines: the state line (shaped dot, reason, relative
   time), a title of at most two lines, and the meta line (agent glyph and
@@ -305,7 +348,7 @@ in the header on desktop and under the top bar on a phone.
 
 The command palette is mounted exactly once in `AppShell` and opened from the
 **Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with
-compact rows. Theme is in **Settings > General** and the footer menu, with
+32px rows (44px on a coarse pointer). Theme is in **Settings > General** and the footer menu, with
 explicit **System**, **Light** and **Dark** choices and matching palette
 commands.
 
@@ -348,21 +391,62 @@ The `--state-*` tokens in [Semantic palette](#semantic-palette) are the
 status vocabulary for a run's presentation state. Domain status enums remain
 unchanged.
 
-`--duration-overlay` (120ms) and `--ease-out` are the overlay motion
-tokens: menus, popovers, selects, tooltips and dialogs fade and scale in over
-it, sheets slide in from their edge, a run's details box wipes in from the
-row it docks to, and every one leaves at once. Panels
-change instantly. The `state-pulse` dot (the run header's working dot, the
-Session view's live row and the working rows on a swarm's Tasks list) and the `live-shimmer` text sweep (also on those rows' reasons) step through a few
-frames per cycle rather than tweening, and stop under
-`prefers-reduced-motion: reduce`, where the shimmer leaves plain muted text.
+Motion confirms a change the viewer caused or marks the one live thing; it
+never decorates still data. `web/src/motion.css` holds the tokens:
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `--duration-hover`, `--ease-hover` | 150ms, CSS `ease` | Colour, fill, border and shadow fades; the default for a bare `transition-*` |
+| `--duration-press`, `--duration-release`, `--ease-press` | 150ms, 130ms | Button press scale, `--scale-press` (0.97) |
+| `--duration-popover`, `--ease-enter` | 130ms | Menus, popovers, selects and tooltips growing from `--scale-popover` (0.98) |
+| `--duration-glide`, `--ease-glide` | 300ms | Tab indicators, meters and layout glides |
+| `--duration-expand` | 250ms | Disclosures opening |
+| `--duration-pulse` | 1600ms | The live shimmer's period |
+| `--duration-instant` | 0ms | Swaps with no fade |
+
+Raw steps (`--duration-100` to `--duration-1600`) cover the rest: 100ms row,
+menu-item and tab-label fades; 200ms chevron turns, word swaps, dialog
+entrances, scrim fades and disclosures closing; 220ms sheets on
+`--ease-sheet`; 360ms row entrances; 1000ms the Working pulse. Each role has
+a `duration-<role>` utility that also sets `--tw-duration`, so a later
+`transition-*` cannot reset it. `web/src/lib/motion.ts` reads the same tokens
+for script animations (`play`, `playEntrance`); code names a token, never a
+literal time or curve.
+
+- Overlays fade and grow from their trigger (the Radix transform origin) and
+  leave at once. A closing tooltip must not animate, or Radix keeps it above
+  the layer the next Escape is meant for. A tooltip opens 250ms after hover,
+  at once on keyboard focus, and at once within 300ms of another closing.
+- Dialogs fade in from `--scale-enter` (0.95) through `transform`, leaving
+  the `translate` that centres them alone. Sheets slide in from their edge; a
+  run's details box wipes in from the row it docks to.
+- `Collapsible` bodies glide their height, clipped only while they move, and
+  unmount once shut.
+- Only rows added after the first render enter: `animate-entrance` fades in
+  and rises 4px. `playEntrance` staggers a burst by `--stagger-row` (30ms) up
+  to the eighth row; the rest arrive with it.
+- `web/src/lib/flip.ts` glides reordered items, translating only, for short
+  lists the viewer reorders; never a virtualized list or a store tick.
+- Row selection, focus outlines and exits change at once.
+- `state-pulse` (the run header's working dot, the Session view's live row
+  and the working rows on a swarm's Tasks list) breathes: opacity to
+  `--opacity-muted` and size to two thirds and back each second.
+  `live-shimmer`, on those rows' reasons, sweeps a light band across muted
+  text in 1.4s of each 1.6s. Sidebar rows, board cards, the palette and All
+  workspaces never pulse.
+
+Under `prefers-reduced-motion: reduce` every animation and transition stops:
+overlays and sheets appear, indicators and bodies jump, the pulse holds, the
+shimmer leaves plain muted text, the spinner shows a still arc and a
+skeleton a flat fill. Holds and timers do not change. `useReducedMotion()` and `prefersReducedMotion()` in
+`web/src/lib/hooks.ts` answer the query in scripts.
 
 The desktop launch splash deliberately retains its original animation,
 independent of these workbench motion tokens: the grain, three drifting cloud
 layers, stepped starfield and coloured stars, satellites and shooting stars,
 700ms logo entrance and 260ms fade. Its status dot uses the local
 `launch-status-pulse`: the original 1.8s `ease-in-out` loop from opacity 1
-to 0.4 and back, not the shared stepped `state-pulse`. The splash's original
+to 0.4 and back, not the shared `state-pulse`. The splash's original
 palette and keyframes stay scoped to `launch-splash` in `web/src/index.css`;
 do not restyle them to match the workbench. Reduced motion skips the splash
 entirely, and its CSS stops animation if the preference changes while it is

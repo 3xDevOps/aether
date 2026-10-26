@@ -90,7 +90,7 @@ function ShortcutKeys({ value }: { value: string }) {
               {value.includes('then') ? 'then' : '+'}
             </span>
           )}
-          <kbd className="inline-flex min-h-[22px] min-w-0 max-w-full items-center justify-center break-words rounded-control border border-seam bg-chrome px-1 font-code text-ui-xs font-medium leading-4 text-text">
+          <kbd className="inline-flex min-h-[22px] min-w-0 max-w-full items-center justify-center break-words rounded-chip border border-seam bg-chrome px-1 font-code text-ui-xs font-medium leading-4 text-text">
             {part}
           </kbd>
         </span>

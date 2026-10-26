@@ -1,6 +1,7 @@
-import { ArrowLeft, CircleAlert, LoaderCircle } from '@/components/icons'
+import { ArrowLeft, CircleAlert } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Spinner } from '@/components/ui/spinner'
 import { useDelayed } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { useStore } from '@/store'
@@ -57,7 +58,7 @@ export function MissingRun() {
         className="w-full max-w-3xl px-3 py-3 sm:px-4 sm:py-4"
       >
         <div className="flex items-center gap-2">
-          <LoaderCircle className="size-4 animate-spin text-muted" aria-hidden />
+          <Spinner className="size-4" />
           <p className="text-ui leading-5 text-muted">Loading run details…</p>
         </div>
         <div className="mt-2 grid gap-1">

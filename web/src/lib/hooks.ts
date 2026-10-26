@@ -88,6 +88,30 @@ export function useMediaQuery(query: string): boolean {
   )
 }
 
+const reducedMotion = '(prefers-reduced-motion: reduce)'
+
+export function useReducedMotion(): boolean {
+  return useMediaQuery(reducedMotion)
+}
+
+/** For code outside render, such as an animation started from an effect. */
+export function prefersReducedMotion(): boolean {
+  return window.matchMedia?.(reducedMotion).matches ?? false
+}
+
+/** True for `holdMs` after each `trigger`; a new trigger restarts the hold. */
+export function useTimedFlag(holdMs: number): [on: boolean, trigger: () => void] {
+  const [on, setOn] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const trigger = useCallback(() => {
+    clearTimeout(timer.current)
+    setOn(true)
+    timer.current = setTimeout(() => setOn(false), holdMs)
+  }, [holdMs])
+  return [on, trigger]
+}
+
 let handedOver: HTMLElement | null = null
 
 /** For a dialog that closes as it opens another, like the palette opening New run: the next useReturnFocus dialog returns to `target`. */

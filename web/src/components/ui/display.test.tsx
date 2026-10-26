@@ -163,7 +163,7 @@ test('a labelled spinner is a status and both loaders still under reduced motion
     </>,
   )
   expect(screen.getByRole('status', { name: 'Loading runs' }).getAttribute('class')).toContain('motion-reduce:animate-none')
-  expect(container.querySelector('[data-slot="skeleton"]')?.className).toContain('motion-reduce:animate-none')
+  expect(container.querySelector('[data-slot="skeleton"]')?.className).toContain('motion-reduce:after:hidden')
 })
 
 test('the small text primitives render their elements', () => {

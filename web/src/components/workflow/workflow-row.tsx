@@ -56,7 +56,7 @@ function GitLine({ branch, runId }: { branch: string; runId?: string }) {
   const run = useStore((s) => (runId ? s.runs[runId] : undefined))
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-ui-xs text-muted">
-      <span className="min-w-0 truncate rounded-control bg-chrome px-1 font-code" title={branch}>{branch}</span>
+      <span className="min-w-0 truncate rounded-chip bg-chrome px-1 font-code" title={branch}>{branch}</span>
       {run && <TrackedPR run={run} />}
     </span>
   )
@@ -108,7 +108,7 @@ export const WorkflowRowItem = memo(function WorkflowRowItem({ row, active, fres
       className={cn(
         focusRingInset,
         'relative min-w-0 rounded-control [--wire:14px] coarse:[--wire:22px]',
-        fresh && 'workflow-enter',
+        fresh && 'animate-entrance motion-reduce:animate-none',
       )}
     >
       <Guides row={row} />

@@ -373,7 +373,7 @@ export function WorkspaceMirrorDialog({
                   <Label htmlFor="workspace-mirror-auth">Authentication</Label>
                   <select
                     id="workspace-mirror-auth"
-                    className="h-[26px] min-h-[26px] w-full rounded-[2px] border border-control bg-canvas px-2 text-ui"
+                    className="h-[26px] min-h-[26px] w-full rounded-control border border-control bg-canvas px-2 text-ui"
                     value={auth}
                     onChange={(event) => setAuth(event.target.value as WorkspaceMirrorAuth)}
                   >

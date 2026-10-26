@@ -48,7 +48,7 @@ function PopoverContent({
         collisionPadding={8}
         className={cn(
           surface,
-          'z-50 max-h-[min(640px,calc(100dvh-16px),var(--radix-popover-content-available-height))] w-[min(420px,calc(100vw-16px))] animate-overlay-in overflow-y-auto p-3 text-ui outline-none motion-reduce:animate-none',
+          'z-50 max-h-[min(640px,calc(100dvh-16px),var(--radix-popover-content-available-height))] w-[min(420px,calc(100vw-16px))] origin-(--radix-popover-content-transform-origin) animate-overlay-in overflow-y-auto p-3 text-ui outline-none motion-reduce:animate-none',
           className,
         )}
         {...props}

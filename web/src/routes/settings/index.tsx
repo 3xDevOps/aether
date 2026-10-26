@@ -6,6 +6,7 @@ import { Callout } from '@/components/ui/callout'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
+import { prefersReducedMotion } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { surfaces } from '@/lib/surfaces'
 import { registerRoute, type RouteProps } from '@/routes/registry'
@@ -37,8 +38,7 @@ const bodies: Record<CategoryID, (client: Api) => ReactNode> = {
 const highlightMs = 1500
 
 function reveal(target: HTMLElement) {
-  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  target.scrollIntoView?.({ block: 'start', behavior: reduced ? 'auto' : 'smooth' })
+  target.scrollIntoView?.({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
   const control = target.querySelector<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], textarea:not(:disabled)')
   ;(control ?? target.closest('section')?.querySelector<HTMLElement>('h3'))?.focus({ preventScroll: true })
   target.setAttribute('data-highlight', '')
