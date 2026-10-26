@@ -142,8 +142,10 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
 		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt,
 		&r.Review, &reviewChangedAt, &r.ACP,
-		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.Via, &r.UnansweredQuestions,
-		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked); err != nil {
+		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.Via,
+		&r.Children, &r.ChildrenSetBy, &r.ChildRefused, &r.UnansweredQuestions,
+		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked,
+		&r.ParentRunID, &r.RootRunID, &r.ChildPurpose, &r.Detached); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(fallbackOrder), &r.Fallback.Order); err != nil {
@@ -169,7 +171,8 @@ const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member
 	runs.reason, runs.activity, runs.status_seq, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
 	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at,
-	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model, runs.via`
+	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model, runs.via,
+	runs.children, runs.children_set_by, runs.child_refused`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions
 // with a denied/cancelled state are not actionable, and a correlated reply
@@ -183,8 +186,12 @@ func runSnapshotQuery(where string) string {
 		     WHEN worker_mission.id IS NOT NULL THEN 'worker' ELSE '' END,
 		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, ''),
 		(SELECT COUNT(*) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `),
-		(SELECT MIN(created_at) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `)
+		(SELECT MIN(created_at) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `),
+		COALESCE(child.parent_run_id, CASE WHEN integrator.id IS NULL THEN worker_mission.current_integrator_run_id END, ''),
+		COALESCE(child.root_run_id, CASE WHEN integrator.id IS NULL THEN worker_mission.current_integrator_run_id END, ''),
+		COALESCE(child.purpose, ''), COALESCE(child.detached, 0)
 		FROM runs
+		LEFT JOIN run_children child ON child.run_id = runs.id
 		LEFT JOIN missions integrator ON integrator.current_integrator_run_id = runs.id
 		LEFT JOIN missions worker_mission ON worker_mission.id = (
 			SELECT MIN(attempt.mission_id) FROM mission_attempts attempt

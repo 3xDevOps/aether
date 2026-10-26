@@ -46,16 +46,28 @@ swarm's runs and their descendants form one tree keyed by the swarm.
      member setting does not apply.
    - Background (one-turn) runs cannot start children: they exit before a
      result arrives.
-4. **Which agents and accounts.**
-   - Ordinary runs: any agent the owner can launch, on the owner's own
-     account or a shared account the owner listed under **Accounts child
-     runs may use** (empty by default). The parent's account is not
-     implicitly allowed, so a run on a teammate's account never fans out
-     children on it unless the owner listed it.
+4. **Which agents and accounts.** These reuse the existing account shares
+   and usage fallback; nothing widens them.
    - Swarm runs: an exact `(account, agent, mode, model)` choice of the
-     swarm, as for `worker.start`.
-   - The allowed accounts are the child's `Fallback.Order`, so launch-time
-     and mid-run usage fallback never leave them.
+     swarm, as for `worker.start`, with the swarm's own fallback policy. The
+     member's child-run settings never override a swarm's choices.
+   - Ordinary runs: any agent the owner can launch, on the owner's own
+     account by default, or on an account shared with the owner that the
+     agent names. Two member settings, offered together the first time the
+     owner turns child runs on and editable in Settings:
+     - **Allow automatic fallback** (on by default, as for every launch
+       today): when the child's account has used 95% of its Claude or Codex
+       quota, at launch or mid-run, the child moves to the account with the
+       most usage left among the owner's own and those shared with them. The
+       agent and model never change. Off keeps every child on its account.
+     - **Use subscriptions shared with me when I don't have my own** (off by
+       default): when the owner is not signed in to the requested agent, the
+       child starts on an account shared with them that is signed in.
+   - A parent launched with an explicit fallback order or `--no-fallback`
+     passes that policy to its children, so descendants only narrow it.
+   - `child options` names each agent's state: **ready**, **exhausted**,
+     **not installed** or **not signed in**, with the exact reason. A child
+     receipt names the account it launched on and whether it fell back.
    - Every launch and every queued dispatch re-runs `AuthorizeLaunch` for the
      owner and account, so a revoked share, a removed member or a turned-off
      setting stops new children at once. Running children continue, as

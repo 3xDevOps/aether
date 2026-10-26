@@ -2014,6 +2014,59 @@ ALTER TABLE coord_state_reports_v85 RENAME TO coord_state_reports;
 	`
 ALTER TABLE missions ADD COLUMN extra_workspace_ids TEXT NOT NULL DEFAULT '[]';
 `,
+	// v87: child runs. A run_children row is reserved under the child's
+	// pre-minted run ID before its run row exists, so queued children have
+	// no run. tree_key is the swarm or root run whose limits the child
+	// shares. Member and run settings decide who may delegate; workspace
+	// columns bound every tree.
+	`
+CREATE TABLE run_children (
+	run_id            TEXT PRIMARY KEY,
+	parent_run_id     TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	root_run_id       TEXT NOT NULL,
+	tree_key          TEXT NOT NULL,
+	mission_id        TEXT NOT NULL DEFAULT '',
+	workspace_id      TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+	owner_member_id   TEXT NOT NULL,
+	account_member_id TEXT NOT NULL,
+	harness           TEXT NOT NULL,
+	mode              TEXT NOT NULL,
+	model             TEXT NOT NULL DEFAULT '',
+	purpose           TEXT NOT NULL,
+	task              TEXT NOT NULL,
+	depth             INTEGER NOT NULL,
+	base_commit       TEXT NOT NULL,
+	base_branch       TEXT NOT NULL DEFAULT '',
+	fallback_disabled INTEGER NOT NULL DEFAULT 0,
+	fallback_order    TEXT NOT NULL DEFAULT '[]',
+	idempotency_key   TEXT NOT NULL,
+	state             TEXT NOT NULL CHECK (state IN ('queued', 'launching', 'started', 'cancelled', 'refused')),
+	detached          INTEGER NOT NULL DEFAULT 0,
+	error             TEXT NOT NULL DEFAULT '',
+	end_notified      INTEGER NOT NULL DEFAULT 0,
+	created_at        INTEGER NOT NULL,
+	started_at        INTEGER,
+	UNIQUE (parent_run_id, idempotency_key)
+);
+CREATE INDEX run_children_tree ON run_children(tree_key, state);
+CREATE TABLE child_settings (
+	member_id     TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+	enabled       INTEGER NOT NULL DEFAULT 0,
+	fallback      INTEGER NOT NULL DEFAULT 1,
+	shared_missing INTEGER NOT NULL DEFAULT 0,
+	configured    INTEGER NOT NULL DEFAULT 0,
+	nudge_snoozes INTEGER NOT NULL DEFAULT 0,
+	nudge_until   INTEGER,
+	nudge_off     INTEGER NOT NULL DEFAULT 0,
+	updated_at    INTEGER NOT NULL
+);
+ALTER TABLE runs ADD COLUMN children TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN children_set_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE runs ADD COLUMN child_refused INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE workspaces ADD COLUMN child_max_live INTEGER NOT NULL DEFAULT 8;
+ALTER TABLE workspaces ADD COLUMN child_max_depth INTEGER NOT NULL DEFAULT 3;
+ALTER TABLE workspaces ADD COLUMN child_max_total INTEGER NOT NULL DEFAULT 100;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

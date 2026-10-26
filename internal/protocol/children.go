@@ -74,6 +74,10 @@ type ChildChoice struct {
 	// empty means any model the agent accepts.
 	Model  string   `json:"model,omitempty"`
 	Models []string `json:"models,omitempty"`
+	// Status is "ready", "exhausted" (usage at the fallback threshold),
+	// "not-installed" or "not-signed-in"; Detail is the exact sentence.
+	Status string `json:"status"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // ChildOptionsParams: Harness asks for that agent's model list, which may
@@ -169,12 +173,17 @@ type ChildFetchResult struct {
 	Commit string `json:"commit"`
 }
 
-// ChildSettings is a member's child-run setting.
+// ChildSettings is a member's child-run setting. Configured is false until
+// the member first saves it.
 type ChildSettings struct {
 	Enabled bool `json:"enabled"`
-	// Accounts are shared accounts, beyond the member's own, that their
-	// children may use.
-	Accounts []string `json:"accounts"`
+	// Fallback lets an exhausted child account roll over to another account
+	// the member may launch on, keeping the agent and model.
+	Fallback bool `json:"fallback"`
+	// SharedWhenMissing starts a child on an account shared with the member
+	// when they have no login of their own for that agent.
+	SharedWhenMissing bool `json:"shared_when_missing"`
+	Configured        bool `json:"configured"`
 	// Nudge is "show", "snoozed" or "never".
 	Nudge string `json:"nudge"`
 }
@@ -182,9 +191,10 @@ type ChildSettings struct {
 // ChildSettingsParams: a nil field keeps its value. Nudge is "later" or
 // "never".
 type ChildSettingsParams struct {
-	Enabled  *bool     `json:"enabled,omitempty"`
-	Accounts *[]string `json:"accounts,omitempty"`
-	Nudge    string    `json:"nudge,omitempty"`
+	Enabled           *bool  `json:"enabled,omitempty"`
+	Fallback          *bool  `json:"fallback,omitempty"`
+	SharedWhenMissing *bool  `json:"shared_when_missing,omitempty"`
+	Nudge             string `json:"nudge,omitempty"`
 }
 
 type RunChildrenParams struct {
