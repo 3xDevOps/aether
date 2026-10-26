@@ -83,7 +83,7 @@ describe('session rows', () => {
     expect(rows({ run: toRecord(run({ status: 'needs-attention' })), events, room, memberName, paused: false })).toEqual([
       { kind: 'event', text: 'Run started' },
       { kind: 'event', text: 'Paused by Alice' },
-      { kind: 'note', authorID: bob.id, body: 'looks good' },
+      { kind: 'note', authorID: bob.id, body: 'looks good', pending: false },
       { kind: 'request', answer: 'reply', authorID: bob.id, title: 'Bob asked', body: 'keep the prefix?', reply: { authorID: alice.id, body: 'yes' } },
       { kind: 'event', text: 'Alice handed the run to Bob' },
     ])
@@ -92,8 +92,20 @@ describe('session rows', () => {
   it('shows the owner\'s own question as a note with no request', () => {
     const own = roomMessage({ id: 'q1', kind: 'question', actor_id: alice.id, body: 'anyone know the port?', created_at: '2026-08-14T10:05:00Z' })
     expect(rows({ run: toRecord(run({ status: 'needs-attention' })), events: [], room: [own], memberName, paused: false }).at(-1)).toEqual({
-      kind: 'note', authorID: alice.id, body: 'anyone know the port?', question: true,
+      kind: 'note', authorID: alice.id, body: 'anyone know the port?', question: true, pending: false,
     })
+  })
+
+  it('carries how a note was posted and the name it carried onto its row', () => {
+    const posted = roomMessage({ id: 'c1', kind: 'comment', actor_id: 'mem_gone', actor_display_name: 'Gone Person', via: 'ChatGPT', body: 'ship it', created_at: '2026-08-14T10:04:00Z' })
+    expect(rows({ run: toRecord(run({ status: 'needs-attention' })), events: [], room: [posted], memberName, paused: false }).at(-1)).toEqual({
+      kind: 'note', authorID: 'mem_gone', authorName: 'Gone Person', via: 'ChatGPT', body: 'ship it', pending: false,
+    })
+  })
+
+  it('marks a note still being sent as pending', () => {
+    const sending = roomMessage({ id: 'k1', idempotency_key: 'k1', kind: 'comment', actor_id: alice.id, body: 'hold on', created_at: '2026-08-14T10:06:00Z' })
+    expect(rows({ run: toRecord(run({ status: 'needs-attention' })), events: [], room: [sending], memberName, paused: false }).at(-1)).toMatchObject({ kind: 'note', pending: true })
   })
 
   it('ends a working run with what the agent is doing and where to watch it live', () => {

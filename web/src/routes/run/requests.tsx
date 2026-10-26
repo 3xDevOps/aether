@@ -7,7 +7,7 @@ import { Clamped, IconTile, RequestCard, RequestTimeBar } from '@/components/ui/
 import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
 import { Textarea } from '@/components/ui/textarea'
 import { useSecondsUntil } from '@/lib/hooks'
-import { memberName, resolveMember } from '@/lib/member-name'
+import { memberNameOr, resolveMember } from '@/lib/member-name'
 import { inputHint, inputTitle } from '@/lib/run-requests'
 import type { SessionRequest } from '@/lib/session-types'
 import type { RoomMessage } from '@/lib/types'
@@ -128,7 +128,7 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
   const { inputs, sessionRequests, steers, questions } = useRunRequests(run)
-  const name = (id: string, snapshot?: string) => (resolveMember({ members, mergedInto }, id).member ? memberName({ members, mergedInto }, id) : snapshot ?? id)
+  const name = (id: string, snapshot?: string) => memberNameOr({ members, mergedInto }, id, snapshot)
   const openTerminal = () => {
     nav.go('terminal')
     if (!agent.localControl && !agent.controlUnavailable) agent.session.takeControl()

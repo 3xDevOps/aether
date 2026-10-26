@@ -14,6 +14,7 @@ import { memberName } from '@/lib/member-name'
 import { inputHint } from '@/lib/run-requests'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunNavigation } from '@/routes/run/header'
+import { NoteMessage } from '@/routes/run/note-thread'
 import { DeliveryCountdown, requestCardID } from '@/routes/run/requests'
 import { hasDetail, MoreSteps, StepDetail, StepsBlockHeader, StepView } from '@/routes/run/session-steps'
 import { SubagentGroup } from '@/routes/run/subagent-cards'
@@ -189,9 +190,7 @@ function Row({ row, open, ctx }: { row: SessionRow; open: boolean; ctx: RowConte
       return <UserRow row={row} ctx={ctx} name={name} />
     case 'note':
       return (
-        <MessageRow variant="note" author={`${name(row.authorID)} · ${row.question ? 'question' : 'note'}`} meta={<RelativeTime at={row.at} />}>
-          {row.body}
-        </MessageRow>
+        <NoteMessage authorID={row.authorID} authorName={row.authorName} via={row.via} question={row.question} at={row.at} body={row.body} status={row.pending ? 'Sending…' : undefined} />
       )
     case 'assistant':
       return <AnswerRow row={row} />
