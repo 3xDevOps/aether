@@ -2375,9 +2375,10 @@ list in a 736px column over `rowsForRun` (`store/sessions.ts`). For a Standard
 run the rows come from the run's `run.agent`, `workspace.timeline` and
 `run.status` events (read with `workspace.timeline` filtered by run and type,
 then kept live by sync), room messages, the run record and its pending inputs:
-`user` (a message to the agent with its delivery word), `note`, `steps`
-(consecutive tool calls in one closed block, "Ran 3 commands and read 2
-files", expanding to verb-first steps), `request` (an agent request reads "Answer in
+`user` (a message to the agent with its delivery word), `note` (the Notes
+thread's row, without the thread's own arrival motion), `steps` (consecutive
+tool calls in one closed block, "Ran 3 commands and read 2 files", expanding
+to verb-first steps), `request` (an agent request reads "Answer in
 the terminal." with **Open terminal**, or "Answer it from the agent's
 session." when the run has no agent terminal; a teammate question offers
 **Reply**, the owner's own question is a plain message), `event`,
@@ -3928,16 +3929,34 @@ whatever opened it. Sections (`details.tsx`):
   secondary button, or "Nothing is waiting on you."
 - **Agent messages**: the run-scoped agent mail, which the Session view also
   shows inline, with **Show older** and **Show all**.
-- **Notes**: notes are `comment` room messages, human to human on the run,
-  with an **Add a note** field and **Add**. **Add** follows
+- **Notes**: a comment thread (`note-thread.tsx`) of `comment` room messages,
+  human to human on the run, and teammates' `question` messages. Each note is
+  a row: the author's `Avatar` ringed in their member colour, the name
+  ("via ChatGPT" after it when a connector posted it, the name the message
+  carried when the member is gone), a **question** badge, the time, and the
+  body indented under the name, clamped to eight lines with **Show more**.
+  A reply to a question nests under it behind an L connector. A teammate
+  question nobody has answered also has **Reply**, which scrolls to its
+  Needs you card; the owner's own question has none. The thread is
+  chronological and shows the newest five loaded notes with **Show N earlier
+  notes** above them; once every loaded note shows and history remains,
+  **Show older** (also shown when the loaded pages hold no notes) pages
+  `run.room.list` back 100 room messages at a time and expands the thread, and a failed read shows the server's error with
+  **Retry**. The count beside the title is the loaded notes, not a total.
+  A note that arrives after the thread settled, yours or a teammate's,
+  fades in and rises 4px once, its body 100ms behind its header;
+  the first page, **Show earlier** and older pages appear at once, and a
+  sent note saved under its server id does not replay it. A teammate's note
+  is also announced politely ("Bob added a note: <text>"). The field **Add a note**
+  and the round **Add note** control (an up arrow) follow
   [Actions](#actions): the field empties and the note shows muted with
-  "Sending…" under its idempotency key as its id, until `run.room.post` or
+  "Sending…" in place of its time, under its idempotency key as its id, until `run.room.post` or
   the `workspace.room_message` refetch brings the server's copy with that
   key. A refusal, the deadline or a failure with no answer removes it and
-  shows the error under the list beside the note's text, one entry per
-  failed note; the text goes back into the field when the field is empty.
+  shows the note's text and the error as a row marked "Not sent" under the
+  thread, one row per failed note; the text goes back into the field when the field is empty.
   Every failure except a refusal adds **Retry**. Until a saved copy arrives, resending the same text by
-  **Retry**, **Add**, or after **Dismiss** reuses its key, so a late answer
+  **Retry**, **Add note**, or after **Dismiss** reuses its key, so a late answer
   never shows twice. A refusal keeps the key too: `run.room.post` can save
   the note and then fail, so the key is dropped only when a saved copy with
   it arrives or the signed-in member changes. The field, pending keys and failures live in the store

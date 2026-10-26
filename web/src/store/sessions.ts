@@ -10,6 +10,7 @@ import type { ControlMetadata } from '@/routes/terminal/attach'
 import type { TakeoverSnapshot } from '@/routes/terminal/session'
 import type { RootStore } from '@/store'
 import { toolTenses, type AgentPayload } from '@/store/activity'
+import { isProvisional } from '@/store/collaboration'
 import { isTerminal, type RunRecord } from '@/store/runs'
 import {
   appendItems,
@@ -514,9 +515,9 @@ export function rowsForRun({ run, events, room, memberName, paused }: SessionSou
         ...base, kind: 'user', authorID: m.actor_id, via: m.via, body: m.body, images: roomImages(m), files: roomFiles(m), ...deliveryOf(m),
       } })
     } else if (m.kind === 'comment') {
-      items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, body: m.body } })
+      items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, authorName: m.actor_display_name, via: m.via, body: m.body, pending: isProvisional(m) } })
     } else if (m.kind === 'question' && m.actor_id === run.member_id) {
-      items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, body: m.body, question: true } })
+      items.push({ at: m.created_at, order, row: { ...base, kind: 'note', authorID: m.actor_id, authorName: m.actor_display_name, via: m.via, body: m.body, question: true, pending: isProvisional(m) } })
     } else if (m.kind === 'question') {
       const reply = replies.get(m.id)
       items.push({ at: m.created_at, order, row: {

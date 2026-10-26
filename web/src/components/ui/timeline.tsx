@@ -19,19 +19,7 @@ import { cn, focusRingInset } from '@/lib/utils'
 
 const collapsedLines = 8
 
-export function MessageRow({
-  author,
-  meta,
-  children,
-  attachments,
-  variant = 'message',
-}: {
-  author?: React.ReactNode
-  meta?: React.ReactNode
-  children: React.ReactNode
-  attachments?: React.ReactNode
-  variant?: 'message' | 'note'
-}) {
+export function ClampedBody({ children, className }: { children: React.ReactNode; className?: string }) {
   const body = useRef<HTMLDivElement>(null)
   const [long, setLong] = useState(false)
   const [open, setOpen] = useState(false)
@@ -41,12 +29,9 @@ export function MessageRow({
     const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight) || 22
     setLong(node.scrollHeight > lineHeight * collapsedLines + 1)
   }, [children])
-  const content = (
+  return (
     <>
-      <div
-        ref={body}
-        className={cn('text-prose break-words whitespace-pre-wrap text-text', long && !open && 'line-clamp-8')}
-      >
+      <div ref={body} className={cn('text-prose break-words whitespace-pre-wrap text-text', long && !open && 'line-clamp-8', className)}>
         {children}
       </div>
       {long && (
@@ -59,23 +44,27 @@ export function MessageRow({
           {open ? 'Show less' : 'Show more'}
         </button>
       )}
-      {attachments}
     </>
   )
-  if (variant === 'note') {
-    return (
-      <div data-slot="message-row" data-variant="note" className="rounded-panel border border-seam px-3 py-2">
-        <div className="flex min-w-0 items-baseline gap-2 text-ui-sm">
-          <span className="min-w-0 truncate font-medium text-text">{author}</span>
-          {meta && <span className="ml-auto flex shrink-0 items-center gap-1.5 text-muted tabular-nums">{meta}</span>}
-        </div>
-        <div className="mt-0.5">{content}</div>
-      </div>
-    )
-  }
+}
+
+export function MessageRow({
+  author,
+  meta,
+  children,
+  attachments,
+}: {
+  author?: React.ReactNode
+  meta?: React.ReactNode
+  children: React.ReactNode
+  attachments?: React.ReactNode
+}) {
   return (
-    <div data-slot="message-row" data-variant="message" className="ml-auto flex w-fit max-w-[85%] min-w-0 flex-col items-end gap-1">
-      <div className="max-w-full min-w-0 rounded-composer bg-chrome px-3.5 py-2">{content}</div>
+    <div data-slot="message-row" className="ml-auto flex w-fit max-w-[85%] min-w-0 flex-col items-end gap-1">
+      <div className="max-w-full min-w-0 rounded-composer bg-chrome px-3.5 py-2">
+        <ClampedBody>{children}</ClampedBody>
+        {attachments}
+      </div>
       {(author || meta) && (
         <div className="flex max-w-full min-w-0 items-center gap-1.5 px-1 text-ui-sm text-muted tabular-nums">
           {author && <span className="min-w-0 truncate">{author}</span>}

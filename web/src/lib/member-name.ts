@@ -17,3 +17,8 @@ export function memberName(s: Names, id: string): string {
   if (!member) return id
   return merged ? `${member.display_name} (merged)` : member.display_name
 }
+
+/** `memberName`, but an id with no member record shows `snapshot`, the name the message carried, before the raw id. */
+export function memberNameOr(s: Names, id: string, snapshot?: string): string {
+  return resolveMember(s, id).member ? memberName(s, id) : snapshot || id
+}

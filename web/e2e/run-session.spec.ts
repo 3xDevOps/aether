@@ -319,7 +319,7 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     const bobDetails = bobPage.getByRole('complementary', { name: 'Run details' })
     const note = 'I will check the migration while you work.'
     await bobDetails.getByRole('textbox', { name: 'Add a note' }).fill(note)
-    await bobDetails.getByRole('button', { name: 'Add', exact: true }).click()
+    await bobDetails.getByRole('button', { name: 'Add note', exact: true }).click()
     await expect(aliceDetails.getByRole('region', { name: 'Notes' })).toContainText(note)
 
     const instruction = 'Please inspect the migration'

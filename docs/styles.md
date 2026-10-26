@@ -148,7 +148,7 @@ restyling it.
 | `quiet` | Muted text; `text-text` and an underline on hover | Inline secondary actions inside muted copy |
 
 Sizes are `md` (28px, the default), `sm` (24px), `icon` (28px square),
-`icon-sm` (24px square), and the composer's send control: `round` (28px
+`icon-sm` (24px square), and the composer's and the Notes field's send control: `round` (28px
 circle) and `pill` (28px, fully rounded); each grows to 44px on a coarse
 pointer. `link` and `quiet` have no height or padding of their own and widen
 their touch target to 44px. An `icon`, `icon-sm` or `round` button requires
@@ -345,7 +345,7 @@ Use compact workbench geometry rather than landing-page ornament:
   holds 8px items. Edges that meet another surface stay square: sheets at the
   screen edge, a run's details box where it docks, joined buttons and dock
   tabs. `rounded-full` is for dots, radios, avatars, meters and the
-  composer's send control only.
+  composer's and the Notes field's send control only.
 - Elevation: panes and headers have none; cards `shadow-card`, lifting to
   `shadow-card-hover` on hover; secondary buttons `shadow-button`; menus,
   popovers, selects, tooltips, toasts and the run details box
@@ -541,6 +541,9 @@ literal time or curve.
   A streaming answer's new Markdown blocks fade in from `--blur-fade` over
   270ms. Opening a block of steps splices rows into the virtual list, so it
   does not glide its height.
+  A note in the Notes thread plays it on its header and, 100ms later, its
+  body, on `--ease-glide`; only notes newer than the thread's first page do,
+  each once.
 - `web/src/lib/flip.ts` glides reordered items, translating only, for short
   lists the viewer reorders; never a virtualized list. The one store-driven
   use is Board moving at most eight cards between columns; see

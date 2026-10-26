@@ -32,7 +32,7 @@ export type SessionRow =
       deliverAfter?: string
       failure?: string
     }
-  | { kind: 'note'; id: string; at: string; authorID: string; body: string; question?: boolean }
+  | { kind: 'note'; id: string; at: string; authorID: string; authorName?: string; via?: string; body: string; question?: boolean; pending?: boolean }
   | { kind: 'assistant'; id: string; at: string; text: string; streaming: boolean; outcome?: Extract<SessionRow, { kind: 'finished' }> }
   | {
       kind: 'steps'

@@ -440,7 +440,7 @@ describe('run details', () => {
     const panel = await details()
     const notes = within(panel.getByRole('region', { name: 'Notes' }))
     expect(await notes.findByText('which port?')).toBeDefined()
-    expect(notes.getByText('· question')).toBeDefined()
+    expect(notes.getByText('question')).toBeDefined()
   })
 
   it('shows a needs-you condition without a request as one card with its action', async () => {
