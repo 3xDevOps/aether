@@ -95,7 +95,14 @@ func runLifecycle(ctx context.Context, c calls, in lifecycleInput) (string, any,
 		if in.Action == lifecycleEnhanced {
 			mode = "acp"
 		}
-		method, did, params = protocol.MethodRunModeSwitch, "Switched to "+in.Action+" mode", protocol.RunModeSwitchParams{RunID: in.RunID, Mode: mode}
+		r, err := getRunRecord(ctx, c.read, in.RunID)
+		if err != nil {
+			return "", nil, err
+		}
+		if r.Mode == mode {
+			return acted(ctx, c.read, l, in.RunID, "Already in "+in.Action+" mode:")
+		}
+		method, did, params = protocol.MethodRunModeSwitch, "Switched to "+in.Action+" mode:", protocol.RunModeSwitchParams{RunID: in.RunID, Mode: mode}
 	case lifecycleProtect, lifecycleUnprotect:
 		method, did, params = protocol.MethodRunProtect, cases(in.Action)+"ed", protocol.RunProtectParams{RunID: in.RunID, Protected: in.Action == lifecycleProtect}
 	case lifecycleArchive, lifecycleRestore:
@@ -104,25 +111,19 @@ func runLifecycle(ctx context.Context, c calls, in lifecycleInput) (string, any,
 		return "", nil, invalid("action %q is not one of relaunch, standard, enhanced, protect, unprotect, archive, restore", in.Action)
 	}
 	if err := c.act(ctx, method, params, &struct{}{}); err != nil {
-		return "", nil, lifecycleError(err)
+		// A connector or the assistant holds no control lease.
+		var perr *protocol.Error
+		if errors.As(err, &perr) && strings.Contains(perr.Message, "holds the run's control") {
+			return "", nil, &protocol.Error{Code: perr.Code, Data: perr.Data,
+				Message: perr.Message + "; this tool holds no control, so ask that member to release it, or switch in the Aether dashboard"}
+		}
+		return "", nil, err
 	}
 	return acted(ctx, c.read, l, in.RunID, did)
 }
 
 func cases(action string) string {
 	return strings.ToUpper(action[:1]) + action[1:]
-}
-
-// lifecycleError adds the way forward to a mode switch refused because
-// another session holds the run's control: a connector or the assistant
-// holds no control lease.
-func lifecycleError(err error) error {
-	var perr *protocol.Error
-	if !errors.As(err, &perr) || !strings.Contains(perr.Message, "holds the run's control") {
-		return err
-	}
-	return &protocol.Error{Code: perr.Code, Data: perr.Data,
-		Message: perr.Message + "; this tool holds no control, so ask that member to release it, or switch in the Aether dashboard"}
 }
 
 func handoffRun(ctx context.Context, c calls, in handoffInput) (string, any, error) {

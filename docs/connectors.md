@@ -214,9 +214,12 @@ agent text begins, and it returns a run's title, task and reason and a swarm's
 goal whole. A permission request longer than 600 characters is
 decided only in the dashboard, never by `aether_decide_approval`. Lists return
 20 rows by default, at most 100, and say how many matched when they cut rows;
-`aether_needs_attention` returns at most 30 items. `aether_run_changes` lists
+`aether_needs_attention` returns at most 30 items. `aether_integration` lists the newest 100
+candidates and says when older ones are not shown. `aether_run_changes` lists
 20 commits and up to 10 diff files of 6000 characters, 12000 in all, per page,
-and returns `next_commits_offset` and `next_diff_file` for the next page; its
+and returns `next_commits_offset` and `next_diff_file` for the next page, and
+`diff_truncated: true` when the server cut the diff before paging, so files
+past the cut are missing; its
 `repos` names a multi-repo run's extra repos, which `repo` selects. Tools that take a `run_id`
 or `swarm_id` also accept the `run:` and `swarm:` ids `search` returns. When
 the server no longer keeps the start of a run's conversation or terminal,
@@ -256,7 +259,8 @@ cannot change what the agent may do next time. Any other tool call is cut off
 after 40 seconds, inside ChatGPT's wait.
 
 The other writes repeat safely without a key. Each `aether_run_lifecycle`
-action but `relaunch` sets a state, so a repeat changes nothing; `relaunch`
+action but `relaunch` sets a state, so a repeat changes nothing, and a
+switch to the mode a run is already in reports that without switching; `relaunch`
 fails on a run that is still live. `aether_handoff_run` to the run's owner,
 `aether_swarm_manage` on a worker nobody holds, and `aether_integration_decide`
 on a request already in the state asked for or already delivered report that
@@ -267,7 +271,9 @@ merged. `aether_replace_integrator` requires `expected_generation`, the
 one from the swarm, that generation and the agent, so a retry returns the
 first replacement even after it moved the generation, and a replacement
 someone else made in between fails with a conflict.
-`aether_memory_add` returns the existing note for a duplicate.
+`aether_memory_add` returns the existing note for a duplicate, and repeating
+a replacement (`supersedes`) that went through returns the note that replaced
+the old one.
 
 `aether_pr_merge` takes `expected_head_oid`, the `head_oid` `aether_pr_status`
 returns, and refuses when the pull request's head has moved since, before
@@ -276,8 +282,11 @@ checks and the reviewers requesting changes, and give the merge state;
 `aether_pr_status` names them under `untrusted`. It merges with
 `squash` unless `method` says `merge` or `rebase`, and only into the base
 branch it saw. `aether_pr_create` opens the pull request from the run's
-current branch into the workspace's base branch on its source repository, as
-the dashboard proposes; the branch must be pushed. `aether_handoff_run` takes
+current branch and head into the target `run.pr.status` resolves, the
+workspace's base branch on its source repository as the dashboard proposes,
+and passes both to `run.pr.create`, so neither changes after you approve;
+the branch must be pushed. `aether_pr_status` and `aether_pr_merge` take the
+same `repo` as `aether_run_changes`. `aether_handoff_run` takes
 the teammate's member id or exact display name; an unknown or ambiguous one
 fails with the teammates' ids and roles, and the server refuses a viewer. `aether_run_lifecycle`'s mode
 switch holds no control lease, so it fails while a member controls the run in

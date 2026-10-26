@@ -11,7 +11,7 @@ import (
 
 type prCreateInput struct {
 	RunID        string `json:"run_id"`
-	Repo         string `json:"repo,omitempty" jsonschema:"an extra repo's id from aether_get_run; default the primary"`
+	Repo         string `json:"repo,omitempty" jsonschema:"an extra repo's workspace_id from aether_run_changes; default the primary"`
 	Title        string `json:"title"`
 	Body         string `json:"body"`
 	Draft        bool   `json:"draft,omitempty"`
@@ -27,9 +27,9 @@ type prMergeInput struct {
 
 var prOps = []Op{
 	opOf("aether_pr_create", "Open pull request", ScopeControl, true, nextRuns,
-		"Use this when the user wants a pull request opened from a run's pushed branch into the workspace's base branch. An open one is returned instead of opening another.", prCreate).
+		"Use this when the user wants a pull request opened from a run's pushed branch into the workspace's base branch, where the dashboard would propose. An open one is returned instead of opening another.", prCreate).
 		hints(false, true).offer(TierConfirmed).
-		calling(protocol.MethodServerInfo, protocol.MethodRunPRStatus, protocol.MethodRunGitStatus, protocol.MethodRunPRCreate),
+		calling(protocol.MethodServerInfo, protocol.MethodRunPRStatus, protocol.MethodRunPRCreate),
 	opOf("aether_pr_merge", "Merge pull request", ScopeControl, true, nextRuns,
 		"Use this when the user wants a run's pull request merged on GitHub after reviewing it with aether_pr_status. Refuses if the head moved from expected_head_oid; GitHub refuses failing required checks and unresolved reviews.", prMerge).
 		enum("method", "squash", "merge", "rebase").hints(true, true).offer(TierConfirmed).
@@ -55,20 +55,15 @@ func prCreate(ctx context.Context, c calls, in prCreateInput) (string, any, erro
 		return fmt.Sprintf("Run %s already has pull request #%d open: %s.", in.RunID, pr.Number, pr.URL),
 			map[string]any{"run_id": in.RunID, "pr": prOf(pr), "created": false, "url": l.run(in.RunID), "untrusted": map[string]any{"title": clip(pr.Title, maxReport)}}, nil
 	}
-	var git protocol.RunGitStatusResult
-	if err := c.read(ctx, protocol.MethodRunGitStatus, protocol.RunGitStatusParams{RunID: in.RunID, Repo: in.Repo}, &git); err != nil {
-		return "", nil, err
+	if status.Expected == nil || status.Target == nil {
+		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("run %s's checkout gave no branch and target to open a pull request from; open it in the Aether dashboard", in.RunID)}
 	}
-	switch {
-	case git.Error != "":
-		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: git.Error}
-	case git.Branch == "":
-		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("run %s's checkout is on a detached HEAD at %s; open the pull request in the Aether dashboard", in.RunID, git.Head)}
-	case in.ExpectedHead != "" && !strings.HasPrefix(git.Head, in.ExpectedHead):
-		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("run %s's branch %s moved to %s since %s; review aether_run_changes again", in.RunID, git.Branch, git.Head, in.ExpectedHead)}
+	if in.ExpectedHead != "" && !strings.HasPrefix(status.Expected.Head, in.ExpectedHead) {
+		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf("run %s's branch %s moved to %s since %s; review aether_run_changes again",
+			in.RunID, status.Expected.Branch, status.Expected.Head, in.ExpectedHead)}
 	}
 	var res protocol.RunPRCreateResult
-	if err := c.act(ctx, protocol.MethodRunPRCreate, protocol.RunPRCreateParams{RunID: in.RunID, Repo: in.Repo, Expected: protocol.RunGitExpected{Branch: git.Branch, Head: git.Head},
+	if err := c.act(ctx, protocol.MethodRunPRCreate, protocol.RunPRCreateParams{RunID: in.RunID, Repo: in.Repo, Expected: *status.Expected, Target: *status.Target,
 		Title: in.Title, Body: in.Body, Draft: in.Draft, ExpectedLogin: status.Identity}, &res); err != nil {
 		return "", nil, err
 	}

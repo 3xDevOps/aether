@@ -45,6 +45,10 @@ func TestRunPRStatusDefaultsExpectedAndTarget(t *testing.T) {
 	if err := json.Unmarshal(value, &status); err != nil {
 		t.Fatal(err)
 	}
+	want := protocol.RunPRTarget{Repository: "acme/app", BaseBranch: "main", HeadRepository: "acme/app", HeadBranch: "aether/run-x"}
+	if status.Target == nil || *status.Target != want || status.Expected == nil || status.Expected.Branch != "aether/run-x" || status.Expected.Head != expected.Head {
+		t.Fatalf("run.pr.status used expected %+v, target %+v; want %+v", status.Expected, status.Target, want)
+	}
 	if status.Error != "" || status.PullRequest == nil || status.PullRequest.Number != 7 || status.PullRequest.HeadBranch != "aether/run-x" {
 		t.Fatalf("run.pr.status = %+v", status)
 	}
@@ -114,46 +118,5 @@ func TestRunPRStatusDefaultsExplainWhatTheyNeed(t *testing.T) {
 	result, perr := status()
 	if perr != nil || !strings.Contains(result.Error, "detached HEAD") || !strings.Contains(result.Error, "pass both") {
 		t.Fatalf("run.pr.status on a detached HEAD = %+v, %v", result, perr)
-	}
-}
-
-func TestRunPRCreateDefaultsTheTarget(t *testing.T) {
-	fixture, expected := newNativeRepoFixture(t)
-	e := newTestEnv(t, func(cfg *Config) { cfg.Services.RunRepo = fixture })
-	if err := e.store.SetWorkspaceOrigin(t.Context(), e.ws.ID, "https://github.com/acme/app.git"); err != nil {
-		t.Fatal(err)
-	}
-	repoGit(t, fixture.dir, "remote", "add", "origin", "https://github.com/acme/app.git")
-	repoGit(t, fixture.dir, "checkout", "-q", "-b", "aether/run-x")
-	expected.Branch = "aether/run-x"
-	var posted string
-	fixture.native = runrepo.New(func(ctx context.Context, id runtime.ID, argv []string, dir string) (int, string, string, error) {
-		gh := slices.Index(argv, "gh")
-		switch {
-		case gh < 0:
-			return repoLocalExec(ctx, id, argv, dir)
-		case slices.Contains(argv, "user"):
-			return 0, "octo\n", "", nil
-		case slices.Contains(argv, "POST"):
-			posted = strings.Join(argv[gh:], " ")
-			return 0, `{"number":8,"html_url":"https://github.com/acme/app/pull/8","state":"open","title":"Fix","draft":false,"merged_at":null,"base":{"ref":"main","repo":{"full_name":"acme/app"}},"head":{"ref":"aether/run-x","sha":"` + expected.Head + `","repo":{"full_name":"acme/app"}}}`, "", nil
-		case slices.ContainsFunc(argv, func(a string) bool { return strings.Contains(a, "/git/ref/heads/") }):
-			return 0, expected.Head + "\n", "", nil
-		}
-		return 0, "[]", "", nil
-	})
-	value, perr := e.srv.dispatch(t.Context(), e.member.ID, protocol.MethodRunPRCreate, repoParams(t, protocol.RunPRCreateParams{RunID: string(e.run.ID), Expected: expected, Title: "Fix", Body: "b"}))
-	if perr != nil {
-		t.Fatal(perr)
-	}
-	var created protocol.RunPRCreateResult
-	if err := json.Unmarshal(value, &created); err != nil {
-		t.Fatal(err)
-	}
-	if created.Error != "" || !created.Created || created.PullRequest == nil || created.PullRequest.Number != 8 {
-		t.Fatalf("run.pr.create = %+v", created)
-	}
-	if !strings.Contains(posted, "repos/acme/app/pulls") || !strings.Contains(posted, "base=main") || !strings.Contains(posted, "head=acme:aether/run-x") {
-		t.Fatalf("POST = %q, want acme/app pulls for acme:aether/run-x into main", posted)
 	}
 }

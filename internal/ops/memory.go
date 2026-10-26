@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -30,7 +31,7 @@ var memoryOps = []Op{
 	opOf("aether_memory_add", "Add team memory", ScopeWrite, false, nextWorkspaces,
 		"Use this when the user wants a decision, convention, gotcha or preference remembered for the workspace's agents and teammates. A note with a secret is refused; the same note again returns the first.", memoryAdd).
 		enum("kind", protocol.MemoryKindDecision, protocol.MemoryKindConvention, protocol.MemoryKindGotcha, protocol.MemoryKindPreference).
-		hints(false, false).offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodMemoryAdd),
+		hints(false, false).offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodMemoryAdd, protocol.MethodMemoryShow),
 	opOf("aether_memory_pin", "Pin team memory", ScopeWrite, true, "call aether_memory_search for note ids",
 		"Use this when the user pins a note, which puts it in every new run's brief in the workspace, or unpins it.", memoryPin).
 		hints(false, false).offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodMemoryPin, protocol.MethodMemoryUnpin),
@@ -39,7 +40,6 @@ var memoryOps = []Op{
 		offer(TierRead).calling(protocol.MethodMemoryShow),
 }
 
-// note is a team memory note; whatever its author wrote is data.
 type note struct {
 	ID           string   `json:"id"`
 	Kind         string   `json:"kind"`
@@ -79,7 +79,11 @@ func memoryAdd(ctx context.Context, c calls, in memoryAddInput) (string, any, er
 	}
 	var res protocol.MemoryAddResult
 	if err := c.act(ctx, protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: in.WorkspaceID, Kind: in.Kind, Text: in.Text, Files: in.Files, Supersedes: in.Supersedes}, &res); err != nil {
-		return "", nil, err
+		replaced, found := replacedBy(ctx, c.read, in)
+		if !found {
+			return "", nil, err
+		}
+		res = protocol.MemoryAddResult{Item: replaced, Duplicate: true}
 	}
 	similar := make([]string, 0, len(res.Similar))
 	for _, m := range res.Similar {
@@ -90,6 +94,25 @@ func memoryAdd(ctx context.Context, c calls, in memoryAddInput) (string, any, er
 		return fmt.Sprintf("The workspace already remembers this as note %s; nothing new was added.", res.Item.ID), out, nil
 	}
 	return fmt.Sprintf("Added %s note %s.", res.Item.Kind, res.Item.ID), out, nil
+}
+
+// replacedBy is the note that already replaced in.Supersedes with in's
+// kind and text, so a repeated replacement returns it: the server refuses
+// to replace a note twice.
+func replacedBy(ctx context.Context, read Call, in memoryAddInput) (protocol.MemoryItem, bool) {
+	if in.Supersedes == "" {
+		return protocol.MemoryItem{}, false
+	}
+	var old protocol.MemoryShowResult
+	if read(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: in.WorkspaceID, ID: in.Supersedes}, &old) != nil || old.Item.SupersededBy == "" {
+		return protocol.MemoryItem{}, false
+	}
+	var next protocol.MemoryShowResult
+	if read(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: in.WorkspaceID, ID: old.Item.SupersededBy}, &next) != nil ||
+		next.Item.Kind != in.Kind || strings.TrimSpace(next.Item.Body) != strings.TrimSpace(in.Text) {
+		return protocol.MemoryItem{}, false
+	}
+	return next.Item, true
 }
 
 func memoryPin(ctx context.Context, c calls, in memoryPinInput) (string, any, error) {

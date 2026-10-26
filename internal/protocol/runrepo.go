@@ -267,7 +267,11 @@ type RunPullRequest struct {
 
 // Status always comes from GitHub, including PRs created by native gh.
 type RunPRStatusResult struct {
-	Repo            string               `json:"repo,omitempty"`
+	Repo string `json:"repo,omitempty"`
+	// Expected and Target are what the lookup used, defaults filled in,
+	// for a run.pr.create of exactly that pull request.
+	Expected        *RunGitExpected      `json:"expected,omitempty"`
+	Target          *RunPRTarget         `json:"target,omitempty"`
 	Identity        string               `json:"identity"`
 	PullRequest     *RunPullRequest      `json:"pull_request"`
 	Output          RunRepoCommandOutput `json:"output"`

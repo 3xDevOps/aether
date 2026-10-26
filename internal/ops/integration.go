@@ -59,9 +59,13 @@ func integration(ctx context.Context, c calls, in integrationInput) (string, any
 			verifications = append(verifications, verification{v.VerificationID, v.Status, v.ExitCode})
 			outputs = append(outputs, map[string]any{"verification_id": v.VerificationID, "argv": v.Argv, "output": clip(v.Output, maxFeedback), "error": clip(v.Error, maxFeedback)})
 		}
+		conflicts := make([]string, 0, min(len(cd.Conflicts), defaultRows))
+		for _, path := range cd.Conflicts[:min(len(cd.Conflicts), defaultRows)] {
+			conflicts = append(conflicts, clip(path, maxReport))
+		}
 		out := map[string]any{"candidate": candidateRow{cd.CandidateID, cd.State, cd.TargetRef, cd.CandidateRevision, cd.DeliveryRequest, cd.DeliveryReceipt, cd.ExpiresAt.UTC().Format(time.RFC3339)},
 			"swarm_id": cd.MissionID, "inputs": len(cd.Inputs), "applied_inputs": cd.AppliedInputs, "conflicts": len(cd.Conflicts), "verifications": verifications,
-			"untrusted": map[string]any{"verifications": outputs, "conflicts": clipAll(cd.Conflicts[:min(len(cd.Conflicts), defaultRows)], maxReport), "error": clip(cd.Error, maxText)}}
+			"untrusted": map[string]any{"verifications": outputs, "conflicts": conflicts, "error": clip(cd.Error, maxText)}}
 		summary := fmt.Sprintf("Candidate %s is %s for %s: %d verifications, %d conflicts.", cd.CandidateID, cd.State, cd.TargetRef, len(verifications), len(cd.Conflicts))
 		if r := cd.DeliveryRequest; r != nil {
 			summary += fmt.Sprintf(" Delivery request %s (%s) is %s.", r.RequestID, r.Action, r.State)
@@ -69,7 +73,7 @@ func integration(ctx context.Context, c calls, in integrationInput) (string, any
 		return summary, out, nil
 	}
 	var res protocol.IntegrationListResult
-	if err := c.read(ctx, protocol.MethodIntegrationList, protocol.IntegrationListParams{WorkspaceID: in.WorkspaceID, MissionID: in.SwarmID, Limit: defaultRows}, &res); err != nil {
+	if err := c.read(ctx, protocol.MethodIntegrationList, protocol.IntegrationListParams{WorkspaceID: in.WorkspaceID, MissionID: in.SwarmID, Limit: maxRows}, &res); err != nil {
 		return "", nil, err
 	}
 	rows := make([]candidateRow, 0, len(res.Candidates))
@@ -80,7 +84,13 @@ func integration(ctx context.Context, c calls, in integrationInput) (string, any
 			pending++
 		}
 	}
-	return fmt.Sprintf("%d candidates, %d delivery requests awaiting a decision.", len(rows), pending), map[string]any{"candidates": rows}, nil
+	out := map[string]any{"candidates": rows}
+	summary := fmt.Sprintf("%d candidates, %d delivery requests awaiting a decision.", len(rows), pending)
+	if len(rows) == maxRows {
+		out["truncated"] = true
+		summary = fmt.Sprintf("The newest %d candidates, %d delivery requests among them awaiting a decision; older ones are not shown.", len(rows), pending)
+	}
+	return summary, out, nil
 }
 
 // integrationDecide decides or delivers the request the user saw: the
@@ -130,12 +140,4 @@ func integrationDecide(ctx context.Context, c calls, in integrationDecideInput) 
 	}
 	out["request_state"] = state
 	return fmt.Sprintf("Candidate %s's delivery request is %s.", cd.CandidateID, state), out, nil
-}
-
-func clipAll(texts []string, n int) []string {
-	out := make([]string, len(texts))
-	for i, t := range texts {
-		out[i] = clip(t, n)
-	}
-	return out
 }

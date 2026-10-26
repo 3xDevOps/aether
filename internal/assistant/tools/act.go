@@ -10,8 +10,6 @@ import (
 
 type summarizer func(s *Server, ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error
 
-// actSummaries are the cards of the lifecycle, swarm, delivery, pull request
-// and memory methods, each naming what it acts on.
 var actSummaries = map[string]summarizer{
 	protocol.MethodRunRelaunch: runSummary(func(protocol.RunIDParams) string { return "Relaunch %s" }),
 	protocol.MethodRunModeSwitch: runSummary(func(p protocol.RunModeSwitchParams) string {
@@ -90,7 +88,6 @@ func (s *Server) summarizeHandoff(ctx context.Context, req protocol.Request, c *
 	return nil
 }
 
-// memberName is member's display name, else their id.
 func (s *Server) memberName(ctx context.Context, member string) (string, *protocol.Error) {
 	var members protocol.MemberListResult
 	if rpcErr := s.call(ctx, protocol.MethodMemberList, nil, &members); rpcErr != nil {
@@ -104,8 +101,6 @@ func (s *Server) memberName(ctx context.Context, member string) (string, *protoc
 	return member, nil
 }
 
-// swarm is the swarm id names, with c marked as acting on another
-// member's swarm when it is one.
 func (s *Server) swarm(ctx context.Context, id string, c *protocol.AssistantConfirmation) (protocol.Mission, *protocol.Error) {
 	var shown protocol.MissionShowResult
 	if rpcErr := s.call(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: id}, &shown); rpcErr != nil {
@@ -168,7 +163,11 @@ func (s *Server) summarizeDelivery(ctx context.Context, req protocol.Request, c 
 		}
 	}
 	cd := shown.Candidate
-	c.Summary = fmt.Sprintf("%s candidate %s to %s", verb, cd.CandidateID, truncate(cd.TargetRef))
+	effect := "moving " + truncate(cd.TargetRef)
+	if r := cd.DeliveryRequest; r != nil && r.Action == protocol.DeliveryActionProposal {
+		effect = "publishing a proposal ref for " + truncate(cd.TargetRef)
+	}
+	c.Summary = fmt.Sprintf("%s candidate %s, %s", verb, cd.CandidateID, effect)
 	if cd.MissionID == "" {
 		return nil
 	}
@@ -176,7 +175,7 @@ func (s *Server) summarizeDelivery(ctx context.Context, req protocol.Request, c 
 	if rpcErr != nil {
 		return rpcErr
 	}
-	c.Summary += fmt.Sprintf(" for swarm %s (%q)%s", m.ID, truncate(m.Objective), ownedBy(c))
+	c.Summary += fmt.Sprintf(", for swarm %s (%q)%s", m.ID, truncate(m.Objective), ownedBy(c))
 	return nil
 }
 
@@ -253,12 +252,18 @@ func (s *Server) summarizeMemoryAdd(ctx context.Context, req protocol.Request, c
 		c.Summary += ", pinned into new runs' briefs"
 	}
 	if p.Supersedes != "" {
-		c.Summary += fmt.Sprintf(", replacing note %s", truncate(p.Supersedes))
+		var old protocol.MemoryShowResult
+		if rpcErr := s.call(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: p.WorkspaceID, ID: p.Supersedes}, &old); rpcErr != nil {
+			return rpcErr
+		}
+		c.Summary += fmt.Sprintf(", replacing note %s (%q)", truncate(p.Supersedes), truncate(cmp.Or(old.Item.Title, old.Item.Body)))
+		if old.Item.PinnedAt != nil {
+			c.Summary += " and moving its pin"
+		}
 	}
 	return nil
 }
 
-// commaAfter closes an ownedBy clause before the sentence goes on.
 func commaAfter(clause string) string {
 	if clause == "" {
 		return ""
@@ -266,7 +271,6 @@ func commaAfter(clause string) string {
 	return clause + ","
 }
 
-// forWhom names who a memory note or pin is for.
 func forWhom(scope string) string {
 	if scope == protocol.MemoryScopeMember {
 		return " for you only"

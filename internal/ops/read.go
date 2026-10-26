@@ -121,7 +121,7 @@ var readOps = []Op{
 		"Use this when the user asks what a run changed: commits, predicted conflicts and, with include_diff, the uncommitted diff by file. Page with next_commits_offset and next_diff_file."+untrustedRule, runChanges).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodRunGitLog, protocol.MethodRunEvidenceList, protocol.MethodRunGitDiff),
 	opOf("aether_pr_status", "Pull request status", ScopeRead, true, nextRuns,
-		"Use this when the user asks about a run's pull request, CI or review feedback. To act on feedback, aether_message_run its run_id; the agent can read the PR itself."+untrustedRule, prStatus).
+		"Use this when the user asks about a run's pull request, CI or review feedback, before aether_pr_merge. To act on feedback, aether_message_run its run_id; the agent can read the PR itself."+untrustedRule, prStatus).
 		offer(TierRead).calling(protocol.MethodRunPRFeedback),
 	opOf("aether_overlaps", "Overlapping runs", ScopeRead, true, nextRuns,
 		"Use this when coordinating running agents so they don't change the same files: pairs of active runs touching the same files, with titles. Then aether_message_run each run about the other."+untrustedRule, overlaps).
@@ -808,7 +808,16 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 		case diff.Error != "":
 			out["diff_error"] = diff.Error
 		default:
-			files := diffFiles(diff.Output.Stdout)
+			var files []string
+			for part := range strings.SplitSeq(diff.Output.Stdout, "\ndiff --git ") {
+				if part == "" {
+					continue
+				}
+				if len(files) > 0 {
+					part = "diff --git " + part
+				}
+				files = append(files, part)
+			}
 			if in.DiffFile < 0 || (in.DiffFile > 0 && in.DiffFile >= len(files)) {
 				return "", nil, invalid("diff_file %d is past the diff's %d files", in.DiffFile, len(files))
 			}
@@ -822,6 +831,10 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 				page, size = append(page, f), size+len(f)
 			}
 			out["diff_files"] = len(files)
+			if diff.Output.Truncated {
+				// The server cuts the diff before paging sees it.
+				out["diff_truncated"] = true
+			}
 			if next := in.DiffFile + len(page); next < len(files) {
 				out["next_diff_file"] = next
 			}
@@ -832,24 +845,14 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 	return summary, out, nil
 }
 
-// diffFiles splits a git diff into one part per file.
-func diffFiles(diff string) []string {
-	var files []string
-	for part := range strings.SplitSeq(diff, "\ndiff --git ") {
-		if part == "" {
-			continue
-		}
-		if len(files) > 0 {
-			part = "diff --git " + part
-		}
-		files = append(files, part)
-	}
-	return files
+type prStatusInput struct {
+	RunID string `json:"run_id"`
+	Repo  string `json:"repo,omitempty" jsonschema:"an extra repo's workspace_id from aether_run_changes; default the primary"`
 }
 
-func prStatus(ctx context.Context, c calls, in runIDInput) (string, any, error) {
+func prStatus(ctx context.Context, c calls, in prStatusInput) (string, any, error) {
 	var res protocol.RunPRFeedbackResult
-	if err := c.read(ctx, protocol.MethodRunPRFeedback, protocol.RunPRFeedbackParams{RunID: in.RunID, Limit: 30}, &res); err != nil {
+	if err := c.read(ctx, protocol.MethodRunPRFeedback, protocol.RunPRFeedbackParams{RunID: in.RunID, Repo: in.Repo, Limit: 30}, &res); err != nil {
 		return "", nil, err
 	}
 	if res.PullRequest == nil {

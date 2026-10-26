@@ -23,8 +23,13 @@ func TestConnectorRunLifecycle(t *testing.T) {
 		t.Fatalf("relaunch called %+v", got)
 	}
 
+	// testRun is Enhanced: switching it to Enhanced again changes nothing.
+	f.calls = nil
+	if text, _ = run(t, cs, "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": "enhanced"}); !strings.HasPrefix(text, "Already in enhanced mode") ||
+		len(called(f, protocol.MethodRunModeSwitch)) != 0 {
+		t.Fatalf("repeated switch = %q", text)
+	}
 	for action, want := range map[string]string{
-		"enhanced":  `{"run_id":"run-1","mode":"acp","control_session_id":"","control_generation":0}`,
 		"standard":  `{"run_id":"run-1","mode":"tui","control_session_id":"","control_generation":0}`,
 		"protect":   `{"run_id":"run-1","protected":true}`,
 		"unprotect": `{"run_id":"run-1","protected":false}`,
@@ -47,7 +52,7 @@ func TestConnectorRunLifecycle(t *testing.T) {
 	f.errs[protocol.MethodRunModeSwitch] = &protocol.Error{Code: protocol.CodeConflict, Message: "member mem-2 holds the run's control; switch from that session, or take control first"}
 	f.errs[protocol.MethodRunArchive] = &protocol.Error{Code: protocol.CodeDenied, Message: "run.archive: denied: not the run's owner"}
 	cs = connectorSession(t, f, ScopeWrite)
-	if text, _, failed := try(t, cs, "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": "enhanced"}); !failed ||
+	if text, _, failed := try(t, cs, "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": "standard"}); !failed ||
 		!strings.Contains(text, "member mem-2 holds the run's control") || !strings.Contains(text, "ask that member to release it") {
 		t.Fatalf("control held = %q", text)
 	}
@@ -294,9 +299,10 @@ func TestConnectorPRMerge(t *testing.T) {
 }
 
 func TestConnectorPRCreate(t *testing.T) {
+	expected := protocol.RunGitExpected{Branch: "fix-login", Head: "abcdef0123456789"}
+	target := protocol.RunPRTarget{Repository: "acme/shop", BaseBranch: "main", HeadRepository: "acme/shop", HeadBranch: "fix-login"}
 	f := newFake(t)
-	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "octo"})
-	f.answers[protocol.MethodRunGitStatus] = returns(protocol.RunGitStatusResult{Branch: "fix-login", Head: "abcdef0123456789"})
+	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "octo", Expected: &expected, Target: &target})
 	f.answers[protocol.MethodRunPRCreate] = returns(protocol.RunPRCreateResult{Created: true,
 		PullRequest: &protocol.RunPullRequest{Number: 8, URL: "https://github.com/acme/shop/pull/8", State: "open"}})
 	cs := connectorSession(t, f, ScopeControl)
@@ -309,20 +315,27 @@ func TestConnectorPRCreate(t *testing.T) {
 	if text != "Opened pull request #8 for run run-1: https://github.com/acme/shop/pull/8." || out["created"] != true {
 		t.Fatalf("create = %q %v", text, out)
 	}
-	if got := f.acted(); got.params != `{"run_id":"run-1","expected":{"branch":"fix-login","head":"abcdef0123456789"},"target":{"repository":"","base_branch":"","head_repository":"","head_branch":""},"title":"Fix login","body":"b","draft":true,"expected_login":"octo"}` {
+	// The pull request opened is the one the status lookup resolved, so the
+	// target cannot change after the member approves it.
+	if got := f.acted(); got.params != `{"run_id":"run-1","expected":{"branch":"fix-login","head":"abcdef0123456789"},"target":{"repository":"acme/shop","base_branch":"main","head_repository":"acme/shop","head_branch":"fix-login"},"title":"Fix login","body":"b","draft":true,"expected_login":"octo"}` {
 		t.Fatalf("create sent %s", got.params)
 	}
 	// An open pull request is returned, so a retry opens no second one.
-	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "octo", PullRequest: &protocol.RunPullRequest{Number: 8, State: "open", URL: "u"}})
+	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "octo", Expected: &expected, Target: &target,
+		PullRequest: &protocol.RunPullRequest{Number: 8, State: "open", URL: "u"}})
 	f.calls = nil
 	if text, _ = run(t, cs, "aether_pr_create", map[string]any{"run_id": "run-1", "title": "Fix login", "body": "b"}); !strings.HasPrefix(text, "Run run-1 already has pull request #8 open") ||
 		len(called(f, protocol.MethodRunPRCreate)) != 0 {
 		t.Fatalf("second create = %q", text)
 	}
-	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "octo"})
+	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "octo", Expected: &expected, Target: &target})
 	f.answers[protocol.MethodRunPRCreate] = returns(protocol.RunPRCreateResult{CreationUncertain: true, Error: "gh timed out"})
 	if _, out = run(t, cs, "aether_pr_create", map[string]any{"run_id": "run-1", "title": "Fix login", "body": "b"}); out["write"] != writePending {
 		t.Fatalf("uncertain creation = %v", out)
+	}
+	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Error: "the checkout is on a detached HEAD at abc, so expected and target cannot default; pass both"})
+	if text, _, failed := try(t, cs, "aether_pr_create", map[string]any{"run_id": "run-1", "title": "Fix login", "body": "b"}); !failed || !strings.Contains(text, "detached HEAD") {
+		t.Fatalf("detached checkout = %q", text)
 	}
 }
 
@@ -341,11 +354,31 @@ func TestConnectorMemoryWrites(t *testing.T) {
 	if text, _ = run(t, cs, "aether_memory_pin", map[string]any{"workspace_id": "ws-1", "id": "mem-9", "pin": true}); text != "Pinned note mem-9." {
 		t.Fatalf("pin = %q", text)
 	}
-	if text, _, failed := try(t, cs, "aether_memory_pin", map[string]any{"workspace_id": "ws-1", "id": "mem-9", "pin": false}); !failed || text != "memory.unpin: denied" {
-		t.Fatalf("denied unpin = %q", text)
+	if msg, _, failed := try(t, cs, "aether_memory_pin", map[string]any{"workspace_id": "ws-1", "id": "mem-9", "pin": false}); !failed || msg != "memory.unpin: denied" {
+		t.Fatalf("denied unpin = %q", msg)
 	}
 	if _, out = run(t, cs, "aether_memory_show", map[string]any{"workspace_id": "ws-1", "id": "mem-9"}); strings.Contains(trusted(t, out), injection) {
 		t.Fatalf("note body outside untrusted: %v", out)
+	}
+
+	// Repeating a replacement that went through returns the note that
+	// replaced the old one, though the server refuses to replace it again.
+	f.errs[protocol.MethodMemoryAdd] = &protocol.Error{Code: protocol.CodeConflict, Message: "memory.add: note mem-1 was already replaced"}
+	f.answers[protocol.MethodMemoryShow] = func(raw json.RawMessage) (any, error) {
+		var p protocol.MemoryShowParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		if p.ID == "mem-1" {
+			return protocol.MemoryShowResult{Item: protocol.MemoryItem{ID: "mem-1", SupersededBy: "mem-9"}}, nil
+		}
+		return protocol.MemoryShowResult{Item: protocol.MemoryItem{ID: "mem-9", Kind: "gotcha", Body: "CI needs Docker."}}, nil
+	}
+	if text, out = run(t, cs, "aether_memory_add", map[string]any{"workspace_id": "ws-1", "kind": "gotcha", "text": "CI needs Docker.", "supersedes": "mem-1"}); out["id"] != "mem-9" || out["duplicate"] != true {
+		t.Fatalf("repeated replacement = %q %v", text, out)
+	}
+	if text, _, failed := try(t, cs, "aether_memory_add", map[string]any{"workspace_id": "ws-1", "kind": "gotcha", "text": "Something else.", "supersedes": "mem-1"}); !failed || !strings.Contains(text, "already replaced") {
+		t.Fatalf("a different replacement of a replaced note = %q", text)
 	}
 }
 
@@ -369,11 +402,11 @@ func TestConnectorRunChangesPages(t *testing.T) {
 	for i := range 12 {
 		diff.WriteString("diff --git a/f" + string(rune('a'+i)) + " b/f\n+line\n")
 	}
-	f.answers[protocol.MethodRunGitDiff] = returns(protocol.RunGitDiffResult{Output: protocol.RunRepoCommandOutput{Stdout: strings.TrimSuffix(diff.String(), "\n")}})
+	f.answers[protocol.MethodRunGitDiff] = returns(protocol.RunGitDiffResult{Output: protocol.RunRepoCommandOutput{Stdout: strings.TrimSuffix(diff.String(), "\n"), Truncated: true}})
 	cs := connectorSession(t, f)
 
 	_, out := run(t, cs, "aether_run_changes", map[string]any{"run_id": "run-1", "repo": "ws-2", "include_diff": true})
-	if out["next_commits_offset"] != float64(20) || out["next_diff_file"] != float64(10) || out["diff_files"] != float64(12) || len(out["repos"].([]any)) != 2 {
+	if out["next_commits_offset"] != float64(20) || out["next_diff_file"] != float64(10) || out["diff_files"] != float64(12) || out["diff_truncated"] != true || len(out["repos"].([]any)) != 2 {
 		t.Fatalf("first page = %v", out)
 	}
 	if got := called(f, protocol.MethodRunGitDiff); got[0].params != `{"repo":"ws-2","run_id":"run-1"}` {

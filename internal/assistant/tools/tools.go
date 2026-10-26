@@ -78,7 +78,6 @@ var tiers = map[string]string{
 	protocol.MethodMemberList:               tierRead,
 	protocol.MethodIntegrationList:          tierRead,
 	protocol.MethodIntegrationShow:          tierRead,
-	protocol.MethodRunGitStatus:             tierRead,
 	protocol.MethodMemoryShow:               tierRead,
 	protocol.MethodMemoryAdd:                tierConfirmed,
 	protocol.MethodRunRelaunch:              tierConfirmed,

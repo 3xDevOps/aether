@@ -308,7 +308,11 @@ func (s *Server) runPRStatus(ctx context.Context, member domain.MemberID, raw js
 	if status.PullRequest != nil {
 		s.recordPR(ctx, call, status.PullRequest, false)
 	}
-	return protocol.RunPRStatusResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(status.PullRequest), Output: runrepo.FailureOutput(status.Output, err), Error: repoError(err), Actual: repoActual(err)}, nil
+	result := protocol.RunPRStatusResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: string(call.account), PullRequest: publicPR(status.PullRequest), Output: runrepo.FailureOutput(status.Output, err), Error: repoError(err), Actual: repoActual(err)}
+	if err == nil {
+		result.Expected, result.Target = &p.Expected, &p.Target
+	}
+	return result, nil
 }
 
 func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -319,15 +323,6 @@ func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw js
 	call, err := s.runRepoAuthority(ctx, member, p.RunID, p.Repo, true)
 	if err != nil {
 		return nil, rpcError(err)
-	}
-	if p.Target == (protocol.RunPRTarget{}) && p.Expected != (protocol.RunGitExpected{}) {
-		perr, repoErr := s.prDefaults(ctx, call, &p.Expected, &p.Target)
-		if perr != nil {
-			return nil, perr
-		}
-		if repoErr != nil {
-			return protocol.RunPRCreateResult{Repo: p.Repo, AccountMemberID: string(call.account), Output: runrepo.FailureOutput(runrepo.CommandOutput{}, repoErr), Error: repoError(repoErr), Actual: repoActual(repoErr)}, nil
-		}
 	}
 	created, err := call.native.CreatePR(ctx, call.execution, runrepo.PRCreateRequest{Expected: p.Expected, Target: runrepo.PRTarget(p.Target), Title: p.Title, Body: p.Body, Draft: p.Draft, ExpectedLogin: p.ExpectedLogin})
 	if created.PullRequest != nil {
