@@ -173,6 +173,11 @@ or quota, no report (the turn ended without one), or disconnected. Cite the
 recovery: answer it, read the failure, wait or check CI, message it, sign in
 again, or resume it.
 
+A `waiting-agents` run whose reason reads `waiting for N child runs` waits on
+child runs it started. Say what `aether_get_run` shows of them; no tool lists
+them. Never change the member's child run setting. To suggest delegating,
+link Settings > Child runs (`?page=settings&id=children`).
+
 ### Review through merge
 
 1. Get the review evidence: the run's history, its changes and the PR.
