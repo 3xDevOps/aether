@@ -251,6 +251,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
         terminalCacheEpoch: s.terminalCacheEpoch + 1,
         sessionLogs: {},
         laneHistory: {},
+        traceLogs: {},
       })),
     setHydrated: (hydrated, error = null) =>
       set({ hydrated, hydrationError: error }),

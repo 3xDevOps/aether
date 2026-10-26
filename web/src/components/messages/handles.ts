@@ -27,9 +27,15 @@ export function workerName(taskIndex: number, attempt: number, firstAttempt: num
 }
 
 const requested = new Map<string, Set<string>>()
+let reads = 0
+const shown = new Map<string, number>()
 
+/** Reads can overlap and answer out of order; an answer to a read asked before the one shown is dropped. */
 export async function loadMission(missionID: string): Promise<void> {
+  const read = ++reads
   const result = await api.missionShow(missionID)
+  if (read < (shown.get(missionID) ?? 0)) return
+  shown.set(missionID, read)
   useStore.getState().setMissionDetail({
     mission: result.mission,
     tasks: result.tasks,

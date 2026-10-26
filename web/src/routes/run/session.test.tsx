@@ -343,6 +343,26 @@ describe('the Enhanced session view', () => {
     expect(log.scrollTo).toHaveBeenLastCalledWith({ top: log.scrollTop, behavior: 'instant' })
   })
 
+  it('scrolls to a turn’s prompt another view asks for after a room message took its row', async () => {
+    SizedObserver.viewport = 240
+    const [start, prompt] = [item('turn_start', 1), say(1, 'user', 'Round the totals')]
+    open()
+    acpSocket().open({}, [
+      start, prompt, ...Array.from({ length: 40 }, (_, n) => say(1, 'assistant', `Reply ${n}`)),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    log.scrollTo = ((to: ScrollToOptions) => {
+      log.scrollTop = to.top ?? log.scrollTop
+      fireEvent.scroll(log)
+    }) as typeof log.scrollTo
+    act(() => useStore.getState().upsertRoomMessage(roomMessage({ id: 'msg_first', kind: 'steer_request', body: 'Round the totals', agent_delivery: 'delivered', created_at: prompt.time })))
+    expect(await within(log).findByText('Reply 39')).toBeDefined()
+    expect(within(log).queryByText('Round the totals')).toBeNull()
+    act(() => useStore.getState().revealSessionRow('run_1', `message:1:${prompt.message!.message_id}`))
+    expect(await within(log).findByText('Round the totals')).toBeDefined()
+  })
+
   it('keeps a queued copy of the oldest loaded prompt as its own row', async () => {
     const [gone, prompt] = [item('turn_start', 1), say(1, 'user', 'continue')]
     vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(Promise.withResolvers<SessionHistory>().promise)

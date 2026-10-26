@@ -825,6 +825,7 @@ export async function applyEvent(
   store.getState().appendLiveEvent(ev)
   store.getState().appendLaneEvent(ev)
   store.getState().appendSessionEvent(ev)
+  store.getState().appendTraceEvent(ev)
   store.getState().noteSeq(ev.seq)
   return true
 }

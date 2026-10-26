@@ -270,3 +270,51 @@
     }
   }
 }
+
+/* The Trace view's axis variables glide on a zoom or a scale step. */
+@property --trace-scale {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --trace-origin {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+@layer components {
+  .trace-axis {
+    transition:
+      --trace-scale var(--duration-glide) var(--ease-glide),
+      --trace-origin var(--duration-glide) var(--ease-glide);
+  }
+
+  /* A running bar: the live shimmer's band crosses the fill. */
+  .trace-live {
+    background-image: linear-gradient(
+      90deg,
+      transparent calc(var(--shimmer-pos) - 28px),
+      color-mix(in srgb, var(--state-working) 35%, transparent) var(--shimmer-pos),
+      transparent calc(var(--shimmer-pos) + 28px)
+    );
+    animation: live-shimmer var(--duration-pulse) var(--ease-linear) infinite;
+  }
+
+  /* History before the first held item: a hatch, so it never reads as idle time. */
+  .trace-unknown {
+    background-image: repeating-linear-gradient(135deg, var(--seam) 0 1px, transparent 1px 5px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .trace-axis {
+      transition: none;
+    }
+
+    .trace-live {
+      animation: none;
+      background-image: none;
+    }
+  }
+}

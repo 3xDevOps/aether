@@ -95,8 +95,8 @@ function withSteers(rows: SessionRow[], room: RoomMessage[], floor: number): Ses
       if (used.has(messageID)) return null
       used.add(messageID)
     }
-    if (!steer) return messageID ? { ...row, id: messageID } : row
-    return { ...row, id: steer.id, body: steer.body, images: roomImages(steer) ?? row.images, files: roomFiles(steer) ?? row.files, authorID: steer.actor_id, via: steer.via, ...deliveryOf(steer) }
+    if (!steer) return messageID ? { ...row, id: messageID, itemID: row.id } : row
+    return { ...row, id: steer.id, itemID: row.id, body: steer.body, images: roomImages(steer) ?? row.images, files: roomFiles(steer) ?? row.files, authorID: steer.actor_id, via: steer.via, ...deliveryOf(steer) }
   }).filter((row): row is SessionRow => row !== null)
   const waiting = steers
     .filter((m) => !used.has(m.id) && m.state !== 'cancelled' && (Date.parse(m.created_at) >= floor || deliveryOf(m).delivery === 'Queued'))
@@ -282,6 +282,15 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
     if (active && pinned.current && count > 0) list.current?.scrollToIndex(count - 1, { align: 'end' })
   }
   useLayoutEffect(() => follow.current(), [active, count])
+  const reveal = useStore((s) => s.sessionReveal[run.id])
+  useLayoutEffect(() => {
+    if (!active || !reveal) return
+    useStore.getState().revealSessionRow(run.id, undefined)
+    const index = flat.findIndex((item) => item.key === reveal || (item.kind === 'row' && item.row.kind === 'user' && item.row.itemID === reveal))
+    if (index === -1) return
+    pin(false)
+    list.current?.scrollToIndex(index + Number(older), { align: 'center' })
+  }, [active, reveal, flat, older, run.id])
   useEffect(() => {
     const node = viewport.current
     if (!node) return

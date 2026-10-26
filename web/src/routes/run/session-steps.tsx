@@ -38,7 +38,7 @@ function clock(ms: number): string {
 }
 
 function Elapsed({ since }: { since: string }) {
-  useSecondClock()
+  useSecondClock(true)
   return <>{clock(Date.now() - Date.parse(since))}</>
 }
 
