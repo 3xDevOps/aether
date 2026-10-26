@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
-	"github.com/modelcontextprotocol/go-sdk/oauthex"
 
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 )
@@ -35,7 +34,7 @@ func (s *Service) registerUniversal(mux *http.ServeMux) {
 	mux.HandleFunc(edgeproto.PathUniversalMCPToken, s.universalToken)
 	mux.HandleFunc(edgeproto.PathUniversalMCPAuthorize, s.universalAuthorize)
 	mux.Handle("GET "+edgeproto.PathUniversalResourceMetadata, auth.ProtectedResourceMetadataHandler(
-		&oauthex.ProtectedResourceMetadata{Resource: base, AuthorizationServers: []string{base}}))
+		edgeproto.ConnectorResourceMetadata(base)))
 	mux.HandleFunc("GET "+edgeproto.PathUniversalAuthServerMetadata, func(w http.ResponseWriter, _ *http.Request) {
 		writeNoStoreJSON(w, http.StatusOK, edgeproto.ConnectorAuthServerMetadata(base))
 	})

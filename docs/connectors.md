@@ -163,7 +163,8 @@ the `aether` CLI instead.
 
 The consent page also sets the connector's scopes. ChatGPT and
 Claude do not choose them; the server ignores any scope they request other
-than `offline_access`.
+than `offline_access`, the only one the OAuth metadata lists in
+`scopes_supported`.
 
 | Scope | On the page | Grants |
 | --- | --- | --- |

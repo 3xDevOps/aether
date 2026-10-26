@@ -156,6 +156,17 @@ func VerifyConnectorAssertion(edgeKey ed25519.PublicKey, signed, issuer, serverI
 	return a, nil
 }
 
+// ConnectorScopes are the scopes a connector client may request. The
+// member picks read, write and control on the consent page, so a client
+// asks only for offline_access, a refresh token.
+var ConnectorScopes = []string{"offline_access"}
+
+// ConnectorResourceMetadata is the RFC 9728 metadata of the connector
+// whose URL, resource and authorization server, is base.
+func ConnectorResourceMetadata(base string) *oauthex.ProtectedResourceMetadata {
+	return &oauthex.ProtectedResourceMetadata{Resource: base, AuthorizationServers: []string{base}, ScopesSupported: ConnectorScopes}
+}
+
 // ConnectorAuthServerMetadata is the RFC 8414 metadata of the connector
 // authorization server whose issuer is base: client_id metadata documents
 // instead of registration, PKCE with S256, and iss on every authorization
@@ -172,7 +183,7 @@ func ConnectorAuthServerMetadata(base string) any {
 		AuthorizationEndpoint:                      base + "/authorize",
 		TokenEndpoint:                              base + "/token",
 		ClientIDMetadataDocumentSupported:          true,
-		ScopesSupported:                            []string{"offline_access"},
+		ScopesSupported:                            ConnectorScopes,
 		ResponseTypesSupported:                     []string{"code"},
 		GrantTypesSupported:                        []string{"authorization_code", "refresh_token"},
 		TokenEndpointAuthMethodsSupported:          []string{"none"},

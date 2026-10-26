@@ -217,7 +217,8 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 			}
 			var prm, asm map[string]any
 			if resp, body = mcpRequest(t, http.MethodGet, metadata, nil, nil); resp.StatusCode != http.StatusOK || json.Unmarshal([]byte(body), &prm) != nil ||
-				prm["resource"] != base || fmt.Sprint(prm["authorization_servers"]) != "["+base+"]" {
+				prm["resource"] != base || fmt.Sprint(prm["authorization_servers"]) != "["+base+"]" ||
+				fmt.Sprint(prm["scopes_supported"]) != "[offline_access]" {
 				t.Fatalf("protected resource metadata: %s %s", resp.Status, body)
 			}
 			if resp, body = mcpRequest(t, http.MethodGet, h.relayURL+edgeproto.PathUniversalAuthServerMetadata, nil, nil); resp.StatusCode != http.StatusOK ||

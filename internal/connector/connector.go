@@ -30,7 +30,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"golang.org/x/time/rate"
 
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
@@ -160,7 +159,7 @@ func New(cfg Config) (http.Handler, error) {
 	})
 	// The edge serves the universal URL's metadata itself.
 	h.mux.Handle("/.well-known/oauth-protected-resource"+h.own.path, auth.ProtectedResourceMetadataHandler(
-		&oauthex.ProtectedResourceMetadata{Resource: h.own.base, AuthorizationServers: []string{h.own.base}}))
+		edgeproto.ConnectorResourceMetadata(h.own.base)))
 	h.mux.HandleFunc("GET /.well-known/oauth-authorization-server"+h.own.path, func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, edgeproto.ConnectorAuthServerMetadata(h.own.base))
 	})
