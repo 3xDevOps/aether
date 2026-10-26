@@ -81,7 +81,7 @@ prints it after the state, for example
 `running -> needs-attention (waiting for 2 workers) · waiting-agents by
 workers`. The dashboard ends each state's tooltip with it, for example
 `Waiting for 2 workers since 3 minutes ago. Mail from its agents can wake it.
-Why: its swarm workers are live or have unread mail for it.`
+Why: its swarm workers or child runs are live or have unread mail for it.`
 
 An agent's `blocked` report reads `blocked: <summary>`, and its question reads
 `needs input: <question>`.

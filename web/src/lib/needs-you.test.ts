@@ -248,6 +248,7 @@ describe('needs you conditions', () => {
     ['waiting', 'no update for 30m: two workers on the parser', 'ended', 'No update for 30m: two workers on the parser'],
     ['waiting-ci', 'no update for 30m: CI on PR 12', 'waiting-ci', 'No update for 30m: CI on PR 12'],
     ['waiting-agents', 'waiting for 2 workers', 'waiting-agents', 'Waiting for 2 workers'],
+    ['waiting-agents', 'waiting for 1 child run', 'waiting-agents', 'Waiting for 1 child run'],
     ['idle', 'stalled: no output or file changes for 10m0s', 'ended', 'No output or file changes for 10m0s'],
     ['idle', 'turn cancelled', 'ended', 'Turn cancelled'],
     ['waiting-agents', 'waiting on 3 workers', 'waiting-agents', 'waiting on 3 workers'],

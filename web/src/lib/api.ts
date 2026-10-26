@@ -9,6 +9,9 @@ import type {
   AgentRemoveResult,
   AgentInfo,
   BudgetReport,
+  ChildLimits,
+  ChildSettings,
+  ChildSettingsParams,
   Connector,
   ConnectorCode,
   CoordMessagesListResult,
@@ -76,6 +79,8 @@ import type {
   RepoFastForwardResult,
   RepoPushResult,
   RoomDecideResult,
+  RunChildrenResult,
+  RunChildrenSetting,
   RoomMessageListResult,
   RoomPostResult,
   RoomStatusResult,
@@ -545,8 +550,18 @@ export const api = {
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
     extra_workspace_ids?: string[]
+    /** The run's own child-run setting; absent follows the owner's. */
+    children?: 'on' | 'off'
   }) => call<{ run: Run }>('run.launch', params).then((r) => r.run),
   runKill: (runID: string) => call<unknown>('run.kill', { run_id: runID }),
+  childSettings: (params: ChildSettingsParams = {}) => call<ChildSettings>('child.settings', params),
+  runChildren: (runID: string) => call<RunChildrenResult>('run.children', { run_id: runID }),
+  runChildrenAllow: (runID: string, children: RunChildrenSetting) =>
+    call<{ children: RunChildrenSetting }>('run.children.allow', { run_id: runID, children }),
+  runChildDetach: (runID: string) => call<unknown>('run.child.detach', { run_id: runID }),
+  /** Without limits it reads them; an admin's limits change them. */
+  workspaceChildLimits: (workspaceID: string, limits: Partial<ChildLimits> = {}) =>
+    call<ChildLimits>('workspace.child_limits', { workspace_id: workspaceID, ...limits }),
   runRelease: (runID: string) => call<Record<string, never>>('run.release', { run_id: runID }),
   runGitStatus: (params: RunGitStatusParams) =>
     call<RunGitStatusResult>('run.git.status', params),

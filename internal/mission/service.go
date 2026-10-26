@@ -1154,7 +1154,13 @@ func (s *Service) List(ctx context.Context, p protocol.MissionListParams) (proto
 }
 
 func (s *Service) Show(ctx context.Context, p protocol.MissionShowParams) (protocol.MissionShowResult, error) {
-	m, err := s.cfg.Missions.GetMission(ctx, domain.MissionID(p.MissionID))
+	var m *domain.Mission
+	var err error
+	if p.MissionID == "" && p.QuestionID != "" {
+		m, err = s.missionForQuestion(ctx, domain.MissionQuestionID(p.QuestionID))
+	} else {
+		m, err = s.cfg.Missions.GetMission(ctx, domain.MissionID(p.MissionID))
+	}
 	if err != nil {
 		return protocol.MissionShowResult{}, err
 	}

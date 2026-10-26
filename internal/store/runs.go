@@ -110,7 +110,8 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		         ? AND ? IN (SELECT run_id FROM mission_attempts WHERE run_id IS NOT NULL
 		                     UNION ALL SELECT current_integrator_run_id FROM missions WHERE current_integrator_run_id IS NOT NULL
 		                     UNION ALL SELECT initial_run_id FROM mission_create_receipts
-		                     UNION ALL SELECT run_id FROM mission_integrator_replacements))`,
+		                     UNION ALL SELECT run_id FROM mission_integrator_replacements
+		                     UNION ALL SELECT run_id FROM run_children WHERE mission_id <> ''))`,
 		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.HomeMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,
@@ -142,8 +143,10 @@ func scanRun(row interface{ Scan(...any) error }) (*domain.Run, error) {
 		&r.LastCommit, &lastCommitAt, &r.HarnessSessionID, &r.BaseCommit, &r.BaseBranch,
 		&r.BaseSource, &baseCheckedAt, &archivedAt, &r.OutcomeUnseen, &r.FinishUnopened, &statusChangedAt,
 		&r.Review, &reviewChangedAt, &r.ACP,
-		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.Via, &r.UnansweredQuestions,
-		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked); err != nil {
+		&r.RequestedAccountMemberID, &r.Fallback.Disabled, &fallbackOrder, &r.Model, &r.Via,
+		&r.Children, &r.ChildrenSetBy, &r.ChildRefused, &r.UnansweredQuestions,
+		&r.MissionID, &r.MissionRole, &r.IntegratorRunID, &r.UnackedMessages, &oldestUnacked,
+		&r.ParentRunID, &r.RootRunID, &r.ChildPurpose, &r.Detached); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(fallbackOrder), &r.Fallback.Order); err != nil {
@@ -169,7 +172,8 @@ const runCols = `runs.id, runs.workspace_id, runs.member_id, runs.account_member
 	runs.reason, runs.activity, runs.status_seq, runs.branch, runs.worktree, runs.protected, runs.created_at, runs.started_at, runs.finished_at, runs.profile_snapshot_id,
 	runs.title, runs.last_commit, runs.last_commit_at, runs.harness_session_id, runs.base_commit, runs.base_branch, runs.base_source,
 	runs.base_checked_at, runs.archived_at, runs.outcome_unseen, runs.finish_unopened, runs.status_changed_at,
-	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model, runs.via`
+	runs.review, runs.review_changed_at, runs.acp, COALESCE(runs.requested_account_member_id, ''), runs.fallback_disabled, runs.fallback_order, runs.model, runs.via,
+	runs.children, runs.children_set_by, runs.child_refused`
 
 // runSnapshotQuery returns one grouped query for a run snapshot. Questions
 // with a denied/cancelled state are not actionable, and a correlated reply
@@ -183,8 +187,12 @@ func runSnapshotQuery(where string) string {
 		     WHEN worker_mission.id IS NOT NULL THEN 'worker' ELSE '' END,
 		COALESCE(integrator.current_integrator_run_id, worker_mission.current_integrator_run_id, ''),
 		(SELECT COUNT(*) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `),
-		(SELECT MIN(created_at) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `)
+		(SELECT MIN(created_at) FROM run_messages WHERE run_messages.to_run = runs.id AND ` + unreadMessage + `),
+		COALESCE(child.parent_run_id, CASE WHEN integrator.id IS NULL THEN worker_mission.current_integrator_run_id END, ''),
+		COALESCE(child.root_run_id, CASE WHEN integrator.id IS NULL THEN worker_mission.current_integrator_run_id END, ''),
+		COALESCE(child.purpose, ''), COALESCE(child.detached, 0)
 		FROM runs
+		LEFT JOIN run_children child ON child.run_id = runs.id
 		LEFT JOIN missions integrator ON integrator.current_integrator_run_id = runs.id
 		LEFT JOIN missions worker_mission ON worker_mission.id = (
 			SELECT MIN(attempt.mission_id) FROM mission_attempts attempt
@@ -627,12 +635,24 @@ func (d *DB) SetRunReview(ctx context.Context, id domain.RunID, review domain.Ru
 // (foreign_keys pragma is on): a bogus member surfaces as ErrConflict
 // via mapConstraint rather than being silently accepted.
 func (d *DB) TransferRun(ctx context.Context, id domain.RunID, to domain.MemberID) error {
-	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE runs SET member_id = ? WHERE id = ?`, to, id))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: transfer run: %w", mapConstraint(err, ErrNotFound))
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: transfer run: %w", err)
 	}
-	return err
+	defer func() { _ = tx.Rollback() }()
+	if err = notFoundOnZeroRows(tx.ExecContext(ctx, `UPDATE runs SET member_id = ? WHERE id = ?`, to, id)); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return fmt.Errorf("store: transfer run: %w", mapConstraint(err, ErrNotFound))
+	}
+	if _, err = tx.ExecContext(ctx, detachTransferred, id, to); err != nil {
+		return fmt.Errorf("store: transfer run: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("store: transfer run: %w", err)
+	}
+	return nil
 }
 
 // SetRunMode updates only the run's launch mode and whether it runs over ACP.

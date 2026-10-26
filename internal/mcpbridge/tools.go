@@ -7,6 +7,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/coordtransport"
+	"github.com/3xDevOps/Aether/internal/ops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
@@ -23,10 +24,6 @@ const (
 	toolReply  = "aether_reply"
 	toolReport = "aether_report"
 )
-
-// MetaErrorCode is the result-metadata key the bridge reports an Aether
-// error code under when a tool call fails.
-const MetaErrorCode = "aether/error_code"
 
 // metaCallID is the request-metadata key the transport stamps an inbox
 // call's JSON-RPC id under on its way to the handler (see gate.go).
@@ -202,6 +199,6 @@ func failed(err error) *mcp.CallToolResult {
 	if code == 0 {
 		code = protocol.CodeInternal
 	}
-	res.Meta = mcp.Meta{MetaErrorCode: code}
+	res.Meta = mcp.Meta{ops.MetaErrorCode: code}
 	return res
 }

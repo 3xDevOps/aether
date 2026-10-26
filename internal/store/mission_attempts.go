@@ -675,13 +675,15 @@ func (d *DB) AcceptSubmission(ctx context.Context, id domain.SubmissionID, accep
 	return &domain.Acceptance{SubmissionID: id, MissionID: missionID, TaskID: taskID, TaskRevision: taskRevision, AcceptedSetVersion: newVersion, IntegratorGeneration: generation, AcceptedByRunID: acceptedBy, ScopeDisposition: scopeDisposition, AcceptedAt: now}, nil
 }
 
-// IntegratorWait is what an integrator's swarm still owes it.
+// IntegratorWait is what a parked run's swarm workers and attached child
+// runs still owe it. Unread counts their mail since the turn started.
 type IntegratorWait struct {
-	Workers int
-	Unread  int
+	Workers  int
+	Children int
+	Unread   int
 }
 
-func (w IntegratorWait) Live() bool { return w.Workers > 0 || w.Unread > 0 }
+func (w IntegratorWait) Live() bool { return w.Workers > 0 || w.Children > 0 || w.Unread > 0 }
 
 func (d *DB) IntegratorWaiting(ctx context.Context, run domain.RunID, since time.Time) (IntegratorWait, error) {
 	var after int64
@@ -706,5 +708,10 @@ func (d *DB) IntegratorWaiting(ctx context.Context, run domain.RunID, since time
 	if err != nil {
 		return IntegratorWait{}, fmt.Errorf("store: integrator waiting: %w", err)
 	}
+	children, unread, err := d.UnfinishedChildren(ctx, run, since)
+	if err != nil {
+		return IntegratorWait{}, err
+	}
+	w.Children, w.Unread = children, w.Unread+unread
 	return w, nil
 }
