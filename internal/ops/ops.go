@@ -135,7 +135,6 @@ type fieldDefault struct {
 	description string
 }
 
-// ReadOnly reports whether the op only reads.
 func (o Op) ReadOnly() bool {
 	return o.Scope == ScopeRead || (o.Scope == "" && o.Tier == TierRead)
 }
@@ -210,7 +209,6 @@ func (o Op) hints(destructive, openWorld bool) Op {
 	return o
 }
 
-// offer sets the op's assistant tier.
 func (o Op) offer(t Tier) Op {
 	o.Tier = t
 	return o
@@ -290,7 +288,6 @@ func (o Op) description(s Surface) string {
 // Ops is the registry: every op either surface serves.
 var Ops = slices.Concat(readOps, writeOps, controlOps, assistantOps)
 
-// Lookup is the op named name.
 func Lookup(name string) (Op, bool) {
 	i := slices.IndexFunc(Ops, func(o Op) bool { return o.Name == name })
 	if i < 0 {

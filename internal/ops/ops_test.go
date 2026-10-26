@@ -133,3 +133,32 @@ func TestAssistantSurface(t *testing.T) {
 		t.Fatalf("an unknown run = %q %v", text, call.Meta)
 	}
 }
+
+// A keyed answer retried after its question stopped waiting repeats the
+// key, so the server returns the saved answer instead of a not-found.
+func TestKeyedAnswerRetry(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodMissionQuestionAnswer] = returns(protocol.MissionQuestionResult{})
+	f.answers[protocol.MethodRunRoomPost] = returns(protocol.RunRoomPostResult{})
+	cs := connectorSession(t, f, ScopeWrite)
+	args := map[string]any{"run_id": "run-1", "answer_id": "q-1", "answer": "main", "idempotency_key": "a1"}
+	if _, out := run(t, cs, "aether_answer", args); out["idempotency_key"] != "a1" {
+		t.Fatalf("a keyed retry = %v", out)
+	}
+	if got := f.acted(); got.method != protocol.MethodMissionQuestionAnswer || got.params != `{"question_id":"q-1","answer":"main","idempotency_key":"a1"}` {
+		t.Fatalf("retry called %+v", got)
+	}
+
+	f.calls = nil
+	f.errs[protocol.MethodMissionQuestionAnswer] = &protocol.Error{Code: protocol.CodeNotFound, Message: "question q-1 not found"}
+	run(t, cs, "aether_answer", args)
+	posts := called(f, protocol.MethodRunRoomPost)
+	if len(posts) != 1 || posts[0].params != `{"workspace_id":"ws-1","run_id":"run-1","kind":"reply","body":"main","correlation_id":"q-1","idempotency_key":"a1"}` {
+		t.Fatalf("a keyed teammate reply retry posted %+v", posts)
+	}
+
+	delete(args, "idempotency_key")
+	if text, _, failed := try(t, cs, "aether_answer", args); !failed || !strings.Contains(text, "nothing pending") {
+		t.Fatalf("a keyless answer to nothing pending = %q", text)
+	}
+}

@@ -376,7 +376,10 @@ func (s *Server) summarizeSwarmAnswer(ctx context.Context, req protocol.Request,
 			truncate(it.Message.Body), truncate(p.Answer))
 		return nil
 	}
-	return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: no pending swarm question %s", req.Method, p.QuestionID)}
+	// A keyed retry of an answer the server may already hold: the
+	// question is no longer pending, so its swarm is unknown here.
+	c.Summary = fmt.Sprintf("Answer swarm question %s again, which no longer waits: %q", p.QuestionID, truncate(p.Answer))
+	return nil
 }
 
 func (s *Server) attention(ctx context.Context, workspaceID string) ([]protocol.AttentionItem, *protocol.Error) {

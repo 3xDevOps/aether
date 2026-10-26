@@ -101,7 +101,7 @@ var writeOps = []Op{
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunInject),
 	opOf("aether_answer", "Answer question", ScopeWrite, true, nextAttention,
 		"Use this when an aether_needs_attention item's answer_with is aether_answer: an agent's question takes option_id (and values), a swarm or teammate question takes answer. The agent goes on with the answer, which cannot be taken back.", answer).hints(true, true).
-		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost, protocol.MethodRunInputRespond),
+		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost, protocol.MethodRunInputRespond, protocol.MethodRunGet),
 	opOf("aether_pause_run", "Pause run", ScopeWrite, true, nextRuns,
 		"Use this when the user wants a run paused: its container freezes until aether_resume_run continues it.", pauseRun(protocol.MethodRunPause, "Paused")).
 		offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodRunPause, protocol.MethodRunGet),
@@ -291,7 +291,7 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	}
 	res, finished, err := launch[protocol.RunLaunchResult](ctx, c, protocol.MethodRunLaunch, params, done)
 	if err != nil && finished {
-		return "", nil, err
+		return "", nil, retryable(err, params.IdempotencyKey)
 	}
 	if res.Run.ID == "" {
 		return starting("aether_launch_run", params.IdempotencyKey, err)
@@ -408,19 +408,20 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	}
 	res, finished, err := launch[protocol.MissionCreateResult](ctx, c, protocol.MethodMissionCreate, params, done)
 	if err != nil && finished {
-		return "", nil, err
+		return "", nil, retryable(err, params.IdempotencyKey)
 	}
 	m := res.Mission
 	if m.ID == "" {
 		return starting("aether_launch_swarm", params.IdempotencyKey, err)
 	}
 	out := swarmLaunched(m, l)
+	out["idempotency_key"] = params.IdempotencyKey
 	switch {
 	case dup:
 		out["duplicate"] = true
 		return fmt.Sprintf("You are already launching this objective; returning swarm %s instead of launching it again. Pass an idempotency_key to launch another.", m.ID), out, nil
 	case !finished:
-		out["state"], out["idempotency_key"], out["write"] = "starting", params.IdempotencyKey, writePending
+		out["state"], out["write"] = "starting", writePending
 		return fmt.Sprintf("Swarm %s is starting; its integrator is run %s.", m.ID, cmp.Or(m.CurrentIntegratorRunID, "not started yet")), out, nil
 	}
 	return fmt.Sprintf("Launched swarm %s (%s); its integrator is run %s.", m.ID, m.Phase, cmp.Or(m.CurrentIntegratorRunID, "not started yet")), out, nil
@@ -528,6 +529,10 @@ func invalid(format string, args ...any) error {
 
 func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 	it, err := pendingItem(ctx, c.read, in.RunID, in.AnswerID)
+	var perr *protocol.Error
+	if errors.As(err, &perr) && perr.Code == protocol.CodeNotFound && in.IdempotencyKey != "" && in.Answer != "" {
+		return answerAgain(ctx, c, in, err)
+	}
 	if err != nil {
 		return "", nil, err
 	}
@@ -564,6 +569,33 @@ func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 		return fmt.Sprintf("Run %s's question: %s.", in.RunID, res.Status), map[string]any{"run_id": in.RunID, "status": res.Status}, nil
 	}
 	return "", nil, invalid("this item is a %s, which is answered with %s", it.Kind, answerWith(it))
+}
+
+// answerAgain repeats a keyed swarm or teammate answer whose question is
+// no longer pending, so a retry after a lost response gets the saved answer
+// back: the server returns what the key already did. notPending is the
+// failure when the answer_id is neither a swarm question nor a run.
+func answerAgain(ctx context.Context, c calls, in answerInput, notPending error) (string, any, error) {
+	key := in.IdempotencyKey
+	var q protocol.MissionQuestionResult
+	err := c.act(ctx, protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{QuestionID: in.AnswerID, Answer: in.Answer, IdempotencyKey: key}, &q)
+	var perr *protocol.Error
+	switch {
+	case err == nil:
+		return fmt.Sprintf("Answered the swarm question %s.", in.AnswerID), map[string]any{"run_id": in.RunID, "answered": true, "idempotency_key": key}, nil
+	case !errors.As(err, &perr) || perr.Code != protocol.CodeNotFound:
+		return "", nil, retryable(err, key)
+	}
+	r, err := getRunRecord(ctx, c.read, in.RunID)
+	if err != nil {
+		return "", nil, notPending
+	}
+	var res protocol.RunRoomPostResult
+	if err := c.act(ctx, protocol.MethodRunRoomPost, protocol.RunRoomPostParams{WorkspaceID: r.WorkspaceID, RunID: r.ID,
+		Kind: protocol.RoomMessageReply, Body: in.Answer, CorrelationID: in.AnswerID, IdempotencyKey: key}, &res); err != nil {
+		return "", nil, retryable(err, key)
+	}
+	return fmt.Sprintf("Replied on run %s.", r.ID), map[string]any{"run_id": r.ID, "answered": true, "idempotency_key": key}, nil
 }
 
 // acted reports a run action that succeeded with the run's state after
