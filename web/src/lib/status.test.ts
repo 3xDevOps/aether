@@ -100,7 +100,7 @@ describe('run presentation', () => {
     })
     expect(shown({ status: 'running', state: 'waiting-tools', reason: 'deploy running' }).next).toBe('It resumes on its next message.')
     expect(shown({ status: 'running', state: 'waiting-agents' })).toEqual({
-      state: 'waiting-agents', reason: 'Waiting for its agents to report', next: 'Mail from its agents wakes it.',
+      state: 'waiting-agents', reason: 'Waiting for its agents to report', next: 'Mail from its agents can wake it.',
     })
     expect(shown({ status: 'running', state: 'waiting-tools', reason: 'working in background: 1 task' })).toEqual({
       state: 'waiting-tools', reason: 'Working in background: 1 task', next: 'Claude Code resumes it when a background task ends.',
@@ -279,7 +279,7 @@ describe('state words', () => {
     expect(stateWords(workers)).toEqual({ label: 'Waiting for 2 workers' })
     expect(stateLine(workers)).toBe('Waiting for 2 workers')
     expect(stateTitle(workers, since, now)).toBe(
-      'Waiting for 2 workers since 42 minutes ago. Mail from its agents wakes it. Why: its swarm workers are live.',
+      'Waiting for 2 workers since 42 minutes ago. Mail from its agents can wake it. Why: its swarm workers are live.',
     )
     expect(stateLine(shown({ status: 'needs-attention', state: 'waiting-agents', reason: 'reviewers on PR 12' }))).toBe('Waiting for agents · reviewers on PR 12')
   })
@@ -291,9 +291,13 @@ describe('state words', () => {
     expect(stateLine(shown({ status: 'needs-attention', state: 'waiting-tools', reason: 'deploy to staging' }))).toBe('Waiting for process · deploy to staging')
   })
 
-  it('carries the cause only while the run is live and not paused', () => {
+  it('carries the cause only while the run shows the state the server chose', () => {
     expect(shown({ status: 'needs-attention', state: 'waiting', cause: 'turn-end' }).cause).toBe('turn-end')
     expect(shown({ status: 'completed', cause: 'report' }).cause).toBeUndefined()
+    // A worker's question waits on its integrator, an agent: the server's human cause does not apply.
+    const asking = shown({ status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?', mission_role: 'worker', cause: 'human' })
+    expect(asking).toMatchObject({ state: 'waiting-agents', reason: 'Waiting for the integrator' })
+    expect(asking.cause).toBeUndefined()
     expect(stateTitle({ state: 'ended', reason: 'Turn ended without a report', cause: 'turn-end' }, since, now)).toBe('Turn ended since 42 minutes ago. Why: the turn ended.')
     expect(stateTitle({ state: 'working', reason: 'Agent working', cause: 'something-new' as never }, since, now)).toBe('Working since 42 minutes ago. Why: something-new.')
   })

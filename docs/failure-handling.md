@@ -80,7 +80,7 @@ run's record carries its latest `cause` too. `aether timeline <run-id>`
 prints it after the state, for example
 `running -> needs-attention (waiting for 2 workers) · waiting-agents by
 workers`. The dashboard ends each state's tooltip with it, for example
-`Waiting for 2 workers since 3 minutes ago. Mail from its agents wakes it.
+`Waiting for 2 workers since 3 minutes ago. Mail from its agents can wake it.
 Why: its swarm workers are live.`
 
 An agent's `blocked` report reads `blocked: <summary>`, and its question reads
@@ -122,9 +122,10 @@ waiting on agents, CI or a process and a reported success.
 | A swarm worker | Only for its `blocked` report | Its other requests go to its integrator. |
 
 A need is announced once: opening the run or restarting the server does not
-repeat it. When it ends, each browser that was notified gets a silent
-`No longer needs you` in place of the notification, and the desktop app
-closes its own.
+repeat it. When it ends, or the run is handed to another member, each
+browser that showed it gets a silent `No longer needs you` in place of the
+notification, and the desktop app closes its own. A server restart forgets
+which browsers showed a need, so one announced before it is not replaced.
 
 ## Recover from disk pressure
 

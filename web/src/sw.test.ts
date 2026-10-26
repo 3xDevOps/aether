@@ -19,7 +19,7 @@ function worker(
     },
     skipWaiting: vi.fn(),
     registration: {
-      showNotification: vi.fn(async () => {}),
+      showNotification: vi.fn(async (_title: string, _options: { body: string }) => {}),
       getNotifications: vi.fn(async ({ tag }: { tag: string }) => shown.filter((n) => n.tag === tag)),
     },
     clients: {
@@ -74,6 +74,19 @@ describe('service worker', () => {
     })
     expect(self.registration.showNotification).toHaveBeenCalledWith('Fix the login redirect', expect.objectContaining({ silent: true, tag: 'run-7k2m9q4xbd' }))
     expect(self.registration.showNotification).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ renotify: true }))
+  })
+
+  it('never lets a clear still reading the shown notification land over a newer need', async () => {
+    const { self, dispatch } = worker()
+    let release = () => {}
+    self.registration.getNotifications.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve([]) }))
+    const cleared = dispatch('push', { data: { json: () => ({ title: 'Fix it', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) } })
+    const asked = dispatch('push', { data: { json: () => ({ title: 'Fix it', body: 'which region?', run: 'run-7k2m9q4xbd' }) } })
+    await Promise.resolve()
+    expect(self.registration.showNotification).not.toHaveBeenCalled()
+    release()
+    await Promise.all([cleared, asked])
+    expect(self.registration.showNotification.mock.calls.map(([, options]) => options.body)).toEqual(['No longer needs you', 'which region?'])
   })
 
   it('still shows something for a push it cannot read', async () => {

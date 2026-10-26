@@ -279,8 +279,9 @@ func TestOwnerIsNotifiedOnceWhileANeedStands(t *testing.T) {
 	}
 	h.publish(run, events.TimelinePayload{Kind: events.TimelineHandoff, Message: string(h.bob.ID)})
 	bobs.expect(t, want)
-	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	// Ada's device stops saying it needs her.
 	phone.expect(t, cleared)
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
 	bobs.expect(t, cleared)
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	want.Body = "which region?"
@@ -666,6 +667,23 @@ func TestGoneSubscriptionIsForgotten(t *testing.T) {
 	if subscribed, err := h.svc.Subscribed(h.ctx, h.ada.ID, phone.endpoint()); err != nil || !subscribed {
 		t.Fatalf("the working device's subscription = %v, %v; want it kept", subscribed, err)
 	}
+}
+
+// Only a device that took a need is told it ended: one the push service
+// refused never showed it.
+func TestAClearGoesOnlyToDevicesThatTookTheNeed(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	refused, phone := h.subscribe(h.ada), h.subscribe(h.ada)
+	refused.answer.Store(http.StatusInternalServerError)
+	run := h.run(h.ada, "Fix the login redirect", domain.LaunchTUI)
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: "which region?", Run: string(run.ID)})
+	refused.answer.Store(http.StatusCreated)
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: clearedBody, Run: string(run.ID), Clear: true})
+	refused.expectNone(t, testQuiet)
 }
 
 func TestTestSendsNowAndReturnsTheRealError(t *testing.T) {

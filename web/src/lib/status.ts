@@ -78,7 +78,7 @@ const resumes = 'It resumes on its next message.'
 
 /** What happens next. Only a state that asks something of the viewer says what to do. */
 const stateNext: Partial<Record<PresentationState, string>> = {
-  'waiting-agents': 'Mail from its agents wakes it.',
+  'waiting-agents': 'Mail from its agents can wake it.',
   'waiting-ci': resumes,
   'waiting-tools': resumes,
   ready: 'Mark it complete, or send a message to keep going.',
@@ -135,7 +135,9 @@ function finishedReason(run: RunRecord): string {
 
 export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
   const shown = presentation(run, ctx)
-  return run.cause && shown.state !== 'paused' && !isTerminal(run.status) ? { ...shown, cause: run.cause } : shown
+  // The cause explains the server's state only: none where the dashboard shows another.
+  const own = !isTerminal(run.status) && shown.state === liveStateOf(run.status as 'running' | 'needs-attention', run.state)
+  return run.cause && own ? { ...shown, cause: run.cause } : shown
 }
 
 function presentation(run: RunRecord, ctx: StateContext): RunPresentation {

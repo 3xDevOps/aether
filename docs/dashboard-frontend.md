@@ -1360,11 +1360,13 @@ chip and the second in its meta line.
 `stateTitle` builds the tooltip each surface puts on a state, and the
 sidebar's run details box shows it: "*Words* since *relative* — *reason*.
 *What happens next*. Why: *cause*.", for example "Waiting for 2 workers
-since 3 minutes ago. Mail from its agents wakes it. Why: its swarm workers
+since 3 minutes ago. Mail from its agents can wake it. Why: its swarm workers
 are live." *What happens next* is said only where it is a fact or a request
 of the viewer; no state that asks nothing tells the viewer to send a
 message. *Cause* is the run's `cause` in words; it is shown only while the
-run is live and not paused.
+run is live and shows the state the server chose, so not for a paused run,
+a swarm worker's question shown as "Waiting for the integrator", or a
+request shown as "Waiting for *name*".
 
 The run header's state line shows the words beyond the label the Workflow
 chip under it already shows, a CI wait's age first ("42m · PR 12 checks"),
@@ -5529,9 +5531,12 @@ cannot read, because Safari drops a subscription whose push shows nothing.
 A message with `clear` set means the run's need ended: for the same reason it
 is not simply closed but replaced, under the same tag and keeping the shown
 title, by a `silent` notification with the server's body,
-`No longer needs you`. The server sends it only to the devices it notified,
+`No longer needs you`. The server sends it only to the devices whose push
+service took the need, when the need ends or the run changes hands,
 under the run's Web Push topic, so a need still queued at the push service
-is never shown. On
+is never shown, and tries again a minute later for a device it could not
+reach. The worker handles pushes in arrival order, so a clear still reading
+the shown notification never lands over a newer need. On
 `notificationclick` it focuses a dashboard window that is already open and
 posts it `{type: 'aether:open-run', run}` or
 `{type: 'aether:open-workspace', workspace}`, or opens `/?run=<id>` or
