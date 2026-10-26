@@ -81,10 +81,12 @@ type Service struct {
 	cfg  Config
 	kick chan struct{}
 
-	mu     sync.Mutex
-	mail   Mailer
-	cancel context.CancelFunc
-	done   chan struct{}
+	mu   sync.Mutex
+	mail Mailer
+	// settingsMu serializes read-modify-write of member settings.
+	settingsMu sync.Mutex
+	cancel     context.CancelFunc
+	done       chan struct{}
 }
 
 func New(cfg Config) (*Service, error) {

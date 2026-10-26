@@ -105,7 +105,8 @@ swarm's runs and their descendants form one tree keyed by the swarm.
    report `waiting`. A parent's turn ending does not stop its children.
 9. **Cancel and detach.** When a run ends (killed, failed, closed or
    deleted), its attached unfinished children are stopped, finished ones
-   closed and queued ones cancelled; each child's own children follow.
+   detached and kept for review, and queued ones cancelled; each child's own
+   children follow.
    `child detach` (or **Detach** in the dashboard) keeps a child running on
    its own; it keeps its lineage and tree, and stops counting toward its
    parent's waiting and completion. Pausing a parent does not pause

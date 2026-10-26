@@ -660,3 +660,26 @@ func TestRefusalNoticeComesFromTheParent(t *testing.T) {
 		t.Fatalf("refusal notices = %+v, want one from the parent, which exists", h.mail.sent)
 	}
 }
+
+func TestFinishedChildrenOutliveTheirParent(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	done := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "done"})
+	busy := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "busy"})
+	h.settle()
+	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(done.RunID), domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := h.db.UpdateRunStatus(h.ctx, parent.ID, domain.RunFailed, "killed", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	kept, _ := h.db.GetRun(h.ctx, domain.RunID(done.RunID))
+	stopped, _ := h.db.GetRun(h.ctx, domain.RunID(busy.RunID))
+	if kept.Status.Terminal() || !kept.Detached || !stopped.Status.Terminal() {
+		t.Fatalf("finished child %s detached=%v, busy child %s; want the finished one kept for review and the busy one stopped",
+			kept.Status, kept.Detached, stopped.Status)
+	}
+}

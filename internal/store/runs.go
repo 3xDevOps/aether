@@ -110,7 +110,8 @@ func (d *DB) createRun(ctx context.Context, r *domain.Run, reserved bool) error 
 		         ? AND ? IN (SELECT run_id FROM mission_attempts WHERE run_id IS NOT NULL
 		                     UNION ALL SELECT current_integrator_run_id FROM missions WHERE current_integrator_run_id IS NOT NULL
 		                     UNION ALL SELECT initial_run_id FROM mission_create_receipts
-		                     UNION ALL SELECT run_id FROM mission_integrator_replacements))`,
+		                     UNION ALL SELECT run_id FROM mission_integrator_replacements
+		                     UNION ALL SELECT run_id FROM run_children WHERE mission_id <> ''))`,
 		id, r.WorkspaceID, r.MemberID, r.AccountMemberID, r.HomeMemberID, r.Task, r.Harness, r.Mode, r.Status,
 		r.Reason, r.Branch, r.Worktree, r.Protected, createdAt, startedAt, finishedAt,
 		r.ProfileSnapshotID, r.Title, r.LastCommit, lastCommitAt, r.HarnessSessionID,

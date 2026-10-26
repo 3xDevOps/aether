@@ -1558,8 +1558,9 @@ While a parked parent has unfinished children (queued, starting, working,
 waiting or needing input), it is `waiting-agents` with the reason `waiting
 for 2 child runs`. Its `success` report is refused with `-32002` until it
 cancels or detaches them. When a parent run ends, killed, failed, closed or
-deleted, the server stops its attached children and cancels the queued ones;
-their own children follow. Pausing a parent does not pause its children.
+deleted, the server stops its attached children that are still working and
+cancels the queued ones; their own children follow. A child that already
+reported its result is detached instead and stays for review. Pausing a parent does not pause its children.
 
 Refusals name the cause: child runs off for the owner, a Background parent
 (it exits before a result can reach it), a cancelled swarm, the depth or total

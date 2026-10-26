@@ -687,6 +687,8 @@ unmetered, so totals read "at least".
 - A child gets the workspace's environment and secrets like any run of yours,
   but not its parent's transcript. It works in the parent's primary
   repository only, from the parent's last commit.
+- Deleting a child takes its spend out of the parent's tree total; the
+  workspace totals and `aether cost` keep it.
 - Revoking a share or turning child runs off stops queued children from
   starting; running ones continue. Kill them from the parent's **Child runs**
   section or with `aether kill <run-id>`.

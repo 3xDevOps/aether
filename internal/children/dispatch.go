@@ -114,6 +114,13 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	s.cfg.AuthorizationMu.Lock()
 	unlock := sync.OnceFunc(s.cfg.AuthorizationMu.Unlock)
 	defer unlock()
+	// A handoff takes this lock, so the parent read here is the one the
+	// launch runs under.
+	if parent, getErr := s.cfg.Store.GetRun(ctx, c.ParentRunID); getErr != nil || parent.MemberID != c.OwnerID || parent.Status.Terminal() {
+		unlock()
+		refuse("the parent run ended or changed owner before this child started")
+		return
+	}
 	requested, err := s.cfg.Authorize(ctx, s.cfg.Store, c.OwnerID, string(c.AccountID))
 	if err != nil {
 		unlock()
@@ -161,6 +168,19 @@ func (s *Service) settle(ctx context.Context) error {
 		child, childErr := s.cfg.Store.GetRun(ctx, c.RunID)
 		childLive := childErr == nil && !child.Status.Terminal()
 		if !c.Detached && (gone || parent.Status.Terminal()) && (c.State == domain.ChildQueued || childLive) {
+			// A child that already delivered its result keeps it for review
+			// instead of being killed with its parent.
+			reported, err := s.cfg.Store.ChildReported(ctx, c.RunID)
+			if err != nil {
+				return err
+			}
+			if childLive && (reported || finished(child)) {
+				if err := s.cfg.Store.DetachChild(ctx, c.RunID); err != nil {
+					return err
+				}
+				s.publish(ctx, c.RunID, "")
+				continue
+			}
 			if stopErr := s.stop(ctx, c, ""); stopErr != nil {
 				slog.Warn("children: stop the child of an ended run", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
 			}
@@ -194,4 +214,12 @@ func (s *Service) settle(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func finished(r *domain.Run) bool {
+	switch r.Activity {
+	case domain.ActivityFinished, domain.ActivityAnswered, domain.ActivityFailed:
+		return true
+	}
+	return false
 }

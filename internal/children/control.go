@@ -44,6 +44,8 @@ func (s *Service) Settings(ctx context.Context, member domain.MemberID) (protoco
 // SetSettings changes member's own setting. Any saved change marks it
 // configured; a nudge answer only snoozes or stops the nudge.
 func (s *Service) SetSettings(ctx context.Context, member domain.MemberID, p protocol.ChildSettingsParams) (protocol.ChildSettings, error) {
+	s.settingsMu.Lock()
+	defer s.settingsMu.Unlock()
 	st, err := s.cfg.Store.ChildSettings(ctx, member)
 	if err != nil {
 		return protocol.ChildSettings{}, err

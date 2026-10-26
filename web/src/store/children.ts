@@ -14,8 +14,14 @@ useStore.subscribe((state, previous) => {
   if (state.identityKey !== previous.identityKey) useChildSettings.setState({ settings: null, error: null }, true)
 })
 
+// Every save bumps writes, so a read that started before it never replaces
+// what the save stored; one read is shared by every caller.
+let writes = 0
+let pending: Promise<ChildSettings> | null = null
+
 export function saveChildSettings(params: ChildSettingsParams, client: Api = api): Promise<ChildSettings> {
   const same = sameIdentity()
+  writes++
   return client.childSettings(params).then((settings) => {
     if (same()) useChildSettings.setState({ settings, error: null })
     return settings
@@ -30,8 +36,10 @@ export function useChildSettingsRead(client: Api = api, attempt = 0): ChildSetti
   useEffect(() => {
     if (!readable || useChildSettings.getState().settings) return
     const same = sameIdentity()
-    client.childSettings().then(
-      (read) => same() && useChildSettings.setState({ settings: read, error: null }),
+    const before = writes
+    pending ??= client.childSettings().finally(() => { pending = null })
+    pending.then(
+      (read) => same() && writes === before && useChildSettings.setState({ settings: read, error: null }),
       (err: unknown) => same() && useChildSettings.setState({ error: errorSentence(err) }),
     )
   }, [client, readable, identity, attempt])
