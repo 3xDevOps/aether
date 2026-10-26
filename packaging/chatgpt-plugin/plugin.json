@@ -17,7 +17,7 @@
       "interface": {
         "displayName": "Aether Coding Agents",
         "shortDescription": "Run and steer coding agents",
-        "longDescription": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This plugin connects ChatGPT to the Aether server you signed in to through the Aether edge.\n\nAsk what needs you, what your agents did today, or what a run changed, and read a run's conversation, pull request checks and review comments. With the write scope, launch a run or a swarm of agents on a task, message a run, answer an agent's question, and pause, resume or accept a run. With the control scope, which is off by default, allow or deny an agent's permission request once, stop or close a run, and cancel a swarm.\n\nWho it is for: developers whose team already runs an Aether server. It needs an Aether account on that server; it does not host agents itself.\n\nLimitations: agents run with the access you gave them on your server, so a launched agent can push branches and open pull requests. ChatGPT asks before every tool that is not read-only. The plugin cannot install Aether, change server settings, merge pull requests or delete repositories. Text written by agents, teammates and GitHub users is returned as untrusted data.",
+        "longDescription": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This plugin connects ChatGPT to the Aether server you signed in to through the Aether edge.\n\nAsk what needs you, what your agents did today, or what a run changed, and read a run's conversation, pull request checks and review comments. With the write scope, launch a run or a swarm of agents on a task, message a run, answer an agent's question, and pause, resume or accept a run. With the control scope, which is off by default, allow or deny an agent's permission request once, stop or close a run, and cancel a swarm.\n\nWho it is for: developers whose team already runs an Aether server. It needs an Aether account on that server; it does not host agents itself.\n\nLimitations: agents run with the access you gave them on your server, so a launched agent can push branches and open pull requests. ChatGPT asks before tools that are not read-only unless you chose to always allow them. No plugin tool installs Aether, changes server settings, merges pull requests or deletes repositories; an agent you instruct can do what its credentials allow. Text written by agents, teammates and GitHub users is returned as untrusted data.",
         "developerName": "3xDevOps",
         "category": "Developer Tools",
         "capabilities": [
@@ -49,34 +49,34 @@
         "test_cases": {
           "positive": [
             {
-              "description": "List what waits on the user: the demo server has a run with an open agent question and a run whose reported success awaits review.",
-              "prompt": "What needs me in Aether?",
-              "tools_triggered": "aether_needs_attention",
-              "expected_behavior": "Lists the open question and the run awaiting review, each with its run title and the tool that answers it, and links to the run in the Aether dashboard."
-            },
-            {
-              "description": "Summarize the reviewer's runs from the past week in the demo workspace.",
-              "prompt": "What did my Aether agents do this week?",
-              "tools_triggered": "aether_activity_summary",
-              "expected_behavior": "Summarizes the finished and running runs of the week with their outcomes and last reports, in the reviewer's time zone."
-            },
-            {
-              "description": "Find a run by what it works on and read what it changed.",
-              "prompt": "What did the run working on the README change?",
-              "tools_triggered": "aether_list_runs, aether_run_changes",
-              "expected_behavior": "Finds the README run and lists its commits and changed files on its branch."
-            },
-            {
-              "description": "Launch an agent on a small task in the demo workspace. ChatGPT asks for confirmation first.",
+              "description": "Launch: start an agent on a small task in the demo workspace. ChatGPT asks for confirmation first.",
               "prompt": "Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md.",
-              "tools_triggered": "aether_list_workspaces, aether_list_agents, aether_launch_run, aether_get_run",
-              "expected_behavior": "After the reviewer confirms, starts one run in aether-demo with Claude Code, returns its run id and dashboard link, and reports its state when polled."
+              "tools_triggered": "aether_list_workspaces, aether_list_agents, aether_launch_run",
+              "expected_behavior": "After the reviewer confirms, starts one run in aether-demo with Claude Code and returns its run id, state and dashboard link."
             },
             {
-              "description": "Send an instruction to a running agent. ChatGPT asks for confirmation first.",
-              "prompt": "Tell the Contributing section run to also link CONTRIBUTING.md.",
-              "tools_triggered": "aether_list_runs, aether_message_run",
-              "expected_behavior": "After the reviewer confirms, delivers the message to that run and reports it as delivered."
+              "description": "Track: report what changed across the reviewer's runs since the last check, without re-reading every run.",
+              "prompt": "What changed in my Aether runs since we last checked?",
+              "tools_triggered": "aether_changes",
+              "expected_behavior": "Lists runs that changed state, new reports and messages, and pull request changes since the previous cursor, each with its run title and dashboard link."
+            },
+            {
+              "description": "Coordinate: two active runs in aether-demo both edit README.md; find the overlap.",
+              "prompt": "Which runs touch the same files as the Contributing section run?",
+              "tools_triggered": "aether_list_runs, aether_overlaps",
+              "expected_behavior": "Names the other run that edits README.md, with both run titles and the shared file."
+            },
+            {
+              "description": "Review and CI: a demo run has an open pull request with finished checks and one review comment.",
+              "prompt": "Is CI green on the README run's pull request, and what did reviewers say?",
+              "tools_triggered": "aether_list_runs, aether_pr_status",
+              "expected_behavior": "Reports each check's result, the review state and the reviewer's comment, and links to the pull request."
+            },
+            {
+              "description": "Act: a demo run's agent asks which licence to use. ChatGPT asks for confirmation before answering.",
+              "prompt": "What needs me in Aether? Answer the licence question with MIT.",
+              "tools_triggered": "aether_needs_attention, aether_answer",
+              "expected_behavior": "Lists the open question and the run awaiting review; after the reviewer confirms, answers the question with MIT and reports it as delivered."
             }
           ],
           "negative": [
