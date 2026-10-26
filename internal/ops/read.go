@@ -654,12 +654,13 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 		Blockers []string `json:"blockers,omitempty"`
 	}
 	type worker struct {
-		RunID   string `json:"run_id"`
-		TaskID  string `json:"task_id"`
-		State   string `json:"state"`
-		Harness string `json:"harness"`
-		HeldBy  string `json:"control_held_by,omitempty"`
-		URL     string `json:"url,omitempty"`
+		AttemptID string `json:"attempt_id"`
+		RunID     string `json:"run_id,omitempty"`
+		TaskID    string `json:"task_id"`
+		State     string `json:"state"`
+		Harness   string `json:"harness"`
+		HeldBy    string `json:"control_held_by,omitempty"`
+		URL       string `json:"url,omitempty"`
 	}
 	type question struct {
 		ID       string `json:"id"`
@@ -685,9 +686,17 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 		}
 		tasks = append(tasks, row)
 	}
+	type workerError struct {
+		AttemptID string `json:"attempt_id"`
+		LastError string `json:"last_error"`
+	}
 	workers := make([]worker, 0, len(res.Attempts))
+	var errs []workerError
 	for _, a := range res.Attempts {
-		w := worker{RunID: a.RunID, TaskID: a.TaskID, State: a.State, Harness: a.Harness, URL: l.run(a.RunID)}
+		w := worker{AttemptID: a.ID, RunID: a.RunID, TaskID: a.TaskID, State: a.State, Harness: a.Harness, URL: l.run(a.RunID)}
+		if a.LastError != "" {
+			errs = append(errs, workerError{AttemptID: a.ID, LastError: clip(a.LastError, maxText)})
+		}
 		if a.TakeoverActive {
 			w.HeldBy = a.TakeoverMemberID
 		}
@@ -703,7 +712,7 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 			Body: clip(cmp.Or(msg.Summary, msg.Body), maxText), At: msg.CreatedAt})
 	}
 	out := map[string]any{"swarm": swarmRowOf(m, l, maxText), "integrator_generation": m.IntegratorGeneration,
-		"workers": workers, "untrusted": map[string]any{"tasks": tasks, "questions": questions, "messages": messages}}
+		"workers": workers, "untrusted": map[string]any{"tasks": tasks, "questions": questions, "messages": messages, "worker_errors": errs}}
 	if m.IntegratorLaunchError != "" {
 		out["integrator_launch_error"] = m.IntegratorLaunchError
 	}

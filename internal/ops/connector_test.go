@@ -492,12 +492,20 @@ func TestConnectorReadTools(t *testing.T) {
 		t.Fatalf("aether_list_swarms across pages = %q %v", text, out)
 	}
 	f.answers[protocol.MethodMissionShow] = returns(protocol.MissionShowResult{Mission: mission,
-		Tasks:     []protocol.Task{{ID: "task-1", Status: "active", Revision: &protocol.TaskRevision{Title: "Tools"}}},
-		Attempts:  []protocol.Attempt{{RunID: "run-1", TaskID: "task-1", State: "running", Harness: "claude"}},
+		Tasks: []protocol.Task{{ID: "task-1", Status: "active", Revision: &protocol.TaskRevision{Title: "Tools"}}},
+		Attempts: []protocol.Attempt{{ID: "att-1", RunID: "run-1", TaskID: "task-1", State: "running", Harness: "claude", TakeoverActive: true, TakeoverMemberID: "mem-1"},
+			{ID: "att-2", TaskID: "task-1", State: "failed", Harness: "codex", LastError: injection}},
 		Questions: []protocol.MissionQuestion{{ID: "q-1", Body: "Which branch?"}}})
-	if text, out = run(t, cs, "aether_get_swarm", map[string]any{"swarm_id": "swarm:mis-1"}); text != "Swarm mis-1 is active: 1 tasks, 1 workers, 0 open questions." ||
+	if text, out = run(t, cs, "aether_get_swarm", map[string]any{"swarm_id": "swarm:mis-1"}); text != "Swarm mis-1 is active: 1 tasks, 2 workers, 0 open questions." ||
 		strings.Contains(trusted(t, out), injection) {
 		t.Fatalf("aether_get_swarm of a search id = %q", text)
+	}
+	// A worker refused before its run existed keeps its attempt and error.
+	workers := out["workers"].([]any)
+	errs := out["untrusted"].(map[string]any)["worker_errors"].([]any)
+	if workers[0].(map[string]any)["control_held_by"] != "mem-1" || workers[1].(map[string]any)["attempt_id"] != "att-2" || workers[1].(map[string]any)["run_id"] != nil ||
+		errs[0].(map[string]any)["attempt_id"] != "att-2" || errs[0].(map[string]any)["last_error"] != injection {
+		t.Fatalf("aether_get_swarm workers = %v, errors %v", workers, errs)
 	}
 
 	f.answers[protocol.MethodRunGitLog] = returns(protocol.RunGitLogResult{Ahead: 2, Commits: []protocol.RunGitCommit{{Short: "abc", Subject: "fix"}},

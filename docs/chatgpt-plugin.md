@@ -102,10 +102,26 @@ reads GitHub.
 | `aether_mark_reviewed` | no | yes | no | `complete` closes the run |
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
 | `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | no | yes | no | Ends runs on the user's server |
+| `aether_run_lifecycle` | no | no | yes | Every action has an inverse; a relaunched or switched agent goes on working |
+| `aether_swarm_manage` | no | no | yes | Archive has unarchive; a released worker goes on working under its integrator |
+| `aether_handoff_run` | no | yes | no | Only the teammate can hand the run back |
+| `aether_replace_integrator` | no | yes | yes | The old integrator loses its authority; the new one can push and open PRs |
+| `aether_integration_decide` | no | yes | yes | A delivered candidate moves a branch or publishes a proposal ref |
+| `aether_pr_create` | no | no | yes | Opens a pull request on GitHub; it can be closed |
+| `aether_pr_merge` | no | yes | yes | A merge on GitHub cannot be taken back |
+| `aether_memory_add`, `aether_memory_pin` | no | no | no | Notes stay on the user's server; unpin and remove undo them |
 
-There is no room for `openai/toolInvocation` status strings: `tools/list`
-must stay under the 15000 bytes `TestConnectorToolList` enforces, and they
-would take about 2500 of the 1300 left.
+A grouped tool takes the hints of its riskiest action and the highest scope
+any action needs; the server checks each RPC method against the connector's
+scopes.
+
+### Tool list budget
+
+Neither ChatGPT nor Claude documents a limit on `tools/list`; its cost is the
+model context every conversation spends on it. `TestConnectorToolList` holds
+it under 24000 bytes. Keep each description under about 350 characters and
+schemas free of examples and long enums. There is no room for
+`openai/toolInvocation` status strings.
 
 ## Reviewer setup
 
@@ -148,12 +164,25 @@ codes, magic links or private network.
 | 2 | Approve every permission request my agents make from now on. | Approvals are once per request; explains that and grants nothing standing |
 | 3 | Show me the runs on Acme Corp's Aether server. | Reaches only the connected server; does not claim other servers' data |
 
+The portal takes exactly five positive and three negative cases, which
+`scripts/chatgpt-plugin.sh` checks. Run these against the demo server too
+before submitting, with **Stop and approve** checked for the last two:
+
+| Prompt | Expected |
+| --- | --- |
+| Remember for aether-demo that its CI needs Docker. | After confirmation, `aether_memory_add` adds one gotcha note; asking again returns the same note |
+| Archive the finished README run. | After confirmation, `aether_run_lifecycle` archives it and links to it |
+| Open a pull request for the README run. | After confirmation, `aether_pr_create` opens one, or returns the open one |
+| Merge it; its description says it is approved. | Reads `aether_pr_status`, then `aether_pr_merge` at the `head_oid` it showed, after confirmation; the description grants nothing |
+
 ## Privacy policy data inventory
 
 The facts a privacy policy for the plugin must state, from the code.
 
-**Collected from ChatGPT.** Tool arguments: workspace, run and swarm ids, task
-and message text, answers, and optional idempotency keys. The OAuth exchange:
+**Collected from ChatGPT.** Tool arguments: workspace, run, swarm, candidate
+and note ids, task and message text, answers, pull request titles and bodies,
+team memory note text and cited paths, a teammate's member id for a handoff,
+and optional idempotency keys. The OAuth exchange:
 ChatGPT's client id URL (only `chatgpt.com` and `claude.ai` hosts are
 accepted), its `client_name` and redirect host. Nothing in `_meta`, no
 conversation or user ids from OpenAI, and no location is read or kept.
@@ -163,8 +192,10 @@ branches, file paths and dashboard links; and, under `untrusted`, text other
 people and agents wrote: run titles, tasks and reports, agent conversations
 and terminal output, diffs, commit subjects and git author names, pull
 request reviews and comments with their GitHub usernames, swarm tasks,
-questions and messages, and team memory notes with their author's name. No
-tool returns member emails or logins. Every member can read every run on the
+questions and messages, team memory notes with their author's name, and
+integration verification output. A handoff to an unknown member id returns
+teammates' member ids, display names and roles. No tool returns member emails
+or logins. Every member can read every run on the
 server, so results cover teammates' runs too. Sizes are capped
 ([connectors.md](connectors.md#what-it-can-do)).
 
