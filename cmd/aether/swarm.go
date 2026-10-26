@@ -86,38 +86,42 @@ func swarmCreate(args []string, stdin io.Reader) error {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		var list protocol.WorkspaceListResult
-		if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
-			return err
-		}
-		wsID, err := pickWorkspace(list.Workspaces, spec.workspace)
-		if err != nil {
-			return err
-		}
-		var repos []string
-		for _, repo := range spec.repos {
-			id, repoErr := workspaceIDIn(list.Workspaces, repo)
-			if repoErr != nil {
-				return fmt.Errorf("--repo %s: %w", repo, repoErr)
-			}
-			repos = append(repos, id)
-		}
-		var info protocol.ServerInfoResult
-		if spec.account == "" || len(repos) > 0 {
-			if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
-				return err
-			}
-		}
-		if len(repos) > 0 && !slices.Contains(info.Features, protocol.FeatureSwarmRepos) {
-			return fmt.Errorf("--repo: server %s does not support swarms with several repositories; update the server with aether server update", info.ServerVersion)
-		}
-		if err := fillSwarmModes(c, &spec); err != nil {
-			return err
-		}
-		params := missionCreateParams(wsID, cmp.Or(spec.account, info.Member.ID), spec, cmp.Or(spec.key, cli.NewControlSessionID()))
-		params.ExtraWorkspaceIDs = repos
-		return createSwarm(c, os.Stdout, params)
+		return submitSwarm(c, os.Stdout, spec, cmp.Or(spec.key, cli.NewControlSessionID()))
 	})
+}
+
+func submitSwarm(c *protocol.Client, w io.Writer, spec swarmSpec, key string) error {
+	var list protocol.WorkspaceListResult
+	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
+		return err
+	}
+	wsID, err := pickWorkspace(list.Workspaces, spec.workspace)
+	if err != nil {
+		return err
+	}
+	var repos []string
+	for _, repo := range spec.repos {
+		id, repoErr := workspaceIDIn(list.Workspaces, repo)
+		if repoErr != nil {
+			return fmt.Errorf("--repo %s: %w", repo, repoErr)
+		}
+		repos = append(repos, id)
+	}
+	var info protocol.ServerInfoResult
+	if spec.account == "" || len(repos) > 0 {
+		if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+			return err
+		}
+	}
+	if len(repos) > 0 && !slices.Contains(info.Features, protocol.FeatureSwarmRepos) {
+		return fmt.Errorf("--repo: server %s does not support swarms with several repositories; update the server with aether server update", info.ServerVersion)
+	}
+	if err := fillSwarmModes(c, &spec); err != nil {
+		return err
+	}
+	params := missionCreateParams(wsID, cmp.Or(spec.account, info.Member.ID), spec, key)
+	params.ExtraWorkspaceIDs = repos
+	return createSwarm(c, w, params)
 }
 
 // parseSwarmCreate rejects what the server would refuse before any RPC, so

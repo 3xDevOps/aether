@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -78,13 +79,10 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	spec, err := parseSwarmCreate([]string{
 		"-", "--agent", "claude", "--model", "opus", "--worker", "codex:background:gpt-5-codex", "--worker", "claude",
 		"--worker", "codex:background:gpt-5-codex", "--worker", "claude:standard:opus", "--worker", "codex:background", "--worker", "codex::gpt-5-codex",
-		"--workspace", "ws-name", "--repo", "api", "--repo", "shared",
+		"--workspace", "ws-name",
 	}, strings.NewReader("ship the swarm CLI\n"))
 	if err != nil {
 		t.Fatalf("parseSwarmCreate: %v", err)
-	}
-	if strings.Join(spec.repos, ",") != "api,shared" {
-		t.Errorf("repos = %q, want api and shared", spec.repos)
 	}
 	mission := protocol.Mission{ID: "01MISSION", Phase: "planning", CurrentIntegratorRunID: "01INTEGRATOR"}
 	created := &fakeReply{result: protocol.MissionCreateResult{Mission: mission}}
@@ -123,6 +121,45 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	}
 	if wantOut := "swarm 01MISSION planning\nintegrator run 01INTEGRATOR\n"; out.String() != wantOut {
 		t.Errorf("output = %q, want %q", out.String(), wantOut)
+	}
+}
+
+func TestSwarmCreateSendsRepoIDsOnlyToAServerThatTakesThem(t *testing.T) {
+	spec, err := parseSwarmCreate([]string{"objective", "--agent", "claude", "--mode", "standard", "--workspace", "web", "--repo", "api", "--repo", "ws-shared"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("parseSwarmCreate: %v", err)
+	}
+	workspaces := protocol.WorkspaceListResult{Workspaces: []protocol.Workspace{{ID: "ws-web", Name: "web"}, {ID: "ws-api", Name: "api"}, {ID: "ws-shared", Name: "shared"}}}
+	info := protocol.ServerInfoResult{ServerVersion: "v1.0.0", Member: protocol.Member{ID: "mem1"}}
+	serve := func(info protocol.ServerInfoResult) (*protocol.Client, *fakeReply) {
+		created := &fakeReply{result: protocol.MissionCreateResult{Mission: protocol.Mission{ID: "m1", Phase: "planning"}}}
+		return fakeControlMethods(t, map[string]*fakeReply{
+			protocol.MethodWorkspaceList: {result: workspaces},
+			protocol.MethodServerInfo:    {result: info},
+			protocol.MethodMissionCreate: created,
+		}), created
+	}
+
+	c, created := serve(info)
+	want := "--repo: server v1.0.0 does not support swarms with several repositories; update the server with aether server update"
+	if err := submitSwarm(c, io.Discard, spec, "key-1"); err == nil || err.Error() != want {
+		t.Fatalf("submitSwarm to an older server = %v, want %q", err, want)
+	}
+	if created.params() != nil {
+		t.Fatalf("mission.create ran on a server that would drop the repos: %s", created.params())
+	}
+
+	info.Features = []string{protocol.FeatureSwarmRepos}
+	c, created = serve(info)
+	if err := submitSwarm(c, io.Discard, spec, "key-1"); err != nil {
+		t.Fatalf("submitSwarm: %v", err)
+	}
+	var sent protocol.MissionCreateParams
+	if err := json.Unmarshal(created.params(), &sent); err != nil {
+		t.Fatalf("decode sent params: %v", err)
+	}
+	if sent.WorkspaceID != "ws-web" || strings.Join(sent.ExtraWorkspaceIDs, ",") != "ws-api,ws-shared" || sent.Integrator.AccountMemberID != "mem1" {
+		t.Errorf("mission.create params = %+v, want ws-web with repos ws-api and ws-shared on mem1", sent)
 	}
 }
 
