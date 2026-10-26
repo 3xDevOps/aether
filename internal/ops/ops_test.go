@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -77,9 +78,12 @@ func TestMessageRetryWithoutKey(t *testing.T) {
 			}
 			msg := map[string]any{"run_id": "run-1", "message": "rebase on main"}
 			_, first := run(t, cs, "aether_message_run", msg)
-			_, again := run(t, cs, "aether_message_run", msg)
+			text, again := run(t, cs, "aether_message_run", msg)
 			if k := keys(); len(k) != 2 || k[0] == "" || k[0] != k[1] || first["idempotency_key"] != k[0] || again["idempotency_key"] != k[0] {
 				t.Fatalf("a retried keyless message used keys %v, results %v %v; want one key", k, first, again)
+			}
+			if first["duplicate"] != nil || again["duplicate"] != true || !strings.Contains(text, "new idempotency_key") {
+				t.Fatalf("a repeated keyless message = %q %v after %v; want it marked a duplicate", text, again, first)
 			}
 			run(t, cs, "aether_message_run", map[string]any{"run_id": "run-1", "message": "and run the tests"})
 			run(t, cs, "aether_message_run", map[string]any{"run_id": "run-2", "message": "rebase on main"})
@@ -134,10 +138,54 @@ func TestAssistantSurface(t *testing.T) {
 	}
 }
 
+// A keyless message still in flight past the window, such as one awaiting
+// the member's approval, keeps its key; a finished one older than the
+// window gives way to a new key.
+func TestMessageKeyKeepsInFlight(t *testing.T) {
+	p := protocol.RunInjectParams{RunID: "run-1", Message: "wait for approval"}
+	start := time.Now()
+	key, dup, done := messageKey("mem-inflight", p, start)
+	if dup {
+		t.Fatal("a first message is a duplicate")
+	}
+	other, _, otherDone := messageKey("mem-inflight", protocol.RunInjectParams{RunID: "run-1", Message: "another"}, start)
+	otherDone(true)
+	later := start.Add(2 * duplicateWindow)
+	again, dup, againDone := messageKey("mem-inflight", p, later)
+	if again != key || !dup {
+		t.Fatalf("a repeat while the first is in flight got key %q (dup %t), want %q", again, dup, key)
+	}
+	done(true)
+	againDone(true)
+	if k, _, d := messageKey("mem-inflight", protocol.RunInjectParams{RunID: "run-1", Message: "another"}, later); k == other {
+		t.Fatal("a finished message older than the window kept its key")
+	} else {
+		d(false)
+	}
+	if k, dup, d := messageKey("mem-inflight", p, time.Now().Add(2*duplicateWindow)); k == key || dup {
+		t.Fatalf("a message repeated after the window got key %q (dup %t), want a new one", k, dup)
+	} else {
+		d(false)
+	}
+}
+
 // A keyed answer retried after its question stopped waiting repeats the
-// key, so the server returns the saved answer instead of a not-found.
+// key on the one call that answers that question, so the server returns
+// the saved answer; an id that is neither a swarm question nor a teammate
+// question on the run, nor one the key replied to, writes nothing.
 func TestKeyedAnswerRetry(t *testing.T) {
 	f := newFake(t)
+	f.answers[protocol.MethodMissionShow] = func(raw json.RawMessage) (any, error) {
+		var p protocol.MissionShowParams
+		if err := json.Unmarshal(raw, &p); err != nil || p.QuestionID != "q-1" {
+			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "mission question not found"}
+		}
+		return protocol.MissionShowResult{Mission: protocol.Mission{ID: "mis-1"}}, nil
+	}
+	f.answers[protocol.MethodRunRoomList] = returns(protocol.RoomMessageListResult{Messages: []protocol.RoomMessage{
+		{ID: "room-1", RunID: "run-1", Kind: protocol.RoomMessageQuestion, Body: "which db?"},
+		{ID: "room-9", RunID: "run-1", Kind: protocol.RoomMessageReply, Body: "main", CorrelationID: "room-old", IdempotencyKey: "a2"},
+	}})
 	f.answers[protocol.MethodMissionQuestionAnswer] = returns(protocol.MissionQuestionResult{})
 	f.answers[protocol.MethodRunRoomPost] = returns(protocol.RunRoomPostResult{})
 	cs := connectorSession(t, f, ScopeWrite)

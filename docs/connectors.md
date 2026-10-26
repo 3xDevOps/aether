@@ -228,8 +228,9 @@ earlier run, unless it failed, was interrupted or was abandoned, and a swarm
 with the same workspace, objective and agents within 60 seconds returns your
 earlier swarm, unless it was cancelled, instead of starting another; so does an
 identical launch still starting. A message without a key reuses the key of the
-same message to the same run sent within 60 seconds, so a retry is delivered
-once.
+same message to the same run still being sent or sent within 60 seconds, so a
+retry is delivered once and its result has `duplicate: true`. To send the same
+text again on purpose, pass a new `idempotency_key`.
 `aether_mark_reviewed` completes only a run whose agent reported success and
 awaits your review; to end any other run, use `aether_stop_run` or
 `aether_close_run` under `control`. A message to your own run that no one

@@ -290,4 +290,5 @@ deciding a card. The assistant does not offer `search`, `fetch`,
 `aether_cancel_swarm`; the connector does not offer the environment, usage,
 docs, view context and workspace tools. Messages and launches dedupe the same
 way on both: an `idempotency_key` repeats a call safely, and a keyless message
-reuses the key of the same message to the same run from the last 60 seconds.
+reuses the key of the same message to the same run still being sent or sent in
+the last 60 seconds, returning that message with `duplicate: true`.

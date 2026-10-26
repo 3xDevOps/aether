@@ -97,7 +97,7 @@ var writeOps = []Op{
 		calling(protocol.MethodAgentList, protocol.MethodServerInfo, protocol.MethodMissionList, protocol.MethodMissionCreate),
 	opOf("aether_message_run", "Message run", ScopeWrite, false, nextRuns,
 		"Use this when the user wants to tell a run's agent something; the agent acts on it, and a sent message cannot be taken back. A message to a run someone else controls waits about 45s for them to approve it."+
-			idempotencyRule+"without one, the same message to the same run within 60s is sent once.", messageRun).hints(true, true).
+			idempotencyRule+"without one, the same message to the same run within 60s is sent once and returned as a duplicate. To send the same text again on purpose, pass a new idempotency_key.", messageRun).hints(true, true).
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunInject),
 	opOf("aether_answer", "Answer question", ScopeWrite, true, nextAttention,
 		"Use this when an aether_needs_attention item's answer_with is aether_answer: an agent's question takes option_id (and values), a swarm or teammate question takes answer. The agent goes on with the answer, which cannot be taken back.", answer).hints(true, true).
@@ -427,42 +427,48 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	return fmt.Sprintf("Launched swarm %s (%s); its integrator is run %s.", m.ID, m.Phase, cmp.Or(m.CurrentIntegratorRunID, "not started yet")), out, nil
 }
 
-// sentKeys remembers the key of each keyless message for duplicateWindow
-// after it was first sent, by member, run, steer and text.
+// sentKeys remembers the key of each keyless message by member, run, steer
+// and text while it is in flight and for duplicateWindow after.
 var sentKeys = struct {
 	sync.Mutex
-	keys map[string]sentKey
-}{keys: map[string]sentKey{}}
+	keys map[string]*sentKey
+}{keys: map[string]*sentKey{}}
 
 type sentKey struct {
-	key string
-	at  time.Time
+	key      string
+	at       time.Time
+	inflight int
+	sent     bool
 }
 
-// messageKey is the key of a keyless message: an identical message's from
-// within duplicateWindow, which the server delivers once, else a new one.
-// sent restarts the window when the call returns, since an assistant call
-// waits for the member's approval first.
-func messageKey(member string, p protocol.RunInjectParams, now time.Time) (key string, sent func()) {
+// messageKey is the key of a keyless message: an identical message's still
+// in flight or from within duplicateWindow, which the server delivers once,
+// else a new one. dup is true when an identical message is in flight or was
+// sent. done ends the call with whether it succeeded and restarts the
+// window, since an assistant call waits for the member's approval first.
+func messageKey(member string, p protocol.RunInjectParams, now time.Time) (key string, dup bool, done func(sent bool)) {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%s\x00%s\x00%t\x00%s", member, p.RunID, p.Steer, p.Message))
 	fingerprint := string(sum[:])
 	sentKeys.Lock()
 	defer sentKeys.Unlock()
 	for f, k := range sentKeys.keys {
-		if now.Sub(k.at) >= duplicateWindow {
+		if k.inflight == 0 && now.Sub(k.at) >= duplicateWindow {
 			delete(sentKeys.keys, f)
 		}
 	}
 	k, ok := sentKeys.keys[fingerprint]
 	if !ok {
-		k = sentKey{key: uuid.NewString()}
+		k = &sentKey{key: uuid.NewString()}
+		sentKeys.keys[fingerprint] = k
 	}
-	k.at = now
-	sentKeys.keys[fingerprint] = k
-	return k.key, func() {
+	dup = k.inflight > 0 || k.sent
+	k.inflight++
+	return k.key, dup, func(sent bool) {
 		sentKeys.Lock()
 		defer sentKeys.Unlock()
-		sentKeys.keys[fingerprint] = sentKey{key: k.key, at: time.Now()}
+		k.inflight--
+		k.at = time.Now()
+		k.sent = k.sent || sent
 	}
 }
 
@@ -473,13 +479,14 @@ func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string,
 	}
 	l := links(info.DashboardURL)
 	params := protocol.RunInjectParams{RunID: in.RunID, Message: in.Message, Steer: in.Steer, IdempotencyKey: in.IdempotencyKey}
+	dup, done := false, func(bool) {}
 	if params.IdempotencyKey == "" {
-		var sent func()
-		params.IdempotencyKey, sent = messageKey(info.Member.ID, params, time.Now())
-		defer sent()
+		params.IdempotencyKey, dup, done = messageKey(info.Member.ID, params, time.Now())
 	}
 	var res protocol.RunRoomPostResult
-	if err := c.act(ctx, protocol.MethodRunInject, params, &res); err != nil {
+	err = c.act(ctx, protocol.MethodRunInject, params, &res)
+	done(err == nil)
+	if err != nil {
 		return "", nil, retryable(err, params.IdempotencyKey)
 	}
 	m := res.Message
@@ -488,6 +495,10 @@ func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string,
 	if m.State == protocol.RoomMessageQueued && m.DeliverAfter != nil {
 		out["deliver_after"], out["write"] = *m.DeliverAfter, writePending
 		summary = fmt.Sprintf("Message to run %s is queued: the member in control can approve or deny it, else it is delivered at %s.", in.RunID, *m.DeliverAfter)
+	}
+	if dup {
+		out["duplicate"] = true
+		summary = fmt.Sprintf("You sent this message to run %s within the last 60s; returning it (%s) instead of sending it again. Pass a new idempotency_key to send the same text again.", in.RunID, m.State)
 	}
 	return summary, out, nil
 }
