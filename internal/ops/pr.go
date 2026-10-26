@@ -21,6 +21,7 @@ type prCreateInput struct {
 type prMergeInput struct {
 	RunID           string `json:"run_id"`
 	Repo            string `json:"repo,omitempty"`
+	Number          int    `json:"number" jsonschema:"pr.number from aether_pr_status"`
 	ExpectedHeadOID string `json:"expected_head_oid" jsonschema:"pr.head_oid from aether_pr_status, at least 7 characters"`
 	Method          string `json:"method,omitempty" jsonschema:"default squash"`
 }
@@ -72,6 +73,8 @@ func prCreate(ctx context.Context, c calls, in prCreateInput) (string, any, erro
 		out["pr"] = prOf(res.PullRequest)
 	}
 	switch {
+	case res.Reconciled && res.PullRequest != nil:
+		return fmt.Sprintf("GitHub's answer was lost, but pull request #%d for run %s is open: %s.", res.PullRequest.Number, in.RunID, res.PullRequest.URL), out, nil
 	case res.CreationUncertain:
 		out["write"] = writePending
 		return fmt.Sprintf("GitHub may have opened the pull request for run %s: %s; call aether_pr_status before trying again.", in.RunID, cmp.Or(res.Error, "its answer was lost")), out, nil
@@ -104,6 +107,9 @@ func prMerge(ctx context.Context, c calls, in prMergeInput) (string, any, error)
 	}
 	out := map[string]any{"run_id": in.RunID, "pr": prOf(pr), "url": l.run(in.RunID)}
 	switch {
+	case pr.Number != in.Number:
+		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
+			"run %s's pull request is now #%d, not #%d; review it with aether_pr_status before merging", in.RunID, pr.Number, in.Number)}
 	case pr.State == "merged":
 		out["merged"] = true
 		return fmt.Sprintf("Pull request #%d is already merged.", pr.Number), out, nil
@@ -118,7 +124,11 @@ func prMerge(ctx context.Context, c calls, in prMergeInput) (string, any, error)
 		ExpectedHead: pr.HeadOID, Repository: pr.Repository, Number: pr.Number, ExpectedLogin: fb.Identity, ExpectedBase: pr.BaseBranch}, &res); err != nil {
 		return "", nil, err
 	}
-	if res.Error != "" || !res.Merged {
+	if res.Error == "" && !res.Merged {
+		out["merged"], out["write"] = false, writePending
+		return fmt.Sprintf("GitHub accepted pull request #%d but has not merged it yet, as with a merge queue; call aether_pr_status to follow it.", pr.Number), out, nil
+	}
+	if res.Error != "" {
 		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("GitHub did not merge pull request #%d: %s%s",
 			pr.Number, cmp.Or(res.Error, "it is not merged"), blockers(fb))}
 	}

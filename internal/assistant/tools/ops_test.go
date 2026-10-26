@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/ops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -15,6 +17,11 @@ import (
 // reversible one changes something without asking, and a confirmed one
 // asks.
 func TestOpsMethodsAreTiered(t *testing.T) {
+	for method, tier := range tiers {
+		if tier == tierConfirmed && !slices.Contains(coordtransport.ConfirmedMethods, method) {
+			t.Errorf("%s is confirmed, but a call of it gives up before the member decides its card: add it to coordtransport.ConfirmedMethods", method)
+		}
+	}
 	for _, o := range ops.Ops {
 		if o.Tier == ops.TierNone {
 			continue

@@ -123,7 +123,7 @@ func memoryPin(ctx context.Context, c calls, in memoryPinInput) (string, any, er
 	var item protocol.MemoryItem
 	if in.Pin {
 		var res protocol.MemoryPinResult
-		err = c.act(ctx, protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: in.WorkspaceID, ID: in.ID}, &res)
+		err = c.act(ctx, protocol.MethodMemoryPin, protocol.MemoryPinParams{WorkspaceID: in.WorkspaceID, ID: in.ID, Scope: protocol.MemoryScopeWorkspace}, &res)
 		item = res.Item
 	} else {
 		var res protocol.MemoryUnpinResult

@@ -275,9 +275,11 @@ someone else made in between fails with a conflict.
 a replacement (`supersedes`) that went through returns the note that replaced
 the old one.
 
-`aether_pr_merge` takes `expected_head_oid`, the `head_oid` `aether_pr_status`
-returns, and refuses when the pull request's head has moved since, before
-asking GitHub. That refusal and GitHub's own count the failing and pending
+`aether_pr_merge` takes `number` and `expected_head_oid`, the pull request's
+`number` and `head_oid` `aether_pr_status` returns, and refuses when the run's
+pull request is now another one or its head has moved since, before asking
+GitHub. A merge GitHub accepts but has not done, as with a merge queue,
+returns `write: "pending"`; follow it with `aether_pr_status`. That refusal and GitHub's own count the failing and pending
 checks and the reviewers requesting changes, and give the merge state;
 `aether_pr_status` names them under `untrusted`. It merges with
 `squash` unless `method` says `merge` or `rebase`, and only into the base
@@ -285,7 +287,8 @@ branch it saw. `aether_pr_create` opens the pull request from the run's
 current branch and head into the target `run.pr.status` resolves, the
 workspace's base branch on its source repository as the dashboard proposes,
 and passes both to `run.pr.create`, so neither changes after you approve;
-the branch must be pushed. `aether_pr_status` and `aether_pr_merge` take the
+the branch must be pushed. When GitHub's answer is lost but the pull request is found
+afterwards, the result is that pull request. `aether_pr_status` and `aether_pr_merge` take the
 same `repo` as `aether_run_changes`. `aether_handoff_run` takes
 the teammate's member id or exact display name; an unknown or ambiguous one
 fails with the teammates' ids and roles, and the server refuses a viewer. `aether_run_lifecycle`'s mode

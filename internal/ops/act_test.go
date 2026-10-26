@@ -258,7 +258,7 @@ func TestConnectorPRMerge(t *testing.T) {
 
 	// A head that moved is refused before any merge, with what GitHub
 	// reports blocking it.
-	text, _, failed := try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "expected_head_oid": "1234567"})
+	text, _, failed := try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "1234567"})
 	if !failed || !strings.Contains(text, "head moved from 1234567 to abcdef0123456789") ||
 		!strings.Contains(text, "GitHub reports 1 failing checks, 1 pending checks, 1 reviewers requesting changes, merge state BLOCKED") || strings.Contains(text, "grace") {
 		t.Fatalf("moved head = %q", text)
@@ -266,11 +266,11 @@ func TestConnectorPRMerge(t *testing.T) {
 	if len(called(f, protocol.MethodRunPRMerge)) != 0 {
 		t.Fatal("a moved head was merged")
 	}
-	if _, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "expected_head_oid": "abc"}); !failed {
+	if _, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abc"}); !failed {
 		t.Fatal("a 3-character head was accepted")
 	}
 
-	text, out := run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "expected_head_oid": "abcdef0"})
+	text, out := run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"})
 	if text != "Merged pull request #7 into main." || out["merged"] != true {
 		t.Fatalf("merge = %q %v", text, out)
 	}
@@ -278,9 +278,16 @@ func TestConnectorPRMerge(t *testing.T) {
 		t.Fatalf("merge sent %+v", got)
 	}
 
+	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 6, "expected_head_oid": "abcdef0"}); !failed || !strings.Contains(text, "now #7, not #6") {
+		t.Fatalf("another pull request = %q", text)
+	}
+	f.answers[protocol.MethodRunPRMerge] = returns(protocol.RunPRMergeResult{PullRequest: &protocol.RunPullRequest{Number: 7, State: "open"}})
+	if _, queued := run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"}); queued["write"] != writePending || queued["merged"] != false {
+		t.Fatalf("queued merge = %v", queued)
+	}
 	// GitHub's refusal carries the blockers too.
 	f.answers[protocol.MethodRunPRMerge] = returns(protocol.RunPRMergeResult{Error: "Required status check \"test\" is failing"})
-	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "expected_head_oid": "abcdef0"}); !failed ||
+	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"}); !failed ||
 		!strings.Contains(text, `GitHub did not merge pull request #7: Required status check "test" is failing; GitHub reports 1 failing checks`) {
 		t.Fatalf("refused merge = %q", text)
 	}
@@ -289,11 +296,11 @@ func TestConnectorPRMerge(t *testing.T) {
 	merged.PullRequest.State = "merged"
 	f.answers[protocol.MethodRunPRFeedback] = returns(merged)
 	f.calls = nil
-	if text, _ = run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "expected_head_oid": "abcdef0"}); text != "Pull request #7 is already merged." || len(called(f, protocol.MethodRunPRMerge)) != 0 {
+	if text, _ = run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"}); text != "Pull request #7 is already merged." || len(called(f, protocol.MethodRunPRMerge)) != 0 {
 		t.Fatalf("merging twice = %q", text)
 	}
 	f.errs[protocol.MethodRunPRFeedback] = &protocol.Error{Code: protocol.CodeDenied, Message: "run.pr.feedback: denied"}
-	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "expected_head_oid": "abcdef0"}); !failed || text != "run.pr.feedback: denied" {
+	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"}); !failed || text != "run.pr.feedback: denied" {
 		t.Fatalf("denied feedback = %q", text)
 	}
 }
@@ -329,6 +336,11 @@ func TestConnectorPRCreate(t *testing.T) {
 		t.Fatalf("second create = %q", text)
 	}
 	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "octo", Expected: &expected, Target: &target})
+	f.answers[protocol.MethodRunPRCreate] = returns(protocol.RunPRCreateResult{Reconciled: true, CreationUncertain: true, Error: "gh timed out",
+		PullRequest: &protocol.RunPullRequest{Number: 9, State: "open", URL: "u9"}})
+	if text, out = run(t, cs, "aether_pr_create", map[string]any{"run_id": "run-1", "title": "Fix login", "body": "b"}); !strings.Contains(text, "pull request #9 for run run-1 is open") || out["write"] != writeDone {
+		t.Fatalf("reconciled creation = %q %v", text, out)
+	}
 	f.answers[protocol.MethodRunPRCreate] = returns(protocol.RunPRCreateResult{CreationUncertain: true, Error: "gh timed out"})
 	if _, out = run(t, cs, "aether_pr_create", map[string]any{"run_id": "run-1", "title": "Fix login", "body": "b"}); out["write"] != writePending {
 		t.Fatalf("uncertain creation = %v", out)
@@ -351,8 +363,9 @@ func TestConnectorMemoryWrites(t *testing.T) {
 	if !strings.Contains(text, "already remembers this as note mem-9") || out["url"] != "https://aether.example/?page=memory" {
 		t.Fatalf("duplicate add = %q %v", text, out)
 	}
-	if text, _ = run(t, cs, "aether_memory_pin", map[string]any{"workspace_id": "ws-1", "id": "mem-9", "pin": true}); text != "Pinned note mem-9." {
-		t.Fatalf("pin = %q", text)
+	if text, _ = run(t, cs, "aether_memory_pin", map[string]any{"workspace_id": "ws-1", "id": "mem-9", "pin": true}); text != "Pinned note mem-9." ||
+		called(f, protocol.MethodMemoryPin)[0].params != `{"workspace_id":"ws-1","id":"mem-9","scope":"workspace"}` {
+		t.Fatalf("pin = %q, %+v", text, called(f, protocol.MethodMemoryPin))
 	}
 	if msg, _, failed := try(t, cs, "aether_memory_pin", map[string]any{"workspace_id": "ws-1", "id": "mem-9", "pin": false}); !failed || msg != "memory.unpin: denied" {
 		t.Fatalf("denied unpin = %q", msg)
