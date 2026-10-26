@@ -142,6 +142,10 @@ their own entries.
 - [Usage fallback](teams.md#usage-fallback) can move their run onto your
   account when theirs runs out, without them picking it: your share is the
   consent. It never picks an account not shared with the launcher.
+- A swarm checks every account it names, for the integrator, the workers and
+  fallback, when it is created, so a member cannot queue a swarm on an account
+  nobody shared with them:
+  `permission denied: member <member-id> has not shared their account with you`.
 
 > [!WARNING]
 > An `omp` share mounts your whole `~/.omp/agent` read-write, because omp
