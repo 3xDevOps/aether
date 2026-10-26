@@ -534,3 +534,31 @@ func TestRunSnapshotCarriesController(t *testing.T) {
 		t.Fatalf("after release: controller %q, last controller %q, want none and %q", got.ControllerMemberID, got.LastControllerMemberID, other.ID)
 	}
 }
+
+// A launch refuses a param it does not know instead of launching without
+// it; other methods still ignore unknown params.
+func TestLaunchRefusesUnknownParams(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	c := controlClient(t, e)
+	var pe *protocol.Error
+	err := c.Call(protocol.MethodRunLaunch, map[string]any{"workspace_id": string(e.ws.ID), "harness": "claude", "task": "t", "fallback_acount_member_ids": []string{"m"}}, nil)
+	if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams || !strings.Contains(pe.Message, `unknown param "fallback_acount_member_ids"`) {
+		t.Fatalf("run.launch with a misspelled param = %v, want invalid params naming it", err)
+	}
+	if _, perr := decodeLaunchParams[protocol.MissionCreateParams](json.RawMessage(`{"workspace_id":"w","objective":"o","integrator":{"harness":"claude","effort":"high"}}`)); perr == nil ||
+		!strings.Contains(perr.Message, `unknown param "effort"`) {
+		t.Errorf("mission.create with an integrator effort = %v, want refused", perr)
+	}
+	if _, perr := decodeLaunchParams[protocol.TemplateLaunchParams](json.RawMessage(`{"workspace_id":"w","name":"n","account_member_id":"m"}`)); perr == nil ||
+		!strings.Contains(perr.Message, `unknown param "account_member_id"`) {
+		t.Errorf("template.launch with an account = %v, want refused", perr)
+	}
+	if _, perr := decodeLaunchParams[protocol.RunLaunchParams](json.RawMessage(`{"workspace_id":"w"} {"harness":"x"}`)); perr == nil {
+		t.Error("run.launch params followed by more data were accepted")
+	}
+	var runs protocol.RunListResult
+	if err := c.Call(protocol.MethodRunList, map[string]any{"workspace_id": string(e.ws.ID), "unknown": true}, &runs); err != nil {
+		t.Fatalf("run.list with an unknown param = %v, want it ignored", err)
+	}
+}

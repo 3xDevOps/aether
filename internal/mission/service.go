@@ -907,6 +907,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	}
 	account, excluded := fallback.Select(ctx, s.cfg.Store, measured, actor, admission.Account.ID, m.Fallback, s.launchable(actor, admission.Account.ID, choice.Harness, choice.Mode))
 	logExcluded(m.CurrentIntegratorRunID, excluded)
+	skipped := fallback.Skipped(excluded)
 	_, err = s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: m.WorkspaceID, RunID: m.CurrentIntegratorRunID,
 		ActorRunID: m.CurrentIntegratorRunID, RunOwnerID: m.IntegratorRunOwnerID,
@@ -922,7 +923,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if recordErr := s.recordIntegratorLaunch(ctx, m, "", true); recordErr != nil {
 		return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, fmt.Errorf("mission %s: integrator run %s launched, but recording the launch failed: %w", m.ID, m.CurrentIntegratorRunID, recordErr)
 	}
-	return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m)}, nil
+	return protocol.MissionCreateResult{Mission: protocol.MissionFromDomain(m), SkippedFallbackAccounts: skipped}, nil
 }
 
 // integratorLaunchFailure records why m's integrator did not launch.

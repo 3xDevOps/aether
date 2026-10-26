@@ -79,7 +79,7 @@ func returns(v any) func(json.RawMessage) (any, error) {
 	return func(json.RawMessage) (any, error) { return v, nil }
 }
 
-var testRun = protocol.Run{ID: "run-1", WorkspaceID: "ws-1", Task: "fix the login test", Title: "Fix login", Harness: "claude",
+var testRun = protocol.Run{ID: "run-1", WorkspaceID: "ws-1", AccountMemberID: "mem-me", Task: "fix the login test", Title: "Fix login", Harness: "claude",
 	Mode: "acp", ACP: true, Status: "running", CreatedAt: "2026-10-22T10:00:00Z", PendingInputs: []domain.RunInputRequest{}}
 
 func newFake(t *testing.T) *fakeServer {
@@ -92,6 +92,8 @@ func newFake(t *testing.T) *fakeServer {
 		protocol.MethodWorkspaceTimeline: returns(protocol.WorkspaceTimelineResult{}),
 		protocol.MethodWorkspaceList:     returns(protocol.WorkspaceListResult{Workspaces: []protocol.Workspace{{ID: "ws-1", Name: "api"}}}),
 		protocol.MethodMissionList:       returns(protocol.MissionListResult{}),
+		protocol.MethodAccountList: returns(protocol.AccountListResult{Accounts: []protocol.Member{{ID: "mem-me", DisplayName: "Me"},
+			{ID: "mem-ada", DisplayName: "Ada"}}}),
 	}}
 }
 
@@ -233,8 +235,10 @@ func jsonOf(t *testing.T, v any) string {
 
 // Every scope lists its own tools and the ones below it; every tool has a
 // title, hints and a "Use this when" description; fixed values are
-// enumerated; and the whole list, which ChatGPT budgets about 5000 tokens
-// for, stays under 15000 bytes.
+// enumerated; and the tools fit the budget in docs/chatgpt-plugin.md: their
+// names, descriptions and compact input schemas, what ChatGPT reportedly
+// counts against 5000 tokens, at most 15000 bytes in all and 3500 per tool,
+// in at most 40 tools.
 func TestConnectorToolList(t *testing.T) {
 	list := func(scopes ...Scope) []*mcp.Tool {
 		res, err := connectorSession(t, newFake(t), scopes...).ListTools(t.Context(), nil)
@@ -244,10 +248,17 @@ func TestConnectorToolList(t *testing.T) {
 		return res.Tools
 	}
 	all := list(ScopeWrite, ScopeControl)
-	size := len(jsonOf(t, all))
-	t.Logf("tools/list: %d tools, %d bytes", len(all), size)
-	if size > 15000 {
-		t.Errorf("tools/list is %d bytes, want at most 15000", size)
+	counted := 0
+	for _, tool := range all {
+		n := len(tool.Name) + len(tool.Description) + len(jsonOf(t, tool.InputSchema))
+		if n > 3500 {
+			t.Errorf("%s is %d bytes of name, description and schema, want at most 3500", tool.Name, n)
+		}
+		counted += n
+	}
+	t.Logf("tools/list: %d tools, %d bytes of names, descriptions and schemas, %d bytes in all", len(all), counted, len(jsonOf(t, all)))
+	if counted > 15000 || len(all) > 40 {
+		t.Errorf("tools/list is %d tools with %d bytes of names, descriptions and schemas, want at most 40 and 15000", len(all), counted)
 	}
 	enums := map[string]string{}
 	for _, tool := range all {
@@ -291,7 +302,7 @@ func TestConnectorToolList(t *testing.T) {
 	// and open pull requests, so those tools are open-world.
 	type hint struct{ readOnly, destructive, openWorld bool }
 	hints := map[string]hint{
-		"aether_launch_run": {false, false, true}, "aether_launch_swarm": {false, false, true},
+		"aether_launch_run": {false, false, true}, "aether_launch_swarm": {false, false, true}, "aether_launch_template": {false, false, true},
 		"aether_message_run": {false, true, true}, "aether_answer": {false, true, true},
 		"aether_pause_run": {false, false, false}, "aether_resume_run": {false, false, true},
 		"aether_mark_reviewed": {false, true, false}, "aether_decide_approval": {false, true, true},
@@ -373,7 +384,7 @@ func TestConnectorReadTools(t *testing.T) {
 
 	text, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run:run-1"})
 	untrusted := out["untrusted"].(map[string]any)
-	if text != "Run run-1 is running. The agent asks a question." || out["pr"].(map[string]any)["number"] != float64(7) ||
+	if text != "Run run-1 is running on your account. The agent asks a question." || out["pr"].(map[string]any)["number"] != float64(7) ||
 		out["pr_error"] != "refresh pull request: gh: rate limited" || untrusted["latest_report"].(map[string]any)["summary"] != injection || untrusted["pr_title"] != injection ||
 		out["needs_you"].(map[string]any)["answer_with"] != "aether_answer" || strings.Contains(trusted(t, out), injection) {
 		t.Fatalf("aether_get_run of a search id = %q %v", text, out)
@@ -800,7 +811,7 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.IdempotencyKey != "s1" || p.AccountableHumanID != "" || len(p.ExecutionChoices) != 2 || p.ExecutionChoices[1] != (protocol.MissionExecutionChoice{Harness: "codex", Mode: "acp"}) || p.Integrator.Mode != "tui" {
+	if p.IdempotencyKey != "s1" || p.AccountableHumanID != "" || len(p.ExecutionChoices) != 2 || p.ExecutionChoices[1] != (protocol.MissionExecutionChoice{AccountMemberID: "mem-me", Harness: "codex", Mode: "acp"}) || p.Integrator.Mode != "tui" {
 		t.Fatalf("mission.create = %+v", p)
 	}
 	f.calls = nil
@@ -813,7 +824,7 @@ func TestConnectorSwarmAndMessage(t *testing.T) {
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	choice := protocol.MissionExecutionChoice{AccountMemberID: "mem-bo", Harness: "claude", Mode: "tui"}
+	choice := protocol.MissionExecutionChoice{AccountMemberID: "mem-me", Harness: "claude", Mode: "tui"}
 	earlier := protocol.Mission{ID: "mis-1", Objective: "Ship it", AccountableHumanID: "mem-bo", Phase: "planning", CreatedAt: now,
 		Integrator: protocol.MissionIntegrator(choice), ExecutionChoices: []protocol.MissionExecutionChoice{choice}}
 	other := earlier

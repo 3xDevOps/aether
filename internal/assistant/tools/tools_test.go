@@ -39,6 +39,12 @@ func (f *fakeCaller) Call(_ context.Context, method string, params json.RawMessa
 		return json.RawMessage(`{"workspace":{"id":"ws-1","name":"shop"}}`), nil
 	case protocol.MethodMemberList:
 		return json.RawMessage(`{"members":[{"id":"m1","display_name":"Ada"},{"id":"m2","display_name":"Grace"}]}`), nil
+	case protocol.MethodAccountList:
+		return json.RawMessage(`{"accounts":[{"id":"m1","display_name":"Ada"},{"id":"m2","display_name":"Grace"}]}`), nil
+	case protocol.MethodWorkspaceList:
+		return json.RawMessage(`{"workspaces":[{"id":"ws-1","name":"shop"},{"id":"ws-2","name":"web"}]}`), nil
+	case protocol.MethodTemplateList:
+		return json.RawMessage(`{"templates":[{"name":"triage","harness":"claude","mode":"acp","model":"opus","task":"triage issue {{issue}}"}]}`), nil
 	}
 	return json.RawMessage(`{}`), nil
 }
@@ -346,23 +352,48 @@ func TestViewContextIsServedFromTheMembersOwnSnapshot(t *testing.T) {
 	}
 }
 
-// A connector's mission.create names no member: the caller is the swarm's
-// accountable human and every agent's account, and naming one is refused.
+// A connector's mission.create names no actor: the caller is the swarm's
+// accountable human and the account of every agent that names none.
+// Naming accounts to launch on is the server's to check.
 func TestPrepareMissionCreate(t *testing.T) {
 	got, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(`{"workspace_id":"ws-1","objective":"o","integrator":{"harness":"claude","mode":"tui"},`+
-		`"execution_choices":[{"harness":"claude","mode":"tui"},{"harness":"codex","mode":"acp"}],"idempotency_key":"k"}`))
+		`"execution_choices":[{"harness":"claude","mode":"tui"},{"account_member_id":"m2","harness":"codex","mode":"acp"}],"idempotency_key":"k",`+
+		`"fallback_account_member_ids":["m3"]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p, err := protocol.DecodeParams[protocol.MissionCreateParams](got)
 	if err != nil || p.AccountableHumanID != "m1" || p.Integrator.AccountMemberID != "m1" || p.ExecutionChoices[0].AccountMemberID != "m1" ||
-		p.ExecutionChoices[1].AccountMemberID != "m1" || p.IdempotencyKey != "k" {
+		p.ExecutionChoices[1].AccountMemberID != "m2" || p.IdempotencyKey != "k" || !slices.Equal(p.FallbackAccountMemberIDs, []string{"m3"}) {
 		t.Fatalf("prepared mission.create = %s %v", got, err)
 	}
-	for _, params := range []string{`{"accountable_human_id":"m2"}`, `{"integrator":{"account_member_id":"m2"}}`,
-		`{"execution_choices":[{"account_member_id":"m2"}]}`, `{"fallback_account_member_ids":["m2"]}`} {
-		if _, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(params)); err == nil || !strings.Contains(err.Error(), "not accepted") {
-			t.Errorf("mission.create %s = %v, want refused", params, err)
+	if _, err := Prepare("m1", protocol.MethodMissionCreate, json.RawMessage(`{"accountable_human_id":"m2"}`)); err == nil || !strings.Contains(err.Error(), "not accepted") {
+		t.Errorf("mission.create naming accountable_human_id = %v, want refused", err)
+	}
+}
+
+// Prepare passes exactly the account fields through and refuses every other
+// member id, which would make the call act for or on another member.
+func TestPrepareAccountFields(t *testing.T) {
+	for _, c := range []struct {
+		method, params string
+		ok             bool
+	}{
+		{protocol.MethodRunLaunch, `{"account_member_id":"m2","fallback_account_member_ids":["m3"]}`, true},
+		{protocol.MethodAgentList, `{"account_member_id":"m2"}`, true},
+		{protocol.MethodAgentModels, `{"name":"claude","account_member_id":"m2"}`, true},
+		{protocol.MethodAccountUsage, `{"account_member_id":"m2"}`, true},
+		{protocol.MethodRunList, `{"member_id":"m2"}`, true},
+		{protocol.MethodRunLaunch, `{"member_id":"m2"}`, false},
+		{protocol.MethodRunGet, `{"account_member_id":"m2"}`, false},
+		{protocol.MethodRunList, `{"account_member_id":"m2"}`, false},
+		{protocol.MethodTemplateLaunch, `{"account_member_id":"m2"}`, false},
+		{protocol.MethodRunHandoff, `{"run_id":"r","to_member_id":"m2"}`, false},
+		{protocol.MethodMissionCreate, `{"accountable_human_id":"m2"}`, false},
+	} {
+		_, err := Prepare("m1", c.method, json.RawMessage(c.params))
+		if (err == nil) != c.ok {
+			t.Errorf("%s %s = %v, want ok %v", c.method, c.params, err, c.ok)
 		}
 	}
 }

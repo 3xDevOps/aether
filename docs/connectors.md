@@ -161,15 +161,18 @@ others:
 | Tools | What they do | Scope |
 | --- | --- | --- |
 | `aether_list_workspaces`, `aether_list_agents` | Workspaces; agents (installed, signed in, Enhanced) | `read` |
+| `aether_launch_options` | What you can launch and on which account: workspaces, your accounts with their usage, each account's agents and modes, swarm eligibility, fallback, a workspace's templates, and an agent's models when asked for ([Launch options](#launch-options)) | `read` |
 | `aether_list_runs`, `aether_get_run` | Your runs (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one run with what it waits on, its latest report and its pull request | `read` |
 | `aether_run_history` | A page of a run's conversation (Enhanced) or terminal, with its reports | `read` |
 | `aether_needs_attention` | What needs you, the dashboard's **Needs you** list, each item naming the tool that answers it | `read` |
 | `aether_activity_summary` | What your runs did today, yesterday or this week, in your time zone | `read` |
-| `aether_list_swarms`, `aether_get_swarm` | Swarms; one swarm's tasks, workers, questions and recent messages | `read` |
+| `aether_list_swarms`, `aether_get_swarm` | Swarms; one swarm's tasks, workers with their agent, mode, model and account, questions and recent messages | `read` |
+| `aether_changes` | What changed since a cursor: run status, reports, agent mail, pull requests, swarms and lifecycle, oldest first, paged with `next_cursor` | `read` |
 | `aether_run_changes`, `aether_pr_status` | A run's commits, conflicts, changed files and optionally its diff; its pull request's checks, reviews, comments and merge state | `read` |
 | `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md) | `read` |
 | `search`, `fetch` | Find runs and swarms by text, in the shape ChatGPT deep research uses | `read` |
-| `aether_launch_run`, `aether_launch_swarm` | Start a run, or a swarm with you as its accountable human; a swarm agent given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
+| `aether_launch_run`, `aether_launch_swarm` | Start a run, or a swarm with you as its accountable human, on any account you may use, with a fallback policy and extra repositories; an integrator given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
+| `aether_launch_template` | Launch a workspace's saved [template](teams.md#task-templates-and-schedules) on your own account | `write` |
 | `aether_message_run`, `aether_answer` | Message a run; answer an agent's, the integrator's or a teammate's question | `write` |
 | `aether_pause_run`, `aether_resume_run`, `aether_mark_reviewed` | Pause or resume a run; accept a reported success, which closes the run, or put it off | `write` |
 | `aether_decide_approval` | Allow or deny a permission request, once | `control` |
@@ -180,6 +183,8 @@ Things to ask:
 - "What needs me in Aether?"
 - "What is the agent working on edge doing?"
 - "Launch a Claude run in api to fix the flaky login test."
+- "Which subscription has the most usage left? Launch the docs fix on it."
+- "What changed since I last asked?"
 - "Start a swarm in api to add rate limiting, with Codex workers."
 - "What did my agents do today?"
 - "Is CI green on the login fix PR? What did reviewers say?"
@@ -224,15 +229,85 @@ the result has the id, `state: "starting"` and the key; poll `aether_get_run`
 or `aether_get_swarm`. If it does not, the result has only `state: "starting"`
 and the key, plus the lookup's `error` when it failed; call the same tool again
 with the same arguments and key to get the id. Without a key, a run launch with
-the same workspace, agent, task, mode and model within 60 seconds returns your
-earlier run, unless it failed, was interrupted or was abandoned, and a swarm
-with the same workspace, objective and agents within 60 seconds returns your
-earlier swarm, unless it was cancelled, instead of starting another; so does an
+the same workspace, agent, task, mode, model, account, fallback policy and
+extra repositories within 60 seconds returns your earlier run, unless it
+failed, was interrupted or was abandoned, and a swarm with the same workspace,
+objective, agents and their accounts, fallback policy and extra repositories
+within 60 seconds returns your earlier swarm, unless it was cancelled, instead
+of starting another; so does an
 identical launch still starting, or one that failed in the last 60 seconds
 without saying whether it started. A message without a key reuses the key of the
 same message to the same run still being sent or sent within 60 seconds, so a
 retry is delivered once and its result has `duplicate: true`. To send the same
 text again on purpose, pass a new `idempotency_key`.
+### Launch options
+
+`aether_launch_options` answers what the launch dialog shows, in one call:
+
+- `workspaces`, and `modes` with their dashboard names: `tui` Standard,
+  `headless` Background, `acp` Enhanced.
+- `accounts`: the agent accounts you may launch on, your own first, then each
+  one a teammate shared with you ([Agent accounts](teams.md#agent-accounts)). Each has
+  `access` (`own` or `shared`), `ready` (some agent can launch on it), its
+  usage, and its agents. A teammate's account that is not shared with you never
+  appears.
+- Usage is each provider's windows, labelled as the provider labels them, with
+  `used_percent` and `resets_at`. It is never money. An agent with no usage row
+  has unknown usage.
+- Each agent has `modes` a run may start in, `integrator_modes` a swarm
+  integrator may use (never Background), `worker_mode` a worker starts in, and
+  `refused` when a launch on that account would be refused, such as an owner
+  who is not signed in.
+- `fallback`: with neither `fallback_account_member_ids` nor `no_fallback`, a
+  launch whose account has used 95% of a usage window moves to the usable
+  account with the most usage left.
+- With `workspace_id`, its templates; with `models` (an agent name) and
+  optionally `account_member_id`, that agent's model ids, which the server
+  caches. When it lists none, launch without `model` for the agent's default.
+- `server.version` and `server.ops_contract`, the version of the tools' inputs
+  and results.
+
+`aether_launch_run` takes `account_member_id`, `fallback_account_member_ids`
+(an order), `no_fallback` and `extra_workspace_ids`, as `aether run` does.
+`aether_launch_swarm` takes the integrator's `account_member_id`, each
+worker's `harness`, `mode`, `model` and `account_member_id`, and one fallback
+policy and extra repositories for the swarm. A worker given no mode starts in
+the `worker_mode` `aether_launch_options` reports, as the launch dialog's
+workers do. A worker on an account not shared
+with you is refused before the swarm starts. The server checks every account:
+a launch on an account not shared with you fails with the server's error. A
+launch, swarm or template launch the server does not understand fails with
+`unknown param "<name>"` instead of starting without it.
+
+Each launch's result, and `aether_get_run` and `aether_get_swarm`, has a
+`launch` receipt: `kind` (`run` or `swarm`), `id`, `workspace_id`, `harness`,
+`mode`, `mode_name`, `model` (absent means the agent's default), `account`
+(`member_id`, `name`, `access`: `own`, `shared`, or `other` for a teammate's
+own run), `requested_account` when usage fallback moved the run, `fallback`
+(`policy`: `automatic`, `ordered` with `order`, or `off`), `repos`, `via`, and
+`url`. A launch's receipt adds `idempotency_key` and
+`skipped_fallback_accounts`: the fallback accounts the server left out because
+checking them failed, each with its error. A swarm's receipt has `integrator`
+and `workers` in place of the run fields, each with the account it was
+asked to run on. `aether_get_swarm`'s `workers` list each worker run with the
+account it launched on, and `requested_account` when usage fallback moved it.
+
+`aether_launch_template` launches on your own account with the template's
+agent, mode and model; it takes no account or fallback, since `template.launch`
+has none.
+
+### Changes
+
+`aether_changes` pages `changes.list`. Without `cursor` it returns the newest
+changes; pass `next_cursor` back for the ones after them, while `more` is true.
+Filter by `workspace_id`, `run_id`, `swarm_id` and `kinds`. Report summaries
+and status reasons sit under `untrusted`, cut to 200 characters. CI checks are
+not changes; read them with `aether_pr_status`. A cursor the server's history
+no longer matches, such as one from before a restore, fails with an error that
+says to call again without `cursor`.
+
+### Writes
+
 `aether_mark_reviewed` completes only a run whose agent reported success and
 awaits your review; to end any other run, use `aether_stop_run` or
 `aether_close_run` under `control`. A message to your own run that no one

@@ -95,7 +95,8 @@ reads GitHub.
 
 | Tool | Read-only | Destructive | Open world | Why |
 | --- | --- | --- | --- | --- |
-| `aether_launch_run`, `aether_launch_swarm` | no | no | yes | Adds runs; their agents can push and open PRs |
+| `aether_launch_run`, `aether_launch_swarm`, `aether_launch_template` | no | no | yes | Adds runs; their agents can push and open PRs |
+| `aether_launch_options`, `aether_changes` | yes | no | no | Read the user's own server: accounts, usage, agents, templates and models; the change feed |
 | `aether_message_run`, `aether_answer` | no | yes | yes | A sent message or answer cannot be taken back; the agent acts on it |
 | `aether_pause_run` | no | no | no | Freezes the container; resume continues it |
 | `aether_resume_run` | no | no | yes | The agent goes on working |
@@ -103,9 +104,52 @@ reads GitHub.
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
 | `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | no | yes | no | Ends runs on the user's server |
 
-There is no room for `openai/toolInvocation` status strings: `tools/list`
-must stay under the 15000 bytes `TestConnectorToolList` enforces, and they
-would take about 2500 of the 1300 left.
+### Tool list budget
+
+`TestConnectorToolList`, with every scope granted, enforces:
+
+1. The names, descriptions and compact JSON input schemas of all tools sum
+   to at most 15000 bytes.
+2. Each tool's name, description and schema sum to at most 3500 bytes.
+3. There are at most 40 tools.
+
+The whole `tools/list` JSON, with titles and hints, is measured but not
+capped.
+
+The evidence:
+
+- No ChatGPT or Claude document sets a limit. One OpenAI forum report shows
+  ChatGPT refusing a server with "All tools (including name, description,
+  and input schema) must be less than 5000 tokens"
+  ([OpenAI community](https://community.openai.com/t/token-limit-when-connecting-chatgpt-with-external-mcp/1371022),
+  2026-01-05). It is unverified, and it may be a total or per tool. A live
+  ChatGPT connection test settles which; 15000 bytes is about 4300 tokens at
+  3.5 bytes per token, under 5000 even as a total.
+- Anthropic: Claude's tool selection degrades past 30 to 50 tools
+  ([tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)).
+- Every conversation that uses the connector pays for the list.
+
+Measured with OpenAI's `o200k_base` tokenizer, offline. Update this when
+tools change:
+
+| Tools | Names, descriptions, schemas | Whole `tools/list` |
+| --- | --- | --- |
+| 29 | 11585 bytes, 2714 tokens | 16594 bytes, 3901 tokens |
+
+To fit:
+
+- Write one "Use this when" sentence per description.
+- Give a property a description only where its name does not say it.
+- Keep enums short.
+- Fold a read that another tool already answers into that tool, as
+  `aether_launch_options` carries templates and models.
+- Merge only operations with the same scope and hints. Never merge a read
+  with a write, or a destructive operation with one that is not: OpenAI wants
+  separate tools for separate permissions and confirmations, and Anthropic's
+  directory rejects a tool that mixes safe and unsafe actions.
+
+`openai/toolInvocation` status strings are not set; they would add about 2500
+bytes to every `tools/list`.
 
 ## Reviewer setup
 
@@ -139,8 +183,10 @@ codes, magic links or private network.
 | 1 | What needs me in Aether? | `aether_needs_attention` | Lists the open question and the run awaiting review, each with its run title and the tool that answers it |
 | 2 | What did my Aether agents do this week? | `aether_activity_summary` | Summarizes the week's runs with outcomes and last reports, in the reviewer's time zone |
 | 3 | What did the run working on the README change? | `aether_list_runs`, `aether_run_changes` | Finds the README run and lists its commits and changed files |
-| 4 | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_list_workspaces`, `aether_list_agents`, `aether_launch_run`, `aether_get_run` | After confirmation, starts one run and returns its id and state |
+| 4 | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_launch_options`, `aether_launch_run`, `aether_get_run` | After confirmation, starts one run and returns its id, state and the account it runs on |
 | 5 | Tell the Contributing section run to also link CONTRIBUTING.md. | `aether_list_runs`, `aether_message_run` | After confirmation, delivers the message to that run |
+| 6 | Which of my Claude subscriptions has the most usage left? | `aether_launch_options` | Lists the reviewer's accounts with each usage window's percentage used and reset time, and names the one with the most left |
+| 7 | What changed in Aether since my last question? | `aether_changes` | Lists recent status changes and reports, oldest first, and says whether more remain |
 
 | # | Prompt | Expected |
 | --- | --- | --- |
@@ -153,7 +199,8 @@ codes, magic links or private network.
 The facts a privacy policy for the plugin must state, from the code.
 
 **Collected from ChatGPT.** Tool arguments: workspace, run and swarm ids, task
-and message text, answers, and optional idempotency keys. The OAuth exchange:
+and message text, answers, template parameters, the member ids of agent
+accounts to launch on or read, and optional idempotency keys. The OAuth exchange:
 ChatGPT's client id URL (only `chatgpt.com` and `claude.ai` hosts are
 accepted), its `client_name` and redirect host. Nothing in `_meta`, no
 conversation or user ids from OpenAI, and no location is read or kept.
@@ -163,8 +210,14 @@ branches, file paths and dashboard links; and, under `untrusted`, text other
 people and agents wrote: run titles, tasks and reports, agent conversations
 and terminal output, diffs, commit subjects and git author names, pull
 request reviews and comments with their GitHub usernames, swarm tasks,
-questions and messages, and team memory notes with their author's name. No
-tool returns member emails or logins. Every member can read every run on the
+questions and messages, template tasks, and team memory notes with their
+author's name. `aether_launch_options` and launch receipts return the display
+names and member ids of the agent accounts the user may launch on (their own
+and those teammates shared with them), each account's agents and whether they
+are signed in, and each usage window's label, percentage used and reset time;
+never money, plan prices or credentials. A run or swarm's receipt names its
+account's owner by id, and by name when the account is the user's or shared
+with them. No tool returns member emails or logins. Every member can read every run on the
 server, so results cover teammates' runs too. Sizes are capped
 ([connectors.md](connectors.md#what-it-can-do)).
 

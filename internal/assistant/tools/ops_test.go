@@ -70,7 +70,12 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 // an action on another member's run says whose it is.
 func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 	params := map[string]any{
-		protocol.MethodRunLaunch:             protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it"},
+		protocol.MethodRunLaunch: protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", AccountMemberID: "m2",
+			FallbackAccountMemberIDs: []string{"m1"}, ExtraWorkspaceIDs: []string{"ws-2"}},
+		protocol.MethodTemplateLaunch: protocol.TemplateLaunchParams{WorkspaceID: "ws-1", Name: "triage", Params: map[string]string{"issue": "42"}},
+		protocol.MethodMissionCreate: map[string]any{"workspace_id": "ws-1", "objective": "ship it", "integrator": map[string]any{"harness": "claude", "mode": "acp"},
+			"execution_choices": []any{map[string]any{"harness": "claude", "mode": "acp"}, map[string]any{"account_member_id": "m2", "harness": "codex", "mode": "tui"}},
+			"idempotency_key":   "k", "reason": "the member asked for codex workers"},
 		protocol.MethodRunInject:             protocol.RunInjectParams{RunID: "run-1", Message: "hi", Attachments: []string{"shot.png"}, IdempotencyKey: "k"},
 		protocol.MethodRunKill:               protocol.RunIDParams{RunID: "run-1"},
 		protocol.MethodEnvSave:               nil,
@@ -80,7 +85,10 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			Anchor: &protocol.RoomMessageAnchor{Kind: "file", Path: "main.go", StartLine: 3, EndLine: 9}, IdempotencyKey: "k"},
 	}
 	want := map[string]string{
-		protocol.MethodRunLaunch:             `Launch claude (default mode) in shop: "fix it"`,
+		protocol.MethodRunLaunch:      `Launch claude (default mode) in shop on "Grace"'s account, falling back to "Ada" in order, with repositories "web": "fix it"`,
+		protocol.MethodTemplateLaunch: `Launch template "triage" in shop: claude (acp, opus) on your account with "{\"issue\":\"42\"}": "triage issue {{issue}}"`,
+		protocol.MethodMissionCreate: `Start a swarm in shop with integrator claude (acp) on your account, agents claude (acp) on your account, codex (tui) on "Grace"'s account: "ship it". ` +
+			`The assistant's reason: "the member asked for codex workers"`,
 		protocol.MethodRunInject:             `Send to run run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
 		protocol.MethodRunKill:               `Stop run run-1 ("Fix login"), owned by Grace`,
 		protocol.MethodEnvSave:               `Save your environment as a new image; new runs and terminals start from it`,
@@ -89,7 +97,8 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodRunRoomPost:           `Reply on run run-1 ("Fix login"), owned by Grace: "yes", anchored at "main.go:3-9"`,
 	}
 	var got protocol.AssistantConfirmation
-	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+	caller := &attentionCaller{}
+	s := &Server{Caller: caller, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
 		got = c
 		return nil
 	}}
@@ -108,9 +117,13 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			t.Errorf("%s: %v", method, perr)
 			continue
 		}
-		if got.Summary != want[method] || got.OtherMember != strings.Contains(want[method], "owned by") {
+		if got.Summary != want[method] || got.OtherMember != (strings.Contains(want[method], "owned by") || strings.Contains(want[method], `"Grace"'s account`)) {
 			t.Errorf("%s summary = %q (other member %t), want %q", method, got.Summary, got.OtherMember, want[method])
 		}
+	}
+
+	if sent := string(caller.params[protocol.MethodMissionCreate]); strings.Contains(sent, "reason") || !strings.Contains(sent, `"accountable_human_id":"m1"`) {
+		t.Fatalf("mission.create reached the server as %s, want the reason taken off and the member accountable", sent)
 	}
 
 	raw, _ := json.Marshal(protocol.RunInputRespondParams{RunID: "run-1", RequestID: "gone", OptionID: "once"})

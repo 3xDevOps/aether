@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -340,6 +341,28 @@ func decodeParams[T any](raw json.RawMessage) (T, *protocol.Error) {
 	p, err := protocol.DecodeParams[T](raw)
 	if err != nil {
 		return p, invalidParams("invalid params: " + err.Error())
+	}
+	return p, nil
+}
+
+// decodeLaunchParams is decodeParams refusing fields T does not have: a
+// launch that dropped a misspelled or unsupported option would start
+// without it.
+func decodeLaunchParams[T any](raw json.RawMessage) (T, *protocol.Error) {
+	var p T
+	if len(raw) == 0 {
+		return p, nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&p); err != nil {
+		if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
+			return p, invalidParams("unknown param " + field + "; this server does not support it")
+		}
+		return p, invalidParams("invalid params: " + err.Error())
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return p, invalidParams("invalid params: data after the params object")
 	}
 	return p, nil
 }

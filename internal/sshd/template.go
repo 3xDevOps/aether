@@ -135,7 +135,7 @@ func (s *Server) templateLaunch(ctx context.Context, member domain.MemberID, par
 	if perr != nil {
 		return nil, perr
 	}
-	p, perr := decodeParams[protocol.TemplateLaunchParams](params)
+	p, perr := decodeLaunchParams[protocol.TemplateLaunchParams](params)
 	if perr != nil {
 		return nil, perr
 	}

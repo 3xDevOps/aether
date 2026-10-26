@@ -149,6 +149,11 @@ func TestSelect(t *testing.T) {
 				(excluded != nil && !strings.Contains(excluded.Error(), "input/output error")) {
 				t.Fatalf("Select = %s, excluded %v; want %s", names[got], excluded, tc.want)
 			}
+			skipped := Skipped(excluded)
+			if tc.failing != "" && (len(skipped) != 1 || skipped[0].AccountMemberID != string(ids[tc.failing]) ||
+				skipped[0].Error != "read the installation: input/output error") {
+				t.Fatalf("Skipped = %+v, want %s with its error", skipped, tc.failing)
+			}
 		})
 	}
 }

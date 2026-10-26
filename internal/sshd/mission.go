@@ -198,7 +198,7 @@ func (s *Server) missionCreate(ctx context.Context, member domain.MemberID, raw 
 		return nil, err
 	}
 
-	p, perr := decodeParams[protocol.MissionCreateParams](raw)
+	p, perr := decodeLaunchParams[protocol.MissionCreateParams](raw)
 	if perr != nil {
 		return nil, perr
 	}

@@ -136,7 +136,7 @@ func (s *Server) memberApprove(ctx context.Context, member domain.MemberID, para
 }
 
 func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
-	p, perr := decodeParams[protocol.RunLaunchParams](params)
+	p, perr := decodeLaunchParams[protocol.RunLaunchParams](params)
 	if perr != nil {
 		return nil, perr
 	}
@@ -169,16 +169,18 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancel()
 	defer context.AfterFunc(s.authCtx(), cancel)()
+	var skipped []protocol.SkippedAccount
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
-		return s.launchRun(ctx, member, p, mode, policy, created)
+		return s.launchRun(ctx, member, p, mode, policy, created, &skipped)
 	})
 	if perr != nil {
 		return nil, perr
 	}
-	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed}, nil
+	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed, SkippedFallbackAccounts: skipped}, nil
 }
 
-func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback, created func(domain.RunID)) (*domain.Run, *protocol.Error) {
+func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protocol.RunLaunchParams, mode domain.LaunchMode, policy domain.AccountFallback,
+	created func(domain.RunID), skipped *[]protocol.SkippedAccount) (*domain.Run, *protocol.Error) {
 	measured, err := fallback.Measure(ctx, s.cfg.Store, s.cfg.Services.Usage, member, p.AccountMemberID, p.Harness, policy)
 	if err != nil {
 		return nil, rpcError(err)
@@ -205,6 +207,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	if excluded != nil {
 		slog.Warn("sshd: fallback accounts left out of a launch", "member", member, "error", excluded)
 	}
+	*skipped = fallback.Skipped(excluded)
 	run, err := launchWithOptions(ctx, s.cfg.Runs, domain.WorkspaceID(p.WorkspaceID), member, account, p.Task, p.Harness, mode, domain.LaunchOptions{
 		CachedBase: p.CachedBase, Model: p.Model, RequestedAccount: requested, Fallback: policy,
 		Admitted: unlockAuthorization, Created: created,

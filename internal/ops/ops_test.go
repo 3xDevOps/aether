@@ -116,7 +116,7 @@ func TestAssistantSurface(t *testing.T) {
 			t.Errorf("%s: tier %d, description %q, annotations %+v", tool.Name, o.Tier, tool.Description, tool.Annotations)
 		}
 	}
-	for _, name := range []string{"search", "fetch", "aether_launch_swarm", "aether_close_run", "aether_cancel_swarm", "aether_mark_reviewed"} {
+	for _, name := range []string{"search", "fetch", "aether_close_run", "aether_cancel_swarm", "aether_mark_reviewed"} {
 		if slices.Contains(names, name) {
 			t.Errorf("the assistant offers %s", name)
 		}

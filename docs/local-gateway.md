@@ -557,9 +557,19 @@ take the fallback policy as `fallback_account_member_ids` (member IDs, tried
 in order) or `no_fallback: true`; omitting both orders the launcher's
 accounts by usage left, and sending both is refused with `-32602`
 `fallback_account_member_ids and no_fallback cannot both be set`. When no
-account qualifies, the run launches on the requested account. Swarm
-attempts carry `launch_account_id`, the account the worker's run launched
-on.
+account qualifies, the run launches on the requested account. Run snapshots
+and swarms carry the policy back in the same two fields. A fallback account
+whose check failed, rather than one that is exhausted or not shared, is left
+out, and `run.launch` and `mission.create` list it in
+`skipped_fallback_accounts` `[{account_member_id, error}]` (an entry with no
+account means listing the candidates failed); a replay does not repeat them.
+Swarm attempts carry `launch_account_id`, the account the worker's run
+launched on.
+
+`run.launch`, `mission.create` and `template.launch` refuse a param they do
+not know with `-32602` `unknown param "<name>"; this server does not support
+it`, so a client never launches without an option it asked for. Other
+methods ignore unknown params.
 
 Run snapshots carry `status_changed_at` (RFC 3339): when the run entered its
 current `status`, or its current `reason` while it is `needs-attention`. A

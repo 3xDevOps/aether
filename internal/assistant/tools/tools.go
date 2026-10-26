@@ -48,6 +48,10 @@ var tiers = map[string]string{
 	protocol.MethodWorkspaceGet:          tierRead,
 	protocol.MethodWorkspaceTimeline:     tierRead,
 	protocol.MethodAgentList:             tierRead,
+	protocol.MethodAgentModels:           tierRead,
+	protocol.MethodAccountList:           tierRead,
+	protocol.MethodTemplateList:          tierRead,
+	protocol.MethodChangesList:           tierRead,
 	protocol.MethodAccountUsage:          tierRead,
 	protocol.MethodTerminalStatus:        tierRead,
 	protocol.MethodAssistantDocs:         tierRead,
@@ -66,6 +70,8 @@ var tiers = map[string]string{
 	protocol.MethodRunPRFeedback:         tierRead,
 	protocol.MethodRunOverlaps:           tierRead,
 	protocol.MethodRunLaunch:             tierConfirmed,
+	protocol.MethodTemplateLaunch:        tierConfirmed,
+	protocol.MethodMissionCreate:         tierConfirmed,
 	protocol.MethodRunInject:             tierConfirmed,
 	protocol.MethodRunPause:              tierReversible,
 	protocol.MethodRunResume:             tierReversible,
@@ -209,7 +215,10 @@ func (s *Server) dispatch(ctx context.Context, req protocol.Request) (json.RawMe
 }
 
 func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (json.RawMessage, *protocol.Error) {
-	params, err := Prepare(s.Member, req.Method, req.Params)
+	params, reason, err := statedReason(req.Method, req.Params)
+	if err == nil {
+		params, err = Prepare(s.Member, req.Method, params)
+	}
 	if err != nil {
 		return nil, &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": " + err.Error()}
 	}
@@ -223,6 +232,9 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 		c := protocol.AssistantConfirmation{Method: req.Method, Params: req.Params, CreatedAt: time.Now().UTC()}
 		if rpcErr := s.summarize(ctx, req, &c); rpcErr != nil {
 			return nil, rpcErr
+		}
+		if reason != "" {
+			c.Summary += fmt.Sprintf(". The assistant's reason: %q", reason)
 		}
 		if err := s.Confirm(ctx, c); err != nil {
 			var pe *protocol.Error
@@ -243,7 +255,7 @@ func (s *Server) run(ctx context.Context, req protocol.Request, tier string) (js
 
 func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
 	switch req.Method {
-	case protocol.MethodRunLaunch:
+	case protocol.MethodRunLaunch, protocol.MethodTemplateLaunch:
 		launched, err := protocol.DecodeParams[protocol.RunResult](result)
 		if err != nil {
 			slog.Warn("assistant tools: read the launched run", "error", err)
@@ -260,14 +272,17 @@ func (s *Server) followed(req protocol.Request, result json.RawMessage) string {
 	return ""
 }
 
-func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) (rpcErr *protocol.Error) {
+func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
 	switch req.Method {
 	case protocol.MethodEnvSave:
 		c.Summary = "Save your environment as a new image; new runs and terminals start from it"
 		return nil
 	case protocol.MethodRunLaunch:
-		c.Summary, rpcErr = s.summarizeLaunch(ctx, req)
-		return rpcErr
+		return s.summarizeLaunch(ctx, req, c)
+	case protocol.MethodMissionCreate:
+		return s.summarizeMission(ctx, req, c)
+	case protocol.MethodTemplateLaunch:
+		return s.summarizeTemplate(ctx, req, c)
 	case protocol.MethodRunInject:
 		return s.summarizeInject(ctx, req, c)
 	case protocol.MethodRunKill:
@@ -411,25 +426,197 @@ func (s *Server) call(ctx context.Context, method string, params, out any) *prot
 	return nil
 }
 
-func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request) (string, *protocol.Error) {
+// launchNames names the accounts and repositories a launch's card
+// mentions.
+type launchNames struct {
+	member               string
+	accounts, workspaces map[string]string
+}
+
+func (s *Server) launchNames(ctx context.Context) (launchNames, *protocol.Error) {
+	var accounts protocol.AccountListResult
+	if rpcErr := s.call(ctx, protocol.MethodAccountList, nil, &accounts); rpcErr != nil {
+		return launchNames{}, rpcErr
+	}
+	var workspaces protocol.WorkspaceListResult
+	if rpcErr := s.call(ctx, protocol.MethodWorkspaceList, nil, &workspaces); rpcErr != nil {
+		return launchNames{}, rpcErr
+	}
+	n := launchNames{member: s.Member, accounts: map[string]string{}, workspaces: map[string]string{}}
+	for _, m := range accounts.Accounts {
+		n.accounts[m.ID] = cmp.Or(m.DisplayName, m.ID)
+	}
+	for _, w := range workspaces.Workspaces {
+		n.workspaces[w.ID] = w.Name
+	}
+	return n, nil
+}
+
+func (n launchNames) owner(id string) string {
+	return truncate(cmp.Or(n.accounts[id], id))
+}
+
+// account is whose account id is, marking c when it is another member's,
+// which spends their usage and so always asks.
+func (n launchNames) account(id string, c *protocol.AssistantConfirmation) string {
+	if id == "" || id == n.member {
+		return "your account"
+	}
+	if !c.OtherMember {
+		c.OtherMember, c.OtherOwner = true, n.owner(id)
+	}
+	return fmt.Sprintf("%q's account", n.owner(id))
+}
+
+// maxNamed bounds how many accounts, repositories or agents a card names.
+const maxNamed = 6
+
+func named(items []string) string {
+	shown := items[:min(len(items), maxNamed)]
+	if more := len(items) - len(shown); more > 0 {
+		shown = append(slices.Clone(shown), fmt.Sprintf("%d more", more))
+	}
+	return strings.Join(shown, ", ")
+}
+
+func (n launchNames) options(order []string, off bool, extras []string) string {
+	var out string
+	switch {
+	case off:
+		out = ", no fallback"
+	case len(order) > 0:
+		accounts := make([]string, len(order))
+		for i, id := range order {
+			accounts[i] = fmt.Sprintf("%q", n.owner(id))
+		}
+		out = ", falling back to " + named(accounts) + " in order"
+	}
+	if len(extras) > 0 {
+		repos := make([]string, len(extras))
+		for i, id := range extras {
+			repos[i] = fmt.Sprintf("%q", truncate(cmp.Or(n.workspaces[id], id)))
+		}
+		out += ", with repositories " + named(repos)
+	}
+	return out
+}
+
+func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
 	p, err := protocol.DecodeParams[protocol.RunLaunchParams](req.Params)
 	if err != nil || p.WorkspaceID == "" || p.Harness == "" {
-		return "", &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and harness are required"}
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and harness are required"}
 	}
-	params, _ := json.Marshal(protocol.WorkspaceGetParams{WorkspaceID: p.WorkspaceID})
-	raw, rpcErr := s.Caller.Call(ctx, protocol.MethodWorkspaceGet, params)
+	ws, rpcErr := s.workspaceName(ctx, p.WorkspaceID)
 	if rpcErr != nil {
-		return "", rpcErr
+		return rpcErr
 	}
-	var ws protocol.WorkspaceGetResult
-	if err := json.Unmarshal(raw, &ws); err != nil {
-		return "", &protocol.Error{Code: protocol.CodeInternal, Message: "decode workspace.get result: " + err.Error()}
+	n, rpcErr := s.launchNames(ctx)
+	if rpcErr != nil {
+		return rpcErr
 	}
 	mode := p.Mode
 	if mode == "" {
 		mode = "default mode"
 	}
-	return fmt.Sprintf("Launch %s (%s) in %s: %q", p.Harness, mode, ws.Workspace.Name, truncate(p.Task)), nil
+	summary := fmt.Sprintf("Launch %s (%s) in %s", p.Harness, mode, ws)
+	if p.AccountMemberID != "" && p.AccountMemberID != s.Member {
+		summary += " on " + n.account(p.AccountMemberID, c)
+	}
+	c.Summary = fmt.Sprintf("%s%s: %q", summary, n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs), truncate(p.Task))
+	return nil
+}
+
+func (s *Server) summarizeMission(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.MissionCreateParams](req.Params)
+	if err != nil || p.WorkspaceID == "" || p.Integrator.Harness == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and integrator are required"}
+	}
+	ws, rpcErr := s.workspaceName(ctx, p.WorkspaceID)
+	if rpcErr != nil {
+		return rpcErr
+	}
+	n, rpcErr := s.launchNames(ctx)
+	if rpcErr != nil {
+		return rpcErr
+	}
+	agents := make([]string, len(p.ExecutionChoices))
+	for i, choice := range p.ExecutionChoices {
+		agents[i] = fmt.Sprintf("%s (%s) on %s", truncate(choice.Harness), choice.Mode, n.account(choice.AccountMemberID, c))
+	}
+	c.Summary = fmt.Sprintf("Start a swarm in %s with integrator %s (%s) on %s, agents %s%s: %q", ws, truncate(p.Integrator.Harness), p.Integrator.Mode,
+		n.account(p.Integrator.AccountMemberID, c), named(agents), n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs), truncate(p.Objective))
+	return nil
+}
+
+// summarizeTemplate names the template's agent, mode, model and task, which
+// any workspace admin may have changed since the assistant read them.
+func (s *Server) summarizeTemplate(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.TemplateLaunchParams](req.Params)
+	if err != nil || p.WorkspaceID == "" || p.Name == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and name are required"}
+	}
+	ws, rpcErr := s.workspaceName(ctx, p.WorkspaceID)
+	if rpcErr != nil {
+		return rpcErr
+	}
+	var list protocol.TemplateListResult
+	if rpcErr := s.call(ctx, protocol.MethodTemplateList, protocol.TemplateListParams{WorkspaceID: p.WorkspaceID}, &list); rpcErr != nil {
+		return rpcErr
+	}
+	i := slices.IndexFunc(list.Templates, func(t protocol.Template) bool { return t.Name == p.Name })
+	if i < 0 {
+		return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: workspace %s has no template %q", req.Method, ws, truncate(p.Name))}
+	}
+	t := list.Templates[i]
+	agent := fmt.Sprintf("%s (%s)", truncate(t.Harness), cmp.Or(t.Mode, "headless"))
+	if t.Model != "" {
+		agent = fmt.Sprintf("%s (%s, %s)", truncate(t.Harness), cmp.Or(t.Mode, "headless"), truncate(t.Model))
+	}
+	c.Summary = fmt.Sprintf("Launch template %q in %s: %s on your account", truncate(p.Name), ws, agent)
+	if len(p.Params) > 0 {
+		values, _ := json.Marshal(p.Params)
+		c.Summary += fmt.Sprintf(" with %q", truncate(string(values)))
+	}
+	c.Summary += fmt.Sprintf(": %q", truncate(t.Task))
+	return nil
+}
+
+// maxReason bounds the assistant's stated reason on a card.
+const maxReason = 200
+
+// statedReason takes the assistant's one-line reason for a launch off its
+// params: it is for the member's card, and the server refuses params it
+// does not know.
+func statedReason(method string, params json.RawMessage) (json.RawMessage, string, error) {
+	if (method != protocol.MethodRunLaunch && method != protocol.MethodMissionCreate) || len(params) == 0 || string(params) == "null" {
+		return params, "", nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(params, &fields); err != nil {
+		return nil, "", errors.New("params must be an object")
+	}
+	raw, ok := fields["reason"]
+	if !ok {
+		return params, "", nil
+	}
+	var reason string
+	if err := json.Unmarshal(raw, &reason); err != nil {
+		return nil, "", errors.New("reason must be a string")
+	}
+	delete(fields, "reason")
+	out, err := json.Marshal(fields)
+	if r := []rune(reason); len(r) > maxReason {
+		reason = string(r[:maxReason]) + "…"
+	}
+	return out, reason, err
+}
+
+func (s *Server) workspaceName(ctx context.Context, id string) (string, *protocol.Error) {
+	var ws protocol.WorkspaceGetResult
+	if rpcErr := s.call(ctx, protocol.MethodWorkspaceGet, protocol.WorkspaceGetParams{WorkspaceID: id}, &ws); rpcErr != nil {
+		return "", rpcErr
+	}
+	return ws.Workspace.Name, nil
 }
 
 func (s *Server) summarizeInject(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
@@ -535,10 +722,11 @@ func truncate(text string) string {
 
 // Prepare checks the params of a call made for member, by the assistant's
 // socket or a connector. Either is bound to one member, so the wire never
-// names one, except that run.list takes member_id as a read filter, and
-// "mine" there selects member. mission.create makes member the swarm's
-// accountable human and the account of every agent, which falls back to
-// accounts member may launch on as member's own launches do.
+// names one as the actor. It may name the agent accounts a call runs on or
+// reads, the accountFields, which the server checks member may use; and
+// run.list takes member_id as a read filter, where "mine" selects member.
+// mission.create makes member the swarm's accountable human and the account
+// of every agent that names none.
 func Prepare(member, method string, params json.RawMessage) (json.RawMessage, error) {
 	if len(params) == 0 || string(params) == "null" {
 		return params, nil
@@ -548,7 +736,8 @@ func Prepare(member, method string, params json.RawMessage) (json.RawMessage, er
 		return nil, errors.New("params must be an object")
 	}
 	for name := range fields {
-		if strings.Contains(strings.ToLower(name), "member_id") && (method != protocol.MethodRunList || name != "member_id") {
+		if strings.Contains(strings.ToLower(name), "member_id") && !slices.Contains(accountFields[method], name) &&
+			(method != protocol.MethodRunList || name != "member_id") {
 			return nil, fmt.Errorf("%s is not accepted: calls act as the member this socket belongs to", name)
 		}
 	}
@@ -573,21 +762,28 @@ func Prepare(member, method string, params json.RawMessage) (json.RawMessage, er
 	return json.Marshal(fields)
 }
 
+// accountFields are the params, by method, that name an agent account to
+// launch on or read; the server refuses one not shared with the caller.
+var accountFields = map[string][]string{
+	protocol.MethodRunLaunch:     {"account_member_id", "fallback_account_member_ids"},
+	protocol.MethodMissionCreate: {"fallback_account_member_ids"},
+	protocol.MethodAgentList:     {"account_member_id"},
+	protocol.MethodAgentModels:   {"account_member_id"},
+	protocol.MethodAccountUsage:  {"account_member_id"},
+}
+
 func prepareMission(member string, params json.RawMessage) (json.RawMessage, error) {
 	p, err := protocol.DecodeParams[protocol.MissionCreateParams](params)
 	if err != nil {
 		return nil, err
 	}
-	named := p.AccountableHumanID != "" || p.Integrator.AccountMemberID != ""
-	for _, c := range p.ExecutionChoices {
-		named = named || c.AccountMemberID != ""
+	if p.AccountableHumanID != "" {
+		return nil, errors.New("accountable_human_id is not accepted: calls act as the member this socket belongs to")
 	}
-	if named {
-		return nil, errors.New("accountable_human_id and account_member_id are not accepted: calls act as the member this socket belongs to")
-	}
-	p.AccountableHumanID, p.Integrator.AccountMemberID = member, member
+	p.AccountableHumanID = member
+	p.Integrator.AccountMemberID = cmp.Or(p.Integrator.AccountMemberID, member)
 	for i := range p.ExecutionChoices {
-		p.ExecutionChoices[i].AccountMemberID = member
+		p.ExecutionChoices[i].AccountMemberID = cmp.Or(p.ExecutionChoices[i].AccountMemberID, member)
 	}
 	return json.Marshal(p)
 }

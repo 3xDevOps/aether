@@ -97,7 +97,8 @@ var readOps = []Op{
 		defaultOn(Assistant, "mine", false, "only runs the member launched; default false, every run they can see"),
 	opOf("aether_get_run", "Get run", ScopeRead, true, nextRuns,
 		"Use this when the user asks about one run, and to poll a launched run."+untrustedRule, getRun).
-		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline, protocol.MethodRunPRStatus),
+		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline,
+		protocol.MethodRunPRStatus),
 	opOf("aether_run_history", "Read run history", ScopeRead, true, nextRuns,
 		"Use this when the user asks what a run said or did: its conversation or terminal, oldest first, and reports."+untrustedRule, runHistory).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodWorkspaceTimeline, protocol.MethodRunACPHistory, protocol.MethodTerminalHistory),
@@ -113,7 +114,7 @@ var readOps = []Op{
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodMissionList),
 	opOf("aether_get_swarm", "Get swarm", ScopeRead, true, nextSwarms,
 		"Use this when the user asks about one swarm, and to poll a launched swarm."+untrustedRule, getSwarm).
-		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodCoordMessagesList),
+		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodCoordMessagesList),
 	opOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
 		"Use this when the user asks what a run changed."+untrustedRule, runChanges).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodRunGitLog, protocol.MethodRunEvidenceList, protocol.MethodRunGitDiff),
@@ -379,6 +380,10 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	book, err := accounts(ctx, c.read)
+	if err != nil {
+		return "", nil, err
+	}
 	items, err := attention(ctx, c.read, r.WorkspaceID)
 	if err != nil {
 		return "", nil, err
@@ -390,9 +395,10 @@ func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
 	row := rowOf(r, l, nil)
 	untrusted := map[string]any{"run": row.Untrusted, "task": clip(r.Task, maxText)}
 	row.Untrusted = nil
-	out := map[string]any{"run": row, "mode": r.Mode, "model": r.Model, "branch": r.Branch,
+	receipt := runReceipt(r, l, book)
+	out := map[string]any{"run": row, "launch": receipt, "branch": r.Branch,
 		"paused": r.Paused, "pending_inputs": len(r.PendingInputs), "finished_at": r.FinishedAt, "review": r.Review, "untrusted": untrusted}
-	summary := fmt.Sprintf("Run %s is %s.", r.ID, r.Status)
+	summary := fmt.Sprintf("Run %s is %s on %s.", r.ID, r.Status, accountName(receipt))
 	for _, it := range items {
 		if it.RunID == r.ID {
 			out["needs_you"] = attentionRowOf(it, l)
@@ -637,6 +643,10 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 	if err != nil {
 		return "", nil, err
 	}
+	book, err := accounts(ctx, c.read)
+	if err != nil {
+		return "", nil, err
+	}
 	m := res.Mission
 	var msgs protocol.CoordMessagesListResult
 	if err := c.read(ctx, protocol.MethodCoordMessagesList, protocol.CoordMessagesListParams{WorkspaceID: m.WorkspaceID, MissionID: m.ID, Limit: 10}, &msgs); err != nil {
@@ -649,11 +659,12 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 		Blockers []string `json:"blockers,omitempty"`
 	}
 	type worker struct {
-		RunID   string `json:"run_id"`
-		TaskID  string `json:"task_id"`
-		State   string `json:"state"`
-		Harness string `json:"harness"`
-		URL     string `json:"url,omitempty"`
+		RunID  string `json:"run_id"`
+		TaskID string `json:"task_id"`
+		State  string `json:"state"`
+		choice
+		RequestedAccount *accountRef `json:"requested_account,omitempty"`
+		URL              string      `json:"url,omitempty"`
 	}
 	type question struct {
 		ID       string `json:"id"`
@@ -681,7 +692,12 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 	}
 	workers := make([]worker, 0, len(res.Attempts))
 	for _, a := range res.Attempts {
-		workers = append(workers, worker{RunID: a.RunID, TaskID: a.TaskID, State: a.State, Harness: a.Harness, URL: l.run(a.RunID)})
+		w := worker{RunID: a.RunID, TaskID: a.TaskID, State: a.State, choice: choiceOf(a.Harness, a.Mode, a.Model, cmp.Or(a.LaunchAccountID, a.AccountOwnerID), book),
+			URL: l.run(a.RunID)}
+		if a.LaunchAccountID != "" && a.LaunchAccountID != a.AccountOwnerID {
+			w.RequestedAccount = book.ref(a.AccountOwnerID)
+		}
+		workers = append(workers, w)
 	}
 	questions := make([]question, 0, len(res.Questions))
 	for _, q := range res.Questions {
@@ -692,7 +708,7 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 		messages = append(messages, message{FromRunID: msg.FromRunID, ToRunID: msg.ToRunID, Kind: msg.Kind,
 			Body: clip(cmp.Or(msg.Summary, msg.Body), maxText), At: msg.CreatedAt})
 	}
-	out := map[string]any{"swarm": swarmRowOf(m, l, maxText),
+	out := map[string]any{"swarm": swarmRowOf(m, l, maxText), "launch": swarmReceipt(m, l, book),
 		"workers": workers, "untrusted": map[string]any{"tasks": tasks, "questions": questions, "messages": messages}}
 	if m.IntegratorLaunchError != "" {
 		out["integrator_launch_error"] = m.IntegratorLaunchError

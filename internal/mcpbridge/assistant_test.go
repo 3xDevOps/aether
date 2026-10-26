@@ -129,6 +129,12 @@ func TestAssistantTools(t *testing.T) {
 		protocol.MethodRunInject:             protocol.RunRoomPostResult{Message: protocol.RoomMessage{State: protocol.RoomMessageSent}},
 		protocol.MethodMissionQuestionAnswer: protocol.MissionQuestionResult{},
 		protocol.MethodRunInputRespond:       protocol.RunInputRespondResult{Status: protocol.RunInputRespondAnswered},
+		protocol.MethodAccountList:           protocol.AccountListResult{Accounts: []protocol.Member{{ID: "m1", DisplayName: "Ada"}}},
+		protocol.MethodAgentList:             protocol.AgentListResult{Agents: []protocol.AgentInfo{{Name: "claude", Installed: true, Enhanced: "adapter", DefaultMode: "tui"}}},
+		protocol.MethodAccountUsage:          protocol.AccountUsageResult{Providers: []protocol.UsageProvider{}},
+		protocol.MethodTemplateList:          protocol.TemplateListResult{Templates: []protocol.Template{{Name: "triage", Harness: "claude", Mode: "acp", Task: injection}}},
+		protocol.MethodChangesList: protocol.ChangesListResult{Changes: []protocol.Change{{Seq: 9, Kind: protocol.ChangeKindReports, RunID: "run-1",
+			Report: &protocol.ChangeReport{Outcome: "success"}, Untrusted: &protocol.ChangeUntrusted{Summary: injection}}}, NextCursor: "9"},
 	}}
 	var mu sync.Mutex
 	var confirmed []protocol.AssistantConfirmation
@@ -176,6 +182,8 @@ func TestAssistantTools(t *testing.T) {
 		{"aether_overlaps", nil},
 		{"aether_activity_summary", map[string]any{"period": "week"}},
 		{"aether_run_history", map[string]any{"run_id": "run-1"}},
+		{"aether_changes", nil},
+		{"aether_launch_options", map[string]any{"workspace_id": "ws-1"}},
 	} {
 		summary, got := callOK(t, cs, c.name, c.args)
 		if strings.Contains(trustedJSON(t, got), injection) || strings.Contains(summary, injection) {

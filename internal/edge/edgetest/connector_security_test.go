@@ -69,7 +69,7 @@ func TestConnectorProtocolThroughTheEdge(t *testing.T) {
 
 	resp, out := rpc(t, base, token.AccessToken, "tools/list", map[string]any{})
 	tools, _ := out["result"].(map[string]any)["tools"].([]any)
-	if resp.StatusCode != http.StatusOK || len(tools) != 26 || resp.Header.Get("Mcp-Session-Id") != "" {
+	if resp.StatusCode != http.StatusOK || len(tools) != 29 || resp.Header.Get("Mcp-Session-Id") != "" {
 		t.Fatalf("tools/list without initialize: %s %v", resp.Status, out)
 	}
 	raw, err := json.Marshal(tools)
@@ -145,12 +145,20 @@ func TestConnectorIsolationThroughTheEdge(t *testing.T) {
 	}
 
 	for name, args := range map[string]map[string]any{
-		"aether_launch_run":   {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "member_id": string(s.memberOf(t, alice).ID)},
-		"aether_list_runs":    {"member_id": string(s.memberOf(t, alice).ID)},
-		"aether_launch_swarm": {"workspace_id": string(ws.ID), "objective": "o", "harness": "claude", "workers": []any{map[string]any{"harness": "codex", "account_member_id": string(s.memberOf(t, alice).ID)}}},
+		"aether_launch_run": {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "member_id": string(s.memberOf(t, alice).ID)},
+		"aether_list_runs":  {"member_id": string(s.memberOf(t, alice).ID)},
 	} {
 		if failed, text := toolText(t, session, name, args); !failed || !strings.Contains(text, "member_id") {
 			t.Errorf("%s with a member id = %v %s, want refused", name, failed, text)
+		}
+	}
+	// Alice has not shared her agent account with bob.
+	for name, args := range map[string]map[string]any{
+		"aether_launch_run":   {"workspace_id": string(ws.ID), "harness": "claude", "task": "t", "account_member_id": string(s.memberOf(t, alice).ID)},
+		"aether_launch_swarm": {"workspace_id": string(ws.ID), "objective": "o", "harness": "claude", "workers": []any{map[string]any{"harness": "codex", "account_member_id": string(s.memberOf(t, alice).ID)}}},
+	} {
+		if failed, text := toolText(t, session, name, args); !failed || !strings.Contains(text, "not shared") {
+			t.Errorf("%s on an account not shared with bob = %v %s, want refused", name, failed, text)
 		}
 	}
 
