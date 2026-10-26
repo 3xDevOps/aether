@@ -15,7 +15,7 @@ import (
 func init() {
 	register(command{
 		name:    "audit",
-		short:   "show audit history: connector and assistant writes, connector, account-share and role changes",
+		short:   "show audit history: connector and assistant writes, and connector, account-share, member and Slack link changes",
 		usage:   "aether audit [--connector <connector-id>] [--limit <n>] [--before <seq>]",
 		example: "aether audit --connector con-7k2m9q4xbd",
 		flags:   true,

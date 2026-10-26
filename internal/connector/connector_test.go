@@ -163,6 +163,14 @@ func TestConnectorEndToEnd(t *testing.T) {
 		t.Fatalf("connector after a reused refresh token = %d %s, want revoked", status, body)
 	}
 	e.refresh(t, second, next.RefreshToken, http.StatusBadRequest)
+	var audit protocol.AuditListResult
+	if err := e.admin.Call(protocol.MethodAuditList, protocol.AuditListParams{Limit: 1}, &audit); err != nil {
+		t.Fatal(err)
+	}
+	if len(audit.Entries) != 1 || audit.Entries[0].Method != "connector.reused" || audit.Entries[0].Client != "Test client" ||
+		audit.Entries[0].ConnectorID == "" || audit.Entries[0].Target != audit.Entries[0].ConnectorID {
+		t.Fatalf("newest audit entry = %+v, want the reused connector's revocation", audit.Entries)
+	}
 
 	third := e.connect(t, allScopes...)
 	if err := e.db.RevokeDevice(ctx, e.deviceID); err != nil {

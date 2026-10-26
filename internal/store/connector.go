@@ -15,6 +15,19 @@ import (
 // away RefreshReuseGrace or longer ago: the connector has been deleted.
 var ErrRefreshReused = errors.New("store: refresh token reused")
 
+// RefreshReusedError is ErrRefreshReused naming the connector it deleted.
+type RefreshReusedError struct {
+	Connector string
+	Member    domain.MemberID
+	Client    string
+}
+
+func (e *RefreshReusedError) Error() string {
+	return ErrRefreshReused.Error() + ": connector " + e.Connector + " revoked"
+}
+
+func (e *RefreshReusedError) Unwrap() error { return ErrRefreshReused }
+
 // ErrRefreshJustRotated is returned for a refresh token its connector
 // rotated away less than RefreshReuseGrace ago, as when a client sends
 // two refreshes at once: the connector is kept.
@@ -185,7 +198,7 @@ type rotatedTokenStore interface {
 
 // revokeReused answers for hash, a refresh token a connector rotated away
 // and unlapsed at at: ErrRefreshJustRotated within RefreshReuseGrace of
-// the rotation, and otherwise ErrRefreshReused once it deleted the
+// the rotation, and otherwise a RefreshReusedError once it deleted the
 // connector. A hash no connector rotated away is ErrNotFound.
 func revokeReused(ctx context.Context, q rotatedTokenStore, hash string, at int64) error {
 	var id string
@@ -201,11 +214,12 @@ func revokeReused(ctx context.Context, q rotatedTokenStore, hash string, at int6
 	case decodeTime(at).Sub(decodeTime(rotated)) < RefreshReuseGrace:
 		return ErrRefreshJustRotated
 	}
-	err = notFoundOnZeroRows(q.ExecContext(ctx, `DELETE FROM connectors WHERE id = ?`, id))
+	reused := &RefreshReusedError{Connector: id}
+	err = q.QueryRowContext(ctx, `DELETE FROM connectors WHERE id = ? RETURNING member_id, client_name`, id).Scan(&reused.Member, &reused.Client)
 	switch {
 	case err == nil:
-		return ErrRefreshReused
-	case errors.Is(err, ErrNotFound):
+		return reused
+	case errors.Is(err, sql.ErrNoRows):
 		return ErrNotFound
 	}
 	return fmt.Errorf("store: revoke connector: %w", err)

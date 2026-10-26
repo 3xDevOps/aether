@@ -793,6 +793,16 @@ func (s *Server) EdgeAccountDeleted(ctx context.Context, provider, subject strin
 	if err != nil {
 		return err
 	}
+	var conns []*store.Connector
+	m, err := ids.GetMemberByIdentity(ctx, provider, subject)
+	switch {
+	case err == nil:
+		if conns, err = s.connectorsOf(ctx, m.ID); err != nil {
+			return fmt.Errorf("sshd: edge account deleted: %w", err)
+		}
+	case !errors.Is(err, store.ErrNotFound):
+		return fmt.Errorf("sshd: edge account deleted: %w", err)
+	}
 	member, devices, err := ids.RemoveIdentity(ctx, provider, subject)
 	if errors.Is(err, store.ErrNotFound) {
 		slog.Info("sshd: edge account deleted; no member has that identity", "provider", provider, "subject", subject)
@@ -801,6 +811,7 @@ func (s *Server) EdgeAccountDeleted(ctx context.Context, provider, subject strin
 	if err != nil {
 		return fmt.Errorf("sshd: edge account deleted: %w", err)
 	}
+	s.recordConnectorsRemoved(ctx, slices.DeleteFunc(conns, func(c *store.Connector) bool { return !slices.Contains(devices, c.Device) }))
 	s.closeConns(func(id connIdentity) bool { return slices.Contains(devices, id.device) })
 	s.notifyDirectory()
 	for _, id := range devices {

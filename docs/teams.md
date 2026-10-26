@@ -198,9 +198,10 @@ can message and stop each other's agents with no setup. Every such act is
 recorded in the workspace timeline with who did it. Change a role with
 `aether member role <id> viewer|collaborator|admin`. It applies to connections
 that are already open: a demoted member's live attach drops with
-`detached: you can no longer control this run`. Role changes, account shares
-and connector writes are kept in the audit history; `aether audit` shows yours,
-or everyone's to an admin ([connectors.md](connectors.md#audit-history)).
+`detached: you can no longer control this run`. Member approvals,
+removals and role changes, account shares and connector writes are kept in the
+audit history; `aether audit` shows yours, or everyone's to an admin
+([connectors.md](connectors.md#audit-history)).
 
 The last admin cannot be removed or demoted: `refusing to delete the last admin`
 or `refusing to demote the last admin`. Admin-only commands fail for others with

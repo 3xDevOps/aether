@@ -7,10 +7,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 func TestConnectorMethodScopesNameRegisteredMethods(t *testing.T) {
@@ -212,5 +214,48 @@ func TestAuditRecordsConnectorWritesForTheirMemberAndAdmins(t *testing.T) {
 	}
 	if _, perr := e.srv.Local(e.member.ID).Call(ctx, protocol.MethodAuditList, json.RawMessage(`{"limit":201}`)); perr == nil || perr.Code != protocol.CodeInvalidParams {
 		t.Fatalf("audit.list limit 201 = %v, want invalid params", perr)
+	}
+}
+
+// Removing a member records the removal and the deletion of each of the
+// member's connectors, which the connector filter finds.
+func TestAuditRecordsConnectorsRemovedWithTheirMember(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	_, bo := addMember(t, e, "Bo", domain.RoleCollaborator, false)
+	now := time.Now()
+	conn := &store.Connector{Member: bo.ID, ClientID: "client", ClientName: "Claude", RedirectHost: "claude.ai", Resource: "https://aether.test/mcp",
+		Scopes: []string{ConnectorScopeRead}, CreatedAt: time.Now()}
+	if err := e.store.(store.ConnectorStore).CreateConnector(ctx, conn, store.ConnectorTokens{Access: "a", AccessExpiresAt: now.Add(time.Hour),
+		Refresh: "r", RefreshExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	admin := e.srv.Local(e.member.ID)
+	if _, perr := admin.Call(ctx, protocol.MethodMemberRemove, json.RawMessage(`{"member_id":"`+string(bo.ID)+`"}`)); perr != nil {
+		t.Fatalf("member.remove: %v", perr)
+	}
+	var got []string
+	for _, params := range []string{`{"limit":2}`, `{"connector_id":"` + conn.ID + `"}`} {
+		raw, perr := admin.Call(ctx, protocol.MethodAuditList, json.RawMessage(params))
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		var res protocol.AuditListResult
+		if err := json.Unmarshal(raw, &res); err != nil {
+			t.Fatal(err)
+		}
+		for _, a := range res.Entries {
+			got = append(got, strings.Join([]string{a.MemberID, a.Via, a.ConnectorID, a.Method, a.Target, a.Outcome}, " "))
+		}
+	}
+	removed := strings.Join([]string{string(bo.ID), ViaConnector, conn.ID, MethodConnectorRemoved, conn.ID, "ok"}, " ")
+	want := []string{
+		strings.Join([]string{string(e.member.ID), ViaDashboard, "", protocol.MethodMemberRemove, string(bo.ID), "ok"}, " "),
+		removed,
+		removed,
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("audit.list = %q, want %q", got, want)
 	}
 }

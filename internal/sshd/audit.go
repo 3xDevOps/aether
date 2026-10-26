@@ -25,9 +25,16 @@ const (
 	ViaAssistant = "assistant"
 )
 
-// MethodConnectorCreate names a connector's authorization in audit
-// history; it is no RPC.
-const MethodConnectorCreate = "connector.create"
+// The names audit history gives what happens to a connector with no call
+// behind it; none is an RPC. MethodConnectorReused is its revocation for
+// presenting a rotated refresh token again, and MethodConnectorRemoved its
+// deletion along with its member or with the edge account its device
+// signed in with.
+const (
+	MethodConnectorCreate  = "connector.create"
+	MethodConnectorReused  = "connector.reused"
+	MethodConnectorRemoved = "connector.removed"
+)
 
 const (
 	auditTimeout   = 5 * time.Second
@@ -36,11 +43,17 @@ const (
 
 // auditedMethods are audited whoever calls them.
 var auditedMethods = map[string]bool{
-	protocol.MethodConnectorRevoke:   true,
-	protocol.MethodAccountShare:      true,
-	protocol.MethodAccountRevoke:     true,
-	protocol.MethodMemberRole:        true,
-	protocol.MethodMemberMergeAccept: true,
+	protocol.MethodConnectorRevoke:      true,
+	protocol.MethodAccountShare:         true,
+	protocol.MethodAccountRevoke:        true,
+	protocol.MethodMemberRole:           true,
+	protocol.MethodMemberApprove:        true,
+	protocol.MethodMemberRemove:         true,
+	protocol.MethodMemberDeviceRevoke:   true,
+	protocol.MethodMemberIdentityRemove: true,
+	protocol.MethodMemberMergeAccept:    true,
+	protocol.MethodSlackLink:            true,
+	protocol.MethodSlackUnlink:          true,
 }
 
 // assistantReads are the read-only methods the assistant calls that no
@@ -101,20 +114,35 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		QuestionID  string `json:"question_id"`
 		ConnectorID string `json:"connector_id"`
 		MemberID    string `json:"member_id"`
+		DeviceID    string `json:"device_id"`
+		ProposalID  string `json:"proposal_id"`
 		WorkspaceID string `json:"workspace_id"`
 	}
 	_ = json.Unmarshal(params, &ids)
 	var made struct {
 		Run     struct{ ID string } `json:"run"`
 		Mission struct{ ID string } `json:"mission"`
+		Merge   struct {
+			AbsorbedID string `json:"absorbed_id"`
+		} `json:"merge"`
+		Link struct {
+			UserID string `json:"user_id"`
+		} `json:"link"`
 	}
 	_ = json.Unmarshal(result, &made)
 	target := cmp.Or(ids.RunID, ids.MissionID, ids.QuestionID, made.Run.ID, made.Mission.ID)
 	switch method {
 	case protocol.MethodConnectorRevoke:
 		target = ids.ConnectorID
-	case protocol.MethodAccountShare, protocol.MethodAccountRevoke, protocol.MethodMemberRole:
+	case protocol.MethodAccountShare, protocol.MethodAccountRevoke, protocol.MethodMemberRole, protocol.MethodMemberApprove,
+		protocol.MethodMemberRemove, protocol.MethodMemberIdentityRemove:
 		target = ids.MemberID
+	case protocol.MethodMemberDeviceRevoke:
+		target = ids.DeviceID
+	case protocol.MethodMemberMergeAccept:
+		target = cmp.Or(made.Merge.AbsorbedID, ids.ProposalID)
+	case protocol.MethodSlackUnlink:
+		target = made.Link.UserID
 	}
 	e := &store.AuditEntry{At: time.Now(), Member: member, Via: via, ConnectorID: connector, Client: client, Method: method,
 		WorkspaceID: clipID(ids.WorkspaceID), Target: clipID(target)}
@@ -124,11 +152,28 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 	s.recordAudit(ctx, e)
 }
 
-// RecordConnectorCreated records that member authorized connector id for
-// client.
-func (s *Server) RecordConnectorCreated(ctx context.Context, member domain.MemberID, id, client string) {
+// RecordConnectorEvent records method, such as MethodConnectorCreate,
+// happening to member's connector id of client.
+func (s *Server) RecordConnectorEvent(ctx context.Context, method string, member domain.MemberID, id, client string) {
 	s.recordAudit(ctx, &store.AuditEntry{At: time.Now(), Member: member, Via: ViaConnector, ConnectorID: id, Client: client,
-		Method: MethodConnectorCreate, Target: id})
+		Method: method, Target: id})
+}
+
+// connectorsOf lists member's connectors so that removing the member or
+// a device deletes them on the record; a store without connectors has none.
+func (s *Server) connectorsOf(ctx context.Context, member domain.MemberID) ([]*store.Connector, error) {
+	cs, ok := s.cfg.Store.(store.ConnectorStore)
+	if !ok {
+		return nil, nil
+	}
+	return cs.ListConnectors(ctx, member, time.Now())
+}
+
+// recordConnectorsRemoved records the deletion of each of conns.
+func (s *Server) recordConnectorsRemoved(ctx context.Context, conns []*store.Connector) {
+	for _, c := range conns {
+		s.RecordConnectorEvent(ctx, MethodConnectorRemoved, c.Member, c.ID, c.ClientName)
+	}
 }
 
 func (s *Server) recordAudit(ctx context.Context, e *store.AuditEntry) {

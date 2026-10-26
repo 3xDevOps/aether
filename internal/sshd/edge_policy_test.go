@@ -462,8 +462,8 @@ func TestNoControlMethodChangesEdgeAccess(t *testing.T) {
 }
 
 // The edge's account-deleted notice only takes access away: the identity
-// and its devices go, their connections close, and the member, its role
-// and its SSH key stay.
+// and its devices go, with the connectors minted on them on the record,
+// their connections close, and the member, its role and its SSH key stay.
 func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withPolicy(edgeproto.PolicyAccount))
@@ -471,11 +471,27 @@ func TestEdgeAccountDeletedOnlyRemovesAccess(t *testing.T) {
 	laptop := newSigner(t)
 	live := e.mustDialEdge(t, octo, laptop, "laptop")
 	m := serverInfoMember(t, controlClientOn(t, live))
+	devs, err := identities(t, e).ListDevices(context.Background(), domain.MemberID(m.ID))
+	if err != nil || len(devs) != 1 {
+		t.Fatalf("devices = %+v, %v", devs, err)
+	}
+	now := time.Now()
+	conn := &store.Connector{Member: domain.MemberID(m.ID), Device: devs[0].ID, ClientID: "client", ClientName: "Claude", RedirectHost: "claude.ai",
+		Resource: "https://aether.test/mcp", Scopes: []string{ConnectorScopeRead}, CreatedAt: now}
+	if err = e.store.(store.ConnectorStore).CreateConnector(context.Background(), conn, store.ConnectorTokens{Access: "a",
+		AccessExpiresAt: now.Add(time.Hour), Refresh: "r", RefreshExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
 
-	if err := e.srv.EdgeAccountDeleted(context.Background(), octo.Provider, octo.Subject); err != nil {
+	if err = e.srv.EdgeAccountDeleted(context.Background(), octo.Provider, octo.Subject); err != nil {
 		t.Fatal(err)
 	}
 	waitClosed(t, live)
+	var audit protocol.AuditListResult
+	if err = controlClient(t, e).Call(protocol.MethodAuditList, protocol.AuditListParams{ConnectorID: conn.ID}, &audit); err != nil ||
+		len(audit.Entries) != 1 || audit.Entries[0].Method != MethodConnectorRemoved || audit.Entries[0].MemberID != m.ID {
+		t.Fatalf("audit for the device's connector = %+v, %v; want its removal", audit.Entries, err)
+	}
 	after, err := e.store.GetMember(context.Background(), domain.MemberID(m.ID))
 	if err != nil || after.Role != domain.RoleAdmin {
 		t.Fatalf("member after the notice = %+v, %v; want kept as admin", after, err)

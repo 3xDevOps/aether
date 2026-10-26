@@ -163,6 +163,10 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	conns, err := s.connectorsOf(ctx, id)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	var activeRuns []*domain.Run
 	if s.cfg.Control != nil {
 		var listErr error
@@ -253,6 +257,7 @@ func (s *Server) memberRemove(ctx context.Context, member domain.MemberID, param
 			}
 		}
 	}
+	s.recordConnectorsRemoved(ctx, conns)
 	s.closeMemberConns(id)
 	s.notifyDirectory()
 	s.publishDroppedDevices(ctx, member, ids, devs)
