@@ -156,7 +156,9 @@ member's role. Reads such as `run.get` and `workspace.timeline` need `read`;
 `run.resume`, `run.review` and `run.relaunch` need `write`; `run.kill`,
 `run.close`, `mission.cancel`, `run.pr.create` and `run.pr.merge` need
 `control`. `run.input.respond` needs `control` to decide a permission request
-and `write` to answer a question. Every other method, such as `member.role` or
+and `write` to answer a question. `run.review` with `complete` needs `control`
+for a live run unless its agent reported success and the run awaits review,
+since completing any other live run ends it. Every other method, such as `member.role` or
 `connector.revoke`, is refused to every connector:
 
 ```
