@@ -265,9 +265,9 @@ A confirmed call blocks until the member approves it in the dashboard, or
 runs at once when the member turned on
 [auto-approval](assistant.md#auto-approval), except that a message to or stop
 of another member's run always waits for a click, and an answer, an approval
-decision, a swarm launch, a template launch and a launch on a teammate's
-shared account always do: the card's `other_member` and `other_owner` name
-the account's owner. The card names what the call acts on: the run's title
+decision, a swarm launch, a template launch, and a launch on a teammate's
+shared account or with one in its fallback order always do: the card's
+`other_member` and `other_owner` name the account's owner. The card names what the call acts on: the run's title
 and owner, the request and the option chosen, a message's attachments and
 anchor, a launch's account when it is a teammate's, its fallback and extra
 repositories, a swarm launch's integrator and agents with their accounts, a

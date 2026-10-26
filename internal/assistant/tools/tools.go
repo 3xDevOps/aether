@@ -479,7 +479,9 @@ func named(items []string) string {
 	return strings.Join(shown, ", ")
 }
 
-func (n launchNames) options(order []string, off bool, extras []string) string {
+// options names a launch's fallback order and extra repositories; a
+// teammate's account in the order marks c as its owner's.
+func (n launchNames) options(order []string, off bool, extras []string, c *protocol.AssistantConfirmation) string {
 	var out string
 	switch {
 	case off:
@@ -487,7 +489,7 @@ func (n launchNames) options(order []string, off bool, extras []string) string {
 	case len(order) > 0:
 		accounts := make([]string, len(order))
 		for i, id := range order {
-			accounts[i] = fmt.Sprintf("%q", n.owner(id))
+			accounts[i] = n.account(id, c)
 		}
 		out = ", falling back to " + named(accounts) + " in order"
 	}
@@ -522,7 +524,7 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *p
 	if p.AccountMemberID != "" && p.AccountMemberID != s.Member {
 		summary += " on " + n.account(p.AccountMemberID, c)
 	}
-	c.Summary = fmt.Sprintf("%s%s: %q", summary, n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs), truncate(p.Task))
+	c.Summary = fmt.Sprintf("%s%s: %q", summary, n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c), truncate(p.Task))
 	return nil
 }
 
@@ -544,7 +546,7 @@ func (s *Server) summarizeMission(ctx context.Context, req protocol.Request, c *
 		agents[i] = fmt.Sprintf("%s (%s) on %s", truncate(choice.Harness), choice.Mode, n.account(choice.AccountMemberID, c))
 	}
 	c.Summary = fmt.Sprintf("Start a swarm in %s with integrator %s (%s) on %s, agents %s%s: %q", ws, truncate(p.Integrator.Harness), p.Integrator.Mode,
-		n.account(p.Integrator.AccountMemberID, c), named(agents), n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs), truncate(p.Objective))
+		n.account(p.Integrator.AccountMemberID, c), named(agents), n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c), truncate(p.Objective))
 	return nil
 }
 

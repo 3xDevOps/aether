@@ -85,7 +85,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			Anchor: &protocol.RoomMessageAnchor{Kind: "file", Path: "main.go", StartLine: 3, EndLine: 9}, IdempotencyKey: "k"},
 	}
 	want := map[string]string{
-		protocol.MethodRunLaunch:      `Launch claude (default mode) in shop on "Grace"'s account, falling back to "Ada" in order, with repositories "web": "fix it"`,
+		protocol.MethodRunLaunch:      `Launch claude (default mode) in shop on "Grace"'s account, falling back to your account in order, with repositories "web": "fix it"`,
 		protocol.MethodTemplateLaunch: `Launch template "triage" in shop: claude (acp, opus) on your account with "{\"issue\":\"42\"}": "triage issue {{issue}}"`,
 		protocol.MethodMissionCreate: `Start a swarm in shop with integrator claude (acp) on your account, agents claude (acp) on your account, codex (tui) on "Grace"'s account: "ship it". ` +
 			`The assistant's reason: "the member asked for codex workers"`,
@@ -144,5 +144,22 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 	raw, _ = json.Marshal(protocol.MissionQuestionAnswerParams{QuestionID: "q-x", Answer: "v2", IdempotencyKey: "k"})
 	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodMissionQuestionAnswer, Params: raw}); perr == nil || perr.Code != protocol.CodeNotFound || got.Summary != "" {
 		t.Fatalf("answering an unknown question = %v, card %q; want not found before any card", perr, got.Summary)
+	}
+}
+
+// A launch on the member's own account that may fall back to a teammate's
+// can spend the teammate's usage, so its card always asks.
+func TestFallbackToATeammateAlwaysAsks(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return nil
+	}}
+	raw, _ := json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", FallbackAccountMemberIDs: []string{"m2"}})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if !got.OtherMember || got.OtherOwner != "Grace" || !strings.Contains(got.Summary, `falling back to "Grace"'s account in order`) {
+		t.Fatalf("confirmation = %+v, want it marked as Grace's", got)
 	}
 }

@@ -40,7 +40,8 @@ func callTimeout(method string, params any) time.Duration {
 	case protocol.MethodCoordInbox, protocol.MethodMissionPlanShow:
 		timeout = callMargin + time.Duration(pollWaitSeconds(params))*time.Second
 	case protocol.MethodRunKill, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject,
-		protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost:
+		protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost,
+		protocol.MethodMissionCreate, protocol.MethodTemplateLaunch:
 		timeout = callConfirmedTimeout
 	case protocol.MethodDevTerminalWait, protocol.MethodDevTerminalStop, protocol.MethodDevBrowserReset:
 		timeout = 30*time.Second + callMargin

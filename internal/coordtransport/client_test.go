@@ -210,7 +210,8 @@ func TestDevelopmentControlFrameLimits(t *testing.T) {
 // take to decide its card.
 func TestConfirmedMethodsOutlastTheirCard(t *testing.T) {
 	for _, m := range []string{protocol.MethodRunKill, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject,
-		protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost} {
+		protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost,
+		protocol.MethodMissionCreate, protocol.MethodTemplateLaunch} {
 		if got := callTimeout(m, nil); got != callConfirmedTimeout {
 			t.Errorf("%s times out after %s, want %s", m, got, callConfirmedTimeout)
 		}
