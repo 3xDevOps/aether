@@ -17,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/push"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -180,17 +181,54 @@ func (s *Service) Close() error {
 	return nil
 }
 
+// evaluateAll evaluates every live watch once. Events replay only from
+// the cursor, so a watch whose evaluation fails here is scheduled to be
+// retried, as a failing read is.
 func (s *Service) evaluateAll(ctx context.Context) {
 	ids, err := s.store.DueWatchIDs(ctx, s.now(), true)
-	if err != nil {
-		slog.Warn("watch: list watches to recover; the next events and checks evaluate them", "error", err)
-		return
+	for wait := time.Second; err != nil; wait = min(wait*2, time.Minute) {
+		slog.Warn("watch: list watches to recover; trying again", "in", wait, "error", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		ids, err = s.store.DueWatchIDs(ctx, s.now(), true)
 	}
 	for _, id := range ids {
 		if err := s.evaluate(ctx, id); err != nil && ctx.Err() == nil {
-			slog.Warn("watch: evaluate after start", "watch", id, "error", err)
+			slog.Warn("watch: evaluate after start; retrying with backoff", "watch", id, "error", err)
+			if rerr := s.retryLater(ctx, id, err); rerr != nil && ctx.Err() == nil {
+				slog.Warn("watch: schedule the retry", "watch", id, "error", rerr)
+			}
 		}
 	}
+}
+
+// retryLater records failure on watch id and when to evaluate it again.
+func (s *Service) retryLater(ctx context.Context, id string, failure error) error {
+	w, err := s.store.GetWatch(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if w.State != protocol.WatchActive && w.State != protocol.WatchError {
+		return nil
+	}
+	now := s.now()
+	w.Failures++
+	next := now.Add(backoff(w.Failures))
+	w.State, w.Error, w.NextCheckAt, w.UpdatedAt = protocol.WatchError, failure.Error(), &next, now
+	if _, err := s.store.CommitWatchEvaluation(ctx, w, nil); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return nil
+		}
+		return err
+	}
+	s.changed(ctx, w, "")
+	return nil
 }
 
 var watchedTypes = []events.Type{

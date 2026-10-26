@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -536,6 +537,76 @@ func TestASuccessAfterResumedWorkIsAnnouncedAgain(t *testing.T) {
 	if got := bodies(h.notices(w.ID)); got[0] != "finished: Agent reported done" || got[1] != "finished: Agent reported done" {
 		t.Fatalf("notices = %q, want Agent reported done twice", got)
 	}
+}
+
+func TestARetainedRunThatCompletesAgainIsAnnouncedAgain(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Rebuild the index")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.status(run, domain.RunCompleted, "", "exited; retained container")
+	h.eventually("the first completion", func() bool { return len(h.notices(w.ID)) == 1 })
+
+	// Relaunched in its retained container, it completes again.
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "")
+	h.status(run, domain.RunCompleted, "", "exited; retained container")
+	h.eventually("the second completion", func() bool { return len(h.notices(w.ID)) == 2 })
+	settle()
+	if got := bodies(h.notices(w.ID)); len(got) != 2 || got[0] != "finished: Completed" || got[1] != "finished: Completed" {
+		t.Fatalf("notices = %q, want Completed twice", got)
+	}
+}
+
+// failingPrefs fails reading notification preferences while fail is set.
+type failingPrefs struct {
+	*store.DB
+	fail atomic.Bool
+}
+
+func (f *failingPrefs) GetNotifyPrefs(ctx context.Context, member domain.MemberID) (store.NotifyPrefs, error) {
+	if f.fail.Load() {
+		return store.NotifyPrefs{}, errors.New("database is locked")
+	}
+	return f.DB.GetNotifyPrefs(ctx, member)
+}
+
+func TestAFailedCheckAtStartIsRetried(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Ship the release")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.eventually("the first check", func() bool { return h.watchState(w.ID).LastCheckAt != nil })
+
+	// A need arises while the server is down, and no event will replay it.
+	_ = h.svc.Close()
+	if _, err := h.db.UpdateRunStatus(h.ctx, run.ID, domain.RunNeedsAttention, "needs input: which tag?", domain.ActivityNeedsYou, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := &failingPrefs{DB: h.db}
+	st.fail.Store(true)
+	svc, err := New(Config{
+		Store: st, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	h.eventually("the failure recorded", func() bool {
+		got := h.watchState(w.ID)
+		return got.State == protocol.WatchError && got.NextCheckAt != nil && strings.Contains(got.Error, "database is locked")
+	})
+
+	st.fail.Store(false)
+	h.clock.advance(maxBackoff)
+	h.eventually("the retried need", func() bool { return len(h.notices(w.ID)) == 1 })
+	h.eventually("the watch recovered", func() bool {
+		got := h.watchState(w.ID)
+		return got.State == protocol.WatchActive && got.Error == "" && got.NextCheckAt == nil
+	})
 }
 
 func TestAStartingRunHasNotFinished(t *testing.T) {
