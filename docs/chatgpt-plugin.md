@@ -146,11 +146,14 @@ scopes.
 
 ### Tool list budget
 
-Neither ChatGPT nor Claude documents a limit on `tools/list`. A report on
-OpenAI's developer forum quotes ChatGPT refusing a server because "All tools (including name, description, and input schema)
-must be less than 5000 tokens", possibly for the total; that figure is
-unverified until a live ChatGPT test settles it. Anthropic notes that tool
-selection degrades past 30 to 50 tools.
+Neither ChatGPT nor Claude documents a limit on `tools/list`. A
+[report on OpenAI's developer forum](https://community.openai.com/t/token-limit-when-connecting-chatgpt-with-external-mcp/1371022)
+(2026-01-05) quotes ChatGPT refusing a server because "All tools (including
+name, description, and input schema) must be less than 5000 tokens",
+possibly for the total; that figure is unverified until a live ChatGPT test
+settles it. Anthropic notes that tool selection "degrades once you exceed
+30–50 available tools"
+([tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)).
 
 `TestConnectorToolList` checks the list with every scope granted: at most 40
 tools, and each tool's name, description and compact input schema at most
