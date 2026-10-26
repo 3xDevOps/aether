@@ -373,11 +373,19 @@ func (s *Service) fetch(ctx context.Context, c *domain.ChildReservation) (protoc
 	if c.State != domain.ChildStarted {
 		return protocol.ChildFetchResult{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("%s: child %s has not started", method, c.RunID)}
 	}
-	if _, err := s.cfg.Git.PublishRunBranch(ctx, c.RunID); err != nil {
-		return protocol.ChildFetchResult{}, rpcErr(method, fmt.Errorf("publish the child's branch: %w", err))
+	r, err := s.cfg.Store.GetRun(ctx, c.RunID)
+	if err != nil {
+		return protocol.ChildFetchResult{}, rpcErr(method, err)
+	}
+	// A finished child's checkout may be gone; its branch was published as
+	// it ended.
+	if !r.Status.Terminal() {
+		if _, err = s.cfg.Git.PublishRunBranch(ctx, c.RunID); err != nil {
+			return protocol.ChildFetchResult{}, rpcErr(method, fmt.Errorf("publish the child's branch: %w", err))
+		}
 	}
 	ref := "refs/remotes/children/" + string(c.RunID)
-	commit, err := s.cfg.Git.FetchRunBranch(ctx, c.RunID, c.ParentRunID, ref)
+	commit, err := s.cfg.Git.FetchRunBranch(ctx, r.WorkspaceID, r.Branch, c.ParentRunID, ref)
 	if err != nil {
 		return protocol.ChildFetchResult{}, rpcErr(method, err)
 	}
@@ -430,7 +438,11 @@ func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protoco
 	}
 	if report, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err == nil && report != nil {
 		out.Report = &protocol.ChildReport{Outcome: string(report.Outcome), Summary: report.Summary, At: report.CreatedAt.UTC().Format(time.RFC3339)}
-		if out.State == protocol.ChildWorking || out.State == protocol.ChildWaiting {
+		reported, err := s.cfg.Store.ChildReported(ctx, c.RunID)
+		if err != nil {
+			return protocol.Child{}, err
+		}
+		if reported && (out.State == protocol.ChildWorking || out.State == protocol.ChildWaiting) {
 			switch report.Outcome {
 			case store.CoordOutcomeSuccess:
 				out.State = protocol.ChildFinished

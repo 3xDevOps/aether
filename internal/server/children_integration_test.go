@@ -65,6 +65,12 @@ func TestIntegrationChildRunEndToEnd(t *testing.T) {
 			for _, m := range in.Messages {
 				if m.FromRunID == receipt.RunID {
 					c.output("result:" + m.Body + "\r\n")
+					var fetched protocol.ChildFetchResult
+					if err := call(c, protocol.MethodChildFetch, protocol.ChildRunParams{RunID: receipt.RunID}, &fetched); err != nil {
+						c.output("agent-error: fetch: " + err.Error() + "\r\n")
+						return
+					}
+					c.output("fetched:" + fetched.Ref + "@" + fetched.Commit + "\r\n")
 					var done protocol.CoordReportResult
 					if err := call(c, protocol.MethodCoordReport, protocol.CoordReportParams{
 						Outcome: "success", Summary: "reviewed by a child", IdempotencyKey: "done",
@@ -131,6 +137,7 @@ func TestIntegrationChildRunEndToEnd(t *testing.T) {
 	childAtt := openAttach(t, client, childID)
 	childAtt.waitOutput(t, "parent:"+parent.ID)
 	att.waitOutput(t, "result:"+verdict)
+	att.waitOutput(t, "fetched:refs/remotes/children/"+childID+"@"+child.BaseCommit)
 	att.waitOutput(t, "reported")
 	assertNoAgentError(t, att)
 	assertNoAgentError(t, childAtt)

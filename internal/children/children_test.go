@@ -72,7 +72,7 @@ func (f *fakeRuns) AgentModels(context.Context, domain.MemberID, domain.MemberID
 type fakeGit struct{ head string }
 
 func (g *fakeGit) PublishRunBranch(context.Context, domain.RunID) (string, error) { return g.head, nil }
-func (g *fakeGit) FetchRunBranch(context.Context, domain.RunID, domain.RunID, string) (string, error) {
+func (g *fakeGit) FetchRunBranch(context.Context, domain.WorkspaceID, string, domain.RunID, string) (string, error) {
 	return g.head, nil
 }
 

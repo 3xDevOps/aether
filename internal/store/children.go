@@ -62,6 +62,9 @@ type ChildStore interface {
 	PutChildSettings(ctx context.Context, member domain.MemberID, settings ChildSettings) error
 	SetRunChildren(ctx context.Context, run domain.RunID, value string, setBy domain.MemberID) error
 	MarkChildRefused(ctx context.Context, run domain.RunID) error
+	// ChildReported reports whether a child's latest word is a success or
+	// failure report it was not woken from since.
+	ChildReported(ctx context.Context, run domain.RunID) (bool, error)
 	// LatestCoordReport is run's newest finalized terminal report.
 	LatestCoordReport(ctx context.Context, run domain.RunID) (*CoordReport, error)
 	WorkspaceChildLimits(ctx context.Context, ws domain.WorkspaceID) (domain.ChildLimits, error)
@@ -405,4 +408,15 @@ func (d *DB) LatestCoordReport(ctx context.Context, run domain.RunID) (*CoordRep
 		return nil, fmt.Errorf("store: latest coord report: %w", err)
 	}
 	return report, nil
+}
+
+func (d *DB) ChildReported(ctx context.Context, run domain.RunID) (bool, error) {
+	var reported bool
+	if err := d.db.QueryRowContext(ctx, `SELECT `+childReported+` FROM run_children rc WHERE rc.run_id = ?`, run).Scan(&reported); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("store: child reported: %w", err)
+	}
+	return reported, nil
 }

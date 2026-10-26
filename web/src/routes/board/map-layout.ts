@@ -147,7 +147,7 @@ export function rootKey(key: string, parents: Map<string, string>): string {
 /** Everything that decides geometry; live state, titles and timestamps stay out of it. */
 function structureOf(cards: Map<string, MapCard>, input: MapLayoutInput): string {
   const runs = [...cards].sort(([a], [b]) => compare(a, b)).map(([key, { run, visiting }]) => [
-    key, run.member_id, run.mission_id, run.mission_role, run.integrator_run_id, run.parent_run_id, visiting, input.folded[key] === true,
+    key, run.member_id, run.mission_id, run.mission_role, run.integrator_run_id, run.parent_run_id, run.detached, visiting, input.folded[key] === true,
   ])
   return JSON.stringify([input.viewerID, input.metrics, runs])
 }

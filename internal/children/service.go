@@ -29,7 +29,7 @@ type Runs interface {
 // Git publishes run branches and copies a child's into its parent.
 type Git interface {
 	PublishRunBranch(ctx context.Context, run domain.RunID) (string, error)
-	FetchRunBranch(ctx context.Context, from, into domain.RunID, ref string) (string, error)
+	FetchRunBranch(ctx context.Context, ws domain.WorkspaceID, branch string, into domain.RunID, ref string) (string, error)
 }
 
 // Agents lists the agents member can launch on account, as agent.list does.
@@ -72,6 +72,9 @@ type Config struct {
 	AuthorizationMu *sync.Mutex
 	// Interval is how often queued and ended children are reconciled.
 	Interval time.Duration
+	// Recovered closes once the scheduler recovered the runs a restart left,
+	// so no child launch races that recovery.
+	Recovered <-chan struct{}
 }
 
 type Service struct {
@@ -116,6 +119,13 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	go func() {
 		defer close(done)
+		if s.cfg.Recovered != nil {
+			select {
+			case <-s.cfg.Recovered:
+			case <-runCtx.Done():
+				return
+			}
+		}
 		ticker := time.NewTicker(s.cfg.Interval)
 		defer ticker.Stop()
 		for {
