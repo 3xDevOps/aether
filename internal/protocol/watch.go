@@ -46,9 +46,8 @@ const (
 )
 
 const (
-	WatchChannelPush    = "push"
-	WatchChannelDesktop = "desktop"
-	WatchChannelInApp   = "in_app"
+	WatchChannelPush  = "push"
+	WatchChannelInApp = "in_app"
 
 	// WatchStatusPending is a push still to be sent: being sent, waiting
 	// for the member to leave a dashboard, or waiting for a retry.

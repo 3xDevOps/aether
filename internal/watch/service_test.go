@@ -854,6 +854,13 @@ func TestTurningQuietHoursOffReleasesHeldPushesExceptPausedOnes(t *testing.T) {
 	if s := h.pushStatus(wb.ID); s != protocol.WatchStatusHeldQuiet || phone.received.Load() != 1 {
 		t.Fatalf("paused watch push = %s, want it still held", s)
 	}
+	// A batch listed before the pause does not send it either.
+	if err := h.svc.deliverMember(h.ctx, h.ada.ID, h.notices(wb.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if s := h.pushStatus(wb.ID); s != protocol.WatchStatusHeldQuiet || phone.received.Load() != 1 {
+		t.Fatalf("paused watch push from a stale batch = %s, want it still held", s)
+	}
 
 	// Paused until it expires, its held push is dropped, never sent.
 	h.clock.advance(DefaultExpiry + time.Hour)

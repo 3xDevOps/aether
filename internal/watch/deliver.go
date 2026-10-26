@@ -61,9 +61,9 @@ func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, not
 		case errors.Is(err, store.ErrNotFound):
 		case err != nil:
 			errs = append(errs, fmt.Errorf("notice %s: %w", n.ID, err))
-		case w.MemberID != member:
-			// A merge moved the watch since the notices were grouped; the
-			// next round sends it to the survivor.
+		case w.MemberID != member, w.State == protocol.WatchPaused:
+			// Paused since the notices were listed, or moved by a merge:
+			// it stays queued for its resumption or for the survivor.
 		case status != "":
 			errs = append(errs, s.settle(ctx, w, n, store.WatchPushNone, n.PushAttempts, nil, status, detail))
 		default:
