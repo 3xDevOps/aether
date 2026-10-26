@@ -140,7 +140,7 @@ func TestAuditRecordsConnectorWritesForTheirMemberAndAdmins(t *testing.T) {
 	if _, perr := e.srv.AssistantLocal(e.member.ID).Call(ctx, protocol.MethodRunResume, run); perr != nil {
 		t.Fatalf("assistant run.resume: %v", perr)
 	}
-	if _, perr := e.srv.Local(bo.ID).Call(ctx, protocol.MethodAccountShare, json.RawMessage(`{"member_id":"`+string(cy.ID)+`"}`)); perr != nil {
+	if _, perr := e.srv.Local(bo.ID).Call(ctx, protocol.MethodAccountShare, json.RawMessage(`{"member_id":"`+string(cy.ID)+`","run_id":"`+string(e.run.ID)+`"}`)); perr != nil {
 		t.Fatalf("account.share: %v", perr)
 	}
 

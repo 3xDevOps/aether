@@ -36,10 +36,11 @@ const (
 
 // auditedMethods are audited whoever calls them.
 var auditedMethods = map[string]bool{
-	protocol.MethodConnectorRevoke: true,
-	protocol.MethodAccountShare:    true,
-	protocol.MethodAccountRevoke:   true,
-	protocol.MethodMemberRole:      true,
+	protocol.MethodConnectorRevoke:   true,
+	protocol.MethodAccountShare:      true,
+	protocol.MethodAccountRevoke:     true,
+	protocol.MethodMemberRole:        true,
+	protocol.MethodMemberMergeAccept: true,
 }
 
 // assistantReads are the read-only methods the assistant calls that no
@@ -108,9 +109,15 @@ func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method s
 		Mission struct{ ID string } `json:"mission"`
 	}
 	_ = json.Unmarshal(result, &made)
+	target := cmp.Or(ids.RunID, ids.MissionID, ids.QuestionID, made.Run.ID, made.Mission.ID)
+	switch method {
+	case protocol.MethodConnectorRevoke:
+		target = ids.ConnectorID
+	case protocol.MethodAccountShare, protocol.MethodAccountRevoke, protocol.MethodMemberRole:
+		target = ids.MemberID
+	}
 	e := &store.AuditEntry{At: time.Now(), Member: member, Via: via, ConnectorID: connector, Client: client, Method: method,
-		WorkspaceID: clipID(ids.WorkspaceID),
-		Target:      clipID(cmp.Or(ids.RunID, ids.MissionID, ids.QuestionID, ids.ConnectorID, ids.MemberID, made.Run.ID, made.Mission.ID))}
+		WorkspaceID: clipID(ids.WorkspaceID), Target: clipID(target)}
 	if perr != nil {
 		e.Code = perr.Code
 	}

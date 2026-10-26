@@ -282,8 +282,8 @@ The server also keeps a durable audit history of:
 - every write call a connector makes past its rate limit, including calls the
   server refused, such as a method outside the connector's scopes
 - every write call the assistant makes
-- connectors being created and revoked, account shares and revocations, and
-  role changes, however they were made
+- connectors being created and revoked, account shares and revocations, role
+  changes and accepted member merges, however they were made
 
 An entry names the member, how the call arrived, the method, the run, swarm,
 question, connector or member it acted on, and `ok` or `error` with the error
@@ -294,7 +294,7 @@ desktop app and `aether gui`.
 
 ```sh
 aether audit                                  # your entries, newest first
-aether audit --connector con-7k2m9q4xbd       # one connector's
+aether audit --connector con-7k2m9q4xbd       # one connector's calls and its revocation
 aether audit --before 812                     # the page after one ending at 812
 ```
 

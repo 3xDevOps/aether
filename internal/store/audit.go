@@ -33,8 +33,8 @@ type AuditEntry struct {
 }
 
 // AuditQuery selects audit entries, newest first: Member's alone unless
-// empty, ConnectorID's alone unless empty, and only those before seq
-// Before unless it is 0.
+// empty, ConnectorID's calls and its revocation alone unless empty, and
+// only those before seq Before unless it is 0.
 type AuditQuery struct {
 	Member      domain.MemberID
 	ConnectorID string
@@ -85,8 +85,8 @@ func (d *DB) ListAudit(ctx context.Context, q AuditQuery) ([]*AuditEntry, error)
 		args = append(args, q.Member)
 	}
 	if q.ConnectorID != "" {
-		query += ` AND connector_id = ?`
-		args = append(args, q.ConnectorID)
+		query += ` AND (connector_id = ? OR (method = 'connector.revoke' AND target = ?))`
+		args = append(args, q.ConnectorID, q.ConnectorID)
 	}
 	if q.Before > 0 {
 		query += ` AND seq < ?`

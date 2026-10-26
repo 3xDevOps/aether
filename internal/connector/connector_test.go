@@ -292,6 +292,10 @@ func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
 	if !slices.Equal(got, want) || !strings.HasPrefix(run, "run-") {
 		t.Fatalf("audit.list = %q, want %q", got, want)
 	}
+	var filtered protocol.AuditListResult
+	if err := e.admin.Call(protocol.MethodAuditList, protocol.AuditListParams{ConnectorID: id}, &filtered); err != nil || len(filtered.Entries) != 3 {
+		t.Fatalf("audit.list for %s = %+v %v, want its calls and its revocation", id, filtered.Entries, err)
+	}
 }
 
 // Refreshes racing with one refresh token must rotate it once and keep
