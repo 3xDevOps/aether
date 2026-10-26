@@ -182,7 +182,7 @@ func TestChangesListPagesMeaningfulChanges(t *testing.T) {
 	}
 	report := byseq[seq["swarm-report"]]
 	if report.Kind != "reports" || report.Report == nil || report.Report.Outcome != "waiting" || report.Report.WaitingFor != "ci" ||
-		report.Untrusted == nil || !strings.HasSuffix(report.Untrusted.Summary, "…") || len([]rune(report.Untrusted.Summary)) != changesUntrustedRunes+1 {
+		report.Untrusted == nil || report.Untrusted.ReportID != "rep-1" || !strings.HasSuffix(report.Untrusted.Summary, "…") || len([]rune(report.Untrusted.Summary)) != changesUntrustedRunes+1 {
 		t.Errorf("report change = %+v, untrusted %+v", report, report.Untrusted)
 	}
 	if m := byseq[seq["mail"]]; m.Message == nil || m.Message.ToRunID != string(solo) || m.Message.Kind != "question" || m.Untrusted != nil {
@@ -219,13 +219,15 @@ func TestChangesListPagesMeaningfulChanges(t *testing.T) {
 		params protocol.ChangesListParams
 		code   int
 	}{
-		"unknown kind":     {protocol.ChangesListParams{Kinds: []string{"diff"}}, protocol.CodeInvalidParams},
-		"bad cursor":       {protocol.ChangesListParams{Cursor: "seq-3"}, protocol.CodeInvalidParams},
-		"mixed scopes":     {protocol.ChangesListParams{WorkspaceID: string(other.ID), RunID: string(solo)}, protocol.CodeInvalidParams},
-		"missing run":      {protocol.ChangesListParams{RunID: "run-missing"}, protocol.CodeNotFound},
-		"missing swarm":    {protocol.ChangesListParams{MissionID: "mis-missing"}, protocol.CodeNotFound},
-		"negative limit":   {protocol.ChangesListParams{Limit: -1}, protocol.CodeInvalidParams},
-		"missing workspce": {protocol.ChangesListParams{WorkspaceID: "ws-missing"}, protocol.CodeNotFound},
+		"unknown kind":      {protocol.ChangesListParams{Kinds: []string{"diff"}}, protocol.CodeInvalidParams},
+		"bad cursor":        {protocol.ChangesListParams{Cursor: "seq-3"}, protocol.CodeInvalidParams},
+		"mixed scopes":      {protocol.ChangesListParams{WorkspaceID: string(other.ID), RunID: string(solo)}, protocol.CodeInvalidParams},
+		"run off swarm":     {protocol.ChangesListParams{RunID: string(solo), MissionID: string(mission.ID)}, protocol.CodeInvalidParams},
+		"unknown cursor ws": {protocol.ChangesListParams{Cursor: "0", WorkspaceID: "ws-never"}, protocol.CodeNotFound},
+		"missing run":       {protocol.ChangesListParams{RunID: "run-missing"}, protocol.CodeNotFound},
+		"missing swarm":     {protocol.ChangesListParams{MissionID: "mis-missing"}, protocol.CodeNotFound},
+		"negative limit":    {protocol.ChangesListParams{Limit: -1}, protocol.CodeInvalidParams},
+		"missing workspce":  {protocol.ChangesListParams{WorkspaceID: "ws-missing"}, protocol.CodeNotFound},
 	} {
 		err := c.Call(protocol.MethodChangesList, tc.params, nil)
 		var perr *protocol.Error
@@ -282,7 +284,7 @@ func TestChangesCursorAheadOfHeadIsRefused(t *testing.T) {
 		t.Fatalf("cursor past the head: err = %v, want CodeUnavailable telling the client to restart", err)
 	}
 	var data protocol.ChangesCursorAheadData
-	if jerr := json.Unmarshal(perr.Data, &data); jerr != nil || data.Head != strconv.FormatUint(head, 10) {
+	if jerr := json.Unmarshal(perr.Data, &data); jerr != nil || data.Reason != protocol.ChangesCursorAhead || data.Head != strconv.FormatUint(head, 10) {
 		t.Fatalf("error data = %s (%v), want head %d", perr.Data, jerr, head)
 	}
 	if res := listChanges(t, c, protocol.ChangesListParams{Cursor: strconv.FormatUint(head, 10)}); len(res.Changes) != 0 || res.More {
@@ -359,5 +361,46 @@ func TestChangesRefusesPendingMember(t *testing.T) {
 	var perr *protocol.Error
 	if !errors.As(err, &perr) || perr.Code != protocol.CodeDenied {
 		t.Fatalf("pending member: err = %v, want CodeDenied", err)
+	}
+}
+
+// Deleting a swarm removes its runs before announcing the deletion, so a
+// swarm follower learns of it from the swarm's own notice.
+func TestChangesDeliverSwarmDeletion(t *testing.T) {
+	t.Parallel()
+	e := newChangesEnv(t, "")
+	ctx := t.Context()
+	db := e.store.(*store.DB)
+	mission := &domain.Mission{WorkspaceID: e.ws.ID, Objective: "Short swarm", AccountableHumanID: e.member.ID,
+		IntegratorRunOwnerID: e.member.ID, IdempotencyKey: "swarm-gone",
+		Integrator: domain.MissionIntegrator{AccountMemberID: e.member.ID, Harness: "claude", Mode: domain.LaunchTUI}}
+	if err := db.CreateMission(ctx, mission); err != nil {
+		t.Fatalf("CreateMission: %v", err)
+	}
+	integrator := &domain.Run{ID: mission.CurrentIntegratorRunID, WorkspaceID: e.ws.ID, MemberID: e.member.ID, MissionID: mission.ID,
+		MissionRole: "integrator", Task: mission.Objective, Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := db.CreateRunWithID(ctx, integrator); err != nil {
+		t.Fatalf("CreateRunWithID: %v", err)
+	}
+	cursor := e.publish(t, e.ws.ID, integrator.ID, events.RunStatusPayload{To: domain.RunRunning})
+
+	if _, err := db.CancelMission(ctx, mission.ID, e.member.ID, "cancel-1"); err != nil {
+		t.Fatalf("CancelMission: %v", err)
+	}
+	if err := db.DeleteMission(ctx, mission.ID, []domain.RunID{integrator.ID}); err != nil {
+		t.Fatalf("DeleteMission: %v", err)
+	}
+	e.publish(t, e.ws.ID, integrator.ID, events.RunDeletedPayload{})
+	notice := e.publish(t, e.ws.ID, "", events.MissionChangedPayload{MissionID: mission.ID, Deleted: true})
+
+	c := controlClient(t, e.testEnv)
+	for _, kinds := range [][]string{{"lifecycle"}, nil} {
+		got, _ := pageAll(t, c, protocol.ChangesListParams{Cursor: strconv.FormatUint(cursor, 10), MissionID: string(mission.ID), Kinds: kinds})
+		if len(got) != 1 || got[0].Seq != notice || got[0].Lifecycle == nil || got[0].Lifecycle.Action != "swarm-deleted" || got[0].MissionID != string(mission.ID) {
+			t.Fatalf("kinds %v: swarm changes after deletion = %+v, want only its deletion at %d", kinds, got, notice)
+		}
+	}
+	if got, _ := pageAll(t, c, protocol.ChangesListParams{Cursor: strconv.FormatUint(cursor, 10), Kinds: []string{"swarm"}}); len(got) != 0 {
+		t.Fatalf("a swarm deletion is a lifecycle change, but the swarm kind returned %+v", got)
 	}
 }

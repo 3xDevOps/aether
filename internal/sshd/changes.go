@@ -37,7 +37,7 @@ var changeKinds = map[string]struct {
 	protocol.ChangeKindMessages:  {types: []events.Type{events.TypeCoordMessage}},
 	protocol.ChangeKindPR:        {types: []events.Type{events.TypeRunPR}},
 	protocol.ChangeKindSwarm:     {types: []events.Type{events.TypeMissionChanged, events.TypeIntegrationChanged}},
-	protocol.ChangeKindLifecycle: {types: []events.Type{events.TypeRunArchived, events.TypeRunDeleted, events.TypeWorkspaceDeleted, events.TypeTimeline}, timeline: []events.TimelineKind{events.TimelineHandoff}},
+	protocol.ChangeKindLifecycle: {types: []events.Type{events.TypeRunArchived, events.TypeRunDeleted, events.TypeWorkspaceDeleted, events.TypeMissionChanged, events.TypeTimeline}, timeline: []events.TimelineKind{events.TimelineHandoff}},
 }
 
 var changeKindOrder = []string{
@@ -91,8 +91,14 @@ func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams)
 		case gone(err):
 		case err != nil:
 			return "", false, rpcError(err)
-		case ws != "" && ws != m.WorkspaceID:
-			return "", false, invalidParams("run_id and mission_id are in different workspaces")
+		case ws != "":
+			served, lerr := ms.ListMissionRunIDs(ctx, m.ID)
+			if lerr != nil {
+				return "", false, rpcError(lerr)
+			}
+			if !slices.Contains(served, domain.RunID(p.RunID)) {
+				return "", false, invalidParams("run_id has not served mission_id")
+			}
 		default:
 			ws = m.WorkspaceID
 		}
@@ -103,6 +109,13 @@ func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams)
 			return "", false, invalidParams("workspace_id does not contain the named run or swarm")
 		}
 		if _, err := s.cfg.Store.GetWorkspace(ctx, id); gone(err) {
+			deleted, derr := s.workspaceDeleted(ctx, id)
+			if derr != nil {
+				return "", false, rpcError(derr)
+			}
+			if !deleted {
+				return "", false, rpcError(err)
+			}
 			return id, false, nil
 		} else if err != nil {
 			return "", false, rpcError(err)
@@ -110,6 +123,20 @@ func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams)
 		ws = id
 	}
 	return ws, ws != "", nil
+}
+
+// workspaceDeleted reports whether the log holds a deletion notice for id,
+// which tells a deleted workspace from one that never existed.
+func (s *Server) workspaceDeleted(ctx context.Context, id domain.WorkspaceID) (bool, error) {
+	reader := s.cfg.Services.Timeline
+	if reader == nil {
+		return false, nil
+	}
+	page, err := reader.Page(ctx, timeline.Filter{Workspace: id, Types: []events.Type{events.TypeWorkspaceDeleted}}, 0, 1)
+	if err != nil {
+		return false, fmt.Errorf("changes.list: look up the deletion of workspace %s: %w", id, err)
+	}
+	return len(page.Events) > 0, nil
 }
 
 func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -139,7 +166,9 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 	if len(kinds) == 0 {
 		kinds = changeKindOrder
 	}
+	requested := make(map[string]bool, len(kinds))
 	for _, k := range kinds {
+		requested[k] = true
 		spec, ok := changeKinds[k]
 		if !ok {
 			return nil, invalidParams(fmt.Sprintf("unknown kind %q; kinds are %s", k, strings.Join(changeKindOrder, ", ")))
@@ -177,7 +206,7 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 			return nil, rpcError(err)
 		}
 		if cursor > page.Head {
-			data, _ := json.Marshal(protocol.ChangesCursorAheadData{Head: strconv.FormatUint(page.Head, 10)})
+			data, _ := json.Marshal(protocol.ChangesCursorAheadData{Reason: protocol.ChangesCursorAhead, Head: strconv.FormatUint(page.Head, 10)})
 			return nil, &protocol.Error{
 				Code:    protocol.CodeUnavailable,
 				Message: fmt.Sprintf("changes.list: cursor %d is past the server's event log head %d; its history was reset or restored, so call again without a cursor", cursor, page.Head),
@@ -197,7 +226,7 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 		Head:       strconv.FormatUint(page.Head, 10),
 	}
 	for _, ev := range page.Events {
-		if c, ok := changeOf(ev, missions[ev.RunID]); ok {
+		if c, ok := changeOf(ev, missions[ev.RunID]); ok && requested[c.Kind] {
 			out.Changes = append(out.Changes, c)
 		}
 	}
@@ -258,9 +287,9 @@ func changeOf(ev events.Event, mission domain.MissionID) (protocol.Change, bool)
 		switch v.Kind {
 		case events.TimelineReport:
 			c.Kind = protocol.ChangeKindReports
-			c.Report = &protocol.ChangeReport{ReportID: v.ReportID, Outcome: v.Outcome, WaitingFor: v.WaitingFor}
-			if v.Summary != "" {
-				c.Untrusted = &protocol.ChangeUntrusted{Summary: clipUntrusted(v.Summary)}
+			c.Report = &protocol.ChangeReport{Outcome: v.Outcome, WaitingFor: v.WaitingFor}
+			if v.ReportID != "" || v.Summary != "" {
+				c.Untrusted = &protocol.ChangeUntrusted{ReportID: clipUntrusted(v.ReportID), Summary: clipUntrusted(v.Summary)}
 			}
 		case events.TimelineHandoff:
 			c.Kind = protocol.ChangeKindLifecycle
@@ -276,9 +305,14 @@ func changeOf(ev events.Event, mission domain.MissionID) (protocol.Change, bool)
 		c.Kind = protocol.ChangeKindPR
 		c.PR = &protocol.ChangePR{Number: v.Number, State: v.State, URL: v.URL, Merged: v.MergedAt != nil}
 	case events.MissionChangedPayload:
-		c.Kind = protocol.ChangeKindSwarm
 		c.MissionID = string(v.MissionID)
-		c.Swarm = &protocol.ChangeSwarm{Change: string(v.Change), TaskID: string(v.TaskID), AttemptID: string(v.AttemptID), Deleted: v.Deleted}
+		if v.Deleted {
+			c.Kind = protocol.ChangeKindLifecycle
+			c.Lifecycle = &protocol.ChangeLifecycle{Action: "swarm-deleted"}
+			break
+		}
+		c.Kind = protocol.ChangeKindSwarm
+		c.Swarm = &protocol.ChangeSwarm{Change: string(v.Change), TaskID: string(v.TaskID), AttemptID: string(v.AttemptID)}
 	case events.IntegrationChangedPayload:
 		c.Kind = protocol.ChangeKindSwarm
 		c.MissionID = string(v.MissionID)

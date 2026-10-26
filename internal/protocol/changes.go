@@ -38,10 +38,14 @@ type ChangesListResult struct {
 	Head       string   `json:"head"`
 }
 
-// ChangesCursorAheadData is the Data of the CodeUnavailable error a cursor
+// ChangesCursorAhead is the Reason of the CodeUnavailable error a cursor
 // past the log head gets: the server's history no longer matches it.
+const ChangesCursorAhead = "cursor_ahead"
+
+// ChangesCursorAheadData is that error's Data.
 type ChangesCursorAheadData struct {
-	Head string `json:"head"`
+	Reason string `json:"reason"`
+	Head   string `json:"head"`
 }
 
 // Change is one compact entry of the feed. Type is the underlying event
@@ -80,9 +84,9 @@ type ChangeInput struct {
 	Pending int `json:"pending"`
 }
 
-// ChangeReport is an agent's report; its summary is under Untrusted.
+// ChangeReport is an agent's report; its summary and ID, which embeds the
+// agent's idempotency key, are under Untrusted.
 type ChangeReport struct {
-	ReportID   string `json:"report_id,omitempty"`
 	Outcome    string `json:"outcome"`
 	WaitingFor string `json:"waiting_for,omitempty"`
 }
@@ -105,27 +109,28 @@ type ChangePR struct {
 }
 
 // ChangeSwarm is a swarm change: Change and TaskID for mission.changed,
-// CandidateID and State for integration.changed.
+// CandidateID and State for integration.changed. A deleted swarm is a
+// lifecycle change.
 type ChangeSwarm struct {
 	Change      string `json:"change,omitempty"`
 	TaskID      string `json:"task_id,omitempty"`
 	AttemptID   string `json:"attempt_id,omitempty"`
-	Deleted     bool   `json:"deleted,omitempty"`
 	CandidateID string `json:"candidate_id,omitempty"`
 	State       string `json:"state,omitempty"`
 }
 
 // ChangeLifecycle is a run being archived, restored, deleted, or handed
-// off, or its workspace being deleted; ToMemberID names a handoff's new
-// owner.
+// off, or its swarm or workspace being deleted; ToMemberID names a
+// handoff's new owner.
 type ChangeLifecycle struct {
 	Action     string `json:"action"`
 	ToMemberID string `json:"to_member_id,omitempty"`
 }
 
-// ChangeUntrusted is text an agent wrote: a report's summary, or the
-// reason on a status change.
+// ChangeUntrusted is text an agent wrote: a report's ID and summary, or
+// the reason on a status change.
 type ChangeUntrusted struct {
-	Summary string `json:"summary,omitempty"`
-	Reason  string `json:"reason,omitempty"`
+	ReportID string `json:"report_id,omitempty"`
+	Summary  string `json:"summary,omitempty"`
+	Reason   string `json:"reason,omitempty"`
 }
