@@ -6,7 +6,7 @@ import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { runLabel } from '@/lib/status'
 import type { Run, Workspace } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { chevronTurn, cn } from '@/lib/utils'
 import { type FileSource, type SelectFile, type Selection, sourceKey } from '@/routes/files/sources'
 import { useStore } from '@/store'
 import type { FileTreeState } from '@/store/files'
@@ -206,7 +206,7 @@ export function TreeDirectory({
         onClick={toggle}
         leading={
           <>
-            <ChevronRight className={cn(expanded && 'rotate-90')} />
+            <ChevronRight className={cn(chevronTurn, expanded && 'rotate-90')} />
             {icon ?? <Folder />}
           </>
         }

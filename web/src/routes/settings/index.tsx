@@ -3,6 +3,7 @@ import { useAssistantAvailable } from '@/components/assistant/button'
 import { ChevronLeft } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { PageBody } from '@/components/ui/page-body'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
@@ -120,7 +121,7 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
         )}
         {current && (
           <section aria-labelledby={headingID} className="min-w-0 flex-1 overflow-y-auto">
-            <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-8 px-4 py-6 sm:px-6">
+            <PageBody key={current.id}>
               <div className="flex min-w-0 flex-col items-start gap-1">
                 {phone && (
                   <Button
@@ -137,7 +138,7 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
                 <p className="text-ui text-muted">{current.purpose}</p>
               </div>
               {bodies[current.id](client)}
-            </div>
+            </PageBody>
           </section>
         )}
       </div>

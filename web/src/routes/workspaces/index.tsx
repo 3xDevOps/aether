@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { ListRow } from '@/components/ui/list-row'
 import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
+import { PageBody } from '@/components/ui/page-body'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
@@ -77,7 +78,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
         )}
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-8 px-4 py-6 sm:px-6">
+        <PageBody>
           <p className="text-ui text-muted">
             A workspace is one repository and the base branch its runs start from. The sidebar shows one workspace at a time.
           </p>
@@ -97,7 +98,11 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
           )}
           <section aria-label="Workspaces" className="flex min-w-0 flex-col gap-2">
             <SectionLabel as="h2">{loaded ? `${workspaces.length} ${workspaces.length === 1 ? 'workspace' : 'workspaces'}` : 'Workspaces'}</SectionLabel>
-            {loading && <div className="h-16"><Skeleton className="size-full" /></div>}
+            {loading && (
+              <div role="status" aria-label="Loading workspaces" className="flex flex-col gap-0.5">
+                {[0, 1, 2].map((row) => <Skeleton key={row} className="h-7" />)}
+              </div>
+            )}
             {empty && <p className="text-ui text-muted">{canAdd ? 'No workspaces yet. Add the first one above.' : 'No workspaces yet. An admin adds the first one.'}</p>}
             {loaded && workspaces.length > 0 && (
               <ul aria-label="Workspace list" className="flex flex-col gap-0.5">
@@ -138,7 +143,7 @@ export function WorkspacesRoute({ client = api }: RouteProps & { client?: Api })
               </ul>
             )}
           </section>
-        </div>
+        </PageBody>
       </div>
       {settings && (
         <WorkspaceSettingsDialog

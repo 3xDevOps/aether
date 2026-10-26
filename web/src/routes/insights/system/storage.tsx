@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Button } from '@/components/ui/button'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
@@ -64,15 +64,6 @@ function Figures({ rows }: { rows: [string, string][] }) {
   )
 }
 
-function RowButton({ onOpen, children }: { onOpen?: () => void; children: ReactNode }) {
-  const className = 'flex w-full min-w-0 flex-col gap-0.5 px-1.5 py-1 text-left text-ui-sm'
-  return onOpen ? (
-    <Button variant="ghost" onClick={onOpen} className={`${className} h-auto items-stretch justify-start whitespace-normal font-normal`}>{children}</Button>
-  ) : (
-    <div className={className}>{children}</div>
-  )
-}
-
 function Docker({ docker }: { docker: DiskUsage['docker'] }) {
   if (!docker) return <p className="text-ui-sm text-muted">Docker accounting unavailable.</p>
   return (
@@ -115,21 +106,23 @@ function ContainerLayers({ disk }: { disk: DiskUsage }) {
           ? <>{containers.length} {containers.length === 1 ? 'container holds' : 'containers hold'} {formatBytes(total)} · measured <RelativeTime at={disk.containers_measured_at} /></>
           : 'Not measured yet'}
       </p>
-      <ul className="flex min-w-0 flex-col">
-        {containers.map((c) => {
-          const name = names.owner(c.owner_kind, c.owner_id)
-          return (
-            <li key={`${c.owner_kind}:${c.owner_id}`}>
-              <RowButton onOpen={c.owner_kind === 'run' ? () => navigate('run', { runId: c.owner_id }) : c.owner_id === selfID ? () => navigate('environment') : undefined}>
-                <span className="flex min-w-0 justify-between gap-3">
-                  <span className="min-w-0 break-words font-medium text-text">{c.owner_kind === 'run' ? 'run' : 'environment'}{name ? ` ${name}` : ''} ({c.owner_id})</span>
-                  <span className="shrink-0 text-muted tabular-nums">{formatBytes(c.bytes)}</span>
-                </span>
-              </RowButton>
-            </li>
-          )
-        })}
-      </ul>
+      {containers.length > 0 && (
+        <InsetList>
+          {containers.map((c) => {
+            const name = names.owner(c.owner_kind, c.owner_id)
+            return (
+              <InsetListItem
+                key={`${c.owner_kind}:${c.owner_id}`}
+                className="justify-between text-ui-sm text-muted"
+                onOpen={c.owner_kind === 'run' ? () => navigate('run', { runId: c.owner_id }) : c.owner_id === selfID ? () => navigate('environment') : undefined}
+              >
+                <span className="min-w-0 break-words font-medium text-text">{c.owner_kind === 'run' ? 'run' : 'environment'}{name ? ` ${name}` : ''} ({c.owner_id})</span>
+                <span className="shrink-0 tabular-nums">{formatBytes(c.bytes)}</span>
+              </InsetListItem>
+            )
+          })}
+        </InsetList>
+      )}
       {disk.containers_error && <p className="whitespace-pre-wrap break-words text-ui-sm text-muted">{disk.containers_error}</p>}
     </Block>
   )
@@ -145,27 +138,29 @@ function Owners({ disk }: { disk: DiskUsage }) {
         <summary className="cursor-pointer py-1">
           {(disk.entries?.length ?? 0) === 1 ? '1 owner' : `${disk.entries?.length ?? 0} owners`} shown{disk.truncated ? ' · Truncated to the largest 50 entries' : ''}
         </summary>
-        <ul className="flex min-w-0 flex-col gap-1">
+        <InsetList>
           {disk.entries?.map((entry, index) => {
             const id = entry.owner_id
             const name = id && names.owner(entry.owner_kind, id)
             return (
-              <li key={index}>
-                <RowButton onOpen={entry.owner_kind === 'run' && id ? () => navigate('run', { runId: id }) : undefined}>
-                  <span className="min-w-0 break-words font-medium text-text">
-                    {entry.owner_kind}{name ? ` ${name}` : ''}{id ? ` (${id})` : ''} · {entry.kind}{entry.pool ? ` (${entry.pool})` : ''} · {formatBytes(entry.bytes)}
-                  </span>
-                  <span>{entry.reason}</span>
-                  <span>
-                    Reclaimable: {known(entry.reclaimable_bytes)}
-                    {entry.retained_until && <> · {entry.kind === 'cache' ? 'Age target' : 'Retained until'} <time dateTime={entry.retained_until}>{new Date(entry.retained_until).toLocaleString()}</time></>}
-                  </span>
-                  {entry.error && <span className="whitespace-pre-wrap">{entry.error}</span>}
-                </RowButton>
-              </li>
+              <InsetListItem
+                key={index}
+                className="flex-col items-stretch gap-0.5 text-ui-sm text-muted"
+                onOpen={entry.owner_kind === 'run' && id ? () => navigate('run', { runId: id }) : undefined}
+              >
+                <span className="min-w-0 break-words font-medium text-text">
+                  {entry.owner_kind}{name ? ` ${name}` : ''}{id ? ` (${id})` : ''} · {entry.kind}{entry.pool ? ` (${entry.pool})` : ''} · {formatBytes(entry.bytes)}
+                </span>
+                <span>{entry.reason}</span>
+                <span>
+                  Reclaimable: {known(entry.reclaimable_bytes)}
+                  {entry.retained_until && <> · {entry.kind === 'cache' ? 'Age target' : 'Retained until'} <time dateTime={entry.retained_until}>{new Date(entry.retained_until).toLocaleString()}</time></>}
+                </span>
+                {entry.error && <span className="whitespace-pre-wrap">{entry.error}</span>}
+              </InsetListItem>
             )
           })}
-        </ul>
+        </InsetList>
       </details>
     </Block>
   )

@@ -1,6 +1,7 @@
 import { useId } from 'react'
 import { ListFilter } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { CountBadge } from '@/components/ui/count-badge'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -87,9 +88,10 @@ export function ActivityFilter({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="secondary" size="sm">
+        <Button variant="secondary" size="sm" aria-label={narrowed > 0 ? `Filter, ${narrowed} active` : undefined}>
           <ListFilter />
-          {narrowed > 0 ? `Filter · ${narrowed}` : 'Filter'}
+          Filter
+          {narrowed > 0 && <CountBadge>{narrowed}</CountBadge>}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" aria-label="Filter activity" className="flex w-[min(320px,calc(100vw-16px))] flex-col gap-3">

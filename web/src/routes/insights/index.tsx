@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import { useShallow } from 'zustand/react/shallow'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { PageBody } from '@/components/ui/page-body'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ViewHeader } from '@/components/view-header'
 import { api, ApiError, type Api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
 import { message } from '@/lib/format'
-import { cn } from '@/lib/utils'
 import { useConnectionProblem } from '@/components/shell/connection'
 import type { InsightsParams, InsightsResult } from '@/lib/types'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
@@ -160,7 +160,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
       <ViewHeader title="Insights" actions={mobile ? undefined : controls} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Tabs value={tab} onValueChange={(value) => navigate('insights', value === 'system' ? { tab: 'system' } : {})}>
-          <div className={cn('mx-auto flex w-full min-w-0 flex-col gap-6 px-4 py-6 sm:px-6', tab === 'system' ? 'max-w-6xl' : 'max-w-4xl')}>
+          <PageBody width="xl" className="gap-6">
             <TabsList aria-label="Insights view">
               <TabsTrigger value="activity">Activity</TabsTrigger>
               <TabsTrigger value="system">System</TabsTrigger>
@@ -202,7 +202,7 @@ export function InsightsRoute({ client = api }: RouteProps & { client?: Api }) {
             <TabsContent value="system">
               <SystemTab client={client} />
             </TabsContent>
-          </div>
+          </PageBody>
         </Tabs>
       </div>
     </div>

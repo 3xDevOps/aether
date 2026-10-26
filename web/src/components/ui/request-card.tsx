@@ -70,14 +70,6 @@ export function RequestCard({
   )
 }
 
-export function IconTile({ children }: { children: React.ReactNode }) {
-  return (
-    <span aria-hidden className="flex size-7 items-center justify-center rounded-control border border-seam bg-chrome [&_svg]:size-4">
-      {children}
-    </span>
-  )
-}
-
 export function RequestTimeBar({ left, total }: { left: number; total: number }) {
   return (
     <ProgressBar

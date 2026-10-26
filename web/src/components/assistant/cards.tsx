@@ -3,7 +3,8 @@ import { AssistantSettingsLink } from '@/components/assistant/suggestion'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Code } from '@/components/ui/code'
 import { RelativeTime } from '@/components/ui/relative-time'
-import { IconTile, RequestCard, RequestTimeBar } from '@/components/ui/request-card'
+import { IconTile } from '@/components/ui/icon-tile'
+import { RequestCard, RequestTimeBar } from '@/components/ui/request-card'
 import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
 import { RequestRows, RequestSection } from '@/components/ui/request-section'
 import { api } from '@/lib/api'
@@ -75,7 +76,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   return (
     <RequestCard
       aria-label={`Approve this action? ${confirmation.summary}`}
-      avatar={<IconTile><AgentGlyph agent={harness} /></IconTile>}
+      avatar={<IconTile aria-hidden><AgentGlyph agent={harness} className="size-4" /></IconTile>}
       title={confirmation.summary}
       source={<Code>{confirmation.method}</Code>}
       meta={<>expires <RelativeTime at={confirmation.expires_at} /></>}

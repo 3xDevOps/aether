@@ -7,7 +7,7 @@ export function CountBadge({ className, ...props }: React.ComponentProps<'span'>
     <span
       data-slot="count-badge"
       className={cn(
-        'inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-chip bg-hover-chrome px-1 text-ui-xs font-medium whitespace-nowrap text-muted tabular-nums',
+        'inline-flex h-4.5 min-w-4.5 shrink-0 items-center justify-center rounded-chip bg-seam px-1 text-ui-xs font-medium whitespace-nowrap text-muted tabular-nums',
         className,
       )}
       {...props}

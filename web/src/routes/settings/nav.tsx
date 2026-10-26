@@ -3,6 +3,7 @@ import { ChevronRight } from '@/components/icons'
 import { Input } from '@/components/ui/input'
 import { ListRow } from '@/components/ui/list-row'
 import { SectionLabel } from '@/components/ui/section-label'
+import { SlidingIndicator } from '@/components/ui/sliding-indicator'
 import { type Category, categories, groups, search, type SettingEntry } from '@/routes/settings/registry'
 import { useStore } from '@/store'
 
@@ -28,7 +29,8 @@ export function SettingsNav({ input, shown, visible, current, phone }: {
   const trailing = phone ? <ChevronRight /> : undefined
 
   return (
-    <nav aria-label="Settings" className="flex min-w-0 flex-col gap-3 p-3">
+    <nav aria-label="Settings" className="relative flex min-w-0 flex-col gap-3 p-3">
+      <SlidingIndicator activeKey={current} className="rounded-control bg-selection" />
       <div role="search" className="flex flex-col gap-1">
         <Input
           ref={input}
@@ -72,6 +74,8 @@ export function SettingsNav({ input, shown, visible, current, phone }: {
               <ListRow
                 key={categoryID}
                 data-settings-category={categoryID}
+                data-indicator-key={categoryID}
+                className="bg-transparent"
                 selected={categoryID === current}
                 aria-current={categoryID === current ? 'page' : undefined}
                 leading={<Icon />}

@@ -334,9 +334,14 @@ top to bottom:
    may launch.
 3. **Runs** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
    **Working** and **Finished** (see [Run state](#run-state)), each an `h2`
-   holding an `aria-expanded` disclosure button and its count. Every group
-   starts expanded and lists all of its runs; a group closes only when its
-   header is pressed. Needs you lists every workspace; a row outside the
+   holding an `aria-expanded` disclosure button, a chevron that turns a
+   quarter and the count in a `CountBadge`; the count stays in the button's
+   name. Every group starts expanded and lists all of its runs; a group
+   closes only when its header is pressed, and the list fades back in when
+   the viewer reopens it (rows never glide their height, and a group that
+   mounts with hydration does not fade). Until the first runs arrive, six
+   row-shaped skeletons stand in for them after ~200ms, announced as
+   "Loading runs". Needs you lists every workspace; a row outside the
    selected workspace leads with that workspace's name. Working and Finished
    list the selected workspace, and only the viewer's own runs while **Mine**
    (`mineOnly`, persisted) in the Working header is pressed. The region
@@ -464,7 +469,10 @@ Its first row shows the Aether mark and lowercase `aether` wordmark on the left,
 styling and current-page selection. A `ResizeObserver` measures the row and
 its buttons, including font and text-size changes. Destinations that do not
 fit move into **More navigation**, a click-to-open menu; Board and Swarms
-never move into it. Gateway capability gates still apply. Hidden buttons
+never move into it. The current page's selection is one `SlidingIndicator`
+that glides between buttons; it sits beside the list, not in it, so the
+overflow measuring still counts only buttons, and it hides while the current
+page is in **More navigation**. Gateway capability gates still apply. Hidden buttons
 are inert and excluded from the accessibility tree.
 
 Under 768px a second, 48px toolbar holds **Open sidebar** with an amber dot
@@ -3439,7 +3447,10 @@ both what it renders and the overlap set the conflict chips read.
   Refresh** and loads them on click. The store keeps one patch per run and
   records which comparison it answers for (`from`); choosing another
   comparison shows a loading state and fetches at once, never the previous
-  comparison's text.
+  comparison's text. The loading state, after ~200ms, is a skeleton of a file
+  header and ten lines of code, announced as "Loading the diff…". An empty
+  comparison is an `EmptyState` with a branch icon and a title without a
+  period ("No changes yet").
 - **Files are split by scanning, then parsed when read.** `parsePatch`
   (`parse.ts`) finds each `diff --git` boundary and counts a file's
   additions, deletions and content lines without allocating a row per line,
@@ -4641,10 +4652,14 @@ in **Needs you**.
   rows. Raw events does not fold.
 - **One Filter popover.** **Filter** in the Activity header holds Workspace,
   **Show** (every event, one event type, or **Agent messages**), Run and
-  Member; its label counts what is set (`Filter · 2`), so a narrowed feed is
-  not read as an empty log, and **Clear filters** resets it. **More activity
+  Member; its label carries a `CountBadge` of what is set (the button is named
+  "Filter, 2 active"), so a narrowed feed is not read as an empty log, and **Clear filters** resets it. **More activity
   options** holds the **Raw events** checkbox, which prints each row's wire
   type and JSON payload instead of its description.
+- **Loading and empty.** While the first page reads, eight row-shaped
+  skeletons stand in after ~200ms ("Loading activity"; "Loading agent
+  messages" in the Agent messages view). An empty feed is an `EmptyState` with
+  a history icon.
 - **Rows share one time column.** Each row is a grid: relative time, a state
   dot only on `run.status` (the run's new state), the actor's avatar or the
   message kind glyph, the sentence, and the run as a quiet link. On a phone
@@ -4704,7 +4719,12 @@ into a one-hour buffer and polls once more after 1.5 s while a container has
 no CPU figure. `model.ts` builds the donut slices and keeps each run on its
 colour slot (`--series-1` to `--series-8`) while it is present. Charts are
 Recharts, framed by `components/ui/chart.tsx`. The Storage section there
-replaced the disk rows of Settings › Server.
+replaced the disk rows of Settings › Server. The CPU, Memory and Network
+figures glide between polls (`useTween`, one glide per new sample; they never
+count up on mount and snap under reduced motion); the Disk figure is a meter.
+Storage's container and owner rows are an `InsetList`, a row that names a run
+opening it. While the first sample is read, six tile skeletons stand in after
+~200ms.
 
 `src/routes/insights/` is **Insights** (`?page=insights`), what a member's
 agents finished over the last seven local days. It is in the header
@@ -4724,7 +4744,8 @@ section loads, fails and retries on its own.
   above the content instead of sitting in the header. Runs in **Needs you**
   follow as a link to the Board.
 - **My statistics** and **Team statistics.** Two sections with the same
-  layout, mine first. Each has four boxes and one chart:
+  layout, mine first. Each has four `StatTile`s and one chart; until they load, four tile skeletons
+  and a chart skeleton stand in:
   - *Runs / swarms completed*: `outcomes.runs.done` and
     `outcomes.swarms.done` as "7 runs / 1 swarm", with the failed and
     abandoned counts of each below. Every number is from `outcomes`, work
@@ -4916,7 +4937,8 @@ A live run's file can switch from **File** to **Changes vs base**. The same
 tree and editor are a view of each run, scoped to that run's checkout: see
 [Files in a run](#files-in-a-run).
 
-The tree lists each workspace's `base: <branch>` first, then its live runs
+Folder chevrons turn as a folder opens, and the empty editor pane is an
+`EmptyState` with a folder-tree icon. The tree lists each workspace's `base: <branch>` first, then its live runs
 under **Run checkouts**, then one **Home** row; both start folded, so a
 run's tree or the home is read only when it is opened. Folder expansion is
 kept per view. The tree sits beside the
@@ -5235,8 +5257,10 @@ deleted (`~/.local/bin/<executable>`, plus the Enhanced adapter's link, or the
 member's definition) and what stays; a refusal appears in the open dialog, and
 success reloads the shared agent list, so the launcher's picker updates too. On the Agents page an installed agent's row also has a **Default
 mode** select, shown as "Default: Standard", which writes `launchDefaults`
-without changing which agent **New run** preselects. Once one agent is
-installed the page folds the rest under **More agents (n)**. **What's the
+without changing which agent **New run** preselects. Rows sit in an `InsetList` with the glyph in an `IconTile`. Once one agent is
+installed the page folds the rest under **More agents**, whose count is a
+`CountBadge` (the button is named "More agents (n)"). While `agent.list` is
+pending, three row-shaped skeletons stand in after ~200ms. **What's the
 difference?** beside the page's lead opens the Standard and Enhanced cards
 (`ModeOverview`) in a dialog.
 **Run** remembers the agent and its default mode and opens **New run** on it;
@@ -5410,8 +5434,10 @@ header's **Environment** button (or **More navigation → Environment**) or
 
 The view mounts `TerminalDock` (`terminal-dock.tsx`) with
 `containment="fill"`, so the dock fills the view with no resize handle and no
-collapse control. Before the container exists the view says "Your
-environment starts on first open" with **Open**. On desktop the dock hands
+collapse control. While the status is read the pane shows a spinner and
+"Checking environment…"; a failed read is a `FailureCallout` (with **Retry**
+before the container exists). Before the container exists the view says
+"Your environment starts on first open" with **Open**. On desktop the dock hands
 its actions to the view's header (`header` prop): **Save environment** is the
 header's only filled button while the container runs, **Environment
 actions** (`…`) holds the rest, and the save hint **Installs here reach
@@ -5481,7 +5507,7 @@ Each tab has its own route name (`members`, `devices`), so the address, back
 button and the palette's **Devices** entry land on the right tab, and the
 sidebar's **Members** row stays current on both.
 
-**Members** is a roster table: name, role, whether you and that member share
+**Members** is a roster table, each row filling on hover: name, role, whether you and that member share
 an agent account, and last seen (**Online**, a relative time, or
 **Offline**). An admin changes a role or removes a member from the row's
 menu; giving up your own admin role, and removing anyone, ask first. Members
@@ -5564,7 +5590,9 @@ from that device, which no row shows: **Review** looks the code up with
 `member.device.lookup`, and a dialog shows the device, its account, its
 fingerprint, and the member and role approving admits it as, before
 **Approve** sends `member.device.approve` with the device id and the code.
-It revokes a device too, and shows every server refusal verbatim.
+It revokes a device too, and shows every server refusal verbatim. The
+list is an `InsetList`; until it arrives, three row skeletons stand in after
+~200ms ("Loading devices").
 
 Personal settings are not on this page. The sidebar footer menu's
 **Profile** opens the **Profile** dialog (`src/routes/members/personal.tsx`):
@@ -5657,7 +5685,8 @@ without a reload.
 
 ## Manage workspaces
 
-`src/routes/workspaces/` lists workspaces as rows. Selecting a row opens the
+`src/routes/workspaces/` lists workspaces as rows, with three row skeletons
+while the list loads. Selecting a row opens the
 workspace: it becomes the active one and the board shows. Each row's menu
 holds **Repository** (the repository page), **Environment** (its Environment
 section), **Settings…** (who may message others' runs) and **Delete…**, each
@@ -5823,8 +5852,9 @@ pushed base.
 ## Settings
 
 `src/routes/settings/` is available through either gateway. A nav on the
-left lists categories in three groups; the selected category fills the
-content pane. `registry.ts` holds the categories and one entry per setting
+left lists categories in three groups, the open one marked by a selection
+that glides between them on desktop; the selected category fills the
+content pane, a `PageBody` that fades in when the category changes. `registry.ts` holds the categories and one entry per setting
 (id, label, help, keywords, and a gate over capabilities, admin, assistant
 availability, onboarding and membership). A category shows in the nav only
 while one of its entries is visible, so the nav and search never disagree.
@@ -6891,12 +6921,13 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   `Checkbox`, `Radio`, `Collapsible`, `Dialog`, `AlertDialog`, `Menu`,
   `Popover`, `Tooltip`, `Tabs`, `Command`, `Card`, `Callout`, `Badge`,
   `CountBadge`, `ProgressBar`, `TextSwap`, `IconSwap`, `SlidingIndicator`,
-  `ListRow`, `PaneHeader`, `EmptyState`, `RequestCard` with its
-  `request-section` and `request-choice` parts, `StatusDot`, `Skeleton`,
-  `CopyButton` and the Session `timeline`, `steps` and `session-blocks` rows.
-  They are tuned to the shared scale and `focusRing`, and preserve props, events, refs
-  and accessibility contracts. Use them instead of raw form elements. Fields
-  and buttons are 28px, small buttons 24px, all 44px on a coarse pointer;
+  `ListRow`, `PageBody`, `InsetList`, `StatTile`, `IconTile`, `PaneHeader`,
+  `EmptyState`, `RequestCard` with its `request-section` and `request-choice`
+  parts, `StatusDot`, `Skeleton`, `CopyButton` and the Session `timeline`,
+  `steps` and `session-blocks` rows. They are tuned to the shared scale and
+  `focusRing`, and preserve props, events, refs and accessibility contracts.
+  Use them instead of raw form elements. Fields and buttons are 28px, small
+  buttons 24px, all 44px on a coarse pointer;
   adjoining panes and rows are square, and controls use the 8px
   `--radius-control`. `Input`, `Textarea` and `SelectTrigger` compose the
   shared `field` style with contrast-tuned `--control-border` borders,
@@ -6948,7 +6979,17 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   the colour is arbitrary server data with no contrast guarantee in either
   theme.
 - **Loading feedback matches duration.** Skeletons appear only after ~200ms
-  (`useDelayed`), so a fast response never flashes.
+  (`useDelayed`), so a fast response never flashes. A skeleton has the shape
+  of what it stands for (rows, tiles, a diff's header and lines), is capped
+  at about ten rows however long the real list is, and its words stay in a
+  `role="status"` for assistive technology. A failure is a `FailureCallout`
+  with **Retry**, and an empty page is an `EmptyState`: an icon, a title
+  without a period, one line and at most one action.
+- **Pages share one anatomy.** A scrolling page is a `PageBody` (a centred
+  column, 32px between sections, a short fade in), its lists are `InsetList`s
+  of `InsetListItem`s (with `onOpen` the whole row is one button), its figures
+  are `StatTile`s (`text-stat`, 24px) and a glyph that leads a row sits in an
+  `IconTile`.
 
 ## Tests
 

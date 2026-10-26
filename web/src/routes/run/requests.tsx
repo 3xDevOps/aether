@@ -3,7 +3,8 @@ import { DecisionButtons } from '@/components/decision-buttons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Clamped, IconTile, RequestCard, RequestTimeBar } from '@/components/ui/request-card'
+import { IconTile } from '@/components/ui/icon-tile'
+import { Clamped, RequestCard, RequestTimeBar } from '@/components/ui/request-card'
 import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
 import { Textarea } from '@/components/ui/textarea'
 import { useSecondsUntil } from '@/lib/hooks'
@@ -147,7 +148,7 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
         <RequestCard
           key={input.id}
           id={requestCardID.input(input.id)}
-          avatar={<IconTile><AgentGlyph agent={run.harness} /></IconTile>}
+          avatar={<IconTile aria-hidden><AgentGlyph agent={run.harness} className="size-4" /></IconTile>}
           title={inputTitle[input.kind]}
           description={inputHint(agent.hasAgentTerminal)}
           footer={agent.hasAgentTerminal && (

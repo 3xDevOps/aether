@@ -5,6 +5,7 @@ import { Confirm } from '@/components/confirm'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { FailureCallout } from '@/components/ui/failure-callout'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { Menu, MenuContent, MenuItem, MenuLabel, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
@@ -104,17 +105,17 @@ export function Roster({ client }: { client: Api }) {
       {pending.length > 0 && (
         <section aria-label="Pending members" className="flex min-w-0 flex-col gap-2">
           <SectionLabel as="h2">Waiting for approval</SectionLabel>
-          <ul className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
+          <InsetList>
             {pending.map((member) => (
-              <li key={member.id} className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-2">
+              <InsetListItem key={member.id}>
                 <Avatar name={member.display_name} color={member.color} size="header" />
                 <span className="min-w-0 flex-1 truncate text-ui font-medium text-text">{member.display_name}</span>
                 {canApprove
                   ? <Button size="sm" onClick={() => update(member, { pending: false }, () => client.memberApprove(member.id), `${member.display_name} approved`)}>Approve</Button>
                   : <span className="text-ui-sm text-muted">Waiting for an admin</span>}
-              </li>
+              </InsetListItem>
             ))}
-          </ul>
+          </InsetList>
         </section>
       )}
       <section aria-label="Roster" className="flex min-w-0 flex-col gap-2">
@@ -135,17 +136,17 @@ export function Roster({ client }: { client: Api }) {
                 const you = member.id === self?.id
                 const seen = lastSeen.get(member.id)
                 return (
-                  <tr key={member.id}>
-                    <td className="px-3 py-2">
+                  <tr key={member.id} className="transition-colors hover:bg-hover motion-reduce:transition-none">
+                    <td className="px-3 py-2.5">
                       <span className="flex min-w-0 items-center gap-2">
                         <Avatar name={member.display_name} color={member.color} size="header" />
                         <span className="min-w-0 truncate font-medium text-text">{member.display_name}</span>
                         {you && <span className="shrink-0 text-ui-sm text-muted">(you)</span>}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-text">{roleLabel[member.role]}</td>
-                    <td className="hidden px-3 py-2 text-muted lg:table-cell">{you ? '' : accountWords(member.id, access)}</td>
-                    <td className="hidden px-3 py-2 text-muted sm:table-cell">
+                    <td className="px-3 py-2.5 text-text">{roleLabel[member.role]}</td>
+                    <td className="hidden px-3 py-2.5 text-muted lg:table-cell">{you ? '' : accountWords(member.id, access)}</td>
+                    <td className="hidden px-3 py-2.5 text-muted sm:table-cell">
                       {online.has(member.id)
                         ? <span className="flex items-center gap-1.5 text-text"><StatusDot tone="done" />Online</span>
                         : seen ? <RelativeTime at={seen} /> : 'Offline'}

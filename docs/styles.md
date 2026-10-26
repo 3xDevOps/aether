@@ -48,6 +48,7 @@ The type scale, in `web/src/index.css`:
 | `text-ui` | 13/20 | Default UI text; the body is 13px |
 | `text-prose` | 14/22 | Agent prose and rendered markdown |
 | `text-title` | 16/24, Saira 600 | Pane, dialog, step and empty-state headings |
+| `text-stat` | 24/28, 500 | The figure in a `StatTile` only |
 
 `text-avatar` (10px) is reserved for avatar initials. **Settings >
 General > Text size** (Default, Large, Larger) sets `data-text-size` on
@@ -125,16 +126,16 @@ Identity colour never replaces run-state colour.
 `web/src/components/ui/` holds the shared primitives: `Button`, `Input`,
 `Textarea`, `Select`, `Checkbox`, `Radio`, `Label`, `FormField`, `Menu`,
 `Popover`, `Tooltip`, `Dialog`, `AlertDialog`, `Command`, `Tabs`,
-`SlidingIndicator`, `Collapsible`, `Card`, `ListRow`, `PaneHeader`,
-`SectionLabel`, `EmptyState`, `Callout`, `Badge`, `CountBadge`, `RadioPills`,
-`FadeStrip`, `RequestCard`, `StatusDot` and `StateLine`, `Avatar`,
-`AgentGlyph`, `Code` and `CodeBlock`, `Kbd`, `Markdown`, `RelativeTime`,
-`Spinner`, `Skeleton`, `ProgressBar`, `DropZone`, `TextSwap` and `IconSwap`,
-`CopyButton`, `Separator`, `Toaster`, `LineGutter` (a code line's clickable
-number gutter, for the Changes view's comments) and the Session view's
-timeline rows, step rail (`steps.tsx`) and blocks. Reach for one before
-writing markup, and pass its `variant`, `size` or `tone` rather than restyling
-it.
+`SlidingIndicator`, `Collapsible`, `Card`, `ListRow`, `PageBody`, `InsetList`,
+`PaneHeader`, `SectionLabel`, `EmptyState`, `IconTile`, `StatTile`, `Callout`,
+`Badge`, `CountBadge`, `RadioPills`, `FadeStrip`, `RequestCard`, `StatusDot`
+and `StateLine`, `Avatar`, `AgentGlyph`, `Code` and `CodeBlock`, `Kbd`,
+`Markdown`, `RelativeTime`, `Spinner`, `Skeleton`, `ProgressBar`, `DropZone`,
+`TextSwap` and `IconSwap`, `CopyButton`, `Separator`, `Toaster`, `LineGutter`
+(a code line's clickable number gutter, for the Changes view's comments) and
+the Session view's timeline rows, step rail (`steps.tsx`) and blocks. Reach
+for one before writing markup, and pass its `variant`, `size` or `tone` rather
+than restyling it.
 
 `Button` variants:
 
@@ -178,6 +179,19 @@ The other primitives with motion or a fixed size:
 - `FadeStrip` scrolls a row sideways with no scrollbar and masks whichever
   edge hides content over 22px, so the fade matches any surface.
 - `CountBadge` is an 18px chip of tabular figures; a count changes at once.
+  A group header, the Activity filter and the Agents
+  disclosure carry one, and the count stays in the control's accessible name.
+- `PageBody` is the centred column of a scrolling page (`md` 3xl, `lg` 4xl,
+  `xl` 6xl), 32px between sections, fading in on arrival. A page that needs
+  a tighter rhythm passes its own `gap-*`.
+- `InsetList` is a bordered, divided list that clips its rows to the 12px
+  edge; an `InsetListItem` is 44px or taller with 12px gutters. With `onOpen`
+  the row is one button, named by its content, and fills `bg-hover` on hover.
+- `StatTile` is a bordered tile: a muted label, the figure in `text-stat`
+  (`compact` for a line of words), detail lines and a `spark` slot pinned to
+  the foot, so tiles of one row align their charts.
+- `IconTile` is a 28px framed square for a glyph; `EmptyState` draws its
+  `icon` in a 32px one above a title that carries no period.
 - `ProgressBar` is a 4px track whose fill glides to its value. With
   `role="meter"` or `role="progressbar"` it reports `value` of `max`;
   without one it only draws, for a parent that carries the role. With no
@@ -212,7 +226,9 @@ The other primitives with motion or a fixed size:
   primary answer.
 - `Spinner` draws a ring: a track at `--opacity-track` under a quarter arc
   turning every 900ms.
-- `Skeleton` sweeps a `bg-hover-chrome` band across `bg-chrome`.
+- `Skeleton` sweeps a `bg-hover-chrome` band across `bg-chrome`. A page that
+  loads shows skeletons shaped like its result, capped at about ten rows,
+  after `useDelayed`'s 200ms.
 - `CopyButton` copies without a toast: its icon turns to a `state-done`
   check and its name to Copied for 1.8s.
 - The step rail (`steps.tsx`): a 28px `StepsHeader` with up to three 20px
@@ -576,6 +592,12 @@ literal time or curve.
   200ms, then glides its height (`--duration-glide`) to the next card, which
   fades in over 250ms, or to nothing. A preview that arrives late glides the
   card open; nothing animates on hydration.
+- A selection that moves between a set of buttons, the header navigation and
+  Settings' categories, is one `SlidingIndicator` that sits beside the list
+  and glides on `--duration-glide`; the selected row's own fill is transparent
+  so the two never double up. A sidebar group turns its chevron and fades its
+  list back in when the viewer reopens it; it never glides its height, since
+  a group can hold hundreds of rows.
 - Only rows added after the first render enter: `animate-entrance` fades in
   and rises 4px. `playEntrance` staggers a burst by `--stagger-row` (30ms) up
   to the eighth row; the rest arrive with it. The Session list plays it only

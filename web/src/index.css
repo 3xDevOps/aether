@@ -311,6 +311,9 @@
   --text-prose--line-height: 22px;
   --text-avatar: 10px;
   --text-avatar--line-height: 1;
+  --text-stat: 24px;
+  --text-stat--line-height: 28px;
+  --text-stat--font-weight: 500;
 }
 
 @theme inline {

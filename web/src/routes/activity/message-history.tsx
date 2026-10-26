@@ -1,13 +1,15 @@
 import { useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Search } from '@/components/icons'
+import { MessageSquare, Search } from '@/components/icons'
 import { MessageRow } from '@/components/messages/message-row'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import type { Api } from '@/lib/api'
+import { useDelayed } from '@/lib/hooks'
 import type { RunMessage } from '@/lib/types'
+import { FeedSkeleton } from '@/routes/activity/feed-skeleton'
 import { VirtualList } from '@/routes/activity/virtual-list'
 import { useStore } from '@/store'
 import { loadMessagePage, type MessageScope, messageScopeKey, scopeMessages, useMessageList } from '@/store/messages'
@@ -53,6 +55,7 @@ export function MessageHistory({
   const loaded = useStore((s) => Boolean(s.messageLists[key]))
   const more = useStore((s) => Boolean(s.messageLists[key]?.nextBefore))
   const error = useStore((s) => s.messageErrors[key])
+  const waiting = useDelayed(!loaded && !error)
   const [query, setQuery] = useState('')
   const [reading, setReading] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
@@ -95,8 +98,9 @@ export function MessageHistory({
       </div>
       {error && <Callout tone="failed" role="alert" className="m-3">{error}</Callout>}
       <div ref={scroller} role="region" aria-label="Agent messages" className="min-h-0 flex-1 overflow-y-auto">
+        {waiting && <FeedSkeleton label="Loading agent messages" />}
         {loaded && shown.length === 0 && !error && (
-          <EmptyState title={messages.length === 0 ? 'No agent messages yet' : 'No messages match'}>
+          <EmptyState icon={<MessageSquare />} title={messages.length === 0 ? 'No agent messages yet' : 'No messages match'}>
             {messages.length === 0
               ? 'Runs in a swarm message each other here: questions, replies and reports.'
               : 'Change the search or the filters.'}
