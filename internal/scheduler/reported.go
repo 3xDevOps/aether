@@ -390,7 +390,7 @@ func (s *Scheduler) overrideExitLocked(ctx context.Context, run domain.RunID, re
 		return fmt.Errorf("scheduler: finish reported run %s over its exit: %w", run, writeErr)
 	}
 	if e := s.runs[run]; e != nil {
-		e.status, e.reason, e.activity = outcome, reason, ""
+		e.status, e.reason, e.activity, e.cause = outcome, reason, "", ""
 	}
 	s.publish(ctx, events.Event{
 		WorkspaceID: r.WorkspaceID,

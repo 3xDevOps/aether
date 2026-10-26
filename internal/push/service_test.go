@@ -247,6 +247,7 @@ func TestOwnerIsNotifiedOnceWhileANeedStands(t *testing.T) {
 	phone, laptop, bobs := h.subscribe(h.ada), h.subscribe(h.ada), h.subscribe(h.bob)
 	run := h.run(h.ada, "Fix the login redirect\n\nIt loops on Safari.", domain.LaunchACP)
 	want := notification{Title: "Fix the login redirect", Body: "which region?", Run: string(run.ID)}
+	cleared := notification{Title: "Fix the login redirect", Body: clearedBody, Run: string(run.ID), Clear: true}
 
 	// A turn end, a stall and a wait on workers need nobody.
 	h.status(run, domain.RunNeedsAttention, domain.ActivityIdle, "agent idle")
@@ -264,6 +265,9 @@ func TestOwnerIsNotifiedOnceWhileANeedStands(t *testing.T) {
 	phone.expectNone(t, testQuiet)
 
 	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	phone.expect(t, cleared)
+	laptop.expect(t, cleared)
+	bobs.expectNone(t, testQuiet)
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: need the staging API key")
 	want.Body = "Blocked: need the staging API key"
 	phone.expect(t, want)
@@ -276,6 +280,8 @@ func TestOwnerIsNotifiedOnceWhileANeedStands(t *testing.T) {
 	h.publish(run, events.TimelinePayload{Kind: events.TimelineHandoff, Message: string(h.bob.ID)})
 	bobs.expect(t, want)
 	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	phone.expect(t, cleared)
+	bobs.expect(t, cleared)
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	want.Body = "which region?"
 	bobs.expect(t, want)
@@ -382,14 +388,18 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 	h.runs.set(run.ID, domain.RunInputRequest{ID: "q1", SessionID: "s1", Kind: "question"})
 	h.publish(run, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
 	phone.expect(t, notification{Title: "Upgrade the linter", Body: "Question from the agent", Run: id})
+	cleared := notification{Title: "Upgrade the linter", Body: clearedBody, Run: id, Clear: true}
 
-	// Answered, then the turn ends: one notification, for the new need.
+	// Answered, then the turn ends: the question is withdrawn, then the new
+	// need is announced.
 	h.runs.set(run.ID)
 	h.publish(run, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
+	phone.expect(t, cleared)
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
 	phone.expect(t, notification{Title: "Upgrade the linter", Body: "which region?", Run: id})
 
 	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	phone.expect(t, cleared)
 	finished := time.Now().UTC()
 	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, &finished); err != nil {
 		t.Fatalf("FinishRunReported: %v", err)
@@ -401,6 +411,13 @@ func TestRequestsAndReportedFinishesAreAnnounced(t *testing.T) {
 		t.Fatalf("SetRunReview: %v", err)
 	}
 	h.publish(run, events.RunReviewPayload{Review: stamp.Review, StatusSeq: stamp.StatusSeq})
+	phone.expect(t, cleared)
+	if got := phone.urgency.Load(); got != urgencyNormal {
+		t.Errorf("cleared urgency = %v, want %s", got, urgencyNormal)
+	}
+	if got, want := phone.topic.Load(), topicOf(id); got != want {
+		t.Errorf("cleared topic = %v, want the run's %s", got, want)
+	}
 	phone.expectNone(t, testQuiet)
 
 	// A member closing a run of their own is not news to them.
@@ -439,6 +456,7 @@ func TestAnOpenedNeedIsNotPushedAgain(t *testing.T) {
 	phone.expectNone(t, testQuiet)
 
 	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	phone.expect(t, notification{Title: "Upgrade the linter", Body: clearedBody, Run: id, Clear: true})
 	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunNeedsAttention, "agent reported success", domain.ActivityFinished, nil, nil); err != nil {
 		t.Fatalf("FinishRunReported: %v", err)
 	}

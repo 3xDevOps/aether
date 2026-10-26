@@ -8,14 +8,20 @@ const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url
 
 type Handler = (event: Record<string, unknown>) => void
 
-function worker(windows: { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void }[] = []) {
+function worker(
+  windows: { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void }[] = [],
+  shown: { tag: string; title: string }[] = [],
+) {
   const handlers: Record<string, Handler> = {}
   const self = {
     addEventListener: (type: string, handler: Handler) => {
       handlers[type] = handler
     },
     skipWaiting: vi.fn(),
-    registration: { showNotification: vi.fn(async () => {}) },
+    registration: {
+      showNotification: vi.fn(async () => {}),
+      getNotifications: vi.fn(async ({ tag }: { tag: string }) => shown.filter((n) => n.tag === tag)),
+    },
     clients: {
       matchAll: vi.fn(async () => windows),
       openWindow: vi.fn(async () => null),
@@ -45,6 +51,29 @@ describe('service worker', () => {
       icon: '/icons/icon-192.png',
       data: { run: 'run-7k2m9q4xbd' },
     })
+  })
+
+  it('quietly replaces the notification of a need that ended, keeping its title', async () => {
+    const { self, dispatch } = worker([], [{ tag: 'run-7k2m9q4xbd', title: 'Fix the login redirect' }])
+    await dispatch('push', {
+      data: { json: () => ({ title: 'Renamed run', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) },
+    })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Fix the login redirect', {
+      body: 'No longer needs you',
+      tag: 'run-7k2m9q4xbd',
+      silent: true,
+      icon: '/icons/icon-192.png',
+      data: { run: 'run-7k2m9q4xbd' },
+    })
+  })
+
+  it('still shows a cleared need the user already dismissed, without alerting', async () => {
+    const { self, dispatch } = worker()
+    await dispatch('push', {
+      data: { json: () => ({ title: 'Fix the login redirect', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) },
+    })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Fix the login redirect', expect.objectContaining({ silent: true, tag: 'run-7k2m9q4xbd' }))
+    expect(self.registration.showNotification).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ renotify: true }))
   })
 
   it('still shows something for a push it cannot read', async () => {

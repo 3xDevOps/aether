@@ -573,7 +573,10 @@ A live run (`running` or `needs-attention`) carries `state`: `working`,
 `needs-you`, `finished`, `failed` or `disconnected`
 ([run activity](failure-handling.md#run-activity)); it is absent on any
 other status. Rows and events written before `waiting` existed carry `idle`,
-which means `waiting`. `status_seq` is always present, starts at 1 and
+which means `waiting`. A live run also carries `cause`, what chose its
+`state`, as in the `run.status` event
+([run activity](failure-handling.md#run-activity)); it is absent on any other
+status and from older servers. `status_seq` is always present, starts at 1 and
 increases on every published change of status, reason, state,
 `outcome_unseen`, `finish_unopened` or `review`. Every run carries `review`
 (`""`, `ready`, `later` or `accepted`) and, once it has changed,

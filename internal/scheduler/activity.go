@@ -287,8 +287,13 @@ func (s *Scheduler) refreshActivityLocked(ctx context.Context, entry *supervised
 		reason = entry.idleReason
 	}
 	d, err := s.activityLocked(ctx, entry.runID, entry, entry.status, reason)
-	if err != nil || (d.activity == entry.activity && d.reason == entry.reason) {
+	if err != nil {
 		return err
+	}
+	if d.activity == entry.activity && d.reason == entry.reason {
+		// Recovery restores the activity from the row but not its cause.
+		entry.cause = d.cause
+		return nil
 	}
 	return s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, entry.status, reason, "")
 }

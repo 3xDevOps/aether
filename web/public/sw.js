@@ -1,5 +1,5 @@
-// Shows push notifications and opens the run, or the workspace budget, one is
-// about. There is no fetch handler: the dashboard is never served or cached
+// Shows push notifications, quietly replaces one whose need ended, and opens
+// the run, or the workspace budget, one is about. There is no fetch handler: the dashboard is never served or cached
 // from here.
 
 self.addEventListener('install', () => {
@@ -14,6 +14,24 @@ self.addEventListener('push', (event) => {
   } catch {
     // Safari drops a subscription whose push shows nothing, so a message
     // this worker cannot read still shows the fallback below.
+  }
+  if (message.clear && message.run) {
+    // The run's need ended. A push that shows nothing would cost the
+    // subscription on Safari, so the notification is replaced quietly
+    // instead of closed.
+    event.waitUntil(
+      (async () => {
+        const [shown] = await self.registration.getNotifications({ tag: message.run })
+        await self.registration.showNotification(shown?.title || message.title || 'Aether', {
+          body: message.body,
+          tag: message.run,
+          silent: true,
+          icon: '/icons/icon-192.png',
+          data: { run: message.run },
+        })
+      })(),
+    )
+    return
   }
   event.waitUntil(
     self.registration.showNotification(message.title || 'Aether', {

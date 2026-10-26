@@ -6,7 +6,7 @@ import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StateLine } from '@/components/ui/status-dot'
-import { runLabel, stateDetail, stateLabel, stateTitle, stateTone } from '@/lib/status'
+import { runLabel, stateLabel, stateLine, stateTitle, stateTone } from '@/lib/status'
 import type { MissionPhase } from '@/lib/types'
 import { CardActionButton, cardAction, openCard, ReplyComposer } from '@/routes/board/card-action'
 import type { BoardCard } from '@/routes/board/selectors'
@@ -49,10 +49,10 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
             tone={stateTone[state]}
             label={stateLabel[state]}
             strong={needsYou}
-            title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next }, since)}
+            title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next, cause: card.cause }, since)}
             trailing={<RelativeTime at={since} />}
           >
-            {needsYou || card.swarm ? reason : [stateLabel[state], stateDetail({ state, reason })].filter(Boolean).join(' · ')}
+            {needsYou || card.swarm ? reason : stateLine({ state, reason })}
           </StateLine>
           <CardTitle onOpen={() => variant === 'map' ? navigate('run', { runId: run.id }) : openCard(card, navigate)}>{title}</CardTitle>
           <div className="flex min-h-4 min-w-0 items-center gap-1.5 text-ui-sm text-muted">

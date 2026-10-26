@@ -20,6 +20,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/sshd"
@@ -84,6 +85,7 @@ func (launcher) DefaultMode(context.Context, domain.MemberID, domain.MemberID, s
 	return domain.LaunchACP, nil
 }
 func (launcher) PendingInputs(domain.RunID) []domain.RunInputRequest { return nil }
+func (launcher) Cause(domain.RunID) events.RunStatusCause            { return "" }
 func (launcher) Switching(domain.RunID) domain.LaunchMode            { return "" }
 func (launcher) Retention(*domain.Run) (scheduler.RetentionInfo, error) {
 	return scheduler.RetentionInfo{}, nil
