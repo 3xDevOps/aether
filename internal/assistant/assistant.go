@@ -105,6 +105,10 @@ type member struct {
 	id       domain.MemberID
 	confirms *confirmations
 	actions  heldActions
+	// conv is cancelled when a reset discards the conversation, so an
+	// action record that outlived it is dropped. Read it under mu.
+	conv    context.Context
+	endConv context.CancelFunc
 	// op serializes starting, stopping and resetting the session.
 	op sync.Mutex
 	// reset is held while a reset runs, so a viewer that sees the session
@@ -162,6 +166,7 @@ func (s *Service) member(id domain.MemberID) *member {
 	if m == nil {
 		m = &member{id: id, changed: make(chan struct{}), watchers: make(map[chan struct{}]struct{}), attempts: make(map[string]*attempt)}
 		m.confirms = newConfirmations(m.notify)
+		m.conv, m.endConv = context.WithCancel(context.Background())
 		s.members[id] = m
 	}
 	return m
@@ -683,6 +688,8 @@ func (s *Service) resetLocked(ctx context.Context, m *member) error {
 		return fmt.Errorf("assistant: remove the item log: %w", err)
 	}
 	m.mu.Lock()
+	m.endConv()
+	m.conv, m.endConv = context.WithCancel(context.Background())
 	m.err = ""
 	m.attempts, m.done = make(map[string]*attempt), nil
 	m.signalLocked()

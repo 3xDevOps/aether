@@ -163,23 +163,28 @@ func (s *Service) approver(m *member) func(context.Context, protocol.AssistantCo
 		if err != nil || passed {
 			return err
 		}
+		conv := m.conversation()
 		err = m.confirms.confirm(ctx, &c)
 		a := newAction(c)
 		a.ConfirmationID, a.DecidedAt = c.ID, time.Now().UTC()
 		// A withdrawn card ends with the caller's context done; its reset
 		// and record must still be stored.
-		if cerr := s.countApproval(context.WithoutCancel(ctx), m, c, err == nil); cerr != nil {
-			return errors.Join(err, fmt.Errorf("count the approval: %w", cerr))
+		var cerr error
+		if cerr = s.countApproval(context.WithoutCancel(ctx), m, c, err == nil); cerr != nil {
+			cerr = fmt.Errorf("count the approval: %w", cerr)
 		}
 		if err != nil {
 			a.Outcome, a.FinishedAt = refusal(err), a.DecidedAt
 			if a.Outcome == protocol.AssistantActionFailed {
 				a.Error = err.Error()
 			}
-			if nerr := s.noteAction(context.WithoutCancel(ctx), m, a, err.Error()); nerr != nil {
-				return errors.Join(err, fmt.Errorf("record the %s card: %w", a.Outcome, nerr))
+			if nerr := s.noteOutcome(conv, m, a, err.Error()); nerr != nil {
+				cerr = errors.Join(cerr, fmt.Errorf("record the %s card: %w", a.Outcome, nerr))
 			}
-			return err
+			return errors.Join(err, cerr)
+		}
+		if cerr != nil {
+			return cerr
 		}
 		slog.Info("assistant approval", "member", m.id, "method", c.Method, "summary", c.Summary, "auto", false)
 		a.Outcome, a.Approval = protocol.AssistantActionApproved, "card"
@@ -352,6 +357,24 @@ func (s *Service) noteAction(ctx context.Context, m *member, a protocol.Assistan
 	return s.note(ctx, m, acphost.Notice{Severity: severity, Title: verb + ": " + a.Summary, Description: body, Action: &a})
 }
 
+func (m *member) conversation() context.Context {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.conv
+}
+
+// noteOutcome records a in the conversation conv, unless a reset discarded
+// it meanwhile.
+func (s *Service) noteOutcome(conv context.Context, m *member, a protocol.AssistantAction, body string) error {
+	if conv.Err() != nil {
+		return nil
+	}
+	if err := s.noteAction(conv, m, a, body); err != nil && conv.Err() == nil {
+		return err
+	}
+	return nil
+}
+
 // heldActions are the actions whose call was allowed and has not run yet,
 // by method and exact params: the tool socket makes the call with the params
 // it asked to confirm.
@@ -396,6 +419,7 @@ type actionCaller struct {
 }
 
 func (c actionCaller) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	conv := c.m.conversation()
 	a, ok := c.m.actions.take(method, params)
 	if !ok && !slices.Contains(reversibleMethods, method) {
 		return c.Caller.Call(ctx, method, params)
@@ -421,7 +445,7 @@ func (c actionCaller) Call(ctx context.Context, method string, params json.RawMe
 	}
 	// The call already ran, so a record that cannot be written must not
 	// turn its result into an error.
-	if err := c.s.noteAction(context.WithoutCancel(ctx), c.m, a, body); err != nil {
+	if err := c.s.noteOutcome(conv, c.m, a, body); err != nil {
 		slog.Warn("assistant: record the action's outcome", "member", c.m.id, "method", method, "action", a.ID, "error", err)
 	}
 	return result, rpcErr

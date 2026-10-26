@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -293,5 +294,59 @@ func TestUnlistedConfirmedMethodIsStillRecorded(t *testing.T) {
 	}
 	if _, ok := m.actions.take(c.Method, c.Params); ok {
 		t.Fatal("the approval is still held after its call")
+	}
+}
+
+// resetCaller discards the conversation while a call is in flight.
+type resetCaller struct {
+	svc *Service
+	m   *member
+}
+
+func (r resetCaller) Call(ctx context.Context, _ string, _ json.RawMessage) (json.RawMessage, *protocol.Error) {
+	r.m.op.Lock()
+	defer r.m.op.Unlock()
+	if err := r.svc.resetLocked(ctx, r.m); err != nil {
+		return nil, &protocol.Error{Code: protocol.CodeInternal, Message: err.Error()}
+	}
+	return json.RawMessage(`{}`), nil
+}
+
+func TestRecordsOfADiscardedConversationAreDropped(t *testing.T) {
+	svc, m, _ := newActionService(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.approver(m)(t.Context(), protocol.AssistantConfirmation{Method: protocol.MethodRunKill, Summary: "Stop run run-1", CreatedAt: time.Now()})
+	}()
+	for len(m.confirms.snapshot()) == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	m.op.Lock()
+	err := svc.resetLocked(t.Context(), m)
+	m.op.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.confirms.cancelAll()
+	if err := wait(t, done); !errors.Is(err, errSessionEnded) {
+		t.Fatalf("withdrawn card = %v, want only the withdrawal", err)
+	}
+	if got := actions(t, svc, m); len(got) != 0 {
+		t.Fatalf("records after the reset = %+v, want none in the new conversation", got)
+	}
+
+	call := actionCaller{Caller: resetCaller{svc: svc, m: m}, s: svc, m: m}
+	if _, err := call.Call(t.Context(), protocol.MethodRunPause, json.RawMessage(`{"run_id":"run-1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := actions(t, svc, m); len(got) != 0 {
+		t.Fatalf("records after a reset during the call = %+v, want none", got)
+	}
+	after := actionCaller{Caller: &actionServer{}, s: svc, m: m}
+	if _, err := after.Call(t.Context(), protocol.MethodRunPause, json.RawMessage(`{"run_id":"run-1"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if got := actions(t, svc, m); len(got) != 1 {
+		t.Fatalf("records = %+v, want the pause made in the new conversation", got)
 	}
 }
