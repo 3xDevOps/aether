@@ -366,8 +366,15 @@ type RunReportParams struct {
 	Tools     bool `json:"tools,omitempty"`
 	Subagent  bool `json:"subagent,omitempty"`
 	TurnStart bool `json:"turn_start,omitempty"`
+	// Stop marks the idle report of a main agent's stop that the harness
+	// lets a hook hold back: Aether may refuse it while the turn owes a
+	// report.
+	Stop bool `json:"stop,omitempty"`
 }
 
-// RunReportResult is the result of run.report. It is empty: the caller is
-// a hook inside the container that exits immediately either way.
-type RunReportResult struct{}
+// RunReportResult is the result of run.report. Continue is set when Aether
+// held back a stop: the report was not applied, and Continue is what the
+// agent must do before its turn ends.
+type RunReportResult struct {
+	Continue string `json:"continue,omitempty"`
+}

@@ -1356,19 +1356,21 @@ func TestEnhancedTasklessRunDeliversInstructionsWithTheFirstMailPrompt(t *testin
 	if err := e.sched.WakeEnhanced(t.Context(), run.ID, "inbox hint"); err != nil {
 		t.Fatal(err)
 	}
-	waitItems(t, e.sched, run.ID, "the wake turn", turnEnded("end_turn", 1))
+	// The wake turn reports nothing, so Aether asks for the report.
+	waitItems(t, e.sched, run.ID, "the wake and reminder turns", turnEnded("end_turn", 2))
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
 	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "second"}, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	waitItems(t, e.sched, run.ID, "the second turn", turnEnded("end_turn", 2))
+	waitItems(t, e.sched, run.ID, "the second turn", turnEnded("end_turn", 3))
 	prompts := rt.all()[0].wire.prompts(t)
-	if len(prompts) != 2 {
-		t.Fatalf("prompts %+v, want two", prompts)
+	if len(prompts) < 3 {
+		t.Fatalf("prompts %+v, want at least three", prompts)
 	}
 	if want := []string{"inbox hint", "\n\n" + e.sched.runInstructions(coordhooks.Guide{RunID: string(run.ID), Role: coordhooks.RoleInteractive, Wake: true})}; !slices.Equal(textOf(prompts[0]), want) {
 		t.Fatalf("mail prompt %q, want the hint and the instructions", textOf(prompts[0]))
 	}
-	if got := textOf(prompts[1]); !slices.Equal(got, []string{"second"}) {
+	if got := textOf(prompts[2]); !slices.Equal(got, []string{"second"}) {
 		t.Fatalf("second prompt %q, want the message alone", got)
 	}
 }

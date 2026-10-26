@@ -20,6 +20,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -568,7 +569,25 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	if err = fsyncDir(s.cfg.StateDir); err != nil {
 		return nil, nil, nil, err
 	}
+	if !run.ACP && c.enabled {
+		s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote, "run instructions: "+instructionChannel(profile, instructions))
+	}
 	return mounts, launchArgs, launchEnv, nil
+}
+
+// instructionChannel names where a Standard or Background launch puts the
+// run instructions. Without a launch route, they reach the agent through
+// its SessionStart hook and the aether MCP server's instructions.
+func instructionChannel(profile harness.Profile, instructions string) string {
+	switch {
+	case instructions == "":
+		return "SessionStart hook and MCP server instructions"
+	case profile.InstructionsConfig != "":
+		return "developer instructions"
+	case len(profile.InstructionArgs) > 0:
+		return "system prompt"
+	}
+	return "instructions file"
 }
 func ensureCoordinationCLIPath(env map[string]string) {
 	if env == nil {

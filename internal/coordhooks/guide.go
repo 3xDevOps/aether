@@ -70,6 +70,10 @@ const (
 	neverRule  = "Never report while still working, and report only what you verified."
 )
 
+// ReportReminder is what Aether tells an agent whose turn is ending without
+// a report.
+const ReportReminder = "Report your state with aether-internal report (answered, waiting, needs-input, blocked, success or failure) before ending the turn."
+
 // Brief is the reporting rule set for g, or nothing for a run whose server
 // takes no reports. It stands alone within 512 bytes, so it can lead any
 // longer instructions.

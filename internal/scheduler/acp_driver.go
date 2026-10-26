@@ -85,6 +85,9 @@ type acpRun struct {
 	// a taskless session accepts carries, for an agent with no system prompt
 	// route.
 	instructions string
+	// askedReport marks the turn askReport started, whose end is not asked
+	// again.
+	askedReport bool
 }
 
 func newACPDriver(s *Scheduler) *acpDriver {
@@ -540,8 +543,16 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 	}
 	d.setRun(runID, r)
 	go d.watch(entry, r)
-	if c := d.s.coordinationSeam(); c != nil && c.enabled && !oneShot {
+	c := d.s.coordinationSeam()
+	if c != nil && c.enabled && !oneShot {
 		c.svc.EnhancedSessionOpened(ctx, runID)
+	}
+	if c != nil && c.enabled && coordDir != "" && fresh {
+		channel := "first message"
+		if systemPrompt != "" {
+			channel = "system prompt"
+		}
+		d.s.publishTimeline(ctx, run.WorkspaceID, runID, "", events.TimelineNote, "run instructions: "+channel)
 	}
 	switch {
 	case oneShot && marked:

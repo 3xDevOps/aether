@@ -10,6 +10,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 )
 
 // The dashboard matches these reason prefixes (web/src/lib/needs-you.ts).
@@ -61,6 +62,9 @@ func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnSt
 	d.s.mu.Lock()
 	entry.betweenTurns = st.Working && st.Reason == "background" && !st.Autonomous
 	d.s.mu.Unlock()
+	if !st.Working && d.askReport(entry, st) {
+		return
+	}
 	report := agentstatus.Report{State: agentstatus.Working}
 	switch {
 	case st.Working && st.Reason == "background":
@@ -209,4 +213,56 @@ func (d *acpDriver) endOneShot(entry *supervised, ok, untried bool, idle agentst
 			slog.Warn("scheduler: end the background run's container", "run", entry.runID, "code", code, "stderr", stderr, "error", err)
 		}
 	}()
+}
+
+// askReport prompts an agent whose turn ended without a report for one, and
+// reports whether it did. Only a turn that ended on its own is asked, never
+// the turn that prompt starts, and a prompt that finds the session busy
+// leaves the new turn to report.
+func (d *acpDriver) askReport(entry *supervised, st acphost.TurnState) bool {
+	d.mu.Lock()
+	r := d.runs[entry.runID]
+	if r == nil || r.session == nil {
+		d.mu.Unlock()
+		return false
+	}
+	asked := r.askedReport
+	r.askedReport = false
+	sess := r.session
+	d.mu.Unlock()
+	if asked || st.Failed != nil || acp.StopReason(st.Reason) != acp.StopReasonEndTurn {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), acpSteerTimeout)
+	held, err := d.s.HoldTurnEnd(ctx, entry.runID)
+	cancel()
+	if err != nil {
+		slog.Warn("scheduler: check the ending turn's report", "run", entry.runID, "error", err)
+	}
+	if !held {
+		return false
+	}
+	d.mu.Lock()
+	r.askedReport = true
+	d.mu.Unlock()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), acpSteerTimeout)
+		defer cancel()
+		started, err := sess.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(coordhooks.ReportReminder)}, nil)
+		if started {
+			return
+		}
+		d.mu.Lock()
+		r.askedReport = false
+		d.mu.Unlock()
+		if err == nil && sess.State().TurnInFlight {
+			return
+		}
+		if err != nil {
+			slog.Warn("scheduler: ask the agent for its report", "run", entry.runID, "error", err)
+		}
+		d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle})
+		d.wakeIdle(entry.runID)
+	}()
+	return true
 }

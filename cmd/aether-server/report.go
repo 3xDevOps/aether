@@ -38,11 +38,12 @@ const reportUsage = `report: usage: aether-server report claude   (hook JSON on 
 // hands that callback a different shape, which is why the subcommand takes
 // two (docs/mcp-bridge.md).
 //
-// It never fails and never prints to stdout: a callback that breaks or
-// slows the agent is worse than a run card that is briefly wrong, so every
-// problem is one line on stderr - which the pi, omp and opencode
-// extensions read and forward to one warning of their own, and every other
-// harness shows only when the callback exits non-zero.
+// It never fails: a callback that breaks or slows the agent is worse than a
+// run card that is briefly wrong, so every problem is one line on stderr -
+// which the pi, omp and opencode extensions read and forward to one warning
+// of their own, and every other harness shows only when the callback exits
+// non-zero. It prints to stdout only Claude Code's decision to block a Stop
+// the server held back because the turn owes a report.
 //
 // Adding a harness is one case below plus one mapping function in
 // internal/agentstatus.
@@ -98,6 +99,7 @@ func report(args []string) {
 	if !mapped {
 		return
 	}
+	var result protocol.RunReportResult
 	err := coordtransport.Call(ctx, *socket, protocol.MethodRunReport, protocol.RunReportParams{
 		State:        string(rep.State),
 		Reason:       rep.Reason,
@@ -107,9 +109,16 @@ func report(args []string) {
 		Tools:        rep.Tools,
 		Subagent:     rep.Subagent,
 		TurnStart:    rep.TurnStart,
-	}, nil)
+		Stop:         rep.Stop && harness == "claude",
+	}, &result)
 	if err != nil {
 		warn("report %s: %v", harness, err)
+		return
+	}
+	if result.Continue != "" {
+		if err := json.NewEncoder(os.Stdout).Encode(map[string]string{"decision": "block", "reason": result.Continue}); err != nil {
+			warn("report %s: write the stop decision: %v", harness, err)
+		}
 	}
 }
 

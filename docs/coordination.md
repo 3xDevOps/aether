@@ -608,6 +608,12 @@ Where the instructions go:
   short brief when the launch carries the card; see
   [mcp-bridge.md](mcp-bridge.md#registration).
 
+Each launch records where its instructions went as a `note` entry in
+`aether timeline <workspace>`: `run instructions: system prompt`,
+`developer instructions` (Codex), `instructions file` (OpenCode, Copilot
+CLI), `first message` (an Enhanced agent without a system prompt route), or
+`SessionStart hook and MCP server instructions`.
+
 `skill` prints the same report decision table as the card, followed by
 shorter notes for the role.
 
@@ -1824,6 +1830,19 @@ clears that reason; older report retries
 cannot bring it back.
 The scheduler applies a report as part of its durable publication, so a
 server restart or a temporarily unreachable run is retried, not lost.
+
+A turn that ends without a report is held once. A run that takes reports
+owes one each turn: a turn owes it when no `coord.report` of any outcome
+arrived since the turn started. A Standard Claude Code `Stop` hook marks its
+`run.report` with `stop: true`, unless the payload has `stop_hook_active`,
+a subagent sent it, or background tasks hold the turn. For a turn that owes
+a report, the server does not apply that stop and answers with `continue`;
+the reporter prints Claude Code's
+`{"decision":"block","reason":"Report your state with aether-internal report (answered, waiting, needs-input, blocked, success or failure) before ending the turn."}`
+and the agent goes on. The next stop of that turn is applied whatever it
+reported. If the server cannot check, the stop is applied. Enhanced runs get
+the same rule as a [report reminder](enhanced-runs.md#report-reminder)
+prompt. Background runs, and Standard runs of other agents, are not held.
 
 Coordination also does not provide a universal inbound terminal hook. When a
 human messages a Standard run, Aether delivers the message through the
