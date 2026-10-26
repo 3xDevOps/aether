@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Camera, Copy, GitBranch, Lock, PanelRight, ScrollText } from '@/components/icons'
+import { RunChildNudge } from '@/components/child-nudge'
 import { RunActions } from '@/components/run-actions'
 import { RunRetention } from '@/components/run-retention'
 import { ConnectionLine } from '@/components/shell/connection'
@@ -21,6 +22,7 @@ import { runLabel, stateDetail, stateLabel, stateTitle } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { RunLineage, useChildRunsItem } from '@/routes/run/child-runs'
 import { useModeSwitch } from '@/routes/run/mode-switch'
 import { useOpenInEditor } from '@/routes/run/open-in-editor'
 import { useRunPullRequest } from '@/routes/run/pull-request'
@@ -237,6 +239,7 @@ export function RunHeader({
   const modeSwitch = useModeSwitch(run, agent, agentEntry)
   const pullRequest = useRunPullRequest(run, agent, agentName)
   const editor = useOpenInEditor(run)
+  const childRunsItem = useChildRunsItem(run)
   useHeaderPrimary(Boolean(primary))
 
   return (
@@ -272,6 +275,7 @@ export function RunHeader({
               extra={[
                 ...(modeSwitch.item ? [modeSwitch.item] : []),
                 ...(editor.item ? [editor.item] : []),
+                ...(childRunsItem ? [childRunsItem] : []),
                 { id: 'captures', label: 'Captures…', Icon: Camera, onSelect: onCaptures },
                 { id: 'events', label: 'Raw events…', Icon: ScrollText, onSelect: onEvents },
               ]}
@@ -279,7 +283,9 @@ export function RunHeader({
           </>
         }
       />
+      <RunLineage run={run} />
       <RunRetention run={run} className="border-b border-seam px-4 py-2" />
+      <RunChildNudge run={run} />
       {!composing && (
         <div className="@container/views flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
           <ViewSwitch view={view} views={views} />

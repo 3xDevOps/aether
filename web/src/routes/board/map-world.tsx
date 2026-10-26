@@ -1,5 +1,6 @@
 import { memo, useLayoutEffect, useRef } from 'react'
 import { Avatar } from '@/components/ui/avatar'
+import { runLabel } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { MapNodeCard } from '@/routes/board/map-card'
 import { MapConnectors } from '@/routes/board/map-connectors'
@@ -68,9 +69,11 @@ function Unit({ unit, section, agentNames, onFold }: {
   onFold: FoldHandler
 }) {
   const mission = useStore((s) => (unit.missionId ? s.missions[unit.missionId] : undefined))
+  const childRuns = `${unit.workers} ${unit.workers === 1 ? 'child run' : 'child runs'}`
   const caption = unit.kind === 'orphan'
     ? 'Integrator not visible'
-    : mission ? `${mission.objective} · ${phaseWord[mission.phase]}` : 'Swarm'
+    : unit.kind === 'family' ? childRuns
+      : mission ? `${mission.objective} · ${phaseWord[mission.phase]}` : 'Swarm'
   const workersId = `map-workers-${unit.key}`
   const root = unit.kind === 'orphan' ? undefined : unit.nodes[0]
   const workers = root ? unit.nodes.slice(1) : unit.nodes
@@ -93,6 +96,7 @@ function Unit({ unit, section, agentNames, onFold }: {
           hidden: unit.hidden.length,
           hiddenNeedsYou: unit.hidden.filter((card) => card.group === 'needs-you').length,
           controls: workersId,
+          noun: unit.kind === 'family' ? 'child runs' : 'workers',
           onFold,
         } : undefined}
       />
@@ -105,6 +109,7 @@ function Unit({ unit, section, agentNames, onFold }: {
       role="group"
       aria-label={unit.kind === 'standalone' ? 'Standalone run'
         : unit.kind === 'orphan' ? `Workers, integrator not visible, ${unit.nodes.length} ${unit.nodes.length === 1 ? 'worker' : 'workers'}`
+          : unit.kind === 'family' ? `Run with child runs: ${runLabel(unit.nodes[0].card.run)}, ${childRuns}`
           : `Swarm: ${mission?.objective ?? unit.missionId}, ${unit.workers} ${unit.workers === 1 ? 'worker' : 'workers'}`}
       className="absolute"
       style={{ left: unit.x - section.x, top: unit.y - section.y, width: unit.width, height: unit.height }}

@@ -171,7 +171,7 @@ function MapViewport({ layout, cards, scope, agentNames, actions, empty }: MapPr
 
   // A worker always goes through the unfold, which also cancels a fold still fading out.
   const reveal = useCallback((key: string) => {
-    const unit = layout.units.find((entry) => entry.kind === 'swarm' && (entry.hidden.some((card) => runKey(card) === key)
+    const unit = layout.units.find((entry) => (entry.kind === 'swarm' || entry.kind === 'family') && (entry.hidden.some((card) => runKey(card) === key)
       || entry.nodes.some((node) => node.key === key && node.role === 'worker')))
     if (!unit) {
       show(key)
@@ -290,7 +290,7 @@ function MapViewport({ layout, cards, scope, agentNames, actions, empty }: MapPr
       <p id={instructionsId} className="sr-only">
         Drag the canvas or use the arrow keys to pan. Scroll to pan; Control or Command plus scroll zooms around the pointer.
         On touch screens, drag to pan or pinch to zoom. Plus and minus zoom; Home or zero fits all runs. Tab reaches each run and its controls.
-        Runs read newest first; a swarm's workers sit under its integrator, whose fold button hides or shows them.
+        Runs read newest first; a swarm's workers sit under its integrator and child runs under the run that started them, whose fold button hides or shows them.
         The needs you and failed counts open lists that bring a run into view. Needs you includes runs from every workspace, even with Mine selected.
       </p>
       <div

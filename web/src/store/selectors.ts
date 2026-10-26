@@ -9,6 +9,7 @@ import {
   type RunGroup,
 } from '@/lib/status'
 import { extraRepoCount, repoLabel } from '@/lib/repos'
+import { rootKey, runKey, runParents } from '@/routes/board/map-layout'
 import type { Member } from '@/lib/types'
 import type { RootState } from '@/store'
 import { isArchivable, type RunRecord } from '@/store/runs'
@@ -36,15 +37,23 @@ export interface RunRow {
   workspaceName?: string
 }
 
-export interface SwarmSummary {
+/** The runs under a tree's root, at any depth. */
+export interface TreeSummary {
   collapsed: boolean
   counts: { working: number; needsYou: number; done: number; failed: number }
   members: RunRow[]
 }
 
+export function childRunsText({ members }: TreeSummary): string {
+  return `${members.length} ${members.length === 1 ? 'child run' : 'child runs'}`
+}
+
+/** `children` are the members that need the viewer, which a folded tree still shows. */
 export interface RunTree extends RunRow {
   children: RunRow[]
-  swarm?: SwarmSummary
+  swarm?: TreeSummary
+  /** Child runs of a run outside a swarm. */
+  childRuns?: TreeSummary
 }
 
 export interface RunGroups {
@@ -112,7 +121,7 @@ function swarmRoot(rows: RunRow[], ctx: StateContext): RunRow {
   )
 }
 
-function swarmTree(root: RunRow, members: RunRow[]): RunTree {
+function memberTree(root: RunRow, members: RunRow[], kind: 'swarm' | 'childRuns'): RunTree {
   const children = members.filter((row) => row.needsYou)
   const counts = { working: 0, needsYou: 0, done: 0, failed: 0 }
   for (const row of members) {
@@ -127,29 +136,61 @@ function swarmTree(root: RunRow, members: RunRow[]): RunTree {
     group: children.length > 0 ? 'needs-you' : root.group,
     waitingSince: waits.map((row) => row.waitingSince).sort()[0] ?? root.waitingSince,
     children,
-    swarm: { collapsed: children.length < members.length, counts, members },
+    [kind]: { collapsed: children.length < members.length, counts, members },
   }
 }
 
+/** A swarm's runs and every run they started form one tree; other child runs join the tree of their root. */
 export function runTrees(rows: RunRow[], ctx: StateContext): RunTree[] {
+  const parents = runParents(rows)
+  const byKey = new Map(rows.map((row) => [runKey(row), row]))
   const swarms = new Map<string, RunRow[]>()
-  const trees: RunTree[] = []
+  const families = new Map<RunRow, RunRow[]>()
   for (const row of rows) {
-    const { mission_id: mission, mission_role: role, workspace_id: workspace } = row.run
-    if (!mission || !role) {
-      trees.push({ ...row, children: [] })
+    const root = byKey.get(rootKey(runKey(row), parents))!
+    const { mission_id: mission, mission_role: role, workspace_id: workspace } = root.run
+    if (mission && role) {
+      const key = JSON.stringify([workspace, mission])
+      const swarm = swarms.get(key)
+      if (swarm) swarm.push(row)
+      else swarms.set(key, [row])
       continue
     }
-    const key = JSON.stringify([workspace, mission])
-    const swarm = swarms.get(key)
-    if (swarm) swarm.push(row)
-    else swarms.set(key, [row])
+    const family = families.get(root) ?? []
+    families.set(root, family)
+    if (root !== row) family.push(row)
+  }
+  const trees: RunTree[] = []
+  for (const [root, members] of families) {
+    trees.push(members.length > 0 ? memberTree(root, members, 'childRuns') : { ...root, children: [] })
   }
   for (const members of swarms.values()) {
-    const root = swarmRoot(members, ctx)
-    trees.push(swarmTree(root, members.filter((row) => row !== root)))
+    const root = swarmRoot(members.filter((row) => row.run.mission_role), ctx)
+    trees.push(memberTree(root, members.filter((row) => row !== root), 'swarm'))
   }
   return trees
+}
+
+/** Every child run below `rootIDs`, nearest first; swarm workers are a swarm's own and not listed. */
+export function descendantRuns(runs: Record<string, RunRecord>, rootIDs: string[]): RunRecord[] {
+  const below = new Map<string, RunRecord[]>()
+  for (const run of Object.values(runs)) {
+    if (!run.parent_run_id || run.mission_role === 'worker') continue
+    const siblings = below.get(run.parent_run_id) ?? []
+    siblings.push(run)
+    below.set(run.parent_run_id, siblings)
+  }
+  const found: RunRecord[] = []
+  const seen = new Set(rootIDs)
+  for (let i = 0, frontier = [...rootIDs]; i < frontier.length; i++) {
+    for (const child of (below.get(frontier[i]) ?? []).sort((a, b) => a.created_at.localeCompare(b.created_at))) {
+      if (seen.has(child.id)) continue
+      seen.add(child.id)
+      found.push(child)
+      frontier.push(child.id)
+    }
+  }
+  return found
 }
 
 export const byWait = (a: RunRow, b: RunRow) =>

@@ -8,7 +8,10 @@ import { unansweredQuestions } from '@/store/collaboration'
 import { runPeople, runWatchers } from '@/store/presence'
 import type { RunRecord } from '@/store/runs'
 import { useStore } from '@/store'
+import { runLabel } from '@/lib/status'
+import { runFacts, type ChildRunFacts } from '@/store/workflow'
 import {
+  descendantRuns,
   listedRuns,
   needsYouByWorkspace,
   sidebarGroups,
@@ -16,6 +19,19 @@ import {
   type RunRow,
   type SidebarGroup,
 } from '@/store/selectors'
+
+/** The child runs below `rootIDs` as workflow rows. */
+export function useChildRunFacts(rootIDs: string[]): ChildRunFacts[] {
+  const now = useClock()
+  const key = useStore((s) => {
+    const ctx = stateContextOf(s, now)
+    return JSON.stringify(descendantRuns(s.runs, rootIDs).map((run): ChildRunFacts => {
+      const shown = presentRun(run, ctx)
+      return { ...runFacts(run, shown, runLabel(run), shown.needsYou !== undefined), runId: run.id, parentRunId: run.parent_run_id! }
+    }))
+  })
+  return useMemo(() => JSON.parse(key) as ChildRunFacts[], [key])
+}
 
 export function useStateContext(): StateContext {
   const now = useClock()

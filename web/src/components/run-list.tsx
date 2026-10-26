@@ -12,7 +12,7 @@ import { useStore } from '@/store'
 import { useRunPresentation } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 import type { RunRow } from '@/store/selectors'
-import { runKey, swarmParents } from '@/routes/board/map-layout'
+import { rootKey, runKey, runParents } from '@/routes/board/map-layout'
 import { connectors } from '@/components/shell/sidebar-runs'
 
 export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
@@ -21,8 +21,9 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   const dead = useStore((s) => s.streamDead)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const tree = useMemo(() => nestWorkers(runs), [runs])
-  const shown = (id: string, workers: RunRow[]) =>
-    expanded[id] ?? true ? workers : workers.filter((worker) => worker.needsYou)
+  // A swarm lists its workers; child runs stay folded until asked for.
+  const open = (row: RunRow) => expanded[row.run.id] ?? row.run.mission_role === 'integrator'
+  const shown = (row: RunRow, workers: RunRow[]) => open(row) ? workers : workers.filter((worker) => worker.needsYou)
   const unreachable = error !== null
   const loading = useDelayed(!hydrated && !unreachable && runs.length === 0)
 
@@ -79,9 +80,9 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
                   foldable(workers) > 0
                     ? {
                         count: foldable(workers),
-                        expanded: expanded[row.run.id] ?? true,
-                        onToggle: () =>
-                          setExpanded((prev) => ({ ...prev, [row.run.id]: !(prev[row.run.id] ?? true) })),
+                        expanded: open(row),
+                        noun: row.run.mission_role === 'integrator' ? 'worker' : 'child run',
+                        onToggle: () => setExpanded((prev) => ({ ...prev, [row.run.id]: !open(row) })),
                       }
                     : undefined
                 }
@@ -89,14 +90,14 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
               {workers.length > 0 && (
                 <ul
                   id={workersID(row.run.id)}
-                  hidden={shown(row.run.id, workers).length === 0}
-                  aria-label={`Workers of ${runLabel(row.run)}`}
+                  hidden={shown(row, workers).length === 0}
+                  aria-label={`${row.run.mission_role === 'integrator' ? 'Workers' : 'Child runs'} of ${runLabel(row.run)}`}
                   className={cn(
                     '[--wire:--spacing(4.75)]',
                     foldable(workers) > 0 ? '[--trunk:--spacing(12.75)] coarse:[--trunk:--spacing(17.75)]' : '[--trunk:--spacing(4.75)]',
                   )}
                 >
-                  {shown(row.run.id, workers).map((worker) => (
+                  {shown(row, workers).map((worker) => (
                     <li key={worker.run.id} className={cn(connectors, 'pl-0')}>
                       <Row row={worker} nested />
                     </li>
@@ -111,14 +112,16 @@ export function RunList({ runs, empty }: { runs: RunRow[]; empty: string }) {
   )
 }
 
+/** Workers and child runs at any depth list under their root, in the order given. */
 function nestWorkers(runs: RunRow[]): { row: RunRow; workers: RunRow[] }[] {
-  const parents = swarmParents(runs)
+  const parents = runParents(runs)
   const nodes = new Map(runs.map((row) => [runKey(row), { row, workers: [] as RunRow[] }]))
   const top = new Set<{ row: RunRow; workers: RunRow[] }>()
   for (const row of runs) {
-    const parent = nodes.get(parents.get(runKey(row)) ?? '')
-    if (parent) parent.workers.push(row)
-    top.add(parent ?? nodes.get(runKey(row))!)
+    const key = runKey(row)
+    const root = nodes.get(rootKey(key, parents))!
+    if (root.row !== row) root.workers.push(row)
+    top.add(root)
   }
   return [...top]
 }
@@ -134,7 +137,7 @@ function Row({
 }: {
   row: RunRow
   nested?: boolean
-  toggle?: { count: number; expanded: boolean; onToggle: () => void }
+  toggle?: { count: number; expanded: boolean; noun: string; onToggle: () => void }
 }) {
   const navigate = useStore((s) => s.navigate)
   return (
@@ -161,7 +164,7 @@ function Row({
           <Button
             variant="ghost"
             size="icon-sm"
-            label={`${toggle.expanded ? 'Hide' : 'Show'} ${toggle.count} ${toggle.count === 1 ? 'worker' : 'workers'}`}
+            label={`${toggle.expanded ? 'Hide' : 'Show'} ${toggle.count} ${toggle.noun}${toggle.count === 1 ? '' : 's'}`}
             aria-expanded={toggle.expanded}
             aria-controls={workersID(run.id)}
             onClick={toggle.onToggle}
@@ -188,7 +191,7 @@ function Row({
             </span>
           </button>
           <span className="mt-0.5 block break-words text-ui-sm leading-4 text-muted">
-            <span>{run.harness}</span>
+            <span>{run.model ? `${run.harness} · ${run.model}` : run.harness}</span>
             <span aria-hidden> · </span>
             <span
               data-run-navigation-exempt={run.branch ? 'true' : undefined}

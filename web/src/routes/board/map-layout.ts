@@ -65,7 +65,8 @@ export interface MapLine {
 
 export interface MapUnit extends MapRect {
   key: string
-  kind: 'standalone' | 'swarm' | 'orphan'
+  /** A family is a run with child runs, laid out like a swarm. */
+  kind: 'standalone' | 'swarm' | 'family' | 'orphan'
   missionId?: string
   /** Every node, world coordinates, in tab order: the root, then workers by creation. */
   nodes: MapNode[]
@@ -110,25 +111,42 @@ export const runKey = ({ run }: { run: RunRecord }) => JSON.stringify([run.works
 const byCreated = (a: MapCard, b: MapCard) =>
   compare(a.run.created_at, b.run.created_at) || compare(runKey(a), runKey(b))
 
-/** Only explicit workspace, mission and integrator IDs establish a relationship. */
-export function swarmParents<T extends { run: RunRecord }>(items: T[]): Map<string, string> {
+/**
+ * Each run's parent key. Only explicit IDs establish a relationship: a worker's
+ * integrator in the same mission, or the parent that started a child run.
+ */
+export function runParents<T extends { run: RunRecord }>(items: T[]): Map<string, string> {
   const byKey = new Map(items.map((item) => [runKey(item), item.run]))
   const parents = new Map<string, string>()
   for (const { run } of items) {
-    if (run.mission_role !== 'worker' || !run.mission_id || !run.integrator_run_id) continue
-    const parentKey = JSON.stringify([run.workspace_id, run.integrator_run_id])
-    const parent = byKey.get(parentKey)
-    if (parent?.mission_role === 'integrator' && parent.mission_id === run.mission_id) {
-      parents.set(runKey({ run }), parentKey)
+    if (run.mission_role === 'worker') {
+      if (!run.mission_id || !run.integrator_run_id) continue
+      const parentKey = JSON.stringify([run.workspace_id, run.integrator_run_id])
+      const parent = byKey.get(parentKey)
+      if (parent?.mission_role === 'integrator' && parent.mission_id === run.mission_id) parents.set(runKey({ run }), parentKey)
+      continue
     }
+    if (!run.parent_run_id) continue
+    const parentKey = JSON.stringify([run.workspace_id, run.parent_run_id])
+    if (byKey.has(parentKey)) parents.set(runKey({ run }), parentKey)
   }
   return parents
+}
+
+/** The top of a run's tree among `parents`; a cycle stops where it closes. */
+export function rootKey(key: string, parents: Map<string, string>): string {
+  const seen = new Set([key])
+  for (let parent = parents.get(key); parent !== undefined && !seen.has(parent); parent = parents.get(parent)) {
+    seen.add(parent)
+    key = parent
+  }
+  return key
 }
 
 /** Everything that decides geometry; live state, titles and timestamps stay out of it. */
 function structureOf(cards: Map<string, MapCard>, input: MapLayoutInput): string {
   const runs = [...cards].sort(([a], [b]) => compare(a, b)).map(([key, { run, visiting }]) => [
-    key, run.member_id, run.mission_id, run.mission_role, run.integrator_run_id, visiting, input.folded[key] === true,
+    key, run.member_id, run.mission_id, run.mission_role, run.integrator_run_id, run.parent_run_id, visiting, input.folded[key] === true,
   ])
   return JSON.stringify([input.viewerID, input.metrics, runs])
 }
@@ -142,7 +160,7 @@ interface Draft {
 
 function makeUnit(draft: Draft, folded: boolean, m: MapMetrics): MapUnit {
   const { root, workers, kind } = draft
-  const shown = kind === 'swarm' && folded ? [] : workers
+  const shown = folded && kind !== 'orphan' ? [] : workers
   const nodes: MapNode[] = []
   const lines: MapLine[] = []
   const dots: MapPoint[] = []
@@ -162,7 +180,7 @@ function makeUnit(draft: Draft, folded: boolean, m: MapMetrics): MapUnit {
       'worker',
     ))
   } else if (!shown.length) {
-    add(root, 0, top, kind === 'swarm' ? 'integrator' : 'standalone')
+    add(root, 0, top, kind === 'standalone' ? 'standalone' : 'integrator')
   } else {
     const rail = shown.length > columns
     const count = Math.min(columns, shown.length)
@@ -208,7 +226,7 @@ function makeUnit(draft: Draft, folded: boolean, m: MapMetrics): MapUnit {
   return {
     key: draft.key, kind, missionId: root.run.mission_id || undefined,
     x: 0, y: 0, width, height: Math.max(...nodes.map((node) => node.y + node.height)),
-    nodes, workers: kind === 'swarm' ? workers.length : 0, hidden: shown === workers ? [] : workers, lines, dots,
+    nodes, workers: kind === 'orphan' ? 0 : workers.length, hidden: shown === workers ? [] : workers, lines, dots,
   }
 }
 
@@ -337,24 +355,27 @@ export function layoutRunMap(cards: MapCard[], input: MapLayoutInput, previous?:
   if (!byKey.size) return { width: 1, height: 1, revision: ++revisions, sections: [], units: [], nodes: [], structure }
 
   const ordered = [...byKey.values()].sort(byCreated)
-  const parents = swarmParents(ordered)
+  const parents = runParents(ordered)
+  const unitOf = ({ run }: MapCard) => run.mission_role === 'worker'
+    ? JSON.stringify([run.workspace_id, 'missing', run.mission_id, run.integrator_run_id || run.id])
+    : runKey({ run })
   const drafts = new Map<string, Draft>()
   for (const card of ordered) {
-    const key = runKey(card)
-    const { run } = card
-    const parent = parents.get(key)
-    const unitKey = parent ?? (run.mission_role === 'worker'
-      ? JSON.stringify([run.workspace_id, 'missing', run.mission_id, run.integrator_run_id || run.id])
-      : key)
+    if (parents.has(runKey(card))) continue
+    const unitKey = unitOf(card)
     const draft = drafts.get(unitKey)
-    if (draft) {
-      if (draft.root !== card) draft.workers.push(card)
-    } else if (parent) {
-      drafts.set(unitKey, { key: unitKey, kind: 'swarm', root: byKey.get(parent)!, workers: [card] })
-    } else {
-      const kind = run.mission_role === 'integrator' ? 'swarm' : run.mission_role === 'worker' ? 'orphan' : 'standalone'
+    if (draft) draft.workers.push(card)
+    else {
+      const kind = card.run.mission_role === 'integrator' ? 'swarm' : card.run.mission_role === 'worker' ? 'orphan' : 'standalone'
       drafts.set(unitKey, { key: unitKey, kind, root: card, workers: kind === 'orphan' ? [card] : [] })
     }
+  }
+  for (const card of ordered) {
+    const key = runKey(card)
+    if (!parents.has(key)) continue
+    const draft = drafts.get(unitOf(byKey.get(rootKey(key, parents))!))!
+    if (draft.kind === 'standalone') draft.kind = 'family'
+    draft.workers.push(card)
   }
 
   const grouped = new Map<string, { kind: MapSection['kind']; units: MapUnit[]; drafts: Draft[] }>()

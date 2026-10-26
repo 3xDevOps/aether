@@ -84,6 +84,23 @@ it('keeps cross-owner workers in their integrator tree and links only the explic
   expectSound(layout)
 })
 
+it('lays a run out with its child runs at any depth, and a worker with its child runs inside the swarm', () => {
+  const parent = card({ id: 'parent', created_at: at(0) })
+  const child = card({ id: 'child', parent_run_id: 'parent', created_at: at(1) })
+  const grandchild = card({ id: 'grandchild', parent_run_id: 'child', created_at: at(2) })
+  const integrator = card({ id: 'root', mission_id: 'mission', mission_role: 'integrator', created_at: at(3) })
+  const worker = card({ id: 'worker', mission_id: 'mission', mission_role: 'worker', integrator_run_id: 'root', parent_run_id: 'root', created_at: at(4) })
+  const review = card({ id: 'review', parent_run_id: 'worker', created_at: at(5) })
+  const layout = layoutRunMap([grandchild, review, child, worker, parent, integrator], input)
+  const family = layout.units.find((unit) => unit.key === key('parent'))!
+  expect(family).toMatchObject({ kind: 'family', workers: 2 })
+  expect(family.nodes.map((node) => [node.card.run.id, node.role])).toEqual([['parent', 'integrator'], ['child', 'worker'], ['grandchild', 'worker']])
+  const swarm = layout.units.find((unit) => unit.key === key('root'))!
+  expect(swarm.nodes.map((node) => node.card.run.id)).toEqual(['root', 'worker', 'review'])
+  expect(layoutRunMap([parent, child, grandchild], { ...input, folded: { [key('parent')]: true } }).units[0]).toMatchObject({ kind: 'family', hidden: [child, grandchild] })
+  expectSound(layout)
+})
+
 it('keeps visible workers without a visible integrator and does not invent legacy relationships', () => {
   const orphan = card({ id: 'worker', member_id: 'missing-member', mission_id: 'mission', mission_role: 'worker', integrator_run_id: 'archived-root' })
   const legacy = card({ id: 'legacy', task: 'Integrator coordinating worker' })
