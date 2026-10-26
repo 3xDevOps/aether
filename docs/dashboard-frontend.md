@@ -1191,12 +1191,13 @@ where a resend is deduped or refused and the eventual result still shows:
 
 `src/routes/board/` is the default center view and the triage surface,
 reached through **Board** in the app header; the sidebar owns the run
-explorer and primary New run action. The **Board / List / Map** tabs in the
-view header choose the layout, stored per workspace in `aether.ui`. **Board**
-shows three columns, **Needs you**, **Working** and **Finished**, each a
-`bg-chrome` well headed by its name and count that scrolls on its own under
-that header. **List** stacks the same three groups full width in one scroll,
-with Finished collapsed until opened. `board()` in
+explorer and primary New run action. The **Board / List / Map / Lanes** tabs
+in the view header choose the layout, stored per workspace in `aether.ui`:
+triage columns, the same groups as one list, a run canvas, or a timeline of
+runs. **Board** shows three columns, **Needs you**, **Working** and
+**Finished**, each a `bg-chrome` well headed by its name and count that
+scrolls on its own under that header. **List** stacks the same three groups
+full width in one scroll, with Finished collapsed until opened. `board()` in
 `src/routes/board/selectors.ts` reads `runGroups`, so the board has the
 sidebar's scoping, ordering and Mine filter: Needs you spans every workspace
 and sorts oldest wait first. The board measures its own width, so the
@@ -1396,7 +1397,7 @@ never moves cards on a state change. Folds persist in `aether.ui`
   fold button in placement order, bringing an offscreen focused card into
   view.
 
-`aether.ui` stores Board/List/Map per active workspace and the map camera per
+`aether.ui` stores Board/List/Map/Lanes per active workspace and the map camera per
 workspace/all-workspaces, Mine and archive scope. These origin-local
 preferences survive view switches, navigation and reloads. A new camera
 fits all runs once, unless that would zoom below 50%: then it opens at 100%
@@ -1406,6 +1407,113 @@ integrator. Live metadata, added or removed
 runs and viewport resizing never reset a chosen camera. Use **Fit** to frame
 the changed set. Cameras saved before this layout (persist version 9) are
 dropped once.
+
+### Lanes
+
+**Lanes** (`src/routes/board/lanes/`) draws every run in scope as a lane on
+one time axis, so you can see what ran when and how the runs relate. It shares
+Map's scope picker (labelled **Lanes workspace scope**), **Mine** and
+**Archived (n)**, and Map's merge-proposal and device strips. The toolbar adds:
+
+- **Time window**: 1h, 6h, 24h or 7d. Without a choice it opens on 1h while
+  any run is working, else 6h. Ctrl/Cmd-scroll zooms around the pointer and
+  the control then reads **Custom**.
+- **Show**: which links to draw (Orchestration, Dependencies, Submissions,
+  Agent messages, Overlaps).
+- **Group lanes by**: status or owner.
+- **Legend**: every bar fill and link style with its meaning.
+- **Now**, shown only after panning into the past. While the window ends at
+  now it follows now.
+
+The axis counts back from now ("−20m") up to an hour wide; wider windows
+show clock times, and 7d weekday and date. Shift-scroll, a sideways wheel or
+dragging the track pans; the history page loads as the window reaches it.
+
+**Sections.** By status, sections follow Board: Needs you (oldest wait first),
+Working and Ready for review (newest start first), then Finished (failed
+first, then latest end). Finished starts folded into one summary lane ("37
+finished · 3 failed") whose strip shows each moment's outcome. By owner, there
+is one section per owner, yours first. A section header counts the runs that
+ended before the window and offers the next wider window. When no run reaches
+the window, a line above the lanes says so; the axis stays, so panning and
+zooming still reach older runs. A swarm lists as one header lane (objective,
+phase, worker counts) in the section of its most urgent member, followed by
+its integrator, then its workers in task order ("Worker 2"), retries after the
+first attempt. It starts open while live with eight tasks or fewer, or when a
+worker needs you; folded, it draws its integrator's bar and a strip of its
+workers' most urgent state over time, and still lists any worker that needs
+you. Disclosure choices last until the view unmounts.
+
+**Bars.** A bar runs from the run's creation to its end or now. A dashed
+outline covers Starting (queued and provisioning); then each span takes the
+state `run.status` history gives it. History knows only the server's
+needs-attention, so a past span reads **Needed attention**; the span since
+the last change shows the viewer's own state (`presentRun`), which alone
+knows Needs you, Paused and Ready for review. Once a run ends, its working
+spans take its outcome's colour, so only live work reads Working. Time
+before the history read is a dotted outline that says "History not loaded";
+if the read fails, bars fall back to the current state and a **Run history**
+callout shows the server's error with **Retry**. A working bar has a 2px end
+cap and its activity text shimmers; a Needs you bar ends in a **Needs you**
+tag. Finished bars add "took 18m" after their end when there is room.
+
+**Links.** Integrator to worker (launch), mail between runs
+(`coord.message`, bundled per lane pair within 24px, its glyph naming a
+question, reply or report, the arrowhead hollow until every message is
+acknowledged), submissions (worker to integrator, by decision), task
+dependencies, and, for the hovered or selected run only, file overlaps at the
+now line. A link into a folded swarm or Finished attaches to its header.
+Hovering or selecting a lane keeps its links in colour and greys the rest.
+Clicking a link opens its facts; a mail link reads the bodies through
+`coord.messages.list` (the thread, else each sender's newest page, since a
+link into a folded lane can bundle several senders) and shows them with
+`MessageRow`. [Styles: Lanes](styles.md#lanes) has the colour coding.
+
+**Popovers.** Clicking a bar or pressing Enter on a lane opens its popover:
+"agent · state · elapsed", the title, the reason, next step, branch and diff,
+unread mail, pending inputs, overlaps and the state span under the pointer,
+then the card's primary action (Reply opens the same composer as a card),
+**Open run**, **Open swarm** and, for Enhanced runs, **Show agents**, then the
+lane's **Links**, each opening the same facts as clicking that link. A swarm's
+popover offers **Open integrator** whenever the integrator is known, even when
+Mine hides it. A popover whose lane leaves the view, as when its run folds
+into Finished, closes and puts focus on the lane that now draws the run. Show
+agents inserts the run's subagents as sub-lanes: from the live session when
+the run is open elsewhere in this tab, else from one `run.acp.history` page of
+1000 items, which the empty state says. Selecting a sub-lane opens the
+subagent. Escape closes and returns focus to the lane.
+
+**Keyboard.** The lanes are one `tree` named "Run lanes" with one tab stop: Up
+and Down move, Home and End jump, Right opens a section, swarm or a run's
+agents (or moves into it), Left closes it or moves to its parent, Enter or
+Space opens the popover or toggles a header, and `o` and `r` open and reply as
+on a card; links open from a lane's popover. The axis is a separate tab stop,
+**Timeline window**: Left and Right pan by a tenth, `+` and `-` zoom, `0` or
+Home return to now. A polite status line announces runs that turn Needs you,
+Failed, Ready for review or Completed, gathered for 1.5s and at most three at
+a time (the Workflow panel's announcer, `src/lib/use-announcement.ts`).
+
+**Data.** `useLaneHistory` holds `laneHistory` in `src/store/lanes.ts` while
+the view is mounted and reads `workspace.timeline` backward with
+`types: ["run.status", "coord.message", "coord.message.acked"]`, 1000 a page,
+until it passes the window's start, the log's start or 5000 events per
+workspace; "Older history not loaded" marks the last case. `sync.ts` appends
+live events of those types to held history, which keeps a workspace's newest
+5000 and moves its loaded boundary past what it drops; the last view to leave
+drops it, and a server switch or a new signed-in member clears it for a fresh
+read. Each swarm in the window is read once with `mission.show` and again on
+its `mission.changed`; a failed read shows a **Swarm details** callout with
+the server's error and **Retry**. Lane geometry comes from the model
+(`model.ts`, `segments.ts`, `edges.ts`, `axis.ts`), never from DOM
+measurement; above 60 lanes only those near the viewport render. Live bars
+move on a timer of window width per pixel, between 1s and 30s. Lanes move with
+a glide only when they change section, and lanes added after the first render
+fade in; reduced motion turns both off.
+
+`aether.ui` stores the window choice, the grouping and hidden link kinds.
+Below 768px the label column shrinks to the state dot and agent glyph, and
+each lane's title moves into its bar; swarm members keep their tree elbow and
+section headers keep the ended-before count.
 
 ### Run state
 
@@ -6544,6 +6652,11 @@ colour and say so in their names until `finish_unopened` clears. They also
 cover a run row's age, owner mark, people stack and details box.
 `src/lib/needs-you.test.ts` has one case per Needs you condition, and the
 device cards an admin and a member see.
+`src/routes/board/lanes/model.test.ts` covers lane segments from status
+history, section order and folding, swarm order, axis ticks and link
+bundling; the board test's `lanes view` cases cover the tree keyboard, the
+run popover and its links, a popover whose lane folds away, a swarm, an empty
+window, bundled mail bodies and failed history and swarm reads.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,

@@ -214,7 +214,7 @@ export async function hydrate(
       store.getState().resetFiles()
       store.getState().resetNotes()
       store.getState().resetAssistant()
-      store.setState({ invitations: null, revokingInvitations: [], agentModels: {}, mergedInto: {}, deletingRuns: {} })
+      store.setState({ invitations: null, revokingInvitations: [], agentModels: {}, mergedInto: {}, deletingRuns: {}, laneHistory: {} })
     }
     s.setIdentityKey(incomingIdentity)
     noteServerTime(store, info.time)
@@ -823,6 +823,7 @@ export async function applyEvent(
     }
   }
   store.getState().appendLiveEvent(ev)
+  store.getState().appendLaneEvent(ev)
   store.getState().appendSessionEvent(ev)
   store.getState().noteSeq(ev.seq)
   return true

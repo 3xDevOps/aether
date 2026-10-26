@@ -3,13 +3,15 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api, ApiError } from '@/lib/api'
-import type { GatewayCapabilities, Run } from '@/lib/types'
+import type { Event, GatewayCapabilities, Run, TimelinePage } from '@/lib/types'
 import { Board } from '@/routes/board'
 import { virtualizeAbove } from '@/routes/board/card-list'
+import { EdgePopover } from '@/routes/board/lanes/lane-popover'
 import { useBoard } from '@/routes/board/selectors'
 import '@/routes/diff/conflict-chips'
 import '@/routes/missions'
 import { useStore } from '@/store'
+import { historyBudget } from '@/store/lanes'
 import { optimisticDeadlineMs } from '@/store/optimistic'
 import { toRecord } from '@/store/runs'
 import { applyEvent } from '@/store/sync'
@@ -589,7 +591,7 @@ describe('Finished footer', () => {
     seed([working, merged])
     renderBoard()
 
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Board', 'Map'])
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Board', 'Map', 'Lanes'])
     const toggle = screen.getByRole('button', { name: 'Finished 1' })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(screen.queryByText('landed already')).toBeNull()
@@ -778,5 +780,169 @@ describe('map view', () => {
     const waiting = screen.getByRole('region', { name: 'Devices waiting for approval' })
     expect(within(waiting).getByText('laptop (github mallory) wants to join as collaborator')).toBeDefined()
     expect(within(waiting).getByRole('button', { name: 'Approve' })).toBeDefined()
+  })
+})
+
+describe('lanes view', () => {
+  async function openLanes() {
+    renderBoard()
+    await userEvent.click(screen.getByRole('tab', { name: 'Lanes' }))
+    return screen.getByRole('tree', { name: 'Run lanes' })
+  }
+
+  it('lists runs as lanes by section, reads their history, and remembers the view', async () => {
+    seed([stopped, working, merged])
+    const tree = await openLanes()
+    expect(useStore.getState().boardViews[workspace.id]).toBe('lanes')
+    const items = within(tree).getAllByRole('treeitem').map((item) => item.getAttribute('aria-label'))
+    expect(items[0]).toBe('Needs you, 1 run')
+    expect(items[1]).toMatch(/^waiting on you, Needs you/)
+    expect(items[2]).toBe('Working, 1 run')
+    expect(items[4]).toBe('Finished, 0 runs, 1 ended before this window')
+    await waitFor(() => expect(api.workspaceTimeline).toHaveBeenCalledWith(expect.objectContaining({
+      workspace_id: workspace.id, types: ['run.status', 'coord.message', 'coord.message.acked'], newest: true,
+    })))
+  })
+
+  it('moves through the tree by keyboard, folds a section and opens a run from its popover', async () => {
+    seed([stopped, working])
+    const tree = await openLanes()
+    const [needs, lane] = within(tree).getAllByRole('treeitem')
+    act(() => lane.focus())
+    await userEvent.keyboard('{ArrowLeft}')
+    await waitFor(() => expect(document.activeElement).toBe(needs))
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(needs.getAttribute('aria-expanded')).toBe('false')
+    expect(within(tree).queryByRole('treeitem', { name: /^waiting on you/ })).toBeNull()
+    await userEvent.keyboard('{ArrowRight}{ArrowDown}')
+    await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^waiting on you/))
+    await userEvent.keyboard('{Enter}')
+    const dialog = await screen.findByRole('dialog', { name: /^waiting on you/ })
+    expect(within(dialog).getByRole('button', { name: 'Reply' })).toBeDefined()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Open run' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: stopped.id } })
+  })
+
+  it('keeps the reply composer open after Reply in a lane popover', async () => {
+    seed([stopped, working])
+    const tree = await openLanes()
+    act(() => within(tree).getAllByRole('treeitem')[1].focus())
+    await userEvent.keyboard('{Enter}')
+    const dialog = await screen.findByRole('dialog', { name: /^waiting on you/ })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Reply' }))
+    const composer = await screen.findByRole('dialog', { name: /^Reply to / })
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(composer.isConnected).toBe(true)
+    expect(document.activeElement).toBe(within(composer).getByRole('textbox', { name: 'Message to the agent' }))
+  })
+
+  it('groups a swarm under one lane with its integrator and workers', async () => {
+    seed([
+      run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' }),
+      run({ id: 'worker', task: 'implement checkout', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator' }),
+    ])
+    useStore.setState({ missions: { mission_1: mission() } })
+    const tree = await openLanes()
+    expect(within(tree).getByRole('treeitem', { name: /^Swarm coordinate checkout work/ }).getAttribute('aria-expanded')).toBe('true')
+    const worker = within(tree).getByRole('treeitem', { name: /^implement checkout, Worker/ })
+    expect([worker.getAttribute('aria-level'), worker.getAttribute('aria-posinset'), worker.getAttribute('aria-setsize')]).toEqual(['3', '2', '2'])
+  })
+
+  it("lists a lane's links in its popover, so the keyboard opens what a click on a link does", async () => {
+    const recent = new Date(Date.now() - 10 * 60_000).toISOString()
+    seed([
+      run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator', created_at: recent }),
+      run({ id: 'worker', task: 'implement checkout', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'run_integrator', created_at: recent }),
+    ])
+    useStore.setState({ missions: { mission_1: mission() } })
+    const tree = await openLanes()
+    act(() => within(tree).getByRole('treeitem', { name: /^implement checkout, Worker/ }).focus())
+    await userEvent.keyboard('{Enter}')
+    const dialog = await screen.findByRole('dialog', { name: /^implement checkout/ })
+    await userEvent.click(within(within(dialog).getByRole('region', { name: 'Links' })).getByRole('button', { name: /^Launched by its integrator/ }))
+    const link = await screen.findByRole('dialog', { name: 'Link' })
+    expect(within(link).getByText(/^Launched by its integrator/)).toBeDefined()
+  })
+
+  it('closes a popover whose lane folds away and focuses the lane that draws its run', async () => {
+    seed([working])
+    const tree = await openLanes()
+    act(() => within(tree).getByRole('treeitem', { name: /^still going/ }).focus())
+    await userEvent.keyboard('{Enter}')
+    await screen.findByRole('dialog', { name: /^still going/ })
+    act(() => useStore.setState((s) => ({ runs: { ...s.runs, [working.id]: toRecord({ ...working, status: 'merged', state: undefined, finished_at: new Date().toISOString() }) } })))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('1 finished'))
+  })
+
+  it('shows the mail of every sender bundled on a link', async () => {
+    seed([run({ id: 'a' }), run({ id: 'b' }), run({ id: 'c' })])
+    const sent = async ({ run_id }: { run_id?: string }) => ({ messages: [{
+      id: `m_${run_id}`, workspace_id: workspace.id, from_run_id: run_id!, to_run_id: 'c', kind: 'message' as const, body: `from ${run_id}`, created_at: '2026-08-14T10:30:00Z',
+    }] })
+    vi.mocked(api.coordMessagesList).mockImplementationOnce(sent).mockImplementationOnce(sent)
+    render(<EdgePopover edge={{ key: 'mail', kind: 'message', from: { lane: 'swarm', run: 'a', t: 0 }, to: { lane: 'c', run: 'c', t: 0 }, messages: { ids: ['m_a', 'm_b'], senders: ['a', 'b'], acked: false } }} now={Date.now()} />)
+    expect(await screen.findByText('from a')).toBeDefined()
+    expect(await screen.findByText('from b')).toBeDefined()
+  })
+
+  it('shows a failed swarm read with its error and retries it', async () => {
+    seed([run({ id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator' })])
+    vi.mocked(api.missionShow).mockRejectedValueOnce(new ApiError(500, 'mission store unavailable'))
+    await openLanes()
+    const alert = await screen.findByRole('alert')
+    expect(within(alert).getByText('Swarm details')).toBeDefined()
+    expect(alert.textContent).toContain('mission store unavailable')
+    await userEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
+  it('keeps the timeline when nothing ran in the window, so it can still pan and zoom', async () => {
+    seed([merged])
+    await openLanes()
+    expect(screen.getByText('Nothing ran in the last 6h.')).toBeDefined()
+    expect(screen.getByRole('group', { name: 'Timeline window' })).toBeDefined()
+  })
+
+  it('shows a failed history read with its error and retries it', async () => {
+    seed([working])
+    vi.mocked(api.workspaceTimeline).mockRejectedValueOnce(new ApiError(500, 'timeline unavailable'))
+    await openLanes()
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('timeline unavailable')
+    await userEvent.click(within(alert).getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+  })
+
+  it('drops an older history page read while live events trimmed held history, so no gap reads as loaded', async () => {
+    seed([working])
+    const start = Date.now() - 30 * 60_000
+    const mail = (seq: number): Event => ({
+      id: `evt_${seq}`, seq, time: new Date(start + seq).toISOString(), workspace_id: workspace.id,
+      run_id: working.id, actor_id: '', type: 'coord.message', payload: {},
+    })
+    const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => mail(from + i))
+    let older!: (page: TimelinePage) => void
+    vi.mocked(api.workspaceTimeline)
+      .mockResolvedValueOnce({ events: range(1001, historyBudget + 999), next_seq: 0, more: true, older_seq: 1001 })
+      .mockImplementationOnce(() => new Promise((resolve) => { older = resolve }))
+    await openLanes()
+    await waitFor(() => expect(api.workspaceTimeline).toHaveBeenCalledTimes(2))
+    act(() => {
+      useStore.getState().appendLaneEvent(mail(historyBudget + 1000))
+      useStore.getState().appendLaneEvent(mail(historyBudget + 1001))
+    })
+    await act(async () => older({ events: range(1, 1000), next_seq: 0, more: true, older_seq: 1 }))
+    expect(await screen.findByText('Older history not loaded')).toBeDefined()
+    const history = useStore.getState().laneHistory[workspace.id]
+    expect(history.events[0].seq).toBe(1002)
+    expect(history.floor).toBe(Date.parse(mail(1002).time))
+  })
+
+  it('says when nothing is in scope', async () => {
+    seed([])
+    renderBoard()
+    await userEvent.click(screen.getByRole('tab', { name: 'Lanes' }))
+    expect(screen.getByText('No runs in this view.')).toBeDefined()
   })
 })

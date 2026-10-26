@@ -114,6 +114,7 @@ import {
   Columns2 as LucideColumns2,
   Columns3 as LucideColumns3,
   Network as LucideNetwork,
+  ChartGantt as LucideChartGantt,
   MousePointer2 as LucideMousePointer2,
   RotateCw as LucideRotateCw,
   Smartphone as LucideSmartphone,
@@ -271,6 +272,7 @@ export const WifiOff = icon(LucideWifiOff)
 export const Columns2 = icon(LucideColumns2)
 export const Columns3 = icon(LucideColumns3)
 export const Network = icon(LucideNetwork)
+export const ChartGantt = icon(LucideChartGantt)
 export const MousePointer2 = icon(LucideMousePointer2)
 export const Orbit = icon(LucideOrbit)
 export const RotateCw = icon(LucideRotateCw)

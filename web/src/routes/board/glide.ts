@@ -4,6 +4,7 @@ import { playEntrance, type Motion } from '@/lib/motion'
 import type { BoardColumn } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
+import type { BoardView } from '@/store/ui'
 
 const glide: Motion = { duration: '--duration-glide', easing: '--ease-glide' }
 
@@ -37,7 +38,7 @@ export function isLiveMove(before: Placement, after: Placement): boolean {
  * glides only vertically and fades in. In List every card shares one scroll
  * and glides the whole way.
  */
-export function useCardGlide(container: RefObject<HTMLElement | null>, layout: 'board' | 'list' | 'map'): () => void {
+export function useCardGlide(container: RefObject<HTMLElement | null>, layout: BoardView): () => void {
   const pending = useRef<Map<string, Box> | null>(null)
   useLayoutEffect(() => {
     const boxes = pending.current

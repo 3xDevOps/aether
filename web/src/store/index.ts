@@ -12,6 +12,7 @@ import { createDiffSlice, type DiffSlice } from '@/store/diff'
 import { createEdgeSlice, type EdgeSlice } from '@/store/edge'
 import { createFilesSlice, type FilesSlice } from '@/store/files'
 import { createEnvTerminalSlice, type EnvTerminalSlice } from '@/store/env-terminal'
+import { createLanesSlice, normalizeLaneHidden, normalizeLaneWindow, type LanesSlice } from '@/store/lanes'
 import { createLocalSlice, type LocalSlice } from '@/store/local'
 import { createMembersSlice, type MembersSlice } from '@/store/members'
 import { createPaletteSlice, type PaletteSlice } from '@/store/palette'
@@ -71,6 +72,7 @@ export type RootState = ServerSlice &
   TypingSlice &
   CostSlice &
   TimelineSlice &
+  LanesSlice &
   FilesSlice &
   DiffSlice &
   CollaborationSlice &
@@ -107,6 +109,9 @@ const persistedUi = (s: RootState) => ({
   boardMapAllWorkspaces: s.boardMapAllWorkspaces,
   boardMapViewports: s.boardMapViewports,
   boardMapFolded: s.boardMapFolded,
+  laneWindow: s.laneWindow,
+  laneGroup: s.laneGroup,
+  laneHidden: s.laneHidden,
   launchDefaults: s.launchDefaults,
   dismissedUpdates: s.dismissedUpdates,
   sysboxNudgeDismissed: s.sysboxNudgeDismissed,
@@ -142,6 +147,7 @@ export function createRootStore() {
         ...createTypingSlice(...a),
         ...createCostSlice(...a),
         ...createTimelineSlice(...a),
+        ...createLanesSlice(...a),
         ...createDiffSlice(...a),
         ...createFilesSlice(...a),
         ...createCollaborationSlice(...a),
@@ -210,6 +216,9 @@ export function createRootStore() {
             boardMapAllWorkspaces: stored.boardMapAllWorkspaces === true,
             boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
             boardMapFolded: normalizeBoardMapFolded(stored.boardMapFolded),
+            laneWindow: normalizeLaneWindow(stored.laneWindow),
+            laneGroup: stored.laneGroup === 'owner' ? 'owner' : 'status',
+            laneHidden: normalizeLaneHidden(stored.laneHidden),
             sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Number(stored.sidebarWidth) || current.sidebarWidth)),
             assistantOpen: stored.assistantOpen === true && !onPhone(),
             assistantWidth: clampAssistantWidth(Number(stored.assistantWidth) || current.assistantWidth),

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Columns3, Ellipsis, List, Network } from '@/components/icons'
+import { ChartGantt, Columns3, Ellipsis, List, Network } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { SysboxNudge } from '@/components/sysbox-nudge'
 import { Callout } from '@/components/ui/callout'
@@ -13,6 +13,7 @@ import { BoardMap } from '@/routes/board/board-map'
 import { Column, type Placeholder } from '@/routes/board/column'
 import { DeviceCard } from '@/routes/board/device-card'
 import { useCardGlide, useMoveGlide } from '@/routes/board/glide'
+import { BoardLanes } from '@/routes/board/lanes/board-lanes'
 import { MergeProposalCard } from '@/routes/board/merge-card'
 import { ProposalsReadError, useOpenProposals } from '@/routes/members/sign-ins'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
@@ -64,21 +65,22 @@ export function Board() {
   const agentNames = agentDisplayNames(agents)
 
   const tab: BoardView = view === 'list' && !fits ? 'board' : view
-  const layout = view === 'map' ? 'map' : fits && view === 'board' ? 'board' : 'list'
+  const layout: BoardView = view === 'map' || view === 'lanes' ? view : fits && view === 'board' ? 'board' : 'list'
+  const cardsLaidOut = layout === 'board' || layout === 'list'
   const column = (key: BoardColumn['key']) => columns.find((c) => c.key === key)!
   const finished = showArchived ? { ...column('finished'), cards: archivedCards } : column('finished')
   const needsYou = column('needs-you').cards.length + devices.length + merges.length
 
   const captureLayout = useCardGlide(area, layout)
-  useMoveGlide(captureLayout, layout === 'map' || !hydrated ? [] : [column('needs-you'), column('working'), finished], [activeWorkspace, mineOnly, showArchived, layout].join(' '))
+  useMoveGlide(captureLayout, !cardsLaidOut || !hydrated ? [] : [column('needs-you'), column('working'), finished], [activeWorkspace, mineOnly, showArchived, layout].join(' '))
   const choose = (value: string) => {
     const next = value as BoardView
-    if (next !== 'map' && view !== 'map') captureLayout()
+    if (cardsLaidOut && (next === 'board' || next === 'list')) captureLayout()
     setView(activeWorkspace, next)
   }
 
   let body: ReactNode
-  if (layout === 'map') {
+  if (layout === 'map' || layout === 'lanes') {
     body = (
       <>
         {merges.length > 0 && (
@@ -91,7 +93,7 @@ export function Board() {
             {devices.map((need) => <DeviceCard key={need.device.id} need={need} />)}
           </div>
         )}
-        <BoardMap agentNames={agentNames} />
+        {layout === 'map' ? <BoardMap agentNames={agentNames} /> : <BoardLanes agentNames={agentNames} />}
       </>
     )
   } else if (unreachable && total === 0) {
@@ -149,6 +151,7 @@ export function Board() {
             <TabsTrigger value="board"><Columns3 />Board</TabsTrigger>
             {fits && <TabsTrigger value="list"><List />List</TabsTrigger>}
             <TabsTrigger value="map"><Network />Map</TabsTrigger>
+            <TabsTrigger value="lanes"><ChartGantt />Lanes</TabsTrigger>
           </TabsList>
         } />
         <TabsContent

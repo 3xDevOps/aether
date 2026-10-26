@@ -122,7 +122,7 @@ const emptySession: AcpSession = {
   touched: 0,
 }
 
-function itemsOf(frames: SessionFrame[]): SessionItem[] {
+export function itemsOf(frames: SessionFrame[]): SessionItem[] {
   return frames.flatMap((frame) => (frame.item ? [frame.truncated ? { ...frame.item, truncated: true } : frame.item] : []))
 }
 
