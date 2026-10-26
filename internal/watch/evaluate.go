@@ -300,10 +300,14 @@ func inputKey(r *domain.RunInputRequest) string {
 // runFinish words how the run ended, keeping apart what the agent
 // reported from what a member decided. A success the agent reported is
 // keyed by when the run entered that standing, so a later one is announced
-// again; prev is the finished key last fired, which a reported success
-// keeps when its live run then completes.
+// again; prev is the finished key last fired. A live reported success that
+// then completes, by its report or by a member accepting or closing it,
+// keeps that key: it is the same finish.
 func runFinish(run *domain.Run, prev string) (key, body string, ok bool) {
 	reason := strings.TrimSuffix(run.Reason, "; retained container")
+	if run.Status == domain.RunCompleted && strings.HasPrefix(prev, "reported|live|") {
+		return prev, "Agent reported done", true
+	}
 	switch run.Status {
 	case domain.RunMerged:
 		return "merged", "Closed as merged", true
@@ -319,9 +323,6 @@ func runFinish(run *domain.Run, prev string) (key, body string, ok bool) {
 	case domain.RunCompleted:
 		if reason != domain.ReportedSuccessReason {
 			return "completed", "Completed", true
-		}
-		if strings.HasPrefix(prev, "reported|live|") {
-			return prev, "Agent reported done", true
 		}
 	}
 	if run.Status.Live() && run.Activity != domain.ActivityFinished {
