@@ -3,7 +3,7 @@ import { type CacheSnapshot, VList, type VListHandle } from 'virtua'
 import { ActionCard, ReadsLine } from '@/components/assistant/action-card'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
-import { actionRecords, assistantView, type ActionGroup, type AssistantView } from '@/lib/assistant-actions'
+import { assistantView, transcriptFacts, type ActionGroup, type AssistantView } from '@/lib/assistant-actions'
 import { cn } from '@/lib/utils'
 import { EnteringRow, rowGap, TimelineRow, useArrivals, useFlatRows, type FlatRow, type RowContext } from '@/routes/run/session-rows'
 import { enhancedRows } from '@/routes/run/session-view'
@@ -24,7 +24,7 @@ export function assistantRows(session: AcpSession) {
 
 export function useAssistantView(session: AcpSession | undefined): AssistantView | null {
   const confirmations = useStore((s) => s.assistantConfirmations)
-  return useMemo(() => (session ? assistantView(assistantRows(session), confirmations, actionRecords(session.turns)) : null), [session, confirmations])
+  return useMemo(() => (session ? assistantView(assistantRows(session), confirmations, transcriptFacts(session.turns)) : null), [session, confirmations])
 }
 
 type Item = FlatRow | { kind: 'actions'; key: string; group: ActionGroup }

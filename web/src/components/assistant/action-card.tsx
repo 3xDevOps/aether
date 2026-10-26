@@ -23,6 +23,7 @@ export const actionTone: Record<ActionState, Tone> = {
   failed: 'failed',
   declined: 'closed',
   expired: 'ended',
+  unfinished: 'interrupted',
 }
 
 export const actionStateWord: Record<ActionState, string> = {
@@ -32,6 +33,7 @@ export const actionStateWord: Record<ActionState, string> = {
   failed: 'Failed',
   declined: 'Declined',
   expired: 'Expired: no answer in time',
+  unfinished: 'Did not finish: the turn ended first',
 }
 
 const targetWord: Record<ActionTarget['kind'], string> = {
@@ -124,7 +126,7 @@ export function ActionCard({ action }: { action: AssistantAction }) {
   const known = isKnownAction(action.tool)
   const facts = launchLine(action, names) ?? watchLine(action)
   const tone = background ? 'working' : actionTone[action.state]
-  const stopped = action.state === 'failed' || action.state === 'declined' || action.state === 'expired'
+  const stopped = action.state === 'failed' || action.state === 'declined' || action.state === 'expired' || action.state === 'unfinished'
   const link = action.target && !gone && (action.target.route || action.target.url) ? action.target : undefined
   const state = [
     background ? 'Working in the background' : actionStateWord[action.state],

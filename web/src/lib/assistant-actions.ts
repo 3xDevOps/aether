@@ -1,10 +1,11 @@
 import type { AssistantActionRecord, AssistantConfirmation } from '@/lib/assistant-types'
 import { routeFromQuery } from '@/lib/url-state'
+import type { SessionToolCall } from '@/lib/session-types'
 import type { SessionRow, Turn } from '@/store/session-rows'
 import { stepsBlock, type Step, type WorkItem } from '@/store/session-steps'
 import type { Route } from '@/store/ui'
 
-export type ActionState = 'approval' | 'running' | 'done' | 'failed' | 'declined' | 'expired'
+export type ActionState = 'approval' | 'running' | 'done' | 'failed' | 'declined' | 'expired' | 'unfinished'
 
 /** How a confirmed call passed: on its card, or by auto-approval. */
 export type Approval = 'approved' | 'auto-approved'
@@ -83,9 +84,14 @@ const readTools: Record<string, [string, string]> = {
   aether_get_watch: ['watch', 'watches'],
 }
 
-/** The Aether tool a call names: Claude Code's `mcp__aether__aether_get_run`, or the bare name another agent reports. */
+/** The Aether tool a call's `tool_name` names: Claude Code's `mcp__aether__aether_get_run`, or a bare name. */
 export function aetherTool(name: string | undefined): string | undefined {
   return /(?:^|__|[./])(aether_[a-z0-9]+(?:_[a-z0-9]+)*)$/.exec(name ?? '')?.[1]
+}
+
+/** Codex reports no tool name; its MCP call's title is `mcp.<server>.<tool>`. */
+function codexTool(call: SessionToolCall | undefined): string | undefined {
+  return /^mcp\.aether\.(aether_[a-z0-9]+(?:_[a-z0-9]+)*)$/.exec(call?.title ?? '')?.[1]
 }
 
 function isRead(tool: string): boolean {
@@ -185,7 +191,30 @@ function target(tool: string, input: Record<string, unknown>, result: Record<str
 function errorText(result: unknown): string {
   if (typeof result === 'string') return result
   const body = record(result)
-  return text(body.error) ?? text(body.message) ?? JSON.stringify(result)
+  return text(body.error) ?? text(record(body.error).message) ?? text(body.message) ?? JSON.stringify(result)
+}
+
+function contentText(call: SessionToolCall): string | undefined {
+  return (call.content ?? []).filter((c) => c.type === 'text' && c.text).map((c) => c.text).join('\n\n') || undefined
+}
+
+/**
+ * A call's arguments and result as the tool saw them. Codex wraps the
+ * arguments as `{server, tool, arguments}` and the result as `{result,
+ * error}` around the MCP result, and reports the call as a command, which
+ * the step drops both of.
+ */
+function callValues(call: SessionToolCall | undefined, entry: WorkItem): { input: Record<string, unknown>; result: unknown } {
+  if (!call) return { input: record(entry.input), result: parsed(entry.result) }
+  const raw = record(call.raw_input)
+  const input = raw.server === 'aether' && 'arguments' in raw ? record(raw.arguments) : raw
+  const out = record(call.raw_output)
+  if (codexTool(call) && ('result' in out || 'error' in out)) {
+    const mcp = record(out.result)
+    const said = Array.isArray(mcp.content) ? mcp.content.map((c) => text(record(c).text)).filter(Boolean).join('\n\n') : undefined
+    return { input, result: out.error ? out.error : mcp.structuredContent ?? parsed(said) ?? out.result }
+  }
+  return { input, result: parsed(contentText(call) ?? call.raw_output) }
 }
 
 function recordApproval(saved: AssistantActionRecord): Approval | undefined {
@@ -227,13 +256,21 @@ export function actionOutcome(
   return { state: entry.status === 'running' ? 'running' : 'done', approval }
 }
 
-/** Each notice that carries an action record, by the id of the event it shows as. */
-export function actionRecords(turns: Turn[] | undefined): Map<string, AssistantActionRecord> {
-  const out = new Map<string, AssistantActionRecord>()
+/** What the steps leave out of the log: each action record by the id of the event it shows as, and each call's latest snapshot by its step id. */
+export interface TranscriptFacts {
+  records: Map<string, AssistantActionRecord>
+  calls: Map<string, SessionToolCall>
+}
+
+export function transcriptFacts(turns: Turn[] | undefined): TranscriptFacts {
+  const facts: TranscriptFacts = { records: new Map(), calls: new Map() }
   for (const turn of turns ?? []) {
-    for (const item of turn.items) if (item.kind === 'notice' && item.notice?.action) out.set(`ev:${item.seq}`, item.notice.action)
+    for (const item of turn.items) {
+      if (item.kind === 'notice' && item.notice?.action) facts.records.set(`ev:${item.seq}`, item.notice.action)
+      if (item.kind === 'tool_call' && item.tool_call) facts.calls.set(`${turn.turn}:${item.tool_call.id}`, item.tool_call)
+    }
   }
-  return out
+  return facts
 }
 
 const workKinds = new Set<Step['kind']>(['thought', 'tool', 'lookup', 'plan', 'subagents', 'answered'])
@@ -296,12 +333,13 @@ function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined 
  * approval note or action record into the card of the call it belongs to.
  * A block splits around its calls, so each card stays where it ran.
  */
-export function assistantView(rows: SessionRow[], confirmations: AssistantConfirmation[], records = new Map<string, AssistantActionRecord>()): AssistantView {
+export function assistantView(rows: SessionRow[], confirmations: AssistantConfirmation[], { records, calls }: TranscriptFacts = transcriptFacts([])): AssistantView {
   const waitingMethods = new Set(confirmations.map((c) => c.method))
   const out: SessionRow[] = []
   const groups = new Map<string, ActionGroup[]>()
   const actions: AssistantAction[] = []
   const drafts: Draft[] = []
+  const toolOf = (step: Step) => step.kind === 'tool' ? aetherTool(step.entry.name) ?? codexTool(calls.get(step.entry.id)) : undefined
   const draft = (entry: WorkItem, tool: string): AssistantAction => {
     const action: AssistantAction = {
       id: entry.id,
@@ -310,8 +348,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       read: isRead(tool),
       at: entry.at,
       state: 'running',
-      input: record(entry.input),
-      result: parsed(entry.result),
+      ...callValues(calls.get(entry.id), entry),
       ...(entry.truncated && entry.seq !== undefined ? { seq: entry.seq } : {}),
     }
     drafts.push({ action, entry, method: toolMethods[tool] })
@@ -342,7 +379,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       if (!claim(row)) out.push(row)
       continue
     }
-    if (!row.steps.some((step) => step.kind === 'tool' && aetherTool(step.entry.name))) {
+    if (!row.steps.some((step) => toolOf(step))) {
       const kept = row.steps.filter((step) => !claim(step))
       if (kept.length === row.steps.length) out.push(row)
       else if (kept.some((step) => workKinds.has(step.kind))) out.push({ ...stepsBlock(row.id, kept, row.start, row.current), live: row.live })
@@ -362,7 +399,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       segment = []
     }
     for (const step of row.steps) {
-      const tool = step.kind === 'tool' ? aetherTool(step.entry.name) : undefined
+      const tool = toolOf(step)
       if (step.kind === 'tool' && tool) {
         flush(false)
         place(draft(step.entry, tool))
@@ -375,15 +412,18 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
   }
   for (const { action, entry, method, noted, saved } of drafts) {
     const error = entry.status === 'failed' ? errorText(action.result) : undefined
-    Object.assign(action, actionOutcome(entry, error, method !== undefined && waitingMethods.has(method), noted, saved))
+    // A turn that ends shows its open calls as finished; the call's own status says whether it ever did.
+    const status = calls.get(entry.id)?.status
+    const unfinished = entry.status === 'done' && status !== undefined && status !== 'completed'
+    Object.assign(action, unfinished && !saved ? { state: 'unfinished' } : actionOutcome(entry, error, method !== undefined && waitingMethods.has(method), noted, saved))
     action.error = saved?.error ?? error
     action.target = target(action.tool, action.input, record(action.result), saved)
   }
   // The live line would name the running call by its raw tool title; its card already says what it does.
-  const calls = new Map(drafts.filter((d) => d.entry.status === 'running').map((d) => [d.entry.label, d.action]))
+  const running = new Map(drafts.filter((d) => d.entry.status === 'running').map((d) => [d.entry.label, d.action]))
   const shown = out.map((row): SessionRow => {
     const live = row.kind === 'live' ? row : row.kind === 'steps' ? row.live : undefined
-    const action = live && calls.get(live.label)
+    const action = live && running.get(live.label)
     if (!live || !action) return row
     const said = action.state === 'approval' ? { label: 'Waiting for your approval', tone: 'needs-you' as const } : { label: 'Generating…', tone: live.tone }
     if (row.kind === 'steps') return { ...row, live: said }

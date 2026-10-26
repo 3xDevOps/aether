@@ -37,7 +37,7 @@ describe('assistantView', () => {
       ['ev:9', record({ summary: 'Auto-approved: message r2', outcome: 'auto_approved', approval: 'auto', target: { run_id: 'r2' } })],
       ['ev:10', record({ summary: 'Done: message r2', outcome: 'succeeded', approval: 'auto', target: { run_id: 'r2' } })],
     ])
-    const view = assistantView([block(stop, message), ...[...records].map(([id, r]) => notice(Number(id.slice(3)), r))], waiting, records)
+    const view = assistantView([block(stop, message), ...[...records].map(([id, r]) => notice(Number(id.slice(3)), r))], waiting, { records, calls: new Map() })
     expect(view.actions.map((a) => [a.state, a.approval, a.error])).toEqual([
       ['failed', undefined, 'the turn or session ended before the member answered'],
       ['done', 'auto-approved', undefined],

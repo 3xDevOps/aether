@@ -335,6 +335,39 @@ describe('review fixes', () => {
   })
 })
 
+describe('agents and turn ends', () => {
+  it("reads a Codex call, which has no tool name and wraps its arguments and result", async () => {
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Stop fix-login'),
+      tool(1, 'c1', 'execute', 'mcp.aether.aether_stop_run', 'completed', {
+        raw_input: { server: 'aether', tool: 'aether_stop_run', arguments: { run_id: 'run_fix' } },
+        raw_output: { result: { content: [{ type: 'text', text: '{"url":"https://aether.example/?run=run_fix"}' }] }, error: null },
+      }),
+      tool(1, 'c2', 'execute', 'mcp.aether.aether_message_run', 'failed', {
+        raw_input: { server: 'aether', tool: 'aether_message_run', arguments: { run_id: 'run_fix', message: 'go' } },
+        raw_output: { result: null, error: { message: 'run.inject was not approved: the member declined this action' } },
+      }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const stopped = await card(aside, /^Stopped run fix-login\. Done$/)
+    await userEvent.click(within(stopped).getByRole('button', { name: 'Open run' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_fix' } })
+    expect(within(await card(aside, /^Message run fix-login\. Declined$/)).getByRole('alert').textContent).toBe('run.inject was not approved: the member declined this action')
+  })
+
+  it('says a call the turn ended under did not finish, rather than done', async () => {
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Stop fix-login'),
+      aether(1, 't1', 'aether_stop_run', 'in_progress', { raw_input: { run_id: 'run_fix' } }),
+      item('turn_end', 1, { stop_reason: 'cancelled' }),
+    ])
+    const open = await card(aside, /^Stop run fix-login\. Did not finish: the turn ended first$/)
+    expect(within(open).getByRole('button', { name: 'Retry' })).toBeDefined()
+  })
+})
+
 describe('status words', () => {
   it("names the assistant's own turn Generating, apart from runs working in the background", async () => {
     const aside = await openPanel([item('turn_start', 1), say(1, 'user', 'hi')])
