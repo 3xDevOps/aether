@@ -49,47 +49,64 @@ func init() {
 	registerGuarded(protocol.MethodChangesList, permissions.View, changesTarget, (*Server).changesList)
 }
 
-// changesTarget resolves the narrowest scope a changes.list request names,
-// so a missing workspace, run or swarm is reported and a per-workspace
-// check applies to it. A member-wide request targets no workspace.
+// changesTarget checks the workspace a changes.list request is scoped to,
+// so a per-workspace boundary applies to it; a member-wide request targets
+// no workspace.
 func changesTarget(s *Server, ctx context.Context, raw json.RawMessage) (permissions.Target, *protocol.Error) {
 	p, perr := decodeParams[protocol.ChangesListParams](raw)
 	if perr != nil {
 		return permissions.Target{}, perr
 	}
-	target := permissions.Target{}
+	ws, perr := s.changesScope(ctx, p)
+	if perr != nil {
+		return permissions.Target{}, perr
+	}
+	return permissions.Target{Workspace: ws}, nil
+}
+
+// changesScope resolves the one workspace the named workspace, run and swarm
+// share. A run or swarm deleted since the caller's cursor was issued scopes
+// nothing, so the feed still delivers its deletion.
+func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams) (domain.WorkspaceID, *protocol.Error) {
+	gone := func(err error) bool { return p.Cursor != "" && errors.Is(err, store.ErrNotFound) }
+	var ws domain.WorkspaceID
 	if p.RunID != "" {
-		t, err := resolveRunTarget(ctx, s.cfg.Store, domain.RunID(p.RunID))
-		if err != nil {
-			return permissions.Target{}, rpcError(err)
+		run, err := s.cfg.Store.GetRun(ctx, domain.RunID(p.RunID))
+		switch {
+		case gone(err):
+		case err != nil:
+			return "", rpcError(err)
+		default:
+			ws = run.WorkspaceID
 		}
-		target = t
 	}
 	if p.MissionID != "" {
 		ms, ok := s.cfg.Store.(store.MissionStore)
 		if !ok {
-			return permissions.Target{}, &protocol.Error{Code: protocol.CodeUnavailable, Message: "changes.list: swarms are not available"}
+			return "", &protocol.Error{Code: protocol.CodeUnavailable, Message: "changes.list: swarms are not available"}
 		}
 		m, err := ms.GetMission(ctx, domain.MissionID(p.MissionID))
-		if err != nil {
-			return permissions.Target{}, rpcError(err)
+		switch {
+		case gone(err):
+		case err != nil:
+			return "", rpcError(err)
+		case ws != "" && ws != m.WorkspaceID:
+			return "", invalidParams("run_id and mission_id are in different workspaces")
+		default:
+			ws = m.WorkspaceID
 		}
-		if target.Workspace != "" && target.Workspace != m.WorkspaceID {
-			return permissions.Target{}, invalidParams("run_id and mission_id are in different workspaces")
-		}
-		target.Workspace = m.WorkspaceID
 	}
 	if p.WorkspaceID != "" {
 		id := domain.WorkspaceID(p.WorkspaceID)
-		if target.Workspace != "" && target.Workspace != id {
-			return permissions.Target{}, invalidParams("workspace_id does not contain the named run or swarm")
+		if ws != "" && ws != id {
+			return "", invalidParams("workspace_id does not contain the named run or swarm")
 		}
 		if _, err := s.cfg.Store.GetWorkspace(ctx, id); err != nil {
-			return permissions.Target{}, rpcError(err)
+			return "", rpcError(err)
 		}
-		target.Workspace = id
+		ws = id
 	}
-	return target, nil
+	return ws, nil
 }
 
 func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -101,8 +118,12 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 	if perr != nil {
 		return nil, perr
 	}
+	ws, perr := s.changesScope(ctx, p)
+	if perr != nil {
+		return nil, perr
+	}
 	filter := timeline.Filter{
-		Workspace: domain.WorkspaceID(p.WorkspaceID),
+		Workspace: ws,
 		Run:       domain.RunID(p.RunID),
 		MissionID: domain.MissionID(p.MissionID),
 	}

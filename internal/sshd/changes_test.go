@@ -317,6 +317,17 @@ func TestChangesSkipDeletedRunHistory(t *testing.T) {
 	if last := got[len(got)-1]; last.Lifecycle == nil || last.Lifecycle.Action != "deleted" || last.RunID != string(doomed.ID) {
 		t.Fatalf("deletion change = %+v", last)
 	}
+
+	// A client following the deleted run still gets its deletion.
+	c := controlClient(t, e.testEnv)
+	if scoped, _ := pageAll(t, c, protocol.ChangesListParams{Cursor: "0", RunID: string(doomed.ID)}); !slices.Equal(changeSeqs(scoped), []uint64{deleted}) {
+		t.Fatalf("changes of the deleted run = %v, want [%d]", changeSeqs(scoped), deleted)
+	}
+	err := c.Call(protocol.MethodChangesList, protocol.ChangesListParams{RunID: string(doomed.ID)}, nil)
+	var perr *protocol.Error
+	if !errors.As(err, &perr) || perr.Code != protocol.CodeNotFound {
+		t.Fatalf("newest changes of a deleted run: err = %v, want CodeNotFound", err)
+	}
 }
 
 func TestChangesRefusesPendingMember(t *testing.T) {

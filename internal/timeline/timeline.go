@@ -45,8 +45,9 @@ var detailTypes = map[events.Type]bool{
 // Filter narrows a timeline page. Member matches an event's actor - who
 // did it - not the owner of the run it concerns. Run matches agent messages
 // on either side; MissionID matches every run that has served the mission
-// and, without Run, the mission's own swarm events. TimelineKinds, when
-// set, keeps only workspace.timeline entries of those kinds.
+// and, without Run, the mission's own swarm events when Types asks for
+// them. TimelineKinds, when set, keeps only workspace.timeline entries of
+// those kinds.
 type Filter struct {
 	Workspace     domain.WorkspaceID
 	Run           domain.RunID
@@ -205,7 +206,7 @@ func (r *Reader) prepare(ctx context.Context, f Filter) (uint64, events.Filter, 
 		}
 		if f.Run != "" {
 			runs = slices.DeleteFunc(runs, func(run domain.RunID) bool { return run != f.Run })
-		} else {
+		} else if slices.Contains(f.Types, events.TypeMissionChanged) || slices.Contains(f.Types, events.TypeIntegrationChanged) {
 			logFilter.Mission = f.MissionID
 		}
 		if len(runs) == 0 && logFilter.Mission == "" {

@@ -2,9 +2,11 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -31,7 +33,7 @@ func runChanges(args []string) error {
 	swarm := fs.String("swarm", "", "only changes for this swarm's runs and the swarm itself")
 	workspace := fs.String("workspace", "", "only changes in this workspace (ID or name)")
 	kinds := fs.String("kinds", "", "comma-separated: status,reports,messages,pr,swarm,lifecycle")
-	limit := fs.Int("limit", 20, "changes per request, at most 100")
+	limit := fs.Int("limit", 20, "changes per request, at most 100; the command reads every page")
 	follow := fs.Bool("follow", false, "keep polling for new changes until interrupted")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -66,7 +68,13 @@ func runChanges(args []string) error {
 				continue
 			}
 			if !*follow {
-				_, _ = fmt.Fprintf(os.Stderr, "next: aether changes --since %s\n", res.NextCursor)
+				resume := []string{"aether", "changes", "--since", res.NextCursor}
+				fs.Visit(func(f *flag.Flag) {
+					if f.Name != "since" {
+						resume = append(resume, "--"+f.Name+"="+strconv.Quote(f.Value.String()))
+					}
+				})
+				_, _ = fmt.Fprintln(os.Stderr, "next: "+strings.Join(resume, " "))
 				return nil
 			}
 			time.Sleep(changesPollInterval)
