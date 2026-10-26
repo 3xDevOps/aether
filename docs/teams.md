@@ -316,6 +316,7 @@ more than one workspace exists`. `aether runs` lists runs from every workspace.
 | `aether pause`, `resume`, `kill <run>` | Suspend, thaw or stop a run. The checkout and transcript survive a kill |
 | `aether runs --needs-you` | Runs waiting on you. `aether runs <run-id>` shows what one needs and the command that answers it |
 | `aether timeline` | The workspace history. `aether timeline <run-id>` shows one run's. Filter with `--member`, `--type`, `--limit`. `--jsonl` exports |
+| `aether changes` | Run and swarm changes since a cursor: status, reports, mail, pull requests, swarm and lifecycle. `--follow` keeps polling ([coordination.md](coordination.md#follow-changes-from-a-cursor)) |
 | `aether cost --runs` | Token spend per member and run |
 
 The dashboard shows each run as **Needs you**, **Working**, **Paused**, **Done**
