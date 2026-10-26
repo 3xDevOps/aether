@@ -80,6 +80,17 @@ type Run struct {
 	MissionID           string  `json:"mission_id,omitempty"`
 	MissionRole         string  `json:"mission_role,omitempty"`
 	IntegratorRunID     string  `json:"integrator_run_id,omitempty"`
+	// ParentRunID is the run that started this one, or a worker's current
+	// integrator; RootRunID is the top of its tree.
+	ParentRunID  string `json:"parent_run_id,omitempty"`
+	RootRunID    string `json:"root_run_id,omitempty"`
+	ChildPurpose string `json:"child_purpose,omitempty"`
+	Detached     bool   `json:"detached,omitempty"`
+	// Children is the run's own child-run setting: "", "on" or "off".
+	Children string `json:"children,omitempty"`
+	// ChildRefused reports that the run's agent tried to start a child run
+	// while child runs were off.
+	ChildRefused bool `json:"child_refused,omitempty"`
 	// Immutable base provenance captured at launch.
 	BaseCommit    string  `json:"base_commit,omitempty"`
 	BaseBranch    string  `json:"base_branch,omitempty"`
@@ -216,6 +227,12 @@ func RunFromDomain(r *domain.Run) Run {
 		MissionID:           string(r.MissionID),
 		MissionRole:         r.MissionRole,
 		IntegratorRunID:     string(r.IntegratorRunID),
+		ParentRunID:         string(r.ParentRunID),
+		RootRunID:           string(r.RootRunID),
+		ChildPurpose:        r.ChildPurpose,
+		Detached:            r.Detached,
+		Children:            r.Children,
+		ChildRefused:        r.ChildRefused,
 		BaseCommit:          r.BaseCommit,
 		BaseBranch:          r.BaseBranch,
 		BaseSource:          r.BaseSource,
@@ -406,6 +423,9 @@ type RunLaunchParams struct {
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	// ExtraWorkspaceIDs must differ from each other and from WorkspaceID.
 	ExtraWorkspaceIDs []string `json:"extra_workspace_ids,omitempty"`
+	// Children is the run's own child-run setting: "on", "off", or empty to
+	// follow the launcher's.
+	Children string `json:"children,omitempty"`
 }
 
 // RunLaunchResult is a RunResult; Replayed is true when IdempotencyKey

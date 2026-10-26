@@ -77,18 +77,22 @@ func (s *Scheduler) briefedInstructions(ctx context.Context, g coordhooks.Guide,
 // Aether resumes when mail arrives while it is idle.
 func (s *Scheduler) runGuide(ctx context.Context, run domain.RunID, assigned, background, wake bool) coordhooks.Guide {
 	g := coordhooks.Guide{RunID: string(run), Background: background, Wake: wake && !background}
+	var r *domain.Run
+	if run != "" {
+		r, _ = s.cfg.Store.GetRun(ctx, run)
+	}
 	switch {
 	case !assigned && background:
 		g.Role = coordhooks.RoleBackground
 	case !assigned:
 		g.Role = coordhooks.RoleInteractive
+	case r != nil && r.MissionRole != "":
+		g.Role = r.MissionRole
 	default:
 		g.Role = coordhooks.RoleMission
-		if run != "" {
-			if r, err := s.cfg.Store.GetRun(ctx, run); err == nil && r.MissionRole != "" {
-				g.Role = r.MissionRole
-			}
-		}
+	}
+	if !assigned && r != nil {
+		g.Parent = string(r.ParentRunID)
 	}
 	return g
 }

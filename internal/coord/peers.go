@@ -27,6 +27,15 @@ func (s *Service) route(ctx context.Context, method string, sender, target *doma
 	if owner == nil {
 		return "", deniedPeer(method, sender.ID, target.ID, reason)
 	}
+	if s.cfg.Children != nil {
+		related, relErr := s.cfg.Children.Related(ctx, sender.ID, target.ID)
+		if relErr != nil {
+			return "", internalError(method, relErr)
+		}
+		if related {
+			return protocol.CoordPeerLineage, nil
+		}
+	}
 	member, err := s.missionMember(ctx, sender.ID, target.ID)
 	if err != nil {
 		return "", missionRPCError(method, err)
@@ -94,7 +103,7 @@ func (s *Service) missionMember(ctx context.Context, run, peer domain.RunID) (bo
 // runs in the workspace that self's owner may message, most recently active
 // first. A run whose owner may not message lists none; a run at its peer
 // cap lists only swarm peers and runs it already has a conversation with.
-func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeers []protocol.CoordPeer) ([]protocol.CoordPeer, int, error) {
+func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeers []protocol.CoordPeer, lineage []domain.RunID) ([]protocol.CoordPeer, int, error) {
 	peers := make([]protocol.CoordPeer, 0, protocol.CoordMaxStatusPeers)
 	owner, _, err := s.messagingOwner(ctx, self)
 	if err != nil || owner == nil {
@@ -136,7 +145,7 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 		if r == nil || r.ID == self.ID || seen[r.ID] {
 			return
 		}
-		if atCap && state != protocol.CoordPeerMission && !conversed[r.ID] {
+		if atCap && state != protocol.CoordPeerMission && state != protocol.CoordPeerLineage && !conversed[r.ID] {
 			return
 		}
 		seen[r.ID] = true
@@ -172,6 +181,9 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 			peer.LastSent = last
 		}
 		peers = append(peers, peer)
+	}
+	for _, id := range lineage {
+		add(byID[id], protocol.CoordPeerLineage, overlaps[id])
 	}
 	for _, p := range missionPeers {
 		id := domain.RunID(p.RunID)

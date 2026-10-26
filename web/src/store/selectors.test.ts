@@ -1,5 +1,6 @@
 import { toRecord, type RunRecord } from '@/store/runs'
 import {
+  descendantRuns,
   listedRuns,
   needsYouByWorkspace,
   runGroups,
@@ -141,6 +142,45 @@ describe('swarms', () => {
     const groups = runGroups(input([worker('w1'), worker('w2', { created_at: '2026-08-14T09:00:00Z' })]))
     expect(ids(groups.working)).toEqual(['w2'])
     expect(ids(groups.working[0].swarm?.members ?? [])).toEqual(['w1'])
+  })
+})
+
+describe('child runs', () => {
+  const parent = record({ id: 'parent' })
+  const child = (id: string, parentID: string, over: Parameters<typeof run>[0] = {}) =>
+    record({ id, parent_run_id: parentID, root_run_id: 'parent', child_purpose: `review ${id}`, harness: 'codex', ...over })
+
+  it('folds children at any depth under their root, and a child that needs the viewer surfaces the root in Needs you', () => {
+    const asking = child('grandchild', 'c1', { status: 'needs-attention', state: 'needs-you', started_at: '2026-08-14T09:30:00Z' })
+    const groups = runGroups(input([parent, child('c1', 'parent'), child('c2', 'parent', { status: 'completed' }), asking]))
+    expect(ids(groups['needs-you'])).toEqual(['parent'])
+    expect(groups.working).toEqual([])
+    const [tree] = groups['needs-you']
+    expect(ids(tree.children)).toEqual(['grandchild'])
+    expect(tree.swarm).toBeUndefined()
+    expect(tree.childRuns).toMatchObject({ collapsed: true, counts: { working: 1, needsYou: 1, done: 1, failed: 0 } })
+    expect(ids(tree.childRuns?.members ?? []).sort()).toEqual(['c1', 'c2', 'grandchild'])
+    expect(tree.waitingSince).toBe(asking.stateChangedAt)
+  })
+
+  it('keeps swarm workers grouped by mission and folds their child runs into the swarm', () => {
+    const integrator = record({ id: 'run_integrator', mission_id: 'mission_1', mission_role: 'integrator' })
+    const worker = record({ id: 'w1', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: integrator.id, parent_run_id: integrator.id })
+    const review = child('review', 'w1', { root_run_id: integrator.id })
+    const groups = runGroups(input([integrator, worker, review]))
+    expect(ids(groups.working)).toEqual(['run_integrator'])
+    expect(groups.working[0].childRuns).toBeUndefined()
+    expect(ids(groups.working[0].swarm?.members ?? []).sort()).toEqual(['review', 'w1'])
+  })
+
+  it('lists a child on its own when its parent is not loaded', () => {
+    expect(ids(runGroups(input([child('c1', 'gone')])).working)).toEqual(['c1'])
+  })
+
+  it('lists descendants nearest first and leaves swarm workers to the swarm', () => {
+    const worker = record({ id: 'w1', mission_id: 'mission_1', mission_role: 'worker', integrator_run_id: 'parent', parent_run_id: 'parent' })
+    const runs = [parent, child('c2', 'c1', { created_at: '2026-08-14T09:00:00Z' }), child('c1', 'parent', { created_at: '2026-08-14T10:00:00Z' }), worker]
+    expect(descendantRuns(Object.fromEntries(runs.map((r) => [r.id, r])), ['parent']).map((r) => r.id)).toEqual(['c1', 'c2'])
   })
 })
 

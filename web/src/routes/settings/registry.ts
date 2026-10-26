@@ -1,8 +1,8 @@
 import type { ComponentType } from 'react'
-import { Bell, Cable, Gauge, Globe, Monitor, ServerCog, Settings, Sparkles } from '@/components/icons'
+import { Bell, Cable, Gauge, Globe, Monitor, Network, ServerCog, Settings, Sparkles } from '@/components/icons'
 import type { Capability } from '@/store/hooks'
 
-export type CategoryID = 'general' | 'connections' | 'notifications' | 'assistant' | 'usage' | 'this-computer' | 'server' | 'remote-access'
+export type CategoryID = 'general' | 'connections' | 'notifications' | 'assistant' | 'children' | 'usage' | 'this-computer' | 'server' | 'remote-access'
 
 export type Gates = { cap: Capability; admin: boolean; assistant: boolean; onboarding: boolean; member: boolean; workspace: boolean }
 
@@ -29,6 +29,7 @@ export const categories: Category[] = [
   { id: 'connections', group: 'You', title: 'Connections', purpose: 'Services Aether works with on your behalf.', Icon: Cable },
   { id: 'notifications', group: 'You', title: 'Notifications', purpose: 'Where Aether reaches you when a run needs you.', Icon: Bell },
   { id: 'assistant', group: 'You', title: 'Assistant', purpose: 'What the built-in assistant may do without asking.', Icon: Sparkles },
+  { id: 'children', group: 'You', title: 'Child runs', purpose: 'Whether agents in your runs may start other agents, and on which accounts.', Icon: Network },
   { id: 'usage', group: 'You', title: 'Usage', purpose: 'Subscription usage of your agent accounts.', Icon: Gauge },
   { id: 'this-computer', group: 'This computer', title: 'This computer', purpose: 'The server this computer links to and the files it syncs.', Icon: Monitor },
   { id: 'server', group: 'Server', title: 'Server', purpose: 'The Aether server every member shares.', Icon: ServerCog },
@@ -48,6 +49,10 @@ export const entries: SettingEntry[] = [
   { id: 'push', category: 'notifications', label: 'Notify this device when a run needs me', help: 'Push notifications on this device.', keywords: 'notification alert phone browser push' },
   { id: 'slack', category: 'notifications', label: 'Slack', help: 'Get a direct message in Slack when a run needs you.', keywords: 'slack dm message' },
   { id: 'auto-approve', category: 'assistant', label: 'Let the assistant act without asking', help: 'Launch, message and stop your runs without an approval card.', keywords: 'auto approve approval card', visible: (g) => g.assistant },
+  { id: 'child-runs', category: 'children', label: 'Let my runs start child runs', help: 'Agents in your runs start other agents, such as a reviewer on another model.', keywords: 'child runs delegate subagent review agent', visible: (g) => g.member && g.cap.hasMethod('child.settings') },
+  { id: 'child-fallback', category: 'children', label: 'Allow automatic fallback', help: "Moves a child run off an account at 95% of its quota.", keywords: 'child runs fallback quota account', visible: (g) => g.member && g.cap.hasMethod('child.settings') },
+  { id: 'child-shared', category: 'children', label: "Use subscriptions shared with me when I don't have my own", help: "Starts a child run on a teammate's shared account when you're not signed in to the agent.", keywords: 'child runs shared account subscription', visible: (g) => g.member && g.cap.hasMethod('child.settings') },
+  { id: 'child-limits', category: 'children', label: 'Child-run limits', help: 'How many child runs a run tree may have busy, deep and in total.', keywords: 'child runs limits depth queue', visible: (g) => g.member && g.workspace && g.cap.hasMethod('child.settings') && g.cap.hasMethod('workspace.child_limits') },
   { id: 'subscription-usage', category: 'usage', label: 'Subscription usage', help: 'Subscription usage the server reads for Claude and Codex logins.', keywords: 'quota limit subscription claude codex', visible: (g) => g.member },
   { id: 'link', category: 'this-computer', label: 'Linked server', help: 'The server and repository this computer links to, and saved servers.', keywords: 'link switch server repository', visible: (g) => g.cap.hasLocal('link.status') },
   { id: 'sync-daemon', category: 'this-computer', label: 'Sync daemon', help: "Fetches each run's branch into your clone as the agent commits.", keywords: 'daemon fetch branch clone', visible: (g) => g.cap.hasLocal('daemon.status') },

@@ -31,6 +31,10 @@ var memberRefs = map[string]bool{
 	"runs.account_member_id":                               true,
 	"runs.home_member_id":                                  true,
 	"runs.requested_account_member_id":                     true,
+	"runs.children_set_by":                                 true,
+	"run_children.owner_member_id":                         true,
+	"run_children.account_member_id":                       true,
+	"child_settings.member_id":                             false,
 	"schedules.member_id":                                  true,
 	"slack_links.member_id":                                true,
 	"assistant_sessions.member_id":                         false,
@@ -111,6 +115,11 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"run homes", `UPDATE runs SET home_member_id = ?2 WHERE home_member_id = ?1`},
 		{"run accounts", `UPDATE runs SET requested_account_member_id = ?2 WHERE requested_account_member_id = ?1`},
 		{"run fallback order", `UPDATE runs SET fallback_order = replace(fallback_order, '"' || ?1 || '"', '"' || ?2 || '"')
+			WHERE instr(fallback_order, '"' || ?1 || '"') > 0`},
+		{"run child settings", `UPDATE runs SET children_set_by = ?2 WHERE children_set_by = ?1`},
+		{"child runs", `UPDATE run_children SET owner_member_id = ?2 WHERE owner_member_id = ?1`},
+		{"child runs", `UPDATE run_children SET account_member_id = ?2 WHERE account_member_id = ?1`},
+		{"child run fallback order", `UPDATE run_children SET fallback_order = replace(fallback_order, '"' || ?1 || '"', '"' || ?2 || '"')
 			WHERE instr(fallback_order, '"' || ?1 || '"') > 0`},
 		{"schedules", `UPDATE schedules SET member_id = ?2 WHERE member_id = ?1`},
 		{"swarm owners", `UPDATE missions SET accountable_human_id = ?2 WHERE accountable_human_id = ?1`},

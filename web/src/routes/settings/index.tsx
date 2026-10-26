@@ -12,6 +12,7 @@ import { useKeybindings } from '@/lib/keybindings'
 import { surfaces } from '@/lib/surfaces'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { AssistantSection } from '@/routes/settings/assistant'
+import { ChildRunsSection } from '@/routes/settings/children'
 import { ConnectorsSection } from '@/routes/settings/connectors'
 import { GeneralSections } from '@/routes/settings/general'
 import { GitHubSection } from '@/routes/settings/github'
@@ -30,6 +31,7 @@ const bodies: Record<CategoryID, (client: Api) => ReactNode> = {
   connections: (client) => <><ConnectorsSection client={client} /><GitHubSection client={client} /></>,
   notifications: (client) => <><PushSection client={client} /><SlackSection client={client} /></>,
   assistant: (client) => <AssistantSection client={client} />,
+  children: (client) => <ChildRunsSection client={client} />,
   usage: (client) => <UsageSection client={client} />,
   'this-computer': (client) => <ThisComputerSections client={client} />,
   server: (client) => <ServerSection client={client} />,
