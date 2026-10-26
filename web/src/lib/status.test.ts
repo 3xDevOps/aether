@@ -1,9 +1,16 @@
 import { awaitingReview } from '@/lib/needs-you'
 import { plainReason } from '@/lib/reasons'
-import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateTitle, stateTone } from '@/lib/status'
+import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateTitle, stateTone, stateWords } from '@/lib/status'
 import type { RunActivity } from '@/lib/types'
 import { isTerminal, toRecord } from '@/store/runs'
 import { bob, run, stateContext } from '@/test/fixtures'
+
+
+/** A state's words as a card reads them: the label, then the detail. */
+const stateLine = (shown: Parameters<typeof stateWords>[0]) => {
+  const { label, detail } = stateWords(shown)
+  return detail ? `${label} · ${detail}` : label
+}
 
 describe('runLabel', () => {
   it('prefers a terminal title over the task', () => {
@@ -71,9 +78,9 @@ describe('run presentation', () => {
       ['waiting-agents', 'Waiting for agents'],
       ['waiting-ci', 'Waiting for CI'],
       ['waiting-tools', 'Waiting for process'],
-      ['waiting', 'Waiting'],
+      ['waiting', 'Turn ended'],
       ['answered', 'Answered'],
-      ['idle', 'Waiting'],
+      ['idle', 'Turn ended'],
       ['finished', 'Ready for review'],
       ['failed', 'Failed'],
       ['disconnected', 'Disconnected'],
@@ -84,10 +91,11 @@ describe('run presentation', () => {
     }
   })
 
-  it('shows the idle older servers wrote exactly as Waiting, and never says Idle', () => {
+  it('shows an unreported turn end, and the idle older servers wrote, as a quiet Turn ended, never Idle', () => {
     const legacy = shown({ status: 'needs-attention', state: 'idle', reason: 'agent idle' })
     expect(legacy).toEqual(shown({ status: 'needs-attention', state: 'waiting', reason: 'turn ended without a report' }))
-    expect(legacy).toEqual({ state: 'waiting', reason: 'Turn ended without a report', next: 'Send a message to continue.' })
+    expect(legacy).toEqual({ state: 'ended', reason: 'Turn ended without a report' })
+    expect(stateLine(legacy)).toBe('Turn ended')
     expect(stateTone[legacy.state]).toBe('ended')
     expect(Object.values(stateLabel).join(' ')).not.toMatch(/idle/i)
     expect(plainReason('agent idle')).toBe('Turn ended without a report')
@@ -95,11 +103,11 @@ describe('run presentation', () => {
 
   it('gives each waiting state the reason the agent reported and what happens next', () => {
     expect(shown({ status: 'running', state: 'waiting-ci', reason: 'waiting for the PR checks' })).toEqual({
-      state: 'waiting-ci', reason: 'waiting for the PR checks', next: 'The agent checks back on its next turn; send a message to nudge it.',
+      state: 'waiting-ci', reason: 'waiting for the PR checks', next: 'It resumes on its next message.',
     })
-    expect(shown({ status: 'running', state: 'waiting-tools', reason: 'deploy running' }).next).toBe('The agent checks back on its next turn; send a message to nudge it.')
+    expect(shown({ status: 'running', state: 'waiting-tools', reason: 'deploy running' }).next).toBe('It resumes on its next message.')
     expect(shown({ status: 'running', state: 'waiting-agents' })).toEqual({
-      state: 'waiting-agents', reason: 'Waiting for its agents to report', next: 'Mail from its agents can wake it; send a message to nudge it.',
+      state: 'waiting-agents', reason: 'Waiting for its agents to report', next: 'Mail from its agents can wake it.',
     })
     expect(shown({ status: 'running', state: 'waiting-tools', reason: 'working in background: 1 task' })).toEqual({
       state: 'waiting-tools', reason: 'Working in background: 1 task', next: 'Claude Code resumes it when a background task ends.',
@@ -111,22 +119,27 @@ describe('run presentation', () => {
     expect(shown({ status: 'needs-attention', state: 'answered', reason: 'explained the retry policy' })).toEqual({
       state: 'answered', reason: 'explained the retry policy',
     })
-    expect(shown({ status: 'needs-attention', state: 'answered' })).toEqual({ state: 'answered', reason: 'Agent answered' })
+    expect(shown({ status: 'needs-attention', state: 'answered' })).toEqual({ state: 'answered', reason: 'Answered' })
+    expect(stateLine(shown({ status: 'needs-attention', state: 'answered' }))).toBe('Answered')
+    expect(stateLine(shown({ status: 'needs-attention', state: 'answered', reason: 'explained the retry policy' }))).toBe('Answered · explained the retry policy')
     expect(stateTone.answered).toBe('ended')
     expect(groupOf({ state: 'answered' })).toBe('working')
   })
 
   it('prints a reason beside its label only where it adds something', () => {
     expect(stateDetail({ state: 'working', reason: 'Agent working' })).toBeUndefined()
-    expect(stateDetail({ state: 'waiting', reason: 'Turn ended without a report' })).toBe('Turn ended without a report')
+    expect(stateDetail({ state: 'ended', reason: 'Turn ended without a report' })).toBeUndefined()
+    expect(stateDetail({ state: 'ended', reason: 'No update for 30m: CI on PR 12' })).toBe('No update for 30m: CI on PR 12')
     expect(stateDetail({ state: 'failed', reason: 'Failed: Agent exited with code 1' })).toBe('Agent exited with code 1')
     expect(stateDetail({ state: 'merged', reason: 'Merged' })).toBeUndefined()
   })
 
   it('titles a state with how long it has held, the reason and the next step', () => {
     const now = Date.parse('2026-08-14T10:20:00Z')
-    expect(stateTitle({ state: 'waiting', reason: 'Turn ended without a report', next: 'Send a message to continue.' }, '2026-08-14T10:15:00Z', now))
-      .toBe('Waiting since 5 minutes ago — Turn ended without a report. Send a message to continue.')
+    expect(stateTitle({ state: 'ended', reason: 'Turn ended without a report' }, '2026-08-14T10:15:00Z', now))
+      .toBe('Turn ended since 5 minutes ago.')
+    expect(stateTitle({ state: 'waiting-ci', reason: 'PR 12 checks', next: 'It resumes on its next message.', cause: 'report' }, '2026-08-14T10:15:00Z', now))
+      .toBe('Waiting for CI since 5 minutes ago — PR 12 checks. It resumes on its next message. Why: the agent reported it.')
     expect(stateTitle({ state: 'working', reason: 'Working' }, '2026-08-14T10:15:00Z', now)).toBe('Working since 5 minutes ago.')
   })
 
@@ -152,7 +165,7 @@ describe('run presentation', () => {
   it('labels a live run without a known state honestly, never Working', () => {
     expect(shown({ status: 'running', state: '' })).toEqual({ state: 'running', reason: 'Running' })
     expect(shown({ status: 'needs-attention', state: undefined, reason: 'agent idle' })).toEqual({
-      state: 'waiting', reason: 'Turn ended without a report', next: 'Send a message to continue.',
+      state: 'ended', reason: 'Turn ended without a report',
     })
     const future = shown({ status: 'running', state: 'compacting' as RunActivity })
     expect(future).toEqual({ state: 'running', reason: 'Running' })
@@ -225,11 +238,11 @@ describe('run presentation', () => {
 
   it('labels every state in words and gives each its own dot, so no state is told by colour alone', () => {
     expect(Object.values(stateLabel)).toEqual([
-      'Working', 'Waiting for agents', 'Waiting for CI', 'Waiting for process', 'Waiting', 'Answered', 'Needs you', 'Ready for review',
+      'Working', 'Waiting for agents', 'Waiting for CI', 'Waiting for process', 'Turn ended', 'Waiting', 'Answered', 'Needs you', 'Ready for review',
       'Failed', 'Disconnected', 'Completed', 'Merged', 'Closed', 'Interrupted', 'Paused', 'Running',
     ])
     expect(stateTone).toMatchObject({
-      'waiting-agents': 'waiting', 'waiting-ci': 'waiting', 'waiting-tools': 'waiting', waiting: 'ended',
+      'waiting-agents': 'waiting', 'waiting-ci': 'waiting', 'waiting-tools': 'waiting', ended: 'ended', waiting: 'ended',
       'needs-you': 'needs-you', ready: 'review', completed: 'done', failed: 'failed', disconnected: 'disconnected',
     })
   })
@@ -259,5 +272,49 @@ describe('plainReason', () => {
     ['disk quota exceeded', 'disk quota exceeded'],
   ])('reads %s', (reason, plain) => {
     expect(plainReason(reason)).toBe(plain)
+  })
+})
+
+describe('state words', () => {
+  const ctx = stateContext()
+  const shown = (over: Parameters<typeof run>[0]) => presentRun(toRecord(run(over)), ctx)
+  const now = Date.parse('2026-08-14T11:00:00Z')
+  const since = '2026-08-14T10:18:00Z'
+
+  it('names what a run waits on in place of the generic label', () => {
+    const workers = shown({ status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 workers', cause: 'workers' })
+    expect(stateWords(workers)).toEqual({ label: 'Waiting for 2 workers' })
+    expect(stateLine(workers)).toBe('Waiting for 2 workers')
+    expect(stateTitle(workers, since, now)).toBe(
+      'Waiting for 2 workers since 42 minutes ago. Mail from its agents can wake it. Why: its swarm workers or child runs are live or have unread mail for it.',
+    )
+    expect(stateLine(shown({ status: 'needs-attention', state: 'waiting-agents', reason: 'reviewers on PR 12' }))).toBe('Waiting for agents · reviewers on PR 12')
+  })
+
+  it('says how long a CI wait has run where nothing else prints its age', () => {
+    const ci = shown({ status: 'needs-attention', state: 'waiting-ci', reason: 'PR 12 checks', cause: 'report' })
+    expect(stateWords(ci, since, now)).toEqual({ label: 'Waiting for CI', detail: '42m · PR 12 checks' })
+    expect(stateLine(ci)).toBe('Waiting for CI · PR 12 checks')
+    const stale = shown({ status: 'needs-attention', state: 'waiting-ci', reason: 'no update for 30m: PR 12 checks', cause: 'wait-expired' })
+    expect(stateWords(stale, since, now)).toEqual({ label: 'Waiting for CI', detail: 'No update for 30m: PR 12 checks' })
+    expect(stateLine(shown({ status: 'needs-attention', state: 'waiting-tools', reason: 'deploy to staging' }))).toBe('Waiting for process · deploy to staging')
+  })
+
+  it('carries the cause only while the run shows the state the server chose', () => {
+    expect(shown({ status: 'needs-attention', state: 'waiting', cause: 'turn-end' }).cause).toBe('turn-end')
+    expect(shown({ status: 'completed', cause: 'report' }).cause).toBeUndefined()
+    // A worker's question waits on its integrator, an agent: the server's human cause does not apply.
+    const asking = shown({ status: 'needs-attention', state: 'needs-you', reason: 'needs input: Which port?', mission_role: 'worker', cause: 'human' })
+    expect(asking).toMatchObject({ state: 'waiting-agents', reason: 'Waiting for the integrator' })
+    expect(asking.cause).toBeUndefined()
+    expect(stateTitle({ state: 'ended', reason: 'Turn ended without a report', cause: 'turn-end' }, since, now)).toBe('Turn ended since 42 minutes ago. Why: the turn ended.')
+    expect(stateTitle({ state: 'working', reason: 'Agent working', cause: 'something-new' as never }, since, now)).toBe('Working since 42 minutes ago. Why: something-new.')
+  })
+
+  it('never asks for a message where nothing is required', () => {
+    for (const state of ['waiting', 'answered', 'waiting-agents', 'waiting-ci', 'waiting-tools'] as const) {
+      const words = stateTitle(shown({ status: 'needs-attention', state }), since, now)
+      expect(words).not.toMatch(/send a message/i)
+    }
   })
 })
