@@ -530,8 +530,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   button that calls `assistant.start {restart_environment: true}`; `failed`
   shows the server's error above the transcript with **Retry**
   (`assistant.start`). Otherwise the transcript (`role="log"`), which reuses
-  the run Session's `TimelineRow` and `flattenRows` with the constant row
-  context id `assistant`, and the composer (Enter sends, Shift+Enter inserts a
+  the run Session's `TimelineRow` and `useFlatRows`, with the Session's
+  open blocks, and the constant row context id `assistant`, and the composer (Enter sends, Shift+Enter inserts a
   newline, `Mod+Enter` also sends; **Stop** replaces **Send** while a turn
   runs). An empty conversation offers four example prompts that fill the
   composer. Harness permission and question prompts render as request cards
@@ -2372,9 +2372,9 @@ list in a 736px column over `rowsForRun` (`store/sessions.ts`). For a Standard
 run the rows come from the run's `run.agent`, `workspace.timeline` and
 `run.status` events (read with `workspace.timeline` filtered by run and type,
 then kept live by sync), room messages, the run record and its pending inputs:
-`user` (a message to the agent with its delivery word), `note`, `work`
-(consecutive tool calls folded into "Ran 3 commands and read 2 files",
-expanding to verb-first entries), `request` (an agent request reads "Answer in
+`user` (a message to the agent with its delivery word), `note`, `steps`
+(consecutive tool calls in one closed block, "Ran 3 commands and read 2
+files", expanding to verb-first steps), `request` (an agent request reads "Answer in
 the terminal." with **Open terminal**, or "Answer it from the agent's
 session." when the run has no agent terminal; a teammate question offers
 **Reply**, the owner's own question is a plain message), `event`,
@@ -2423,7 +2423,7 @@ the Changes view at that file; **Review** opens its **All changes**. A
 `truncated` snapshot shows no line counts, because they are only a floor.
 The bar is hidden while nothing has changed and once the run is merged or
 abandoned, which removes its checkout; a
-failed read shows the server's error with **Retry**. Conversation rows carry no file lists: each edit's diff stays in its `work` entry.
+failed read shows the server's error with **Retry**. Conversation rows carry no file lists: each edit's diff stays in its edit step.
 
 For a run with `acp: true` (Enhanced, or Background over ACP) the rows come
 from its [session item log](enhanced-runs.md#instructions-and-the-session-log) instead.
@@ -2473,8 +2473,10 @@ they do or history ends. Inactive views and failed reads do not auto-page;
 failures keep the server's error with **Retry**. While older items remain, a
 room message or agent message from before the oldest item held stays hidden
 until the items around it load; a message the agent has not taken yet always
-shows. A page can merge into the first loaded row and change its key (tool
-calls joining a `work` row), so the list matches rows by key from the end.
+shows. A page can merge into the first loaded row and change its key (a block
+gaining the person's message that starts its segment), so the list matches
+rows by key from the end. A step's open or shut choice is stored under the
+step's own id, so it outlives that change.
 While every row below the top visible one keeps its key, it anchors the page
 from the end. That keeps the distance from the end, which moves with any row
 that resizes below the reader, so an unpinned view also restores the first
@@ -2482,26 +2484,64 @@ visible row that survives, by key and offset; that alone places the view when
 live rows arrive with the page. A closed
 turn's rows are derived once and kept; only the open turn re-derives. At most
 three sessions stay whole; the least recently
-opened others keep their newest 200 items. Rows: `user` (the run's
-appended instructions hidden under its task), `assistant` (markdown through
-`react-markdown` and `remark-gfm`, split into blocks with `marked`'s lexer
-so only the streaming block re-renders, code highlighted with the Lezer
-languages), `thinking`, `work` (folded by kind; expanded entries and their
-detail - command, output tail, `DiffBlock` - splice into the same list,
-and a body cut to fit the wire is read whole with `run.acp.item`), `live`,
-`plan`, `answered`, `event` (notices, mode changes, a new
-agent session, an inbox wake), `finished` and `agent-message`. The `live`
-row reads "Waiting for your approval: <command>" (or "Waiting for your
-answer") with the amber dot while a request is pending. A `finished` row
-reads **Finished**, **Cancelled** (stop reason `cancelled`) or **Interrupted**
-(`interrupted`, a turn a restart or lost connection cut off), matching the
-run reasons `turn cancelled` and `turn interrupted`. A person's
+opened others keep their newest 200 items. Rows: `user` (a
+right-aligned bubble; the author shows only when it is not the viewer or the
+message came through a connector, and the run's appended instructions hide
+under its task), `steps`, `assistant` (markdown through `react-markdown` and
+`remark-gfm`, split into blocks with `marked`'s lexer so only the streaming
+block re-renders, code highlighted with the Lezer languages), `live`,
+`event` (a wake, a new agent session, or a notice outside a block),
+`finished` and `agent-message`.
+
+`turnRows` splits a turn into segments at each person's message, wake and
+new agent session (`store/session-steps.ts`). In a segment, every step up to
+the last piece of work (a thought, tool call, plan, subagent launch or
+answered request) joins one `steps` block, and the prose after it is the
+answer. A segment without work, such as `ping` and `pong`, has no block. The
+block's header names the work ("Read 12 files, ran 5 commands and edited 3
+files") with up to three tool icons, failures, plan progress and tools still
+running. While the turn is open and the stream live, the header carries the
+live state instead: the state dot, "Running npm test", "Waiting on 2
+subagents", "Waiting for your approval: <command>" (or "Waiting for your
+answer") in amber, else "Working", with the seconds since the segment began.
+A turn with no block yet keeps the `live` row. Steps sit on a rail: thoughts
+(a two-line preview that expands to the whole thought), narration, lookups
+(consecutive reads, searches and fetches as chips; a chip for a file in the
+checkout opens Files,
+a page chip a new tab; four, then **+N more**), tool calls (the command, the
+edited path with `+a −d`, or an MCP tool's name; a spinner and seconds while
+running, the duration, **Failed** or **Exit N** once returned, and "Waiting
+for approval" while its permission is pending), the plan as its segment
+last updated it, with each entry's state, subagent cards, answered requests, notices and mode changes. A tool
+step with detail expands to the command and output tail, a `DiffBlock` per
+file, or its **Input** and **Result** (JSON highlighted, ten lines until
+**Show all**, which a copy without clipboard access also opens so the
+selection holds every line); a body cut to fit the wire is read whole with `run.acp.item`.
+A block over 40 steps shows its first 5 and last 30 around **Show N more
+steps**, which then reads **Show fewer steps**.
+
+A block is open while its turn is, or while a subagent in it runs, and shuts
+once the turn ends; the viewer's own choice for a block or step
+(`expandedRows`, kept until reload) wins. Those defaults, and how much of a
+growing block folds, change only while the view follows the newest row and
+focus is outside the block, so nothing moves under a reader scrolled up or a
+keyboard in the block. An open block's steps and details splice into the same list after its
+header, so they virtualize. The answer's footer keeps the turn's outcome,
+**Finished in 12s**, in view; its time and **Copy the reply**, which turns
+to a check, show on hover. A turn that ends **Cancelled** (stop reason
+`cancelled`), **Interrupted** (`interrupted`, a turn a restart or lost
+connection cut off) or **Stopped**, or ends without an answer, gets a
+`finished` row with its dot instead, matching the run reasons `turn
+cancelled` and `turn interrupted`. Rows that arrive while the view is open
+rise in, at most eight at a time, and a streaming answer's new blocks fade
+in from a blur above a pulsing dot; a first load, a replay and a history
+page do not animate. A person's
 message is matched to the room message that carried it for its author. While
 older items remain and the same text was sent more than once, a delivered
 room message sent within the loaded items, before the row, is matched first.
 One not in the log yet shows its delivery word. One polite `status` region
 announces a new request, a finished turn and a state change. The row
-components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
+components (`components/ui/timeline.tsx`, `steps.tsx`, `session-blocks.tsx`,
 `markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.
 
 A subagent is the agent that Claude Code's `Agent` or `Task` tool launches,
@@ -2516,7 +2556,7 @@ activity, and start and settle times. `acpFrames` and `acpOlder` update it
 incrementally; a history page that arrives out of order prepends, and a
 reset starts it over. Only the turns' own items reach `turnRows`, so a
 child item re-renders its card, not the conversation. A launch call
-becomes a `subagents` row, and consecutive launches share one row:
+becomes a subagents step, and consecutive launches share one step:
 "3 subagents · 2 running", expanded by default. Each card shows a status dot,
 the description, the subagent type, the tool and nested counts, and the
 elapsed time. A running card shows its latest activity, a settled one the
@@ -2536,7 +2576,7 @@ A subagent whose launch call is not loaded, or was trimmed, shows its card at
 its first held item until a history page brings the launch; without the
 call its state is unknown. A launch id seen again after
 its call settled names a new subagent, keyed `<id>@<seq>`. While the main
-agent only waits on its subagents, the live row reads "Waiting on 2
+agent only waits on its subagents, the live steps header reads "Waiting on 2
 subagents". A fallback launch shows a card with no nested items;
 an agent with neither child sessions nor a launch call renders as before.
 
@@ -2557,8 +2597,8 @@ reopen it. Below them,
 one virtualized list holds the prompt (`raw_input.prompt`, read whole with
 `run.acp.item` when the item was cut; a launch input over the log's
 16 KiB raw limit is kept cut, so the prompt reads as unavailable), the
-subagent's transcript through `turnRows`, `flattenRows` and `TimelineRow`,
-and its report (the completed
+subagent's transcript through `turnRows`, `flattenRows` and `TimelineRow`
+with every block open, and its report (the completed
 call's text content). Until a known subagent's launch call is loaded it pages
 `run.acp.history`, at most five pages, then offers **Load earlier history**;
 an id the loaded history does not name pages only on that button. A failed
@@ -2569,8 +2609,8 @@ A tool call snapshot logged in a later turn than the call's first, as
 when a call outlives its turn, joins that first turn and keeps one row.
 
 A path the agent names opens that file in the run's
-[Files view](#files-in-a-run): in an `assistant` or `thinking` row's prose
-and inline code, in a `work` entry's command and output tail, and in a
+[Files view](#files-in-a-run): in an answer's, narration's or thought's prose
+and inline code, in a tool step's command and output tail, and in a
 `DiffBlock`'s caption. A Markdown link whose target is a repository path
 opens there as well, where it used to open a dead address in a new tab.
 Fenced code blocks, a person's own messages and the entry labels, which
@@ -6556,11 +6596,11 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   described under [Run state](#run-state).
 - **Lists stay still.** Sidebar rows, board cards, the palette and All
   workspaces draw a static dot. Only the run header's dot and the Session
-  view's live row pulse while Working (`state-pulse`, a breathe in opacity
-  and size).
+  view's live row or live steps header pulse while Working (`state-pulse`, a
+  breathe in opacity and size).
 - **Motion is optional.** Every animation and transition stops under
-  `prefers-reduced-motion: reduce`: the state pulse, the Session live row's
-  shimmer, overlay and sheet entrances, tab indicators, disclosures, spinners
+  `prefers-reduced-motion: reduce`: the state pulse, the Session live
+  shimmer, row and answer-block entrances, overlay and sheet entrances, tab indicators, disclosures, spinners
   and skeletons. The controlling terminal's 1px teal outline is always static.
   There is no startup scene or reveal-flash animation.
 - **Primitives first.** `src/components/ui/` holds the house primitives on
@@ -6570,7 +6610,8 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   `Popover`, `Tooltip`, `Tabs`, `Command`, `Card`, `Callout`, `Badge`,
   `CountBadge`, `ProgressBar`, `TextSwap`, `IconSwap`, `SlidingIndicator`,
   `ListRow`, `PaneHeader`, `EmptyState`, `RequestCard`, `StatusDot`,
-  `Skeleton` and the Session `timeline` and `session-blocks` rows. They are
+  `Skeleton`, `CopyButton` and the Session `timeline`, `steps` and
+  `session-blocks` rows. They are
   tuned to the shared scale and `focusRing`, and preserve props, events, refs
   and accessibility contracts. Use them instead of raw form elements. Fields
   and buttons are 28px, small buttons 24px, all 44px on a coarse pointer;
@@ -6726,7 +6767,8 @@ attach, presence and occupied-lease fencing; `src/store/sessions.test.ts`
 covers the Session rows; `src/store/session-rows.test.ts`,
 `acp-sessions.test.ts`, `src/lib/acp-stream.test.ts`,
 `src/routes/run/composer-state.test.ts` and `session.test.tsx` cover the
-Enhanced rows, store, stream client, composer and requests, and
+Enhanced rows and their blocks of steps, store, stream client, composer and
+requests, and
 `src/store/session-perf.test.tsx` (`RUN_PERF=1`) streams 5,000 items and
 opens 2,000. `src/routes/browser/index.test.tsx` covers the first page,
 silent acquisition, takeover, release on blur and on focus elsewhere, the

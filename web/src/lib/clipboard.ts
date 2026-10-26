@@ -5,22 +5,28 @@ import { message } from '@/lib/format'
  * Put `text` on the clipboard. jsdom, plain-http origins and older engines
  * have no navigator.clipboard, so the fallback selects `fallback`'s contents
  * and leaves them for a manual copy rather than failing silently. Without a
- * fallback element the error toast carries the text instead.
+ * fallback element the error toast carries the text instead. A `fallback`
+ * function runs only on that path, so it can first show text it clips. A
+ * caller that confirms the copy in place sets `confirm` to false to skip the
+ * toast, and learns from the result whether the text reached the clipboard.
  */
-export async function copyText(text: string, fallback: HTMLElement | null): Promise<void> {
+export async function copyText(text: string, fallback: HTMLElement | null | (() => HTMLElement | null), confirm = true): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text)
-    toast.success('Copied')
+    if (confirm) toast.success('Copied')
+    return true
   } catch (err) {
-    if (!fallback) {
+    const element = typeof fallback === 'function' ? fallback() : fallback
+    if (!element) {
       toast.error(`Could not copy: ${message(err)}`, { description: text })
-      return
+      return false
     }
     const range = document.createRange()
-    range.selectNodeContents(fallback)
+    range.selectNodeContents(element)
     const selection = window.getSelection()
     selection?.removeAllRanges()
     selection?.addRange(range)
     toast.info('Selected. Press Ctrl+C to copy.')
+    return false
   }
 }

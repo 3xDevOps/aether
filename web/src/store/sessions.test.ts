@@ -1,7 +1,7 @@
 import type { Event } from '@/lib/types'
 import { createRootStore } from '@/store'
 import { toRecord } from '@/store/runs'
-import { workSummary } from '@/store/session-rows'
+import { workSummary } from '@/store/session-steps'
 import { readSessionLog, rowsForRun, type SessionRow } from '@/store/sessions'
 import { alice, bob, fakeApi, roomMessage, run } from '@/test/fixtures'
 
@@ -19,7 +19,7 @@ function rows(over: Parameters<typeof rowsForRun>[0]): Omit<SessionRow, 'id' | '
 }
 
 describe('session rows', () => {
-  it('folds consecutive tool calls into one work row with verb-first entries', () => {
+  it('folds consecutive tool calls into one closed block of verb-first steps', () => {
     const events = [
       event('run.agent', { kind: 'tool_call', tool: 'Bash', tool_use_id: 't1', detail: 'go test ./...' }, '2026-08-14T10:03:00Z'),
       event('run.agent', { kind: 'tool_result', tool_use_id: 't1' }, '2026-08-14T10:03:01Z'),
@@ -30,12 +30,15 @@ describe('session rows', () => {
     const [start, work] = rowsForRun({ run: toRecord(run()), events, room: [], memberName, paused: false })
     expect(start).toMatchObject({ kind: 'event', text: 'Run started' })
     expect(work).toMatchObject({
-      kind: 'work',
+      kind: 'steps',
       summary: 'Ran 1 command and read 2 files',
-      entries: [
-        { label: 'Ran go test ./...', status: 'done' },
-        { label: 'Reading src/auth.ts', status: 'running' },
-        { label: 'Read src/db.ts', status: 'failed' },
+      current: false,
+      failed: 1,
+      running: 1,
+      steps: [
+        { kind: 'tool', entry: { label: 'Ran go test ./...', status: 'done' } },
+        { kind: 'tool', entry: { label: 'Reading src/auth.ts', status: 'running' } },
+        { kind: 'tool', entry: { label: 'Read src/db.ts', status: 'failed' } },
       ],
     })
   })

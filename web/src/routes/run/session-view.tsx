@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type * as React from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { VList, type VListHandle } from 'virtua'
@@ -21,7 +21,7 @@ import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
 import { SessionFailureCallout } from '@/routes/run/session-failure'
 import { RequestDock, requestTitle } from '@/routes/run/session-requests'
-import { flattenRows, rowGap, sessionColumn, TimelineRow, useRowContext, type FlatRow } from '@/routes/run/session-rows'
+import { EnteringRow, rowGap, sessionColumn, TimelineRow, useArrivals, useFlatRows, useRowContext, type FlatRow, type OpenPolicy } from '@/routes/run/session-rows'
 import type { RunShells } from '@/routes/run/shells'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
@@ -30,7 +30,7 @@ import type { RunRecord } from '@/store/runs'
 import { liveActivity, rowsOfTurn, type SessionRow, type Turn } from '@/store/session-rows'
 import { backgroundWait, deliveryOf, readSessionLog, roomFiles, roomImages, rowsForRun, type AcpSession } from '@/store/sessions'
 import { loadOlderItems } from '@/store/session-stream'
-import { extrasSig, noAgents, turnExtras, withAgentRows, type AgentIndex } from '@/store/subagents'
+import { agentState, extrasSig, noAgents, turnExtras, withAgentRows, type AgentIndex } from '@/store/subagents'
 
 const emptyRoom: RoomMessage[] = []
 const emptyIDs: string[] = []
@@ -112,7 +112,11 @@ export function enhancedRows(turns: Turn[] | undefined, streaming: boolean, extr
   const rows = byTime(turns.flatMap((turn) => withAgentRows(rowsOfTurn(turn), turn.turn, extras)), lost)
   const open = turns.at(-1)
   const live = streaming ? liveActivity(open) : null
-  if (live) rows.push({ kind: 'live', id: 'live', at: open!.items.at(-1)!.time, ...live })
+  // The open turn's last block carries the live state in its header; a turn without one yet keeps the live row.
+  const current = streaming ? rows.map((row) => row.kind === 'steps' && row.current).lastIndexOf(true) : -1
+  const block = rows[current]
+  if (block?.kind === 'steps') rows[current] = { ...block, live: live ?? { label: 'Working', tone: 'working' } }
+  else if (live) rows.push({ kind: 'live', id: 'live', at: open!.items.at(-1)!.time, ...live })
   else if (wait) rows.push({ kind: 'live', id: 'live', at: open?.items.at(-1)?.time ?? wait.at, label: wait.label, tone: wait.tone })
   return rows
 }
@@ -154,14 +158,15 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
 
 function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession | undefined): string {
   const [text, setText] = useState('')
-  const finished = [...rows].reverse().find((row) => row.kind === 'finished')
+  const ended = [...rows].reverse().find((row) => row.kind === 'finished' || (row.kind === 'assistant' && row.outcome !== undefined))
+  const finished = ended?.kind === 'assistant' ? ended.outcome : ended
   const pending = session?.pending.at(-1)
   const seen = useRef({ finished: finished?.id, pending: pending?.id, status: run.status })
   useEffect(() => {
     const prior = seen.current
     seen.current = { finished: finished?.id, pending: pending?.id, status: run.status }
     if (pending && pending.id !== prior.pending) setText(`${requestTitle(pending)} ${pending.title}`)
-    else if (finished && finished.id !== prior.finished && finished.kind === 'finished') setText(`The agent’s turn ended: ${finished.text}`)
+    else if (finished?.kind === 'finished' && finished.id !== prior.finished) setText(`The agent’s turn ended: ${finished.text}`)
     else if (run.status !== prior.status) setText(`Run is now ${run.status.replace('-', ' ')}`)
   }, [finished, pending, run.status])
   return text
@@ -219,9 +224,21 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   useEffect(() => {
     if (missingRoomImages && olderRoom && !roomLoading && !roomError) void room.loadOlder()
   }, [missingRoomImages, olderRoom, roomLoading, roomError, room.loadOlder])
-  const flat = useMemo(() => flattenRows(rows, expanded), [rows, expanded])
   const list = useRef<VListHandle>(null)
   const pinned = useRef(true)
+  const [following, setFollowing] = useState(true)
+  const pin = (value: boolean) => {
+    pinned.current = value
+    setFollowing(value)
+  }
+  const agents = session?.agents
+  const policy = useCallback<OpenPolicy>((row) => row.current || row.agents.some((id) => {
+    const agent = agents?.agents[id]
+    return agent !== undefined && agentState(agent) === 'running'
+  }), [agents])
+  const [focused, setFocused] = useState<string | null>(null)
+  const flat = useFlatRows(rows, expanded, following, focused, policy)
+  const arrivals = useArrivals(flat, expanded)
   const lastInput = useRef(-Infinity)
   const viewport = useRef<HTMLDivElement>(null)
   const previous = useRef({ flat, older })
@@ -250,12 +267,12 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
     previous.current = { flat, older }
     if (anchor) list.current?.scrollToIndex(anchor.index, { align: 'start', offset: anchor.offset })
   })
-  const [focused, setFocused] = useState<number | null>(null)
   const announcement = useAnnouncement(run, rows, session)
 
   const ctx = useRowContext(run, agent, nav)
 
   const count = flat.length + (older ? 1 : 0)
+  const focusedIndex = focused === null ? -1 : flat.findIndex((item) => item.key === focused)
   const markInput = () => {
     lastInput.current = performance.now()
   }
@@ -293,7 +310,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   }, [pendingCount, active, textarea])
 
   const loadOlder = () => {
-    pinned.current = false
+    pin(false)
     if (enhanced && session?.more) void loadOlderItems(useStore, api, run.id)
     if (olderRoom) void room.loadOlder()
   }
@@ -372,13 +389,14 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
           style={enhanced && count === 0 ? { display: 'none' } : undefined}
           data={older ? [null, ...flat] : flat}
           shift={shift}
-          keepMounted={focused !== null && focused < count ? [focused] : undefined}
+          keepMounted={focusedIndex >= 0 ? [focusedIndex + Number(older)] : undefined}
           onScroll={(offset) => {
             const handle = list.current
             if (!handle) return
             // Only the person's own scrolling unpins; resizes and row measurements move the offset too.
-            if (offset + handle.viewportSize >= handle.scrollSize - bottomSlack) pinned.current = true
-            else if (performance.now() - lastInput.current < userScrollWindow) pinned.current = false
+            if (offset + handle.viewportSize >= handle.scrollSize - bottomSlack) {
+              if (!pinned.current) pin(true)
+            } else if (pinned.current && performance.now() - lastInput.current < userScrollWindow) pin(false)
             loadEarlier()
           }}
           onResize={loadEarlier}
@@ -396,18 +414,23 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
               )}
             </div>
           ) : (
-            <div
+            <EnteringRow
               key={item.key}
+              itemKey={item.key}
+              arrivals={arrivals}
               role="article"
               aria-posinset={index + (older ? 0 : 1)}
               aria-setsize={flat.length}
-              onFocus={() => setFocused(index)}
+              onFocus={() => setFocused(item.key)}
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) setFocused(null)
+              }}
               className={cn(sessionColumn, rowGap(item), index === count - 1 && 'pb-4', index === 0 && 'pt-4')}
             >
               <RunFileLinks run={run}>
-                <TimelineRow depth={item.depth} row={item.depth === 0 ? item.row : undefined} entry={item.depth === 0 ? undefined : item.entry} ctx={ctx} />
+                <TimelineRow item={item} ctx={ctx} />
               </RunFileLinks>
-            </div>
+            </EnteringRow>
           )}
         </VList>
       </div>

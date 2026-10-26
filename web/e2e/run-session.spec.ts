@@ -38,8 +38,12 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await expect(card.getByRole('button')).toHaveText(['Allow', 'Reject', 'Always Allow'])
   await expect(page.getByRole('log', { name: 'Session' }).getByText('Waiting for your approval: rm -rf build')).toBeVisible()
   await page.keyboard.press('1')
-  await expect(log.getByText(/Approved: run/)).toBeVisible()
   await expect(log.getByText('permission: allow')).toBeVisible()
+  // The command and its answer are steps; once the turn ends their block shuts behind the header.
+  const asked = log.getByRole('button', { name: /^Ran 1 command/ })
+  await expect(asked).toHaveAttribute('aria-expanded', 'false')
+  await asked.click()
+  await expect(log.getByText(/Approved: run/)).toBeVisible()
   await expect.poll(async () => {
     const [row, view] = await Promise.all([log.getByText('permission: allow').boundingBox(), log.boundingBox()])
     return Boolean(row && view && row.y >= view.y && row.y + row.height <= view.y + view.height)
@@ -55,12 +59,15 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
 
   await box.fill('demo edit')
   await box.press('Enter')
-  await expect(log.getByRole('button', { name: /Read 2 files, ran 1 command and edited 1 file/ })).toBeVisible({ timeout: 30_000 })
-  await log.getByRole('button', { name: /Read 2 files, ran 1 command and edited 1 file/ }).click()
+  // The mock advertises steering but does not implement it, so wait for the turn to end and its block to shut.
+  const steps = log.getByRole('button', { name: /^Read 2 files, ran 1 command and edited 1 file/ })
+  await expect(steps).toHaveAttribute('aria-expanded', 'false', { timeout: 30_000 })
+  await expect(log.getByText(/^Finished in \d+s$/).last()).toBeVisible()
+  await steps.click()
+  await expect(log.getByText('billing.js', { exact: true })).toBeVisible()
+  await expect(log.getByText('All 3 steps done')).toBeVisible()
   await log.getByRole('button', { name: /Edited src\/billing\.js/ }).click()
   await expect(log.locator('[data-slot="diff-block"]')).toContainText('Math.round')
-  // The mock advertises steering but does not implement it, so wait for the turn to end.
-  await expect(log.getByText(/^Finished in \d+s$/)).toBeVisible()
   await expect(log.getByText(/^Changed \d+ files?$/)).toHaveCount(0)
 
   const changes = page.getByRole('region', { name: 'Changes' })
@@ -178,6 +185,11 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   await box.fill('subagents')
   await box.press('Enter')
   await expect(log.getByText('All three subagents finished.')).toBeVisible({ timeout: 30_000 })
+  // The finished turn's steps, its narration and subagent cards among them, sit behind the block header.
+  const delegated = log.getByRole('button', { name: /^Delegated 3 tasks/ })
+  await expect(delegated).toHaveAttribute('aria-expanded', 'false')
+  await expect(log.getByText('Splitting the work across subagents.')).toHaveCount(0)
+  await delegated.click()
   await expect(log.getByText('Splitting the work across subagents.')).toBeVisible()
   await expect(log.getByRole('button', { name: '3 subagents' })).toHaveAttribute('aria-expanded', 'true')
   const billing = log.getByRole('button', { name: 'Map the billing module, Explore, Done' })

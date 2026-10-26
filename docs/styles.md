@@ -129,9 +129,10 @@ Identity colour never replaces run-state colour.
 `SectionLabel`, `EmptyState`, `Callout`, `Badge`, `CountBadge`,
 `RequestCard`, `StatusDot` and `StateLine`, `Avatar`, `AgentGlyph`, `Code`
 and `CodeBlock`, `Kbd`, `Markdown`, `RelativeTime`, `Spinner`, `Skeleton`,
-`ProgressBar`, `TextSwap` and `IconSwap`, `Separator`, `Toaster`,
+`ProgressBar`, `TextSwap` and `IconSwap`, `CopyButton`, `Separator`, `Toaster`,
 `LineGutter` (a code line's clickable number gutter, for the Changes view's
-comments) and the Session view's timeline rows and blocks. Reach for one
+comments) and the Session view's timeline rows, step rail (`steps.tsx`) and
+blocks. Reach for one
 before writing markup, and pass its `variant`, `size` or `tone` rather than
 restyling it.
 
@@ -178,6 +179,17 @@ The other primitives with motion or a fixed size:
 - `Spinner` draws a ring: a track at `--opacity-track` under a quarter arc
   turning every 900ms.
 - `Skeleton` sweeps a `bg-hover-chrome` band across `bg-chrome`.
+- `CopyButton` copies without a toast: its icon turns to a `state-done`
+  check and its name to Copied for 1.8s.
+- The step rail (`steps.tsx`): a 28px `StepsHeader` with up to three 20px
+  tool tiles (`IconStack`, `rounded-chip`, seam border, `bg-chrome`) or, while
+  live, the state dot; `StepRow`s with a 24px gutter holding a 14px
+  `icon-faint` mark and a 1px rail in `icon-faint` at 40% that stops 3px
+  short of each mark;
+  28px `StepLine`s with the `StepStatus` cluster (`Spinner` in
+  `state-working`, an `icon-faint` check, a `state-failed` cross, or the
+  needs-you dot); and 24px `StepChip`s (32px coarse), `font-code` at
+  `text-ui-xs` on `bg-chrome` with a seam border.
 
 ## Charts
 
@@ -449,7 +461,11 @@ below 30rem **Multiplayer** as its icon.
 Takeover progress uses `state-failed` with `on-failed` text in both themes.
 One run-owned holder decision dialog sits above every sheet and dialog.
 Request cards use the needs-you soft fill; the Session transcript column is
-736px wide with no row borders. Its composer fills the available pane with
+736px wide with no row borders and no card around a block of steps. In it a
+person's message is a `bg-chrome` bubble at the right, at most 85% wide, with
+`rounded-composer`; everything the agent wrote starts after the step rail's
+24px gutter, where state dots and step marks sit. Turns are 24px apart and a
+turn's header and answer 12px. Its composer fills the available pane with
 balanced 16px side gutters, including when Details is open. An empty ACP
 conversation shows a subdued Aether mark above the centered run title and
 metadata rows: workspace, agent, branch, owner and creation time. Symmetric
@@ -494,7 +510,12 @@ literal time or curve.
   unmount once shut.
 - Only rows added after the first render enter: `animate-entrance` fades in
   and rises 4px. `playEntrance` staggers a burst by `--stagger-row` (30ms) up
-  to the eighth row; the rest arrive with it.
+  to the eighth row; the rest arrive with it. The Session list plays it only
+  for rows new since its last render: a streamed burst of at most eight, or
+  the steps a viewer just opened, never a first load, replay or history page.
+  A streaming answer's new Markdown blocks fade in from `--blur-fade` over
+  270ms. Opening a block of steps splices rows into the virtual list, so it
+  does not glide its height.
 - `web/src/lib/flip.ts` glides reordered items, translating only, for short
   lists the viewer reorders; never a virtualized list. The one store-driven
   use is Board moving at most eight cards between columns; see
@@ -507,7 +528,8 @@ literal time or curve.
   the repack. Hydration and scope changes never animate.
 - Row selection, focus outlines and exits change at once.
 - `state-pulse` (the run header's working dot, the Session view's live row
-  and the working rows on a swarm's Tasks list) breathes: opacity to
+  and live steps header, a plan's step in progress, the dot under a streaming
+  answer and the working rows on a swarm's Tasks list) breathes: opacity to
   `--opacity-muted` and size to two thirds and back each second.
   `live-shimmer`, on those rows' reasons and on a working lane's activity in
   Board's Lanes, sweeps a light band across muted text in 1.4s of each 1.6s.

@@ -4,7 +4,8 @@ import type { CandidateState, DeliveryReceipt, DeliveryRequest, VerificationStat
 import type { MissionAttempt, MissionAttemptState, MissionSubmission, MissionTask } from '@/lib/types'
 import { missionTree, taskTitle } from '@/routes/missions/tree'
 import type { MissionDetail } from '@/store/missions'
-import { isLaunch, workSummary } from '@/store/session-rows'
+import { isLaunch } from '@/store/session-rows'
+import { workSummary } from '@/store/session-steps'
 import { agentLabel, agentState, type AgentIndex, type AgentState, type Subagent } from '@/store/subagents'
 
 /** A run's states, plus Not started for work nobody picked up and Not checked yet for a fact nobody read. */

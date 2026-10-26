@@ -18,12 +18,11 @@ import {
   rehome,
   replaceItem,
   trimTurns,
-  workSummary,
   type Delivery,
   type SessionRow,
   type Turn,
-  type WorkItem,
 } from '@/store/session-rows'
+import { stepsBlock, type WorkItem } from '@/store/session-steps'
 import type { SliceCreator } from '@/store/slice'
 import { indexItems, localItem, noAgents, replaceAgentItem, trimAgents, type AgentIndex } from '@/store/subagents'
 
@@ -74,7 +73,8 @@ export interface SessionsSlice {
   appendSessionEvent: (event: Event) => void
 
   acpSessions: Record<string, AcpSession>
-  expandedRows: Record<string, Record<string, true>>
+  /** A person's open or shut choice per row, block or step; a row without one follows its default. */
+  expandedRows: Record<string, Record<string, boolean>>
   /** Runs whose Session timeline leaves out messages between agents. */
   hiddenAgentMessages: Record<string, true>
   acpAck: (runID: string, ack: SessionStreamAck) => void
@@ -86,7 +86,7 @@ export interface SessionsSlice {
   acpControl: (runID: string, control: ControlMetadata | undefined, error?: string) => void
   acpTakeover: (runID: string, takeover: TakeoverSnapshot | undefined, error?: string) => void
   touchAcpSession: (runID: string, open: (runID: string) => boolean) => void
-  toggleSessionRow: (runID: string, rowID: string) => void
+  setSessionRow: (runID: string, rowID: string, open: boolean) => void
   toggleAgentMessages: (runID: string) => void
 }
 
@@ -308,13 +308,8 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
       }
       return { acpSessions: sessions }
     }),
-  toggleSessionRow: (runID, rowID) =>
-    set((s) => {
-      const rows = { ...s.expandedRows[runID] }
-      if (rows[rowID]) delete rows[rowID]
-      else rows[rowID] = true
-      return { expandedRows: { ...s.expandedRows, [runID]: rows } }
-    }),
+  setSessionRow: (runID, rowID, open) =>
+    set((s) => ({ expandedRows: { ...s.expandedRows, [runID]: { ...s.expandedRows[runID], [rowID]: open } } })),
   toggleAgentMessages: (runID) =>
     set((s) => {
       const hidden = { ...s.hiddenAgentMessages }
@@ -397,15 +392,15 @@ type Item =
   | { at: string; order: number; tool: AgentPayload; id: string }
 
 function workRow(calls: { id: string; at: string; tool: AgentPayload }[], results: Map<string, AgentPayload>): SessionRow {
-  const tools = calls.map(({ tool }) => (tool.kind === 'subagent' ? 'subagent' : tool.tool ?? ''))
-  const entries = calls.map(({ id, at, tool }, index): WorkItem => {
+  const steps = calls.map(({ id, at, tool }) => {
     const result = tool.tool_use_id ? results.get(tool.tool_use_id) : undefined
     const [present, past] = toolTenses(tool)
     const target = tool.detail || tool.tool || ''
     const status = result ? (result.is_error ? 'failed' : 'done') : 'running'
-    return { id, at, status, tool: tools[index]!, label: `${status === 'running' ? present : past} ${target}`.trimEnd() }
+    const entry: WorkItem = { id, at, status, tool: tool.kind === 'subagent' ? 'subagent' : tool.tool ?? '', label: `${status === 'running' ? present : past} ${target}`.trimEnd() }
+    return { kind: 'tool' as const, id, at, entry }
   })
-  return { kind: 'work', id: `work:${calls[0]!.id}`, at: calls[0]!.at, summary: workSummary(tools), entries }
+  return stepsBlock(`work:${calls[0]!.id}`, steps, calls[0]!.at)
 }
 
 export interface TimelinePayload {

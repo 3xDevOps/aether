@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react'
+import { memo, useLayoutEffect, useMemo, useRef } from 'react'
 import type * as React from 'react'
 import { javascript } from '@codemirror/lang-javascript'
 import { json } from '@codemirror/lang-json'
@@ -15,6 +15,8 @@ import { lexer } from 'marked'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Code, CodeBlock } from '@/components/ui/code'
+import { playEntrance, type Entrance } from '@/lib/motion'
+import { cn } from '@/lib/utils'
 import { FileLink } from '@/routes/files/path-link'
 import { findPaths, parsePath } from '@/routes/files/paths'
 
@@ -61,7 +63,7 @@ function languageFor(name: string): Language | undefined {
   return language
 }
 
-function Highlighted({ code, lang }: { code: string; lang: string }) {
+export function Highlighted({ code, lang }: { code: string; lang: string }) {
   const parts = useMemo(() => {
     const language = languageFor(lang)
     if (!language) return null
@@ -121,10 +123,23 @@ const Block = memo(function Block({ source }: { source: string }) {
   return <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypePaths]} components={components}>{source}</ReactMarkdown>
 })
 
-export function Markdown({ text }: { text: string }) {
+const blockEnter: Entrance = { motion: { duration: '--duration-270', easing: '--ease-enter' }, blur: true }
+
+/** While `live`, each block that appears after the first render fades in from a blur. A `muted` text is the agent's own reasoning. */
+export function Markdown({ text, live = false, muted = false }: { text: string; live?: boolean; muted?: boolean }) {
   const blocks = useMemo(() => lexer(text).map((token) => token.raw).filter((raw) => raw.trim()), [text])
+  const root = useRef<HTMLDivElement>(null)
+  const shown = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    const children = root.current?.children
+    if (!children) return
+    if (live && shown.current !== null) {
+      for (let index = shown.current; index < children.length; index++) playEntrance(children[index]!, blockEnter)
+    }
+    shown.current = children.length
+  })
   return (
-    <div data-slot="markdown" className="markdown text-prose break-words text-text">
+    <div ref={root} data-slot="markdown" className={cn('markdown break-words', muted ? 'text-ui-sm text-muted' : 'text-prose text-text')}>
       {blocks.map((raw, index) => <Block key={index} source={raw} />)}
     </div>
   )

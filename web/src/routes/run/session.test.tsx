@@ -139,12 +139,13 @@ afterEach(async () => {
 })
 
 describe('the Enhanced session view', () => {
-  it('streams the session into rows and folds tool work into one line', async () => {
+  it('streams the session into rows and folds a finished turn\'s steps behind one header', async () => {
     open()
     acpSocket().open({ has_control: true, control_generation: 4 }, [
       item('turn_start', 1),
       say(1, 'user', 'Round the totals'),
-      tool(1, 'r1', 'read', 'Read src/billing.js', 'completed', { locations: [{ path: 'src/billing.js' }] }),
+      tool(1, 'r1', 'read', 'Read src/billing.js', 'completed', { locations: [{ path: '/workspace/src/billing.js' }] }),
+      tool(1, 'r2', 'read', 'Read /tmp/notes.md', 'completed', { locations: [{ path: '/tmp/notes.md' }] }),
       tool(1, 'x1', 'execute', 'npm test', 'completed', { output: 'ok\n', exit_code: 0 }),
       say(1, 'assistant', 'Totals now **round** to cents.'),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
@@ -152,11 +153,83 @@ describe('the Enhanced session view', () => {
     const log = await screen.findByRole('log', { name: 'Session' })
     expect(await within(log).findByText('Round the totals')).toBeDefined()
     expect(within(log).getByText('round').tagName).toBe('STRONG')
-    const group = within(log).getByRole('button', { name: /Read 1 file and ran 1 command/ })
-    await userEvent.click(group)
+    const header = within(log).getByRole('button', { name: /Read 2 files and ran 1 command/ })
+    expect(header.getAttribute('aria-expanded')).toBe('false')
+    expect(within(log).getByText('Finished in 6s')).toBeDefined()
+    expect(within(log).queryByRole('button', { name: /Ran npm test/ })).toBeNull()
+    await userEvent.click(header)
+    expect(within(log).queryByRole('button', { name: 'notes.md' })).toBeNull()
+    await userEvent.click(within(log).getByRole('button', { name: 'billing.js' }))
+    expect(useStore.getState().route.params).toMatchObject({ view: 'files', file: 'src/billing.js' })
     await userEvent.click(await within(log).findByRole('button', { name: /Ran npm test/ }))
     expect(await within(log).findByText('$ npm test')).toBeDefined()
     expect(within(log).getByText('Exit code 0')).toBeDefined()
+  })
+
+  it('carries the live turn in its block header and shuts the block when the turn ends', async () => {
+    open()
+    const session = acpSocket().open({ has_control: true, control_generation: 4 }, [
+      item('turn_start', 1),
+      say(1, 'user', 'Round the totals'),
+      item('thought', 1, { message: { role: 'assistant', message_id: 't1', text: 'Check the module first.', complete: true } }),
+      tool(1, 'x1', 'execute', 'npm test', 'in_progress'),
+    ])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    const header = await within(log).findByRole('button', { name: /^Running npm test, Ran 1 command/ })
+    expect(header.getAttribute('aria-expanded')).toBe('true')
+    expect(within(log).queryByText('Working')).toBeNull()
+    expect(within(log).getByText('Check the module first.')).toBeDefined()
+    session.items(tool(1, 'x1', 'execute', 'npm test', 'completed', { exit_code: 0 }), say(1, 'assistant', 'All green.'), item('turn_end', 1, { stop_reason: 'end_turn' }))
+    await waitFor(() => expect(within(log).getByRole('button', { name: /^Ran 1 command/ }).getAttribute('aria-expanded')).toBe('false'))
+    expect(within(log).getByText('All green.')).toBeDefined()
+    expect(within(log).queryByText('Check the module first.')).toBeNull()
+  })
+
+  it('folds a block over 40 steps to its first and last steps until asked', async () => {
+    open()
+    acpSocket().open({}, [
+      item('turn_start', 1),
+      ...Array.from({ length: 45 }, (_, n) => tool(1, `x${n}`, 'execute', `step ${n}`, 'completed')),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    await userEvent.click(await within(log).findByRole('button', { name: /^Ran 45 commands/ }))
+    expect(within(log).getByRole('button', { name: /Ran step 4(?!\d)/ })).toBeDefined()
+    expect(within(log).queryByRole('button', { name: /Ran step 5(?!\d)/ })).toBeNull()
+    await userEvent.click(within(log).getByRole('button', { name: 'Show 10 more steps' }))
+    expect(within(log).getByRole('button', { name: /Ran step 5(?!\d)/ })).toBeDefined()
+    expect(document.activeElement).toBe(within(log).getByRole('button', { name: 'Show fewer steps' }))
+  })
+
+  it('keeps a focused step in view while its live block grows past the fold', async () => {
+    open()
+    const session = acpSocket().open({}, [
+      item('turn_start', 1),
+      ...Array.from({ length: 40 }, (_, n) => tool(1, `x${n}`, 'execute', `step ${n}`, 'completed')),
+    ])
+    const log = await screen.findByRole('log', { name: 'Session' })
+    const step = (await within(log).findByText('step 7')).closest('button')!
+    act(() => step.focus())
+    session.items(tool(1, 'x40', 'execute', 'step 40', 'in_progress'))
+    expect(await within(log).findByLabelText(/^Running step 40, Ran 41 commands/)).toBeDefined()
+    expect(document.activeElement).toBe(step)
+    expect(within(log).queryByRole('button', { name: /^Show \d+ more steps/ })).toBeNull()
+  })
+
+  it('keeps a step opened in the first loaded block once the turn\'s prompt pages in', async () => {
+    const earlier = [item('turn_start', 1), say(1, 'user', 'Round the totals')]
+    const loaded = [tool(1, 'x1', 'execute', 'npm test', 'completed', { output: 'ok\n', exit_code: 0 }), tool(1, 'x2', 'execute', 'npm run build', 'in_progress')]
+    const page = Promise.withResolvers<SessionHistory>()
+    vi.mocked(api.runACPHistory).mockClear().mockReturnValueOnce(page.promise)
+    open()
+    acpSocket().open({ oldest_seq: loaded[0]!.seq }, loaded)
+    const log = await screen.findByRole('log', { name: 'Session' })
+    await userEvent.click(await within(log).findByRole('button', { name: /Ran npm test/ }))
+    expect(await within(log).findByText('$ npm test')).toBeDefined()
+    await waitFor(() => expect(api.runACPHistory).toHaveBeenCalledTimes(1))
+    await act(async () => page.resolve({ frames: earlier.map((it) => ({ seq: it.seq, item: it })), oldest_seq: earlier[0]!.seq }))
+    expect(await within(log).findByText('Round the totals')).toBeDefined()
+    expect(within(log).getByText('$ npm test')).toBeDefined()
   })
 
   it('keeps live Enhanced output and approvals usable after a retained-prefix replay reset', async () => {
@@ -190,7 +263,6 @@ describe('the Enhanced session view', () => {
     const entry = tool(1, 'x1', 'execute', 'npm test', 'completed', { output: 'retained excerpt', exit_code: 0 })
     acpSocket().open({}, [start, { ...entry, truncated: true }])
     const log = await screen.findByRole('log', { name: 'Session' })
-    await userEvent.click(await within(log).findByRole('button', { name: /Ran 1 command/ }))
     await userEvent.click(await within(log).findByRole('button', { name: /Ran npm test/ }))
     expect(await within(log).findByText('retained excerpt')).toBeDefined()
     expect((await within(log).findByRole('alert')).textContent).toContain(expired)
@@ -265,7 +337,7 @@ describe('the Enhanced session view', () => {
     await waitFor(() => expect(api.runACPHistory).toHaveBeenCalledTimes(1))
     const before = fromTop()
     await act(async () => page.resolve({ frames: earlier.map((it) => ({ seq: it.seq, item: it })), oldest_seq: 1 }))
-    expect(await within(log).findByRole('button', { name: /Read 2 files/ })).toBeDefined()
+    expect(await within(log).findByRole('button', { name: /Read 3 files/ })).toBeDefined()
     expect(fromTop()).toBe(before)
     // The end-anchored offset alone would move with a row growing below the reader, so the view also holds a row it shows.
     expect(log.scrollTo).toHaveBeenLastCalledWith({ top: log.scrollTop, behavior: 'instant' })
