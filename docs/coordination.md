@@ -1689,8 +1689,9 @@ What a report does depends on the run:
   (**Answered**). It never makes the run **Needs you**, sends no push,
   assistant or Slack notification, and never goes stale; a live worker
   attempt or held background task outranks it with the matching waiting
-  state. It never replaces a needs-input or blocked report that is still
-  open: that reason stays shown. Every role may report it: a swarm worker's
+  state. While a needs-input or blocked report still waits on a member it
+  is refused with `CodeInvalidParams` (`your needs-input or blocked report
+  is still open and stays shown; end your turn without another report`). Every role may report it: a swarm worker's
   answered submits nothing, leaves its attempt open, and still forwards its
   provisional report. Like waiting it is nonterminal,
   takes no `--evidence-ref` or `--for`, belongs to the turn that reported

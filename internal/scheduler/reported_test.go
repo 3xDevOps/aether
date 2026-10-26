@@ -1541,9 +1541,10 @@ func TestNeedsInputReasonParksAtTurnEndAndClearsOnResume(t *testing.T) {
 	}
 }
 
-// An answer is quiet, so it never hides a question the agent asked: the
-// question stays the run's reason and keeps the run Needs you.
-func TestAnsweredKeepsAnOpenQuestion(t *testing.T) {
+// An answer is quiet, so it is refused while a question the agent asked
+// is open: the question stays the run's reason and keeps the run Needs you,
+// and nothing moves the watermark a queued reply is judged against.
+func TestAnsweredIsRefusedWhileAQuestionIsOpen(t *testing.T) {
 	t.Parallel()
 	e := newReportingEnv(t, nil)
 	ctx := t.Context()
@@ -1556,27 +1557,21 @@ func TestAnsweredKeepsAnOpenQuestion(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	answeredAt := time.Now().Add(time.Second)
-	if err := e.sched.ReportAnswered(ctx, run.ID, "answered-1", "replied to a peer", answeredAt); err != nil {
-		t.Fatalf("ReportAnswered: %v", err)
-	}
-	// The answer takes the watermark, so its retry after the question is
-	// dealt with cannot label a later turn Answered.
-	if err := e.sched.ReportAnswered(ctx, run.ID, "answered-1", "replied to a peer", answeredAt); err != nil {
-		t.Fatalf("replayed ReportAnswered: %v", err)
+	e.sched.mu.Lock()
+	before := e.sched.runs[run.ID].idleReportAt
+	e.sched.mu.Unlock()
+	if err := e.sched.ReportAnswered(ctx, run.ID, "answered-1", "replied to a peer", time.Now().Add(time.Second)); !errors.Is(err, coord.ErrHumanOpen) {
+		t.Fatalf("ReportAnswered = %v, want ErrHumanOpen", err)
 	}
 	e.sched.mu.Lock()
-	kept, watermark := e.sched.runs[run.ID].idleReason, e.sched.runs[run.ID].idleReportID
+	kept, after := e.sched.runs[run.ID].idleReason, e.sched.runs[run.ID].idleReportAt
 	e.sched.mu.Unlock()
-	if watermark != "answered-1" {
-		t.Fatalf("idle report watermark = %q, want the kept answer's id", watermark)
-	}
 	r, err := e.db.GetRun(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kept != "needs input: which region?" || r.Reason != kept || r.Activity != domain.ActivityNeedsYou || !r.NeedsAttention(false) {
-		t.Fatalf("after an answer: idle reason %q, row %s %q, want the question kept", kept, r.Activity, r.Reason)
+	if kept != "needs input: which region?" || !after.Equal(before) || r.Reason != kept || r.Activity != domain.ActivityNeedsYou || !r.NeedsAttention(false) {
+		t.Fatalf("after a refused answer: idle reason %q at %v (was %v), row %s %q; want the question kept", kept, after, before, r.Activity, r.Reason)
 	}
 }
 

@@ -104,7 +104,7 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 	if err != nil {
 		slog.Info("coord: state report did not take effect", "run", run, "report", id, "error", err)
 		switch {
-		case errors.Is(err, ErrCannotAsk), errors.Is(err, ErrRunFinished):
+		case errors.Is(err, ErrCannotAsk), errors.Is(err, ErrRunFinished), errors.Is(err, ErrHumanOpen):
 			if releaseErr := s.cfg.Mail.ReleaseCoordStateReport(ctx, run, p.IdempotencyKey); releaseErr != nil {
 				return protocol.CoordReportResult{}, internalError(method, errors.Join(err, releaseErr))
 			}

@@ -61,6 +61,9 @@ var (
 	// ErrReportSuperseded is returned by an OutcomeSink for a report older
 	// than one the run already recorded, or than its relaunch.
 	ErrReportSuperseded = errors.New("a newer report or a relaunch of this run already replaced this report; report again with a new idempotency key")
+	// ErrHumanOpen is returned by an OutcomeSink for an answered report
+	// while the run's question or blocker still waits on a member.
+	ErrHumanOpen = errors.New("your needs-input or blocked report is still open and stays shown; end your turn without another report")
 )
 
 // EvidenceCapture is the narrow evidence seam needed by coord.report.

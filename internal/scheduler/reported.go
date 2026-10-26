@@ -292,9 +292,7 @@ func outboxFenced(run domain.RunID, id string, err error) error {
 // recordIdleReportLocked shares the blocked-report watermark and park machinery
 // with interactive outcomes. No native execution report is synthesized. Only
 // id's own retry is accepted without effect: the coord receipt guarantees it
-// carries the same inputs. An answer leaves an open question or blocker
-// shown but still takes the watermark, so its retry cannot relabel a later
-// turn.
+// carries the same inputs.
 func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervised, id, reason string, at time.Time) error {
 	switch {
 	case at.Before(entry.relaunchedAt):
@@ -307,10 +305,7 @@ func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervise
 		return coord.ErrReportSuperseded
 	}
 	old := entry.sidecar()
-	kept := strings.HasPrefix(reason, answeredReasonPrefix) && humanReason(entry.idleReason)
-	if !kept {
-		entry.idleReason, entry.idleShown = reason, false
-	}
+	entry.idleReason, entry.idleShown = reason, false
 	entry.idleReportID, entry.idleReportAt = id, at
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		entry.idleReason, entry.idleShown = old.IdleReason, old.IdleShown
@@ -320,9 +315,6 @@ func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervise
 			entry.idleReportAt = *old.IdleReportAt
 		}
 		return fmt.Errorf("scheduler: record idle report for %s: %w", entry.runID, err)
-	}
-	if kept {
-		return nil
 	}
 	if entry.outcomeDue() && !entry.atPrompt() {
 		return s.parkIdleReportLocked(ctx, entry)
@@ -441,9 +433,9 @@ func (s *Scheduler) ReportWaiting(ctx context.Context, run domain.RunID, id, wai
 
 // ReportAnswered records a turn that replied with nothing pending like
 // ReportBlocked: at its turn end the run shows the summary as answered,
-// which asks nothing of a member. It never replaces a question or blocker
-// the agent reported: that stays shown until a member deals with it
-// (reportIdle).
+// which asks nothing of a member. It is refused while a question or
+// blocker the agent reported waits on a member, so it never hides one and
+// takes no watermark a queued reply would be judged against.
 func (s *Scheduler) ReportAnswered(ctx context.Context, run domain.RunID, id, summary string, at time.Time) error {
 	return s.reportIdle(ctx, run, id, answeredReasonPrefix+summary, at, "answered report", coord.ErrRunFinished)
 }
@@ -457,6 +449,9 @@ func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason
 		defer s.mu.Unlock()
 		if entry.status.Terminal() || entry.reported != "" {
 			return finished
+		}
+		if strings.HasPrefix(reason, answeredReasonPrefix) && humanReason(entry.idleReason) {
+			return coord.ErrHumanOpen
 		}
 		return s.recordIdleReportLocked(ctx, entry, id, reason, at)
 	}

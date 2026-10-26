@@ -537,6 +537,26 @@ func TestCoordReportNeedsInputAsksTheUser(t *testing.T) {
 	}
 }
 
+// An answer refused while the run's question is open does not keep its key.
+func TestCoordReportAnsweredWhileAQuestionIsOpen(t *testing.T) {
+	outcomes := &recordingOutcomes{}
+	outcomes.fail(ErrHumanOpen)
+	h := newHarness(t, 1, func(c *Config) {
+		c.Evidence = &coordReportEvidenceCapture{id: "ev_open"}
+		c.Outcomes = outcomes
+	})
+	params := protocol.CoordReportParams{Outcome: protocol.CoordOutcomeAnswered, Summary: "replied to a peer", IdempotencyKey: "answered-1"}
+	_, rpcErr := h.svc.CoordReport(context.Background(), h.run(0), params)
+	if rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams || !strings.Contains(rpcErr.Message, ErrHumanOpen.Error()) {
+		t.Fatalf("err = %+v, want invalid params carrying %q", rpcErr, ErrHumanOpen)
+	}
+	outcomes.fail(nil)
+	params.Summary = "explained the retry policy"
+	if _, rpcErr := h.svc.CoordReport(context.Background(), h.run(0), params); rpcErr != nil {
+		t.Fatalf("the released key with new inputs: %v", rpcErr)
+	}
+}
+
 func TestCoordReportNeedsInputFromAFinishedRun(t *testing.T) {
 	outcomes := &recordingOutcomes{}
 	outcomes.fail(ErrRunFinished)
