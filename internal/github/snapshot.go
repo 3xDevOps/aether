@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,8 +15,9 @@ import (
 )
 
 const (
-	pageSize = 100
-	maxPages = 10
+	pageSize      = 100
+	maxPages      = 10
+	reviewBodyMax = 2000
 )
 
 // Snapshot is one read of a pull request, the check runs and commit statuses
@@ -31,8 +33,11 @@ type Snapshot struct {
 	URL      string     `json:"html_url"`
 	HeadSHA  string     `json:"head_sha"`
 	BaseRef  string     `json:"base_ref"`
+	// ReviewRequested is whether any user or team review request is open.
+	ReviewRequested bool `json:"review_requested"`
 
 	CheckRuns []CheckRun     `json:"check_runs"`
+	Suites    []CheckSuite   `json:"check_suites"`
 	Statuses  []CommitStatus `json:"statuses"`
 	Reviews   []Review       `json:"reviews"`
 
@@ -40,11 +45,13 @@ type Snapshot struct {
 }
 
 // Page is one conditional GET of a snapshot. Count is how many items of the
-// matching Snapshot list the page contributed, in request order.
+// matching Snapshot list the page contributed, in request order; Full is
+// whether GitHub returned a whole page before any items were dropped.
 type Page struct {
 	Path  string `json:"path"`
 	ETag  string `json:"etag"`
 	Count int    `json:"count"`
+	Full  bool   `json:"full,omitempty"`
 }
 
 type CheckRun struct {
@@ -57,6 +64,17 @@ type CheckRun struct {
 	URL         string     `json:"html_url"`
 	StartedAt   *time.Time `json:"started_at,omitempty"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// CheckSuite is one app's suite on the head commit. GitHub creates a suite
+// before the check runs of jobs gated by needs: or of a queued workflow.
+type CheckSuite struct {
+	ID         int64  `json:"id"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion,omitempty"`
+	App        string `json:"app"`
+	AppSlug    string `json:"app_slug"`
+	Runs       int    `json:"latest_check_runs_count"`
 }
 
 // CommitStatus is the latest status for one context.
@@ -73,6 +91,7 @@ type Review struct {
 	ID          int64      `json:"id"`
 	State       string     `json:"state"`
 	User        string     `json:"user"`
+	Body        string     `json:"body,omitempty"`
 	URL         string     `json:"html_url"`
 	SubmittedAt *time.Time `json:"submitted_at,omitempty"`
 }
@@ -98,6 +117,8 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 		Base struct {
 			Ref string `json:"ref"`
 		} `json:"base"`
+		RequestedReviewers []json.RawMessage `json:"requested_reviewers"`
+		RequestedTeams     []json.RawMessage `json:"requested_teams"`
 	}
 	old, cached := prev.page(pullPath)
 	etag := ""
@@ -110,11 +131,13 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	}
 	if notModified {
 		snap.State, snap.MergedAt, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = prev.State, prev.MergedAt, prev.Title, prev.URL, prev.HeadSHA, prev.BaseRef
+		snap.ReviewRequested = prev.ReviewRequested
 	} else {
 		if pull.Number != number || pull.State != "open" && pull.State != "closed" || !validSHA(pull.Head.SHA) || !strings.HasPrefix(pull.URL, "https://github.com/") {
 			return Snapshot{}, errors.New("github: API returned invalid pull request metadata")
 		}
 		snap.State, snap.MergedAt, snap.Title, snap.URL, snap.HeadSHA, snap.BaseRef = pull.State, pull.MergedAt, pull.Title, pull.URL, pull.Head.SHA, pull.Base.Ref
+		snap.ReviewRequested = len(pull.RequestedReviewers)+len(pull.RequestedTeams) > 0
 		if snap.MergedAt != nil {
 			snap.State = "merged"
 		}
@@ -123,10 +146,11 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 
 	commit := "/repos/" + repo + "/commits/" + snap.HeadSHA
 	var prevRuns []CheckRun
+	var prevSuites []CheckSuite
 	var prevStatuses []CommitStatus
 	var prevReviews []Review
 	if prev != nil {
-		prevRuns, prevStatuses, prevReviews = prev.CheckRuns, prev.Statuses, prev.Reviews
+		prevRuns, prevSuites, prevStatuses, prevReviews = prev.CheckRuns, prev.Suites, prev.Statuses, prev.Reviews
 	}
 	type checkRunsPage struct {
 		CheckRuns []struct {
@@ -145,7 +169,7 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 			} `json:"app"`
 		} `json:"check_runs"`
 	}
-	runs, pages, err := paginate(ctx, s, token, commit+"/check-runs?", prev, prevRuns, "check runs", func(page checkRunsPage) []CheckRun {
+	runs, pages, err := paginate(ctx, s, token, commit+"/check-runs?", prev, prevRuns, "check runs", nil, func(page checkRunsPage) []CheckRun {
 		out := make([]CheckRun, 0, len(page.CheckRuns))
 		for _, r := range page.CheckRuns {
 			run := CheckRun{ID: r.ID, Name: r.Name, Status: r.Status, SuiteID: r.Suite.ID, App: r.App.Name, URL: r.URL, StartedAt: r.StartedAt, CompletedAt: r.CompletedAt}
@@ -161,10 +185,38 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	}
 	snap.CheckRuns, snap.Pages = runs, append(snap.Pages, pages...)
 
+	type checkSuitesPage struct {
+		CheckSuites []struct {
+			ID         int64   `json:"id"`
+			Status     string  `json:"status"`
+			Conclusion *string `json:"conclusion"`
+			Runs       int     `json:"latest_check_runs_count"`
+			App        struct {
+				Name string `json:"name"`
+				Slug string `json:"slug"`
+			} `json:"app"`
+		} `json:"check_suites"`
+	}
+	suites, pages, err := paginate(ctx, s, token, commit+"/check-suites?", prev, prevSuites, "check suites", nil, func(page checkSuitesPage) []CheckSuite {
+		out := make([]CheckSuite, 0, len(page.CheckSuites))
+		for _, r := range page.CheckSuites {
+			suite := CheckSuite{ID: r.ID, Status: r.Status, App: r.App.Name, AppSlug: r.App.Slug, Runs: r.Runs}
+			if r.Conclusion != nil {
+				suite.Conclusion = *r.Conclusion
+			}
+			out = append(out, suite)
+		}
+		return out
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snap.Suites, snap.Pages = suites, append(snap.Pages, pages...)
+
 	type statusPage struct {
 		Statuses []CommitStatus `json:"statuses"`
 	}
-	statuses, pages, err := paginate(ctx, s, token, commit+"/status?", prev, prevStatuses, "commit statuses", func(page statusPage) []CommitStatus {
+	statuses, pages, err := paginate(ctx, s, token, commit+"/status?", prev, prevStatuses, "commit statuses", nil, func(page statusPage) []CommitStatus {
 		return page.Statuses
 	})
 	if err != nil {
@@ -175,16 +227,20 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 	type reviewRecord struct {
 		ID          int64      `json:"id"`
 		State       string     `json:"state"`
+		Body        string     `json:"body"`
 		URL         string     `json:"html_url"`
 		SubmittedAt *time.Time `json:"submitted_at"`
 		User        *struct {
 			Login string `json:"login"`
 		} `json:"user"`
 	}
-	reviews, pages, err := paginate(ctx, s, token, pullPath+"/reviews?", prev, prevReviews, "reviews", func(page []reviewRecord) []Review {
+	// A PENDING review is the token owner's unsubmitted draft; submitting it
+	// later keeps the ID, so announcing the draft would hide the real review.
+	submitted := func(r Review) bool { return r.State != "PENDING" }
+	reviews, pages, err := paginate(ctx, s, token, pullPath+"/reviews?", prev, prevReviews, "reviews", submitted, func(page []reviewRecord) []Review {
 		out := make([]Review, 0, len(page))
 		for _, r := range page {
-			review := Review{ID: r.ID, State: r.State, URL: r.URL, SubmittedAt: r.SubmittedAt}
+			review := Review{ID: r.ID, State: r.State, Body: truncate(r.Body, reviewBodyMax), URL: r.URL, SubmittedAt: r.SubmittedAt}
 			// GitHub returns a null user for deleted accounts.
 			if r.User != nil {
 				review.User = r.User.Login
@@ -202,8 +258,9 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 
 // paginate walks per_page=100 pages of base, conditionally against the pages
 // recorded in prev. A 304 page reuses its items from cached, which holds
-// prev's items for the same endpoint in page order.
-func paginate[R, T any](ctx context.Context, s *Service, token, base string, prev *Snapshot, cached []T, what string, items func(R) []T) ([]T, []Page, error) {
+// prev's items for the same endpoint in page order. keep, when set, drops
+// items before they are recorded.
+func paginate[R, T any](ctx context.Context, s *Service, token, base string, prev *Snapshot, cached []T, what string, keep func(T) bool, items func(R) []T) ([]T, []Page, error) {
 	var out []T
 	var pages []Page
 	offset, reusable := 0, prev != nil
@@ -227,22 +284,27 @@ func paginate[R, T any](ctx context.Context, s *Service, token, base string, pre
 			return nil, nil, err
 		}
 		var got []T
+		full := old.Full
 		_, more := nextLink(header.Values("Link"))
 		if notModified {
 			got = cached[offset : offset+old.Count]
 			// An unchanged full page says nothing about items added after it.
-			more = more || old.Count == pageSize
+			more = more || full
 		} else {
 			got = items(record)
 			if len(got) > pageSize {
 				return nil, nil, fmt.Errorf("github: API returned too many %s in one page", what)
+			}
+			full = len(got) == pageSize
+			if keep != nil {
+				got = slices.DeleteFunc(got, func(item T) bool { return !keep(item) })
 			}
 		}
 		if reusable {
 			offset += old.Count
 		}
 		out = append(out, got...)
-		pages = append(pages, Page{Path: path, ETag: etagOf(header, etag, notModified), Count: len(got)})
+		pages = append(pages, Page{Path: path, ETag: etagOf(header, etag, notModified), Count: len(got), Full: full})
 		if !more {
 			return out, pages, nil
 		}
@@ -290,27 +352,49 @@ type Checks struct {
 	// Final is true once at least one check exists and none is pending. A
 	// commit whose checks have not been created yet is not final.
 	Final bool `json:"final"`
-	// Key changes with the head commit and with every new check run or status
-	// ID, so a failed run followed by a passing rerun yields two keys.
+	// Key changes with the head commit and with every check run or status ID
+	// and final conclusion, so a failed run followed by a passing rerun, or a
+	// run updated in place, yields a new key.
 	Key string `json:"key"`
 }
 
+// Checks counts only the newest check run per app and name, so a run that
+// concurrency cancelled in favor of a newer one does not fail the commit. An
+// incomplete suite with no pending run counts as one pending check when it
+// belongs to GitHub Actions or already has runs; other apps can leave a
+// zero-run suite queued forever.
 func (s Snapshot) Checks() Checks {
 	var c Checks
-	ids := make([]string, 0, len(s.CheckRuns)+len(s.Statuses))
+	type runName struct{ app, name string }
+	newest := map[runName]CheckRun{}
 	for _, run := range s.CheckRuns {
-		ids = append(ids, "c"+strconv.FormatInt(run.ID, 10))
+		key := runName{run.App, run.Name}
+		if seen, ok := newest[key]; !ok || run.ID > seen.ID {
+			newest[key] = run
+		}
+	}
+	ids := make([]string, 0, len(newest)+len(s.Statuses))
+	running := map[int64]bool{}
+	for _, run := range newest {
+		ids = append(ids, "c"+strconv.FormatInt(run.ID, 10)+"="+run.Conclusion)
 		switch {
 		case run.Status != "completed":
 			c.Pending++
+			running[run.SuiteID] = true
 		case run.Conclusion == "success" || run.Conclusion == "neutral" || run.Conclusion == "skipped":
 			c.Passed++
 		default:
 			c.Failed++
 		}
 	}
+	for _, suite := range s.Suites {
+		if suite.Status != "completed" && !running[suite.ID] && (suite.AppSlug == "github-actions" || suite.Runs > 0) {
+			c.Pending++
+			ids = append(ids, "q"+strconv.FormatInt(suite.ID, 10))
+		}
+	}
 	for _, status := range s.Statuses {
-		ids = append(ids, "s"+strconv.FormatInt(status.ID, 10))
+		ids = append(ids, "s"+strconv.FormatInt(status.ID, 10)+"="+status.State)
 		switch status.State {
 		case "success":
 			c.Passed++

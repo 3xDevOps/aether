@@ -80,13 +80,23 @@ const (
 	commitPath   = "/repos/acme/app/commits/" + headSHA
 	checksPage1  = commitPath + "/check-runs?per_page=100&page=1"
 	checksPage2  = commitPath + "/check-runs?per_page=100&page=2"
+	suitesPage1  = commitPath + "/check-suites?per_page=100&page=1"
 	statusPage1  = commitPath + "/status?per_page=100&page=1"
 	reviewsPage1 = pullPath + "/reviews?per_page=100&page=1"
 )
 
+func checkSuite(id int64, status, slug string, runs int) string {
+	return fmt.Sprintf(`{"id":%d,"status":%q,"conclusion":null,"latest_check_runs_count":%d,"app":{"name":%q,"slug":%q}}`, id, status, runs, slug, slug)
+}
+
+func checkSuitesBody(suites ...string) string {
+	return `{"total_count":` + strconv.Itoa(len(suites)) + `,"check_suites":[` + strings.Join(suites, ",") + `]}`
+}
+
 func standardPR(f *fakeGitHub) {
 	f.bodies[pullPath] = pullBody("open", "null")
 	f.bodies[checksPage1] = checkRunsBody(checkRun(1, "build", "completed", "success"))
+	f.bodies[suitesPage1] = checkSuitesBody(`{"id":9,"status":"completed","conclusion":"success","latest_check_runs_count":1,"app":{"name":"GitHub Actions","slug":"github-actions"}}`)
 	f.bodies[statusPage1] = `{"state":"success","statuses":[]}`
 	f.bodies[reviewsPage1] = `[]`
 }
@@ -146,14 +156,14 @@ func TestPullRequestSnapshotReusesNotModifiedPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.notMod != 0 || len(first.Pages) != 4 {
+	if f.notMod != 0 || len(first.Pages) != 5 {
 		t.Fatalf("first poll: notModified=%d pages=%+v", f.notMod, first.Pages)
 	}
 	second, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, &first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.notMod != 4 || second.Title != first.Title || second.HeadSHA != headSHA || len(second.CheckRuns) != 1 || second.CheckRuns[0].ID != 1 {
+	if f.notMod != 5 || second.Title != first.Title || second.HeadSHA != headSHA || len(second.CheckRuns) != 1 || second.CheckRuns[0].ID != 1 {
 		t.Fatalf("unchanged poll did not reuse 304 pages: notModified=%d %+v", f.notMod, second)
 	}
 	if second.Checks() != first.Checks() {
@@ -165,7 +175,7 @@ func TestPullRequestSnapshotReusesNotModifiedPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.notMod != 7 || len(third.Reviews) != 1 || third.Reviews[0].State != "CHANGES_REQUESTED" || len(third.CheckRuns) != 1 {
+	if f.notMod != 9 || len(third.Reviews) != 1 || third.Reviews[0].State != "CHANGES_REQUESTED" || len(third.CheckRuns) != 1 {
 		t.Fatalf("changed page not refetched: notModified=%d %+v", f.notMod, third)
 	}
 
@@ -182,15 +192,16 @@ func TestPullRequestSnapshotFindsPageAfterUnchangedFullPage(t *testing.T) {
 	for i := range 101 {
 		reviews = append(reviews, `{"id":`+strconv.Itoa(i+1)+`,"state":"COMMENTED","html_url":"https://github.com/acme/app/pull/7","user":{"login":"mona"}}`)
 	}
+	reviews[0] = `{"id":1,"state":"PENDING","html_url":"https://github.com/acme/app/pull/7","user":{"login":"mona"}}`
 	f.bodies[reviewsPage1] = "[" + strings.Join(reviews[:100], ",") + "]"
 	s := snapshotService(t, f)
 	first, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
-	if err != nil || len(first.Reviews) != 100 {
+	if err != nil || len(first.Reviews) != 99 || first.Reviews[0].ID != 2 {
 		t.Fatalf("first poll: %d %v", len(first.Reviews), err)
 	}
 	f.bodies[pullPath+"/reviews?per_page=100&page=2"] = "[" + reviews[100] + "]"
 	second, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, &first)
-	if err != nil || len(second.Reviews) != 101 || second.Reviews[100].ID != 101 {
+	if err != nil || len(second.Reviews) != 100 || second.Reviews[99].ID != 101 {
 		t.Fatalf("review on a new page missed behind an unchanged full page: %d %v", len(second.Reviews), err)
 	}
 }
@@ -214,6 +225,28 @@ func TestPullRequestSnapshotDropsETagWhenFreshBodyHasNone(t *testing.T) {
 	}
 	if second.Pages[1].ETag != first.Pages[1].ETag {
 		t.Fatal("304 without an ETag lost the tag that matched")
+	}
+}
+
+func TestPullRequestSnapshotReviewRequestsAndBodies(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	f.bodies[reviewsPage1] = `[{"id":5,"state":"CHANGES_REQUESTED","body":"` + strings.Repeat("x", reviewBodyMax+10) + `","html_url":"https://github.com/acme/app/pull/7","user":{"login":"mona"}}]`
+	s := snapshotService(t, f)
+	snap, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	if err != nil || snap.ReviewRequested || len([]rune(snap.Reviews[0].Body)) != reviewBodyMax+1 {
+		t.Fatalf("review body or request: %v %+v", err, snap)
+	}
+	for _, requested := range []string{`"requested_reviewers":[{"login":"mona"}],"requested_teams":[]`, `"requested_reviewers":[],"requested_teams":[{"slug":"core"}]`} {
+		f.bodies[pullPath] = strings.TrimSuffix(pullBody("open", "null"), "}") + "," + requested + "}"
+		snap, err = s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+		if err != nil || !snap.ReviewRequested {
+			t.Fatalf("review request %s not seen: %v", requested, err)
+		}
+		again, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, &snap)
+		if err != nil || !again.ReviewRequested {
+			t.Fatalf("review request lost on 304: %v", err)
+		}
 	}
 }
 
@@ -257,9 +290,60 @@ func TestPullRequestSnapshotRerunChangesKey(t *testing.T) {
 		t.Fatal("key is not stable across identical polls")
 	}
 
+	f.bodies[checksPage1] = checkRunsBody(checkRun(1, "build", "completed", "success"), checkRun(3, "test", "completed", "failure"))
+	if patched := poll(); patched.Key == passed.Key || patched.Failed != 1 {
+		t.Fatal("a run updated in place from success to failure kept its key")
+	}
+
 	f.bodies[checksPage1] = checkRunsBody()
+	f.bodies[suitesPage1] = checkSuitesBody()
 	if none := poll(); none.Final {
 		t.Fatal("a commit without checks reported final")
+	}
+}
+
+func TestPullRequestSnapshotCountsOnlyNewestRunPerName(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	f.bodies[checksPage1] = checkRunsBody(checkRun(1, "build", "completed", "success"), checkRun(2, "test", "completed", "cancelled"), checkRun(4, "test", "completed", "success"))
+	snap, err := snapshotService(t, f).PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checks := snap.Checks(); !checks.Final || checks.Passed != 2 || checks.Failed != 0 {
+		t.Fatalf("superseded cancelled run counted: %+v", checks)
+	}
+}
+
+func TestPullRequestSnapshotWaitsForIncompleteSuites(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	s := snapshotService(t, f)
+	checks := func() Checks {
+		t.Helper()
+		snap, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return snap.Checks()
+	}
+
+	f.bodies[suitesPage1] = checkSuitesBody(checkSuite(9, "in_progress", "github-actions", 1), checkSuite(20, "queued", "github-actions", 0))
+	if c := checks(); c.Final || c.Passed != 1 || c.Pending != 2 {
+		t.Fatalf("jobs gated by needs: and a queued workflow did not hold CI open: %+v", c)
+	}
+	f.bodies[suitesPage1] = checkSuitesBody(checkSuite(9, "completed", "github-actions", 1), checkSuite(30, "queued", "buildkite", 2))
+	if c := checks(); c.Final || c.Pending != 1 {
+		t.Fatalf("another app's suite with runs did not hold CI open: %+v", c)
+	}
+	f.bodies[suitesPage1] = checkSuitesBody(checkSuite(9, "completed", "github-actions", 1), checkSuite(40, "queued", "codecov", 0))
+	if c := checks(); !c.Final || c.Pending != 0 {
+		t.Fatalf("another app's zero-run suite held CI open: %+v", c)
+	}
+	f.bodies[checksPage1] = checkRunsBody(checkRun(1, "build", "in_progress", ""))
+	f.bodies[suitesPage1] = checkSuitesBody(checkSuite(9, "in_progress", "github-actions", 1))
+	if c := checks(); c.Pending != 1 {
+		t.Fatalf("suite counted beside its own pending run: %+v", c)
 	}
 }
 
@@ -312,6 +396,7 @@ func TestPullRequestSnapshotTypedErrorsCarryGitHubMessage(t *testing.T) {
 	}{
 		{http.StatusUnauthorized, "Bad credentials", ErrUnauthorized},
 		{http.StatusNotFound, "Not Found", ErrNotFound},
+		{http.StatusMovedPermanently, "renamed or transferred", ErrMoved},
 		{http.StatusForbidden, "Resource not accessible by integration", nil},
 	} {
 		s, _ := newTestService(t, nativeCredentials(), func(*http.Request) (*http.Response, error) {
@@ -322,7 +407,7 @@ func TestPullRequestSnapshotTypedErrorsCarryGitHubMessage(t *testing.T) {
 		if !errors.As(err, &apiErr) || apiErr.Status != tc.status || !strings.Contains(err.Error(), tc.message) {
 			t.Fatalf("HTTP %d: %v", tc.status, err)
 		}
-		if tc.is != nil && !errors.Is(err, tc.is) || errors.Is(err, ErrUnauthorized) && tc.is != ErrUnauthorized {
+		if tc.is != nil && !errors.Is(err, tc.is) || errors.Is(err, ErrUnauthorized) && tc.is != ErrUnauthorized || errors.Is(err, ErrNotFound) && tc.is != ErrNotFound {
 			t.Fatalf("HTTP %d matches the wrong sentinel: %v", tc.status, err)
 		}
 		if strings.Contains(err.Error(), testToken) {

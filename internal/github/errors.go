@@ -23,6 +23,9 @@ var (
 	// ErrNotFound matches an APIError for HTTP 404: the resource does not
 	// exist or the token cannot see it.
 	ErrNotFound = errors.New("github: not found")
+	// ErrMoved matches an APIError for HTTP 301: the repository was renamed
+	// or transferred, and retrying the old owner/name never succeeds.
+	ErrMoved = errors.New("github: repository moved")
 )
 
 // APIError is a non-200 GitHub response. Message is GitHub's own error text,
@@ -38,7 +41,8 @@ func (e *APIError) Error() string {
 
 func (e *APIError) Is(target error) bool {
 	return target == ErrUnauthorized && e.Status == http.StatusUnauthorized ||
-		target == ErrNotFound && e.Status == http.StatusNotFound
+		target == ErrNotFound && e.Status == http.StatusNotFound ||
+		target == ErrMoved && e.Status == http.StatusMovedPermanently
 }
 
 // RateLimitError is a primary or secondary GitHub rate limit. RetryAt comes
@@ -66,6 +70,9 @@ func responseError(response *http.Response, token string, now time.Time) error {
 	message := ""
 	if response.StatusCode >= 400 && response.StatusCode < 500 {
 		message = errorMessage(response.Body, token)
+	}
+	if response.StatusCode == http.StatusMovedPermanently {
+		message = "the repository was renamed or transferred; watch it under its new owner/name"
 	}
 	header := response.Header
 	limited := response.StatusCode == http.StatusTooManyRequests ||
@@ -107,8 +114,12 @@ func errorMessage(body io.Reader, token string) string {
 		message = strings.ReplaceAll(message, token, "[redacted]")
 	}
 	message = strings.Join(strings.FieldsFunc(message, func(r rune) bool { return !unicode.IsPrint(r) || unicode.IsSpace(r) }), " ")
-	if runes := []rune(message); len(runes) > errorMessageMax {
-		message = string(runes[:errorMessageMax]) + "…"
+	return truncate(message, errorMessageMax)
+}
+
+func truncate(text string, limit int) string {
+	if runes := []rune(text); len(runes) > limit {
+		return string(runes[:limit]) + "…"
 	}
-	return message
+	return text
 }
