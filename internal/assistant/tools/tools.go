@@ -352,34 +352,30 @@ func (s *Server) summarizeRespond(ctx context.Context, req protocol.Request, c *
 }
 
 // summarizeSwarmAnswer names the swarm whose integrator asked, by its
-// objective, and the integrator run's owner.
+// objective, and its accountable human when that is another member.
 func (s *Server) summarizeSwarmAnswer(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
 	p, err := protocol.DecodeParams[protocol.MissionQuestionAnswerParams](req.Params)
 	if err != nil || p.QuestionID == "" {
 		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": question_id is required"}
 	}
-	items, rpcErr := s.attention(ctx, "")
-	if rpcErr != nil {
+	var shown protocol.MissionShowResult
+	if rpcErr := s.call(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{QuestionID: p.QuestionID}, &shown); rpcErr != nil {
 		return rpcErr
 	}
-	for _, it := range items {
-		if it.Kind != protocol.AttentionKindSwarmQuestion || it.Message == nil || it.Message.ID != p.QuestionID {
-			continue
-		}
-		if _, rpcErr = s.ownedRun(ctx, it.RunID, c); rpcErr != nil {
-			return rpcErr
-		}
-		var shown protocol.MissionShowResult
-		if rpcErr = s.call(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: it.MissionID}, &shown); rpcErr != nil {
-			return rpcErr
-		}
-		c.Summary = fmt.Sprintf("Answer swarm %s (%q)%s, which asked %q: %q", it.MissionID, truncate(shown.Mission.Objective), ownedBy(c),
-			truncate(it.Message.Body), truncate(p.Answer))
-		return nil
+	i := slices.IndexFunc(shown.Questions, func(q protocol.MissionQuestion) bool { return q.ID == p.QuestionID })
+	if i < 0 {
+		return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: swarm %s has no question %s", req.Method, shown.Mission.ID, p.QuestionID)}
 	}
-	// A keyed retry of an answer the server may already hold: the
-	// question is no longer pending, so its swarm is unknown here.
-	c.Summary = fmt.Sprintf("Answer swarm question %s again, which no longer waits: %q", p.QuestionID, truncate(p.Answer))
+	if rpcErr := s.owner(ctx, shown.Mission.AccountableHumanID, c); rpcErr != nil {
+		return rpcErr
+	}
+	q := shown.Questions[i]
+	again, waits := "", ""
+	if q.AnsweredAt != nil {
+		again, waits = " again", " and no longer waits"
+	}
+	c.Summary = fmt.Sprintf("Answer swarm %s (%q)%s%s, which asked %q%s: %q", shown.Mission.ID, truncate(shown.Mission.Objective), ownedBy(c), again,
+		truncate(q.Body), waits, truncate(p.Answer))
 	return nil
 }
 
@@ -397,7 +393,7 @@ func (s *Server) ownedRun(ctx context.Context, id string, c *protocol.AssistantC
 	if rpcErr != nil {
 		return protocol.Run{}, rpcErr
 	}
-	return run, s.owner(ctx, run, c)
+	return run, s.owner(ctx, run.MemberID, c)
 }
 
 func (s *Server) call(ctx context.Context, method string, params, out any) *protocol.Error {
@@ -449,14 +445,14 @@ func (s *Server) summarizeInject(ctx context.Context, req protocol.Request, c *p
 	return nil
 }
 
-// owner marks c as acting on another member's run when the run is not the
-// socket's member's, and names that member: their display name, else their
-// id.
-func (s *Server) owner(ctx context.Context, run protocol.Run, c *protocol.AssistantConfirmation) *protocol.Error {
-	if run.MemberID == s.Member {
+// owner marks c as acting on another member's run or swarm when member is
+// not the socket's member, and names that member: their display name, else
+// their id.
+func (s *Server) owner(ctx context.Context, member string, c *protocol.AssistantConfirmation) *protocol.Error {
+	if member == s.Member {
 		return nil
 	}
-	c.OtherMember, c.OtherOwner = true, run.MemberID
+	c.OtherMember, c.OtherOwner = true, member
 	raw, rpcErr := s.Caller.Call(ctx, protocol.MethodMemberList, nil)
 	if rpcErr != nil {
 		return rpcErr
@@ -466,7 +462,7 @@ func (s *Server) owner(ctx context.Context, run protocol.Run, c *protocol.Assist
 		return &protocol.Error{Code: protocol.CodeInternal, Message: "decode member.list result: " + err.Error()}
 	}
 	for _, m := range members.Members {
-		if m.ID == run.MemberID && m.DisplayName != "" {
+		if m.ID == member && m.DisplayName != "" {
 			c.OtherOwner = m.DisplayName
 		}
 	}
