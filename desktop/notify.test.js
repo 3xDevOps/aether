@@ -389,3 +389,12 @@ test('a watched finish shown before its run.status closes when the success is pu
   await review(run, 'later')
   assert.ok(shown[0].closed)
 })
+
+test("an assistant-made watch's notice is left to its assistant.notice", async () => {
+  watches.set('wat-9', {
+    watch: { id: 'wat-9', source: 'assistant', target: { kind: 'run', run_id: 'r19' }, link: '/?run=r19' },
+    notifications: [{ id: 'not-1', watch_id: 'wat-9', condition: 'finished', title: 'Agent reported done', body: '', link: '/?run=r19' }],
+  })
+  await watchChanged({ watch_id: 'wat-9', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 0)
+})

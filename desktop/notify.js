@@ -191,7 +191,8 @@ async function showWatchNotice(p) {
   }
   const got = await readWatch(p.watch_id)
   const notice = got && (got.notifications || []).find((n) => n.id === p.notification_id)
-  if (!notice) return
+  // The assistant's own watches notify through assistant.notice.
+  if (!notice || got.watch.source === 'assistant') return
   const target = got.watch.target || {}
   const runId = target.kind === 'run' ? target.run_id : ''
   const need = runId && notice.condition === 'needs_you'

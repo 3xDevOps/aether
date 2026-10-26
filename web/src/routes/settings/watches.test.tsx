@@ -129,6 +129,7 @@ describe('watches in settings', () => {
           { ...notice, id: 'not-b', title: 'Off', deliveries: [at('push', 'disabled', 'Push is off in your notification settings')] },
           { ...notice, id: 'not-d', title: 'Waiting', deliveries: [at('push', 'pending', 'you are active at a dashboard')] },
           { ...notice, id: 'not-c', title: 'Broken', deliveries: [at('push', 'failed', '410 Gone from fcm.googleapis.com')] },
+          { ...notice, id: 'not-e', title: 'Skipped', deliveries: [at('push', 'skipped', 'The run notification already sent it'), at('assistant', 'delivered')] },
         ],
       })),
     })
@@ -144,6 +145,8 @@ describe('watches in settings', () => {
     expect(within(dialog).getByText('Push off: Push is off in your notification settings')).toBeDefined()
     expect(within(dialog).getByText('Push pending: you are active at a dashboard')).toBeDefined()
     expect(within(dialog).getByText('Push failed: 410 Gone from fcm.googleapis.com')).toBeDefined()
+    expect(within(dialog).getByText('Push skipped: The run notification already sent it')).toBeDefined()
+    expect(within(dialog).getByText('In the assistant chat')).toBeDefined()
   })
 
   it('pauses, resumes and deletes with the server receipt', async () => {
@@ -370,6 +373,13 @@ describe('watch.changed', () => {
     await applyWatchChanged(useStore, client, event(new Date().toISOString(), { watch_id: 'wat-1', member_id: 'mem_other', notification_id: 'not-1' }))
     expect(toast).not.toHaveBeenCalled()
     expect(client.watchGet).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the toast of an assistant-made watch to its assistant.notice', async () => {
+    const client = fakeApi({ watchGet: vi.fn(async () => ({ watch: watch({ source: 'assistant' }), notifications: [notice] })) })
+    await applyWatchChanged(useStore, client, event(new Date().toISOString(), { watch_id: 'wat-1', member_id: serverInfo.member.id, notification_id: 'not-1' }))
+    expect(useStore.getState().watches['wat-1']).toBeDefined()
+    expect(toast).not.toHaveBeenCalled()
   })
 })
 

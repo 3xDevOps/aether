@@ -84,10 +84,15 @@ export function deliveryText(delivery: WatchDelivery): string {
           return 'Push not sent: resolved before delivery'
         case 'pending':
           return detail ? `Push pending: ${detail}` : 'Push pending'
+        case 'skipped':
+          return `Push skipped: ${detail || 'the run notification already sent it'}`
       }
       break
     case 'in_app':
       return delivery.status === 'failed' ? `In-app failed: ${detail || 'no reason given'}` : 'In-app'
+    case 'assistant':
+      if (delivery.status === 'delivered') return 'In the assistant chat'
+      if (delivery.status === 'failed') return `Assistant chat failed: ${detail || 'no reason given'}`
   }
   return `${delivery.channel}: ${delivery.status}${detail ? ` (${detail})` : ''}`
 }

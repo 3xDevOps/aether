@@ -6242,8 +6242,9 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   **Delete…** (confirmed), and up to 50 notices, each with one line per
   delivery: `Push delivered to 2 devices`, `Push off: <why>`, `No push
   device - in-app only`, `Held for quiet hours: Until 07:00 CET`, `Push
-  pending: <why>`, `Push not sent: resolved before delivery`, `Push failed:
-  <error>`. Opening or closing it keeps focus in
+  pending: <why>`, `Push not sent: resolved before delivery`, `Push skipped:
+  <why>`, `Push failed: <error>`, and `In the assistant chat` for a notice
+  the assistant also wrote into its chat. Opening or closing it keeps focus in
   the dialog's hands rather than the category heading.
 - **Creating**: **Watch…** in a live run's menu and the palette
   (`runCommands`, when the server has `watch.create`), **Watch…** in a live
@@ -6262,7 +6263,8 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   new notice and is not a replayed catch-up (older than 30 seconds on the
   server's clock), it toasts the notice's title and body with **Open**,
   which follows the notice's link: a dashboard link in place, a GitHub link
-  in a new tab.
+  in a new tab. A watch the assistant made (`source: assistant`) toasts
+  through its `assistant.notice` instead, here and in the desktop app.
 - **Desktop app**: `desktop/notify.js` shows each new watch notice natively
   and opens its link on click. A run's needs-you or finished notice shares
   the run's five-second duplicate window with `run.status`, so one need or

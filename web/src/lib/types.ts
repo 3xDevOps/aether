@@ -2310,10 +2310,10 @@ export interface WatchObserved {
   review_state?: string
 }
 
-export type WatchDeliveryChannel = 'push' | 'in_app'
+export type WatchDeliveryChannel = 'push' | 'in_app' | 'assistant'
 
 /** pending: not sent yet, with why in detail. cleared: a held push dropped because its need was resolved before it could be sent. */
-export type WatchDeliveryStatus = 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'failed' | 'cleared' | 'pending'
+export type WatchDeliveryStatus = 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'failed' | 'cleared' | 'pending' | 'skipped'
 
 export interface WatchDelivery {
   channel: WatchDeliveryChannel
