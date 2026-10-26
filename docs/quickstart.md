@@ -336,7 +336,8 @@ linked clone. Evidence packets cover the primary repo only, and the dashboard's
 Compare menu is the primary repo's.
 Extra branches are published to their own workspaces; closing the run commits
 and publishes every repo. Each pull request is per repo; there is no cross-repo
-merge. Swarms and templates use one workspace.
+merge. A swarm takes extra repos the same way, for its integrator and every
+worker ([teams.md](teams.md#launch-a-swarm)); templates use one workspace.
 
 ## 7. Watch it
 

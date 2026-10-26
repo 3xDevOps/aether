@@ -18,7 +18,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
-import { multiRepoFeature, multiRepoMethod } from '@/lib/repos'
+import { multiRepoFeature, multiRepoMethod, swarmReposFeature } from '@/lib/repos'
 import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
 import { useStore } from '@/store'
@@ -46,7 +46,7 @@ export function LaunchDialog() {
   const upsertRun = useStore((s) => s.upsertRun)
   const rememberLaunch = useStore((s) => s.rememberLaunch)
   const self = useStore((s) => s.info?.member)
-  const serverMountsRepos = useStore((s) => s.info?.features?.includes(multiRepoFeature) ?? false)
+  const features = useStore((s) => s.info?.features)
   const capabilities = useStore((s) => s.capabilities)
   const cap = useCapability()
   const workspaces = useStore((s) => s.workspaces)
@@ -62,6 +62,9 @@ export function LaunchDialog() {
     const { paletteDialog, route } = useStore.getState()
     return swarmAvailable && (paletteDialog === 'swarm' || route.name === 'missions') ? 'swarm' : 'run'
   })
+  const reposOffered = extraOptions.length > 0 && cap.hasMethod(multiRepoMethod) &&
+    (features?.includes(kind === 'swarm' ? swarmReposFeature : multiRepoFeature) ?? false)
+  const extraRepos = reposOffered && extras.length ? { extra_workspace_ids: extras } : {}
   const [accounts, setAccounts] = useState<Member[]>(self ? [self] : [])
   const [account, setAccount] = useState(self?.id ?? '')
   const [fallback, setFallback] = useState(automaticFallback)
@@ -164,7 +167,7 @@ export function LaunchDialog() {
       ...(chosenModel ? { model: chosenModel } : {}),
       ...(sharedAccount ? { account_member_id: account } : {}),
       ...fallbackParams(fallback, accounts, account),
-      ...(extras.length ? { extra_workspace_ids: extras } : {}),
+      ...extraRepos,
     })
     rememberLaunch(harness, mode, chosenModel)
     upsertRun(run)
@@ -201,6 +204,7 @@ export function LaunchDialog() {
       execution_choices: [integrator, ...workerChoices.filter((choice) => !sameWorker(choice, integrator) || choice.mode !== integrator.mode)]
         .sort((a, b) => a.account_member_id.localeCompare(b.account_member_id) || a.harness.localeCompare(b.harness) || a.mode.localeCompare(b.mode) || (a.model ?? '').localeCompare(b.model ?? '')),
       ...fallbackParams(fallback, accounts, ''),
+      ...extraRepos,
     }
     const serialized = JSON.stringify(contents)
     const key = swarmKeys.get(serialized) ?? idempotencyKey()
@@ -286,9 +290,6 @@ export function LaunchDialog() {
           >
             <TabsContent value="run" className="flex flex-col gap-4">
               <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
-              {extraOptions.length > 0 && cap.hasMethod(multiRepoMethod) && serverMountsRepos && (
-                <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} />
-              )}
             </TabsContent>
             <TabsContent value="swarm" className="flex flex-col gap-4">
               {swarmUnavailable && <Callout tone="needs-you" role="status" id="launch-swarm-unavailable">{swarmUnavailable}</Callout>}
@@ -316,6 +317,7 @@ export function LaunchDialog() {
                 help="A worker whose agent cannot use this mode runs in the mode its row names."
               />
             </TabsContent>
+            {reposOffered && <ExtraRepos options={extraOptions} value={extras} onChange={setExtras} disabled={launching} swarm={kind === 'swarm'} />}
             {notes}
             {options}
             {error && <Callout ref={errorCallout} tone="failed" role="alert" title={kind === 'swarm' ? 'Swarm not created' : 'Launch failed'}>{error}{setup && <SetupOutput output={setup} />}</Callout>}

@@ -156,6 +156,8 @@ export interface Mission {
   accountable_human_id: string
   integrator: MissionIntegrator
   execution_choices: MissionExecutionChoice[]
+  /** Workspaces the integrator and every worker check out at /repos/<name>. */
+  extra_workspace_ids?: string[]
   current_integrator_run_id: string
   integrator_generation: number
   accepted_set_version: number

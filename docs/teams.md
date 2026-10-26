@@ -529,7 +529,8 @@ flowchart LR
 In the dashboard, open **New run** and use the **Swarm** tab. Set the objective,
 the **Integrator agent**, **Integrator mode** (Standard or Enhanced, since
 Background exits after one turn), the **Integrator model**, **Agents for
-workers** with a model on each, and **Worker mode** (Enhanced by default). A
+workers** with a model on each, **Worker mode** (Enhanced by default) and,
+optionally, **Add repos**. A
 worker whose agent cannot use that mode runs in the mode its row names. Swarm
 agents run only in a mode Aether can wake when mail arrives, so an agent with no
 idle wake ([Agents](harnesses.md#supported-agents)) is refused Standard, with
@@ -543,7 +544,13 @@ aether swarm create "add a health check endpoint and document it" \
 ```
 
 `--idempotency-key <key>` makes a retried create return the same swarm.
-`--worker agent[:mode[:model]]` allows workers on an agent and repeats. An empty
+`--worker agent[:mode[:model]]` allows workers on an agent and repeats.
+`--repo <workspace>` (repeatable) checks out another workspace at
+`/repos/<name>` in the integrator and every worker, as `aether run --repo`
+does for one run ([quickstart.md](quickstart.md#working-across-repos)). A
+candidate combines `/workspace` only: a worker's commits in an extra repo stay
+on that worker's run branch there, which its run page shows under **Changes**,
+and the integrator names those runs in its final report. An empty
 model keeps the agent's default. `-` as the objective reads it from stdin. The
 integrator runs on your account, or the one named by `--account`, in `--mode
 standard` or `enhanced` ([enhanced-runs.md](enhanced-runs.md)). A mode left out of
@@ -608,6 +615,7 @@ A candidate lives 30 days, and a passing verification is valid for 24 hours. See
 - The permissive default lets any collaborator stop any run. Use `aether protect`
   or `--message-others admins-only` to narrow it.
 - A run's extra repos (`aether run --repo`) share its primary workspace's
-  environment, account and budget. Swarms and templates take one workspace.
+  environment, account and budget. A swarm's candidates combine its primary
+  workspace only. Templates take one workspace.
 - Evidence packets and candidates expire after 30 days.
 - A merge of two members cannot be undone.

@@ -54,6 +54,7 @@ type Mission struct {
 	AccountableHumanID           string                   `json:"accountable_human_id"`
 	Integrator                   MissionIntegrator        `json:"integrator"`
 	ExecutionChoices             []MissionExecutionChoice `json:"execution_choices"`
+	ExtraWorkspaceIDs            []string                 `json:"extra_workspace_ids,omitempty"`
 	CurrentIntegratorRunID       string                   `json:"current_integrator_run_id,omitempty"`
 	IntegratorAuthorizingHumanID string                   `json:"integrator_authorizing_human_id,omitempty"`
 	IntegratorRunOwnerID         string                   `json:"integrator_run_owner_id,omitempty"`
@@ -249,6 +250,9 @@ type MissionCreateParams struct {
 	// integrator and every worker, as on RunLaunchParams.
 	FallbackAccountMemberIDs []string `json:"fallback_account_member_ids,omitempty"`
 	NoFallback               bool     `json:"no_fallback,omitempty"`
+	// ExtraWorkspaceIDs are checked out in the integrator and every worker,
+	// as on RunLaunchParams.
+	ExtraWorkspaceIDs []string `json:"extra_workspace_ids,omitempty"`
 }
 
 type MissionCreateResult struct {
@@ -467,6 +471,9 @@ func MissionFromDomain(m *domain.Mission) Mission {
 	out.ExecutionChoices = make([]MissionExecutionChoice, len(m.ExecutionChoices))
 	for i, c := range m.ExecutionChoices {
 		out.ExecutionChoices[i] = MissionExecutionChoice{AccountMemberID: string(c.AccountMemberID), Harness: c.Harness, Mode: string(c.Mode), Model: c.Model}
+	}
+	for _, id := range m.ExtraWorkspaces {
+		out.ExtraWorkspaceIDs = append(out.ExtraWorkspaceIDs, string(id))
 	}
 	return out
 }

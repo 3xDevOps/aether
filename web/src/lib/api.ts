@@ -644,6 +644,7 @@ export const api = {
     execution_choices: MissionExecutionChoice[]
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
+    extra_workspace_ids?: string[]
     idempotency_key: string
   }) => call<MissionCreateResult>('mission.create', params),
   missionShow: (missionID: string) =>

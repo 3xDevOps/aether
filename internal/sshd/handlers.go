@@ -51,7 +51,7 @@ func (s *Server) serverInfo(ctx context.Context, member domain.MemberID, _ json.
 		TailnetDashboardError: dashboardErr,
 		DashboardURL:          dashboardURL,
 		MinClientVersion:      s.minClientVersion(),
-		Features:              []string{protocol.FeatureMultiRepo},
+		Features:              []string{protocol.FeatureMultiRepo, protocol.FeatureSwarmRepos},
 	}, nil
 }
 
@@ -155,7 +155,7 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if p.Task == "" && mode == domain.LaunchHeadless {
 		return nil, invalidParams("task is required in headless mode")
 	}
-	if err := validateExtraWorkspaces(p.WorkspaceID, p.ExtraWorkspaceIDs); err != nil {
+	if err := ValidateExtraWorkspaces(p.WorkspaceID, p.ExtraWorkspaceIDs); err != nil {
 		return nil, invalidParams(err.Error())
 	}
 	policy, err := fallback.Policy(p.FallbackAccountMemberIDs, p.NoFallback)
@@ -786,14 +786,15 @@ func (s *Server) runPull(ctx context.Context, _ domain.MemberID, params json.Raw
 	}, nil
 }
 
-func validateExtraWorkspaces(primary string, extras []string) error {
+// ValidateExtraWorkspaces checks the extra_workspace_ids of a run or swarm launch.
+func ValidateExtraWorkspaces(primary string, extras []string) error {
 	seen := map[string]bool{primary: true}
 	for _, id := range extras {
 		switch {
 		case id == "":
 			return errors.New("extra_workspace_ids must not contain an empty id")
 		case id == primary:
-			return fmt.Errorf("extra workspace %s is the run's primary workspace", id)
+			return fmt.Errorf("extra workspace %s is the primary workspace", id)
 		case seen[id]:
 			return fmt.Errorf("extra workspace %s is listed twice", id)
 		}

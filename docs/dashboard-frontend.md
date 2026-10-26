@@ -3256,10 +3256,17 @@ name, container path, branch, `primary`), the primary first; a single-repo run
 has none and shows none of what follows. The dashboard offers it only when the
 gateway lists the `run.repos` method.
 
-- **Launch.** With another workspace to add, the run tab of the launch dialog
-  shows **Add repos** (`launch/extra-repos.tsx`), a checklist of the member's
-  other workspaces. Each pick becomes a chip and goes out as
-  `extra_workspace_ids`; the repo is checked out at `/repos/<name>`.
+- **Launch.** With another workspace to add, the launch dialog shows **Add
+  repos** (`launch/extra-repos.tsx`) below either tab, a checklist of the
+  member's other workspaces. Each pick becomes a chip and goes out as
+  `extra_workspace_ids` on `run.launch`, or on `mission.create` from the Swarm
+  tab, whose help line adds that candidates combine `/workspace` only; the repo
+  is checked out at `/repos/<name>`. The picks are kept across tabs. The Swarm
+  tab offers it only when `server.info` also lists the `swarm-repos` feature,
+  since an older server drops the field; a pick made on Run is then not sent.
+- **Swarm page.** A swarm with extra repos says `Extra repos: <names>, at
+  /repos/<name> in every run.` under its phase line, naming a workspace that
+  no longer exists by its id.
 - **Changes.** The view gains a **Repos** tab strip above it: one tab per repo
   with its changed-file count, then **All repos**. The choice is the `repo`
   query parameter of `?run=<id>&view=changes` (a workspace id, or `all`; none
