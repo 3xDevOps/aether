@@ -140,6 +140,11 @@ const (
 // itself blocked.
 const BlockedReasonPrefix = "blocked: "
 
+// ReportedSuccessReason is the reason of a run its agent's success report
+// completed, before any retention suffix. A live run in that standing has
+// ActivityFinished instead.
+const ReportedSuccessReason = "agent reported success"
+
 // NeedsAttention is the one rule for whether a run needs a member, which
 // push notifications, assistant follow notices, aether runs --needs-you and
 // the dashboard's Needs you list share: a live run with an open human

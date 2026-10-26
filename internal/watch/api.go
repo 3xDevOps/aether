@@ -145,11 +145,11 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 			return "", "", nil, fmt.Errorf("run %s: %w", t.RunID, err)
 		}
 		if run.Status.Final() {
-			_, body, _ := runFinish(run)
+			_, body, _ := runFinish(run, "")
 			return "", "", nil, invalid("run %s has already ended (%s); there is nothing left to watch", t.RunID, body)
 		}
 		ws, title = run.WorkspaceID, push.RunTitle(run)
-		if key, _, ok := runFinish(run); ok {
+		if key, _, ok := runFinish(run, ""); ok {
 			fired[protocol.WatchFinished] = key
 		}
 	case protocol.WatchTargetMission:

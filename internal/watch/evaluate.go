@@ -215,7 +215,7 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 		}
 	}
 	var finished string
-	if key, body, ok := runFinish(run); ok {
+	if key, body, ok := runFinish(run, w.Fired[protocol.WatchFinished]); ok {
 		finished = body
 		if slices.Contains(w.Conditions, protocol.WatchFinished) {
 			r.notices = append(r.notices, Notice{Condition: protocol.WatchFinished, Key: key, Title: r.title, Body: body, Link: link})
@@ -299,8 +299,10 @@ func inputKey(r *domain.RunInputRequest) string {
 
 // runFinish words how the run ended, keeping apart what the agent
 // reported from what a member decided. A success the agent reported is
-// keyed by when it was reported, so a later one is announced again.
-func runFinish(run *domain.Run) (key, body string, ok bool) {
+// keyed by when the run entered that standing, so a later one is announced
+// again; prev is the finished key last fired, which a reported success
+// keeps when its live run then completes.
+func runFinish(run *domain.Run, prev string) (key, body string, ok bool) {
 	reason := strings.TrimSuffix(run.Reason, "; retained container")
 	switch run.Status {
 	case domain.RunMerged:
@@ -314,22 +316,25 @@ func runFinish(run *domain.Run) (key, body string, ok bool) {
 		return "failed", "Failed: " + reason, true
 	case domain.RunInterrupted:
 		return "interrupted", "Stopped", true
-	}
-	if run.Review == domain.ReviewReady && (run.Status == domain.RunCompleted || run.Status.Live() && run.Activity == domain.ActivityFinished) {
-		at := run.ReviewChangedAt
-		if at == nil {
-			at = run.StatusChangedAt
+	case domain.RunCompleted:
+		if reason != domain.ReportedSuccessReason {
+			return "completed", "Completed", true
 		}
-		key = "reported"
-		if at != nil {
-			key += "|" + strconv.FormatInt(at.UnixNano(), 10)
+		if strings.HasPrefix(prev, "reported|live|") {
+			return prev, "Agent reported done", true
 		}
-		return key, "Agent reported done", true
 	}
-	if run.Status == domain.RunCompleted && run.Review == "" {
-		return "completed", "Completed", true
+	if run.Status.Live() && run.Activity != domain.ActivityFinished {
+		return "", "", false
 	}
-	return "", "", false
+	key = "reported|"
+	if run.Status.Live() {
+		key += "live|"
+	}
+	if run.StatusChangedAt != nil {
+		key += strconv.FormatInt(run.StatusChangedAt.UnixNano(), 10)
+	}
+	return key, "Agent reported done", true
 }
 
 func (s *Service) readMission(ctx context.Context, w *store.Watch) (reading, error) {

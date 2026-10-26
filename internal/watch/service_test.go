@@ -374,7 +374,7 @@ func TestRunNeedsAreNotifiedOncePerNeedAndFinishWordsStayApart(t *testing.T) {
 	}
 
 	h.runs.answer(run.ID)
-	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, nil); err != nil {
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, domain.ReportedSuccessReason, "", nil, nil); err != nil {
 		t.Fatalf("FinishRunReported: %v", err)
 	}
 	h.publish(run.ID, events.RunStatusPayload{To: domain.RunCompleted})
@@ -390,6 +390,37 @@ func TestRunNeedsAreNotifiedOncePerNeedAndFinishWordsStayApart(t *testing.T) {
 	h.eventually("the watch to finish", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
 	if got := bodies(h.notices(w.ID)); len(got) != 4 || got[3] != "finished: Closed as merged" {
 		t.Fatalf("notices = %q, want Closed as merged last", got)
+	}
+}
+
+func TestReportedSuccessIsAnnouncedOnceAfterTheOwnerClearsReview(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Tidy the config loader")
+	w := h.watch(h.ada, runTarget(run)).Watch
+
+	// The owner puts the success off before the debounced evaluation reads it.
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunNeedsAttention, domain.ReportedSuccessReason, domain.ActivityFinished, nil, nil); err != nil {
+		t.Fatalf("FinishRunReported: %v", err)
+	}
+	if _, ok, err := h.db.SetRunReview(h.ctx, run.ID, domain.ReviewLater, domain.ReviewReady); err != nil || !ok {
+		t.Fatalf("SetRunReview = %v, %v", ok, err)
+	}
+	h.publish(run.ID, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFinished})
+	h.eventually("the finish", func() bool { return len(h.notices(w.ID)) == 1 })
+
+	// Accepting it, and the run then closing on that report, are the same success.
+	if _, ok, err := h.db.SetRunReview(h.ctx, run.ID, domain.ReviewAccepted, domain.ReviewLater); err != nil || !ok {
+		t.Fatalf("SetRunReview = %v, %v", ok, err)
+	}
+	h.publish(run.ID, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityFinished})
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, domain.ReportedSuccessReason, "", nil, nil); err != nil {
+		t.Fatalf("FinishRunReported: %v", err)
+	}
+	h.publish(run.ID, events.RunStatusPayload{To: domain.RunCompleted})
+	settle()
+	if got := bodies(h.notices(w.ID)); len(got) != 1 || got[0] != "finished: Agent reported done" {
+		t.Fatalf("notices = %q, want Agent reported done once", got)
 	}
 }
 
@@ -816,7 +847,7 @@ func TestWatchingAFinishedTargetAnnouncesOnlyWhatComesNext(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	run := h.run(h.ada, "Already done")
-	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, nil); err != nil {
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, domain.ReportedSuccessReason, "", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	w := h.watch(h.ada, runTarget(run)).Watch
