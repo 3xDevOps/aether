@@ -29,10 +29,15 @@ function dateValue(at: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-/** The end of the chosen day, on this browser's clock. */
-function endOfDay(value: string): string {
+/** The end of the chosen day on this browser's clock, or the latest the server takes. */
+function endOfDay(value: string, latest: number): string {
   const [year, month, day] = value.split('-').map(Number)
-  return new Date(year!, month! - 1, day!, 23, 59, 59).toISOString()
+  return new Date(Math.min(new Date(year!, month! - 1, day!, 23, 59, 59).getTime(), latest)).toISOString()
+}
+
+/** The server refuses an end more than maxExpiryDays from its own now; a minute's margin covers clock skew and the request. */
+function latestEnd(): number {
+  return Date.now() + maxExpiryDays * dayMs - 60_000
 }
 
 export function LinkTo({ link, children, className }: { link: string; children: ReactNode; className?: string }) {
@@ -56,7 +61,8 @@ function Observed({ watch }: { watch: Watch }) {
   if (o.checks) rows.push(['Checks', `${o.checks.passed} passed, ${o.checks.failed} failed, ${o.checks.pending} pending`])
   if (o.review_state) rows.push(['Review', o.review_state])
   rows.push(['Created', <RelativeTime key="created" at={watch.created_at} />])
-  rows.push([isLive(watch) ? 'Ends' : 'Ended', <RelativeTime key="expires" at={watch.expires_at} />])
+  if (watch.state === 'done') rows.push(['Done', <RelativeTime key="done" at={watch.updated_at} />])
+  else rows.push([watch.state === 'expired' ? 'Ended' : 'Ends', <RelativeTime key="expires" at={watch.expires_at} />])
   if (watch.last_check_at) rows.push(['Last check', <RelativeTime key="last" at={watch.last_check_at} />])
   if (watch.next_check_at && isLive(watch)) rows.push(['Next check', <RelativeTime key="next" at={watch.next_check_at} />])
   return (
@@ -107,19 +113,40 @@ function Notices({ notices }: { notices: WatchNotification[] | undefined }) {
   )
 }
 
+interface EditFields {
+  conditions: WatchCondition[]
+  label: string
+  expires: string
+}
+
+function editFields(watch: Watch): EditFields {
+  return { conditions: watch.conditions, label: watch.label ?? '', expires: dateValue(watch.expires_at) }
+}
+
+function sameConditions(a: WatchCondition[], b: WatchCondition[]): boolean {
+  return a.length === b.length && a.every((c) => b.includes(c))
+}
+
 function Edit({ watch, client }: { watch: Watch; client: Api }) {
   const id = useId()
-  const [conditions, setConditions] = useState<WatchCondition[]>(watch.conditions)
-  const [label, setLabel] = useState(watch.label ?? '')
-  const [expires, setExpires] = useState(dateValue(watch.expires_at))
+  // base is the watch as this form last took it. An untouched form follows later changes, such as the assistant's;
+  // a touched one keeps the member's edits and sends only the fields they changed.
+  const [base, setBase] = useState(() => ({ at: watch.updated_at, fields: editFields(watch) }))
+  const [form, setForm] = useState(base.fields)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const changed =
-    conditions.length !== watch.conditions.length || conditions.some((c) => !watch.conditions.includes(c)) ||
-    label.trim() !== (watch.label ?? '') ||
-    expires !== dateValue(watch.expires_at)
+  const conditionsChanged = !sameConditions(form.conditions, base.fields.conditions)
+  const labelChanged = form.label.trim() !== base.fields.label
+  const expiresChanged = form.expires !== base.fields.expires
+  const touched = conditionsChanged || labelChanged || expiresChanged
+  if (!touched && !busy && base.at !== watch.updated_at) {
+    const next = { at: watch.updated_at, fields: editFields(watch) }
+    setBase(next)
+    setForm(next.fields)
+  }
+  const expired = watch.state === 'expired'
   const today = dateValue(new Date().toISOString())
-  const latest = dateValue(new Date(Date.parse(watch.created_at) + maxExpiryDays * dayMs).toISOString())
+  const latest = dateValue(new Date(latestEnd()).toISOString())
 
   const save = async () => {
     setBusy(true)
@@ -127,11 +154,14 @@ function Edit({ watch, client }: { watch: Watch; client: Api }) {
     try {
       const result = await client.watchUpdate({
         watch_id: watch.id,
-        conditions,
-        label: label.trim(),
-        ...(expires !== dateValue(watch.expires_at) ? { expires_at: endOfDay(expires) } : {}),
+        ...(conditionsChanged ? { conditions: form.conditions } : {}),
+        ...(labelChanged ? { label: form.label.trim() } : {}),
+        ...(expiresChanged ? { expires_at: endOfDay(form.expires, latestEnd()) } : {}),
       })
       useStore.getState().putWatch(result.watch)
+      const next = { at: result.watch.updated_at, fields: editFields(result.watch) }
+      setBase(next)
+      setForm(next.fields)
       toast.success(result.receipt)
     } catch (err) {
       setError(errorSentence(err))
@@ -142,17 +172,20 @@ function Edit({ watch, client }: { watch: Watch; client: Api }) {
 
   return (
     <section aria-label="Change this watch" className="flex min-w-0 flex-col gap-3">
-      <SectionLabel as="h3">Notify me when</SectionLabel>
-      <div className="flex min-w-0 flex-col gap-2">
+      <fieldset className="flex min-w-0 flex-col gap-2">
+        <legend className="mb-2 text-ui-sm font-medium text-muted">Notify me when</legend>
         {conditionChoices[watch.target.kind].map((choice) => (
           <div key={choice.value} className="flex min-w-0 items-start gap-3">
             <Checkbox
               id={`${id}-${choice.value}`}
               className="mt-0.5"
               aria-describedby={`${id}-${choice.value}-help`}
-              checked={conditions.includes(choice.value)}
+              checked={form.conditions.includes(choice.value)}
               disabled={busy}
-              onCheckedChange={(on) => setConditions((list) => (on === true ? [...list, choice.value] : list.filter((c) => c !== choice.value)))}
+              onCheckedChange={(on) => setForm((f) => ({
+                ...f,
+                conditions: on === true ? [...f.conditions, choice.value] : f.conditions.filter((c) => c !== choice.value),
+              }))}
             />
             <div className="flex min-w-0 flex-col gap-0.5">
               <label htmlFor={`${id}-${choice.value}`} className="text-ui font-medium text-text">{choice.label}</label>
@@ -160,18 +193,27 @@ function Edit({ watch, client }: { watch: Watch; client: Api }) {
             </div>
           </div>
         ))}
-      </div>
+      </fieldset>
       <div className="grid min-w-0 gap-3 sm:grid-cols-2">
         <FormField label="Label" help="Shown instead of the target's title.">
-          <Input value={label} maxLength={120} disabled={busy} placeholder={watch.target_title} onChange={(event) => setLabel(event.target.value)} />
+          <Input value={form.label} maxLength={120} disabled={busy} placeholder={watch.target_title} onChange={(event) => setForm({ ...form, label: event.target.value })} />
         </FormField>
-        <FormField label="Ends on" help={`At most ${maxExpiryDays} days after it was created.`}>
-          <Input type="date" value={expires} min={today} max={latest} disabled={busy} onChange={(event) => setExpires(event.target.value)} />
+        <FormField
+          label="Ends on"
+          help={expired ? `Pick a new day, at most ${maxExpiryDays} days from today, to watch again.` : `At most ${maxExpiryDays} days from today.`}
+        >
+          <Input type="date" value={form.expires} min={today} max={latest} disabled={busy} onChange={(event) => setForm({ ...form, expires: event.target.value })} />
         </FormField>
       </div>
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
-      <Button variant="secondary" size="sm" className="self-start" disabled={busy || !changed || conditions.length === 0} onClick={() => void save()}>
-        {busy ? 'Saving…' : 'Save changes'}
+      <Button
+        variant="secondary"
+        size="sm"
+        className="self-start"
+        disabled={busy || !touched || form.conditions.length === 0 || (expired && !expiresChanged)}
+        onClick={() => void save()}
+      >
+        {busy ? 'Saving…' : expired ? 'Watch again' : 'Save changes'}
       </Button>
     </section>
   )
@@ -220,10 +262,10 @@ export function WatchDetail({ watchID, client, onClose }: { watchID: string; cli
       <DialogContent
         variant={phone ? 'side' : 'center'}
         className={phone ? 'w-full gap-4 overflow-y-auto p-4' : 'max-w-2xl'}
-        aria-describedby={undefined}
       >
         <DialogHeader>
           <DialogTitle>{watch ? watch.label || watch.target_title : 'Watch'}</DialogTitle>
+          {!watch && <DialogDescription className="sr-only">What this watch follows and the notices it sent.</DialogDescription>}
           {watch && (
             <DialogDescription asChild>
               <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -247,7 +289,7 @@ export function WatchDetail({ watchID, client, onClose }: { watchID: string; cli
               </Callout>
             )}
             <Observed watch={watch} />
-            {isLive(watch) && <Edit watch={watch} client={client} />}
+            {(isLive(watch) || watch.state === 'expired') && <Edit watch={watch} client={client} />}
             <Notices notices={notices} />
             <div className="flex flex-wrap gap-2 border-t border-seam pt-3">
               {watch.state === 'paused' && <Button variant="secondary" size="sm" disabled={busy} onClick={() => void pause(false)}>Resume</Button>}

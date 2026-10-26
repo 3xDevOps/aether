@@ -15,13 +15,13 @@ export interface ConditionChoice {
 export const conditionChoices: Record<WatchTargetKind, ConditionChoice[]> = {
   run: [
     { value: 'needs_you', label: 'Needs you', description: 'The agent asks a question, wants a permission or is blocked. Once per need.', default: true },
-    { value: 'finished', label: 'Finished', description: 'The run ends: the agent reported done or failed, or it was killed or closed. Finished means the agent reported done, not that anything merged.', default: true },
+    { value: 'finished', label: 'Finished', description: 'The run ends: the agent reported done or failed, it was stopped, or a member closed it. Finished means the agent reported done, not that anything merged.', default: true },
     { value: 'pr_merged', label: 'Pull request merged', description: "The run's pull request merged on GitHub. Merged means GitHub merged the PR.", default: false },
     { value: 'ci', label: 'CI finished', description: "The checks on the run's pull request finish, pass or fail.", default: false },
   ],
   mission: [
     { value: 'needs_you', label: 'Needs you', description: 'The integrator asks you something, is blocked or stops. Never for each worker.', default: true },
-    { value: 'finished', label: 'Finished', description: 'The swarm completes, fails or is cancelled.', default: true },
+    { value: 'finished', label: 'Finished', description: 'The swarm completes or is cancelled.', default: true },
     { value: 'delivered', label: 'Delivered', description: 'The integrated result lands on its target branch, or is proposed as a pull request.', default: false },
   ],
   pr: [
@@ -73,11 +73,11 @@ export function deliveryText(delivery: WatchDelivery): string {
         case 'delivered':
           return detail ? `Push delivered to ${detail}` : 'Push delivered'
         case 'disabled':
-          return 'Push off'
+          return detail ? `Push off: ${detail}` : 'Push off'
         case 'no_destination':
           return 'No push device - in-app only'
         case 'held_quiet_hours':
-          return 'Held for quiet hours'
+          return detail ? `Held for quiet hours: ${detail}` : 'Held for quiet hours'
         case 'failed':
           return `Push failed: ${detail || 'no reason given'}`
         case 'cleared':
@@ -93,9 +93,9 @@ export function deliveryText(delivery: WatchDelivery): string {
         case 'no_destination':
           return 'Desktop app not open'
         case 'disabled':
-          return 'Desktop app notifications off'
+          return detail ? `Desktop app notifications off: ${detail}` : 'Desktop app notifications off'
         case 'held_quiet_hours':
-          return 'Desktop app held for quiet hours'
+          return detail ? `Desktop app held for quiet hours: ${detail}` : 'Desktop app held for quiet hours'
         case 'failed':
           return `Desktop app failed: ${detail || 'no reason given'}`
         case 'cleared':
@@ -108,6 +108,14 @@ export function deliveryText(delivery: WatchDelivery): string {
       return delivery.status === 'failed' ? `In-app failed: ${detail || 'no reason given'}` : 'In-app'
   }
   return `${delivery.channel}: ${delivery.status}${detail ? ` (${detail})` : ''}`
+}
+
+/** What a live watch does now, from its own conditions and state. */
+export function watchHint(watch: Pick<Watch, 'target' | 'conditions' | 'state' | 'error'>): string {
+  if (watch.state === 'paused') return 'Watch paused: no notices until you resume it.'
+  if (watch.state === 'error') return `The server cannot check this watch: ${watch.error || 'no reason given'}. It keeps retrying.`
+  const conditions = watch.conditions.map((c) => conditionLabel(watch.target.kind, c)).join(', ')
+  return `Notifies you on: ${conditions}. Notices appear in the dashboard, and on your push devices when push is on.`
 }
 
 export function deliveryTone(delivery: WatchDelivery): Tone {

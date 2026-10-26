@@ -79,7 +79,7 @@ export function WatchDialog({ client = api }: { client?: Api }) {
         <DialogHeader>
           <DialogTitle>Watch {title}</DialogTitle>
           <DialogDescription>
-            The server checks it and tells you on your push devices, the desktop app and here, even with this page closed. A watch never acts: it does not answer, approve or merge. It ends after {defaultExpiryDays} days.
+            The server keeps checking it after you close this page. Notices appear in the dashboard and go to your push devices when push is on; the confirmation lists where they will go. A watch never acts: it does not answer, approve or merge. It ends after {defaultExpiryDays} days.
           </DialogDescription>
         </DialogHeader>
         <fieldset className="flex min-w-0 flex-col gap-3">

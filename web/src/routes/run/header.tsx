@@ -20,7 +20,7 @@ import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
 import { runLabel, stateLabel, stateTitle, stateWords } from '@/lib/status'
 import { cn } from '@/lib/utils'
-import { watchRoute } from '@/lib/watches'
+import { watchHint, watchRoute } from '@/lib/watches'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { RunLineage, useChildRunsItems } from '@/routes/run/child-runs'
@@ -167,7 +167,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
           <Button
             variant="quiet"
             size="sm"
-            hint="You get a notification when this run needs you or finishes, even with this page closed"
+            hint={watchHint(watch)}
             className="shrink-0"
             onClick={() => {
               const route = watchRoute(watch.id)

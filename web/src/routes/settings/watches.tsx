@@ -105,8 +105,8 @@ export function WatchesSection({ client }: { client: Api }) {
         hidden > 0
           ? <p className="text-ui text-muted">No active watches. {hidden === 1 ? 'One watch has' : `${hidden} watches have`} ended; show All to see {hidden === 1 ? 'it' : 'them'}.</p>
           : (
-            <EmptyState icon={<Eye />} title="No watches yet." className="py-10">
-              A watch has the server tell you when a run, swarm or pull request needs you or finishes, even with every Aether page closed. Choose Watch… in a run&apos;s menu, a swarm&apos;s menu or beside a run&apos;s pull request.
+            <EmptyState icon={<Eye />} title="No watches yet" className="py-10">
+              A watch has the server keep checking a run, swarm or pull request after you close the dashboard, and notify you here and on your push devices when it needs you, finishes, or its checks or reviews come in. Choose Watch… in a run&apos;s menu, a swarm&apos;s menu or beside a run&apos;s pull request.
             </EmptyState>
           )
       )}

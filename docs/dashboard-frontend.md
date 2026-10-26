@@ -6109,10 +6109,12 @@ Categories:
   and Slack direct messages ([slack.md](slack.md)). Watch notifications
   (`notify.prefs.get` and `notify.prefs.set`, shown when the server has
   them) holds **Watch notifications on push devices**, whose help states
-  where notices go now (`Push to 2 devices`, `Push is off` or `No push
-  device subscribed, so in-app only`, then the desktop app and in-app), and
-  **Quiet hours**: turning it on saves 22:00 to 07:00 in the browser's time
-  zone; **From**, **Until** and **Time zone** change it, with **Save**. See
+  where notices go now (`Push to 2 devices`, `Push is off`, `No push
+  device subscribed, so in-app only`, or `No push (<push.status error>), so
+  in-app only` when the server has no Web Push, then the desktop app and
+  in-app), and **Quiet hours**: turning it on saves 22:00 to 07:00 in the browser's time
+  zone; **From**, **Until** and **Time zone** change it, with **Save**; a
+  refused change shows its error on that row. See
   [Watches](#watches).
 - **Assistant**, where the assistant is available (`useAssistantAvailable`):
   **Let the assistant act without asking** reads and sets `assistant.settings`
@@ -6215,7 +6217,8 @@ Repository settings, base freshness and the source mirror live on the
 
 A **watch** is a member's standing request that the server tell them when a
 run, a swarm or a pull request needs them or finishes; the server evaluates
-it, so it keeps working with every page closed. The server side and the
+it, so it keeps checking with every page closed. Notices appear in the
+dashboard and go to the member's push devices when push is on. The server side and the
 conditions are in [watches.md](watches.md). The dashboard's parts:
 
 - **Settings › Watches** (`src/routes/settings/watches.tsx`), shown when the
@@ -6231,11 +6234,16 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   `?page=settings&id=watches&watch=<id>`, a dialog that is a full-screen
   sheet under 768px. It reads `watch.get` and shows what the server sees
   (`observed`), the conditions, label and end date to change
-  (`watch.update`, at most 90 days after creation), **Pause** or **Resume**,
+  (`watch.update` with only the fields the member changed, the end at most
+  90 days from now). An untouched form follows changes made elsewhere, such
+  as by the assistant. An expired watch shows the same form with **Watch
+  again**, which needs a new end date; a done watch shows when it finished.
+  **Pause** or **Resume**,
   **Delete…** (confirmed), and up to 50 notices, each with one line per
-  delivery: `Push delivered to 2 devices`, `Push off`, `No push device -
-  in-app only`, `Held for quiet hours`, `Push pending: <why>`, `Push not sent: resolved before
-  delivery`, `Push failed: <error>`. Opening or closing it keeps focus in
+  delivery: `Push delivered to 2 devices`, `Push off: <why>`, `No push
+  device - in-app only`, `Held for quiet hours: Until 07:00 CET`, `Push
+  pending: <why>`, `Push not sent: resolved before delivery`, `Push failed:
+  <error>`. Opening or closing it keeps focus in
   the dialog's hands rather than the category heading.
 - **Creating**: **Watch…** in a live run's menu and the palette
   (`runCommands`, when the server has `watch.create`), **Watch…** in a live
@@ -6247,7 +6255,8 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   with **View watch**; a refusal stays in the form verbatim.
 - **Watched runs**: the run header's state line shows **Watch on** (or
   **Watch paused**, **Watch failing**) while the member has a live watch on
-  the run; it opens the watch. A watched pull request shows **Watching PR**.
+  the run; its hint names the watch's conditions, or why it is paused or
+  failing, and it opens the watch. A watched pull request shows **Watching PR**.
 - **Live**: `watch.changed` reaches only the watch's owner. The dashboard
   re-reads `watch.get` (`src/store/watch-notice.ts`); when the event names a
   new notice and is not a replayed catch-up (older than 30 seconds on the
@@ -6255,8 +6264,10 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   which follows the notice's link: a dashboard link in place, a GitHub link
   in a new tab.
 - **Desktop app**: `desktop/notify.js` shows each new watch notice natively
-  and opens its link on click. A needs-you notice on a run shares the run's
-  five-second duplicate window with `run.status`, so one need shows once.
+  and opens its link on click. A run's needs-you or finished notice shares
+  the run's five-second duplicate window with `run.status`, so one need or
+  one success ready for review shows once, in either order, and closes when
+  the need is answered.
 
 ### Push notifications
 

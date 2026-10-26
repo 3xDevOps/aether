@@ -107,8 +107,8 @@ describe('watches in settings', () => {
 
   it('explains what a watch is when there are none', async () => {
     showSettings([])
-    expect(await screen.findByRole('heading', { name: 'No watches yet.' })).toBeDefined()
-    expect(screen.getByText(/even with every Aether page closed/)).toBeDefined()
+    expect(await screen.findByRole('heading', { name: 'No watches yet' })).toBeDefined()
+    expect(screen.getByText(/after you close the dashboard, and notify you here and on your push devices/)).toBeDefined()
   })
 
   it('opens the detail from a row with what the server sees and where each notice went', async () => {
@@ -122,10 +122,10 @@ describe('watches in settings', () => {
             ...notice,
             id: 'not-0',
             title: 'Held one',
-            deliveries: [at('push', 'held_quiet_hours'), at('desktop', 'failed', 'socket closed')],
+            deliveries: [at('push', 'held_quiet_hours', 'Until 07:00 CET'), at('desktop', 'failed', 'socket closed')],
           },
           { ...notice, id: 'not-a', title: 'No device', deliveries: [at('push', 'no_destination')] },
-          { ...notice, id: 'not-b', title: 'Off', deliveries: [at('push', 'disabled')] },
+          { ...notice, id: 'not-b', title: 'Off', deliveries: [at('push', 'disabled', 'Push is off in your notification settings')] },
           { ...notice, id: 'not-d', title: 'Waiting', deliveries: [at('push', 'pending', 'you are active at a dashboard')] },
           { ...notice, id: 'not-c', title: 'Broken', deliveries: [at('push', 'failed', '410 Gone from fcm.googleapis.com')] },
         ],
@@ -138,10 +138,10 @@ describe('watches in settings', () => {
     const dialog = await screen.findByRole('dialog', { name: 'fix the login redirect' })
     expect(within(dialog).getByText('Working: editing auth.go')).toBeDefined()
     await within(dialog).findByText('Push delivered to 2 devices')
-    expect(within(dialog).getByText('Held for quiet hours')).toBeDefined()
+    expect(within(dialog).getByText('Held for quiet hours: Until 07:00 CET')).toBeDefined()
     expect(within(dialog).getByText('Desktop app failed: socket closed')).toBeDefined()
     expect(within(dialog).getByText('No push device - in-app only')).toBeDefined()
-    expect(within(dialog).getByText('Push off')).toBeDefined()
+    expect(within(dialog).getByText('Push off: Push is off in your notification settings')).toBeDefined()
     expect(within(dialog).getByText('Push pending: you are active at a dashboard')).toBeDefined()
     expect(within(dialog).getByText('Push failed: 410 Gone from fcm.googleapis.com')).toBeDefined()
   })
@@ -170,6 +170,59 @@ describe('watches in settings', () => {
     await waitFor(() => expect(client.watchDelete).toHaveBeenCalledWith('wat-1'))
     await waitFor(() => expect(useStore.getState().watches['wat-1']).toBeUndefined())
     expect(useStore.getState().route.params).toEqual({ section: 'watches' })
+  })
+
+  it('renews an expired watch with a new end no later than 90 days from now', async () => {
+    const user = userEvent.setup()
+    seed({ route: { name: 'settings', params: { section: 'watches', watch: 'wat-1' } } })
+    const expired = watch({ state: 'expired', created_at: '2026-01-01T10:00:00Z', expires_at: '2026-01-15T10:00:00Z' })
+    const { client } = showSettings([expired], {
+      watchGet: vi.fn(async () => ({ watch: expired, notifications: [] })),
+      watchUpdate: vi.fn(async (params) => ({ watch: { ...expired, state: 'active' as const, expires_at: params.expires_at!, updated_at: new Date().toISOString() }, receipt: 'Watching run fix-login for: needs you, finished.' })),
+    })
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('Ended')).toBeDefined()
+    const again = await within(dialog).findByRole('button', { name: 'Watch again' })
+    expect(again).toHaveProperty('disabled', true)
+    const ends = within(dialog).getByLabelText('Ends on') as HTMLInputElement
+    const limit = Date.now() + 90 * 24 * 60 * 60 * 1000
+    await user.clear(ends)
+    await user.type(ends, ends.max)
+    await user.click(again)
+    const params = vi.mocked(client.watchUpdate).mock.calls[0]![0]
+    expect(Object.keys(params).sort()).toEqual(['expires_at', 'watch_id'])
+    expect(Date.parse(params.expires_at!)).toBeLessThanOrEqual(limit)
+    expect(Date.parse(params.expires_at!)).toBeGreaterThan(limit - 24 * 60 * 60 * 1000)
+  })
+
+  it('dates a done watch by when it finished, not by its end', async () => {
+    seed({ route: { name: 'settings', params: { section: 'watches', watch: 'wat-1' } } })
+    const done = watch({ state: 'done', updated_at: '2026-10-26T12:00:00Z' })
+    showSettings([done], { watchGet: vi.fn(async () => ({ watch: done, notifications: [] })) })
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('Done', { selector: 'dt' })).toBeDefined()
+    expect(within(dialog).queryByText('Ended')).toBeNull()
+    expect(within(dialog).queryByText('Ends')).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: 'Save changes' })).toBeNull()
+  })
+
+  it('follows changes made elsewhere until the member edits, then sends only their edits', async () => {
+    const user = userEvent.setup()
+    seed({ route: { name: 'settings', params: { section: 'watches', watch: 'wat-1' } } })
+    const { client } = showSettings([watch()], {
+      watchGet: vi.fn(async () => ({ watch: watch(), notifications: [] })),
+      watchUpdate: vi.fn(async () => ({ watch: watch({ label: 'login', conditions: ['needs_you'], updated_at: '2026-10-26T10:02:00Z' }), receipt: 'Watching run login for: needs you.' })),
+    })
+    const dialog = await screen.findByRole('dialog')
+    const label = await within(dialog).findByLabelText('Label')
+    useStore.getState().putWatch(watch({ conditions: ['needs_you'], updated_at: '2026-10-26T10:01:00Z' }))
+    await waitFor(() => expect(within(dialog).getByRole('checkbox', { name: 'Finished' }).getAttribute('aria-checked')).toBe('false'))
+
+    await user.type(label, 'login')
+    useStore.getState().putWatch(watch({ conditions: ['needs_you'], expires_at: '2026-11-20T10:00:00Z', updated_at: '2026-10-26T10:01:30Z' }))
+    expect(label).toHaveProperty('value', 'login')
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }))
+    expect(client.watchUpdate).toHaveBeenCalledWith({ watch_id: 'wat-1', label: 'login' })
   })
 
   it('fills the screen on a phone', async () => {
@@ -266,6 +319,21 @@ describe('watch notification preferences', () => {
     expect(client.notifyPrefsSet).toHaveBeenCalledWith({ push: true, quiet_hours: { start: '22:00', end: '07:00', tz: zone } })
     expect(await screen.findByLabelText('Time zone')).toHaveProperty('value', zone)
   })
+
+  it('tells a server without Web Push apart from no device, and shows a quiet-hours error on that row', async () => {
+    const user = userEvent.setup()
+    const client = fakeApi({
+      notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 0 } })),
+      notifyPrefsSet: vi.fn(async () => { throw new Error('notify.prefs.set: unknown time zone "Mars/Olympus"') }),
+      pushStatus: vi.fn(async () => { throw new Error('push service not configured') }),
+    })
+    render(<WatchNotifySection client={client} />)
+    expect(await screen.findByText(/No push \(push service not configured\), so in-app only/)).toBeDefined()
+    await user.click(screen.getByRole('checkbox', { name: 'Quiet hours' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('unknown time zone')
+    expect(alert.closest('#quiet-hours')).not.toBeNull()
+  })
 })
 
 describe('watch.changed', () => {
@@ -293,5 +361,16 @@ describe('watch.changed', () => {
     await applyWatchChanged(useStore, client, event(new Date().toISOString(), { watch_id: 'wat-1', member_id: 'mem_other', notification_id: 'not-1' }))
     expect(toast).not.toHaveBeenCalled()
     expect(client.watchGet).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the run header hint', () => {
+  it('names the watch’s own conditions and state', async () => {
+    const { watchHint } = await import('@/lib/watches')
+    expect(watchHint(watch({ conditions: ['needs_you', 'ci'] }))).toBe(
+      'Notifies you on: Needs you, CI finished. Notices appear in the dashboard, and on your push devices when push is on.',
+    )
+    expect(watchHint(watch({ state: 'paused' }))).toBe('Watch paused: no notices until you resume it.')
+    expect(watchHint(watch({ state: 'error', error: 'run is gone' }))).toContain('run is gone')
   })
 })
