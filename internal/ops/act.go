@@ -131,7 +131,7 @@ func handoffRun(ctx context.Context, c calls, in handoffInput) (string, any, err
 		return "", nil, err
 	}
 	var members protocol.MemberListResult
-	if err := c.read(ctx, protocol.MethodMemberList, nil, &members); err != nil {
+	if err = c.read(ctx, protocol.MethodMemberList, nil, &members); err != nil {
 		return "", nil, err
 	}
 	i := slices.IndexFunc(members.Members, func(m protocol.Member) bool { return m.ID == in.ToMemberID && !m.Pending })

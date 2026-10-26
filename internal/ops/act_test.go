@@ -31,12 +31,12 @@ func TestConnectorRunLifecycle(t *testing.T) {
 		"archive":   `{"run_id":"run-1","archived":true}`,
 		"restore":   `{"run_id":"run-1","archived":false}`,
 	} {
-		f := newFake(t)
+		g := newFake(t)
 		for _, m := range []string{protocol.MethodRunModeSwitch, protocol.MethodRunProtect, protocol.MethodRunArchive} {
-			f.answers[m] = returns(protocol.RunResult{Run: testRun})
+			g.answers[m] = returns(protocol.RunResult{Run: testRun})
 		}
-		run(t, connectorSession(t, f, ScopeWrite), "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": action})
-		if got := f.acted(); got.params != want {
+		run(t, connectorSession(t, g, ScopeWrite), "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": action})
+		if got := g.acted(); got.params != want {
 			t.Errorf("%s sent %s %s, want %s", action, got.method, got.params, want)
 		}
 	}
@@ -118,8 +118,8 @@ func TestConnectorSwarmManage(t *testing.T) {
 		len(called(f, protocol.MethodMissionWorkerRelease)) != 0 {
 		t.Fatalf("releasing a worker nobody holds = %q, calls %+v", text, f.calls)
 	}
-	if text, _, failed := try(t, cs, "aether_swarm_manage", map[string]any{"swarm_id": "mis-1", "action": "release_worker"}); !failed || !strings.Contains(text, "takes run_id") {
-		t.Fatalf("release without run_id = %q", text)
+	if msg, _, failed := try(t, cs, "aether_swarm_manage", map[string]any{"swarm_id": "mis-1", "action": "release_worker"}); !failed || !strings.Contains(msg, "takes run_id") {
+		t.Fatalf("release without run_id = %q", msg)
 	}
 	text, out = run(t, cs, "aether_swarm_manage", map[string]any{"swarm_id": "mis-1", "action": "archive"})
 	if text != "Swarm mis-1 is archived." || out["archived"] != true {
@@ -138,11 +138,9 @@ func TestConnectorReplaceIntegrator(t *testing.T) {
 	f := newFake(t)
 	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{DashboardURL: "https://aether.example", Member: protocol.Member{ID: "mem-1"}})
 	f.answers[protocol.MethodMissionShow] = returns(protocol.MissionShowResult{Mission: mission})
-	f.answers[protocol.MethodMissionReplaceIntegrator] = func(raw json.RawMessage) (any, error) {
-		replaced := mission
-		replaced.IntegratorGeneration = 4
-		return protocol.MissionReplaceIntegratorResult{Mission: replaced, RunID: "run-new"}, nil
-	}
+	replaced := mission
+	replaced.IntegratorGeneration = 4
+	f.answers[protocol.MethodMissionReplaceIntegrator] = returns(protocol.MissionReplaceIntegratorResult{Mission: replaced, RunID: "run-new"})
 	cs := connectorSession(t, f, ScopeControl)
 
 	text, out := run(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1"})
@@ -167,8 +165,8 @@ func TestConnectorReplaceIntegrator(t *testing.T) {
 	if got := f.acted(); !strings.Contains(got.params, `"account_member_id":"mem-2","harness":"codex","mode":"tui"`) {
 		t.Fatalf("codex replacement sent %s", got.params)
 	}
-	if text, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "harness": "gemini"}); !failed || !strings.Contains(text, "its agents are claude, codex") {
-		t.Fatalf("an agent the swarm lacks = %q", text)
+	if msg, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "harness": "gemini"}); !failed || !strings.Contains(msg, "its agents are claude, codex") {
+		t.Fatalf("an agent the swarm lacks = %q", msg)
 	}
 
 	// A generation the swarm moved past is refused before any write, and
@@ -194,16 +192,13 @@ func TestConnectorIntegrationDecide(t *testing.T) {
 		DeliveryRequest: request, Verifications: []protocol.Verification{{VerificationID: "v-1", Status: protocol.VerificationPassed, Output: injection}},
 		ExpiresAt: time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)}
 	f := newFake(t)
-	f.answers[protocol.MethodIntegrationShow] = func(json.RawMessage) (any, error) { return protocol.IntegrationShowResult{Candidate: candidate}, nil }
+	f.answers[protocol.MethodIntegrationShow] = returns(protocol.IntegrationShowResult{Candidate: candidate})
 	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{Candidates: []protocol.CandidateSummary{
 		{CandidateID: "cand-1", State: protocol.CandidateFrozen, TargetRef: "refs/heads/main", DeliveryRequest: request}}})
-	f.answers[protocol.MethodIntegrationDecide] = func(json.RawMessage) (any, error) {
-		decided := candidate
-		r := *request
-		r.State = protocol.DeliveryApproved
-		decided.DeliveryRequest = &r
-		return protocol.IntegrationDecideResult{Candidate: decided}, nil
-	}
+	decided, approved := candidate, *request
+	approved.State = protocol.DeliveryApproved
+	decided.DeliveryRequest = &approved
+	f.answers[protocol.MethodIntegrationDecide] = returns(protocol.IntegrationDecideResult{Candidate: decided})
 	cs := connectorSession(t, f, ScopeControl)
 
 	text, _ := run(t, cs, "aether_integration", map[string]any{"workspace_id": "ws-1"})
@@ -223,9 +218,9 @@ func TestConnectorIntegrationDecide(t *testing.T) {
 		t.Fatalf("approve sent %+v", got)
 	}
 	f.calls = nil
-	if text, _, failed := try(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-0", "action": "deliver"}); !failed ||
-		!strings.Contains(text, "no longer req-0") || len(called(f, protocol.MethodIntegrationDeliver)) != 0 {
-		t.Fatalf("deciding a request that changed = %q", text)
+	if msg, _, failed := try(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-0", "action": "deliver"}); !failed ||
+		!strings.Contains(msg, "no longer req-0") || len(called(f, protocol.MethodIntegrationDeliver)) != 0 {
+		t.Fatalf("deciding a request that changed = %q", msg)
 	}
 	// A request already in the state asked for is done, so a retry is safe.
 	request.State = protocol.DeliveryApproved
@@ -361,7 +356,9 @@ func TestConnectorRunChangesPages(t *testing.T) {
 	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: multi})
 	f.answers[protocol.MethodRunGitLog] = func(raw json.RawMessage) (any, error) {
 		var p protocol.RunGitLogParams
-		_ = json.Unmarshal(raw, &p)
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
 		commits := make([]protocol.RunGitCommit, p.Limit)
 		for i := range commits {
 			commits[i] = protocol.RunGitCommit{Short: string(rune('a' + i%26))}
