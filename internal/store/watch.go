@@ -94,6 +94,9 @@ const (
 	WatchPushNone    = "none"
 	WatchPushPending = "pending"
 	WatchPushHeld    = "held"
+	// WatchPushWithdraw is a delivered needs_you push to replace quietly:
+	// its need ended.
+	WatchPushWithdraw = "withdraw"
 )
 
 // WatchStore persists watches, their notifications and deliveries, each
@@ -132,8 +135,9 @@ type WatchStore interface {
 
 	ListWatchNotifications(ctx context.Context, watch string, limit int) ([]*WatchNotification, error)
 	GetWatchNotification(ctx context.Context, id string) (*WatchNotification, error)
-	// DueWatchPushes lists the notifications whose push is pending or held
-	// until now or earlier, oldest first, leaving out paused watches'.
+	// DueWatchPushes lists the notifications whose push is pending, held
+	// or to withdraw until now or earlier, oldest first, leaving out paused
+	// watches' pending and held ones.
 	DueWatchPushes(ctx context.Context, now time.Time) ([]*WatchNotification, error)
 	// ReleaseHeldWatchPushes makes member's held pushes due at now, for
 	// their quiet hours to be applied again.
@@ -141,6 +145,9 @@ type WatchStore interface {
 	// SetWatchPush records a notification's push state and, when d is not
 	// nil, replaces its delivery row on d's channel.
 	SetWatchPush(ctx context.Context, id, state string, attempts int, next *time.Time, d *WatchDelivery) error
+	// WithdrawWatchNeeds makes watch's needs_you notices whose push was
+	// delivered due at now to be withdrawn, and counts them.
+	WithdrawWatchNeeds(ctx context.Context, watch string, now time.Time) (int64, error)
 
 	GetNotifyPrefs(ctx context.Context, member domain.MemberID) (NotifyPrefs, error)
 	PutNotifyPrefs(ctx context.Context, member domain.MemberID, p NotifyPrefs) error
@@ -486,7 +493,7 @@ func (d *DB) ExpireWatches(ctx context.Context, now time.Time) ([]*Watch, error)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 	const heldByPause = `SELECT n.id FROM watch_notifications n JOIN watches w ON w.id = n.watch_id
-		WHERE n.push_state <> 'none' AND w.state = 'paused' AND w.expires_at <= ?1`
+		WHERE n.push_state IN ('pending', 'held') AND w.state = 'paused' AND w.expires_at <= ?1`
 	if _, err = tx.ExecContext(ctx,
 		`UPDATE watch_deliveries SET status = 'cleared', detail = 'The watch was paused until it expired', at = ?1
 		 WHERE channel = 'push' AND notification_id IN (`+heldByPause+`)`, at); err != nil {

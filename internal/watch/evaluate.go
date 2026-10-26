@@ -117,20 +117,43 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 	}
 	if len(notes) == 0 && !visiblyChanged(&before, w) && maps.Equal(before.Fired, w.Fired) &&
 		(before.NextCheckAt == nil) == (w.NextCheckAt == nil) && (w.NextCheckAt == nil || w.NextCheckAt.Equal(*before.NextCheckAt)) {
-		return s.store.TouchWatchCheck(ctx, w.ID, now)
-	}
-	recorded, err := s.store.CommitWatchEvaluation(ctx, w, notes)
-	if err != nil {
-		return err
-	}
-	for _, n := range recorded {
-		s.changed(ctx, w, n.ID)
-		if n.PushState != store.WatchPushNone {
-			s.wake()
+		if err := s.store.TouchWatchCheck(ctx, w.ID, now); err != nil {
+			return err
+		}
+	} else {
+		recorded, err := s.store.CommitWatchEvaluation(ctx, w, notes)
+		if err != nil {
+			return err
+		}
+		for _, n := range recorded {
+			s.changed(ctx, w, n.ID)
+			if n.PushState != store.WatchPushNone {
+				s.wake()
+			}
+		}
+		if len(recorded) == 0 && visiblyChanged(&before, w) {
+			s.changed(ctx, w, "")
 		}
 	}
-	if len(recorded) == 0 && visiblyChanged(&before, w) {
-		s.changed(ctx, w, "")
+	if readErr != nil || !r.ok || slices.ContainsFunc(r.notices, func(n Notice) bool { return n.Condition == protocol.WatchNeedsYou }) {
+		return nil
+	}
+	return s.withdrawEnded(ctx, w)
+}
+
+// withdrawEnded queues the quiet replacement of w's delivered needs_you
+// pushes, once its target needs nothing from the owner. A paused run's
+// needs read as none while they are still open, so they stay.
+func (s *Service) withdrawEnded(ctx context.Context, w *store.Watch) error {
+	if !slices.Contains(w.Conditions, protocol.WatchNeedsYou) || w.TargetKind == protocol.WatchTargetRun && s.runs.Paused(w.RunID) {
+		return nil
+	}
+	n, err := s.store.WithdrawWatchNeeds(ctx, w.ID, s.now())
+	if err != nil {
+		return fmt.Errorf("watch %s: %w", w.ID, err)
+	}
+	if n > 0 {
+		s.wake()
 	}
 	return nil
 }

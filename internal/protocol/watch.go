@@ -60,6 +60,9 @@ const (
 	// WatchStatusCleared is a push dropped unsent: the need it announced
 	// was resolved first, or its watch was paused until it expired.
 	WatchStatusCleared = "cleared"
+	// WatchStatusWithdrawn is a needs_you push that was delivered and then
+	// replaced quietly on the devices because its need ended.
+	WatchStatusWithdrawn = "withdrawn"
 )
 
 type WatchTarget struct {

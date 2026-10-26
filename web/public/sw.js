@@ -25,19 +25,20 @@ self.addEventListener('push', (event) => {
 })
 
 async function display(message) {
-  if (message.clear && message.run) {
-    // The run's need ended. A push that shows nothing would cost the
-    // subscription on Safari, so the notification is replaced quietly
-    // instead of closed.
-    const [current] = await self.registration.getNotifications({ tag: message.run })
+  const cleared = message.run || message.url
+  if (message.clear && cleared) {
+    // The need of the run, or of the page a swarm's need opens, ended. A
+    // push that shows nothing would cost the subscription on Safari, so the
+    // notification is replaced quietly instead of closed.
+    const [current] = await self.registration.getNotifications({ tag: cleared })
     // An assistant's newer notice about the run stays, shown again as it was.
     const notice = current?.data?.notice === true
     await self.registration.showNotification(current?.title || message.title || 'Aether', {
       body: notice ? current.body : message.body,
-      tag: message.run,
+      tag: cleared,
       silent: true,
       icon: '/icons/icon-192.png',
-      data: notice ? current.data : { run: message.run },
+      data: notice ? current.data : { run: message.run, url: message.url },
     })
     return
   }

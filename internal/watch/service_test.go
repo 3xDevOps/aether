@@ -531,6 +531,32 @@ func TestNeedAnsweredBeforeThePushIsDropped(t *testing.T) {
 	}
 }
 
+func TestDeliveredNeedIsWithdrawnWhenItEnds(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.bob)
+	run := h.run(h.ada, "Rotate the keys")
+	w := h.watch(h.bob, runTarget(run)).Watch
+
+	h.runs.ask(run.ID, "q1", "Rotate prod too?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
+
+	h.runs.answer(run.ID)
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
+	h.eventually("the withdrawal", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusWithdrawn })
+	if d := pushOf(h.notices(w.ID)[0]); d.Detail != "Withdrawn: no longer needs you" {
+		t.Fatalf("push row = %+v, want it to say the push was withdrawn", d)
+	}
+	h.status(run, domain.RunInterrupted, "", "")
+	h.eventually("the finish", func() bool { return len(h.notices(w.ID)) == 2 })
+	h.eventually("the finish pushed", func() bool { return phone.received.Load() == 3 })
+	settle()
+	if n := phone.received.Load(); n != 3 {
+		t.Fatalf("device received %d pushes, want the need, its withdrawal and the finish", n)
+	}
+}
+
 func TestEveryOpenRequestIsItsOwnNeed(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

@@ -57,6 +57,10 @@ func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, not
 	var sendable []*store.WatchNotification
 	watches := map[string]*store.Watch{}
 	for _, n := range notes {
+		if n.PushState == store.WatchPushWithdraw {
+			errs = append(errs, s.withdraw(ctx, member, n))
+			continue
+		}
 		w, status, detail, err := s.stillDue(ctx, n, prefs)
 		switch {
 		case errors.Is(err, store.ErrNotFound), errors.Is(err, errRunPaused):
@@ -116,13 +120,57 @@ func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, not
 	}
 	for _, n := range single {
 		needsYou := n.Condition == protocol.WatchNeedsYou
-		m := push.Message{Title: n.Title, Body: n.Body, URL: n.Link, Topic: n.WatchID, Urgent: needsYou, Notice: !needsYou}
+		m := push.Message{Title: n.Title, Body: n.Body, URL: n.Link, Topic: topicOf(n), Urgent: needsYou, Notice: !needsYou}
 		if w := watches[n.WatchID]; w.TargetKind == protocol.WatchTargetRun {
 			m.Run = w.RunID
 		}
 		errs = append(errs, s.send(ctx, member, m, []*store.WatchNotification{n}, watches))
 	}
 	return errors.Join(errs...)
+}
+
+// withdraw quietly replaces n's delivered push on member's devices, the
+// way the push service clears a run's need that ended, so it no longer
+// reads as one. Unlike a notice it is sent through quiet hours and while
+// they use a dashboard: it does not alert.
+func (s *Service) withdraw(ctx context.Context, member domain.MemberID, n *store.WatchNotification) error {
+	w, err := s.store.GetWatch(ctx, n.WatchID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("notice %s: %w", n.ID, err)
+	}
+	attempts := n.PushAttempts + 1
+	next := s.now().Add(backoff(attempts))
+	if err := s.store.SetWatchPush(ctx, n.ID, store.WatchPushWithdraw, attempts, &next, nil); err != nil {
+		return fmt.Errorf("notice %s: %w", n.ID, err)
+	}
+	m := push.Message{Title: n.Title, URL: n.Link, Topic: topicOf(n), Clear: true}
+	if w.TargetKind == protocol.WatchTargetRun {
+		m.Run = w.RunID
+	}
+	status, detail := pushOutcome(s.push.Deliver(ctx, member, m))
+	switch {
+	case status == protocol.WatchStatusFailed && attempts < maxPushAttempts:
+		slog.Warn("watch: withdraw a push; trying again", "notice", n.ID, "at", next, "error", detail)
+		return nil
+	case status == protocol.WatchStatusFailed:
+		detail = fmt.Sprintf("Delivered, then withdrawing it failed after %d attempts: %s", attempts, detail)
+	default:
+		status, detail = protocol.WatchStatusWithdrawn, "Withdrawn: no longer needs you"
+	}
+	return s.settle(ctx, w, n, store.WatchPushNone, attempts, nil, status, detail)
+}
+
+// topicOf is the push topic of n, under which a push service keeps only
+// the newest message a device has yet to receive. A watch's needs have one
+// of their own, so withdrawing one never displaces its other notices.
+func topicOf(n *store.WatchNotification) string {
+	if n.Condition == protocol.WatchNeedsYou {
+		return n.WatchID + "|" + protocol.WatchNeedsYou
+	}
+	return n.WatchID
 }
 
 // hold puts n's push off until held, saying so once.
@@ -254,8 +302,21 @@ func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Messa
 			}
 		}
 		errs = append(errs, s.settle(ctx, watches[n.WatchID], n, state, attempts, next, rowStatus, rowDetail))
+		if rowStatus == protocol.WatchStatusDelivered && n.Condition == protocol.WatchNeedsYou {
+			errs = append(errs, s.withdrawIfEnded(ctx, watches[n.WatchID]))
+		}
 	}
 	return errors.Join(errs...)
+}
+
+// withdrawIfEnded withdraws a needs_you push delivered after its need
+// ended, which the evaluation that saw it end could not.
+func (s *Service) withdrawIfEnded(ctx context.Context, w *store.Watch) error {
+	current, err := s.currentNeeds(ctx, w)
+	if err != nil || len(current) > 0 {
+		return err
+	}
+	return s.withdrawEnded(ctx, w)
 }
 
 func pushOutcome(results []push.DeviceResult, err error) (string, string) {

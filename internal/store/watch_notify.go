@@ -61,7 +61,8 @@ func (d *DB) DueWatchPushes(ctx context.Context, now time.Time) ([]*WatchNotific
 	}
 	rows, err := d.db.QueryContext(ctx,
 		`SELECT `+watchNotificationColumns+` FROM watch_notifications n JOIN watches w ON w.id = n.watch_id
-		 WHERE n.push_state <> 'none' AND n.push_next_at <= ? AND w.state <> 'paused' ORDER BY n.created_at, n.rowid`, at)
+		 WHERE n.push_state <> 'none' AND n.push_next_at <= ? AND (w.state <> 'paused' OR n.push_state = 'withdraw')
+		 ORDER BY n.created_at, n.rowid`, at)
 	if err != nil {
 		return nil, fmt.Errorf("store: due watch pushes: %w", err)
 	}
@@ -140,6 +141,26 @@ func (d *DB) SetWatchPush(ctx context.Context, id, state string, attempts int, n
 		return fmt.Errorf("store: set watch push: %w", err)
 	}
 	return nil
+}
+
+func (d *DB) WithdrawWatchNeeds(ctx context.Context, watch string, now time.Time) (int64, error) {
+	at, err := encodeTime(now)
+	if err != nil {
+		return 0, fmt.Errorf("store: withdraw watch needs: %w", err)
+	}
+	res, err := d.db.ExecContext(ctx,
+		`UPDATE watch_notifications SET push_state = 'withdraw', push_attempts = 0, push_next_at = ?
+		 WHERE watch_id = ? AND condition = 'needs_you' AND push_state = 'none' AND EXISTS (
+		   SELECT 1 FROM watch_deliveries d
+		   WHERE d.notification_id = watch_notifications.id AND d.channel = 'push' AND d.status = 'delivered')`, at, watch)
+	if err != nil {
+		return 0, fmt.Errorf("store: withdraw watch needs: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: withdraw watch needs: %w", err)
+	}
+	return n, nil
 }
 
 func (d *DB) GetNotifyPrefs(ctx context.Context, member domain.MemberID) (NotifyPrefs, error) {

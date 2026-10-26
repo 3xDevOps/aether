@@ -69,6 +69,19 @@ describe('service worker', () => {
     })
   })
 
+  it("quietly replaces a swarm's need, tagged by the page it opens, when it ends", async () => {
+    const url = '/?page=missions&id=mis-4c8v2n6k1p'
+    const { self, dispatch } = worker([], [{ tag: url, title: 'Swarm: login rework', data: { url } }])
+    await dispatch('push', { data: { json: () => ({ title: 'Swarm: login rework', body: 'No longer needs you', url, clear: true }) } })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Swarm: login rework', {
+      body: 'No longer needs you',
+      tag: url,
+      silent: true,
+      icon: '/icons/icon-192.png',
+      data: { url },
+    })
+  })
+
   it("keeps an assistant's newer notice about the run when its need clears", async () => {
     const notice = { tag: 'run-7k2m9q4xbd', title: 'Run "Fix it" finished', body: 'All green', data: { run: 'run-7k2m9q4xbd', notice: true } }
     const { self, dispatch } = worker([], [notice])

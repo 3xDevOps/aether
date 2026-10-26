@@ -2061,7 +2061,7 @@ CREATE TABLE watch_notifications (
 	body          TEXT NOT NULL,
 	link          TEXT NOT NULL,
 	created_at    INTEGER NOT NULL,
-	push_state    TEXT NOT NULL CHECK (push_state IN ('none', 'pending', 'held')),
+	push_state    TEXT NOT NULL CHECK (push_state IN ('none', 'pending', 'held', 'withdraw')),
 	push_attempts INTEGER NOT NULL DEFAULT 0,
 	push_next_at  INTEGER,
 	UNIQUE (watch_id, condition, dedup_key)
