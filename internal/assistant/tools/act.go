@@ -259,17 +259,14 @@ func (s *Server) summarizePRMerge(ctx context.Context, req protocol.Request, c *
 	if p.Repository != "" {
 		pr = fmt.Sprintf("%s#%d", truncate(p.Repository), p.Number)
 	}
-	c.Summary = fmt.Sprintf("Merge (%s) %s of run %s (%q)%s at %.7s into %s; %s", cmp.Or(p.Method, "default"), pr, p.RunID, runLabel(run), commaAfter(ownedBy(c)),
-		p.ExpectedHead, cmp.Or(truncate(p.ExpectedBase), "its base"), mergeBlockers(fb))
-	return nil
-}
-
-func mergeBlockers(fb protocol.RunPRFeedbackResult) string {
-	if fb.Error != "" {
-		return "GitHub's checks and reviews could not be read: " + truncate(fb.Error)
-	}
 	b := fb.Blockers()
-	return fmt.Sprintf("GitHub reports %d failing checks, %d pending checks and %d reviewers requesting changes", b.FailingChecks, b.PendingChecks, b.ChangesRequested)
+	blockers := fmt.Sprintf("GitHub reports %d failing checks, %d pending checks and %d reviewers requesting changes", b.FailingChecks, b.PendingChecks, b.ChangesRequested)
+	if fb.Error != "" {
+		blockers = "GitHub's checks and reviews could not be read: " + truncate(fb.Error)
+	}
+	c.Summary = fmt.Sprintf("Merge (%s) %s of run %s (%q)%s at %.7s into %s; %s", cmp.Or(p.Method, "default"), pr, p.RunID, runLabel(run), commaAfter(ownedBy(c)),
+		p.ExpectedHead, cmp.Or(truncate(p.ExpectedBase), "its base"), blockers)
+	return nil
 }
 
 func (s *Server) note(ctx context.Context, req protocol.Request) (protocol.MemoryItem, *protocol.Error) {

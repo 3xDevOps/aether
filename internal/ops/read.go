@@ -828,7 +828,11 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 			for i, f := range files[in.DiffFile:] {
 				cut := len(f) > diffFileText
 				if cut {
-					f = clipBytes(f, diffFileText)
+					n := diffFileText - len("…")
+					for !utf8.RuneStart(f[n]) {
+						n--
+					}
+					f = f[:n] + "…"
 				}
 				if len(page) == diffPageFiles || size+len(f) > diffPageText {
 					break
@@ -854,20 +858,6 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 	}
 	out["untrusted"] = untrusted
 	return summary, out, nil
-}
-
-// clipBytes cuts text to at most n bytes, ellipsis included, at a rune
-// boundary.
-func clipBytes(text string, n int) string {
-	const ellipsis = "…"
-	if len(text) <= n {
-		return text
-	}
-	n -= len(ellipsis)
-	for n > 0 && !utf8.RuneStart(text[n]) {
-		n--
-	}
-	return text[:n] + ellipsis
 }
 
 type prStatusInput struct {
