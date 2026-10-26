@@ -295,6 +295,8 @@ describe('state words', () => {
     const ci = shown({ status: 'needs-attention', state: 'waiting-ci', reason: 'PR 12 checks', cause: 'report' })
     expect(stateWords(ci, since, now)).toEqual({ label: 'Waiting for CI', detail: '42m · PR 12 checks' })
     expect(stateLine(ci)).toBe('Waiting for CI · PR 12 checks')
+    const stale = shown({ status: 'needs-attention', state: 'waiting-ci', reason: 'no update for 30m: PR 12 checks', cause: 'wait-expired' })
+    expect(stateWords(stale, since, now)).toEqual({ label: 'Waiting for CI', detail: 'No update for 30m: PR 12 checks' })
     expect(stateLine(shown({ status: 'needs-attention', state: 'waiting-tools', reason: 'deploy to staging' }))).toBe('Waiting for process · deploy to staging')
   })
 

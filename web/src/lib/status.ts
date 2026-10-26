@@ -136,7 +136,8 @@ function finishedReason(run: RunRecord): string {
 export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
   const shown = presentation(run, ctx)
   // The cause explains the server's state only: none where the dashboard shows another.
-  const own = !isTerminal(run.status) && shown.state === liveStateOf(run.status as 'running' | 'needs-attention', run.state)
+  const own = !isTerminal(run.status) && waitingOn(run, ctx) === undefined &&
+    shown.state === liveStateOf(run.status as 'running' | 'needs-attention', run.state)
   return run.cause && own ? { ...shown, cause: run.cause } : shown
 }
 
@@ -171,12 +172,14 @@ export function stateDetail({ state, reason }: Pick<RunPresentation, 'state' | '
 /**
  * A state's words: what the run waits on when the reason names it ("Waiting for 2 workers",
  * "Waiting for Ada"), else the state's label, and the detail after it. Given `since`, a CI wait's
- * detail starts with how long it has run, for a surface that prints no age of its own.
+ * detail starts with how long it has run, for a surface that prints no age of its own, unless it
+ * went stale.
  */
-export function stateWords(shown: Pick<RunPresentation, 'state' | 'reason'>, since?: string, now = Date.now()): { label: string; detail?: string } {
+export function stateWords(shown: Pick<RunPresentation, 'state' | 'reason' | 'cause'>, since?: string, now = Date.now()): { label: string; detail?: string } {
   const reason = stateDetail(shown)
   if ((shown.state === 'waiting-agents' || shown.state === 'waiting') && reason?.startsWith('Waiting for ')) return { label: reason }
-  const ran = since && shown.state === 'waiting-ci' ? compactAge(since, now) : undefined
+  // A stale wait's reason already says how long nothing happened.
+  const ran = since && shown.state === 'waiting-ci' && shown.cause !== 'wait-expired' ? compactAge(since, now) : undefined
   return { label: stateLabel[shown.state], detail: [ran, reason].filter(Boolean).join(' · ') || undefined }
 }
 

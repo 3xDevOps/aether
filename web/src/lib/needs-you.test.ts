@@ -433,6 +433,18 @@ describe('viewer scoping', () => {
     expect(needsYou(theirs, stateContext({ ...ctx, viewerID: 'mem_carol', viewerRole: 'collaborator' }))).toBeUndefined()
   })
 
+  it("shows a teammate's swarm question as waiting for them, with no cause the server gave for its workers", () => {
+    const ctx = stateContext({
+      missions: { mission_1: mission({ accountable_human_id: bob.id, open_questions: 1 }) },
+      viewerID: 'mem_carol',
+      viewerRole: 'collaborator',
+    })
+    const waiting = record({ ...integrator, status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 workers', cause: 'workers' })
+    const shown = presentRun(waiting, ctx)
+    expect(shown).toMatchObject({ state: 'waiting-agents', reason: 'Waiting for Bob' })
+    expect(shown.cause).toBeUndefined()
+  })
+
   it("keeps a paused integrator's open swarm question", () => {
     const ctx = stateContext({
       missions: { mission_1: mission() },

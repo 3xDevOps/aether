@@ -1575,8 +1575,9 @@ a swarm worker's question shown as "Waiting for the integrator", or a
 request shown as "Waiting for *name*".
 
 The run header's state line shows the words beyond the label the Workflow
-chip under it already shows, a CI wait's age first ("42m · PR 12 checks"),
-since the header prints no age of its own; `stateTitle` is the tooltip of
+chip under it already shows, a CI wait's age first ("42m · PR 12 checks";
+a stale one's reason already says "No update for 30m"), since the header
+prints no age of its own; `stateTitle` is the tooltip of
 the space it fills, there even when the line is empty. The label stays in a
 visually hidden `role=status` element, so a screen reader hears only a
 change of state. While a run waits for agents,
