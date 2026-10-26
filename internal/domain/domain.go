@@ -763,6 +763,21 @@ type Run struct {
 	MissionID       MissionID
 	MissionRole     string
 	IntegratorRunID RunID
+	// Lineage is read-only snapshot metadata too: ParentRunID is the run
+	// that started this child run, or a worker's current integrator, and
+	// RootRunID the top of its tree. Detached children keep both.
+	ParentRunID  RunID
+	RootRunID    RunID
+	ChildPurpose string
+	Detached     bool
+	// Children is the run's own child-run setting, ChildrenOn or
+	// ChildrenOff, or "" to follow the owner's. It counts only while
+	// ChildrenSetBy still owns the run.
+	Children      string
+	ChildrenSetBy MemberID
+	// ChildRefused records that the agent tried to start a child run while
+	// child runs were off.
+	ChildRefused bool
 	// ProfileSnapshotID is the agent-profile snapshot pinned at provisioning;
 	// empty means unpinned.
 	ProfileSnapshotID ProfileSnapshotID
