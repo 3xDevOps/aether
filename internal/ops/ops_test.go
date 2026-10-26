@@ -189,24 +189,39 @@ func TestKeyedAnswerRetry(t *testing.T) {
 	f.answers[protocol.MethodMissionQuestionAnswer] = returns(protocol.MissionQuestionResult{})
 	f.answers[protocol.MethodRunRoomPost] = returns(protocol.RunRoomPostResult{})
 	cs := connectorSession(t, f, ScopeWrite)
-	args := map[string]any{"run_id": "run-1", "answer_id": "q-1", "answer": "main", "idempotency_key": "a1"}
-	if _, out := run(t, cs, "aether_answer", args); out["idempotency_key"] != "a1" {
-		t.Fatalf("a keyed retry = %v", out)
+	answer := func(id, key string) (string, bool) {
+		f.calls = nil
+		text, _, failed := try(t, cs, "aether_answer", map[string]any{"run_id": "run-1", "answer_id": id, "answer": "main", "idempotency_key": key})
+		return text, failed
+	}
+
+	if _, failed := answer("q-1", "a1"); failed {
+		t.Fatal("a keyed swarm answer retry failed")
 	}
 	if got := f.acted(); got.method != protocol.MethodMissionQuestionAnswer || got.params != `{"question_id":"q-1","answer":"main","idempotency_key":"a1"}` {
-		t.Fatalf("retry called %+v", got)
+		t.Fatalf("a keyed swarm answer retry called %+v", got)
 	}
 
-	f.calls = nil
-	f.errs[protocol.MethodMissionQuestionAnswer] = &protocol.Error{Code: protocol.CodeNotFound, Message: "question q-1 not found"}
-	run(t, cs, "aether_answer", args)
-	posts := called(f, protocol.MethodRunRoomPost)
-	if len(posts) != 1 || posts[0].params != `{"workspace_id":"ws-1","run_id":"run-1","kind":"reply","body":"main","correlation_id":"q-1","idempotency_key":"a1"}` {
-		t.Fatalf("a keyed teammate reply retry posted %+v", posts)
+	for id, key := range map[string]string{"room-1": "a1", "room-old": "a2"} {
+		if _, failed := answer(id, key); failed {
+			t.Fatalf("a keyed teammate reply retry to %s failed", id)
+		}
+		want := `{"workspace_id":"ws-1","run_id":"run-1","kind":"reply","body":"main","correlation_id":"` + id + `","idempotency_key":"` + key + `"}`
+		if got := f.acted(); got.method != protocol.MethodRunRoomPost || got.params != want {
+			t.Fatalf("a keyed teammate reply retry to %s called %+v", id, got)
+		}
 	}
 
-	delete(args, "idempotency_key")
-	if text, _, failed := try(t, cs, "aether_answer", args); !failed || !strings.Contains(text, "nothing pending") {
+	if text, failed := answer("room-stale", "a3"); !failed || !strings.Contains(text, "nothing pending") {
+		t.Fatalf("a keyed answer to an unknown id = %q", text)
+	}
+	for _, c := range f.calls {
+		if c.scope != ScopeRead {
+			t.Fatalf("a keyed answer to an unknown id wrote %+v", c)
+		}
+	}
+
+	if text, _, failed := try(t, cs, "aether_answer", map[string]any{"run_id": "run-1", "answer_id": "q-1", "answer": "main"}); !failed || !strings.Contains(text, "nothing pending") {
 		t.Fatalf("a keyless answer to nothing pending = %q", text)
 	}
 }

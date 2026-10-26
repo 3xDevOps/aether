@@ -215,7 +215,8 @@ retry with the same key returns the first result. A write's result has
 for approval, and the key it used. A failure that leaves it unknown whether the
 write happened, such as a timeout, ends with the key to retry with. A
 swarm or teammate answer retried with its key after the question stopped
-waiting returns the saved answer. A launch or swarm still starting after
+waiting returns the saved answer; an `answer_id` that is neither a swarm
+question nor a teammate question on the run fails and writes nothing. A launch or swarm still starting after
 30 seconds, such as one pulling its image, keeps starting after the tool call
 ends. The tool then repeats the call with the key to look up the run or swarm,
 which does not count as a write call. If the lookup answers within 5 seconds,

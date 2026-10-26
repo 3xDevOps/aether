@@ -58,6 +58,7 @@ var tiers = map[string]string{
 	protocol.MethodMissionList:           tierRead,
 	protocol.MethodMissionShow:           tierRead,
 	protocol.MethodCoordMessagesList:     tierRead,
+	protocol.MethodRunRoomList:           tierRead,
 	protocol.MethodRunGitLog:             tierRead,
 	protocol.MethodRunGitDiff:            tierRead,
 	protocol.MethodRunEvidenceList:       tierRead,

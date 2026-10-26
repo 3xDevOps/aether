@@ -101,7 +101,8 @@ var writeOps = []Op{
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunInject),
 	opOf("aether_answer", "Answer question", ScopeWrite, true, nextAttention,
 		"Use this when an aether_needs_attention item's answer_with is aether_answer: an agent's question takes option_id (and values), a swarm or teammate question takes answer. The agent goes on with the answer, which cannot be taken back.", answer).hints(true, true).
-		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost, protocol.MethodRunInputRespond, protocol.MethodRunGet),
+		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost, protocol.MethodRunInputRespond, protocol.MethodRunGet,
+		protocol.MethodMissionShow, protocol.MethodRunRoomList),
 	opOf("aether_pause_run", "Pause run", ScopeWrite, true, nextRuns,
 		"Use this when the user wants a run paused: its container freezes until aether_resume_run continues it.", pauseRun(protocol.MethodRunPause, "Paused")).
 		offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodRunPause, protocol.MethodRunGet),
@@ -584,21 +585,33 @@ func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 
 // answerAgain repeats a keyed swarm or teammate answer whose question is
 // no longer pending, so a retry after a lost response gets the saved answer
-// back: the server returns what the key already did. notPending is the
-// failure when the answer_id is neither a swarm question nor a run.
+// back: the server returns what the key already did. It answers only a
+// swarm question by that id, or a teammate question on the run that the id
+// names or the key already replied to; anything else fails with notPending.
 func answerAgain(ctx context.Context, c calls, in answerInput, notPending error) (string, any, error) {
 	key := in.IdempotencyKey
-	var q protocol.MissionQuestionResult
-	err := c.act(ctx, protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{QuestionID: in.AnswerID, Answer: in.Answer, IdempotencyKey: key}, &q)
+	var shown protocol.MissionShowResult
+	err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{QuestionID: in.AnswerID}, &shown)
 	var perr *protocol.Error
 	switch {
 	case err == nil:
-		return fmt.Sprintf("Answered the swarm question %s.", in.AnswerID), map[string]any{"run_id": in.RunID, "answered": true, "idempotency_key": key}, nil
+		var q protocol.MissionQuestionResult
+		if actErr := c.act(ctx, protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{QuestionID: in.AnswerID, Answer: in.Answer, IdempotencyKey: key}, &q); actErr != nil {
+			return "", nil, retryable(actErr, key)
+		}
+		return fmt.Sprintf("Answered swarm %s's question.", shown.Mission.ID), map[string]any{"run_id": in.RunID, "answered": true, "idempotency_key": key}, nil
 	case !errors.As(err, &perr) || perr.Code != protocol.CodeNotFound:
-		return "", nil, retryable(err, key)
+		return "", nil, err
 	}
 	r, err := getRunRecord(ctx, c.read, in.RunID)
 	if err != nil {
+		return "", nil, notPending
+	}
+	asked, err := roomQuestion(ctx, c.read, r, in.AnswerID, key)
+	if err != nil {
+		return "", nil, err
+	}
+	if !asked {
 		return "", nil, notPending
 	}
 	var res protocol.RunRoomPostResult
@@ -607,6 +620,32 @@ func answerAgain(ctx context.Context, c calls, in answerInput, notPending error)
 		return "", nil, retryable(err, key)
 	}
 	return fmt.Sprintf("Replied on run %s.", r.ID), map[string]any{"run_id": r.ID, "answered": true, "idempotency_key": key}, nil
+}
+
+// roomPages bounds how many pages of a run's room roomQuestion reads.
+const roomPages = 5
+
+// roomQuestion is whether run r's room, newest first, holds question id or a
+// reply to it under key.
+func roomQuestion(ctx context.Context, read Call, r protocol.Run, id, key string) (bool, error) {
+	before := ""
+	for range roomPages {
+		var page protocol.RoomMessageListResult
+		if err := read(ctx, protocol.MethodRunRoomList, protocol.RunRoomListParams{WorkspaceID: r.WorkspaceID, RunID: r.ID, Before: before,
+			Limit: protocol.CollaborationMaxPageSize}, &page); err != nil {
+			return false, err
+		}
+		if slices.ContainsFunc(page.Messages, func(m protocol.RoomMessage) bool {
+			return (m.ID == id && m.Kind == protocol.RoomMessageQuestion) || (m.IdempotencyKey == key && m.CorrelationID == id)
+		}) {
+			return true, nil
+		}
+		if page.NextBefore == "" {
+			break
+		}
+		before = page.NextBefore
+	}
+	return false, nil
 }
 
 // acted reports a run action that succeeded with the run's state after
