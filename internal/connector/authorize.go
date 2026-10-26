@@ -104,12 +104,10 @@ type authRequest struct {
 }
 
 // asserted is the account a ConnectorAssertion named, its nonce, which
-// the consent form spends, the edgeproto.HeaderBrowser of the browser
-// that brought it, and when the assertion was issued and expires.
+// the consent form spends, and when the assertion was issued and expires.
 type asserted struct {
 	Account edgeproto.Account `json:"a"`
 	Nonce   string            `json:"n"`
-	Browser string            `json:"b"`
 	Issued  time.Time         `json:"i"`
 	Expires time.Time         `json:"e"`
 }
@@ -225,7 +223,7 @@ func (h *handler) assertion(ctx context.Context, signed string, req authRequest,
 	if err != nil {
 		return nil, "", err
 	}
-	return &asserted{Account: a.Account, Nonce: a.Nonce, Browser: browser, Issued: a.IssuedAt, Expires: expires}, name, nil
+	return &asserted{Account: a.Account, Nonce: a.Nonce, Issued: a.IssuedAt, Expires: expires}, name, nil
 }
 
 // beforeStart refuses an assertion issued before the handler started,

@@ -465,10 +465,11 @@ form posts from the opaque origin its sandbox gives it.
 The server, not the edge, renders the consent page: only the server knows its
 members, its policy and its pairing codes, and it signs the consent form, so
 the edge never decides a grant. Every server shares the relay host, so on the
-universal paths the edge forwards a server's `Location` only to the relay
-host, `chatgpt.com` or `claude.ai`. Anything else becomes `502 the server sent
-the browser to "<url>"; on https://<relay host>/mcp the edge sends it only to
-...`. The edge also adds `form-action https://<relay host> https://chatgpt.com
+universal paths the edge forwards a server's `Location` only to
+`https://<relay host>/mcp/authorize`, `chatgpt.com` or `claude.ai`, never to a
+server's own `/mcp/<server id>` pages, which have no form limit. Anything else
+becomes `502 the server sent the browser to "<url>"; on https://<relay
+host>/mcp the edge sends it only to ...`. The edge also adds `form-action https://<relay host> https://chatgpt.com
 https://claude.ai` to the sandbox policy, so no server's page can post a form
 elsewhere.
 

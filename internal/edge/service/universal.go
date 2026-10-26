@@ -200,7 +200,7 @@ func (g *universalGuard) WriteHeader(code int) {
 		h.Set("Content-Type", "text/plain; charset=utf-8")
 		g.ResponseWriter.WriteHeader(http.StatusBadGateway)
 		_, _ = fmt.Fprintf(g.ResponseWriter, "the server sent the browser to %q; on %s%s the edge sends it only to %s or to %s\n",
-			loc, g.s.relayOrigin, edgeproto.PathUniversalMCP, g.s.relayOrigin, strings.Join(g.s.clientHosts, " or "))
+			loc, g.s.relayOrigin, edgeproto.PathUniversalMCP, g.s.relayOrigin+edgeproto.PathUniversalMCPAuthorize, strings.Join(g.s.clientHosts, " or "))
 		return
 	}
 	g.ResponseWriter.WriteHeader(code)
@@ -228,17 +228,17 @@ func (s *Service) clientSources() string {
 	return out
 }
 
-// allowedLocation reports whether loc is a path on the relay origin or
-// an https URL there or on a connector client's host name.
+// allowedLocation reports whether loc is the universal authorization
+// path on the relay origin or an https URL on a connector client's host
+// name. A server's own paths on the relay origin get no form-action
+// limit, so a universal page may not send the browser there.
 func (s *Service) allowedLocation(loc string) bool {
 	u, err := url.Parse(loc)
 	switch {
 	case err != nil || strings.ContainsAny(loc, "\\\r\n\t"):
 		return false
-	case u.Scheme == "" && u.Host == "":
-		return strings.HasPrefix(loc, "/") && !strings.HasPrefix(loc, "//")
-	case u.Scheme+"://"+u.Host == s.relayOrigin:
-		return true
+	case u.Scheme == "" && u.Host == "" && !strings.HasPrefix(loc, "//"), u.Scheme+"://"+u.Host == s.relayOrigin:
+		return u.User == nil && u.Path == edgeproto.PathUniversalMCPAuthorize
 	}
 	return u.Scheme == "https" && u.User == nil && slices.Contains(s.clientHosts, u.Hostname())
 }

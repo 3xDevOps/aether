@@ -151,6 +151,8 @@ func TestUniversalGuardsServerAnswers(t *testing.T) {
 		{"https://user@" + client.host + "/callback", false},
 		{"/mcp/authorize?next=1", true},
 		{h.relayURL + "/mcp/authorize", true},
+		{"/mcp/" + s.id + "/authorize", false},
+		{h.relayURL + "/mcp/" + s.id + "/", false},
 		{client.redirect + "?code=x", true},
 	} {
 		target := at
