@@ -1,7 +1,9 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { type CacheSnapshot, VList, type VListHandle } from 'virtua'
+import { ActionCard, ReadsLine } from '@/components/assistant/action-card'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
+import { actionRecords, assistantView, type ActionGroup, type AssistantView } from '@/lib/assistant-actions'
 import { cn } from '@/lib/utils'
 import { EnteringRow, rowGap, TimelineRow, useArrivals, useFlatRows, type FlatRow, type RowContext } from '@/routes/run/session-rows'
 import { enhancedRows } from '@/routes/run/session-view'
@@ -20,10 +22,37 @@ export function assistantRows(session: AcpSession) {
   return enhancedRows(session.turns, session.live, turnExtras(noAgents, 0), null)
 }
 
+export function useAssistantView(session: AcpSession | undefined): AssistantView | null {
+  const confirmations = useStore((s) => s.assistantConfirmations)
+  return useMemo(() => (session ? assistantView(assistantRows(session), confirmations, actionRecords(session.turns)) : null), [session, confirmations])
+}
+
+type Item = FlatRow | { kind: 'actions'; key: string; group: ActionGroup }
+
+/** Each row's cards follow it, after the steps an open block shows. */
+function withActions(flat: FlatRow[], groups: AssistantView['groups']): Item[] {
+  const out: Item[] = []
+  const after = (anchor: string) => {
+    for (const group of groups.get(anchor) ?? []) out.push({ kind: 'actions', key: group.id, group })
+  }
+  after('')
+  let host: string | null = null
+  for (const item of flat) {
+    if (item.kind === 'row') {
+      if (host !== null) after(host)
+      host = item.row.id
+    }
+    out.push(item)
+  }
+  if (host !== null) after(host)
+  return out
+}
+
 export function Transcript({ session }: { session: AcpSession }) {
   const self = useStore((s) => s.info?.member.id ?? '')
   const expanded = useStore((s) => s.expandedRows[assistantSessionID])
-  const rows = useMemo(() => assistantRows(session), [session])
+  const view = useAssistantView(session)!
+  const rows = view.rows
   const list = useRef<VListHandle>(null)
   const generation = useStore((s) => `${s.identityKey}:${s.assistantGeneration}`)
   const conversation = useRef('')
@@ -37,8 +66,9 @@ export function Transcript({ session }: { session: AcpSession }) {
     setFollowing(value)
   }
   const [focused, setFocused] = useState<string | null>(null)
-  const flat = useFlatRows(rows, expanded, following, focused)
-  const arrivals = useArrivals(flat, expanded)
+  const steps = useFlatRows(rows, expanded, following, focused)
+  const arrivals = useArrivals(steps, expanded)
+  const flat = useMemo(() => withActions(steps, view.groups), [steps, view.groups])
   const firstKey = useRef(flat[0]?.key)
   const shift = firstKey.current !== undefined && flat[0]?.key !== firstKey.current
   const older = session.more
@@ -82,7 +112,7 @@ export function Transcript({ session }: { session: AcpSession }) {
         if (handle) pin(offset + handle.viewportSize >= handle.scrollSize - bottomSlack)
       }}
     >
-      {(item: FlatRow | null, index: number) => item === null ? (
+      {(item: Item | null, index: number) => item === null ? (
         <div key="older" className="flex justify-center px-3 pt-3">
           <Button size="sm" variant="ghost" disabled={session.olderLoading} onClick={() => {
             pin(false)
@@ -104,9 +134,13 @@ export function Transcript({ session }: { session: AcpSession }) {
           onBlur={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget)) setFocused(null)
           }}
-          className={cn('w-full px-3', rowGap(item), index === count - 1 && 'pb-3', index === 0 && 'pt-3')}
+          className={cn('w-full px-3', item.kind === 'actions' ? 'pt-2' : rowGap(item), index === count - 1 && 'pb-3', index === 0 && 'pt-3')}
         >
-          <TimelineRow item={item} ctx={ctx} />
+          {item.kind !== 'actions'
+            ? <TimelineRow item={item} ctx={ctx} />
+            : item.group.kind === 'action'
+              ? <ActionCard action={item.group.action} />
+              : <ReadsLine id={item.group.id} actions={item.group.actions} />}
         </EnteringRow>
       )}
     </VList>

@@ -24,6 +24,25 @@ export interface AssistantConfirmation {
   other_owner?: string
 }
 
+/** The server's record of one assistant action, on a transcript notice; a later record with the same `id` replaces an earlier one. */
+export interface AssistantActionRecord {
+  id: string
+  method: string
+  summary: string
+  target?: { workspace_id?: string; run_id?: string; mission_id?: string; pr?: string | number }
+  outcome: 'approved' | 'auto_approved' | 'declined' | 'expired' | 'withdrawn' | 'failed' | 'succeeded'
+  /** How it passed; absent for a call that never asks, such as a pause. */
+  approval?: 'card' | 'auto'
+  confirmation_id?: string
+  other_owner?: string
+  error?: string
+  /** Only what the call created, such as a launched run. */
+  result?: { workspace_id?: string; run_id?: string; mission_id?: string }
+  created_at: string
+  decided_at?: string
+  finished_at?: string
+}
+
 export interface AssistantStatus {
   state: AssistantState
   agent?: string
