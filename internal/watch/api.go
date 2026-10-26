@@ -316,7 +316,8 @@ func (s *Service) existing(ctx context.Context, member domain.MemberID, t protoc
 		if w.State != protocol.WatchPaused {
 			return w, nil
 		}
-		w.State, w.UpdatedAt = protocol.WatchActive, s.now()
+		now := s.now()
+		w.State, w.UpdatedAt, w.NextCheckAt = protocol.WatchActive, now, &now
 		err = s.store.UpdateWatch(ctx, w)
 		if errors.Is(err, store.ErrConflict) {
 			continue
@@ -561,6 +562,11 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 			}
 		}
 		w.UpdatedAt = now
+		if w.State == protocol.WatchActive {
+			// Due now, so the background loop checks it should the
+			// check below not commit.
+			w.NextCheckAt = &now
+		}
 		err = s.store.UpdateWatch(ctx, w)
 		if errors.Is(err, store.ErrConflict) {
 			continue
@@ -568,7 +574,7 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 		if err != nil {
 			return protocol.WatchResult{}, err
 		}
-		return s.settled(ctx, w.ID)
+		return s.settled(context.WithoutCancel(ctx), w.ID)
 	}
 	return protocol.WatchResult{}, fmt.Errorf("watch %s: changed by every concurrent update", p.WatchID)
 }
