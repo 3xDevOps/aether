@@ -210,7 +210,7 @@ describe('action cards', () => {
       say(1, 'user', 'Launch and watch it'),
       aether(1, 't1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: {
         run: { id: 'run_fix' },
-        launch: { kind: 'run', workspace_id: workspace.id, harness: 'claude', model: 'opus', account: { member_id: 'mem_bob', name: 'Bob', shared: true }, requested_account: { name: 'Alice' }, fallback: { policy: 'ordered', order: ['mem_bob', alice.id] }, link: '?run=run_fix' },
+        launch: { kind: 'run', workspace_id: workspace.id, harness: 'claude', model: 'opus', mode: 'acp', mode_name: 'Enhanced', account: { member_id: 'mem_bob', name: 'Bob', access: 'shared' }, requested_account: { member_id: alice.id, name: 'Alice', access: 'own' }, fallback: { policy: 'ordered', order: ['mem_bob', alice.id] }, url: '?run=run_fix' },
       } }),
       aether(1, 't2', 'aether_watch_create', 'completed', { raw_input: { run_id: 'run_fix' }, raw_output: {
         watch: { state: 'active', conditions: ['needs_you', 'finished'], last_notification: { deliveries: [{ channel: 'push', status: 'no_destination' }] } },
@@ -219,7 +219,7 @@ describe('action cards', () => {
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const launched = await card(aside, /^Launched run on main-repo with Claude Code\./)
-    expect(within(launched).getByText("run · main-repo · Claude Code opus · Bob's account, shared · fell back from Alice · then mem_bob, your account")).toBeDefined()
+    expect(within(launched).getByText("run · main-repo · Claude Code opus · Bob's account, shared · fell back from your account · then mem_bob, your account")).toBeDefined()
     const watching = await card(aside, /^Started watching run fix-login\. Done$/)
     expect(within(watching).getByText('active · on needs you, finished · last notice: push no destination')).toBeDefined()
     await userEvent.click(within(watching).getByRole('button', { name: 'Open watch' }))

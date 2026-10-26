@@ -64,7 +64,7 @@ otherwise say what you cannot do and give the dashboard path instead.
   `aether_run_changes`, `aether_changes`, `aether_overlaps`,
   `aether_pr_status`, `aether_activity_summary`, `aether_launch_options`
 - `aether_answer`, `aether_decide_approval`, `aether_launch_swarm`,
-  `aether_relaunch_run`
+  `aether_launch_template`, `aether_relaunch_run`
 - `aether_watch_*`: create, list and delete watches
 
 ### Approval

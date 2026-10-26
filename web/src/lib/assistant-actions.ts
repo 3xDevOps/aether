@@ -53,6 +53,7 @@ const toolMethods: Record<string, string> = {
   aether_resume_run: 'run.resume',
   aether_save_environment: 'env.save',
   aether_launch_swarm: 'mission.create',
+  aether_launch_template: 'run.launch',
   aether_pr_merge: 'run.pr.merge',
   aether_relaunch_run: 'run.relaunch',
   aether_answer: 'run.input.respond',
@@ -481,6 +482,7 @@ function watchObject(action: AssistantAction, names: ActionNames): string {
 const phrases: Record<string, { verb: Verb; object: (action: AssistantAction, names: ActionNames) => string }> = {
   aether_launch_run: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('run') },
   aether_launch_swarm: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('swarm') },
+  aether_launch_template: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('run from a template') },
   aether_relaunch_run: runVerb(['Relaunch', 'Relaunched', 'Relaunching']),
   aether_message_run: runVerb(['Message', 'Messaged', 'Messaging']),
   aether_stop_run: runVerb(['Stop', 'Stopped', 'Stopping']),
@@ -517,26 +519,31 @@ export function launchLine(action: AssistantAction, names: ActionNames): string 
   const launch = record(result.launch)
   const kind = text(launch.kind)
   if (!kind) return action.state === 'done' && (action.tool === 'aether_launch_run' || action.tool === 'aether_launch_swarm') ? askedLaunch(action, result, names) : undefined
+  const lead = kind === 'swarm' ? record(launch.integrator) : launch
   const workspace = text(launch.workspace_id)
-  const harness = text(launch.harness)
-  const account = record(launch.account)
-  const member = text(account.member_id)
-  const own = account.own === true || account.shared === false || (member !== undefined && names.sharer(member) === undefined)
-  const sharer = own ? undefined : text(account.name) ?? (member && names.sharer(member))
-  const requested = text(record(launch.requested_account).name) ?? text(launch.requested_account)
+  const harness = text(lead.harness)
+  const requested = record(launch.requested_account)
   return [
     kind,
     workspace && (names.workspace(workspace) ?? workspace),
-    harness && [names.agent(harness) ?? harness, text(launch.model)].filter(Boolean).join(' '),
-    sharer ? `${sharer}'s account, shared` : 'your account',
-    requested && `fell back from ${requested}`,
+    harness && [names.agent(harness) ?? harness, text(lead.model)].filter(Boolean).join(' '),
+    accountWords(record(lead.account), names),
+    Object.keys(requested).length > 0 && `fell back from ${accountWords(requested, names)}`,
     fallbackWords(record(launch.fallback), names),
   ].filter(Boolean).join(' · ')
 }
 
+/** A receipt's account: `access` is own, shared (with the member) or other (a teammate's run on their own account). */
+function accountWords(account: Record<string, unknown>, names: ActionNames): string {
+  const member = text(account.member_id)
+  const name = text(account.name) ?? (member && (names.sharer(member) ?? member))
+  if (account.access === 'own' || !name) return 'your account'
+  return account.access === 'shared' ? `${name}'s account, shared` : `${name}'s account`
+}
+
 /** The receipt's fallback policy, when it is not the automatic one. */
 function fallbackWords(fallback: Record<string, unknown>, names: ActionNames): string | undefined {
-  if (fallback.policy === 'off' || fallback.no_fallback === true) return 'no fallback'
+  if (fallback.policy === 'off') return 'no fallback'
   const order = Array.isArray(fallback.order) ? fallback.order.map(text).filter((id): id is string => id !== undefined) : []
   return order.length ? `then ${order.map((id) => names.sharer(id) ?? 'your account').join(', ')}` : undefined
 }

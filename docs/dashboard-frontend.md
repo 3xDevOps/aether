@@ -585,8 +585,10 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   waiting for approval is one line that points at the approval card in the
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the
-  error for **Details**. A launch receipt (`result.launch`) or a watch result
-  gets one more line; a done launch without a receipt gets the same line from
+  error for **Details**. A launch receipt (`result.launch`: the account by
+  `access` own, shared or other, the integrator's for a swarm, `fell back
+  from` its `requested_account`, `no fallback` for policy `off` or the
+  `ordered` accounts) or a watch result gets one more line; a done launch without a receipt gets the same line from
   the returned run and its inputs (kind, workspace, agent and model, `your
   account` or `<name>'s account, shared`, `no fallback`). A done launch whose
   run or swarm is still active reads **Working in the background** and says
