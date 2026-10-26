@@ -1,13 +1,13 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AppShell } from '@/components/shell/app-shell'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
-import type { AssistantConfirmation, AssistantStatus } from '@/lib/assistant-types'
+import type { AssistantActionRecord, AssistantConfirmation, AssistantStatus } from '@/lib/assistant-types'
 import type { SessionItem } from '@/lib/session-types'
 import { useStore } from '@/store'
 import { item, resetItems, ScriptedSession, say, tool } from '@/test/acp-stream'
-import { alice, run, runRecords, serverInfo, workspace } from '@/test/fixtures'
+import { alice, mission, run, runRecords, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 
 vi.mock('@/lib/api', async (importOriginal) => {
@@ -107,7 +107,9 @@ describe('action cards', () => {
     assistantSocket().send({ status: status({ state: 'running', confirmations: [launch] }) })
     const pending = await card(aside, /^Launching run on main-repo with Claude Code\. Waiting for your approval$/)
     expect(pending.dataset.state).toBe('approval')
-    expect(aside.querySelector('[data-slot="live-row"]')?.textContent).toBe('Waiting for your approval')
+    expect(pending.textContent).toBe('Launching run on main-repo with Claude Code · Waiting for your approval below')
+    expect(within(pending).queryAllByRole('button')).toHaveLength(0)
+    expect(aside.querySelector('[data-slot="live-row"]')).toBeNull()
 
     act(() => useStore.getState().upsertRun(run({ id: 'run_9', title: 'login-test', status: 'running' })))
     assistantSocket().send({ status: status({ state: 'running' }) }).items(
@@ -117,8 +119,11 @@ describe('action cards', () => {
     const done = await card(aside, /^Launched run on main-repo with Claude Code\. Working in the background · approved by you$/)
     expect(within(aside).queryByText(`Approved: ${launch.summary}`)).toBeNull()
 
-    done.focus()
-    fireEvent.keyDown(done, { key: 'Enter' })
+    expect(done.tabIndex).toBe(-1)
+    within(aside).getByRole('textbox').focus()
+    const primary = within(done).getByRole('button', { name: 'Open run' })
+    while (document.activeElement !== primary) await userEvent.tab()
+    await userEvent.keyboard('{Enter}')
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
 
     act(() => useStore.getState().upsertRun(run({ id: 'run_9', title: 'login-test', status: 'completed' })))
@@ -132,8 +137,11 @@ describe('action cards', () => {
       aether(1, 't1', 'aether_stop_run', 'failed', { raw_input: { run_id: 'run_fix' }, content: [{ type: 'text', text: 'run.kill was not approved: the member declined this action' }] }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    const declined = await card(aside, /^Stop run fix-login\. Declined$/)
-    expect(within(declined).getByRole('alert').textContent).toBe('run.kill was not approved: the member declined this action')
+    const declined = await card(aside, /^Stop run fix-login\. You declined$/)
+    expect(within(declined).queryByRole('alert')).toBeNull()
+    expect(within(declined).queryByText(/not approved/)).toBeNull()
+    await userEvent.click(within(declined).getByRole('button', { name: 'Details' }))
+    expect(within(declined).getByText('run.kill was not approved: the member declined this action')).toBeDefined()
 
     await userEvent.click(within(declined).getByRole('button', { name: 'Retry' }))
     expect(useStore.getState().assistantDraft).toBe('Retry: Stop run fix-login')
@@ -152,7 +160,9 @@ describe('action cards', () => {
       aether(1, 't2', 'aether_message_run', 'failed', { raw_input: { run_id: 'run_gone', message: 'rebase' }, raw_output: 'run.inject: run run_gone not found (-32004)' }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    expect(await card(aside, /^Message run fix-login\. Expired: no answer in time$/)).toBeDefined()
+    const expired = await card(aside, /^Message run fix-login\. No answer in 10 minutes$/)
+    expect(within(expired).queryByRole('alert')).toBeNull()
+    expect(within(expired).getByRole('button', { name: 'Retry' })).toBeDefined()
     const failed = await card(aside, /^Message run run_gone\. Failed$/)
     expect(within(failed).getByRole('alert').textContent).toBe('run.inject: run run_gone not found (-32004)')
     expect(within(failed).getByText('This run no longer exists')).toBeDefined()
@@ -190,7 +200,7 @@ describe('action cards', () => {
     const merged = await card(aside, /^Merged PR #42\. Done$/)
     await userEvent.click(within(merged).getByRole('button', { name: 'Open pull request' }))
     expect(opened).toHaveBeenCalledWith('https://github.com/acme/api/pull/42', '_blank', 'noopener,noreferrer')
-    await userEvent.click(within(await card(aside, /^Launched swarm on main-repo\. Done$/)).getByRole('button', { name: 'Open swarm' }))
+    await userEvent.click(within(await card(aside, /^Launched swarm on main-repo\. Working in the background$/)).getByRole('button', { name: 'Open swarm' }))
     expect(useStore.getState().route).toEqual({ name: 'missions', params: { missionId: 'mis_7' } })
   })
 
@@ -259,12 +269,12 @@ describe('action history', () => {
       aether(1, 't2', 'aether_message_run', 'failed', { raw_input: { run_id: 'run_fix', message: 'go' }, raw_output: 'run.inject was not approved: the member declined this action' }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
-    await card(aside, /^Message run fix-login\. Declined$/)
+    await card(aside, /^Message run fix-login\. You declined$/)
     await userEvent.click(within(aside).getByRole('button', { name: 'Actions' }))
     const list = await screen.findByRole('list', { name: 'Actions' })
     const entries = within(list).getAllByRole('button')
     expect(entries.map((entry) => entry.textContent)).toEqual([
-      expect.stringMatching(/^Message run fix-loginDeclined · opens the run/),
+      expect.stringMatching(/^Message run fix-loginYou declined · opens the run/),
       expect.stringMatching(/^Launched run on main-repo with Claude CodeWorking in the background · opens the run/),
     ])
     expect(document.activeElement).toBe(entries[0])
@@ -291,7 +301,7 @@ describe('review fixes', () => {
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     act(() => useStore.getState().setAssistantDraft('also check CI'))
-    await userEvent.click(within(await card(aside, /^Stop run fix-login\. Declined$/)).getByRole('button', { name: 'Retry' }))
+    await userEvent.click(within(await card(aside, /^Stop run fix-login\. You declined$/)).getByRole('button', { name: 'Retry' }))
     expect(useStore.getState().assistantDraft).toBe('also check CI\n\nRetry: Stop run fix-login')
     expect(api.assistantPrompt).not.toHaveBeenCalled()
   })
@@ -353,7 +363,7 @@ describe('agents and turn ends', () => {
     const stopped = await card(aside, /^Stopped run fix-login\. Done$/)
     await userEvent.click(within(stopped).getByRole('button', { name: 'Open run' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_fix' } })
-    expect(within(await card(aside, /^Message run fix-login\. Declined$/)).getByRole('alert').textContent).toBe('run.inject was not approved: the member declined this action')
+    expect(await card(aside, /^Message run fix-login\. You declined$/)).toBeDefined()
   })
 
   it('says a call the turn ended under did not finish, rather than done', async () => {
@@ -373,5 +383,61 @@ describe('status words', () => {
     const aside = await openPanel([item('turn_start', 1), say(1, 'user', 'hi')])
     assistantSocket().send({ status: status({ state: 'running' }) })
     expect(await within(aside).findByText('Claude Code · Generating…')).toBeDefined()
+  })
+})
+
+describe('quiet outcomes and names', () => {
+  it('says a withdrawn card in its own words, without an error or a retry', async () => {
+    const withdrawn: AssistantActionRecord = { id: 'a1', method: 'run.kill', summary: 'Stop run fix-login', target: { run_id: 'run_fix' }, outcome: 'withdrawn', confirmation_id: 'c1', created_at: '2026-10-26T10:00:00Z' }
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Stop fix-login'),
+      aether(1, 't1', 'aether_stop_run', 'in_progress', { raw_input: { run_id: 'run_fix' } }),
+      item('notice', 1, { notice: { severity: 'info', title: 'Withdrawn: Stop run fix-login', action: withdrawn } }),
+      aether(1, 't1', 'aether_stop_run', 'failed', { raw_input: { run_id: 'run_fix' }, raw_output: 'run.kill was not approved: the turn or session ended before the member answered' }),
+      item('turn_end', 1, { stop_reason: 'cancelled' }),
+    ])
+    const stopped = await card(aside, /^Stop run fix-login\. Withdrawn: the turn ended before you answered$/)
+    expect(within(stopped).queryByRole('alert')).toBeNull()
+    expect(within(stopped).queryByRole('button', { name: 'Retry' })).toBeNull()
+    expect(within(aside).queryByText('Withdrawn: Stop run fix-login')).toBeNull()
+  })
+
+  it('names a run by its task when it has no title', async () => {
+    useStore.getState().upsertRun(run({ id: 'run_untitled', title: '', task: 'Fix the flaky login test\nThen push', status: 'running' }))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Stop it'),
+      aether(1, 't1', 'aether_stop_run', 'completed', { raw_input: { run_id: 'run_untitled' } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    expect(await card(aside, /^Stopped run Fix the flaky login test\. Done$/)).toBeDefined()
+  })
+
+  it('reads a launched swarm it has not loaded, working until the swarm says it finished', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof api.missionShow>>) => void
+    vi.mocked(api.missionShow).mockReturnValue(new Promise((resolve) => { finish = resolve }))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Start a swarm'),
+      aether(1, 't1', 'aether_launch_swarm', 'completed', { raw_input: { workspace_id: workspace.id }, raw_output: { ids: { mission_id: 'mis_7' } } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    expect(await card(aside, /^Launched swarm on main-repo\. Working in the background$/)).toBeDefined()
+    expect(api.missionShow).toHaveBeenCalledWith('mis_7')
+    act(() => finish({ mission: mission({ id: 'mis_7', phase: 'completed' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] }))
+    expect(await card(aside, /^Launched swarm on main-repo\. Done$/)).toBeDefined()
+  })
+
+  it('shows why a launched swarm could not be read instead of calling it working', async () => {
+    vi.mocked(api.missionShow).mockRejectedValue(new Error('mission.get: mission mis_7 not found (-32004)'))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Start a swarm'),
+      aether(1, 't1', 'aether_launch_swarm', 'completed', { raw_input: { workspace_id: workspace.id }, raw_output: { ids: { mission_id: 'mis_7' } } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const launched = await card(aside, /^Launched swarm on main-repo\. Done$/)
+    expect(within(launched).getByText('Could not read swarm mis_7: mission.get: mission mis_7 not found (-32004)')).toBeDefined()
   })
 })

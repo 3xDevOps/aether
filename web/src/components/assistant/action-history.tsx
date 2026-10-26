@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type * as React from 'react'
-import { actionStateWord, actionTone, useActionNames, useBackground, useOpenTarget, useTargetGone } from '@/components/assistant/action-card'
+import { actionTone, stateLine, useActionNames, useBackground, useOpenTarget, useTargetGone } from '@/components/assistant/action-card'
 import { useAssistantView } from '@/components/assistant/transcript'
 import { History } from '@/components/icons'
 import { api } from '@/lib/api'
@@ -8,15 +8,20 @@ import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot } from '@/components/ui/status-dot'
-import { actionSummary, type AssistantAction } from '@/lib/assistant-actions'
+import { actionSummary, type ActionTarget, type AssistantAction } from '@/lib/assistant-actions'
 import { useStore } from '@/store'
 import { loadOlderAssistant } from '@/store/assistant-stream'
 import type { AcpSession } from '@/store/sessions'
 
-const outcomeWord = (action: AssistantAction, background: boolean) => [
-  background ? 'Working in the background' : actionStateWord[action.state],
-  action.approval === 'approved' ? 'approved by you' : action.approval === 'auto-approved' ? 'auto-approved' : undefined,
-].filter(Boolean).join(' · ')
+const opensWord: Record<ActionTarget['kind'], string> = {
+  run: 'opens the run',
+  swarm: 'opens the swarm',
+  pr: 'opens the pull request',
+  workspace: 'opens the workspace',
+  environment: 'opens the environment',
+  watch: 'opens the watch',
+  link: 'opens the link',
+}
 
 function moveFocus(event: React.KeyboardEvent<HTMLUListElement>) {
   const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[data-action-entry]')]
@@ -50,8 +55,8 @@ function Entry({ action, onOpen }: { action: AssistantAction; onOpen: () => void
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="break-words text-text">{actionSummary(action, names)}</span>
           <span className="text-ui-sm text-muted">
-            {outcomeWord(action, background)}
-            {gone ? ' · no longer exists' : target ? ` · ${target.url ? 'opens the pull request' : `opens the ${target.kind === 'swarm' ? 'swarm' : target.kind}`}` : ''}
+            {stateLine(action, background)}
+            {gone ? ' · no longer exists' : target ? ` · ${opensWord[target.kind]}` : ''}
           </span>
         </span>
         <span className="flex h-5 shrink-0 items-center text-ui-sm text-muted tabular-nums"><RelativeTime at={action.at} /></span>
@@ -62,8 +67,6 @@ function Entry({ action, onOpen }: { action: AssistantAction; onOpen: () => void
 
 export function ActionHistory({ session }: { session: AcpSession | undefined }) {
   const [open, setOpen] = useState(false)
-  const view = useAssistantView(session)
-  const actions = [...(view?.actions ?? [])].reverse()
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -82,23 +85,34 @@ export function ActionHistory({ session }: { session: AcpSession | undefined }) 
           first.focus()
         }}
       >
-        <p className="px-2 pt-1 text-ui-sm text-muted">
-          {session?.more ? 'Actions in the loaded part of this conversation, newest first' : 'Actions in this conversation, newest first'}
-        </p>
-        {actions.length === 0 ? (
-          <p className="px-2 pb-1 text-ui-sm">{session?.more ? 'No actions in the loaded messages. Reads are not listed.' : 'No actions yet. Reads are not listed.'}</p>
-        ) : (
-          <ul aria-label="Actions" className="flex flex-col" onKeyDown={moveFocus}>
-            {actions.map((action) => <Entry key={action.id} action={action} onOpen={() => setOpen(false)} />)}
-          </ul>
-        )}
-        {session?.more && (
-          <Button variant="quiet" size="sm" className="self-start px-2" disabled={session.olderLoading} onClick={() => void loadOlderAssistant(useStore, api)}>
-            {session.olderLoading ? 'Loading…' : 'Show earlier actions'}
-          </Button>
-        )}
-        {session?.olderError && <p role="alert" className="px-2 text-ui-sm text-state-failed">{session.olderError}</p>}
+        <Actions session={session} onOpen={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** Mounted only while the popover is open, so a closed list reads nothing as the transcript streams. */
+function Actions({ session, onOpen }: { session: AcpSession | undefined; onOpen: () => void }) {
+  const view = useAssistantView(session)
+  const actions = [...(view?.actions ?? [])].reverse()
+  return (
+    <>
+      <p className="px-2 pt-1 text-ui-sm text-muted">
+        {session?.more ? 'Actions in the loaded part of this conversation, newest first' : 'Actions in this conversation, newest first'}
+      </p>
+      {actions.length === 0 ? (
+        <p className="px-2 pb-1 text-ui-sm">{session?.more ? 'No actions in the loaded messages. Reads are not listed.' : 'No actions yet. Reads are not listed.'}</p>
+      ) : (
+        <ul aria-label="Actions" className="flex flex-col" onKeyDown={moveFocus}>
+          {actions.map((action) => <Entry key={action.id} action={action} onOpen={onOpen} />)}
+        </ul>
+      )}
+      {session?.more && (
+        <Button variant="quiet" size="sm" className="self-start px-2" disabled={session.olderLoading} onClick={() => void loadOlderAssistant(useStore, api)}>
+          {session.olderLoading ? 'Loading…' : 'Show earlier actions'}
+        </Button>
+      )}
+      {session?.olderError && <p role="alert" className="px-2 text-ui-sm text-state-failed">{session.olderError}</p>}
+    </>
   )
 }
