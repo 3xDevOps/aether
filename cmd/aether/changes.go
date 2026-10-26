@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -47,17 +48,21 @@ func runChanges(args []string) error {
 	return withControl(func(c *protocol.Client) error {
 		params := protocol.ChangesListParams{Cursor: *since, RunID: *run, MissionID: *swarm, Kinds: splitTypes(*kinds), Limit: *limit}
 		if *workspace != "" {
-			id, err := resolveWorkspace(c, *workspace)
-			switch {
-			case err == nil:
-				params.WorkspaceID = id
-			case *since != "":
-				// A resumed feed may name a workspace deleted since; the
-				// server still pages it, to deliver the deletion.
-				params.WorkspaceID = *workspace
-			default:
+			var wl protocol.WorkspaceListResult
+			if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &wl); err != nil {
 				return err
 			}
+			id, err := workspaceIDIn(wl.Workspaces, *workspace)
+			unknown := !slices.ContainsFunc(wl.Workspaces, func(w protocol.Workspace) bool { return w.Name == *workspace })
+			if err != nil && *since != "" && unknown {
+				// A resumed feed may name a workspace deleted since; the
+				// server still pages it, to deliver the deletion.
+				id, err = *workspace, nil
+			}
+			if err != nil {
+				return err
+			}
+			params.WorkspaceID = id
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "SEQ\tTIME\tRUN\tKIND\tDETAIL")

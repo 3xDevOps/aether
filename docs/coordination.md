@@ -548,7 +548,9 @@ every event in it, its runs' `run.deleted` included, and leaves
 `workspace.deleted`. Paging skips those holes. Drop every run you cached for
 a deleted workspace. A cursor call scoped to a workspace, run or swarm that
 has since been deleted still pages, so it delivers the deletion; without a
-cursor it is `-32000`. A cursor past the head means the database was reset or restored
+cursor it is `-32000`. The server cannot tell a deleted ID from one that never
+existed, so with a cursor an unknown ID pages only what the log holds for it,
+usually nothing. A cursor past the head means the database was reset or restored
 from a backup:
 
 ```json
