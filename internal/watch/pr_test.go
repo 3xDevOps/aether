@@ -390,6 +390,15 @@ func TestPRTwoWatchesOnOnePullRequestShareOneRead(t *testing.T) {
 	}
 }
 
+func TestPRRepoCasingFindsTheSameWatch(t *testing.T) {
+	p := newPRHarness(t)
+	upper := p.watchOn(p.ada, protocol.WatchTarget{Kind: protocol.WatchTargetPR, Repo: "ACME/App", Number: 7}, protocol.WatchCI).Watch
+	lower := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	if upper.ID != lower.ID || upper.Target.Repo != "acme/app" {
+		t.Fatalf("ACME/App#7 and acme/app#7 gave watches %s (%s) and %s, want one watch on acme/app", upper.ID, upper.Target.Repo, lower.ID)
+	}
+}
+
 func TestPRRateLimitWaitsForTheReset(t *testing.T) {
 	p := newPRHarness(t)
 	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
