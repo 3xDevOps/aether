@@ -38,6 +38,8 @@ import { diffSnapshot } from '@/store/diff'
 import { coalesce } from '@/store/coalesce'
 import { isProvisional } from '@/store/collaboration'
 import { loadDevices } from '@/store/devices'
+import { applyWatchChanged } from '@/store/watch-notice'
+import { loadWatches } from '@/store/watches'
 import { loadMergeProposals } from '@/store/members'
 import { loadEdge } from '@/store/edge'
 import { pausedFromTimeline } from '@/store/board'
@@ -249,6 +251,7 @@ export async function hydrate(
     s.setCapabilities(capabilities)
     // Device cards are an extra; their failure must not fail hydration.
     await loadDevices(store, client).catch(ignore)
+    await loadWatches(store, client).catch(ignore)
     await loadMergeProposals(store, client)
     await loadEdge(store, client).catch(ignore)
     if (signal?.aborted) return false
@@ -505,6 +508,9 @@ export async function applyEvent(
     }
     case 'assistant.notice':
       applyAssistantNotice(store, ev)
+      break
+    case 'watch.changed':
+      void applyWatchChanged(store, client, ev)
       break
     case 'run.deleted':
       store.getState().removeRun(ev.run_id)
@@ -1086,6 +1092,7 @@ export function connect(store: RootStore, client: Api = api): () => void {
     if (signal.aborted) return
     if (!retryTimer) {
       coalesce(store, 'devices', () => loadDevices(store, client).catch(ignore))
+      coalesce(store, 'watches', () => loadWatches(store, client).catch(ignore))
       coalesce(store, 'merges', () => loadMergeProposals(store, client))
       return
     }

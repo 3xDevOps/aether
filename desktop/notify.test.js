@@ -58,8 +58,13 @@ globalThis.WebSocket = class {
 
 const runs = new Map()
 let readFails = false
+const watches = new Map()
 globalThis.fetch = async (url, init) => {
   if (url.endsWith('/server.info')) return { ok: true, json: async () => ({ member: { id: 'me' } }) }
+  if (url.endsWith('/watch.get')) {
+    const got = watches.get(JSON.parse(init.body).watch_id)
+    return { ok: Boolean(got), status: 404, json: async () => got }
+  }
   const run = readFails ? undefined : runs.get(JSON.parse(init.body).run_id)
   return { ok: Boolean(run), status: 500, json: async () => ({ run }) }
 }
@@ -90,12 +95,16 @@ function lead(id) {
   return { id, member_id: 'me', title: `run ${id}`, status: 'running', state: 'working', reason: '', status_changed_at: '2026-10-16T00:00:00Z' }
 }
 
+let linked = []
+
 beforeEach(() => {
+  linked = []
+  watches.clear()
   shown.length = 0
   readFails = false
   supported = true
   focused = null
-  notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {})
+  notify.start('127.0.0.1:1', 'http://127.0.0.1:1/?token=t', () => {}, (link) => linked.push(link))
 })
 
 async function review(run, value) {
@@ -279,4 +288,39 @@ test('no update notification where notifications are unsupported', () => {
   supported = false
   notify.showUpdate({ key: 'cli:v3.0.0', title: 'Aether 3.0.0 is available', body: '' }, () => {})
   assert.equal(shown.length, 0)
+})
+
+async function watchChanged(payload) {
+  socket.onmessage({ data: JSON.stringify({ type: 'watch.changed', payload }) })
+  await new Promise((resolve) => setImmediate(resolve))
+  await new Promise((resolve) => setImmediate(resolve))
+}
+
+function watchWith(id, target, notice) {
+  watches.set(id, {
+    watch: { id, target, link: '/?page=settings&id=watches&watch=' + id },
+    notifications: [{ id: 'not-1', watch_id: id, title: 'PR #12 merged on GitHub', body: 'acme/app', link: 'https://github.com/acme/app/pull/12', ...notice }],
+  })
+}
+
+test("a watch notice shows natively and opens its link; another member's never does", async () => {
+  watchWith('wat-1', { kind: 'pr', repo: 'acme/app', number: 12 }, { condition: 'merged' })
+  await watchChanged({ watch_id: 'wat-1', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 1)
+  assert.equal(shown[0].options.title, 'PR #12 merged on GitHub')
+  assert.equal(shown[0].options.body, 'acme/app')
+  shown[0].handlers.click()
+  assert.deepEqual(linked, ['https://github.com/acme/app/pull/12'])
+
+  await watchChanged({ watch_id: 'wat-1', member_id: 'someone-else', notification_id: 'not-1' })
+  await watchChanged({ watch_id: 'wat-1', member_id: 'me' })
+  assert.equal(shown.length, 1, 'only a new notice for this member shows')
+})
+
+test('a watched need and the same run.status need show once', async () => {
+  const run = lead('r9')
+  watchWith('wat-2', { kind: 'run', run_id: 'r9' }, { condition: 'needs_you', title: 'run r9 needs you', link: '/?run=r9' })
+  await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+  await watchChanged({ watch_id: 'wat-2', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 1)
 })

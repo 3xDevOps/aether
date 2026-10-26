@@ -17,19 +17,21 @@ import { ConnectorsSection } from '@/routes/settings/connectors'
 import { GeneralSections } from '@/routes/settings/general'
 import { GitHubSection } from '@/routes/settings/github'
 import { SettingsNav } from '@/routes/settings/nav'
-import { PushSection, SlackSection } from '@/routes/settings/notifications'
+import { PushSection, SlackSection, WatchNotifySection } from '@/routes/settings/notifications'
 import { type CategoryID, categoryOf, visibleCategories, visibleEntries } from '@/routes/settings/registry'
 import { RemoteAccessSection } from '@/routes/settings/remote-access'
 import { ServerSection } from '@/routes/settings/server'
 import { ThisComputerSections } from '@/routes/settings/this-computer'
 import { UsageSection } from '@/routes/settings/usage'
+import { WatchesSection } from '@/routes/settings/watches'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 
 const bodies: Record<CategoryID, (client: Api) => ReactNode> = {
   general: () => <GeneralSections />,
   connections: (client) => <><ConnectorsSection client={client} /><GitHubSection client={client} /></>,
-  notifications: (client) => <><PushSection client={client} /><SlackSection client={client} /></>,
+  notifications: (client) => <><PushSection client={client} /><WatchNotifySection client={client} /><SlackSection client={client} /></>,
+  watches: (client) => <WatchesSection client={client} />,
   assistant: (client) => <AssistantSection client={client} />,
   children: (client) => <ChildRunsSection client={client} />,
   usage: (client) => <UsageSection client={client} />,
@@ -77,7 +79,12 @@ export function SettingsRoute({ params, client = api }: RouteProps & { client?: 
     },
   })
 
+  const shownParams = useRef(params)
   useEffect(() => {
+    const before = shownParams.current
+    shownParams.current = params
+    // Opening or closing a watch's detail stays in the category, and the dialog owns focus.
+    if (before !== params && before.section === params.section && (before.watch || params.watch)) return
     if (!target || !linked) return
     if (target === linked.id) {
       heading.current?.focus()

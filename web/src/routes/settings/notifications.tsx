@@ -4,7 +4,9 @@ import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Code } from '@/components/ui/code'
 import type { Api } from '@/lib/api'
-import type { SlackLinkResult, SlackStatusResult } from '@/lib/types'
+import { desktopBridge } from '@/components/shell/window-bar'
+import { Input } from '@/components/ui/input'
+import type { NotifyPrefs, SlackLinkResult, SlackStatusResult } from '@/lib/types'
 import { errorSentence } from '@/lib/format'
 import { disablePush, enablePush, readPush, testPush, type PushState } from '@/lib/push'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
@@ -177,6 +179,112 @@ export function PushSection({ client }: { client: Api }) {
           </div>
         )}
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
+      </SettingRow>
+    </SettingsSection>
+  )
+}
+
+const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+const quietDefault = () => ({ start: '22:00', end: '07:00', tz: browserZone() })
+
+function destinations(prefs: NotifyPrefs): string {
+  const devices = prefs.destinations?.push_devices
+  const push = !prefs.push
+    ? 'Push is off'
+    : devices === undefined
+      ? 'Push devices: this server does not say how many'
+      : devices === 0
+        ? 'No push device subscribed, so in-app only'
+        : `Push to ${devices} ${devices === 1 ? 'device' : 'devices'}`
+  const desktop = desktopBridge() ? 'this desktop app while it is open' : 'the desktop app while it is open'
+  return `${push} · ${desktop} · in-app on every dashboard.`
+}
+
+/** Watch notices: whether they push, and the hours they wait. */
+export function WatchNotifySection({ client }: { client: Api }) {
+  const cap = useStore((s) => s.capabilities)
+  const [prefs, setPrefs] = useState<NotifyPrefs | null>(null)
+  const [quiet, setQuiet] = useState(quietDefault)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const supported = cap === null || cap.methods.includes('*') || cap.methods.includes('notify.prefs.get')
+
+  useEffect(() => {
+    if (!supported) return
+    let live = true
+    client.notifyPrefsGet().then(
+      (next) => {
+        if (!live) return
+        setPrefs(next)
+        if (next.quiet_hours) setQuiet(next.quiet_hours)
+      },
+      (err: unknown) => live && setError(errorSentence(err)),
+    )
+    return () => {
+      live = false
+    }
+  }, [client, attempt, supported])
+
+  if (!supported) return null
+
+  const save = (next: NotifyPrefs) => {
+    setBusy(true)
+    setError(null)
+    const { destinations: _, ...wanted } = next
+    client.notifyPrefsSet(wanted)
+      .then((saved) => {
+        setPrefs(saved)
+        if (saved.quiet_hours) setQuiet(saved.quiet_hours)
+      }, (err: unknown) => setError(errorSentence(err)))
+      .finally(() => setBusy(false))
+  }
+
+  const held = prefs?.quiet_hours
+  const edited = held && (held.start !== quiet.start || held.end !== quiet.end || held.tz !== quiet.tz)
+  return (
+    <SettingsSection title="Watch notifications" id="watch-notifications" scope="Your account">
+      <SettingRow
+        id="watch-push"
+        label="Watch notifications on push devices"
+        labelFor="settings-watch-push"
+        help={prefs ? destinations(prefs) : error ? null : 'Reading your preferences…'}
+        control={<Checkbox id="settings-watch-push" checked={prefs?.push ?? false} disabled={busy || !prefs} onCheckedChange={(on) => prefs && save({ ...prefs, push: on === true })} />}
+      >
+        {error && <Callout tone="failed" role="alert">{error}</Callout>}
+        {error && !prefs && <TryAgain onClick={() => { setError(null); setAttempt((n) => n + 1) }} />}
+      </SettingRow>
+      <SettingRow
+        id="quiet-hours"
+        label="Quiet hours"
+        labelFor="settings-quiet-hours"
+        help="Pushes wait until quiet hours end, then arrive as one. In-app notices and the desktop app are not held."
+        control={(
+          <Checkbox
+            id="settings-quiet-hours"
+            checked={Boolean(held)}
+            disabled={busy || !prefs}
+            onCheckedChange={(on) => prefs && save({ ...prefs, quiet_hours: on === true ? quiet : undefined })}
+          />
+        )}
+      >
+        {held && (
+          <div className="flex min-w-0 flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-ui-sm text-muted">
+              From
+              <Input type="time" required value={quiet.start} disabled={busy} className="w-28" onChange={(event) => setQuiet({ ...quiet, start: event.target.value })} />
+            </label>
+            <label className="flex flex-col gap-1 text-ui-sm text-muted">
+              Until
+              <Input type="time" required value={quiet.end} disabled={busy} className="w-28" onChange={(event) => setQuiet({ ...quiet, end: event.target.value })} />
+            </label>
+            <label className="flex min-w-0 flex-col gap-1 text-ui-sm text-muted">
+              Time zone
+              <Input value={quiet.tz} disabled={busy} className="w-52 max-w-full" spellCheck={false} onChange={(event) => setQuiet({ ...quiet, tz: event.target.value })} />
+            </label>
+            {edited && <Button size="sm" variant="secondary" disabled={busy || !quiet.start || !quiet.end || !quiet.tz.trim()} onClick={() => prefs && save({ ...prefs, quiet_hours: { ...quiet, tz: quiet.tz.trim() } })}>Save</Button>}
+          </div>
+        )}
       </SettingRow>
     </SettingsSection>
   )

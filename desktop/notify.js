@@ -26,6 +26,7 @@ let attempt = 0
 let reconnectTimer = null
 let gateway = { origin: '', token: '' }
 let openRun = () => {}
+let openLink = () => {}
 let selfID = null
 
 // When each run last raised a needs-you notification, by either path. The
@@ -43,12 +44,14 @@ function recentlyShown(runId) {
  * @param {string} addr    host:port of the loopback gateway
  * @param {string} url     the full gateway URL; its ?token= query is the auth
  * @param {(runId: string) => void} onOpen  open a run when its notification is clicked
+ * @param {(link: string) => void} onLink  open a watch notice's link when it is clicked
  */
-function start(addr, url, onOpen) {
+function start(addr, url, onOpen, onLink = () => {}) {
   stop() // a sidecar respawn hands us a fresh addr and token
   stopped = false
   attempt = 0
   openRun = onOpen
+  openLink = onLink
   selfID = null
   lastShown.clear()
   announced.clear()
@@ -94,6 +97,10 @@ function connect(wsURL) {
     }
     if (ev.type === 'assistant.notice') {
       void showNotice(ev.payload || {})
+      return
+    }
+    if (ev.type === 'watch.changed') {
+      void showWatchNotice(ev.payload || {})
       return
     }
     if (!ev.run_id) return
@@ -159,6 +166,46 @@ async function showNotice(p) {
   const notification = new Notification({ title: p.title || p.run_id, body: p.body || '' })
   notification.on('click', () => openRun(p.run_id))
   notification.show()
+}
+
+// watch.changed names a new notice by id; only its owner hears it. A
+// needs-you notice on a run shares the run's duplicate window, so the same
+// need reaching us by run.status as well shows once.
+async function showWatchNotice(p) {
+  if (!p.notification_id || !Notification.isSupported()) return
+  try {
+    if (p.member_id !== (await memberID())) return
+  } catch (err) {
+    console.log(`notify: cannot tell who this member is: ${err.message}`)
+    return
+  }
+  const got = await readWatch(p.watch_id)
+  const notice = got && (got.notifications || []).find((n) => n.id === p.notification_id)
+  if (!notice) return
+  const target = got.watch.target || {}
+  if (target.kind === 'run' && target.run_id && notice.condition === 'needs_you') {
+    const duplicate = recentlyShown(target.run_id)
+    lastShown.set(target.run_id, Date.now())
+    if (duplicate) return
+  }
+  const notification = new Notification({ title: clip(notice.title || 'Watch', 120), body: clip(notice.body || '', 240) })
+  notification.on('click', () => openLink(notice.link || got.watch.link || ''))
+  notification.show()
+}
+
+async function readWatch(watchId) {
+  try {
+    const res = await fetch(`${gateway.origin}/api/v1/watch.get`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${gateway.token}` },
+      body: JSON.stringify({ watch_id: watchId }),
+    })
+    if (res.ok) return await res.json()
+    console.log(`notify: watch.get ${watchId}: ${res.status}`)
+  } catch (err) {
+    console.log(`notify: watch.get ${watchId}: ${err.message}`)
+  }
+  return null
 }
 
 function onStatus(runId, p) {
