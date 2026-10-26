@@ -12,9 +12,8 @@ import (
 )
 
 func TestConnectorMethodScopesNameRegisteredMethods(t *testing.T) {
-	unregistered := map[string]bool{"changes.list": true, "run.children": true}
 	for method := range connectorMethodScopes {
-		if _, ok := methodHandlers[method]; !ok && !unregistered[method] {
+		if _, ok := methodHandlers[method]; !ok {
 			t.Errorf("connectorMethodScopes lists %s, which no handler serves", method)
 		}
 	}
@@ -28,6 +27,16 @@ func TestConnectorScopesGateEachMethod(t *testing.T) {
 	e := newTestEnv(t, nil)
 	ctx := context.Background()
 	run := json.RawMessage(`{"run_id":"` + string(e.run.ID) + `"}`)
+	ready := &domain.Run{WorkspaceID: e.ws.ID, MemberID: e.member.ID, Task: "reported", Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
+	if err := e.store.CreateRun(ctx, ready); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.store.SetRunReview(ctx, ready.ID, domain.ReviewReady, ""); err != nil {
+		t.Fatal(err)
+	}
+	review := func(id domain.RunID, action string) json.RawMessage {
+		return json.RawMessage(`{"run_id":"` + string(id) + `","action":"` + action + `"}`)
+	}
 	read := []string{ConnectorScopeRead}
 	write := []string{ConnectorScopeRead, ConnectorScopeWrite}
 	all := []string{ConnectorScopeRead, ConnectorScopeWrite, ConnectorScopeControl}
@@ -51,6 +60,12 @@ func TestConnectorScopesGateEachMethod(t *testing.T) {
 		{"write scope cannot stop", connector(write), protocol.MethodRunKill, run, "run.kill needs the control scope, which ChatGPT connector con-test was not granted"},
 		{"write scope cannot merge", connector(write), protocol.MethodRunPRMerge, run, "run.pr.merge needs the control scope"},
 		{"control scope stops", connector(all), protocol.MethodRunKill, run, ""},
+		{"write scope cannot complete a live run", connector(write), protocol.MethodRunReview, review(e.run.ID, protocol.RunReviewComplete),
+			"run.review complete of a run with no reported success awaiting review needs the control scope"},
+		{"write scope puts a review off", connector(write), protocol.MethodRunReview, review(e.run.ID, protocol.RunReviewLater), ""},
+		{"write scope completes a reported success", connector(write), protocol.MethodRunReview, review(ready.ID, protocol.RunReviewComplete), ""},
+		{"control scope completes a live run", connector(all), protocol.MethodRunReview, review(e.run.ID, protocol.RunReviewComplete), ""},
+		{"read scope reads a room", connector(read), protocol.MethodRunRoomList, run, ""},
 		{"unlisted method", connector(all), protocol.MethodMemberRole, json.RawMessage(`{}`),
 			"member.role: ChatGPT connector con-test cannot call this method; no connector can, so use the Aether app or the aether CLI"},
 		{"dashboard is unscoped", e.srv.Local(e.member.ID), protocol.MethodMemberList, nil, ""},
