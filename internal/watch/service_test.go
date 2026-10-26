@@ -33,6 +33,7 @@ type fakeRuns struct {
 	mu      sync.Mutex
 	inputs  map[domain.RunID][]domain.RunInputRequest
 	pending map[domain.RunID][]acphost.Request
+	paused  map[domain.RunID]bool
 }
 
 func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
@@ -47,7 +48,17 @@ func (f *fakeRuns) ACPPending(run domain.RunID) []acphost.Request {
 	return f.pending[run]
 }
 
-func (f *fakeRuns) Paused(domain.RunID) bool { return false }
+func (f *fakeRuns) Paused(run domain.RunID) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.paused[run]
+}
+
+func (f *fakeRuns) pause(run domain.RunID, paused bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paused[run] = paused
+}
 
 func (f *fakeRuns) ask(run domain.RunID, id, title string) {
 	f.mu.Lock()
@@ -106,7 +117,7 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	ctx := context.Background()
 	h := &harness{t: t, ctx: ctx, path: filepath.Join(t.TempDir(), "aether.db"), clock: &clock{},
-		runs: &fakeRuns{inputs: map[domain.RunID][]domain.RunInputRequest{}, pending: map[domain.RunID][]acphost.Request{}}}
+		runs: &fakeRuns{inputs: map[domain.RunID][]domain.RunInputRequest{}, pending: map[domain.RunID][]acphost.Request{}, paused: map[domain.RunID]bool{}}}
 	db, err := storetest.Open(h.path)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -635,8 +646,9 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 	}
 }
 
-// setPhase moves the swarm's phase on the harness's database file
-// directly, which the store offers no method for.
+// setPhase moves the swarm's phase, and on a finish its finish time, on
+// the harness's database file directly, which the store offers no method
+// for.
 func (h *harness) setPhase(mission domain.MissionID, phase domain.MissionPhase) {
 	h.t.Helper()
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(h.path)+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
@@ -644,7 +656,9 @@ func (h *harness) setPhase(mission domain.MissionID, phase domain.MissionPhase) 
 		h.t.Fatal(err)
 	}
 	defer raw.Close() //nolint:errcheck // test cleanup
-	if _, err := raw.ExecContext(h.ctx, `UPDATE missions SET phase = ? WHERE id = ?`, phase, mission); err != nil {
+	if _, err := raw.ExecContext(h.ctx, `UPDATE missions SET phase = ?1,
+		finished_at = CASE WHEN ?1 IN ('completed', 'cancelled') THEN ?2 ELSE finished_at END WHERE id = ?3`,
+		phase, time.Now().UnixNano(), mission); err != nil {
 		h.t.Fatalf("set swarm phase: %v", err)
 	}
 }
@@ -688,9 +702,43 @@ func TestSwarmWatchSaysSwarmTransitionsOnly(t *testing.T) {
 	if got := bodies(h.notices(w.ID)); got[1] != "finished: Swarm completed" || h.watchState(w.ID).State != protocol.WatchActive {
 		t.Fatalf("notices = %q, state %s; want Swarm completed last and the watch active", got, h.watchState(w.ID).State)
 	}
+	// Reopened, it is announced again when it completes again.
+	h.setPhase(m.ID, domain.MissionPhaseActive)
+	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
+	settle()
+	h.setPhase(m.ID, domain.MissionPhaseCompleted)
+	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
+	h.eventually("the second completion", func() bool { return len(h.notices(w.ID)) == 3 })
 	h.setPhase(m.ID, domain.MissionPhaseCancelled)
 	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
 	h.eventually("the watch to end", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
+}
+
+func TestPushOfAPausedRunWaitsForItsResumption(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	now := h.clock.now().UTC()
+	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Push: true, QuietHours: &protocol.QuietHours{
+		Start: now.Add(-time.Hour).Format("15:04"), End: now.Add(time.Hour).Format("15:04"), TZ: "UTC",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	run := h.run(h.ada, "Paused mid-question")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: keep going?")
+	h.eventually("the held push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusHeldQuiet })
+
+	h.runs.pause(run.ID, true)
+	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Push: true}); err != nil {
+		t.Fatal(err)
+	}
+	settle()
+	if s := h.pushStatus(w.ID); s != protocol.WatchStatusHeldQuiet || phone.received.Load() != 0 {
+		t.Fatalf("push while the run is paused = %s, %d sent; want it still queued", s, phone.received.Load())
+	}
+	h.runs.pause(run.ID, false)
+	h.eventually("the push after resumption", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
 }
 
 func TestWatchingAFinishedTargetAnnouncesOnlyWhatComesNext(t *testing.T) {

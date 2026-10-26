@@ -58,7 +58,7 @@ func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, not
 	for _, n := range notes {
 		w, status, detail, err := s.stillDue(ctx, n, prefs)
 		switch {
-		case errors.Is(err, store.ErrNotFound):
+		case errors.Is(err, store.ErrNotFound), errors.Is(err, errRunPaused):
 		case err != nil:
 			errs = append(errs, fmt.Errorf("notice %s: %w", n.ID, err))
 		case w.MemberID != member, w.State == protocol.WatchPaused:
@@ -137,6 +137,10 @@ func (s *Service) hold(ctx context.Context, w *store.Watch, n *store.WatchNotifi
 	return s.settle(ctx, w, n, n.PushState, n.PushAttempts, &held, protocol.WatchStatusPending, dashboardHold)
 }
 
+// errRunPaused keeps a needs_you push queued while its run is paused: the
+// run's need reads as none then, though it is still pending.
+var errRunPaused = errors.New("the run is paused")
+
 // stillDue reads n's watch and returns the status that drops n's push,
 // empty when it is still to be sent.
 func (s *Service) stillDue(ctx context.Context, n *store.WatchNotification, prefs store.NotifyPrefs) (*store.Watch, string, string, error) {
@@ -157,6 +161,9 @@ func (s *Service) stillDue(ctx context.Context, n *store.WatchNotification, pref
 	}
 	if n.Condition != protocol.WatchNeedsYou {
 		return w, "", "", nil
+	}
+	if w.TargetKind == protocol.WatchTargetRun && s.runs.Paused(w.RunID) {
+		return w, "", "", errRunPaused
 	}
 	current, err := s.currentNeed(ctx, w)
 	if err != nil {

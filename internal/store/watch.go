@@ -149,6 +149,10 @@ type WatchStore interface {
 	// integration candidate of mission, keyed by candidate id.
 	MissionDeliveryReceipts(ctx context.Context, workspace domain.WorkspaceID, mission domain.MissionID) (map[string]json.RawMessage, error)
 
+	// MissionFinishedAt is when mission last completed or was cancelled,
+	// nil while it never has.
+	MissionFinishedAt(ctx context.Context, mission domain.MissionID) (*time.Time, error)
+
 	// WatchCursor is the last event sequence the watch service applied;
 	// ok is false before it first saved one.
 	WatchCursor(ctx context.Context) (seq uint64, ok bool, err error)
@@ -542,4 +546,16 @@ func (d *DB) MissionDeliveryReceipts(ctx context.Context, workspace domain.Works
 		return nil, fmt.Errorf("store: list delivery receipts: %w", err)
 	}
 	return out, nil
+}
+
+func (d *DB) MissionFinishedAt(ctx context.Context, mission domain.MissionID) (*time.Time, error) {
+	var at *int64
+	err := d.db.QueryRowContext(ctx, `SELECT finished_at FROM missions WHERE id = ?`, mission).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: mission %s: %w", mission, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: read mission finish: %w", err)
+	}
+	return decodeTimePtr(at), nil
 }

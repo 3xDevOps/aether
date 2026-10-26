@@ -165,7 +165,9 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 		}
 		ws, title = m.WorkspaceID, MissionTitle(m)
 		if m.Phase == domain.MissionPhaseCompleted {
-			fired[protocol.WatchFinished] = string(m.Phase)
+			if fired[protocol.WatchFinished], err = s.missionFinish(ctx, m); err != nil {
+				return "", "", nil, err
+			}
 		}
 	case protocol.WatchTargetPR:
 		if t.Repo == "" || t.Number <= 0 {

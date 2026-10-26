@@ -347,7 +347,11 @@ func (s *Service) readMission(ctx context.Context, w *store.Watch) (reading, err
 	if m.Phase.Terminal() {
 		finished = "Swarm " + string(m.Phase)
 		if slices.Contains(w.Conditions, protocol.WatchFinished) {
-			r.notices = append(r.notices, Notice{Condition: protocol.WatchFinished, Key: string(m.Phase), Title: r.title, Body: finished, Link: link})
+			key, err := s.missionFinish(ctx, m)
+			if err != nil {
+				return reading{}, err
+			}
+			r.notices = append(r.notices, Notice{Condition: protocol.WatchFinished, Key: key, Title: r.title, Body: finished, Link: link})
 		}
 	}
 	var delivered string
@@ -363,6 +367,19 @@ func (s *Service) readMission(ctx context.Context, w *store.Watch) (reading, err
 	}
 	r.observed.Summary = cmp.Or(r.observed.Need, finished, delivered, "Swarm "+string(m.Phase))
 	return r, nil
+}
+
+// missionFinish keys the swarm's finish by when it happened, so a swarm
+// that is reopened and completes again is announced again.
+func (s *Service) missionFinish(ctx context.Context, m *domain.Mission) (string, error) {
+	at, err := s.store.MissionFinishedAt(ctx, m.ID)
+	if err != nil {
+		return "", fmt.Errorf("read swarm %s finish: %w", m.ID, err)
+	}
+	if at == nil {
+		return string(m.Phase), nil
+	}
+	return string(m.Phase) + "|" + strconv.FormatInt(at.UnixNano(), 10), nil
 }
 
 // missionNeed is the swarm row of the Needs you table its current

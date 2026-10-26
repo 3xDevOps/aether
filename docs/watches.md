@@ -24,7 +24,7 @@ takes the target's defaults, marked *.
 | `run` | `finished`* | `Agent reported done`: the agent reported success; nothing is merged. `Failed: <reason>`. `Stopped`: the run was interrupted. `Completed`: the agent exited with its results committed. `Closed as merged` and `Closed as abandoned`: a member's disposition. |
 | `run` | `pr_merged`, `ci` | The run's pull request merged on GitHub, or its checks finished. Not supported yet: refused until the pull request evaluator ships. |
 | `mission` | `needs_you`* | The swarm needs its accountable human: the integrator asks a question, or the integrator stopped or failed to launch. Each question is its own notice. Workers never notify on their own; the integrator handles them. |
-| `mission` | `finished`* | `Swarm completed` or `Swarm cancelled`. A completed swarm can be reopened or still deliver, so its watch stays `active`. |
+| `mission` | `finished`* | `Swarm completed` or `Swarm cancelled`. A completed swarm can be reopened or still deliver, so its watch stays `active`, and a swarm that completes again is announced again. |
 | `mission` | `delivered` | An integration delivery receipt landed after the watch began: `Delivered to <ref>` when the ref moved, `Proposed <ref>` when a proposal was opened. |
 | `pr` | `ci`*, `review`*, `merged`*, `closed` | Not supported yet: refused until the pull request evaluator ships. |
 
@@ -72,7 +72,8 @@ the notice is recorded and updated in place as the push resolves:
 | `push` | `cleared` | Dropped unsent: a `needs_you` push whose need was resolved (answered, dismissed, granted) first, or a push of a watch paused until it expired. |
 
 A paused watch's pending pushes wait until you resume it, and are dropped if
-it expires first.
+it expires first. A `needs_you` push about a run the server paused waits
+until the run resumes.
 
 A device whose push service answers `404` or `410` is unsubscribed, as for
 every other notification.
