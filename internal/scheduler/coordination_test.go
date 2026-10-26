@@ -34,6 +34,10 @@ type fakeCoordinator struct {
 	// hold a writer in.
 	beforeWrite func()
 
+	// remind answers RemindReport; withCoordination points it at the
+	// scheduler's own wake.
+	remind func(context.Context, domain.RunID, string) error
+
 	mu             sync.Mutex
 	onWake         func(domain.RunID)
 	released       []domain.RunID
@@ -125,6 +129,13 @@ func (f *fakeCoordinator) EnhancedSessionOpened(_ context.Context, run domain.Ru
 	f.opened = append(f.opened, run)
 }
 
+func (f *fakeCoordinator) RemindReport(ctx context.Context, run domain.RunID, prompt string) error {
+	if f.remind == nil {
+		return errors.New("fakeCoordinator: no waker")
+	}
+	return f.remind(ctx, run, prompt)
+}
+
 func (f *fakeCoordinator) ProvisionalReport(_ context.Context, run domain.RunID, since time.Time, message string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -177,7 +188,7 @@ func withServerBinary(path string) func(*Config) {
 func withCoordination(t *testing.T, e *testEnv) (*fakeCoordinator, string) {
 	t.Helper()
 	dir := t.TempDir()
-	c := &fakeCoordinator{root: filepath.Join(dir, "coord")}
+	c := &fakeCoordinator{root: filepath.Join(dir, "coord"), remind: e.sched.Wake}
 	binDir := filepath.Join(dir, "runtime", "bin")
 	e.sched.UseCoordination(c, binDir)
 	return c, binDir

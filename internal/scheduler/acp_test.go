@@ -1326,7 +1326,9 @@ func TestEnhancedRunAppendsInstructionsToTheTaskWithoutASystemPromptRoute(t *tes
 func TestEnhancedTasklessRunDeliversInstructionsWithTheFirstMessageOnly(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
-	withCoordination(t, e)
+	coord, _ := withCoordination(t, e)
+	// No report reminder between the two prompts.
+	coord.remind = func(context.Context, domain.RunID, string) error { return errors.New("no reminders") }
 	run := e.launchACP(t, "")
 	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
 	for i, text := range []string{"first", "second"} {

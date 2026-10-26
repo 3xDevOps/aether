@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -22,12 +21,12 @@ type fakeSink struct {
 	mu   sync.Mutex
 	got  []agentstatus.Report
 	runs []domain.RunID
-	hold func() (bool, error)
+	hold func() (string, error)
 }
 
-func (f *fakeSink) HoldTurnEnd(context.Context, domain.RunID) (bool, error) {
+func (f *fakeSink) HoldTurnEnd(context.Context, domain.RunID) (string, error) {
 	if f.hold == nil {
-		return false, nil
+		return "", nil
 	}
 	return f.hold()
 }
@@ -243,7 +242,7 @@ type reportFileSink struct {
 	errors chan error
 }
 
-func (reportFileSink) HoldTurnEnd(context.Context, domain.RunID) (bool, error) { return false, nil }
+func (reportFileSink) HoldTurnEnd(context.Context, domain.RunID) (string, error) { return "", nil }
 
 func (s reportFileSink) ReportAgentState(_ context.Context, _ domain.RunID, report agentstatus.Report) error {
 	data, err := json.Marshal(report)
@@ -307,15 +306,15 @@ func TestRunReportHoldsAStopThatOwesAReport(t *testing.T) {
 	}
 	client := h.dial(t, run)
 	stop := protocol.RunReportParams{State: string(agentstatus.Idle), Reason: agentstatus.ReasonIdle, Stop: true}
-	sink.hold = func() (bool, error) { return true, nil }
+	sink.hold = func() (string, error) { return "report first", nil }
 	var held protocol.RunReportResult
-	if err := client.Call(protocol.MethodRunReport, stop, &held); err != nil || held.Continue != coordhooks.ReportReminder {
+	if err := client.Call(protocol.MethodRunReport, stop, &held); err != nil || held.Continue != "report first" {
 		t.Fatalf("held stop = %+v, %v; want the reminder", held, err)
 	}
 	if _, got := sink.reports(); len(got) != 0 {
 		t.Fatalf("a held stop reached the scheduler: %+v", got)
 	}
-	sink.hold = func() (bool, error) { return false, errors.New("store down") }
+	sink.hold = func() (string, error) { return "", errors.New("store down") }
 	var failed protocol.RunReportResult
 	if err := client.Call(protocol.MethodRunReport, stop, &failed); err != nil || failed.Continue != "" {
 		t.Fatalf("stop with a failed check = %+v, %v; want it let through", failed, err)

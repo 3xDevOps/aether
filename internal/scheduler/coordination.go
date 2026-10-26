@@ -45,6 +45,9 @@ type Coordinator interface {
 	WakeIdle(run domain.RunID)
 	EnhancedSessionOpened(ctx context.Context, run domain.RunID)
 	ProvisionalReport(ctx context.Context, run domain.RunID, since time.Time, message string) error
+	// RemindReport prompts an idle session the server drives as a mail
+	// wake would, under the same admission.
+	RemindReport(ctx context.Context, run domain.RunID, prompt string) error
 }
 
 // coordination attaches the run transport and staged binaries. enabled controls
@@ -570,24 +573,21 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 		return nil, nil, nil, err
 	}
 	if !run.ACP && c.enabled {
-		s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote, "run instructions: "+instructionChannel(profile, instructions))
+		// Without a launch route, the instructions reach the agent through
+		// its SessionStart hook and the aether MCP server's instructions.
+		channel := "SessionStart hook and MCP server instructions"
+		switch {
+		case instructions == "":
+		case profile.InstructionsConfig != "":
+			channel = "developer instructions"
+		case len(profile.InstructionArgs) > 0:
+			channel = "system prompt"
+		default:
+			channel = "instructions file"
+		}
+		s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote, "run instructions: "+channel)
 	}
 	return mounts, launchArgs, launchEnv, nil
-}
-
-// instructionChannel names where a Standard or Background launch puts the
-// run instructions. Without a launch route, they reach the agent through
-// its SessionStart hook and the aether MCP server's instructions.
-func instructionChannel(profile harness.Profile, instructions string) string {
-	switch {
-	case instructions == "":
-		return "SessionStart hook and MCP server instructions"
-	case profile.InstructionsConfig != "":
-		return "developer instructions"
-	case len(profile.InstructionArgs) > 0:
-		return "system prompt"
-	}
-	return "instructions file"
 }
 func ensureCoordinationCLIPath(env map[string]string) {
 	if env == nil {

@@ -608,7 +608,7 @@ Where the instructions go:
   short brief when the launch carries the card; see
   [mcp-bridge.md](mcp-bridge.md#registration).
 
-Each launch records where its instructions went as a `note` entry in
+Each launch attempt records where its instructions went as a `note` entry in
 `aether timeline <workspace>`: `run instructions: system prompt`,
 `developer instructions` (Codex), `instructions file` (OpenCode, Copilot
 CLI), `first message` (an Enhanced agent without a system prompt route), or
@@ -1838,9 +1838,11 @@ arrived since the turn started. A Standard Claude Code `Stop` hook marks its
 a subagent sent it, or background tasks hold the turn. For a turn that owes
 a report, the server does not apply that stop and answers with `continue`;
 the reporter prints Claude Code's
-`{"decision":"block","reason":"Report your state with aether-internal report (answered, waiting, needs-input, blocked, success or failure) before ending the turn."}`
+`{"decision":"block","reason":"Report your state with aether-internal report before ending the turn. <the role's reporting rules>"}`
 and the agent goes on. The next stop of that turn is applied whatever it
-reported. If the server cannot check, the stop is applied. Enhanced runs get
+reported. If the server cannot check, the stop is applied. If no hook
+arrives within a minute of the hold, as when the answer never reached Claude
+Code, the server ends the turn itself. Enhanced runs get
 the same rule as a [report reminder](enhanced-runs.md#report-reminder)
 prompt. Background runs, and Standard runs of other agents, are not held.
 

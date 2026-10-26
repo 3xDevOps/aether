@@ -10,7 +10,6 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
-	"github.com/3xDevOps/Aether/internal/coordhooks"
 )
 
 // The dashboard matches these reason prefixes (web/src/lib/needs-you.ts).
@@ -42,14 +41,28 @@ func heldByTasks(report agentstatus.Report) bool {
 }
 
 func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnState) {
+	// A swarm worker's ended turn hands its last message to its integrator.
+	forward, message := false, ""
 	switch acp.StopReason(st.Reason) {
 	case acp.StopReasonEndTurn, acp.StopReasonMaxTokens, acp.StopReasonMaxTurnRequests, acp.StopReasonRefusal, "error":
 		d.s.mu.Lock()
 		assigned := entry.missionAssigned
 		d.s.mu.Unlock()
 		if sess := d.session(entry.runID); assigned && sess != nil {
-			d.s.TurnEnded(entry.runID, acphost.LastMessage(sess.Log()))
+			forward, message = true, acphost.LastMessage(sess.Log())
 		}
+	}
+	if !oneShot && !st.Working {
+		held, asked := d.askReport(entry, st, forward, message)
+		if held {
+			return
+		}
+		if asked != nil {
+			forward, message = asked.forward, asked.message
+		}
+	}
+	if forward {
+		d.s.TurnEnded(entry.runID, message)
 	}
 	if oneShot && !st.Working {
 		// An interrupted session is ended by its connection's end or
@@ -62,9 +75,6 @@ func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnSt
 	d.s.mu.Lock()
 	entry.betweenTurns = st.Working && st.Reason == "background" && !st.Autonomous
 	d.s.mu.Unlock()
-	if !st.Working && d.askReport(entry, st) {
-		return
-	}
 	report := agentstatus.Report{State: agentstatus.Working}
 	switch {
 	case st.Working && st.Reason == "background":
@@ -215,54 +225,92 @@ func (d *acpDriver) endOneShot(entry *supervised, ok, untried bool, idle agentst
 	}()
 }
 
+// askedTurn is the turn end a report reminder deferred: the reminder turn's
+// end forwards the asked turn's last message, not its own.
+type askedTurn struct {
+	forward bool
+	message string
+	// start is the Seq of the reminder turn's start, zero until it is
+	// known.
+	start int64
+}
+
 // askReport prompts an agent whose turn ended without a report for one, and
 // reports whether it did. Only a turn that ended on its own is asked, never
-// the turn that prompt starts, and a prompt that finds the session busy
-// leaves the new turn to report.
-func (d *acpDriver) askReport(entry *supervised, st acphost.TurnState) bool {
+// the turn the reminder starts; that turn's end gets the asked turn back.
+func (d *acpDriver) askReport(entry *supervised, st acphost.TurnState, forward bool, message string) (bool, *askedTurn) {
 	d.mu.Lock()
 	r := d.runs[entry.runID]
 	if r == nil || r.session == nil {
 		d.mu.Unlock()
-		return false
+		return false, nil
 	}
-	asked := r.askedReport
-	r.askedReport = false
-	sess := r.session
+	sess, asked := r.session, r.asked
+	var start int64
+	if asked != nil {
+		start = asked.start
+	}
+	r.asked = nil
 	d.mu.Unlock()
-	if asked || st.Failed != nil || acp.StopReason(st.Reason) != acp.StopReasonEndTurn {
-		return false
+	// A queued prompt runs right after the reminder's turn with no turn end
+	// of its own in between: only the reminder's turn is exempt.
+	if asked != nil && (start == 0 || acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq == start) {
+		return false, asked
+	}
+	if st.Failed != nil || acp.StopReason(st.Reason) != acp.StopReasonEndTurn {
+		return false, nil
+	}
+	c := d.s.coordinationSeam()
+	if c == nil {
+		return false, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), acpSteerTimeout)
-	held, err := d.s.HoldTurnEnd(ctx, entry.runID)
+	reminder, err := d.s.HoldTurnEnd(ctx, entry.runID)
 	cancel()
 	if err != nil {
 		slog.Warn("scheduler: check the ending turn's report", "run", entry.runID, "error", err)
 	}
-	if !held {
-		return false
+	if reminder == "" {
+		return false, nil
 	}
+	turn := &askedTurn{forward: forward, message: message}
 	d.mu.Lock()
-	r.askedReport = true
+	r.asked = turn
 	d.mu.Unlock()
+	before := acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), acpSteerTimeout)
 		defer cancel()
-		started, err := sess.PromptIdle(ctx, []acp.ContentBlock{acp.TextBlock(coordhooks.ReportReminder)}, nil)
-		if started {
+		err := c.svc.RemindReport(ctx, entry.runID, reminder)
+		started := acphost.LastItem(sess.Log(), acphost.KindTurnStart).Seq
+		if err == nil {
+			d.mu.Lock()
+			if turn.start == 0 {
+				turn.start = started
+			}
+			d.mu.Unlock()
+			return
+		}
+		// A turn that started, whether the reminder the agent refused or
+		// another prompt, reports its own end.
+		if started > before {
 			return
 		}
 		d.mu.Lock()
-		r.askedReport = false
+		current := d.runs[entry.runID] == r && r.session == sess && r.asked == turn
+		if current {
+			r.asked = nil
+		}
 		d.mu.Unlock()
-		if err == nil && sess.State().TurnInFlight {
+		if !current {
 			return
 		}
-		if err != nil {
-			slog.Warn("scheduler: ask the agent for its report", "run", entry.runID, "error", err)
+		slog.Info("scheduler: the report reminder was not sent", "run", entry.runID, "error", err)
+		if turn.forward {
+			d.s.TurnEnded(entry.runID, turn.message)
 		}
 		d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle})
 		d.wakeIdle(entry.runID)
 	}()
-	return true
+	return true, nil
 }

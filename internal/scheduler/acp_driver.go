@@ -85,9 +85,9 @@ type acpRun struct {
 	// a taskless session accepts carries, for an agent with no system prompt
 	// route.
 	instructions string
-	// askedReport marks the turn askReport started, whose end is not asked
-	// again.
-	askedReport bool
+	// asked is the turn end askReport deferred while the reminder's turn
+	// runs; that turn's end is not asked again.
+	asked *askedTurn
 }
 
 func newACPDriver(s *Scheduler) *acpDriver {

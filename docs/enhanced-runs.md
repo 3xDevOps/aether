@@ -221,15 +221,19 @@ share one prompt, and each set of new unread messages starts at most one turn.
 ### Report reminder
 
 A turn that ends normally (`end_turn`) without an outcome report gets one more
-prompt from the server:
-`Report your state with aether-internal report (answered, waiting, needs-input, blocked, success or failure) before ending the turn.`
-It appears in the Session view as a message. The turn it starts is never
+prompt from the server: `Report your state with aether-internal report before
+ending the turn.` followed by the reporting rules for the run's role. It
+appears in the Session view as a message. The turn it starts is never
 reminded, so an agent that still does not report parks with
-`turn ended without a report`. A run gets no reminder for a turn that was
-cancelled, interrupted, failed or stopped on another stop reason, while
-background tasks hold it, while a request waits on you, or when your message
-or mail already starts the next turn. Background runs get none: their turn end
-finishes the run.
+`turn ended without a report`. A swarm worker's integrator then gets the
+last message of the reminded turn, not the reminder's.
+
+No reminder follows a turn that was cancelled, interrupted, failed or stopped
+on another stop reason, or one that background tasks or a request waiting on
+you hold. A message you sent during the turn starts the next turn instead.
+The reminder waits on the same admission as a mail prompt: a protected run, a
+swarm worker a human holds, and a paused or switching run get none. Background
+runs get none either: their turn end finishes the run.
 
 The reminder is a prompt, not a hook, so it works the same for every agent.
 Claude Code's ACP adapter does forward `_meta.claudeCode.options.settings`,
