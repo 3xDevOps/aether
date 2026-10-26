@@ -5,7 +5,7 @@ import type { SessionRow, Turn } from '@/store/session-rows'
 import { asRow, stepsBlock, workKinds, type Step, type WorkItem } from '@/store/session-steps'
 import type { Route } from '@/store/ui'
 
-export type ActionState = 'approval' | 'running' | 'done' | 'failed' | 'declined' | 'expired' | 'unfinished'
+export type ActionState = 'approval' | 'running' | 'done' | 'failed' | 'declined' | 'expired' | 'withdrawn' | 'unfinished'
 
 export type Approval = 'approved' | 'auto-approved'
 
@@ -172,7 +172,7 @@ function target(tool: string, input: Record<string, unknown>, result: Record<str
   if (linked) return linked
   const ids = record(result.ids)
   const run = text(saved?.result?.run_id) ?? text(record(result.run).id) ?? text(ids.run_id)
-  const swarm = text(saved?.result?.mission_id) ?? text(record(result.mission).id) ?? text(record(result.swarm).id) ?? text(ids.mission_id) ?? text(ids.swarm_id)
+  const swarm = text(record(result.mission).id) ?? text(record(result.swarm).id) ?? text(ids.mission_id) ?? text(ids.swarm_id)
   if (tool === 'aether_pr_merge') {
     const url = text(result.url) ?? text(result.pr_url) ?? text(record(result.pr).url)
     if (url) return { kind: 'pr', id: url, url }
@@ -238,8 +238,8 @@ export function actionOutcome(
   switch (saved?.outcome) {
     case 'declined':
     case 'expired':
-      return { state: saved.outcome }
     case 'withdrawn':
+      return { state: saved.outcome }
     case 'failed':
       return { state: 'failed', approval }
     case 'succeeded':
@@ -248,6 +248,7 @@ export function actionOutcome(
   if (entry.status === 'failed') {
     if (!saved && error?.includes('the member declined this action')) return { state: 'declined' }
     if (!saved && error?.includes('the member did not answer within')) return { state: 'expired' }
+    if (!saved && error?.includes('the turn or session ended before the member answered')) return { state: 'withdrawn' }
     return { state: 'failed', approval }
   }
   if (entry.status === 'running' && !approval && (entry.waiting || awaiting)) return { state: 'approval' }
@@ -293,6 +294,8 @@ function noteOf(note: Step | SessionRow, records: Map<string, AssistantActionRec
 interface Draft {
   action: AssistantAction
   entry: WorkItem
+  /** The id of the step block the call ran in. */
+  block: string
   method?: string
   noted?: Approval
   saved?: AssistantActionRecord
@@ -302,18 +305,28 @@ interface Draft {
  * The call a note belongs to. A record carries no tool call id; it is written
  * while its call runs, so it follows the call's first appearance. It goes to
  * the call that already holds its action, else to an unclaimed call of its
- * method on its run. An older server's note names the run only in its
+ * method whose input names no other run or workspace than its target: the
+ * oldest such call of the newest block holding one, since a block's
+ * identical calls are approved in turn and an older block's call may never
+ * have been recorded. An older server's note names the run only in its
  * summary, so it goes to the one call that fits; with more, it stays a row.
  */
 function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined {
-  const held = note.saved && drafts.find((d) => d.saved?.id === note.saved!.id)
-  if (held) return held
   const open = drafts.filter((d) => d.method === note.method && !d.noted && !d.saved)
-  const run = (d: Draft) => typeof d.action.input.run_id === 'string' ? d.action.input.run_id : undefined
-  const fits = note.saved?.target?.run_id
-    ? open.filter((d) => !run(d) || run(d) === note.saved!.target!.run_id)
-    : open.length > 1 ? open.filter((d) => run(d) && words.includes(run(d)!)) : open
-  return fits.length === 1 ? fits[0] : note.saved ? fits.at(-1) : undefined
+  if (!note.saved) {
+    const run = (d: Draft) => text(d.action.input.run_id)
+    const fits = open.length > 1 ? open.filter((d) => run(d) && words.includes(run(d)!)) : open
+    return fits.length === 1 ? fits[0] : undefined
+  }
+  const saved = note.saved
+  const held = drafts.find((d) => d.saved?.id === saved.id)
+  if (held) return held
+  const fits = open.filter((d) => (['run_id', 'workspace_id'] as const).every((key) => {
+    const named = text(d.action.input[key])
+    return !named || !saved.target?.[key] || named === saved.target[key]
+  }))
+  const newest = fits.at(-1)?.block
+  return fits.find((d) => d.block === newest)
 }
 
 /**
@@ -329,7 +342,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
   const actions: AssistantAction[] = []
   const drafts: Draft[] = []
   const toolOf = (step: Step) => step.kind === 'tool' ? aetherTool(step.entry.name) ?? codexTool(calls.get(step.entry.id)) : undefined
-  const draft = (entry: WorkItem, tool: string): AssistantAction => {
+  const draft = (entry: WorkItem, tool: string, block: string): AssistantAction => {
     const action: AssistantAction = {
       id: entry.id,
       callID: entry.id.slice(entry.id.indexOf(':') + 1),
@@ -340,7 +353,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       ...callValues(calls.get(entry.id), entry),
       ...(entry.truncated && entry.seq !== undefined ? { seq: entry.seq } : {}),
     }
-    drafts.push({ action, entry, method: toolMethods[tool] })
+    drafts.push({ action, entry, block, method: toolMethods[tool] })
     return action
   }
   const claim = (step: Step | SessionRow): boolean => {
@@ -391,7 +404,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       const tool = toolOf(step)
       if (step.kind === 'tool' && tool) {
         flush(false)
-        place(draft(step.entry, tool))
+        place(draft(step.entry, tool, row.id))
         id = `${row.id}:${step.id}`
       } else if (!claim(step)) segment.push(step)
     }
@@ -403,20 +416,23 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
     const error = entry.status === 'failed' ? errorText(action.result) : undefined
     // A turn that ends shows its open calls as finished; the call's own status says whether it ever did.
     const status = calls.get(entry.id)?.status
-    const unfinished = entry.status === 'done' && status !== undefined && status !== 'completed'
-    Object.assign(action, unfinished && !saved ? { state: 'unfinished' } : actionOutcome(entry, error, method !== undefined && waitingMethods.has(method), noted, saved))
+    const cut = entry.status === 'done' && status !== undefined && status !== 'completed'
+    const open = !saved || saved.outcome === 'approved' || saved.outcome === 'auto_approved'
+    Object.assign(action, cut && open
+      ? { state: 'unfinished', approval: saved ? recordApproval(saved) : noted }
+      : actionOutcome(entry, error, method !== undefined && waitingMethods.has(method), noted, saved))
     action.error = saved?.error ?? error
     action.target = target(action.tool, action.input, record(action.result), saved)
   }
-  // The live line would name the running call by its raw tool title; its card already says what it does.
+  // The live line would name the running call by its raw tool title; its card already says what it does, and the approval card asks for a call waiting on it.
   const running = new Map(drafts.filter((d) => d.entry.status === 'running').map((d) => [d.entry.label, d.action]))
-  const shown = out.map((row): SessionRow => {
+  const shown = out.flatMap((row): SessionRow[] => {
     const live = row.kind === 'live' ? row : row.kind === 'steps' ? row.live : undefined
     const action = live && running.get(live.label)
-    if (!live || !action) return row
-    const said = action.state === 'approval' ? { label: 'Waiting for your approval', tone: 'needs-you' as const } : { label: 'Generating…', tone: live.tone }
-    if (row.kind === 'steps') return { ...row, live: said }
-    return row.kind === 'live' ? { ...row, ...said } : row
+    if (!live || !action) return [row]
+    const said = action.state === 'approval' ? undefined : { label: 'Generating…', tone: live.tone }
+    if (row.kind === 'steps') return [{ ...row, live: said }]
+    return said ? [{ ...row, ...said }] : []
   })
   return { rows: shown, groups, actions }
 }
