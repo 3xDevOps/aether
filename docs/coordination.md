@@ -574,9 +574,10 @@ Start again without a cursor and re-read any state you cached.
 `aether changes` prints the feed. `--since <cursor>` resumes, `--run`,
 `--swarm` and `--workspace` narrow it, `--kinds` takes a comma-separated
 list, and `--follow` polls every two seconds until interrupted. It reads
-every page; `--limit` sets the page size. It ends, on Ctrl-C and when the
-connection drops too, with the command that resumes, naming the workspace by
-ID so it still works after the workspace is deleted:
+every page; `--limit` sets the page size. It ends, on Ctrl-C (exit 130, even
+mid-request) and when the connection drops too, with the command that
+resumes, naming the workspace by ID so it still works after the workspace is
+deleted:
 
 ```text
 $ aether changes --since 1 --kinds pr,reports

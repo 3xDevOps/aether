@@ -75,12 +75,15 @@ func runChanges(args []string) error {
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "SEQ\tTIME\tRUN\tKIND\tDETAIL")
-		for ctx.Err() == nil {
+		for {
 			var res protocol.ChangesListResult
-			if err := c.Call(protocol.MethodChangesList, params, &res); err != nil {
+			if err := callInterruptibly(c, protocol.MethodChangesList, params, &res); err != nil {
 				var refused *protocol.Error
 				if !errors.As(err, &refused) {
 					next()
+				}
+				if errors.Is(err, errInterrupted) {
+					return &exitStatusError{code: 130, err: err}
 				}
 				return err
 			}
@@ -95,15 +98,16 @@ func runChanges(args []string) error {
 				continue
 			}
 			if !*follow {
-				break
+				next()
+				return nil
 			}
 			select {
 			case <-ctx.Done():
+				next()
+				return &exitStatusError{code: 130, err: errInterrupted}
 			case <-time.After(changesPollInterval):
 			}
 		}
-		next()
-		return nil
 	})
 }
 
