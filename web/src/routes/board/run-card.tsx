@@ -41,7 +41,9 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
   const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
   const state = needsYou && !card.needsYou ? 'needs-you' : card.state
   const reason = card.swarm ? swarmReason(card, mission?.phase) : card.reason
-  const { label, detail } = needsYou || card.swarm ? { label: stateLabel[state], detail: reason } : stateWords({ state, reason })
+  const words = stateWords({ state, reason: card.reason })
+  const label = needsYou ? stateLabel[state] : words.label
+  const detail = needsYou || card.swarm ? reason : words.detail
   const description = detail && detail !== label ? detail : undefined
   const owner = card.owner?.display_name ?? run.member_id
   const since = needsYou ? card.waitingSince : run.stateChangedAt

@@ -271,6 +271,19 @@ describe('board columns', () => {
     expect(useStore.getState().route).toEqual({ name: 'missions', params: { missionId: 'mission_1' } })
   })
 
+  it("labels a swarm waiting on its workers with the integrator's reason", () => {
+    const integrator = run({
+      id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
+      status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 workers',
+    })
+    seed([integrator])
+    useStore.setState({ missions: { mission_1: mission({ phase: 'active' }) } })
+    renderBoard()
+    const swarm = cardOf('coordinate checkout work')
+    expect(swarm.getByRole('img', { name: 'Waiting for 2 workers' })).toBeDefined()
+    expect(swarm.getByText('Swarm active')).toBeDefined()
+  })
+
   it('acts on a swarm card for the integrator itself when the integrator needs you', () => {
     const integrator = run({
       id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
