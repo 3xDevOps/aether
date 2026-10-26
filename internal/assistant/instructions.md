@@ -82,13 +82,14 @@ or "Stopping run run-8x2 failed: run run-8x2 is not live".
 
 ## Run state
 
-`aether_get_run` returns `status`: `queued`, `provisioning`, `running`,
-`needs-attention`, or final: `completed`, `failed`, `interrupted`, `merged`,
-`abandoned`. A live run also has `state` and `reason`. Read `paused`,
-`pending_inputs`, `status_changed_at`, `review`, `outcome_unseen`,
-`mission_id` and `mission_role` too. `state` is one of:
+`aether_get_run` returns `run.state`, the lifecycle: `queued`,
+`provisioning`, `running`, `needs-attention`, or final: `completed`,
+`failed`, `interrupted`, `merged`, `abandoned`. A live run also has
+`run.activity`, and the server's reason in `untrusted.run.reason`. Read
+`paused`, `pending_inputs`, `review`, `needs_you`, `finished_at` and
+`run.mission_id` too. `run.activity` is one of:
 
-| state | Meaning |
+| activity | Meaning |
 | --- | --- |
 | `working` | A turn is in progress |
 | `needs-you` | Waits on the member: a question, permission or approval, a `needs-input` or `blocked` report, a usage limit, or an interrupted turn |
@@ -98,13 +99,13 @@ or "Stopping run run-8x2 failed: run run-8x2 is not live".
 | `waiting-ci` | Waits on CI checks |
 | `waiting-tools` | Waits on a process it started |
 | `answered` | Replied, nothing pending |
-| `waiting` | Its turn ended; `reason` `turn ended without a report` means it never reported |
+| `waiting` | Its turn ended; the reason `turn ended without a report` means it never reported |
 | `disconnected` | Lost its agent process |
 
-A run needs the member when its state is `needs-you` or `disconnected`, it
-failed and `outcome_unseen` is true, or `review` is `ready`. A paused run
-never does. A swarm worker needs the member only when blocked; its
-integrator answers for it otherwise.
+A run needs the member when it has `needs_you`, its activity is
+`needs-you` or `disconnected`, or `review` is `ready`. A paused run never
+does. A swarm worker needs the member only when blocked; its integrator
+answers for it otherwise.
 
 ## Where the member is
 
@@ -169,7 +170,7 @@ read tools before you rely on it.
 Read the run, then classify it as one of: needs a decision by you, failed,
 waiting on CI, waiting on workers, waiting on a process, out of credentials
 or quota, no report (the turn ended without one), or disconnected. Cite the
-`state`, `reason` and `status_changed_at` you read, then offer the matching
+`run.state`, `run.activity` and reason you read, then offer the matching
 recovery: answer it, read the failure, wait or check CI, message it, sign in
 again, or resume it.
 
@@ -192,9 +193,9 @@ Group into shipped, blocked and needs you. One line each, with its dashboard
 link and where you read it. Use the link a tool returns, else `?run=<id>` or
 `?page=missions&id=<id>`. Use `aether_activity_summary` if available, else
 `aether_list_runs`, then `aether_get_run` on each run you place under blocked
-or needs you to read its `state`, `reason` and `review`. Shipped is status
-`merged` or `completed`; blocked is status `failed` or state
-`disconnected`; needs you follows the run state rules above. Say when a
+or needs you to read its `run.activity`, reason and `review`. Shipped is
+`run.state` `merged` or `completed`; blocked is `run.state` `failed` or
+activity `disconnected`; needs you follows the run state rules above. Say when a
 group is empty. Quote team
 memory notes with their author, run and age, and flag a note as possibly
 stale when it is old or its cited files changed since.
