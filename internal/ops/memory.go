@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -79,11 +80,19 @@ func memoryAdd(ctx context.Context, c calls, in memoryAddInput) (string, any, er
 	}
 	var res protocol.MemoryAddResult
 	if err := c.act(ctx, protocol.MethodMemoryAdd, protocol.MemoryAddParams{WorkspaceID: in.WorkspaceID, Kind: in.Kind, Text: in.Text, Files: in.Files, Supersedes: in.Supersedes}, &res); err != nil {
-		replaced, found := replacedBy(ctx, c.read, in)
-		if !found {
+		// The server refuses to replace a note twice, so a repeated
+		// replacement returns the note that already replaced it.
+		var perr *protocol.Error
+		if in.Supersedes == "" || !errors.As(err, &perr) || perr.Code != protocol.CodeConflict {
 			return "", nil, err
 		}
-		res = protocol.MemoryAddResult{Item: replaced, Duplicate: true}
+		var old, next protocol.MemoryShowResult
+		if c.read(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: in.WorkspaceID, ID: in.Supersedes}, &old) != nil || old.Item.SupersededBy == "" ||
+			c.read(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: in.WorkspaceID, ID: old.Item.SupersededBy}, &next) != nil ||
+			next.Item.Kind != in.Kind || strings.TrimSpace(next.Item.Body) != strings.TrimSpace(in.Text) {
+			return "", nil, err
+		}
+		res = protocol.MemoryAddResult{Item: next.Item, Duplicate: true}
 	}
 	similar := make([]string, 0, len(res.Similar))
 	for _, m := range res.Similar {
@@ -94,25 +103,6 @@ func memoryAdd(ctx context.Context, c calls, in memoryAddInput) (string, any, er
 		return fmt.Sprintf("The workspace already remembers this as note %s; nothing new was added.", res.Item.ID), out, nil
 	}
 	return fmt.Sprintf("Added %s note %s.", res.Item.Kind, res.Item.ID), out, nil
-}
-
-// replacedBy is the note that already replaced in.Supersedes with in's
-// kind and text, so a repeated replacement returns it: the server refuses
-// to replace a note twice.
-func replacedBy(ctx context.Context, read Call, in memoryAddInput) (protocol.MemoryItem, bool) {
-	if in.Supersedes == "" {
-		return protocol.MemoryItem{}, false
-	}
-	var old protocol.MemoryShowResult
-	if read(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: in.WorkspaceID, ID: in.Supersedes}, &old) != nil || old.Item.SupersededBy == "" {
-		return protocol.MemoryItem{}, false
-	}
-	var next protocol.MemoryShowResult
-	if read(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: in.WorkspaceID, ID: old.Item.SupersededBy}, &next) != nil ||
-		next.Item.Kind != in.Kind || strings.TrimSpace(next.Item.Body) != strings.TrimSpace(in.Text) {
-		return protocol.MemoryItem{}, false
-	}
-	return next.Item, true
 }
 
 func memoryPin(ctx context.Context, c calls, in memoryPinInput) (string, any, error) {

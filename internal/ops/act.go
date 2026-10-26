@@ -64,7 +64,7 @@ var actOps = []Op{
 		"Use this when the user wants a stopped run relaunched, protected from cleanup, or archived or restored. Each action but relaunch sets a state, so a repeat changes nothing; relaunch refuses a live run.", runLifecycle).
 		enum("action", lifecycleRelaunch, lifecycleProtect, lifecycleUnprotect, lifecycleArchive, lifecycleRestore).
 		hints(false, true).offer(TierConfirmed).
-		calling(protocol.MethodServerInfo, protocol.MethodRunRelaunch, protocol.MethodRunProtect, protocol.MethodRunArchive),
+		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodRunRelaunch, protocol.MethodRunProtect, protocol.MethodRunArchive),
 	opOf("aether_switch_run_mode", "Switch run mode", ScopeControl, true, nextRuns,
 		"Use this when the user wants a live run switched to standard (terminal) or enhanced (structured) mode. It discards a turn in progress; a run already in that mode is left alone.", switchRunMode).
 		enum("mode", lifecycleStandard, lifecycleEnhanced).
@@ -102,6 +102,14 @@ func runLifecycle(ctx context.Context, c calls, in lifecycleInput) (string, any,
 		out := launched(res.Run, l)
 		return fmt.Sprintf("Relaunched run %s (%s).", res.Run.ID, res.Run.Status), out, nil
 	case lifecycleProtect, lifecycleUnprotect:
+		// run.protect revokes the run's control even when the flag is unchanged.
+		r, err := getRunRecord(ctx, c.read, in.RunID)
+		if err != nil {
+			return "", nil, err
+		}
+		if r.Protected == (in.Action == lifecycleProtect) {
+			return acted(ctx, c.read, l, in.RunID, "Already "+in.Action+"ed:")
+		}
 		method, did, params = protocol.MethodRunProtect, cases(in.Action)+"ed", protocol.RunProtectParams{RunID: in.RunID, Protected: in.Action == lifecycleProtect}
 	case lifecycleArchive, lifecycleRestore:
 		method, did, params = protocol.MethodRunArchive, cases(in.Action)+"d", protocol.RunArchiveParams{RunID: in.RunID, Archived: in.Action == lifecycleArchive}
@@ -257,11 +265,6 @@ func swarmManage(ctx context.Context, c calls, in swarmManageInput) (string, any
 	return fmt.Sprintf("Released %s control of worker run %s; the integrator steers it again.", holder, a.RunID), out, nil
 }
 
-// replaceIntegrator chooses the replacement among the swarm's execution
-// choices, as the dashboard's dialog does: the harness and model given, else
-// the current integrator's, on the current integrator's account when it
-// offers that agent, else on the member's own, else on the first account
-// that does.
 func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) (string, any, error) {
 	info, err := serverInfo(ctx, c.read)
 	if err != nil {

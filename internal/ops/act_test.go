@@ -31,6 +31,9 @@ func TestConnectorRunLifecycle(t *testing.T) {
 		"restore":   `{"run_id":"run-1","archived":false}`,
 	} {
 		g := newFake(t)
+		protectedRun := testRun
+		protectedRun.Protected = action == "unprotect"
+		g.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: protectedRun})
 		for _, m := range []string{protocol.MethodRunProtect, protocol.MethodRunArchive} {
 			g.answers[m] = returns(protocol.RunResult{Run: testRun})
 		}
@@ -38,6 +41,17 @@ func TestConnectorRunLifecycle(t *testing.T) {
 		if got := g.acted(); got.params != want {
 			t.Errorf("%s sent %s %s, want %s", action, got.method, got.params, want)
 		}
+	}
+
+	// run.protect revokes the run's control, so protecting a protected run
+	// does not call it again.
+	f = newFake(t)
+	protectedRun := testRun
+	protectedRun.Protected = true
+	f.answers[protocol.MethodRunGet] = returns(protocol.RunResult{Run: protectedRun})
+	if text, _ := run(t, connectorSession(t, f, ScopeWrite), "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": "protect"}); !strings.HasPrefix(text, "Already protected") ||
+		len(called(f, protocol.MethodRunProtect)) != 0 {
+		t.Fatalf("repeated protect = %q", text)
 	}
 
 	// The server's refusal reaches the model unchanged.
@@ -213,7 +227,8 @@ func TestConnectorReplaceIntegrator(t *testing.T) {
 func TestConnectorIntegrationDecide(t *testing.T) {
 	request := &protocol.DeliveryRequest{RequestID: "req-1", RequestVersion: 7, Action: "land", State: protocol.DeliveryPending}
 	candidate := protocol.Candidate{CandidateID: "cand-1", WorkspaceID: "ws-1", TargetRef: "refs/heads/main", State: protocol.CandidateFrozen,
-		DeliveryRequest: request, Verifications: []protocol.Verification{{VerificationID: "v-1", Status: protocol.VerificationPassed, Output: injection}},
+		DeliveryRequest: request, Verifications: []protocol.Verification{{VerificationID: "v-1", Status: protocol.VerificationPassed, Output: injection,
+			Argv: []string{"sh", "-c", strings.Repeat("x", 20000)}}},
 		ExpiresAt: time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)}
 	f := newFake(t)
 	f.answers[protocol.MethodIntegrationShow] = returns(protocol.IntegrationShowResult{Candidate: candidate})
@@ -233,6 +248,10 @@ func TestConnectorIntegrationDecide(t *testing.T) {
 	text, out = run(t, cs, "aether_integration", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1"})
 	if strings.Contains(trusted(t, out), injection) || strings.Contains(trusted(t, out), "refs/heads/main") || strings.Contains(text, "refs/heads/main") {
 		t.Fatalf("agent text outside untrusted: %q %v", text, out)
+	}
+	command := out["untrusted"].(map[string]any)["verifications"].([]any)[0].(map[string]any)["command"].(string)
+	if !strings.HasPrefix(command, "sh -c xxx") || !strings.HasSuffix(command, "…") || len([]rune(command)) > maxText+1 {
+		t.Fatalf("verification command = %d runes, starts %q", len([]rune(command)), command[:min(len(command), 20)])
 	}
 
 	text, out = run(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-1", "action": "approve"})
@@ -413,6 +432,12 @@ func TestConnectorMemoryWrites(t *testing.T) {
 	}
 	if text, _, failed := try(t, cs, "aether_memory_add", map[string]any{"workspace_id": "ws-1", "kind": "gotcha", "text": "Something else.", "supersedes": "mem-1"}); !failed || !strings.Contains(text, "already replaced") {
 		t.Fatalf("a different replacement of a replaced note = %q", text)
+	}
+	// A declined card stays declined, even for a replacement already made.
+	f.errs[protocol.MethodMemoryAdd] = &protocol.Error{Code: protocol.CodeDenied, Message: "memory.add was not approved: the member declined this action"}
+	if text, _, failed := try(t, cs, "aether_memory_add", map[string]any{"workspace_id": "ws-1", "kind": "gotcha", "text": "CI needs Docker.", "supersedes": "mem-1"}); !failed ||
+		text != "memory.add was not approved: the member declined this action" {
+		t.Fatalf("declined replacement = %q", text)
 	}
 }
 

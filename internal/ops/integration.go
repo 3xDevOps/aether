@@ -3,9 +3,11 @@ package ops
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 type integrationInput struct {
@@ -80,7 +82,11 @@ func integration(ctx context.Context, c calls, in integrationInput) (string, any
 		outputs := make([]map[string]any, 0, len(cd.Verifications))
 		for _, v := range cd.Verifications {
 			verifications = append(verifications, verification{v.VerificationID, v.Status, v.ExitCode})
-			outputs = append(outputs, map[string]any{"verification_id": v.VerificationID, "argv": v.Argv, "output": clip(v.Output, maxFeedback), "error": clip(v.Error, maxFeedback)})
+			quoted := make([]string, len(v.Argv))
+			for i, arg := range v.Argv {
+				quoted[i] = shellquote.Quote(arg)
+			}
+			outputs = append(outputs, map[string]any{"verification_id": v.VerificationID, "command": clip(strings.Join(quoted, " "), maxText), "output": clip(v.Output, maxFeedback), "error": clip(v.Error, maxFeedback)})
 		}
 		conflicts := make([]string, 0, min(len(cd.Conflicts), defaultRows))
 		for _, path := range cd.Conflicts[:min(len(cd.Conflicts), defaultRows)] {
