@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -14,7 +13,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
-const changesPollInterval = 2 * time.Second
+const (
+	changesPollInterval = 2 * time.Second
+	changesDefaultLimit = 20
+)
 
 func init() {
 	register(command{
@@ -34,7 +36,7 @@ func runChanges(args []string) error {
 	swarm := fs.String("swarm", "", "only changes for this swarm's runs and the swarm itself")
 	workspace := fs.String("workspace", "", "only changes in this workspace (ID or name)")
 	kinds := fs.String("kinds", "", "comma-separated: status,reports,messages,pr,swarm,lifecycle")
-	limit := fs.Int("limit", 20, "changes per request, at most 100; the command reads every page")
+	limit := fs.Int("limit", changesDefaultLimit, "changes per request, at most 100; the command reads every page")
 	follow := fs.Bool("follow", false, "keep polling for new changes until interrupted")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -46,10 +48,16 @@ func runChanges(args []string) error {
 		params := protocol.ChangesListParams{Cursor: *since, RunID: *run, MissionID: *swarm, Kinds: splitTypes(*kinds), Limit: *limit}
 		if *workspace != "" {
 			id, err := resolveWorkspace(c, *workspace)
-			if err != nil {
+			switch {
+			case err == nil:
+				params.WorkspaceID = id
+			case *since != "":
+				// A resumed feed may name a workspace deleted since; the
+				// server still pages it, to deliver the deletion.
+				params.WorkspaceID = *workspace
+			default:
 				return err
 			}
-			params.WorkspaceID = id
 		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "SEQ\tTIME\tRUN\tKIND\tDETAIL")
@@ -69,18 +77,27 @@ func runChanges(args []string) error {
 				continue
 			}
 			if !*follow {
-				resume := []string{"aether", "changes", "--since", res.NextCursor}
-				fs.Visit(func(f *flag.Flag) {
-					if f.Name != "since" {
-						resume = append(resume, "--"+f.Name, shellquote.Quote(f.Value.String()))
-					}
-				})
-				_, _ = fmt.Fprintln(os.Stderr, "next: "+strings.Join(resume, " "))
+				_, _ = fmt.Fprintln(os.Stderr, "next: "+changesResume(params))
 				return nil
 			}
 			time.Sleep(changesPollInterval)
 		}
 	})
+}
+
+// changesResume is the command that continues params' feed, naming the
+// workspace by ID so it still resolves after the workspace is deleted.
+func changesResume(p protocol.ChangesListParams) string {
+	resume := []string{"aether", "changes", "--since=" + p.Cursor}
+	for _, f := range [][2]string{{"run", p.RunID}, {"swarm", p.MissionID}, {"workspace", p.WorkspaceID}, {"kinds", strings.Join(p.Kinds, ",")}} {
+		if f[1] != "" {
+			resume = append(resume, "--"+f[0]+"="+shellquote.Quote(f[1]))
+		}
+	}
+	if p.Limit != changesDefaultLimit {
+		resume = append(resume, "--limit="+strconv.Itoa(p.Limit))
+	}
+	return strings.Join(resume, " ")
 }
 
 func changeDetail(ch protocol.Change) string {
@@ -114,6 +131,9 @@ func changeDetail(ch protocol.Change) string {
 		detail = fmt.Sprintf("%s %s %s", ch.MissionID, ch.Swarm.Change, ch.Swarm.TaskID)
 	case ch.Lifecycle != nil:
 		detail = ch.Lifecycle.Action
+		if ch.Lifecycle.Action == "workspace-deleted" {
+			detail += " " + ch.WorkspaceID
+		}
 		if ch.Lifecycle.ToMemberID != "" {
 			detail += " to " + ch.Lifecycle.ToMemberID
 		}

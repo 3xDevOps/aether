@@ -561,14 +561,15 @@ Start again without a cursor and re-read any state you cached.
 `--swarm` and `--workspace` narrow it, `--kinds` takes a comma-separated
 list, and `--follow` polls every two seconds until interrupted. It reads
 every page; `--limit` sets the page size. Without `--follow` it ends with the
-command that resumes:
+command that resumes, naming the workspace by ID so it still works after the
+workspace is deleted:
 
 ```text
 $ aether changes --since 1 --kinds pr,reports
 SEQ  TIME                 RUN       KIND     DETAIL
 3    2026-10-26 20:08:20  run-demo  reports  waiting for ci: pushed fix ...
 4    2026-10-26 20:08:20  run-demo  pr       #42 OPEN
-next: aether changes --since 4 --kinds pr,reports
+next: aether changes --since=4 --kinds=pr,reports
 ```
 
 ## `aether-internal` CLI
