@@ -359,20 +359,25 @@ type Checks struct {
 	Key string `json:"key"`
 }
 
-// Checks drops a check run when a newer one with the same app and name is in
-// the same suite (a rerun) or the older one was cancelled (superseded by
-// concurrency); separate workflows can share a job name. An
-// incomplete suite with no pending run counts as one pending check when it
-// belongs to GitHub Actions or already has runs; other apps can leave a
-// zero-run suite queued forever.
-func (s Snapshot) Checks() Checks {
-	var c Checks
-	current := slices.DeleteFunc(slices.Clone(s.CheckRuns), func(run CheckRun) bool {
+// CurrentRuns drops a check run when a newer one with the same app and name
+// is in the same suite (a rerun) or the older one was cancelled (superseded
+// by concurrency); separate workflows can share a job name.
+func (s Snapshot) CurrentRuns() []CheckRun {
+	return slices.DeleteFunc(slices.Clone(s.CheckRuns), func(run CheckRun) bool {
 		return slices.ContainsFunc(s.CheckRuns, func(newer CheckRun) bool {
 			return newer.ID > run.ID && newer.App == run.App && newer.Name == run.Name &&
 				(newer.SuiteID == run.SuiteID || run.Conclusion == "cancelled")
 		})
 	})
+}
+
+// Checks counts CurrentRuns and the commit statuses. An incomplete suite
+// with no pending run counts as one pending check when it belongs to GitHub
+// Actions or already has runs; other apps can leave a zero-run suite queued
+// forever.
+func (s Snapshot) Checks() Checks {
+	var c Checks
+	current := s.CurrentRuns()
 	ids := make([]string, 0, len(current)+len(s.Statuses))
 	running := map[int64]bool{}
 	for _, run := range current {
