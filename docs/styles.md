@@ -382,6 +382,14 @@ Use compact workbench geometry rather than landing-page ornament:
   (52px coarse): the name line, then the bar. Each level indents 14px, up to
   the sixth. Span glyphs sit in 20px seam-bordered `bg-chrome` tiles in
   `text-muted`; the details use a 30px tile.
+- The template library: a 256px list pane (224px in the composer and palette
+  pickers, stacked above the detail below a 544px container) of 32px rows
+  (44px coarse), each with the agent glyph, the name, a clock when scheduled
+  and a neutral 18px mode badge; a 44px `bg-chrome` footer band. Inline
+  placeholder fields are 22px chips that size to their text: `bg-accent-soft`
+  and `text-accent` once they have a value, `bg-hover-chrome` with a seam ring
+  while empty, and the field focus outline. The fill dots are 6px,
+  `bg-accent` filled and `bg-seam` empty.
 - A Board column is a `bg-chrome` well, 8px from the next, with a 36px
   header (sentence-case label and `CountBadge`) and a 3px inset around
   cards 4px apart. Its cards pass `raised` to `Card`: `bg-raised`, keeping
@@ -591,7 +599,11 @@ literal time or curve.
   landed file's check and disc `animate-pop-in` (scale 0.5 to 1 on
   `--ease-pop`, 250ms), a failed row `animate-shake`s once (360ms) and a
   dragged-over drop zone's arrow `animate-bob`s 3px (450ms, alternating).
-- Row selection, focus outlines and exits change at once.
+- Row selection, focus outlines and exits change at once, except the
+  template library's selected row, whose `bg-hover-chrome` highlight is a
+  `SlidingIndicator`. Its detail fades in over 220ms on `--ease-standard`
+  when the selection changes, never on mount; its footer swaps text with
+  `TextSwap` and Copy's icon with `IconSwap`.
 - `state-pulse` (the run header's working dot, the Session view's live row
   and live steps header, a plan's step in progress, the dot under a streaming
   answer and the working rows on a swarm's Tasks list) breathes: opacity to

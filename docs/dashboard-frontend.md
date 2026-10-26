@@ -727,7 +727,8 @@ its end, exposing the shell or the raw connection error and window controls.
 `?run=<id>`, with `&view=session|trace|terminal|changes|files|browser` (an old
 `&view=diff` reads as `changes`; `changes` also takes `&repo=<workspace id>|all` on a
 [multi-repo run](#multi-repo-runs)); any other
-view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page;
+view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page, a
+Settings section or the selected template (`?page=templates&id=<name>`);
 the name is the route's, so Activity is `?page=timeline`, and Devices is
 `?page=devices`, a tab of the Members view (`pageOf` in
 `src/lib/surfaces.ts`). The board is the bare address. The store starts on
@@ -2026,9 +2027,10 @@ moderation and receipt rules. The launch and message forms are store dialogs
 button on any surface opens one by asking the store, with no dependence on
 the palette being on screen. The template form's open state lives with
 `CommandPalette` in `index.tsx` instead, because the store's dialog union
-does not include it. It lists the active workspace's templates over
-`template.list`, shows the chosen template's agent, mode, model and task, and
-starts the run with `template.launch`, then reveals it.
+does not include it. Its body is the composer's template library (see
+[Templates](#templates)) with **Launch** as the primary action: it starts the
+run with `template.launch`, sending the name and the filled-in parameters,
+then reveals it. A refusal shows the server's error and any setup output.
 
 The launch form lives in `components/launch/`. Its **Run** tab asks for a
 task, an agent, a mode and a model; an account appears only when one is shared with the
@@ -2703,8 +2705,10 @@ target does nothing instead of replacing the dashboard with that file.
 The timeline rows and both composers share `sessionColumn`
 (`session-rows.tsx`): the 736px column with 16px gutters, so message text and
 the message box line up at every width. The box (`rounded-composer`, 14px)
-holds the textarea above one footer row: attach, the agent's mode, model and
-effort pickers, the context meter, and the send pill at the end. The pill is a
+holds the textarea above one footer row: attach, **Insert a template**, the
+agent's mode, model and effort pickers, the context meter, and the send pill
+at the end. The Standard composer's row has attach, **Insert a template** and
+Send. The pill is a
 round arrow while it reads **Send** and widens to its word otherwise. Hints
 and the 45-second delivery notice sit under the box. Footer controls wrap on
 narrow screens. The context meter shows the agent's last ACP `usage_update`
@@ -2755,6 +2759,16 @@ Drafts live in memory and end with the page. They sit in their own Zustand
 store, not a root-store slice: every root-store write rewrites `aether.ui`,
 and one made while events drain notifies on the next frame, which drops
 keystrokes in a controlled textarea.
+
+**Insert a template** (shown when the gateway offers `template.list`,
+disabled while the draft is locked) opens the template library above the
+button, or as a sheet on a phone, over the run's workspace's templates, with
+a clock on each scheduled one (`schedule.list`). Its primary action,
+**Insert**, writes the filled-in task into the draft: over
+the textarea's selection, or after a blank line when nothing is selected.
+It never sends. The picker closes and the caret lands after the inserted
+text; `Esc` closes it and returns focus to the textarea, while a click
+elsewhere leaves focus where it landed.
 
 User rows keep room-message IDs and attachment indices, not image bytes, and
 the container paths of other files. A path under
@@ -5066,17 +5080,46 @@ sheet (`FilesPane`).
 
 ## Templates
 
-`src/routes/templates/` lists the active workspace's templates
-(`template.list`), one row each: agent glyph, name, mode word (Standard,
-Enhanced, Background), whether it is scheduled, the task, and when it next
-launches, last launched or was saved. **Launch** is the row's action and opens
-the new run. The row menu holds **Schedule…**, **Edit**, **Duplicate** and
-**Delete**. **Schedule…** opens the cron editor in a dialog; the preview is
+`src/routes/templates/` is a two-pane library of the active workspace's
+templates (`template.list`). The list, sorted by name, has a search over
+name, task, agent, mode and model, and one row per template: agent glyph,
+name, a clock when it is scheduled and the mode word (Standard, Enhanced,
+Background). The arrow keys, `Home` and `End` move the selection and focus
+together; `ArrowDown` in the search enters the list and `Esc` clears it. The
+selection is the address's `id`; with none, or a name the workspace lacks
+("That template is not in this workspace."), the first row is shown. A new
+or duplicated template is selected once saved, and deleting the selected one
+selects the next.
+
+The detail shows the name, the mode, **Edit** and a menu with **Schedule…**,
+**Duplicate** and **Delete**; a meta line with the agent, the model or
+"agent default", the schedule (`Scheduled <cron> UTC, next in 3 hours`) or
+when it was saved, and the advisory budget; then the task. Each `{{name}}`
+placeholder (the server's pattern in `internal/templates/render.go`) is an
+inline field at its first occurrence, prefilled with the template's default;
+later occurrences mirror it. "N of M filled" counts placeholders with a value
+or a default, and a preview shows the rendered task. The footer shows "~N
+tokens" (characters / 4, an estimate whatever the agent's tokenizer), a
+field's default while it has focus, or "Fill N more to launch" on the
+disabled **Launch**; **Copy** copies the rendered task. `Enter` in a field
+moves to the next empty one, or launches once none is left. **Launch** sends
+`template.launch` with only the values typed over a default, never the task,
+reads "Launching…", with every **Launch** held, until the server answers so
+one click starts one run, and opens the new run; a refusal toasts the
+server's error. Typed values last, per workspace, while the page is open.
+On a phone the list and the detail are one pane at a time, with
+**Templates** to go back. A failed `template.list` read shows the
+server's error with **Retry**.
+
+**Schedule…** opens the cron editor in a dialog; the preview is
 the `next_fire_at` that `schedule.save` returned, shown relative and in UTC,
 never computed in the browser. **Duplicate** opens the form prefilled under
 `<name> copy`. The form's agent select lists the agents from `agent.list` by
 display name and keeps the template's current agent as an extra option when
-the list omits it. With no templates the view says what one is and offers
+the list omits it. Its **Parameters** group lists each `{{name}}` the task
+uses, live, with an optional default (clearing the field removes it); defaults for names the task no longer
+uses are dropped, and the template's budget hint is kept, so an edit never
+wipes either. With no templates the view says what one is and offers
 **New template**.
 
 Save, **Delete** and the schedule save follow [Actions](#actions): the dialog
@@ -5105,13 +5148,15 @@ what it saves.
 **Retry** in a dialog sends what the dialog shows now, so edits made after
 the deadline are not lost. A template whose save the server has not answered, past the deadline
 too, offers no **Launch**, **Delete** or **Schedule…**, since
-`template.launch` sends only the name. **Unschedule** reads "Unscheduling…", then
+`template.launch` sends the name and the filled-in parameters, never the
+task. **Unschedule** reads "Unscheduling…", then
 "Still waiting for the server…" past the deadline; while a schedule save for
 that template in that workspace is unanswered it reads "Saving…" and is disabled, so the delete
 cannot land before the save. Both holds last across leaving Templates and
-coming back, and so do the lists, kept per workspace outside the view:
-coming back shows them at once, and an answer or rollback that arrives
-after you left still lands on them.
+coming back, and so do the lists, kept per workspace in
+`src/store/templates.ts`: coming back shows them at once, an answer or
+rollback that arrives after you left still lands on them, and the composer
+and palette pickers read and refresh the same lists.
 When saves of one template, or of its schedule, overlap, only
 the answer to the last one sent is written; an earlier answer leaves the
 list alone. An earlier save's answer becomes the value a later pending

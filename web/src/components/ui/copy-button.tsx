@@ -22,7 +22,7 @@ export function CopyButton({ text, label, source, reveal }: { text: string; labe
       onClick={() => void copyText(text, () => {
         reveal?.()
         return source.current
-      }, false).then((done) => done && confirm())}
+      }, { quiet: true }).then((done) => done && confirm())}
     >
       <IconSwap swapped={copied} from={<Copy />} to={<Check className="text-state-done" />} />
     </Button>

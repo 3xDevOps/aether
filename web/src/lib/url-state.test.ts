@@ -19,6 +19,7 @@ describe('route in the query string', () => {
     [{ name: 'settings', params: { section: 'connectors' } }, 'page=settings&id=connectors'],
     [{ name: 'missions', params: { missionId: 'mis_1' } }, 'page=missions&id=mis_1'],
     [{ name: 'workspace', params: { workspaceId: 'wsp_1' } }, 'page=workspace&id=wsp_1'],
+    [{ name: 'templates', params: { template: 'dep-audit' } }, 'page=templates&id=dep-audit'],
   ])('writes %o as "%s" and reads it back', (route, text) => {
     expect(query(route)).toBe(text)
     expect(routeFromQuery(new URLSearchParams(text))).toEqual(route)

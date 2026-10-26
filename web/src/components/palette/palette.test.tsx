@@ -592,14 +592,16 @@ describe('command palette', () => {
     open()
 
     fireEvent.click(await screen.findByText('Launch from a template…'))
-    const template = await screen.findByLabelText('Template')
-    await waitFor(() => expect(template.textContent).toBe('nightly triage'))
+    const dialog = within(await screen.findByRole('dialog', { name: 'Launch from a template' }))
+    const option = await dialog.findByRole('option', { name: 'Template nightly triage' })
+    expect(option.getAttribute('aria-selected')).toBe('true')
     expect(api.templateList).toHaveBeenCalledWith(workspace.id)
+    expect(document.activeElement).toBe(dialog.getByRole('searchbox', { name: 'Search templates' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Launch' }))
+    fireEvent.click(dialog.getByRole('button', { name: 'Launch' }))
 
     await waitFor(() =>
-      expect(api.templateLaunch).toHaveBeenCalledWith(workspace.id, 'nightly triage'),
+      expect(api.templateLaunch).toHaveBeenCalledWith(workspace.id, 'nightly triage', undefined),
     )
     await waitFor(() =>
       expect(useStore.getState().route).toEqual({

@@ -8,6 +8,7 @@ const pageIDs: Record<string, string> = {
   workspace: 'workspaceId',
   insights: 'tab',
   settings: 'section',
+  templates: 'template',
 }
 
 const keys = ['run', 'view', 'agent', 'repo', 'page', 'id']
