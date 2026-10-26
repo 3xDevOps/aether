@@ -149,7 +149,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
           textarea={textarea}
           running={running}
           dock={(confirmations.length > 0 || (session?.pending.length ?? 0) > 0) && (
-            <div className="flex max-h-[40dvh] flex-col gap-2 overflow-y-auto">
+            <div className="flex max-h-[30dvh] flex-col gap-2 overflow-y-auto [@media(min-height:50rem)]:max-h-[40dvh]">
               {confirmations.map((confirmation) => <ConfirmationCard key={confirmation.id} confirmation={confirmation} />)}
               {session?.pending.map((request) => <AssistantRequestCard key={request.id} request={request} />)}
             </div>
