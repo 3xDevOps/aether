@@ -1,4 +1,4 @@
-package mcpbridge
+package ops
 
 import (
 	"context"
@@ -102,8 +102,8 @@ func connectorSession(t *testing.T, f *fakeServer, scopes ...Scope) *mcp.ClientS
 
 func callSession(t *testing.T, call Call, scopes ...Scope) *mcp.ClientSession {
 	t.Helper()
-	srv := mcp.NewServer(&mcp.Implementation{Name: ServerName, Version: "v0"}, nil)
-	RegisterConnectorTools(srv, call, func(s Scope) bool { return s == ScopeRead || slices.Contains(scopes, s) })
+	srv := mcp.NewServer(&mcp.Implementation{Name: "aether", Version: "v0"}, nil)
+	RegisterConnector(srv, call, func(s Scope) bool { return s == ScopeRead || slices.Contains(scopes, s) })
 	st, ct := mcp.NewInMemoryTransports()
 	if _, err := srv.Connect(t.Context(), st, nil); err != nil {
 		t.Fatal(err)
@@ -282,6 +282,7 @@ func TestConnectorToolList(t *testing.T) {
 		"aether_mark_reviewed.action": "complete,later", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome"}; !maps.Equal(enums, want) {
 		t.Errorf("enums = %v, want %v", enums, want)
 	}
+	connectorTools := slices.DeleteFunc(slices.Clone(Ops), func(o Op) bool { return o.Scope == "" })
 	if len(all) != len(connectorTools) {
 		t.Fatalf("tools with every scope = %d, want %d", len(all), len(connectorTools))
 	}
@@ -311,8 +312,8 @@ func TestConnectorToolList(t *testing.T) {
 			t.Errorf("%s hints = %+v, want %+v", tool.Name, got, want)
 		}
 		for _, ct := range connectorTools {
-			if ct.name == tool.Name {
-				names[ct.scope] = append(names[ct.scope], tool.Name)
+			if ct.Name == tool.Name {
+				names[ct.Scope] = append(names[ct.Scope], tool.Name)
 			}
 		}
 	}

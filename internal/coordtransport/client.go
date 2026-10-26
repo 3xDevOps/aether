@@ -212,6 +212,16 @@ func internalError(method string, cause error) *coordError {
 	}
 }
 
+// ProtocolError is err as the *protocol.Error it carries when Call returned
+// a coordination failure, else err unchanged.
+func ProtocolError(err error) error {
+	var ce *coordError
+	if errors.As(err, &ce) {
+		return &protocol.Error{Code: ce.Code, Message: ce.Message}
+	}
+	return err
+}
+
 // ErrorCode classifies an error returned by Call. A zero result means the
 // failure was local to the transport (for example JSON encoding), rather than
 // a coordination protocol error.

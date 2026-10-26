@@ -209,8 +209,11 @@ or `swarm_id` also accept the `run:` and `swarm:` ids `search` returns. When
 the server no longer keeps the start of a run's conversation or terminal,
 `aether_run_history` returns `truncated_before: true` and a `note` saying so.
 
-A launch, swarm or message takes an optional `idempotency_key`; a retry with
-the same key returns the first result. A launch or swarm still starting after
+A launch, swarm, message or answer takes an optional `idempotency_key`; a
+retry with the same key returns the first result. A write's result has
+`write: "done"`, or `"pending"` while a launch is starting or a message waits
+for approval, and the key it used. A failure that leaves it unknown whether the
+write happened, such as a timeout, ends with the key to retry with. A launch or swarm still starting after
 30 seconds, such as one pulling its image, keeps starting after the tool call
 ends. The tool then repeats the call with the key to look up the run or swarm,
 which does not count as a write call. If the lookup answers within 5 seconds,
@@ -222,7 +225,9 @@ the same workspace, agent, task, mode and model within 60 seconds returns your
 earlier run, unless it failed, was interrupted or was abandoned, and a swarm
 with the same workspace, objective and agents within 60 seconds returns your
 earlier swarm, unless it was cancelled, instead of starting another; so does an
-identical launch still starting. A retried message without a key is sent again.
+identical launch still starting. A message without a key reuses the key of the
+same message to the same run sent within 60 seconds, so a retry is delivered
+once.
 `aether_mark_reviewed` completes only a run whose agent reported success and
 awaits your review; to end any other run, use `aether_stop_run` or
 `aether_close_run` under `control`. A message to your own run that no one

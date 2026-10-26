@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/Aether/internal/ops"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
@@ -225,7 +226,7 @@ func toolErrorCode(res *mcp.CallToolResult) int {
 	if res == nil {
 		return 0
 	}
-	code, ok := res.Meta[mcpbridge.MetaErrorCode].(float64)
+	code, ok := res.Meta[ops.MetaErrorCode].(float64)
 	if !ok {
 		return 0
 	}

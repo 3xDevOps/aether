@@ -1,4 +1,4 @@
-package mcpbridge
+package ops
 
 import (
 	"cmp"
@@ -29,7 +29,7 @@ const (
 
 type connectorListRunsInput struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
-	Mine        *bool  `json:"mine,omitempty" jsonschema:"only runs you launched; default true"`
+	Mine        *bool  `json:"mine,omitempty"`
 	ActiveOnly  bool   `json:"active_only,omitempty"`
 	NeedsYou    bool   `json:"needs_you,omitempty"`
 	Query       string `json:"query,omitempty" jsonschema:"words in title, task, workspace or branch"`
@@ -81,39 +81,56 @@ type memoryInput struct {
 	File        string `json:"file,omitempty" jsonschema:"only notes citing this path"`
 }
 
-var readTools = []connectorTool{
-	connectorToolOf("aether_list_workspaces", "List workspaces", ScopeRead, true, "",
-		"Use this when you need a workspace (repository) id, before launching.", listWorkspaces),
-	connectorToolOf("aether_list_agents", "List agents", ScopeRead, true, "",
-		"Use this when choosing an agent to launch.", listAgents),
-	connectorToolOf("aether_list_runs", "List runs", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks what is happening, about their runs, or about a run by what it works on (query). Newest first."+untrustedRule, listRuns),
-	connectorToolOf("aether_get_run", "Get run", ScopeRead, true, nextRuns,
-		"Use this when the user asks about one run, and to poll a launched run."+untrustedRule, getRun),
-	connectorToolOf("aether_run_history", "Read run history", ScopeRead, true, nextRuns,
-		"Use this when the user asks what a run said or did: its conversation or terminal, oldest first, and reports."+untrustedRule, runHistory),
-	connectorToolOf("aether_needs_attention", "What needs me", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks what needs them; each item names the tool that answers it."+untrustedRule, needsAttention),
-	connectorToolOf("aether_activity_summary", "Activity summary", ScopeRead, true, "",
+var readOps = []Op{
+	opOf("aether_list_workspaces", "List workspaces", ScopeRead, true, "",
+		"Use this when you need a workspace (repository) id, before launching.", listWorkspaces).
+		offer(TierRead).calling(protocol.MethodWorkspaceList),
+	opOf("aether_list_agents", "List agents", ScopeRead, true, "",
+		"Use this when choosing an agent to launch.", listAgents).
+		offer(TierRead).calling(protocol.MethodAgentList),
+	opOf("aether_list_runs", "List runs", ScopeRead, true, nextWorkspaces,
+		"Use this when the user asks what is happening, about their runs, or about a run by what it works on (query). Newest first."+untrustedRule, listRuns).
+		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodRunList, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline).
+		defaultOn(Connector, "mine", true, "only runs you launched; default true").
+		defaultOn(Assistant, "mine", false, "only runs the member launched; default false, every run they can see"),
+	opOf("aether_get_run", "Get run", ScopeRead, true, nextRuns,
+		"Use this when the user asks about one run, and to poll a launched run."+untrustedRule, getRun).
+		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline, protocol.MethodRunPRStatus),
+	opOf("aether_run_history", "Read run history", ScopeRead, true, nextRuns,
+		"Use this when the user asks what a run said or did: its conversation or terminal, oldest first, and reports."+untrustedRule, runHistory).
+		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodWorkspaceTimeline, protocol.MethodRunACPHistory, protocol.MethodTerminalHistory),
+	opOf("aether_needs_attention", "What needs me", ScopeRead, true, nextWorkspaces,
+		"Use this when the user asks what needs them; each item names the tool that answers it."+untrustedRule, needsAttention).
+		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodAttentionList),
+	opOf("aether_activity_summary", "Activity summary", ScopeRead, true, "",
 		"Use this when the user asks what their agents did today, yesterday or this week."+untrustedRule, activitySummary).
-		enum("period", "today", "yesterday", "week"),
-	connectorToolOf("aether_list_swarms", "List swarms", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks about their swarms.", listSwarms),
-	connectorToolOf("aether_get_swarm", "Get swarm", ScopeRead, true, nextSwarms,
-		"Use this when the user asks about one swarm, and to poll a launched swarm."+untrustedRule, getSwarm),
-	connectorToolOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
-		"Use this when the user asks what a run changed."+untrustedRule, runChanges),
-	connectorToolOf("aether_pr_status", "Pull request status", ScopeRead, true, nextRuns,
-		"Use this when the user asks about a run's pull request, CI or review feedback. To act on feedback, aether_message_run its run_id; the agent can read the PR itself."+untrustedRule, prStatus),
-	connectorToolOf("aether_overlaps", "Overlapping runs", ScopeRead, true, nextRuns,
-		"Use this when coordinating running agents so they don't change the same files: pairs of active runs touching the same files, with titles. Then aether_message_run each run about the other."+untrustedRule, overlaps),
-	connectorToolOf("aether_memory_search", "Search team memory", ScopeRead, true, nextWorkspaces,
+		enum("period", "today", "yesterday", "week").
+		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodInsightsGet, protocol.MethodWorkspaceTimeline),
+	opOf("aether_list_swarms", "List swarms", ScopeRead, true, nextWorkspaces,
+		"Use this when the user asks about their swarms.", listSwarms).
+		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodMissionList),
+	opOf("aether_get_swarm", "Get swarm", ScopeRead, true, nextSwarms,
+		"Use this when the user asks about one swarm, and to poll a launched swarm."+untrustedRule, getSwarm).
+		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodCoordMessagesList),
+	opOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
+		"Use this when the user asks what a run changed."+untrustedRule, runChanges).
+		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodRunGitLog, protocol.MethodRunEvidenceList, protocol.MethodRunGitDiff),
+	opOf("aether_pr_status", "Pull request status", ScopeRead, true, nextRuns,
+		"Use this when the user asks about a run's pull request, CI or review feedback. To act on feedback, aether_message_run its run_id; the agent can read the PR itself."+untrustedRule, prStatus).
+		offer(TierRead).calling(protocol.MethodRunPRFeedback),
+	opOf("aether_overlaps", "Overlapping runs", ScopeRead, true, nextRuns,
+		"Use this when coordinating running agents so they don't change the same files: pairs of active runs touching the same files, with titles. Then aether_message_run each run about the other."+untrustedRule, overlaps).
+		offer(TierRead).calling(protocol.MethodRunOverlaps, protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodRunList),
+	opOf("aether_memory_search", "Search team memory", ScopeRead, true, nextWorkspaces,
 		"Use this when the user asks what the team decided or learned in a workspace."+untrustedRule, memorySearch).
-		enum("kind", "decision", "convention", "gotcha", "preference", "outcome"),
-	connectorToolOf("search", "Search runs and swarms", ScopeRead, true, "",
-		"Use this when ChatGPT deep research needs runs or swarms by words; in chat use aether_list_runs with query."+searchRule, search),
-	connectorToolOf("fetch", "Fetch run or swarm", ScopeRead, true, "call search for ids",
-		"Use this when deep research needs the full text of a search result."+searchRule, fetch),
+		enum("kind", "decision", "convention", "gotcha", "preference", "outcome").
+		offer(TierRead).calling(protocol.MethodMemorySearch),
+	opOf("search", "Search runs and swarms", ScopeRead, true, "",
+		"Use this when ChatGPT deep research needs runs or swarms by words; in chat use aether_list_runs with query."+searchRule, search).
+		calling(protocol.MethodServerInfo, protocol.MethodRunList, protocol.MethodWorkspaceList, protocol.MethodMissionList),
+	opOf("fetch", "Fetch run or swarm", ScopeRead, true, "call search for ids",
+		"Use this when deep research needs the full text of a search result."+searchRule, fetch).
+		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodWorkspaceTimeline, protocol.MethodMissionShow),
 }
 
 func listWorkspaces(ctx context.Context, c calls, _ struct{}) (string, any, error) {
@@ -217,7 +234,7 @@ func listRuns(ctx context.Context, c calls, in connectorListRunsInput) (string, 
 	params := struct {
 		protocol.RunListParams
 		Mine bool `json:"mine,omitempty"`
-	}{protocol.RunListParams{WorkspaceID: in.WorkspaceID, ActiveOnly: in.ActiveOnly}, in.Mine == nil || *in.Mine}
+	}{protocol.RunListParams{WorkspaceID: in.WorkspaceID, ActiveOnly: in.ActiveOnly}, *in.Mine}
 	var res protocol.RunListResult
 	if err = c.read(ctx, protocol.MethodRunList, params, &res); err != nil {
 		return "", nil, err

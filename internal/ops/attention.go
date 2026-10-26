@@ -1,4 +1,4 @@
-package mcpbridge
+package ops
 
 import (
 	"cmp"
