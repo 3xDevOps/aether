@@ -44,48 +44,50 @@ func (s *Service) deliverDue(ctx context.Context) {
 // deliverMember settles member's due pushes: dropped when the owner can no
 // longer see the target, turned push off, or the need was resolved; held
 // through quiet hours and while they use a dashboard; otherwise sent, the
-// ones quiet hours held as one push.
+// ones quiet hours held as one push. A notice that fails to settle does
+// not stop the others.
 func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, notes []*store.WatchNotification) error {
 	now := s.now()
 	prefs, err := s.store.GetNotifyPrefs(ctx, member)
 	if err != nil {
 		return err
 	}
+	var errs []error
 	var sendable []*store.WatchNotification
+	watches := map[string]*store.Watch{}
 	for _, n := range notes {
-		status, detail, err := s.stillDue(ctx, n, prefs)
-		if err != nil {
-			return err
+		w, status, detail, err := s.stillDue(ctx, n, prefs)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+		case err != nil:
+			errs = append(errs, fmt.Errorf("notice %s: %w", n.ID, err))
+		case w.MemberID != member:
+			// A merge moved the watch since the notices were grouped; the
+			// next round sends it to the survivor.
+		case status != "":
+			errs = append(errs, s.settle(ctx, w, n, store.WatchPushNone, n.PushAttempts, nil, status, detail))
+		default:
+			watches[n.WatchID] = w
+			sendable = append(sendable, n)
 		}
-		if status != "" {
-			if err := s.settle(ctx, n, store.WatchPushNone, n.PushAttempts, nil, status, detail); err != nil {
-				return err
-			}
-			continue
-		}
-		sendable = append(sendable, n)
 	}
 	if len(sendable) == 0 {
-		return nil
+		return errors.Join(errs...)
 	}
 	if until, quiet := quietUntil(prefs, now); quiet {
 		for _, n := range sendable {
 			if n.PushState == store.WatchPushHeld && n.PushNextAt != nil && n.PushNextAt.Equal(until) {
 				continue
 			}
-			if err := s.settle(ctx, n, store.WatchPushHeld, n.PushAttempts, &until, protocol.WatchStatusHeldQuiet, quietDetail(prefs, until)); err != nil {
-				return err
-			}
+			errs = append(errs, s.settle(ctx, watches[n.WatchID], n, store.WatchPushHeld, n.PushAttempts, &until, protocol.WatchStatusHeldQuiet, quietDetail(prefs, until)))
 		}
-		return nil
+		return errors.Join(errs...)
 	}
 	if held := s.push.HeldUntil(member); held.After(now) {
 		for _, n := range sendable {
-			if err := s.hold(ctx, n, held); err != nil {
-				return err
-			}
+			errs = append(errs, s.hold(ctx, watches[n.WatchID], n, held))
 		}
-		return nil
+		return errors.Join(errs...)
 	}
 	var quietHeld, single []*store.WatchNotification
 	for _, n := range sendable {
@@ -99,30 +101,30 @@ func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, not
 		single, quietHeld = append(single, quietHeld[0]), nil
 	}
 	if len(quietHeld) > 0 {
+		lines := make([]string, 0, len(quietHeld))
+		for _, n := range quietHeld {
+			lines = append(lines, n.Title+": "+n.Body)
+		}
 		m := push.Message{
 			Title: fmt.Sprintf("%d watch notices", len(quietHeld)),
-			Body:  summarize(quietHeld),
+			Body:  strings.Join(lines, "\n"),
 			URL:   WatchesLink(),
 			Topic: "watches:" + string(member),
 		}
-		if err := s.send(ctx, member, m, quietHeld); err != nil {
-			return err
-		}
+		errs = append(errs, s.send(ctx, member, m, quietHeld, watches))
 	}
 	for _, n := range single {
 		m := push.Message{Title: n.Title, Body: n.Body, URL: n.Link, Topic: n.WatchID, Urgent: n.Condition == protocol.WatchNeedsYou}
-		if w, err := s.store.GetWatch(ctx, n.WatchID); err == nil && w.TargetKind == protocol.WatchTargetRun {
+		if w := watches[n.WatchID]; w.TargetKind == protocol.WatchTargetRun {
 			m.Run = w.RunID
 		}
-		if err := s.send(ctx, member, m, []*store.WatchNotification{n}); err != nil {
-			return err
-		}
+		errs = append(errs, s.send(ctx, member, m, []*store.WatchNotification{n}, watches))
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // hold puts n's push off until held, saying so once.
-func (s *Service) hold(ctx context.Context, n *store.WatchNotification, held time.Time) error {
+func (s *Service) hold(ctx context.Context, w *store.Watch, n *store.WatchNotification, held time.Time) error {
 	full, err := s.store.GetWatchNotification(ctx, n.ID)
 	if err != nil {
 		return err
@@ -132,43 +134,38 @@ func (s *Service) hold(ctx context.Context, n *store.WatchNotification, held tim
 			return s.store.SetWatchPush(ctx, n.ID, n.PushState, n.PushAttempts, &held, nil)
 		}
 	}
-	return s.settle(ctx, n, n.PushState, n.PushAttempts, &held, protocol.WatchStatusPending, dashboardHold)
+	return s.settle(ctx, w, n, n.PushState, n.PushAttempts, &held, protocol.WatchStatusPending, dashboardHold)
 }
 
-func summarize(notes []*store.WatchNotification) string {
-	lines := make([]string, 0, len(notes))
-	for _, n := range notes {
-		lines = append(lines, n.Title+": "+n.Body)
-	}
-	return strings.Join(lines, "\n")
-}
-
-// stillDue returns the status that drops n's push, empty when it is still
-// to be sent.
-func (s *Service) stillDue(ctx context.Context, n *store.WatchNotification, prefs store.NotifyPrefs) (string, string, error) {
-	if !prefs.Push {
-		return protocol.WatchStatusDisabled, "Push is off in your notification settings", nil
-	}
+// stillDue reads n's watch and returns the status that drops n's push,
+// empty when it is still to be sent.
+func (s *Service) stillDue(ctx context.Context, n *store.WatchNotification, prefs store.NotifyPrefs) (*store.Watch, string, string, error) {
 	w, err := s.store.GetWatch(ctx, n.WatchID)
 	if err != nil {
-		return "", "", err
+		return nil, "", "", err
+	}
+	if !prefs.Push {
+		return w, protocol.WatchStatusDisabled, "Push is off in your notification settings", nil
+	}
+	if n.PushAttempts >= maxPushAttempts {
+		return w, protocol.WatchStatusFailed, fmt.Sprintf("Gave up after %d attempts; the server stopped before the last result was saved", n.PushAttempts), nil
 	}
 	if err = s.allowed(ctx, w); errors.Is(err, errRevoked) {
-		return protocol.WatchStatusFailed, err.Error(), nil
+		return w, protocol.WatchStatusFailed, err.Error(), nil
 	} else if err != nil {
-		return "", "", err
+		return nil, "", "", err
 	}
 	if n.Condition != protocol.WatchNeedsYou {
-		return "", "", nil
+		return w, "", "", nil
 	}
 	current, err := s.currentNeed(ctx, w)
 	if err != nil {
-		return "", "", err
+		return nil, "", "", err
 	}
 	if current != n.Key {
-		return protocol.WatchStatusCleared, "Resolved before the push was sent", nil
+		return w, protocol.WatchStatusCleared, "Resolved before the push was sent", nil
 	}
-	return "", "", nil
+	return w, "", "", nil
 }
 
 // currentNeed is the key of what w's target waits on its owner for now,
@@ -205,16 +202,31 @@ func (s *Service) currentNeed(ctx context.Context, w *store.Watch) (string, erro
 
 // send pushes m to member's devices and records the result on each of
 // notes: delivered when a device took it, no_destination with none, and
-// failed otherwise, tried again with backoff up to maxPushAttempts.
-func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Message, notes []*store.WatchNotification) error {
+// failed otherwise, tried again with backoff up to maxPushAttempts. The
+// attempt is counted and its retry scheduled before the push goes out, so
+// a crash before the result is saved repeats it at most that many times.
+func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Message, notes []*store.WatchNotification, watches map[string]*store.Watch) error {
+	retryAt := make(map[string]time.Time, len(notes))
+	for _, n := range notes {
+		attempts := n.PushAttempts + 1
+		retryAt[n.ID] = s.now().Add(backoff(attempts))
+		next := retryAt[n.ID]
+		if attempts >= maxPushAttempts {
+			next = s.now().Add(maxBackoff)
+		}
+		if err := s.store.SetWatchPush(ctx, n.ID, n.PushState, attempts, &next, nil); err != nil {
+			return err
+		}
+	}
 	results, err := s.push.Deliver(ctx, member, m)
 	status, detail := pushOutcome(results, err)
+	var errs []error
 	for _, n := range notes {
 		attempts := n.PushAttempts + 1
 		state, next, rowStatus, rowDetail := store.WatchPushNone, (*time.Time)(nil), status, detail
 		if status == protocol.WatchStatusFailed {
 			if attempts < maxPushAttempts {
-				at := s.now().Add(backoff(attempts))
+				at := retryAt[n.ID]
 				state, next = store.WatchPushPending, &at
 				if n.PushState == store.WatchPushHeld {
 					state = store.WatchPushHeld
@@ -225,11 +237,9 @@ func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Messa
 				rowDetail += fmt.Sprintf("; gave up after %d attempts", attempts)
 			}
 		}
-		if err := s.settle(ctx, n, state, attempts, next, rowStatus, rowDetail); err != nil {
-			return err
-		}
+		errs = append(errs, s.settle(ctx, watches[n.WatchID], n, state, attempts, next, rowStatus, rowDetail))
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func pushOutcome(results []push.DeviceResult, err error) (string, string) {
@@ -248,23 +258,26 @@ func pushOutcome(results []push.DeviceResult, err error) (string, string) {
 			failures = append(failures, r.Err.Error())
 		}
 	}
-	switch delivered {
-	case 0:
+	if delivered == 0 {
 		return protocol.WatchStatusFailed, strings.Join(failures, "; ")
-	case 1:
-		return protocol.WatchStatusDelivered, "1 device"
 	}
-	return protocol.WatchStatusDelivered, fmt.Sprintf("%d devices", delivered)
+	detail := fmt.Sprintf("%d devices", delivered)
+	if delivered == 1 {
+		detail = "1 device"
+	}
+	if len(failures) > 0 {
+		detail += "; not delivered to the others: " + strings.Join(failures, "; ")
+	}
+	return protocol.WatchStatusDelivered, detail
 }
 
-func (s *Service) settle(ctx context.Context, n *store.WatchNotification, state string, attempts int, next *time.Time, status, detail string) error {
+// settle records n's push state and delivery row, and tells w's owner.
+func (s *Service) settle(ctx context.Context, w *store.Watch, n *store.WatchNotification, state string, attempts int, next *time.Time, status, detail string) error {
 	d := &store.WatchDelivery{Channel: protocol.WatchChannelPush, Status: status, Detail: detail, At: s.now()}
 	if err := s.store.SetWatchPush(ctx, n.ID, state, attempts, next, d); err != nil {
-		return err
+		return fmt.Errorf("notice %s: %w", n.ID, err)
 	}
-	if w, err := s.store.GetWatch(ctx, n.WatchID); err == nil {
-		s.changed(ctx, w, "")
-	}
+	s.changed(ctx, w, "")
 	return nil
 }
 

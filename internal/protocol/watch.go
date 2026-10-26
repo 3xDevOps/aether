@@ -13,14 +13,13 @@ const (
 	WatchNotificationsMax = 50
 )
 
-// Watch target kinds.
 const (
 	WatchTargetRun     = "run"
 	WatchTargetMission = "mission"
 	WatchTargetPR      = "pr"
 )
 
-// Watch conditions. A target kind accepts only its own subset.
+// A target kind accepts only its own subset of the watch conditions.
 const (
 	WatchNeedsYou  = "needs_you"
 	WatchFinished  = "finished"
@@ -32,7 +31,6 @@ const (
 	WatchClosed    = "closed"
 )
 
-// Watch states.
 const (
 	WatchActive  = "active"
 	WatchPaused  = "paused"
@@ -41,14 +39,12 @@ const (
 	WatchExpired = "expired"
 )
 
-// Watch sources.
 const (
 	WatchSourceDashboard = "dashboard"
 	WatchSourceAssistant = "assistant"
 	WatchSourceMCP       = "mcp"
 )
 
-// Notification delivery channels and statuses.
 const (
 	WatchChannelPush    = "push"
 	WatchChannelDesktop = "desktop"
@@ -62,8 +58,8 @@ const (
 	WatchStatusDisabled      = "disabled"
 	WatchStatusHeldQuiet     = "held_quiet_hours"
 	WatchStatusFailed        = "failed"
-	// WatchStatusCleared is a held push dropped because the need it
-	// announced was resolved before it could be sent.
+	// WatchStatusCleared is a push dropped unsent: the need it announced
+	// was resolved first, or its watch was paused until it expired.
 	WatchStatusCleared = "cleared"
 )
 

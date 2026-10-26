@@ -113,6 +113,9 @@ type WatchStore interface {
 	// already recorded is skipped; the ones recorded are returned with
 	// their deliveries.
 	CommitWatchEvaluation(ctx context.Context, w *Watch, notices []*WatchNotification) ([]*WatchNotification, error)
+	// TouchWatchCheck records a check that changed nothing, leaving
+	// Version as it is.
+	TouchWatchCheck(ctx context.Context, id string, at time.Time) error
 	DeleteWatch(ctx context.Context, id string) error
 	// EvaluableWatchIDs lists the active and failing watches on run or on
 	// the swarm run serves, or on mission when run is empty.
@@ -121,7 +124,7 @@ type WatchStore interface {
 	// at or before now, or all of them when all is set.
 	DueWatchIDs(ctx context.Context, now time.Time, all bool) ([]string, error)
 	// ExpireWatches marks every live watch past its expiry expired and
-	// returns them.
+	// returns them. A paused watch's unsent pushes are dropped as cleared.
 	ExpireWatches(ctx context.Context, now time.Time) ([]*Watch, error)
 	// PurgeWatches deletes the done and expired watches that ended before
 	// cutoff, with their notifications.
@@ -141,6 +144,10 @@ type WatchStore interface {
 
 	GetNotifyPrefs(ctx context.Context, member domain.MemberID) (NotifyPrefs, error)
 	PutNotifyPrefs(ctx context.Context, member domain.MemberID, p NotifyPrefs) error
+
+	// MissionDeliveryReceipts are the delivery receipts of every
+	// integration candidate of mission, keyed by candidate id.
+	MissionDeliveryReceipts(ctx context.Context, workspace domain.WorkspaceID, mission domain.MissionID) (map[string]json.RawMessage, error)
 
 	// WatchCursor is the last event sequence the watch service applied;
 	// ok is false before it first saved one.
@@ -405,6 +412,17 @@ func insertWatchDelivery(ctx context.Context, db execer, notification string, de
 	return nil
 }
 
+func (d *DB) TouchWatchCheck(ctx context.Context, id string, at time.Time) error {
+	t, err := encodeTime(at)
+	if err != nil {
+		return fmt.Errorf("store: touch watch check: %w", err)
+	}
+	if _, err := d.db.ExecContext(ctx, `UPDATE watches SET last_check_at = ? WHERE id = ?`, t, id); err != nil {
+		return fmt.Errorf("store: touch watch check: %w", err)
+	}
+	return nil
+}
+
 func (d *DB) DeleteWatch(ctx context.Context, id string) error {
 	return d.execDelete(ctx, "delete watch", `DELETE FROM watches WHERE id = ?`, id)
 }
@@ -458,14 +476,37 @@ func (d *DB) ExpireWatches(ctx context.Context, now time.Time) ([]*Watch, error)
 	if err != nil {
 		return nil, fmt.Errorf("store: expire watches: %w", err)
 	}
-	rows, err := d.db.QueryContext(ctx,
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("store: expire watches: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	const heldByPause = `SELECT n.id FROM watch_notifications n JOIN watches w ON w.id = n.watch_id
+		WHERE n.push_state <> 'none' AND w.state = 'paused' AND w.expires_at <= ?1`
+	if _, err = tx.ExecContext(ctx,
+		`UPDATE watch_deliveries SET status = 'cleared', detail = 'The watch was paused until it expired', at = ?1
+		 WHERE channel = 'push' AND notification_id IN (`+heldByPause+`)`, at); err != nil {
+		return nil, fmt.Errorf("store: expire watches: drop paused pushes: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx,
+		`UPDATE watch_notifications SET push_state = 'none', push_next_at = NULL WHERE id IN (`+heldByPause+`)`, at); err != nil {
+		return nil, fmt.Errorf("store: expire watches: drop paused pushes: %w", err)
+	}
+	rows, err := tx.QueryContext(ctx,
 		`UPDATE watches SET state = 'expired', ended_at = ?1, updated_at = ?1, next_check_at = NULL, version = version + 1
 		 WHERE state IN ('active', 'paused', 'error') AND expires_at <= ?1
 		 RETURNING `+watchColumns, at)
 	if err != nil {
 		return nil, fmt.Errorf("store: expire watches: %w", err)
 	}
-	return collect(rows, scanWatch)
+	expired, err := collect(rows, scanWatch)
+	if err != nil {
+		return nil, fmt.Errorf("store: expire watches: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("store: expire watches: %w", err)
+	}
+	return expired, nil
 }
 
 func (d *DB) PurgeWatches(ctx context.Context, cutoff time.Time) (int64, error) {
@@ -478,4 +519,27 @@ func (d *DB) PurgeWatches(ctx context.Context, cutoff time.Time) (int64, error) 
 		return 0, fmt.Errorf("store: purge watches: %w", err)
 	}
 	return res.RowsAffected()
+}
+
+func (d *DB) MissionDeliveryReceipts(ctx context.Context, workspace domain.WorkspaceID, mission domain.MissionID) (map[string]json.RawMessage, error) {
+	rows, err := d.db.QueryContext(ctx,
+		`SELECT id, json_extract(payload, '$.delivery_receipt') FROM integration_candidates
+		 WHERE workspace_id = ? AND json_extract(payload, '$.mission_id') = ?
+		   AND json_extract(payload, '$.delivery_receipt') IS NOT NULL`, workspace, mission)
+	if err != nil {
+		return nil, fmt.Errorf("store: list delivery receipts: %w", err)
+	}
+	defer rows.Close() //nolint:errcheck // read-only iteration
+	out := map[string]json.RawMessage{}
+	for rows.Next() {
+		var id, receipt string
+		if err := rows.Scan(&id, &receipt); err != nil {
+			return nil, fmt.Errorf("store: list delivery receipts: %w", err)
+		}
+		out[id] = json.RawMessage(receipt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list delivery receipts: %w", err)
+	}
+	return out, nil
 }

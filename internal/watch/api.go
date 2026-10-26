@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -126,60 +127,68 @@ func label(raw string) (string, error) {
 }
 
 // resolve checks that target exists and member may watch it, and returns
-// its workspace and title.
-func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol.WatchTarget) (domain.WorkspaceID, string, error) {
+// its workspace, its title, and the finish it already reached, which the
+// new watch must not announce.
+func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol.WatchTarget) (domain.WorkspaceID, string, map[string]string, error) {
 	var (
 		ws    domain.WorkspaceID
 		title string
+		fired = map[string]string{}
 	)
 	switch t.Kind {
 	case protocol.WatchTargetRun:
 		if t.RunID == "" {
-			return "", "", invalid("target.run_id is required")
+			return "", "", nil, invalid("target.run_id is required")
 		}
 		run, err := s.store.GetRun(ctx, domain.RunID(t.RunID))
 		if err != nil {
-			return "", "", fmt.Errorf("run %s: %w", t.RunID, err)
+			return "", "", nil, fmt.Errorf("run %s: %w", t.RunID, err)
 		}
 		if run.Status.Final() {
 			_, body, _ := runFinish(run)
-			return "", "", invalid("run %s has already ended (%s); there is nothing left to watch", t.RunID, body)
+			return "", "", nil, invalid("run %s has already ended (%s); there is nothing left to watch", t.RunID, body)
 		}
 		ws, title = run.WorkspaceID, push.RunTitle(run)
+		if key, _, ok := runFinish(run); ok {
+			fired[protocol.WatchFinished] = key
+		}
 	case protocol.WatchTargetMission:
 		if t.MissionID == "" {
-			return "", "", invalid("target.mission_id is required")
+			return "", "", nil, invalid("target.mission_id is required")
 		}
 		m, err := s.store.GetMission(ctx, domain.MissionID(t.MissionID))
 		if err != nil {
-			return "", "", fmt.Errorf("swarm %s: %w", t.MissionID, err)
+			return "", "", nil, fmt.Errorf("swarm %s: %w", t.MissionID, err)
 		}
-		if m.Phase.Terminal() {
-			return "", "", invalid("swarm %s is already %s; there is nothing left to watch", t.MissionID, m.Phase)
+		if m.Phase == domain.MissionPhaseCancelled {
+			return "", "", nil, invalid("swarm %s is cancelled; there is nothing left to watch", t.MissionID)
 		}
 		ws, title = m.WorkspaceID, MissionTitle(m)
+		if m.Phase == domain.MissionPhaseCompleted {
+			fired[protocol.WatchFinished] = string(m.Phase)
+		}
 	case protocol.WatchTargetPR:
 		if t.Repo == "" || t.Number <= 0 {
-			return "", "", invalid("target.repo and target.number are required")
+			return "", "", nil, invalid("target.repo and target.number are required")
 		}
 		if t.RunID != "" {
 			run, err := s.store.GetRun(ctx, domain.RunID(t.RunID))
 			if err != nil {
-				return "", "", fmt.Errorf("run %s: %w", t.RunID, err)
+				return "", "", nil, fmt.Errorf("run %s: %w", t.RunID, err)
 			}
 			ws = run.WorkspaceID
 		}
 		title = fmt.Sprintf("%s#%d", t.Repo, t.Number)
 	default:
-		return "", "", invalid("target kind %q is not one of run, mission, pr", t.Kind)
+		return "", "", nil, invalid("target kind %q is not one of run, mission, pr", t.Kind)
 	}
 	if ws != "" {
 		actor := permissions.Actor{ID: member.ID, Role: member.Role}
 		if err := permissions.Check(permissions.View, actor, permissions.Target{Workspace: ws}); err != nil {
-			return "", "", fmt.Errorf("%w: %w", ErrDenied, err)
+			return "", "", nil, fmt.Errorf("%w: %w", ErrDenied, err)
 		}
 	}
-	return ws, title, nil
+	return ws, title, fired, nil
 }
 
 // ErrDenied marks a target the caller may not see.
@@ -220,72 +229,102 @@ func (s *Service) Create(ctx context.Context, memberID domain.MemberID, p protoc
 	if !slices.Contains([]string{protocol.WatchSourceDashboard, protocol.WatchSourceAssistant, protocol.WatchSourceMCP}, source) {
 		return protocol.WatchResult{}, invalid("source %q is not one of dashboard, assistant, mcp", source)
 	}
-	ws, title, err := s.resolve(ctx, member, p.Target)
+	ws, title, fired, err := s.resolve(ctx, member, p.Target)
 	if err != nil {
 		return protocol.WatchResult{}, err
-	}
-	if p.IdempotencyKey == "" {
-		if w, err := s.existing(ctx, memberID, p.Target, conditions); err != nil || w != nil {
-			if err != nil {
-				return protocol.WatchResult{}, err
-			}
-			return s.result(ctx, w)
-		}
 	}
 	w := &store.Watch{
 		MemberID: memberID, WorkspaceID: ws, TargetKind: p.Target.Kind, RunID: domain.RunID(p.Target.RunID),
 		MissionID: domain.MissionID(p.Target.MissionID), Repo: p.Target.Repo, Number: p.Target.Number,
 		TargetTitle: title, Conditions: conditions, Label: lbl, Source: source, State: protocol.WatchActive,
-		IdempotencyKey: p.IdempotencyKey, CreatedAt: now, UpdatedAt: now, ExpiresAt: expires,
+		Fired: fired, IdempotencyKey: p.IdempotencyKey, CreatedAt: now, UpdatedAt: now, ExpiresAt: expires,
+		NextCheckAt: &now,
 	}
 	if p.Target.Kind == protocol.WatchTargetPR || len(prConditionsOf(conditions)) > 0 {
-		prTitle, err := s.pr.Validate(ctx, memberID, p.Target)
+		prTitle, verr := s.pr.Validate(ctx, memberID, p.Target)
 		switch {
-		case errors.Is(err, ErrTransient):
-			w.State, w.Error, w.Failures = protocol.WatchError, err.Error(), 1
+		case errors.Is(verr, ErrTransient):
+			w.State, w.Error, w.Failures = protocol.WatchError, verr.Error(), 1
 			next := now.Add(backoff(1))
 			w.NextCheckAt = &next
-		case err != nil:
-			return protocol.WatchResult{}, invalid("%s", err.Error())
+		case verr != nil:
+			return protocol.WatchResult{}, invalid("%s", verr.Error())
 		case prTitle != "" && p.Target.Kind == protocol.WatchTargetPR:
 			w.TargetTitle = prTitle
 		}
 	}
-	if err := s.store.CreateWatch(ctx, w); errors.Is(err, store.ErrConflict) && p.IdempotencyKey != "" {
-		first, gerr := s.store.GetWatchByIdempotencyKey(ctx, memberID, p.IdempotencyKey)
-		if gerr != nil {
-			return protocol.WatchResult{}, gerr
-		}
-		return s.result(ctx, first)
-	} else if err != nil {
+	created, err := s.insert(ctx, w)
+	if err != nil {
 		return protocol.WatchResult{}, err
 	}
-	return s.settled(ctx, w.ID)
+	if !created {
+		return s.result(ctx, w)
+	}
+	// The first check outlives the request; if it cannot commit, the
+	// next_check_at saved with the watch has the background loop retry it.
+	return s.settled(context.WithoutCancel(ctx), w.ID)
+}
+
+// insert stores w unless member already has it: the watch with the same
+// idempotency key, or without a key, a live watch on the same target with
+// the same conditions, resumed if it was paused. It reports whether w is
+// new, and otherwise replaces *w with the existing watch.
+func (s *Service) insert(ctx context.Context, w *store.Watch) (bool, error) {
+	if w.IdempotencyKey != "" {
+		err := s.store.CreateWatch(ctx, w)
+		if !errors.Is(err, store.ErrConflict) {
+			return err == nil, err
+		}
+		first, err := s.store.GetWatchByIdempotencyKey(ctx, w.MemberID, w.IdempotencyKey)
+		if err != nil {
+			return false, err
+		}
+		*w = *first
+		return false, nil
+	}
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
+	found, err := s.existing(ctx, w.MemberID, targetOf(w), w.Conditions)
+	if err != nil {
+		return false, err
+	}
+	if found != nil {
+		*w = *found
+		return false, nil
+	}
+	return true, s.store.CreateWatch(ctx, w)
 }
 
 // existing is member's live watch on target with conditions, resumed if it
 // was paused, or nil.
 func (s *Service) existing(ctx context.Context, member domain.MemberID, t protocol.WatchTarget, conditions []string) (*store.Watch, error) {
-	watches, err := s.store.ListWatches(ctx, store.WatchFilter{MemberID: member, TargetKind: t.Kind, RunID: domain.RunID(t.RunID), MissionID: domain.MissionID(t.MissionID)})
-	if err != nil {
-		return nil, err
-	}
-	for _, w := range watches {
-		if targetOf(w) != t || !slices.Equal(w.Conditions, conditions) ||
-			w.State == protocol.WatchDone || w.State == protocol.WatchExpired {
-			continue
+	for range 4 {
+		watches, err := s.store.ListWatches(ctx, store.WatchFilter{MemberID: member, TargetKind: t.Kind, RunID: domain.RunID(t.RunID), MissionID: domain.MissionID(t.MissionID)})
+		if err != nil {
+			return nil, err
 		}
+		i := slices.IndexFunc(watches, func(w *store.Watch) bool {
+			return targetOf(w) == t && slices.Equal(w.Conditions, conditions) &&
+				w.State != protocol.WatchDone && w.State != protocol.WatchExpired
+		})
+		if i < 0 {
+			return nil, nil
+		}
+		w := watches[i]
 		if w.State != protocol.WatchPaused {
 			return w, nil
 		}
 		w.State, w.UpdatedAt = protocol.WatchActive, s.now()
-		if err := s.store.UpdateWatch(ctx, w); err != nil {
+		err = s.store.UpdateWatch(ctx, w)
+		if errors.Is(err, store.ErrConflict) {
+			continue
+		}
+		if err != nil {
 			return nil, err
 		}
-		res, err := s.settledWatch(ctx, w.ID)
-		return res, err
+		return s.settledWatch(context.WithoutCancel(ctx), w.ID)
 	}
-	return nil, nil
+	return nil, fmt.Errorf("watch on %s %s: changed by every concurrent update", kindWords[t.Kind], cmp.Or(t.RunID, t.MissionID, t.Repo))
 }
 
 // settled evaluates watch id once, so its result shows the target as it
@@ -399,7 +438,9 @@ func (s *Service) toProto(ctx context.Context, w *store.Watch) (protocol.Watch, 
 		Source: w.Source, CreatedAt: stamp(&w.CreatedAt), UpdatedAt: stamp(&w.UpdatedAt), ExpiresAt: stamp(&w.ExpiresAt),
 		LastCheckAt: stamp(w.LastCheckAt), NextCheckAt: stamp(w.NextCheckAt), Link: WatchLink(w.ID),
 	}
-	_ = json.Unmarshal(w.Observed, &out.Observed)
+	if err := json.Unmarshal(w.Observed, &out.Observed); err != nil {
+		return protocol.Watch{}, fmt.Errorf("watch %s observed: %w", w.ID, err)
+	}
 	last, err := s.store.ListWatchNotifications(ctx, w.ID, 1)
 	if err != nil {
 		return protocol.Watch{}, err

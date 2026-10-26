@@ -3,8 +3,8 @@
 A watch is a subscription you keep on one run or one swarm. The server
 evaluates it, not your browser or an agent, so it keeps working after you
 close the dashboard and across server restarts. When the target needs you or
-reaches the state you asked about, the server records a notice in the
-dashboard and sends it to your Web Push devices (see
+reaches the state you asked about, the server records a notice, which
+`watch.get` returns, and sends it to your Web Push devices (see
 [push notifications](dashboard-frontend.md#push-notifications) for turning
 them on in a browser).
 
@@ -24,7 +24,7 @@ takes the target's defaults, marked *.
 | `run` | `finished`* | `Agent reported done`: the agent reported success; nothing is merged. `Failed: <reason>`. `Stopped`: the run was interrupted. `Completed`: the agent exited with its results committed. `Closed as merged` and `Closed as abandoned`: a member's disposition. |
 | `run` | `pr_merged`, `ci` | The run's pull request merged on GitHub, or its checks finished. Not supported yet: refused until the pull request evaluator ships. |
 | `mission` | `needs_you`* | The swarm needs its accountable human: the integrator asks a question, or the integrator stopped or failed to launch. Each question is its own notice. Workers never notify on their own; the integrator handles them. |
-| `mission` | `finished`* | `Swarm completed` or `Swarm cancelled`. |
+| `mission` | `finished`* | `Swarm completed` or `Swarm cancelled`. A completed swarm can be reopened or still deliver, so its watch stays `active`. |
 | `mission` | `delivered` | An integration delivery receipt landed after the watch began: `Delivered to <ref>` when the ref moved, `Proposed <ref>` when a proposal was opened. |
 | `pr` | `ci`*, `review`*, `merged`*, `closed` | Not supported yet: refused until the pull request evaluator ships. |
 
@@ -35,8 +35,10 @@ A notice's title is the run's title or the swarm's objective. Its body is the
 line above, or the question's own text, and it links to the target:
 `/?run=<id>` for a run, `/?page=missions&id=<id>` for a swarm.
 
-A run or swarm that has already ended cannot be watched: `watch.create` says
-how it ended.
+A run that has ended (failed, stopped, merged or abandoned) or a cancelled
+swarm cannot be watched: `watch.create` says how it ended. A finish the
+target reached before the watch began, such as a run whose agent already
+reported done or a completed swarm, is not announced; the next one is.
 
 ## States
 
@@ -45,7 +47,7 @@ how it ended.
 | `active` | Evaluated on every event about the target. |
 | `paused` | You paused it. Nothing is evaluated or sent until you resume it. |
 | `error` | Evaluation failed; `error` holds the real error. It retries with backoff from 30 seconds, doubling to at most 15 minutes, and returns to `active` once an evaluation succeeds. `access revoked: ...` means you no longer exist, await approval, or cannot see the workspace; it is not retried on a timer, only on the target's next event. |
-| `done` | The target reached its final state (a run merged, abandoned, failed or stopped; a swarm completed or cancelled) and its last notice is recorded. |
+| `done` | The target reached its final state (a run merged, abandoned, failed or stopped; a swarm cancelled) and its last notice is recorded. |
 | `expired` | It passed `expires_at`. Give it a new `expires_at` to watch again. |
 
 A watch expires 14 days after creation unless you set `expires_at`, at most
@@ -60,23 +62,23 @@ the notice is recorded and updated in place as the push resolves:
 
 | Channel | Status | Meaning |
 | --- | --- | --- |
-| `in_app` | `delivered` | Always recorded when the notice is. The dashboard shows it. |
+| `in_app` | `delivered` | Always recorded when the notice is; `watch.get` returns it and `watch.changed` announces it. |
 | `push` | `pending` | Still to be sent. `detail` says why: `Sending`, `Waiting until you leave the dashboard`, or `Retry 2 of 5 at 14:05: <the push service's error>`. |
-| `push` | `delivered` | At least one of your devices' push services took it. `detail` is the device count, such as `2 devices`. |
+| `push` | `delivered` | At least one of your devices' push services took it. `detail` is the device count, such as `2 devices`, followed by the errors of the devices that did not take it. |
 | `push` | `no_destination` | No device had notifications turned on when the notice was recorded or sent. |
 | `push` | `disabled` | Push is off in your notification preferences, or Web Push is not configured on this server; `detail` says which. |
 | `push` | `held_quiet_hours` | Quiet hours hold it; `detail` says until when. |
-| `push` | `failed` | No device took it after 5 attempts with backoff; `detail` is the push service's error. |
-| `push` | `cleared` | A held `needs_you` push whose need was resolved (answered, dismissed, granted) before it could be sent is dropped. |
+| `push` | `failed` | No device took it after 5 attempts with backoff; `detail` is the push service's error. Each attempt is counted before it is sent, so a server that stops mid-send retries it rather than sending it more than 5 times. |
+| `push` | `cleared` | Dropped unsent: a `needs_you` push whose need was resolved (answered, dismissed, granted) first, or a push of a watch paused until it expired. |
 
-A paused watch's pending pushes wait until you resume it.
+A paused watch's pending pushes wait until you resume it, and are dropped if
+it expires first.
 
 A device whose push service answers `404` or `410` is unsubscribed, as for
 every other notification.
 
 While you are using a dashboard, pushes wait until you have been away from
-every dashboard for a minute, the same hold run notifications use; the
-dashboard shows the notice meanwhile.
+every dashboard for a minute, the same hold run notifications use.
 
 ## Notification preferences
 

@@ -65,7 +65,9 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 	before := *w
 	before.Fired = maps.Clone(w.Fired)
 	var prev protocol.WatchObserved
-	_ = json.Unmarshal(w.Observed, &prev)
+	if err := json.Unmarshal(w.Observed, &prev); err != nil {
+		return fmt.Errorf("watch %s observed: %w", w.ID, err)
+	}
 	w.LastCheckAt, w.UpdatedAt = &now, now
 	var notes []*store.WatchNotification
 	r, readErr := s.read(ctx, w, prev)
@@ -105,8 +107,9 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 			w.NextCheckAt = &r.nextCheck
 		}
 	}
-	if len(notes) == 0 && !visiblyChanged(&before, w) && maps.Equal(before.Fired, w.Fired) && sameTime(before.NextCheckAt, w.NextCheckAt) {
-		return nil
+	if len(notes) == 0 && !visiblyChanged(&before, w) && maps.Equal(before.Fired, w.Fired) &&
+		(before.NextCheckAt == nil) == (w.NextCheckAt == nil) && (w.NextCheckAt == nil || w.NextCheckAt.Equal(*before.NextCheckAt)) {
+		return s.store.TouchWatchCheck(ctx, w.ID, now)
 	}
 	recorded, err := s.store.CommitWatchEvaluation(ctx, w, notes)
 	if err != nil {
@@ -127,10 +130,6 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 func visiblyChanged(before, after *store.Watch) bool {
 	return before.State != after.State || before.Error != after.Error || before.TargetTitle != after.TargetTitle ||
 		string(before.Observed) != string(after.Observed)
-}
-
-func sameTime(a, b *time.Time) bool {
-	return a == nil && b == nil || a != nil && b != nil && a.Equal(*b)
 }
 
 func backoff(failures int) time.Duration {
@@ -329,7 +328,9 @@ func (s *Service) readMission(ctx context.Context, w *store.Watch) (reading, err
 	if err != nil {
 		return reading{}, fmt.Errorf("read swarm %s: %w", w.MissionID, err)
 	}
-	r := reading{ok: true, title: MissionTitle(m), final: m.Phase.Terminal()}
+	// A completed swarm can be reopened or still deliver; only a cancelled
+	// one is over.
+	r := reading{ok: true, title: MissionTitle(m), final: m.Phase == domain.MissionPhaseCancelled}
 	r.observed = protocol.WatchObserved{Phase: string(m.Phase)}
 	link := MissionLink(m.ID)
 	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
@@ -400,18 +401,15 @@ type delivery struct {
 // deliveries are the swarm's integration delivery receipts since the watch
 // began, oldest first: a ref landed, or a proposal opened.
 func (s *Service) deliveries(ctx context.Context, m *domain.Mission, since time.Time) ([]delivery, error) {
-	candidates, err := s.store.ListIntegrationCandidates(ctx, m.WorkspaceID, m.ID, protocol.IntegrationMaxPageSize)
+	receipts, err := s.store.MissionDeliveryReceipts(ctx, m.WorkspaceID, m.ID)
 	if err != nil {
 		return nil, fmt.Errorf("read swarm %s deliveries: %w", m.ID, err)
 	}
 	var out []delivery
-	for _, c := range candidates {
-		if len(c.DeliveryReceipt) == 0 {
-			continue
-		}
+	for candidate, raw := range receipts {
 		var receipt protocol.DeliveryReceipt
-		if err := json.Unmarshal(c.DeliveryReceipt, &receipt); err != nil {
-			return nil, fmt.Errorf("read candidate %s delivery receipt: %w", c.CandidateID, err)
+		if err := json.Unmarshal(raw, &receipt); err != nil {
+			return nil, fmt.Errorf("read candidate %s delivery receipt: %w", candidate, err)
 		}
 		if receipt.CreatedAt.Before(since) {
 			continue
@@ -422,7 +420,7 @@ func (s *Service) deliveries(ctx context.Context, m *domain.Mission, since time.
 		}
 		out = append(out, delivery{Key: receipt.ReceiptID, Body: body, at: receipt.CreatedAt})
 	}
-	slices.SortStableFunc(out, func(a, b delivery) int { return a.at.Compare(b.at) })
+	slices.SortFunc(out, func(a, b delivery) int { return cmp.Or(a.at.Compare(b.at), strings.Compare(a.Key, b.Key)) })
 	return out, nil
 }
 

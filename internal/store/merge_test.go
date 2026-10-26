@@ -173,6 +173,14 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if err := db.PutPushSubscription(ctx, &PushSubscription{Endpoint: "https://push.example/b", MemberID: b.ID, P256DH: "k", Auth: "a"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.PutNotifyPrefs(ctx, b.ID, NotifyPrefs{Push: false}); err != nil {
+		t.Fatal(err)
+	}
+	watchB := &Watch{MemberID: b.ID, WorkspaceID: w.ID, TargetKind: "run", RunID: runB.ID, Conditions: []string{"finished"},
+		State: "active", Source: "dashboard", CreatedAt: time.Now(), UpdatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
+	if err := db.CreateWatch(ctx, watchB); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.UpsertHarnessDefinition(ctx, &HarnessDefinition{MemberID: b.ID, Name: "mine", Definition: []byte(`{"Name":"mine"}`)}); err != nil {
 		t.Fatal(err)
 	}
@@ -269,6 +277,12 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	}
 	if grantees, gerr := db.ListAccountGrantees(ctx, a.ID); gerr != nil || len(grantees) != 0 {
 		t.Fatalf("survivor shares with %v, %v", grantees, gerr)
+	}
+	if p, gerr := db.GetNotifyPrefs(ctx, a.ID); gerr != nil || p.Push {
+		t.Fatalf("survivor's notification settings = %+v, %v; want the absorbed member's, push off", p, gerr)
+	}
+	if got, gerr := db.GetWatch(ctx, watchB.ID); gerr != nil || got.MemberID != a.ID || got.Version == watchB.Version {
+		t.Fatalf("absorbed member's watch = %+v, %v; want it moved with a new version", got, gerr)
 	}
 	if r, gerr := db.GetRun(ctx, runB.ID); gerr != nil || r.MemberID != a.ID {
 		t.Fatalf("absorbed member's run = %+v, %v", r, gerr)

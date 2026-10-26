@@ -601,7 +601,8 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 	for attempt := 1; attempt <= maxPushAttempts; attempt++ {
 		h.eventually(fmt.Sprintf("push attempt %d", attempt), func() bool {
 			n := h.notices(w.ID)
-			return len(n) == 1 && n[0].PushAttempts == attempt
+			return len(n) == 1 && n[0].PushAttempts == attempt &&
+				(strings.HasPrefix(pushOf(n[0]).Detail, fmt.Sprintf("Retry %d of", attempt+1)) || pushOf(n[0]).Status == protocol.WatchStatusFailed)
 		})
 		if d := pushOf(h.notices(w.ID)[0]); attempt == 1 && (d.Status != protocol.WatchStatusPending || !strings.HasPrefix(d.Detail, "Retry 2 of 5 at ")) {
 			t.Fatalf("push after a failed attempt = %+v, want pending with the retry", d)
@@ -634,17 +635,17 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 	}
 }
 
-// exec runs a statement on the harness's database file directly, for
-// writes the store offers no method for.
-func (h *harness) exec(query string, args ...any) {
+// setPhase moves the swarm's phase on the harness's database file
+// directly, which the store offers no method for.
+func (h *harness) setPhase(mission domain.MissionID, phase domain.MissionPhase) {
 	h.t.Helper()
 	raw, err := sql.Open("sqlite", "file:"+url.PathEscape(h.path)+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		h.t.Fatal(err)
 	}
 	defer raw.Close() //nolint:errcheck // test cleanup
-	if _, err := raw.ExecContext(h.ctx, query, args...); err != nil {
-		h.t.Fatalf("exec %q: %v", query, err)
+	if _, err := raw.ExecContext(h.ctx, `UPDATE missions SET phase = ? WHERE id = ?`, phase, mission); err != nil {
+		h.t.Fatalf("set swarm phase: %v", err)
 	}
 }
 
@@ -656,7 +657,7 @@ func TestSwarmWatchSaysSwarmTransitionsOnly(t *testing.T) {
 	if err := h.db.CreateMission(h.ctx, m); err != nil {
 		t.Fatal(err)
 	}
-	h.exec(`UPDATE missions SET phase = ? WHERE id = ?`, domain.MissionPhaseActive, m.ID)
+	h.setPhase(m.ID, domain.MissionPhaseActive)
 	integrator := &domain.Run{ID: m.CurrentIntegratorRunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "integrate",
 		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning}
 	if err := h.db.CreateRunWithID(h.ctx, integrator); err != nil {
@@ -679,11 +680,92 @@ func TestSwarmWatchSaysSwarmTransitionsOnly(t *testing.T) {
 		t.Fatalf("notices = %q, want the question alone", bodies(got))
 	}
 
-	h.exec(`UPDATE missions SET phase = ? WHERE id = ?`, domain.MissionPhaseCompleted, m.ID)
+	// A completed swarm can be reopened or still deliver, so its watch
+	// stays; a cancelled one is over.
+	h.setPhase(m.ID, domain.MissionPhaseCompleted)
 	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
-	h.eventually("the swarm to finish", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
-	if got := bodies(h.notices(w.ID)); len(got) != 2 || got[1] != "finished: Swarm completed" {
-		t.Fatalf("notices = %q, want Swarm completed last", got)
+	h.eventually("the swarm to complete", func() bool { return len(h.notices(w.ID)) == 2 })
+	if got := bodies(h.notices(w.ID)); got[1] != "finished: Swarm completed" || h.watchState(w.ID).State != protocol.WatchActive {
+		t.Fatalf("notices = %q, state %s; want Swarm completed last and the watch active", got, h.watchState(w.ID).State)
+	}
+	h.setPhase(m.ID, domain.MissionPhaseCancelled)
+	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
+	h.eventually("the watch to end", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
+}
+
+func TestWatchingAFinishedTargetAnnouncesOnlyWhatComesNext(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Already done")
+	if _, err := h.db.FinishRunReported(h.ctx, run.ID, domain.RunCompleted, "agent reported success", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	w := h.watch(h.ada, runTarget(run)).Watch
+	settle()
+	if got := h.notices(w.ID); len(got) != 0 {
+		t.Fatalf("notices = %q, want none for a finish reached before the watch", bodies(got))
+	}
+	h.status(run, domain.RunMerged, "", "closed")
+	h.eventually("the watch to finish", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
+	if got := bodies(h.notices(w.ID)); len(got) != 1 || got[0] != "finished: Closed as merged" {
+		t.Fatalf("notices = %q, want Closed as merged alone", got)
+	}
+
+	m := &domain.Mission{WorkspaceID: h.ws.ID, Objective: "Done swarm", AccountableHumanID: h.ada.ID,
+		Integrator: domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchTUI}, IdempotencyKey: "done"}
+	if err := h.db.CreateMission(h.ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	h.setPhase(m.ID, domain.MissionPhaseCompleted)
+	sw := h.watch(h.ada, protocol.WatchTarget{Kind: protocol.WatchTargetMission, MissionID: string(m.ID)}).Watch
+	settle()
+	if got := h.notices(sw.ID); len(got) != 0 || h.watchState(sw.ID).State != protocol.WatchActive {
+		t.Fatalf("notices = %q, want none and the watch active for a swarm completed before it", bodies(got))
+	}
+}
+
+// slowList widens the gap between looking for a matching watch and
+// inserting one.
+type slowList struct{ *store.DB }
+
+func (s slowList) ListWatches(ctx context.Context, f store.WatchFilter) ([]*store.Watch, error) {
+	watches, err := s.DB.ListWatches(ctx, f)
+	time.Sleep(50 * time.Millisecond)
+	return watches, err
+}
+
+func TestConcurrentCreatesMakeOneWatch(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	svc, err := New(Config{Store: slowList{h.db}, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Now: h.clock.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := h.run(h.ada, "Popular run")
+	ids := make([]string, 8)
+	var wg sync.WaitGroup
+	for i := range ids {
+		wg.Go(func() {
+			res, cerr := svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: runTarget(run)})
+			if cerr != nil {
+				t.Errorf("Create: %v", cerr)
+				return
+			}
+			ids[i] = res.Watch.ID
+		})
+	}
+	wg.Wait()
+	watches, err := h.db.ListWatches(h.ctx, store.WatchFilter{MemberID: h.ada.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(watches) != 1 {
+		t.Fatalf("watches = %d, want one", len(watches))
+	}
+	for _, id := range ids {
+		if id != watches[0].ID {
+			t.Fatalf("Create returned %s, want every call to return %s", id, watches[0].ID)
+		}
 	}
 }
 
@@ -771,5 +853,13 @@ func TestTurningQuietHoursOffReleasesHeldPushesExceptPausedOnes(t *testing.T) {
 	}
 	if s := h.pushStatus(wb.ID); s != protocol.WatchStatusHeldQuiet || phone.received.Load() != 1 {
 		t.Fatalf("paused watch push = %s, want it still held", s)
+	}
+
+	// Paused until it expires, its held push is dropped, never sent.
+	h.clock.advance(DefaultExpiry + time.Hour)
+	h.eventually("the paused push to be dropped", func() bool { return h.pushStatus(wb.ID) == protocol.WatchStatusCleared })
+	settle()
+	if n := phone.received.Load(); n != 1 {
+		t.Fatalf("device received %d pushes, want the paused watch's never sent", n)
 	}
 }

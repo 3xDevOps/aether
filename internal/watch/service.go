@@ -46,7 +46,6 @@ type Store interface {
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	GetMission(ctx context.Context, id domain.MissionID) (*domain.Mission, error)
-	ListIntegrationCandidates(ctx context.Context, workspace domain.WorkspaceID, mission domain.MissionID, limit int) ([]*store.IntegrationCandidateSummary, error)
 }
 
 // Runs is what the scheduler knows about a live run that its row does not.
@@ -99,6 +98,10 @@ type Service struct {
 	kick chan struct{}
 	wg   sync.WaitGroup
 	stop context.CancelFunc
+
+	// createMu makes finding a member's matching watch and inserting a new
+	// one a single step.
+	createMu sync.Mutex
 
 	mu     sync.Mutex
 	closed bool
