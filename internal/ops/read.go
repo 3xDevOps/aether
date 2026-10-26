@@ -67,8 +67,11 @@ type swarmInput struct {
 }
 
 type changesInput struct {
-	RunID       string `json:"run_id"`
-	IncludeDiff bool   `json:"include_diff,omitempty" jsonschema:"add the uncommitted diff"`
+	RunID         string `json:"run_id"`
+	Repo          string `json:"repo,omitempty" jsonschema:"an extra repo's workspace_id from repos; default the primary"`
+	CommitsOffset int    `json:"commits_offset,omitempty" jsonschema:"next_commits_offset of the previous page"`
+	IncludeDiff   bool   `json:"include_diff,omitempty" jsonschema:"add the uncommitted diff"`
+	DiffFile      int    `json:"diff_file,omitempty" jsonschema:"next_diff_file of the previous page"`
 }
 
 type overlapsInput struct {
@@ -115,7 +118,7 @@ var readOps = []Op{
 		"Use this when the user asks about one swarm, and to poll a launched swarm."+untrustedRule, getSwarm).
 		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodCoordMessagesList),
 	opOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
-		"Use this when the user asks what a run changed."+untrustedRule, runChanges).
+		"Use this when the user asks what a run changed: commits, predicted conflicts and, with include_diff, the uncommitted diff by file. Page with next_commits_offset and next_diff_file."+untrustedRule, runChanges).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodRunGitLog, protocol.MethodRunEvidenceList, protocol.MethodRunGitDiff),
 	opOf("aether_pr_status", "Pull request status", ScopeRead, true, nextRuns,
 		"Use this when the user asks about a run's pull request, CI or review feedback. To act on feedback, aether_message_run its run_id; the agent can read the PR itself."+untrustedRule, prStatus).
@@ -357,17 +360,19 @@ func reports(ctx context.Context, read Call, workspaceID, runID string) ([]repor
 }
 
 type pullRequest struct {
-	Number int    `json:"number"`
-	URL    string `json:"url"`
-	State  string `json:"state"`
-	Draft  bool   `json:"draft"`
+	Number     int    `json:"number"`
+	URL        string `json:"url"`
+	State      string `json:"state"`
+	Draft      bool   `json:"draft"`
+	BaseBranch string `json:"base_branch,omitempty"`
+	HeadOID    string `json:"head_oid,omitempty"`
 }
 
 func prOf(p *protocol.RunPullRequest) *pullRequest {
 	if p == nil {
 		return nil
 	}
-	return &pullRequest{Number: p.Number, URL: p.URL, State: p.State, Draft: p.Draft}
+	return &pullRequest{Number: p.Number, URL: p.URL, State: p.State, Draft: p.Draft, BaseBranch: p.BaseBranch, HeadOID: p.HeadOID}
 }
 
 func getRun(ctx context.Context, c calls, in runIDInput) (string, any, error) {
@@ -653,6 +658,7 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 		TaskID  string `json:"task_id"`
 		State   string `json:"state"`
 		Harness string `json:"harness"`
+		HeldBy  string `json:"control_held_by,omitempty"`
 		URL     string `json:"url,omitempty"`
 	}
 	type question struct {
@@ -681,7 +687,11 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 	}
 	workers := make([]worker, 0, len(res.Attempts))
 	for _, a := range res.Attempts {
-		workers = append(workers, worker{RunID: a.RunID, TaskID: a.TaskID, State: a.State, Harness: a.Harness, URL: l.run(a.RunID)})
+		w := worker{RunID: a.RunID, TaskID: a.TaskID, State: a.State, Harness: a.Harness, URL: l.run(a.RunID)}
+		if a.TakeoverActive {
+			w.HeldBy = a.TakeoverMemberID
+		}
+		workers = append(workers, w)
 	}
 	questions := make([]question, 0, len(res.Questions))
 	for _, q := range res.Questions {
@@ -692,7 +702,7 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 		messages = append(messages, message{FromRunID: msg.FromRunID, ToRunID: msg.ToRunID, Kind: msg.Kind,
 			Body: clip(cmp.Or(msg.Summary, msg.Body), maxText), At: msg.CreatedAt})
 	}
-	out := map[string]any{"swarm": swarmRowOf(m, l, maxText),
+	out := map[string]any{"swarm": swarmRowOf(m, l, maxText), "integrator_generation": m.IntegratorGeneration,
 		"workers": workers, "untrusted": map[string]any{"tasks": tasks, "questions": questions, "messages": messages}}
 	if m.IntegratorLaunchError != "" {
 		out["integrator_launch_error"] = m.IntegratorLaunchError
@@ -700,16 +710,44 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 	return fmt.Sprintf("Swarm %s is %s: %d tasks, %d workers, %d open questions.", m.ID, m.Phase, len(tasks), len(workers), m.OpenQuestions), out, nil
 }
 
+// diffPage bounds one page of a run's diff: its files, the text of each
+// and of the whole page.
+const (
+	diffPageFiles = 10
+	diffFileText  = 6000
+	diffPageText  = 12000
+)
+
 func runChanges(ctx context.Context, c calls, in changesInput) (string, any, error) {
 	r, err := getRunRecord(ctx, c.read, in.RunID)
 	if err != nil {
 		return "", nil, err
 	}
+	if in.CommitsOffset < 0 || in.CommitsOffset >= protocol.MaxRunGitLogLimit {
+		return "", nil, invalid("commits_offset must be between 0 and %d", protocol.MaxRunGitLogLimit-1)
+	}
 	out := map[string]any{"run_id": r.ID, "branch": r.Branch}
+	if in.Repo != "" {
+		out["repo"] = in.Repo
+	}
+	if len(r.Repos) > 1 {
+		type repo struct {
+			WorkspaceID string `json:"workspace_id"`
+			Name        string `json:"name"`
+			Branch      string `json:"branch"`
+			Primary     bool   `json:"primary,omitempty"`
+		}
+		repos := make([]repo, 0, len(r.Repos))
+		for _, rp := range r.Repos {
+			repos = append(repos, repo{rp.WorkspaceID, rp.Name, rp.Branch, rp.Primary})
+		}
+		out["repos"] = repos
+	}
 	untrusted := map[string]any{}
 	summary := fmt.Sprintf("Run %s:", r.ID)
 	var log protocol.RunGitLogResult
-	switch err := c.read(ctx, protocol.MethodRunGitLog, protocol.RunGitLogParams{RunID: r.ID, Limit: defaultRows}, &log); {
+	limit := min(in.CommitsOffset+defaultRows, protocol.MaxRunGitLogLimit)
+	switch err := c.read(ctx, protocol.MethodRunGitLog, protocol.RunGitLogParams{RunID: r.ID, Repo: in.Repo, Limit: limit}, &log); {
 	case err != nil:
 		out["git_error"] = err.Error()
 	case log.Error != "":
@@ -721,9 +759,13 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 			Author  string `json:"author"`
 			At      string `json:"at"`
 		}
-		commits := make([]commit, 0, len(log.Commits))
-		for _, cm := range log.Commits {
+		page := log.Commits[min(in.CommitsOffset, len(log.Commits)):]
+		commits := make([]commit, 0, len(page))
+		for _, cm := range page {
 			commits = append(commits, commit{Short: cm.Short, Subject: clip(cm.Subject, maxReport), Author: cm.Author, At: cm.AuthoredAt})
+		}
+		if next := in.CommitsOffset + len(commits); len(log.Commits) == limit && next < min(log.Ahead, protocol.MaxRunGitLogLimit) {
+			out["next_commits_offset"] = next
 		}
 		conflicts := make([]string, 0, len(log.Conflicts))
 		for _, cf := range log.Conflicts {
@@ -736,30 +778,64 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 		untrusted["commits"] = commits
 		summary += fmt.Sprintf(" %d commits ahead, %d behind, %d predicted conflicts.", log.Ahead, log.Behind, len(conflicts))
 	}
-	var ev protocol.EvidencePacketListResult
-	switch err := c.read(ctx, protocol.MethodRunEvidenceList, protocol.RunEvidenceListParams{WorkspaceID: r.WorkspaceID, RunID: r.ID, Limit: 1}, &ev); {
-	case err != nil:
-		out["evidence_error"] = err.Error()
-	case len(ev.Packets) > 0:
-		p := ev.Packets[0]
-		out["changed_files"] = p.ChangedFiles
-		untrusted["evidence"] = map[string]any{"captured_at": p.CapturedAt, "verification_notes": clip(p.VerificationNotes, maxText),
-			"unresolved": p.UnresolvedFacts, "next_action": clip(p.NextAction, maxText)}
-		summary += fmt.Sprintf(" %d changed files in its latest evidence.", len(p.ChangedFiles))
+	if in.Repo == "" {
+		var ev protocol.EvidencePacketListResult
+		switch err := c.read(ctx, protocol.MethodRunEvidenceList, protocol.RunEvidenceListParams{WorkspaceID: r.WorkspaceID, RunID: r.ID, Limit: 1}, &ev); {
+		case err != nil:
+			out["evidence_error"] = err.Error()
+		case len(ev.Packets) > 0:
+			p := ev.Packets[0]
+			out["changed_files"] = p.ChangedFiles
+			untrusted["evidence"] = map[string]any{"captured_at": p.CapturedAt, "verification_notes": clip(p.VerificationNotes, maxText),
+				"unresolved": p.UnresolvedFacts, "next_action": clip(p.NextAction, maxText)}
+			summary += fmt.Sprintf(" %d changed files in its latest evidence.", len(p.ChangedFiles))
+		}
 	}
 	if in.IncludeDiff {
 		var diff protocol.RunGitDiffResult
-		switch err := c.read(ctx, protocol.MethodRunGitDiff, protocol.RunGitDiffParams{RunID: r.ID}, &diff); {
+		switch err := c.read(ctx, protocol.MethodRunGitDiff, protocol.RunGitDiffParams{RunID: r.ID, Repo: in.Repo}, &diff); {
 		case err != nil:
 			out["diff_error"] = err.Error()
 		case diff.Error != "":
 			out["diff_error"] = diff.Error
 		default:
-			untrusted["diff"] = clip(diff.Output.Stdout, 12000)
+			files := diffFiles(diff.Output.Stdout)
+			if in.DiffFile < 0 || (in.DiffFile > 0 && in.DiffFile >= len(files)) {
+				return "", nil, invalid("diff_file %d is past the diff's %d files", in.DiffFile, len(files))
+			}
+			var page []string
+			size := 0
+			for _, f := range files[in.DiffFile:] {
+				f = clip(f, diffFileText)
+				if len(page) == diffPageFiles || (len(page) > 0 && size+len(f) > diffPageText) {
+					break
+				}
+				page, size = append(page, f), size+len(f)
+			}
+			out["diff_files"] = len(files)
+			if next := in.DiffFile + len(page); next < len(files) {
+				out["next_diff_file"] = next
+			}
+			untrusted["diff"] = page
 		}
 	}
 	out["untrusted"] = untrusted
 	return summary, out, nil
+}
+
+// diffFiles splits a git diff into one part per file.
+func diffFiles(diff string) []string {
+	var files []string
+	for part := range strings.SplitSeq(diff, "\ndiff --git ") {
+		if part == "" {
+			continue
+		}
+		if len(files) > 0 {
+			part = "diff --git " + part
+		}
+		files = append(files, part)
+	}
+	return files
 }
 
 func prStatus(ctx context.Context, c calls, in runIDInput) (string, any, error) {
@@ -888,28 +964,9 @@ func memorySearch(ctx context.Context, c calls, in memoryInput) (string, any, er
 	if err := c.read(ctx, protocol.MethodMemorySearch, protocol.MemorySearchParams{WorkspaceID: in.WorkspaceID, Words: in.Words, Kind: in.Kind, File: in.File, All: in.All}, &res); err != nil {
 		return "", nil, err
 	}
-	type note struct {
-		ID           string   `json:"id"`
-		Kind         string   `json:"kind"`
-		Title        string   `json:"title"`
-		Body         string   `json:"body"`
-		Files        []string `json:"files,omitempty"`
-		Author       string   `json:"author,omitempty"`
-		Source       string   `json:"source,omitempty"`
-		SourceRef    string   `json:"source_ref,omitempty"`
-		RunID        string   `json:"run_id,omitempty"`
-		Harness      string   `json:"harness,omitempty"`
-		Commit       string   `json:"commit,omitempty"`
-		PRURL        string   `json:"pr_url,omitempty"`
-		SupersededBy string   `json:"superseded_by,omitempty"`
-		Pinned       bool     `json:"pinned"`
-		CreatedAt    string   `json:"created_at"`
-	}
 	notes := make([]note, 0, len(res.Items))
 	for _, m := range res.Items {
-		notes = append(notes, note{ID: m.ID, Kind: m.Kind, Title: clip(m.Title, maxReport), Body: clip(m.Body, maxText), Files: m.Files,
-			Author: m.AuthorName, Source: m.Source, SourceRef: m.SourceRef, RunID: m.RunID, Harness: m.Harness, Commit: m.Commit, PRURL: m.PRURL,
-			SupersededBy: m.SupersededBy, Pinned: m.PinnedAt != nil, CreatedAt: m.CreatedAt})
+		notes = append(notes, noteOf(m, maxText))
 	}
 	return fmt.Sprintf("%d notes.", len(notes)), map[string]any{"untrusted": map[string]any{"notes": notes}}, nil
 }

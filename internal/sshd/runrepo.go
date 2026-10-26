@@ -320,6 +320,15 @@ func (s *Server) runPRCreate(ctx context.Context, member domain.MemberID, raw js
 	if err != nil {
 		return nil, rpcError(err)
 	}
+	if p.Target == (protocol.RunPRTarget{}) && p.Expected != (protocol.RunGitExpected{}) {
+		perr, repoErr := s.prDefaults(ctx, call, &p.Expected, &p.Target)
+		if perr != nil {
+			return nil, perr
+		}
+		if repoErr != nil {
+			return protocol.RunPRCreateResult{Repo: p.Repo, AccountMemberID: string(call.account), Output: runrepo.FailureOutput(runrepo.CommandOutput{}, repoErr), Error: repoError(repoErr), Actual: repoActual(repoErr)}, nil
+		}
+	}
 	created, err := call.native.CreatePR(ctx, call.execution, runrepo.PRCreateRequest{Expected: p.Expected, Target: runrepo.PRTarget(p.Target), Title: p.Title, Body: p.Body, Draft: p.Draft, ExpectedLogin: p.ExpectedLogin})
 	if created.PullRequest != nil {
 		s.recordPR(ctx, call, created.PullRequest, created.Created || created.Reconciled)

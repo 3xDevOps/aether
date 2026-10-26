@@ -53,7 +53,8 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 			{"kind":"permission","run_id":"run-1","workspace_id":"ws-1","request":{"id":"req-1","title":"Run git push","options":[{"id":"once","label":"Allow once","kind":"allow_once"},{"id":"no","label":"Reject","kind":"reject_once"}]}},
 			{"kind":"swarm-question","run_id":"run-1","mission_id":"mis-1","workspace_id":"ws-1","message":{"id":"q-1","body":"Which branch?"}}]}`), nil
 	case protocol.MethodMissionShow:
-		switch p, _ := protocol.DecodeParams[protocol.MissionShowParams](params); p.QuestionID {
+		p, _ := protocol.DecodeParams[protocol.MissionShowParams](params)
+		switch p.QuestionID {
 		case "q-1":
 			return json.RawMessage(`{"mission":{"id":"mis-1","objective":"Ship the billing page","accountable_human_id":"m2"},
 				"questions":[{"id":"q-1","mission_id":"mis-1","body":"Which branch?"}]}`), nil
@@ -61,7 +62,14 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 			return json.RawMessage(`{"mission":{"id":"mis-2","objective":"Port the API","accountable_human_id":"m1"},
 				"questions":[{"id":"q-2","mission_id":"mis-2","body":"Which version?","answer":"v2","answered_at":"2026-10-26T10:00:00Z"}]}`), nil
 		}
+		if p.MissionID == "mis-1" {
+			return json.RawMessage(`{"mission":{"id":"mis-1","objective":"Ship the billing page","accountable_human_id":"m2","current_integrator_run_id":"run-9"}}`), nil
+		}
 		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "mission question not found"}
+	case protocol.MethodIntegrationShow:
+		return json.RawMessage(`{"candidate":{"candidate_id":"cand-1","mission_id":"mis-1","target_ref":"refs/heads/main"}}`), nil
+	case protocol.MethodMemoryShow:
+		return json.RawMessage(`{"item":{"id":"mem-1","kind":"gotcha","title":"CI needs Docker"}}`), nil
 	}
 	return c.fakeCaller.Call(ctx, method, params)
 }
@@ -78,15 +86,50 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodMissionQuestionAnswer: protocol.MissionQuestionAnswerParams{QuestionID: "q-1", Answer: "main", IdempotencyKey: "k"},
 		protocol.MethodRunRoomPost: protocol.RunRoomPostParams{WorkspaceID: "ws-1", RunID: "run-1", Kind: protocol.RoomMessageReply, Body: "yes",
 			Anchor: &protocol.RoomMessageAnchor{Kind: "file", Path: "main.go", StartLine: 3, EndLine: 9}, IdempotencyKey: "k"},
+		protocol.MethodRunRelaunch:          protocol.RunIDParams{RunID: "run-1"},
+		protocol.MethodRunModeSwitch:        protocol.RunModeSwitchParams{RunID: "run-1", Mode: "acp"},
+		protocol.MethodRunProtect:           protocol.RunProtectParams{RunID: "run-1", Protected: true},
+		protocol.MethodRunArchive:           protocol.RunArchiveParams{RunID: "run-1"},
+		protocol.MethodRunHandoff:           protocol.RunHandoffParams{RunID: "run-1", ToMemberID: "m1"},
+		protocol.MethodMissionWorkerRelease: protocol.MissionWorkerReleaseParams{RunID: "run-1", ExpectedTakeoverGeneration: 2},
+		protocol.MethodMissionArchive:       protocol.MissionIDParams{MissionID: "mis-1"},
+		protocol.MethodMissionUnarchive:     protocol.MissionIDParams{MissionID: "mis-1"},
+		protocol.MethodMissionReplaceIntegrator: protocol.MissionReplaceIntegratorParams{MissionID: "mis-1", ExpectedGeneration: 1, IdempotencyKey: "k",
+			Integrator: protocol.MissionIntegrator{AccountMemberID: "m2", Harness: "codex", Mode: "acp"}},
+		protocol.MethodIntegrationDecide:  protocol.IntegrationDecideParams{WorkspaceID: "ws-1", CandidateID: "cand-1", RequestID: "req-1", RequestVersion: 1, Approve: true},
+		protocol.MethodIntegrationDeliver: protocol.IntegrationDeliverParams{WorkspaceID: "ws-1", CandidateID: "cand-1", RequestID: "req-1", RequestVersion: 2},
+		protocol.MethodRunPRCreate: protocol.RunPRCreateParams{RunID: "run-1", Expected: protocol.RunGitExpected{Branch: "fix-login", Head: "0123456789abcdef"},
+			Title: "Fix login", Draft: true},
+		protocol.MethodRunPRMerge: protocol.RunPRMergeParams{RunID: "run-1", Method: "squash", ExpectedHead: "fedcba9876543210", Repository: "acme/shop", Number: 7,
+			ExpectedBase: "main"},
+		protocol.MethodMemoryAdd:   protocol.MemoryAddParams{WorkspaceID: "ws-1", Kind: "gotcha", Text: "CI needs Docker."},
+		protocol.MethodMemoryPin:   protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "mem-1"},
+		protocol.MethodMemoryUnpin: protocol.MemoryUnpinParams{WorkspaceID: "ws-1", ID: "mem-1"},
 	}
 	want := map[string]string{
-		protocol.MethodRunLaunch:             `Launch claude (default mode) in shop: "fix it"`,
-		protocol.MethodRunInject:             `Send to run run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
-		protocol.MethodRunKill:               `Stop run run-1 ("Fix login"), owned by Grace`,
-		protocol.MethodEnvSave:               `Save your environment as a new image; new runs and terminals start from it`,
-		protocol.MethodRunInputRespond:       `Allow once run run-1's request ("Fix login"), owned by Grace: "Run git push", choosing "Allow once"`,
-		protocol.MethodMissionQuestionAnswer: `Answer swarm mis-1 ("Ship the billing page"), owned by Grace, which asked "Which branch?": "main"`,
-		protocol.MethodRunRoomPost:           `Reply on run run-1 ("Fix login"), owned by Grace: "yes", anchored at "main.go:3-9"`,
+		protocol.MethodRunLaunch:                `Launch claude (default mode) in shop: "fix it"`,
+		protocol.MethodRunInject:                `Send to run run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
+		protocol.MethodRunKill:                  `Stop run run-1 ("Fix login"), owned by Grace`,
+		protocol.MethodEnvSave:                  `Save your environment as a new image; new runs and terminals start from it`,
+		protocol.MethodRunInputRespond:          `Allow once run run-1's request ("Fix login"), owned by Grace: "Run git push", choosing "Allow once"`,
+		protocol.MethodMissionQuestionAnswer:    `Answer swarm mis-1 ("Ship the billing page"), owned by Grace, which asked "Which branch?": "main"`,
+		protocol.MethodRunRoomPost:              `Reply on run run-1 ("Fix login"), owned by Grace: "yes", anchored at "main.go:3-9"`,
+		protocol.MethodRunRelaunch:              `Relaunch run run-1 ("Fix login"), owned by Grace`,
+		protocol.MethodRunModeSwitch:            `Switch run run-1 ("Fix login") to Enhanced mode, owned by Grace`,
+		protocol.MethodRunProtect:               `Protect run run-1 ("Fix login") from cleanup, owned by Grace`,
+		protocol.MethodRunArchive:               `Restore run run-1 ("Fix login") from the archive, owned by Grace`,
+		protocol.MethodRunHandoff:               `Hand run run-1 ("Fix login"), owned by Grace, to Ada, who then owns it`,
+		protocol.MethodMissionWorkerRelease:     `Release your control of worker run run-1 ("Fix login"), owned by Grace`,
+		protocol.MethodMissionArchive:           `Archive swarm mis-1 ("Ship the billing page"), owned by Grace`,
+		protocol.MethodMissionUnarchive:         `Unarchive swarm mis-1 ("Ship the billing page"), owned by Grace`,
+		protocol.MethodMissionReplaceIntegrator: `Replace integrator run run-9 of swarm mis-1 ("Ship the billing page"), owned by Grace, with codex (acp) on Grace's account`,
+		protocol.MethodIntegrationDecide:        `Approve delivering candidate cand-1 to refs/heads/main for swarm mis-1 ("Ship the billing page"), owned by Grace`,
+		protocol.MethodIntegrationDeliver:       `Deliver candidate cand-1 to refs/heads/main for swarm mis-1 ("Ship the billing page"), owned by Grace`,
+		protocol.MethodRunPRCreate:              `Open a draft pull request from run run-1 ("Fix login"), owned by Grace, branch fix-login at 0123456: "Fix login"`,
+		protocol.MethodRunPRMerge:               `Merge (squash) acme/shop#7 of run run-1 ("Fix login"), owned by Grace, at fedcba9 into main`,
+		protocol.MethodMemoryAdd:                `Remember a gotcha for everyone in shop: "CI needs Docker."`,
+		protocol.MethodMemoryPin:                `Pin for every new run's brief note mem-1 (gotcha): "CI needs Docker"`,
+		protocol.MethodMemoryUnpin:              `Unpin note mem-1 (gotcha): "CI needs Docker"`,
 	}
 	var got protocol.AssistantConfirmation
 	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {

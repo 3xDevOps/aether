@@ -233,8 +233,8 @@ func jsonOf(t *testing.T, v any) string {
 
 // Every scope lists its own tools and the ones below it; every tool has a
 // title, hints and a "Use this when" description; fixed values are
-// enumerated; and the whole list, which ChatGPT budgets about 5000 tokens
-// for, stays under 15000 bytes.
+// enumerated; and the whole list stays under 24000 bytes, a budget for the
+// model's context (docs/chatgpt-plugin.md#tool-list-budget).
 func TestConnectorToolList(t *testing.T) {
 	list := func(scopes ...Scope) []*mcp.Tool {
 		res, err := connectorSession(t, newFake(t), scopes...).ListTools(t.Context(), nil)
@@ -246,8 +246,8 @@ func TestConnectorToolList(t *testing.T) {
 	all := list(ScopeWrite, ScopeControl)
 	size := len(jsonOf(t, all))
 	t.Logf("tools/list: %d tools, %d bytes", len(all), size)
-	if size > 15000 {
-		t.Errorf("tools/list is %d bytes, want at most 15000", size)
+	if size > 24000 {
+		t.Errorf("tools/list is %d bytes, want at most 24000", size)
 	}
 	enums := map[string]string{}
 	for _, tool := range all {
@@ -279,7 +279,11 @@ func TestConnectorToolList(t *testing.T) {
 	if want := map[string]string{"aether_launch_run.mode": ",tui,headless,acp", "aether_launch_swarm.mode": ",tui,acp",
 		"aether_launch_swarm.workers.mode": ",tui,headless,acp", "aether_activity_summary.period": ",today,yesterday,week",
 		"aether_decide_approval.decision": "allow,deny", "aether_close_run.outcome": "merged,abandoned",
-		"aether_mark_reviewed.action": "complete,later", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome"}; !maps.Equal(enums, want) {
+		"aether_mark_reviewed.action": "complete,later", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome",
+		"aether_memory_add.kind": "decision,convention,gotcha,preference", "aether_pr_merge.method": ",squash,merge,rebase",
+		"aether_replace_integrator.mode": ",tui,acp", "aether_integration_decide.action": "approve,reject,deliver",
+		"aether_run_lifecycle.action": "relaunch,standard,enhanced,protect,unprotect,archive,restore",
+		"aether_swarm_manage.action":  "release_worker,archive,unarchive"}; !maps.Equal(enums, want) {
 		t.Errorf("enums = %v, want %v", enums, want)
 	}
 	connectorTools := slices.DeleteFunc(slices.Clone(Ops), func(o Op) bool { return o.Scope == "" })
@@ -296,6 +300,10 @@ func TestConnectorToolList(t *testing.T) {
 		"aether_pause_run": {false, false, false}, "aether_resume_run": {false, false, true},
 		"aether_mark_reviewed": {false, true, false}, "aether_decide_approval": {false, true, true},
 		"aether_stop_run": {false, true, false}, "aether_close_run": {false, true, false}, "aether_cancel_swarm": {false, true, false},
+		"aether_run_lifecycle": {false, false, true}, "aether_swarm_manage": {false, false, true}, "aether_handoff_run": {false, true, false},
+		"aether_replace_integrator": {false, true, true}, "aether_integration_decide": {false, true, true},
+		"aether_pr_create": {false, false, true}, "aether_pr_merge": {false, true, true},
+		"aether_memory_add": {false, false, false}, "aether_memory_pin": {false, false, false},
 	}
 	names := map[Scope][]string{}
 	for _, tool := range all {
@@ -323,7 +331,8 @@ func TestConnectorToolList(t *testing.T) {
 			t.Errorf("%s, served before, is missing", name)
 		}
 	}
-	if want := []string{"aether_cancel_swarm", "aether_close_run", "aether_decide_approval", "aether_stop_run"}; !slices.Equal(names[ScopeControl], want) {
+	if want := []string{"aether_cancel_swarm", "aether_close_run", "aether_decide_approval", "aether_handoff_run", "aether_integration_decide",
+		"aether_pr_create", "aether_pr_merge", "aether_replace_integrator", "aether_stop_run"}; !slices.Equal(names[ScopeControl], want) {
 		t.Errorf("control tools = %v, want %v", names[ScopeControl], want)
 	}
 	if got := list(); len(got) != len(names[ScopeRead]) {

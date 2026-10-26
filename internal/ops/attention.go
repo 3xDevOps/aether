@@ -108,7 +108,9 @@ func answerWith(it protocol.AttentionItem) string {
 	case protocol.AttentionKindFailed:
 		return "aether_get_run, then aether_message_run or aether_close_run"
 	case protocol.AttentionKindIntegratorDown:
-		return "aether_get_swarm"
+		return "aether_replace_integrator"
+	case protocol.AttentionKindControlHold:
+		return "aether_swarm_manage with release_worker"
 	}
 	return dashboard
 }

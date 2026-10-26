@@ -286,7 +286,7 @@ func (o Op) description(s Surface) string {
 }
 
 // Ops is the registry: every op either surface serves.
-var Ops = slices.Concat(readOps, writeOps, controlOps, assistantOps)
+var Ops = slices.Concat(readOps, writeOps, controlOps, actOps, integrationOps, prOps, memoryOps, assistantOps)
 
 // RegisterConnector adds to srv the ops a ChatGPT or Claude connector
 // serves whose scope is granted, so tools/list shows none the connector
