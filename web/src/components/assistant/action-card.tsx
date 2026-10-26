@@ -1,4 +1,4 @@
-import { useContext, useMemo } from 'react'
+import { useContext, useEffect, useMemo, useState } from 'react'
 import type * as React from 'react'
 import { paramRows } from '@/components/assistant/cards'
 import { AssistantSheet } from '@/components/assistant/suggestion'
@@ -7,11 +7,14 @@ import { Button } from '@/components/ui/button'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { ToolValue } from '@/components/ui/session-blocks'
 import { StatusDot, type Tone, toneClasses } from '@/components/ui/status-dot'
+import { api } from '@/lib/api'
 import { actionSummary, isKnownAction, launchLine, readNoun, readSummary, watchLine, type ActionNames, type ActionState, type ActionTarget, type AssistantAction } from '@/lib/assistant-actions'
+import { message } from '@/lib/format'
 import { cn, focusRingInset } from '@/lib/utils'
 import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
 import { isTerminal } from '@/store/runs'
+import { loadWholeItem } from '@/store/session-stream'
 
 export const actionTone: Record<ActionState, Tone> = {
   approval: 'needs-you',
@@ -38,6 +41,7 @@ const targetWord: Record<ActionTarget['kind'], string> = {
   workspace: 'Open workspace',
   environment: 'Open environment',
   watch: 'Open watch',
+  link: 'Open link',
 }
 
 const goneWord: Partial<Record<ActionTarget['kind'], string>> = {
@@ -59,10 +63,15 @@ export function useActionNames(): ActionNames {
   }), [runs, workspaces, agents, assistantAgents])
 }
 
-/** Whether the store, once loaded, no longer holds the target. Swarms load on demand, so only runs and workspaces can tell. */
-export function useTargetGone(target: ActionTarget | undefined): boolean {
+/**
+ * Whether the store, once loaded, no longer holds the target. Swarms load on
+ * demand, so only runs and workspaces can tell; a launch's own run can reach
+ * the transcript before the store hears of it, so it never reads as gone.
+ */
+export function useTargetGone(action: AssistantAction): boolean {
+  const target = action.target
   return useStore((s) => {
-    if (!s.hydrated || !target) return false
+    if (!s.hydrated || !target || launches.has(action.tool)) return false
     if (target.kind === 'run') return !s.runs[target.id] && !s.deletingRuns[target.id]
     if (target.kind === 'workspace') return !s.workspaces[target.id]
     return false
@@ -96,15 +105,18 @@ export function useBackground(action: AssistantAction): boolean {
   })
 }
 
+/** Adds the retry under any text already typed, which it never replaces. */
 export function retryDraft(action: AssistantAction, names: ActionNames): void {
-  useStore.getState().setAssistantDraft(`Retry: ${actionSummary({ ...action, state: 'failed' }, names)}`)
+  const retry = `Retry: ${actionSummary({ ...action, state: 'failed' }, names)}`
+  const typed = useStore.getState().assistantDraft.trimEnd()
+  useStore.getState().setAssistantDraft(typed ? `${typed}\n\n${retry}` : retry)
   document.querySelector<HTMLTextAreaElement>('#assistant textarea')?.focus()
 }
 
 export function ActionCard({ action }: { action: AssistantAction }) {
   const names = useActionNames()
   const open = useOpenTarget()
-  const gone = useTargetGone(action.target)
+  const gone = useTargetGone(action)
   const background = useBackground(action)
   const details = useStore((s) => s.expandedRows[assistantSessionID]?.[action.id] ?? false)
   const setRow = useStore((s) => s.setSessionRow)
@@ -166,12 +178,24 @@ export function ActionCard({ action }: { action: AssistantAction }) {
       </div>
       {details && (
         <div className="flex min-w-0 flex-col gap-2 pl-5">
+          <WholeItem seq={action.seq} />
           <ToolValue label={`Input to ${action.tool}`} value={action.input} />
           {action.result !== undefined && !action.error && <ToolValue label="Result" value={action.result} />}
         </div>
       )}
     </div>
   )
+}
+
+/** Reads the whole item behind a cut-down call once its details open. */
+function WholeItem({ seq }: { seq: number | undefined }) {
+  const [error, setError] = useState<string>()
+  useEffect(() => {
+    if (seq === undefined) return
+    loadWholeItem(useStore, api, assistantSessionID, seq).catch((err) => setError(message(err)))
+  }, [seq])
+  if (seq === undefined) return null
+  return <p role={error ? 'alert' : 'status'} className={cn('text-ui-sm', error ? 'text-state-failed' : 'text-muted')}>{error ?? 'Loading the whole call…'}</p>
 }
 
 function InputRows({ input }: { input: Record<string, unknown> }) {
@@ -222,6 +246,7 @@ function ReadEntry({ action }: { action: AssistantAction }) {
   const params = paramRows(action.input).map(([key, value]) => `${key} ${value}`).join(' · ')
   return (
     <li className="flex min-w-0 flex-col gap-1">
+      <WholeItem seq={action.seq} />
       <span className="flex min-w-0 items-center gap-1.5">
         <StatusDot tone={actionTone[action.state]} />
         <span className="min-w-0 break-words text-text">{readNoun(action.tool)[0]}</span>

@@ -58,4 +58,26 @@ describe('assistantView', () => {
     const reads = [{ tool: 'aether_list_tickets', state: 'done' }, { tool: 'aether_list_tickets', state: 'running' }] as AssistantAction[]
     expect(readSummary(reads)).toBe('Reading 2 tickets')
   })
+
+  it('keeps each card where its call ran in the block', () => {
+    const read: WorkItem = { id: '1:r', tool: 'other', label: '', status: 'done', at, name: 'aether_get_run' }
+    const bash: WorkItem = { id: '1:x', tool: 'execute', label: 'Ran npm test', status: 'done', at, name: 'Bash' }
+    const b = stepsBlock('b1', [
+      { kind: 'tool', id: read.id, at, entry: read },
+      { kind: 'narration', id: 'n1', at, text: 'It is stuck on CI.', streaming: false },
+      { kind: 'tool', id: bash.id, at, entry: bash },
+    ], at)
+    const view = assistantView([{ kind: 'user', id: 'u1', at, body: 'why?' }, b], [])
+    expect(view.rows.map((row) => row.id)).toEqual(['u1', 'b1:1:r'])
+    expect(view.groups.get('u1')?.map((g) => g.id)).toEqual(['reads:1:r'])
+  })
+
+  it("gives an older server's approval note only to the call its words name", () => {
+    const message = (id: string, run: string): Partial<WorkItem> => ({ id, name: 'aether_message_run', status: 'running', input: { run_id: run } })
+    const note = (seq: number, title: string): SessionRow => ({ kind: 'event', id: `ev:${seq}`, at, text: title, detail: 'run.inject passed after you approved its card.' })
+    const waiting = [{ id: 'c', method: 'run.inject', summary: '', params: {}, created_at: at, expires_at: at }]
+    const view = assistantView([block(message('1:a', 'run-a'), message('1:b', 'run-b')), note(1, 'Approved: Message a run'), note(2, 'Approved: Message run run-a')], waiting)
+    expect(view.actions.map((a) => [a.input.run_id, a.state, a.approval])).toEqual([['run-a', 'running', 'approved'], ['run-b', 'approval', undefined]])
+    expect(view.rows.map((row) => row.id)).toEqual(['ev:1'])
+  })
 })

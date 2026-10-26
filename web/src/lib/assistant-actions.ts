@@ -10,7 +10,7 @@ export type ActionState = 'approval' | 'running' | 'done' | 'failed' | 'declined
 export type Approval = 'approved' | 'auto-approved'
 
 export interface ActionTarget {
-  kind: 'run' | 'swarm' | 'pr' | 'workspace' | 'environment' | 'watch'
+  kind: 'run' | 'swarm' | 'pr' | 'workspace' | 'environment' | 'watch' | 'link'
   id: string
   route?: Route
   url?: string
@@ -28,6 +28,8 @@ export interface AssistantAction {
   result: unknown
   error?: string
   target?: ActionTarget
+  /** The log holds a cut-down item; `assistant.item` reads the whole one. */
+  seq?: number
 }
 
 export type ActionGroup =
@@ -130,7 +132,11 @@ function text(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : typeof value === 'number' ? String(value) : undefined
 }
 
-/** A deep link the result names: the dashboard's own query (`?run=<id>`) or an outside address such as a pull request. */
+/**
+ * A deep link the result names. A dashboard link opens in this app whatever
+ * its host, since the server writes its own configured dashboard address;
+ * anything else, such as a pull request, opens in a new tab.
+ */
 function linkTarget(link: string): ActionTarget | undefined {
   let url: URL
   try {
@@ -138,14 +144,14 @@ function linkTarget(link: string): ActionTarget | undefined {
   } catch {
     return undefined
   }
-  if (url.origin !== window.location.origin) return { kind: 'pr', id: link, url: link }
   const route = routeFromQuery(url.searchParams)
   if (route.name === 'run' && route.params.runId) return { kind: 'run', id: route.params.runId, route }
   if (route.name === 'missions' && route.params.missionId) return { kind: 'swarm', id: route.params.missionId, route }
   if (route.name === 'workspace' && route.params.workspaceId) return { kind: 'workspace', id: route.params.workspaceId, route }
   const watch = url.searchParams.get('watch')
   if (route.name === 'settings' && watch) return { kind: 'watch', id: watch, route: { ...route, params: { ...route.params, watch } } }
-  return undefined
+  if (url.origin === window.location.origin || !/^https?:$/.test(url.protocol)) return undefined
+  return { kind: /\/pull\/\d+/.test(url.pathname) ? 'pr' : 'link', id: url.href, url: url.href }
 }
 
 export function runTarget(id: string): ActionTarget {
@@ -157,7 +163,7 @@ export function swarmTarget(id: string): ActionTarget {
 }
 
 function target(tool: string, input: Record<string, unknown>, result: Record<string, unknown>, saved?: AssistantActionRecord): ActionTarget | undefined {
-  const link = text(result.link) ?? text(record(result.launch).link)
+  const link = text(result.link) ?? text(result.url) ?? text(record(result.launch).link)
   const linked = link ? linkTarget(link) : undefined
   if (linked) return linked
   const ids = record(result.ids)
@@ -266,15 +272,29 @@ interface Draft {
   saved?: AssistantActionRecord
 }
 
-function sameRun(draft: Draft, saved: AssistantActionRecord | undefined): boolean {
-  const asked = text(draft.action.input.run_id)
-  return !asked || !saved?.target?.run_id || asked === saved.target.run_id
+/**
+ * The call a note belongs to. A record carries no tool call id; it is written
+ * while its call runs, so it follows the call's first appearance. It goes to
+ * the call that already holds its action, else to an unclaimed call of its
+ * method on its run. An older server's note names the run only in its
+ * summary, so it goes to the one call that fits; with more, it stays a row.
+ */
+function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined {
+  const held = note.saved && drafts.find((d) => d.saved?.id === note.saved!.id)
+  if (held) return held
+  const open = drafts.filter((d) => d.method === note.method && !d.noted && !d.saved)
+  const run = (d: Draft) => typeof d.action.input.run_id === 'string' ? d.action.input.run_id : undefined
+  const fits = note.saved?.target?.run_id
+    ? open.filter((d) => !run(d) || run(d) === note.saved!.target!.run_id)
+    : open.length > 1 ? open.filter((d) => run(d) && words.includes(run(d)!)) : open
+  return fits.length === 1 ? fits[0] : note.saved ? fits.at(-1) : undefined
 }
 
 /**
  * Pulls the assistant's Aether tool calls out of the transcript's step
  * blocks into cards, consecutive reads into one line, and folds each
  * approval note or action record into the card of the call it belongs to.
+ * A block splits around its calls, so each card stays where it ran.
  */
 export function assistantView(rows: SessionRow[], confirmations: AssistantConfirmation[], records = new Map<string, AssistantActionRecord>()): AssistantView {
   const waitingMethods = new Set(confirmations.map((c) => c.method))
@@ -292,54 +312,65 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       state: 'running',
       input: record(entry.input),
       result: parsed(entry.result),
+      ...(entry.truncated && entry.seq !== undefined ? { seq: entry.seq } : {}),
     }
     drafts.push({ action, entry, method: toolMethods[tool] })
     return action
   }
-  // A record carries no tool call id. It is written while its call runs, so
-  // it follows the call's first appearance: it goes to the call that already
-  // holds its action, or else the latest unclaimed call of its method and run.
   const claim = (step: Step | SessionRow): boolean => {
     const note = noteOf(step, records)
-    if (!note) return false
-    const owner = drafts.find((d) => note.saved && d.saved?.id === note.saved.id)
-      ?? [...drafts].reverse().find((d) => d.method === note.method && !d.noted && !d.saved && sameRun(d, note.saved))
-    if (!owner) return false
+    const owner = note && ownerOf(drafts, note, step.kind === 'event' ? step.text : '')
+    if (!note || !owner) return false
     if (note.saved) owner.saved = note.saved
     else owner.noted = note.approval
     return true
+  }
+  const place = (action: AssistantAction) => {
+    const anchor = out.at(-1)?.id ?? ''
+    const list = groups.get(anchor) ?? []
+    const last = list.at(-1)
+    if (action.read && last?.kind === 'reads') last.actions.push(action)
+    else if (action.read) list.push({ kind: 'reads', id: `reads:${action.id}`, actions: [action] })
+    else {
+      list.push({ kind: 'action', id: `action:${action.id}`, action })
+      actions.push(action)
+    }
+    groups.set(anchor, list)
   }
   for (const row of rows) {
     if (row.kind !== 'steps') {
       if (!claim(row)) out.push(row)
       continue
     }
-    const kept: Step[] = []
-    const built: AssistantAction[] = []
-    for (const step of row.steps) {
-      const tool = step.kind === 'tool' ? aetherTool(step.entry.name) : undefined
-      if (step.kind === 'tool' && tool) built.push(draft(step.entry, tool))
-      else if (!claim(step)) kept.push(step)
-    }
-    if (kept.length === row.steps.length) {
-      out.push(row)
+    if (!row.steps.some((step) => step.kind === 'tool' && aetherTool(step.entry.name))) {
+      const kept = row.steps.filter((step) => !claim(step))
+      if (kept.length === row.steps.length) out.push(row)
+      else if (kept.some((step) => workKinds.has(step.kind))) out.push({ ...stepsBlock(row.id, kept, row.start, row.current), live: row.live })
+      else {
+        out.push(...kept.flatMap(asRow))
+        if (row.live) out.push({ kind: 'live', id: 'live', at: row.at, ...row.live })
+      }
       continue
     }
-    const working = kept.some((step) => workKinds.has(step.kind))
-    if (working) out.push({ ...stepsBlock(row.id, kept, row.start, row.current), live: row.live })
-    else out.push(...kept.flatMap(asRow))
-    const anchor = out.at(-1)?.id ?? ''
-    const list = groups.get(anchor) ?? []
-    for (const action of built) {
-      const last = list.at(-1)
-      if (action.read && last?.kind === 'reads') last.actions.push(action)
-      else if (action.read) list.push({ kind: 'reads', id: `reads:${action.id}`, actions: [action] })
-      else {
-        list.push({ kind: 'action', id: `action:${action.id}`, action })
-        actions.push(action)
-      }
+    let segment: Step[] = []
+    let id = row.id
+    const flush = (last: boolean) => {
+      if (segment.length === 0) return
+      if (segment.some((step) => workKinds.has(step.kind))) {
+        out.push({ ...stepsBlock(id, segment, id === row.id ? row.start : segment[0]!.at, row.current && last), live: last ? row.live : undefined })
+      } else out.push(...segment.flatMap(asRow))
+      segment = []
     }
-    groups.set(anchor, list)
+    for (const step of row.steps) {
+      const tool = step.kind === 'tool' ? aetherTool(step.entry.name) : undefined
+      if (step.kind === 'tool' && tool) {
+        flush(false)
+        place(draft(step.entry, tool))
+        id = `${row.id}:${step.id}`
+      } else if (!claim(step)) segment.push(step)
+    }
+    const working = segment.some((step) => workKinds.has(step.kind))
+    flush(true)
     if (!working && row.live) out.push({ kind: 'live', id: 'live', at: row.at, ...row.live })
   }
   for (const { action, entry, method, noted, saved } of drafts) {

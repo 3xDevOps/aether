@@ -3,11 +3,14 @@ import type * as React from 'react'
 import { actionStateWord, actionTone, useActionNames, useBackground, useOpenTarget, useTargetGone } from '@/components/assistant/action-card'
 import { useAssistantView } from '@/components/assistant/transcript'
 import { History } from '@/components/icons'
+import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot } from '@/components/ui/status-dot'
 import { actionSummary, type AssistantAction } from '@/lib/assistant-actions'
+import { useStore } from '@/store'
+import { loadOlderAssistant } from '@/store/assistant-stream'
 import type { AcpSession } from '@/store/sessions'
 
 const outcomeWord = (action: AssistantAction, background: boolean) => [
@@ -27,7 +30,7 @@ function moveFocus(event: React.KeyboardEvent<HTMLUListElement>) {
 function Entry({ action, onOpen }: { action: AssistantAction; onOpen: () => void }) {
   const names = useActionNames()
   const open = useOpenTarget()
-  const gone = useTargetGone(action.target)
+  const gone = useTargetGone(action)
   const background = useBackground(action)
   const target = action.target && !gone && (action.target.route || action.target.url) ? action.target : undefined
   return (
@@ -79,14 +82,22 @@ export function ActionHistory({ session }: { session: AcpSession | undefined }) 
           first.focus()
         }}
       >
-        <p className="px-2 pt-1 text-ui-sm text-muted">Actions in this conversation, newest first</p>
+        <p className="px-2 pt-1 text-ui-sm text-muted">
+          {session?.more ? 'Actions in the loaded part of this conversation, newest first' : 'Actions in this conversation, newest first'}
+        </p>
         {actions.length === 0 ? (
-          <p className="px-2 pb-1 text-ui-sm">No actions yet. Reads are not listed.</p>
+          <p className="px-2 pb-1 text-ui-sm">{session?.more ? 'No actions in the loaded messages. Reads are not listed.' : 'No actions yet. Reads are not listed.'}</p>
         ) : (
           <ul aria-label="Actions" className="flex flex-col" onKeyDown={moveFocus}>
             {actions.map((action) => <Entry key={action.id} action={action} onOpen={() => setOpen(false)} />)}
           </ul>
         )}
+        {session?.more && (
+          <Button variant="quiet" size="sm" className="self-start px-2" disabled={session.olderLoading} onClick={() => void loadOlderAssistant(useStore, api)}>
+            {session.olderLoading ? 'Loading…' : 'Show earlier actions'}
+          </Button>
+        )}
+        {session?.olderError && <p role="alert" className="px-2 text-ui-sm text-state-failed">{session.olderError}</p>}
       </PopoverContent>
     </Popover>
   )

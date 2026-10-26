@@ -177,14 +177,14 @@ describe('action cards', () => {
     expect(within(aside).getByText('Auto-approved: Stop run run_x')).toBeDefined()
   })
 
-  it('opens a merged pull request in a new tab and a swarm from the result link', async () => {
+  it('opens a merged pull request in a new tab and a swarm from a dashboard link on another host in the app', async () => {
     const opened = vi.fn()
     vi.stubGlobal('open', opened)
     const aside = await openPanel([
       item('turn_start', 1),
       say(1, 'user', 'Merge and start a swarm'),
       aether(1, 't1', 'aether_pr_merge', 'completed', { raw_input: { run_id: 'run_fix' }, content: [{ type: 'text', text: JSON.stringify({ number: 42, url: 'https://github.com/acme/api/pull/42' }) }] }),
-      aether(1, 't2', 'aether_launch_swarm', 'completed', { raw_input: { workspace_id: workspace.id }, raw_output: { link: '?page=missions&id=mis_7', ids: { mission_id: 'mis_7' } } }),
+      aether(1, 't2', 'aether_launch_swarm', 'completed', { raw_input: { workspace_id: workspace.id }, raw_output: { url: 'https://aether.example/?page=missions&id=mis_7', ids: { mission_id: 'mis_7' } } }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const merged = await card(aside, /^Merged PR #42\. Done$/)
@@ -279,6 +279,59 @@ describe('action history', () => {
     const aside = await openPanel([item('turn_start', 1), say(1, 'user', 'hi'), say(1, 'assistant', 'Hello'), item('turn_end', 1, { stop_reason: 'end_turn' })])
     await userEvent.click(within(aside).getByRole('button', { name: 'Actions' }))
     expect(await screen.findByText('No actions yet. Reads are not listed.')).toBeDefined()
+  })
+})
+
+describe('review fixes', () => {
+  it('adds the retry under text already typed instead of replacing it', async () => {
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Stop fix-login'),
+      aether(1, 't1', 'aether_stop_run', 'failed', { raw_input: { run_id: 'run_fix' }, raw_output: 'run.kill was not approved: the member declined this action' }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    act(() => useStore.getState().setAssistantDraft('also check CI'))
+    await userEvent.click(within(await card(aside, /^Stop run fix-login\. Declined$/)).getByRole('button', { name: 'Retry' }))
+    expect(useStore.getState().assistantDraft).toBe('also check CI\n\nRetry: Stop run fix-login')
+    expect(api.assistantPrompt).not.toHaveBeenCalled()
+  })
+
+  it('keeps Open run on a launch whose run the store has not heard of yet', async () => {
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Launch'),
+      aether(1, 't1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_new' } } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const launched = await card(aside, /^Launched run on main-repo with Claude Code\. Done$/)
+    expect(within(launched).queryByText('This run no longer exists')).toBeNull()
+    await userEvent.click(within(launched).getByRole('button', { name: 'Open run' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_new' } })
+  })
+
+  it('reads the whole item behind a cut-down call when its details open', async () => {
+    const head = [item('turn_start', 1), say(1, 'user', 'Message')]
+    const cut = { ...aether(1, 't1', 'aether_message_run', 'completed', { raw_input: { run_id: 'run_fix' } }), truncated: true }
+    vi.mocked(api.assistantItem).mockResolvedValue({ ...cut, truncated: false, tool_call: { ...cut.tool_call!, raw_input: { run_id: 'run_fix', message: 'the whole message' }, raw_output: { delivered: true } } })
+    const aside = await openPanel([...head, cut, item('turn_end', 1, { stop_reason: 'end_turn' })])
+    await userEvent.click(within(await card(aside, /^Messaged run fix-login\. Done$/)).getByRole('button', { name: 'Details' }))
+    expect(api.assistantItem).toHaveBeenCalledWith(cut.seq)
+    expect(await within(aside).findByText(/the whole message/)).toBeDefined()
+  })
+
+  it('loads earlier actions into the history when the conversation has more', async () => {
+    const older = [item('turn_start', 1), say(1, 'user', 'Launch'), aether(1, 'o1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_fix' } } }), item('turn_end', 1, { stop_reason: 'end_turn' })]
+    const recent = [item('turn_start', 2), say(2, 'user', 'Read'), aether(2, 'r1', 'aether_get_run', 'completed', { raw_input: { run_id: 'run_fix' } }), item('turn_end', 2, { stop_reason: 'end_turn' })]
+    vi.mocked(api.assistantHistory).mockResolvedValue({ frames: older.map((it) => ({ seq: it.seq, item: it })), oldest_seq: 1 })
+    render(<AppShell />)
+    await userEvent.click(screen.getByRole('button', { name: 'Assistant' }))
+    const aside = await screen.findByRole('complementary', { name: 'Assistant' })
+    assistantSocket().open({ oldest_seq: recent[0]!.seq }, recent)
+    await userEvent.click(within(aside).getByRole('button', { name: 'Actions' }))
+    expect(await screen.findByText('No actions in the loaded messages. Reads are not listed.')).toBeDefined()
+    await userEvent.click(screen.getByRole('button', { name: 'Show earlier actions' }))
+    const list = await screen.findByRole('list', { name: 'Actions' })
+    expect(within(list).getByRole('button').textContent).toMatch(/^Launched run on main-repo with Claude Code/)
   })
 })
 
