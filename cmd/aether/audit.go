@@ -63,7 +63,7 @@ func printAudit(w io.Writer, res protocol.AuditListResult, connector string) err
 		if e.Code != 0 {
 			outcome += " " + strconv.Itoa(e.Code)
 		}
-		_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Seq, at.Local().Format(time.DateTime), e.MemberID, via, e.Method, e.Target, outcome)
+		_, _ = fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", e.Seq, at.Local().Format(time.DateTime), e.MemberID, printable(via), e.Method, printable(e.Target), outcome)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
