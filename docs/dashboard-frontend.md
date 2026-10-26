@@ -572,14 +572,20 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   ran; a part left with no work becomes the rows its prose and notices would
   have been. The card names the verb and target from the inputs and the
   store's names ("Launched run on api with Claude Code", "Messaged run
-  fix-login", "Merged PR #42"), a state (`Waiting for your approval`,
-  `Running`, `Done`, `Failed`, `Declined`, `Expired: no answer in time`, or
-  `Did not finish: the turn ended first` for a call still open when its turn
-  ended) with `approved by you` or `auto-approved`, and its time. A failure
-  shows the server's error verbatim. A launch receipt (`result.launch`) or a
-  watch result gets one more line. A done launch whose run or swarm is still
-  active reads **Working in the background**; the header calls the assistant's
-  own turn **Generating…**. The target comes from the result's `link` or
+  fix-login", "Merged PR #42"; a run is named by `runLabel`), a state
+  (`Running`, `Done`, `Failed`, `You declined`, `No answer in 10 minutes`,
+  `Withdrawn: the turn ended before you answered`, or `Did not finish: the
+  turn ended first` for a call still open when its turn ended, approved or
+  not) with `approved by you` or `auto-approved`, and its time. A call
+  waiting for approval is one line that points at the approval card in the
+  composer dock, and the live line under it is dropped. A failure shows the
+  server's error verbatim; a declined, expired or withdrawn card keeps the
+  error for **Details**. A launch receipt (`result.launch`) or a watch result
+  gets one more line. A done launch whose run or swarm is still active reads
+  **Working in the background**; a launched swarm the store has not loaded
+  counts as working while the card reads it with `mission.show`, and a read
+  that fails shows its error. The header calls the assistant's own turn
+  **Generating…**. The target comes from the result's `link` or
   `url`: a dashboard link (`?run=<id>`, `?page=missions&id=<id>`, a watch's
   settings link) opens in the app whatever its host, and any other `http(s)`
   address, such as a pull request, opens in a new tab. Without one it comes
@@ -591,8 +597,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   <summary>` under any text in the composer and focuses it without sending.
   **Details** shows the input and result, and first reads a cut-down item
   whole with `assistant.item`, as does an expanded read. An `aether_*` tool
-  without words of its own shows its name and inputs. The card is focusable,
-  and Enter opens its link. Consecutive read tools (and any `aether_list_*` or
+  without words of its own shows its name and inputs. The card is not a tab
+  stop; Tab reaches its link, Retry and Details buttons. Consecutive read tools (and any `aether_list_*` or
   `aether_get_*`) fold into one quiet line, "Read 3 runs and 1 workspace
   list", that expands to each read. Expansion lives in `expandedRows` under
   `assistant`.
@@ -600,16 +606,21 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   server's `AssistantAction`) decides the state. Records with the same
   `action.id` replace earlier ones. Records carry no tool call id, so a record
   goes to the card already holding its `action.id`, or else to an unclaimed
-  call of the same method whose `run_id` matches. An older server's
-  `Approved:` note names its run only in the summary: it goes to the one
-  unclaimed call of its method, or to the one whose `run_id` the summary
+  call of the same method whose input names no `run_id` or `workspace_id`
+  other than the record's target: the oldest such call in the newest block
+  that has one, so identical calls of one block take their records in turn
+  and an older block's unrecorded call does not take a new record. An older
+  server's `Approved:` note names its run only in the summary: it goes to the
+  one unclaimed call of its method, or to the one whose `run_id` the summary
   names, and otherwise stays a row. Without a record, the state comes from the
-  tool call's status, a `declined` or `did not answer within` error, a pending
+  tool call's status, a `declined`, `did not answer within` or `ended before
+  the member answered` error, a pending
   confirmation of the call's method, and the `Approved:` or `Auto-approved:`
   note. A matched notice is folded into its card instead of showing as a row.
 - **Actions** (`components/assistant/action-history.tsx`): a header button
-  opening a popover. It lists this conversation's cards (not reads) newest
-  first with outcome, target and time, all read from the loaded transcript.
+  opening a popover that reads the transcript only while open. It lists this
+  conversation's cards (not reads) newest first with outcome, target and
+  time, all read from the loaded transcript.
   While earlier messages are not loaded it says so and offers **Show earlier
   actions**, which loads them as **Show earlier messages** does. Focus starts
   on the newest entry. Up, Down, Home and End move, and Enter opens the target
