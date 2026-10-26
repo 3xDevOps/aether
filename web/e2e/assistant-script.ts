@@ -116,7 +116,7 @@ export async function fixThisJourney(page: Page, aether: Aether, testInfo: TestI
   send(
     { status: status([], 'running') },
     frame(1, 'notice', { notice: { severity: 'info', title: `Approved: Launch fake (headless) in ${workspace.name}`, description: 'run.launch passed after you approved its card.' } }),
-    launchCall('completed', { raw_input: params, raw_output: { run_id: launched.id, state: 'queued', workspace_id: workspace.id, harness: 'fake', url: `?run=${launched.id}` } }),
+    launchCall('completed', { raw_input: params, content: [{ type: 'text', text: `Launched run ${launched.id}.\n${JSON.stringify({ run_id: launched.id, state: 'queued', workspace_id: workspace.id, harness: 'fake', url: `?run=${launched.id}` })}` }] }),
     frame(1, 'message', { message: { role: 'assistant', message_id: 'a2', text: `Launched run ${launched.id} in ${workspace.name}.`, complete: true } }),
     frame(1, 'turn_end', { stop_reason: 'end_turn' }),
     { status: status() },

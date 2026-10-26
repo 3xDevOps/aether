@@ -117,12 +117,14 @@ export function readSummary(actions: AssistantAction[]): string {
   return `${actions.some((action) => action.state === 'running') ? 'Reading' : 'Read'} ${list}`
 }
 
+/** A tool's result: JSON, or as Aether's tools write it, a one-line summary then JSON. */
 function parsed(value: unknown): unknown {
   if (typeof value !== 'string') return value
   const text = value.trim()
-  if (!text.startsWith('{') && !text.startsWith('[')) return value
+  const json = text.startsWith('{') || text.startsWith('[') ? text : text.slice(text.indexOf('\n') + 1).trimStart()
+  if (!json.startsWith('{') && !json.startsWith('[')) return value
   try {
-    return JSON.parse(text)
+    return JSON.parse(json)
   } catch {
     return value
   }

@@ -468,7 +468,7 @@ describe('quiet outcomes and names', () => {
       say(1, 'user', 'Fix the login test on Bob'),
       aether(1, 't1', 'aether_launch_run', 'completed', {
         raw_input: { ...launchInput, model: 'opus', account_member_id: 'mem_bob', no_fallback: true },
-        raw_output: { run_id: 'run_9', workspace_id: workspace.id, harness: 'claude', url: '?run=run_9' },
+        content: [{ type: 'text', text: `Launched run run_9.\n${JSON.stringify({ run_id: 'run_9', workspace_id: workspace.id, harness: 'claude', url: '?run=run_9' })}` }],
       }),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
