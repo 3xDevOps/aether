@@ -316,6 +316,7 @@ export type ApiErrorData = { refusal?: EdgeRefusal; edge_path?: EdgePath } & Rec
 // internal/protocol's error codes.
 export const codeNotFound = -32000
 export const codeInvalidState = -32002
+export const codeUnavailable = -32004
 export const codeUpgradeRequired = -32005
 export const codeMethodNotFound = -32601
 

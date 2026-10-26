@@ -137,14 +137,15 @@ function Edit({ watch, client }: { watch: Watch; client: Api }) {
   const [error, setError] = useState<string | null>(null)
   const conditionsChanged = !sameConditions(form.conditions, base.fields.conditions)
   const labelChanged = form.label.trim() !== base.fields.label
-  const expiresChanged = form.expires !== base.fields.expires
+  const expired = watch.state === 'expired'
+  // An expired watch may be renewed to the end of the day it expired on.
+  const expiresChanged = form.expires !== base.fields.expires || (expired && form.expires >= dateValue(new Date().toISOString()))
   const touched = conditionsChanged || labelChanged || expiresChanged
   if (!touched && !busy && base.at !== watch.updated_at) {
     const next = { at: watch.updated_at, fields: editFields(watch) }
     setBase(next)
     setForm(next.fields)
   }
-  const expired = watch.state === 'expired'
   const today = dateValue(new Date().toISOString())
   const latest = dateValue(new Date(latestEnd()).toISOString())
 

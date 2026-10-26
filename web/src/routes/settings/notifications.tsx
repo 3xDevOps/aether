@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Code } from '@/components/ui/code'
-import type { Api } from '@/lib/api'
+import { ApiError, codeUnavailable, type Api } from '@/lib/api'
 import { desktopBridge } from '@/components/shell/window-bar'
 import { Input } from '@/components/ui/input'
 import type { NotifyPrefs, SlackLinkResult, SlackStatusResult } from '@/lib/types'
@@ -227,7 +227,7 @@ export function WatchNotifySection({ client }: { client: Api }) {
     )
     client.pushStatus().then(
       () => live && setUnavailable(null),
-      (err: unknown) => live && setUnavailable(errorSentence(err)),
+      (err: unknown) => live && setUnavailable(err instanceof ApiError && err.code === codeUnavailable ? errorSentence(err) : null),
     )
     return () => {
       live = false

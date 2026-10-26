@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { WatchDialog } from '@/components/palette/watch-dialog'
 import type { Event, Watch, WatchDelivery, WatchNotification } from '@/lib/types'
+import { ApiError, codeUnavailable } from '@/lib/api'
 import { SettingsRoute } from '@/routes/settings'
 import { WatchNotifySection } from '@/routes/settings/notifications'
 import { useStore, type RootState } from '@/store'
@@ -325,7 +326,7 @@ describe('watch notification preferences', () => {
     const client = fakeApi({
       notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 0 } })),
       notifyPrefsSet: vi.fn(async () => { throw new Error('notify.prefs.set: unknown time zone "Mars/Olympus"') }),
-      pushStatus: vi.fn(async () => { throw new Error('push service not configured') }),
+      pushStatus: vi.fn(async () => { throw new ApiError(503, 'push service not configured', codeUnavailable) }),
     })
     render(<WatchNotifySection client={client} />)
     expect(await screen.findByText(/No push \(push service not configured\), so in-app only/)).toBeDefined()
@@ -333,6 +334,15 @@ describe('watch notification preferences', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain('unknown time zone')
     expect(alert.closest('#quiet-hours')).not.toBeNull()
+  })
+
+  it('does not claim the server lacks Web Push when push.status fails for another reason', async () => {
+    const client = fakeApi({
+      notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 2 } })),
+      pushStatus: vi.fn(async () => { throw new Error('network down') }),
+    })
+    render(<WatchNotifySection client={client} />)
+    expect(await screen.findByText(/Push to 2 devices/)).toBeDefined()
   })
 })
 

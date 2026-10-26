@@ -6266,8 +6266,8 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
 - **Desktop app**: `desktop/notify.js` shows each new watch notice natively
   and opens its link on click. A run's needs-you or finished notice shares
   the run's five-second duplicate window with `run.status`, so one need or
-  one success ready for review shows once, in either order, and closes when
-  the need is answered.
+  one outcome shows once, in either order. A need's notice closes when the
+  need is answered, a finish's when its outcome is seen or put off.
 
 ### Push notifications
 
