@@ -1,206 +1,60 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { toast } from 'sonner'
-import { create } from 'zustand'
-import { modeLabel } from '@/components/launch/modes'
-import { Ellipsis } from '@/components/icons'
-import { AgentGlyph } from '@/components/ui/agent-glyph'
+import { draftKey, reopen, toastFailure, useReopenHost } from '@/components/failure'
+import { launchParams } from '@/components/templates/placeholders'
+import { useTypedValues, type Typed } from '@/components/templates/prompt-fill'
+import { TemplateList } from '@/components/templates/template-list'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
-import { RelativeTime } from '@/components/ui/relative-time'
+import { FailureCallout } from '@/components/ui/failure-callout'
+import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
 import { api, ApiError, codeNotFound, type Api } from '@/lib/api'
-import { errorSentence } from '@/lib/format'
+import { useIsMobile } from '@/lib/breakpoints'
+import { errorSentence, message } from '@/lib/format'
+import { useDelayed } from '@/lib/hooks'
 import type { Schedule, Template } from '@/lib/types'
-import { draftKey, reopen, toastFailure, useReopenHost } from '@/components/failure'
+import { redirectRoute } from '@/lib/url-state'
+import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
 import { registerRoute, type RouteProps } from '@/routes/registry'
+import { DetailPane } from '@/routes/templates/detail-pane'
 import { ScheduleEditor } from '@/routes/templates/schedule-editor'
 import { DeleteTemplate, type Failure, type FormMode, type TemplateDraft, TemplateForm } from '@/routes/templates/template-form'
 import { sameIdentity, useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import { optimistic, type Outcome } from '@/store/optimistic'
+import {
+  answered,
+  changesIn,
+  failureToasts,
+  mark,
+  readSchedules,
+  readTemplates,
+  saveKey,
+  savingSchedules,
+  savingTemplates,
+  sendSave,
+  setSchedules,
+  setTemplates,
+  started,
+  unread,
+  useLists,
+  useSaves,
+  withSchedule,
+  withTemplate,
+  type Started,
+} from '@/store/templates'
+import type { Route } from '@/store/ui'
 import { soleWorkspace } from '@/store/workspaces'
-
-const saveKey = (kind: 'template' | 'schedule', workspaceID: string, name: string) => JSON.stringify([kind, workspaceID, name])
-
-type Lists = { templates: Template[] | null; schedules: Schedule[] }
-type Changes = { seq: number; templates: Map<string, number>; schedules: Map<string, number>; reads: number; applied: Record<keyof Lists, number> }
-
-// Outlive the route, so an action sent before leaving Templates still holds Delete and Unschedule, and lands on the list, after coming back.
-const useSaves = create<Record<string, number[]>>(() => ({}))
-const useLists = create<Record<string, Lists>>(() => ({}))
-const latestSave = new Map<string, number>()
-// When each template and schedule last changed here, per workspace, so a list read sent before keeps that change.
-const changes = new Map<string, Changes>()
-// Each pending save's prediction, mapped to the server value it replaced.
-const savingTemplates = new Map<Template, Template | undefined>()
-const savingSchedules = new Map<Schedule, Schedule | undefined>()
-// Keyed by what an action sends, not by mutation: a dialog's Retry is a new mutation, so optimistic() cannot drop the late refusal it supersedes.
-const confirms = new Map<string, number>()
-// Per action, the toast showing its failure, so a late success dismisses it.
-const failureToasts = new Map<string, string | number>()
-let saves = 0
-
-useStore.subscribe((state, previous) => {
-  if (state.identityKey === previous.identityKey) return
-  useSaves.setState({}, true)
-  useLists.setState({}, true)
-  for (const held of [latestSave, changes, savingTemplates, savingSchedules, confirms, failureToasts]) held.clear()
-})
-
-const confirmed = (action: string) => confirms.get(action) ?? 0
-const answered = (action: string) => {
-  confirms.set(action, confirmed(action) + 1)
-  const shown = failureToasts.get(action)
-  if (shown === undefined) return
-  toast.dismiss(shown)
-  failureToasts.delete(action)
-}
-type Started = { action: string; superseded: () => boolean; same: () => boolean }
-const started = (action: string): Started => {
-  const sent = confirmed(action)
-  return { action, superseded: () => confirmed(action) > sent, same: sameIdentity() }
-}
-
-function changesIn(workspaceID: string): Changes {
-  let since = changes.get(workspaceID)
-  if (!since) changes.set(workspaceID, (since = { seq: 0, templates: new Map(), schedules: new Map(), reads: 0, applied: { templates: 0, schedules: 0 } }))
-  return since
-}
-
-function mark(workspaceID: string, kind: 'templates' | 'schedules', name: string) {
-  const since = changesIn(workspaceID)
-  since[kind].set(name, ++since.seq)
-}
-
-const unread: Lists = { templates: null, schedules: [] }
-
-function setTemplates(workspaceID: string, next: (list: Template[] | null) => Template[] | null) {
-  useLists.setState((all) => {
-    const lists = all[workspaceID] ?? unread
-    return { [workspaceID]: { ...lists, templates: next(lists.templates) } }
-  })
-}
-
-function setSchedules(workspaceID: string, next: (list: Schedule[]) => Schedule[]) {
-  useLists.setState((all) => {
-    const lists = all[workspaceID] ?? unread
-    return { [workspaceID]: { ...lists, schedules: next(lists.schedules) } }
-  })
-}
-
-function sendSave<T>(key: string, send: () => Promise<T>): { sent: Promise<T>; latest: () => boolean } {
-  const order = ++saves
-  latestSave.set(key, order)
-  useSaves.setState((sending) => ({ [key]: [...(sending[key] ?? []), order] }))
-  const sent = send().finally(() => useSaves.setState((sending) => ({ [key]: (sending[key] ?? []).filter((o) => o !== order) })))
-  return { sent, latest: () => latestSave.get(key) === order }
-}
-
-const byName = (a: Template, b: Template) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
-
-function withTemplate(list: Template[] | null, name: string, next?: Template): Template[] | null {
-  if (!list) return next ? [next] : list
-  const rest = list.filter((t) => t.name !== name)
-  return next ? [...rest, next].sort(byName) : rest
-}
-
-function withSchedule(list: Schedule[], template: string, next?: Schedule): Schedule[] {
-  const rest = list.filter((s) => s.template !== template)
-  return next ? [...rest, next] : rest
-}
 
 type FormState = FormMode & { draft?: TemplateDraft; failure?: Failure; edited?: boolean }
 type DeletingState = { template: Template; failure?: Failure }
 type SchedulingState = { template: Template; draft?: string; failure?: Failure }
 type Reopened = { workspaceID: string; form?: FormState; deleting?: DeletingState; scheduling?: SchedulingState }
-/**
- * Returns a merge for a list read sent now: entries changed here after it was sent, or with a save still unanswered, keep their shown value, since the read may predate the change.
- * It returns null, to keep the shown list, for an answer to a read sent before the last one applied or before the signed-in identity changed.
- */
-function sinceRead<T>(workspaceID: string, kind: 'templates' | 'schedules', name: (item: T) => string) {
-  const since = changesIn(workspaceID)
-  const sent = since.seq
-  const order = ++since.reads
-  const same = sameIdentity()
-  const saving = (item: T) => Boolean(useSaves.getState()[saveKey(kind === 'templates' ? 'template' : 'schedule', workspaceID, name(item))]?.length)
-  const changed = (item: T) => (since[kind].get(name(item)) ?? 0) > sent || saving(item)
-  return (read: T[], shown: T[]): T[] | null => {
-    if (!same() || order < since.applied[kind]) return null
-    since.applied[kind] = order
-    return [...read.filter((i) => !changed(i)), ...shown.filter(changed)]
-  }
-}
 
-function Timing({ template, schedule }: { template: Template; schedule?: Schedule }) {
-  if (schedule?.next_fire_at) return <>Next <RelativeTime at={schedule.next_fire_at} /></>
-  if (schedule?.last_fire_at) return <>Last <RelativeTime at={schedule.last_fire_at} /></>
-  return <>Saved <RelativeTime at={template.created_at} /></>
-}
-
-function TemplateRow({
-  template,
-  schedule,
-  saving,
-  onLaunch,
-  onSchedule,
-  onEdit,
-  onDuplicate,
-  onDelete,
-}: {
-  template: Template
-  schedule?: Schedule
-  saving: boolean
-  onLaunch: () => void
-  onSchedule?: () => void
-  onEdit?: () => void
-  onDuplicate?: () => void
-  onDelete?: () => void
-}) {
-  const menu = onSchedule || onEdit || onDuplicate || onDelete
-  return (
-    <li aria-label={`Template ${template.name}`} className="flex min-h-12 min-w-0 items-center gap-3 px-4 py-2 hover:bg-hover">
-      <AgentGlyph agent={template.harness} className="size-4" />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate font-medium text-text">{template.name}</span>
-        <span className="truncate text-ui-sm text-muted" title={template.task}>
-          {modeLabel(template.mode)}
-          {template.model && ` · ${template.model}`}
-          {schedule && ' · Scheduled'} · {template.task}
-        </span>
-      </div>
-      <span className="shrink-0 text-ui-sm text-muted tabular-nums max-sm:hidden">
-        <Timing template={template} schedule={schedule} />
-      </span>
-      <Button variant="secondary" size="sm" aria-label={`Launch ${template.name}`} disabled={saving} onClick={onLaunch}>
-        Launch
-      </Button>
-      {menu && (
-        <Menu>
-          <MenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm" label={`More for ${template.name}`}>
-              <Ellipsis />
-            </Button>
-          </MenuTrigger>
-          <MenuContent align="end">
-            {onSchedule && <MenuItem disabled={saving} onSelect={onSchedule}>Schedule…</MenuItem>}
-            {onEdit && <MenuItem onSelect={onEdit}>Edit</MenuItem>}
-            {onDuplicate && <MenuItem onSelect={onDuplicate}>Duplicate</MenuItem>}
-            {onDelete && (
-              <>
-                <MenuSeparator />
-                <MenuItem tone="danger" disabled={saving} onSelect={onDelete}>Delete</MenuItem>
-              </>
-            )}
-          </MenuContent>
-        </Menu>
-      )}
-    </li>
-  )
-}
-
-export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) {
+export function TemplatesRoute({ params, client = api }: RouteProps & { client?: Api }) {
   const workspaces = useStore((s) => s.workspaces)
   const active = useStore((s) => s.activeWorkspace)
   const navigate = useStore((s) => s.navigate)
@@ -219,6 +73,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
   const saveAction = (draft: TemplateDraft) => JSON.stringify(['save', workspaceID, draft])
   const deleteAction = (name: string) => JSON.stringify(['delete', workspaceID, name])
   const scheduleAction = (template: string, cron: string) => JSON.stringify(['schedule', workspaceID, template, cron])
+  const launchAction = (name: string) => JSON.stringify(['launch', workspaceID, name])
   const canSave = caps.hasMethod('template.save')
   const canSchedule = caps.hasMethod('schedule.save')
   // A failure of an action sent from another workspace toasts rather than opening its dialog over this one.
@@ -235,50 +90,55 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
       mounted.current = false
     }
   }, [])
+  const phone = useIsMobile()
+  const { agents } = useAgentList()
+  const agentNames = agentDisplayNames(agents)
+  const values = useTypedValues()
+  const [readError, setReadError] = useState<string | null>(null)
+  const [launching, setLaunching] = useState<string | null>(null)
+  const loading = useDelayed(templates === null)
+  const asked = params.template
+  const found = templates?.find((t) => t.name === asked)
+  const selected = found ?? (phone ? undefined : templates?.[0])
+  const unknown = Boolean(asked && templates && !found)
+
+  // A phone pushes the detail so Back returns to the list; a desktop swaps the selection in place.
+  const select = (name: string | undefined) => {
+    const route: Route = { name: 'templates', params: name ? { template: name } : {} }
+    if (phone && name) navigate(route.name, route.params)
+    else redirectRoute(useStore, route)
+  }
+
   useReopenHost<Reopened>('templates', (state) => {
     if (state.workspaceID !== workspaceID) useStore.getState().setActiveWorkspace(state.workspaceID)
     if (state.form) setForm(state.form)
     if (state.deleting) setDeleting(state.deleting)
     if (state.scheduling) setScheduling(state.scheduling)
+    const shownTemplate = state.deleting?.template ?? state.scheduling?.template ?? (state.form?.kind === 'edit' ? state.form.template : undefined)
+    if (shownTemplate) select(shownTemplate.name)
   })
-
-  const refetch = useCallback(async () => {
-    if (!workspaceID) return
-    const templates = sinceRead<Template>(workspaceID, 'templates', (t) => t.name)
-    const list = await client.templateList(workspaceID)
-    setTemplates(workspaceID, (current) => templates(list, current ?? [])?.sort(byName) ?? current)
-    if (!caps.hasMethod('schedule.list')) return
-    const schedules = sinceRead<Schedule>(workspaceID, 'schedules', (s) => s.template)
-    const read = await client.scheduleList(workspaceID)
-    setSchedules(workspaceID, (current) => schedules(read, current) ?? current)
-  }, [client, workspaceID, caps])
 
   // Schedules are optional on legacy gateways; the templates themselves are
   // not, so their failures split: templates report, schedules stay empty.
-  useEffect(() => {
+  const read = useCallback(() => {
     if (!workspaceID) return
-    const templates = sinceRead<Template>(workspaceID, 'templates', (t) => t.name)
-    client
-      .templateList(workspaceID)
-      .then((list) => setTemplates(workspaceID, (current) => templates(list, current ?? [])?.sort(byName) ?? current))
-      .catch((err) => toast.error(errorSentence(err)))
-    if (caps.hasMethod('schedule.list')) {
-      const schedules = sinceRead<Schedule>(workspaceID, 'schedules', (s) => s.template)
-      client
-        .scheduleList(workspaceID)
-        .then((list) => setSchedules(workspaceID, (current) => schedules(list, current) ?? current))
-        .catch(() => {})
-    }
+    setReadError(null)
+    readTemplates(client, workspaceID).catch((err: unknown) => shown.current === workspaceID && setReadError(message(err)))
+    if (caps.hasMethod('schedule.list')) readSchedules(client, workspaceID).catch(() => {})
   }, [client, workspaceID, caps])
+  useEffect(read, [read])
 
-  const launch = async (template: Template) => {
+  const launch = async (template: Template, typed: Typed) => {
+    setLaunching(launchAction(template.name))
     try {
-      const result = await client.templateLaunch(workspaceID, template.name)
+      const result = await client.templateLaunch(workspaceID, template.name, launchParams(template, typed))
       upsertRun(result.run)
       navigate('run', { runId: result.run.id })
       toast.success('Run launched')
     } catch (err) {
       toast.error(errorSentence(err))
+    } finally {
+      setLaunching(null)
     }
   }
 
@@ -467,33 +327,74 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
     </Button>
   )
 
+  const neighbour = (name: string) => {
+    const list = templates ?? []
+    const at = list.findIndex((t) => t.name === name)
+    return phone ? undefined : (list[at + 1] ?? list[at - 1])?.name
+  }
+
+  const listPane = (
+    <div className={phone ? 'flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3' : 'flex w-64 shrink-0 flex-col gap-3 border-r border-seam p-3'}>
+      {phone && unknown && <Callout tone="neutral">That template is not in this workspace.</Callout>}
+      {readError && <FailureCallout error={readError} onRetry={read} />}
+      {templates ? (
+        <TemplateList
+          templates={templates}
+          schedules={schedules}
+          agentNames={agentNames}
+          selected={selected?.name}
+          onSelect={select}
+          className="flex-1"
+        />
+      ) : (
+        loading && !readError && (
+          <div aria-label="Loading templates" className="flex flex-col gap-1">
+            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-8" />)}
+          </div>
+        )
+      )}
+    </div>
+  )
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ViewHeader title="Templates" actions={templates?.length ? newTemplate : undefined} />
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {templates && templates.length > 0 && (
-          <ul aria-label="Saved templates" className="mx-auto w-full max-w-4xl divide-y divide-seam py-2">
-            {templates.map((template) => (
-              <TemplateRow
-                key={template.id}
-                template={template}
-                schedule={schedules.find((s) => s.template === template.name)}
-                saving={saving('template', template.name)}
-                onLaunch={() => void launch(template)}
-                onSchedule={canSchedule ? () => setScheduling({ template }) : undefined}
-                onEdit={canSave ? () => setForm({ kind: 'edit', template }) : undefined}
-                onDuplicate={canSave ? () => setForm({ kind: 'duplicate', template }) : undefined}
-                onDelete={caps.hasMethod('template.delete') ? () => setDeleting({ template }) : undefined}
-              />
-            ))}
-          </ul>
-        )}
-        {templates?.length === 0 && (
+      {templates?.length === 0 ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {readError && <div className="mx-auto max-w-sm px-4 pt-4"><FailureCallout error={readError} onRetry={read} /></div>}
           <EmptyState title="No templates yet" action={newTemplate}>
             A template saves a task you launch often, so it starts again in one step or on a schedule.
           </EmptyState>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          {!(phone && selected) && listPane}
+          {selected && (
+            <DetailPane
+              template={selected}
+              schedule={schedules.find((s) => s.template === selected.name)}
+              agentName={agentNames[selected.harness] ?? selected.harness}
+              typed={values.of(selected)}
+              onValue={(name, value) => values.set(selected, name, value)}
+              saving={saving('template', selected.name)}
+              primary={{
+                text: 'Launch',
+                label: `Launch ${selected.name}`,
+                pending: launching === launchAction(selected.name) ? 'Launching…' : undefined,
+                // Every Launch holds while one is in flight, since each ends by opening its run.
+                disabled: launching !== null || saving('template', selected.name),
+                run: () => void launch(selected, values.of(selected)),
+              }}
+              notice={unknown && <Callout tone="neutral">That template is not in this workspace.</Callout>}
+              onBack={phone ? () => navigate('templates') : undefined}
+              onEdit={canSave ? () => setForm({ kind: 'edit', template: selected }) : undefined}
+              onSchedule={canSchedule ? () => setScheduling({ template: selected }) : undefined}
+              onDuplicate={canSave ? () => setForm({ kind: 'duplicate', template: selected }) : undefined}
+              onDelete={caps.hasMethod('template.delete') ? () => setDeleting({ template: selected }) : undefined}
+            />
+          )}
+        </div>
+      )}
 
       {form && (
         <TemplateForm
@@ -501,7 +402,10 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
           form={form}
           onClose={() => setForm(null)}
           onEdit={() => form.draft && !form.edited && setForm({ ...form, edited: true })}
-          onSave={(draft) => void saveTemplate(form, draft, () => templateSave(draft))}
+          onSave={(draft) => {
+            if (form.kind !== 'edit') select(draft.name)
+            void saveTemplate(form, draft, () => templateSave(draft))
+          }}
           onRetry={(draft) => void saveTemplate(form, draft, () => templateSave(draft))}
         />
       )}
@@ -510,7 +414,10 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
           template={deleting.template}
           failure={deleting.failure}
           onClose={() => setDeleting(null)}
-          onDelete={() => void deleteTemplate(deleting.template, () => templateDelete(deleting.template.name))}
+          onDelete={() => {
+            if (asked === deleting.template.name) select(neighbour(asked))
+            void deleteTemplate(deleting.template, () => templateDelete(deleting.template.name))
+          }}
           onRetry={() => deleting.failure && void deleteTemplate(deleting.template, deleting.failure.retry)}
         />
       )}
@@ -532,7 +439,7 @@ export function TemplatesRoute({ client = api }: RouteProps & { client?: Api }) 
               client={client}
               onSave={(cron) => void saveSchedule(scheduling.template, cron, () => scheduleSave(scheduling.template.name, cron))}
               onRetry={(cron) => void saveSchedule(scheduling.template, cron, () => scheduleSave(scheduling.template.name, cron))}
-              onChanged={() => void refetch()}
+              onChanged={read}
             />
           </DialogContent>
         </Dialog>

@@ -6,14 +6,14 @@ import { message } from '@/lib/format'
  * have no navigator.clipboard, so the fallback selects `fallback`'s contents
  * and leaves them for a manual copy rather than failing silently. Without a
  * fallback element the error toast carries the text instead. A `fallback`
- * function runs only on that path, so it can first show text it clips. A
- * caller that confirms the copy in place sets `confirm` to false to skip the
- * toast, and learns from the result whether the text reached the clipboard.
+ * function runs only on that path, so it can first show text it clips.
+ * `quiet` skips the success toast for a caller that confirms in place; it
+ * resolves true only when the text reached the clipboard.
  */
-export async function copyText(text: string, fallback: HTMLElement | null | (() => HTMLElement | null), confirm = true): Promise<boolean> {
+export async function copyText(text: string, fallback: HTMLElement | null | (() => HTMLElement | null), { quiet = false } = {}): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text)
-    if (confirm) toast.success('Copied')
+    if (!quiet) toast.success('Copied')
     return true
   } catch (err) {
     const element = typeof fallback === 'function' ? fallback() : fallback

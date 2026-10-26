@@ -9,6 +9,7 @@ import {
   ChevronRight as LucideChevronRight,
   ChevronLeft as LucideChevronLeft,
   ChevronUp as LucideChevronUp,
+  Clock as LucideClock,
   Copy as LucideCopy,
   Ellipsis as LucideEllipsis,
   FileText as LucideFileText,
@@ -164,6 +165,7 @@ export const Check = icon(LucideCheck)
 export const ChevronDown = icon(LucideChevronDown)
 export const ChevronRight = icon(LucideChevronRight)
 export const ChevronUp = icon(LucideChevronUp)
+export const Clock = icon(LucideClock)
 export const Copy = icon(LucideCopy)
 export const Ellipsis = icon(LucideEllipsis)
 export const FileText = icon(LucideFileText)

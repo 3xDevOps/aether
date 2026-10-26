@@ -19,6 +19,7 @@ import { hasImages, useComposerImages, type ComposerImageState } from '@/routes/
 import { ContextWindow } from '@/routes/run/context-window'
 import { commandSuggestions, currentChoice, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
 import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type ComposerDraft, type Pill } from '@/routes/run/composer-state'
+import { TemplateInsert } from '@/routes/run/composer-templates'
 import type { RunRoom } from '@/routes/run/room'
 import { TypingIndicator, useTypingSignal } from '@/routes/run/typing'
 import { sessionColumn } from '@/routes/run/session-rows'
@@ -317,6 +318,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
         footer={(
           <>
             <AttachButton images={images} disabled={attachOff} textarea={textarea} />
+            <TemplateInsert run={run} textarea={textarea} disabled={busy} />
             <SendActions
               pill="send"
               label={late ? stillWaiting : busy ? 'Sending…' : 'Send'}
@@ -554,6 +556,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
               textarea={textarea}
               unsupported={refusedImages ? 'This agent does not support image prompts.' : undefined}
             />
+            <TemplateInsert run={run} textarea={textarea} disabled={busy} />
             <OptionPills options={state?.config_options ?? []} disabled={busy || moderated} onSet={setOption} />
             {state?.usage && state.usage.size > 0 && (
               <ContextWindow

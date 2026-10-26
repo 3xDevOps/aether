@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { modes } from '@/components/launch/modes'
+import { own, placeholderNames } from '@/components/templates/placeholders'
 import { ModelField } from '@/components/launch/run-fields'
 import {
   AlertDialog,
@@ -18,6 +19,7 @@ import { FailureCallout } from '@/components/ui/failure-callout'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SectionLabel } from '@/components/ui/section-label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import type { Template } from '@/lib/types'
@@ -34,6 +36,8 @@ export interface TemplateDraft {
   harness: string
   mode: string
   model?: string
+  params?: Record<string, string>
+  budget_usd?: number
 }
 
 export function TemplateForm({
@@ -56,6 +60,7 @@ export function TemplateForm({
   const [harness, setHarness] = useState(source?.harness ?? 'claude')
   const [mode, setMode] = useState(source?.mode ?? 'headless')
   const [model, setModel] = useState(source?.model ?? '')
+  const [defaults, setDefaults] = useState<Record<string, string>>(source?.params ?? {})
   const { agents, error: agentsError, reload: reloadAgents } = useAgentList()
   const options = (agents ?? []).map((agent) => ({ value: agent.name, label: agent.display_name || agent.name }))
   // agent.list leaves out the deployment's `custom` agent, which a template may still name.
@@ -63,7 +68,18 @@ export function TemplateForm({
     if (!options.some((option) => option.value === value)) options.push({ value, label: value })
   }
   const chosenModel = model.trim()
-  const draft = { name: name.trim(), task: task.trim(), harness, mode, ...(chosenModel ? { model: chosenModel } : {}) }
+  const names = placeholderNames(task)
+  // Only names the task uses: the server refuses a default for any other.
+  const params = Object.fromEntries(names.flatMap((n) => (Object.hasOwn(defaults, n) ? [[n, defaults[n]]] : [])))
+  const draft: TemplateDraft = {
+    name: name.trim(),
+    task: task.trim(),
+    harness,
+    mode,
+    ...(chosenModel ? { model: chosenModel } : {}),
+    ...(Object.keys(params).length ? { params } : {}),
+    ...(source?.budget_usd ? { budget_usd: source.budget_usd } : {}),
+  }
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -86,12 +102,32 @@ export function TemplateForm({
               onEdit()
             }} />
           </FormField>
-          <FormField label="Task" help="This task is sent unchanged when the template launches.">
+          <FormField label="Task" help={<>Write <code className="font-code">{'{{name}}'}</code> where each launch fills in a value.</>}>
             <Textarea rows={5} value={task} onChange={(e) => {
               setTask(e.target.value)
               onEdit()
             }} />
           </FormField>
+          {names.length > 0 && (
+            <div role="group" aria-label="Parameters" className="flex flex-col gap-2">
+              <SectionLabel>Parameters</SectionLabel>
+              <p className="text-ui-sm text-muted">A default fills its parameter unless the launch gives a value. One without a default must be filled at every launch, so a scheduled template needs them all.</p>
+              {names.map((n) => (
+                <FormField key={n} label={<code className="font-code">{n}</code>}>
+                  <Input placeholder="No default" value={own(defaults, n) ?? ''} onChange={(e) => {
+                    const value = e.target.value
+                    setDefaults((all) => {
+                      const next = { ...all }
+                      if (value) next[n] = value
+                      else delete next[n]
+                      return next
+                    })
+                    onEdit()
+                  }} />
+                </FormField>
+              ))}
+            </div>
+          )}
           {agentsError && (
             <Callout tone="failed" role="alert" actions={<Button type="button" size="sm" variant="secondary" onClick={reloadAgents}>Retry</Button>}>
               Agents did not load: {agentsError}
