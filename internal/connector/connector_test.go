@@ -560,10 +560,11 @@ type connection struct {
 var (
 	readTools = []string{"aether_list_workspaces", "aether_list_agents", "aether_list_runs", "aether_get_run", "aether_run_history",
 		"aether_needs_attention", "aether_activity_summary", "aether_list_swarms", "aether_get_swarm", "aether_run_changes",
-		"aether_pr_status", "aether_overlaps", "aether_memory_search", "search", "fetch"}
+		"aether_pr_status", "aether_overlaps", "aether_memory_search", "aether_memory_show", "aether_integration", "search", "fetch"}
 	writeTools = []string{"aether_launch_run", "aether_launch_swarm", "aether_message_run", "aether_answer", "aether_pause_run",
-		"aether_resume_run", "aether_mark_reviewed"}
-	controlTools = []string{"aether_decide_approval", "aether_stop_run", "aether_close_run", "aether_cancel_swarm"}
+		"aether_resume_run", "aether_mark_reviewed", "aether_run_lifecycle", "aether_swarm_manage", "aether_memory_add", "aether_memory_pin"}
+	controlTools = []string{"aether_decide_approval", "aether_stop_run", "aether_close_run", "aether_cancel_swarm", "aether_handoff_run",
+		"aether_replace_integrator", "aether_integration_decide", "aether_pr_create", "aether_pr_merge"}
 )
 
 func sorted(lists ...[]string) []string {
