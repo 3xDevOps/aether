@@ -1,0 +1,51 @@
+{
+  "server_url": "https://edge.onaether.dev/mcp",
+  "auth_type": "oauth_cimd",
+  "callback_url": "https://claude.ai/api/mcp/auth_callback",
+  "name": "Aether",
+  "one_liner": "Launch, track and steer the coding agents on your own Aether server: see what needs you, read runs and pull requests, and act.",
+  "description": "Aether is self-hosted software that runs coding agents such as Claude Code, Codex and opencode in containers on your own server. This connector links Claude to the Aether server you are a member of, through the Aether edge at edge.onaether.dev.\n\nAsk what needs you, what your agents did this week, or what a run changed. Read a run's conversation or terminal, its reports, diff, and its pull request's checks, reviews and comments. Search runs, swarms and a workspace's team memory, and see which active runs touch the same files.\n\nWith the Launch and message scope, checked by default on the consent page, launch a run or a swarm of agents on a task, message a run, answer an agent's question, pause or resume a run, and accept a run's reported success. With the Stop and approve scope, off by default, allow or deny one permission request, stop or close a run, and cancel a swarm.\n\nWho it is for: developers whose team already runs an Aether server. You need an Aether account on a server linked to the Aether edge, signed in with GitHub.\n\nLimitations: agents run with the access your server gave them, so a launched agent can push branches and open pull requests. No connector tool installs Aether, changes server settings, merges pull requests or deletes repositories or workspaces; an agent you instruct can do what its credentials allow. Text written by agents, teammates and GitHub users is returned as untrusted data.",
+  "categories": ["Developer tools"],
+  "slug": "aether",
+  "documentation_url": "https://github.com/3xDevOps/Aether/blob/main/docs/connectors.md",
+  "privacy_policy_url": "PLACEHOLDER: hosted connector privacy policy, from docs/legal/privacy-connectors.md; see docs/claude-connector.md",
+  "terms_of_service_url": "PLACEHOLDER: hosted connector terms, from docs/legal/terms-connectors.md; see docs/claude-connector.md",
+  "support_contact": "https://github.com/3xDevOps/Aether/issues",
+  "icon": "web/public/icons/icon-512.png",
+  "access": "read and write",
+  "prerequisites": "An Aether account on an Aether server linked to edge.onaether.dev, with a GitHub account bound to your member. A server under edge-access approved-devices also asks for a one-time code from aether mcp.",
+  "use_cases": [
+    "Triage: ask what needs you across your runs (agent questions, permission requests, runs awaiting review) and answer from the chat.",
+    "Delegate: launch a run or a swarm of agents on a task in a workspace, then follow its state and reports.",
+    "Review: read what a run changed, its pull request's checks and reviewers' comments, and accept or redirect the work.",
+    "Coordinate: see which active runs touch the same files and message a run to change course."
+  ],
+  "example_prompts": [
+    "What needs me in Aether?",
+    "Launch a Claude Code run in the api workspace to fix the flaky login test.",
+    "Is CI green on the login fix pull request? What did reviewers say?",
+    "Which runs touch the same files as the migration run?",
+    "Tell the parser run to use the new tokenizer."
+  ],
+  "company": {
+    "name": "3xDevOps",
+    "website": "https://onaether.dev",
+    "contact": "team@onaether.dev"
+  },
+  "data_handling": {
+    "api_ownership": "First-party: every tool calls the Aether server the user connected, through the Aether edge that 3xDevOps operates.",
+    "personal_health_data": false,
+    "sponsored_content": false,
+    "financial_transactions": false,
+    "ai_media_generation": false
+  },
+  "compliance_acknowledgments": [
+    "Directory guidelines",
+    "First-party API usage",
+    "Financial transactions",
+    "AI media generation",
+    "Prompt injection",
+    "Conversation data collection",
+    "Public documentation"
+  ]
+}

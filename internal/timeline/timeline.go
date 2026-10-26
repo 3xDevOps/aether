@@ -26,6 +26,12 @@ const (
 	scanBudget = 20
 	// minBatch keeps small pages from reading the log one row at a time.
 	minBatch = 64
+	// scanWindow bounds the seq span one read covers when no workspace
+	// narrows it: only the seq key bounds such a read, so SQLite examines
+	// every row in the span however few match. A page reads at most
+	// scanWindows of them and reports More when it stops there.
+	scanWindow  = 10000
+	scanWindows = 8
 )
 
 // detailTypes are the firehoses the feed leaves out by default: diff
@@ -44,13 +50,17 @@ var detailTypes = map[events.Type]bool{
 
 // Filter narrows a timeline page. Member matches an event's actor - who
 // did it - not the owner of the run it concerns. Run matches agent messages
-// on either side; MissionID matches every run that has served the mission.
+// on either side; MissionID matches every run that has served the mission
+// and, without Run, the mission's own swarm events when Types asks for
+// them. TimelineKinds, when set, keeps only workspace.timeline entries of
+// those kinds.
 type Filter struct {
-	Workspace domain.WorkspaceID
-	Run       domain.RunID
-	MissionID domain.MissionID
-	Member    domain.MemberID
-	Types     []events.Type
+	Workspace     domain.WorkspaceID
+	Run           domain.RunID
+	MissionID     domain.MissionID
+	Member        domain.MemberID
+	Types         []events.Type
+	TimelineKinds []events.TimelineKind
 }
 
 type MissionRuns interface {
@@ -61,11 +71,13 @@ type MissionRuns interface {
 // pass as the next call's afterSeq; More reports that history remains past
 // it. A page read backward by Before sets NextSeq to the log head, More to
 // older history remaining, and OlderSeq to the next call's beforeSeq.
+// Head is the log head the read was bounded by.
 type Page struct {
 	Events   []events.Event
 	NextSeq  uint64
 	More     bool
 	OlderSeq uint64
+	Head     uint64
 }
 
 // Reader pages a workspace's history out of the event log.
@@ -91,13 +103,18 @@ func (r *Reader) Page(ctx context.Context, f Filter, afterSeq uint64, limit int)
 	}
 	cursor := afterSeq
 	if !ok || cursor >= head {
-		return Page{NextSeq: head}, nil
+		return Page{NextSeq: head, Head: head}, nil
 	}
 	batch := max(limit, minBatch)
 	out := make([]events.Event, 0, limit)
 	scanned := 0
-	for len(out) < limit && cursor < head && scanned < limit*scanBudget {
-		got, rerr := r.log.Read(ctx, logFilter, cursor, head, batch)
+	windowed := f.Workspace == ""
+	for reads := 0; len(out) < limit && cursor < head && scanned < limit*scanBudget && (!windowed || reads < scanWindows); reads++ {
+		upto := head
+		if windowed {
+			upto = min(head, cursor+scanWindow)
+		}
+		got, rerr := r.log.Read(ctx, logFilter, cursor, upto, batch)
 		if rerr != nil {
 			return Page{}, fmt.Errorf("timeline: read workspace %s history: %w", f.Workspace, rerr)
 		}
@@ -115,13 +132,13 @@ func (r *Reader) Page(ctx context.Context, f Filter, afterSeq uint64, limit int)
 			}
 		}
 		// A short batch fully consumed means the log holds nothing else
-		// matching up to head: skip the cursor there so callers are not
+		// matching up to upto: skip the cursor there so callers are not
 		// asked to page over the gap event by event.
 		if consumed == len(got) && len(got) < batch {
-			cursor = head
+			cursor = upto
 		}
 	}
-	return Page{Events: out, NextSeq: cursor, More: cursor < head}, nil
+	return Page{Events: out, NextSeq: cursor, More: cursor < head, Head: head}, nil
 }
 
 // Before returns the newest limit events matching f with Seq < beforeSeq,
@@ -137,13 +154,18 @@ func (r *Reader) Before(ctx context.Context, f Filter, beforeSeq uint64, limit i
 		cursor = head + 1
 	}
 	if !ok {
-		return Page{NextSeq: head}, nil
+		return Page{NextSeq: head, Head: head}, nil
 	}
 	batch := max(limit, minBatch)
 	out := make([]events.Event, 0, limit)
 	scanned := 0
-	for len(out) < limit && cursor > 1 && scanned < limit*scanBudget {
-		got, rerr := r.log.ReadBefore(ctx, logFilter, cursor, batch)
+	windowed := f.Workspace == ""
+	for reads := 0; len(out) < limit && cursor > 1 && scanned < limit*scanBudget && (!windowed || reads < scanWindows); reads++ {
+		var after uint64
+		if windowed && cursor > scanWindow {
+			after = cursor - scanWindow
+		}
+		got, rerr := r.log.ReadBefore(ctx, logFilter, after, cursor, batch)
 		if rerr != nil {
 			return Page{}, fmt.Errorf("timeline: read workspace %s history: %w", f.Workspace, rerr)
 		}
@@ -161,11 +183,11 @@ func (r *Reader) Before(ctx context.Context, f Filter, beforeSeq uint64, limit i
 			}
 		}
 		if consumed == len(got) && len(got) < batch {
-			cursor = 0
+			cursor = after + 1
 		}
 	}
 	slices.Reverse(out)
-	page := Page{Events: out, NextSeq: head, More: cursor > 1}
+	page := Page{Events: out, NextSeq: head, More: cursor > 1, Head: head}
 	if page.More {
 		page.OlderSeq = cursor
 	}
@@ -200,8 +222,10 @@ func (r *Reader) prepare(ctx context.Context, f Filter) (uint64, events.Filter, 
 		}
 		if f.Run != "" {
 			runs = slices.DeleteFunc(runs, func(run domain.RunID) bool { return run != f.Run })
+		} else if slices.Contains(f.Types, events.TypeMissionChanged) || slices.Contains(f.Types, events.TypeIntegrationChanged) {
+			logFilter.Mission = f.MissionID
 		}
-		if len(runs) == 0 {
+		if len(runs) == 0 && logFilter.Mission == "" {
 			return head, logFilter, false, nil
 		}
 		logFilter.Runs = runs
@@ -211,6 +235,9 @@ func (r *Reader) prepare(ctx context.Context, f Filter) (uint64, events.Filter, 
 
 func (f Filter) keeps(e events.Event) bool {
 	if f.Member != "" && e.ActorID != f.Member {
+		return false
+	}
+	if p, ok := e.Payload.(events.TimelinePayload); ok && len(f.TimelineKinds) > 0 && !slices.Contains(f.TimelineKinds, p.Kind) {
 		return false
 	}
 	return len(f.Types) > 0 || !detailTypes[e.Type]

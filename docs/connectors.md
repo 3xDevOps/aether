@@ -106,7 +106,8 @@ The connector then works in Claude on the web, desktop and mobile.
 
 `https://<edge>/mcp` is one URL for every Aether server, so one ChatGPT
 plugin can serve every Aether user. Once Aether is listed in ChatGPT's plugin
-directory ([chatgpt-plugin.md](chatgpt-plugin.md)), install it from there
+directory ([chatgpt-plugin.md](chatgpt-plugin.md)) or Claude's connector
+directory ([claude-connector.md](claude-connector.md)), install it from there
 instead of adding a custom MCP server; connecting then works as described here.
 
 When you connect, the edge's sign-in page opens: sign in with GitHub if you
