@@ -182,8 +182,8 @@ func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 // own events and the agent messages other runs addressed to it, because
 // SQLite answers their OR by scanning the workspace's events. The message
 // type is a literal so the partial idx_events_coord_to_run can serve the
-// second lookup. Several runs keep the OR: SQLite would read both lookups
-// off the workspace index and scan it twice.
+// second lookup. Several runs, or a Mission, keep the OR: SQLite would read
+// both lookups off the workspace index and scan it twice.
 func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (string, []any) {
 	where := "seq > ?"
 	args := []any{afterSeq}
@@ -199,17 +199,25 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 		where += " AND run_id = ?"
 		args = append(args, string(f.Run))
 	}
-	if len(f.Runs) > 1 {
-		set := "(?" + strings.Repeat(", ?", len(f.Runs)-1) + ")"
-		where += " AND (run_id IN " + set +
-			" OR (type = ? AND json_extract(payload, '$.to_run_id') IN " + set + "))"
-		for _, r := range f.Runs {
-			args = append(args, string(r))
+	union := len(f.Runs) == 1 && f.Mission == ""
+	if !union && (len(f.Runs) > 0 || f.Mission != "") {
+		var either []string
+		if len(f.Runs) > 0 {
+			set := "(?" + strings.Repeat(", ?", len(f.Runs)-1) + ")"
+			either = append(either, "run_id IN "+set, "(type = ? AND json_extract(payload, '$.to_run_id') IN "+set+")")
+			for _, r := range f.Runs {
+				args = append(args, string(r))
+			}
+			args = append(args, string(TypeCoordMessage))
+			for _, r := range f.Runs {
+				args = append(args, string(r))
+			}
 		}
-		args = append(args, string(TypeCoordMessage))
-		for _, r := range f.Runs {
-			args = append(args, string(r))
+		if f.Mission != "" {
+			either = append(either, "(type IN (?, ?) AND json_extract(payload, '$.mission_id') = ?)")
+			args = append(args, string(TypeMissionChanged), string(TypeIntegrationChanged), string(f.Mission))
 		}
+		where += " AND (" + strings.Join(either, " OR ") + ")"
 	}
 	if len(f.Types) > 0 {
 		where += " AND type IN (?" + strings.Repeat(", ?", len(f.Types)-1) + ")"
@@ -219,7 +227,7 @@ func readQuery(f Filter, afterSeq, uptoSeq uint64, limit int, order string) (str
 	}
 	const cols = "seq, id, ts, workspace_id, run_id, actor_id, type, payload"
 	query := "SELECT " + cols + " FROM events WHERE " + where
-	if len(f.Runs) == 1 {
+	if union {
 		run := string(f.Runs[0])
 		query += " AND run_id = ? UNION ALL SELECT " + cols + " FROM events WHERE " + where +
 			" AND type = '" + string(TypeCoordMessage) + "' AND json_extract(payload, '$.to_run_id') = ? AND run_id <> ?"

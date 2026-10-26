@@ -86,6 +86,11 @@ func TestRunAndMissionFiltersMatchBothSidesOfAgentMail(t *testing.T) {
 	if !matcher.Matches(events.Event{RunID: "run-worker", Payload: events.CoordMessagePayload{ToRunID: "run-integrator"}}) {
 		t.Error("a live subscription filtered by run must see mail addressed to it")
 	}
+	swarm := events.Filter{Runs: []domain.RunID{"run-integrator"}, Mission: "mission-1"}
+	if !swarm.Matches(events.Event{Payload: events.MissionChangedPayload{MissionID: "mission-1"}}) ||
+		swarm.Matches(events.Event{Payload: events.IntegrationChangedPayload{MissionID: "mission-2"}}) {
+		t.Error("a live subscription filtered by mission must see that mission's swarm events only")
+	}
 }
 
 func TestBeforeReadsTheNewestHistoryFirst(t *testing.T) {
