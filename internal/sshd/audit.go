@@ -71,41 +71,26 @@ func (s *Server) AssistantLocal(member domain.MemberID) *Local {
 	return &Local{s: s, member: member, assistant: true}
 }
 
-// callVia is how the call behind ctx arrived, and the connector and its
-// client for a connector call.
-func callVia(ctx context.Context) (via, connector, client string) {
-	if id, ok := ctx.Value(connIdentityKey{}).(connIdentity); ok {
-		if id.connector != "" {
-			return ViaConnector, id.connector, id.connectorClient
-		}
-		return ViaCLI, "", ""
-	}
-	if assistant, _ := ctx.Value(assistantCallKey{}).(bool); assistant {
-		return ViaAssistant, "", ""
-	}
-	return ViaDashboard, "", ""
-}
-
-// audits reports whether a call of method that arrived via is audited:
-// every write by a connector or the assistant, and auditedMethods.
-func audits(via, method string) bool {
-	if auditedMethods[method] {
-		return true
-	}
-	if via != ViaConnector && via != ViaAssistant {
-		return false
+// auditCall records every write call by a connector or the assistant, and
+// every call of auditedMethods. The entry holds the ids the params and
+// result name, never the params themselves. Recording happens after the
+// call took effect, so a store failure is logged rather than turned into
+// the call's error.
+func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method string, params, result json.RawMessage, perr *protocol.Error) {
+	var via, connector, client string
+	switch id, ok := ctx.Value(connIdentityKey{}).(connIdentity); {
+	case ok && id.connector != "":
+		via, connector, client = ViaConnector, id.connector, id.connectorClient
+	case ok:
+		via = ViaCLI
+	case ctx.Value(assistantCallKey{}) == true:
+		via = ViaAssistant
+	default:
+		via = ViaDashboard
 	}
 	scopes, listed := connectorMethodScopes[method]
-	return (!listed || !slices.Equal(scopes, scopeRead)) && !assistantReads[method]
-}
-
-// auditCall records a call dispatch decided to audit. The entry holds the
-// ids the params and result name, never the params themselves. Recording
-// happens after the call took effect, so a store failure is logged rather
-// than turned into the call's error.
-func (s *Server) auditCall(ctx context.Context, member domain.MemberID, method string, params, result json.RawMessage, perr *protocol.Error) {
-	via, connector, client := callVia(ctx)
-	if !audits(via, method) {
+	write := (!listed || !slices.Equal(scopes, scopeRead)) && !assistantReads[method]
+	if !auditedMethods[method] && (!write || via == ViaDashboard || via == ViaCLI) {
 		return
 	}
 	var ids struct {
