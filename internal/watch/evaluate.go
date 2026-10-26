@@ -115,6 +115,13 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 			w.NextCheckAt = &r.nextCheck
 		}
 	}
+	// Queued before the watch is saved, so a watch saved done never
+	// leaves a delivered need without its clear.
+	if readErr == nil && r.ok && !slices.ContainsFunc(r.notices, func(n Notice) bool { return n.Condition == protocol.WatchNeedsYou }) {
+		if err := s.withdrawEnded(ctx, w); err != nil {
+			return err
+		}
+	}
 	if len(notes) == 0 && !visiblyChanged(&before, w) && maps.Equal(before.Fired, w.Fired) &&
 		(before.NextCheckAt == nil) == (w.NextCheckAt == nil) && (w.NextCheckAt == nil || w.NextCheckAt.Equal(*before.NextCheckAt)) {
 		if err := s.store.TouchWatchCheck(ctx, w.ID, now); err != nil {
@@ -135,10 +142,7 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 			s.changed(ctx, w, "")
 		}
 	}
-	if readErr != nil || !r.ok || slices.ContainsFunc(r.notices, func(n Notice) bool { return n.Condition == protocol.WatchNeedsYou }) {
-		return nil
-	}
-	return s.withdrawEnded(ctx, w)
+	return nil
 }
 
 // withdrawEnded queues the quiet replacement of w's delivered needs_you

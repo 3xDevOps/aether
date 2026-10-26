@@ -99,6 +99,11 @@ const (
 	WatchPushWithdraw = "withdraw"
 )
 
+// WatchPushSummarized starts the detail of a push delivered inside one
+// push with other notices. It has no notification of its own on a device,
+// so it is never withdrawn.
+const WatchPushSummarized = "Sent in one push with other notices"
+
 // WatchStore persists watches, their notifications and deliveries, each
 // member's notification preferences and the watch service's event cursor.
 type WatchStore interface {

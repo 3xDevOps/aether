@@ -152,7 +152,8 @@ func (d *DB) WithdrawWatchNeeds(ctx context.Context, watch string, now time.Time
 		`UPDATE watch_notifications SET push_state = 'withdraw', push_attempts = 0, push_next_at = ?
 		 WHERE watch_id = ? AND condition = 'needs_you' AND push_state = 'none' AND EXISTS (
 		   SELECT 1 FROM watch_deliveries d
-		   WHERE d.notification_id = watch_notifications.id AND d.channel = 'push' AND d.status = 'delivered')`, at, watch)
+		   WHERE d.notification_id = watch_notifications.id AND d.channel = 'push' AND d.status = 'delivered'
+		   AND d.detail NOT LIKE ? || '%')`, at, watch, WatchPushSummarized)
 	if err != nil {
 		return 0, fmt.Errorf("store: withdraw watch needs: %w", err)
 	}

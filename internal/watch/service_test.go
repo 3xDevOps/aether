@@ -30,6 +30,93 @@ import (
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
 
+func TestAStaleClearNeverHidesANewerNeed(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.bob)
+	run := h.run(h.ada, "Rotate the keys")
+	w := h.watch(h.bob, runTarget(run)).Watch
+	h.runs.ask(run.ID, "q1", "Rotate prod too?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the first push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
+
+	// The clear fails, and a new question is pushed before it is retried.
+	phone.status.Store(http.StatusInternalServerError)
+	h.runs.answer(run.ID)
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
+	h.eventually("the clear to fail", func() bool {
+		n := h.notices(w.ID)[0]
+		return n.PushState == store.WatchPushWithdraw && n.PushAttempts == 1
+	})
+	phone.status.Store(http.StatusCreated)
+	h.runs.ask(run.ID, "q2", "Rotate staging?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the second push", func() bool {
+		return len(h.notices(w.ID)) == 2 && pushOf(h.notices(w.ID)[1]).Status == protocol.WatchStatusDelivered
+	})
+
+	h.clock.advance(time.Minute)
+	h.eventually("the stale clear settled", func() bool { return pushOf(h.notices(w.ID)[0]).Detail == "Replaced by a newer need" })
+	if n := phone.received.Load(); n != 2 {
+		t.Fatalf("device received %d pushes, want the two questions and no clear", n)
+	}
+}
+
+func TestAQueuedClearStopsAtItsAttemptLimit(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.bob)
+	run := h.run(h.ada, "Rotate the keys")
+	w := h.watch(h.bob, runTarget(run)).Watch
+	h.runs.ask(run.ID, "q1", "Rotate prod too?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
+
+	// The server stopped after reserving the last attempt of a clear.
+	_ = h.svc.Close()
+	h.runs.answer(run.ID)
+	now := h.clock.now()
+	if err := h.db.SetWatchPush(h.ctx, h.notices(w.ID)[0].ID, store.WatchPushWithdraw, maxPushAttempts, &now, nil); err != nil {
+		t.Fatal(err)
+	}
+	h.start()
+	h.eventually("the clear given up", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusFailed })
+	if n := phone.received.Load(); n != 1 {
+		t.Fatalf("device received %d pushes, want the question alone", n)
+	}
+}
+
+func TestANeedSentInASummaryIsNotWithdrawnOnItsOwn(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	now := h.clock.now().UTC()
+	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{QuietHours: &protocol.QuietHours{
+		Start: now.Add(-time.Hour).Format("15:04"), End: now.Add(time.Hour).Format("15:04"), TZ: "UTC",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	a, b := h.run(h.ada, "First"), h.run(h.ada, "Second")
+	wa, wb := h.watch(h.ada, runTarget(a)).Watch, h.watch(h.ada, runTarget(b)).Watch
+	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
+	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")
+	h.eventually("both held", func() bool {
+		return h.pushStatus(wa.ID) == protocol.WatchStatusHeldQuiet && h.pushStatus(wb.ID) == protocol.WatchStatusHeldQuiet
+	})
+	h.clock.advance(time.Hour + time.Minute)
+	h.eventually("the summary", func() bool { return h.pushStatus(wa.ID) == protocol.WatchStatusDelivered })
+
+	h.status(a, domain.RunRunning, domain.ActivityWorking, "")
+	h.eventually("the need read as ended", func() bool {
+		var o protocol.WatchObserved
+		return json.Unmarshal(h.watchState(wa.ID).Observed, &o) == nil && o.Need == ""
+	})
+	settle()
+	if d := pushOf(h.notices(wa.ID)[0]); d.Status != protocol.WatchStatusDelivered || !strings.HasPrefix(d.Detail, store.WatchPushSummarized) || phone.received.Load() != 1 {
+		t.Fatalf("push row = %+v, %d sent; want the summary alone and no clear", d, phone.received.Load())
+	}
+}
+
 type fakeRuns struct {
 	mu      sync.Mutex
 	inputs  map[domain.RunID][]domain.RunInputRequest

@@ -151,6 +151,18 @@ func (s *Service) withdraw(ctx context.Context, member domain.MemberID, n *store
 	if err != nil {
 		return fmt.Errorf("notice %s: %w", n.ID, err)
 	}
+	if n.PushAttempts >= maxPushAttempts {
+		return s.settle(ctx, w, n, store.WatchPushNone, n.PushAttempts, nil, protocol.WatchStatusFailed,
+			fmt.Sprintf("Delivered, then withdrawing it failed after %d attempts; the server stopped before the last result was saved", n.PushAttempts))
+	}
+	// A newer need shares the notification, so a clear would hide it.
+	current, err := s.currentNeeds(ctx, w)
+	if err != nil {
+		return fmt.Errorf("notice %s: %w", n.ID, err)
+	}
+	if len(current) > 0 {
+		return s.settle(ctx, w, n, store.WatchPushNone, n.PushAttempts, nil, protocol.WatchStatusWithdrawn, "Replaced by a newer need")
+	}
 	attempts := n.PushAttempts + 1
 	next := s.now().Add(backoff(attempts))
 	if err := s.store.SetWatchPush(ctx, n.ID, store.WatchPushWithdraw, attempts, &next, nil); err != nil {
@@ -292,6 +304,9 @@ func (s *Service) send(ctx context.Context, member domain.MemberID, notes []*sto
 	}
 	results, err := s.push.Deliver(ctx, member, message(reserved))
 	status, detail := pushOutcome(results, err)
+	if status == protocol.WatchStatusDelivered && len(reserved) > 1 {
+		detail = store.WatchPushSummarized + ": " + detail
+	}
 	for _, n := range reserved {
 		attempts := n.PushAttempts + 1
 		state, next, rowStatus, rowDetail := store.WatchPushNone, (*time.Time)(nil), status, detail
