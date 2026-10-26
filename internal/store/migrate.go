@@ -2015,8 +2015,10 @@ ALTER TABLE coord_state_reports_v85 RENAME TO coord_state_reports;
 ALTER TABLE missions ADD COLUMN extra_workspace_ids TEXT NOT NULL DEFAULT '[]';
 `,
 	// v87: audit history of writes by connectors and the assistant, and of
-	// connector, account-share and role changes. Rows hold ids, never
-	// params, and outlive the members and connectors they name.
+	// connector, account-share, member and Slack link changes. Rows hold
+	// ids, never params, and outlive the members and connectors they name;
+	// security marks a change that took effect, which is kept apart from
+	// call entries.
 	`
 CREATE TABLE audit (
 	seq          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2028,9 +2030,11 @@ CREATE TABLE audit (
 	method       TEXT NOT NULL,
 	workspace_id TEXT NOT NULL DEFAULT '',
 	target       TEXT NOT NULL DEFAULT '',
-	code         INTEGER NOT NULL
+	code         INTEGER NOT NULL,
+	security     INTEGER NOT NULL
 );
 CREATE INDEX audit_member ON audit(member_id, seq);
+CREATE INDEX audit_kept ON audit(member_id, security, seq);
 CREATE INDEX audit_connector ON audit(connector_id, seq);
 `,
 }

@@ -3,20 +3,33 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// AuditKeep is how many audit entries the store keeps per member; adding
-// one drops that member's oldest beyond it, so no member's calls evict
-// another's.
+// AuditKeep is how many call entries, and separately how many security
+// entries, the store keeps per member; adding one drops that member's
+// oldest of its kind beyond it, so no member's calls evict another's and
+// no flood of calls evicts a security change.
 const AuditKeep = 10_000
+
+// securityPrefixes are the methods whose entries, once they took effect,
+// are security entries: connector, account-share, member and Slack link
+// changes.
+var securityPrefixes = []string{"connector.", "account.", "member.", "slack."}
+
+func securityEntry(e *AuditEntry) bool {
+	return e.Code == 0 && slices.ContainsFunc(securityPrefixes, func(p string) bool { return strings.HasPrefix(e.Method, p) })
+}
 
 // AuditEntry is one durable record of who changed what and how. Via is
 // how the call arrived (dashboard, cli, connector or assistant);
-// ConnectorID and Client name the connector of a connector call.
-// Target is the run, swarm, connector or member the call acted on. Code
+// ConnectorID and Client name the connector of a connector call or of
+// an event that befell a connector. Target is the run, swarm, connector,
+// member, device, Slack user or merge proposal the call acted on. Code
 // is 0 for a call that succeeded and its protocol error code otherwise.
 // Entries never hold tokens, message bodies or other params.
 type AuditEntry struct {
@@ -59,17 +72,19 @@ func (d *DB) AddAudit(ctx context.Context, e *AuditEntry) error {
 		return fmt.Errorf("store: begin add audit: %w", err)
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
-	res, err := tx.ExecContext(ctx, `INSERT INTO audit (ts, member_id, via, connector_id, client, method, workspace_id, target, code)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		at, e.Member, e.Via, e.ConnectorID, e.Client, e.Method, e.WorkspaceID, e.Target, e.Code)
+	security := securityEntry(e)
+	res, err := tx.ExecContext(ctx, `INSERT INTO audit (ts, member_id, via, connector_id, client, method, workspace_id, target, code, security)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		at, e.Member, e.Via, e.ConnectorID, e.Client, e.Method, e.WorkspaceID, e.Target, e.Code, security)
 	if err != nil {
 		return fmt.Errorf("store: add audit: %w", err)
 	}
 	if e.Seq, err = res.LastInsertId(); err != nil {
 		return fmt.Errorf("store: add audit: %w", err)
 	}
-	if _, err = tx.ExecContext(ctx, `DELETE FROM audit WHERE member_id = ? AND seq <= (
-		SELECT seq FROM audit WHERE member_id = ? ORDER BY seq DESC LIMIT 1 OFFSET ?)`, e.Member, e.Member, AuditKeep); err != nil {
+	if _, err = tx.ExecContext(ctx, `DELETE FROM audit WHERE member_id = ? AND security = ? AND seq <= (
+		SELECT seq FROM audit WHERE member_id = ? AND security = ? ORDER BY seq DESC LIMIT 1 OFFSET ?)`,
+		e.Member, security, e.Member, security, AuditKeep); err != nil {
 		return fmt.Errorf("store: trim audit: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
