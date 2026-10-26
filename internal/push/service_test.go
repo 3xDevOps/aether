@@ -845,6 +845,20 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	}
 }
 
+// An assistant's notice of a need is replaced when the need clears; only its
+// news stays.
+func TestNotifyMarksOnlyNewsAsANotice(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Fix the login redirect", domain.LaunchACP)
+	stands := func(context.Context) bool { return true }
+	if err := h.svc.Notify(h.ctx, h.ada.ID, "Bob's run needs Bob", "which region?", run.ID, true, nil, stands); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	phone.expect(t, notification{Title: "Bob's run needs Bob", Body: "which region?", Run: string(run.ID)})
+}
+
 func TestNotifyReturnsTheDeviceError(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

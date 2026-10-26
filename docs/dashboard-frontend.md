@@ -1567,7 +1567,7 @@ row puts the label in its status chip and the detail in its meta line.
 sidebar's run details box shows it: "*Words* since *relative* — *reason*.
 *What happens next*. Why: *cause*.", for example "Waiting for 2 workers
 since 3 minutes ago. Mail from its agents can wake it. Why: its swarm workers
-are live." *What happens next* is said only where it is a fact or a request
+are live or have unread mail for it." *What happens next* is said only where it is a fact or a request
 of the viewer; no state that asks nothing tells the viewer to send a
 message. *Cause* is the run's `cause` in words; it is shown only while the
 run is live and shows the state the server chose, so not for a paused run,
@@ -6091,9 +6091,10 @@ service took the need, when the need ends or the run changes hands,
 under the run's Web Push topic, so a need still queued at the push service
 is never shown, and tries again a minute later for a device it could not
 reach. The worker handles pushes in arrival order, so a clear still reading
-the shown notification never lands over a newer need. An assistant's notice
-about the run carries `notice`; a clear that finds one shown shows it again,
-silently, as it was. On
+the shown notification never lands over a newer need. An assistant's news
+about the run, such as that it finished, carries `notice`; a clear that
+finds it shown shows it again, silently, as it was. An assistant's notice of
+a need carries no `notice`, so a clear replaces it like any need. On
 `notificationclick` it focuses a dashboard window that is already open and
 posts it `{type: 'aether:open-run', run}` or
 `{type: 'aether:open-workspace', workspace}`, or opens `/?run=<id>` or

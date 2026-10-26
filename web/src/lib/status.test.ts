@@ -286,7 +286,7 @@ describe('state words', () => {
     expect(stateWords(workers)).toEqual({ label: 'Waiting for 2 workers' })
     expect(stateLine(workers)).toBe('Waiting for 2 workers')
     expect(stateTitle(workers, since, now)).toBe(
-      'Waiting for 2 workers since 42 minutes ago. Mail from its agents can wake it. Why: its swarm workers are live.',
+      'Waiting for 2 workers since 42 minutes ago. Mail from its agents can wake it. Why: its swarm workers are live or have unread mail for it.',
     )
     expect(stateLine(shown({ status: 'needs-attention', state: 'waiting-agents', reason: 'reviewers on PR 12' }))).toBe('Waiting for agents · reviewers on PR 12')
   })

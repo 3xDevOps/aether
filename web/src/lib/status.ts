@@ -190,7 +190,7 @@ const causeWords: Record<string, string> = {
   'turn-end': 'the turn ended',
   stall: 'the run stalled',
   'wait-expired': 'its reported wait went stale',
-  workers: 'its swarm workers are live',
+  workers: 'its swarm workers are live or have unread mail for it',
   'tasks-held': 'it holds background tasks',
   human: 'a request waits on a person',
   disconnect: 'the agent session ended',

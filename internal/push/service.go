@@ -149,7 +149,7 @@ type notification struct {
 	Workspace string `json:"workspace,omitempty"`
 	// Clear replaces the run's notification quietly: its need ended.
 	Clear bool `json:"clear,omitempty"`
-	// Notice marks an assistant's notice, which a clear leaves shown.
+	// Notice marks an assistant's news, which a clear leaves shown.
 	Notice bool `json:"notice,omitempty"`
 }
 
@@ -530,7 +530,8 @@ func topicOf(id string) string {
 }
 
 // Notify sends an assistant notice to member's devices; only an urgent one
-// wakes them.
+// wakes them. A notice with no current check is news, which a later clear of
+// the run's need leaves shown; one with a check is a need, which it replaces.
 func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID, urgent bool, flush <-chan struct{}, current func(context.Context) bool) error {
 	for flushed := false; !flushed; {
 		wait := time.Until(s.freeAt(member))
@@ -548,7 +549,7 @@ func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, bod
 	if current != nil && !current(ctx) {
 		return nil
 	}
-	payload, err := json.Marshal(notification{Title: clip(title, fallbackTitleRunes), Body: clip(body, maxBodyRunes), Run: string(run), Notice: true})
+	payload, err := json.Marshal(notification{Title: clip(title, fallbackTitleRunes), Body: clip(body, maxBodyRunes), Run: string(run), Notice: current == nil})
 	if err != nil {
 		return fmt.Errorf("push: encode notification: %w", err)
 	}
