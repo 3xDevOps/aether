@@ -210,12 +210,21 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 		if req.AccountMemberID != "" && domain.MemberID(req.AccountMemberID) != p.owner {
 			return launchSpec{}, denied("agent %q runs only on the owner's own account", req.Harness)
 		}
-	case req.AccountMemberID == "" || domain.MemberID(req.AccountMemberID) == p.owner:
-		if (own.Status == choiceNotInstalled || own.Status == choiceNotSignedIn) && len(shared) > 0 {
-			spec.account = domain.MemberID(shared[0].AccountMemberID)
-		} else if own.Status == choiceNotInstalled || own.Status == choiceNotSignedIn {
+	case own.Status == choiceNotInstalled || own.Status == choiceNotSignedIn:
+		if req.AccountMemberID != "" && domain.MemberID(req.AccountMemberID) == p.owner || len(shared) == 0 {
 			return launchSpec{}, denied("%s%s", own.Detail, sharedHint(p))
 		}
+		if req.AccountMemberID == "" {
+			slices.SortStableFunc(shared, func(a, b protocol.ChildChoice) int { return readyFirst(a) - readyFirst(b) })
+			spec.account = domain.MemberID(shared[0].AccountMemberID)
+			break
+		}
+		i := slices.IndexFunc(shared, func(c protocol.ChildChoice) bool { return c.AccountMemberID == req.AccountMemberID })
+		if i < 0 {
+			return launchSpec{}, denied("account %s is not shared with the owner or has no %s login", req.AccountMemberID, req.Harness)
+		}
+		spec.account = domain.MemberID(req.AccountMemberID)
+	case req.AccountMemberID == "" || domain.MemberID(req.AccountMemberID) == p.owner:
 	default:
 		i := slices.IndexFunc(shared, func(c protocol.ChildChoice) bool { return c.AccountMemberID == req.AccountMemberID })
 		if i < 0 {
@@ -246,4 +255,11 @@ func trimPurpose(s string) string {
 		s = string(r[:80])
 	}
 	return s
+}
+
+func readyFirst(c protocol.ChildChoice) int {
+	if c.Status == choiceReady {
+		return 0
+	}
+	return 1
 }

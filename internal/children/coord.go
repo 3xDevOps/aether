@@ -24,7 +24,7 @@ func (s *Service) Related(ctx context.Context, a, b domain.RunID) (bool, error) 
 		if err != nil {
 			return false, err
 		}
-		if c.ParentRunID == pair[1] {
+		if c.ParentRunID == pair[1] && !c.Detached {
 			return true, nil
 		}
 	}
@@ -35,9 +35,9 @@ func (s *Service) Related(ctx context.Context, a, b domain.RunID) (bool, error) 
 // may always message.
 func (s *Service) Lineage(ctx context.Context, run domain.RunID) ([]domain.RunID, error) {
 	var out []domain.RunID
-	if c, err := s.cfg.Store.GetChild(ctx, run); err == nil {
+	if c, err := s.cfg.Store.GetChild(ctx, run); err == nil && !c.Detached {
 		out = append(out, c.ParentRunID)
-	} else if !errors.Is(err, store.ErrNotFound) {
+	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return nil, err
 	}
 	kids, err := s.cfg.Store.ListChildren(ctx, run, false)
@@ -45,7 +45,7 @@ func (s *Service) Lineage(ctx context.Context, run domain.RunID) ([]domain.RunID
 		return nil, err
 	}
 	for _, c := range kids {
-		if c.State == domain.ChildStarted {
+		if c.State == domain.ChildStarted && !c.Detached {
 			out = append(out, c.RunID)
 		}
 	}

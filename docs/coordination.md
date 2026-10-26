@@ -1538,8 +1538,11 @@ and it appears under its parent in the dashboard. Who may start one is in
   `cancelled` or `refused`), its latest report, branch, the account it runs
   on, its cost when metered, and `stale` when the parent's branch moved past
   the commit the child started from.
-- `child cancel` stops a child or drops it from the queue. `child detach`
-  lets it run on without the parent. `child fetch` publishes the child's
+- `child cancel` stops a child or drops it from the queue; a child still
+  starting answers `-32002`, so cancel again a few seconds later. `child
+  detach` lets it run on without the parent, which then can no longer
+  cancel, fetch or message it outside the usual rules. A handoff of either
+  run detaches it the same way. `child fetch` publishes the child's
   branch and copies it into the parent's checkout at
   `refs/remotes/children/<run-id>`.
 

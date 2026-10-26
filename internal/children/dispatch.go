@@ -92,6 +92,9 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	case p.owner != c.OwnerID:
 		refuse(fmt.Sprintf("the parent run now belongs to %s, not %s, who asked for it", p.owner, c.OwnerID))
 		return
+	case p.mission == nil && c.AccountID != c.OwnerID && !p.settings.SharedWhenMissing:
+		refuse("\"Use subscriptions shared with me when I don't have my own\" was turned off before this child started")
+		return
 	}
 	if s.cfg.Cost != nil {
 		if cost := s.cfg.Cost(); cost != nil {
@@ -153,15 +156,16 @@ func (s *Service) settle(ctx context.Context) error {
 		if err != nil && !gone {
 			return err
 		}
-		if !c.Detached && (gone || parent.Status.Terminal()) {
+		child, childErr := s.cfg.Store.GetRun(ctx, c.RunID)
+		childLive := childErr == nil && !child.Status.Terminal()
+		if !c.Detached && (gone || parent.Status.Terminal()) && (c.State == domain.ChildQueued || childLive) {
 			if stopErr := s.stop(ctx, c, ""); stopErr != nil {
 				slog.Warn("children: stop the child of an ended run", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
 			}
 			continue
 		}
-		child, err := s.cfg.Store.GetRun(ctx, c.RunID)
-		if err != nil {
-			return err
+		if childErr != nil {
+			return childErr
 		}
 		first, err := s.cfg.Store.MarkChildEndNotified(ctx, c.RunID)
 		if err != nil || !first || c.Detached || gone {

@@ -37,9 +37,10 @@ swarm's runs and their descendants form one tree keyed by the swarm.
      runs, `aether children on`), or allowed it for that one run (launch
      dialog **Options → Child runs**, run header **More → Allow child runs**,
      `aether run --children on`). A run's own setting overrides the member
-     setting and covers its descendants. It counts only while the member who
-     set it still owns the run, so a handoff never carries one member's
-     choice to another. Only the owner turns it on; the owner or an admin
+     setting and covers its descendants. An "on" counts only while the member
+     who set it still owns the run, so a handoff never carries one member's
+     choice to another; an "off" always counts. A handoff of a child or its
+     parent detaches the child. Only the owner turns it on; the owner or an admin
      turns it off. One member's choice never enables another member's runs.
    - Swarm runs: the swarm's execution choices are the authorization.
      Creating a swarm already lets agents start runs on those choices; the

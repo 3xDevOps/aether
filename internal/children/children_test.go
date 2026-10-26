@@ -540,3 +540,73 @@ func TestTreeUsageCountsEachRunOnceOnThePayingAccount(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminOffStopsChildrenAndHandoffDetaches(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.bob.ID, protocol.ChildSettingsParams{Enabled: on()})
+	parent := h.run(h.bob.ID, domain.LaunchACP, "parent")
+	if _, err := h.svc.Allow(h.ctx, h.ada, parent.ID, domain.ChildrenOff); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.start(parent.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
+		t.Fatalf("start after an admin turned child runs off = %v, want denied", err)
+	}
+	if _, err := h.svc.Allow(h.ctx, h.bob, parent.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	child := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex"})
+	h.settle()
+	if err := h.db.TransferRun(h.ctx, domain.RunID(child.RunID), h.ada.ID); err != nil {
+		t.Fatal(err)
+	}
+	if related, _ := h.svc.Related(h.ctx, parent.ID, domain.RunID(child.RunID)); related {
+		t.Fatal("a child handed to another member still messages its old parent outside the usual rules")
+	}
+	_, err := h.svc.HandleAgent(h.ctx, parent.ID, protocol.MethodChildCancel, json.RawMessage(`{"run_id":"`+child.RunID+`"}`))
+	if code(err) != protocol.CodeDenied {
+		t.Fatalf("the old parent cancelling a handed-off child = %v, want denied", err)
+	}
+	if err := h.svc.ValidateReport(h.ctx, parent.ID, store.CoordOutcomeSuccess); err != nil {
+		t.Fatalf("a handed-off child still holds its old parent's success: %v", err)
+	}
+}
+
+func TestSwarmChildrenNeedTheSwarmOwnersRun(t *testing.T) {
+	h := newHarness(t)
+	m := &domain.Mission{
+		WorkspaceID: h.ws.ID, Objective: "objective", AccountableHumanID: h.ada.ID, IdempotencyKey: "swarm-owner",
+		Integrator:       domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchACP},
+		ExecutionChoices: []domain.MissionExecutionChoice{{AccountMemberID: h.ada.ID, Harness: "codex", Mode: domain.LaunchACP}},
+	}
+	if err := h.db.CreateMission(h.ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	integrator := &domain.Run{ID: m.CurrentIntegratorRunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "objective", Harness: "claude", Mode: domain.LaunchACP, Status: domain.RunRunning}
+	if err := h.db.CreateRunWithID(h.ctx, integrator); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.TransferRun(h.ctx, integrator.ID, h.bob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.start(integrator.ID, protocol.ChildStartParams{Harness: "codex"}); code(err) != protocol.CodeDenied {
+		t.Fatalf("a swarm run handed to another member starting a child on the swarm's accounts = %v, want denied", err)
+	}
+}
+
+func TestSettleForgetsEndedTrees(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex"})
+	h.settle()
+	now := time.Now()
+	if _, err := h.db.UpdateRunStatus(h.ctx, parent.ID, domain.RunFailed, "killed", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	h.settle()
+	left, err := h.db.ChildrenToSettle(h.ctx)
+	if err != nil || len(left) != 0 {
+		t.Fatalf("children left to settle = %d, %v; want none once the tree ended", len(left), err)
+	}
+}

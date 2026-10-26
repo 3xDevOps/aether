@@ -68,6 +68,10 @@ type ChildStore interface {
 	SetWorkspaceChildLimits(ctx context.Context, ws domain.WorkspaceID, limits domain.ChildLimits) error
 }
 
+// detachTransferred detaches a run handed to another member from its parent
+// and from its children, so lineage never carries authority across owners.
+const detachTransferred = `UPDATE run_children SET detached = 1 WHERE (run_id = ?1 OR parent_run_id = ?1) AND owner_member_id <> ?2`
+
 const terminalStatuses = `'completed', 'merged', 'abandoned', 'failed', 'interrupted'`
 
 const childCols = `rc.run_id, rc.parent_run_id, rc.root_run_id, rc.tree_key, rc.mission_id, rc.workspace_id,
@@ -76,9 +80,12 @@ const childCols = `rc.run_id, rc.parent_run_id, rc.root_run_id, rc.tree_key, rc.
 	rc.detached, rc.error, rc.end_notified, rc.created_at, rc.started_at`
 
 // childReported holds for a reservation whose run's latest word is a
-// finalized success or failure report, before its run parks on it.
+// finalized success or failure report, before its run parks on it, and that
+// was not woken from parked since.
 const childReported = `EXISTS (SELECT 1 FROM coord_reports cr WHERE cr.run_id = rc.run_id AND cr.state = 'finalized'
-	AND cr.superseded_at IS NULL AND cr.outcome IN ('success', 'failure'))`
+	AND cr.superseded_at IS NULL AND cr.outcome IN ('success', 'failure')
+	AND NOT EXISTS (SELECT 1 FROM run_state_transitions t WHERE t.run_id = rc.run_id
+		AND t.from_status = 'needs-attention' AND t.to_status = 'running' AND t.at > cr.created_at))`
 
 // childBusy holds for a reservation that occupies a slot: launching, or
 // started and provisioning or working. A child that reported, waits on its

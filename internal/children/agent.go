@@ -61,6 +61,9 @@ func (s *Service) HandleAgent(ctx context.Context, run domain.RunID, method stri
 		if perr != nil {
 			return nil, perr
 		}
+		if c.Detached {
+			return nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf("%s: child %s is detached from run %s and runs on its own", method, c.RunID, run)}
+		}
 		switch method {
 		case protocol.MethodChildCancel:
 			return s.cancelChild(ctx, c)
@@ -334,7 +337,10 @@ func (s *Service) stop(ctx context.Context, c *domain.ChildReservation, actor do
 		return s.stop(ctx, fresh, actor)
 	case domain.ChildLaunching, domain.ChildStarted:
 		r, err := s.cfg.Store.GetRun(ctx, c.RunID)
-		if errors.Is(err, store.ErrNotFound) || (err == nil && r.Status.Terminal()) {
+		if errors.Is(err, store.ErrNotFound) {
+			return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("child %s is starting; cancel it again in a few seconds", c.RunID)}
+		}
+		if err == nil && r.Status.Terminal() {
 			return nil
 		}
 		if err != nil {

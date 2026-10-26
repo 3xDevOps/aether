@@ -616,12 +616,24 @@ func (d *DB) SetRunReview(ctx context.Context, id domain.RunID, review domain.Ru
 // (foreign_keys pragma is on): a bogus member surfaces as ErrConflict
 // via mapConstraint rather than being silently accepted.
 func (d *DB) TransferRun(ctx context.Context, id domain.RunID, to domain.MemberID) error {
-	err := notFoundOnZeroRows(d.db.ExecContext(ctx,
-		`UPDATE runs SET member_id = ? WHERE id = ?`, to, id))
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		err = fmt.Errorf("store: transfer run: %w", mapConstraint(err, ErrNotFound))
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: transfer run: %w", err)
 	}
-	return err
+	defer func() { _ = tx.Rollback() }()
+	if err = notFoundOnZeroRows(tx.ExecContext(ctx, `UPDATE runs SET member_id = ? WHERE id = ?`, to, id)); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return fmt.Errorf("store: transfer run: %w", mapConstraint(err, ErrNotFound))
+	}
+	if _, err = tx.ExecContext(ctx, detachTransferred, id, to); err != nil {
+		return fmt.Errorf("store: transfer run: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("store: transfer run: %w", err)
+	}
+	return nil
 }
 
 // SetRunMode updates only the run's launch mode and whether it runs over ACP.

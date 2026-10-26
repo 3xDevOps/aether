@@ -649,7 +649,8 @@ Otherwise a child runs on your own account. **Allow child runs** in a run's
 **More** menu, or **Options → Child runs** in the launch dialog, allows or
 stops them for that one run and its children without changing your setting.
 Only the run's owner allows it, and a handoff to another member voids it. An
-admin can turn it off. The dashboard suggests the feature when an agent tried
+admin can turn it off. Handing a run to another member detaches it from its
+parent and from its children, so no lineage spans two owners. The dashboard suggests the feature when an agent tried
 to start a child while it was off; **Not now** hides that for 7 days, then
 30, and **Don't show again** for good.
 

@@ -75,6 +75,8 @@ func (s *Service) resolve(ctx context.Context, parentID domain.RunID) (*policy, 
 	switch {
 	case parent.Status.Terminal():
 		p.refusal = fmt.Sprintf("run %s has finished", parent.ID)
+	case p.mission != nil && parent.MemberID != p.owner:
+		p.refusal = fmt.Sprintf("run %s belongs to %s, not to %s who owns swarm %s, so it cannot start children on the swarm's accounts", parent.ID, parent.MemberID, p.owner, p.mission.ID)
 	case parent.Mode == domain.LaunchHeadless:
 		p.refusal = "a Background run exits when its turn ends, before a child's result can reach it; start the parent in Standard or Enhanced mode"
 	case p.mission != nil && p.mission.Phase == domain.MissionPhaseCancelled:
@@ -99,13 +101,11 @@ func (s *Service) resolve(ctx context.Context, parentID domain.RunID) (*policy, 
 func (s *Service) memberAllows(ctx context.Context, run *domain.Run, settings store.ChildSettings) (bool, error) {
 	owner := run.MemberID
 	for r := run; r != nil; {
-		if r.MemberID == owner && r.ChildrenSetBy == owner {
-			switch r.Children {
-			case domain.ChildrenOn:
-				return true, nil
-			case domain.ChildrenOff:
-				return false, nil
-			}
+		switch {
+		case r.Children == domain.ChildrenOff:
+			return false, nil
+		case r.Children == domain.ChildrenOn && r.MemberID == owner && r.ChildrenSetBy == owner:
+			return true, nil
 		}
 		if r.ParentRunID == "" || r.MissionRole != "" {
 			break
