@@ -8,7 +8,9 @@ const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url
 
 type Handler = (event: Record<string, unknown>) => void
 
-function worker(windows: { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void }[] = []) {
+type Window = { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void; navigate: (url: string) => Promise<unknown> }
+
+function worker(windows: Window[] = []) {
   const handlers: Record<string, Handler> = {}
   const self = {
     addEventListener: (type: string, handler: Handler) => {
@@ -30,7 +32,7 @@ function worker(windows: { focused: boolean; focus: () => Promise<void>; postMes
   return { self, dispatch }
 }
 
-const window = (focused: boolean) => ({ focused, focus: vi.fn(async () => {}), postMessage: vi.fn() })
+const window = (focused: boolean): Window => ({ focused, focus: vi.fn(async () => {}), postMessage: vi.fn(), navigate: vi.fn(async () => null) })
 
 describe('service worker', () => {
   it('shows one notification per run, replacing the older one', async () => {
@@ -88,6 +90,27 @@ describe('service worker', () => {
     const front = window(true)
     await worker([front]).dispatch('notificationclick', { notification: { close: vi.fn(), data: { workspace: 'ws-b9gjv14p8h' } } })
     expect(front.postMessage).toHaveBeenCalledWith({ type: 'aether:open-workspace', workspace: 'ws-b9gjv14p8h' })
+  })
+
+  it('keeps one notification per page and opens the page it names', async () => {
+    const { self, dispatch } = worker()
+    const url = '/?page=missions&id=mis-rtgje8zxp6'
+    await dispatch('push', { data: { json: () => ({ title: 'Ship watches', body: 'Swarm completed', url }) } })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Ship watches', expect.objectContaining({ tag: url, data: { url } }))
+    await dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
+    expect(self.clients.openWindow).toHaveBeenCalledWith(url)
+
+    const front = window(true)
+    await worker([front]).dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
+    expect(front.navigate).toHaveBeenCalledWith(url)
+    expect(front.focus).toHaveBeenCalled()
+  })
+
+  it('opens the page in a new window when the open one is not its own', async () => {
+    const front = { ...window(true), navigate: vi.fn(async () => { throw new TypeError('not controlled') }) }
+    const { self, dispatch } = worker([front])
+    await dispatch('notificationclick', { notification: { close: vi.fn(), data: { url: '/?page=settings&id=watches' } } })
+    expect(self.clients.openWindow).toHaveBeenCalledWith('/?page=settings&id=watches')
   })
 
   it('opens the dashboard itself from a test notification', async () => {
