@@ -2036,6 +2036,7 @@ CREATE TABLE audit (
 CREATE INDEX audit_member ON audit(member_id, seq);
 CREATE INDEX audit_kept ON audit(member_id, security, seq);
 CREATE INDEX audit_connector ON audit(connector_id, seq);
+CREATE INDEX audit_target ON audit(target, seq);
 `,
 }
 
