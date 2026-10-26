@@ -1315,10 +1315,21 @@ Needs you count changes.
 
 **Map** exposes every individual run, including each swarm integrator and
 worker. `mapRuns()` reads the unaggregated `runRows()` presentation rather
-than Board's swarm cards. Both views reuse `RunCard`, the five run states,
-agent display names, owner avatars and card actions. A map card opens that
+than Board's swarm cards, and `useMapRuns` reuses unchanged card objects
+(`dequal`), so a `run.agent` event re-renders one card. A map card opens that
 individual run; its primary action still targets the condition that needs
 the viewer.
+
+A map card (`map-card.tsx`) has three rows: the agent glyph in a tile, the
+run's label over a muted line (agent display name, model, and the workspace
+for a run outside the active one) and a state pill (`Badge` with the
+`StatusDot`); the reason, two lines at most, in the text colour when it
+needs you and muted otherwise; and a meta row with the owner avatar when
+it differs from the section's, `+added −deleted`, the compact age, the
+`card:meta` slot, the card's action on hover, focus or a touch screen and, on
+an integrator, the fold button. The action and fold button keep their full
+width; when the row runs out of room, the rest is clipped from the
+`card:meta` end.
 
 The **Map workspace scope** picker selects the active workspace or **All
 workspaces**, without changing the sidebar's selected workspace or Board's
@@ -1330,16 +1341,48 @@ runs while keeping Needs you and Working visible; **Back to Finished**
 returns. Archived runs obey workspace and Mine, and an all-archived scope
 keeps the toggle available.
 
-Named owner boundaries keep workers with their actual owners. Relationships
+The Runs strip counts every run in scope, folded workers included: **Runs
+N**, **N working**, and the **N needs you** and **N failed** chips. Each chip
+opens a list (oldest wait first; newest failure first) whose rows bring the
+run into view: its swarm unfolds if folded, the camera centres it at a
+readable zoom, and its title takes focus.
+
+`map-layout.ts` lays out units: a standalone run, or a swarm tree with the
+integrator above all its visible workers, whoever owns them. Relationships
 require an explicit worker role, matching `workspace_id` and `mission_id`,
-and an `integrator_run_id` identifying a visible integrator. Directed
-connectors cross owner boundaries as dashed lines. A worker whose integrator
-is filtered, archived or not listed remains reachable and is labelled
-"integrator not visible". Task text never establishes a relationship.
-`map-layout.ts` packs fixed 320×160 cards into deterministic owner shelves;
-run state, timestamps and input ordering do not reposition nodes.
-Title, timestamp and owner-profile updates reuse geometry. Changes to visible
-run identities, ownership or swarm relationships repack it.
+and an `integrator_run_id` identifying a visible integrator; task text never
+establishes one. Up to four workers hang in one row from a bus; five or more
+fill four fixed columns row by row, each on a rail, so a new worker is
+appended without moving the others. Workers whose integrator is filtered,
+archived or not listed share one unit captioned "Integrator not visible". A
+swarm's caption is its objective and phase.
+
+Units are placed newest first by the root run's `created_at`: each takes the
+highest free spot in a band of one common width, leftmost on a tie, so the
+newest sit top left and older units fill the room under short neighbours.
+Workers keep spawn order. Sections stack the
+viewer's runs, then other owners by their newest unit, then **Needs you
+elsewhere**: Needs you runs present only because Needs you ignores scope and
+Mine, last so their churn never reflows the rest: the band width and framing
+come from owner sections alone. With two or more owner sections each is
+framed and headed by its owner and count; Needs you elsewhere is always
+framed. A teammate's worker inside your swarm shows its owner's avatar.
+Section headers and swarm captions grow as the camera zooms out so a distant
+map still reads; a caption grows only into the gap above its unit.
+
+Geometry is fixed per text size and pointer. State, reasons, titles,
+timestamps and profile edits never move a node. A repack happens only when
+runs are added or removed, ownership or relationships change, a swarm folds,
+or the text size or pointer changes; moved units and cards glide from their
+old place, new cards fade in, removed ones fade out, and the camera stays.
+
+An integrator's fold button shows its worker count; folded, `+N`. Folding
+fades the workers out and repacks, and the camera follows so the integrator
+stays where it was on screen; a folded swarm never unfolds by itself.
+When hidden workers need you the button turns amber, as `+N · k need you`.
+Unlike the sidebar, whose fold keeps Needs you workers visible, the Map
+never moves cards on a state change. Folds persist in `aether.ui`
+(`boardMapFolded`), pruned to runs that still exist.
 
 - Drag the canvas or a card to pan; releasing a drag never opens the card.
   A press released outside the canvas cannot pan on hover or consume the next
@@ -1349,15 +1392,20 @@ run identities, ownership or swarm relationships repack it.
 - With the canvas focused, arrow keys pan, Shift increases the step,
   `+` / `-` zoom, and `Home` / `0` fit all runs.
 - **Zoom out**, the zoom percentage, **Zoom in** and **Fit** remain available
-  in the wrapping Runs toolbar. Tab reaches every run and its actions,
-  bringing an offscreen focused card into view.
+  in the wrapping Runs toolbar. Tab reaches every run, its action and its
+  fold button in placement order, bringing an offscreen focused card into
+  view.
 
 `aether.ui` stores Board/List/Map per active workspace and the map camera per
 workspace/all-workspaces, Mine and archive scope. These origin-local
 preferences survive view switches, navigation and reloads. A new camera
-fits once; live metadata, added or removed runs and viewport resizing never
-reset a chosen camera. Use **Fit** to frame the changed set. A map card keeps
-the canvas fill and clamps its description to one line.
+fits all runs once, unless that would zoom below 50%: then it opens at 100%
+on the top left, where the newest runs are, panned just enough to show the
+first unit's top card whole, so a wide swarm on a phone opens on its
+integrator. Live metadata, added or removed
+runs and viewport resizing never reset a chosen camera. Use **Fit** to frame
+the changed set. Cameras saved before this layout (persist version 9) are
+dropped once.
 
 ### Run state
 

@@ -32,6 +32,7 @@ import {
   createUiSlice,
   maxSidebarWidth,
   minSidebarWidth,
+  normalizeBoardMapFolded,
   normalizeBoardMapViewports,
   normalizeBoardViews,
   onboardingSteps,
@@ -105,6 +106,7 @@ const persistedUi = (s: RootState) => ({
   boardViews: s.boardViews,
   boardMapAllWorkspaces: s.boardMapAllWorkspaces,
   boardMapViewports: s.boardMapViewports,
+  boardMapFolded: s.boardMapFolded,
   launchDefaults: s.launchDefaults,
   dismissedUpdates: s.dismissedUpdates,
   sysboxNudgeDismissed: s.sysboxNudgeDismissed,
@@ -155,14 +157,14 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
-        version: 8,
+        version: 9,
         // Before 2 the Repository step record is unusable and is dropped, so
         // the step asks the gateway again. Before 3 the resume point is an
         // index. Before 4 there is no furthest step, so the resume point
         // stands in, or the header would turn every later step inert. Before 6
         // the stored width sized the old run pane, not the sidebar. Before 8
         // the step names are the six-step wizard's and the run dock height is
-        // still stored.
+        // still stored. Before 9 map cameras frame the old packed geometry.
         migrate: (persisted, version): PersistedState => {
           const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
@@ -194,6 +196,7 @@ export function createRootStore() {
             state.onboardingFurthest = v7OnboardingSteps[walk.onboardingFurthest ?? ''] ?? state.onboardingStep
             delete (state as { runDockHeight?: unknown }).runDockHeight
           }
+          if (version < 9) delete state.boardMapViewports
           return state
         },
         // `migrate` only runs on a version change, and xterm does not validate
@@ -206,6 +209,7 @@ export function createRootStore() {
             boardViews: normalizeBoardViews(stored.boardViews),
             boardMapAllWorkspaces: stored.boardMapAllWorkspaces === true,
             boardMapViewports: normalizeBoardMapViewports(stored.boardMapViewports),
+            boardMapFolded: normalizeBoardMapFolded(stored.boardMapFolded),
             sidebarWidth: Math.min(maxSidebarWidth, Math.max(minSidebarWidth, Number(stored.sidebarWidth) || current.sidebarWidth)),
             assistantOpen: stored.assistantOpen === true && !onPhone(),
             assistantWidth: clampAssistantWidth(Number(stored.assistantWidth) || current.assistantWidth),

@@ -278,13 +278,18 @@ Use compact workbench geometry rather than landing-page ornament:
   others in `muted`, never with a second dot or a **New** pill. From 365px
   of card width (`@container`) the description and footer indent under the
   title. See [Dashboard SPA: Board](dashboard-frontend.md#board).
-- Board's **Map** reuses those cards at 320×160 inside a bounded pan/zoom
-  canvas. Owner groups use `bg-chrome` and `border-seam`, cards `bg-canvas`;
-  identity colour stays on the shared avatars. Muted directed connectors
-  link integrators to workers, dashed across owners. The Runs toolbar wraps
-  its scope, Mine, archive and camera controls on phones. Fixed geometry
-  accommodates the larger text settings and coarse-pointer card actions;
-  live presentation updates do not move nodes or reset the camera.
+- Board's **Map** draws its own compact cards (288×128 by default, larger
+  for the larger text sizes, 20px taller on a coarse pointer) on a
+  `bg-chrome` canvas: `bg-canvas` with `shadow-card`, a 22px `bg-chrome` agent
+  tile, the state as a soft `Badge` led by its `StatusDot`, and no pulse.
+  Swarms are org charts joined by 1.5px `icon-faint` connectors with rounded
+  corners and an 8px ringed dot under the integrator. Owner sections, when
+  there are two or more, and Needs you elsewhere are `border-seam` frames
+  with no fill; identity colour stays on the shared avatars. The **N needs
+  you** and **N failed** chips are small buttons on their state's soft fill,
+  a 20% mix of the state colour on hover and while open. The Runs toolbar
+  wraps its counts, scope, Mine, archive and camera controls on phones. Live
+  presentation updates do not move nodes or reset the camera.
 
 At 390px every operation remains available through compact navigation or
 overflow, stacked forms, bounded dialogs and tree-to-file navigation. The main
@@ -437,6 +442,12 @@ literal time or curve.
   lists the viewer reorders; never a virtualized list. The one store-driven
   use is Board moving at most eight cards between columns; see
   [Board](dashboard-frontend.md#board).
+- The Map repacks with motion: units and cards glide from their old layout
+  coordinates on `--duration-glide` / `--ease-glide` (never DOM-measured,
+  since the world is scaled), new cards rise 6px and fade in over 220ms after
+  a 150ms hold, staggered by `--stagger-row` up to the eighth, and removed
+  cards fade out over 130ms. Folding fades workers out last to first before
+  the repack. Hydration and scope changes never animate.
 - Row selection, focus outlines and exits change at once.
 - `state-pulse` (the run header's working dot, the Session view's live row
   and the working rows on a swarm's Tasks list) breathes: opacity to
