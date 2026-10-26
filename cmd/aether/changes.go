@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,11 +66,22 @@ func runChanges(args []string) error {
 			}
 			params.WorkspaceID = id
 		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		next := func() {
+			if params.Cursor != "" {
+				_, _ = fmt.Fprintln(os.Stderr, "next: "+changesResume(params))
+			}
+		}
 		tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		_, _ = fmt.Fprintln(tw, "SEQ\tTIME\tRUN\tKIND\tDETAIL")
-		for {
+		for ctx.Err() == nil {
 			var res protocol.ChangesListResult
 			if err := c.Call(protocol.MethodChangesList, params, &res); err != nil {
+				var refused *protocol.Error
+				if !errors.As(err, &refused) {
+					next()
+				}
 				return err
 			}
 			for _, ch := range res.Changes {
@@ -82,11 +95,15 @@ func runChanges(args []string) error {
 				continue
 			}
 			if !*follow {
-				_, _ = fmt.Fprintln(os.Stderr, "next: "+changesResume(params))
-				return nil
+				break
 			}
-			time.Sleep(changesPollInterval)
+			select {
+			case <-ctx.Done():
+			case <-time.After(changesPollInterval):
+			}
 		}
+		next()
+		return nil
 	})
 }
 
@@ -136,8 +153,11 @@ func changeDetail(ch protocol.Change) string {
 		detail = fmt.Sprintf("%s %s %s", ch.MissionID, ch.Swarm.Change, ch.Swarm.TaskID)
 	case ch.Lifecycle != nil:
 		detail = ch.Lifecycle.Action
-		if ch.Lifecycle.Action == "workspace-deleted" {
+		switch ch.Lifecycle.Action {
+		case "workspace-deleted":
 			detail += " " + ch.WorkspaceID
+		case "swarm-deleted":
+			detail += " " + ch.MissionID
 		}
 		if ch.Lifecycle.ToMemberID != "" {
 			detail += " to " + ch.Lifecycle.ToMemberID
