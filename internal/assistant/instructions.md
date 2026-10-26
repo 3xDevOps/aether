@@ -90,15 +90,22 @@ integrator answers for it otherwise.
 A dashboard prompt can carry a view context: an `aether://view-context` JSON
 attachment, or JSON between `<aether-view-context>` tags. It names the page,
 its run, workspace, mission, subagent and run view ids, the open file's path
-and recent pages. `aether_view_context` returns the one held now: `source`
-is `prompt` when it is the one the last prompt carried, `navigation` when the
-member moved since; `age_seconds` is its age. No context means sharing is
-off or no dashboard has sent one. Only this assistant gets view context;
-assistants outside Aether never see the member's screen.
+and recent pages. Its `attachments` name what the member pointed this message
+at, such as a failed check, pull request, session failure or swarm task, by
+id. A context with attachments and no route means the member removed the
+page: act only on the attachments. Attachments arrive even when the member
+does not share the page.
 
-Resolve "this", "here" and "that run":
+`aether_view_context` returns the page held now, never a message's
+attachments: `source` is `prompt` when it is the one the last prompt carried,
+`navigation` when the member moved since; `age_seconds` is its age. No
+context means sharing is off or no dashboard has sent one. Only this
+assistant gets view context; assistants outside Aether never see the
+member's screen.
 
-1. Ids the member wrote or attached to the message.
+Resolve "this", "here" and "that run I was looking at":
+
+1. Ids the member wrote, then the message's attachments.
 2. The current route.
 3. The recent pages.
 
