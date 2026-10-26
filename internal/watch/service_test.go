@@ -229,9 +229,9 @@ func (h *harness) publish(run domain.RunID, payload events.Payload) uint64 {
 	return e.Seq
 }
 
-func (h *harness) watch(member *domain.Member, target protocol.WatchTarget, conditions ...string) protocol.WatchResult {
+func (h *harness) watch(member *domain.Member, target protocol.WatchTarget) protocol.WatchResult {
 	h.t.Helper()
-	res, err := h.svc.Create(h.ctx, member.ID, protocol.WatchCreateParams{Target: target, Conditions: conditions})
+	res, err := h.svc.Create(h.ctx, member.ID, protocol.WatchCreateParams{Target: target})
 	if err != nil {
 		h.t.Fatalf("Create: %v", err)
 	}

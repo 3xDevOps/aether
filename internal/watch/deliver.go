@@ -140,7 +140,7 @@ func (s *Service) stillDue(ctx context.Context, n *store.WatchNotification, pref
 	if err != nil {
 		return "", "", err
 	}
-	if err := s.allowed(ctx, w); errors.Is(err, errRevoked) {
+	if err = s.allowed(ctx, w); errors.Is(err, errRevoked) {
 		return protocol.WatchStatusFailed, err.Error(), nil
 	} else if err != nil {
 		return "", "", err
