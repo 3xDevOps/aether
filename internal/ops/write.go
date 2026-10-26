@@ -161,8 +161,10 @@ var inflight sync.Map
 // keyless gives a launch with no idempotency key one: an identical
 // launch's still in flight (dup is true), else a new one, unless guard,
 // run under the member's lock, finds a recent identical launch (found is
-// true). done ends the in-flight entry when the launch call returns.
-func keyless(member, method string, params any, guard func() (bool, error)) (key string, dup, found bool, done func(), err error) {
+// true). done ends the in-flight entry when the launch call returns with
+// err, or duplicateWindow later when err leaves unknown whether the launch
+// happened, so a keyless retry meanwhile replays the key.
+func keyless(member, method string, params any, guard func() (bool, error)) (key string, dup, found bool, done func(error), err error) {
 	defer lockLaunches(member)()
 	b, err := json.Marshal(params)
 	if err != nil {
@@ -170,14 +172,21 @@ func keyless(member, method string, params any, guard func() (bool, error)) (key
 	}
 	fingerprint := member + "\x00" + method + "\x00" + string(b)
 	if k, ok := inflight.Load(fingerprint); ok {
-		return k.(string), true, false, func() {}, nil
+		return k.(string), true, false, func(error) {}, nil
 	}
 	if found, err = guard(); err != nil || found {
 		return "", false, found, nil, err
 	}
 	key = uuid.NewString()
 	inflight.Store(fingerprint, key)
-	return key, false, false, func() { inflight.Delete(fingerprint) }, nil
+	return key, false, false, func(err error) {
+		forget := func() { inflight.CompareAndDelete(fingerprint, key) }
+		if uncertain(err) {
+			time.AfterFunc(duplicateWindow, forget)
+			return
+		}
+		forget()
+	}, nil
 }
 
 // launchWait is how long a launch tool waits for the launch call before
@@ -195,11 +204,11 @@ const replayWait = 5 * time.Second
 // that replay failed or is not answered in time either. done runs when the
 // launch call returns. A surface with no budget waits for the launch, since
 // its member may still be deciding whether to approve it.
-func launch[R any](ctx context.Context, c calls, method string, params any, done func()) (res R, finished bool, err error) {
+func launch[R any](ctx context.Context, c calls, method string, params any, done func(error)) (res R, finished bool, err error) {
 	act := c.act
 	if c.surface.budget() == 0 {
 		err = act(ctx, method, params, &res)
-		done()
+		done(err)
 		return res, true, err
 	}
 	detached := context.WithoutCancel(ctx)
@@ -207,7 +216,7 @@ func launch[R any](ctx context.Context, c calls, method string, params any, done
 	var launched R
 	go func() {
 		err := act(detached, method, params, &launched)
-		done()
+		done(err)
 		first <- err
 	}()
 	select {
@@ -272,7 +281,7 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	l := links(info.DashboardURL)
 	params := protocol.RunLaunchParams{WorkspaceID: in.WorkspaceID, Task: in.Task, Harness: in.Harness, Mode: in.Mode, Model: in.Model,
 		IdempotencyKey: in.IdempotencyKey}
-	dup, done := false, func() {}
+	dup, done := false, func(error) {}
 	if params.IdempotencyKey == "" {
 		var prior protocol.Run
 		var found bool
@@ -389,7 +398,7 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	l := links(info.DashboardURL)
 	params := protocol.MissionCreateParams{WorkspaceID: in.WorkspaceID, Objective: in.Objective,
 		Integrator: protocol.MissionIntegrator(integrator), ExecutionChoices: choices, IdempotencyKey: in.IdempotencyKey}
-	dup, done := false, func() {}
+	dup, done := false, func(error) {}
 	if params.IdempotencyKey == "" {
 		var prior protocol.Mission
 		var found bool

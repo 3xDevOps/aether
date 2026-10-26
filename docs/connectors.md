@@ -228,7 +228,8 @@ the same workspace, agent, task, mode and model within 60 seconds returns your
 earlier run, unless it failed, was interrupted or was abandoned, and a swarm
 with the same workspace, objective and agents within 60 seconds returns your
 earlier swarm, unless it was cancelled, instead of starting another; so does an
-identical launch still starting. A message without a key reuses the key of the
+identical launch still starting, or one that failed in the last 60 seconds
+without saying whether it started. A message without a key reuses the key of the
 same message to the same run still being sent or sent within 60 seconds, so a
 retry is delivered once and its result has `duplicate: true`. To send the same
 text again on purpose, pass a new `idempotency_key`.

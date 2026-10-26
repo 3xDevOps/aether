@@ -383,15 +383,21 @@ func failed(err error) *mcp.CallToolResult {
 // retryable adds to a write's failure the key that repeats it safely when
 // the failure leaves unknown whether it happened.
 func retryable(err error, key string) error {
-	var perr *protocol.Error
-	switch {
-	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
-		perr = &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
-	case !errors.As(err, &perr) || (perr.Code != protocol.CodeUnavailable && perr.Code != protocol.CodeInternal):
+	if !uncertain(err) {
 		return err
 	}
+	perr := &protocol.Error{Code: protocol.CodeUnavailable, Message: err.Error()}
+	errors.As(err, &perr)
 	return &protocol.Error{Code: perr.Code, Data: perr.Data,
 		Message: perr.Message + "; retry with idempotency_key " + key + ", which does it at most once"}
+}
+
+// uncertain is whether a write's failure leaves unknown whether it
+// happened.
+func uncertain(err error) bool {
+	var perr *protocol.Error
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) ||
+		(errors.As(err, &perr) && (perr.Code == protocol.CodeUnavailable || perr.Code == protocol.CodeInternal))
 }
 
 // links builds dashboard links from server.info's dashboard_url; with none,

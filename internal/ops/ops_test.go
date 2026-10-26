@@ -234,3 +234,45 @@ func TestKeyedAnswerRetry(t *testing.T) {
 		t.Fatalf("a keyless answer to nothing pending = %q", text)
 	}
 }
+
+// A keyless launch whose call failed without saying whether the run
+// started keeps its key, so a keyless retry replays it instead of
+// launching again; a refused launch does not.
+func TestKeylessLaunchKeepsKeyAfterUncertainFailure(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{Member: protocol.Member{ID: "mem-uncertain"}})
+	f.answers[protocol.MethodRunLaunch] = returns(protocol.RunLaunchResult{Run: protocol.Run{ID: "run-9", Status: "starting"}})
+	cs := assistantSession(t, f.call)
+	keys := func() []string {
+		var out []string
+		for _, c := range called(f, protocol.MethodRunLaunch) {
+			var p protocol.RunLaunchParams
+			if err := json.Unmarshal([]byte(c.params), &p); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, p.IdempotencyKey)
+		}
+		return out
+	}
+	args := map[string]any{"workspace_id": "ws-1", "harness": "claude", "task": "add a health check"}
+	f.errs[protocol.MethodRunLaunch] = &protocol.Error{Code: protocol.CodeUnavailable, Message: "connection closed"}
+	if text, _, failed := try(t, cs, "aether_launch_run", args); !failed || !strings.Contains(text, "retry with idempotency_key") {
+		t.Fatalf("an uncertain launch failure = %q", text)
+	}
+	delete(f.errs, protocol.MethodRunLaunch)
+	if _, out := run(t, cs, "aether_launch_run", args); out["run_id"] != "run-9" {
+		t.Fatalf("the retry = %v", out)
+	}
+	if k := keys(); len(k) != 2 || k[0] == "" || k[0] != k[1] {
+		t.Fatalf("a keyless retry after an uncertain failure used keys %v, want the first one", k)
+	}
+
+	args["task"] = "add a readiness check"
+	f.errs[protocol.MethodRunLaunch] = &protocol.Error{Code: protocol.CodeDenied, Message: "declined"}
+	try(t, cs, "aether_launch_run", args)
+	delete(f.errs, protocol.MethodRunLaunch)
+	run(t, cs, "aether_launch_run", args)
+	if k := keys(); len(k) != 4 || k[2] == k[3] {
+		t.Fatalf("a retry after a refused launch used keys %v, want a new one", k)
+	}
+}
