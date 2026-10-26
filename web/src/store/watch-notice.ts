@@ -18,9 +18,10 @@ export function openLink(store: RootStore, link: string): void {
  */
 export async function applyWatchChanged(store: RootStore, client: Api, ev: Event): Promise<void> {
   const p = ev.payload as WatchChangedPayload
-  if (store.getState().info?.member.id !== p.member_id) return
+  const owner = () => store.getState().info?.member.id === p.member_id
+  if (!owner()) return
   const result = await readWatch(store, client, p.watch_id).catch(() => null)
-  if (!result || !p.notification_id) return
+  if (!result || !p.notification_id || !owner()) return
   if (Date.now() + serverOffset(store) - Date.parse(ev.time) > liveWindowMs) return
   const notice = result.notifications.find((n) => n.id === p.notification_id)
   if (!notice) return

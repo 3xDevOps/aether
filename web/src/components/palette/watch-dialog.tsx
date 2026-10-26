@@ -39,15 +39,17 @@ export function WatchDialog({ client = api }: { client?: Api }) {
   const [target] = useState<WatchTarget | null>(() => picked ?? (runID ? { kind: 'run', run_id: runID } : null))
   const title = useTargetTitle(target)
   const [chosen, setChosen] = useState<WatchCondition[]>(() => (target ? defaultConditions(target.kind) : []))
-  // One key per open form, so a retry after a lost answer cannot make a second watch.
-  const [key] = useState(() => crypto.randomUUID())
+  // One key per request: a retry after a lost answer cannot make a second watch, and changed conditions are a new request.
+  const [key, setKey] = useState(() => crypto.randomUUID())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const id = useId()
   if (!target) return null
 
-  const toggle = (condition: WatchCondition, on: boolean) =>
+  const toggle = (condition: WatchCondition, on: boolean) => {
     setChosen((list) => (on ? [...list, condition] : list.filter((c) => c !== condition)))
+    setKey(crypto.randomUUID())
+  }
 
   const submit = async () => {
     setBusy(true)
