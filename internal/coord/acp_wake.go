@@ -329,20 +329,16 @@ func (s *Service) enhancedWakeLock(run domain.RunID) *sync.Mutex {
 }
 
 // RemindReport hands an idle session the server drives prompt, the reminder
-// to report the turn that just ended, under the admission a mail wake
-// takes: a protected run, a worker a human holds or a stale assignment is
-// not prompted. Neither is a run a member controls: the next prompt is
-// theirs.
+// to report the turn that just ended, under ReminderAdmission: a protected
+// run, a worker a human holds, a run a member controls or a stale assignment
+// is not prompted.
 func (s *Service) RemindReport(ctx context.Context, run domain.RunID, prompt string) error {
-	if s.cfg.Disabled || s.cfg.Waker == nil || s.cfg.WakeAdmission == nil {
+	if s.cfg.Disabled || s.cfg.Waker == nil || s.cfg.ReminderAdmission == nil {
 		return errors.New("coord: report reminder: no session waker")
-	}
-	if s.cfg.Controlled != nil && s.cfg.Controlled(run) {
-		return errors.New("coord: report reminder: a member controls the run")
 	}
 	if !s.enterRun(run) {
 		return errors.New("coord: report reminder: the run is closing")
 	}
 	defer s.leaveRun(run)
-	return s.cfg.WakeAdmission(ctx, run, func() error { return s.cfg.Waker.Wake(ctx, run, prompt) })
+	return s.cfg.ReminderAdmission(ctx, run, func() error { return s.cfg.Waker.Wake(ctx, run, prompt) })
 }

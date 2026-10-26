@@ -293,6 +293,10 @@ func (d *acpDriver) askReport(entry *supervised, st acphost.TurnState, forward b
 			if turn.start == 0 {
 				turn.start = started
 			}
+			// A reconnect replaced r: the reminder reached its session.
+			if current := d.runs[entry.runID]; current != nil && current != r && current.asked == nil {
+				current.asked = turn
+			}
 			d.mu.Unlock()
 			return
 		}
