@@ -63,7 +63,7 @@ merged or closed.
 
 | Condition | Notice |
 | --- | --- |
-| `ci` | When every check run and commit status on the head commit is final: `Checks passed on #7`, or `2 checks failed on #7: build, lint`. One notice per head commit and set of check runs, so a failure, a rerun and a pass send the failure, then the pass, and a new push sends one more. A pull request with no checks on its head commit never sends one; its summary says so. |
+| `ci` | When every check run and commit status on the head commit is final: `Checks passed on #7`, or `2 checks failed on #7: build, lint`. One notice per head commit and set of check runs, so a failure, a rerun and a pass send the failure, then the pass, and a new push sends one more. A cancelled check run counts as failed unless a newer run of the same job replaced it in the same check suite or GitHub Actions workflow. A pull request with no checks on its head commit never sends one; its summary says so. |
 | `review` | `mona approved #7`, `mona requested changes on #7`, `mona commented on #7` (a review with a body). One per review. |
 | `merged`, `pr_merged` | `PR #7 merged on GitHub`. Only GitHub's merged state sends it; an agent reporting success does not. |
 | `closed` | `PR #7 closed without merging on GitHub`. |
