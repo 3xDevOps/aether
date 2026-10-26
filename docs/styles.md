@@ -358,7 +358,8 @@ Use compact workbench geometry rather than landing-page ornament:
   holds 8px items. Edges that meet another surface stay square: sheets at the
   screen edge, a run's details box where it docks, joined buttons and dock
   tabs. `rounded-full` is for dots, radios, avatars, meters and the
-  composer's and the Notes field's send control only.
+  composer's and the Notes field's send control only. The Context window's
+  grid cells and legend swatches are 2px (`rounded-xs`).
 - Elevation: panes and headers have none; cards `shadow-card`, lifting to
   `shadow-card-hover` on hover; secondary buttons `shadow-button`; menus,
   popovers, selects, tooltips, toasts and the run details box
@@ -533,7 +534,8 @@ never decorates still data. `web/src/motion.css` holds the tokens:
 Raw steps (`--duration-100` to `--duration-1600`) cover the rest: 100ms row,
 menu-item and tab-label fades; 200ms chevron turns, word swaps, dialog
 entrances, scrim fades and disclosures closing; 220ms sheets on
-`--ease-sheet`; 360ms row entrances; 1000ms the Working pulse. Each role has
+`--ease-sheet`; 360ms row entrances; 500ms number tweens
+(`useNumberTween`); 1000ms the Working pulse. Each role has
 a `duration-<role>` utility that also sets `--tw-duration`, so a later
 `transition-*` cannot reset it. `web/src/lib/motion.ts` reads the same tokens
 for script animations (`play`, `playEntrance`); code names a token, never a
@@ -573,6 +575,11 @@ literal time or curve.
   a 150ms hold, staggered by `--stagger-row` up to the eighth, and removed
   cards fade out over 130ms. Folding fades workers out last to first before
   the repack. Hydration and scope changes never animate.
+- A popover may animate what it shows: the Context window tweens its token
+  total over 500ms and recolours its grid cells on the glide curve, each 2ms
+  after the one before (`--stagger-cell`). Nothing runs on open; the number and
+  cells move when a new report arrives or the pointer singles out a category,
+  and the hover dim moves every cell together.
 - Row selection, focus outlines and exits change at once.
 - `state-pulse` (the run header's working dot, the Session view's live row
   and live steps header, a plan's step in progress, the dot under a streaming
