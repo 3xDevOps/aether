@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/3xDevOps/Aether/internal/fallback"
@@ -115,7 +116,7 @@ type repoRef struct {
 }
 
 // launchReceipt is what a launch started and on what, the result field
-// launch of aether_launch_run, aether_launch_swarm, aether_launch_template,
+// launch of aether_launch_run, aether_launch_swarm,
 // aether_get_run and aether_get_swarm. RequestedAccount is set when usage
 // fallback moved a run off the account asked for.
 type launchReceipt struct {
@@ -164,23 +165,12 @@ type launchOptionsInput struct {
 	AccountMemberID string `json:"account_member_id,omitempty"`
 }
 
-type launchTemplateInput struct {
-	WorkspaceID    string            `json:"workspace_id"`
-	Name           string            `json:"name"`
-	Params         map[string]string `json:"params,omitempty" jsonschema:"values for the template's placeholders"`
-	IdempotencyKey string            `json:"idempotency_key,omitempty"`
-}
-
 var launchOps = []Op{
 	opOf("aether_launch_options", "Launch options", ScopeRead, true, nextWorkspaces,
 		"Use this when choosing what to launch: workspaces, your accounts with usage, their agents and modes, swarm eligibility, fallback; "+
 			"templates with workspace_id, models with models.", launchOptions).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodAccountList, protocol.MethodAgentList,
 		protocol.MethodAccountUsage, protocol.MethodTemplateList, protocol.MethodAgentModels),
-	opOf("aether_launch_template", "Launch template", ScopeWrite, false, "call aether_launch_options with workspace_id for its templates",
-		"Use this when the user asks to run a saved template, on your own account."+
-			idempotencyRule+"without one, an identical call still starting returns its run.", launchTemplate).hints(false, true).
-		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodTemplateLaunch),
 }
 
 // agentRow is an agent on one account. Refused is why a launch on the
@@ -376,7 +366,23 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 	return summary, out, nil
 }
 
-func launchTemplate(ctx context.Context, c calls, in launchTemplateInput) (string, any, error) {
+// launchTemplate runs aether_launch_run's template on the caller's own
+// account; template.launch takes nothing else a run launch does, so naming
+// it is refused rather than dropped.
+func launchTemplate(ctx context.Context, c calls, in connectorLaunchInput) (string, any, error) {
+	var named []string
+	for field, set := range map[string]bool{"task": in.Task != "", "harness": in.Harness != "", "mode": in.Mode != "", "model": in.Model != "",
+		"account_member_id": in.AccountMemberID != "", "fallback_account_member_ids": len(in.FallbackAccountMemberIDs) > 0,
+		"no_fallback": in.NoFallback, "extra_workspace_ids": len(in.ExtraWorkspaceIDs) > 0} {
+		if set {
+			named = append(named, field)
+		}
+	}
+	if len(named) > 0 {
+		slices.Sort(named)
+		return "", nil, invalid("a template launch takes only workspace_id, template, params and idempotency_key: the template sets the rest and runs on your own account, so %s cannot be given",
+			strings.Join(named, ", "))
+	}
 	info, err := serverInfo(ctx, c.read)
 	if err != nil {
 		return "", nil, err
@@ -386,7 +392,7 @@ func launchTemplate(ctx context.Context, c calls, in launchTemplateInput) (strin
 		return "", nil, err
 	}
 	l := links(info.DashboardURL)
-	params := protocol.TemplateLaunchParams{WorkspaceID: in.WorkspaceID, Name: in.Name, Params: in.Params, IdempotencyKey: in.IdempotencyKey}
+	params := protocol.TemplateLaunchParams{WorkspaceID: in.WorkspaceID, Name: in.Template, Params: in.Params, IdempotencyKey: in.IdempotencyKey}
 	dup, done := false, func(error) {}
 	if params.IdempotencyKey == "" {
 		params.IdempotencyKey, dup, _, done, err = keyless(info.Member.ID, protocol.MethodTemplateLaunch, params, func() (bool, error) { return false, nil })
@@ -394,12 +400,12 @@ func launchTemplate(ctx context.Context, c calls, in launchTemplateInput) (strin
 			return "", nil, err
 		}
 	}
-	res, finished, err := launch[protocol.TemplateLaunchResult](ctx, c, protocol.MethodTemplateLaunch, params, done)
+	res, finished, err := launch[protocol.TemplateLaunchResult](ctx, c, protocol.MethodTemplateLaunch, withReason(params, in.Reason), done)
 	if err != nil && finished {
 		return "", nil, retryable(err, params.IdempotencyKey)
 	}
 	if res.Run.ID == "" {
-		return starting("aether_launch_template", params.IdempotencyKey, err)
+		return starting("aether_launch_run", params.IdempotencyKey, err)
 	}
 	receipt := runReceipt(res.Run, l, book)
 	receipt.IdempotencyKey = params.IdempotencyKey
@@ -410,10 +416,10 @@ func launchTemplate(ctx context.Context, c calls, in launchTemplateInput) (strin
 		return fmt.Sprintf("You are already launching this template; returning run %s.", res.Run.ID), out, nil
 	case !finished:
 		out["state"], out["write"] = "starting", writePending
-		return fmt.Sprintf("Run %s is starting from template %s.", res.Run.ID, in.Name), out, nil
+		return fmt.Sprintf("Run %s is starting from template %s.", res.Run.ID, in.Template), out, nil
 	case res.Replayed:
 		out["replayed"] = true
 		return fmt.Sprintf("This idempotency_key already launched run %s; nothing new was launched.", res.Run.ID), out, nil
 	}
-	return fmt.Sprintf("Launched run %s from template %s (%s).", res.Run.ID, in.Name, res.Run.Status), out, nil
+	return fmt.Sprintf("Launched run %s from template %s (%s).", res.Run.ID, in.Template, res.Run.Status), out, nil
 }

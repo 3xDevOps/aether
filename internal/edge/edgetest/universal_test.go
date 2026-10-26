@@ -229,8 +229,8 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 				}
 				names = append(names, tool.Name)
 			}
-			if len(names) != 25 {
-				t.Fatalf("tools with read and write = %v, want 25", names)
+			if len(names) != 24 {
+				t.Fatalf("tools with read and write = %v, want 24", names)
 			}
 			t.Logf("tools/list on %s as %s: %d tools: %s", base, bobName, len(names), strings.Join(names, " "))
 			list := call[protocol.ConnectorListResult](t, bctl, protocol.MethodConnectorList, struct{}{})

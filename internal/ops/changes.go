@@ -21,7 +21,7 @@ type changesFeedInput struct {
 var changesOps = []Op{
 	opOf("aether_changes", "Changes", ScopeRead, true, nextRuns,
 		"Use this when the user asks what changed: run status, reports, mail, pull requests, swarms, lifecycle; oldest first, paged by next_cursor. "+
-			"CI checks are in aether_pr_status."+untrustedRule, changesFeed).
+			"CI checks: aether_pr_status."+untrustedRule, changesFeed).
 		enum("kinds", protocol.ChangeKindStatus, protocol.ChangeKindReports, protocol.ChangeKindMessages, protocol.ChangeKindPR,
 			protocol.ChangeKindSwarm, protocol.ChangeKindLifecycle).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodChangesList),

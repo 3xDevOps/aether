@@ -590,7 +590,7 @@ const maxReason = 200
 // params: it is for the member's card, and the server refuses params it
 // does not know.
 func statedReason(method string, params json.RawMessage) (json.RawMessage, string, error) {
-	if (method != protocol.MethodRunLaunch && method != protocol.MethodMissionCreate) || len(params) == 0 || string(params) == "null" {
+	if !slices.Contains([]string{protocol.MethodRunLaunch, protocol.MethodMissionCreate, protocol.MethodTemplateLaunch}, method) || len(params) == 0 || string(params) == "null" {
 		return params, "", nil
 	}
 	var fields map[string]json.RawMessage

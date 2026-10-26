@@ -302,7 +302,7 @@ func TestConnectorToolList(t *testing.T) {
 	// and open pull requests, so those tools are open-world.
 	type hint struct{ readOnly, destructive, openWorld bool }
 	hints := map[string]hint{
-		"aether_launch_run": {false, false, true}, "aether_launch_swarm": {false, false, true}, "aether_launch_template": {false, false, true},
+		"aether_launch_run": {false, false, true}, "aether_launch_swarm": {false, false, true},
 		"aether_message_run": {false, true, true}, "aether_answer": {false, true, true},
 		"aether_pause_run": {false, false, false}, "aether_resume_run": {false, false, true},
 		"aether_mark_reviewed": {false, true, false}, "aether_decide_approval": {false, true, true},

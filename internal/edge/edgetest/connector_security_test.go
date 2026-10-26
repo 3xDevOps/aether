@@ -69,7 +69,7 @@ func TestConnectorProtocolThroughTheEdge(t *testing.T) {
 
 	resp, out := rpc(t, base, token.AccessToken, "tools/list", map[string]any{})
 	tools, _ := out["result"].(map[string]any)["tools"].([]any)
-	if resp.StatusCode != http.StatusOK || len(tools) != 29 || resp.Header.Get("Mcp-Session-Id") != "" {
+	if resp.StatusCode != http.StatusOK || len(tools) != 28 || resp.Header.Get("Mcp-Session-Id") != "" {
 		t.Fatalf("tools/list without initialize: %s %v", resp.Status, out)
 	}
 	raw, err := json.Marshal(tools)

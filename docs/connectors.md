@@ -172,8 +172,7 @@ others:
 | `aether_run_changes`, `aether_pr_status` | A run's commits, conflicts, changed files and optionally its diff; its pull request's checks, reviews, comments and merge state | `read` |
 | `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md) | `read` |
 | `search`, `fetch` | Find runs and swarms by text, in the shape ChatGPT deep research uses | `read` |
-| `aether_launch_run`, `aether_launch_swarm` | Start a run, or a swarm with you as its accountable human, on any account you may use, with a fallback policy and extra repositories; an integrator given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
-| `aether_launch_template` | Launch a workspace's saved [template](teams.md#task-templates-and-schedules) on your own account | `write` |
+| `aether_launch_run`, `aether_launch_swarm` | Start a run, from a task or a saved [template](teams.md#task-templates-and-schedules), or a swarm with you as its accountable human, on any account you may use, with a fallback policy and extra repositories; an integrator given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
 | `aether_message_run`, `aether_answer` | Message a run; answer an agent's, the integrator's or a teammate's question | `write` |
 | `aether_pause_run`, `aether_resume_run`, `aether_mark_reviewed` | Pause or resume a run; accept a reported success, which closes the run, or put it off | `write` |
 | `aether_decide_approval` | Allow or deny a permission request, once | `control` |
@@ -293,9 +292,11 @@ and `workers` in place of the run fields, each with the account it was
 asked to run on. `aether_get_swarm`'s `workers` list each worker run with the
 account it launched on, and `requested_account` when usage fallback moved it.
 
-`aether_launch_template` launches on your own account with the template's
-agent, mode and model; it takes no account or fallback, since `template.launch`
-has none.
+`aether_launch_run` with `template` (a name from `aether_launch_options`
+with `workspace_id`) and `params` runs a saved template on your own account
+with its agent, mode and model. It takes no task, agent, mode, model, account,
+fallback or extra repositories, since `template.launch` has none, and refuses
+them by name. Without `template`, it needs `task` and `harness`.
 
 ### Changes
 

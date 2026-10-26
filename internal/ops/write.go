@@ -31,11 +31,13 @@ type accountChoice struct {
 }
 
 type connectorLaunchInput struct {
-	WorkspaceID string `json:"workspace_id"`
-	Task        string `json:"task" jsonschema:"a complete brief"`
-	Harness     string `json:"harness" jsonschema:"agent name"`
-	Mode        string `json:"mode,omitempty" jsonschema:"default acp where installed, else tui"`
-	Model       string `json:"model,omitempty" jsonschema:"default the agent's"`
+	WorkspaceID string            `json:"workspace_id"`
+	Task        string            `json:"task,omitempty" jsonschema:"a complete brief"`
+	Harness     string            `json:"harness,omitempty" jsonschema:"agent name"`
+	Template    string            `json:"template,omitempty" jsonschema:"a saved template to run instead of task"`
+	Params      map[string]string `json:"params,omitempty" jsonschema:"the template's placeholder values"`
+	Mode        string            `json:"mode,omitempty" jsonschema:"default acp where installed, else tui"`
+	Model       string            `json:"model,omitempty" jsonschema:"default the agent's"`
 	accountChoice
 	// Reason is the assistant's, for the member's confirmation card; the
 	// server never sees it.
@@ -101,13 +103,12 @@ const idempotencyRule = " Pass a new idempotency_key and reuse it on a retry; "
 
 var writeOps = []Op{
 	opOf("aether_launch_run", "Launch run", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user asks to start an agent on a task; the agent can push branches and open pull requests. Take the options from aether_launch_options, then poll aether_get_run. "+
-			"For several independent tasks, call it once per task, each with its own idempotency_key."+
-			idempotencyRule+"without one, the same launch within 60s returns the first run.", launchRun).
+		"Use this when the user asks to start an agent on a task or a saved template; it can push branches and open pull requests. "+
+			"Options: aether_launch_options; poll aether_get_run. One new idempotency_key per task, reused on a retry; without one, the same launch within 60s returns the first run.", launchRun).
 		enum("mode", "tui", "headless", "acp").hints(false, true).hide(Connector, "reason").
-		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodRunList, protocol.MethodRunLaunch),
+		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodRunList, protocol.MethodRunLaunch, protocol.MethodTemplateLaunch),
 	opOf("aether_launch_swarm", "Launch swarm", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user asks for a swarm or for one goal to be split across agents: an integrator agent plans it into tasks for worker agents, which can push branches and open pull requests. Poll aether_get_swarm."+
+		"Use this when the user asks for a swarm or to split one goal across agents: an integrator plans tasks for workers, which can push and open pull requests. Poll aether_get_swarm."+
 			idempotencyRule+"without one, the same objective within 60s returns the first swarm.", launchSwarm).
 		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").hints(false, true).hide(Connector, "reason").
 		offer(TierConfirmed).calling(protocol.MethodAgentList, protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodMissionList, protocol.MethodMissionCreate),
@@ -293,6 +294,14 @@ func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, self 
 }
 
 func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, any, error) {
+	switch {
+	case in.Template != "":
+		return launchTemplate(ctx, c, in)
+	case len(in.Params) > 0:
+		return "", nil, invalid("params fill a template's placeholders; pass template too")
+	case in.Task == "" || in.Harness == "":
+		return "", nil, invalid("task and harness are required, or template to run a saved template; aether_launch_options lists the agents and, with workspace_id, the templates")
+	}
 	info, err := serverInfo(ctx, c.read)
 	if err != nil {
 		return "", nil, err

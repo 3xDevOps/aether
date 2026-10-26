@@ -120,7 +120,7 @@ can push branches and open pull requests.
 | `aether_list_workspaces`, `aether_list_agents`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_list_swarms`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `aether_launch_options`, `aether_changes`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
 | `aether_get_run` | yes | no | no | Reads one run on the user's server. It also reads the run's pull request state, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_pr_status` | yes | no | no | Reads a run's pull request checks and reviews, which the server fetches from GitHub; open world `yes` is proposed |
-| `aether_launch_run`, `aether_launch_swarm`, `aether_launch_template` | no | no | yes | Adds a run or swarm, which can be stopped; its agents can push branches and open pull requests |
+| `aether_launch_run`, `aether_launch_swarm` | no | no | yes | Adds a run or swarm, which can be stopped; its agents can push branches and open pull requests |
 | `aether_message_run`, `aether_answer` | no | yes | yes | A sent message or answer cannot be taken back, and the agent acts on it |
 | `aether_pause_run` | no | no | no | Freezes the run's container; resume continues it |
 | `aether_resume_run` | no | no | yes | The agent goes on working and can push |

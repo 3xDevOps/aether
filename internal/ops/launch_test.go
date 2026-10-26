@@ -203,12 +203,14 @@ func TestConnectorChanges(t *testing.T) {
 	}
 }
 
-// A template launch replays its key, and its receipt is a run's.
+// aether_launch_run runs a saved template, replaying its key, with a run's
+// receipt; it refuses what template.launch cannot take, and a launch with
+// neither a task nor a template.
 func TestConnectorLaunchTemplate(t *testing.T) {
 	f := newFake(t)
 	f.answers[protocol.MethodTemplateLaunch] = returns(protocol.TemplateLaunchResult{Run: testRun, Replayed: true})
 	cs := connectorSession(t, f, ScopeWrite)
-	text, out := run(t, cs, "aether_launch_template", map[string]any{"workspace_id": "ws-1", "name": "triage", "params": map[string]string{"issue": "42"},
+	text, out := run(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "template": "triage", "params": map[string]string{"issue": "42"},
 		"idempotency_key": "k1"})
 	var p protocol.TemplateLaunchParams
 	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
@@ -216,11 +218,22 @@ func TestConnectorLaunchTemplate(t *testing.T) {
 	}
 	if p.Name != "triage" || p.Params["issue"] != "42" || p.IdempotencyKey != "k1" || out["replayed"] != true ||
 		!strings.Contains(text, "already launched run run-1") || out["launch"].(map[string]any)["account"].(map[string]any)["access"] != "own" {
-		t.Fatalf("aether_launch_template = %q %v %+v", text, out, p)
+		t.Fatalf("a template launch = %q %v %+v", text, out, p)
 	}
-	if text, _, failed := try(t, cs, "aether_launch_template", map[string]any{"workspace_id": "ws-1", "name": "triage", "account_member_id": "mem-ada"}); !failed ||
-		!strings.Contains(text, `unknown argument "account_member_id"`) {
-		t.Fatalf("a template launch on another account = %q", text)
+	for _, c := range []struct {
+		args map[string]any
+		want string
+	}{
+		{map[string]any{"workspace_id": "ws-1", "template": "triage", "account_member_id": "mem-ada", "model": "opus"}, "account_member_id, model cannot be given"},
+		{map[string]any{"workspace_id": "ws-1", "params": map[string]string{"issue": "42"}, "task": "t", "harness": "claude"}, "pass template too"},
+		{map[string]any{"workspace_id": "ws-1", "task": "t"}, "task and harness are required, or template"},
+	} {
+		if text, _, failed := try(t, cs, "aether_launch_run", c.args); !failed || !strings.Contains(text, c.want) {
+			t.Errorf("aether_launch_run %v = %q, want refused with %q", c.args, text, c.want)
+		}
+	}
+	if got := len(called(f, protocol.MethodTemplateLaunch)) + len(called(f, protocol.MethodRunLaunch)); got != 1 {
+		t.Fatalf("launches = %d, want only the first", got)
 	}
 }
 

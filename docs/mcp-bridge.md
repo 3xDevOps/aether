@@ -259,7 +259,7 @@ member. `aether_list_runs` with `mine` filters to the socket's member.
 | --- | --- |
 | Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_list_swarms`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_list_workspaces`, `aether_get_workspace`, `aether_list_agents`, `aether_launch_options`, `aether_changes`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
 | Reversible | `aether_pause_run`, `aether_resume_run` |
-| Confirmed | `aether_launch_run`, `aether_launch_swarm`, `aether_launch_template`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment` |
+| Confirmed | `aether_launch_run`, `aether_launch_swarm`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment` |
 
 A confirmed call blocks until the member approves it in the dashboard, or
 runs at once when the member turned on
