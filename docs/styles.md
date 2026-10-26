@@ -228,6 +228,19 @@ alone. Axis and legend text stays at `text-ui-xs` or `text-ui-sm` in
 with `preserveAspectRatio="none"` draws strokes with
 `vector-effect: non-scaling-stroke`.
 
+The Trace waterfall is the exception. Its bars are 14px high (10px stacked)
+with a 3px radius, segments inside them 2px. A finished tool call is
+`bg-accent-soft` with an accent border; running, failed, stopped and waiting
+bars take the `-soft` fill and border of `state-working`, `state-failed`,
+`state-paused` and `state-needs-you`. Turn and subagent bars are `bg-chrome`
+with a seam border, holding `icon-faint` model time and accent tool density
+at 50%, 75% and 100% for one, two and three or more calls at once. The run's
+own bar is its state history in the `-soft` state fills. A running bar
+carries `trace-live`, the live shimmer's band in working blue; history that
+is not loaded is hatched (`trace-unknown`). A duration that would run past
+the track sits inside the bar's end, on the bar's own fill. The **Slowest**
+pill is neutral, `bg-hover-chrome` and muted, because amber means Needs you.
+
 ## Lanes
 
 Board's **Lanes** view ([dashboard-frontend.md](dashboard-frontend.md#lanes))
@@ -355,6 +368,12 @@ Use compact workbench geometry rather than landing-page ornament:
   that must read as none is written `0 0 #0000`, never `none`, so it still
   composes with ring utilities. Headers stay at `text-title` or smaller.
 - Scrollbars are 8px with an `--icon-faint` thumb.
+- The Trace view has a 66px stats strip with 1px seams between cells (a
+  3×2 grid when stacked), a 29px axis header, a 256px span pane and 30px
+  rows (44px coarse). Below 561px of its own width the rows stack to 46px
+  (52px coarse): the name line, then the bar. Each level indents 14px, up to
+  the sixth. Span glyphs sit in 20px seam-bordered `bg-chrome` tiles in
+  `text-muted`; the details use a 30px tile.
 - A Board column is a `bg-chrome` well, 8px from the next, with a 36px
   header (sentence-case label and `CountBadge`) and a 3px inset around
   cards 4px apart. Its cards pass `raised` to `Card`: `bg-raised`, keeping
@@ -466,8 +485,8 @@ primitives retain their props, events, refs and accessibility contracts.
 
 The run header shows one primary action for the run's state, a **Details**
 toggle and **More**; destructive verbs stay last in **More**, behind their
-existing gates and confirmations. The view switch (Session, Terminal,
-Changes, Browser) is a segmented tab list. A run with a pull request ends
+existing gates and confirmations. The view switch (Session, Trace on an
+Enhanced run, Terminal, Changes, Files, Browser) is a segmented tab list. A run with a pull request ends
 that row with its number as a muted link and its check state as a ghost
 button led by a `StatusDot`: failed, working, done or neutral. Details is a 320px side panel at
 1280px and wider, a side sheet below that and a bottom sheet on phones; it
@@ -563,6 +582,11 @@ literal time or curve.
   Board's Lanes, sweeps a light band across muted text in 1.4s of each 1.6s.
   A Needs you tag in Lanes pulses its dot, never its text. Sidebar rows,
   board cards, the palette and All workspaces never pulse.
+- The Trace view shimmers its live Duration and its running bars on the same
+  period, and moves its now line once a second. A zoom or an axis scale step
+  glides `--trace-scale` and `--trace-origin` over `--duration-glide`; the
+  first measured layout after the view opens jumps into place. Unfolded
+  rows enter with `animate-entrance`, unless more than eight arrive at once.
 
 Under `prefers-reduced-motion: reduce` every animation and transition stops:
 overlays and sheets appear, indicators and bodies jump, the pulse holds, the

@@ -88,6 +88,9 @@ export interface SessionsSlice {
   acpTakeover: (runID: string, takeover: TakeoverSnapshot | undefined, error?: string) => void
   touchAcpSession: (runID: string, open: (runID: string) => boolean) => void
   setSessionRow: (runID: string, rowID: string, open: boolean) => void
+  /** A Session row another view asked to show, by its flattened key, until the Session view scrolls to it. */
+  sessionReveal: Record<string, string>
+  revealSessionRow: (runID: string, key: string | undefined, expand?: string[]) => void
   toggleAgentMessages: (runID: string) => void
 }
 
@@ -311,6 +314,17 @@ export const createSessionsSlice: SliceCreator<SessionsSlice> = (set, get) => ({
     }),
   setSessionRow: (runID, rowID, open) =>
     set((s) => ({ expandedRows: { ...s.expandedRows, [runID]: { ...s.expandedRows[runID], [rowID]: open } } })),
+  sessionReveal: {},
+  revealSessionRow: (runID, key, expand = []) =>
+    set((s) => {
+      const sessionReveal = { ...s.sessionReveal }
+      if (key) sessionReveal[runID] = key
+      else delete sessionReveal[runID]
+      if (expand.length === 0) return { sessionReveal }
+      const rows = { ...s.expandedRows[runID] }
+      for (const id of expand) rows[id] = true
+      return { sessionReveal, expandedRows: { ...s.expandedRows, [runID]: rows } }
+    }),
   toggleAgentMessages: (runID) =>
     set((s) => {
       const hidden = { ...s.hiddenAgentMessages }

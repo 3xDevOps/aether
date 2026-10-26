@@ -24,6 +24,7 @@ import { createSessionsSlice, type SessionsSlice } from '@/store/sessions'
 import { createWorkspacesSlice, type WorkspacesSlice } from '@/store/workspaces'
 import { createUpdatesSlice, type UpdatesSlice } from '@/store/updates'
 import { createTerminalSlice, type TerminalSlice } from '@/store/terminal'
+import { createTraceSlice, type TraceSlice } from '@/store/trace-log'
 import { createTimelineSlice, type TimelineSlice } from '@/store/timeline'
 import { createMessagesSlice, type MessagesSlice } from '@/store/messages'
 import { createMissionsSlice, type MissionsSlice } from '@/store/missions'
@@ -81,6 +82,7 @@ export type RootState = ServerSlice &
   MissionsSlice &
   MessagesSlice &
   SessionsSlice &
+  TraceSlice &
   AssistantSlice &
   ViewContextSlice &
   WorkflowSignalsSlice &
@@ -156,6 +158,7 @@ export function createRootStore() {
         ...createMissionsSlice(...a),
         ...createMessagesSlice(...a),
         ...createSessionsSlice(...a),
+        ...createTraceSlice(...a),
         ...createAssistantSlice(...a),
         ...createViewContextSlice(...a),
         ...createWorkflowSignalsSlice(...a),

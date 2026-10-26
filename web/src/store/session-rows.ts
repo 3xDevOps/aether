@@ -31,6 +31,8 @@ export type SessionRow =
       delivery?: Delivery
       deliverAfter?: string
       failure?: string
+      /** The session item's row id, when a room message's id replaced it. */
+      itemID?: string
     }
   | { kind: 'note'; id: string; at: string; authorID: string; authorName?: string; via?: string; body: string; question?: boolean; pending?: boolean }
   | { kind: 'assistant'; id: string; at: string; text: string; streaming: boolean; outcome?: Extract<SessionRow, { kind: 'finished' }> }
@@ -76,6 +78,13 @@ export interface Turn {
 
 const inboxWake = /^Aether has \d+ unacknowledged inbox item\(s\)\./
 const missionWake = /^Mission update(?: \([^)]*\))?: run \/usr\/local\/bin\/aether-internal mission plan show/
+
+/** What Aether's own wake-up prompt reads as, or undefined for a person's message. */
+export function wakeText(prompt: string): string | undefined {
+  if (inboxWake.test(prompt)) return 'Woken by new agent messages'
+  if (missionWake.test(prompt)) return 'Woken by a swarm update'
+  return undefined
+}
 
 const launchTools = ['Agent', 'Task', 'Workflow']
 
@@ -157,7 +166,8 @@ function workItem(turn: number, track: ToolTrack, ended: boolean, waiting: boole
   }
 }
 
-const stopText: Record<string, [string, Tone]> = {
+/** A turn's stop reason as Session words and the tone they read in. */
+export const stopText: Record<string, [string, Tone]> = {
   end_turn: ['Finished', 'done'],
   cancelled: ['Cancelled', 'paused'],
   interrupted: ['Interrupted', 'failed'],
@@ -166,7 +176,8 @@ const stopText: Record<string, [string, Tone]> = {
   refusal: ['Stopped: the agent refused', 'failed'],
 }
 
-const quietDuration = 50
+/** Log times are not exact: a tool call that settled faster than this is shown as instant. */
+export const quietDuration = 50
 
 function seconds(ms: number): string {
   const s = Math.round(ms / 1000)
@@ -347,8 +358,8 @@ export function turnRows(turn: Turn): SessionRow[] {
     if (slot.role === 'user') {
       const attached = slot.images.length > 0 || slot.files.length > 0
       const boundary = (row: SessionRow) => parts.push({ kind: 'boundary', row })
-      if (!attached && inboxWake.test(slot.text)) boundary({ kind: 'event', id: slot.id, at, text: 'Woken by new agent messages' })
-      else if (!attached && missionWake.test(slot.text)) boundary({ kind: 'event', id: slot.id, at, text: 'Woken by a swarm update' })
+      const wake = attached ? undefined : wakeText(slot.text)
+      if (wake) boundary({ kind: 'event', id: slot.id, at, text: wake })
       else boundary({ kind: 'user', id: slot.id, at, body: slot.text, ...(slot.images.length ? { images: slot.images } : {}), ...(slot.files.length ? { files: slot.files } : {}) })
     } else if (slot.role === 'thought') {
       step({ kind: 'thought', id: slot.id, at, text: slot.text, streaming: !slot.complete && !ended })

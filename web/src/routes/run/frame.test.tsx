@@ -167,6 +167,27 @@ describe('run frame', () => {
   })
 })
 
+describe('the Trace view', () => {
+  const views = () => within(screen.getByRole('tablist', { name: 'Run views' }))
+
+  it('follows Session for an Enhanced run and mounts only while shown', () => {
+    const view = open({ mode: 'acp', acp: true })
+    expect(views().getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Session', 'Trace', 'Terminal', 'Changes', 'Files', 'Browser'])
+    expect(screen.queryByRole('tree', { name: 'Trace' })).toBeNull()
+    view.rerender(rerouted('trace'))
+    expect(screen.getByRole('tree', { name: 'Trace' })).toBeDefined()
+    expect(screen.getByText('Tool calls')).toBeDefined()
+    view.rerender(rerouted('session'))
+    expect(screen.queryByRole('tree', { name: 'Trace' })).toBeNull()
+  })
+
+  it('is not offered for a Standard run, even by URL', () => {
+    open({}, 'trace')
+    expect(views().queryByRole('tab', { name: 'Trace' })).toBeNull()
+    expect(views().getByRole('tab', { name: 'Terminal' }).getAttribute('aria-selected')).toBe('true')
+  })
+})
+
 describe('the Files view', () => {
   const views = () => within(screen.getByRole('tablist', { name: 'Run views' }))
 

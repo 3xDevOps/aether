@@ -69,6 +69,18 @@ export function flattenRows(rows: SessionRow[], expanded: Record<string, boolean
   return out
 }
 
+/** The flat key of the first step `match` finds, with its block and, when the step is folded away, the fold to open. */
+export function stepTarget(rows: SessionRow[], match: (step: Step) => boolean): { key: string; expand: string[] } | undefined {
+  for (const row of rows) {
+    if (row.kind !== 'steps') continue
+    const index = row.steps.findIndex(match)
+    if (index === -1) continue
+    const folded = index >= foldHead && index < foldAt(row)
+    return { key: `${row.id}/${row.steps[index]!.id}`, expand: folded ? [row.id, `${row.id}/more`] : [row.id] }
+  }
+  return undefined
+}
+
 /**
  * The flat list with each block's default open state and fold. Defaults
  * change on their own (a block shuts when its turn ends, a growing block folds

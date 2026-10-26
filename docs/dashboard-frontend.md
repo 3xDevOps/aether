@@ -724,7 +724,7 @@ its end, exposing the shell or the raw connection error and window controls.
 ### URL state
 
 `src/lib/url-state.ts` keeps the route in the query string. A run view is
-`?run=<id>`, with `&view=session|terminal|changes|files|browser` (an old
+`?run=<id>`, with `&view=session|trace|terminal|changes|files|browser` (an old
 `&view=diff` reads as `changes`; `changes` also takes `&repo=<workspace id>|all` on a
 [multi-repo run](#multi-repo-runs)); any other
 view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page;
@@ -2148,7 +2148,8 @@ a client-side base refresh before trying again.
 ## Run view
 
 `src/routes/run/` is the one `run` route. Its params are `runId` and an
-optional `view` (`session`, `terminal`, `changes`, `files`, `browser`),
+optional `view` (`session`, `trace`, `terminal`, `changes`, `files`,
+`browser`),
 written to the address as `?run=<id>&view=<view>`; the old `?view=diff` reads
 as `changes`.
 Every way into a run navigates to `run`: board card, sidebar row, run list,
@@ -2156,7 +2157,8 @@ palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one this tab last
 showed for the run (`runViewMemory`, not persisted), else `defaultView`:
 Session for an Enhanced run or any run that streams a session (`acp: true`),
-Terminal otherwise. Files is in the list while the run still has its
+Terminal otherwise. Trace follows Session for a run with `acp: true` only.
+Files is in the list while the run still has its
 checkout, on a gateway that serves `files.tree` (`hasFiles` in
 `src/routes/files/open.ts`): every run the Files tree lists, a completed one
 that is not yet merged or abandoned included. Browser is in the list for
@@ -2172,7 +2174,8 @@ mounted, laid out but `invisible` and `inert`: xterm hidden with
 `display: none` measures zero and would resize the shared PTY, a Publish
 draft (commit message, an uncertain pull request) must survive a view switch,
 and an open file keeps its scroll position, caret and undo history. Browser
-mounts only while shown, so a hidden Browser streams no screencast.
+and Trace mount only while shown, so a hidden Browser streams no screencast
+and a hidden Trace derives nothing and ticks no clock.
 
 The Browser can also sit beside the other three views instead of being a tab:
 its toolbar's **Show beside Session** (**Show beside Terminal** on a Standard
@@ -2766,6 +2769,95 @@ you** shows one link, "1 request, shown below the timeline", that closes a
 Details sheet and focuses the card; on other views it lists the cards. `routes/run/session-failure.tsx` shows an adapter failure with
 **Retry Enhanced** and **Open in Standard**, and a sign-in failure with the
 agent's auth methods.
+
+### Trace view
+
+The Trace view (`src/routes/run/trace-view.tsx`) shows when each part of an
+Enhanced run ran, as a span tree beside a time waterfall. A span is one
+timed piece of the run: the run itself, a turn, a tool call, a subagent, a
+wait for a person, an error notice, or, on an integrator, one swarm worker.
+`deriveTrace` in `src/store/trace.ts` builds the tree from data the Session
+view already holds; nothing new is read from the agent:
+
+| Span | Start | End |
+| --- | --- | --- |
+| Run | `started_at`, else `created_at` | `finished_at`, else now |
+| Turn | its `turn_start` item | its `turn_end`, or its last child's end |
+| Tool call | the call's first snapshot | the snapshot that settles it (a background task's own status) |
+| Subagent | `startedAt` from the subagent index | `settledAt`, or its last activity for a Workflow or background agent |
+| Wait | the `request` item opening it | the item answering or cancelling it |
+| Worker | the attempt's `started_at`, else `reserved_at` | `finished_at` |
+
+A subagent whose launch is not held starts at its first held item and sits
+in that item's turn, or under the run when that turn is not held either. An
+integrator's workers are read with `mission.show` when Trace opens and again
+on each `mission.changed`; an answer to an earlier read never replaces a
+later one, and a failed read shows its error with **Retry**.
+
+A call still open when its turn or subagent ended is **Stopped** at that end,
+unless it is a background task of a live run. Item times are log times, so a
+call that settled within 50ms is instant. A turn is named by the first line
+of its prompt, by Aether's wake-up wording ("Woken by new agent messages"),
+or `Turn N`. The run's bar is its `run.status` history, coloured by state;
+`readTraceLog` (`src/store/trace-log.ts`) reads the run's `run.status` and
+`run.cost` events with `workspace.timeline` (newest first, at most 2,000),
+and sync appends later ones while the log is held. Until that read finishes
+the run's bar stays neutral; a failed read shows its error on the bar, and
+the next read starts again from the newest event.
+
+The stats strip shows Duration (shimmering while live), Turns, Tool calls,
+Subagents when there are any, and Errors: failed calls, subagents, turns
+and error notices. Errors is a button that steps through the failures,
+unfolding each one's ancestors and opening its details. Tokens and Cost appear only for a metered
+run (`run.cost` with `metered`: Enhanced increments add, headless totals
+replace) and never as an invented zero; a failed read shows **Not read**
+with the server's error; when the read stopped at 2,000 events they read
+`≥`. While earlier history is not held the counts read `≥`. A neutral **Slowest** pill marks the longest finished tool call once
+three have finished.
+
+The axis is elapsed run time. A stretch with nothing running that is longer
+than a minute and 5% of the active time becomes a fixed break labelled with
+its length ("2h idle"); history before the first held item is a hatched
+**Not loaded** break. An idle stretch reaching now is a break too, its label
+updated once a minute. While the run is live the axis keeps headroom and
+steps through a ladder of round lengths, as does a zoom to a running span; a
+line and dot mark now, moving each second on the server's clock
+(`serverOffset`), and the list follows new rows at its end until you
+scroll; **Jump to now** returns. Bars are placed through CSS variables on
+the list (`--trace-origin`, `--trace-scale`, `--trace-now`), so a zoom or a
+scale step glides; the first layout after opening does not. A tool call's bar is accent; running, failed, stopped and waiting bars
+take those state tones; a turn's or subagent's bar packs its model time and
+its tool calls' density, failures and waits.
+
+Closed turns start folded with a `+N` count; the live and the last turn
+are open, as is a running subagent, and the Workers group while it has 8 or
+fewer. A failed or waiting span shows under its folded parent. **Trace
+actions** has **Expand all** and **Collapse all**. Folds, zoom, the
+keyboard's row and the older pages read so far are kept per run in this tab
+(`traceViews`), not persisted.
+Past 200 visible rows the list renders only those in view. The tree takes
+one tab stop: Up, Down, Home and End move, Right unfolds or enters, Left
+folds or leaves, Enter or Space opens the span's details, and Shift+Enter
+zooms the axis to it. Escape closes the details, then leaves the zoom
+(**Whole run** does too), then falls through to leaving the run. One polite
+status line announces turn starts and ends and new failures, batched over
+1.5 seconds; failures in older history as it loads stay silent.
+
+The details open beside the bar, or as a bottom sheet on a phone: the kind
+("Tool call · Bash", "Turn 4 · autonomous"), state, duration, start and
+end ("+43s", the clock time in its tooltip), exit code, spans below, files
+changed, context window, the command and the stop reason or exit code of a
+failure. **Open subagent**, **Show in Session** (switches views and scrolls
+the Session to that row, opening its block of steps and any fold that hides
+the step; for a wait still open, focuses the docked request), **Open worker
+run**, **Zoom to this span** and **Copy command** act on it.
+
+While earlier history is not held, the view reads up to 5 older pages
+(`run.acp.history`, 1,000 items each), then leaves **Load earlier**. Expired
+history reads "History before 14:02 expired on the server." and a failed
+page shows its error with **Retry**. Below 561px the rows stack: the name
+and duration, then the bar on its own line. The view is not offered for a
+Standard run, which has no turns or timed tool calls.
 
 ### Terminal view
 
@@ -3978,7 +4070,8 @@ Any other failed room action shows its error above the sections with
 ### Workflow panel
 
 The Workflow panel (`src/routes/run/workflow-panel.tsx`) shows what the run
-and its agents are doing as a tree. Its chip sits after the view switch and
+and its agents are doing as a tree; the [Trace view](#trace-view) shows when
+they did it. Its chip sits after the view switch and
 mirrors the run's state: `● Working · 2 agents running` (subagents and
 workflows running at any depth, a background one included) or
 `● Waiting for CI · 3 of 9 checks` (passing checks of the pull request's
@@ -6470,7 +6563,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `u` | global | Open the next run that needs you |
 | `j` / `k` | global | Focus the next or previous run in the sidebar |
 | `g` then `b`, `l`, `s`, `a`, `f`, `g`, `e`, `,` | global | Go to the board, all workspaces, swarms, activity, files, agents, environment, settings |
-| `[` / `]` | run | Show the previous or next run view |
+| `[` / `]` | run | Show the previous or next run view, Trace included on an Enhanced run |
 | `⌘.` / `Ctrl+.` | run | Show or hide run details |
 | `c` | run | Message the agent (focuses the Session composer) |
 | `Esc` | run | Leave a run for the board |
@@ -6756,6 +6849,15 @@ window, bundled mail bodies and failed history and swarm reads.
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,
 Delete and Backspace close, focus handoff, clamped resizing and collapse.
+`src/store/trace.test.ts` covers span derivation (open, stopped and
+background calls, subagents with and without a held launch, waits, turn
+names and stop reasons, the status lane), stats, folding, bar segments, idle
+breaks and a 5,000-span derive and flatten budget;
+`src/routes/run/trace-view.test.tsx` covers the Trace tree's keyboard,
+details, zoom and Escape order, the Errors stat, metered-only and capped
+cost, a history read retried after a partial failure, workers re-read in
+order and their read error, history notices, virtualization and which
+failures are announced.
 `src/components/shell/nav-shortcuts.test.tsx` covers the shell shortcut
 precedence across fields, dialogs, menus, lists and selects, and the
 Single-key shortcuts setting; `src/lib/keybindings.test.ts` fails on two
@@ -6784,7 +6886,7 @@ outline, and drags the sidebar resizer. `window-sizing` exercises the updates
 dialog at the smallest desktop window and below it. `run-deep-link` checks
 that the address follows navigation, survives a reload and agrees with back
 and Escape. `run-session` streams an Enhanced run, answers a permission,
-sends a message and stops it with Interrupt.
+sends a message and stops it with Interrupt, then checks its Trace tab.
 
 The touch shell is driven by the `mobile` project, which
 [testing.md](testing.md) describes: `shell-drawer.mobile.spec.ts` opens the
