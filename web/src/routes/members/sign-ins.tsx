@@ -8,6 +8,7 @@ import { Code } from '@/components/ui/code'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { Label } from '@/components/ui/label'
 import { Radio, RadioGroup } from '@/components/ui/radio'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -191,18 +192,18 @@ function SignInList({ identities }: { identities: MemberIdentities }) {
   ].filter((row): row is { key: string; label: string; value: string } => Boolean(row))
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <ul aria-label="Your sign-ins" className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
+      <InsetList aria-label="Your sign-ins">
         {rows.map((row) => (
-          <li key={row.key} className="flex min-h-11 min-w-0 flex-col justify-center px-3 py-2">
+          <InsetListItem key={row.key} className="flex-col items-stretch justify-center gap-0">
             <span className="text-ui-sm text-muted">{row.label}</span>
             <span className="break-all font-code text-ui-sm text-text">{row.value}</span>
-          </li>
+          </InsetListItem>
         ))}
-      </ul>
+      </InsetList>
       {identities.devices.length > 0 && (
-        <ul aria-label="Your devices" className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
+        <InsetList aria-label="Your devices">
           {identities.devices.map((device) => (
-            <li key={device.id} className="flex min-h-11 min-w-0 flex-col justify-center px-3 py-2">
+            <InsetListItem key={device.id} className="flex-col items-stretch justify-center gap-0">
               <span className="flex min-w-0 items-center gap-2">
                 <span className="truncate text-ui font-medium text-text">{device.label}</span>
                 <Badge tone={deviceStatus[device.status].tone}>{deviceStatus[device.status].label}</Badge>
@@ -211,9 +212,9 @@ function SignInList({ identities }: { identities: MemberIdentities }) {
                 {device.account} on {providerName[device.provider] ?? device.provider}
                 {' · '}{device.last_seen_at ? <>last seen <RelativeTime at={device.last_seen_at} /></> : 'never seen'}
               </span>
-            </li>
+            </InsetListItem>
           ))}
-        </ul>
+        </InsetList>
       )}
     </div>
   )
@@ -756,13 +757,13 @@ function MergeHistory({ client }: { client: Api }) {
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
       {merges?.length === 0 && <p className="text-ui-sm text-muted">No merges.</p>}
       {merges && merges.length > 0 && (
-        <ul aria-label="Merges" className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
+        <InsetList aria-label="Merges">
           {merges.map((merge) => (
-            <li key={merge.id} className="min-w-0 px-3 py-2 text-ui-sm text-text">
+            <InsetListItem key={merge.id} className="block text-ui-sm text-text">
               <MergeSummary merge={merge} names={names} />
-            </li>
+            </InsetListItem>
           ))}
-        </ul>
+        </InsetList>
       )}
     </section>
   )

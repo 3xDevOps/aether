@@ -68,7 +68,7 @@ export function RunDetails({ label, children, ...shown }: Shown & { label: strin
           collisionPadding={edge}
           className={cn(
             surface,
-            'pointer-events-none z-50 max-h-(--radix-tooltip-content-available-height) w-72 overflow-hidden rounded-tl-none p-3 text-ui-sm data-[state=delayed-open]:animate-expand-right motion-reduce:animate-none',
+            'pointer-events-none z-50 max-h-(--radix-tooltip-content-available-height) w-72 overflow-hidden rounded-tl-none p-3 text-ui-sm motion-safe:data-[state=delayed-open]:animate-expand-right',
           )}
         >
           <Details {...shown} />

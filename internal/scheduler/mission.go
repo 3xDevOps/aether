@@ -31,6 +31,7 @@ type MissionLaunchSpec struct {
 	// differs from it after a usage fallback.
 	RequestedAccount domain.MemberID
 	Fallback         domain.AccountFallback
+	ExtraWorkspaces  []domain.WorkspaceID
 	// Admitted is domain.LaunchOptions.Admitted.
 	Admitted func()
 }
@@ -207,7 +208,7 @@ func (s *Scheduler) LaunchMission(ctx context.Context, spec MissionLaunchSpec) (
 	}
 	return s.launchWithOptions(ctx, spec.WorkspaceID, spec.RunOwner, spec.AccountOwner, spec.Task, spec.Harness, spec.Mode, domain.LaunchOptions{
 		Model: spec.Model, CachedBase: spec.CachedBase, AssignedRunID: spec.RunID, RequestedAccount: spec.RequestedAccount, Fallback: spec.Fallback,
-		Admitted: spec.Admitted,
+		Admitted: spec.Admitted, ExtraWorkspaces: spec.ExtraWorkspaces,
 	})
 }
 

@@ -368,3 +368,14 @@ export function queuedSteers(messages: RoomMessage[]): RoomMessage[] {
     (message) => message.kind === 'steer_request' && message.state === 'queued',
   )
 }
+
+export const isNote = (message: RoomMessage) => message.kind === 'comment' || message.kind === 'question'
+
+export function repliesByQuestion(messages: RoomMessage[]): Map<string, RoomMessage[]> {
+  const replies = new Map<string, RoomMessage[]>()
+  for (const message of messages) {
+    if (message.kind !== 'reply' || !message.correlation_id) continue
+    replies.set(message.correlation_id, [...(replies.get(message.correlation_id) ?? []), message])
+  }
+  return replies
+}

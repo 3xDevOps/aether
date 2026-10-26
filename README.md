@@ -1,52 +1,85 @@
 <div align="center">
 
-<p><img src="docs/assets/aether-banner.svg" alt="Aether" width="100%"></p>
+<img src="docs/assets/aether-banner.svg" alt="Aether" width="100%">
 
-Aether is an open-source multiplayer runtime where engineering teams run and jointly steer AI coding agents like Claude Code and Codex on their own servers.
+# Aether - Multiplayer Cloud Agent Runtime
+
+**A self-hosted development environment for AI coding agents running in the cloud, for teams & *multiplayer* control.**
 
 [![Go 1.26+](https://img.shields.io/badge/Go-1.26%2B-6EE7D6?style=flat-square)](go.mod)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-4A6FA5?style=flat-square)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/3xDevOps/aether?include_prereleases&style=flat-square&color=4A6FA5)](https://github.com/3xDevOps/aether/releases)
-![Status: beta](https://img.shields.io/badge/status-beta-6EE7D6?style=flat-square)
+![Status: beta](https://img.shields.io/badge/status-beta-FF9D6B?style=flat-square)
 
 [Quickstart](docs/quickstart.md) · [Install](docs/install.md) · [Docs](docs/) · [Contributing](CONTRIBUTING.md)
+
+<!-- Goes live once docs/media/demo.gif exists. Shot list and recording recipe: docs/media/README.md.
+![Aether demo](docs/media/demo.gif)
+-->
 
 </div>
 
 ---
 
-Aether is in beta.
+Aether is a **self-hosted** development environment for long-running AI coding agents in the cloud. It offers agent-agnostic sandboxed environments that can be hosted **anywhere** and be controlled by **anyone** on your team.  
+</br>
+Leaving your laptop open for your agents is no longer needed. 
 
-## What it does
+# Installation 
 
-- **Your whole team sees every agent.** Everyone who joins a server can watch
-  each other's agents live, message them, answer their approvals and take over
-  their terminals. Every action is recorded with the person who took it
-  ([teams.md](docs/teams.md#roles)).
-- **Agents run on your server, not your laptop.** Each run is one agent working
-  on one task in its own container on the server, so it keeps going after you
-  close your laptop.
-- **Each run ends as a branch or a pull request.** A run commits to its own
-  branch, `aether/run-<task>-<id>`. Pull it to review locally, or publish it and
-  open a pull request from the dashboard
-  ([quickstart.md](docs/quickstart.md#8-review-and-publish-the-result)).
-- **Agents coordinate with each other.** Runs message and ask each other
-  questions across sessions, whatever agent CLI each one uses. A swarm hands
-  one objective to an integrator run that splits it into tasks and launches a
-  worker run for each, so Claude Code can direct Codex workers
-  ([teams.md](docs/teams.md#swarms)).
-- **Runs share what they learn.** Team memory holds short notes per workspace
-  that every run searches and adds to ([memory.md](docs/memory.md)). The
-  dashboard assistant answers questions and acts for you, such as launching a
-  run, using your own agent login ([assistant.md](docs/assistant.md)).
-- **It works for one person too.** The first person to link a fresh server
-  becomes its administrator.
+```sh
+curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
+```
+Aether installs in two places: a **desktop client** & CLI for your laptop/PC, and a **server framework** for where you intend to run your agents - a home server, PC, or an old laptop repurposed to be on all day long. 
 
-Aether works with Claude Code, Codex and many more agent CLIs, plus a
-[custom agent](docs/harnesses.md#custom-and-unlisted-agents) of your own. You
-install each one on the server and sign in with the vendor's own login.
-[Supported agents](docs/harnesses.md#supported-agents) has the full list and
-each agent's limits.
+The server runs on Linux. The script above handles Linux and macOS, asking
+whether this machine is a server or a client.
+
+On **Windows**, download and review the PowerShell installer, then run it:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
+& "$env:TEMP\aether-install.ps1"
+```
+
+It installs the CLI and builds the desktop app by default. `-Role none`
+installs only the CLI. See the [Windows install guide](docs/install.md#windows-install-script)
+for supported releases and script-policy requirements.
+
+On **Android**, every release carries `aether-android.apk`, a phone app for
+the server-hosted dashboard; install it from the release page as described in
+the [Android app guide](docs/install.md#android-app). It is not on Google Play
+yet; the Play link replaces this sentence the day the listing goes live. What
+it stores and sends is in [docs/privacy.md](docs/privacy.md).
+
+**Next, see [docs/quickstart.md](docs/quickstart.md) to set up your first workspace and link your codebase, tools, and CLI agents.** 
+
+For manual installation or uninstallation, see [install.md](docs/install.md#manual-install).
+
+## Why Aether
+
+Coding agents run for hours, and a laptop is a poor host for that. They use a
+lot of its resources, and they stop when you close the lid. Hosted agent
+services keep them running, but they charge per seat on top of your inference
+bill and keep a copy of your code. Aether runs your agents on hardware you own,
+such as a home server or a spare PC, and you control them from your laptop,
+your phone or the desktop app.
+
+## What you get
+
+- Several people share one server. Everyone can watch and message each other's
+  agents live, and every action is attributed to the person who took it.
+- Agents run in containers on the server, so they keep working after you close
+  your laptop.
+- Each run works on its own git branch. Pull it and review it, or let the agent
+  push it and open a pull request.
+- You bring your own agent CLIs and logins: Claude Code, Codex, OpenCode and
+  [others](docs/harnesses.md). Their configuration and logins live in a
+  persistent home on the server.
+- Runs share a team memory of short notes per repository, and a dashboard
+  assistant answers questions and acts for you with your own agent login.
+- It works for one person too: the first person to link a server becomes its
+  administrator.
 
 ```mermaid
 flowchart LR
@@ -54,53 +87,6 @@ flowchart LR
     server -->|"one container<br>per run"| run["Agent run"]
     run -->|"commits to"| branch["A git branch<br>you review"]
 ```
-
-## Install
-
-Aether has two parts: `aether-server`, which runs agents on a Linux machine
-that stays on, and the `aether` CLI and desktop app, which you use from your
-own computer.
-
-To set up with a coding agent, paste the prompt in
-[docs/agents.md](docs/agents.md) into Claude Code, Codex or another one.
-
-### Linux and macOS
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.sh | sh
-```
-
-The script asks whether this machine is a `server` or a `client`. A server
-gets `aether-server` and `aether` and runs `sudo aether-server setup`. A client
-gets `aether` and runs `aether gui build` to install the desktop app. The
-server is Linux only, so macOS installs the client. Flags and the
-non-interactive form are in
-[install.md](docs/install.md#the-install-script).
-
-### Windows
-
-Windows runs the client only. Download the PowerShell installer, review it,
-then run it:
-
-```powershell
-Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/3xDevOps/Aether/main/scripts/install.ps1 -OutFile "$env:TEMP\aether-install.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\aether-install.ps1"
-```
-
-It installs `aether.exe` and the desktop app. `-Role none` installs only the
-CLI. See [install.md](docs/install.md#windows-install-script).
-
-### Android
-
-Every release carries `aether-android.apk`, which shows the dashboard on a
-phone. Download it from the
-[latest release](https://github.com/3xDevOps/aether/releases/latest) and follow
-the [Android app guide](docs/install.md#android-app). It is not on Google Play
-yet. What it stores and sends is in [privacy.md](docs/privacy.md).
-
-Next, follow the [quickstart](docs/quickstart.md) to start the server, link
-your computer, create a workspace and launch your first run. Manual install
-and removal are in [install.md](docs/install.md#manual-install).
 
 ## Documentation
 

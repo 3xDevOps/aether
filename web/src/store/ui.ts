@@ -15,7 +15,7 @@ import type { SliceCreator } from '@/store/slice'
 export type Theme = 'light' | 'dark' | 'system'
 export type TextSize = 'default' | 'large' | 'larger'
 export type UpdateKind = 'cli' | 'server' | 'shell'
-export type BoardView = 'board' | 'map'
+export type BoardView = 'board' | 'list' | 'map' | 'lanes'
 
 export interface BoardMapViewport {
   x: number
@@ -47,9 +47,14 @@ export function normalizeBoardMapViewports(value: unknown): Record<string, Board
   return Object.fromEntries(viewports)
 }
 
+export function normalizeBoardMapFolded(value: unknown): Record<string, true> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] === true)) as Record<string, true>
+}
+
 export function normalizeBoardViews(value: unknown): Record<string, BoardView> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] === 'board' || entry[1] === 'map'))
+  return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] === 'board' || entry[1] === 'list' || entry[1] === 'map' || entry[1] === 'lanes'))
 }
 
 export interface Route {
@@ -138,6 +143,8 @@ export interface UiSlice {
   boardViews: Record<string, BoardView>
   boardMapAllWorkspaces: boolean
   boardMapViewports: Record<string, BoardMapViewport>
+  /** Folded swarms on the Map, keyed by the integrator's map key. */
+  boardMapFolded: Record<string, true>
   /** Keyed by agent name; the newest `at` is the agent a launch preselects. */
   launchDefaults: Record<string, { mode: LaunchMode; model?: string; at: number }>
   route: Route
@@ -191,6 +198,7 @@ export interface UiSlice {
   setBoardView: (scope: string, view: BoardView) => void
   setBoardMapAllWorkspaces: (all: boolean) => void
   setBoardMapViewport: (scope: string, viewport: BoardMapViewport) => void
+  setBoardMapFolded: (runKey: string, folded: boolean) => void
   rememberLaunch: (agent: string, mode: LaunchMode, model?: string) => void
   setLaunchDefault: (agent: string, mode: LaunchMode) => void
   navigate: (name: string, params?: Record<string, string>) => void
@@ -241,6 +249,7 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
   boardViews: {},
   boardMapAllWorkspaces: false,
   boardMapViewports: {},
+  boardMapFolded: {},
   launchDefaults: {},
   route: initialRoute(),
   runViewMemory: {},
@@ -307,6 +316,13 @@ export const createUiSlice: SliceCreator<UiSlice> = (set) => ({
     const viewport = normalizeBoardMapViewport(value)
     if (viewport) set((s) => ({ boardMapViewports: { ...s.boardMapViewports, [scope]: viewport } }))
   },
+  // Each write drops folds of runs that no longer exist, so the record stays small.
+  setBoardMapFolded: (runKey, folded) =>
+    set((s) => {
+      const listed = new Set(Object.values(s.runs).map((run) => JSON.stringify([run.workspace_id, run.id])))
+      const kept = Object.keys(s.boardMapFolded).filter((key) => key !== runKey && listed.has(key))
+      return { boardMapFolded: Object.fromEntries([...kept, ...(folded ? [runKey] : [])].map((key) => [key, true as const])) }
+    }),
   // An omitted model keeps the remembered one; an empty model forgets it.
   rememberLaunch: (agent, mode, model) =>
     set((s) => {

@@ -85,6 +85,8 @@ export interface PredictionMarker {
 
 export interface RunsSlice {
   runs: Record<string, RunRecord>
+  /** Counts `setRuns` calls, so a view can tell a snapshot re-read from a live event. */
+  runSnapshots: number
   setRuns: (runs: Run[]) => void
   upsertRun: (run: Run) => void
   removeRun: (runID: string) => void
@@ -131,6 +133,7 @@ export interface RunsSlice {
 
 export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
   runs: {},
+  runSnapshots: 0,
   setRuns: (runs) =>
     set((s) => {
       const records = Object.fromEntries(
@@ -139,6 +142,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
       const listed = (runID: string) => runID in records || runID in s.deletingRuns
       return {
         runs: records,
+        runSnapshots: s.runSnapshots + 1,
         terminalWriteIntents: pruneRuns(s.terminalWriteIntents, listed),
         terminalControlSessions: pruneRuns(s.terminalControlSessions, listed),
       }

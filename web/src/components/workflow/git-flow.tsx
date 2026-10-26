@@ -204,13 +204,13 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
       case 'merge':
         return (
           <span className="inline-flex">
-            <Button size="sm" className="rounded-r-none" disabled={acting !== null} onClick={() => pr && setConfirming({ pr, login: feedback?.identity, ready })}>
+            <Button size="sm" className="rounded-r-none pointer-fine:active:not-aria-disabled:scale-none" disabled={acting !== null} onClick={() => pr && setConfirming({ pr, login: feedback?.identity, ready })}>
               {spinner('merge')}
               {methodLabel[method]}
             </Button>
             <Menu>
               <MenuTrigger asChild>
-                <Button size="sm" className="rounded-l-none border-l border-on-accent/30 px-1.5" disabled={acting !== null} aria-label="Merge method">
+                <Button size="sm" className="rounded-l-none border-l border-on-accent/30 px-1.5 pointer-fine:active:not-aria-disabled:scale-none" disabled={acting !== null} aria-label="Merge method">
                   <ChevronDown aria-hidden />
                 </Button>
               </MenuTrigger>

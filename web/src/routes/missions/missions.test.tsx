@@ -199,6 +199,13 @@ describe('swarm detail', () => {
     expect(screen.getByText('rewrite the guest checkout flow · attempt 1')).toBeDefined()
   })
 
+  it('names the extra repos every run checks out', async () => {
+    const api = { ...workspace, id: 'wsp_api', name: 'api' }
+    seed({ runs: { run_integrator: toRecord(integrator()) }, workspaces: { [workspace.id]: workspace, [api.id]: api } })
+    await mount(showing({ extra_workspace_ids: [api.id, 'wsp_deleted'] }))
+    expect(screen.getByText('Extra repos: api, wsp_deleted, at /repos/<name> in every run.')).toBeDefined()
+  })
+
   it('links run IDs in Technical details to their runs', async () => {
     seed({ runs: { run_integrator: toRecord(integrator()) } })
     await mount(showing({}, { tasks: [missionTask()], attempts: [attempt()] }))

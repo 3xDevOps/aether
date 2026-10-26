@@ -180,12 +180,6 @@ export function stateWords(shown: Pick<RunPresentation, 'state' | 'reason'>, sin
   return { label: stateLabel[shown.state], detail: [ran, reason].filter(Boolean).join(' · ') || undefined }
 }
 
-/** The one line a card or row prints for a state: its words, joined. */
-export function stateLine(shown: Pick<RunPresentation, 'state' | 'reason'>): string {
-  const { label, detail } = stateWords(shown)
-  return detail ? `${label} · ${detail}` : label
-}
-
 // Mirrors events.RunStatusCause in internal/events/event.go.
 const causeWords: Record<string, string> = {
   turn: 'a turn is running',

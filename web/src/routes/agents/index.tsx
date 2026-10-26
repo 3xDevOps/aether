@@ -10,13 +10,17 @@ import { modes } from '@/components/launch/modes'
 import { ArrowLeft } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { CountBadge } from '@/components/ui/count-badge'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
+import { PageBody } from '@/components/ui/page-body'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
 import { useDelayed } from '@/lib/hooks'
+import { cn } from '@/lib/utils'
 import type { AgentInfo, GitHubConnectResult, LaunchMode } from '@/lib/types'
 import { useAgentList } from '@/routes/agents/use-agents'
 import { GitHubConnect } from '@/routes/onboarding/github-connect'
@@ -58,10 +62,31 @@ function AgentRows({ agents, ...actions }: { agents: AgentInfo[] } & Pick<Compon
     <>
       {list(installed)}
       <Collapsible>
-        <CollapsibleTrigger>More agents ({more.length})</CollapsibleTrigger>
+        <CollapsibleTrigger aria-label={`More agents (${more.length})`}>
+          More agents
+          <CountBadge>{more.length}</CountBadge>
+        </CollapsibleTrigger>
         <CollapsibleContent><div className="pt-2">{list(more, 'More agents')}</div></CollapsibleContent>
       </Collapsible>
     </>
+  )
+}
+
+function AgentsSkeleton() {
+  return (
+    <div role="status" aria-label="Loading agents">
+      <InsetList>
+        {['w-32', 'w-24', 'w-28'].map((width) => (
+          <InsetListItem key={width}>
+            <Skeleton className="size-8 shrink-0" />
+            <span className="flex flex-col gap-1.5">
+              <Skeleton className={cn('h-3.5', width)} />
+              <Skeleton className="h-3 w-48" />
+            </span>
+          </InsetListItem>
+        ))}
+      </InsetList>
+    </div>
   )
 }
 
@@ -106,7 +131,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
           : caps.hasMethod('agent.register') && <Button ref={addButton} size="sm" variant="secondary" onClick={() => setScreen(addScreen)}>Add agent…</Button>}
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-5 px-4 py-6 sm:px-6">
+        <PageBody width="lg" className="gap-6">
           {screen === githubScreen ? (
             <GitHubConnect client={client} caps={caps} onConnected={setGithub} onClose={close} />
           ) : screen === addScreen ? (
@@ -114,7 +139,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
           ) : screen ? (
             settingUp
               ? <AgentSetup key={settingUp.name} agent={settingUp} client={client} onDone={() => { reload(); close() }} />
-              : <div className="h-28"><Skeleton className="size-full" /></div>
+              : <AgentsSkeleton />
           ) : (
             <>
               <p className="max-w-2xl text-ui text-muted">
@@ -122,7 +147,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
                 {' '}A run shows the agent in Standard or Enhanced mode.{' '}
                 <Button variant="link" size="sm" onClick={() => setCompare(true)}>What's the difference?</Button>
               </p>
-              {loading && <div className="h-28"><Skeleton className="size-full" /></div>}
+              {loading && <AgentsSkeleton />}
               {error && (
                 <Callout tone="failed" role="alert" actions={<Button size="sm" variant="secondary" onClick={reload}>Retry</Button>}>
                   {error}
@@ -141,7 +166,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
               <AgentExtras client={client} caps={caps} identity github={github} onConnectGitHub={() => setScreen(githubScreen)} />
             </>
           )}
-        </div>
+        </PageBody>
       </div>
       {removing && <RemoveAgent agent={removing} client={client} onRemoved={reload} focusAfterRemoval={() => focusAfterRemoval(removing)} onClose={() => setRemoving(null)} />}
       <Dialog open={compare} onOpenChange={setCompare}>

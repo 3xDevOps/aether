@@ -6,15 +6,20 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 import { canReopenRun } from '@/lib/commands'
+import { useFileDrop } from '@/lib/file-drag'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
-import type { ConfigOption, SessionUsage } from '@/lib/session-types'
+import type { ConfigOption } from '@/lib/session-types'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
-import { ComposerImagePicker, ComposerImages, hasImages, useComposerImages } from '@/routes/run/composer-images'
-import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
+import { AttachmentChips } from '@/routes/run/composer-attachments'
+import { AttachButton, DropOverlay, dropRoom } from '@/routes/run/composer-dropzone'
+import { hasImages, useComposerImages, type ComposerImageState } from '@/routes/run/composer-images'
+import { ContextWindow } from '@/routes/run/context-window'
+import { commandSuggestions, currentChoice, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
 import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type ComposerDraft, type Pill } from '@/routes/run/composer-state'
+import { TemplateInsert } from '@/routes/run/composer-templates'
 import type { RunRoom } from '@/routes/run/room'
 import { TypingIndicator, useTypingSignal } from '@/routes/run/typing'
 import { sessionColumn } from '@/routes/run/session-rows'
@@ -24,7 +29,7 @@ import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 import { sessionLease } from '@/store/session-stream'
 import { backgroundWait } from '@/store/sessions'
-import { cn, focusRing } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 interface ComposerProps {
   run: RunRecord
@@ -46,17 +51,16 @@ function ComposerFrame({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Closed({ runID, reason, action, dock, failure }: { runID: string; reason: string; action?: React.ReactNode; dock?: React.ReactNode; failure?: string }) {
+function Closed({ runID, reason, action, failure }: { runID: string; reason: string; action?: React.ReactNode; failure?: string }) {
   return (
-    <ComposerFrame>
-      {dock}
+    <>
       {failure && <p role="alert" className="text-ui-sm text-state-failed">{failure}</p>}
       <TypingIndicator runID={runID} />
       <div className="flex min-h-14 min-w-0 items-center gap-2 rounded-composer border border-seam bg-chrome py-2 pl-4 pr-2">
         <p role="status" className="min-w-0 flex-1 text-ui-sm text-muted">{reason}</p>
         {action}
       </div>
-    </ComposerFrame>
+    </>
   )
 }
 
@@ -77,39 +81,15 @@ function ClosedRun({ run, reason, dock }: { run: RunRecord; reason: string; dock
     }
   }
   return (
-    <Closed
-      runID={run.id}
-      reason={reason}
-      dock={dock}
-      failure={failure}
-      action={<Button variant="primary" disabled={busy} onClick={() => void relaunch()}><RefreshCw aria-hidden="true" />{busy ? 'Relaunching…' : 'Relaunch'}</Button>}
-    />
-  )
-}
-
-const usageFormat = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
-
-function ContextMeter({ usage }: { usage: SessionUsage }) {
-  if (usage.size <= 0) return null
-  const percent = Math.min(100, Math.round((usage.used / usage.size) * 100))
-  return (
-    <Tooltip content={`Context window: ${usageFormat.format(usage.used)} of ${usageFormat.format(usage.size)} tokens used`}>
-      <span
-        role="meter"
-        tabIndex={0}
-        aria-label="Context window used"
-        aria-valuemin={0}
-        aria-valuemax={usage.size}
-        aria-valuenow={Math.min(usage.used, usage.size)}
-        aria-valuetext={`${percent}%`}
-        className={cn(focusRing, 'flex h-6 shrink-0 items-center gap-1.5 rounded-control px-1.5 text-ui-sm text-muted tabular-nums coarse:h-11')}
-      >
-        <span aria-hidden="true" className="block h-1.5 w-4 overflow-hidden rounded-full bg-hover-chrome">
-          <span className={cn('block h-full', percent >= 90 ? 'bg-state-needs-you' : 'bg-icon-faint')} style={{ width: `${percent}%` }} />
-        </span>
-        {percent}%
-      </span>
-    </Tooltip>
+    <ComposerFrame>
+      {dock}
+      <Closed
+        runID={run.id}
+        reason={reason}
+        failure={failure}
+        action={<Button variant="primary" disabled={busy} onClick={() => void relaunch()}><RefreshCw aria-hidden="true" />{busy ? 'Relaunching…' : 'Relaunch'}</Button>}
+      />
+    </ComposerFrame>
   )
 }
 
@@ -122,7 +102,7 @@ const pillLook: Record<Pill, { label: string; Icon: typeof ArrowUp; variant: 'pr
   resume: { label: 'Resume', Icon: Play, variant: 'primary' },
 }
 
-function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox, onPaste, readOnly, images, footer }: {
+function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox, onPaste, readOnly, images, attach, footer }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
   autoFocus?: boolean
   value: string
@@ -140,9 +120,13 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusCha
   onPaste?: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void
   readOnly?: boolean
   images?: React.ReactNode
+  /** What a file dropped on the box joins, and whether the box takes none now. */
+  attach: { images: ComposerImageState; disabled: boolean }
   footer: React.ReactNode
 }) {
   const coarse = useMediaQuery(coarsePointer)
+  const room = dropRoom(attach.images, attach.disabled)
+  const drop = useFileDrop({ onFiles: (files) => void attach.images.upload(files), limit: room.limit })
   const [focused, setFocused] = useState(false)
   const caretPlaced = useRef(false)
   useEffect(() => {
@@ -163,8 +147,9 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusCha
     } : {}),
   } : {})
   return (
-    <div className="relative">
+    <div className="relative" {...drop.handlers}>
       {menu}
+      {drop.count !== null && <DropOverlay count={drop.count} refused={drop.refused} blocked={room.blocked} limit={room.limit} />}
       <div className={cn('overflow-hidden rounded-composer border border-seam bg-chrome', focused && 'border-control')}>
       {images}
       <Textarea
@@ -278,6 +263,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
   const images = useComposerImages(run.id, !block && cap.hasMethod('terminal.file'))
+  const attachOff = busy || !cap.hasMethod('terminal.file')
   const { uploading, uploadError } = images
   const control = useImplicitControl(run, agent)
   const hint = !control.waits
@@ -301,7 +287,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
     else void post()
   }
 
-  if (block) return <Closed runID={run.id} reason={block} />
+  if (block) return <ComposerFrame><Closed runID={run.id} reason={block} /></ComposerFrame>
 
   return (
     <ComposerFrame>
@@ -327,10 +313,12 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
         placeholder="Message the agent"
         describedBy={hintID}
         onPaste={images.onPaste}
-        images={<ComposerImages images={images} disabled={busy} />}
+        images={<AttachmentChips images={images} disabled={busy} />}
+        attach={{ images, disabled: attachOff }}
         footer={(
           <>
-            <ComposerImagePicker images={images} disabled={busy || !cap.hasMethod('terminal.file')} />
+            <AttachButton images={images} disabled={attachOff} textarea={textarea} />
+            <TemplateInsert run={run} textarea={textarea} disabled={busy} />
             <SendActions
               pill="send"
               label={late ? stillWaiting : busy ? 'Sending…' : 'Send'}
@@ -407,6 +395,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const waiting = backgroundWait(run, session) !== null
   const supportsImages = state?.prompt_images === true
   const images = useComposerImages(run.id, !gate && cap.hasMethod('terminal.file'))
+  const attachOff = busy || !cap.hasMethod('terminal.file')
   const refusedImages = !supportsImages && hasImages(images.previews)
   const hasContent = Boolean(body.trim()) || images.previews.length > 0
   const pill = moderated ? 'send' : pillFor({ paused, turnRunning, backgroundWait: waiting, steering: state?.steering ?? false, queueHeld, empty: !hasContent })
@@ -426,6 +415,23 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     setCaret(at)
     setActive(0)
     requestAnimationFrame(() => textarea.current?.setSelectionRange(at, at))
+  }
+
+  const modelOption = state?.config_options?.find((option) => option.category === 'model' && option.type === 'select')
+  const modelName = (modelOption && currentChoice(modelOption)?.name) ?? run.model
+  const canCompact = state?.commands?.some((command) => command.name === 'compact') ?? false
+  const compactBlock = moderated
+    ? 'Take control of the session to compact it.'
+    : busy || hasContent
+      ? 'Clear the message box first, so nothing you typed is replaced.'
+      : undefined
+  const compact = () => {
+    setBody('/compact ')
+    setCaret(9)
+    requestAnimationFrame(() => {
+      textarea.current?.focus()
+      textarea.current?.setSelectionRange(9, 9)
+    })
   }
 
   const attempt = async (action: () => Promise<unknown>) => {
@@ -497,18 +503,20 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
 
   if (gate) {
     return (
-      <Closed
-        runID={run.id}
-        reason={gate.reason}
-        dock={dock}
-        failure={gate.interrupt ? error : undefined}
-        action={gate.interrupt && turnRunning && (
-          <Button size="sm" variant="danger" aria-label="Interrupt the agent" hint={pillHint.interrupt} disabled={busy} onClick={() => act('interrupt')}>
-            <Square className="fill-current" />
-            Interrupt
-          </Button>
-        )}
-      />
+      <ComposerFrame>
+        {dock}
+        <Closed
+          runID={run.id}
+          reason={gate.reason}
+          failure={gate.interrupt ? error : undefined}
+          action={gate.interrupt && turnRunning && (
+            <Button size="sm" variant="danger" aria-label="Interrupt the agent" hint={pillHint.interrupt} disabled={busy} onClick={() => act('interrupt')}>
+              <Square className="fill-current" />
+              Interrupt
+            </Button>
+          )}
+        />
+      </ComposerFrame>
     )
   }
 
@@ -538,16 +546,27 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
         value={body}
         readOnly={busy}
         onPaste={images.onPaste}
-        images={<ComposerImages images={images} disabled={busy} />}
+        images={<AttachmentChips images={images} disabled={busy} />}
+        attach={{ images, disabled: attachOff }}
         footer={(
           <>
-            <ComposerImagePicker
+            <AttachButton
               images={images}
-              disabled={busy || !cap.hasMethod('terminal.file')}
+              disabled={attachOff}
+              textarea={textarea}
               unsupported={refusedImages ? 'This agent does not support image prompts.' : undefined}
             />
+            <TemplateInsert run={run} textarea={textarea} disabled={busy} />
             <OptionPills options={state?.config_options ?? []} disabled={busy || moderated} onSet={setOption} />
-            {state?.usage && <ContextMeter usage={state.usage} />}
+            {state?.usage && state.usage.size > 0 && (
+              <ContextWindow
+                runID={run.id}
+                harness={run.harness}
+                usage={state.usage}
+                model={modelName}
+                compact={canCompact ? { onCompact: compact, blocked: compactBlock } : undefined}
+              />
+            )}
             <SendActions
               pill={pill}
               label={late ? stillWaiting : busy ? 'Sending…' : pillLook[pill].label}

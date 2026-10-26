@@ -272,6 +272,9 @@ type ServerInfoResult struct {
 
 const FeatureMultiRepo = "multi-repo"
 
+// FeatureSwarmRepos marks a server whose mission.create takes extra_workspace_ids; an older one drops them.
+const FeatureSwarmRepos = "swarm-repos"
+
 // CapabilityRunRepos is listed in a gateway's capability methods but is not an RPC method.
 const CapabilityRunRepos = "run.repos"
 

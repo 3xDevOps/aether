@@ -110,7 +110,7 @@ describe('hydrate', () => {
 
     expect(store.getState().runs.run_1.unanswered_questions).toBe(2)
   })
-  it("drops the previous member's note drafts, keys, failed notes and invitations when the member changes", async () => {
+  it("drops the previous member's note drafts, keys, failed notes, invitations and lane history when the member changes", async () => {
     let member = alice
     const client = fakeApi({ serverInfo: vi.fn(async () => ({ ...serverInfoFixture, member })) })
     const store = createRootStore()
@@ -119,6 +119,7 @@ describe('hydrate', () => {
     store.getState().noteSending('run_1', 'sent', 'key-1')
     store.getState().noteFailed('run_1', { text: 'sent', key: 'key-1', error: 'Failed to fetch', unanswered: true })
     store.setState({ invitations: [], revokingInvitations: ['inv_octocat'] })
+    store.getState().setLaneHistory('wsp_1', { loading: true })
 
     member = bob
     await hydrate(store, client)
@@ -128,6 +129,7 @@ describe('hydrate', () => {
     expect(store.getState().failedNotes).toEqual({})
     expect(store.getState().invitations).toBeNull()
     expect(store.getState().revokingInvitations).toEqual([])
+    expect(store.getState().laneHistory).toEqual({})
   })
   it("drops an invitation the previous member's write added while the new member's hydrate was pending", async () => {
     let member = alice

@@ -181,7 +181,7 @@ function Row({
             }}
             className={cn(
               focusRing,
-              'block min-h-[22px] coarse:min-h-11 max-w-full rounded-[2px] text-left',
+              'block min-h-[22px] coarse:min-h-11 max-w-full rounded-chip text-left',
             )}
           >
             <span className="block line-clamp-2 break-words text-ui font-medium leading-5">
@@ -243,7 +243,7 @@ export function RunStatusChip({ run }: { run: RunRecord }) {
 
 export function StatusChip({ state, label = stateLabel[state], title }: { state: PresentationState; label?: string; title?: string }) {
   return (
-    <span title={title} className="inline-flex min-h-5 items-center gap-1.5 rounded-[2px] border border-seam/80 px-1.5 py-px text-ui-sm leading-4 text-text">
+    <span title={title} className="inline-flex min-h-5 items-center gap-1.5 rounded-chip border border-seam/80 px-1.5 py-px text-ui-sm leading-4 text-text">
       <StatusDot tone={stateTone[state]} />
       <span>{label}</span>
     </span>

@@ -1,7 +1,9 @@
 import { useState } from 'react'
+import { FolderGit2 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
 import { EmptyState } from '@/components/ui/empty-state'
+import { PageBody } from '@/components/ui/page-body'
 import { SectionLabel } from '@/components/ui/section-label'
 import { ViewHeader } from '@/components/view-header'
 import { WorkspaceEnvironmentSection } from '@/components/workspace-environment'
@@ -34,7 +36,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
     return (
       <div className="flex h-full min-w-0 flex-col">
         <ViewHeader title="Repository" />
-        <EmptyState title="Unknown workspace">It may have been deleted, or this link names another server&apos;s workspace.</EmptyState>
+        <EmptyState icon={<FolderGit2 />} title="Unknown workspace">It may have been deleted, or this link names another server&apos;s workspace.</EmptyState>
       </div>
     )
   }
@@ -44,7 +46,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
     <div className="flex h-full min-w-0 flex-col">
       <ViewHeader title={workspace.name} subtitle="Repository" />
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-8 px-4 py-6 sm:px-6">
+        <PageBody>
           <SettingsSection title="Base branch" heading="h2">
             <SettingRow
               label={<Code>{workspace.base_branch}</Code>}
@@ -91,7 +93,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
               )}
             />
           </SettingsSection>
-        </div>
+        </PageBody>
       </div>
       {dialog === 'budget' && <BudgetDialog workspaceID={workspaceID} client={client} onClose={() => setDialog(null)} />}
       {dialog === 'settings' && <WorkspaceSettingsDialog workspaceID={workspaceID} client={client} onClose={() => setDialog(null)} />}

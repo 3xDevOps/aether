@@ -1,11 +1,12 @@
 import type { Route } from '@/store/ui'
 
-export const runViews = ['session', 'terminal', 'changes', 'files', 'browser'] as const
+export const runViews = ['session', 'trace', 'terminal', 'changes', 'files', 'browser'] as const
 
 export type RunView = (typeof runViews)[number]
 
 export const runViewLabel: Record<RunView, string> = {
   session: 'Session',
+  trace: 'Trace',
   terminal: 'Terminal',
   changes: 'Changes',
   files: 'Files',

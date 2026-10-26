@@ -324,8 +324,9 @@ describe('indexing subagents', () => {
     const { index: idx, main: held } = index(main)
     expect(turnExtras(idx, 0).get(1)?.orphans?.ids).toEqual(['ghost'])
     const rows = withAgentRows(rowsOfTurn({ turn: 1, items: held, closed: true }), 1, turnExtras(idx, 0))
-    expect(rows.map((row) => row.kind)).toEqual(['user', 'subagents', 'assistant', 'finished'])
+    expect(rows.map((row) => row.kind)).toEqual(['user', 'subagents', 'assistant'])
     expect(rows[1]).toMatchObject({ id: 'orphans:1', ids: ['ghost'] })
+    expect(rows[2]).toMatchObject({ outcome: { text: 'Finished in 4s' } })
     expect(turnExtras(index([launch(1, 'ghost')], true, idx).index, 0).get(1)?.orphans).toBeUndefined()
   })
 

@@ -79,9 +79,29 @@ describe('shell landmarks', () => {
     const finished = runList().getByRole('button', { name: /^Finished\s*\d+$/ })
     expect(finished.getAttribute('aria-expanded')).toBe('true')
     expect(runList().getByText('tidy the readme')).toBeDefined()
+    const chevron = finished.querySelector('svg')!
+    expect(chevron.getAttribute('class')).toContain('rotate-90')
+    const list = document.getElementById(finished.getAttribute('aria-controls')!)!
+    expect(list.getAttribute('class') ?? '').not.toContain('animate-fade-in')
     fireEvent.click(finished)
     expect(finished.getAttribute('aria-expanded')).toBe('false')
+    expect(chevron.getAttribute('class')).not.toContain('rotate-90')
     expect(runList().queryByText('tidy the readme')).toBeNull()
+    fireEvent.click(finished)
+    expect(list.getAttribute('class')).toContain('animate-fade-in')
+  })
+
+  it('shows a shaped placeholder, not words, while the first runs load', () => {
+    vi.useFakeTimers()
+    try {
+      useStore.setState({ runs: {}, hydrated: false, hydrationError: null })
+      render(<AppShell />)
+      expect(screen.queryByRole('status', { name: 'Loading runs' })).toBeNull()
+      act(() => void vi.advanceTimersByTime(250))
+      expect(screen.getByRole('status', { name: 'Loading runs' }).querySelectorAll('[data-slot="skeleton"]')).toHaveLength(18)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 
@@ -470,6 +490,16 @@ describe('navigation rows', () => {
 
     act(() => useStore.setState((s) => ({ info: s.info && { ...s.info, member: { ...s.info.member, role: 'admin' } } })))
     expect(nav().getByRole('button', { name: 'Members' })).toBeDefined()
+  })
+
+  it('draws the selection beside the list, so the overflow measuring still counts only items', () => {
+    render(<AppShell />)
+
+    const navigation = screen.getByRole('navigation', { name: 'Main navigation' })
+    const list = navigation.querySelector('ul')!
+    expect(navigation.querySelector(':scope > [data-slot="sliding-indicator"]')).not.toBeNull()
+    expect(list.querySelector('[data-slot="sliding-indicator"]')).toBeNull()
+    expect([...list.children].slice(0, -1).every((item) => item.hasAttribute('data-indicator-key'))).toBe(true)
   })
 })
 

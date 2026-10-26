@@ -1,4 +1,3 @@
-import { LoaderCircle } from '@/components/icons'
 import { RunRetention } from '@/components/run-retention'
 import { Button } from '@/components/ui/button'
 import {
@@ -9,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Spinner } from '@/components/ui/spinner'
 import type { ClearDonePlan, ReleaseFinishedPlan } from '@/lib/commands'
 import { runLabel } from '@/lib/status'
 
@@ -67,7 +67,7 @@ export function ClearDoneConfirm({
           </Button>
           {n > 0 && (
             <Button disabled={running} onClick={onConfirm}>
-              {running && <LoaderCircle className="size-3 animate-spin" aria-hidden />}
+              {running && <Spinner className="size-3 text-current" />}
               Archive {n}
             </Button>
           )}
@@ -126,7 +126,7 @@ export function ReleaseFinishedConfirm({
           </Button>
           {n > 0 && (
             <Button disabled={running} onClick={onConfirm}>
-              {running && <LoaderCircle className="size-3 animate-spin" aria-hidden />}
+              {running && <Spinner className="size-3 text-current" />}
               Free {n}
             </Button>
           )}

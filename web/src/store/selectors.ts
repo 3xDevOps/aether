@@ -154,9 +154,9 @@ export function runTrees(rows: RunRow[], ctx: StateContext): RunTree[] {
   return trees
 }
 
-const byWait = (a: RunRow, b: RunRow) =>
+export const byWait = (a: RunRow, b: RunRow) =>
   a.waitingSince.localeCompare(b.waitingSince) || a.run.id.localeCompare(b.run.id)
-const byChange = (a: RunRow, b: RunRow) =>
+export const byChange = (a: RunRow, b: RunRow) =>
   b.run.stateChangedAt.localeCompare(a.run.stateChangedAt) || a.run.id.localeCompare(b.run.id)
 const failedFirst = (a: RunRow, b: RunRow) =>
   Number(endedBadly(b.state)) - Number(endedBadly(a.state)) || byChange(a, b)

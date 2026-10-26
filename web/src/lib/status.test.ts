@@ -1,9 +1,16 @@
 import { awaitingReview } from '@/lib/needs-you'
 import { plainReason } from '@/lib/reasons'
-import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateLine, stateTitle, stateTone, stateWords } from '@/lib/status'
+import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateTitle, stateTone, stateWords } from '@/lib/status'
 import type { RunActivity } from '@/lib/types'
 import { isTerminal, toRecord } from '@/store/runs'
 import { bob, run, stateContext } from '@/test/fixtures'
+
+
+/** A state's words as a card reads them: the label, then the detail. */
+const stateLine = (shown: Parameters<typeof stateWords>[0]) => {
+  const { label, detail } = stateWords(shown)
+  return detail ? `${label} · ${detail}` : label
+}
 
 describe('runLabel', () => {
   it('prefers a terminal title over the task', () => {

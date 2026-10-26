@@ -6,6 +6,7 @@ import { desktopBridge, WindowControls } from '@/components/shell/window-bar'
 import { Button } from '@/components/ui/button'
 import { ListRow } from '@/components/ui/list-row'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
+import { SlidingIndicator } from '@/components/ui/sliding-indicator'
 import { useIsMobile } from '@/lib/breakpoints'
 import { AssistantButton } from '@/components/assistant/button'
 import { canLaunch, launchBlocked } from '@/lib/commands'
@@ -120,16 +121,20 @@ function HeaderNavigation() {
   }, [layout])
 
   const overflow = list.slice(layout.count)
+  const active = list.findIndex(({ name, tabs }) => current === name || tabs?.includes(current))
   return (
-    <nav aria-label="Main navigation" className="min-w-0 flex-1" style={{ minWidth: layout.minimum }}>
+    <nav aria-label="Main navigation" className="relative min-w-0 flex-1" style={{ minWidth: layout.minimum }}>
+      {/* A sibling of the list, which the overflow measuring counts child by child. */}
+      <SlidingIndicator activeKey={active >= 0 && active < layout.count ? list[active]!.name : undefined} className="rounded-control bg-selection" />
       <ul ref={row} className="relative flex items-center gap-1">
-        {list.map(({ name, label, Icon, tabs }, index) => {
+        {list.map(({ name, label, Icon }, index) => {
           const hidden = index >= layout.count
-          const selected = current === name || tabs?.includes(current)
+          const selected = index === active
           return (
-            <li key={name} aria-hidden={hidden || undefined} inert={hidden} className={cn('w-max shrink-0', hidden && 'invisible absolute')}>
+            <li key={name} data-indicator-key={name} aria-hidden={hidden || undefined} inert={hidden} className={cn('w-max shrink-0', hidden && 'invisible absolute')}>
               <ListRow
                 selected={selected}
+                className="bg-transparent"
                 aria-current={selected ? 'page' : undefined}
                 leading={<Icon />}
                 onClick={() => navigate(name)}

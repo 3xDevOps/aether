@@ -690,6 +690,42 @@ describe('swarm', () => {
     expect(params.fallback_account_member_ids).toBeUndefined()
   })
 
+  describe('extra repos', () => {
+    const docs = { ...workspace, id: 'wsp_docs', name: 'docs-site' }
+
+    async function addDocs() {
+      await userEvent.click(screen.getByRole('button', { name: 'Add repos' }))
+      await userEvent.click(within(await screen.findByRole('dialog', { name: 'Add repos' })).getByRole('checkbox', { name: /docs-site/ }))
+      await userEvent.keyboard('{Escape}')
+    }
+
+    beforeEach(() => {
+      useStore.setState({ workspaces: { [workspace.id]: workspace, [docs.id]: docs } })
+    })
+
+    it('creates the swarm with them and says candidates combine /workspace only', async () => {
+      useStore.setState({ info: { ...serverInfo, features: ['multi-repo', 'swarm-repos'] } })
+      await openSwarm()
+      await addDocs()
+      expect(screen.getByText(/Candidates combine \/workspace only/)).toBeTruthy()
+      await create('coordinate checkout work')
+      await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+      expect(vi.mocked(api.missionCreate).mock.calls[0][0].extra_workspace_ids).toEqual([docs.id])
+    })
+
+    it('sends none to a server whose swarms would drop them, even ones picked for a run', async () => {
+      useStore.setState({ info: { ...serverInfo, features: ['multi-repo'] } })
+      await openSwarm()
+      expect(screen.queryByRole('button', { name: 'Add repos' })).toBeNull()
+      await userEvent.click(screen.getByRole('tab', { name: 'Run' }))
+      await addDocs()
+      await userEvent.click(screen.getByRole('tab', { name: 'Swarm' }))
+      await create('coordinate checkout work')
+      await waitFor(() => expect(api.missionCreate).toHaveBeenCalledTimes(1))
+      expect(vi.mocked(api.missionCreate).mock.calls[0][0]).not.toHaveProperty('extra_workspace_ids')
+    })
+  })
+
   it('shows the server\'s refusal verbatim', async () => {
     vi.mocked(api.missionCreate).mockRejectedValueOnce(new Error('mission: coordination is unavailable'))
     await openSwarm()

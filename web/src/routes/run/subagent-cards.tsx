@@ -24,6 +24,7 @@ const tones: Record<AgentState, { tone: Tone; pulse?: boolean; word: string }> =
 }
 
 export const agentStateWord = (state: AgentState) => tones[state].word
+export const agentTone = (state: AgentState) => tones[state].tone
 
 /** replace swaps the open subagent without a history entry. */
 export function openAgent(runID: string, id: string, replace = false) {
@@ -142,8 +143,7 @@ function summary(kinds: string[]): string {
 }
 
 export function SubagentGroup({ runID, rowID, ids }: { runID: string; rowID: string; ids: string[] }) {
-  const collapseKey = `collapsed:${rowID}`
-  const collapsed = useStore((s) => s.expandedRows[runID]?.[collapseKey] === true)
+  const open = useStore((s) => s.expandedRows[runID]?.[rowID] ?? true)
   const listID = useId()
   const kinds = useStore((s) => ids.map((id) => {
     const agent = s.acpSessions[runID]?.agents.agents[id]
@@ -154,12 +154,12 @@ export function SubagentGroup({ runID, rowID, ids }: { runID: string; rowID: str
     <div data-slot="subagent-group" className="flex flex-col">
       <WorkGroup
         summary={summary(kinds.split(' '))}
-        expanded={!collapsed}
+        expanded={open}
         controls={listID}
-        onToggle={() => useStore.getState().toggleSessionRow(runID, collapseKey)}
+        onToggle={() => useStore.getState().setSessionRow(runID, rowID, !open)}
       />
       <div id={listID} className="flex flex-col">
-        {!collapsed && ids.map((id) => <SubagentCard key={id} runID={runID} id={id} />)}
+        {open && ids.map((id) => <SubagentCard key={id} runID={runID} id={id} />)}
       </div>
     </div>
   )

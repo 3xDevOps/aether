@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
@@ -20,8 +21,8 @@ func init() {
 		name:  "swarm",
 		short: "create, follow, and cancel swarms (an integrator run and its workers)",
 		usage: "aether swarm create <objective>|- --agent <agent> [--worker <agent>[:<mode>[:<model>]]]... [--workspace <name>]\n" +
-			"    [--mode standard|enhanced] [--model <model>] [--account <member-id>] [--fallback <member-id>,...|--no-fallback]\n" +
-			"    [--idempotency-key <key>]\n" +
+			"    [--repo <workspace>]... [--mode standard|enhanced] [--model <model>] [--account <member-id>]\n" +
+			"    [--fallback <member-id>,...|--no-fallback] [--idempotency-key <key>]\n" +
 			"aether swarm list [--workspace <name>]\n" +
 			"aether swarm show <swarm-id>\n" +
 			"aether swarm answer <swarm-id> --question <question-id> \"<answer>\"\n" +
@@ -37,7 +38,7 @@ func init() {
 	})
 }
 
-const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--model <model>] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--worker <agent>[:standard|enhanced|background[:<model>]]]... [--workspace] [--idempotency-key <key>]\n" +
+const swarmUsage = "usage: aether swarm create \"<objective>\"|- --agent <agent> [--mode standard|enhanced] [--model <model>] [--account <member-id>] [--fallback <member-id>,... | --no-fallback] [--worker <agent>[:standard|enhanced|background[:<model>]]]... [--workspace] [--repo <workspace>]... [--idempotency-key <key>]\n" +
 	"   or: aether swarm list [--workspace]\n" +
 	"   or: aether swarm show <swarm-id>\n" +
 	"   or: aether swarm answer <swarm-id> --question <question-id> \"<answer>\"|-\n" +
@@ -73,6 +74,7 @@ type swarmSpec struct {
 	account    string
 	workspace  string
 	workers    []protocol.MissionExecutionChoice
+	repos      []string
 	fallbacks  []string
 	noFallback bool
 	key        string
@@ -84,23 +86,42 @@ func swarmCreate(args []string, stdin io.Reader) error {
 		return err
 	}
 	return withControl(func(c *protocol.Client) error {
-		wsID, err := resolveWorkspace(c, spec.workspace)
-		if err != nil {
-			return err
-		}
-		if err := fillSwarmModes(c, &spec); err != nil {
-			return err
-		}
-		accountID := spec.account
-		if accountID == "" {
-			var info protocol.ServerInfoResult
-			if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
-				return err
-			}
-			accountID = info.Member.ID
-		}
-		return createSwarm(c, os.Stdout, missionCreateParams(wsID, accountID, spec, cmp.Or(spec.key, cli.NewControlSessionID())))
+		return submitSwarm(c, os.Stdout, spec, cmp.Or(spec.key, cli.NewControlSessionID()))
 	})
+}
+
+func submitSwarm(c *protocol.Client, w io.Writer, spec swarmSpec, key string) error {
+	var list protocol.WorkspaceListResult
+	if err := c.Call(protocol.MethodWorkspaceList, struct{}{}, &list); err != nil {
+		return err
+	}
+	wsID, err := pickWorkspace(list.Workspaces, spec.workspace)
+	if err != nil {
+		return err
+	}
+	var repos []string
+	for _, repo := range spec.repos {
+		id, repoErr := workspaceIDIn(list.Workspaces, repo)
+		if repoErr != nil {
+			return fmt.Errorf("--repo %s: %w", repo, repoErr)
+		}
+		repos = append(repos, id)
+	}
+	var info protocol.ServerInfoResult
+	if spec.account == "" || len(repos) > 0 {
+		if err := c.Call(protocol.MethodServerInfo, struct{}{}, &info); err != nil {
+			return err
+		}
+	}
+	if len(repos) > 0 && !slices.Contains(info.Features, protocol.FeatureSwarmRepos) {
+		return fmt.Errorf("--repo: server %s does not support swarms with several repositories; update the server with aether server update", info.ServerVersion)
+	}
+	if err := fillSwarmModes(c, &spec); err != nil {
+		return err
+	}
+	params := missionCreateParams(wsID, cmp.Or(spec.account, info.Member.ID), spec, key)
+	params.ExtraWorkspaceIDs = repos
+	return createSwarm(c, w, params)
 }
 
 // parseSwarmCreate rejects what the server would refuse before any RPC, so
@@ -115,6 +136,8 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	fallbackOrder := fs.String("fallback", "", fallbackHelp)
 	noFallback := fs.Bool("no-fallback", false, noFallbackHelp)
 	key := fs.String("idempotency-key", "", "the key a failed or interrupted create printed: the retry returns that swarm instead of starting another (default: a new key)")
+	var repos stringList
+	fs.Var(&repos, "repo", "also check out this workspace ID or name at /repos/<name> in the integrator and every worker (repeatable)")
 	var workers stringList
 	fs.Var(&workers, "worker", "allow workers on this agent, agent[:mode[:model]] with mode standard|enhanced|background; an omitted or empty mode is "+defaultModeHelp+" (repeatable)")
 	objective, err := parseLeadingArg(fs, args)
@@ -141,7 +164,7 @@ func parseSwarmCreate(args []string, stdin io.Reader) (swarmSpec, error) {
 	}
 	spec := swarmSpec{
 		objective: objective, agent: *agent, mode: integratorMode, model: *model, account: *account, workspace: *workspace,
-		fallbacks: fallbacks, noFallback: *noFallback, key: *key,
+		repos: repos, fallbacks: fallbacks, noFallback: *noFallback, key: *key,
 	}
 	for _, w := range workers {
 		choice, parseErr := parseWorker(w)
@@ -371,6 +394,9 @@ func renderSwarm(w io.Writer, res protocol.MissionShowResult) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "swarm %s %s\n", m.ID, m.Phase)
 	fmt.Fprintf(&b, "objective: %s\n", m.Objective)
+	if len(m.ExtraWorkspaceIDs) > 0 {
+		fmt.Fprintf(&b, "extra repos: %s\n", strings.Join(m.ExtraWorkspaceIDs, ", "))
+	}
 	fmt.Fprintf(&b, "accountable human: %s\n", m.AccountableHumanID)
 	integrator := m.Integrator.Harness + " " + modeName(m.Integrator.Mode)
 	if m.Integrator.Model != "" {

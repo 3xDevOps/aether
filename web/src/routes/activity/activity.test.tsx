@@ -3,6 +3,7 @@ import type { Api } from '@/lib/api'
 import { eventLabel } from '@/lib/events'
 import type { Event, RunMessage, TimelinePage, TimelineQuery } from '@/lib/types'
 import { ActivityRoute } from '@/routes/activity'
+import { EventFeed } from '@/routes/activity/event-feed'
 import { olderFeed, openFeed } from '@/routes/team/sync'
 import { useStore } from '@/store'
 import { toRecord } from '@/store/runs'
@@ -128,6 +129,14 @@ async function showMessages() {
 beforeEach(() => sizedViewport())
 
 describe('activity feed', () => {
+  it('shows row-shaped placeholders while the first page loads', async () => {
+    seed()
+    useStore.setState({ feedLoading: true })
+    render(<EventFeed client={feedApi()} raw={false} />)
+
+    expect((await screen.findByRole('status', { name: 'Loading activity' })).querySelectorAll('[data-slot="skeleton"]')).toHaveLength(32)
+  })
+
   it('opens a window at the end of the log and lists it newest first', async () => {
     const client = feedApi()
     seed()
@@ -310,7 +319,7 @@ describe('activity filter', () => {
     await openFilter()
     await pickOption(screen.getByLabelText('Show'), 'Run title')
     await vi.waitFor(() => expect(client.workspaceTimeline).toHaveBeenCalledWith(expect.objectContaining({ types: ['run.title'] })))
-    expect(screen.getByRole('button', { name: 'Filter · 1' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Filter, 1 active' })).toBeDefined()
   })
 
   it('filters runtime retention separately from business status', async () => {
@@ -427,7 +436,7 @@ describe('agent message history', () => {
     fireEvent.click(within(screen.getAllByRole('article')[1]).getByRole('button', { name: 'Thread' }))
     await vi.waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2))
     expect(client.coordMessagesList).toHaveBeenCalledWith(expect.objectContaining({ correlation_id: 'msg_2' }))
-    expect(screen.getByRole('button', { name: 'Filter · 2' })).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Filter, 2 active' })).toBeDefined()
   })
 
   it('reads the whole thread from the server when part of it is on an older page', async () => {

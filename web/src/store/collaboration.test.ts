@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createRootStore } from '@/store'
+import { repliesByQuestion } from '@/store/collaboration'
 import { evidencePacket, roomMessage } from '@/test/fixtures'
 const createdAt = '2026-08-14T10:00:00Z'
 const oldestID = '01ARZ3NDEKTSV4RRFFQ69G5FAV'
@@ -129,5 +130,19 @@ describe('collaboration slice', () => {
     store.getState().setEvidencePage('run_evidence', [evidencePacket({ id: 'packet-new' })], 'evidence-refresh-cursor')
     expect(store.getState().evidenceNextBefore.run_evidence).toBeUndefined()
     expect(store.getState().evidencePagination.run_evidence.exhausted).toBe(true)
+  })
+})
+
+describe('repliesByQuestion', () => {
+  it('groups replies under the question they answer, in room order', () => {
+    const replies = repliesByQuestion([
+      roomMessage({ id: 'q1', kind: 'question' }),
+      roomMessage({ id: 'r1', kind: 'reply', correlation_id: 'q1' }),
+      roomMessage({ id: 'c1', kind: 'comment' }),
+      roomMessage({ id: 'r2', kind: 'reply', correlation_id: 'q1' }),
+      roomMessage({ id: 'r3', kind: 'reply' }),
+    ])
+    expect([...replies.keys()]).toEqual(['q1'])
+    expect(replies.get('q1')!.map((m) => m.id)).toEqual(['r1', 'r2'])
   })
 })

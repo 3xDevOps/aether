@@ -233,7 +233,8 @@ func (s *Scheduler) BuildEnvironmentPlan(ctx context.Context, run *domain.Run, w
 	}); validateErr != nil {
 		return nil, validateErr
 	}
-	plan.Mounts, plan.Worktrees = mounts[:len(plan.Mounts)], mounts[len(plan.Mounts):]
+	// Capped, or a later append to plan.Mounts overwrites plan.Worktrees.
+	plan.Mounts, plan.Worktrees = mounts[:len(plan.Mounts):len(plan.Mounts)], mounts[len(plan.Mounts):]
 	return plan, nil
 }
 

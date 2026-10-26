@@ -78,9 +78,9 @@ const CommitRow = memo(function CommitRow({ row }: { row: Extract<GraphRow, { ki
           {commit.subject}
         </span>
       </Tooltip>
-      {row.tip && <span className="shrink-0 truncate rounded-control bg-chrome px-1 font-code text-ui-xs text-muted max-w-32">{row.tip}</span>}
+      {row.tip && <span className="shrink-0 truncate rounded-chip bg-chrome px-1 font-code text-ui-xs text-muted max-w-32">{row.tip}</span>}
       {row.conflicts > 0 && (
-        <span className="shrink-0 rounded-control bg-state-needs-you-soft px-1 text-ui-xs text-state-needs-you tabular-nums">
+        <span className="shrink-0 rounded-chip bg-state-needs-you-soft px-1 text-ui-xs text-state-needs-you tabular-nums">
           {row.conflicts} {row.conflicts === 1 ? 'conflict' : 'conflicts'}
         </span>
       )}

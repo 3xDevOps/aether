@@ -229,7 +229,7 @@ function Marks({ runID, page, frame, size, notes, hover, viewing, onView, onCapt
           <span
             aria-hidden
             data-slot="annotate-hover"
-            className="absolute max-w-full truncate rounded-control bg-accent px-1 font-code text-ui-xs text-on-accent"
+            className="absolute max-w-full truncate rounded-chip bg-accent px-1 font-code text-ui-xs text-on-accent"
             style={{ left: Math.max(0, hoverBox.left), top: hoverBox.top >= 20 ? hoverBox.top - 20 : Math.max(0, hoverBox.top + hoverBox.height + 2) }}
           >
             {boxLabel(hover.element)}

@@ -27,21 +27,23 @@ export function workerName(taskIndex: number, attempt: number, firstAttempt: num
 }
 
 const requested = new Map<string, Set<string>>()
+let reads = 0
+const shown = new Map<string, number>()
 
-async function loadMission(missionID: string): Promise<void> {
-  try {
-    const result = await api.missionShow(missionID)
-    useStore.getState().setMissionDetail({
-      mission: result.mission,
-      tasks: result.tasks,
-      attempts: result.attempts ?? [],
-      submissions: result.submissions ?? [],
-      diagnostics: result.diagnostics ?? [],
-      questions: result.questions ?? [],
-    })
-  } catch {
-    // Without the swarm the participant keeps its run label.
-  }
+/** Reads can overlap and answer out of order; an answer to a read asked before the one shown is dropped. */
+export async function loadMission(missionID: string): Promise<void> {
+  const read = ++reads
+  const result = await api.missionShow(missionID)
+  if (read < (shown.get(missionID) ?? 0)) return
+  shown.set(missionID, read)
+  useStore.getState().setMissionDetail({
+    mission: result.mission,
+    tasks: result.tasks,
+    attempts: result.attempts ?? [],
+    submissions: result.submissions ?? [],
+    diagnostics: result.diagnostics ?? [],
+    questions: result.questions ?? [],
+  })
 }
 
 export function useRunHandle(runID: string, run: RunRecord | undefined): Handle | undefined {
@@ -53,7 +55,8 @@ export function useRunHandle(runID: string, run: RunRecord | undefined): Handle 
     const asked = requested.get(missionID) ?? new Set()
     if (asked.has(runID)) return
     requested.set(missionID, asked.add(runID))
-    void loadMission(missionID)
+    // Without the swarm the participant keeps its run label.
+    loadMission(missionID).catch(() => {})
   }, [missionID, runID, name])
   if (name) return { name, task }
   return run?.mission_role === 'integrator' ? { name: 'Integrator' } : undefined

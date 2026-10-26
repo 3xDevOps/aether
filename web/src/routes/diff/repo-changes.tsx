@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
-import { RefreshCw } from '@/components/icons'
+import { GitBranch, RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -9,6 +9,7 @@ import { coarsePointer, useElementSize, useMediaQuery } from '@/lib/hooks'
 import type { RunRepo } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import type { PatchFile } from '@/routes/diff/parse'
+import { DiffSkeleton } from '@/routes/diff/diff-skeleton'
 import { ChangedFileRow, FileList } from '@/routes/diff/file-list'
 import { isLargeDiff, useOffsetTop } from '@/routes/diff/large-diff'
 import { collapsedByDefault, Counts, FilePatch } from '@/routes/diff/patch-view'
@@ -101,7 +102,7 @@ function RepoSummary({ repo, run, agent, agentName }: { repo: RunRepo; run: Scop
         <span className="ml-auto"><RepoPR run={run} agent={agent} agentName={agentName} /></span>
       </div>
       {patch.error && <Callout tone="failed" role="alert" className="m-2">{patch.error}</Callout>}
-      {patch.loading && !patch.error && <p className="p-3 text-ui text-muted">Loading the diff…</p>}
+      {patch.loading && !patch.error && <DiffSkeleton className="p-3" />}
       {!patch.loading && !patch.error && patch.files.length === 0 && <p className="p-3 text-ui text-muted">No changes yet.</p>}
       {patch.files.slice(0, listed).map((file) => (
         <ChangedFileRow key={file.path} file={file} onOpen={open} />
@@ -210,8 +211,8 @@ export function RepoChanges({ run, repo, agent, agentName }: { run: ScopedRecord
           files.map(patchAt)
         )}
         {files.length === 0 && !data.error && (data.loading
-          ? <p className="p-4 text-ui text-muted">Loading the diff…</p>
-          : <EmptyState title="No changes yet.">{`Nothing differs from ${run.base_branch || 'the base branch'} in ${repo.name}. Files the agent changes show up here.`}</EmptyState>)}
+          ? <DiffSkeleton />
+          : <EmptyState icon={<GitBranch />} title="No changes yet">{`Nothing differs from ${run.base_branch || 'the base branch'} in ${repo.name}. Files the agent changes show up here.`}</EmptyState>)}
         </div>
       </div>
     </div>

@@ -16,13 +16,15 @@ import (
 // recordingLauncher persists the run the attempt already reserved, which is
 // what the scheduler seam must do: the durable RunID is never re-issued.
 type recordingLauncher struct {
-	db *store.DB
-	mu sync.Mutex
+	db       *store.DB
+	mu       sync.Mutex
+	requests []MissionLaunchRequest
 }
 
 func (l *recordingLauncher) LaunchMission(ctx context.Context, req MissionLaunchRequest) (*domain.Run, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.requests = append(l.requests, req)
 	r := &domain.Run{
 		ID: req.RunID, WorkspaceID: req.WorkspaceID, MemberID: req.RunOwnerID, AccountMemberID: req.AccountOwner,
 		Task: req.Task, Harness: req.Harness, Mode: req.Mode, Model: req.Model, Status: domain.RunQueued, Fallback: req.Fallback,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
+import { GitBranch } from '@/components/icons'
 import { MissingRun } from '@/components/missing-run'
 import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -9,6 +10,7 @@ import { api } from '@/lib/api'
 import { clockTime } from '@/lib/format'
 import { extraRepoCount } from '@/lib/repos'
 import { coarsePointer, useElementSize, useMediaQuery } from '@/lib/hooks'
+import { DiffSkeleton } from '@/routes/diff/diff-skeleton'
 import { FileList } from '@/routes/diff/file-list'
 import { isLargeDiff, useOffsetTop } from '@/routes/diff/large-diff'
 import { Land } from '@/routes/diff/land'
@@ -240,13 +242,14 @@ function PrimaryChanges({ runID, agent, agentName }: { runID: string; agent: Age
 }
 
 function Empty({ comparison, loading, recorded, against }: { comparison: Comparison; loading: boolean; recorded: boolean; against: string }) {
-  if (loading) return <p className="p-4 text-ui text-muted">Loading the diff…</p>
+  if (loading) return <DiffSkeleton />
+  const icon = <GitBranch />
   if (comparison.kind === 'since') {
-    return <EmptyState title="No changes.">Nothing changed since {clockTime(comparison.checkpoint.time)}.</EmptyState>
+    return <EmptyState icon={icon} title="No changes">Nothing changed since {clockTime(comparison.checkpoint.time)}.</EmptyState>
   }
-  if (comparison.kind === 'start') return <EmptyState title="No changes.">Nothing changed since the run started.</EmptyState>
-  if (recorded) return <EmptyState title="No recorded changes.">The last snapshot matched {against}.</EmptyState>
-  return <EmptyState title="No changes yet.">Nothing differs from {against}. Files the agent changes show up here.</EmptyState>
+  if (comparison.kind === 'start') return <EmptyState icon={icon} title="No changes">Nothing changed since the run started.</EmptyState>
+  if (recorded) return <EmptyState icon={icon} title="No recorded changes">The last snapshot matched {against}.</EmptyState>
+  return <EmptyState icon={icon} title="No changes yet">Nothing differs from {against}. Files the agent changes show up here.</EmptyState>
 }
 
 /** Runs with a fetch in flight, across remounts of the view. A snapshot

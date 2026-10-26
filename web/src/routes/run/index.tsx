@@ -26,13 +26,14 @@ import { CompletionPrompt } from '@/routes/run/completion-prompt'
 import { RunDetails } from '@/routes/run/details'
 import { RunHeader, type RunNavigation } from '@/routes/run/header'
 import { MultiplayerControls } from '@/routes/run/multiplayer-controls'
+import { dockedRequestID } from '@/routes/run/request-dock'
 import { useRunRoom } from '@/routes/run/room'
-import { dockedRequestID } from '@/routes/run/session-requests'
 import { SessionView } from '@/routes/run/session-view'
 import { useRunShells } from '@/routes/run/shells'
 import { WorkflowChip, WorkflowPanel, workflowPanelID } from '@/routes/run/workflow-panel'
 import { SubagentInspector } from '@/routes/run/subagent-inspector'
 import { TerminalView } from '@/routes/run/terminal-view'
+import { TraceView } from '@/routes/run/trace-view'
 import { defaultView, isRunView, runViewLabel, runViews, type RunView } from '@/routes/run/views'
 import { TakeoverDialog } from '@/routes/terminal/takeover-dialog'
 import { useStore } from '@/store'
@@ -95,7 +96,8 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
   const splittable = browser && frame.width >= 2 * minBesideWidth
   const docked = splittable && beside
   const files = hasFiles(run, cap)
-  const views = runViews.filter((view) => (view !== 'browser' || (browser && !docked)) && (view !== 'files' || files))
+  const views = runViews.filter((view) =>
+    (view !== 'browser' || (browser && !docked)) && (view !== 'files' || files) && (view !== 'trace' || run.acp === true))
   const asked = isRunView(params.view) ? params.view : remembered
   const view = asked && views.includes(asked) ? asked : defaultView(run)
   const visited = useVisited(view)
@@ -291,6 +293,11 @@ function RunFrame({ run, params }: { run: RunRecord; params: RouteProps['params'
                   shells={shells}
                   switchable={switchable}
                 />
+              </TabsContent>
+            )}
+            {view === 'trace' && (
+              <TabsContent value="trace" className={panel}>
+                <TraceView run={run} nav={nav} />
               </TabsContent>
             )}
             <TabsContent value="terminal" forceMount inert={view !== 'terminal'} className={cn(panel, view !== 'terminal' && 'invisible')}>

@@ -13,9 +13,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Ellipsis } from '@/components/icons'
+import { Ellipsis, SquareTerminal } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
+import { FailureCallout } from '@/components/ui/failure-callout'
+import { Spinner } from '@/components/ui/spinner'
 import {
   Menu,
   MenuContent,
@@ -537,30 +539,30 @@ export function TerminalDock({
           )}
           <div className="min-h-0 flex-1 overflow-hidden">
             {loading ? (
-              <p className="h-full bg-canvas p-3 text-ui text-muted">Checking environment…</p>
+              <div role="status" className="flex h-full items-center justify-center gap-2 bg-canvas p-3 text-ui text-muted">
+                <Spinner />
+                Checking environment…
+              </div>
             ) : dock.statusError ? (
-              <div className="h-full min-h-0 min-w-0 space-y-2 overflow-y-auto break-words whitespace-pre-wrap bg-canvas p-3 text-ui">
-                <p className="text-state-failed">{dock.statusError}</p>
-                {empty && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => {
-                      setStatus(null)
-                      setStatusAttempt((attempt) => attempt + 1)
-                    }}
-                  >
-                    Retry
-                  </Button>
-                )}
+              <div className="h-full min-h-0 min-w-0 overflow-y-auto whitespace-pre-wrap bg-canvas p-3">
+                <FailureCallout
+                  error={dock.statusError}
+                  onRetry={empty ? () => {
+                    setStatus(null)
+                    setStatusAttempt((attempt) => attempt + 1)
+                  } : undefined}
+                />
               </div>
             ) : empty && containment === 'fill' ? (
-              <EmptyState
-                title="Your environment starts on first open"
-                action={<Button ref={openTrigger} type="button" onClick={open}>Open</Button>}
-              >
-                A container with your home directory, for installing tools and logging in to agents. Save it and new runs start from it.
-              </EmptyState>
+              <div className="h-full overflow-y-auto">
+                <EmptyState
+                  icon={<SquareTerminal />}
+                  title="Your environment starts on first open"
+                  action={<Button ref={openTrigger} type="button" onClick={open}>Open</Button>}
+                >
+                  A container with your home directory, for installing tools and logging in to agents. Save it and new runs start from it.
+                </EmptyState>
+              </div>
             ) : empty ? (
               <div className="h-full space-y-2 bg-canvas p-3 text-ui">
                 <p>Your environment starts on first open</p>

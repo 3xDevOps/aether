@@ -279,11 +279,11 @@ export function useTerminalImage({
               Some clipboard managers provide only a client-local path. The remote terminal cannot read that path; choose the actual image file here. Supported formats: PNG, JPEG, GIF, and WebP, up to 8 MiB.
             </p>
             {selected && (
-              <div className="flex min-w-0 items-center gap-3 rounded-[2px] border border-seam bg-canvas p-2">
+              <div className="flex min-w-0 items-center gap-3 rounded-control border border-seam bg-canvas p-2">
                 {preview ? (
-                  <img className="size-16 shrink-0 rounded-[2px] border border-seam object-contain" src={preview} alt="Selected image preview" />
+                  <img className="size-16 shrink-0 rounded-chip border border-seam object-contain" src={preview} alt="Selected image preview" />
                 ) : (
-                  <span className="grid size-16 shrink-0 place-items-center rounded-[2px] border border-seam text-ui-sm text-muted">Image</span>
+                  <span className="grid size-16 shrink-0 place-items-center rounded-chip border border-seam text-ui-sm text-muted">Image</span>
                 )}
                 <span className="min-w-0 break-words text-ui">{selected.name || 'Clipboard image'}</span>
               </div>
