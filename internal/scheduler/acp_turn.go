@@ -306,17 +306,23 @@ func (d *acpDriver) askReport(entry *supervised, st acphost.TurnState, forward b
 			return
 		}
 		d.mu.Lock()
-		current := d.runs[entry.runID] == r && r.session == sess && r.asked == turn
-		if current {
+		owned := r.asked == turn
+		if owned {
 			r.asked = nil
 		}
+		current := owned && d.runs[entry.runID] == r && r.session == sess
 		d.mu.Unlock()
-		if !current {
+		if !owned {
 			return
 		}
 		slog.Info("scheduler: the report reminder was not sent", "run", entry.runID, "error", err)
+		// The asked turn's message is forwarded even when the session went
+		// away; only its idle report needs the live session.
 		if turn.forward {
 			d.s.TurnEnded(entry.runID, turn.message)
+		}
+		if !current {
+			return
 		}
 		// Under the scheduler lock, so a member's prompt that started a turn
 		// meanwhile is never reported idle.
