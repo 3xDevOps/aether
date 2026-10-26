@@ -1,10 +1,10 @@
 # Watches
 
-A watch is a subscription you keep on one run or one swarm. The server
-evaluates it, not your browser or an agent, so it keeps working after you
-close the dashboard and across server restarts. When the target needs you or
-reaches the state you asked about, the server records a notice, which
-`watch.get` returns, and sends it to your Web Push devices (see
+A watch is a subscription you keep on one run, one swarm or one pull
+request. The server evaluates it, not your browser or an agent, so it keeps
+working after you close the dashboard and across server restarts. When the
+target needs you or reaches the state you asked about, the server records a
+notice, which `watch.get` returns, and sends it to your Web Push devices (see
 [push notifications](dashboard-frontend.md#push-notifications) for turning
 them on in a browser).
 
@@ -22,11 +22,11 @@ takes the target's defaults, marked *.
 | --- | --- | --- |
 | `run` | `needs_you`* | The run waits on a person: a permission request, a question, a blocked report, a usage limit, a disconnected agent, a turn cut short, or a live failure nobody has seen. This is the rule the **Needs you** list uses (`domain.Run.NeedsAttention`). A run waiting on workers, on CI, on tools or on nothing, an answered run, and a turn that ended without a report never notify. One notice per distinct need, and each open permission request or question is a need of its own; an unchanged question is never repeated. |
 | `run` | `finished`* | `Agent reported done`: the agent reported success; nothing is merged. `Failed: <reason>`. `Stopped`: the run was interrupted. `Completed`: the run ended completed without a success report, because the agent exited with its results committed or a member or the swarm's integrator closed it as completed; a member accepting or closing a reported success is not announced again, but a success reported after the run went back to work is. `Closed as merged` and `Closed as abandoned`: a member's disposition. |
-| `run` | `pr_merged`, `ci` | The run's pull request merged on GitHub, or its checks finished. Not supported yet: refused until the pull request evaluator ships. |
+| `run` | `pr_merged`, `ci` | Every pull request the run recorded: `PR #N merged on GitHub`, or its checks finished. See [Pull requests and CI](#pull-requests-and-ci). |
 | `mission` | `needs_you`* | The swarm needs its accountable human: the integrator asks a question, or the integrator stopped or failed to launch, with the launch error. Each open question is its own notice, in any order they are answered. Workers never notify on their own; the integrator handles them. |
 | `mission` | `finished`* | `Swarm completed` or `Swarm cancelled`. A completed swarm can be reopened or still deliver, so its watch stays `active`, and a swarm that completes again is announced again. |
 | `mission` | `delivered` | An integration delivery receipt landed after the watch began: `Delivered to <ref>` when the ref moved, `Proposed <ref>` when a proposal was opened. |
-| `pr` | `ci`*, `review`*, `merged`*, `closed` | Not supported yet: refused until the pull request evaluator ships. |
+| `pr` | `ci`*, `review`*, `merged`*, `closed` | See [Pull requests and CI](#pull-requests-and-ci). |
 
 Aether has no deploy signal. `deployed` is refused with that reason; watch
 `finished`, `pr_merged` or `delivered` instead.
@@ -39,6 +39,59 @@ A run that has ended (failed, stopped, merged or abandoned) or a cancelled
 swarm cannot be watched: `watch.create` says how it ended. A finish the
 target reached before the watch began, such as a run whose agent already
 reported done or a completed swarm, is not announced; the next one is.
+
+## Pull requests and CI
+
+A `pr` target is `{"kind": "pr", "repo": "owner/name", "number": 7}`, with
+an optional `run_id` for the run that opened it. A run target's `pr_merged`
+and `ci` follow every pull request the run recorded (`run.pr.create`), and
+start the moment it records one.
+
+The server reads GitHub with the watch owner's own `gh` login in their
+Aether home, the one `aether github connect` sets up (see
+[environment-home.md](environment-home.md#from-the-cli)). Without one the
+watch is created in the `error` state with the real error and the fix:
+
+```text
+no usable GitHub login in your Aether home (github: no native gh login found; run aether github connect); run aether github connect on your computer, or use Onboarding → Agent → GitHub → Connect GitHub in the dashboard
+```
+
+It recovers on its own once you log in. `watch.create` refuses a pull
+request your login cannot read (`... is not reachable with your GitHub
+login: github: API request: HTTP 404 Not Found`) and one that is already
+merged or closed.
+
+| Condition | Notice |
+| --- | --- |
+| `ci` | When every check run and commit status on the head commit is final: `Checks passed on #7`, or `2 checks failed on #7: build, lint`. One notice per head commit and set of check runs, so a failure, a rerun and a pass send the failure, then the pass, and a new push sends one more. A pull request with no checks on its head commit never sends one; its summary says so. |
+| `review` | `mona approved #7`, `mona requested changes on #7`, `mona commented on #7` (a review with a body). One per review. |
+| `merged`, `pr_merged` | `PR #7 merged on GitHub`. Only GitHub's merged state sends it; an agent reporting success does not. |
+| `closed` | `PR #7 closed without merging on GitHub`. |
+
+The notice's title is `owner/name#7: <pull request title>` and it links to
+the pull request on GitHub. Nothing that happened before the watch began is
+announced.
+
+GitHub sends Aether no webhooks, so the server polls:
+
+- Every minute, give or take 10%, while checks are pending, a review is
+  requested, or the pull request changed since the last read; every 5
+  minutes once nothing changes. `next_check_at` and `last_check_at` on the
+  watch say when.
+- At once on a `run.pr` event for the watched run.
+- Polling stops when the pull request is merged or closed and every
+  condition is final. A `pr` watch is then `done`; a run watch stays on
+  the run.
+- Requests are conditional on the last ETags, which are stored, so a
+  restart neither re-reads everything nor repeats a notice. Unchanged
+  answers do not count against GitHub's rate limit.
+- One request at a time per member and four across the server; watches
+  on the same pull request share one read.
+- A rate limit puts the watch in `error` with `GitHub rate limit, retrying
+  at <time>` and sends nothing to GitHub before that time.
+
+A read that finds a run's pull request merged or closed also records it on
+the run, so every surface that shows the run's pull request sees it.
 
 ## States
 
