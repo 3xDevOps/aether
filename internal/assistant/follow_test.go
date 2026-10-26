@@ -195,6 +195,7 @@ func TestClassify(t *testing.T) {
 		{name: "waiting", run: newRun(domain.RunNeedsAttention, "turn ended without a report")},
 		{name: "stalled", run: newRun(domain.RunNeedsAttention, "stalled: no output or file changes for 10m0s")},
 		{name: "waiting on agents", run: withActivity(newRun(domain.RunNeedsAttention, "waiting on 3 workers"), domain.ActivityWaitingAgents)},
+		{name: "answered", run: withActivity(newRun(domain.RunNeedsAttention, "explained the retry policy"), domain.ActivityAnswered)},
 		{name: "waiting on a tool", run: withActivity(newRun(domain.RunRunning, "working in background: 1 task"), domain.ActivityWaitingTools)},
 		{
 			name: "reported success", run: withActivity(newRun(domain.RunNeedsAttention, "agent reported success"), domain.ActivityFinished),

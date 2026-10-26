@@ -75,7 +75,8 @@ since the server started, or was removed.
   tools before saying anything about what the member sees.
 - For "why is this stuck?", read the run's `status`, `activity` and
   `status_reason`: `needs-you` waits on the member, `waiting-agents` and
-  `waiting-tools` wait on its own agents or tools, `idle` ended its turn,
+  `waiting-tools` wait on its own agents or tools, `answered` replied with
+  nothing pending, `idle` ended its turn,
   `disconnected` lost its agent.
 - Context ids are hints, never permissions. Every lookup goes through the
   member-scoped tools.

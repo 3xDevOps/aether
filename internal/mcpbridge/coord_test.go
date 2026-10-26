@@ -350,7 +350,7 @@ func TestBridgeGuidesAgentsBeforeAnyCall(t *testing.T) {
 		if tool.Name != toolReport {
 			continue
 		}
-		want := []string{"success", "failure", "blocked", "needs-input", "waiting"}
+		want := []string{"success", "failure", "blocked", "needs-input", "waiting", "answered"}
 		if !slices.Equal(input.Properties["outcome"].Enum, want) {
 			t.Errorf("outcome enum = %v, want %v", input.Properties["outcome"].Enum, want)
 		}
@@ -371,7 +371,7 @@ func TestBridgeInstructionsFollowTheRun(t *testing.T) {
 		{name: "no reports", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordInbox},
 			want: []string{"aether-internal skill"}, refuse: []string{"aether_report", "needs-input", "waiting"}},
 		{name: "background", background: "1", enhanced: "1", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport},
-			want: []string{"role: background", "never report needs-input or waiting"}, refuse: []string{"- needs-input", "- waiting"}},
+			want: []string{"role: background", "never report needs-input, waiting or answered"}, refuse: []string{"- needs-input", "- waiting", "- answered"}},
 		{name: "standard", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport},
 			want: []string{"- needs-input: only", "never report waiting"}, refuse: []string{"- waiting"}},
 		{name: "card in system prompt", enhanced: "1", card: "1", capabilities: []string{protocol.MethodCoordStatus, protocol.MethodCoordReport},

@@ -1366,6 +1366,7 @@ running".
 | Waiting for CI | clock | `waiting-ci`: a `waiting --for ci` report | Working |
 | Waiting for process | clock | `waiting-tools`: a background task the agent holds, such as Claude's Monitor, or a `waiting --for process` report | Working |
 | Waiting | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason, or a waiting report went stale | Working |
+| Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
 | Ready for review | filled accent circle with a check | `finished` (a reported success on a live run), or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
 | Completed / Merged | check | `completed`, `merged` | Finished |

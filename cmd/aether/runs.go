@@ -319,6 +319,7 @@ var activityLabels = map[domain.RunActivity]string{
 	domain.ActivityIdle:          "Waiting",
 	domain.ActivityNeedsYou:      "Needs you",
 	domain.ActivityFinished:      "Finished",
+	domain.ActivityAnswered:      "Answered",
 	domain.ActivityFailed:        "Failed",
 	domain.ActivityDisconnected:  "Disconnected",
 }

@@ -13,11 +13,12 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
-// These mark a waiting outcome in the idle reason the sidecar keeps, by what
-// the agent waits for. The run shows the summary alone
+// These mark a waiting or answered outcome in the idle reason the sidecar
+// keeps, by what the agent waits for. The run shows the summary alone
 // (publicRunStatusReason). A CI or process wait that went stale keeps its
-// kind under a waited prefix, so it goes stale once.
+// kind under a waited prefix, so it goes stale once. An answer never does.
 const (
+	answeredReasonPrefix       = "answered: "
 	waitingReasonPrefix        = "waiting: "
 	waitingCIReasonPrefix      = "waiting for ci: "
 	waitingProcessReasonPrefix = "waiting for process: "
@@ -30,6 +31,7 @@ var waitingPrefixes = []struct {
 	activity domain.RunActivity
 	stale    bool
 }{
+	{answeredReasonPrefix, domain.ActivityAnswered, false},
 	{waitingReasonPrefix, domain.ActivityWaitingAgents, false},
 	{waitingCIReasonPrefix, domain.ActivityWaitingCI, false},
 	{waitingProcessReasonPrefix, domain.ActivityWaitingTools, false},
@@ -78,11 +80,13 @@ type activityFacts struct {
 	waitingAgents bool
 	waitingCI     bool
 	waitingTools  bool
+	answered      bool
 }
 
 // deriveActivity applies the precedence disconnected > needs-you > failed >
-// finished > waiting-agents > waiting-ci > waiting-tools > waiting, where a
-// turn in progress is working unless a human request is open.
+// finished > waiting-agents > waiting-ci > waiting-tools > answered >
+// waiting, where a turn in progress is working unless a human request is
+// open.
 func deriveActivity(f activityFacts) domain.RunActivity {
 	switch {
 	case !f.status.Live():
@@ -103,6 +107,8 @@ func deriveActivity(f activityFacts) domain.RunActivity {
 		return domain.ActivityWaitingCI
 	case f.waitingTools:
 		return domain.ActivityWaitingTools
+	case f.answered:
+		return domain.ActivityAnswered
 	}
 	return domain.ActivityWaiting
 }
@@ -130,6 +136,12 @@ func failedReason(reason string) bool {
 func (e *supervised) waits() bool {
 	activity, _, _ := cutWaiting(e.idleReason)
 	return activity != ""
+}
+
+// answered reports whether the run's outcome is an answered report. The
+// caller must hold s.mu.
+func (e *supervised) answered() bool {
+	return strings.HasPrefix(e.idleReason, answeredReasonPrefix)
 }
 
 // asksMember reports whether a pending input request waits on a member. A
@@ -184,6 +196,7 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 		waitingAgents: waiting == domain.ActivityWaitingAgents,
 		waitingCI:     waiting == domain.ActivityWaitingCI,
 		waitingTools:  waiting == domain.ActivityWaitingTools,
+		answered:      waiting == domain.ActivityAnswered,
 	}
 	if entry != nil {
 		held := !stalled && heldByTasks(entry.agentReport) && (!entry.acp || entry.betweenTurns)
@@ -235,6 +248,8 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 		if written == reportedFailureReason || d.activity == domain.ActivityFinished {
 			d.cause = events.CauseReport
 		}
+	case domain.ActivityAnswered:
+		d.cause = events.CauseReport
 	case domain.ActivityWaitingAgents, domain.ActivityWaitingCI, domain.ActivityWaitingTools:
 		switch {
 		case inferred:
@@ -297,7 +312,7 @@ func (s *Scheduler) refreshActivities(ctx context.Context) {
 // (refreshActivities). Caller holds s.mu.
 func (e *supervised) waitExpires() bool {
 	activity, stale, _ := cutWaiting(e.idleReason)
-	return activity != "" && !stale && e.activity == activity
+	return activity != "" && !e.answered() && !stale && e.activity == activity
 }
 
 // expireWaitLocked marks a run's wait stale (waitExpires) once nothing

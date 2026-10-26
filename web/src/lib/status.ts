@@ -40,7 +40,7 @@ export function backgroundReason(tasks: BackgroundTask[]): string {
   return held === 0 ? 'Working in background' : `Working in background: ${held} ${held === 1 ? 'task' : 'tasks'}`
 }
 
-const liveActivities = new Set<string>(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools', 'waiting', 'needs-you', 'failed', 'disconnected'])
+const liveActivities = new Set<string>(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools', 'waiting', 'answered', 'needs-you', 'failed', 'disconnected'])
 
 /**
  * A live run's state from its wire status and activity. A reported success reads Ready for review.
@@ -60,6 +60,7 @@ const stateReasons: Record<LiveState, string> = {
   'waiting-ci': 'Waiting for CI',
   'waiting-tools': 'Waiting for a background process',
   waiting: 'Turn ended without a report',
+  answered: 'Agent answered',
   'needs-you': 'The agent needs you',
   ready: 'Agent reported success',
   failed: 'Agent reported failure',
@@ -204,6 +205,7 @@ export const stateLabel: Record<PresentationState, string> = {
   'waiting-ci': 'Waiting for CI',
   'waiting-tools': 'Waiting for process',
   waiting: 'Waiting',
+  answered: 'Answered',
   'needs-you': 'Needs you',
   ready: 'Ready for review',
   failed: 'Failed',
@@ -223,6 +225,7 @@ export const stateTone: Record<PresentationState, Tone> = {
   'waiting-ci': 'waiting',
   'waiting-tools': 'waiting',
   waiting: 'ended',
+  answered: 'ended',
   'needs-you': 'needs-you',
   ready: 'review',
   failed: 'failed',

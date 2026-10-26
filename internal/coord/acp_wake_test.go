@@ -99,7 +99,7 @@ func TestEnhancedWakeOncePerUnreadSet(t *testing.T) {
 	if _, err := h.svc.Send(ctx, a, sendParams(b, "first")); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := waker.next(t), protocol.CoordInboxContext(1); got != want {
+	if got, want := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != want {
 		t.Fatalf("wake prompt %q, want %q", got, want)
 	}
 
@@ -112,7 +112,7 @@ func TestEnhancedWakeOncePerUnreadSet(t *testing.T) {
 	if _, err := h.svc.Send(ctx, a, sendParams(b, "second")); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := waker.next(t), protocol.CoordInboxContext(2); got != want {
+	if got, want := waker.next(t), protocol.CoordInboxContext(2)+protocol.CoordReportReminder; got != want {
 		t.Fatalf("a new message must re-arm the wake: prompt %q, want %q", got, want)
 	}
 }
@@ -200,7 +200,7 @@ func TestEnhancedWakeSkipsBusySessionUntilIdle(t *testing.T) {
 
 	waker.endTurn(b)
 	h.svc.WakeIdle(b)
-	if got, want := waker.next(t), protocol.CoordInboxContext(1); got != want {
+	if got, want := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != want {
 		t.Fatalf("wake at idle: prompt %q, want %q", got, want)
 	}
 }
@@ -227,7 +227,7 @@ func TestEnhancedWakeRetriesARefusedAdmission(t *testing.T) {
 	if _, err := h.svc.Send(context.Background(), a, sendParams(b, "refused once")); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := waker.next(t), protocol.CoordInboxContext(1); got != want {
+	if got, want := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != want {
 		t.Fatalf("retried wake prompt %q, want %q", got, want)
 	}
 	mu.Lock()
@@ -292,7 +292,7 @@ func TestEnhancedWakeSweepLandsAWakeItsRetriesGaveUpOn(t *testing.T) {
 	if _, err := h.svc.Send(t.Context(), a, sendParams(b, "refused past its retries")); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := waker.next(t), protocol.CoordInboxContext(1); got != want {
+	if got, want := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != want {
 		t.Fatalf("swept wake prompt %q, want %q", got, want)
 	}
 	mu.Lock()
@@ -340,7 +340,7 @@ func TestEnhancedWakeSweepPassesARunWhoseAdmissionWaits(t *testing.T) {
 	waker.endTurn(blocked)
 	waker.endTurn(open)
 	// Only sweeps offer these wakes; the second offer to open must not wait for blocked.
-	if got, want := waker.next(t), protocol.CoordInboxContext(1); got != want {
+	if got, want := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != want {
 		t.Fatalf("swept wake prompt %q, want %q", got, want)
 	}
 	if waker.Wakeable(open) {
@@ -387,7 +387,7 @@ func TestEnhancedWakeRetriesWhenProtectionIsLifted(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := waker.next(t), protocol.CoordInboxContext(1); got != want {
+	if got, want := waker.next(t), protocol.CoordInboxContext(1)+protocol.CoordReportReminder; got != want {
 		t.Fatalf("wake after unprotect: prompt %q, want %q", got, want)
 	}
 }
@@ -458,7 +458,7 @@ func TestEnhancedWakeAnnouncesMissionChangesToIntegrator(t *testing.T) {
 
 	stub.change(domain.MissionWorkerEnded, false)
 	h.publishMissionChanged(t)
-	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded})
+	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded}) + protocol.CoordReportReminder
 	if got := waker.next(t); got != want {
 		t.Fatalf("mission wake prompt %q, want %q", got, want)
 	}
@@ -481,7 +481,7 @@ func TestEnhancedWakeAnnouncesAnAskAndAnswerWithinOneTurn(t *testing.T) {
 	h.publishMissionChanged(t)
 	waker.endTurn(integrator)
 	h.svc.WakeIdle(integrator)
-	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionQuestionAnswered})
+	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionQuestionAnswered}) + protocol.CoordReportReminder
 	if got := waker.next(t); got != want {
 		t.Fatalf("mission wake prompt %q, want %q", got, want)
 	}
@@ -505,7 +505,7 @@ func TestEnhancedWakeSkipsTheIntegratorsOwnChanges(t *testing.T) {
 	stub.change(domain.MissionWorkerEnded, false)
 	stub.change(domain.MissionTaskProposed, false)
 	h.svc.wakeEnhanced(integrator)
-	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded, domain.MissionTaskProposed})
+	want := protocol.CoordMissionUpdateContext("mission-1", []domain.MissionChange{domain.MissionWorkerEnded, domain.MissionTaskProposed}) + protocol.CoordReportReminder
 	if got := waker.next(t); got != want {
 		t.Fatalf("mission wake prompt %q, want %q", got, want)
 	}

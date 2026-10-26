@@ -1541,6 +1541,44 @@ func TestNeedsInputReasonParksAtTurnEndAndClearsOnResume(t *testing.T) {
 	}
 }
 
+// An answer is quiet, so it is refused while a question the agent asked
+// is open: the question stays the run's reason and keeps the run Needs you,
+// and nothing moves the watermark a queued reply is judged against.
+func TestAnsweredIsRefusedWhileAQuestionIsOpen(t *testing.T) {
+	t.Parallel()
+	e := newReportingEnv(t, nil)
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	if err := e.sched.ReportNeedsInput(ctx, run.ID, "needs-input-1", "which region?", time.Now()); err != nil {
+		t.Fatalf("ReportNeedsInput: %v", err)
+	}
+	if err := e.sched.ReportAgentState(ctx, run.ID, waitingForInput); err != nil {
+		t.Fatal(err)
+	}
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	e.sched.mu.Lock()
+	before := e.sched.runs[run.ID].idleReportAt
+	e.sched.mu.Unlock()
+	// An answer older than the question is superseded, keeping its key.
+	if err := e.sched.ReportAnswered(ctx, run.ID, "answered-0", "an earlier reply", before.Add(-time.Second)); !errors.Is(err, coord.ErrReportSuperseded) {
+		t.Fatalf("older ReportAnswered = %v, want ErrReportSuperseded", err)
+	}
+	if err := e.sched.ReportAnswered(ctx, run.ID, "answered-1", "replied to a peer", time.Now().Add(time.Second)); !errors.Is(err, coord.ErrHumanOpen) {
+		t.Fatalf("ReportAnswered = %v, want ErrHumanOpen", err)
+	}
+	e.sched.mu.Lock()
+	kept, after := e.sched.runs[run.ID].idleReason, e.sched.runs[run.ID].idleReportAt
+	e.sched.mu.Unlock()
+	r, err := e.db.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept != "needs input: which region?" || !after.Equal(before) || r.Reason != kept || r.Activity != domain.ActivityNeedsYou || !r.NeedsAttention(false) {
+		t.Fatalf("after a refused answer: idle reason %q at %v (was %v), row %s %q; want the question kept", kept, after, before, r.Activity, r.Reason)
+	}
+}
+
 func TestNeedsInputSupersedesAnEarlierSuccessReport(t *testing.T) {
 	t.Parallel()
 	e := newReportingEnv(t, nil)

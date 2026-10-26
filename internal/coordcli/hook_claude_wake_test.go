@@ -78,7 +78,7 @@ func TestClaudeWakeStartsATurnForNewMail(t *testing.T) {
 	if result.code != claudeWakeExit || result.err != nil || result.stdout != "" {
 		t.Fatalf("wake = %d, %v, stdout %q; want exit %d with no stdout", result.code, result.err, result.stdout, claudeWakeExit)
 	}
-	if result.stderr != protocol.CoordInboxContext(1) || strings.Contains(result.stderr, "UNTRUSTED") {
+	if result.stderr != protocol.CoordInboxContext(1)+protocol.CoordReportReminder || strings.Contains(result.stderr, "UNTRUSTED") {
 		t.Fatalf("wake stderr = %q; want only the trusted inbox instruction", result.stderr)
 	}
 	if count, err := db.CountUnackedRunMessages(t.Context(), run); err != nil || count != 1 {
@@ -112,7 +112,7 @@ func TestClaudeWakeOnSessionStartAnnouncesWaitingMail(t *testing.T) {
 		t.Fatalf("announcing hook = %d, %v, %q", code, err, out.String())
 	}
 	result := waitClaudeWaiter(t, startClaudeWaiter(t.Context(), socket, `{"hook_event_name":"SessionStart","source":"resume"}`), 5*time.Second)
-	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(1) {
+	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(1)+protocol.CoordReportReminder {
 		t.Fatalf("resumed session with waiting mail = %d, %v, %q; want an immediate wake", result.code, result.err, result.stderr)
 	}
 }
@@ -125,7 +125,7 @@ func TestClaudeWakeAtStopForMailAnnouncedMidTurn(t *testing.T) {
 	}
 	// The agent was told about the mail mid-turn and stopped without reading it.
 	result := waitClaudeWaiter(t, startClaudeWaiter(t.Context(), socket, `{"hook_event_name":"Stop","stop_hook_active":false}`), 5*time.Second)
-	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(1) {
+	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(1)+protocol.CoordReportReminder {
 		t.Fatalf("announced, unread mail at Stop = %d, %v, %q; want a wake", result.code, result.err, result.stderr)
 	}
 	// The woken turn also stops without reading it; only newer mail wakes again.
@@ -133,7 +133,7 @@ func TestClaudeWakeAtStopForMailAnnouncedMidTurn(t *testing.T) {
 	waitClaimed(t, run)
 	sendHookMail(t, service, run, "newer-mail")
 	result = waitClaudeWaiter(t, done, 5*time.Second)
-	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(2) {
+	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(2)+protocol.CoordReportReminder {
 		t.Fatalf("newer mail = %d, %v, %q; want a wake", result.code, result.err, result.stderr)
 	}
 }
@@ -143,7 +143,7 @@ func TestClaudeWakeCarriesMailWaitingAtTurnEnd(t *testing.T) {
 	// brings unannounced mail into a new turn.
 	_, _, socket, _ := hookMailbox(t)
 	result := waitClaudeWaiter(t, startClaudeWaiter(t.Context(), socket, `{"hook_event_name":"Stop","stop_hook_active":false}`), 5*time.Second)
-	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(1) {
+	if result.code != claudeWakeExit || result.stderr != protocol.CoordInboxContext(1)+protocol.CoordReportReminder {
 		t.Fatalf("mail waiting at turn end = %d, %v, %q; want a wake", result.code, result.err, result.stderr)
 	}
 }

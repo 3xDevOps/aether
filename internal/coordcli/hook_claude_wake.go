@@ -119,7 +119,7 @@ func claudeWake(ctx context.Context, cfg Config, input hookEvent) (code int, err
 			notices := readHookNotices(record)
 			notices.Mail = ids
 			writeHookNotices(record, notices)
-			if _, err := io.WriteString(cfg.ErrOut, protocol.CoordInboxContext(len(ids))); err != nil {
+			if _, err := io.WriteString(cfg.ErrOut, protocol.CoordInboxContext(len(ids))+protocol.CoordReportReminder); err != nil {
 				return ExitFailure, fmt.Errorf("hook claude wake: write the inbox instruction: %w", err)
 			}
 			return claudeWakeExit, nil

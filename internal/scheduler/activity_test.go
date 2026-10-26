@@ -161,6 +161,23 @@ func TestRunActivityFollowsWhatTheRunWaitsOn(t *testing.T) {
 			}
 			report(idle)
 		}, domain.RunNeedsAttention, domain.ActivityWaitingTools, "release build"},
+		{"answered reported", func() {
+			report(working)
+			nextActivity(t, sub, run.ID, &seq)
+			if err := e.sched.ReportAnswered(ctx, run.ID, "answered-1", "blocked: explained the retry policy", time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			report(idle)
+		}, domain.RunNeedsAttention, domain.ActivityAnswered, "blocked: explained the retry policy"},
+		{"an answer never goes stale, but a live worker outranks it", func() {
+			quietFor(t, e)
+			integrator.workers.Store(1)
+			e.sched.refreshActivities(ctx)
+		}, domain.RunNeedsAttention, domain.ActivityWaitingAgents, "blocked: explained the retry policy"},
+		{"the answer shows again once the worker finished", func() {
+			integrator.workers.Store(0)
+			e.sched.refreshActivities(ctx)
+		}, domain.RunNeedsAttention, domain.ActivityAnswered, "blocked: explained the retry policy"},
 		{"a waiting outcome shown without a turn end", func() {
 			report(working)
 			nextActivity(t, sub, run.ID, &seq)

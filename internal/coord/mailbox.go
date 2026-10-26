@@ -469,8 +469,8 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	}()
 	if p.Outcome != protocol.CoordOutcomeSuccess && p.Outcome != protocol.CoordOutcomeFailure &&
 		p.Outcome != protocol.CoordOutcomeBlocked && p.Outcome != protocol.CoordOutcomeNeedsInput &&
-		p.Outcome != protocol.CoordOutcomeWaiting {
-		return protocol.CoordReportResult{}, invalidParams(method, "outcome must be \"success\", \"failure\", \"blocked\", \"needs-input\", or \"waiting\"")
+		p.Outcome != protocol.CoordOutcomeWaiting && p.Outcome != protocol.CoordOutcomeAnswered {
+		return protocol.CoordReportResult{}, invalidParams(method, "outcome must be \"success\", \"failure\", \"blocked\", \"needs-input\", \"waiting\", or \"answered\"")
 	}
 	switch {
 	case p.WaitingFor != "" && p.Outcome != protocol.CoordOutcomeWaiting:
@@ -494,7 +494,7 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 	if summary == "" {
 		return protocol.CoordReportResult{}, invalidParams(method, "summary is required")
 	}
-	if p.Outcome == protocol.CoordOutcomeNeedsInput || p.Outcome == protocol.CoordOutcomeWaiting {
+	if p.Outcome == protocol.CoordOutcomeNeedsInput || p.Outcome == protocol.CoordOutcomeWaiting || p.Outcome == protocol.CoordOutcomeAnswered {
 		return s.reportState(ctx, run, p, summary)
 	}
 	if len(p.EvidenceRefs) >= protocol.CoordMaxEvidenceRefs {

@@ -254,6 +254,7 @@ describe('needs you conditions', () => {
     ['waiting-agents', 'working in background: 2 tasks', 'waiting-agents', 'Working in background: 2 tasks'],
     ['waiting-ci', 'waiting for the PR checks', 'waiting-ci', 'waiting for the PR checks'],
     ['waiting-tools', '', 'waiting-tools', 'Waiting for a background process'],
+    ['answered', 'explained the retry policy', 'answered', 'explained the retry policy'],
   ] as const)('never needs anyone for a %s run parked with %j', (state, reason, shownState, shown) => {
     for (const acp of [false, true]) {
       const parked = record({ mode: acp ? 'acp' : 'tui', acp, status: 'needs-attention', state, reason: reason || undefined })

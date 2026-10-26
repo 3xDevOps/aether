@@ -118,6 +118,7 @@ const (
 	ActivityWaiting       RunActivity = "waiting"
 	ActivityNeedsYou      RunActivity = "needs-you"
 	ActivityFinished      RunActivity = "finished"
+	ActivityAnswered      RunActivity = "answered"
 	ActivityFailed        RunActivity = "failed"
 	ActivityDisconnected  RunActivity = "disconnected"
 	// ActivityIdle is what rows and events written before waiting existed
