@@ -118,7 +118,7 @@ type WatchStore interface {
 	TouchWatchCheck(ctx context.Context, id string, at time.Time) error
 	DeleteWatch(ctx context.Context, id string) error
 	// EvaluableWatchIDs lists the active and failing watches on run or on
-	// the swarm run serves, or on mission when run is empty.
+	// the swarm run integrates, or on mission when run is empty.
 	EvaluableWatchIDs(ctx context.Context, run domain.RunID, mission domain.MissionID) ([]string, error)
 	// DueWatchIDs lists the active and failing watches whose next check is
 	// at or before now, or all of them when all is set.
@@ -438,7 +438,7 @@ func (d *DB) EvaluableWatchIDs(ctx context.Context, run domain.RunID, mission do
 	args := []any{mission}
 	if run != "" {
 		query = `SELECT id FROM watches WHERE ` + evaluable + ` AND (run_id = ?1
-			OR mission_id IN (SELECT mission_id FROM runs WHERE id = ?1 AND mission_id IS NOT NULL AND mission_id <> ''))`
+			OR mission_id IN (SELECT id FROM missions WHERE current_integrator_run_id = ?1))`
 		args = []any{run}
 	}
 	return d.watchIDs(ctx, query+` ORDER BY id`, args...)

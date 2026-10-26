@@ -84,3 +84,28 @@ func TestWatchWritesCompareVersionsAndNoticesRecordOnce(t *testing.T) {
 		t.Fatalf("recommit = %d notices, %v; want none", len(out), err)
 	}
 }
+
+func TestRunEventsReachOnlyTheSwarmTheRunIntegrates(t *testing.T) {
+	ctx := context.Background()
+	db := openTestDB(t)
+	ws := mustCreateWorkspace(t, db)
+	member := mustCreateMember(t, db)
+	m := &domain.Mission{WorkspaceID: ws.ID, Objective: "o", AccountableHumanID: member.ID, IdempotencyKey: "m",
+		Integrator: domain.MissionIntegrator{AccountMemberID: member.ID, Harness: "claude", Mode: domain.LaunchTUI}}
+	if err := db.CreateMission(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	other := mustCreateRun(t, db, ws.ID, member.ID, domain.RunRunning)
+	now := time.Now().UTC()
+	w := &Watch{MemberID: member.ID, WorkspaceID: ws.ID, TargetKind: "mission", MissionID: m.ID, Conditions: []string{"needs_you"},
+		Source: "dashboard", State: "active", CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour)}
+	if err := db.CreateWatch(ctx, w); err != nil {
+		t.Fatal(err)
+	}
+	if ids, err := db.EvaluableWatchIDs(ctx, other.ID, ""); err != nil || len(ids) != 0 {
+		t.Fatalf("watches an unrelated run's event reaches = %v, %v; want none", ids, err)
+	}
+	if ids, err := db.EvaluableWatchIDs(ctx, m.CurrentIntegratorRunID, ""); err != nil || len(ids) != 1 || ids[0] != w.ID {
+		t.Fatalf("watches the integrator's event reaches = %v, %v; want the swarm's", ids, err)
+	}
+}
