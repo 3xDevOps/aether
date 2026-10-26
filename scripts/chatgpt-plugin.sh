@@ -58,7 +58,7 @@ problems=$(jq -r '
 			| "positive test case lacks description, prompt, tools_triggered or expected_behavior: \(.prompt)"),
 		(.test_cases.negative[]? | select(.description == null or .prompt == null) | "negative test case lacks description or prompt"),
 		(.test_cases.positive[]? | select((.description | length) > 4000) | "positive test case description over 4000 characters")),
-	(paths(type == "object") as $p | getpath($p) | keys[] | select(. == "test_credentials" or . == "reviewer_instructions")
+	(.. | objects | keys[] | select(. == "test_credentials" or . == "reviewer_instructions")
 		| "\(.) must be entered in the portal, not the package")
 ' "$src/plugin.json") || fail "$src/plugin.json is not valid JSON"
 problems=$problems$(jq -r '

@@ -45,5 +45,6 @@ refuse "an http privacy policy" "privacyPolicyURL is not an https URL" "$ui.priv
 refuse "a logo it does not package" "./assets/missing.png is referenced by plugin.json but not packaged" "$ui.logo = \"./assets/missing.png\"" .
 refuse "four positive test cases" "exactly 5 positive" '.extensions["com.openai"].review.test_cases.positive |= .[:4]' .
 refuse "reviewer credentials" "test_credentials must be entered in the portal" '.extensions["com.openai"].review.test_credentials = "x"' .
+refuse "top-level reviewer credentials" "test_credentials must be entered in the portal" '.test_credentials = "x"' .
 refuse "MCP server headers" "must not set headers" . '.mcpServers.aether.headers = {"Authorization": "x"}'
 refuse "an http demo recording" "demo_recording_url is not an https URL" '.extensions["com.openai"].review.demo_recording_url = "http://example.com/demo"' .
