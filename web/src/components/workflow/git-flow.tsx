@@ -291,7 +291,7 @@ function Card({ run, compact, send, agentName }: { run: RunRecord; compact: bool
         </p>
       ) : (
         <>
-          <CheckPills feedback={feedback} />
+          <CheckPills feedback={feedback} target={{ runId: run.id, workspaceId: run.workspace_id }} />
           <Reviews feedback={feedback} />
         </>
       ))}
