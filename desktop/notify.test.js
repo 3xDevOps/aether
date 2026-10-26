@@ -5,7 +5,7 @@ const fs = require('node:fs')
 const Module = require('node:module')
 const os = require('node:os')
 const path = require('node:path')
-const { test, beforeEach, after } = require('node:test')
+const { test, beforeEach, after, mock } = require('node:test')
 
 const shown = []
 let badge = 0
@@ -323,4 +323,46 @@ test('a watched need and the same run.status need show once', async () => {
   await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
   await watchChanged({ watch_id: 'wat-2', member_id: 'me', notification_id: 'not-1' })
   assert.equal(shown.length, 1)
+})
+
+test('a success ready for review and its watched finish show once, in either order', async () => {
+  const first = lead('r13')
+  watchWith('wat-3', { kind: 'run', run_id: 'r13' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r13' })
+  await status(first, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
+  await watchChanged({ watch_id: 'wat-3', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 1)
+
+  const second = lead('r16')
+  watchWith('wat-6', { kind: 'run', run_id: 'r16' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r16' })
+  await watchChanged({ watch_id: 'wat-6', member_id: 'me', notification_id: 'not-1' })
+  await status(second, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
+  assert.equal(shown.length, 2)
+  assert.equal(shown[1].options.title, 'Agent reported done')
+})
+
+test('a watched need shown before its run.status closes when the need is answered', async () => {
+  const run = lead('r14')
+  watchWith('wat-4', { kind: 'run', run_id: 'r14' }, { condition: 'needs_you', title: 'run r14 needs you', link: '/?run=r14' })
+  await watchChanged({ watch_id: 'wat-4', member_id: 'me', notification_id: 'not-1' })
+  await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+  assert.equal(shown.length, 1)
+  assert.equal(badge, 1)
+
+  await status(run, { status: 'running', state: 'working', reason: '' })
+  assert.ok(shown[0].closed)
+  assert.equal(badge, 0)
+})
+
+test('a watched need shown after its run.status closes with it', async () => {
+  const run = lead('r15')
+  await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+  watchWith('wat-5', { kind: 'run', run_id: 'r15' }, { condition: 'needs_you', title: 'run r15 needs you', link: '/?run=r15' })
+  const now = Date.now()
+  mock.method(Date, 'now', () => now + 6000)
+  await watchChanged({ watch_id: 'wat-5', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 2)
+
+  await status(run, { status: 'running', state: 'working', reason: '' })
+  assert.ok(shown.every((n) => n.closed))
+  mock.restoreAll()
 })

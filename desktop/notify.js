@@ -12,6 +12,9 @@ const { app, BrowserWindow, Notification } = require('electron')
 // Runs that need the member now, with the need's key and notification; its
 // size is the dock/taskbar badge.
 const standing = new Map()
+// Watch notices shown for a run's need, with when, so resolve() closes them
+// with the need whichever path announced it first.
+const watchShown = new Map()
 // The need key last announced per run. It outlives a reconnect, so a need
 // already announced stays quiet when its run's next event arrives.
 const announced = new Map()
@@ -54,6 +57,7 @@ function start(addr, url, onOpen, onLink = () => {}) {
   openLink = onLink
   selfID = null
   lastShown.clear()
+  watchShown.clear()
   announced.clear()
   seqs.clear()
 
@@ -118,6 +122,7 @@ function connect(wsURL) {
       standing.clear()
       updateBadge()
     }
+    watchShown.clear()
     reading.clear()
     scheduleReconnect(wsURL)
   }
@@ -168,9 +173,10 @@ async function showNotice(p) {
   notification.show()
 }
 
-// watch.changed names a new notice by id; only its owner hears it. A
-// needs-you notice on a run shares the run's duplicate window, so the same
-// need reaching us by run.status as well shows once.
+// watch.changed names a new notice by id; only its owner hears it. A run's
+// needs-you or finished notice shares the run's duplicate window, so the
+// need or the success ready for review reaching us by run.status as well
+// shows once, and closes with that need.
 async function showWatchNotice(p) {
   if (!p.notification_id || !Notification.isSupported()) return
   try {
@@ -183,14 +189,18 @@ async function showWatchNotice(p) {
   const notice = got && (got.notifications || []).find((n) => n.id === p.notification_id)
   if (!notice) return
   const target = got.watch.target || {}
-  if (target.kind === 'run' && target.run_id && notice.condition === 'needs_you') {
-    const duplicate = recentlyShown(target.run_id)
-    lastShown.set(target.run_id, Date.now())
+  const runId = target.kind === 'run' && (notice.condition === 'needs_you' || notice.condition === 'finished') ? target.run_id : ''
+  if (runId) {
+    const duplicate = recentlyShown(runId)
+    lastShown.set(runId, Date.now())
     if (duplicate) return
   }
   const notification = new Notification({ title: clip(notice.title || 'Watch', 120), body: clip(notice.body || '', 240) })
   notification.on('click', () => openLink(notice.link || got.watch.link || ''))
   notification.show()
+  if (runId && (notice.condition === 'needs_you' || standing.has(runId))) {
+    watchShown.set(runId, [...(watchShown.get(runId) || []), { notification, at: Date.now() }])
+  }
 }
 
 async function readWatch(watchId) {
@@ -275,7 +285,8 @@ function announce(runId, run) {
   const attention = needsAttention(run)
   let entry = standing.get(runId)
   if (entry && (!attention || entry.key !== key)) {
-    resolve(runId)
+    // A watch notice for the new need can arrive before this event does.
+    resolve(runId, attention ? Date.now() - duplicateWindowMs : Infinity)
     entry = undefined
   }
   if (attention && !entry) {
@@ -301,8 +312,15 @@ function announce(runId, run) {
   if (entry) entry.notification = notification
 }
 
-function resolve(runId) {
+// resolve ends runId's need and closes its watch notices shown before `before`.
+function resolve(runId, before = Infinity) {
   reading.delete(runId)
+  const kept = (watchShown.get(runId) || []).filter(({ notification, at }) => {
+    if (at < before) notification.close()
+    return at >= before
+  })
+  if (kept.length > 0) watchShown.set(runId, kept)
+  else watchShown.delete(runId)
   const entry = standing.get(runId)
   if (!entry) return
   entry.notification?.close()
@@ -448,6 +466,7 @@ function stop() {
     socket = null
   }
   standing.clear()
+  watchShown.clear()
   reading.clear()
   updateBadge()
 }
