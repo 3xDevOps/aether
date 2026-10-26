@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useLaunchRows } from '@/components/assistant/launch-summary'
+import { isLaunch, useLaunchRows } from '@/components/assistant/launch-summary'
 import { AssistantSettingsLink } from '@/components/assistant/suggestion'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Code } from '@/components/ui/code'
@@ -91,7 +91,11 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
           </RequestActions>
           {error && <p role="alert" className="text-ui-sm text-state-failed">{error}</p>}
           {confirmation.other_member ? (
-            <p className="text-ui-xs text-muted">{confirmation.other_owner} owns this run, so this asks even with auto-approval on.</p>
+            <p className="text-ui-xs text-muted">
+              {isLaunch(confirmation.method)
+                ? `${confirmation.other_owner}'s account pays for this launch, so this asks even with auto-approval on.`
+                : `${confirmation.other_owner} owns this run, so this asks even with auto-approval on.`}
+            </p>
           ) : !autoApprove && (
             <p className="text-ui-xs"><AssistantSettingsLink>Skip these cards…</AssistantSettingsLink></p>
           )}

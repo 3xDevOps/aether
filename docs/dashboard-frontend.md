@@ -565,8 +565,9 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   prompts in one 40dvh scroll. A card leaves only when a
   `confirmations` frame stops listing it. While `auto_approve` is off a card
   links **Skip these cards…** to Settings > Assistant; a card with
-  `other_member` says that member (`other_owner`) owns the run, so it asks
-  even with auto-approval on.
+  `other_member` says that member (`other_owner`) owns the run, or for a
+  launch that their account pays for it, so it asks even with auto-approval
+  on.
 - **Action cards** (`components/assistant/action-card.tsx`,
   `lib/assistant-actions.ts`): `assistantView` takes each Aether tool call out
   of its step block as a card: one whose `tool_name` ends in an `aether_*`

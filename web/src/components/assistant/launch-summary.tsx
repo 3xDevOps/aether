@@ -5,6 +5,11 @@ import { useStore, type RootState } from '@/store'
 /** The methods whose card says what a launch starts and where. */
 const launchMethods = new Set(['run.launch', 'mission.create'])
 
+/** Whether `method` starts work, which another member's account may pay for. */
+export function isLaunch(method: string): boolean {
+  return launchMethods.has(method) || method === 'template.launch'
+}
+
 export const hearBack = {
   run: 'Aether notifies you here, on the desktop app and on your phone when it finishes or needs you.',
   swarm: 'The swarm’s page shows its progress; Aether notifies you when it needs you.',
@@ -48,7 +53,7 @@ export function launchRows(s: RootState, method: string, params: unknown): [stri
     ['Kind', swarm ? 'Swarm: an integrator plans the work for worker runs' : 'Run: one agent on one task'],
     ['Workspace', [workspace, ...extras].filter(Boolean).map((id) => s.workspaces[id!]?.name ?? id).join(', ')],
     [swarm ? 'Integrator' : 'Agent', lead ? agentLine(s, lead) : ''],
-    ['Account', owner ? `${owner}'s, shared with you` : 'Yours'],
+    ['Account', owner ? `${owner}'s account, shared with you` : 'Yours'],
     ['Fallback', fallbackLine(s, p)],
   ]
   if (swarm && Array.isArray(p.execution_choices) && p.execution_choices.length) {
