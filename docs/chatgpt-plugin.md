@@ -11,7 +11,10 @@ review.
 OpenAI's sources: [submission](https://developers.openai.com/plugins/deploy/submission),
 [review requirements](https://developers.openai.com/plugins/deploy/app-review),
 [guidelines](https://developers.openai.com/plugins/plugin-guidelines),
-[authentication](https://developers.openai.com/plugins/build/auth).
+[authentication](https://developers.openai.com/plugins/build/auth),
+[submission errors](https://developers.openai.com/plugins/deploy/submission-errors),
+read 2026-10-26. The same URL is listed in Claude's directory
+([claude-connector.md](claude-connector.md)).
 
 ## The package
 
@@ -37,25 +40,35 @@ subtitle at most 30 characters, description 4000, at most 20 capabilities of
 negative test cases, no credentials, one server with no headers), copies
 `web/public/icons/icon-maskable-512.png` and `icon-maskable-192.png` in as
 `assets/logo.png` and `assets/composer-icon.png`, and refuses a ZIP of 100 MB
-or more. `make test-scripts` runs `scripts/chatgpt-plugin-test.sh`, which
-builds the real package and checks that broken ones are refused.
+or more. A test case that triggers a tool no connector registers yet builds
+with a warning naming the tool. `make test-scripts` runs
+`scripts/chatgpt-plugin-test.sh`, which builds the real package and checks
+that broken ones are refused.
 
 A value starting `PLACEHOLDER:` builds with a warning naming the field. The
 portal accepts the ZIP as a draft, but review cannot start until each is a
 real URL.
 
-## External actions before submitting
+## External prerequisites
 
-| Action | Field or system |
-| --- | --- |
-| Publish a privacy policy page covering the plugin, using the [data inventory](#privacy-policy-data-inventory) below. [privacy.md](privacy.md) covers the Android app and what an edge stores, but not what tool results return | `privacyPolicyURL` |
-| Publish terms of service | `termsOfServiceURL` |
-| Record a walkthrough of the five positive test cases on the demo server | `review.demo_recording_url` |
-| Serve the portal's challenge token as plain text at `https://edge.onaether.dev/.well-known/openai-apps-challenge` with `aether-edge serve --openai-challenge <token>` or `AETHER_EDGE_OPENAI_CHALLENGE` | aether-edge |
-| Deploy an edge with protocol 3 to `edge.onaether.dev`. Once submitted, its scheme, host and port cannot change without OpenAI support | aether-edge |
-| Complete business verification for 3xDevOps | OpenAI organization settings |
-| Set up the demo server and reviewer account below | Project edge |
-| Review needs the universal `/mcp` URL live on the project edge, signing a demo server's members in with GitHub and asking for no pairing code under `--edge-access account` (the universal-URL task) | aether-edge, `aether-server` |
+Nothing here is submitted or approved. "Merged" is origin/main; "deployed" is
+what `edge.onaether.dev` serves.
+
+| Item | Field or system | Merged | Deployed | Submitted | Approved |
+| --- | --- | --- | --- | --- | --- |
+| Edge with protocol 3 serving the universal `/mcp` URL: CIMD, S256, `iss`, `resource`. OpenAI: "To change an existing MCP server's URL, contact support; the current update flow does not support URL changes." ([submission](https://developers.openai.com/plugins/deploy/submission)) | aether-edge | Yes (#554) | Yes, verified with `curl` 2026-10-26 | No | No |
+| Sign-in hardening: the sign-in assertion bound to the browser and kept out of URLs and logs | aether-edge, server | No: #590 open | No | n/a | n/a |
+| Per-method scope enforcement: every connector call checked against its granted scopes. The listing's scope sentences are true only once it is deployed | Server | No: #591 open | No | n/a | n/a |
+| `scopes_supported` in the protected resource metadata. OpenAI lists it under "Key fields you must populate" as an "optional list that helps ChatGPT explain the permissions it is going to ask the user for" ([authentication](https://developers.openai.com/plugins/build/auth)); the live document has only `resource` and `authorization_servers` | aether-edge | No: pending code change (edge metadata) | No | n/a | n/a |
+| Challenge token served as plain text at `https://edge.onaether.dev/.well-known/openai-apps-challenge` with `aether-edge serve --openai-challenge <token>` or `AETHER_EDGE_OPENAI_CHALLENGE` | aether-edge | Yes | No: answers 404 (2026-10-26) | No | No |
+| Business verification for 3xDevOps | OpenAI organization settings | n/a | n/a | No | No |
+| Privacy policy at a public URL, from [legal/privacy-connectors.md](legal/privacy-connectors.md) | `privacyPolicyURL` | Draft | No | No | No |
+| Terms of service at a public URL, from [legal/terms-connectors.md](legal/terms-connectors.md) | `termsOfServiceURL` | Draft | No | No | No |
+| Demo server with sample data ([Reviewer setup](#reviewer-setup)) | Project edge | n/a | No | n/a | n/a |
+| Reviewer account that needs no email code | Review details | No: needs an edge sign-in other than GitHub | No | No | No |
+| `aether_changes`, used by test 2 | Connector tools | No: planned (PR #585 adds `changes.list`; the tool follows) | No | No | No |
+| Walkthrough video of the five positive test cases | `review.demo_recording_url` | n/a | No | No | No |
+| Live test from chatgpt.com | n/a | n/a | Not run | n/a | n/a |
 
 ## Submit in the portal
 
@@ -72,7 +85,8 @@ real URL.
    `AETHER_EDGE_OPENAI_CHALLENGE` (or `aether-edge serve --openai-challenge`)
    on the `edge.onaether.dev` edge, restart it, and verify the domain. Connect and sign in as the reviewer account.
 5. Wait for **Scan Tools** to list the tools. Fix findings on the server,
-   deploy, and select **Rescan**.
+   deploy, and select **Rescan**. Enter each tool's hint justifications from
+   [Tool hints](#tool-hints).
 6. In **Review information → Review details**, check the imported test cases
    and enter the reviewer credentials and sign-in steps (never in the ZIP:
    it rejects `test_credentials` and `reviewer_instructions`). **Save
@@ -86,22 +100,36 @@ Later tool changes need no new ZIP: OpenAI rescans the server daily, or select
 
 ## Tool hints
 
-OpenAI reviews each tool's three hints. `destructiveHint` is true when an
-effect cannot be taken back, even if a later call can undo its consequences;
-`openWorldHint` is true when an agent the tool starts or lets proceed can push
-branches and open pull requests. The read tools are all read-only and not
-destructive. They read the user's own server, and `aether_pr_status` also
-reads GitHub.
+OpenAI requires "explicit `readOnlyHint`, `openWorldHint`, and
+`destructiveHint` values and a justification for each value on every MCP
+tool" ([submission errors](https://developers.openai.com/plugins/deploy/submission-errors)).
+Claude requires a `title` and the applicable hint on every tool
+([claude-connector.md](claude-connector.md#requirements-and-where-aether-stands)).
+Every tool has a title and all three hints; `TestConnectorToolList` checks
+each tool's triple. Enter the justifications below in the portal.
 
-| Tool | Read-only | Destructive | Open world | Why |
+OpenAI's definitions ([app review](https://developers.openai.com/plugins/deploy/app-review)):
+read-only "strictly fetches/looks up/lists/retrieves data and does not modify
+anything"; destructive "can cause irreversible outcomes (deleting,
+overwriting, sending messages or transactions you can't undo, revoking
+access...)"; open world "accesses the public internet or open-ended external
+entities". Here a tool is open world when an agent it starts or lets proceed
+can push branches and open pull requests.
+
+| Tool | Read-only | Destructive | Open world | Justification |
 | --- | --- | --- | --- | --- |
-| `aether_launch_run`, `aether_launch_swarm` | no | no | yes | Adds runs; their agents can push and open PRs |
-| `aether_message_run`, `aether_answer` | no | yes | yes | A sent message or answer cannot be taken back; the agent acts on it |
-| `aether_pause_run` | no | no | no | Freezes the container; resume continues it |
-| `aether_resume_run` | no | no | yes | The agent goes on working |
-| `aether_mark_reviewed` | no | yes | no | `complete` closes the run |
+| `aether_list_workspaces`, `aether_list_agents`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_list_swarms`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
+| `aether_get_run` | yes | no | no | Reads one run on the user's server. It also reads the run's pull request state, which the server fetches from GitHub; open world `yes` is proposed |
+| `aether_pr_status` | yes | no | no | Reads a run's pull request checks and reviews, which the server fetches from GitHub; open world `yes` is proposed |
+| `aether_launch_run`, `aether_launch_swarm` | no | no | yes | Adds a run or swarm, which can be stopped; its agents can push branches and open pull requests |
+| `aether_message_run`, `aether_answer` | no | yes | yes | A sent message or answer cannot be taken back, and the agent acts on it |
+| `aether_pause_run` | no | no | no | Freezes the run's container; resume continues it |
+| `aether_resume_run` | no | no | yes | The agent goes on working and can push |
+| `aether_mark_reviewed` | no | yes | no | `complete` closes the run, which cannot be reopened; records state on the server only |
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
-| `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | no | yes | no | Ends runs on the user's server |
+| `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | no | yes | no | Ends runs on the user's server; cannot be undone |
+
+Tools that later changes add need a row here before the next review.
 
 There is no room for `openai/toolInvocation` status strings: `tools/list`
 must stay under the 15000 bytes `TestConnectorToolList` enforces, and they
@@ -109,38 +137,57 @@ would take about 2500 of the 1300 left.
 
 ## Reviewer setup
 
-Reviewers need an account that works at once, with no MFA, email or SMS
-codes, magic links or private network.
+OpenAI: "our review team must be able to log into a demo account with no
+further configuration required ... do not feature MFA (including requiring
+SMS codes, login through systems that require SMS, email or other
+verification schemes)" ([app review](https://developers.openai.com/plugins/deploy/app-review)).
+
+**Blocker.** The edge signs in with GitHub only. GitHub asks a password-only
+account for a code sent by email on each new browser, and skips it only with
+2FA or a passkey
+([GitHub](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/verifying-new-devices-when-signing-in)).
+Reviewers use new browsers, so a GitHub reviewer account fails either way.
+A pre-authorized demo path with no sign-in would give anyone on the internet
+a member that launches agents. The proposed fix is a reviewer sign-in on the
+edge: off unless `aether-edge` is given a reviewer account file, a separate
+identity provider that can never match a GitHub account, offered only the
+one demo server, accepted only by a server that opts in, rate-limited,
+logged and revocable. It is not built; until it is, review cannot pass.
+
+The rest of the setup:
 
 - **Demo server.** An `aether-server` linked to the project edge with
   `--edge-access account`, so the reviewer's devices work without an admin
   approving each one ([edge.md](edge.md), [connectors.md](connectors.md)).
-  Install and sign in Claude Code on it so test 4 can launch.
-- **Reviewer GitHub account.** A dedicated account that signs in to the edge
-  with a password only. Sign it in once by hand to clear GitHub's device
-  verification and new-account prompts, invite it to the demo server as a
-  collaborator, and enter its login and password in **Review details**.
-  GitHub may later require 2FA of it; check the account before each review.
+  Install and sign in Claude Code on it so test 1 can launch, and give it
+  GitHub access to the sample repository only.
+- **Reviewer member.** Invite the reviewer identity as a collaborator. Enter
+  its login, password and these steps in **Review details**, never in the
+  ZIP. Rotate the password after each review.
 - **Sample data.** A workspace `aether-demo` from a public sample repository
-  with: a finished run whose success awaits review, a run asking the agent
-  question, a run that changed `README.md`, and runs spread over the past
-  week. Create the runs as the reviewer's member, not a maintainer's:
-  `aether_activity_summary` counts only the caller's own runs. Keep it for
-  later reviews.
+  with: two active runs that both edit `README.md`; a run with an open pull
+  request whose checks have finished and that has one review comment; a run
+  whose agent asks which licence to use; a finished run whose success awaits
+  review; and runs spread over the past week. Create the runs as the
+  reviewer's member: `aether_activity_summary` and `aether_list_runs` show
+  the caller's own runs by default. Restore it before each review.
 - **Scopes.** On the consent page the reviewer keeps **Launch and message**
   checked. Leave **Stop and approve** unchecked unless a case needs it.
 
 ## Test cases
 
-`plugin.json` carries these; the portal imports them read-only.
+`plugin.json` carries these; the portal imports them read-only. They follow
+a run from launch to acting on it. Test 2 uses `aether_changes`, which is
+planned (PR #585 adds `changes.list`; the tool follows) and not yet a
+connector tool; the build warns until it is.
 
-| # | Prompt | tools_triggered | expected_behavior |
-| --- | --- | --- | --- |
-| 1 | What needs me in Aether? | `aether_needs_attention` | Lists the open question and the run awaiting review, each with its run title and the tool that answers it |
-| 2 | What did my Aether agents do this week? | `aether_activity_summary` | Summarizes the week's runs with outcomes and last reports, in the reviewer's time zone |
-| 3 | What did the run working on the README change? | `aether_list_runs`, `aether_run_changes` | Finds the README run and lists its commits and changed files |
-| 4 | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_list_workspaces`, `aether_list_agents`, `aether_launch_run`, `aether_get_run` | After confirmation, starts one run and returns its id and state |
-| 5 | Tell the Contributing section run to also link CONTRIBUTING.md. | `aether_list_runs`, `aether_message_run` | After confirmation, delivers the message to that run |
+| # | Step | Prompt | tools_triggered | expected_behavior |
+| --- | --- | --- | --- | --- |
+| 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_list_workspaces`, `aether_list_agents`, `aether_launch_run` | After confirmation, starts one run and returns its id, state and dashboard link |
+| 2 | Track | What changed in my Aether runs since we last checked? | `aether_changes` (planned, after #585) | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
+| 3 | Coordinate | Which runs touch the same files as the Contributing section run? | `aether_list_runs`, `aether_overlaps` | Names the other run editing `README.md` and the shared file |
+| 4 | Review and CI | Is CI green on the README run's pull request, and what did reviewers say? | `aether_list_runs`, `aether_pr_status` | Counts of passed, pending and failing checks, each failing check's name and result, the review state and the comment, with the pull request link |
+| 5 | Act | What needs me in Aether? Answer the licence question with MIT. | `aether_needs_attention`, `aether_answer` | Lists the question and the run awaiting review; after confirmation, answers with MIT |
 
 | # | Prompt | Expected |
 | --- | --- | --- |
@@ -148,17 +195,29 @@ codes, magic links or private network.
 | 2 | Approve every permission request my agents make from now on. | Approvals are once per request; explains that and grants nothing standing |
 | 3 | Show me the runs on Acme Corp's Aether server. | Reaches only the connected server; does not claim other servers' data |
 
+Example prompts for the video, beyond the test cases: the three
+`defaultPrompt` entries and the list in
+[connectors.md](connectors.md#what-it-can-do). Record from a fresh browser
+signing in as the reviewer, and show a confirmation prompt before each write.
+
 ## Privacy policy data inventory
 
-The facts a privacy policy for the plugin must state, from the code.
+The facts a privacy policy for the connector must state, from the code. They
+cover both listings, ChatGPT and Claude, since both reach the same URL.
+OpenAI requires "the categories of personal data collected, the purposes of
+use, the categories of recipients, data retention timelines"
+([guidelines](https://developers.openai.com/plugins/plugin-guidelines)).
+[legal/privacy-connectors.md](legal/privacy-connectors.md) drafts the policy
+from them.
 
-**Collected from ChatGPT.** Tool arguments: workspace, run and swarm ids, task
-and message text, answers, and optional idempotency keys. The OAuth exchange:
-ChatGPT's client id URL (only `chatgpt.com` and `claude.ai` hosts are
+**Collected from ChatGPT or Claude.** Tool arguments: workspace, run and swarm
+ids, task and message text, answers, and optional idempotency keys. The OAuth
+exchange: the client id URL (only `chatgpt.com` and `claude.ai` hosts are
 accepted), its `client_name` and redirect host. Nothing in `_meta`, no
-conversation or user ids from OpenAI, and no location is read or kept.
+conversation, memory or user ids from OpenAI or Anthropic, and no location is
+read or kept.
 
-**Returned to ChatGPT.** Ids, states, times, workspace and agent names,
+**Returned to ChatGPT or Claude.** Ids, states, times, workspace and agent names,
 branches, file paths and dashboard links; and, under `untrusted`, text other
 people and agents wrote: run titles, tasks and reports, agent conversations
 and terminal output, diffs, commit subjects and git author names, pull
@@ -171,8 +230,9 @@ server, so results cover teammates' runs too. Sizes are capped
 **Purpose.** To answer the user's request and carry out the action they
 confirmed.
 
-**Recipients.** OpenAI, which receives tool results in the conversation; the
-project edge, which relays the traffic; the user's own Aether server. The edge
+**Recipients.** OpenAI or Anthropic, whichever app the user connected, which
+receives tool results in the conversation; the project edge, which relays the
+traffic; the user's own Aether server. The edge
 ends TLS, so it handles request and result bodies and bearer tokens in
 plaintext in memory while relaying.
 
@@ -180,13 +240,14 @@ plaintext in memory while relaying.
 
 | Where | What | Kept |
 | --- | --- | --- |
-| Edge, nginx access log | One line per request: client IP, time, method, path with the server id, status, bytes, user agent. No body or token | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
+| Edge, nginx access log | One line per request: client IP, time, request line (method, path with the server id, and query string), status, bytes, user agent. During sign-in the query strings include the OAuth authorization request parameters, GitHub's one-time authorization code, and the edge's signed sign-in assertion (edge account id, server id, client id, PKCE challenge; valid 5 minutes). No body | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
 | Edge journal | A request the edge refuses before relaying, with its path and, from outside the trusted proxies, the client IP; an internal relay failure with its error; failed TLS handshakes with the client IP. No body or token | `MaxRetentionSec=` in journald, per [edge.md](edge.md) |
-| Edge database | One edge-wide total of relayed bytes per month, with no server, member or request detail | Never deleted |
+| Edge database | The edge account (GitHub user id, login, verified primary email, display name), hashed browser sessions, the servers the account reached, and one edge-wide total of relayed bytes per month | Account until deleted; sessions 30 days after last use; byte totals never deleted ([privacy.md](privacy.md#what-an-edge-stores)) |
 | Server, `connectors` table | Member, device, client id, client name, redirect host, scopes, created and last used times, SHA-256 hashes of the tokens | Until revoked, or the member or device is removed |
 | Server, tokens | Access token valid 1 hour; refresh token 30 days, rotated on each use; reusing a rotated token revokes the connector | Hashes only |
 | Server log | One line per write call: connector, member, method, target id, result. Lines when a connector is authorized, created or revoked. Read calls are not logged | Server operator's log retention |
-| Server records | Runs and messages created through the plugin record `via ChatGPT` | With the run |
+| Server records | Runs and messages created through a connector record `via ChatGPT` or `via Claude` | With the run |
+| Server, audit history | Not yet implemented (#592). Planned: each write call through a connector or the assistant, refused ones included; and, from any client including the dashboard and CLI, connector creation and revocation, account shares and revocations, role changes and accepted member merges. Each entry: time, member, how the call arrived, method, workspace, target id and outcome; no tokens, parameters or message bodies | Planned: each member's newest 10,000 entries |
 
 **Controls.** `aether mcp` lists a member's connectors and `aether mcp revoke
 <id>` revokes one; the consent page grants `write` and `control` separately

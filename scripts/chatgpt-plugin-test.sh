@@ -8,7 +8,7 @@ src=$script_dir/../packaging/chatgpt-plugin
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-sh "$script_dir/chatgpt-plugin.sh" "$tmp/plugin.zip" 2>"$tmp/err"
+sh "$script_dir/chatgpt-plugin.sh" "$tmp/plugin.zip" 2>"$tmp/built"
 listing=$(python3 -m zipfile -l "$tmp/plugin.zip")
 for file in plugin.json mcp.json assets/logo.png assets/composer-icon.png; do
 	printf '%s\n' "$listing" | grep -q "^$file " || {
@@ -45,5 +45,25 @@ refuse "an http privacy policy" "privacyPolicyURL is not an https URL" "$ui.priv
 refuse "a logo it does not package" "./assets/missing.png is referenced by plugin.json but not packaged" "$ui.logo = \"./assets/missing.png\"" .
 refuse "four positive test cases" "exactly 5 positive" '.extensions["com.openai"].review.test_cases.positive |= .[:4]' .
 refuse "reviewer credentials" "test_credentials must be entered in the portal" '.extensions["com.openai"].review.test_credentials = "x"' .
+refuse "top-level reviewer credentials" "test_credentials must be entered in the portal" '.test_credentials = "x"' .
 refuse "MCP server headers" "must not set headers" . '.mcpServers.aether.headers = {"Authorization": "x"}'
 refuse "an http demo recording" "demo_recording_url is not an https URL" '.extensions["com.openai"].review.demo_recording_url = "http://example.com/demo"' .
+
+# A planned tool may warn; a registered one never does.
+for tool in $(sed -n 's/^chatgpt-plugin: warning: a test case triggers \([^ ,]*\), which.*/\1/p' "$tmp/built"); do
+	[ "$tool" = aether_changes ] || {
+		echo "chatgpt-plugin-test: the shipped package warns that $tool is not registered" >&2
+		exit 1
+	}
+done
+mkdir "$tmp/unknown"
+jq '.extensions["com.openai"].review.test_cases.positive[0].tools_triggered = "aether_list_runs, aether_no_such_tool"' \
+	"$src/plugin.json" >"$tmp/unknown/plugin.json"
+cp "$src/mcp.json" "$tmp/unknown/"
+sh "$script_dir/chatgpt-plugin.sh" "$tmp/unknown.zip" "$tmp/unknown" 2>"$tmp/err"
+if ! grep -qF "triggers aether_no_such_tool, which no connector tool registers yet" "$tmp/err" ||
+	grep -qF "triggers aether_list_runs," "$tmp/err"; then
+	echo "chatgpt-plugin-test: an unregistered test-case tool did not warn, or a registered one did:" >&2
+	cat "$tmp/err" >&2
+	exit 1
+fi

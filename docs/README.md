@@ -110,6 +110,10 @@ Reference:
   and message each other.
 - [ChatGPT plugin listing](chatgpt-plugin.md): build the directory package,
   submit it to OpenAI and set up its review.
+- [Claude connector listing](claude-connector.md): Anthropic's directory
+  requirements, the listing package, testing and review.
+- [legal/](legal/): drafts of the connector privacy policy and terms, not yet
+  approved or published.
 - [Candidate integration](integration.md): how swarm results are verified
   and delivered.
 - [MCP bridge](mcp-bridge.md): the coordination and memory tools inside a run's
