@@ -28,15 +28,18 @@ func runMCP(args []string) error {
 	switch {
 	case len(args) == 0:
 		return withControl(func(c *protocol.Client) error {
-			var code protocol.ConnectorCodeResult
-			if err := c.Call(protocol.MethodConnectorCode, struct{}{}, &code); err != nil {
-				return olderServer(err)
-			}
 			var list protocol.ConnectorListResult
 			if err := c.Call(protocol.MethodConnectorList, struct{}{}, &list); err != nil {
-				return err
+				return olderServer(err)
 			}
-			return printConnectors(os.Stdout, code, list.Connectors, time.Now())
+			var code *protocol.ConnectorCodeResult
+			if !list.SignIn {
+				code = &protocol.ConnectorCodeResult{}
+				if err := c.Call(protocol.MethodConnectorCode, struct{}{}, code); err != nil {
+					return olderServer(err)
+				}
+			}
+			return printConnectors(os.Stdout, list, code, time.Now())
 		})
 	case len(args) == 2 && args[0] == "revoke":
 		return withControl(func(c *protocol.Client) error {
@@ -59,19 +62,35 @@ func olderServer(err error) error {
 	return err
 }
 
-func printConnectors(w io.Writer, code protocol.ConnectorCodeResult, connectors []protocol.Connector, now time.Time) error {
-	expires, err := time.Parse(time.RFC3339, code.ExpiresAt)
-	if err != nil {
-		return fmt.Errorf("connector.code: expires_at: %w", err)
+func printConnectors(w io.Writer, list protocol.ConnectorListResult, code *protocol.ConnectorCodeResult, now time.Time) error {
+	connectorURL := list.URL
+	if code != nil {
+		connectorURL = code.URL
 	}
-	_, _ = fmt.Fprintf(w, "Add this server to ChatGPT or Claude as a custom connector:\n  URL   %s\n", code.URL)
-	_, _ = fmt.Fprintf(w, "  Code  %s   one use, expires in %d minutes; paste it on the page that opens when you connect, if it asks\n",
-		code.Code, int(expires.Sub(now).Round(time.Minute)/time.Minute))
-	if len(connectors) == 0 {
+	if connectorURL != "" && connectorURL == list.UniversalURL {
+		_, _ = fmt.Fprintf(w, "Install Aether from the ChatGPT or Claude directory where it is listed, or add this URL as a custom connector:\n  URL   %s\n", connectorURL)
+	} else {
+		_, _ = fmt.Fprintf(w, "Add this server to ChatGPT or Claude as a custom connector:\n  URL   %s\n", connectorURL)
+	}
+	if code == nil {
+		_, _ = fmt.Fprintln(w, "  No code: on the page that opens, sign in to the edge with GitHub, pick this server and select Allow")
+	} else {
+		expires, err := time.Parse(time.RFC3339, code.ExpiresAt)
+		if err != nil {
+			return fmt.Errorf("connector.code: expires_at: %w", err)
+		}
+		_, _ = fmt.Fprintf(w, "  Code  %s   one use, expires in %d minutes; paste it on the page that opens when you connect, if it asks\n",
+			code.Code, int(expires.Sub(now).Round(time.Minute)/time.Minute))
+	}
+	if list.UniversalURL != "" && connectorURL != list.UniversalURL {
+		_, _ = fmt.Fprintf(w, "To use the one URL %s instead, link a GitHub account: aether member link --github <login>\n", list.UniversalURL)
+	}
+	if len(list.Connectors) == 0 {
 		return nil
 	}
 	_, _ = fmt.Fprintln(w, "Connected:")
-	for _, c := range connectors {
+	var own []string
+	for _, c := range list.Connectors {
 		added, err := time.Parse(time.RFC3339, c.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("connector %s: created_at: %w", c.ID, err)
@@ -84,8 +103,20 @@ func printConnectors(w io.Writer, code protocol.ConnectorCodeResult, connectors 
 			}
 			used = "last used " + ago(now.Sub(last))
 		}
-		_, _ = fmt.Fprintf(w, "  %s  %s (%s)  scopes %s  added %s  %s\n", c.ID, c.ClientName, c.RedirectHost, strings.Join(c.Scopes, ","),
-			added.Local().Format(time.DateOnly), used)
+		at := ""
+		switch c.Resource {
+		case "":
+		case list.UniversalURL:
+			at = "  universal URL"
+		default:
+			at = "  at " + c.Resource
+			own = append(own, c.ID)
+		}
+		_, _ = fmt.Fprintf(w, "  %s  %s (%s)  scopes %s  added %s  %s%s\n", c.ID, c.ClientName, c.RedirectHost, strings.Join(c.Scopes, ","),
+			added.Local().Format(time.DateOnly), used, at)
+	}
+	if len(own) > 0 && connectorURL == list.UniversalURL {
+		_, _ = fmt.Fprintf(w, "Move %s to the universal URL: connect again at %s, then aether mcp revoke <id>\n", strings.Join(own, ", "), list.UniversalURL)
 	}
 	_, _ = fmt.Fprintln(w, "Remove one: aether mcp revoke <id>")
 	return nil

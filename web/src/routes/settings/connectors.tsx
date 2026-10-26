@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { type Api, ApiError, codeMethodNotFound } from '@/lib/api'
 import { errorSentence } from '@/lib/format'
 import { useCountdown } from '@/lib/hooks'
-import type { Connector, ConnectorCode, ServerEdge } from '@/lib/types'
+import type { Connector, ConnectorCode, ConnectorList, ServerEdge } from '@/lib/types'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
@@ -107,41 +107,73 @@ const guides: Record<App, { open: ReactNode; paste: ReactNode; note: string }> =
   },
 }
 
+function SignInStep({ watching, busy, onWatch }: { watching: boolean; busy: boolean; onWatch: () => void }) {
+  return (
+    <>
+      <p>On the Aether pages that open, sign in to the edge with GitHub, select <strong>Continue</strong> next to this server, choose its scopes and select <strong>Allow</strong>. No code is needed.</p>
+      {!watching && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <Button size="sm" variant="secondary" disabled={busy} onClick={onWatch}>Watch for the connection</Button>
+          <span className="text-muted">Shows it here once it connects, for 10 minutes.</span>
+        </div>
+      )}
+    </>
+  )
+}
+
 function Setup({
   app,
-  url,
+  info,
   edgeNote,
   code,
+  watching,
   busy,
   expired,
   onMint,
 }: {
   app: App
-  url: string | null
+  info: Omit<ConnectorList, 'connectors'>
   edgeNote: ReactNode
   code: ConnectorCode | null
+  watching: boolean
   busy: boolean
   expired: boolean
   onMint: () => void
 }) {
   const guide = guides[app]
+  const url = code?.url ?? info.url ?? null
+  const universal = url !== null && url === info.universal_url
   return (
     <div className="flex min-w-0 flex-col gap-3">
+      {universal && <p>Install Aether from the {app === 'chatgpt' ? 'ChatGPT' : 'Claude'} directory where it is listed, or add it as a custom connector:</p>}
       <ol className="flex min-w-0 flex-col gap-3">
         <Step n={1}><p>{guide.open}</p></Step>
         <Step n={2}>
           <p>{guide.paste}</p>
           {url ? <CopyableCommand command={url} /> : edgeNote ?? <p className="text-muted">The URL appears with the code.</p>}
+          {url && info.universal_url && !universal && (
+            <p className="text-muted">
+              This is this server’s own URL. To use the one URL <Code>{info.universal_url}</Code> instead, link a GitHub account in <strong>Profile › Sign-ins › Link a GitHub account</strong>, or run <Code>aether member link --github &lt;login&gt;</Code>.
+            </p>
+          )}
         </Step>
         <Step n={3}>
-          <p>On the Aether page that opens, choose its scopes, paste this code if the page asks for one, and select <strong>Allow</strong>.</p>
-          <CodeStep code={code} busy={busy} expired={expired} onMint={onMint} />
+          {info.sign_in
+            ? <SignInStep watching={watching} busy={busy} onWatch={onMint} />
+            : (
+                <>
+                  <p>On the Aether page that opens, choose its scopes, paste this code if the page asks for one, and select <strong>Allow</strong>.</p>
+                  <CodeStep code={code} busy={busy} expired={expired} onMint={onMint} />
+                </>
+              )}
         </Step>
       </ol>
       <p className="text-muted">{guide.note}</p>
     </div>
   )
 }
+
+const watchMs = 10 * 60_000
 
 // Keyed by identity: a code and the connector list belong to the member who
 // was signed in when they were read.
@@ -153,20 +185,28 @@ function Connectors({ client }: { client: Api }) {
   const servesEdge = useCapability().hasMethod('server.edge')
   const route = useStore((s) => s.route)
   const [connectors, setConnectors] = useState<Connector[] | null>(null)
+  const [info, setInfo] = useState<Omit<ConnectorList, 'connectors'>>({})
   const [listError, setListError] = useState<Failure | null>(null)
   const [edge, setEdge] = useState<ServerEdge | null>(null)
   const [edgeError, setEdgeError] = useState<string | null>(null)
   const [app, setApp] = useState<App>('chatgpt')
-  const [attempt, setAttempt] = useState<{ code: ConnectorCode; app: App; known: Set<string> } | null>(null)
+  // An attempt watches for a new connector until `until`: a code's expiry,
+  // or 10 minutes when signing in replaces the code. A move watches only
+  // for one of `replaces`'s client at `into`, then revokes `replaces`.
+  const [attempt, setAttempt] = useState<{ code: ConnectorCode | null; until: string; app: App; known: Set<string>; replaces?: Connector; into?: string } | null>(null)
   const [pollError, setPollError] = useState<Failure | null>(null)
   const [expired, setExpired] = useState(false)
   const [connected, setConnected] = useState<Connector | null>(null)
   const [busy, setBusy] = useState(false)
   const [mintError, setMintError] = useState<Failure | null>(null)
-  const [confirming, setConfirming] = useState<{ connector: Connector; reconnect: boolean } | null>(null)
+  const [confirming, setConfirming] = useState<{ connector: Connector; action: 'reconnect' | 'move' | 'revoke' } | null>(null)
   const done = useRef<HTMLButtonElement>(null)
 
-  const read = useCallback(() => client.connectorList().then((r) => r.connectors), [client])
+  const read = useCallback(() => client.connectorList().then((r) => {
+    const { connectors: list, ...rest } = r
+    setInfo(rest)
+    return list
+  }), [client])
   const refresh = () => read().then((next) => {
     setConnectors(next)
     setListError(null)
@@ -205,13 +245,23 @@ function Connectors({ client }: { client: Api }) {
     const settle = (next: Connector[], final: boolean) => {
       if (!live) return
       setPollError(null)
-      const added = next.find((c) => !attempt.known.has(c.id))
+      const old = attempt.replaces
+      const added = next.find((c) => !attempt.known.has(c.id) && (!old || (c.resource === attempt.into && c.redirect_host === old.redirect_host)))
       if (added || final) {
+        // The expiry read and a poll can both find it; only one settles.
+        live = false
         setConnectors(next)
         setAttempt(null)
       }
-      if (added) setConnected(added)
-      else if (final) setExpired(true)
+      if (added) {
+        setConnected(added)
+        if (old) {
+          client.connectorRevoke(old.id).then(
+            () => setConnectors((list) => list && list.filter((c) => c.id !== old.id)),
+            (err: unknown) => setPollError(failure(err)),
+          )
+        }
+      } else if (final) setExpired(true)
     }
     const fail = (err: unknown, final: boolean) => {
       if (!live) return
@@ -224,7 +274,7 @@ function Connectors({ client }: { client: Api }) {
     // A connector authorized just before the code expires still shows.
     const expiry = setTimeout(() => {
       read().then((next) => settle(next, true), (err: unknown) => fail(err, true))
-    }, Date.parse(attempt.code.expires_at) - Date.now())
+    }, Date.parse(attempt.until) - Date.now())
     const timer = setInterval(() => {
       if (polling) return
       polling = true
@@ -237,19 +287,20 @@ function Connectors({ client }: { client: Api }) {
       clearTimeout(expiry)
       clearInterval(timer)
     }
-  }, [attempt, read])
+  }, [attempt, read, client])
 
-  const start = async (forApp: App) => {
+  const start = async (forApp: App, replaces?: Connector) => {
     setMintError(null)
     setPollError(null)
     setConnected(null)
     setExpired(false)
-    const fresh = await read()
+    const { connectors: fresh, ...rest } = await client.connectorList()
+    setInfo(rest)
     setConnectors(fresh)
     setListError(null)
-    const code = await client.connectorCode()
+    const code = rest.sign_in ? null : await client.connectorCode()
     setApp(forApp)
-    setAttempt({ code, app: forApp, known: new Set(fresh.map((c) => c.id)) })
+    setAttempt({ code, until: code?.expires_at ?? new Date(Date.now() + watchMs).toISOString(), app: forApp, known: new Set(fresh.map((c) => c.id)), replaces, into: rest.universal_url })
   }
 
   const mint = async () => {
@@ -286,7 +337,7 @@ function Connectors({ client }: { client: Api }) {
             </TabsList>
             {(['chatgpt', 'claude'] as const).map((value) => (
               <TabsContent key={value} value={value}>
-                <Setup app={value} url={attempt?.code.url ?? null} edgeNote={edgeNote} code={attempt?.code ?? null} busy={busy} expired={expired} onMint={() => void mint()} />
+                <Setup app={value} info={info} edgeNote={edgeNote} code={attempt?.code ?? null} watching={attempt !== null} busy={busy} expired={expired} onMint={() => void mint()} />
               </TabsContent>
             ))}
             {offline}
@@ -328,29 +379,55 @@ function Connectors({ client }: { client: Api }) {
       {connectors?.length === 0 && (
         <SettingRow label="No connectors yet" help="One appears here once you select Allow on the Aether page." />
       )}
-      {connectors?.map((c) => (
-        <SettingRow
-          key={c.id}
-          label={label(c)}
-          help={(
-            <>
-              <span className="block">{scopeList(c)}</span>
-              Added <RelativeTime at={c.created_at} />
-              {' · '}{c.last_used_at ? <>last used <RelativeTime at={c.last_used_at} /></> : 'never used'}
-            </>
-          )}
-          control={(
-            <>
-              <Button size="sm" variant="ghost" aria-label={`Reconnect ${label(c)}`} disabled={busy} onClick={() => setConfirming({ connector: c, reconnect: true })}>Reconnect</Button>
-              <Button size="sm" variant="ghost" aria-label={`Revoke ${label(c)}`} disabled={busy} onClick={() => setConfirming({ connector: c, reconnect: false })}>Revoke</Button>
-            </>
-          )}
+      {connectors?.map((c) => {
+        const movable = !!c.resource && !!info.universal_url && c.resource !== info.universal_url && info.url === info.universal_url
+        return (
+          <SettingRow
+            key={c.id}
+            label={label(c)}
+            help={(
+              <>
+                <span className="block">{scopeList(c)}</span>
+                {c.resource && <span className="block">{c.resource === info.universal_url ? 'Universal URL' : <>This server’s own URL, <Code>{c.resource}</Code></>}</span>}
+                Added <RelativeTime at={c.created_at} />
+                {' · '}{c.last_used_at ? <>last used <RelativeTime at={c.last_used_at} /></> : 'never used'}
+              </>
+            )}
+            control={(
+              <>
+                <Button size="sm" variant="ghost" aria-label={`Reconnect ${label(c)}`} disabled={busy} onClick={() => setConfirming({ connector: c, action: 'reconnect' })}>Reconnect</Button>
+                <Button size="sm" variant="ghost" aria-label={`Revoke ${label(c)}`} disabled={busy} onClick={() => setConfirming({ connector: c, action: 'revoke' })}>Revoke</Button>
+              </>
+            )}
+          >
+            {movable && <Button size="sm" variant="secondary" className="self-start" aria-label={`Move ${label(c)} to the universal URL`} disabled={busy} onClick={() => setConfirming({ connector: c, action: 'move' })}>Move to the universal URL</Button>}
+          </SettingRow>
+        )
+      })}
+      {confirming?.action === 'move' && (
+        <Confirm
+          title={`Move ${label(confirming.connector)} to the universal URL?`}
+          description={`Add Aether again in ${confirming.connector.client_name} with ${info.universal_url}${info.sign_in ? ' and sign in' : ' and paste the code'}. Once it connects, this connector is revoked; remove the old Aether connector in ${confirming.connector.client_name} too.`}
+          action="Move"
+          pending="Starting…"
+          onConfirm={async () => {
+            setBusy(true)
+            try {
+              await start(confirming.connector.redirect_host === 'claude.ai' ? 'claude' : 'chatgpt', confirming.connector)
+            } finally {
+              setBusy(false)
+            }
+          }}
+          onDone={() => {}}
+          onClose={() => setConfirming(null)}
         />
-      ))}
-      {confirming && (confirming.reconnect ? (
+      )}
+      {confirming && confirming.action !== 'move' && (confirming.action === 'reconnect' ? (
         <Confirm
           title={`Reconnect ${label(confirming.connector)}?`}
-          description={`This gets a new code, then revokes the connector. Connect Aether again in ${confirming.connector.client_name} and paste the code; you can choose other scopes.`}
+          description={info.sign_in
+            ? `This revokes the connector. Connect Aether again in ${confirming.connector.client_name} and sign in; you can choose other scopes.`
+            : `This gets a new code, then revokes the connector. Connect Aether again in ${confirming.connector.client_name} and paste the code; you can choose other scopes.`}
           action="Reconnect"
           pending="Reconnecting…"
           onConfirm={async () => {
@@ -369,7 +446,7 @@ function Connectors({ client }: { client: Api }) {
       ) : (
         <Confirm
           title={`Revoke ${label(confirming.connector)}?`}
-          description={`Its next call fails, and ${confirming.connector.client_name} asks you to connect again with a new code. Removing it in ${confirming.connector.client_name} does not revoke it here.`}
+          description={`Its next call fails, and ${confirming.connector.client_name} asks you to connect again${info.sign_in ? '' : ' with a new code'}. Removing it in ${confirming.connector.client_name} does not revoke it here.`}
           action="Revoke"
           pending="Revoking…"
           onConfirm={async () => {

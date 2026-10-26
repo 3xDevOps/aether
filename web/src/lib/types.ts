@@ -2247,9 +2247,24 @@ export interface Connector {
   client_name: string
   redirect_host: string
   device_id?: string
+  /** The connector URL it was authorized for: the edge's universal `<edge>/mcp` or the server's own `<edge>/mcp/<server id>`. */
+  resource?: string
   scopes: string[]
   created_at: string
   last_used_at?: string
+}
+
+/**
+ * connector.list: the member's connectors and how they add one. `url` is
+ * the URL to add; `universal_url` the edge's one URL for every server,
+ * which differs from `url` until the member links a GitHub account;
+ * `sign_in` means the consent page takes the edge sign-in, no code.
+ */
+export interface ConnectorList {
+  connectors: Connector[]
+  url?: string
+  universal_url?: string
+  sign_in?: boolean
 }
 
 export interface SlackLinkResult {

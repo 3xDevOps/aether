@@ -5920,16 +5920,24 @@ Categories:
   `connectors`): one exported `ConnectorsSection
   {client}`, remounted when `identityKey` changes so a code never outlives
   its member. A ChatGPT / Claude segmented control picks numbered steps.
-  **Get a code** calls `connector.code` and shows its `url` and code, the
-  code with `useCountdown`; before that, `server.edge` only says whether the
-  server has an edge or is connected to it. While the code lives,
-  `connector.list` is polled every 3 s, and once more when it expires; a
+  `connector.list` gives the URL to show at once (`url`), the edge's
+  `universal_url` and `sign_in`. With `sign_in` the third step mints no code
+  and **Watch for the connection** polls for 10 minutes; otherwise **Get a
+  code** calls `connector.code` and shows its code with `useCountdown`. A
+  `url` other than `universal_url` adds how to link a GitHub account. Without
+  a `url`, `server.edge` only says whether the server has an edge or is
+  connected to it. While a code or watch lives, `connector.list` is polled
+  every 3 s, and once more when it ends; a
   connector absent at mint time shows **<client> (<host>) connected** in the
   section's one `role="status"` region and focuses its **Done** button. A
   failed poll shows its error until the next one succeeds. Rows list each
-  connector's scopes, added and last-used times, **Reconnect** (confirm,
-  a new code on that client's tab, then `connector.revoke`; a failed mint
-  revokes nothing) and **Revoke** (confirm). Errors show verbatim with a fix:
+  connector's scopes, its `resource` as **Universal URL** or the server's own
+  URL, added and last-used times, **Move to the universal URL** (where `url`
+  is universal and the connector's is not: confirm, start watching, and
+  `connector.revoke` the old connector only once the new one appears),
+  **Reconnect** (confirm, a new code on that client's tab, then
+  `connector.revoke`; a failed mint revokes nothing) and **Revoke**
+  (confirm). Errors show verbatim with a fix:
   a server without `connector.list` (`-32601`) gets the update command and
   hides the steps, the no-edge and not-connected errors link `docs/edge.md`,
   anything else links the connector troubleshooting. The palette's **Connect

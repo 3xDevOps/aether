@@ -151,3 +151,55 @@ it('shows a failed check while waiting, and forgets the code when the member cha
   act(() => useStore.setState({ identityKey: 'someone-else' }))
   expect(screen.queryByText('ABCD-EFGH')).toBeNull()
 })
+
+const universal = 'https://edge.example/mcp'
+const own = 'https://edge.example/mcp/srv'
+
+it('shows the universal URL without minting a code when signing in replaces it, and watches for the connection', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const signedIn = { url: universal, universal_url: universal, sign_in: true }
+  const client = show({
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [], ...signedIn }).mockResolvedValueOnce({ connectors: [], ...signedIn })
+      .mockResolvedValue({ connectors: [{ ...chatgpt, resource: universal }], ...signedIn }),
+  })
+  expect(await screen.findByText(universal)).toBeTruthy()
+  expect(screen.getByText(/Install Aether from the ChatGPT directory where it is listed, or add it as a custom connector/)).toBeTruthy()
+  expect(screen.getByText(/No code is needed/)).toBeTruthy()
+  expect(screen.queryByRole('button', { name: 'Get a code' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Watch for the connection' }))
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(await screen.findByText('ChatGPT (chatgpt.com) connected')).toBeTruthy()
+  expect(screen.getByText('Universal URL')).toBeTruthy()
+  expect(client.connectorCode).not.toHaveBeenCalled()
+})
+
+it('shows the server’s own URL with how to link GitHub, and still asks for a code', async () => {
+  show({ connectorList: vi.fn().mockResolvedValue({ connectors: [], url: own, universal_url: universal }) })
+  expect(await screen.findByText(own)).toBeTruthy()
+  expect(screen.getByText(/Profile › Sign-ins › Link a GitHub account/)).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Get a code' })).toBeTruthy()
+})
+
+it('moves a connector on the server’s own URL to the universal URL, revoking it only once its replacement connects', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const old = { ...chatgpt, resource: own }
+  const added = { ...chatgpt, id: 'con-universal01', resource: universal }
+  const unrelated = { ...claude, id: 'con-claudeuni01', resource: universal }
+  const signedIn = { url: universal, universal_url: universal, sign_in: true }
+  const client = show({
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [old], ...signedIn }).mockResolvedValueOnce({ connectors: [old], ...signedIn })
+      .mockResolvedValueOnce({ connectors: [old, unrelated], ...signedIn }).mockResolvedValue({ connectors: [old, unrelated, added], ...signedIn }),
+  })
+  expect(await screen.findByText(own)).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Move ChatGPT (chatgpt.com) to the universal URL' }))
+  const dialog = await screen.findByRole('alertdialog')
+  expect(dialog.textContent).toContain(`Add Aether again in ChatGPT with ${universal} and sign in. Once it connects, this connector is revoked`)
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(client.connectorRevoke).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(3000)
+  await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-7k2m9q4xbd'))
+  expect(client.connectorCode).not.toHaveBeenCalled()
+})
