@@ -146,6 +146,9 @@ their own entries.
   fallback, when it is created, so a member cannot queue a swarm on an account
   nobody shared with them:
   `permission denied: member <member-id> has not shared their account with you`.
+- Sharing and revoking are recorded in the
+  [audit history](connectors.md#audit-history), readable by the sharing member
+  and admins.
 
 > [!WARNING]
 > An `omp` share mounts your whole `~/.omp/agent` read-write, because omp
@@ -287,6 +290,9 @@ permissions, and it always uses your own agent account.
   hook, or a `.bashrc` line or `~/.claude` hook one of your runs planted in
   your shared home. Saving the environment then bakes that code into the image
   new runs start from.
+
+Every write call the assistant makes, such as a launch, message, pause or stop,
+is recorded in the [audit history](connectors.md#audit-history) as `assistant`.
 
 Do not sign the `aether` CLI in inside your environment: that gives the
 assistant, and every run that mounts your home, a way to approve its own cards.
@@ -535,7 +541,12 @@ there is no terminal, file, settings or git-writing tool.
   assistant into approving or ending work. A connector serves only
   its scopes' tools, and the server checks every call's method against its
   scopes, a permission decision against `control`, and refuses every method
-  outside its table ([connectors.md](connectors.md#scopes)). It can make 30 write calls at once,
+  outside its table ([connectors.md](connectors.md#scopes)).
+- Audit history: a connector's write calls, refused ones included, and its
+  creation and revocation are recorded with the member, connector, method,
+  target and outcome, never the parameters
+  ([connectors.md](connectors.md#audit-history)). A member reads their own
+  entries; an admin reads all. It can make 30 write calls at once,
   then one every 2 seconds.
 - A connector minted over a member SSH key or a tailnet connection has no
   device: revoking a device does not cut it off. `aether mcp revoke` does.
@@ -603,7 +614,8 @@ way a connector does: with that member's role checks, judged by the device
 `aether slack link` ran on, and with audit records naming
 `Slack connector <Slack user id>`. It holds all three [scopes](connectors.md#scopes), since deciding a
 permission request takes `control`, and calls only the methods its buttons and
-replies need.
+replies need. Its write calls enter the
+[audit history](connectors.md#audit-history) as a connector's do.
 
 - It messages runs and answers requests once. It launches, stops and closes
   nothing, posts in no channel, and never picks an "always" option. A request

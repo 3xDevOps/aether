@@ -244,7 +244,8 @@ func TestConnectorScopes(t *testing.T) {
 }
 
 // connector.revoke ends a connector at once: its open session, its
-// access token and its refresh token all fail on their next use.
+// access token and its refresh token all fail on their next use, and
+// audit history keeps its creation, its write calls and its revocation.
 func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
 	e := newEnv(t)
 	c := e.connect(t, allScopes...)
@@ -271,6 +272,26 @@ func TestRevokeEndsEveryTokenAndOpenSession(t *testing.T) {
 		t.Fatalf("launches = %v, want only the one before revoke", got)
 	}
 
+	var audit protocol.AuditListResult
+	if err := e.admin.Call(protocol.MethodAuditList, protocol.AuditListParams{}, &audit); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, a := range audit.Entries {
+		got = append(got, a.Via+" "+a.Method+" "+a.ConnectorID+" "+a.Target+" "+a.Outcome)
+	}
+	run := ""
+	if len(audit.Entries) == 3 {
+		run = audit.Entries[1].Target
+	}
+	want := []string{
+		"cli connector.revoke  " + id + " ok",
+		"connector run.launch " + id + " " + run + " ok",
+		"connector connector.create " + id + " " + id + " ok",
+	}
+	if !slices.Equal(got, want) || !strings.HasPrefix(run, "run-") {
+		t.Fatalf("audit.list = %q, want %q", got, want)
+	}
 }
 
 // Refreshes racing with one refresh token must rotate it once and keep

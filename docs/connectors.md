@@ -275,6 +275,40 @@ connector: write call connector=con-7k2m9q4xbd member=mem-... method=run.launch 
 `result` is `ok` or the call's error. Audit records, such as a member merge's
 `confirmed_by`, name the connector: `ChatGPT connector con-7k2m9q4xbd of member mem-...`.
 
+### Audit history
+
+The server also keeps a durable audit history of:
+
+- every write call a connector makes past its rate limit, including calls the
+  server refused, such as a method outside the connector's scopes
+- every write call the assistant makes
+- connectors being created and revoked, account shares and revocations, and
+  role changes, however they were made
+
+An entry names the member, how the call arrived, the method, the run, swarm,
+question, connector or member it acted on, and `ok` or `error` with the error
+code. It never holds tokens, messages or other parameters. How a call arrived
+is `connector` with the client and connector id, `assistant`, `dashboard` for
+the server-hosted dashboard, or `cli` for any SSH client, including the
+desktop app and `aether gui`.
+
+```sh
+aether audit                                  # your entries, newest first
+aether audit --connector con-7k2m9q4xbd       # one connector's
+aether audit --before 812                     # the page after one ending at 812
+```
+
+```
+SEQ  TIME                 MEMBER          VIA                                METHOD      TARGET          OUTCOME
+814  2026-10-26 14:02:11  mem-4f8x2kq9vd  connector ChatGPT con-7k2m9q4xbd    run.kill    run-d6ay38tj8j  error -32001
+813  2026-10-26 14:01:40  mem-4f8x2kq9vd  connector ChatGPT con-7k2m9q4xbd    run.launch  run-d6ay38tj8j  ok
+```
+
+You see your own entries; an admin sees everyone's. The `audit.list` RPC
+returns the same entries, at most 200 a page. The server keeps each member's
+newest 10,000 entries. After a member merge, the absorbed member's entries
+keep their id, so only admins see them.
+
 ## Revoke a connector
 
 Select **Revoke** next to it in **Settings → ChatGPT and Claude**, or run:

@@ -21,9 +21,10 @@ import (
 // and steer checks have one implementation. Local trusts the member it is
 // given the way handleConn trusts a completed handshake.
 type Local struct {
-	s      *Server
-	member domain.MemberID
-	id     *connIdentity
+	s         *Server
+	member    domain.MemberID
+	id        *connIdentity
+	assistant bool
 }
 
 func (s *Server) Local(member domain.MemberID) *Local {
@@ -50,6 +51,9 @@ func (l *Local) Call(ctx context.Context, method string, params json.RawMessage)
 	}
 	if l.id != nil {
 		ctx = domain.WithVia(context.WithValue(ctx, connIdentityKey{}, *l.id), l.id.connectorClient)
+	}
+	if l.assistant {
+		ctx = context.WithValue(ctx, assistantCallKey{}, true)
 	}
 	return l.s.dispatch(ctx, l.member, method, params)
 }

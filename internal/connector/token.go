@@ -102,6 +102,7 @@ func (h *handler) exchangeCode(ctx context.Context, w http.ResponseWriter, r *ht
 		tokenFail(w, http.StatusInternalServerError, "server_error", err.Error())
 		return
 	}
+	h.ssh.RecordConnectorCreated(ctx, conn.Member, conn.ID, conn.ClientName)
 	slog.Info("connector: created", "connector", conn.ID, "member", conn.Member, "device", conn.Device, "subject", conn.Subject,
 		"resource", conn.Resource, "redirect_host", conn.RedirectHost, "scopes", conn.Scopes)
 	writeTokens(w, access, refresh)
