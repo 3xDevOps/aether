@@ -175,7 +175,7 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
             }}
           >
             <Eye aria-hidden />
-            {watch.state === 'paused' ? 'Watch paused' : watch.state === 'error' ? 'Watch failing' : 'Watching'}
+            {watch.state === 'paused' ? 'Watch paused' : watch.state === 'error' ? 'Watch failing' : 'Watch on'}
           </Button>
         </>
       )}

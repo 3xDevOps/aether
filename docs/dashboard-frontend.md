@@ -6245,7 +6245,7 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   reported done; Merged means GitHub merged the PR), and sends one
   idempotency key per open form. The success toast is the server's receipt
   with **View watch**; a refusal stays in the form verbatim.
-- **Watched runs**: the run header's state line shows **Watching** (or
+- **Watched runs**: the run header's state line shows **Watch on** (or
   **Watch paused**, **Watch failing**) while the member has a live watch on
   the run; it opens the watch. A watched pull request shows **Watching PR**.
 - **Live**: `watch.changed` reaches only the watch's owner. The dashboard

@@ -40,7 +40,7 @@ test('a watch made from the run menu notices a need while the page is closed', a
   await form.getByRole('button', { name: 'Watch', exact: true }).click()
   await expect(form).toBeHidden()
   await expect(page.getByText(/^Watching run .* for: needs you, finished\./)).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Watching' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Watch on' })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath('watch-created.png') })
 
   const { watches } = await alice.api.rpc<{ watches: { id: string }[] }>('watch.list', { run_id: run.id })
