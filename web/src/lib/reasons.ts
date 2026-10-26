@@ -37,6 +37,7 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^(?:agent idle|turn ended without a report)$/, () => 'Turn ended without a report'],
   [/^no update for ([^\s:]+)(: .*)?$/s, (span, summary = '') => `No update for ${span}${summary}`],
   [/^waiting for (\d+ workers?)$/, (workers) => `Waiting for ${workers}`],
+  [/^waiting for (\d+ child runs?)$/, (children) => `Waiting for ${children}`],
   [/^agent resumed$/, () => 'Agent resumed'],
   [/^agent failed$/, () => 'Agent failed'],
   [/^stalled: no output or file changes for (.+)$/, (span) => `No output or file changes for ${span}`],
