@@ -229,6 +229,7 @@ func (s *Scheduler) applyAgentReport(ctx context.Context, run domain.RunID, repo
 			entry.parkedAt, entry.postParkActivity = time.Time{}, time.Time{}
 		}
 	case agentstatus.Idle:
+		entry.stopHeld = false
 		if !finishes {
 			entry.parkedAt, entry.postParkActivity = time.Now().UTC(), time.Time{}
 		}

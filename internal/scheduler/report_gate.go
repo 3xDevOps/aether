@@ -46,6 +46,7 @@ func (s *Scheduler) HoldTurnEnd(ctx context.Context, run domain.RunID) (string, 
 	}
 	entry.reportAsked = started
 	if entry.launchMode == domain.LaunchTUI {
+		entry.stopHeld = true
 		heldAt := time.Now().UTC()
 		time.AfterFunc(heldStopGrace, func() { s.applyHeldStop(entry, started, heldAt) })
 	}
@@ -67,10 +68,11 @@ func (s *Scheduler) applyHeldStop(entry *supervised, started, heldAt time.Time) 
 }
 
 // reportOwed reports whether the run's current turn may be held for its
-// report. A pending request already waits on a member. The caller must hold
-// s.mu.
+// report. A pending request already waits on a member. A Standard run is
+// never held twice in a row: Claude Code can report the continuation of a
+// held stop as a new turn. The caller must hold s.mu.
 func (e *supervised) reportOwed() bool {
-	return e.coordDir != "" && e.launchMode.Interactive() && !e.turnStartedAt.IsZero() && !e.reportAsked.Equal(e.turnStartedAt) &&
+	return e.coordDir != "" && e.launchMode.Interactive() && !e.turnStartedAt.IsZero() && !e.reportAsked.Equal(e.turnStartedAt) && !e.stopHeld &&
 		(e.status == domain.RunRunning || e.status == domain.RunNeedsAttention) && e.reported == "" && !e.atPrompt() &&
 		!e.killRequested && !e.finalizing && !e.destroyPending && !e.exitObserved
 }

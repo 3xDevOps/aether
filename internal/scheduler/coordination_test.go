@@ -34,8 +34,7 @@ type fakeCoordinator struct {
 	// hold a writer in.
 	beforeWrite func()
 
-	// remind answers RemindReport; withCoordination points it at the
-	// scheduler's own wake.
+	// remind answers RemindReport; nil refuses every report reminder.
 	remind func(context.Context, domain.RunID, string) error
 
 	mu             sync.Mutex
@@ -188,7 +187,7 @@ func withServerBinary(path string) func(*Config) {
 func withCoordination(t *testing.T, e *testEnv) (*fakeCoordinator, string) {
 	t.Helper()
 	dir := t.TempDir()
-	c := &fakeCoordinator{root: filepath.Join(dir, "coord"), remind: e.sched.Wake}
+	c := &fakeCoordinator{root: filepath.Join(dir, "coord")}
 	binDir := filepath.Join(dir, "runtime", "bin")
 	e.sched.UseCoordination(c, binDir)
 	return c, binDir

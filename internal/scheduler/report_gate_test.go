@@ -55,7 +55,8 @@ func userMessages(items []acphost.Item) []string {
 func TestEnhancedTurnWithoutAReportIsAskedOnce(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
-	withCoordination(t, e)
+	coord, _ := withCoordination(t, e)
+	coord.remind = e.sched.Wake
 	sub := e.subscribe(t)
 	run := e.launchACP(t, "say pong")
 	waitItems(t, e.sched, run.ID, "the reminder's turn", turnEnded("end_turn", 2))
@@ -138,9 +139,9 @@ func TestStandardLaunchRecordsItsInstructionChannel(t *testing.T) {
 	waitNote(t, sub, "run instructions: SessionStart hook and MCP server instructions")
 }
 
-// A Standard turn is held once, a report since its start lets it end, and a
-// held stop whose answer never reached Claude Code ends the turn anyway once
-// no hook follows.
+// A Standard turn is held once, never twice in a row, a report since its
+// start lets it end, and a held stop whose answer never reached Claude Code
+// ends the turn anyway once no hook follows.
 func TestStandardTurnIsHeldOnceAndEndsWhenTheHookGoesQuiet(t *testing.T) {
 	heldStopGrace = 50 * time.Millisecond
 	t.Cleanup(func() { heldStopGrace = time.Minute })
@@ -163,6 +164,20 @@ func TestStandardTurnIsHeldOnceAndEndsWhenTheHookGoesQuiet(t *testing.T) {
 	}
 	if got := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); got.Reason != turnEndedReason {
 		t.Fatalf("reason %q, want %q", got.Reason, turnEndedReason)
+	}
+
+	// Claude Code can start the held stop's continuation as a new turn; it
+	// is not held again before a stop is applied.
+	start()
+	if reminder, err := e.sched.HoldTurnEnd(t.Context(), run.ID); err != nil || reminder == "" {
+		t.Fatalf("HoldTurnEnd of the next turn = %q, %v; want the reminder", reminder, err)
+	}
+	start()
+	if again, err := e.sched.HoldTurnEnd(t.Context(), run.ID); err != nil || again != "" {
+		t.Fatalf("HoldTurnEnd of the held stop's continuation = %q, %v; want none", again, err)
+	}
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
+		t.Fatal(err)
 	}
 
 	start()
