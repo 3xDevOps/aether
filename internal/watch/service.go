@@ -46,6 +46,8 @@ type Store interface {
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
 	GetMission(ctx context.Context, id domain.MissionID) (*domain.Mission, error)
+	ListMissionQuestions(ctx context.Context, id domain.MissionID) ([]*domain.MissionQuestion, error)
+	RunResumedSince(ctx context.Context, id domain.RunID, at time.Time) (bool, error)
 }
 
 // Runs is what the scheduler knows about a live run that its row does not.

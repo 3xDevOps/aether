@@ -106,27 +106,37 @@ func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, not
 		single, quietHeld = append(single, quietHeld[0]), nil
 	}
 	if len(quietHeld) > 0 {
-		lines := make([]string, 0, len(quietHeld))
-		for _, n := range quietHeld {
-			lines = append(lines, n.Title+": "+n.Body)
-		}
-		m := push.Message{
-			Title: fmt.Sprintf("%d watch notices", len(quietHeld)),
-			Body:  strings.Join(lines, "\n"),
-			URL:   WatchesLink(),
-			Topic: "watches:" + string(member),
-		}
-		errs = append(errs, s.send(ctx, member, m, quietHeld, watches))
+		errs = append(errs, s.send(ctx, member, quietHeld, watches, func(reserved []*store.WatchNotification) push.Message {
+			if len(reserved) == 1 {
+				return noticeMessage(reserved[0], watches[reserved[0].WatchID])
+			}
+			lines := make([]string, 0, len(reserved))
+			for _, n := range reserved {
+				lines = append(lines, n.Title+": "+n.Body)
+			}
+			return push.Message{
+				Title: fmt.Sprintf("%d watch notices", len(reserved)),
+				Body:  strings.Join(lines, "\n"),
+				URL:   WatchesLink(),
+				Topic: "watches:" + string(member),
+			}
+		}))
 	}
 	for _, n := range single {
-		needsYou := n.Condition == protocol.WatchNeedsYou
-		m := push.Message{Title: n.Title, Body: n.Body, URL: n.Link, Topic: topicOf(n), Urgent: needsYou, Notice: !needsYou}
-		if w := watches[n.WatchID]; w.TargetKind == protocol.WatchTargetRun {
-			m.Run = w.RunID
-		}
-		errs = append(errs, s.send(ctx, member, m, []*store.WatchNotification{n}, watches))
+		errs = append(errs, s.send(ctx, member, []*store.WatchNotification{n}, watches, func([]*store.WatchNotification) push.Message {
+			return noticeMessage(n, watches[n.WatchID])
+		}))
 	}
 	return errors.Join(errs...)
+}
+
+func noticeMessage(n *store.WatchNotification, w *store.Watch) push.Message {
+	needsYou := n.Condition == protocol.WatchNeedsYou
+	m := push.Message{Title: n.Title, Body: n.Body, URL: n.Link, Topic: topicOf(n), Urgent: needsYou, Notice: !needsYou}
+	if w.TargetKind == protocol.WatchTargetRun {
+		m.Run = w.RunID
+	}
+	return m
 }
 
 // withdraw quietly replaces n's delivered push on member's devices, the
@@ -245,21 +255,18 @@ func (s *Service) currentNeeds(ctx context.Context, w *store.Watch) ([]need, err
 		if err != nil {
 			return nil, err
 		}
-		n, err := s.missionNeed(ctx, m)
-		if err != nil || n == nil {
-			return nil, err
-		}
-		return []need{*n}, nil
+		return s.missionNeeds(ctx, m)
 	}
 	return nil, nil
 }
 
-// send pushes m to member's devices and records the result on each of
-// notes: delivered when a device took it, no_destination with none, and
-// failed otherwise, tried again with backoff up to maxPushAttempts. The
-// attempt is counted and its retry scheduled before the push goes out, so
-// a crash before the result is saved repeats it at most that many times.
-func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Message, notes []*store.WatchNotification, watches map[string]*store.Watch) error {
+// send pushes the message built from the notes it could reserve to
+// member's devices and records the result on each of them: delivered when
+// a device took it, no_destination with none, and failed otherwise,
+// tried again with backoff up to maxPushAttempts. The attempt is counted
+// and its retry scheduled before the push goes out, so a crash before the
+// result is saved repeats it at most that many times.
+func (s *Service) send(ctx context.Context, member domain.MemberID, notes []*store.WatchNotification, watches map[string]*store.Watch, message func([]*store.WatchNotification) push.Message) error {
 	var errs []error
 	retryAt := make(map[string]time.Time, len(notes))
 	reserved := make([]*store.WatchNotification, 0, len(notes))
@@ -283,7 +290,7 @@ func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Messa
 	if len(reserved) == 0 {
 		return errors.Join(errs...)
 	}
-	results, err := s.push.Deliver(ctx, member, m)
+	results, err := s.push.Deliver(ctx, member, message(reserved))
 	status, detail := pushOutcome(results, err)
 	for _, n := range reserved {
 		attempts := n.PushAttempts + 1

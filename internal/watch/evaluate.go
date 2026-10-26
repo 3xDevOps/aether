@@ -237,8 +237,22 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 			r.notices = append(r.notices, Notice{Condition: protocol.WatchNeedsYou, Key: n.key, Title: r.title, Body: n.body, Link: link})
 		}
 	}
+	fired := w.Fired[protocol.WatchFinished]
+	if at, live := strings.CutPrefix(fired, "reported|live|"); live && run.Status == domain.RunCompleted && at != "" {
+		nanos, err := strconv.ParseInt(at, 10, 64)
+		if err != nil {
+			return reading{}, fmt.Errorf("watch %s finished key %q: %w", w.ID, fired, err)
+		}
+		resumed, err := s.store.RunResumedSince(ctx, run.ID, time.Unix(0, nanos))
+		if err != nil {
+			return reading{}, fmt.Errorf("read run %s history: %w", run.ID, err)
+		}
+		if resumed {
+			fired = ""
+		}
+	}
 	var finished string
-	if key, body, ok := runFinish(run, w.Fired[protocol.WatchFinished]); ok {
+	if key, body, ok := runFinish(run, fired); ok {
 		finished = body
 		if slices.Contains(w.Conditions, protocol.WatchFinished) {
 			r.notices = append(r.notices, Notice{Condition: protocol.WatchFinished, Key: key, Title: r.title, Body: body, Link: link})
@@ -325,7 +339,8 @@ func inputKey(r *domain.RunInputRequest) string {
 // keyed by when the run entered that standing, so a later one is announced
 // again; prev is the finished key last fired. A live reported success that
 // then completes, by its report or by a member accepting or closing it,
-// keeps that key: it is the same finish.
+// keeps that key: it is the same finish. The caller clears prev when the
+// run went back to work since, so a later finish is a new one.
 func runFinish(run *domain.Run, prev string) (key, body string, ok bool) {
 	reason := strings.TrimSuffix(run.Reason, "; retained container")
 	if run.Status == domain.RunCompleted && strings.HasPrefix(prev, "reported|live|") {
@@ -348,7 +363,7 @@ func runFinish(run *domain.Run, prev string) (key, body string, ok bool) {
 			return "completed", "Completed", true
 		}
 	}
-	if run.Status.Live() && run.Activity != domain.ActivityFinished {
+	if run.Status != domain.RunCompleted && (!run.Status.Live() || run.Activity != domain.ActivityFinished) {
 		return "", "", false
 	}
 	key = "reported|"
@@ -372,12 +387,14 @@ func (s *Service) readMission(ctx context.Context, w *store.Watch) (reading, err
 	r.observed = protocol.WatchObserved{Phase: string(m.Phase)}
 	link := MissionLink(m.ID)
 	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
-		n, err := s.missionNeed(ctx, m)
+		needs, err := s.missionNeeds(ctx, m)
 		if err != nil {
 			return reading{}, err
 		}
-		if n != nil {
-			r.observed.Need = n.body
+		for i, n := range needs {
+			if i == 0 {
+				r.observed.Need = n.body
+			}
 			r.notices = append(r.notices, Notice{Condition: protocol.WatchNeedsYou, Key: n.key, Title: r.title, Body: n.body, Link: link})
 		}
 	}
@@ -420,16 +437,37 @@ func (s *Service) missionFinish(ctx context.Context, m *domain.Mission) (string,
 	return string(m.Phase) + "|" + strconv.FormatInt(at.UnixNano(), 10), nil
 }
 
-// missionNeed is the swarm row of the Needs you table its current
-// integrator carries: a question, or the integrator down. Each question
+// missionNeeds is what the swarm waits on a member for: each question
+// its integrator asked that is still open, and the swarm row of the Needs
+// you table its current integrator carries otherwise, such as the
+// integrator down. An integrator that failed to launch before its run row
+// existed carries none, so its launch error is read from the swarm. Each
 // is a need of its own.
-func (s *Service) missionNeed(ctx context.Context, m *domain.Mission) (*need, error) {
+func (s *Service) missionNeeds(ctx context.Context, m *domain.Mission) ([]need, error) {
+	var out []need
+	if m.OpenQuestions > 0 {
+		questions, err := s.store.ListMissionQuestions(ctx, m.ID)
+		if err != nil {
+			return nil, fmt.Errorf("read swarm %s questions: %w", m.ID, err)
+		}
+		for _, q := range questions {
+			if q.AnsweredAt == nil {
+				out = append(out, need{key: protocol.AttentionKindSwarmQuestion + ":" + string(q.ID), body: "The integrator asks: " + q.Body})
+			}
+		}
+	}
 	if m.CurrentIntegratorRunID == "" {
-		return nil, nil
+		return out, nil
 	}
 	run, err := s.store.GetRun(ctx, m.CurrentIntegratorRunID)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil
+		if m.IntegratorLaunchError != "" && m.IntegratorLaunchErrorAt != nil {
+			out = append(out, need{
+				key:  protocol.AttentionKindIntegratorDown + ":" + m.IntegratorLaunchErrorAt.UTC().Format(time.RFC3339Nano),
+				body: "Integrator failed to launch, replace it to continue: " + m.IntegratorLaunchError,
+			})
+		}
+		return out, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read swarm %s integrator: %w", m.ID, err)
@@ -438,14 +476,10 @@ func (s *Service) missionNeed(ctx context.Context, m *domain.Mission) (*need, er
 	if err != nil {
 		return nil, fmt.Errorf("read swarm %s attention: %w", m.ID, err)
 	}
-	if item == nil {
-		return nil, nil
+	if item == nil || item.Kind == protocol.AttentionKindSwarmQuestion {
+		return out, nil
 	}
-	key := item.Kind + ":" + item.Since
-	if item.Message != nil {
-		key = item.Kind + ":" + item.Message.ID
-	}
-	return &need{key: key, body: item.Reason}, nil
+	return append(out, need{key: item.Kind + ":" + item.Since, body: item.Reason}), nil
 }
 
 type delivery struct {

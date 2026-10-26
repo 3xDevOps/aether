@@ -396,6 +396,24 @@ func recordTransition(ctx context.Context, tx *sql.Tx, id domain.RunID, status d
 	return nil
 }
 
+// RunResumedSince reports whether run id, parked on its agent's reported
+// success at at, has since entered another live standing: whether it went
+// back to work, so a later finish is not that report's.
+func (d *DB) RunResumedSince(ctx context.Context, id domain.RunID, at time.Time) (bool, error) {
+	n, err := encodeTime(at)
+	if err != nil {
+		return false, err
+	}
+	live, args := liveStatusArgs()
+	var resumed bool
+	if err := d.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_state_transitions
+		WHERE run_id = ? AND at > ? AND reason <> ? AND to_status IN (`+live+`))`,
+		append([]any{id, n, domain.ReportedSuccessReason}, args...)...).Scan(&resumed); err != nil {
+		return false, fmt.Errorf("store: read run %s transitions: %w", id, err)
+	}
+	return resumed, nil
+}
+
 // ClearRunWorktree clears only a checkout path that still has the expected
 // terminal status and value. A concurrent ownership transfer therefore
 // survives even when GC started from an older run snapshot.
