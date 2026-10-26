@@ -121,7 +121,7 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 	if perr != nil {
 		return nil, perr
 	}
-	ws, _, perr := s.changesScope(ctx, p)
+	ws, live, perr := s.changesScope(ctx, p)
 	if perr != nil {
 		return nil, perr
 	}
@@ -129,6 +129,11 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 		Workspace: ws,
 		Run:       domain.RunID(p.RunID),
 		MissionID: domain.MissionID(p.MissionID),
+	}
+	if ws != "" && !live {
+		// A deleted workspace's log holds only its workspace.deleted, which
+		// carries no run: the run and swarm filters would hide it.
+		filter.Run, filter.MissionID = "", ""
 	}
 	kinds := p.Kinds
 	if len(kinds) == 0 {

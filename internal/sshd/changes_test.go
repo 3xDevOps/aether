@@ -339,9 +339,15 @@ func TestChangesSkipDeletedRunHistory(t *testing.T) {
 		t.Fatalf("delete workspace: %v", err)
 	}
 	notice := e.publish(t, gone.ID, "", events.WorkspaceDeletedPayload{})
-	scoped, _ := pageAll(t, c, protocol.ChangesListParams{Cursor: strconv.FormatUint(deleted, 10), WorkspaceID: string(gone.ID)})
-	if len(scoped) != 1 || scoped[0].Seq != notice || scoped[0].Lifecycle == nil || scoped[0].Lifecycle.Action != "workspace-deleted" {
-		t.Fatalf("changes of the deleted workspace = %+v, want only its deletion at %d", scoped, notice)
+	for _, p := range []protocol.ChangesListParams{
+		{WorkspaceID: string(gone.ID)},
+		{WorkspaceID: string(gone.ID), RunID: "run-in-gone", MissionID: "mis-in-gone"},
+	} {
+		p.Cursor = strconv.FormatUint(deleted, 10)
+		scoped, _ := pageAll(t, c, p)
+		if len(scoped) != 1 || scoped[0].Seq != notice || scoped[0].Lifecycle == nil || scoped[0].Lifecycle.Action != "workspace-deleted" {
+			t.Fatalf("changes of the deleted workspace for %+v = %+v, want only its deletion at %d", p, scoped, notice)
+		}
 	}
 }
 
