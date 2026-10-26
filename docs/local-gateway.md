@@ -569,8 +569,8 @@ changed before the server recorded it; a client then estimates from
 `finished_at`, `started_at` or `created_at`.
 
 A live run (`running` or `needs-attention`) carries `state`: `working`,
-`waiting-agents`, `waiting-ci`, `waiting-tools`, `waiting`, `needs-you`,
-`finished`, `failed` or `disconnected`
+`waiting-agents`, `waiting-ci`, `waiting-tools`, `waiting`, `answered`,
+`needs-you`, `finished`, `failed` or `disconnected`
 ([run activity](failure-handling.md#run-activity)); it is absent on any
 other status. Rows and events written before `waiting` existed carry `idle`,
 which means `waiting`. `status_seq` is always present, starts at 1 and

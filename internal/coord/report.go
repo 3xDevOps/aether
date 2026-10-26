@@ -41,9 +41,10 @@ type OutcomeSink interface {
 	// ReportWaiting's waitingFor is a protocol.CoordWaitingFor* value,
 	// empty for agents.
 	ReportWaiting(ctx context.Context, run domain.RunID, id, waitingFor, summary string, at time.Time) error
+	ReportAnswered(ctx context.Context, run domain.RunID, id, summary string, at time.Time) error
 }
 
-// reportState hands a needs-input or waiting report straight to the
+// reportState hands a needs-input, waiting or answered report straight to the
 // scheduler: nothing is reserved, no evidence is captured, and the terminal
 // slot stays free. Its receipt binds the idempotency key to the report's
 // inputs before the hand-off, so only a retry of the same report reuses a
@@ -91,10 +92,13 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 	ctx = context.WithoutCancel(ctx)
 	id := fmt.Sprintf("%s:%s:%s", p.Outcome, run, p.IdempotencyKey)
 	nextAction := "end your turn; the next prompt or mail resumes you"
-	if p.Outcome == protocol.CoordOutcomeNeedsInput {
+	switch p.Outcome {
+	case protocol.CoordOutcomeNeedsInput:
 		nextAction = "answer the agent's question"
 		err = s.cfg.Outcomes.ReportNeedsInput(ctx, run, id, reportText(summary), receipt.CreatedAt)
-	} else {
+	case protocol.CoordOutcomeAnswered:
+		err = s.cfg.Outcomes.ReportAnswered(ctx, run, id, reportReason(summary), receipt.CreatedAt)
+	default:
 		err = s.cfg.Outcomes.ReportWaiting(ctx, run, id, p.WaitingFor, reportReason(summary), receipt.CreatedAt)
 	}
 	if err != nil {

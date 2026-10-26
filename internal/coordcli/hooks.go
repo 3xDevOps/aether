@@ -280,6 +280,9 @@ func hookContext(status protocol.CoordStatusResult, notices hookNotices, stoppin
 	if notices.Overlap != "" && !stopping {
 		text.WriteString(protocol.CoordOverlapContext)
 	}
+	if stopping && text.Len() > 0 {
+		text.WriteString(protocol.CoordReportReminder)
+	}
 	return text.String()
 }
 

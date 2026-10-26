@@ -31,6 +31,7 @@ func TestRenderRuns(t *testing.T) {
 		{ID: "r12", Status: "needs-attention", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Parked", Task: "task twelve"},
 		{ID: "r13", Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no token", MissionRole: "worker", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Blocked", Task: "task thirteen"},
 		{ID: "r14", Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no key", MissionRole: "worker", Paused: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Paused", Task: "task fourteen"},
+		{ID: "r15", Status: "needs-attention", Activity: "answered", Reason: "explained the retry policy", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Q&A", Task: "task fifteen"},
 		{ID: "r3", Status: "abandoned", Harness: "claude", MemberID: "m3", AccountMemberID: "m3", Title: "Title three", Task: "task three",
 			ArchivedAt: &archivedAt},
 	}
@@ -59,7 +60,8 @@ func TestRenderRuns(t *testing.T) {
 				"r11  Waiting                     claude  m1      m1                            Legacy     task eleven\n" +
 				"r12  Waiting                     claude  m1      m1                            Parked     task twelve\n" +
 				"r13  Needs you                   claude  m1      m1                            Blocked    task thirteen\n" +
-				"r14  Needs you                   claude  m1      m1                            Paused     task fourteen\n",
+				"r14  Needs you                   claude  m1      m1                            Paused     task fourteen\n" +
+				"r15  Answered                    claude  m1      m1                            Q&A        task fifteen\n",
 		},
 		{
 			name:     "--needs-you hides archived, waiting, worker, ended and put off runs",

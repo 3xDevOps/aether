@@ -59,6 +59,8 @@ func TestNeedOf(t *testing.T) {
 		{name: "reported waiting", run: parked(domain.ActivityWaitingAgents, "waiting on 3 workers", enhanced)},
 		{name: "waiting for CI", run: parked(domain.ActivityWaitingCI, "CI on PR 12", enhanced)},
 		{name: "waiting for a process", run: parked(domain.ActivityWaitingTools, "release build", enhanced)},
+		{name: "answered", run: parked(domain.ActivityAnswered, "explained the retry policy", enhanced)},
+		{name: "worker answered", run: parked(domain.ActivityAnswered, "replied to the integrator", worker)},
 		{name: "waiting on a tool", run: &domain.Run{Mode: domain.LaunchACP, ACP: true, Status: domain.RunRunning, Activity: domain.ActivityWaitingTools}},
 		{name: "blocked", run: parked(needsYou, "blocked: need the staging API key", background), want: "Blocked: need the staging API key"},
 		{name: "worker blocked", run: parked(needsYou, "blocked: merge conflict", worker), want: "Worker blocked: merge conflict"},

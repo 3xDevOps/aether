@@ -10,8 +10,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// CoordStateReport is the receipt of a needs-input or waiting report. It
-// holds no evidence and no terminal slot; it only binds the run's
+// CoordStateReport is the receipt of a needs-input, waiting or answered
+// report. It holds no evidence and no terminal slot; it only binds the run's
 // idempotency key to the report's inputs.
 type CoordStateReport struct {
 	RunID          domain.RunID

@@ -54,6 +54,7 @@ A live run carries a state that says what it is doing. The dashboard and
 | `waiting-agents` | Waiting for agents | No turn runs, but the run waits on its own subagents, swarm workers (`waiting for <n> workers`), or a `waiting --for agents` report. |
 | `waiting-ci` | Waiting for CI | The agent reported `waiting --for ci`. |
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
+| `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
 | `waiting` | Waiting | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). |
 | `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, or an Enhanced turn that waits for a reply. |
 | `finished` | Ready for review | An interactive run reported `success`. |
@@ -61,7 +62,8 @@ A live run carries a state that says what it is doing. The dashboard and
 | `disconnected` | Disconnected | The Enhanced session failed or ended while the run is open. |
 
 When several apply, the first in this order wins: disconnected, needs-you,
-working, failed, finished, waiting-agents, waiting-ci, waiting-tools, waiting.
+working, failed, finished, waiting-agents, waiting-ci, waiting-tools,
+answered, waiting. An answer never goes stale.
 A wait the agent reported goes stale after three times `--stall-threshold`
 (30 minutes by default) with no activity, unless the run still holds
 background tasks or, as a swarm integrator, has a live worker attempt or

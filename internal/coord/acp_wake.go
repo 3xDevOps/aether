@@ -165,12 +165,16 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 			prompt.WriteString(protocol.CoordMissionUpdateContext(notice.mission, changes))
 		}
 		// The turn may have ended while admission waited.
-		overlapSent = freshOverlap && s.cfg.Waker.InTurn(run)
+		steers := s.cfg.Waker.InTurn(run)
+		overlapSent = freshOverlap && steers
 		if overlapSent {
 			prompt.WriteString(protocol.CoordOverlapContext)
 		}
 		if prompt.Len() == 0 {
 			return nil
+		}
+		if !steers {
+			prompt.WriteString(protocol.CoordReportReminder)
 		}
 		// Admission may have spent ctx waiting for a lock; a turn that starts
 		// but times out unconfirmed goes unrecorded, and its mail wakes again.

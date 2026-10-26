@@ -55,7 +55,7 @@ func stateReport(h *coordHarness, run domain.RunID, outcome, waitingFor, summary
 	return rpcErr
 }
 
-// Every accepted waiting or needs-input report is a timeline entry, once per
+// Every accepted waiting, needs-input or answered report is a timeline entry, once per
 // report however often it is retried.
 func TestStateReportsAreTimelineEntries(t *testing.T) {
 	outcomes := &recordingOutcomes{}
@@ -70,11 +70,16 @@ func TestStateReportsAreTimelineEntries(t *testing.T) {
 	if rpcErr := stateReport(h, run, protocol.CoordOutcomeNeedsInput, "", "which region?", "ask-1"); rpcErr != nil {
 		t.Fatalf("needs-input: %v", rpcErr)
 	}
+	if rpcErr := stateReport(h, run, protocol.CoordOutcomeAnswered, "", "explained the retry policy", "answered-1"); rpcErr != nil {
+		t.Fatalf("answered: %v", rpcErr)
+	}
 	want := []events.TimelinePayload{
 		{Kind: events.TimelineReport, ReportID: "waiting:" + string(run) + ":wait-1", Outcome: protocol.CoordOutcomeWaiting,
 			WaitingFor: protocol.CoordWaitingForCI, Summary: "CI on PR 12", NextAction: "end your turn; the next prompt or mail resumes you"},
 		{Kind: events.TimelineReport, ReportID: "needs-input:" + string(run) + ":ask-1", Outcome: protocol.CoordOutcomeNeedsInput,
 			Summary: "which region?", NextAction: "answer the agent's question"},
+		{Kind: events.TimelineReport, ReportID: "answered:" + string(run) + ":answered-1", Outcome: protocol.CoordOutcomeAnswered,
+			Summary: "explained the retry policy", NextAction: "end your turn; the next prompt or mail resumes you"},
 	}
 	got := timelineReports(t, log, run)
 	if len(got) != len(want) {
@@ -86,8 +91,8 @@ func TestStateReportsAreTimelineEntries(t *testing.T) {
 			t.Fatalf("timeline report %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}
-	if calls := outcomes.recorded(); len(calls) != 3 || calls[0] != calls[1] {
-		t.Fatalf("scheduler calls = %+v, want the waiting report handed off twice, then the question", calls)
+	if calls := outcomes.recorded(); len(calls) != 4 || calls[0] != calls[1] {
+		t.Fatalf("scheduler calls = %+v, want the waiting report handed off twice, then the question and the answer", calls)
 	}
 	if outcomes.reportedAt[0] != outcomes.reportedAt[1] {
 		t.Fatalf("retry reported at %v, first at %v: want the receipt's time both times", outcomes.reportedAt[1], outcomes.reportedAt[0])

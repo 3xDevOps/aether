@@ -431,6 +431,13 @@ func (s *Scheduler) ReportWaiting(ctx context.Context, run domain.RunID, id, wai
 	return s.reportIdle(ctx, run, id, prefix+summary, at, "waiting report", coord.ErrRunFinished)
 }
 
+// ReportAnswered records a turn that replied with nothing pending like
+// ReportBlocked: at its turn end the run shows the summary as answered,
+// which asks nothing of a member.
+func (s *Scheduler) ReportAnswered(ctx context.Context, run domain.RunID, id, summary string, at time.Time) error {
+	return s.reportIdle(ctx, run, id, answeredReasonPrefix+summary, at, "answered report", coord.ErrRunFinished)
+}
+
 func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason string, at time.Time, what string, finished error) error {
 	if runes := []rune(reason); len(runes) > maxPublicRunStatusReason && !strings.HasPrefix(reason, needsInputReasonPrefix) {
 		reason = string(runes[:maxPublicRunStatusReason])

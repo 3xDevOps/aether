@@ -97,7 +97,7 @@ func writeHookSummary(out io.Writer) error {
 	harness := os.Getenv("AETHER_HARNESS")
 	home, homeErr := os.UserHomeDir()
 	cwd, cwdErr := os.Getwd()
-	if harness == "" || homeErr != nil || cwdErr != nil {
+	if (harness == "" && os.Getenv(coordtransport.EnhancedEnv) != "1") || homeErr != nil || cwdErr != nil {
 		_, err := io.WriteString(out, "Inbox hooks: aether-internal skill --hooks checks and installs them for your harness.\n")
 		return err
 	}
@@ -105,7 +105,10 @@ func writeHookSummary(out io.Writer) error {
 }
 
 func managedHooksLine(harness string, in hookInstallInputs) string {
-	if harness == "" || in.env(coordtransport.ManagedHooksEnv) != "1" || in.env(coordtransport.EnhancedEnv) == "1" {
+	if in.env(coordtransport.EnhancedEnv) == "1" {
+		return "Inbox hooks: not used in Enhanced runs; Aether hands this run its mail as a session prompt. Do not install them.\n"
+	}
+	if harness == "" || in.env(coordtransport.ManagedHooksEnv) != "1" {
 		return ""
 	}
 	if harness == "codex" {
@@ -202,6 +205,10 @@ func hookInstallationPlans(in hookInstallInputs) []hookInstallPlan {
 }
 
 func writeHookInstallationWithInputs(out io.Writer, in hookInstallInputs) error {
+	if in.env(coordtransport.EnhancedEnv) == "1" {
+		_, err := io.WriteString(out, "\n"+managedHooksLine(in.env("AETHER_HARNESS"), in))
+		return err
+	}
 	var text strings.Builder
 	text.WriteString(managedHooksLine(in.env("AETHER_HARNESS"), in))
 	text.WriteString("\nHook installation (read-only): configured means matching files on disk, NOT loaded, trusted or executed. Install only your current harness; no process-tree guessing.\n")

@@ -183,6 +183,7 @@ Standard run whose agent reports its turns. The reason tells you how it ended:
 | `needs input: <question>` | `needs-you` | The agent ran `aether-internal report --outcome needs-input` and ended its turn |
 | `blocked: <summary>` | `needs-you` | The agent reported an external blocker |
 | the summary of a `waiting` report | `waiting-agents`, `waiting-ci` or `waiting-tools` | The agent waits on its own agents, CI or a process |
+| the summary of an `answered` report | `answered` | The agent replied with nothing pending. It never needs you |
 | `turn cancelled` | `waiting` | You or the agent cancelled the turn |
 | `turn interrupted` | `needs-you` | The connection that ran the turn ended first, as after a server restart. Send a message to continue |
 | `turn ended: <stop reason>` | `needs-you` | Any other ACP stop reason, such as `max_tokens` or `refusal`. Send a message to continue |
@@ -212,7 +213,9 @@ between turns.
 Messages from other runs and people ([coordination.md](coordination.md)) reach an
 Enhanced run without hooks. When mail arrives and the session has no turn running,
 the server sends the agent one prompt telling it to run
-`aether-internal inbox` and acknowledge the batch. Messages that arrive together
+`aether-internal inbox` and acknowledge the batch, ending with
+`End this turn with exactly one /usr/local/bin/aether-internal report as your last action.`
+A message steered into a running turn carries no such line. Messages that arrive together
 share one prompt, and each set of new unread messages starts at most one turn.
 
 The prompt waits while a run is protected, a human holds a swarm worker, or the

@@ -197,7 +197,7 @@ func waitOutcome(r protocol.Run, items []protocol.AttentionItem) (int, bool) {
 		return waitFailed, true
 	case needsYou(r):
 		return waitNeedsYou, true
-	case activity == domain.ActivityWaiting, activity == domain.ActivityIdle:
+	case activity == domain.ActivityWaiting, activity == domain.ActivityIdle, activity == domain.ActivityAnswered:
 		return waitWaiting, true
 	}
 	return 0, false

@@ -191,20 +191,21 @@ func TestCLISkillRoleBoundaries(t *testing.T) {
 // capabilities, not merely by whether the socket belongs to a mission.
 func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
 	reports := []string{protocol.MethodCoordInbox, protocol.MethodCoordReport}
-	backgroundRule := "never report needs-input or waiting"
+	backgroundRule := "never report needs-input, waiting or answered"
 	for _, tc := range []struct {
 		name, role, background, enhanced string
 		capabilities                     []string
 		want, refuse                     []string
 	}{
 		{name: "ordinary", capabilities: reports,
-			want: []string{ordinaryOutcomes, "- needs-input: only", "never report waiting", coordhooks.ReviewRule}, refuse: []string{"- waiting:"}},
+			want: []string{ordinaryOutcomes, "- answered: ", "- needs-input: only", "never report waiting", coordhooks.ReviewRule}, refuse: []string{"- waiting:"}},
 		{name: "enhanced", enhanced: "1", capabilities: reports,
-			want: []string{ordinaryOutcomes, "- needs-input: only", "- waiting: "}, refuse: []string{"never report waiting"}},
+			want:   []string{ordinaryOutcomes, "- answered: ", "- needs-input: only", "- waiting: ", "Inbox hooks: not used in Enhanced runs"},
+			refuse: []string{"never report waiting", "): missing"}},
 		{name: "background", background: "1", capabilities: reports,
-			want: []string{backgroundOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting"}},
+			want: []string{backgroundOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting", "- answered"}},
 		{name: "worker", role: "worker", enhanced: "1", capabilities: reports,
-			want: []string{workerOutcomes, "- needs-input: not for workers", "- waiting: "}, refuse: []string{coordhooks.ReviewRule}},
+			want: []string{workerOutcomes, "- answered: ", "- needs-input: not for workers", "- waiting: "}, refuse: []string{coordhooks.ReviewRule}},
 		{name: "background worker", role: "worker", background: "1", enhanced: "1", capabilities: reports,
 			want: []string{workerOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting"}},
 		{name: "integrator", role: "integrator", capabilities: reports,
@@ -212,7 +213,7 @@ func TestCLISkillOutcomesFollowTheRole(t *testing.T) {
 		{name: "background integrator", role: "integrator", background: "1", capabilities: reports,
 			want: []string{integratorOutcomes, backgroundRule}, refuse: []string{"- needs-input", "- waiting"}},
 		{name: "no reports", capabilities: []string{protocol.MethodCoordInbox},
-			want: []string{"aether-internal inbox --wait 30"}, refuse: []string{"- waiting", "Report your state"}},
+			want: []string{"aether-internal inbox --wait 30"}, refuse: []string{"- waiting", "END EVERY TURN"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv(coordtransport.BackgroundEnv, tc.background)

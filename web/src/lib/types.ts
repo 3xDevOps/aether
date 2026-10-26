@@ -26,6 +26,8 @@ export type RunActivity =
   /** Written before `waiting` replaced it; shown as `waiting`. */
   | 'idle'
   | 'finished'
+  /** The agent replied with nothing pending; never asks anything of a member. */
+  | 'answered'
   | 'failed'
   | 'disconnected'
 

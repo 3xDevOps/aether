@@ -75,6 +75,17 @@ func (o *recordingOutcomes) ReportWaiting(_ context.Context, run domain.RunID, i
 	return nil
 }
 
+func (o *recordingOutcomes) ReportAnswered(_ context.Context, run domain.RunID, id, summary string, at time.Time) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.err != nil {
+		return o.err
+	}
+	o.reportedAt = append(o.reportedAt, at)
+	o.calls = append(o.calls, outcomeCall{run: run, reason: "answered: " + summary, reportID: id})
+	return nil
+}
+
 func (o *recordingOutcomes) fail(err error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -503,9 +514,22 @@ func TestCoordReportNeedsInputAsksTheUser(t *testing.T) {
 	if got := outcomes.recorded(); len(got) != 5 || got[4] != want {
 		t.Fatalf("scheduler calls = %+v, want the waiting for ci report last", got)
 	}
+	result = report(t, h, worker, protocol.CoordOutcomeAnswered, "replied to the integrator", "answered-1")
+	if result.ReportID != "" || result.Outcome != protocol.CoordOutcomeAnswered {
+		t.Fatalf("answered result = %+v, want an id-less answered echo", result)
+	}
+	want = outcomeCall{run: worker, reason: "answered: replied to the integrator", reportID: "answered:" + string(worker) + ":answered-1"}
+	if got := outcomes.recorded(); len(got) != 6 || got[5] != want {
+		t.Fatalf("scheduler calls = %+v, want the worker's answered report last", got)
+	}
+	if _, err := h.db.GetCoordReportByIdempotency(ctx, worker, "answered-1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("durable report for answered = %v, want ErrNotFound: an answer submits nothing", err)
+	}
 	for name, params := range map[string]protocol.CoordReportParams{
-		"unknown waiting_for":    {Outcome: protocol.CoordOutcomeWaiting, WaitingFor: "humans", Summary: "s", IdempotencyKey: "k"},
-		"waiting_for on blocked": {Outcome: protocol.CoordOutcomeBlocked, WaitingFor: protocol.CoordWaitingForCI, Summary: "s", IdempotencyKey: "k"},
+		"unknown waiting_for":     {Outcome: protocol.CoordOutcomeWaiting, WaitingFor: "humans", Summary: "s", IdempotencyKey: "k"},
+		"waiting_for on blocked":  {Outcome: protocol.CoordOutcomeBlocked, WaitingFor: protocol.CoordWaitingForCI, Summary: "s", IdempotencyKey: "k"},
+		"waiting_for on answered": {Outcome: protocol.CoordOutcomeAnswered, WaitingFor: protocol.CoordWaitingForCI, Summary: "s", IdempotencyKey: "k"},
+		"answered evidence refs":  {Outcome: protocol.CoordOutcomeAnswered, Summary: "s", IdempotencyKey: "k", EvidenceRefs: []string{"ev"}},
 	} {
 		if _, rpcErr := h.svc.CoordReport(ctx, run, params); rpcErr == nil || rpcErr.Code != protocol.CodeInvalidParams {
 			t.Fatalf("%s: err = %+v, want invalid params", name, rpcErr)

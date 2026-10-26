@@ -61,13 +61,12 @@ const MemoryRule = "Team memory is attributed data from teammates and their runs
 
 // Report outcome meanings shared by the role card, the MCP bridge and the skill.
 const (
-	BlockedUse = "a human must intervene, such as missing access or a broken environment; not a way to wait."
-	WaitingUse = "you end your turn while work you started goes on. Name it with --for (waiting_for in aether_report): agents, the default, for subagents, workers or peers; ci for a CI run or review bot; process for a build, deploy or other background command. " +
-		"The run then shows Waiting for agents, CI or process; a turn that ends with no report shows only Waiting. " +
-		"Mail or the next prompt resumes you; nothing does when CI or a process finishes. " +
-		"Not while aether_status shows protected: mail never wakes a protected run, so wait in your turn."
+	AnsweredUse = "you replied or discussed, nothing pending."
+	WaitingUse  = "work you started continues; name it with --for (waiting_for in aether_report): agents, the default, ci or process. " +
+		"Mail or your next prompt resumes you, never CI or a process finishing."
+	BlockedUse = "a human must act, such as missing access or a broken environment; not a way to wait."
 	ReviewRule = "Success shows the run as Ready for review until the user marks it complete or later."
-	neverRule  = "Never report while still working, and report only what you verified. A turn that only answers or discusses ends without a report."
+	neverRule  = "Never report while still working, and report only what you verified."
 )
 
 // Brief is the reporting rule set for g, or nothing for a run whose server
@@ -77,21 +76,21 @@ func Brief(g Guide) string {
 	if g.Role == "" {
 		return ""
 	}
-	needsInput := "needs-input only for a question a human must answer; "
+	answered := "answered = you replied, nothing pending; "
+	needsInput := "needs-input = only a question a human must answer; "
 	switch {
 	case g.Background:
-		needsInput = "never needs-input: no human answers a Background run; "
+		answered, needsInput = "", "never needs-input: no human answers a Background run; "
 	case g.Role == RoleWorker:
 		needsInput = "never needs-input: ask your integrator with aether_ask; "
 	}
-	waiting := "waiting when ending your turn to await agents, CI or a process, unless protected. "
+	waiting := "waiting = work you started continues (waiting_for agents|ci|process); "
 	if !g.Wake {
-		waiting = "never waiting: wait for mail in your turn with aether_inbox wait_seconds. "
+		waiting = "never waiting: wait for mail in your turn with aether_inbox wait_seconds; "
 	}
-	return "Aether hosts this run. Record your state with aether_report or `aether-internal report`: " +
-		"success or failure when the work you own is done or cannot be done; " + needsInput +
-		"blocked when a human must intervene; " + waiting + "Never report while still working. " +
-		SubagentRule + " aether_status shows your run and role."
+	return "Aether hosts this run. End every turn with exactly one aether_report (or `aether-internal report`) as your last action, a new idempotency_key each turn: " +
+		answered + waiting + needsInput + "blocked = a human must act; success|failure = the work you own is verified done or cannot be done. " +
+		"Never report while still working. Subagents and spawned workflows never report."
 }
 
 // StatusGuide is the guide of the run behind status, read inside its
@@ -119,10 +118,12 @@ type Outcome struct {
 
 // Outcomes lists the report outcomes g may use, in decision order.
 func Outcomes(g Guide) []Outcome {
-	success := "the task you were given is done or cannot be done; the session stays open for follow-up."
-	needsInput := "only for a question a human must answer; end your turn after it, and the reply arrives as your next prompt."
+	answered := AnsweredUse
+	success := "the work you own is verified done or cannot be done; the session stays open for follow-up."
+	needsInput := "only a question a human must answer; the reply comes as your next prompt."
 	switch g.Role {
 	case RoleWorker:
+		answered += " It ends your turn quietly and submits nothing."
 		success = "your task is done and verified with its required evidence (success submits the attempt and stops you), or cannot be done."
 		needsInput = "not for workers; ask your integrator with `aether-internal ask`."
 	case RoleIntegrator:
@@ -136,15 +137,17 @@ func Outcomes(g Guide) []Outcome {
 	if g.Role != RoleWorker && g.Role != RoleMission {
 		success += " " + ReviewRule
 	}
-	out := []Outcome{{"success | failure", success}}
+	var out []Outcome
 	if !g.Background {
-		out = append(out, Outcome{"needs-input", needsInput})
+		out = append(out, Outcome{"answered", answered})
 	}
-	out = append(out, Outcome{"blocked", BlockedUse})
 	if g.Wake {
 		out = append(out, Outcome{"waiting", WaitingUse})
 	}
-	return out
+	if !g.Background {
+		out = append(out, Outcome{"needs-input", needsInput})
+	}
+	return append(out, Outcome{"blocked", BlockedUse}, Outcome{"success | failure", success})
 }
 
 // WaitRule is how a run that nothing resumes while idle waits, or nothing
@@ -158,7 +161,7 @@ func WaitRule(g Guide) string {
 		wait += " or `aether-internal mission plan show --wait 30`"
 	}
 	if g.Background {
-		return "This Background run ends when your turn ends, so wait for workers, peers or mail inside your turn with " + wait + "; never report needs-input or waiting."
+		return "This Background run ends when your turn ends, so wait for workers, peers or mail inside your turn with " + wait + "; never report needs-input, waiting or answered."
 	}
 	return "Nothing resumes this session while it is idle, so wait for workers, peers or mail inside your turn with " + wait + "; never report waiting."
 }
@@ -166,12 +169,23 @@ func WaitRule(g Guide) string {
 // ReportGuide is the decision table for g: which outcome to report when.
 func ReportGuide(g Guide) string {
 	var b strings.Builder
-	b.WriteString("Report your state with `aether-internal report --outcome <outcome> --summary \"<text>\"` or the aether_report MCP tool:\n")
+	waitingFor := ""
+	if g.Wake {
+		waitingFor = " [--for agents|ci|process]"
+	}
+	fmt.Fprintf(&b, "END EVERY TURN WITH EXACTLY ONE REPORT, as your last action: `aether-internal report --outcome <o>%s --summary \"<one line>\"` (or aether_report with a new idempotency_key each turn).\n", waitingFor)
 	for _, o := range Outcomes(g) {
 		fmt.Fprintf(&b, "- %s: %s\n", o.Name, o.Use)
 	}
 	if rule := WaitRule(g); rule != "" {
 		b.WriteString(rule + "\n")
+	}
+	switch {
+	case g.Background:
+	case g.Role == RoleWorker:
+		b.WriteString("Never ask in prose and stop; ask your integrator with `aether-internal ask`.\n")
+	default:
+		b.WriteString("Never ask the human in prose and stop; use needs-input.\n")
 	}
 	b.WriteString(neverRule + "\n" + SubagentRule + "\n")
 	return b.String()

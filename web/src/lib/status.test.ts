@@ -72,6 +72,7 @@ describe('run presentation', () => {
       ['waiting-ci', 'Waiting for CI'],
       ['waiting-tools', 'Waiting for process'],
       ['waiting', 'Waiting'],
+      ['answered', 'Answered'],
       ['idle', 'Waiting'],
       ['finished', 'Ready for review'],
       ['failed', 'Failed'],
@@ -104,6 +105,15 @@ describe('run presentation', () => {
       state: 'waiting-tools', reason: 'Working in background: 1 task', next: 'Claude Code resumes it when a background task ends.',
     })
     expect(shown({ status: 'needs-attention', state: 'waiting', reason: 'no update for 12m' }).reason).toBe('No update for 12m')
+  })
+
+  it('shows an answered turn calmly, with no call to action', () => {
+    expect(shown({ status: 'needs-attention', state: 'answered', reason: 'explained the retry policy' })).toEqual({
+      state: 'answered', reason: 'explained the retry policy',
+    })
+    expect(shown({ status: 'needs-attention', state: 'answered' })).toEqual({ state: 'answered', reason: 'Agent answered' })
+    expect(stateTone.answered).toBe('ended')
+    expect(groupOf({ state: 'answered' })).toBe('working')
   })
 
   it('prints a reason beside its label only where it adds something', () => {
@@ -215,7 +225,7 @@ describe('run presentation', () => {
 
   it('labels every state in words and gives each its own dot, so no state is told by colour alone', () => {
     expect(Object.values(stateLabel)).toEqual([
-      'Working', 'Waiting for agents', 'Waiting for CI', 'Waiting for process', 'Waiting', 'Needs you', 'Ready for review',
+      'Working', 'Waiting for agents', 'Waiting for CI', 'Waiting for process', 'Waiting', 'Answered', 'Needs you', 'Ready for review',
       'Failed', 'Disconnected', 'Completed', 'Merged', 'Closed', 'Interrupted', 'Paused', 'Running',
     ])
     expect(stateTone).toMatchObject({

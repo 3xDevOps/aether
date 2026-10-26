@@ -434,9 +434,9 @@ function timelineRow(event: Event, name: (id: string) => string): SessionRow | n
       return { ...base, kind: 'event', text: `${who} messaged the agent and is now a co-author` }
     case 'report':
     {
-      // Only a durable outcome is also mail; a waiting or needs-input report is the timeline's alone.
+      // Only a durable outcome is also mail; a waiting, answered or needs-input report is the timeline's alone.
       const row = { ...base, kind: 'event' as const, text: ['Agent report', p.outcome, p.summary].filter(Boolean).join(': ') }
-      return p.outcome === 'waiting' || p.outcome === 'needs-input' ? row : { ...row, report: true as const }
+      return p.outcome === 'waiting' || p.outcome === 'answered' || p.outcome === 'needs-input' ? row : { ...row, report: true as const }
     }
     default:
       return null

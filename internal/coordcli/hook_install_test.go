@@ -186,8 +186,11 @@ func TestHookSummaryReportsOnlyTheRunHarness(t *testing.T) {
 	}
 }
 
+// An Enhanced run gets its mail as a session prompt, so its hooks do nothing
+// and are never reported missing.
 func TestHookInstallManagedLaunchLoadsHooks(t *testing.T) {
 	const managed = "Inbox hooks (opencode): loaded by this run's launch; do not install a manual copy.\n"
+	const enhanced = "Inbox hooks: not used in Enhanced runs; Aether hands this run its mail as a session prompt. Do not install them.\n"
 	for _, tt := range []struct {
 		name    string
 		env     map[string]string
@@ -195,6 +198,7 @@ func TestHookInstallManagedLaunchLoadsHooks(t *testing.T) {
 	}{
 		{"managed", map[string]string{"AETHER_MANAGED_HOOKS": "1"}, true},
 		{"managed enhanced", map[string]string{"AETHER_MANAGED_HOOKS": "1", "AETHER_ENHANCED": "1"}, false},
+		{"enhanced", map[string]string{"AETHER_ENHANCED": "1"}, false},
 		{"unmanaged", map[string]string{}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -214,6 +218,12 @@ func TestHookInstallManagedLaunchLoadsHooks(t *testing.T) {
 				}
 				if !strings.HasPrefix(full.String(), managed+"\nHook installation (read-only)") {
 					t.Fatalf("installation = %q", full.String())
+				}
+				return
+			}
+			if env["AETHER_ENHANCED"] == "1" {
+				if summary.String() != enhanced || full.String() != "\n"+enhanced {
+					t.Fatalf("summary = %q, installation = %q", summary.String(), full.String())
 				}
 				return
 			}

@@ -31,6 +31,8 @@ func TestWaitExitsWithTheRunsOutcome(t *testing.T) {
 			lines: []string{"r1 permission req-1: Run rm -rf build\n", "  aether answer r1 req-1 allow-1    # Allow once\n"}},
 		{name: "turn ended without a report", run: protocol.Run{Status: "needs-attention", Activity: "waiting", Reason: "turn ended without a report"},
 			code: waitWaiting, lines: []string{"run r1 Waiting: turn ended without a report\n", "  aether message r1 \"<reply>\"\n"}},
+		{name: "answered", run: protocol.Run{Status: "needs-attention", Activity: "answered", Reason: "explained the retry policy"},
+			code: waitWaiting, lines: []string{"run r1 Answered: explained the retry policy\n", "  aether message r1 \"<reply>\"\n"}},
 		{name: "blocked", run: protocol.Run{Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no token"}, code: waitNeedsYou,
 			lines: []string{"run r1 Needs you: blocked: no token\n", "  it waits on another member; aether runs r1 shows its state\n"}},
 		{name: "disconnected", run: protocol.Run{Status: "needs-attention", Activity: "disconnected"}, code: waitNeedsYou},

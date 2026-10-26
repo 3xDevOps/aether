@@ -185,7 +185,7 @@ peers lists up to 32 runs you may message (peer_total and peers_truncated
 report omissions), each with its state (mission: same swarm;
 active or grace: overlapping edits, with files; workspace: same workspace),
 task summary and what it is doing: activity (working, waiting-agents,
-waiting-ci, waiting-tools, waiting, needs-you, finished, failed or
+waiting-ci, waiting-tools, waiting, answered, needs-you, finished, failed or
 disconnected) with its reason, then the raw run_status, where needs-attention
 only means parked. A peer you wrote to has
 last_sent: your newest message to it, sent, delivered, acked or retired. Use
@@ -274,11 +274,12 @@ Use task propose --help or task revise --help for revision JSON and required fla
 Worker mutations use the mission authority on the run socket. Dispatch keys
 are explicit identities for retry-safe starts and retries.
 `,
-	"report": `usage: aether-internal report [--outcome] <success|failure|blocked|needs-input|waiting> [--for <agents|ci|process>] (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
+	"report": `usage: aether-internal report [--outcome] <success|failure|blocked|needs-input|waiting|answered> [--for <agents|ci|process>] (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
 
-Record your state. aether-internal skill lists which outcome your role reports
-when. Subagents and spawned workflows never report; they return their results
-to the agent that started them.
+Record your state: end every turn with exactly one report, as your last
+action. aether-internal skill lists which outcome your role reports when.
+Subagents and spawned workflows never report; they return their results to
+the agent that started them.
 Success and failure: verify the changed behavior and collect required evidence
 first. A mission worker's success submits the attempt and stops the worker;
 failure ends it without a task result. An integrator's success completes an
@@ -294,16 +295,21 @@ Needs-input is nonterminal and takes no --evidence-ref: the summary is one
 specific question shown as the Needs you reason at turn end. End your turn
 after it; the reply arrives as your next prompt. Refused for Background runs
 and mission workers, who ask their integrator with ask.
-Waiting is nonterminal, takes no --evidence-ref and is allowed for every role;
-the summary is what you wait on, and your next turn clears it. Report it when
-` + coordhooks.WaitingUse + `
-Only Enhanced runs, managed Claude Code launches and native pi/omp/OpenCode
-integrations are resumed by mail while idle; elsewhere, and in Background
-runs, wait inside your turn with inbox --wait 30 instead.
-Use a fresh idempotency key for each new report, including each new waiting
-or needs-input report. Only a retry of the same report reuses its key: the same
-key with another outcome, --for or summary is refused with a conflict, and so
-is a superseded report's key. Every accepted report appears in aether timeline.
+Waiting is nonterminal and takes no --evidence-ref: ` + coordhooks.WaitingUse + `
+The summary is what you wait on, and your next turn clears it. Only Enhanced
+runs, managed Claude Code launches and native pi/omp/OpenCode integrations are
+resumed by mail while idle; elsewhere, in Background runs and while status
+shows protected, never report waiting: wait inside your turn with
+inbox --wait 30 instead.
+Answered is nonterminal, takes no --evidence-ref and is allowed for every
+role: ` + coordhooks.AnsweredUse + ` The run shows Answered, which never
+needs you and sends no notification. A worker's answered submits nothing and
+leaves its attempt open. A Background run ends with success or failure
+instead.
+Use a fresh idempotency key for each new report, including each new waiting,
+answered or needs-input report. Only a retry of the same report reuses its
+key: the same key with another outcome, --for or summary is refused with a
+conflict, and so is a superseded report's key. Every accepted report appears in aether timeline.
 A summary file of "-" reads standard input.
 When live capabilities advertise artifact retain, deliberately retain reviewed
 captures before a terminal report can clean up the run; pass its packet_id as
@@ -515,9 +521,8 @@ const integratorOutcomes = `Success is refused before mission start and stops le
 objective has nothing to deliver, report it once the findings are gathered.
 Failure leaves the mission in its phase for Replace integrator. An interactive
 integrator stays open after either outcome: end your turn and await follow-up
-in this session; only an explicit user Close shuts it down. A Background
-integrator finishes when its turn ends. Use a new idempotency key for a later
-outcome.
+in this session; only an explicit user Close shuts it down. Use a new
+idempotency key for a later outcome.
 `
 
 const ordinaryOutcomes = `Verify the changed behavior and collect required screenshots and evidence
@@ -778,7 +783,7 @@ func reply(ctx context.Context, socket string, args []string, in io.Reader, errO
 
 func report(ctx context.Context, socket string, args []string, in io.Reader, errOut io.Writer) (protocol.CoordReportResult, error) {
 	fs := newFlags("report")
-	outcome := fs.String("outcome", "", "success, failure, blocked, needs-input or waiting")
+	outcome := fs.String("outcome", "", "success, failure, blocked, needs-input, waiting or answered")
 	waitingFor := fs.String("for", "", "with waiting: agents, ci or process")
 	summary := fs.String("summary", "", "bounded outcome summary")
 	summaryFile := fs.String("summary-file", "", "read summary from a file, or - for stdin")

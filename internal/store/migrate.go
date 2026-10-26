@@ -1993,6 +1993,22 @@ CREATE TABLE coord_state_reports (
 	PRIMARY KEY (run_id, idempotency_key)
 );
 `,
+	// v85: answered reports take a receipt too.
+	`
+CREATE TABLE coord_state_reports_v85 (
+	run_id          TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	idempotency_key TEXT NOT NULL,
+	outcome         TEXT NOT NULL CHECK (outcome IN ('needs-input', 'waiting', 'answered')),
+	waiting_for     TEXT NOT NULL DEFAULT '',
+	summary         TEXT NOT NULL,
+	created_at      INTEGER NOT NULL,
+	applied_at      INTEGER,
+	PRIMARY KEY (run_id, idempotency_key)
+);
+INSERT INTO coord_state_reports_v85 SELECT run_id, idempotency_key, outcome, waiting_for, summary, created_at, applied_at FROM coord_state_reports;
+DROP TABLE coord_state_reports;
+ALTER TABLE coord_state_reports_v85 RENAME TO coord_state_reports;
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables
