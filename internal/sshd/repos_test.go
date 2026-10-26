@@ -4,7 +4,7 @@ import "testing"
 
 func TestValidateExtraWorkspaces(t *testing.T) {
 	t.Parallel()
-	if err := validateExtraWorkspaces("a", []string{"b", "c"}); err != nil {
+	if err := ValidateExtraWorkspaces("a", []string{"b", "c"}); err != nil {
 		t.Fatalf("valid extras: %v", err)
 	}
 	for name, extras := range map[string][]string{
@@ -12,7 +12,7 @@ func TestValidateExtraWorkspaces(t *testing.T) {
 		"duplicate":        {"b", "b"},
 		"empty":            {""},
 	} {
-		if err := validateExtraWorkspaces("a", extras); err == nil {
+		if err := ValidateExtraWorkspaces("a", extras); err == nil {
 			t.Errorf("%s: accepted %v", name, extras)
 		}
 	}

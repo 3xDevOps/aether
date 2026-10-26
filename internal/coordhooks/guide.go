@@ -215,6 +215,9 @@ func RoleCard(g Guide) string {
 	if g.Repos != "" {
 		b.WriteString("This run also has extra repositories beside the one in the working directory: " + g.Repos +
 			". Each is its own git repository with its own run branch; commit in every repository you change.\n")
+		if g.Role == RoleIntegrator {
+			b.WriteString("Integration candidates combine only the working-directory repository: a worker's commits in an extra repository stay on that worker's run branch there, so name those worker runs in your final report.\n")
+		}
 	}
 	if g.Role != "" {
 		b.WriteString(ReportGuide(g))

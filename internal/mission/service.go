@@ -67,6 +67,7 @@ type MissionLaunchRequest struct {
 	RequestedAccount domain.MemberID
 	Fallback         domain.AccountFallback
 	Model            string
+	ExtraWorkspaces  []domain.WorkspaceID
 	// Admitted is domain.LaunchOptions.Admitted: the caller releases
 	// AuthorizationMu and dispatchMu there.
 	Admitted func()
@@ -437,7 +438,7 @@ func (s *Service) launchRecovered(ctx context.Context, req MissionLaunchRequest)
 		if err != nil {
 			return err
 		}
-		req.Fallback = current.Fallback
+		req.Fallback, req.ExtraWorkspaces = current.Fallback, current.ExtraWorkspaces
 	}
 	if s.cfg.Cost != nil {
 		if admitErr := s.cfg.Cost.Admit(ctx, req.WorkspaceID, req.RunOwnerID); admitErr != nil {
@@ -794,6 +795,9 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if p.WorkspaceID == "" || strings.TrimSpace(p.Objective) == "" || p.IdempotencyKey == "" {
 		return protocol.MissionCreateResult{}, errors.New("workspace_id, objective, and idempotency_key are required")
 	}
+	if err := sshd.ValidateExtraWorkspaces(p.WorkspaceID, p.ExtraWorkspaceIDs); err != nil {
+		return protocol.MissionCreateResult{}, invalidMissionParams(err.Error())
+	}
 	policy, err := fallback.Policy(p.FallbackAccountMemberIDs, p.NoFallback)
 	if err != nil {
 		return protocol.MissionCreateResult{}, invalidMissionParams(err.Error())
@@ -852,6 +856,13 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	if validateErr == nil {
 		validateErr = s.validateModelChoices(ctx, domain.MemberID(p.AccountableHumanID), choices)
 	}
+	var extras []domain.WorkspaceID
+	for _, id := range p.ExtraWorkspaceIDs {
+		if _, getErr := s.cfg.Store.GetWorkspace(ctx, domain.WorkspaceID(id)); getErr != nil && validateErr == nil {
+			validateErr = fmt.Errorf("extra workspace %s: %w", id, getErr)
+		}
+		extras = append(extras, domain.WorkspaceID(id))
+	}
 	if validateErr != nil {
 		// A retry of a create that already succeeded replays its result, even
 		// if the harness has since become unlaunchable.
@@ -867,6 +878,7 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		WorkspaceID: domain.WorkspaceID(p.WorkspaceID), Objective: p.Objective,
 		AccountableHumanID: domain.MemberID(p.AccountableHumanID),
 		Integrator:         choice, ExecutionChoices: choices, Fallback: policy,
+		ExtraWorkspaces:              extras,
 		IdempotencyKey:               p.IdempotencyKey,
 		IntegratorAuthorizingHumanID: actor, IntegratorRunOwnerID: actor,
 	}
@@ -899,7 +911,8 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 		WorkspaceID: m.WorkspaceID, RunID: m.CurrentIntegratorRunID,
 		ActorRunID: m.CurrentIntegratorRunID, RunOwnerID: m.IntegratorRunOwnerID,
 		RequestedAccount: admission.Account.ID, AccountOwner: account, Fallback: m.Fallback,
-		Task: m.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
+		ExtraWorkspaces: m.ExtraWorkspaces,
+		Task:            m.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
 		Admitted: func() { unlockDispatch(); unlockAuthorization() },
 	})
 	if err != nil {
@@ -1015,7 +1028,8 @@ func (s *Service) ReplaceIntegrator(ctx context.Context, actor domain.MemberID, 
 		WorkspaceID: replaced.WorkspaceID, RunID: replaced.CurrentIntegratorRunID,
 		ActorRunID: replaced.CurrentIntegratorRunID, RunOwnerID: replaced.IntegratorRunOwnerID,
 		RequestedAccount: admission.Account.ID, AccountOwner: account, Fallback: replaced.Fallback,
-		Task: replaced.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
+		ExtraWorkspaces: replaced.ExtraWorkspaces,
+		Task:            replaced.Objective, Harness: choice.Harness, Mode: choice.Mode, Model: choice.Model,
 		Admitted: func() { unlockDispatch(); unlockAuthorization() },
 	})
 	if err != nil {

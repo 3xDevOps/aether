@@ -593,6 +593,14 @@ whitespace or control characters, a leading `-`, or more than 128 bytes is
 Run snapshots and templates carry the `model` they launch with, omitted when
 empty.
 
+`run.launch` and `mission.create` take an optional `extra_workspace_ids`:
+other workspaces checked out at `/repos/<name>` in the run, or in a swarm's
+integrator and every worker. An empty id, the primary workspace or a repeated
+id is `-32602`. `server.info` lists the `multi-repo` feature when `run.launch`
+takes them and `swarm-repos` when `mission.create` does; an older server drops
+the field. `mission.show` and `mission.list` return a swarm's
+`extra_workspace_ids`.
+
 Run snapshots, including mutation results, also expose
 `container_retained_until` (RFC 3339), `cleanup_pending`, and `cleanup_error`
 when applicable. These describe the retained runtime, not the lifetime of

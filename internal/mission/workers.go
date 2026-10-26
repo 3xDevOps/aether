@@ -147,7 +147,8 @@ func (s *Service) workerStartInternal(ctx context.Context, run domain.RunID, raw
 	launched, err := s.cfg.Runs.LaunchMission(s.operationContext(ctx), MissionLaunchRequest{
 		WorkspaceID: m.WorkspaceID, RunID: attempt.RunID, ActorRunID: run,
 		RunOwnerID: attempt.RunOwnerID, RequestedAccount: attempt.AccountOwnerID, AccountOwner: account,
-		Fallback: m.Fallback, Task: task.Revision.Objective, Harness: attempt.Harness, Mode: attempt.Mode, Model: attempt.Model,
+		Fallback: m.Fallback, ExtraWorkspaces: m.ExtraWorkspaces,
+		Task: task.Revision.Objective, Harness: attempt.Harness, Mode: attempt.Mode, Model: attempt.Model,
 		Admitted: func() { unlockDispatch(); unlockAuthorization() },
 	})
 	if err != nil {

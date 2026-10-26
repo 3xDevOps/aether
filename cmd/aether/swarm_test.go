@@ -78,10 +78,13 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	spec, err := parseSwarmCreate([]string{
 		"-", "--agent", "claude", "--model", "opus", "--worker", "codex:background:gpt-5-codex", "--worker", "claude",
 		"--worker", "codex:background:gpt-5-codex", "--worker", "claude:standard:opus", "--worker", "codex:background", "--worker", "codex::gpt-5-codex",
-		"--workspace", "ws-name",
+		"--workspace", "ws-name", "--repo", "api", "--repo", "shared",
 	}, strings.NewReader("ship the swarm CLI\n"))
 	if err != nil {
 		t.Fatalf("parseSwarmCreate: %v", err)
+	}
+	if strings.Join(spec.repos, ",") != "api,shared" {
+		t.Errorf("repos = %q, want api and shared", spec.repos)
 	}
 	mission := protocol.Mission{ID: "01MISSION", Phase: "planning", CurrentIntegratorRunID: "01INTEGRATOR"}
 	created := &fakeReply{result: protocol.MissionCreateResult{Mission: mission}}
@@ -222,6 +225,7 @@ func TestRenderSwarm(t *testing.T) {
 			Integrator:             protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "claude", Mode: "tui"},
 			CurrentIntegratorRunID: "r1", IntegratorGeneration: 2, OpenQuestions: 1,
 			IntegratorLaunchError: "image missing", IntegratorLaunchErrorAt: "2026-09-25T07:01:00Z",
+			ExtraWorkspaceIDs: []string{"ws-api", "ws-shared"},
 		},
 		Questions: []protocol.MissionQuestion{
 			{ID: "q1", Body: "Which harness?", Answer: "claude", AnsweredAt: &answered},
@@ -243,6 +247,7 @@ func TestRenderSwarm(t *testing.T) {
 	}
 	want := `swarm m1 active
 objective: ship the swarm CLI
+extra repos: ws-api, ws-shared
 accountable human: mem1
 integrator: run r1 generation 2 (claude standard, account mem1)
 launch error: image missing (since 2026-09-25T07:01:00Z)

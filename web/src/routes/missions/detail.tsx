@@ -138,6 +138,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
   onChanged: () => void
 }) {
   const navigate = useStore((s) => s.navigate)
+  const workspaces = useStore((s) => s.workspaces)
   const mobile = useIsMobile()
   const self = useSelf()
   const cap = useCapability()
@@ -177,6 +178,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
   const title = objectiveTitle(mission.objective)
   const [first, ...more] = mission.objective.trim().split('\n')
   const rest = (first.trim() === title ? more.join('\n') : mission.objective).trim()
+  const repos = (mission.extra_workspace_ids ?? []).map((id) => workspaces[id]?.name ?? id)
   const stateLine = (
     <StateLine tone={state.tone}>
       {state.text} · {integratorLabel(mission, agents)} · created <RelativeTime at={mission.created_at} />
@@ -239,6 +241,7 @@ export function SwarmDetail({ missionID, detail, agents, error, loading, client,
             )}
             {rest && <div className="text-ui"><ClampedText text={rest} /></div>}
             <p className="text-ui text-muted">{phaseSentence[mission.phase]}</p>
+            {repos.length > 0 && <p className="text-ui text-muted">Extra repos: {repos.join(', ')}, at /repos/&lt;name&gt; in every run.</p>}
             {error && <Callout tone="failed" role="alert">{error}</Callout>}
             {typeof lookup === 'object' && <Callout tone="failed" role="alert">{lookup.error}</Callout>}
             <Recovery
