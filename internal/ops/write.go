@@ -1,8 +1,9 @@
-package mcpbridge
+package ops
 
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,6 +59,9 @@ type answerInput struct {
 	Answer   string         `json:"answer,omitempty" jsonschema:"reply text, for a swarm or teammate question"`
 	OptionID string         `json:"option_id,omitempty" jsonschema:"for an agent's question, one of its options"`
 	Values   map[string]any `json:"values,omitempty" jsonschema:"form values for the question's schema"`
+	// IdempotencyKey repeats a swarm or teammate answer safely; an agent's
+	// question takes one answer, so a repeat finds nothing pending.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 }
 
 type reviewInput struct {
@@ -79,41 +83,53 @@ type closeInput struct {
 
 const idempotencyRule = " Pass a new idempotency_key and reuse it on a retry; "
 
-var writeTools = []connectorTool{
-	connectorToolOf("aether_launch_run", "Launch run", ScopeWrite, false, nextWorkspaces,
+var writeOps = []Op{
+	opOf("aether_launch_run", "Launch run", ScopeWrite, false, nextWorkspaces,
 		"Use this when the user asks to start an agent on a task; the agent can push branches and open pull requests. Take workspace_id and harness from aether_list_workspaces and aether_list_agents, then poll aether_get_run. "+
 			"For several independent tasks, call it once per task, each with its own idempotency_key."+
 			idempotencyRule+"without one, the same launch within 60s returns the first run.", launchRun).
-		enum("mode", "tui", "headless", "acp").hints(false, true),
-	connectorToolOf("aether_launch_swarm", "Launch swarm", ScopeWrite, false, nextWorkspaces,
+		enum("mode", "tui", "headless", "acp").hints(false, true).
+		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunList, protocol.MethodRunLaunch),
+	opOf("aether_launch_swarm", "Launch swarm", ScopeWrite, false, nextWorkspaces,
 		"Use this when the user asks for a swarm or for one goal to be split across agents: an integrator agent plans it into tasks for worker agents, which can push branches and open pull requests. Poll aether_get_swarm."+
 			idempotencyRule+"without one, the same objective within 60s returns the first swarm.", launchSwarm).
-		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").hints(false, true),
-	connectorToolOf("aether_message_run", "Message run", ScopeWrite, false, nextRuns,
+		enum("mode", "tui", "acp").enum("workers.mode", "tui", "headless", "acp").hints(false, true).
+		calling(protocol.MethodAgentList, protocol.MethodServerInfo, protocol.MethodMissionList, protocol.MethodMissionCreate),
+	opOf("aether_message_run", "Message run", ScopeWrite, false, nextRuns,
 		"Use this when the user wants to tell a run's agent something; the agent acts on it, and a sent message cannot be taken back. A message to a run someone else controls waits about 45s for them to approve it."+
-			idempotencyRule+"without one, a retry sends it again.", messageRun).hints(true, true),
-	connectorToolOf("aether_answer", "Answer question", ScopeWrite, true, nextAttention,
-		"Use this when an aether_needs_attention item's answer_with is aether_answer: an agent's question takes option_id (and values), a swarm or teammate question takes answer. The agent goes on with the answer, which cannot be taken back.", answer).hints(true, true),
-	connectorToolOf("aether_pause_run", "Pause run", ScopeWrite, true, nextRuns,
-		"Use this when the user wants a run paused: its container freezes until aether_resume_run continues it.", pauseRun(protocol.MethodRunPause, "Paused")),
-	connectorToolOf("aether_resume_run", "Resume run", ScopeWrite, true, nextRuns,
-		"Use this when the user wants a paused run to continue; its agent goes on working.", pauseRun(protocol.MethodRunResume, "Resumed")).hints(false, true),
-	connectorToolOf("aether_mark_reviewed", "Mark run reviewed", ScopeWrite, true, nextRuns,
+			idempotencyRule+"without one, the same message to the same run within 60s is sent once and returned as a duplicate. To send the same text again on purpose, pass a new idempotency_key.", messageRun).hints(true, true).
+		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunInject),
+	opOf("aether_answer", "Answer question", ScopeWrite, true, nextAttention,
+		"Use this when an aether_needs_attention item's answer_with is aether_answer: an agent's question takes option_id (and values), a swarm or teammate question takes answer. The agent goes on with the answer, which cannot be taken back.", answer).hints(true, true).
+		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost, protocol.MethodRunInputRespond, protocol.MethodRunGet,
+		protocol.MethodMissionShow, protocol.MethodRunRoomList),
+	opOf("aether_pause_run", "Pause run", ScopeWrite, true, nextRuns,
+		"Use this when the user wants a run paused: its container freezes until aether_resume_run continues it.", pauseRun(protocol.MethodRunPause, "Paused")).
+		offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodRunPause, protocol.MethodRunGet),
+	opOf("aether_resume_run", "Resume run", ScopeWrite, true, nextRuns,
+		"Use this when the user wants a paused run to continue; its agent goes on working.", pauseRun(protocol.MethodRunResume, "Resumed")).hints(false, true).
+		offer(TierReversible).calling(protocol.MethodServerInfo, protocol.MethodRunResume, protocol.MethodRunGet),
+	opOf("aether_mark_reviewed", "Mark run reviewed", ScopeWrite, true, nextRuns,
 		"Use this when the user has checked a run's reported success: complete accepts it and closes the run, later puts it off.", markReviewed).
-		enum("action", protocol.RunReviewComplete, protocol.RunReviewLater).hints(true, false),
+		enum("action", protocol.RunReviewComplete, protocol.RunReviewLater).hints(true, false).
+		calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodRunReview),
 }
 
-var controlTools = []connectorTool{
-	connectorToolOf("aether_decide_approval", "Decide approval", ScopeControl, true, nextAttention,
+var controlOps = []Op{
+	opOf("aether_decide_approval", "Decide approval", ScopeControl, true, nextAttention,
 		"Use this when the user allows or denies a permission item from aether_needs_attention. It allows once, never always; an allowed action, such as a push, cannot be taken back.", decideApproval).
-		enum("decision", "allow", "deny").hints(true, true),
-	connectorToolOf("aether_stop_run", "Stop run", ScopeControl, true, nextRuns,
-		"Use this when the user wants a run stopped now: it kills the run's agent at once.", stopRun).hints(true, false),
-	connectorToolOf("aether_close_run", "Close run", ScopeControl, true, nextRuns,
+		enum("decision", "allow", "deny").hints(true, true).
+		offer(TierConfirmed).calling(protocol.MethodAttentionList, protocol.MethodServerInfo, protocol.MethodRunInputRespond),
+	opOf("aether_stop_run", "Stop run", ScopeControl, true, nextRuns,
+		"Use this when the user wants a run stopped now: it kills the run's agent at once.", stopRun).hints(true, false).
+		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodRunKill, protocol.MethodRunGet),
+	opOf("aether_close_run", "Close run", ScopeControl, true, nextRuns,
 		"Use this when a run's work was merged or abandoned, to close the run with that outcome.", closeRun).
-		enum("outcome", "merged", "abandoned").hints(true, false),
-	connectorToolOf("aether_cancel_swarm", "Cancel swarm", ScopeControl, true, nextSwarms,
-		"Use this when the user wants a swarm ended; it stops its integrator and workers.", cancelSwarm).hints(true, false),
+		enum("outcome", "merged", "abandoned").hints(true, false).
+		calling(protocol.MethodServerInfo, protocol.MethodRunClose, protocol.MethodRunGet),
+	opOf("aether_cancel_swarm", "Cancel swarm", ScopeControl, true, nextSwarms,
+		"Use this when the user wants a swarm ended; it stops its integrator and workers.", cancelSwarm).hints(true, false).
+		calling(protocol.MethodMissionCancel),
 }
 
 func launched(r protocol.Run, l links) map[string]any {
@@ -145,8 +161,10 @@ var inflight sync.Map
 // keyless gives a launch with no idempotency key one: an identical
 // launch's still in flight (dup is true), else a new one, unless guard,
 // run under the member's lock, finds a recent identical launch (found is
-// true). done ends the in-flight entry when the launch call returns.
-func keyless(member, method string, params any, guard func() (bool, error)) (key string, dup, found bool, done func(), err error) {
+// true). done ends the in-flight entry when the launch call returns with
+// err, or duplicateWindow later when err leaves unknown whether the launch
+// happened, so a keyless retry meanwhile replays the key.
+func keyless(member, method string, params any, guard func() (bool, error)) (key string, dup, found bool, done func(error), err error) {
 	defer lockLaunches(member)()
 	b, err := json.Marshal(params)
 	if err != nil {
@@ -154,14 +172,21 @@ func keyless(member, method string, params any, guard func() (bool, error)) (key
 	}
 	fingerprint := member + "\x00" + method + "\x00" + string(b)
 	if k, ok := inflight.Load(fingerprint); ok {
-		return k.(string), true, false, func() {}, nil
+		return k.(string), true, false, func(error) {}, nil
 	}
 	if found, err = guard(); err != nil || found {
 		return "", false, found, nil, err
 	}
 	key = uuid.NewString()
 	inflight.Store(fingerprint, key)
-	return key, false, false, func() { inflight.Delete(fingerprint) }, nil
+	return key, false, false, func(err error) {
+		forget := func() { inflight.CompareAndDelete(fingerprint, key) }
+		if uncertain(err) {
+			time.AfterFunc(duplicateWindow, forget)
+			return
+		}
+		forget()
+	}, nil
 }
 
 // launchWait is how long a launch tool waits for the launch call before
@@ -177,14 +202,21 @@ const replayWait = 5 * time.Second
 // replays the key, which the server answers as soon as the run or swarm
 // exists; finished is false then, err is the replay's, and res is empty if
 // that replay failed or is not answered in time either. done runs when the
-// launch call returns.
-func launch[R any](ctx context.Context, act Call, method string, params any, done func()) (res R, finished bool, err error) {
+// launch call returns. A surface with no budget waits for the launch, since
+// its member may still be deciding whether to approve it.
+func launch[R any](ctx context.Context, c calls, method string, params any, done func(error)) (res R, finished bool, err error) {
+	act := c.act
+	if c.surface.budget() == 0 {
+		err = act(ctx, method, params, &res)
+		done(err)
+		return res, true, err
+	}
 	detached := context.WithoutCancel(ctx)
 	first := make(chan error, 1)
 	var launched R
 	go func() {
 		err := act(detached, method, params, &launched)
-		done()
+		done(err)
 		first <- err
 	}()
 	select {
@@ -211,7 +243,8 @@ func launch[R any](ctx context.Context, act Call, method string, params any, don
 // when the replay failed.
 func starting(tool, key string, replayErr error) (string, any, error) {
 	text := fmt.Sprintf("The launch is still starting; call %s again with the same arguments and idempotency_key %s to get it.", tool, key)
-	out := map[string]any{"state": "starting", "idempotency_key": key, "next": "call " + tool + " again with the same arguments and idempotency_key"}
+	out := map[string]any{"state": "starting", "idempotency_key": key, "write": writePending,
+		"next": "call " + tool + " again with the same arguments and idempotency_key"}
 	if replayErr != nil {
 		text += " Looking it up failed: " + replayErr.Error()
 		out["error"] = replayErr.Error()
@@ -248,7 +281,7 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 	l := links(info.DashboardURL)
 	params := protocol.RunLaunchParams{WorkspaceID: in.WorkspaceID, Task: in.Task, Harness: in.Harness, Mode: in.Mode, Model: in.Model,
 		IdempotencyKey: in.IdempotencyKey}
-	dup, done := false, func() {}
+	dup, done := false, func(error) {}
 	if params.IdempotencyKey == "" {
 		var prior protocol.Run
 		var found bool
@@ -266,20 +299,21 @@ func launchRun(ctx context.Context, c calls, in connectorLaunchInput) (string, a
 				prior.Harness, prior.CreatedAt, prior.ID), out, nil
 		}
 	}
-	res, finished, err := launch[protocol.RunLaunchResult](ctx, c.act, protocol.MethodRunLaunch, params, done)
+	res, finished, err := launch[protocol.RunLaunchResult](ctx, c, protocol.MethodRunLaunch, params, done)
 	if err != nil && finished {
-		return "", nil, err
+		return "", nil, retryable(err, params.IdempotencyKey)
 	}
 	if res.Run.ID == "" {
 		return starting("aether_launch_run", params.IdempotencyKey, err)
 	}
 	out := launched(res.Run, l)
+	out["idempotency_key"] = params.IdempotencyKey
 	switch {
 	case dup:
 		out["duplicate"] = true
 		return fmt.Sprintf("You are already launching this task; returning run %s instead of launching it again. Pass an idempotency_key to launch another.", res.Run.ID), out, nil
 	case !finished:
-		out["state"], out["idempotency_key"] = "starting", params.IdempotencyKey
+		out["state"], out["write"] = "starting", writePending
 		return fmt.Sprintf("Run %s is starting.", res.Run.ID), out, nil
 	case res.Replayed:
 		out["replayed"] = true
@@ -364,7 +398,7 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	l := links(info.DashboardURL)
 	params := protocol.MissionCreateParams{WorkspaceID: in.WorkspaceID, Objective: in.Objective,
 		Integrator: protocol.MissionIntegrator(integrator), ExecutionChoices: choices, IdempotencyKey: in.IdempotencyKey}
-	dup, done := false, func() {}
+	dup, done := false, func(error) {}
 	if params.IdempotencyKey == "" {
 		var prior protocol.Mission
 		var found bool
@@ -382,42 +416,99 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 				prior.CreatedAt, prior.ID), out, nil
 		}
 	}
-	res, finished, err := launch[protocol.MissionCreateResult](ctx, c.act, protocol.MethodMissionCreate, params, done)
+	res, finished, err := launch[protocol.MissionCreateResult](ctx, c, protocol.MethodMissionCreate, params, done)
 	if err != nil && finished {
-		return "", nil, err
+		return "", nil, retryable(err, params.IdempotencyKey)
 	}
 	m := res.Mission
 	if m.ID == "" {
 		return starting("aether_launch_swarm", params.IdempotencyKey, err)
 	}
 	out := swarmLaunched(m, l)
+	out["idempotency_key"] = params.IdempotencyKey
 	switch {
 	case dup:
 		out["duplicate"] = true
 		return fmt.Sprintf("You are already launching this objective; returning swarm %s instead of launching it again. Pass an idempotency_key to launch another.", m.ID), out, nil
 	case !finished:
-		out["state"], out["idempotency_key"] = "starting", params.IdempotencyKey
+		out["state"], out["write"] = "starting", writePending
 		return fmt.Sprintf("Swarm %s is starting; its integrator is run %s.", m.ID, cmp.Or(m.CurrentIntegratorRunID, "not started yet")), out, nil
 	}
 	return fmt.Sprintf("Launched swarm %s (%s); its integrator is run %s.", m.ID, m.Phase, cmp.Or(m.CurrentIntegratorRunID, "not started yet")), out, nil
 }
 
+// sentKeys remembers the key of each keyless message by member, run, steer
+// and text while it is in flight and for duplicateWindow after.
+var sentKeys = struct {
+	sync.Mutex
+	keys map[string]*sentKey
+}{keys: map[string]*sentKey{}}
+
+type sentKey struct {
+	key      string
+	at       time.Time
+	inflight int
+	sent     bool
+}
+
+// messageKey is the key of a keyless message: an identical message's still
+// in flight or from within duplicateWindow, which the server delivers once,
+// else a new one. dup is true when an identical message is in flight or was
+// sent. done ends the call with whether it succeeded and restarts the
+// window, since an assistant call waits for the member's approval first.
+func messageKey(member string, p protocol.RunInjectParams, now time.Time) (key string, dup bool, done func(sent bool)) {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s\x00%s\x00%t\x00%s", member, p.RunID, p.Steer, p.Message))
+	fingerprint := string(sum[:])
+	sentKeys.Lock()
+	defer sentKeys.Unlock()
+	for f, k := range sentKeys.keys {
+		if k.inflight == 0 && now.Sub(k.at) >= duplicateWindow {
+			delete(sentKeys.keys, f)
+		}
+	}
+	k, ok := sentKeys.keys[fingerprint]
+	if !ok {
+		k = &sentKey{key: uuid.NewString()}
+		sentKeys.keys[fingerprint] = k
+	}
+	dup = k.inflight > 0 || k.sent
+	k.inflight++
+	return k.key, dup, func(sent bool) {
+		sentKeys.Lock()
+		defer sentKeys.Unlock()
+		k.inflight--
+		k.at = time.Now()
+		k.sent = k.sent || sent
+	}
+}
+
 func messageRun(ctx context.Context, c calls, in connectorMessageInput) (string, any, error) {
-	l, err := dashboardLinks(ctx, c.read)
+	info, err := serverInfo(ctx, c.read)
 	if err != nil {
 		return "", nil, err
 	}
+	l := links(info.DashboardURL)
+	params := protocol.RunInjectParams{RunID: in.RunID, Message: in.Message, Steer: in.Steer, IdempotencyKey: in.IdempotencyKey}
+	dup, done := false, func(bool) {}
+	if params.IdempotencyKey == "" {
+		params.IdempotencyKey, dup, done = messageKey(info.Member.ID, params, time.Now())
+	}
 	var res protocol.RunRoomPostResult
-	if err := c.act(ctx, protocol.MethodRunInject, protocol.RunInjectParams{RunID: in.RunID, Message: in.Message, Steer: in.Steer,
-		IdempotencyKey: cmp.Or(in.IdempotencyKey, uuid.NewString())}, &res); err != nil {
-		return "", nil, err
+	err = c.act(ctx, protocol.MethodRunInject, params, &res)
+	done(err == nil)
+	if err != nil {
+		return "", nil, retryable(err, params.IdempotencyKey)
 	}
 	m := res.Message
-	out := map[string]any{"run_id": in.RunID, "state": m.State, "outcome": res.Outcome, "url": l.run(in.RunID)}
+	out := map[string]any{"run_id": in.RunID, "state": m.State, "outcome": res.Outcome, "url": l.run(in.RunID), "idempotency_key": params.IdempotencyKey}
 	summary := fmt.Sprintf("Message to run %s is %s.", in.RunID, m.State)
 	if m.State == protocol.RoomMessageQueued && m.DeliverAfter != nil {
-		out["deliver_after"] = *m.DeliverAfter
+		out["deliver_after"], out["write"] = *m.DeliverAfter, writePending
 		summary = fmt.Sprintf("Message to run %s is queued: the member in control can approve or deny it, else it is delivered at %s.", in.RunID, *m.DeliverAfter)
+	}
+	if dup {
+		out["duplicate"] = true
+		summary = fmt.Sprintf("You sent this message to run %s within the last 60s; returning it (%s) instead of sending it again. Pass a new idempotency_key to send the same text again.", in.RunID, m.State)
 	}
 	return summary, out, nil
 }
@@ -459,10 +550,14 @@ func invalid(format string, args ...any) error {
 
 func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 	it, err := pendingItem(ctx, c.read, in.RunID, in.AnswerID)
+	var perr *protocol.Error
+	if errors.As(err, &perr) && perr.Code == protocol.CodeNotFound && in.IdempotencyKey != "" && in.Answer != "" {
+		return answerAgain(ctx, c, in, err)
+	}
 	if err != nil {
 		return "", nil, err
 	}
-	key := "connector-answer-" + in.AnswerID
+	key := cmp.Or(in.IdempotencyKey, "connector-answer-"+in.AnswerID)
 	switch it.Kind {
 	case protocol.AttentionKindSwarmQuestion:
 		if in.Answer == "" {
@@ -470,9 +565,9 @@ func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 		}
 		var res protocol.MissionQuestionResult
 		if err := c.act(ctx, protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{QuestionID: in.AnswerID, Answer: in.Answer, IdempotencyKey: key}, &res); err != nil {
-			return "", nil, err
+			return "", nil, retryable(err, key)
 		}
-		return fmt.Sprintf("Answered swarm %s's question.", it.MissionID), map[string]any{"run_id": in.RunID, "answered": true}, nil
+		return fmt.Sprintf("Answered swarm %s's question.", it.MissionID), map[string]any{"run_id": in.RunID, "answered": true, "idempotency_key": key}, nil
 	case protocol.AttentionKindRoomQuestion:
 		if in.Answer == "" {
 			return "", nil, invalid("a teammate's question takes answer, the reply text")
@@ -480,9 +575,9 @@ func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 		var res protocol.RunRoomPostResult
 		if err := c.act(ctx, protocol.MethodRunRoomPost, protocol.RunRoomPostParams{WorkspaceID: it.WorkspaceID, RunID: in.RunID,
 			Kind: protocol.RoomMessageReply, Body: in.Answer, CorrelationID: in.AnswerID, IdempotencyKey: key}, &res); err != nil {
-			return "", nil, err
+			return "", nil, retryable(err, key)
 		}
-		return fmt.Sprintf("Replied on run %s.", in.RunID), map[string]any{"run_id": in.RunID, "answered": true}, nil
+		return fmt.Sprintf("Replied on run %s.", in.RunID), map[string]any{"run_id": in.RunID, "answered": true, "idempotency_key": key}, nil
 	case protocol.AttentionKindQuestion:
 		if in.OptionID == "" {
 			return "", nil, invalid("an agent's question takes option_id, one of the item's options")
@@ -495,6 +590,71 @@ func answer(ctx context.Context, c calls, in answerInput) (string, any, error) {
 		return fmt.Sprintf("Run %s's question: %s.", in.RunID, res.Status), map[string]any{"run_id": in.RunID, "status": res.Status}, nil
 	}
 	return "", nil, invalid("this item is a %s, which is answered with %s", it.Kind, answerWith(it))
+}
+
+// answerAgain repeats a keyed swarm or teammate answer whose question is
+// no longer pending, so a retry after a lost response gets the saved answer
+// back: the server returns what the key already did. It answers only a
+// swarm question by that id, or a teammate question on the run that the id
+// names or the key already replied to; anything else fails with notPending.
+func answerAgain(ctx context.Context, c calls, in answerInput, notPending error) (string, any, error) {
+	key := in.IdempotencyKey
+	var shown protocol.MissionShowResult
+	err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{QuestionID: in.AnswerID}, &shown)
+	var perr *protocol.Error
+	switch {
+	case err == nil:
+		var q protocol.MissionQuestionResult
+		if actErr := c.act(ctx, protocol.MethodMissionQuestionAnswer, protocol.MissionQuestionAnswerParams{QuestionID: in.AnswerID, Answer: in.Answer, IdempotencyKey: key}, &q); actErr != nil {
+			return "", nil, retryable(actErr, key)
+		}
+		return fmt.Sprintf("Answered swarm %s's question.", shown.Mission.ID), map[string]any{"run_id": in.RunID, "answered": true, "idempotency_key": key}, nil
+	case !errors.As(err, &perr) || perr.Code != protocol.CodeNotFound:
+		return "", nil, err
+	}
+	r, err := getRunRecord(ctx, c.read, in.RunID)
+	if err != nil {
+		return "", nil, notPending
+	}
+	asked, err := roomQuestion(ctx, c.read, r, in.AnswerID, key)
+	if err != nil {
+		return "", nil, err
+	}
+	if !asked {
+		return "", nil, notPending
+	}
+	var res protocol.RunRoomPostResult
+	if err := c.act(ctx, protocol.MethodRunRoomPost, protocol.RunRoomPostParams{WorkspaceID: r.WorkspaceID, RunID: r.ID,
+		Kind: protocol.RoomMessageReply, Body: in.Answer, CorrelationID: in.AnswerID, IdempotencyKey: key}, &res); err != nil {
+		return "", nil, retryable(err, key)
+	}
+	return fmt.Sprintf("Replied on run %s.", r.ID), map[string]any{"run_id": r.ID, "answered": true, "idempotency_key": key}, nil
+}
+
+// roomPages bounds how many pages of a run's room roomQuestion reads.
+const roomPages = 5
+
+// roomQuestion is whether run r's room, newest first, holds question id or a
+// reply to it under key.
+func roomQuestion(ctx context.Context, read Call, r protocol.Run, id, key string) (bool, error) {
+	before := ""
+	for range roomPages {
+		var page protocol.RoomMessageListResult
+		if err := read(ctx, protocol.MethodRunRoomList, protocol.RunRoomListParams{WorkspaceID: r.WorkspaceID, RunID: r.ID, Before: before,
+			Limit: protocol.CollaborationMaxPageSize}, &page); err != nil {
+			return false, err
+		}
+		if slices.ContainsFunc(page.Messages, func(m protocol.RoomMessage) bool {
+			return (m.ID == id && m.Kind == protocol.RoomMessageQuestion) || (m.IdempotencyKey == key && m.CorrelationID == id)
+		}) {
+			return true, nil
+		}
+		if page.NextBefore == "" {
+			break
+		}
+		before = page.NextBefore
+	}
+	return false, nil
 }
 
 // acted reports a run action that succeeded with the run's state after

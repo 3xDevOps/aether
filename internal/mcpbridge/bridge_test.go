@@ -14,6 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/Aether/internal/ops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -545,13 +546,13 @@ func errorCode(t *testing.T, res *mcp.CallToolResult) int {
 	if !res.IsError {
 		t.Fatalf("result is not an error: %+v", res)
 	}
-	raw, ok := res.Meta[MetaErrorCode]
+	raw, ok := res.Meta[ops.MetaErrorCode]
 	if !ok {
-		t.Fatalf("result carries no %s: %+v", MetaErrorCode, res.Meta)
+		t.Fatalf("result carries no %s: %+v", ops.MetaErrorCode, res.Meta)
 	}
 	code, ok := raw.(float64)
 	if !ok {
-		t.Fatalf("%s = %v (%T), want a number", MetaErrorCode, raw, raw)
+		t.Fatalf("%s = %v (%T), want a number", ops.MetaErrorCode, raw, raw)
 	}
 	return int(code)
 }

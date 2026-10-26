@@ -205,3 +205,14 @@ func TestDevelopmentControlFrameLimits(t *testing.T) {
 		})
 	}
 }
+
+// A method the assistant socket confirms waits as long as the member may
+// take to decide its card.
+func TestConfirmedMethodsOutlastTheirCard(t *testing.T) {
+	for _, m := range []string{protocol.MethodRunKill, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject,
+		protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost} {
+		if got := callTimeout(m, nil); got != callConfirmedTimeout {
+			t.Errorf("%s times out after %s, want %s", m, got, callConfirmedTimeout)
+		}
+	}
+}

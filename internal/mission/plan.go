@@ -232,7 +232,7 @@ func (s *Service) AnswerQuestion(ctx context.Context, actor domain.MemberID, p p
 	}
 	s.cfg.AuthorizationMu.Lock()
 	defer s.cfg.AuthorizationMu.Unlock()
-	_, m, err := s.missionForQuestion(ctx, domain.MissionQuestionID(p.QuestionID))
+	m, err := s.missionForQuestion(ctx, domain.MissionQuestionID(p.QuestionID))
 	if err != nil {
 		return protocol.MissionQuestionResult{}, err
 	}
@@ -298,14 +298,13 @@ func (s *Service) authorizeMissionHuman(ctx context.Context, actor domain.Member
 	return nil
 }
 
-// missionForQuestion resolves a question and the mission it belongs to, which
-// is what the accountable-human rule is checked against. The wire carries no
+// missionForQuestion resolves the mission a question belongs to, which is
+// what the accountable-human rule is checked against. The wire carries no
 // mission_id: a question id names its mission on its own.
-func (s *Service) missionForQuestion(ctx context.Context, id domain.MissionQuestionID) (*domain.MissionQuestion, *domain.Mission, error) {
+func (s *Service) missionForQuestion(ctx context.Context, id domain.MissionQuestionID) (*domain.Mission, error) {
 	question, err := s.cfg.Missions.GetMissionQuestion(ctx, id)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	m, err := s.cfg.Missions.GetMission(ctx, question.MissionID)
-	return question, m, err
+	return s.cfg.Missions.GetMission(ctx, question.MissionID)
 }

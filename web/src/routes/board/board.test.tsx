@@ -236,7 +236,7 @@ describe('board columns', () => {
   it("keeps another member's stopped run in Working, waiting for its owner", () => {
     seed([run({ ...stopped, member_id: bob.id })])
     renderBoard()
-    expect(cardOf('waiting on you').getByRole('img', { name: 'Waiting' })).toBeDefined()
+    expect(cardOf('waiting on you').getByRole('img', { name: 'Waiting for Bob' })).toBeDefined()
     expect(cardOf('waiting on you').getByText('Waiting for Bob')).toBeDefined()
   })
 
@@ -269,6 +269,19 @@ describe('board columns', () => {
     expect(screen.queryByText('worker w1')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'coordinate checkout work' }))
     expect(useStore.getState().route).toEqual({ name: 'missions', params: { missionId: 'mission_1' } })
+  })
+
+  it("labels a swarm waiting on its workers with the integrator's reason", () => {
+    const integrator = run({
+      id: 'run_integrator', task: 'coordinate', mission_id: 'mission_1', mission_role: 'integrator',
+      status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 workers',
+    })
+    seed([integrator])
+    useStore.setState({ missions: { mission_1: mission({ phase: 'active' }) } })
+    renderBoard()
+    const swarm = cardOf('coordinate checkout work')
+    expect(swarm.getByRole('img', { name: 'Waiting for 2 workers' })).toBeDefined()
+    expect(swarm.getByText('Swarm active')).toBeDefined()
   })
 
   it('acts on a swarm card for the integrator itself when the integrator needs you', () => {

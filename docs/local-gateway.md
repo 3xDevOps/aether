@@ -573,7 +573,10 @@ A live run (`running` or `needs-attention`) carries `state`: `working`,
 `needs-you`, `finished`, `failed` or `disconnected`
 ([run activity](failure-handling.md#run-activity)); it is absent on any
 other status. Rows and events written before `waiting` existed carry `idle`,
-which means `waiting`. `status_seq` is always present, starts at 1 and
+which means `waiting`. A live run also carries `cause`, what chose its
+`state`, as in the `run.status` event
+([run activity](failure-handling.md#run-activity)); it is absent on any other
+status and from older servers. `status_seq` is always present, starts at 1 and
 increases on every published change of status, reason, state,
 `outcome_unseen`, `finish_unopened` or `review`. Every run carries `review`
 (`""`, `ready`, `later` or `accepted`) and, once it has changed,
@@ -600,6 +603,9 @@ id is `-32602`. `server.info` lists the `multi-repo` feature when `run.launch`
 takes them and `swarm-repos` when `mission.create` does; an older server drops
 the field. `mission.show` and `mission.list` return a swarm's
 `extra_workspace_ids`.
+
+`mission.show` takes `mission_id`, or `question_id` alone to show the swarm
+that asked that question.
 
 Run snapshots, including mutation results, also expose
 `container_retained_until` (RFC 3339), `cleanup_pending`, and `cleanup_error`

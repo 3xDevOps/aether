@@ -32,6 +32,9 @@ type Run struct {
 	// Activity is the live run's state on the wire; see domain.RunActivity.
 	Activity  string `json:"state,omitempty"`
 	StatusSeq int64  `json:"status_seq"`
+	// Cause comes from the scheduler: what chose Activity, as in the
+	// run.status event.
+	Cause string `json:"cause,omitempty"`
 	// RequestedAccountMemberID is the account the launcher asked for, set
 	// only when its usage was exhausted and the run launched on
 	// AccountMemberID instead.

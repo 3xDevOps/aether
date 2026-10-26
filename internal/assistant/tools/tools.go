@@ -5,6 +5,7 @@ package tools
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,24 +36,44 @@ const (
 	tierConfirmed  = "confirmed"
 )
 
+// tiers are the methods the assistant may call: every method of every op
+// internal/ops offers it, which a test checks.
 var tiers = map[string]string{
-	protocol.MethodRunList:              tierRead,
-	protocol.MethodRunGet:               tierRead,
-	protocol.MethodRunACPHistory:        tierRead,
-	protocol.MethodWorkspaceList:        tierRead,
-	protocol.MethodWorkspaceGet:         tierRead,
-	protocol.MethodAgentList:            tierRead,
-	protocol.MethodAccountUsage:         tierRead,
-	protocol.MethodTerminalStatus:       tierRead,
-	protocol.MethodAssistantDocs:        tierRead,
-	protocol.MethodAssistantViewContext: tierRead,
-	protocol.MethodMemorySearch:         tierRead,
-	protocol.MethodRunLaunch:            tierConfirmed,
-	protocol.MethodRunInject:            tierConfirmed,
-	protocol.MethodRunPause:             tierReversible,
-	protocol.MethodRunResume:            tierReversible,
-	protocol.MethodRunKill:              tierConfirmed,
-	protocol.MethodEnvSave:              tierConfirmed,
+	protocol.MethodServerInfo:            tierRead,
+	protocol.MethodRunList:               tierRead,
+	protocol.MethodRunGet:                tierRead,
+	protocol.MethodRunACPHistory:         tierRead,
+	protocol.MethodTerminalHistory:       tierRead,
+	protocol.MethodWorkspaceList:         tierRead,
+	protocol.MethodWorkspaceGet:          tierRead,
+	protocol.MethodWorkspaceTimeline:     tierRead,
+	protocol.MethodAgentList:             tierRead,
+	protocol.MethodAccountUsage:          tierRead,
+	protocol.MethodTerminalStatus:        tierRead,
+	protocol.MethodAssistantDocs:         tierRead,
+	protocol.MethodAssistantViewContext:  tierRead,
+	protocol.MethodMemorySearch:          tierRead,
+	protocol.MethodAttentionList:         tierRead,
+	protocol.MethodInsightsGet:           tierRead,
+	protocol.MethodMissionList:           tierRead,
+	protocol.MethodMissionShow:           tierRead,
+	protocol.MethodCoordMessagesList:     tierRead,
+	protocol.MethodRunRoomList:           tierRead,
+	protocol.MethodRunGitLog:             tierRead,
+	protocol.MethodRunGitDiff:            tierRead,
+	protocol.MethodRunEvidenceList:       tierRead,
+	protocol.MethodRunPRStatus:           tierRead,
+	protocol.MethodRunPRFeedback:         tierRead,
+	protocol.MethodRunOverlaps:           tierRead,
+	protocol.MethodRunLaunch:             tierConfirmed,
+	protocol.MethodRunInject:             tierConfirmed,
+	protocol.MethodRunPause:              tierReversible,
+	protocol.MethodRunResume:             tierReversible,
+	protocol.MethodRunKill:               tierConfirmed,
+	protocol.MethodEnvSave:               tierConfirmed,
+	protocol.MethodRunInputRespond:       tierConfirmed,
+	protocol.MethodMissionQuestionAnswer: tierConfirmed,
+	protocol.MethodRunRoomPost:           tierConfirmed,
 }
 
 // Reversible reports whether the assistant may call method without a card
@@ -253,19 +274,144 @@ func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protoco
 		return rpcErr
 	case protocol.MethodRunInject:
 		return s.summarizeInject(ctx, req, c)
+	case protocol.MethodRunKill:
+		p, err := protocol.DecodeParams[protocol.RunIDParams](req.Params)
+		if err != nil || p.RunID == "" {
+			return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
+		}
+		run, rpcErr := s.ownedRun(ctx, p.RunID, c)
+		if rpcErr != nil {
+			return rpcErr
+		}
+		c.Summary = fmt.Sprintf("Stop run %s (%q)%s", p.RunID, runLabel(run), ownedBy(c))
+		return nil
+	case protocol.MethodRunInputRespond:
+		return s.summarizeRespond(ctx, req, c)
+	case protocol.MethodMissionQuestionAnswer:
+		return s.summarizeSwarmAnswer(ctx, req, c)
+	case protocol.MethodRunRoomPost:
+		p, err := protocol.DecodeParams[protocol.RunRoomPostParams](req.Params)
+		if err != nil || p.RunID == "" {
+			return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
+		}
+		run, rpcErr := s.ownedRun(ctx, p.RunID, c)
+		if rpcErr != nil {
+			return rpcErr
+		}
+		verb := "Reply on"
+		if p.Kind != protocol.RoomMessageReply {
+			verb = fmt.Sprintf("Post a %q message on", truncate(string(p.Kind)))
+		}
+		c.Summary = fmt.Sprintf("%s run %s (%q)%s: %q%s", verb, p.RunID, runLabel(run), ownedBy(c), truncate(p.Body), attached(p.Attachments, p.Anchor))
+		return nil
 	}
-	p, err := protocol.DecodeParams[protocol.RunIDParams](req.Params)
-	if err != nil || p.RunID == "" {
-		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
+	return &protocol.Error{Code: protocol.CodeInternal, Message: req.Method + ": no confirmation summary for this method"}
+}
+
+// summarizeRespond names the run, its request and the option chosen, from
+// the request as the Needs you list shows it.
+func (s *Server) summarizeRespond(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.RunInputRespondParams](req.Params)
+	if err != nil || p.RunID == "" || p.RequestID == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id and request_id are required"}
 	}
-	run, rpcErr := s.getRun(ctx, req.Params)
+	run, rpcErr := s.ownedRun(ctx, p.RunID, c)
 	if rpcErr != nil {
 		return rpcErr
 	}
-	if rpcErr = s.owner(ctx, run, c); rpcErr != nil {
+	items, rpcErr := s.attention(ctx, run.WorkspaceID)
+	if rpcErr != nil {
 		return rpcErr
 	}
-	c.Summary = fmt.Sprintf("Stop run %s (%q)%s", p.RunID, runLabel(run), ownedBy(c))
+	for _, it := range items {
+		if it.RunID != p.RunID || it.Request == nil || it.Request.ID != p.RequestID {
+			continue
+		}
+		// The option's label is the agent's own; its kind is what the
+		// answer grants, so the card names it, "always" included.
+		verb, option := "Answer", p.OptionID
+		for _, o := range it.Request.Options {
+			if o.ID == p.OptionID {
+				option = truncate(cmp.Or(o.Label, o.ID))
+				switch o.Kind {
+				case "allow_once":
+					verb = "Allow once"
+				case "allow_always":
+					verb = "Allow always"
+				case "reject_once":
+					verb = "Deny once"
+				case "reject_always":
+					verb = "Deny always"
+				}
+			}
+		}
+		c.Summary = fmt.Sprintf("%s run %s's request (%q)%s: %q, choosing %q", verb, p.RunID, runLabel(run), ownedBy(c), truncate(it.Request.Title), option)
+		if len(p.Values) > 0 {
+			values, _ := json.Marshal(p.Values)
+			c.Summary += fmt.Sprintf(" with %q", truncate(string(values)))
+		}
+		return nil
+	}
+	return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: run %s has no pending request %s", req.Method, p.RunID, p.RequestID)}
+}
+
+// summarizeSwarmAnswer names the swarm whose integrator asked, by its
+// objective, and its accountable human when that is another member.
+func (s *Server) summarizeSwarmAnswer(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.MissionQuestionAnswerParams](req.Params)
+	if err != nil || p.QuestionID == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": question_id is required"}
+	}
+	var shown protocol.MissionShowResult
+	if rpcErr := s.call(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{QuestionID: p.QuestionID}, &shown); rpcErr != nil {
+		return rpcErr
+	}
+	i := slices.IndexFunc(shown.Questions, func(q protocol.MissionQuestion) bool { return q.ID == p.QuestionID })
+	if i < 0 {
+		return &protocol.Error{Code: protocol.CodeNotFound, Message: fmt.Sprintf("%s: swarm %s has no question %s", req.Method, shown.Mission.ID, p.QuestionID)}
+	}
+	if rpcErr := s.owner(ctx, shown.Mission.AccountableHumanID, c); rpcErr != nil {
+		return rpcErr
+	}
+	q := shown.Questions[i]
+	again, waits := "", ""
+	if q.AnsweredAt != nil {
+		again, waits = " again", " and no longer waits"
+	}
+	c.Summary = fmt.Sprintf("Answer swarm %s (%q)%s%s, which asked %q%s: %q", shown.Mission.ID, truncate(shown.Mission.Objective), ownedBy(c), again,
+		truncate(q.Body), waits, truncate(p.Answer))
+	return nil
+}
+
+func (s *Server) attention(ctx context.Context, workspaceID string) ([]protocol.AttentionItem, *protocol.Error) {
+	var res protocol.AttentionListResult
+	rpcErr := s.call(ctx, protocol.MethodAttentionList, protocol.AttentionListParams{WorkspaceID: workspaceID}, &res)
+	return res.Items, rpcErr
+}
+
+// ownedRun is the run id names, with c marked as acting on another
+// member's run when it is one.
+func (s *Server) ownedRun(ctx context.Context, id string, c *protocol.AssistantConfirmation) (protocol.Run, *protocol.Error) {
+	params, _ := json.Marshal(protocol.RunIDParams{RunID: id})
+	run, rpcErr := s.getRun(ctx, params)
+	if rpcErr != nil {
+		return protocol.Run{}, rpcErr
+	}
+	return run, s.owner(ctx, run.MemberID, c)
+}
+
+func (s *Server) call(ctx context.Context, method string, params, out any) *protocol.Error {
+	raw, err := json.Marshal(params)
+	if err != nil {
+		return &protocol.Error{Code: protocol.CodeInternal, Message: method + ": " + err.Error()}
+	}
+	result, rpcErr := s.Caller.Call(ctx, method, raw)
+	if rpcErr != nil {
+		return rpcErr
+	}
+	if err := json.Unmarshal(result, out); err != nil {
+		return &protocol.Error{Code: protocol.CodeInternal, Message: "decode " + method + " result: " + err.Error()}
+	}
 	return nil
 }
 
@@ -295,26 +441,22 @@ func (s *Server) summarizeInject(ctx context.Context, req protocol.Request, c *p
 	if err != nil || p.RunID == "" {
 		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
 	}
-	params, _ := json.Marshal(protocol.RunIDParams{RunID: p.RunID})
-	run, rpcErr := s.getRun(ctx, params)
+	run, rpcErr := s.ownedRun(ctx, p.RunID, c)
 	if rpcErr != nil {
 		return rpcErr
 	}
-	if rpcErr = s.owner(ctx, run, c); rpcErr != nil {
-		return rpcErr
-	}
-	c.Summary = fmt.Sprintf("Send to run %s (%q)%s: %q", p.RunID, runLabel(run), ownedBy(c), truncate(p.Message))
+	c.Summary = fmt.Sprintf("Send to run %s (%q)%s: %q%s", p.RunID, runLabel(run), ownedBy(c), truncate(p.Message), attached(p.Attachments, nil))
 	return nil
 }
 
-// owner marks c as acting on another member's run when the run is not the
-// socket's member's, and names that member: their display name, else their
-// id.
-func (s *Server) owner(ctx context.Context, run protocol.Run, c *protocol.AssistantConfirmation) *protocol.Error {
-	if run.MemberID == s.Member {
+// owner marks c as acting on another member's run or swarm when member is
+// not the socket's member, and names that member: their display name, else
+// their id.
+func (s *Server) owner(ctx context.Context, member string, c *protocol.AssistantConfirmation) *protocol.Error {
+	if member == s.Member {
 		return nil
 	}
-	c.OtherMember, c.OtherOwner = true, run.MemberID
+	c.OtherMember, c.OtherOwner = true, member
 	raw, rpcErr := s.Caller.Call(ctx, protocol.MethodMemberList, nil)
 	if rpcErr != nil {
 		return rpcErr
@@ -324,11 +466,40 @@ func (s *Server) owner(ctx context.Context, run protocol.Run, c *protocol.Assist
 		return &protocol.Error{Code: protocol.CodeInternal, Message: "decode member.list result: " + err.Error()}
 	}
 	for _, m := range members.Members {
-		if m.ID == run.MemberID && m.DisplayName != "" {
+		if m.ID == member && m.DisplayName != "" {
 			c.OtherOwner = m.DisplayName
 		}
 	}
 	return nil
+}
+
+// attached names a message's attachments and the place it is anchored to.
+func attached(files []string, anchor *protocol.RoomMessageAnchor) string {
+	var out string
+	if len(files) > 0 {
+		quoted := make([]string, len(files))
+		for i, f := range files {
+			quoted[i] = fmt.Sprintf("%q", truncate(f))
+		}
+		out = ", attaching " + strings.Join(quoted, ", ")
+	}
+	if anchor == nil {
+		return out
+	}
+	switch {
+	case anchor.Path != "":
+		at := anchor.Path
+		if anchor.StartLine > 0 {
+			at += fmt.Sprintf(":%d", anchor.StartLine)
+		}
+		if anchor.EndLine > anchor.StartLine {
+			at += fmt.Sprintf("-%d", anchor.EndLine)
+		}
+		out += fmt.Sprintf(", anchored at %q", truncate(at))
+	case anchor.Kind != "":
+		out += fmt.Sprintf(", anchored at %s offset %d", truncate(anchor.Kind), anchor.TranscriptOffset)
+	}
+	return out
 }
 
 func ownedBy(c *protocol.AssistantConfirmation) string {

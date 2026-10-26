@@ -6,7 +6,7 @@ import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
-import { runLabel, stateDetail, stateLabel, stateTitle, stateTone } from '@/lib/status'
+import { runLabel, stateLabel, stateTitle, stateTone, stateWords } from '@/lib/status'
 import type { MissionPhase } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { CardActionButton, cardAction, openCard, ReplyComposer, setReplying, useReply } from '@/routes/board/card-action'
@@ -40,9 +40,10 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
   const needsYou = card.group === 'needs-you'
   const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
   const state = needsYou && !card.needsYou ? 'needs-you' : card.state
-  const label = stateLabel[state]
   const reason = card.swarm ? swarmReason(card, mission?.phase) : card.reason
-  const detail = needsYou || card.swarm ? reason : stateDetail({ state, reason })
+  const words = stateWords({ state, reason: card.reason })
+  const label = needsYou ? stateLabel[state] : words.label
+  const detail = needsYou || card.swarm ? reason : words.detail
   const description = detail && detail !== label ? detail : undefined
   const owner = card.owner?.display_name ?? run.member_id
   const since = needsYou ? card.waitingSince : run.stateChangedAt
@@ -69,7 +70,7 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
           <div className={cn('mt-2 flex min-h-4 min-w-0 flex-wrap items-center gap-2 text-ui-sm text-muted', wideIndent)}>
             <span
               className="flex min-w-0 flex-1 items-center gap-1.5"
-              title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next }, since)}
+              title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next, cause: card.cause }, since)}
             >
               <StatusDot tone={stateTone[state]} label={label} />
               <span className="min-w-0 truncate">

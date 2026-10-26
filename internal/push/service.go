@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -146,7 +147,14 @@ type notification struct {
 	Body      string `json:"body"`
 	Run       string `json:"run,omitempty"`
 	Workspace string `json:"workspace,omitempty"`
+	// Clear replaces the run's notification quietly: its need ended.
+	Clear bool `json:"clear,omitempty"`
+	// Notice marks an assistant's news, which a clear leaves shown.
+	Notice bool `json:"notice,omitempty"`
 }
+
+// clearedBody is what a device shows in place of a need that ended.
+const clearedBody = "No longer needs you"
 
 // New loads the server's VAPID key, creating it on first use; call Start to
 // begin consuming events.
@@ -292,8 +300,10 @@ func (s *Service) changed(ctx context.Context, id domain.RunID) {
 func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct{}) {
 	announced := map[string]bool{}
 	// offered is every need a device was sent, as {need, endpoint}, so one
-	// that was interrupted goes on with the devices still without it.
-	offered := map[[2]string]bool{}
+	// that was interrupted goes on with the devices still without it. Each
+	// maps to the member whose device may show it, empty when the push
+	// service surely did not take it, so only such a device is cleared.
+	offered := map[[2]string]domain.MemberID{}
 	// shown is the need the sink last took, so one announced before and
 	// back after another is shown again.
 	var shown string
@@ -305,15 +315,50 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			slog.Warn("push: read run; trying again later", "run", id, "in", retry, "error", err)
 			wake = time.After(retry)
 		case n == nil:
+			// Devices and the sink are cleared independently, each tried
+			// again while it fails.
+			devicesErr := s.withdraw(ctx, run, id, offered, "")
+			if devicesErr != nil {
+				slog.Warn("push: a device was not told a need ended; trying again later", "run", id, "in", retry, "error", devicesErr)
+			}
 			if err = s.sink.Clear(ctx, id); err != nil {
 				slog.Warn("push: the sink did not clear a need; trying again later", "run", id, "in", retry, "error", err)
+			}
+			if devicesErr != nil || err != nil {
 				wake = time.After(retry)
 			} else if s.unwatch(id, signal) {
 				return
 			}
 			clear(announced)
-			clear(offered)
+			// A device still to be told keeps its entry for the next try.
+			for device, member := range offered {
+				if member == "" {
+					delete(offered, device)
+				}
+			}
 			shown = ""
+		}
+		if n != nil {
+			// A handed-off run's need is its new owner's alone. A former
+			// owner whose devices were told so hears of it again if it
+			// comes back to them.
+			moved := false
+			for _, member := range offered {
+				moved = moved || member != "" && member != n.member
+			}
+			if err = s.withdraw(ctx, run, id, offered, n.member); err != nil {
+				slog.Warn("push: a former owner's device was not told a need moved; trying again later", "run", id, "in", retry, "error", err)
+				wake = time.After(retry)
+			}
+			for key := range announced {
+				if !strings.HasPrefix(key, string(n.member)+"|") {
+					delete(announced, key)
+				}
+			}
+			// Clearing can take a while: announce what the run needs then.
+			if moved && err == nil {
+				continue
+			}
 		}
 		if n != nil && !n.since.IsZero() && n.since.Before(s.startedAt()) {
 			announced[n.key] = true
@@ -339,6 +384,68 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 	}
 }
 
+// withdraw sends every device that took a need of the run, except those of
+// keep, a quiet replacement under the run's tag and topic, so a need that
+// ended stops reading as one, or is never shown if it was still queued. It
+// forgets each device it cleared or that is no longer subscribed, and
+// returns what kept the others for another try. run is nil when it was
+// deleted.
+func (s *Service) withdraw(ctx context.Context, run *domain.Run, id domain.RunID, offered map[[2]string]domain.MemberID, keep domain.MemberID) error {
+	devices := map[domain.MemberID]map[string]bool{}
+	for device, member := range offered {
+		if member == "" || member == keep {
+			continue
+		}
+		if devices[member] == nil {
+			devices[member] = map[string]bool{}
+		}
+		devices[member][device[1]] = true
+	}
+	if len(devices) == 0 {
+		return nil
+	}
+	message := notification{Body: clearedBody, Run: string(id), Clear: true}
+	if run != nil {
+		message.Title = RunTitle(run)
+	}
+	payload, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("push: encode a cleared notification: %w", err)
+	}
+	forget := func(member domain.MemberID, endpoint string) {
+		for device, took := range offered {
+			if took == member && device[1] == endpoint {
+				delete(offered, device)
+			}
+		}
+	}
+	var errs []error
+	for member, endpoints := range devices {
+		subs, err := s.store.ListPushSubscriptions(ctx, member)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("push: list the subscriptions of %s to clear a notification: %w", member, err))
+			continue
+		}
+		subscribed := map[string]*store.PushSubscription{}
+		for _, sub := range subs {
+			subscribed[sub.Endpoint] = sub
+		}
+		for endpoint := range endpoints {
+			sub := subscribed[endpoint]
+			if sub == nil {
+				forget(member, endpoint)
+				continue
+			}
+			if err := s.send(ctx, sub, payload, topicOf(string(id)), urgencyNormal); err != nil && !errors.Is(err, errGone) {
+				errs = append(errs, fmt.Errorf("push: clear a notification on a device of %s: %w", member, err))
+				continue
+			}
+			forget(member, endpoint)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (s *Service) startedAt() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -358,7 +465,7 @@ func (s *Service) unwatch(id domain.RunID, signal chan struct{}) bool {
 
 // offer sends n to the next device of its member that has not had it, and
 // reports whether there was one.
-func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered map[[2]string]bool) bool {
+func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered map[[2]string]domain.MemberID) bool {
 	payload, err := json.Marshal(notification{Title: RunTitle(run), Body: n.body, Run: string(run.ID)})
 	if err != nil {
 		slog.Warn("push: encode notification", "run", run.ID, "error", err)
@@ -371,12 +478,15 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 	}
 	for _, sub := range subs {
 		device := [2]string{n.key, sub.Endpoint}
-		if offered[device] {
+		if _, sent := offered[device]; sent {
 			continue
 		}
-		offered[device] = true
+		offered[device] = n.member
 		if err := s.send(ctx, sub, payload, topicOf(string(run.ID)), n.urgency); err != nil {
 			slog.Warn("push: notification not delivered", "member", n.member, "error", err)
+			if !errors.As(err, new(unsure)) {
+				offered[device] = ""
+			}
 		}
 		return true
 	}
@@ -420,7 +530,8 @@ func topicOf(id string) string {
 }
 
 // Notify sends an assistant notice to member's devices; only an urgent one
-// wakes them.
+// wakes them. A notice with no current check is news, which a later clear of
+// the run's need leaves shown; one with a check is a need, which it replaces.
 func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, body string, run domain.RunID, urgent bool, flush <-chan struct{}, current func(context.Context) bool) error {
 	for flushed := false; !flushed; {
 		wait := time.Until(s.freeAt(member))
@@ -438,7 +549,7 @@ func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, bod
 	if current != nil && !current(ctx) {
 		return nil
 	}
-	payload, err := json.Marshal(notification{Title: clip(title, fallbackTitleRunes), Body: clip(body, maxBodyRunes), Run: string(run)})
+	payload, err := json.Marshal(notification{Title: clip(title, fallbackTitleRunes), Body: clip(body, maxBodyRunes), Run: string(run), Notice: current == nil})
 	if err != nil {
 		return fmt.Errorf("push: encode notification: %w", err)
 	}

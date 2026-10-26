@@ -242,14 +242,14 @@ describe('needs you conditions', () => {
   })
 
   it.each([
-    ['idle', 'agent idle', 'waiting', 'Turn ended without a report'],
-    ['waiting', 'turn ended without a report', 'waiting', 'Turn ended without a report'],
-    ['waiting', 'no update for 12m', 'waiting', 'No update for 12m'],
-    ['waiting', 'no update for 30m: two workers on the parser', 'waiting', 'No update for 30m: two workers on the parser'],
+    ['idle', 'agent idle', 'ended', 'Turn ended without a report'],
+    ['waiting', 'turn ended without a report', 'ended', 'Turn ended without a report'],
+    ['waiting', 'no update for 12m', 'ended', 'No update for 12m'],
+    ['waiting', 'no update for 30m: two workers on the parser', 'ended', 'No update for 30m: two workers on the parser'],
     ['waiting-ci', 'no update for 30m: CI on PR 12', 'waiting-ci', 'No update for 30m: CI on PR 12'],
     ['waiting-agents', 'waiting for 2 workers', 'waiting-agents', 'Waiting for 2 workers'],
-    ['idle', 'stalled: no output or file changes for 10m0s', 'waiting', 'No output or file changes for 10m0s'],
-    ['idle', 'turn cancelled', 'waiting', 'Turn cancelled'],
+    ['idle', 'stalled: no output or file changes for 10m0s', 'ended', 'No output or file changes for 10m0s'],
+    ['idle', 'turn cancelled', 'ended', 'Turn cancelled'],
     ['waiting-agents', 'waiting on 3 workers', 'waiting-agents', 'waiting on 3 workers'],
     ['waiting-agents', 'working in background: 2 tasks', 'waiting-agents', 'Working in background: 2 tasks'],
     ['waiting-ci', 'waiting for the PR checks', 'waiting-ci', 'waiting for the PR checks'],
@@ -431,6 +431,18 @@ describe('viewer scoping', () => {
     const theirs = record({ ...integrator, member_id: bob.id })
     expect(needsYou(theirs, stateContext(ctx))?.id).toBe('swarm-question')
     expect(needsYou(theirs, stateContext({ ...ctx, viewerID: 'mem_carol', viewerRole: 'collaborator' }))).toBeUndefined()
+  })
+
+  it("shows a teammate's swarm question as waiting for them, with no cause the server gave for its workers", () => {
+    const ctx = stateContext({
+      missions: { mission_1: mission({ accountable_human_id: bob.id, open_questions: 1 }) },
+      viewerID: 'mem_carol',
+      viewerRole: 'collaborator',
+    })
+    const waiting = record({ ...integrator, status: 'needs-attention', state: 'waiting-agents', reason: 'waiting for 2 workers', cause: 'workers' })
+    const shown = presentRun(waiting, ctx)
+    expect(shown).toMatchObject({ state: 'waiting-agents', reason: 'Waiting for Bob' })
+    expect(shown.cause).toBeUndefined()
   })
 
   it("keeps a paused integrator's open swarm question", () => {
