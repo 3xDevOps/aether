@@ -46,7 +46,7 @@ type ChildStore interface {
 	ChildrenInState(ctx context.Context, state domain.ChildState) ([]*domain.ChildReservation, error)
 	// ChildrenToSettle returns started children whose run ended and whose
 	// parent was not told, and attached children still queued or live
-	// whose parent ended.
+	// whose parent ended or was deleted.
 	ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, error)
 	// BusyChildren counts the parent's children that hold a slot.
 	BusyChildren(ctx context.Context, parent domain.RunID) (int, error)
@@ -193,9 +193,9 @@ func (d *DB) ChildrenToSettle(ctx context.Context) ([]*domain.ChildReservation, 
 	return d.listChildren(ctx, "children to settle",
 		`SELECT `+childCols+` FROM run_children rc
 		 LEFT JOIN runs child ON child.id = rc.run_id
-		 JOIN runs parent ON parent.id = rc.parent_run_id
+		 LEFT JOIN runs parent ON parent.id = rc.parent_run_id
 		 WHERE (rc.state = 'started' AND rc.end_notified = 0 AND child.status IN (`+terminalStatuses+`))
-		    OR (rc.detached = 0 AND parent.status IN (`+terminalStatuses+`)
+		    OR (rc.detached = 0 AND (parent.id IS NULL OR parent.status IN (`+terminalStatuses+`))
 		        AND (rc.state = 'queued' OR (rc.state = 'started' AND child.status NOT IN (`+terminalStatuses+`))))
 		 ORDER BY rc.depth, rc.created_at`)
 }

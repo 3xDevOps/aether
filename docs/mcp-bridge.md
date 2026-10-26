@@ -81,9 +81,10 @@ See [coordination.md](coordination.md) for the established CLI commands and
 wire limits. The optional bridge does not install a skill package or carry an
 identity claim.
 
-## The eight-tool surface
+## The tool surface
 
-The bridge exposes exactly eight tools. Their parameters, receipts,
+The bridge exposes eight tools, and four child-run tools on servers that
+offer [child runs](coordination.md#child-runs). Their parameters, receipts,
 authorization rules, limits, idempotency behavior, and durable storage map to
 the established v3 run socket methods. This is the bridge's complete
 surface; it does not expose Release B swarm, task, worker, takeover, or
@@ -99,10 +100,19 @@ integrator-management commands.
 | `aether_report` | `coord.report` | `outcome`, `summary`, optional `evidence_refs`, optional `waiting_for`, `idempotency_key` | durable `report_id`, outcome, summary, next action, evidence references, automatic `evidence_ref` |
 | `aether_memory_search` | `memory.search`, or `memory.show` with `id` | optional `query`, `id`, `kind`, `file`, `all` | up to 10 `items`, best first; with `id`, that note as the one item and its supersede `chain` |
 | `aether_memory_add` | `memory.add` | `kind`, `text`, optional `files`, `supersedes`, `scope` | the stored `item`, `duplicate`, up to 3 `similar` live notes |
+| `aether_child_options` | `child.options` | optional `harness` | `allowed`, the refusal `reason`, `scope`, `limits`, `busy`, `queued`, `total`, each `choice` with its `status` |
+| `aether_child_start` | `child.start` | `harness`, `purpose`, `task`, `idempotency_key`, optional `model`, `mode`, `account_member_id` | the child and `next` |
+| `aether_children` | `child.list` | optional `run_id` | `children` |
+| `aether_child_cancel` | `child.cancel` | `run_id` | the child |
 
 The bridge returns the established structured result directly. This
 presentation differs from any CLI envelope, but it does not add operations or
 make MCP a Release B-parity interface.
+
+The bridge registers the child-run tools when the run's `coord.status`
+lists `child.options` as it starts; the server still refuses a start the
+run's owner or swarm does not allow. `child.detach` and `child.fetch` are
+CLI-only.
 
 The two memory tools read and write the workspace's
 [team memory](coordination.md#team-memory). Both descriptions end with

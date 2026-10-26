@@ -203,10 +203,13 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 			shared = append(shared, c)
 		}
 	}
-	if own == nil {
-		return launchSpec{}, invalid("unknown agent %q; aether-internal child options lists the agents", req.Harness)
-	}
 	switch {
+	case own == nil:
+		// A server-wide definition or a test agent is not listed; the
+		// launch resolves it like any other, below.
+		if req.AccountMemberID != "" && domain.MemberID(req.AccountMemberID) != p.owner {
+			return launchSpec{}, denied("agent %q runs only on the owner's own account", req.Harness)
+		}
 	case req.AccountMemberID == "" || domain.MemberID(req.AccountMemberID) == p.owner:
 		if (own.Status == choiceNotInstalled || own.Status == choiceNotSignedIn) && len(shared) > 0 {
 			spec.account = domain.MemberID(shared[0].AccountMemberID)
@@ -220,10 +223,12 @@ func (s *Service) choose(ctx context.Context, p *policy, req protocol.ChildStart
 		}
 		spec.account = domain.MemberID(req.AccountMemberID)
 	}
+	defaultMode, err := s.cfg.Runs.DefaultMode(ctx, p.owner, spec.account, spec.harness)
+	if err != nil {
+		return launchSpec{}, invalid("agent %q: %s; aether-internal child options lists the agents", req.Harness, err.Error())
+	}
 	if spec.mode == "" {
-		if spec.mode, err = s.cfg.Runs.DefaultMode(ctx, p.owner, spec.account, spec.harness); err != nil {
-			return launchSpec{}, rpcErr(protocol.MethodChildStart, err)
-		}
+		spec.mode = defaultMode
 	}
 	return spec, nil
 }

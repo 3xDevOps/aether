@@ -2016,13 +2016,14 @@ ALTER TABLE missions ADD COLUMN extra_workspace_ids TEXT NOT NULL DEFAULT '[]';
 `,
 	// v87: child runs. A run_children row is reserved under the child's
 	// pre-minted run ID before its run row exists, so queued children have
-	// no run. tree_key is the swarm or root run whose limits the child
-	// shares. Member and run settings decide who may delegate; workspace
+	// no run, and outlives its parent's row so a deleted parent's children
+	// are still stopped. tree_key is the swarm or root run whose limits the
+	// child shares. Member and run settings decide who may delegate; workspace
 	// columns bound every tree.
 	`
 CREATE TABLE run_children (
 	run_id            TEXT PRIMARY KEY,
-	parent_run_id     TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	parent_run_id     TEXT NOT NULL,
 	root_run_id       TEXT NOT NULL,
 	tree_key          TEXT NOT NULL,
 	mission_id        TEXT NOT NULL DEFAULT '',
@@ -2049,6 +2050,7 @@ CREATE TABLE run_children (
 	UNIQUE (parent_run_id, idempotency_key)
 );
 CREATE INDEX run_children_tree ON run_children(tree_key, state);
+CREATE INDEX run_children_parent ON run_children(parent_run_id);
 CREATE TABLE child_settings (
 	member_id     TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
 	enabled       INTEGER NOT NULL DEFAULT 0,

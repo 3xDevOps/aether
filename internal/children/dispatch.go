@@ -149,10 +149,11 @@ func (s *Service) settle(ctx context.Context) error {
 	}
 	for _, c := range list {
 		parent, err := s.cfg.Store.GetRun(ctx, c.ParentRunID)
-		if err != nil {
+		gone := errors.Is(err, store.ErrNotFound)
+		if err != nil && !gone {
 			return err
 		}
-		if !c.Detached && parent.Status.Terminal() {
+		if !c.Detached && (gone || parent.Status.Terminal()) {
 			if err := s.stop(ctx, c, ""); err != nil {
 				slog.Warn("children: stop the child of an ended run", "child", c.RunID, "parent", parent.ID, "error", err)
 			}
@@ -163,7 +164,7 @@ func (s *Service) settle(ctx context.Context) error {
 			return err
 		}
 		first, err := s.cfg.Store.MarkChildEndNotified(ctx, c.RunID)
-		if err != nil || !first || c.Detached {
+		if err != nil || !first || c.Detached || gone {
 			continue
 		}
 		if _, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err == nil {
