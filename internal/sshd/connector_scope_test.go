@@ -65,7 +65,8 @@ func TestConnectorScopesGateEachMethod(t *testing.T) {
 		{"write scope puts a review off", connector(write), protocol.MethodRunReview, review(e.run.ID, protocol.RunReviewLater), ""},
 		{"write scope completes a reported success", connector(write), protocol.MethodRunReview, review(ready.ID, protocol.RunReviewComplete), ""},
 		{"control scope completes a live run", connector(all), protocol.MethodRunReview, review(e.run.ID, protocol.RunReviewComplete), ""},
-		{"read scope reads a room", connector(read), protocol.MethodRunRoomList, run, ""},
+		{"read scope reads a room", connector(read), protocol.MethodRunRoomList,
+			json.RawMessage(`{"workspace_id":"` + string(e.ws.ID) + `","run_id":"` + string(e.run.ID) + `"}`), ""},
 		{"unlisted method", connector(all), protocol.MethodMemberRole, json.RawMessage(`{}`),
 			"member.role: ChatGPT connector con-test cannot call this method; no connector can, so use the Aether app or the aether CLI"},
 		{"dashboard is unscoped", e.srv.Local(e.member.ID), protocol.MethodMemberList, nil, ""},
@@ -74,8 +75,8 @@ func TestConnectorScopesGateEachMethod(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, perr := tc.caller.Call(ctx, tc.method, tc.params)
 			if tc.denied == "" {
-				if perr != nil && (strings.Contains(perr.Message, " scope, which ") || strings.Contains(perr.Message, "cannot call this method")) {
-					t.Fatalf("%s = %v, want no scope refusal", tc.method, perr)
+				if perr != nil {
+					t.Fatalf("%s = %v, want success", tc.method, perr)
 				}
 				return
 			}
