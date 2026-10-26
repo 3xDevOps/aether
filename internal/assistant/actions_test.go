@@ -33,6 +33,9 @@ func (f *actionServer) Call(_ context.Context, method string, params json.RawMes
 	f.mu.Unlock()
 	switch method {
 	case protocol.MethodRunGet:
+		if strings.Contains(string(params), "run-gone") {
+			return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "run run-gone not found"}
+		}
 		if strings.Contains(string(params), "run-2") {
 			return json.RawMessage(`{"run":{"id":"run-2","member_id":"m2","workspace_id":"ws-1","title":"Docs"}}`), nil
 		}
@@ -292,6 +295,22 @@ func TestReversibleCallOnAnotherMembersRunNamesTheOwner(t *testing.T) {
 	got := actions(t, svc, m)
 	if len(got) != 1 || got[0][0].OtherOwner != "Dana" || got[0][0].Summary != "Resume run run-2, owned by Dana" {
 		t.Fatalf("records = %+v, want the resume naming Dana as the owner", got)
+	}
+}
+
+func TestReversibleCallWhoseOwnerCannotBeReadFailsWithoutRunning(t *testing.T) {
+	svc, m, _ := newActionService(t)
+	sock, fake := serveTools(t, svc, m)
+	err := callTool(t, sock, m, protocol.MethodRunPause, protocol.RunIDParams{RunID: "run-gone"}, false, false)
+	if err == nil || !strings.Contains(err.Error(), "look up the owner of run run-gone: run run-gone not found") {
+		t.Fatalf("pause = %v, want the owner lookup's error", err)
+	}
+	if fake.ran(protocol.MethodRunPause) {
+		t.Fatal("run.pause ran without its owner known")
+	}
+	got := actions(t, svc, m)
+	if len(got) != 1 || got[0][0].Outcome != protocol.AssistantActionFailed || !strings.Contains(got[0][0].Error, "run run-gone not found") {
+		t.Fatalf("records = %+v, want the pause recorded as failed with the lookup's error", got)
 	}
 }
 
