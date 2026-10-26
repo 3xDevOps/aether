@@ -29,7 +29,8 @@ command -v jq >/dev/null || fail "jq not found; install it (on Debian or Ubuntu:
 chatgpt_url=$(jq -r '.mcpServers[].url' "$root/packaging/chatgpt-plugin/mcp.json") ||
 	fail "packaging/chatgpt-plugin/mcp.json is not valid JSON"
 
-problems=$(jq -r --arg chatgpt_url "$chatgpt_url" '
+problems=$(jq -r --arg chatgpt_url "$chatgpt_url" --argjson acks '["Directory guidelines", "First-party API usage",
+	"Financial transactions", "AI media generation", "Prompt injection", "Conversation data collection", "Public documentation"]' '
 	def text($f; $max): if (.[$f] | type) != "string" or (.[$f] | length) == 0 then "\($f) is missing"
 		elif (.[$f] | length) > $max then "\($f) is \(.[$f] | length) characters, at most \($max)" else empty end;
 	def url($f): if (.[$f] | type) != "string" then "\($f) is missing"
@@ -38,6 +39,7 @@ problems=$(jq -r --arg chatgpt_url "$chatgpt_url" '
 	text("name"; 100), text("one_liner"; 200), text("description"; 2000),
 	(if (.categories | type) != "array" or (.categories | length) < 1 or (.categories | length) > 5
 		then "categories needs 1 to 5 entries"
+		elif any(.categories[]; type != "string" or length == 0) then "categories entries must be non-empty text"
 		elif (.categories | unique | length) != (.categories | length) then "categories repeats an entry" else empty end),
 	(if (.slug | type) == "string" and (.slug | test("^[a-z0-9]+(-[a-z0-9]+)*$")) then empty
 		else "slug must be lowercase letters and digits joined by single hyphens; it is permanent once published" end),
@@ -61,7 +63,8 @@ problems=$(jq -r --arg chatgpt_url "$chatgpt_url" '
 		(.personal_health_data, .sponsored_content | select(type != "boolean") | "data_handling flags must be true or false"),
 		(if .financial_transactions != false then "the directory does not accept connectors that move money" else empty end),
 		(if .ai_media_generation != false then "the directory does not accept connectors that generate images, video or audio" else empty end) end),
-	(if (.compliance_acknowledgments | type) != "array" or (.compliance_acknowledgments | length) != 7 then "compliance_acknowledgments must list the seven policy acknowledgments" else empty end),
+	(if (.compliance_acknowledgments | type) != "array" or (.compliance_acknowledgments | sort) != ($acks | sort)
+		then "compliance_acknowledgments must list each of the seven policy acknowledgments once: \($acks | join(", "))" else empty end),
 	(.. | objects | keys[] | select(test("credential|password|secret|token|api_?key|username|login|otp|instructions"; "i"))
 		| "\(.) must be entered in the portal, not the package")
 ' "$src/listing.json") || fail "$src/listing.json failed to check; jq's error is above"
@@ -83,6 +86,7 @@ height=$(($5 * 16777216 + $6 * 65536 + $7 * 256 + $8))
 [ "$width" -eq "$height" ] || fail "icon is ${width}x$height; it must be square"
 
 if [ -e "$out" ]; then
+	[ "$(realpath -- "$out")" != "$(realpath -- "$src")" ] || fail "$out is the package directory; give an empty or new directory"
 	extra=$(find "$out" -mindepth 1 ! -name listing.json ! -name icon.png | head -n 1)
 	[ -z "$extra" ] || fail "$out holds $extra; give an empty or new directory"
 fi

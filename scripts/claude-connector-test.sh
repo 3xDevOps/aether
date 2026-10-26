@@ -43,11 +43,27 @@ refuse "dynamic client registration" "want oauth_cimd" '.auth_type = "oauth_dcr"
 refuse "an http privacy policy" "privacy_policy_url is not an https URL" '.privacy_policy_url = "http://example.com/privacy"'
 refuse "two use cases" "use_cases needs at least 3" '.use_cases |= .[:2]'
 refuse "six acknowledgments" "seven policy acknowledgments" '.compliance_acknowledgments |= .[:6]'
+refuse "one acknowledgment seven times" "seven policy acknowledgments" '.compliance_acknowledgments = [range(7) | "Prompt injection"]'
+refuse "a misnamed acknowledgment" "seven policy acknowledgments" '.compliance_acknowledgments[0] = "Directory rules"'
+refuse "an empty category" "categories entries must be non-empty text" '.categories = [""]'
+refuse "a null category" "categories entries must be non-empty text" '.categories = [null]'
 refuse "a money-moving connector" "does not accept connectors that move money" '.data_handling.financial_transactions = true'
 refuse "reviewer credentials" "test_password must be entered in the portal" '.test_password = "x"'
 refuse "a missing icon" "does not exist" '.icon = "web/public/icons/missing.png"'
 refuse "a string for categories" "categories needs 1 to 5 entries" '.categories = "Developer tools"'
 refuse "no company" "company is missing" 'del(.company)'
+
+mkdir "$tmp/self"
+cp "$src/listing.json" "$tmp/self/"
+if sh "$script_dir/claude-connector.sh" "$tmp/self/." "$tmp/self" 2>"$tmp/err"; then
+	echo "claude-connector-test: staged a listing over its own package directory" >&2
+	exit 1
+fi
+grep -qF "is the package directory" "$tmp/err" && cmp -s "$src/listing.json" "$tmp/self/listing.json" || {
+	echo "claude-connector-test: staging into the package directory failed without naming it, or changed the listing:" >&2
+	cat "$tmp/err" >&2
+	exit 1
+}
 
 mkdir "$tmp/full"
 touch "$tmp/full/keep"
