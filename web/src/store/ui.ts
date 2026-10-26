@@ -15,7 +15,7 @@ import type { SliceCreator } from '@/store/slice'
 export type Theme = 'light' | 'dark' | 'system'
 export type TextSize = 'default' | 'large' | 'larger'
 export type UpdateKind = 'cli' | 'server' | 'shell'
-export type BoardView = 'board' | 'map'
+export type BoardView = 'board' | 'list' | 'map'
 
 export interface BoardMapViewport {
   x: number
@@ -49,7 +49,7 @@ export function normalizeBoardMapViewports(value: unknown): Record<string, Board
 
 export function normalizeBoardViews(value: unknown): Record<string, BoardView> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] === 'board' || entry[1] === 'map'))
+  return Object.fromEntries(Object.entries(value).filter((entry) => entry[1] === 'board' || entry[1] === 'list' || entry[1] === 'map'))
 }
 
 export interface Route {

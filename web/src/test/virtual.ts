@@ -8,27 +8,31 @@ import { afterEach } from 'vitest'
 const original = globalThis.ResizeObserver
 const offsetParent = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')
 
-export function sizedViewport(height = 600, row = 32): void {
+/** Returns a resize: every observed element reports its size again. */
+export function sizedViewport(height = 600, row = 32): () => void {
   Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
     configurable: true,
     get(this: HTMLElement) {
       return this.parentElement
     },
   })
+  const reports: (() => void)[] = []
   globalThis.ResizeObserver = class {
     constructor(private readonly callback: ResizeObserverCallback) {}
     observe(target: Element) {
       const size = target.tagName === 'LI' ? row : height
-      queueMicrotask(() =>
+      const report = () =>
         this.callback(
           [{ target, contentRect: { width: 800, height: size } } as unknown as ResizeObserverEntry],
           this as unknown as ResizeObserver,
-        ),
-      )
+        )
+      reports.push(report)
+      queueMicrotask(report)
     }
     unobserve() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver
+  return () => reports.forEach((report) => report())
 }
 
 afterEach(() => {

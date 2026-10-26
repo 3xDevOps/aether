@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react'
+import { useRef } from 'react'
 import { toast } from 'sonner'
+import { create } from 'zustand'
 import { deliveryLabel } from '@/components/palette/inject-dialog'
 import { Button } from '@/components/ui/button'
 import { PopoverContent } from '@/components/ui/popover'
@@ -19,6 +20,32 @@ export function cardAction(card: BoardCard): PrimaryAction | undefined {
   if (card.group !== 'needs-you') return undefined
   return conditionOf(card)?.action(card.run) ?? openAction
 }
+
+interface Reply {
+  runId: string
+  text: string
+  request?: { payload: string; key: string }
+  /** The send in flight, which a remounted composer waits for too. */
+  sending?: number
+  error?: string
+}
+
+// Not card state: a group crossing `virtualizeAbove` swaps its list, which
+// remounts every card in it.
+export const useReply = create<{ reply: Reply | null }>(() => ({ reply: null }))
+
+useStore.subscribe((state, previous) => {
+  if (state.identityKey !== previous.identityKey) useReply.setState({ reply: null })
+})
+
+export function setReplying(runId: string, open: boolean) {
+  if (open) useReply.setState({ reply: { runId, text: '' } })
+  else if (useReply.getState().reply?.runId === runId) useReply.setState({ reply: null })
+}
+
+const saveReply = (patch: Partial<Reply>) => useReply.setState(({ reply }) => ({ reply: reply && { ...reply, ...patch } }))
+
+let sends = 0
 
 const targetView: Partial<Record<NeedsYouTarget, RunView>> = { changes: 'changes', terminal: 'terminal' }
 
@@ -69,29 +96,29 @@ export function ReplyComposer({
   onDone: () => void
   returnFocus: () => void
 }) {
-  const [text, setText] = useState('')
-  const [request, setRequest] = useState<{ payload: string; key: string } | null>(null)
-  const [sending, setSending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const text = useReply((s) => s.reply?.text ?? '')
+  const sending = useReply((s) => Boolean(s.reply?.sending))
+  const error = useReply((s) => s.reply?.error)
   const leftOutside = useRef(false)
 
   const send = async () => {
-    const payload = text.trim()
-    if (!payload || sending) return
-    const next = request?.payload === payload ? request : { payload, key: crypto.randomUUID() }
-    setRequest(next)
-    setSending(true)
-    setError(null)
+    const reply = useReply.getState().reply
+    const payload = reply?.text.trim()
+    if (!reply || !payload || reply.sending) return
+    const request = reply.request?.payload === payload ? reply.request : { payload, key: crypto.randomUUID() }
+    const attempt = ++sends
+    saveReply({ request, sending: attempt, error: undefined })
+    // A reply closed or replaced meanwhile is not this send's to settle.
+    const current = () => useReply.getState().reply?.sending === attempt
     try {
-      const result = await api.runInject(card.run.id, payload, next.key)
+      const result = await api.runInject(card.run.id, payload, request.key)
       const state = result.receipt ?? result.message.state
       const label = `Message ${deliveryLabel(result).toLowerCase()}`
       if (state === 'not_sent' || state === 'uncertain') toast.error(label)
       else toast.success(label)
-      onDone()
+      if (current()) onDone()
     } catch (err) {
-      setError(`Send failed: ${message(err)}`)
-      setSending(false)
+      if (current()) saveReply({ sending: undefined, error: `Send failed: ${message(err)}` })
     }
   }
 
@@ -120,7 +147,7 @@ export function ReplyComposer({
           aria-label="Message to the agent"
           placeholder="Message to the agent"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => saveReply({ text: event.target.value })}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
               event.preventDefault()

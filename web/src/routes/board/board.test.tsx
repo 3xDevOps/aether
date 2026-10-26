@@ -5,6 +5,7 @@ import { PaletteDialogs } from '@/components/palette/dialogs'
 import { api, ApiError } from '@/lib/api'
 import type { GatewayCapabilities, Run } from '@/lib/types'
 import { Board } from '@/routes/board'
+import { virtualizeAbove } from '@/routes/board/card-list'
 import { useBoard } from '@/routes/board/selectors'
 import '@/routes/diff/conflict-chips'
 import '@/routes/missions'
@@ -24,7 +25,7 @@ import {
   serverInfo,
   workspace,
 } from '@/test/fixtures'
-import { atViewport } from '@/test/viewport'
+import { sizedViewport } from '@/test/virtual'
 
 vi.mock('@/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api')>()
@@ -35,6 +36,21 @@ vi.mock('@/lib/api', async (importOriginal) => {
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
+
+/** jsdom lays nothing out; the board learns its width from ResizeObserver. */
+function atBoardWidth(width: number) {
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private readonly report: ResizeObserverCallback) {}
+    observe(target: Element) {
+      this.report([{ target, contentRect: { width, height: 800 } } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver)
+    }
+    unobserve() {}
+    disconnect() {}
+  })
+  onTestFinished(() => {
+    vi.unstubAllGlobals()
+  })
+}
 
 const everyMethod: GatewayCapabilities = { gateway: 'remote', methods: ['*'], ws: [] }
 
@@ -132,7 +148,7 @@ describe('board columns', () => {
     expect(order('Finished')).toEqual(['broke', 'landed already'])
   })
 
-  it('draws a card as a state line, a title and a meta line, and nothing else', async () => {
+  it('draws a card as a title and a status footer, and nothing else', async () => {
     seed([merged])
     renderBoard()
     const merge = cardOf('landed already')
@@ -142,6 +158,7 @@ describe('board columns', () => {
     await waitFor(() => expect(merge.getByText('Claude Code')).toBeDefined())
     expect(merge.queryByText(/Details|Protected|tui/)).toBeNull()
     expect(merge.getAllByRole('button')).toHaveLength(1)
+    expect(merge.getByRole('img', { name: 'Merged' }).closest('article')!.querySelector('p')).toBeNull()
   })
 
   it('adds the diff counts once a snapshot names them', () => {
@@ -209,7 +226,7 @@ describe('board columns', () => {
     renderBoard()
 
     expect(column('Working').getByText('busy agent')).toBeDefined()
-    expect(column('Working').getByText('Working · Working in background: 2 tasks')).toBeDefined()
+    expect(column('Working').getByText('Working in background: 2 tasks')).toBeDefined()
     expect(column('Needs you').getByText('asking agent')).toBeDefined()
     expect(column('Needs you').getByText('Agent asks: Which database?')).toBeDefined()
   })
@@ -217,7 +234,8 @@ describe('board columns', () => {
   it("keeps another member's stopped run in Working, waiting for its owner", () => {
     seed([run({ ...stopped, member_id: bob.id })])
     renderBoard()
-    expect(column('Working').getByText('Waiting · Waiting for Bob')).toBeDefined()
+    expect(cardOf('waiting on you').getByRole('img', { name: 'Waiting' })).toBeDefined()
+    expect(cardOf('waiting on you').getByText('Waiting for Bob')).toBeDefined()
   })
 
   it('shows Paused off the timeline stream and clears it on resume', () => {
@@ -242,7 +260,10 @@ describe('board columns', () => {
     expect(screen.getAllByRole('article')).toHaveLength(1)
     const swarm = cardOf('coordinate checkout work')
     expect(swarm.getByText('Swarm active')).toBeDefined()
-    expect(swarm.getByText('2 working · 1 done · 1 failed')).toBeDefined()
+    expect(swarm.getByRole('img', { name: '2 working' })).toBeDefined()
+    expect(swarm.getByRole('img', { name: '1 done' })).toBeDefined()
+    expect(swarm.getByRole('img', { name: '1 failed' })).toBeDefined()
+    expect(swarm.queryByRole('img', { name: /needs you/ })).toBeNull()
     expect(screen.queryByText('worker w1')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'coordinate checkout work' }))
     expect(useStore.getState().route).toEqual({ name: 'missions', params: { missionId: 'mission_1' } })
@@ -388,6 +409,87 @@ describe('Needs you actions', () => {
     expect(composer.getByRole('textbox')).toHaveProperty('value', 'hello')
   })
 
+  it('keeps an open reply and its draft while its group starts and stops virtualizing', async () => {
+    sizedViewport(600, 100)
+    const others = Array.from({ length: virtualizeAbove - 1 }, (_, i) => run({ ...stopped, id: `run_wait_${i}`, task: `ask ${i}` }))
+    seed([stopped, ...others])
+    renderBoard()
+
+    fireEvent.click(cardOf('waiting on you').getByRole('button', { name: 'Reply' }))
+    await userEvent.type(within(await screen.findByRole('dialog')).getByRole('textbox'), 'half a thought')
+    const draft = async () => within(await screen.findByRole('dialog', { name: 'Reply to waiting on you' })).getByRole('textbox')
+
+    act(() => useStore.setState({ devices: [pendingDevice()] }))
+    expect(await draft()).toHaveProperty('value', 'half a thought')
+    act(() => useStore.setState({ devices: [] }))
+    expect(await draft()).toHaveProperty('value', 'half a thought')
+  })
+
+  it('keeps a pending send and its error while its group starts virtualizing', async () => {
+    sizedViewport(600, 100)
+    const others = Array.from({ length: virtualizeAbove - 1 }, (_, i) => run({ ...stopped, id: `run_wait_${i}`, task: `ask ${i}` }))
+    seed([stopped, ...others])
+    let fail!: (err: Error) => void
+    vi.mocked(api.runInject).mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    renderBoard()
+
+    fireEvent.click(cardOf('waiting on you').getByRole('button', { name: 'Reply' }))
+    const first = within(await screen.findByRole('dialog'))
+    await userEvent.type(first.getByRole('textbox'), 'hello')
+    fireEvent.click(first.getByRole('button', { name: 'Send' }))
+
+    act(() => useStore.setState({ devices: [pendingDevice()] }))
+    const composer = within(await screen.findByRole('dialog', { name: 'Reply to waiting on you' }))
+    expect(composer.getByRole('button', { name: 'Sending…' })).toHaveProperty('disabled', true)
+    await act(async () => fail(new Error('run is not running')))
+    expect(await composer.findByRole('alert')).toHaveProperty('textContent', 'Send failed: run is not running')
+    expect(composer.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', false)
+  })
+
+  it('lets a send close only the reply it was sent from', async () => {
+    seed([stopped])
+    let deliver!: () => void
+    vi.mocked(api.runInject).mockReturnValueOnce(new Promise((resolve) => {
+      deliver = () => resolve({ message: roomMessage({ kind: 'steer_request', state: 'queued' }) })
+    }))
+    renderBoard()
+
+    fireEvent.click(cardOf('waiting on you').getByRole('button', { name: 'Reply' }))
+    const first = within(await screen.findByRole('dialog'))
+    await userEvent.type(first.getByRole('textbox'), 'first')
+    fireEvent.click(first.getByRole('button', { name: 'Send' }))
+    fireEvent.click(first.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    fireEvent.click(cardOf('waiting on you').getByRole('button', { name: 'Reply' }))
+    await userEvent.type(within(await screen.findByRole('dialog')).getByRole('textbox'), 'second thought')
+    await act(async () => deliver())
+    expect(toast.success).toHaveBeenCalledWith('Message queued')
+    expect(within(screen.getByRole('dialog')).getByRole('textbox')).toHaveProperty('value', 'second thought')
+  })
+
+  it("drops a member's reply and its pending send when another member signs in", async () => {
+    useStore.getState().setIdentityKey('alice')
+    seed([stopped])
+    let fail!: (err: Error) => void
+    vi.mocked(api.runInject).mockReturnValueOnce(new Promise((_, reject) => { fail = reject }))
+    renderBoard()
+
+    fireEvent.click(cardOf('waiting on you').getByRole('button', { name: 'Reply' }))
+    const alices = within(await screen.findByRole('dialog'))
+    await userEvent.type(alices.getByRole('textbox'), 'from alice')
+    fireEvent.click(alices.getByRole('button', { name: 'Send' }))
+
+    act(() => useStore.getState().setIdentityKey('bob'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    fireEvent.click(cardOf('waiting on you').getByRole('button', { name: 'Reply' }))
+    const bobs = within(await screen.findByRole('dialog'))
+    await act(async () => fail(new Error('member signed out')))
+    expect(bobs.queryByRole('alert')).toBeNull()
+    expect(bobs.getByRole('button', { name: 'Send' })).toHaveProperty('disabled', true)
+    expect(bobs.getByRole('textbox')).toHaveProperty('value', '')
+  })
+
   it('answers r and o on the focused card', async () => {
     seed([stopped, working])
     renderBoard()
@@ -482,16 +584,71 @@ describe('Finished footer', () => {
     await waitFor(() => expect(api.runRelease).toHaveBeenCalledWith(retained.id))
   })
 
-  it('collapses Finished by default when the columns stack', () => {
-    atViewport(800)
+  it('stacks into the list with Finished collapsed, and hides List, when three columns do not fit', () => {
+    atBoardWidth(600)
     seed([working, merged])
     renderBoard()
 
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Board', 'Map'])
     const toggle = screen.getByRole('button', { name: 'Finished 1' })
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(screen.queryByText('landed already')).toBeNull()
     fireEvent.click(toggle)
     expect(screen.getByText('landed already')).toBeDefined()
+  })
+})
+
+describe('layouts', () => {
+  it('offers List beside Board when the columns fit, and remembers it for the workspace', async () => {
+    seed([working, merged])
+    renderBoard()
+    expect(screen.queryByRole('button', { name: 'Finished 1' })).toBeNull()
+
+    await userEvent.click(screen.getByRole('tab', { name: 'List' }))
+    expect(useStore.getState().boardViews).toEqual({ [workspace.id]: 'list' })
+    expect(screen.getByRole('button', { name: 'Finished 1' }).getAttribute('aria-expanded')).toBe('false')
+    expect(column('Working').getByText('still going')).toBeDefined()
+  })
+
+  it('renders a long group only as far as its scroll shows', async () => {
+    sizedViewport(600, 100)
+    const many = Array.from({ length: virtualizeAbove + 10 }, (_, i) =>
+      run({ ...merged, id: `run_done_${i}`, task: `done ${i}`, finished_at: `2026-08-14T10:${String(i % 60).padStart(2, '0')}:00Z` }))
+    seed([working, ...many])
+    renderBoard()
+
+    const shown = (await column('Finished').findAllByRole('article')).length
+    expect(shown).toBeLessThan(many.length)
+    expect(column('Working').getAllByRole('article')).toHaveLength(1)
+  })
+
+  it('shows the right cards of a long list group after a resize moves the group', async () => {
+    const resize = sizedViewport(600, 100)
+    let groupTop = 0
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const group = this.parentElement?.getAttribute('aria-label') === 'Working' && this.firstElementChild?.tagName === 'UL'
+      const top = group ? groupTop - this.closest('.overflow-y-auto')!.scrollTop : 0
+      return { left: 0, top, width: 800, height: 100, right: 800, bottom: top + 100, x: 0, y: top, toJSON: () => ({}) }
+    })
+    onTestFinished(() => rect.mockRestore())
+    seed(Array.from({ length: virtualizeAbove + 10 }, (_, i) => run({ ...working, id: `run_busy_${String(i).padStart(2, '0')}`, task: `busy ${i}` })))
+    useStore.setState({ boardViews: { [workspace.id]: 'list' } })
+    renderBoard()
+    const list = (await column('Working').findByRole('button', { name: 'busy 0' })).closest<HTMLElement>('.overflow-y-auto')!
+
+    // The groups above rewrap: Working now starts 2000px down, and the list is scrolled 1000px into it.
+    groupTop = 2000
+    list.scrollTop = 3000
+    act(() => resize())
+    fireEvent.scroll(list)
+    expect(await column('Working').findByRole('button', { name: 'busy 10' })).toBeDefined()
+  })
+
+  it('announces how many items need the viewer', () => {
+    seed([stopped, working])
+    useStore.setState({ devices: [pendingDevice()] })
+    renderBoard()
+    expect(screen.getByRole('status').textContent).toBe('2 need you')
   })
 })
 

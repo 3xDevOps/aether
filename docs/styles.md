@@ -112,8 +112,8 @@ fill. Diffs use `text-diff-add`/`text-diff-del` (the done and failed colours)
 and `bg-diff-add-bg`/`bg-diff-del-bg` at 8% light, 10% dark.
 
 Agent vendor colours (`text-agent-claude`, `-codex`, `-pi`, `-omp`,
-`-opencode`) appear only on the Agents page and the launch picker, through
-`AgentGlyph colored`.
+`-opencode`) appear only on the Agents page, the launch picker and the head
+of a Board card, through `AgentGlyph colored`.
 
 Member colours are the only arbitrary server data applied inline: avatar
 rings, the owner rail in run lists, the owner mark on sidebar run rows and
@@ -249,8 +249,9 @@ Use compact workbench geometry rather than landing-page ornament:
   keys, inline code and checkboxes; `--radius-control` 8px (`rounded-sm`,
   `rounded-control`) for buttons, fields, rows, menu items and tooltips;
   `--radius-panel` 12px (`rounded-md` and up, `rounded-panel`) for cards,
-  callouts, dialogs, menus, popovers, toasts and the palette; and the run
-  composer's `--radius-composer` 14px (`rounded-composer`). A radius nested
+  callouts, dialogs, menus, popovers, toasts and the palette; and
+  `--radius-composer` 14px (`rounded-composer`) for the run composer and
+  Board's column wells. A radius nested
   in another is the outer one minus the inset: a 12px menu with 4px padding
   holds 8px items. Edges that meet another surface stay square: sheets at the
   screen edge, a run's details box where it docks, joined buttons and dock
@@ -265,11 +266,18 @@ Use compact workbench geometry rather than landing-page ornament:
   that must read as none is written `0 0 #0000`, never `none`, so it still
   composes with ring utilities. Headers stay at `text-title` or smaller.
 - Scrollbars are 8px with an `--icon-faint` thumb.
-- A board card is three lines: the state line (shaped dot, reason, relative
-  time), a title of at most two lines, and the meta line (agent glyph and
-  name, owner avatar, `+a −d`, the `card:meta` slot). A Needs you reason reads
-  in the text colour, the others in `muted`, never with a second dot or a
-  **New** pill. See [Dashboard SPA: Board](dashboard-frontend.md#board).
+- A Board column is a `bg-chrome` well, 8px from the next, with a 36px
+  header (sentence-case label and `CountBadge`) and a 3px inset around
+  cards 4px apart. Its cards pass `raised` to `Card`: `bg-raised`, keeping
+  that fill and lifting the shadow on hover. A card is a head
+  (coloured agent glyph, title of at most two lines), a description of at
+  most two lines in `text-ui-sm` (one line for live Working activity), and
+  a 16px footer whose 24px action overhangs it (dot, label, compact
+  age, workspace; then agent name, owner avatar, `+a −d`, the `card:meta`
+  slot and the action). A Needs you reason reads in the text colour, the
+  others in `muted`, never with a second dot or a **New** pill. From 365px
+  of card width (`@container`) the description and footer indent under the
+  title. See [Dashboard SPA: Board](dashboard-frontend.md#board).
 - Board's **Map** reuses those cards at 320×160 inside a bounded pan/zoom
   canvas. Owner groups use `bg-chrome` and `border-seam`, cards `bg-canvas`;
   identity colour stays on the shared avatars. Muted directed connectors
@@ -426,7 +434,9 @@ literal time or curve.
   and rises 4px. `playEntrance` staggers a burst by `--stagger-row` (30ms) up
   to the eighth row; the rest arrive with it.
 - `web/src/lib/flip.ts` glides reordered items, translating only, for short
-  lists the viewer reorders; never a virtualized list or a store tick.
+  lists the viewer reorders; never a virtualized list. The one store-driven
+  use is Board moving at most eight cards between columns; see
+  [Board](dashboard-frontend.md#board).
 - Row selection, focus outlines and exits change at once.
 - `state-pulse` (the run header's working dot, the Session view's live row
   and the working rows on a swarm's Tasks list) breathes: opacity to

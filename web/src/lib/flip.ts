@@ -5,7 +5,7 @@ import { type Motion, play } from '@/lib/motion'
 // Opt-in layout glides for short lists the viewer reorders: never on a
 // virtualized list, whose rows are recycled, nor on store ticks.
 
-type Box = Pick<DOMRectReadOnly, 'left' | 'top'>
+export type Box = Pick<DOMRectReadOnly, 'left' | 'top'>
 
 const glides = new WeakMap<Element, Animation>()
 
@@ -27,7 +27,7 @@ export function glideFrom(el: HTMLElement, from: Box, motion: Motion): Animation
   return animation
 }
 
-function capture(container: HTMLElement | null): Map<string, Box> {
+export function capture(container: HTMLElement | null): Map<string, Box> {
   const boxes = new Map<string, Box>()
   container?.querySelectorAll<HTMLElement>('[data-glide-key]').forEach((el) => {
     boxes.set(el.dataset.glideKey!, el.getBoundingClientRect())
