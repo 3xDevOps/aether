@@ -650,6 +650,8 @@ func TestADeletedWatchDoesNotCostAnotherItsPush(t *testing.T) {
 	if err := h.svc.Delete(h.ctx, h.ada.ID, wb.ID); err != nil {
 		t.Fatal(err)
 	}
+	// The delivery loop is stopped, so this send is the batch's only one.
+	_ = h.svc.Close()
 	if err := h.svc.send(h.ctx, h.ada.ID, push.Message{Title: "2 watch notices", URL: WatchesLink()}, batch, watches); err != nil {
 		t.Fatal(err)
 	}
