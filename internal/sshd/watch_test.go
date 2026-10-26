@@ -92,17 +92,21 @@ func TestWatchesBelongToTheirCreator(t *testing.T) {
 	}
 
 	var prefs protocol.NotifyPrefs
-	if err := ada.Call(protocol.MethodNotifyPrefsGet, struct{}{}, &prefs); err != nil || !prefs.Push || prefs.QuietHours != nil {
+	if err := ada.Call(protocol.MethodNotifyPrefsGet, struct{}{}, &prefs); err != nil || prefs.Push == nil || !*prefs.Push || prefs.QuietHours != nil {
 		t.Fatalf("default prefs = %+v, %v; want push on", prefs, err)
 	}
+	off := false
+	if err := ada.Call(protocol.MethodNotifyPrefsSet, protocol.NotifyPrefs{Push: &off}, &prefs); err != nil || *prefs.Push {
+		t.Fatalf("push off = %+v, %v", prefs, err)
+	}
 	var pe *protocol.Error
-	bad := protocol.NotifyPrefs{Push: true, QuietHours: &protocol.QuietHours{Start: "22:00", End: "07:00", TZ: "Mars/Olympus"}}
+	bad := protocol.NotifyPrefs{QuietHours: &protocol.QuietHours{Start: "22:00", End: "07:00", TZ: "Mars/Olympus"}}
 	if err := ada.Call(protocol.MethodNotifyPrefsSet, bad, nil); !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams {
 		t.Fatalf("an unknown time zone = %v, want invalid params", err)
 	}
 	bad.QuietHours.TZ = "Europe/Berlin"
-	if err := ada.Call(protocol.MethodNotifyPrefsSet, bad, &prefs); err != nil || prefs.QuietHours == nil || prefs.QuietHours.TZ != "Europe/Berlin" {
-		t.Fatalf("set prefs = %+v, %v", prefs, err)
+	if err := ada.Call(protocol.MethodNotifyPrefsSet, bad, &prefs); err != nil || *prefs.Push || prefs.QuietHours == nil || prefs.QuietHours.TZ != "Europe/Berlin" {
+		t.Fatalf("set quiet hours alone = %+v, %v; want them set and push still off", prefs, err)
 	}
 
 	if err := ada.Call(protocol.MethodWatchDelete, protocol.WatchIDParams{WatchID: created.Watch.ID}, nil); err != nil {

@@ -663,7 +663,7 @@ func TestQuietHoursHoldPushesAndSendOneWhenTheyEnd(t *testing.T) {
 	phone := h.subscribe(h.ada)
 	now := h.clock.now().UTC()
 	start, end := now.Add(-time.Hour), now.Add(time.Hour)
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Push: true, QuietHours: &protocol.QuietHours{
+	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{QuietHours: &protocol.QuietHours{
 		Start: start.Format("15:04"), End: end.Format("15:04"), TZ: "UTC",
 	}}); err != nil {
 		t.Fatal(err)
@@ -847,7 +847,7 @@ func TestPushOfAPausedRunWaitsForItsResumption(t *testing.T) {
 	h := newHarness(t)
 	phone := h.subscribe(h.ada)
 	now := h.clock.now().UTC()
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Push: true, QuietHours: &protocol.QuietHours{
+	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{QuietHours: &protocol.QuietHours{
 		Start: now.Add(-time.Hour).Format("15:04"), End: now.Add(time.Hour).Format("15:04"), TZ: "UTC",
 	}}); err != nil {
 		t.Fatal(err)
@@ -858,7 +858,7 @@ func TestPushOfAPausedRunWaitsForItsResumption(t *testing.T) {
 	h.eventually("the held push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusHeldQuiet })
 
 	h.runs.pause(run.ID, true)
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Push: true}); err != nil {
+	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{}); err != nil {
 		t.Fatal(err)
 	}
 	settle()
@@ -1003,7 +1003,7 @@ func TestTurningQuietHoursOffReleasesHeldPushesExceptPausedOnes(t *testing.T) {
 	h := newHarness(t)
 	phone := h.subscribe(h.ada)
 	now := h.clock.now().UTC()
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Push: true, QuietHours: &protocol.QuietHours{
+	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{QuietHours: &protocol.QuietHours{
 		Start: now.Add(-time.Hour).Format("15:04"), End: now.Add(time.Hour).Format("15:04"), TZ: "UTC",
 	}}); err != nil {
 		t.Fatal(err)
@@ -1019,7 +1019,7 @@ func TestTurningQuietHoursOffReleasesHeldPushesExceptPausedOnes(t *testing.T) {
 	if _, err := h.svc.Update(h.ctx, h.ada.ID, protocol.WatchUpdateParams{WatchID: wb.ID, Paused: &paused}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{Push: true}); err != nil {
+	if _, err := h.svc.SetPrefs(h.ctx, h.ada.ID, protocol.NotifyPrefs{}); err != nil {
 		t.Fatal(err)
 	}
 	h.eventually("the released push", func() bool { return phone.received.Load() == 1 })

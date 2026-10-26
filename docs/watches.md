@@ -90,7 +90,8 @@ every dashboard for a minute, the same hold run notifications use.
 {"push": true, "quiet_hours": {"start": "22:00", "end": "07:00", "tz": "Europe/Berlin"}}
 ```
 
-`push` sends watch notices to your Web Push devices; it defaults to `true`.
+`push` sends watch notices to your Web Push devices; it defaults to `true`,
+and a `notify.prefs.set` that omits it keeps its current value.
 During quiet hours pushes are held, and when they end the held notices go out
 as one push. Changing or removing quiet hours applies to pushes already held.
 The hold is stored, so a server restart does not lose it.

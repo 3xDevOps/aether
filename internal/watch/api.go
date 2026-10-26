@@ -602,7 +602,7 @@ func (s *Service) Prefs(ctx context.Context, member domain.MemberID) (protocol.N
 }
 
 func (s *Service) prefsProto(ctx context.Context, member domain.MemberID, p store.NotifyPrefs) (protocol.NotifyPrefs, error) {
-	out := protocol.NotifyPrefs{Push: p.Push}
+	out := protocol.NotifyPrefs{Push: &p.Push}
 	if p.QuietTZ != "" {
 		out.QuietHours = &protocol.QuietHours{Start: p.QuietStart, End: p.QuietEnd, TZ: p.QuietTZ}
 	}
@@ -616,9 +616,17 @@ func (s *Service) prefsProto(ctx context.Context, member domain.MemberID, p stor
 	return out, nil
 }
 
-// SetPrefs replaces member's notification preferences.
+// SetPrefs replaces member's notification preferences, keeping push as it
+// is when p leaves it out.
 func (s *Service) SetPrefs(ctx context.Context, member domain.MemberID, p protocol.NotifyPrefs) (protocol.NotifyPrefs, error) {
-	rec := store.NotifyPrefs{Push: p.Push}
+	current, err := s.store.GetNotifyPrefs(ctx, member)
+	if err != nil {
+		return protocol.NotifyPrefs{}, err
+	}
+	rec := store.NotifyPrefs{Push: current.Push}
+	if p.Push != nil {
+		rec.Push = *p.Push
+	}
 	if q := p.QuietHours; q != nil {
 		start, okStart := minutes(q.Start)
 		end, okEnd := minutes(q.End)

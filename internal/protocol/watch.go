@@ -187,7 +187,9 @@ type QuietHours struct {
 // to their Web Push devices; during QuietHours push is held and one push
 // is sent when they end.
 type NotifyPrefs struct {
-	Push       bool        `json:"push"`
+	// Push is always set in a result; notify.prefs.set keeps the current
+	// value when it is omitted.
+	Push       *bool       `json:"push"`
 	QuietHours *QuietHours `json:"quiet_hours,omitempty"`
 	// Destinations is read-only: notify.prefs.set ignores it.
 	Destinations NotifyDestinations `json:"destinations"`
