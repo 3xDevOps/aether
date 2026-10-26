@@ -171,6 +171,9 @@ func (d *DB) TransferRunWithHandoff(ctx context.Context, h *HandoffOutbox) error
 	if err != nil {
 		return fmt.Errorf("store: transfer run: %w", mapConstraint(err, ErrNotFound))
 	}
+	if _, err = tx.ExecContext(ctx, detachTransferred, h.RunID, h.ToMemberID); err != nil {
+		return fmt.Errorf("store: transfer run: %w", err)
+	}
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("store: transfer run rows: %w", err)

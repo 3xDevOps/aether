@@ -162,6 +162,9 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if err != nil {
 		return nil, invalidParams(err.Error())
 	}
+	if p.Children != "" && p.Children != domain.ChildrenOn && p.Children != domain.ChildrenOff {
+		return nil, invalidParams(`children must be "on", "off" or empty`)
+	}
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
 	// Cancelling a launch mid-provisioning fails the run it is creating, so
@@ -169,11 +172,24 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancel()
 	defer context.AfterFunc(s.authCtx(), cancel)()
+	var childrenErr *protocol.Error
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
-		return s.launchRun(ctx, member, p, mode, policy, created)
+		return s.launchRun(ctx, member, p, mode, policy, func(id domain.RunID) {
+			if created != nil {
+				created(id)
+			}
+			// Recorded with the row, before the agent starts, so the agent
+			// never runs under the member setting the launcher overrode.
+			if p.Children != "" {
+				childrenErr = s.setRunChildren(ctx, member, id, p.Children)
+			}
+		})
 	})
 	if perr != nil {
 		return nil, perr
+	}
+	if childrenErr != nil {
+		return nil, childrenErr
 	}
 	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed}, nil
 }
@@ -281,6 +297,7 @@ func (s *Server) runSnapshot(run *domain.Run) protocol.Run {
 	out := protocol.RunFromDomain(run)
 	if s.cfg.Runs != nil {
 		out.Paused = s.cfg.Runs.Paused(run.ID)
+		out.Cause = string(s.cfg.Runs.Cause(run.ID, run.Activity))
 		out.PendingInputs = s.cfg.Runs.PendingInputs(run.ID)
 		out.Switching = string(s.cfg.Runs.Switching(run.ID))
 		retention, err := s.cfg.Runs.Retention(run)

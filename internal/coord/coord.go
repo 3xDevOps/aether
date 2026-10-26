@@ -150,6 +150,10 @@ type Config struct {
 	// authorization and owns mission task/worker methods and report
 	// validation/reconciliation; nil preserves ordinary coordination.
 	Mission MissionService
+	// Children is the optional child-run authority. It owns the child
+	// methods, lets a parent and child message each other, and routes a
+	// child's reports to its parent.
+	Children ChildService
 	// Development is independent of conflict and mission policy. Nil advertises
 	// no development methods and leaves their dispatch unavailable.
 	Development DevelopmentService

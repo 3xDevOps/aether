@@ -8,14 +8,20 @@ const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url
 
 type Handler = (event: Record<string, unknown>) => void
 
-function worker(windows: { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void }[] = []) {
+function worker(
+  windows: { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void }[] = [],
+  shown: { tag: string; title: string; body?: string; data?: Record<string, unknown> }[] = [],
+) {
   const handlers: Record<string, Handler> = {}
   const self = {
     addEventListener: (type: string, handler: Handler) => {
       handlers[type] = handler
     },
     skipWaiting: vi.fn(),
-    registration: { showNotification: vi.fn(async () => {}) },
+    registration: {
+      showNotification: vi.fn(async (_title: string, _options: { body: string }) => {}),
+      getNotifications: vi.fn(async ({ tag }: { tag: string }) => shown.filter((n) => n.tag === tag)),
+    },
     clients: {
       matchAll: vi.fn(async () => windows),
       openWindow: vi.fn(async () => null),
@@ -45,6 +51,55 @@ describe('service worker', () => {
       icon: '/icons/icon-192.png',
       data: { run: 'run-7k2m9q4xbd' },
     })
+  })
+
+  it('quietly replaces the notification of a need that ended, keeping its title', async () => {
+    const { self, dispatch } = worker([], [{ tag: 'run-7k2m9q4xbd', title: 'Fix the login redirect' }])
+    await dispatch('push', {
+      data: { json: () => ({ title: 'Renamed run', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) },
+    })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Fix the login redirect', {
+      body: 'No longer needs you',
+      tag: 'run-7k2m9q4xbd',
+      silent: true,
+      icon: '/icons/icon-192.png',
+      data: { run: 'run-7k2m9q4xbd' },
+    })
+  })
+
+  it("keeps an assistant's newer notice about the run when its need clears", async () => {
+    const notice = { tag: 'run-7k2m9q4xbd', title: 'Run "Fix it" finished', body: 'All green', data: { run: 'run-7k2m9q4xbd', notice: true } }
+    const { self, dispatch } = worker([], [notice])
+    await dispatch('push', { data: { json: () => ({ title: 'Fix it', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) } })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Run "Fix it" finished', {
+      body: 'All green',
+      tag: 'run-7k2m9q4xbd',
+      silent: true,
+      icon: '/icons/icon-192.png',
+      data: { run: 'run-7k2m9q4xbd', notice: true },
+    })
+  })
+
+  it('still shows a cleared need the user already dismissed, without alerting', async () => {
+    const { self, dispatch } = worker()
+    await dispatch('push', {
+      data: { json: () => ({ title: 'Fix the login redirect', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) },
+    })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Fix the login redirect', expect.objectContaining({ silent: true, tag: 'run-7k2m9q4xbd' }))
+    expect(self.registration.showNotification).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ renotify: true }))
+  })
+
+  it('never lets a clear still reading the shown notification land over a newer need', async () => {
+    const { self, dispatch } = worker()
+    let release = () => {}
+    self.registration.getNotifications.mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve([]) }))
+    const cleared = dispatch('push', { data: { json: () => ({ title: 'Fix it', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) } })
+    const asked = dispatch('push', { data: { json: () => ({ title: 'Fix it', body: 'which region?', run: 'run-7k2m9q4xbd' }) } })
+    await Promise.resolve()
+    expect(self.registration.showNotification).not.toHaveBeenCalled()
+    release()
+    await Promise.all([cleared, asked])
+    expect(self.registration.showNotification.mock.calls.map(([, options]) => options.body)).toEqual(['No longer needs you', 'which region?'])
   })
 
   it('still shows something for a push it cannot read', async () => {

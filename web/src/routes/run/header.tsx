@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
 import { Camera, Copy, GitBranch, Lock, PanelRight, ScrollText } from '@/components/icons'
+import { RunChildNudge } from '@/components/child-nudge'
 import { RunActions } from '@/components/run-actions'
 import { RunRetention } from '@/components/run-retention'
 import { ConnectionLine } from '@/components/shell/connection'
@@ -17,10 +18,11 @@ import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
-import { runLabel, stateDetail, stateLabel, stateTitle } from '@/lib/status'
+import { runLabel, stateLabel, stateTitle, stateWords } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
+import { RunLineage, useChildRunsItems } from '@/routes/run/child-runs'
 import { useModeSwitch } from '@/routes/run/mode-switch'
 import { useOpenInEditor } from '@/routes/run/open-in-editor'
 import { useRunPullRequest } from '@/routes/run/pull-request'
@@ -97,10 +99,16 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
       ? Object.values(s.acpSessions[run.id]?.agents.agents ?? {}).filter((agent) => agentState(agent) === 'running').length
       : 0,
   )
-  const detail = [subagents > 0 && `${subagents} ${subagents === 1 ? 'subagent' : 'subagents'} running`, stateDetail(presentation)]
+  const since = state === 'ready' && run.review_changed_at ? run.review_changed_at : run.stateChangedAt
+  const words = stateWords(presentation, since, useClock())
+  // The Workflow chip under the header shows the state's own label.
+  const detail = [
+    subagents > 0 && `${subagents} ${subagents === 1 ? 'subagent' : 'subagents'} running`,
+    words.label !== stateLabel[state] && words.label,
+    words.detail,
+  ]
     .filter(Boolean)
     .join(' · ')
-  const since = state === 'ready' && run.review_changed_at ? run.review_changed_at : run.stateChangedAt
   const owner = useStore((s) => resolveMember(s, run.member_id).member)
   const ownerName = useStore((s) => memberName(s, run.member_id))
   const accountID = run.requested_account_member_id ? run.account_member_id ?? '' : ''
@@ -237,6 +245,7 @@ export function RunHeader({
   const modeSwitch = useModeSwitch(run, agent, agentEntry)
   const pullRequest = useRunPullRequest(run, agent, agentName)
   const editor = useOpenInEditor(run)
+  const childRunsItems = useChildRunsItems(run)
   useHeaderPrimary(Boolean(primary))
 
   return (
@@ -272,6 +281,7 @@ export function RunHeader({
               extra={[
                 ...(modeSwitch.item ? [modeSwitch.item] : []),
                 ...(editor.item ? [editor.item] : []),
+                ...childRunsItems,
                 { id: 'captures', label: 'Captures…', Icon: Camera, onSelect: onCaptures },
                 { id: 'events', label: 'Raw events…', Icon: ScrollText, onSelect: onEvents },
               ]}
@@ -279,7 +289,9 @@ export function RunHeader({
           </>
         }
       />
+      <RunLineage run={run} />
       <RunRetention run={run} className="border-b border-seam px-4 py-2" />
+      <RunChildNudge run={run} />
       {!composing && (
         <div className="@container/views flex h-8 shrink-0 items-center border-b border-seam px-2 coarse:h-11">
           <ViewSwitch view={view} views={views} />

@@ -149,6 +149,7 @@ test('an Enhanced run holding background work stays working, asks while it waits
   await expect(log.getByText('started', { exact: true })).toBeVisible()
   await expect(runs.getByRole('button', { name: /^Waiting for agents · .* · Working in background: 1 task/ })).toBeVisible()
   await expect(header.getByText('Working in background: 1 task')).toBeVisible()
+  await expect(header.locator('[title^="Waiting for agents since"]')).toHaveAttribute('title', /Why: it holds background tasks\.$/)
   // Past acpmock's 2 s BackgroundDelay, the held task still keeps the run working.
   await page.waitForTimeout(3_000)
   expect(await status()).toMatchObject({ status: 'running', reason: 'working in background: 1 task' })
@@ -168,8 +169,10 @@ test('an Enhanced run holding background work stays working, asks while it waits
   await page.waitForTimeout(3_000)
   const parked = (await statuses()).filter((event) => event.seq > released && event.payload.to === 'needs-attention')
   expect(parked.map((event) => event.payload.reason)).toEqual(['turn ended without a report'])
-  await expect(header.getByText('Turn ended without a report')).toBeVisible()
-  await expect(runs.getByRole('button', { name: /^Waiting · / })).toBeVisible()
+  // An unreported turn end is a quiet Turn ended that asks nothing, and its tooltip says why.
+  await expect(runs.getByRole('button', { name: /^Turn ended · / })).toBeVisible()
+  await expect(header.locator('[title^="Turn ended since"]')).toHaveAttribute('title', /^Turn ended since [^—]*\. Why: the turn ended\.$/)
+  await expect(page.getByText(/send a message to continue/i)).toHaveCount(0)
 
   await box.fill('hold in background')
   await box.press('Enter')

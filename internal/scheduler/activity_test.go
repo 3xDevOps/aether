@@ -462,3 +462,19 @@ func TestAnIntegratorsWorkersReasonFollowsItsSwarm(t *testing.T) {
 	e.sched.refreshActivities(ctx)
 	expect("the swarm done", domain.ActivityWaiting, turnEndedReason)
 }
+
+func TestCauseOnlyExplainsTheActivityAsked(t *testing.T) {
+	s := &Scheduler{runs: map[domain.RunID]*supervised{
+		"run-1": {activity: domain.ActivityWorking, cause: events.CauseTurn},
+	}}
+	if got := s.Cause("run-1", domain.ActivityWorking); got != events.CauseTurn {
+		t.Fatalf("Cause(working) = %q, want %q", got, events.CauseTurn)
+	}
+	// A row read before the run resumed must not take the new turn's cause.
+	if got := s.Cause("run-1", domain.ActivityWaitingCI); got != "" {
+		t.Fatalf("Cause(waiting-ci) = %q, want none", got)
+	}
+	if got := s.Cause("run-2", domain.ActivityWorking); got != "" {
+		t.Fatalf("Cause(unknown run) = %q, want none", got)
+	}
+}
