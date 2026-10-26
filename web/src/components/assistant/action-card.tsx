@@ -80,7 +80,6 @@ export function useTargetGone(action: AssistantAction): boolean {
   })
 }
 
-/** Opens the target in the app, or a pull request in a new tab; leaving a phone's sheet closes it. */
 export function useOpenTarget(): (target: ActionTarget) => void {
   const sheet = useContext(AssistantSheet)
   return (target) => {
@@ -107,7 +106,6 @@ export function useBackground(action: AssistantAction): boolean {
   })
 }
 
-/** Adds the retry under any text already typed, which it never replaces. */
 export function retryDraft(action: AssistantAction, names: ActionNames): void {
   const retry = `Retry: ${actionSummary({ ...action, state: 'failed' }, names)}`
   const typed = useStore.getState().assistantDraft.trimEnd()
@@ -189,7 +187,6 @@ export function ActionCard({ action }: { action: AssistantAction }) {
   )
 }
 
-/** Reads the whole item behind a cut-down call once its details open. */
 function WholeItem({ seq }: { seq: number | undefined }) {
   const [error, setError] = useState<string>()
   useEffect(() => {

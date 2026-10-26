@@ -2,12 +2,11 @@ import type { AssistantActionRecord, AssistantConfirmation } from '@/lib/assista
 import { routeFromQuery } from '@/lib/url-state'
 import type { SessionToolCall } from '@/lib/session-types'
 import type { SessionRow, Turn } from '@/store/session-rows'
-import { stepsBlock, type Step, type WorkItem } from '@/store/session-steps'
+import { asRow, stepsBlock, workKinds, type Step, type WorkItem } from '@/store/session-steps'
 import type { Route } from '@/store/ui'
 
 export type ActionState = 'approval' | 'running' | 'done' | 'failed' | 'declined' | 'expired' | 'unfinished'
 
-/** How a confirmed call passed: on its card, or by auto-approval. */
 export type Approval = 'approved' | 'auto-approved'
 
 export interface ActionTarget {
@@ -98,7 +97,6 @@ function isRead(tool: string): boolean {
   return tool in readTools || /^aether_(?:list|get)_/.test(tool)
 }
 
-/** A read tool's noun, singular and plural; one added since falls back to its own name. */
 export function readNoun(tool: string): [string, string] {
   const known = readTools[tool]
   if (known) return known
@@ -256,7 +254,7 @@ export function actionOutcome(
   return { state: entry.status === 'running' ? 'running' : 'done', approval }
 }
 
-/** What the steps leave out of the log: each action record by the id of the event it shows as, and each call's latest snapshot by its step id. */
+/** Records are keyed by the id of the event their notice shows as, calls by their step id. */
 export interface TranscriptFacts {
   records: Map<string, AssistantActionRecord>
   calls: Map<string, SessionToolCall>
@@ -271,15 +269,6 @@ export function transcriptFacts(turns: Turn[] | undefined): TranscriptFacts {
     }
   }
   return facts
-}
-
-const workKinds = new Set<Step['kind']>(['thought', 'tool', 'lookup', 'plan', 'subagents', 'answered'])
-
-/** A step left without work around it reads as the conversation row it would have been. */
-function asRow(step: Step): SessionRow[] {
-  if (step.kind === 'narration') return [{ kind: 'assistant', id: step.id, at: step.at, text: step.text, streaming: step.streaming }]
-  if (step.kind === 'event') return [{ kind: 'event', id: step.id, at: step.at, text: step.text, detail: step.detail, tone: step.tone }]
-  return []
 }
 
 const approvalNote = /^(Approved|Auto-approved): /
@@ -384,7 +373,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       if (kept.length === row.steps.length) out.push(row)
       else if (kept.some((step) => workKinds.has(step.kind))) out.push({ ...stepsBlock(row.id, kept, row.start, row.current), live: row.live })
       else {
-        out.push(...kept.flatMap(asRow))
+        out.push(...kept.map(asRow))
         if (row.live) out.push({ kind: 'live', id: 'live', at: row.at, ...row.live })
       }
       continue
@@ -395,7 +384,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       if (segment.length === 0) return
       if (segment.some((step) => workKinds.has(step.kind))) {
         out.push({ ...stepsBlock(id, segment, id === row.id ? row.start : segment[0]!.at, row.current && last), live: last ? row.live : undefined })
-      } else out.push(...segment.flatMap(asRow))
+      } else out.push(...segment.map(asRow))
       segment = []
     }
     for (const step of row.steps) {
@@ -432,7 +421,6 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
   return { rows: shown, groups, actions }
 }
 
-/** Display names the transcript knows; a missing one leaves the id. */
 export interface ActionNames {
   workspace: (id: string) => string | undefined
   agent: (name: string) => string | undefined
@@ -489,7 +477,6 @@ const phrases: Record<string, { verb: Verb; object: (action: AssistantAction, na
   aether_watch_delete: { verb: ['Stop watching', 'Stopped watching', 'Stopping watching'], object: watchObject },
 }
 
-/** What the call did in product words: "Launched run on api with Claude Code". */
 export function actionSummary(action: AssistantAction, names: ActionNames): string {
   const phrase = phrases[action.tool] ?? { verb: ['Use', 'Used', 'Using'] as Verb, object: () => action.tool }
   const [imperative, past, present] = phrase.verb
@@ -497,12 +484,10 @@ export function actionSummary(action: AssistantAction, names: ActionNames): stri
   return `${verb} ${phrase.object(action, names)}`.trimEnd()
 }
 
-/** Whether the tool has its own words; any other Aether tool shows its name and inputs. */
 export function isKnownAction(tool: string): boolean {
   return tool in phrases
 }
 
-/** A launch's receipt in one line: what started where, on which agent and whose account, and whether it fell back. */
 export function launchLine(action: AssistantAction, names: ActionNames): string | undefined {
   const launch = record(record(action.result).launch)
   const kind = text(launch.kind)
@@ -521,7 +506,6 @@ export function launchLine(action: AssistantAction, names: ActionNames): string 
   ].filter(Boolean).join(' · ')
 }
 
-/** A watch's state, what it waits for and how its last notice went. */
 export function watchLine(action: AssistantAction): string | undefined {
   if (!action.tool.startsWith('aether_watch_')) return undefined
   const result = record(action.result)
