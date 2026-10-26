@@ -369,6 +369,50 @@ func TestPullRequestSnapshotDropsSupersededRuns(t *testing.T) {
 	}
 }
 
+func TestPullRequestSnapshotKeepsCancelledRunWhenActionsRunsAreRefused(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	f.bodies[checksPage1] = checkRunsBody(checkRun(2, "test", "completed", "cancelled"), inSuite(checkRun(4, "test", "completed", "success"), 10))
+	refuse := func(status int, message string, limited bool) func(*http.Request) (*http.Response, error) {
+		return func(r *http.Request) (*http.Response, error) {
+			if r.URL.RequestURI() != workflowsPage1 {
+				return f.serve(r)
+			}
+			response := jsonResponse(status, `{"message":"`+message+`"}`)
+			if limited {
+				response.Header.Set("X-RateLimit-Remaining", "0")
+			}
+			return response, nil
+		}
+	}
+	for _, tc := range []struct {
+		status  int
+		message string
+	}{
+		{http.StatusForbidden, "Resource not accessible by personal access token"},
+		{http.StatusNotFound, "Not Found"},
+	} {
+		s, _ := newTestService(t, nativeCredentials(), refuse(tc.status, tc.message, false))
+		snap, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+		if err != nil {
+			t.Fatalf("HTTP %d on workflow runs failed the snapshot: %v", tc.status, err)
+		}
+		if !strings.Contains(snap.WorkflowsUnreadable, tc.message) {
+			t.Fatalf("HTTP %d: workflows unreadable = %q", tc.status, snap.WorkflowsUnreadable)
+		}
+		if c := snap.Checks(); c.Failed != 1 || c.Passed != 1 {
+			t.Fatalf("HTTP %d: cancelled run not counted: %+v", tc.status, c)
+		}
+	}
+
+	s, _ := newTestService(t, nativeCredentials(), refuse(http.StatusForbidden, "API rate limit exceeded", true))
+	_, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	var limited *RateLimitError
+	if !errors.As(err, &limited) {
+		t.Fatalf("rate limit on workflow runs = %v, want a RateLimitError", err)
+	}
+}
+
 func workflowRun(id, workflow, suite int64) string {
 	return fmt.Sprintf(`{"id":%d,"workflow_id":%d,"check_suite_id":%d}`, id, workflow, suite)
 }

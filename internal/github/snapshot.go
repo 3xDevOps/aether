@@ -43,6 +43,10 @@ type Snapshot struct {
 	// Workflows is read only when a cancelled check run shares its app and
 	// name with a newer run in another suite.
 	Workflows []WorkflowRun `json:"workflow_runs,omitempty"`
+	// WorkflowsUnreadable is GitHub's answer when that read was refused, for
+	// example a fine-grained token without Actions read. A cancelled run then
+	// stays counted.
+	WorkflowsUnreadable string `json:"workflows_unreadable,omitempty"`
 
 	Pages []Page `json:"pages"`
 }
@@ -236,10 +240,15 @@ func (s *Service) PullRequestSnapshot(ctx context.Context, token, repo string, n
 		workflows, pages, err = paginate(ctx, s, token, "/repos/"+repo+"/actions/runs?head_sha="+snap.HeadSHA+"&", prev, prevWorkflows, "workflow runs", nil, func(page workflowRunsPage) []WorkflowRun {
 			return page.WorkflowRuns
 		})
-		if err != nil {
+		var refused *APIError
+		switch {
+		case errors.As(err, &refused) && (refused.Status == http.StatusForbidden || refused.Status == http.StatusNotFound):
+			snap.WorkflowsUnreadable = refused.Error()
+		case err != nil:
 			return Snapshot{}, err
+		default:
+			snap.Workflows, snap.Pages = workflows, append(snap.Pages, pages...)
 		}
-		snap.Workflows, snap.Pages = workflows, append(snap.Pages, pages...)
 	}
 
 	type statusPage struct {

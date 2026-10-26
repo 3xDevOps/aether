@@ -36,6 +36,7 @@ type fakeCheck struct {
 	Status     string `json:"status"`
 	Conclusion string `json:"conclusion,omitempty"`
 	Completed  string `json:"completed_at,omitempty"`
+	Suite      int64  `json:"-"`
 }
 
 type fakeReview struct {
@@ -115,8 +116,12 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(path, "/repos/acme/app/commits/"+f.head+"/check-runs?"):
 		runs := []map[string]any{}
 		for _, c := range f.checks[f.head] {
+			suite := c.Suite
+			if suite == 0 {
+				suite = 9
+			}
 			run := map[string]any{"id": c.ID, "name": c.Name, "status": c.Status, "conclusion": nil, "html_url": "https://github.com/acme/app/runs/1",
-				"check_suite": map[string]int{"id": 9}, "app": map[string]string{"name": "GitHub Actions"}}
+				"check_suite": map[string]int64{"id": suite}, "app": map[string]string{"name": "GitHub Actions"}}
 			if c.Conclusion != "" {
 				run["conclusion"], run["completed_at"] = c.Conclusion, c.Completed
 			}
@@ -408,6 +413,29 @@ func TestPRRateLimitWaitsForTheReset(t *testing.T) {
 	p.gh.set(func(f *fakeGitHub) { f.limitUntil = time.Time{} })
 	p.clock.advance(time.Hour)
 	p.eventually("recovery after the reset", func() bool { return p.watchState(w.ID).State == protocol.WatchActive })
+}
+
+func TestPRActionsRunsUnreadableCountsCancelledCheck(t *testing.T) {
+	p := newPRHarness(t)
+	done := p.stamp()
+	p.gh.set(func(f *fakeGitHub) {
+		f.checks[shaOne] = []fakeCheck{{ID: 1, Name: "test", Status: "completed", Conclusion: "cancelled", Completed: done},
+			{ID: 2, Name: "test", Status: "completed", Conclusion: "success", Completed: done, Suite: 10}}
+	})
+	w := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	p.eventually("the first read", func() bool { return p.watchState(w.ID).LastCheckAt != nil })
+	got := p.watchState(w.ID)
+	if got.State != protocol.WatchActive {
+		t.Fatalf("state = %s %q, want active when only Actions runs are unreadable", got.State, got.Error)
+	}
+	var observed protocol.WatchObserved
+	_ = json.Unmarshal(got.Observed, &observed)
+	if !strings.Contains(observed.Summary, "can't read Actions runs, so a cancelled check counts as failed") || !strings.Contains(observed.Summary, "HTTP 404") {
+		t.Fatalf("summary = %q, want it to say the cancelled check counts and why", observed.Summary)
+	}
+	if observed.Checks == nil || observed.Checks.Failed != 1 || observed.Checks.Passed != 1 {
+		t.Fatalf("checks = %+v, want the cancelled run counted as failed", observed.Checks)
+	}
 }
 
 func TestPRWatchWithoutGitHubLoginSaysHowToFixIt(t *testing.T) {

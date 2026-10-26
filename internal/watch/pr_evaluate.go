@@ -174,6 +174,9 @@ func prSummary(snap github.Snapshot, checks github.Checks, review string) string
 	if review != "" {
 		parts = append(parts, strings.ReplaceAll(review, "_", " "))
 	}
+	if snap.WorkflowsUnreadable != "" {
+		parts = append(parts, "can't read Actions runs, so a cancelled check counts as failed ("+snap.WorkflowsUnreadable+")")
+	}
 	return strings.Join(parts, " · ")
 }
 
