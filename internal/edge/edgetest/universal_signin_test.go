@@ -82,7 +82,7 @@ func TestUniversalSignInBoundToBrowser(t *testing.T) {
 
 	resp, page = aliceBrowser.send(t, http.MethodPost, action, choose)
 	m := requestField.FindStringSubmatch(page)
-	if resp.StatusCode != http.StatusOK || m == nil || resp.Header.Get("Content-Security-Policy") != universalCSP {
+	if resp.StatusCode != http.StatusOK || m == nil || resp.Header.Get("Content-Security-Policy") != h.universalCSP() {
 		t.Fatalf("alice's consent page: %s %v\n%s", resp.Status, resp.Header, page)
 	}
 	consent := url.Values{"request": {m[1]}, edgeproto.ParamServer: {s1.id}, "scope": {"write"}}
@@ -146,7 +146,8 @@ func TestUniversalGuardsServerAnswers(t *testing.T) {
 		{"", true},
 		{"https://evil.example/steal", false},
 		{"//evil.example/steal", false},
-		{"http://" + client.host + "/callback", false},
+		{"http://evil.example/callback", false},
+		{"http://127.0.0.1:54321/callback?code=x", false},
 		{"https://user@" + client.host + "/callback", false},
 		{"/mcp/authorize?next=1", true},
 		{h.relayURL + "/mcp/authorize", true},
@@ -171,8 +172,8 @@ func TestUniversalGuardsServerAnswers(t *testing.T) {
 		switch {
 		case !browserBinding.MatchString(got) || (binding != "" && got != binding):
 			t.Fatalf("to %q: the server saw browser %q, want the edge's one binding %q", tt.to, got, binding)
-		case resp.Header.Get("Content-Security-Policy") != universalCSP && tt.pass:
-			t.Fatalf("to %q: Content-Security-Policy %q, want %q", tt.to, resp.Header.Get("Content-Security-Policy"), universalCSP)
+		case resp.Header.Get("Content-Security-Policy") != h.universalCSP() && tt.pass:
+			t.Fatalf("to %q: Content-Security-Policy %q, want %q", tt.to, resp.Header.Get("Content-Security-Policy"), h.universalCSP())
 		case tt.pass && tt.to != "" && (resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != tt.to):
 			t.Fatalf("to %q: %s %q, want it passed", tt.to, resp.Status, resp.Header.Get("Location"))
 		case !tt.pass && (resp.StatusCode != http.StatusBadGateway || resp.Header.Get("Location") != "" ||
@@ -180,9 +181,14 @@ func TestUniversalGuardsServerAnswers(t *testing.T) {
 			t.Fatalf("to %q: %s %q %s, want 502 and no Location", tt.to, resp.Status, resp.Header.Get("Location"), body)
 		}
 		for _, c := range resp.Cookies() {
-			if c.Value == "fixed" {
-				t.Fatalf("to %q: the server's cookie passed: %v", tt.to, c)
+			// Browsers drop a __Host- cookie unless it is Secure with Path
+			// /; Go's cookie jar does not check.
+			if c.Value == "fixed" || c.Path != "/" || !c.Secure || !c.HttpOnly || c.SameSite != http.SameSiteNoneMode {
+				t.Fatalf("to %q: cookie %v, want only the edge's, Secure, HttpOnly, SameSite=None and Path /", tt.to, c)
 			}
+		}
+		if tt.to == "" && len(resp.Cookies()) != 1 {
+			t.Fatalf("the first answer set cookies %v, want the edge's browser cookie", resp.Cookies())
 		}
 		binding = got
 	}

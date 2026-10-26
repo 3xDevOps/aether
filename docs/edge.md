@@ -468,7 +468,7 @@ the edge never decides a grant. Every server shares the relay host, so on the
 universal paths the edge forwards a server's `Location` only to the relay
 host, `chatgpt.com` or `claude.ai`. Anything else becomes `502 the server sent
 the browser to "<url>"; on https://<relay host>/mcp the edge sends it only to
-...`. The edge also adds `form-action 'self' https://chatgpt.com
+...`. The edge also adds `form-action https://<relay host> https://chatgpt.com
 https://claude.ai` to the sandbox policy, so no server's page can post a form
 elsewhere.
 

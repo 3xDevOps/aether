@@ -30,10 +30,14 @@ import (
 var (
 	chooseForm  = regexp.MustCompile(`(?s)<form method="post" action="([^"]+)">(.*?)</form>`)
 	hiddenField = regexp.MustCompile(`<input type="hidden" name="([^"]+)" value="([^"]*)">`)
-	// universalCSP is connectorCSP as the edge stamps it on the universal
-	// paths, with forms limited to the edge and the test client's host.
-	universalCSP = connectorCSP + "; form-action 'self' https://127.0.0.1"
 )
+
+// universalCSP is connectorCSP as the edge stamps it on the universal
+// paths, with forms limited to the relay origin and the test client's
+// host.
+func (h *harness) universalCSP() string {
+	return connectorCSP + "; form-action " + h.relayURL + " https://127.0.0.1"
+}
 
 // chooseForms are the choose page's forms by the server each picks, with
 // the URL each posts to.
@@ -135,7 +139,7 @@ func universalConsent(t *testing.T, b *browser, authURL, pick, member, code stri
 	}
 	resp, page = b.send(t, http.MethodPost, action, flow.choose)
 	m := requestField.FindStringSubmatch(page)
-	if resp.StatusCode != http.StatusOK || m == nil || resp.Header.Get("Content-Security-Policy") != universalCSP {
+	if resp.StatusCode != http.StatusOK || m == nil || resp.Header.Get("Content-Security-Policy") != b.h.universalCSP() {
 		t.Fatalf("consent page: %s %v\n%s", resp.Status, resp.Header, page)
 	}
 	flow.consent = url.Values{"request": {m[1]}, edgeproto.ParamServer: {pick}, "scope": scopes}

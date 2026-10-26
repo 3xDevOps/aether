@@ -142,8 +142,9 @@ func (s *Service) universalAuthorize(w http.ResponseWriter, r *http.Request) {
 	} else {
 		browser = edgeproto.NewToken()
 		// SameSite None: the consent page's form posts from the opaque
-		// origin its sandbox gives it, a cross-site request.
-		g.cookie = &http.Cookie{Name: browserCookie, Value: browser, Path: edgeproto.PathUniversalMCPAuthorize,
+		// origin its sandbox gives it, a cross-site request. Browsers drop
+		// a __Host- cookie whose Path is not /.
+		g.cookie = &http.Cookie{Name: browserCookie, Value: browser, Path: "/",
 			HttpOnly: true, Secure: true, SameSite: http.SameSiteNoneMode}
 	}
 	s.link.ForwardUniversal(g, r, id, body, edgeproto.BrowserBinding(id, browser))
@@ -162,10 +163,9 @@ func (s *Service) forwardUniversal(w http.ResponseWriter, r *http.Request, id st
 // connector client, and forms only to those. It sets cookie, when set,
 // past the relay, which drops every cookie a server sets.
 func (s *Service) guard(w http.ResponseWriter) *universalGuard {
-	formAction := "form-action 'self'"
-	for _, host := range s.clientHosts {
-		formAction += " https://" + host
-	}
+	// The consent page's sandbox gives it an opaque origin, which 'self'
+	// may not match, so the relay origin is named.
+	formAction := "form-action " + s.relayOrigin + s.clientSources()
 	return &universalGuard{ResponseWriter: w, s: s, formAction: formAction}
 }
 
@@ -218,6 +218,16 @@ func (g *universalGuard) Write(p []byte) (int, error) {
 }
 
 func (g *universalGuard) Unwrap() http.ResponseWriter { return g.ResponseWriter }
+
+// clientSources is the connector clients' origins as CSP sources, each
+// after a space.
+func (s *Service) clientSources() string {
+	var out string
+	for _, host := range s.clientHosts {
+		out += " https://" + host
+	}
+	return out
+}
 
 // allowedLocation reports whether loc is a path on the relay origin or
 // an https URL there or on a connector client's host name.
@@ -299,7 +309,9 @@ func (s *Service) mcpChoose(w http.ResponseWriter, r *http.Request, v visitor) e
 		}
 		other = append(other, c)
 	}
-	w.Header().Set("Content-Security-Policy", pageCSP+" "+s.relayOrigin)
+	// The server answers a bad request with a redirect to the client,
+	// which form-action also governs.
+	w.Header().Set("Content-Security-Policy", pageCSP+" "+s.relayOrigin+s.clientSources())
 	s.render(w, http.StatusOK, "choose", s.view(&v, "Choose a server", chooseData{
 		Action: s.relayOrigin + edgeproto.PathUniversalMCPAuthorize, Client: redirectHost(q.Get("redirect_uri")),
 		Fields: fields, Ready: ready, Other: other,
