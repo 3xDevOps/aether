@@ -243,7 +243,7 @@ export function WatchNotifySection({ client }: { client: Api }) {
   const held = prefs?.quiet_hours
   const edited = held && (held.start !== quiet.start || held.end !== quiet.end || held.tz !== quiet.tz)
   return (
-    <SettingsSection title="Watch notifications" id="watch-notifications" scope="Your account">
+    <SettingsSection title="Watch notifications" scope="Your account">
       <SettingRow
         id="watch-push"
         label="Watch notifications on push devices"

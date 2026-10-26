@@ -80,6 +80,8 @@ export function deliveryText(delivery: WatchDelivery): string {
           return 'Held for quiet hours'
         case 'failed':
           return `Push failed: ${detail || 'no reason given'}`
+        case 'cleared':
+          return 'Push not sent: resolved before delivery'
       }
       break
     case 'desktop':
@@ -94,6 +96,8 @@ export function deliveryText(delivery: WatchDelivery): string {
           return 'Desktop app held for quiet hours'
         case 'failed':
           return `Desktop app failed: ${detail || 'no reason given'}`
+        case 'cleared':
+          return 'Desktop app not shown: resolved before delivery'
       }
       break
     case 'in_app':

@@ -6023,7 +6023,8 @@ while one of its entries is visible, so the nav and search never disagree.
 |---|---|---|
 | You | General (`general`) | Appearance: Theme (`theme`), Text size (`text-size`); Keyboard (`keyboard`); Profile (`profile`); Setup guide (`setup-guide`) |
 | You | Connections (`connections`) | ChatGPT and Claude (`connectors`); GitHub (`github`) |
-| You | Notifications (`notifications`) | Push notifications (`push`); Slack (`slack`) |
+| You | Notifications (`notifications`) | Push notifications (`push`); Watch notifications: push devices (`watch-push`), Quiet hours (`quiet-hours`); Slack (`slack`) |
+| You | Watches (`watches`) | Watches (`watch-list`) |
 | You | Assistant (`assistant`) | Approvals (`auto-approve`) |
 | You | Child runs (`children`) | Child runs (`child-runs`): Allow automatic fallback (`child-fallback`), Use subscriptions shared with me (`child-shared`), Limits (`child-limits`) |
 | You | Usage (`usage`) | Subscription usage (`subscription-usage`) |
@@ -6104,8 +6105,15 @@ Categories:
   reused. Successful explicit revision acceptance upserts/selects the
   workspace and opens its repository page. Non-admins see neither row.
 - **Notifications**: **Notify this device when a run needs me**, described
-  under [Push notifications](#push-notifications), and Slack direct
-  messages ([slack.md](slack.md)).
+  under [Push notifications](#push-notifications), **Watch notifications**
+  and Slack direct messages ([slack.md](slack.md)). Watch notifications
+  (`notify.prefs.get` and `notify.prefs.set`, shown when the server has
+  them) holds **Watch notifications on push devices**, whose help states
+  where notices go now (`Push to 2 devices`, `Push is off` or `No push
+  device subscribed, so in-app only`, then the desktop app and in-app), and
+  **Quiet hours**: turning it on saves 22:00 to 07:00 in the browser's time
+  zone; **From**, **Until** and **Time zone** change it, with **Save**. See
+  [Watches](#watches).
 - **Assistant**, where the assistant is available (`useAssistantAvailable`):
   **Let the assistant act without asking** reads and sets `assistant.settings`
   `auto_approve`. Under it, **What auto-approval covers** lists what runs
@@ -6203,6 +6211,53 @@ Categories:
 Repository settings, base freshness and the source mirror live on the
 [Repository page](#repository-page) on either gateway.
 
+### Watches
+
+A **watch** is a member's standing request that the server tell them when a
+run, a swarm or a pull request needs them or finishes; the server evaluates
+it, so it keeps working with every page closed. The server side and the
+conditions are in [watches.md](watches.md). The dashboard's parts:
+
+- **Settings › Watches** (`src/routes/settings/watches.tsx`), shown when the
+  server has `watch.list`: the member's watches from the `watches` store
+  slice (`src/store/watches.ts`, read at hydration and on wake) in an
+  `InsetList`. A row holds the label or target title, the target kind, a
+  `StateLine` (`Watching`, `Paused`, `Cannot check`, `Done`, `Expired`) with
+  the conditions, the server's error verbatim for `error`, the last notice
+  and the last and next check. **Active** (the default) hides done and
+  expired watches; **All** shows them. With none, the empty state says what
+  a watch is and where to add one.
+- **Detail** (`src/routes/settings/watch-detail.tsx`): a row opens
+  `?page=settings&id=watches&watch=<id>`, a dialog that is a full-screen
+  sheet under 768px. It reads `watch.get` and shows what the server sees
+  (`observed`), the conditions, label and end date to change
+  (`watch.update`, at most 90 days after creation), **Pause** or **Resume**,
+  **Delete…** (confirmed), and up to 50 notices, each with one line per
+  delivery: `Push delivered to 2 devices`, `Push off`, `No push device -
+  in-app only`, `Held for quiet hours`, `Push not sent: resolved before
+  delivery`, `Push failed: <error>`. Opening or closing it keeps focus in
+  the dialog's hands rather than the category heading.
+- **Creating**: **Watch…** in a live run's menu and the palette
+  (`runCommands`, when the server has `watch.create`), **Watch…** in a live
+  swarm's menu, and **Watch PR** beside a run's pull request status open
+  `WatchDialog` (`src/components/palette/watch-dialog.tsx`). It pre-checks
+  the target's default conditions, describes each (Finished means the agent
+  reported done; Merged means GitHub merged the PR), and sends one
+  idempotency key per open form. The success toast is the server's receipt
+  with **View watch**; a refusal stays in the form verbatim.
+- **Watched runs**: the run header's state line shows **Watching** (or
+  **Watch paused**, **Watch failing**) while the member has a live watch on
+  the run; it opens the watch. A watched pull request shows **Watching PR**.
+- **Live**: `watch.changed` reaches only the watch's owner. The dashboard
+  re-reads `watch.get` (`src/store/watch-notice.ts`); when the event names a
+  new notice and is not a replayed catch-up (older than 30 seconds on the
+  server's clock), it toasts the notice's title and body with **Open**,
+  which follows the notice's link: a dashboard link in place, a GitHub link
+  in a new tab.
+- **Desktop app**: `desktop/notify.js` shows each new watch notice natively
+  and opens its link on click. A needs-you notice on a run shares the run's
+  five-second duplicate window with `run.status`, so one need shows once.
+
 ### Push notifications
 
 `src/routes/settings/notifications.tsx` is one row over `src/lib/push.ts`.
@@ -6274,6 +6329,7 @@ failure and on a `run.review` event that sets `later` or `accepted`. A
 review `ready` gets one silent, low-urgency notice per entry into `ready`,
 counted in the badge; an unseen failure of a run that already ended gets
 one outside it.
+It also shows watch notices; see [Watches](#watches).
 `cd desktop && node --test` runs `desktop/notify.test.js`; `make
 test-scripts` includes it.
 Clicking it pushes `?run=<id>` onto the page's history and dispatches
@@ -7311,6 +7367,9 @@ links in the Session view, `paths.test.ts` what reads as a path, and
 Notifications row, `src/lib/push.test.ts` the browser side behind it
 (permission before anything else, the server key, the activity report), and
 `src/sw.test.ts` runs `public/sw.js` against a stand-in for the worker scope.
+`src/routes/settings/watches.test.tsx` covers the Watches list, detail,
+delivery lines, pause, resume and delete, the Watch form, the watch
+notification preferences, the phone sheet and `watch.changed` toasts.
 `src/components/workspace-environment.test.tsx` covers the workspace
 Environment section: the change a save sends, replacing a secret, the `.env`
 preview, rows that cannot be saved, egress control, the server's refusal and

@@ -2312,7 +2312,8 @@ export interface WatchObserved {
 
 export type WatchDeliveryChannel = 'push' | 'desktop' | 'in_app'
 
-export type WatchDeliveryStatus = 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'failed'
+/** cleared: a held push dropped because its need was resolved before it could be sent. */
+export type WatchDeliveryStatus = 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'failed' | 'cleared'
 
 export interface WatchDelivery {
   channel: WatchDeliveryChannel
