@@ -29,6 +29,7 @@ that runs coding agents for you and your team. If you are new, start with the
 | Standard, Enhanced and Background mode | How a run shows its agent. Standard is the agent's own terminal, Enhanced shows its messages, tool calls and approvals as dashboard controls, and Background runs the task once with no interaction. | [enhanced-runs.md](enhanced-runs.md) |
 | Swarm | One objective handed to a group of runs: an integrator run splits it into tasks and launches a worker run for each. `aether-internal` calls a swarm a mission. | [teams.md](teams.md#swarms) |
 | Team memory | Short notes per workspace that runs of any agent search and add to. Collaborators and admins pin the notes every new run starts with. | [memory.md](memory.md) |
+| Watch | A subscription you keep on a run or a swarm. The server tells you, in the dashboard and on your Web Push devices, when it needs you or finishes, even with the dashboard closed. | [watches.md](watches.md) |
 | Assistant | A chat panel in the dashboard that answers questions and acts for you, such as launching a run. It is your own Claude Code or Codex, running in Enhanced mode in your environment. | [assistant.md](assistant.md) |
 
 ```mermaid
@@ -77,18 +78,20 @@ Daily use:
     in Slack, including on Android.
 13. [Insights](insights.md): when you want statistics on runs, time, cost and
     pull requests.
+14. [Watches](watches.md): when you want to be told that a run or swarm needs
+    you or finished, after you close the dashboard.
 
 Reference:
 
-14. [Install](install.md): every platform, the desktop and Android apps,
+15. [Install](install.md): every platform, the desktop and Android apps,
     upgrades and removal.
-15. [Security](security.md): what the container boundary protects and what it
+16. [Security](security.md): what the container boundary protects and what it
     does not.
-16. [Troubleshooting](failure-handling.md): reboots, full disks, stalled runs
+17. [Troubleshooting](failure-handling.md): reboots, full disks, stalled runs
     and dropped connections, and the server settings that tune them.
-17. [Privacy](privacy.md): what the Android app, the dashboard and the
+18. [Privacy](privacy.md): what the Android app, the dashboard and the
     project's edge store and send.
-18. [Notices](notices.md): the licence and what the release artifacts bundle.
+19. [Notices](notices.md): the licence and what the release artifacts bundle.
 
 ## Extend Aether
 
