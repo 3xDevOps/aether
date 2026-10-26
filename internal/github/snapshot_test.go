@@ -45,7 +45,9 @@ func (f *fakeGitHub) serve(r *http.Request) (*http.Response, error) {
 	if r.Header.Get("If-None-Match") == etag {
 		f.notMod++
 		response := jsonResponse(http.StatusNotModified, "")
-		response.Header.Set("ETag", etag)
+		if !f.omitETag {
+			response.Header.Set("ETag", etag)
+		}
 		return response, nil
 	}
 	response := jsonResponse(http.StatusOK, body)
@@ -206,6 +208,32 @@ func TestPullRequestSnapshotFindsPageAfterUnchangedFullPage(t *testing.T) {
 	}
 }
 
+func TestPullRequestSnapshotPollsExactlyMaxItemsAgain(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	reviews := make([]string, 0, pageSize)
+	for page := 1; page <= maxPages; page++ {
+		reviews = reviews[:0]
+		for i := range pageSize {
+			reviews = append(reviews, `{"id":`+strconv.Itoa(page*1000+i)+`,"state":"COMMENTED","html_url":"https://github.com/acme/app/pull/7","user":{"login":"mona"}}`)
+		}
+		key := pullPath + "/reviews?per_page=100&page=" + strconv.Itoa(page)
+		f.bodies[key] = "[" + strings.Join(reviews, ",") + "]"
+		if page < maxPages {
+			f.links[key] = `<https://api.github.com/x>; rel="next"`
+		}
+	}
+	s := snapshotService(t, f)
+	first, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	if err != nil || len(first.Reviews) != maxPages*pageSize {
+		t.Fatalf("first poll: %d %v", len(first.Reviews), err)
+	}
+	second, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, &first)
+	if err != nil || len(second.Reviews) != maxPages*pageSize {
+		t.Fatalf("unchanged poll of exactly %d reviews: %d %v", maxPages*pageSize, len(second.Reviews), err)
+	}
+}
+
 func TestPullRequestSnapshotDropsETagWhenFreshBodyHasNone(t *testing.T) {
 	f := newFakeGitHub(t)
 	standardPR(f)
@@ -302,16 +330,30 @@ func TestPullRequestSnapshotRerunChangesKey(t *testing.T) {
 	}
 }
 
-func TestPullRequestSnapshotCountsOnlyNewestRunPerName(t *testing.T) {
+func inSuite(run string, suite int64) string {
+	return strings.Replace(run, `"check_suite":{"id":9}`, `"check_suite":{"id":`+strconv.FormatInt(suite, 10)+`}`, 1)
+}
+
+func TestPullRequestSnapshotDropsSupersededRuns(t *testing.T) {
 	f := newFakeGitHub(t)
 	standardPR(f)
-	f.bodies[checksPage1] = checkRunsBody(checkRun(1, "build", "completed", "success"), checkRun(2, "test", "completed", "cancelled"), checkRun(4, "test", "completed", "success"))
-	snap, err := snapshotService(t, f).PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
-	if err != nil {
-		t.Fatal(err)
+	s := snapshotService(t, f)
+	checks := func() Checks {
+		t.Helper()
+		snap, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return snap.Checks()
 	}
-	if checks := snap.Checks(); !checks.Final || checks.Passed != 2 || checks.Failed != 0 {
-		t.Fatalf("superseded cancelled run counted: %+v", checks)
+
+	f.bodies[checksPage1] = checkRunsBody(checkRun(1, "build", "completed", "success"), checkRun(2, "test", "completed", "cancelled"), inSuite(checkRun(4, "test", "completed", "success"), 10))
+	if c := checks(); !c.Final || c.Passed != 2 || c.Failed != 0 {
+		t.Fatalf("run cancelled by concurrency counted: %+v", c)
+	}
+	f.bodies[checksPage1] = checkRunsBody(checkRun(2, "test", "completed", "failure"), inSuite(checkRun(4, "test", "completed", "success"), 10))
+	if c := checks(); c.Failed != 1 || c.Passed != 1 {
+		t.Fatalf("another workflow's job with the same name hid a failure: %+v", c)
 	}
 }
 

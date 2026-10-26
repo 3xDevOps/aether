@@ -275,7 +275,8 @@ func paginate[R, T any](ctx context.Context, s *Service, token, base string, pre
 			reusable = reusable && offset+old.Count <= len(cached)
 		}
 		etag := ""
-		if reusable {
+		// A 304 on the last allowed full page cannot say whether more follow.
+		if reusable && (!old.Full || number < maxPages) {
 			etag = old.ETag
 		}
 		var record R
@@ -358,24 +359,23 @@ type Checks struct {
 	Key string `json:"key"`
 }
 
-// Checks counts only the newest check run per app and name, so a run that
-// concurrency cancelled in favor of a newer one does not fail the commit. An
+// Checks drops a check run when a newer one with the same app and name is in
+// the same suite (a rerun) or the older one was cancelled (superseded by
+// concurrency); separate workflows can share a job name. An
 // incomplete suite with no pending run counts as one pending check when it
 // belongs to GitHub Actions or already has runs; other apps can leave a
 // zero-run suite queued forever.
 func (s Snapshot) Checks() Checks {
 	var c Checks
-	type runName struct{ app, name string }
-	newest := map[runName]CheckRun{}
-	for _, run := range s.CheckRuns {
-		key := runName{run.App, run.Name}
-		if seen, ok := newest[key]; !ok || run.ID > seen.ID {
-			newest[key] = run
-		}
-	}
-	ids := make([]string, 0, len(newest)+len(s.Statuses))
+	current := slices.DeleteFunc(slices.Clone(s.CheckRuns), func(run CheckRun) bool {
+		return slices.ContainsFunc(s.CheckRuns, func(newer CheckRun) bool {
+			return newer.ID > run.ID && newer.App == run.App && newer.Name == run.Name &&
+				(newer.SuiteID == run.SuiteID || run.Conclusion == "cancelled")
+		})
+	})
+	ids := make([]string, 0, len(current)+len(s.Statuses))
 	running := map[int64]bool{}
-	for _, run := range newest {
+	for _, run := range current {
 		ids = append(ids, "c"+strconv.FormatInt(run.ID, 10)+"="+run.Conclusion)
 		switch {
 		case run.Status != "completed":

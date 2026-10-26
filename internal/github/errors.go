@@ -46,8 +46,8 @@ func (e *APIError) Is(target error) bool {
 }
 
 // RateLimitError is a primary or secondary GitHub rate limit. RetryAt comes
-// from Retry-After, then X-RateLimit-Reset; GitHub asks for at least one
-// minute when a secondary limit carries neither.
+// from Retry-After, then X-RateLimit-Reset when X-RateLimit-Remaining is 0;
+// otherwise it is one minute, the least GitHub asks for.
 type RateLimitError struct {
 	Status  int
 	Message string
