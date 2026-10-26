@@ -160,8 +160,8 @@ type EventLog interface {
 	// means no upper bound.
 	Read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64, limit int) ([]Event, error)
 	// ReadBefore returns up to limit stored events matching f with
-	// Seq < beforeSeq, ordered by Seq descending.
-	ReadBefore(ctx context.Context, f Filter, beforeSeq uint64, limit int) ([]Event, error)
+	// afterSeq < Seq < beforeSeq, ordered by Seq descending.
+	ReadBefore(ctx context.Context, f Filter, afterSeq, beforeSeq uint64, limit int) ([]Event, error)
 	// LastSeq returns the highest stored sequence number, zero when empty.
 	LastSeq(ctx context.Context) (uint64, error)
 	// Close releases the log's resources.

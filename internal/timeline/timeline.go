@@ -26,6 +26,12 @@ const (
 	scanBudget = 20
 	// minBatch keeps small pages from reading the log one row at a time.
 	minBatch = 64
+	// scanWindow bounds the seq span one read covers when no workspace
+	// narrows it: only the seq key bounds such a read, so SQLite examines
+	// every row in the span however few match. A page reads at most
+	// scanWindows of them and reports More when it stops there.
+	scanWindow  = 10000
+	scanWindows = 8
 )
 
 // detailTypes are the firehoses the feed leaves out by default: diff
@@ -102,8 +108,13 @@ func (r *Reader) Page(ctx context.Context, f Filter, afterSeq uint64, limit int)
 	batch := max(limit, minBatch)
 	out := make([]events.Event, 0, limit)
 	scanned := 0
-	for len(out) < limit && cursor < head && scanned < limit*scanBudget {
-		got, rerr := r.log.Read(ctx, logFilter, cursor, head, batch)
+	windowed := f.Workspace == ""
+	for reads := 0; len(out) < limit && cursor < head && scanned < limit*scanBudget && (!windowed || reads < scanWindows); reads++ {
+		upto := head
+		if windowed {
+			upto = min(head, cursor+scanWindow)
+		}
+		got, rerr := r.log.Read(ctx, logFilter, cursor, upto, batch)
 		if rerr != nil {
 			return Page{}, fmt.Errorf("timeline: read workspace %s history: %w", f.Workspace, rerr)
 		}
@@ -121,10 +132,10 @@ func (r *Reader) Page(ctx context.Context, f Filter, afterSeq uint64, limit int)
 			}
 		}
 		// A short batch fully consumed means the log holds nothing else
-		// matching up to head: skip the cursor there so callers are not
+		// matching up to upto: skip the cursor there so callers are not
 		// asked to page over the gap event by event.
 		if consumed == len(got) && len(got) < batch {
-			cursor = head
+			cursor = upto
 		}
 	}
 	return Page{Events: out, NextSeq: cursor, More: cursor < head, Head: head}, nil
@@ -148,8 +159,13 @@ func (r *Reader) Before(ctx context.Context, f Filter, beforeSeq uint64, limit i
 	batch := max(limit, minBatch)
 	out := make([]events.Event, 0, limit)
 	scanned := 0
-	for len(out) < limit && cursor > 1 && scanned < limit*scanBudget {
-		got, rerr := r.log.ReadBefore(ctx, logFilter, cursor, batch)
+	windowed := f.Workspace == ""
+	for reads := 0; len(out) < limit && cursor > 1 && scanned < limit*scanBudget && (!windowed || reads < scanWindows); reads++ {
+		var after uint64
+		if windowed && cursor > scanWindow {
+			after = cursor - scanWindow
+		}
+		got, rerr := r.log.ReadBefore(ctx, logFilter, after, cursor, batch)
 		if rerr != nil {
 			return Page{}, fmt.Errorf("timeline: read workspace %s history: %w", f.Workspace, rerr)
 		}
@@ -167,7 +183,7 @@ func (r *Reader) Before(ctx context.Context, f Filter, beforeSeq uint64, limit i
 			}
 		}
 		if consumed == len(got) && len(got) < batch {
-			cursor = 0
+			cursor = after + 1
 		}
 	}
 	slices.Reverse(out)

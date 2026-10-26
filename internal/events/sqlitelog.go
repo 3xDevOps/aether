@@ -131,11 +131,11 @@ func (l *SQLiteLog) Read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64
 }
 
 // ReadBefore implements EventLog.
-func (l *SQLiteLog) ReadBefore(ctx context.Context, f Filter, beforeSeq uint64, limit int) ([]Event, error) {
-	if beforeSeq <= 1 {
+func (l *SQLiteLog) ReadBefore(ctx context.Context, f Filter, afterSeq, beforeSeq uint64, limit int) ([]Event, error) {
+	if beforeSeq <= afterSeq+1 {
 		return nil, nil
 	}
-	return l.read(ctx, f, 0, beforeSeq-1, limit, "DESC")
+	return l.read(ctx, f, afterSeq, beforeSeq-1, limit, "DESC")
 }
 
 func (l *SQLiteLog) read(ctx context.Context, f Filter, afterSeq, uptoSeq uint64, limit int, order string) ([]Event, error) {
