@@ -15,6 +15,9 @@ const standing = new Map()
 // Watch notices shown for a run's need, with when, so resolve() closes them
 // with the need whichever path announced it first.
 const watchShown = new Map()
+// Watch finished notices per run, closed once the member sees the outcome or
+// puts it off.
+const finishedShown = new Map()
 // The need key last announced per run. It outlives a reconnect, so a need
 // already announced stays quiet when its run's next event arrives.
 const announced = new Map()
@@ -32,14 +35,17 @@ let openRun = () => {}
 let openLink = () => {}
 let selfID = null
 
-// When each run last raised a needs-you notification, by either path. The
-// same transition can reach us as run.status and as assistant.notice kind
-// needs_attention; other notice kinds are different events.
+// When each run last raised a needs-you notification, by any path, and
+// under `<run> done` a finished one. The same transition can reach us as
+// run.status, as assistant.notice kind needs_attention and as a watch
+// notice; other notice kinds are different events.
 const lastShown = new Map()
 const duplicateWindowMs = 5000
 
-function recentlyShown(runId) {
-  return Date.now() - (lastShown.get(runId) || 0) < duplicateWindowMs
+function recentlyShown(slot) {
+  const duplicate = Date.now() - (lastShown.get(slot) || 0) < duplicateWindowMs
+  lastShown.set(slot, Date.now())
+  return duplicate
 }
 
 /**
@@ -58,6 +64,7 @@ function start(addr, url, onOpen, onLink = () => {}) {
   selfID = null
   lastShown.clear()
   watchShown.clear()
+  finishedShown.clear()
   announced.clear()
   seqs.clear()
 
@@ -123,6 +130,7 @@ function connect(wsURL) {
       updateBadge()
     }
     watchShown.clear()
+  finishedShown.clear()
     reading.clear()
     scheduleReconnect(wsURL)
   }
@@ -163,11 +171,7 @@ async function showNotice(p) {
     console.log(`notify: cannot tell who this member is: ${err.message}`)
     return
   }
-  if (p.kind === 'needs_attention') {
-    const duplicate = recentlyShown(p.run_id)
-    lastShown.set(p.run_id, Date.now())
-    if (duplicate) return
-  }
+  if (p.kind === 'needs_attention' && recentlyShown(p.run_id)) return
   const notification = new Notification({ title: p.title || p.run_id, body: p.body || '' })
   notification.on('click', () => openRun(p.run_id))
   notification.show()
@@ -175,8 +179,8 @@ async function showNotice(p) {
 
 // watch.changed names a new notice by id; only its owner hears it. A run's
 // needs-you or finished notice shares the run's duplicate window, so the
-// need or the success ready for review reaching us by run.status as well
-// shows once, and closes with that need.
+// same need or outcome reaching us by run.status as well shows once. A need
+// closes when it is answered, a finish when its outcome is seen or put off.
 async function showWatchNotice(p) {
   if (!p.notification_id || !Notification.isSupported()) return
   try {
@@ -189,18 +193,20 @@ async function showWatchNotice(p) {
   const notice = got && (got.notifications || []).find((n) => n.id === p.notification_id)
   if (!notice) return
   const target = got.watch.target || {}
-  const runId = target.kind === 'run' && (notice.condition === 'needs_you' || notice.condition === 'finished') ? target.run_id : ''
-  if (runId) {
-    const duplicate = recentlyShown(runId)
-    lastShown.set(runId, Date.now())
-    if (duplicate) return
-  }
+  const runId = target.kind === 'run' ? target.run_id : ''
+  const need = runId && notice.condition === 'needs_you'
+  const finished = runId && notice.condition === 'finished'
+  if ((need && recentlyShown(runId)) || (finished && recentlyShown(`${runId} done`))) return
   const notification = new Notification({ title: clip(notice.title || 'Watch', 120), body: clip(notice.body || '', 240) })
   notification.on('click', () => openLink(notice.link || got.watch.link || ''))
   notification.show()
-  if (runId && (notice.condition === 'needs_you' || standing.has(runId))) {
-    watchShown.set(runId, [...(watchShown.get(runId) || []), { notification, at: Date.now() }])
-  }
+  if (need) watchShown.set(runId, [...(watchShown.get(runId) || []), { notification, at: Date.now() }])
+  if (finished) finishedShown.set(runId, [...(finishedShown.get(runId) || []), notification])
+}
+
+function closeFinished(runId) {
+  for (const notification of finishedShown.get(runId) || []) notification.close()
+  finishedShown.delete(runId)
 }
 
 async function readWatch(watchId) {
@@ -246,6 +252,7 @@ function onStatus(runId, p) {
 }
 
 function onOutcomeSeen(runId) {
+  closeFinished(runId)
   const entry = standing.get(runId)
   if (entry && !needsAttention({ ...entry.run, outcome_unseen: false })) resolve(runId)
 }
@@ -256,6 +263,7 @@ function onReview(runId, p) {
   if (p.status_seq > 0 && p.status_seq <= (seqs.get(runId) || 0)) return
   if (p.status_seq > 0) seqs.set(runId, p.status_seq)
   reading.delete(runId)
+  if (p.review !== 'ready') closeFinished(runId)
   const entry = standing.get(runId)
   if (entry && !needsAttention({ ...entry.run, review: p.review || '' })) resolve(runId)
 }
@@ -296,11 +304,8 @@ function announce(runId, run) {
   }
   if (announced.get(runId) === key) return
   announced.set(runId, key)
-  if (attention) {
-    const duplicate = recentlyShown(runId)
-    lastShown.set(runId, Date.now())
-    if (duplicate) return
-  }
+  // A success ready for review or an unseen failure is the watch's finished notice too.
+  if (attention && recentlyShown(run.review === 'ready' || run.state === 'failed' ? `${runId} done` : runId)) return
   if (!Notification.isSupported()) return
   const notification = new Notification({
     title: titleOf(run),
@@ -467,6 +472,7 @@ function stop() {
   }
   standing.clear()
   watchShown.clear()
+  finishedShown.clear()
   reading.clear()
   updateBadge()
 }

@@ -366,3 +366,26 @@ test('a watched need shown after its run.status closes with it', async () => {
   assert.ok(shown.every((n) => n.closed))
   mock.restoreAll()
 })
+
+test('a finish right after a need still shows, and stays until its outcome is seen', async () => {
+  const run = lead('r17')
+  await status(run, { status: 'needs-attention', state: 'needs-you', reason: 'needs input: pick a database' })
+  watchWith('wat-7', { kind: 'run', run_id: 'r17' }, { condition: 'finished', title: 'Stopped', link: '/?run=r17' })
+  await watchChanged({ watch_id: 'wat-7', member_id: 'me', notification_id: 'not-1' })
+  assert.equal(shown.length, 2)
+  await status(run, { status: 'killed', state: 'finished', reason: 'killed' })
+  assert.ok(shown[0].closed, 'the need ended')
+  assert.ok(!shown[1].closed, 'the finish stays')
+  socket.onmessage({ data: JSON.stringify({ type: 'run.outcome_seen', run_id: 'r17', payload: {} }) })
+  assert.ok(shown[1].closed)
+})
+
+test('a watched finish shown before its run.status closes when the success is put off', async () => {
+  const run = lead('r18')
+  watchWith('wat-8', { kind: 'run', run_id: 'r18' }, { condition: 'finished', title: 'Agent reported done', link: '/?run=r18' })
+  await watchChanged({ watch_id: 'wat-8', member_id: 'me', notification_id: 'not-1' })
+  await status(run, { status: 'needs-attention', state: 'finished', reason: 'agent reported success', outcome_unseen: true, review: 'ready' })
+  assert.equal(shown.length, 1)
+  await review(run, 'later')
+  assert.ok(shown[0].closed)
+})
