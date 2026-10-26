@@ -31,12 +31,12 @@ func (s *Server) Local(member domain.MemberID) *Local {
 }
 
 // ConnectorLocal is Local for connector connectorID, which client (such as
-// ChatGPT) holds under grant: its calls are judged by the grant's device,
-// as a relayed connection on that device is, and audit records name the
-// connector.
-func (s *Server) ConnectorLocal(grant ConnectorGrant, connectorID, client string) *Local {
+// ChatGPT) holds under grant with scopes: its calls are judged by the
+// grant's device, as a relayed connection on that device is, each method
+// needs its scope, and audit records name the connector.
+func (s *Server) ConnectorLocal(grant ConnectorGrant, connectorID, client string, scopes []string) *Local {
 	return &Local{s: s, member: grant.Member, id: &connIdentity{member: grant.Member, device: grant.Device,
-		connector: connectorID, connectorClient: client, edgeSignIn: grant.Subject != ""}}
+		connector: connectorID, connectorClient: client, scopes: scopes, edgeSignIn: grant.Subject != ""}}
 }
 
 // Call applies the SSH control channel's request payload budget, which the
@@ -148,6 +148,9 @@ func (l *Local) Terminal(ctx context.Context, req protocol.TerminalRequest) (*Lo
 // returned stream carries the bytes after it. Server Close ends and waits for
 // the handler like a channel handler.
 func (l *Local) open(ctx context.Context, header, ack any, serve func(context.Context, subsystemConn)) (*localStream, error) {
+	if l.id != nil && l.id.connector != "" {
+		return nil, fmt.Errorf("sshd: %s calls methods only and opens no stream", ConnectorLabel(l.id.connectorClient, l.id.connector))
+	}
 	line, err := json.Marshal(header)
 	if err != nil {
 		return nil, err
