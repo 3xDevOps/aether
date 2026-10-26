@@ -75,13 +75,13 @@ func TestConnectorHandoff(t *testing.T) {
 
 	text, _, failed := try(t, cs, "aether_handoff_run", map[string]any{"run_id": "run-1", "to_member_id": "mem-3"})
 	_, teammates, _ := strings.Cut(text, "teammates: ")
-	if !failed || !strings.Contains(teammates, `"id":"mem-1","name":"Ada"`) || strings.Contains(teammates, "mem-3") || strings.Contains(teammates, "ada@example.com") {
-		t.Fatalf("handoff to a pending member = %q, want the teammates without emails or pending members", text)
+	if !failed || !strings.Contains(teammates, `{"id":"mem-1","role":"admin"}`) || strings.Contains(teammates, "mem-3") || strings.Contains(text, "Ada") || strings.Contains(text, "ada@example.com") {
+		t.Fatalf("handoff to a pending member = %q, want teammates' ids and roles only", text)
 	}
 	if len(called(f, protocol.MethodRunHandoff)) != 0 {
 		t.Fatal("an unknown teammate reached run.handoff")
 	}
-	if text, _, failed = try(t, cs, "aether_handoff_run", map[string]any{"run_id": "run-1", "to_member_id": "mem-2"}); !failed || !strings.Contains(text, "viewers cannot own runs") {
+	if text, _, failed = try(t, cs, "aether_handoff_run", map[string]any{"run_id": "run-1", "to_member_id": "grace"}); !failed || !strings.Contains(text, "viewers cannot own runs") {
 		t.Fatalf("handoff to a viewer = %q, want the server's refusal", text)
 	}
 	if got := called(f, protocol.MethodRunHandoff); len(got) != 1 || got[0].scope != ScopeControl || got[0].params != `{"run_id":"run-1","to_member_id":"mem-2"}` {
@@ -104,7 +104,7 @@ func TestConnectorSwarmManage(t *testing.T) {
 	f.answers[protocol.MethodMissionWorkerRelease] = returns(protocol.MissionWorkerReleaseResult{RunID: "run-7", TakeoverGeneration: 5})
 	archived := "2026-10-26T10:00:00Z"
 	f.answers[protocol.MethodMissionArchive] = returns(protocol.MissionArchiveResult{Mission: protocol.Mission{ID: "mis-1", Phase: "completed", ArchivedAt: &archived}})
-	cs := connectorSession(t, f, ScopeWrite)
+	cs := connectorSession(t, f, ScopeControl)
 
 	text, out := run(t, cs, "aether_swarm_manage", map[string]any{"swarm_id": "swarm:mis-1", "action": "release_worker", "run_id": "run-7"})
 	if text != "Released control of worker run run-7; the integrator steers it again." || out["held"] != false {
@@ -143,7 +143,10 @@ func TestConnectorReplaceIntegrator(t *testing.T) {
 	f.answers[protocol.MethodMissionReplaceIntegrator] = returns(protocol.MissionReplaceIntegratorResult{Mission: replaced, RunID: "run-new"})
 	cs := connectorSession(t, f, ScopeControl)
 
-	text, out := run(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1"})
+	if _, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1"}); !failed {
+		t.Fatal("a replacement without expected_generation was accepted")
+	}
+	text, out := run(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3})
 	if text != "Replaced swarm mis-1's integrator with claude (acp); its run is run-new." || out["integrator_run_id"] != "run-new" || out["account_member_id"] != "mem-2" {
 		t.Fatalf("replace = %q %v", text, out)
 	}
@@ -152,36 +155,33 @@ func TestConnectorReplaceIntegrator(t *testing.T) {
 	if err := json.Unmarshal([]byte(first.params), &p); err != nil || p.ExpectedGeneration != 3 || p.IdempotencyKey == "" || p.Integrator.Harness != "claude" {
 		t.Fatalf("replace sent %s", first.params)
 	}
-	// A keyless retry at the same generation reuses the key, so the server
-	// returns the first replacement.
+	// A keyless retry at the same expected generation reuses the key, so the
+	// server returns the first replacement, even once the swarm moved past it.
+	f.answers[protocol.MethodMissionShow] = returns(protocol.MissionShowResult{Mission: replaced})
 	f.calls = nil
-	run(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1"})
+	run(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3})
 	if again := f.acted(); again.params != first.params {
 		t.Fatalf("retry sent %s, want %s", again.params, first.params)
 	}
 	// Another agent stays on the integrator's account where it offers it.
 	f.calls = nil
-	run(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "harness": "codex", "mode": "tui"})
+	run(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3, "harness": "codex", "mode": "tui"})
 	if got := f.acted(); !strings.Contains(got.params, `"account_member_id":"mem-2","harness":"codex","mode":"tui"`) {
 		t.Fatalf("codex replacement sent %s", got.params)
 	}
-	if msg, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "harness": "gemini"}); !failed || !strings.Contains(msg, "its agents are claude, codex") {
+	if msg, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3, "harness": "gemini"}); !failed || !strings.Contains(msg, "its agents are claude, codex") {
 		t.Fatalf("an agent the swarm lacks = %q", msg)
 	}
 
-	// A generation the swarm moved past is refused before any write, and
-	// the server's own conflict passes through without a retry hint.
-	f.calls = nil
-	text, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 2})
-	if !failed || !strings.Contains(text, "at generation 3, not 2") || len(called(f, protocol.MethodMissionReplaceIntegrator)) != 0 {
-		t.Fatalf("stale generation = %q", text)
-	}
+	// A replacement made in between is the server's conflict, which says
+	// to read the swarm again rather than retry.
 	f.errs[protocol.MethodMissionReplaceIntegrator] = &protocol.Error{Code: protocol.CodeConflict, Message: "store: mission stale: expected generation 3, current 4"}
-	if text, _, failed = try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1"}); !failed || text != "store: mission stale: expected generation 3, current 4" {
+	if text, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3}); !failed ||
+		text != "store: mission stale: expected generation 3, current 4; call aether_get_swarm: the integrator was replaced since expected_generation" {
 		t.Fatalf("server conflict = %q", text)
 	}
 	f.errs[protocol.MethodMissionReplaceIntegrator] = &protocol.Error{Code: protocol.CodeUnavailable, Message: "server restarting"}
-	if text, _, failed = try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "idempotency_key": "k-1"}); !failed || !strings.Contains(text, "retry with idempotency_key k-1") {
+	if text, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3, "idempotency_key": "k-1"}); !failed || !strings.Contains(text, "retry with idempotency_key k-1") {
 		t.Fatalf("uncertain failure = %q", text)
 	}
 }
@@ -255,7 +255,7 @@ func TestConnectorPRMerge(t *testing.T) {
 	// reports blocking it.
 	text, _, failed := try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "expected_head_oid": "1234567"})
 	if !failed || !strings.Contains(text, "head moved from 1234567 to abcdef0123456789") ||
-		!strings.Contains(text, "failing checks: test failure; 1 checks pending; changes requested by grace; merge state BLOCKED") {
+		!strings.Contains(text, "GitHub reports 1 failing checks, 1 pending checks, 1 reviewers requesting changes, merge state BLOCKED") || strings.Contains(text, "grace") {
 		t.Fatalf("moved head = %q", text)
 	}
 	if len(called(f, protocol.MethodRunPRMerge)) != 0 {
@@ -276,7 +276,7 @@ func TestConnectorPRMerge(t *testing.T) {
 	// GitHub's refusal carries the blockers too.
 	f.answers[protocol.MethodRunPRMerge] = returns(protocol.RunPRMergeResult{Error: "Required status check \"test\" is failing"})
 	if text, _, failed = try(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "expected_head_oid": "abcdef0"}); !failed ||
-		!strings.Contains(text, `GitHub did not merge pull request #7: Required status check "test" is failing; GitHub reports failing checks: test failure`) {
+		!strings.Contains(text, `GitHub did not merge pull request #7: Required status check "test" is failing; GitHub reports 1 failing checks`) {
 		t.Fatalf("refused merge = %q", text)
 	}
 	// A merged pull request is reported merged, so a retry is safe.

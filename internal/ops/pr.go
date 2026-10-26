@@ -4,8 +4,6 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -17,7 +15,7 @@ type prCreateInput struct {
 	Title        string `json:"title"`
 	Body         string `json:"body"`
 	Draft        bool   `json:"draft,omitempty"`
-	ExpectedHead string `json:"expected_head,omitempty" jsonschema:"the commit the user reviewed; fails if the branch moved"`
+	ExpectedHead string `json:"expected_head,omitempty" jsonschema:"at least 7 characters of the commit the user reviewed; fails if the branch moved"`
 }
 
 type prMergeInput struct {
@@ -39,6 +37,9 @@ var prOps = []Op{
 }
 
 func prCreate(ctx context.Context, c calls, in prCreateInput) (string, any, error) {
+	if in.ExpectedHead != "" && len(in.ExpectedHead) < 7 {
+		return "", nil, invalid("expected_head takes at least 7 characters of the commit")
+	}
 	l, err := dashboardLinks(ctx, c.read)
 	if err != nil {
 		return "", nil, err
@@ -133,39 +134,39 @@ func prMerge(ctx context.Context, c calls, in prMergeInput) (string, any, error)
 	return fmt.Sprintf("Merged pull request #%d into %s.", pr.Number, pr.BaseBranch), out, nil
 }
 
-// blockers is what fb reports could block a merge: failing and pending
-// checks, reviews requesting changes and GitHub's merge state.
+// blockers counts what fb reports could block a merge. Check names and
+// reviewers are GitHub users' text, so aether_pr_status returns them under
+// untrusted and the refusal only counts them.
 func blockers(fb protocol.RunPRFeedbackResult) string {
-	var failing []string
-	pending := 0
+	failing, pending := 0, 0
 	for _, ch := range fb.Checks {
 		switch strings.ToUpper(ch.Conclusion) {
 		case "SUCCESS", "NEUTRAL", "SKIPPED":
 		case "":
 			pending++
 		default:
-			failing = append(failing, clip(ch.Name, 80)+" "+strings.ToLower(ch.Conclusion))
+			failing++
 		}
 	}
 	latest := map[string]string{}
 	for _, rv := range fb.Reviews {
 		latest[rv.Author] = rv.State
 	}
-	var changes []string
-	for _, author := range slices.Sorted(maps.Keys(latest)) {
-		if latest[author] == "CHANGES_REQUESTED" {
-			changes = append(changes, clip(author, 80))
+	changes := 0
+	for _, state := range latest {
+		if state == "CHANGES_REQUESTED" {
+			changes++
 		}
 	}
 	var parts []string
-	if len(failing) > 0 {
-		parts = append(parts, "failing checks: "+strings.Join(failing[:min(len(failing), 10)], ", "))
+	if failing > 0 {
+		parts = append(parts, fmt.Sprintf("%d failing checks", failing))
 	}
 	if pending > 0 {
-		parts = append(parts, fmt.Sprintf("%d checks pending", pending))
+		parts = append(parts, fmt.Sprintf("%d pending checks", pending))
 	}
-	if len(changes) > 0 {
-		parts = append(parts, "changes requested by "+strings.Join(changes, ", "))
+	if changes > 0 {
+		parts = append(parts, fmt.Sprintf("%d reviewers requesting changes", changes))
 	}
 	if fb.MergeStateStatus != "" && fb.MergeStateStatus != "CLEAN" {
 		parts = append(parts, "merge state "+fb.MergeStateStatus)
@@ -173,5 +174,5 @@ func blockers(fb protocol.RunPRFeedbackResult) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return "; GitHub reports " + strings.Join(parts, "; ")
+	return "; GitHub reports " + strings.Join(parts, ", ") + "; aether_pr_status names them"
 }

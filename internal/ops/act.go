@@ -21,7 +21,7 @@ type lifecycleInput struct {
 
 type handoffInput struct {
 	RunID      string `json:"run_id"`
-	ToMemberID string `json:"to_member_id" jsonschema:"the teammate's member id; an unknown one fails listing teammates"`
+	ToMemberID string `json:"to_member_id" jsonschema:"the teammate's member id, or their exact display name"`
 }
 
 type swarmManageInput struct {
@@ -32,7 +32,7 @@ type swarmManageInput struct {
 
 type replaceIntegratorInput struct {
 	SwarmID            string `json:"swarm_id"`
-	ExpectedGeneration uint64 `json:"expected_generation,omitempty" jsonschema:"integrator_generation from aether_get_swarm"`
+	ExpectedGeneration uint64 `json:"expected_generation" jsonschema:"integrator_generation from aether_get_swarm"`
 	Harness            string `json:"harness,omitempty" jsonschema:"one of the swarm's agents; default the current integrator's"`
 	Mode               string `json:"mode,omitempty"`
 	Model              string `json:"model,omitempty"`
@@ -63,14 +63,14 @@ var actOps = []Op{
 		"Use this when the user gives one of their runs to a teammate, who then owns and controls it; only the teammate can hand it back.", handoffRun).
 		hints(true, false).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodMemberList, protocol.MethodRunHandoff),
-	opOf("aether_swarm_manage", "Manage swarm", ScopeWrite, true, nextSwarms,
-		"Use this when the user releases their control of a swarm worker (release_worker, with its run_id) so the integrator steers it again, or archives or unarchives a swarm.", swarmManage).
+	opOf("aether_swarm_manage", "Manage swarm", ScopeControl, true, nextSwarms,
+		"Use this when the user releases their control of a swarm worker (release_worker, with its run_id) so the integrator steers it again, or archives a finished swarm, which closes its completed runs, or unarchives one.", swarmManage).
 		enum("action", swarmReleaseWorker, swarmArchive, swarmUnarchive).
-		hints(false, true).offer(TierConfirmed).
+		hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodMissionWorkerRelease, protocol.MethodMissionArchive, protocol.MethodMissionUnarchive),
 	opOf("aether_replace_integrator", "Replace integrator", ScopeControl, true, nextSwarms,
-		"Use this when a swarm's integrator stopped or is stuck: it starts a new integrator from the swarm's agents and the old one loses its authority. Fails if the integrator changed since expected_generation."+
-			idempotencyRule+"without one, the same replacement at the same generation is made once.", replaceIntegrator).
+		"Use this when a swarm's integrator stopped or is stuck: it starts a new integrator from the swarm's agents and the old one loses its authority. Fails if the integrator changed since expected_generation, unless this replacement made that change."+
+			idempotencyRule+"without one, the same replacement at the same expected_generation is made once.", replaceIntegrator).
 		enum("mode", "tui", "acp").hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodMissionReplaceIntegrator),
 }
@@ -134,22 +134,33 @@ func handoffRun(ctx context.Context, c calls, in handoffInput) (string, any, err
 	if err = c.read(ctx, protocol.MethodMemberList, nil, &members); err != nil {
 		return "", nil, err
 	}
-	i := slices.IndexFunc(members.Members, func(m protocol.Member) bool { return m.ID == in.ToMemberID && !m.Pending })
-	if i < 0 {
+	var matches []protocol.Member
+	for _, m := range members.Members {
+		if !m.Pending && (m.ID == in.ToMemberID || strings.EqualFold(m.DisplayName, in.ToMemberID)) {
+			matches = append(matches, m)
+		}
+	}
+	if i := slices.IndexFunc(matches, func(m protocol.Member) bool { return m.ID == in.ToMemberID }); i >= 0 {
+		matches = matches[i : i+1]
+	}
+	if len(matches) != 1 {
 		type teammate struct {
 			ID   string `json:"id"`
-			Name string `json:"name"`
 			Role string `json:"role"`
 		}
 		var list []string
 		for _, m := range members.Members[:min(len(members.Members), maxRows)] {
 			if !m.Pending {
-				list = append(list, jsonText(teammate{m.ID, clip(m.DisplayName, 80), m.Role}))
+				list = append(list, jsonText(teammate{m.ID, m.Role}))
 			}
 		}
-		return "", nil, invalid("to_member_id %q is not a teammate; teammates: %s", in.ToMemberID, strings.Join(list, ", "))
+		what := "is not a teammate"
+		if len(matches) > 1 {
+			what = "names more than one teammate"
+		}
+		return "", nil, invalid("to_member_id %s; ask the user which teammate by member id; teammates: %s", what, strings.Join(list, ", "))
 	}
-	to := members.Members[i]
+	to := matches[0]
 	l, err := dashboardLinks(ctx, c.read)
 	if err != nil {
 		return "", nil, err
@@ -232,10 +243,12 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 		return "", nil, err
 	}
 	m := shown.Mission
-	expected := cmp.Or(in.ExpectedGeneration, m.IntegratorGeneration)
-	if expected != m.IntegratorGeneration {
-		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
-			"swarm %s's integrator is at generation %d, not %d: it was replaced since; call aether_get_swarm before replacing it again", m.ID, m.IntegratorGeneration, expected)}
+	// The server answers a key it already used with that replacement before
+	// it compares generations, so a retry of a replacement that went
+	// through is not refused as stale.
+	expected := in.ExpectedGeneration
+	if expected == 0 {
+		return "", nil, invalid("expected_generation is required: integrator_generation from aether_get_swarm, now %d", m.IntegratorGeneration)
 	}
 	harness := cmp.Or(in.Harness, m.Integrator.Harness)
 	model := in.Model
@@ -270,6 +283,10 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 	var res protocol.MissionReplaceIntegratorResult
 	if err := c.act(ctx, protocol.MethodMissionReplaceIntegrator, protocol.MissionReplaceIntegratorParams{MissionID: m.ID, ExpectedGeneration: expected,
 		Integrator: choice, IdempotencyKey: key}, &res); err != nil {
+		var perr *protocol.Error
+		if errors.As(err, &perr) && perr.Code == protocol.CodeConflict {
+			return "", nil, &protocol.Error{Code: perr.Code, Data: perr.Data, Message: perr.Message + "; call aether_get_swarm: the integrator was replaced since expected_generation"}
+		}
 		return "", nil, retryable(err, key)
 	}
 	out := map[string]any{"swarm_id": m.ID, "integrator_run_id": res.RunID, "integrator_generation": res.Mission.IntegratorGeneration,

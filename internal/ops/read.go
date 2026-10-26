@@ -780,7 +780,7 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 		for _, cf := range log.Conflicts {
 			conflicts = append(conflicts, cf.Path)
 		}
-		out["base_ref"], out["ahead"], out["behind"], out["conflicts"] = log.BaseRef, log.Ahead, log.Behind, conflicts
+		out["branch"], out["base_ref"], out["ahead"], out["behind"], out["conflicts"] = cmp.Or(log.Branch, r.Branch), log.BaseRef, log.Ahead, log.Behind, conflicts
 		if log.ConflictsError != "" {
 			out["conflicts_error"] = log.ConflictsError
 		}

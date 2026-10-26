@@ -265,8 +265,9 @@ anchor, or the swarm's goal, its accountable human when that is someone else,
 and its question, saying so when the question was already answered; the
 teammate a run is handed to; the agent and account a replacement integrator
 uses; a delivery's candidate and target branch; a pull request's branch, head
-and title or repository, number, head and base; a memory note's workspace and
-text. A decline, timeout or closed session fails the call with the reason.
+and title or repository, number, head and base; a memory note's workspace, text, who
+it is for and the note it replaces; that archiving a swarm closes its
+completed runs. A decline, timeout or closed session fails the call with the reason.
 `aether_docs` reads the guides in `docs/`, which the server binary embeds.
 Without `--assistant` the bridge serves the coordination tools above,
 unchanged.

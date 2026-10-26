@@ -143,8 +143,8 @@ than `offline_access`.
 | Scope | On the page | Grants |
 | --- | --- | --- |
 | `read` | Always granted | Every read-only tool |
-| `write` | **Launch and message**, checked by default | Launching runs and swarms; messaging, pausing, resuming, relaunching, protecting and archiving runs and switching their mode; answering agents' and teammates' questions; marking runs reviewed; releasing a swarm worker and archiving swarms; adding and pinning team memory |
-| `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing runs, cancelling swarms, handing runs to teammates, replacing a swarm's integrator, deciding and delivering integration candidates, opening and merging pull requests. Text an agent wrote could talk the assistant into approving or ending work without asking you |
+| `write` | **Launch and message**, checked by default | Launching runs and swarms; messaging, pausing, resuming, relaunching, protecting and archiving runs and switching their mode; answering agents' and teammates' questions; marking runs reviewed; adding and pinning team memory |
+| `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing runs, cancelling, archiving and unarchiving swarms, releasing a swarm worker, handing runs to teammates, replacing a swarm's integrator, deciding and delivering integration candidates, opening and merging pull requests. Text an agent wrote could talk the assistant into approving or ending work without asking you |
 
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
@@ -174,12 +174,12 @@ others:
 | `aether_message_run`, `aether_answer` | Message a run; answer an agent's, the integrator's or a teammate's question | `write` |
 | `aether_pause_run`, `aether_resume_run`, `aether_mark_reviewed` | Pause or resume a run; accept a reported success, which closes the run, or put it off | `write` |
 | `aether_run_lifecycle` | Relaunch a stopped run, switch it to Standard or Enhanced, protect or unprotect it, archive or restore it | `write` |
-| `aether_swarm_manage` | Release your control of a swarm worker, archive or unarchive a swarm | `write` |
 | `aether_memory_add`, `aether_memory_pin` | Add a team memory note; pin or unpin one | `write` |
 | `aether_decide_approval` | Allow or deny a permission request, once | `control` |
 | `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | Stop a run; close it as merged or abandoned; cancel a swarm | `control` |
 | `aether_handoff_run` | Give a run to a teammate, who then owns and controls it | `control` |
 | `aether_replace_integrator` | Start a new integrator for a swarm from its agents | `control` |
+| `aether_swarm_manage` | Release your control of a swarm worker; archive a finished swarm, which closes its completed runs as merged or abandoned; unarchive one | `control` |
 | `aether_integration_decide` | Approve or reject a candidate's delivery request, or deliver an approved one to its target branch | `control` |
 | `aether_pr_create`, `aether_pr_merge` | Open a pull request from a run's pushed branch; merge it on GitHub | `control` |
 
@@ -262,22 +262,24 @@ fails on a run that is still live. `aether_handoff_run` to the run's owner,
 on a request already in the state asked for or already delivered report that
 and write nothing. `aether_pr_create` returns the run's open pull request
 instead of opening another, and `aether_pr_merge` reports a merged one as
-merged. `aether_replace_integrator` takes `expected_generation`, the
+merged. `aether_replace_integrator` requires `expected_generation`, the
 `integrator_generation` `aether_get_swarm` returns; without a key it derives
 one from the swarm, that generation and the agent, so a retry returns the
-first replacement and a replacement made in between fails with a conflict.
+first replacement even after it moved the generation, and a replacement
+someone else made in between fails with a conflict.
 `aether_memory_add` returns the existing note for a duplicate.
 
 `aether_pr_merge` takes `expected_head_oid`, the `head_oid` `aether_pr_status`
 returns, and refuses when the pull request's head has moved since, before
-asking GitHub. That refusal and GitHub's own name the failing and pending
-checks, the reviewers requesting changes and the merge state. It merges with
+asking GitHub. That refusal and GitHub's own count the failing and pending
+checks and the reviewers requesting changes, and give the merge state;
+`aether_pr_status` names them under `untrusted`. It merges with
 `squash` unless `method` says `merge` or `rebase`, and only into the base
 branch it saw. `aether_pr_create` opens the pull request from the run's
 current branch into the workspace's base branch on its source repository, as
 the dashboard proposes; the branch must be pushed. `aether_handoff_run` takes
-the teammate's member id; an unknown one fails with the teammates' ids, names
-and roles, and the server refuses a viewer. `aether_run_lifecycle`'s mode
+the teammate's member id or exact display name; an unknown or ambiguous one
+fails with the teammates' ids and roles, and the server refuses a viewer. `aether_run_lifecycle`'s mode
 switch holds no control lease, so it fails while a member controls the run in
 the dashboard. Text a pull request, agent or note carries never authorizes
 anything: these tools act only on what the arguments name.

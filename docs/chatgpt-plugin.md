@@ -103,7 +103,7 @@ reads GitHub.
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
 | `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | no | yes | no | Ends runs on the user's server |
 | `aether_run_lifecycle` | no | no | yes | Every action has an inverse; a relaunched or switched agent goes on working |
-| `aether_swarm_manage` | no | no | yes | Archive has unarchive; a released worker goes on working under its integrator |
+| `aether_swarm_manage` | no | yes | yes | Archiving closes the swarm's completed runs; a released worker goes on working under its integrator |
 | `aether_handoff_run` | no | yes | no | Only the teammate can hand the run back |
 | `aether_replace_integrator` | no | yes | yes | The old integrator loses its authority; the new one can push and open PRs |
 | `aether_integration_decide` | no | yes | yes | A delivered candidate moves a branch or publishes a proposal ref |
@@ -181,7 +181,7 @@ The facts a privacy policy for the plugin must state, from the code.
 
 **Collected from ChatGPT.** Tool arguments: workspace, run, swarm, candidate
 and note ids, task and message text, answers, pull request titles and bodies,
-team memory note text and cited paths, a teammate's member id for a handoff,
+team memory note text and cited paths, a teammate's member id or display name for a handoff,
 and optional idempotency keys. The OAuth exchange:
 ChatGPT's client id URL (only `chatgpt.com` and `claude.ai` hosts are
 accepted), its `client_name` and redirect host. Nothing in `_meta`, no
@@ -193,8 +193,8 @@ people and agents wrote: run titles, tasks and reports, agent conversations
 and terminal output, diffs, commit subjects and git author names, pull
 request reviews and comments with their GitHub usernames, swarm tasks,
 questions and messages, team memory notes with their author's name, and
-integration verification output. A handoff to an unknown member id returns
-teammates' member ids, display names and roles. No tool returns member emails
+integration verification output. A handoff to an unknown teammate returns
+teammates' member ids and roles. No tool returns member emails
 or logins. Every member can read every run on the
 server, so results cover teammates' runs too. Sizes are capped
 ([connectors.md](connectors.md#what-it-can-do)).

@@ -102,8 +102,8 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			Title: "Fix login", Draft: true},
 		protocol.MethodRunPRMerge: protocol.RunPRMergeParams{RunID: "run-1", Method: "squash", ExpectedHead: "fedcba9876543210", Repository: "acme/shop", Number: 7,
 			ExpectedBase: "main"},
-		protocol.MethodMemoryAdd:   protocol.MemoryAddParams{WorkspaceID: "ws-1", Kind: "gotcha", Text: "CI needs Docker."},
-		protocol.MethodMemoryPin:   protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "mem-1"},
+		protocol.MethodMemoryAdd:   protocol.MemoryAddParams{WorkspaceID: "ws-1", Kind: "gotcha", Text: "CI needs Docker.", Supersedes: "mem-0"},
+		protocol.MethodMemoryPin:   protocol.MemoryPinParams{WorkspaceID: "ws-1", ID: "mem-1", Scope: protocol.MemoryScopeMember},
 		protocol.MethodMemoryUnpin: protocol.MemoryUnpinParams{WorkspaceID: "ws-1", ID: "mem-1"},
 	}
 	want := map[string]string{
@@ -118,18 +118,18 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodRunModeSwitch:            `Switch run run-1 ("Fix login") to Enhanced mode, owned by Grace`,
 		protocol.MethodRunProtect:               `Protect run run-1 ("Fix login") from cleanup, owned by Grace`,
 		protocol.MethodRunArchive:               `Restore run run-1 ("Fix login") from the archive, owned by Grace`,
-		protocol.MethodRunHandoff:               `Hand run run-1 ("Fix login"), owned by Grace, to Ada, who then owns it`,
+		protocol.MethodRunHandoff:               `Hand run run-1 ("Fix login"), owned by Grace, to Ada (m1), who then owns it`,
 		protocol.MethodMissionWorkerRelease:     `Release your control of worker run run-1 ("Fix login"), owned by Grace`,
-		protocol.MethodMissionArchive:           `Archive swarm mis-1 ("Ship the billing page"), owned by Grace`,
+		protocol.MethodMissionArchive:           `Archive, closing its completed runs, swarm mis-1 ("Ship the billing page"), owned by Grace`,
 		protocol.MethodMissionUnarchive:         `Unarchive swarm mis-1 ("Ship the billing page"), owned by Grace`,
-		protocol.MethodMissionReplaceIntegrator: `Replace integrator run run-9 of swarm mis-1 ("Ship the billing page"), owned by Grace, with codex (acp) on Grace's account`,
+		protocol.MethodMissionReplaceIntegrator: `Replace integrator run run-9 of swarm mis-1 ("Ship the billing page"), owned by Grace, with codex (acp) on Grace's (m2) account`,
 		protocol.MethodIntegrationDecide:        `Approve delivering candidate cand-1 to refs/heads/main for swarm mis-1 ("Ship the billing page"), owned by Grace`,
 		protocol.MethodIntegrationDeliver:       `Deliver candidate cand-1 to refs/heads/main for swarm mis-1 ("Ship the billing page"), owned by Grace`,
-		protocol.MethodRunPRCreate:              `Open a draft pull request from run run-1 ("Fix login"), owned by Grace, branch fix-login at 0123456: "Fix login"`,
+		protocol.MethodRunPRCreate:              `Open a draft pull request from run run-1 ("Fix login"), owned by Grace, branch fix-login at 0123456, into the workspace's base branch: "Fix login"`,
 		protocol.MethodRunPRMerge:               `Merge (squash) acme/shop#7 of run run-1 ("Fix login"), owned by Grace, at fedcba9 into main`,
-		protocol.MethodMemoryAdd:                `Remember a gotcha for everyone in shop: "CI needs Docker."`,
-		protocol.MethodMemoryPin:                `Pin for every new run's brief note mem-1 (gotcha): "CI needs Docker"`,
-		protocol.MethodMemoryUnpin:              `Unpin note mem-1 (gotcha): "CI needs Docker"`,
+		protocol.MethodMemoryAdd:                `Remember a gotcha in shop for everyone: "CI needs Docker.", replacing note mem-0`,
+		protocol.MethodMemoryPin:                `Pin, into new runs' briefs, note mem-1 (gotcha) for you only: "CI needs Docker"`,
+		protocol.MethodMemoryUnpin:              `Unpin note mem-1 (gotcha) for everyone: "CI needs Docker"`,
 	}
 	var got protocol.AssistantConfirmation
 	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {

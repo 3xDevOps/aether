@@ -36,7 +36,7 @@ var actSummaries = map[string]summarizer{
 		return "Release your control of worker %s"
 	}),
 	protocol.MethodRunHandoff:               (*Server).summarizeHandoff,
-	protocol.MethodMissionArchive:           swarmSummary("Archive"),
+	protocol.MethodMissionArchive:           swarmSummary("Archive, closing its completed runs,"),
 	protocol.MethodMissionUnarchive:         swarmSummary("Unarchive"),
 	protocol.MethodMissionReplaceIntegrator: (*Server).summarizeReplaceIntegrator,
 	protocol.MethodIntegrationDecide:        (*Server).summarizeDelivery,
@@ -44,7 +44,7 @@ var actSummaries = map[string]summarizer{
 	protocol.MethodRunPRCreate:              (*Server).summarizePRCreate,
 	protocol.MethodRunPRMerge:               (*Server).summarizePRMerge,
 	protocol.MethodMemoryAdd:                (*Server).summarizeMemoryAdd,
-	protocol.MethodMemoryPin:                noteSummary("Pin for every new run's brief"),
+	protocol.MethodMemoryPin:                noteSummary("Pin, into new runs' briefs,"),
 	protocol.MethodMemoryUnpin:              noteSummary("Unpin"),
 }
 
@@ -86,7 +86,7 @@ func (s *Server) summarizeHandoff(ctx context.Context, req protocol.Request, c *
 	if rpcErr != nil {
 		return rpcErr
 	}
-	c.Summary = fmt.Sprintf("Hand run %s (%q)%s to %s, who then owns it", p.RunID, runLabel(run), commaAfter(ownedBy(c)), to)
+	c.Summary = fmt.Sprintf("Hand run %s (%q)%s to %s (%s), who then owns it", p.RunID, runLabel(run), commaAfter(ownedBy(c)), to, truncate(p.ToMemberID))
 	return nil
 }
 
@@ -146,8 +146,8 @@ func (s *Server) summarizeReplaceIntegrator(ctx context.Context, req protocol.Re
 	if p.Integrator.Model != "" {
 		agent += " " + p.Integrator.Model
 	}
-	c.Summary = fmt.Sprintf("Replace integrator run %s of swarm %s (%q)%s with %s (%s) on %s's account", cmp.Or(m.CurrentIntegratorRunID, "(none)"),
-		m.ID, truncate(m.Objective), commaAfter(ownedBy(c)), truncate(agent), p.Integrator.Mode, account)
+	c.Summary = fmt.Sprintf("Replace integrator run %s of swarm %s (%q)%s with %s (%s) on %s's (%s) account", cmp.Or(m.CurrentIntegratorRunID, "(none)"),
+		m.ID, truncate(m.Objective), commaAfter(ownedBy(c)), truncate(agent), p.Integrator.Mode, account, truncate(p.Integrator.AccountMemberID))
 	return nil
 }
 
@@ -193,7 +193,16 @@ func (s *Server) summarizePRCreate(ctx context.Context, req protocol.Request, c 
 	if p.Draft {
 		kind = "a draft pull request"
 	}
-	c.Summary = fmt.Sprintf("Open %s from run %s (%q)%s, branch %s at %.7s: %q", kind, p.RunID, runLabel(run), ownedBy(c), truncate(p.Expected.Branch), p.Expected.Head, truncate(p.Title))
+	into := "the workspace's base branch"
+	if p.Target.Repository != "" || p.Target.BaseBranch != "" {
+		into = fmt.Sprintf("%s on %s", truncate(p.Target.BaseBranch), truncate(p.Target.Repository))
+	}
+	repo := ""
+	if p.Repo != "" {
+		repo = fmt.Sprintf(" (repo %s)", truncate(p.Repo))
+	}
+	c.Summary = fmt.Sprintf("Open %s from run %s (%q)%s%s, branch %s at %.7s, into %s: %q", kind, p.RunID, runLabel(run), ownedBy(c), repo,
+		truncate(p.Expected.Branch), p.Expected.Head, into, truncate(p.Title))
 	return nil
 }
 
@@ -225,7 +234,7 @@ func noteSummary(verb string) summarizer {
 		if rpcErr := s.call(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: p.WorkspaceID, ID: p.ID}, &shown); rpcErr != nil {
 			return rpcErr
 		}
-		c.Summary = fmt.Sprintf("%s note %s (%s): %q", verb, p.ID, shown.Item.Kind, truncate(cmp.Or(shown.Item.Title, shown.Item.Body)))
+		c.Summary = fmt.Sprintf("%s note %s (%s)%s: %q", verb, p.ID, shown.Item.Kind, forWhom(p.Scope), truncate(cmp.Or(shown.Item.Title, shown.Item.Body)))
 		return nil
 	}
 }
@@ -239,7 +248,13 @@ func (s *Server) summarizeMemoryAdd(ctx context.Context, req protocol.Request, c
 	if rpcErr := s.call(ctx, protocol.MethodWorkspaceGet, protocol.WorkspaceGetParams{WorkspaceID: p.WorkspaceID}, &ws); rpcErr != nil {
 		return rpcErr
 	}
-	c.Summary = fmt.Sprintf("Remember a %s for everyone in %s: %q", p.Kind, ws.Workspace.Name, truncate(p.Text))
+	c.Summary = fmt.Sprintf("Remember a %s in %s%s: %q", p.Kind, ws.Workspace.Name, forWhom(p.Scope), truncate(p.Text))
+	if p.Pin {
+		c.Summary += ", pinned into new runs' briefs"
+	}
+	if p.Supersedes != "" {
+		c.Summary += fmt.Sprintf(", replacing note %s", truncate(p.Supersedes))
+	}
 	return nil
 }
 
@@ -249,4 +264,12 @@ func commaAfter(clause string) string {
 		return ""
 	}
 	return clause + ","
+}
+
+// forWhom names who a memory note or pin is for.
+func forWhom(scope string) string {
+	if scope == protocol.MemoryScopeMember {
+		return " for you only"
+	}
+	return " for everyone"
 }

@@ -300,7 +300,7 @@ func TestConnectorToolList(t *testing.T) {
 		"aether_pause_run": {false, false, false}, "aether_resume_run": {false, false, true},
 		"aether_mark_reviewed": {false, true, false}, "aether_decide_approval": {false, true, true},
 		"aether_stop_run": {false, true, false}, "aether_close_run": {false, true, false}, "aether_cancel_swarm": {false, true, false},
-		"aether_run_lifecycle": {false, false, true}, "aether_swarm_manage": {false, false, true}, "aether_handoff_run": {false, true, false},
+		"aether_run_lifecycle": {false, false, true}, "aether_swarm_manage": {false, true, true}, "aether_handoff_run": {false, true, false},
 		"aether_replace_integrator": {false, true, true}, "aether_integration_decide": {false, true, true},
 		"aether_pr_create": {false, false, true}, "aether_pr_merge": {false, true, true},
 		"aether_memory_add": {false, false, false}, "aether_memory_pin": {false, false, false},
@@ -332,7 +332,7 @@ func TestConnectorToolList(t *testing.T) {
 		}
 	}
 	if want := []string{"aether_cancel_swarm", "aether_close_run", "aether_decide_approval", "aether_handoff_run", "aether_integration_decide",
-		"aether_pr_create", "aether_pr_merge", "aether_replace_integrator", "aether_stop_run"}; !slices.Equal(names[ScopeControl], want) {
+		"aether_pr_create", "aether_pr_merge", "aether_replace_integrator", "aether_stop_run", "aether_swarm_manage"}; !slices.Equal(names[ScopeControl], want) {
 		t.Errorf("control tools = %v, want %v", names[ScopeControl], want)
 	}
 	if got := list(); len(got) != len(names[ScopeRead]) {
