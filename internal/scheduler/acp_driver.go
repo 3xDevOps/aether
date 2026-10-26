@@ -36,7 +36,11 @@ const (
 	// acpSteerTimeout bounds a delivery, which runs under the run's
 	// admission lock and may wait on the agent's answer to a steer.
 	acpSteerTimeout = 15 * time.Second
-	oneShotResume   = "Aether's server restarted and interrupted your previous turn. Continue the task where you stopped."
+	// acpLostAgain is how soon after the agent last lost the run's session
+	// that losing it again stops the session instead of reopening it, so an
+	// agent that drops every session is not reopened in a loop.
+	acpLostAgain  = 5 * time.Minute
+	oneShotResume = "Aether's server restarted and interrupted your previous turn. Continue the task where you stopped."
 )
 
 // Claude Code stored its title within a second of the prompt in every
@@ -492,6 +496,10 @@ func (d *acpDriver) open(ctx context.Context, entry *supervised, how acpOpen) er
 				d.s.goMove(func() { d.usageLimit(entry, oneShot, st, message) })
 				return
 			}
+			if !oneShot && acphost.SessionLost(st.Failed) {
+				d.s.goMove(func() { d.reopenLost(entry, r, st.Failed) })
+				return
+			}
 			d.turnState(entry, oneShot, st)
 		},
 		OnInputs: func(pending []domain.RunInputRequest) {
@@ -574,6 +582,39 @@ func (d *acpDriver) reconnected(entry *supervised) {
 	d.s.mu.Unlock()
 	if ended {
 		d.report(entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle})
+	}
+}
+
+// reopenLost restores the session the agent lost from the agent's own
+// history, or stops it when the agent lost it again soon after, unless the
+// run stopped or reopened its session meanwhile.
+func (d *acpDriver) reopenLost(entry *supervised, lost *acpRun, cause error) {
+	defer d.lockOp(entry.runID)()
+	d.mu.Lock()
+	sess := lost.session
+	current := d.runs[entry.runID] == lost && !lost.stopping && sess != nil
+	d.mu.Unlock()
+	if !current {
+		return
+	}
+	d.s.mu.Lock()
+	again := time.Since(entry.sessionLostAt) < acpLostAgain
+	entry.sessionLostAt = time.Now()
+	d.s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), acpConnectTimeout)
+	defer cancel()
+	if again {
+		if err := d.stopAdapterLocked(ctx, entry.runID); err != nil {
+			slog.Warn("scheduler: stop the ACP server that lost its session", "run", entry.runID, "error", err)
+		}
+		d.fail(entry, fmt.Errorf("the agent lost its session again within %d minutes: %w", int(acpLostAgain.Minutes()), cause))
+		return
+	}
+	if err := sess.Notice("warning", "Agent session lost", "The agent no longer has this session. Aether is restarting the agent and restoring the session from its history; send again any message that failed."); err != nil {
+		slog.Warn("scheduler: record the lost session notice", "run", entry.runID, "error", err)
+	}
+	if err := d.open(ctx, entry, openRestore); err != nil {
+		d.fail(entry, err)
 	}
 }
 

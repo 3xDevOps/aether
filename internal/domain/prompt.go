@@ -9,6 +9,10 @@ import (
 // agent transport. It must not wrap failures after delivery was attempted.
 var ErrPromptNotSent = errors.New("agent prompt was not sent")
 
+// ErrPromptRefused marks a prompt that started a turn which failed before
+// the agent accepted the prompt.
+var ErrPromptRefused = errors.New("the agent refused the prompt")
+
 // MaxImageBytes bounds decoded image uploads and previews on every transport.
 const MaxImageBytes = 8 << 20
 

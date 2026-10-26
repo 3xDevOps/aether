@@ -3,6 +3,7 @@ package coord
 import (
 	"cmp"
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -121,6 +122,16 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 	lock := s.enhancedWakeLock(run)
 	lock.Lock()
 	defer lock.Unlock()
+	s.mu.Lock()
+	opens := s.enhancedOpens[run]
+	if refusal, ok := s.enhancedRefusals[run]; ok && refusal.opens != opens {
+		delete(s.enhancedWoken, run)
+		if refusal.noticed {
+			s.enhancedNotices[run] = refusal.notice
+		}
+		delete(s.enhancedRefusals, run)
+	}
+	s.mu.Unlock()
 	ctx, cancel := s.wakeContext(s.serveCtx, run, enhancedWakeTimeout)
 	defer cancel()
 	ids, err := mail.ListUnackedRunMessageIDs(ctx, run, protocol.CoordMaxUnread)
@@ -182,12 +193,18 @@ func (s *Service) wakeEnhanced(run domain.RunID) (retry bool) {
 		defer cancel()
 		return s.cfg.Waker.Wake(promptCtx, run, prompt.String())
 	})
-	if err != nil {
+	// An agent that refused the prompt still had it, and would refuse the
+	// same wake again at once.
+	if err != nil && !errors.Is(err, domain.ErrPromptRefused) {
 		slog.Debug("coord: enhanced wake suppressed", "run", run, "error", err)
 		return s.cfg.Waker.Wakeable(run)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, refused := s.enhancedRefusals[run]; err != nil && !refused {
+		baseline, noticed := s.enhancedNotices[run]
+		s.enhancedRefusals[run] = wakeRefusal{opens: opens, notice: baseline, noticed: noticed}
+	}
 	woken := s.enhancedWoken[run]
 	if woken == nil {
 		woken = make(map[string]struct{}, len(ids))
@@ -272,6 +289,15 @@ func (s *Service) missionChanges(run domain.RunID, notice missionNotice) []domai
 	return changes
 }
 
+// wakeRefusal is a wake the agent refused. It counts as delivered only to
+// the opens sessions opened before it; a later session is woken for its mail
+// and for mission changes since notice, the baseline it replaced.
+type wakeRefusal struct {
+	opens   uint64
+	notice  missionNotice
+	noticed bool
+}
+
 // EnhancedSessionOpened takes the baseline before the session's first turn,
 // so a change during that turn wakes it when the turn ends.
 func (s *Service) EnhancedSessionOpened(ctx context.Context, run domain.RunID) {
@@ -279,6 +305,9 @@ func (s *Service) EnhancedSessionOpened(ctx context.Context, run domain.RunID) {
 		return
 	}
 	defer s.leaveRun(run)
+	s.mu.Lock()
+	s.enhancedOpens[run]++
+	s.mu.Unlock()
 	s.missionChanges(run, s.integratorNotice(ctx, run))
 }
 

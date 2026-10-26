@@ -212,6 +212,8 @@ type Service struct {
 	reportLocks       map[domain.RunID]*sync.Mutex
 	enhancedWoken     map[domain.RunID]map[string]struct{}
 	enhancedNotices   map[domain.RunID]missionNotice
+	enhancedOpens     map[domain.RunID]uint64
+	enhancedRefusals  map[domain.RunID]wakeRefusal
 	enhancedOverlaps  map[domain.RunID]string
 	enhancedWakeLocks map[domain.RunID]*sync.Mutex
 	enhancedSweeps    map[domain.RunID]struct{}
@@ -280,6 +282,8 @@ func New(cfg Config) (*Service, error) {
 		reportLocks:       make(map[domain.RunID]*sync.Mutex),
 		enhancedWoken:     make(map[domain.RunID]map[string]struct{}),
 		enhancedNotices:   make(map[domain.RunID]missionNotice),
+		enhancedOpens:     make(map[domain.RunID]uint64),
+		enhancedRefusals:  make(map[domain.RunID]wakeRefusal),
 		enhancedOverlaps:  make(map[domain.RunID]string),
 		enhancedWakeLocks: make(map[domain.RunID]*sync.Mutex),
 		enhancedSweeps:    make(map[domain.RunID]struct{}),
