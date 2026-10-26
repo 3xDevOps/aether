@@ -1524,7 +1524,7 @@ and it appears under its parent in the dashboard. Who may start one is in
   its quota used), `not-installed` or `not-signed-in`, with the sentence
   that says how to fix it. `--harness` adds that agent's models.
 - `child start` takes `--harness`, `--purpose` (3-8 words, shown in the
-  dashboard) and `--task` or `--task-file` (at most 64 KiB; `-` reads
+  dashboard) and `--task` or `--task-file` (at most 24 KiB, so the escaped request fits the socket's 64 KiB; `-` reads
   standard input), plus optional `--model`, `--mode
   standard|enhanced|background` and `--account <member-id>`. The server
   publishes the parent's branch and checks the child out from that commit;
@@ -1540,7 +1540,7 @@ and it appears under its parent in the dashboard. Who may start one is in
   the commit the child started from.
 - `child cancel` stops a child or drops it from the queue; a child still
   starting answers `-32002`, so cancel again a few seconds later. `child
-  detach` lets it run on without the parent, which then can no longer
+  detach` lets a started child run on without the parent, which then can no longer
   cancel, fetch or message it outside the usual rules. A handoff of either
   run detaches it the same way. `child fetch` publishes the child's
   branch and copies it into the parent's checkout at

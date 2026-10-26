@@ -172,16 +172,24 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancel()
 	defer context.AfterFunc(s.authCtx(), cancel)()
+	var childrenErr *protocol.Error
 	run, replayed, perr := s.idempotentLaunch(ctx, member, key, protocol.MethodRunLaunch, p, func(created func(domain.RunID)) (*domain.Run, *protocol.Error) {
-		return s.launchRun(ctx, member, p, mode, policy, created)
+		return s.launchRun(ctx, member, p, mode, policy, func(id domain.RunID) {
+			if created != nil {
+				created(id)
+			}
+			// Recorded with the row, before the agent starts, so the agent
+			// never runs under the member setting the launcher overrode.
+			if p.Children != "" {
+				childrenErr = s.setRunChildren(ctx, member, id, p.Children)
+			}
+		})
 	})
 	if perr != nil {
 		return nil, perr
 	}
-	if p.Children != "" && !replayed {
-		if perr := s.setRunChildren(ctx, member, run, p.Children); perr != nil {
-			return nil, perr
-		}
+	if childrenErr != nil {
+		return nil, childrenErr
 	}
 	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed}, nil
 }

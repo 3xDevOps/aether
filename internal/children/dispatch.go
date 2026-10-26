@@ -72,7 +72,9 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 			slog.Warn("children: refuse child", "child", c.RunID, "error", err)
 			return
 		}
-		s.notify(ctx, c.RunID, c.ParentRunID,
+		s.publish(ctx, c.ParentRunID, "")
+		// A child that never started has no run to send from.
+		_ = s.notify(ctx, c.ParentRunID, c.ParentRunID,
 			fmt.Sprintf("Child run %s (%s) did not start: %s", c.RunID, c.Purpose, reason), "", "child-refused:"+string(c.RunID))
 	}
 	p, err := s.resolve(ctx, c.ParentRunID)
@@ -167,22 +169,29 @@ func (s *Service) settle(ctx context.Context) error {
 		if childErr != nil {
 			return childErr
 		}
-		first, err := s.cfg.Store.MarkChildEndNotified(ctx, c.RunID)
-		if err != nil || !first || c.Detached || gone {
+		if c.Detached || gone || c.EndNotified {
+			if _, err := s.cfg.Store.MarkChildEndNotified(ctx, c.RunID); err != nil {
+				return err
+			}
 			continue
 		}
-		if _, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err == nil {
-			continue
-		} else if !errors.Is(err, store.ErrNotFound) {
+		if _, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		} else if err != nil {
+			reason := ""
+			if child.Reason != "" {
+				reason = ": " + child.Reason
+			}
+			// The notice's key makes a resend after a failed mark a no-op.
+			if err := s.notify(ctx, c.RunID, c.ParentRunID,
+				fmt.Sprintf("Child run %s (%s) ended %s without a report%s", c.RunID, c.Purpose, child.Status, reason),
+				"", "child-ended:"+string(c.RunID)); err != nil {
+				continue
+			}
+		}
+		if _, err := s.cfg.Store.MarkChildEndNotified(ctx, c.RunID); err != nil {
 			return err
 		}
-		reason := ""
-		if child.Reason != "" {
-			reason = ": " + child.Reason
-		}
-		s.notify(ctx, c.RunID, c.ParentRunID,
-			fmt.Sprintf("Child run %s (%s) ended %s without a report%s", c.RunID, c.Purpose, child.Status, reason),
-			"", "child-ended:"+string(c.RunID))
 	}
 	return nil
 }

@@ -97,11 +97,15 @@ type fakeMail struct {
 	mu   sync.Mutex
 	sent []mail
 	keys map[string]bool
+	fail bool
 }
 
 func (m *fakeMail) Notify(_ context.Context, from, to domain.RunID, body, _, key string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.fail {
+		return errors.New("inbox full")
+	}
 	if m.keys[key] {
 		return nil
 	}
@@ -608,5 +612,51 @@ func TestSettleForgetsEndedTrees(t *testing.T) {
 	left, err := h.db.ChildrenToSettle(h.ctx)
 	if err != nil || len(left) != 0 {
 		t.Fatalf("children left to settle = %d, %v; want none once the tree ended", len(left), err)
+	}
+}
+
+func TestNoticesSurviveAFailedDeliveryAndQueuedChildrenCannotDetach(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+	zero := 1
+	if _, err := h.svc.SetLimits(h.ctx, protocol.WorkspaceChildLimitsParams{WorkspaceID: string(h.ws.ID), MaxLive: &zero}); err != nil {
+		t.Fatal(err)
+	}
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	first := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "first"})
+	h.settle()
+	queued := h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex", Task: "second"})
+	if _, err := h.svc.Detach(h.ctx, domain.RunID(queued.RunID)); code(err) != protocol.CodeInvalidState {
+		t.Fatalf("detaching a queued child = %v, want invalid state", err)
+	}
+	h.mail.fail = true
+	now := time.Now()
+	if _, err := h.db.UpdateRunStatus(h.ctx, domain.RunID(first.RunID), domain.RunFailed, "agent exited 1", "", nil, &now); err != nil {
+		t.Fatal(err)
+	}
+	h.settle()
+	h.mail.fail = false
+	h.settle()
+	notices := 0
+	for _, m := range h.mail.sent {
+		if strings.Contains(m.body, first.RunID) && strings.Contains(m.body, "without a report") {
+			notices++
+		}
+	}
+	if notices != 1 {
+		t.Fatalf("parent got %d ended notices after a failed delivery, want 1", notices)
+	}
+}
+
+func TestRefusalNoticeComesFromTheParent(t *testing.T) {
+	h := newHarness(t)
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: on()})
+	parent := h.run(h.ada.ID, domain.LaunchACP, "parent")
+	h.mustStart(parent.ID, protocol.ChildStartParams{Harness: "codex"})
+	off := false
+	h.enable(h.ada.ID, protocol.ChildSettingsParams{Enabled: &off})
+	h.settle()
+	if len(h.mail.sent) != 1 || h.mail.sent[0].from != parent.ID || !strings.Contains(h.mail.sent[0].body, "did not start") {
+		t.Fatalf("refusal notices = %+v, want one from the parent, which exists", h.mail.sent)
 	}
 }

@@ -92,7 +92,7 @@ func (s *Service) NeedsInput(ctx context.Context, run domain.RunID, question str
 	if err != nil || parent == "" {
 		return
 	}
-	s.notify(ctx, run, parent, "Child run "+string(run)+" asks its owner: "+question+
+	_ = s.notify(ctx, run, parent, "Child run "+string(run)+" asks its owner: "+question+
 		"\nIf you can answer within its task, reply with aether-internal send --to "+string(run)+".", "", "child-needs-input:"+string(run)+":"+digest(question))
 }
 

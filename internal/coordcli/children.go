@@ -2,6 +2,7 @@ package coordcli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +12,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-const maxChildTaskBytes = 64 << 10
+const (
+	maxChildTaskBytes    = 24 << 10
+	maxChildRequestBytes = 60 << 10
+)
 
 const childUsage = `usage: aether-internal child <options|start|list|cancel|detach|fetch> [options]
 
@@ -105,6 +109,9 @@ func childStart(ctx context.Context, socket string, args []string, in io.Reader,
 	}
 	if p.IdempotencyKey, err = mutationKey("child", *key, errOut); err != nil {
 		return protocol.ChildReceipt{}, err
+	}
+	if raw, err := json.Marshal(p); err == nil && len(raw) > maxChildRequestBytes {
+		return protocol.ChildReceipt{}, usageError(fmt.Sprintf("the task escapes to a %d-byte request; the run socket takes %d; shorten the task", len(raw), maxChildRequestBytes))
 	}
 	var out protocol.ChildReceipt
 	return out, coordtransport.Call(ctx, socket, protocol.MethodChildStart, p, &out)

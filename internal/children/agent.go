@@ -13,8 +13,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
-// MaxTaskBytes bounds a child's task text.
-const MaxTaskBytes = 64 << 10
+// MaxTaskBytes bounds a child's task text so the whole request, escaped,
+// fits the run socket's 64 KiB request limit.
+const MaxTaskBytes = 24 << 10
 
 const startNext = "The child's report arrives in your inbox and wakes you: end your turn or report waiting --for agents. Do not poll it."
 
@@ -187,6 +188,7 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 	if replay && !sameStart(reserved, req) {
 		return protocol.ChildReceipt{}, idempotencyConflict(req.IdempotencyKey)
 	}
+	s.publish(ctx, run, "")
 	s.Kick()
 	return s.receipt(ctx, reserved, nil)
 }
@@ -327,6 +329,9 @@ func (s *Service) stop(ctx context.Context, c *domain.ChildReservation, actor do
 	switch c.State {
 	case domain.ChildQueued:
 		err := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildCancelled, "cancelled before it started", domain.ChildQueued)
+		if err == nil {
+			s.publish(ctx, c.ParentRunID, actor)
+		}
 		if !errors.Is(err, store.ErrConflict) {
 			return err
 		}
@@ -352,6 +357,10 @@ func (s *Service) stop(ctx context.Context, c *domain.ChildReservation, actor do
 }
 
 func (s *Service) detach(ctx context.Context, c *domain.ChildReservation) (protocol.Child, error) {
+	if c.State != domain.ChildStarted {
+		return protocol.Child{}, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf(
+			"%s: child %s has not started, so it has nothing to keep running; cancel it or detach it once it starts", protocol.MethodChildDetach, c.RunID)}
+	}
 	if err := s.cfg.Store.DetachChild(ctx, c.RunID); err != nil {
 		return protocol.Child{}, rpcErr(protocol.MethodChildDetach, err)
 	}

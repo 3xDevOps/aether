@@ -136,7 +136,7 @@ func childResult(out any, err error) (any, *protocol.Error) {
 
 // setRunChildren records the launcher's child-run choice on the run it just
 // started.
-func (s *Server) setRunChildren(ctx context.Context, member domain.MemberID, run *domain.Run, value string) *protocol.Error {
+func (s *Server) setRunChildren(ctx context.Context, member domain.MemberID, run domain.RunID, value string) *protocol.Error {
 	svc, perr := s.children()
 	if perr != nil {
 		return perr
@@ -145,9 +145,8 @@ func (s *Server) setRunChildren(ctx context.Context, member domain.MemberID, run
 	if err != nil {
 		return rpcError(err)
 	}
-	if _, err = svc.Allow(ctx, actor, run.ID, value); err != nil {
+	if _, err = svc.Allow(ctx, actor, run, value); err != nil {
 		return rpcError(err)
 	}
-	run.Children, run.ChildrenSetBy = value, member
 	return nil
 }

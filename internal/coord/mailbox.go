@@ -1185,7 +1185,7 @@ func (s *Service) sendMessage(ctx context.Context, method string, from, to domai
 		if rpcErr != nil {
 			return nil, "", rpcErr
 		}
-		openPeer = route != protocol.CoordPeerMission
+		openPeer = route != protocol.CoordPeerMission && route != protocol.CoordPeerLineage
 	}
 	msg := &store.RunMessage{
 		WorkspaceID: sender.WorkspaceID, FromRun: from, ToRun: to, Body: body,

@@ -126,7 +126,8 @@ export function runParents<T extends { run: RunRecord }>(items: T[]): Map<string
       if (parent?.mission_role === 'integrator' && parent.mission_id === run.mission_id) parents.set(runKey({ run }), parentKey)
       continue
     }
-    if (!run.parent_run_id) continue
+    // A detached child runs on its own, so it is a root of its own tree.
+    if (!run.parent_run_id || run.detached) continue
     const parentKey = JSON.stringify([run.workspace_id, run.parent_run_id])
     if (byKey.has(parentKey)) parents.set(runKey({ run }), parentKey)
   }

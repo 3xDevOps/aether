@@ -15,6 +15,7 @@ import type { Child, ChildState, ChildUsage, RunChildrenResult } from '@/lib/typ
 import { cn } from '@/lib/utils'
 import { limitsText } from '@/routes/settings/children'
 import { useStore } from '@/store'
+import { useChildTouches } from '@/store/child-touches'
 import { useCapability, useSelf } from '@/store/hooks'
 import { isTerminal, type RunRecord } from '@/store/runs'
 import { descendantRuns } from '@/store/selectors'
@@ -32,7 +33,8 @@ const childState: Record<ChildState, { label: string; tone: Tone }> = {
   refused: { label: 'Refused', tone: 'failed' },
 }
 
-const unfinished = new Set<ChildState>(['queued', 'starting', 'working', 'waiting', 'needs-you'])
+// A child that has not started has nothing to keep running, so only these detach.
+const detachable = new Set<ChildState>(['working', 'waiting', 'needs-you'])
 
 const tokens = new Intl.NumberFormat(undefined, { notation: 'compact' })
 
@@ -51,7 +53,8 @@ export function tokensText(usage: Pick<ChildUsage, 'input_tokens' | 'output_toke
 function useChildren(run: RunRecord, client: Api): { result: RunChildrenResult | null; error: string | null; reload: () => void } {
   const readable = useCapability().hasMethod('run.children')
   // Any change to a descendant the store holds rereads the list, which also holds reservations the store never sees.
-  const changed = useStore((s) => JSON.stringify(descendantRuns(s.runs, [run.id]).map((child) => [child.id, child.status_seq, child.detached])))
+  const changed = useStore((s) => JSON.stringify([s.runs[run.id]?.last_commit, descendantRuns(s.runs, [run.id]).map((child) => [child.id, child.status_seq, child.detached])]))
+  const touched = useChildTouches((s) => s.touched[run.id] ?? 0)
   const [seq, setSeq] = useState(0)
   const [state, setState] = useState<{ runID: string; result: RunChildrenResult | null; error: string | null }>({ runID: run.id, result: null, error: null })
   useEffect(() => {
@@ -64,7 +67,7 @@ function useChildren(run: RunRecord, client: Api): { result: RunChildrenResult |
     return () => {
       live = false
     }
-  }, [client, readable, run.id, changed, seq])
+  }, [client, readable, run.id, changed, touched, seq])
   const shown = state.runID === run.id ? state : { result: null, error: null }
   return { ...shown, reload: () => setSeq((n) => n + 1) }
 }
@@ -108,7 +111,7 @@ function ChildRow({ child, mayDetach, onDetached, client }: { child: Child; mayD
       {child.error && <p className="pl-4 text-ui-sm break-words text-state-failed">{child.error}</p>}
       <div className="flex gap-1 pl-3">
         {started && <Button size="sm" variant="ghost" onClick={() => navigate('run', { runId: child.run_id })}>Open</Button>}
-        {mayDetach && !child.detached && unfinished.has(child.state) && (
+        {mayDetach && !child.detached && detachable.has(child.state) && (
           <Button size="sm" variant="ghost" disabled={detaching} onClick={detach}>{detaching ? 'Detaching…' : 'Detach'}</Button>
         )}
       </div>

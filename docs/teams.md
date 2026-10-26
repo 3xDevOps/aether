@@ -670,7 +670,8 @@ at once; more wait in a queue and start as slots free, the parent with the
 fewest busy children first. A child that reported or waits on its own
 children holds no slot. `--child-max-depth` (default 3, at most 8) bounds
 nesting, and `--child-max-total` (default 100, at most 2000) the children a
-tree starts in all. A swarm's runs share one tree. Every child is also
+tree starts in all. A swarm's runs share one tree. Only a started child can
+be detached; a queued one is cancelled with its parent. Every child is also
 admitted against the workspace [budget](#budgets) when it is queued and when
 it starts.
 

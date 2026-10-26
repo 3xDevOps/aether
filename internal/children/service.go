@@ -181,7 +181,28 @@ func (s *Service) recover(ctx context.Context) error {
 	return nil
 }
 
+// repairStarted marks started a launching reservation whose run row
+// exists, in case recording it at creation failed.
+func (s *Service) repairStarted(ctx context.Context) error {
+	launching, err := s.cfg.Store.ChildrenInState(ctx, domain.ChildLaunching)
+	if err != nil {
+		return err
+	}
+	for _, c := range launching {
+		if _, getErr := s.cfg.Store.GetRun(ctx, c.RunID); getErr != nil {
+			continue
+		}
+		if err := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildStarted, "", domain.ChildLaunching); err != nil && !errors.Is(err, store.ErrConflict) {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) reconcile(ctx context.Context) {
+	if err := s.repairStarted(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("children: repair started reservations", "error", err)
+	}
 	if err := s.dispatch(ctx); err != nil && ctx.Err() == nil {
 		slog.Warn("children: dispatch failed", "error", err)
 	}
@@ -190,16 +211,18 @@ func (s *Service) reconcile(ctx context.Context) {
 	}
 }
 
-func (s *Service) notify(ctx context.Context, from, to domain.RunID, body, correlation, key string) {
+func (s *Service) notify(ctx context.Context, from, to domain.RunID, body, correlation, key string) error {
 	s.mu.Lock()
 	mail := s.mail
 	s.mu.Unlock()
 	if mail == nil {
-		return
+		return errors.New("children: the coordination mailbox is not connected")
 	}
 	if err := mail.Notify(ctx, from, to, body, correlation, key); err != nil {
 		slog.Warn("children: notify parent", "child", from, "parent", to, "error", err)
+		return err
 	}
+	return nil
 }
 
 func denied(format string, args ...any) *protocol.Error {
