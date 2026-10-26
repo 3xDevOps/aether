@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -79,6 +80,7 @@ type memoryInput struct {
 	Words       string `json:"words,omitempty"`
 	Kind        string `json:"kind,omitempty"`
 	File        string `json:"file,omitempty" jsonschema:"only notes citing this path"`
+	All         bool   `json:"all,omitempty" jsonschema:"include notes that were replaced"`
 }
 
 var readOps = []Op{
@@ -122,7 +124,7 @@ var readOps = []Op{
 		"Use this when coordinating running agents so they don't change the same files: pairs of active runs touching the same files, with titles. Then aether_message_run each run about the other."+untrustedRule, overlaps).
 		offer(TierRead).calling(protocol.MethodRunOverlaps, protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodRunList),
 	opOf("aether_memory_search", "Search team memory", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks what the team decided or learned in a workspace."+untrustedRule, memorySearch).
+		"Use this when the user asks what the team decided or learned in a workspace. Each note has its author, run, harness and the commit it was written at."+untrustedRule+" "+coordhooks.MemoryRule, memorySearch).
 		enum("kind", "decision", "convention", "gotcha", "preference", "outcome").
 		offer(TierRead).calling(protocol.MethodMemorySearch),
 	opOf("search", "Search runs and swarms", ScopeRead, true, "",
@@ -883,24 +885,31 @@ func overlaps(ctx context.Context, c calls, in overlapsInput) (string, any, erro
 
 func memorySearch(ctx context.Context, c calls, in memoryInput) (string, any, error) {
 	var res protocol.MemorySearchResult
-	if err := c.read(ctx, protocol.MethodMemorySearch, protocol.MemorySearchParams{WorkspaceID: in.WorkspaceID, Words: in.Words, Kind: in.Kind, File: in.File}, &res); err != nil {
+	if err := c.read(ctx, protocol.MethodMemorySearch, protocol.MemorySearchParams{WorkspaceID: in.WorkspaceID, Words: in.Words, Kind: in.Kind, File: in.File, All: in.All}, &res); err != nil {
 		return "", nil, err
 	}
 	type note struct {
-		ID     string   `json:"id"`
-		Kind   string   `json:"kind"`
-		Title  string   `json:"title"`
-		Body   string   `json:"body"`
-		Files  []string `json:"files,omitempty"`
-		Author string   `json:"author,omitempty"`
-		RunID  string   `json:"run_id,omitempty"`
-		PRURL  string   `json:"pr_url,omitempty"`
-		Pinned bool     `json:"pinned"`
+		ID           string   `json:"id"`
+		Kind         string   `json:"kind"`
+		Title        string   `json:"title"`
+		Body         string   `json:"body"`
+		Files        []string `json:"files,omitempty"`
+		Author       string   `json:"author,omitempty"`
+		Source       string   `json:"source,omitempty"`
+		SourceRef    string   `json:"source_ref,omitempty"`
+		RunID        string   `json:"run_id,omitempty"`
+		Harness      string   `json:"harness,omitempty"`
+		Commit       string   `json:"commit,omitempty"`
+		PRURL        string   `json:"pr_url,omitempty"`
+		SupersededBy string   `json:"superseded_by,omitempty"`
+		Pinned       bool     `json:"pinned"`
+		CreatedAt    string   `json:"created_at"`
 	}
 	notes := make([]note, 0, len(res.Items))
 	for _, m := range res.Items {
 		notes = append(notes, note{ID: m.ID, Kind: m.Kind, Title: clip(m.Title, maxReport), Body: clip(m.Body, maxText), Files: m.Files,
-			Author: m.AuthorName, RunID: m.RunID, PRURL: m.PRURL, Pinned: m.PinnedAt != nil})
+			Author: m.AuthorName, Source: m.Source, SourceRef: m.SourceRef, RunID: m.RunID, Harness: m.Harness, Commit: m.Commit, PRURL: m.PRURL,
+			SupersededBy: m.SupersededBy, Pinned: m.PinnedAt != nil, CreatedAt: m.CreatedAt})
 	}
 	return fmt.Sprintf("%d notes.", len(notes)), map[string]any{"untrusted": map[string]any{"notes": notes}}, nil
 }

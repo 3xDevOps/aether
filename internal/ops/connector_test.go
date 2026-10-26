@@ -528,8 +528,10 @@ func TestConnectorReadTools(t *testing.T) {
 		t.Fatalf("aether_overlaps = %q %v", text, out)
 	}
 
-	f.answers[protocol.MethodMemorySearch] = returns(protocol.MemorySearchResult{Items: []protocol.MemoryItem{{ID: "mem-1", Title: "Use bun", Body: long}}})
-	if _, out = run(t, cs, "aether_memory_search", map[string]any{"workspace_id": "ws-1", "words": "bun", "kind": ""}); len([]rune(out["untrusted"].(map[string]any)["notes"].([]any)[0].(map[string]any)["body"].(string))) != 601 {
+	f.answers[protocol.MethodMemorySearch] = returns(protocol.MemorySearchResult{Items: []protocol.MemoryItem{{ID: "mem-1", Title: "Use bun", Body: long, Commit: "abc123", Harness: "claude"}}})
+	_, out = run(t, cs, "aether_memory_search", map[string]any{"workspace_id": "ws-1", "words": "bun", "kind": "", "all": true})
+	if n := out["untrusted"].(map[string]any)["notes"].([]any)[0].(map[string]any); len([]rune(n["body"].(string))) != 601 || n["commit"] != "abc123" || n["harness"] != "claude" ||
+		!strings.Contains(called(f, protocol.MethodMemorySearch)[0].params, `"all":true`) {
 		t.Fatalf("aether_memory_search = %v", out)
 	}
 
