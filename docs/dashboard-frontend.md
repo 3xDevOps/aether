@@ -6234,7 +6234,7 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   (`watch.update`, at most 90 days after creation), **Pause** or **Resume**,
   **Delete…** (confirmed), and up to 50 notices, each with one line per
   delivery: `Push delivered to 2 devices`, `Push off`, `No push device -
-  in-app only`, `Held for quiet hours`, `Push not sent: resolved before
+  in-app only`, `Held for quiet hours`, `Push pending: <why>`, `Push not sent: resolved before
   delivery`, `Push failed: <error>`. Opening or closing it keeps focus in
   the dialog's hands rather than the category heading.
 - **Creating**: **Watch…** in a live run's menu and the palette

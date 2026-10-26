@@ -126,6 +126,7 @@ describe('watches in settings', () => {
           },
           { ...notice, id: 'not-a', title: 'No device', deliveries: [at('push', 'no_destination')] },
           { ...notice, id: 'not-b', title: 'Off', deliveries: [at('push', 'disabled')] },
+          { ...notice, id: 'not-d', title: 'Waiting', deliveries: [at('push', 'pending', 'you are active at a dashboard')] },
           { ...notice, id: 'not-c', title: 'Broken', deliveries: [at('push', 'failed', '410 Gone from fcm.googleapis.com')] },
         ],
       })),
@@ -141,6 +142,7 @@ describe('watches in settings', () => {
     expect(within(dialog).getByText('Desktop app failed: socket closed')).toBeDefined()
     expect(within(dialog).getByText('No push device - in-app only')).toBeDefined()
     expect(within(dialog).getByText('Push off')).toBeDefined()
+    expect(within(dialog).getByText('Push pending: you are active at a dashboard')).toBeDefined()
     expect(within(dialog).getByText('Push failed: 410 Gone from fcm.googleapis.com')).toBeDefined()
   })
 

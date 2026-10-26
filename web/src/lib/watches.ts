@@ -82,6 +82,8 @@ export function deliveryText(delivery: WatchDelivery): string {
           return `Push failed: ${detail || 'no reason given'}`
         case 'cleared':
           return 'Push not sent: resolved before delivery'
+        case 'pending':
+          return detail ? `Push pending: ${detail}` : 'Push pending'
       }
       break
     case 'desktop':
@@ -98,6 +100,8 @@ export function deliveryText(delivery: WatchDelivery): string {
           return `Desktop app failed: ${detail || 'no reason given'}`
         case 'cleared':
           return 'Desktop app not shown: resolved before delivery'
+        case 'pending':
+          return detail ? `Desktop app pending: ${detail}` : 'Desktop app pending'
       }
       break
     case 'in_app':
@@ -113,6 +117,7 @@ export function deliveryTone(delivery: WatchDelivery): Tone {
     case 'failed':
       return 'failed'
     case 'held_quiet_hours':
+    case 'pending':
       return 'paused'
     default:
       return 'neutral'
