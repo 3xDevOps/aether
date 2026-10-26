@@ -52,7 +52,7 @@ test('a phone creates, pauses, resumes and deletes a watch, and sees its notice 
 
   await page.getByRole('dialog').getByRole('button', { name: 'Delete…' }).tap()
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete watch' }).tap()
-  await expect(page.getByRole('heading', { name: 'No watches yet.' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'No watches yet' })).toBeVisible()
   const { watches } = await alice.api.rpc<{ watches: unknown[] }>('watch.list')
   expect(watches).toHaveLength(0)
 })
