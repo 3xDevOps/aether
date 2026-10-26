@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
+	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -48,11 +51,13 @@ func newConfirmations(changed func()) *confirmations {
 	return &confirmations{now: time.Now, ttl: confirmTTL, changed: changed}
 }
 
-func (r *confirmations) confirm(ctx context.Context, c protocol.AssistantConfirmation) error {
+// confirm shows c as a card, filling its id and times, and waits for the
+// member's answer.
+func (r *confirmations) confirm(ctx context.Context, c *protocol.AssistantConfirmation) error {
 	c.ID = rand.Text()
 	c.CreatedAt = r.now().UTC()
 	c.ExpiresAt = c.CreatedAt.Add(r.ttl)
-	p := &pendingConfirmation{AssistantConfirmation: c, answer: make(chan error, 1)}
+	p := &pendingConfirmation{AssistantConfirmation: *c, answer: make(chan error, 1)}
 	r.mu.Lock()
 	r.pending = append(r.pending, p)
 	r.mu.Unlock()
@@ -150,28 +155,53 @@ func settingsOf(st store.AssistantSettings) protocol.AssistantSettings {
 // auto-approval on and the call is one it covers, or else when they approve
 // its card. The setting is read from the store on every call, so a change
 // applies to the live session. A passed call is in the transcript before it
-// runs; one that cannot be recorded does not run.
+// runs; one that cannot be recorded does not run. A card that does not pass
+// is recorded with its outcome.
 func (s *Service) approver(m *member) func(context.Context, protocol.AssistantConfirmation) error {
 	return func(ctx context.Context, c protocol.AssistantConfirmation) error {
 		passed, err := s.autoApprove(ctx, m, c)
 		if err != nil || passed {
 			return err
 		}
-		err = m.confirms.confirm(ctx, c)
+		err = m.confirms.confirm(ctx, &c)
+		a := newAction(c)
+		a.ConfirmationID, a.DecidedAt = c.ID, time.Now().UTC()
 		// A withdrawn card ends with the caller's context done; its reset
-		// must still be stored.
+		// and record must still be stored.
 		if cerr := s.countApproval(context.WithoutCancel(ctx), m, c, err == nil); cerr != nil {
 			return errors.Join(err, fmt.Errorf("count the approval: %w", cerr))
 		}
 		if err != nil {
+			a.Outcome, a.FinishedAt = refusal(err), a.DecidedAt
+			if a.Outcome == protocol.AssistantActionFailed {
+				a.Error = err.Error()
+			}
+			if nerr := s.noteAction(context.WithoutCancel(ctx), m, a, err.Error()); nerr != nil {
+				return errors.Join(err, fmt.Errorf("record the %s card: %w", a.Outcome, nerr))
+			}
 			return err
 		}
 		slog.Info("assistant approval", "member", m.id, "method", c.Method, "summary", c.Summary, "auto", false)
-		if err = s.note(ctx, m, "info", "Approved: "+c.Summary, c.Method+" passed after you approved its card."); err != nil {
+		a.Outcome, a.Approval = protocol.AssistantActionApproved, "card"
+		if err = s.noteAction(ctx, m, a, c.Method+" passed after you approved its card."); err != nil {
 			return fmt.Errorf("record the approval: %w", err)
 		}
+		m.actions.hold(a, c.Params)
 		return nil
 	}
+}
+
+// refusal is the outcome of a card that did not pass with err.
+func refusal(err error) string {
+	switch {
+	case errors.Is(err, errDeclined):
+		return protocol.AssistantActionDeclined
+	case errors.Is(err, errExpired):
+		return protocol.AssistantActionExpired
+	case errors.Is(err, errSessionEnded), errors.Is(err, context.Canceled):
+		return protocol.AssistantActionWithdrawn
+	}
+	return protocol.AssistantActionFailed
 }
 
 // countApproval counts a card auto-approval would have passed toward the
@@ -219,9 +249,12 @@ func (s *Service) autoApprove(ctx context.Context, m *member, c protocol.Assista
 		return false, err
 	}
 	slog.Info("assistant approval", "member", m.id, "method", c.Method, "summary", c.Summary, "auto", true)
-	if err = s.note(ctx, m, "info", "Auto-approved: "+c.Summary, c.Method+" passed without a card: auto-approval is on."); err != nil {
+	a := newAction(c)
+	a.Outcome, a.Approval, a.DecidedAt = protocol.AssistantActionAutoApproved, "auto", a.CreatedAt
+	if err = s.noteAction(ctx, m, a, c.Method+" passed without a card: auto-approval is on."); err != nil {
 		return false, fmt.Errorf("record the approval: %w", err)
 	}
+	m.actions.hold(a, c.Params)
 	return true, nil
 }
 
@@ -283,8 +316,147 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 	if st.AutoApprove {
 		severity, title, body = "warning", "Auto-approval turned on", "The assistant launches, messages and stops your runs and saves the environment without asking. Messaging or stopping another member's run still asks."
 	}
-	if err = s.note(ctx, m, severity, title, body); err != nil && !errors.Is(err, ErrRemoving) {
+	if err = s.note(ctx, m, acphost.Notice{Severity: severity, Title: title, Description: body}); err != nil && !errors.Is(err, ErrRemoving) {
 		return protocol.AssistantSettings{}, fmt.Errorf("assistant: %s, but noting it in the transcript failed: %w", strings.ToLower(title), err)
 	}
 	return settingsOf(st), nil
+}
+
+// reversibleMethods are the calls that run without a card and are recorded
+// as actions; every call that passed approver is recorded too.
+var reversibleMethods = []string{protocol.MethodRunPause, protocol.MethodRunResume}
+
+func newAction(c protocol.AssistantConfirmation) protocol.AssistantAction {
+	a := protocol.AssistantAction{ID: rand.Text(), Method: c.Method, Summary: c.Summary, OtherOwner: c.OtherOwner, CreatedAt: c.CreatedAt.UTC()}
+	// The socket validated the params, and every action method names its
+	// target with these fields; env.save has none.
+	_ = json.Unmarshal(c.Params, &a.Target)
+	return a
+}
+
+// noteAction records a in the transcript as a notice that clients without
+// action records still show.
+func (s *Service) noteAction(ctx context.Context, m *member, a protocol.AssistantAction, body string) error {
+	severity, verb := "info", map[string]string{
+		protocol.AssistantActionApproved: "Approved", protocol.AssistantActionAutoApproved: "Auto-approved",
+		protocol.AssistantActionDeclined: "Declined", protocol.AssistantActionExpired: "Expired",
+		protocol.AssistantActionWithdrawn: "Withdrawn", protocol.AssistantActionFailed: "Failed",
+		protocol.AssistantActionSucceeded: "Done",
+	}[a.Outcome]
+	switch a.Outcome {
+	case protocol.AssistantActionFailed:
+		severity = "error"
+	case protocol.AssistantActionExpired:
+		severity = "warning"
+	}
+	return s.note(ctx, m, acphost.Notice{Severity: severity, Title: verb + ": " + a.Summary, Description: body, Action: &a})
+}
+
+// heldActions are the actions whose call was allowed and has not run yet,
+// by method and exact params: the tool socket makes the call with the params
+// it asked to confirm.
+type heldActions struct {
+	mu   sync.Mutex
+	held map[string][]protocol.AssistantAction
+}
+
+func (h *heldActions) hold(a protocol.AssistantAction, params json.RawMessage) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.held == nil {
+		h.held = make(map[string][]protocol.AssistantAction)
+	}
+	key := a.Method + "\x00" + string(params)
+	h.held[key] = append(h.held[key], a)
+}
+
+func (h *heldActions) take(method string, params json.RawMessage) (protocol.AssistantAction, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	key := method + "\x00" + string(params)
+	queue := h.held[key]
+	if len(queue) == 0 {
+		return protocol.AssistantAction{}, false
+	}
+	if len(queue) == 1 {
+		delete(h.held, key)
+	} else {
+		h.held[key] = queue[1:]
+	}
+	return queue[0], true
+}
+
+// actionCaller is the tool socket's caller: it records the outcome of each
+// action call, after the approval approver recorded for it, or as the only
+// record of a reversible call.
+type actionCaller struct {
+	tools.Caller
+	s *Service
+	m *member
+}
+
+func (c actionCaller) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
+	a, ok := c.m.actions.take(method, params)
+	if !ok && !slices.Contains(reversibleMethods, method) {
+		return c.Caller.Call(ctx, method, params)
+	}
+	if !ok {
+		a = newAction(protocol.AssistantConfirmation{Method: method, Params: params, CreatedAt: time.Now()})
+		a.Summary = reversibleSummary(method, a.Target.RunID)
+	}
+	result, rpcErr := c.Caller.Call(ctx, method, params)
+	a.FinishedAt = time.Now().UTC()
+	body := ""
+	if rpcErr != nil {
+		a.Outcome, a.Error, body = protocol.AssistantActionFailed, rpcErr.Message, rpcErr.Message
+	} else {
+		a.Outcome, a.Result = protocol.AssistantActionSucceeded, created(result, a.Target)
+		switch {
+		case a.Result == nil:
+		case a.Result.RunID != "":
+			body = "Run " + a.Result.RunID
+		default:
+			body = "Swarm " + a.Result.MissionID
+		}
+	}
+	// The call already ran, so a record that cannot be written must not
+	// turn its result into an error.
+	if err := c.s.noteAction(context.WithoutCancel(ctx), c.m, a, body); err != nil {
+		slog.Warn("assistant: record the action's outcome", "member", c.m.id, "method", method, "action", a.ID, "error", err)
+	}
+	return result, rpcErr
+}
+
+// created names the run or swarm a call's result holds that its target does
+// not: what the call created.
+func created(result json.RawMessage, target protocol.AssistantActionTarget) *protocol.AssistantActionTarget {
+	var ids struct {
+		Run       *protocol.Run `json:"run"`
+		RunID     string        `json:"run_id"`
+		MissionID string        `json:"mission_id"`
+	}
+	if json.Unmarshal(result, &ids) != nil {
+		return nil
+	}
+	out := protocol.AssistantActionTarget{RunID: ids.RunID, MissionID: ids.MissionID}
+	if ids.Run != nil {
+		out.RunID, out.WorkspaceID = ids.Run.ID, ids.Run.WorkspaceID
+	}
+	if out.RunID == target.RunID {
+		out.RunID = ""
+	}
+	if out.MissionID == target.MissionID {
+		out.MissionID = ""
+	}
+	if out.RunID == "" && out.MissionID == "" {
+		return nil
+	}
+	return &out
+}
+
+func reversibleSummary(method, run string) string {
+	if method == protocol.MethodRunResume {
+		return "Resume run " + run
+	}
+	return "Pause run " + run
 }

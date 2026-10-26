@@ -129,12 +129,23 @@ func promptBlocks(text string, v *protocol.AssistantViewContext, embedded bool) 
 	return append(blocks, block), nil
 }
 
+// Sources of the held view context.
+const (
+	viewFromPrompt     = "prompt"
+	viewFromNavigation = "navigation"
+)
+
+// viewRace is how long after a view arrives a navigation update captured
+// before it counts as in flight, and loses. Past it the update wins, so a
+// device whose clock runs slow still moves the view.
+const viewRace = 10 * time.Second
+
 // keepView returns v while the member shares their view and is not fenced,
-// else nil; the caller holds m.share. With replace, v becomes the latest view
-// context, ordered by when it arrived. A prompt's view is kept only when none
-// is held: a retried prompt carries the context it was first sent with,
-// which a newer assistant.view must win over.
-func (s *Service) keepView(ctx context.Context, m *member, v *protocol.AssistantViewContext, replace bool) (*protocol.AssistantViewContext, error) {
+// else nil; the caller holds m.share. A prompt's view always becomes the held
+// one. A navigation update replaces it unless it was captured before the
+// held view, which arrived within viewRace: the update was in flight when
+// the newer view was sent.
+func (s *Service) keepView(ctx context.Context, m *member, v *protocol.AssistantViewContext, source string, now time.Time) (*protocol.AssistantViewContext, error) {
 	if v == nil {
 		return nil, nil
 	}
@@ -147,19 +158,20 @@ func (s *Service) keepView(ctx context.Context, m *member, v *protocol.Assistant
 	if !st.ShareView || m.removing {
 		return nil, nil
 	}
-	if replace || m.view == nil {
-		m.view, m.viewAt = v, time.Now()
+	stale := m.view != nil && v.CapturedAt.Before(m.view.CapturedAt) && now.Sub(m.viewAt) < viewRace
+	if source == viewFromPrompt || !stale {
+		m.view, m.viewAt, m.viewSource = v, now, source
 	}
 	return v, nil
 }
 
-// SetView replaces the member's latest view context. It is kept in memory
-// only.
+// SetView offers a navigation update as the member's held view context. It
+// is kept in memory only.
 func (s *Service) SetView(ctx context.Context, id domain.MemberID, v *protocol.AssistantViewContext) error {
 	m := s.member(id)
 	m.share.RLock()
 	defer m.share.RUnlock()
-	_, err := s.keepView(ctx, m, v, true)
+	_, err := s.keepView(ctx, m, v, viewFromNavigation, time.Now())
 	return err
 }
 
@@ -184,18 +196,22 @@ func (s *Service) SetShareView(ctx context.Context, id domain.MemberID, on bool)
 	}
 	if !on {
 		m.mu.Lock()
-		m.view, m.viewAt = nil, time.Time{}
+		m.forgetViewLocked()
 		m.mu.Unlock()
 	}
 	return nil
 }
 
-// View is the member's latest view context, its age since it arrived, and
-// whether a dashboard streams their assistant now.
+func (m *member) forgetViewLocked() {
+	m.view, m.viewAt, m.viewSource = nil, time.Time{}, ""
+}
+
+// View is the member's held view context, where it came from, its age since
+// it arrived, and whether a dashboard streams their assistant now.
 func (s *Service) View(id domain.MemberID, now time.Time) protocol.AssistantViewContextResult {
 	m := s.member(id)
 	m.mu.Lock()
-	out := protocol.AssistantViewContextResult{ViewContext: m.view}
+	out := protocol.AssistantViewContextResult{ViewContext: m.view, Source: m.viewSource}
 	if m.view != nil {
 		out.AgeSeconds = int64(max(now.Sub(m.viewAt), 0) / time.Second)
 	}

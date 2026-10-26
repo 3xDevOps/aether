@@ -366,13 +366,13 @@ func (s *Service) deliver(n notice) bool {
 
 // transcribe puts n in the member's transcript.
 func (s *Service) transcribe(m *member, n notice) error {
-	return s.record(context.Background(), m, n.severity, n.title, n.body)
+	return s.record(context.Background(), m, acphost.Notice{Severity: n.severity, Title: n.title, Description: n.body})
 }
 
 // record puts a notice in the member's transcript, unless ctx ended while it
 // waited for the member's op lock: in the live session, or else in the item
 // log, which no session writes while m.op is held.
-func (s *Service) record(ctx context.Context, m *member, severity, title, body string) error {
+func (s *Service) record(ctx context.Context, m *member, n acphost.Notice) error {
 	m.op.Lock()
 	defer m.op.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -382,7 +382,7 @@ func (s *Service) record(ctx context.Context, m *member, severity, title, body s
 		return ErrRemoving
 	}
 	if live := m.live(); live != nil {
-		err := live.acp.Notice(severity, title, body)
+		err := live.acp.Record(n)
 		if err == nil {
 			return nil
 		}
@@ -399,7 +399,7 @@ func (s *Service) record(ctx context.Context, m *member, severity, title, body s
 	if err != nil {
 		return err
 	}
-	appendErr := log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &acphost.Notice{Severity: severity, Title: title, Description: body}})
+	appendErr := log.Append(&acphost.Item{Kind: acphost.KindNotice, Notice: &n})
 	if err = errors.Join(appendErr, log.Close()); err != nil {
 		return err
 	}
@@ -411,11 +411,11 @@ func (s *Service) record(ctx context.Context, m *member, severity, title, body s
 
 // note is record without waiting for m.op while a session is live: a stopped
 // session refuses the notice, which then goes through record.
-func (s *Service) note(ctx context.Context, m *member, severity, title, body string) error {
+func (s *Service) note(ctx context.Context, m *member, n acphost.Notice) error {
 	if live := m.live(); live != nil {
-		if err := live.acp.Notice(severity, title, body); !errors.Is(err, acphost.ErrClosed) {
+		if err := live.acp.Record(n); !errors.Is(err, acphost.ErrClosed) {
 			return err
 		}
 	}
-	return s.record(ctx, m, severity, title, body)
+	return s.record(ctx, m, n)
 }
