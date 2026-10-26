@@ -235,6 +235,13 @@ type LaunchOptions struct {
 	// Admitted; a replayed or refused launch never calls it.
 	Created         func(RunID)
 	ExtraWorkspaces []WorkspaceID
+	// ReservedRunID creates the run under an ID minted beforehand, like
+	// AssignedRunID but without a swarm worker's lifecycle.
+	ReservedRunID RunID
+	// FromCommit starts the checkout at this commit of the workspace repo,
+	// recorded with FromBranch, instead of capturing the workspace base.
+	FromCommit string
+	FromBranch string
 }
 
 // AccountFallback is where a launch may move when the requested account's

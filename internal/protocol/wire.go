@@ -420,6 +420,9 @@ type RunLaunchParams struct {
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	// ExtraWorkspaceIDs must differ from each other and from WorkspaceID.
 	ExtraWorkspaceIDs []string `json:"extra_workspace_ids,omitempty"`
+	// Children is the run's own child-run setting: "on", "off", or empty to
+	// follow the launcher's.
+	Children string `json:"children,omitempty"`
 }
 
 // RunLaunchResult is a RunResult; Replayed is true when IdempotencyKey

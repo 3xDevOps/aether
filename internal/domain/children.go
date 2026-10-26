@@ -29,9 +29,6 @@ type ChildLimits struct {
 	MaxTotal int
 }
 
-// DefaultChildLimits apply to a workspace that never set its own.
-var DefaultChildLimits = ChildLimits{MaxLive: 8, MaxDepth: 3, MaxTotal: 100}
-
 // MaxChildLimits are the largest values an admin may set.
 var MaxChildLimits = ChildLimits{MaxLive: 64, MaxDepth: 8, MaxTotal: 2000}
 

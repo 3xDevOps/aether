@@ -162,6 +162,9 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if err != nil {
 		return nil, invalidParams(err.Error())
 	}
+	if p.Children != "" && p.Children != domain.ChildrenOn && p.Children != domain.ChildrenOff {
+		return nil, invalidParams(`children must be "on", "off" or empty`)
+	}
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
 	// Cancelling a launch mid-provisioning fails the run it is creating, so
@@ -174,6 +177,11 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	})
 	if perr != nil {
 		return nil, perr
+	}
+	if p.Children != "" && !replayed {
+		if perr := s.setRunChildren(ctx, member, run, p.Children); perr != nil {
+			return nil, perr
+		}
 	}
 	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed}, nil
 }

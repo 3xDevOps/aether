@@ -222,6 +222,10 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 		case inferred && (written == turnEndedReason || ours):
 			workers = true
 			switch {
+			case swarm.Workers == 0 && swarm.Children == 1:
+				public = "waiting for 1 child run"
+			case swarm.Workers == 0 && swarm.Children > 1:
+				public = fmt.Sprintf("waiting for %d child runs", swarm.Children)
 			case swarm.Workers == 1:
 				public = "waiting for 1 worker"
 			case swarm.Workers > 1:
