@@ -55,11 +55,14 @@ type ChildReservation struct {
 	BaseBranch     string
 	Fallback       AccountFallback
 	IdempotencyKey string
-	State          ChildState
-	Detached       bool
-	Error          string
-	CreatedAt      time.Time
-	StartedAt      *time.Time
+	// RequestHash fingerprints the start request as the agent sent it, so
+	// a retry must repeat it exactly.
+	RequestHash string
+	State       ChildState
+	Detached    bool
+	Error       string
+	CreatedAt   time.Time
+	StartedAt   *time.Time
 	// EndNotified is set once the parent was told the child ended without a
 	// report.
 	EndNotified bool

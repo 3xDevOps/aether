@@ -2,6 +2,8 @@ package children
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -176,7 +178,7 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 		ParentRunID: p.parent.ID, RootRunID: p.root, TreeKey: p.treeKey, WorkspaceID: p.parent.WorkspaceID,
 		OwnerID: p.owner, AccountID: spec.account, Harness: spec.harness, Mode: spec.mode, Model: spec.model,
 		Purpose: req.Purpose, Task: req.Task, Depth: p.depth, BaseCommit: base, BaseBranch: p.parent.Branch,
-		Fallback: spec.fallback, IdempotencyKey: req.IdempotencyKey,
+		Fallback: spec.fallback, IdempotencyKey: req.IdempotencyKey, RequestHash: requestHash(req),
 	}
 	if p.mission != nil {
 		c.MissionID = p.mission.ID
@@ -212,10 +214,15 @@ func (s *Service) priorStart(ctx context.Context, run domain.RunID, req protocol
 }
 
 func sameStart(c *domain.ChildReservation, req protocol.ChildStartParams) bool {
-	return c.Harness == req.Harness && c.Task == req.Task && c.Purpose == req.Purpose &&
-		(req.Model == "" || c.Model == req.Model) &&
-		(req.AccountMemberID == "" || string(c.AccountID) == req.AccountMemberID) &&
-		(req.Mode == "" || c.Mode == modeNames[req.Mode])
+	return c.RequestHash == requestHash(req)
+}
+
+// requestHash fingerprints everything a start request asks for but its key.
+func requestHash(req protocol.ChildStartParams) string {
+	req.IdempotencyKey = ""
+	raw, _ := json.Marshal(req)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func idempotencyConflict(key string) *protocol.Error {
@@ -453,7 +460,7 @@ func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protoco
 		if reportedErr != nil {
 			return protocol.Child{}, reportedErr
 		}
-		if reported && (out.State == protocol.ChildWorking || out.State == protocol.ChildWaiting) {
+		if reported && (out.State == protocol.ChildWorking || out.State == protocol.ChildWaiting || out.State == protocol.ChildEnded) {
 			switch report.Outcome {
 			case store.CoordOutcomeSuccess:
 				out.State = protocol.ChildFinished

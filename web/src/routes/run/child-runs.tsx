@@ -177,19 +177,16 @@ export function RunLineage({ run }: { run: RunRecord }) {
   )
 }
 
-/** More → Allow child runs: only the owner turns it on; the owner or an admin turns it off. */
-export function useChildRunsItem(run: RunRecord, client: Api = api): ExtraItem | null {
+/** More → Allow child runs and Turn off child runs: only the owner allows; the owner or an admin turns them off, whether the run allowed them itself or inherits it. */
+export function useChildRunsItems(run: RunRecord, client: Api = api): ExtraItem[] {
   const cap = useCapability()
   const self = useSelf()
-  if (!cap.hasMethod('run.children.allow') || run.mission_id || isTerminal(run.status)) return null
+  if (!cap.hasMethod('run.children.allow') || run.mission_id || isTerminal(run.status)) return []
   const owner = self.id === run.member_id
-  const on = run.children === 'on'
-  if (!owner && !(on && self.role === 'admin')) return null
-  const next = on ? 'off' : 'on'
-  return {
-    id: 'child-runs',
-    label: on ? 'Turn off child runs' : 'Allow child runs',
-    description: on ? 'New child runs are refused; running ones continue.' : 'The agent may start other agents as child runs.',
+  const item = (next: 'on' | 'off'): ExtraItem => ({
+    id: `child-runs-${next}`,
+    label: next === 'on' ? 'Allow child runs' : 'Turn off child runs',
+    description: next === 'on' ? 'The agent may start other agents as child runs.' : 'New child runs are refused; running ones continue.',
     Icon: Network,
     onSelect: () => {
       client.runChildrenAllow(run.id, next).then(
@@ -197,7 +194,11 @@ export function useChildRunsItem(run: RunRecord, client: Api = api): ExtraItem |
         (err: unknown) => toast.error(`${next === 'on' ? 'Allow child runs' : 'Turn off child runs'} failed: ${message(err)}`),
       )
     },
-  }
+  })
+  const items: ExtraItem[] = []
+  if (owner && run.children !== 'on') items.push(item('on'))
+  if ((owner || self.role === 'admin') && run.children !== 'off') items.push(item('off'))
+  return items
 }
 
 export function ChildRuns({ run, inset, client = api }: { run: RunRecord; inset: boolean; client?: Api }) {

@@ -2041,6 +2041,7 @@ CREATE TABLE run_children (
 	fallback_disabled INTEGER NOT NULL DEFAULT 0,
 	fallback_order    TEXT NOT NULL DEFAULT '[]',
 	idempotency_key   TEXT NOT NULL,
+	request_hash      TEXT NOT NULL,
 	state             TEXT NOT NULL CHECK (state IN ('queued', 'launching', 'started', 'cancelled', 'refused')),
 	detached          INTEGER NOT NULL DEFAULT 0,
 	error             TEXT NOT NULL DEFAULT '',

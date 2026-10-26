@@ -36,6 +36,11 @@ func (s *Service) handleChild(ctx context.Context, run domain.RunID, method stri
 		return nil, runClosing(method)
 	}
 	defer s.leaveRun(run)
+	if method == protocol.MethodChildStart {
+		lock := s.reportLock(run)
+		lock.Lock()
+		defer lock.Unlock()
+	}
 	result, err := s.cfg.Children.HandleAgent(ctx, run, method, params)
 	return result, missionRPCError(method, err)
 }

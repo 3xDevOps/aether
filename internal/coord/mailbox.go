@@ -558,11 +558,6 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 			}
 		}
 	}
-	if s.cfg.Children != nil && !existingFinalized {
-		if err := s.cfg.Children.ValidateReport(ctx, run, store.CoordOutcome(p.Outcome)); err != nil {
-			return protocol.CoordReportResult{}, missionRPCError(method, err)
-		}
-	}
 	missionReconcile := s.cfg.Mission != nil && (missionActive || missionLookupFailed)
 	if s.cfg.Evidence == nil {
 		return protocol.CoordReportResult{}, internalError(method, ErrNoEvidenceCapture)
@@ -575,6 +570,13 @@ func (s *Service) CoordReport(ctx context.Context, run domain.RunID, p protocol.
 			lock.Unlock()
 		}
 	}()
+	// child.start takes the same lock, so no child is reserved between this
+	// check and the report's finalization.
+	if s.cfg.Children != nil && !existingFinalized {
+		if err := s.cfg.Children.ValidateReport(ctx, run, store.CoordOutcome(p.Outcome)); err != nil {
+			return protocol.CoordReportResult{}, missionRPCError(method, err)
+		}
+	}
 	nextAction := "review retained evidence"
 	switch p.Outcome {
 	case protocol.CoordOutcomeFailure:

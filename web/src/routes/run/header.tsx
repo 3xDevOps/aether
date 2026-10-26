@@ -22,7 +22,7 @@ import { runLabel, stateDetail, stateLabel, stateTitle } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
-import { RunLineage, useChildRunsItem } from '@/routes/run/child-runs'
+import { RunLineage, useChildRunsItems } from '@/routes/run/child-runs'
 import { useModeSwitch } from '@/routes/run/mode-switch'
 import { useOpenInEditor } from '@/routes/run/open-in-editor'
 import { useRunPullRequest } from '@/routes/run/pull-request'
@@ -239,7 +239,7 @@ export function RunHeader({
   const modeSwitch = useModeSwitch(run, agent, agentEntry)
   const pullRequest = useRunPullRequest(run, agent, agentName)
   const editor = useOpenInEditor(run)
-  const childRunsItem = useChildRunsItem(run)
+  const childRunsItems = useChildRunsItems(run)
   useHeaderPrimary(Boolean(primary))
 
   return (
@@ -275,7 +275,7 @@ export function RunHeader({
               extra={[
                 ...(modeSwitch.item ? [modeSwitch.item] : []),
                 ...(editor.item ? [editor.item] : []),
-                ...(childRunsItem ? [childRunsItem] : []),
+                ...childRunsItems,
                 { id: 'captures', label: 'Captures…', Icon: Camera, onSelect: onCaptures },
                 { id: 'events', label: 'Raw events…', Icon: ScrollText, onSelect: onEvents },
               ]}

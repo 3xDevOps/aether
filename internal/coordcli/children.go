@@ -52,7 +52,8 @@ func childCommand(ctx context.Context, socket string, args []string, in io.Reade
 			return nil, err
 		}
 		var out protocol.ChildOptionsResult
-		return out, coordtransport.Call(ctx, socket, protocol.MethodChildOptions, protocol.ChildOptionsParams{Harness: *harness}, &out)
+		err := coordtransport.Call(ctx, socket, protocol.MethodChildOptions, protocol.ChildOptionsParams{Harness: *harness}, &out)
+		return out, err
 	case "start":
 		return childStart(ctx, socket, args[1:], in, errOut)
 	case "list":
@@ -62,7 +63,8 @@ func childCommand(ctx context.Context, socket string, args []string, in io.Reade
 			return nil, err
 		}
 		var out protocol.ChildListResult
-		return out, coordtransport.Call(ctx, socket, protocol.MethodChildList, protocol.ChildListParams{RunID: *runID}, &out)
+		err := coordtransport.Call(ctx, socket, protocol.MethodChildList, protocol.ChildListParams{RunID: *runID}, &out)
+		return out, err
 	case "cancel", "detach", "fetch":
 		fs := newFlags("child " + args[0])
 		runID := fs.String("run-id", "", "the child's run ID")
@@ -78,10 +80,12 @@ func childCommand(ctx context.Context, socket string, args []string, in io.Reade
 		method := map[string]string{"cancel": protocol.MethodChildCancel, "detach": protocol.MethodChildDetach, "fetch": protocol.MethodChildFetch}[args[0]]
 		if args[0] == "fetch" {
 			var out protocol.ChildFetchResult
-			return out, coordtransport.Call(ctx, socket, method, protocol.ChildRunParams{RunID: *runID}, &out)
+			err := coordtransport.Call(ctx, socket, method, protocol.ChildRunParams{RunID: *runID}, &out)
+			return out, err
 		}
 		var out protocol.Child
-		return out, coordtransport.Call(ctx, socket, method, protocol.ChildRunParams{RunID: *runID}, &out)
+		err := coordtransport.Call(ctx, socket, method, protocol.ChildRunParams{RunID: *runID}, &out)
+		return out, err
 	}
 	return nil, usageError("unknown child command: " + args[0])
 }
@@ -114,7 +118,8 @@ func childStart(ctx context.Context, socket string, args []string, in io.Reader,
 		return protocol.ChildReceipt{}, usageError(fmt.Sprintf("the task escapes to a %d-byte request; the run socket takes %d; shorten the task", len(raw), maxChildRequestBytes))
 	}
 	var out protocol.ChildReceipt
-	return out, coordtransport.Call(ctx, socket, protocol.MethodChildStart, p, &out)
+	err = coordtransport.Call(ctx, socket, protocol.MethodChildStart, p, &out)
+	return out, err
 }
 
 func readTask(task, file string, in io.Reader) (string, error) {
