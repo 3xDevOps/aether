@@ -56,14 +56,17 @@ what `edge.onaether.dev` serves.
 
 | Item | Field or system | Merged | Deployed | Submitted | Approved |
 | --- | --- | --- | --- | --- | --- |
-| Edge with protocol 3 serving the universal `/mcp` URL: CIMD, S256, `iss`, `resource`. Once submitted, its scheme, host and port cannot change without a new plugin | aether-edge | Yes (#554) | Yes, verified with `curl` 2026-10-26 | No | No |
+| Edge with protocol 3 serving the universal `/mcp` URL: CIMD, S256, `iss`, `resource`. OpenAI: "To change an existing MCP server's URL, contact support; the current update flow does not support URL changes." ([submission](https://developers.openai.com/plugins/deploy/submission)) | aether-edge | Yes (#554) | Yes, verified with `curl` 2026-10-26 | No | No |
+| Sign-in hardening: the sign-in assertion bound to the browser and kept out of URLs and logs | aether-edge, server | No: #590 open | No | n/a | n/a |
+| Per-method scope enforcement: every connector call checked against its granted scopes. The listing's scope sentences are true only once it is deployed | Server | No: #591 open | No | n/a | n/a |
+| `scopes_supported` in the protected resource metadata. OpenAI lists it under "Key fields you must populate" as an "optional list that helps ChatGPT explain the permissions it is going to ask the user for" ([authentication](https://developers.openai.com/plugins/build/auth)); the live document has only `resource` and `authorization_servers` | aether-edge | No: pending code change (edge metadata) | No | n/a | n/a |
 | Challenge token served as plain text at `https://edge.onaether.dev/.well-known/openai-apps-challenge` with `aether-edge serve --openai-challenge <token>` or `AETHER_EDGE_OPENAI_CHALLENGE` | aether-edge | Yes | No: answers 404 (2026-10-26) | No | No |
 | Business verification for 3xDevOps | OpenAI organization settings | n/a | n/a | No | No |
 | Privacy policy at a public URL, from [legal/privacy-connectors.md](legal/privacy-connectors.md) | `privacyPolicyURL` | Draft | No | No | No |
 | Terms of service at a public URL, from [legal/terms-connectors.md](legal/terms-connectors.md) | `termsOfServiceURL` | Draft | No | No | No |
 | Demo server with sample data ([Reviewer setup](#reviewer-setup)) | Project edge | n/a | No | n/a | n/a |
 | Reviewer account that needs no email code | Review details | No: needs an edge sign-in other than GitHub | No | No | No |
-| `aether_changes`, used by test 2 | Connector tools | No: planned | No | No | No |
+| `aether_changes`, used by test 2 | Connector tools | No: planned (PR #585 adds `changes.list`; the tool follows) | No | No | No |
 | Walkthrough video of the five positive test cases | `review.demo_recording_url` | n/a | No | No | No |
 | Live test from chatgpt.com | n/a | n/a | Not run | n/a | n/a |
 
@@ -175,14 +178,15 @@ The rest of the setup:
 
 `plugin.json` carries these; the portal imports them read-only. They follow
 a run from launch to acting on it. Test 2 uses `aether_changes`, which is
-planned and not yet a connector tool; the build warns until it is.
+planned (PR #585 adds `changes.list`; the tool follows) and not yet a
+connector tool; the build warns until it is.
 
 | # | Step | Prompt | tools_triggered | expected_behavior |
 | --- | --- | --- | --- | --- |
 | 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_list_workspaces`, `aether_list_agents`, `aether_launch_run` | After confirmation, starts one run and returns its id, state and dashboard link |
-| 2 | Track | What changed in my Aether runs since we last checked? | `aether_changes` (planned) | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
+| 2 | Track | What changed in my Aether runs since we last checked? | `aether_changes` (planned, after #585) | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
 | 3 | Coordinate | Which runs touch the same files as the Contributing section run? | `aether_list_runs`, `aether_overlaps` | Names the other run editing `README.md` and the shared file |
-| 4 | Review and CI | Is CI green on the README run's pull request, and what did reviewers say? | `aether_list_runs`, `aether_pr_status` | Each check's result, the review state and the comment, with the pull request link |
+| 4 | Review and CI | Is CI green on the README run's pull request, and what did reviewers say? | `aether_list_runs`, `aether_pr_status` | Counts of passed, pending and failing checks, each failing check's name and result, the review state and the comment, with the pull request link |
 | 5 | Act | What needs me in Aether? Answer the licence question with MIT. | `aether_needs_attention`, `aether_answer` | Lists the question and the run awaiting review; after confirmation, answers with MIT |
 
 | # | Prompt | Expected |
@@ -243,7 +247,7 @@ plaintext in memory while relaying.
 | Server, tokens | Access token valid 1 hour; refresh token 30 days, rotated on each use; reusing a rotated token revokes the connector | Hashes only |
 | Server log | One line per write call: connector, member, method, target id, result. Lines when a connector is authorized, created or revoked. Read calls are not logged | Server operator's log retention |
 | Server records | Runs and messages created through a connector record `via ChatGPT` or `via Claude` | With the run |
-| Server, audit history | Planned (fix/connector-authz-audit): each mutating call through a connector, and connector creation and revocation, with time, member, connector, method, targets and outcome; no tokens or message bodies | Not yet decided |
+| Server, audit history | Not yet implemented (#592). Planned: each write call through a connector or the assistant, refused ones included; and, from any client including the dashboard and CLI, connector creation and revocation, account shares and revocations, role changes and accepted member merges. Each entry: time, member, how the call arrived, method, workspace, target id and outcome; no tokens, parameters or message bodies | Planned: each member's newest 10,000 entries |
 
 **Controls.** `aether mcp` lists a member's connectors and `aether mcp revoke
 <id>` revokes one; the consent page grants `write` and `control` separately

@@ -63,14 +63,14 @@ by their policies, not this one.
 
 | Where | What | Kept |
 | --- | --- | --- |
-| Project edge, nginx access log | Per request: client IP address, time, request line (method, path with the server id, and query string), status, bytes and user agent. During sign-in the query strings include the OAuth authorization request parameters, GitHub's one-time authorization code, and the edge's signed sign-in assertion naming your edge account and the server you chose. No request bodies | 14 days ([confirm the deployed logrotate setting]) [TODO: update when the universal sign-in change (fix/universal-mcp-signin) moves those parameters out of URLs] |
+| Project edge, nginx access log | Per request: client IP address, time, request line (method, path with the server id, and query string), status, bytes and user agent. During sign-in the query strings include the OAuth authorization request parameters, GitHub's one-time authorization code, and the edge's signed sign-in assertion naming your edge account and the server you chose. No request bodies | 14 days ([confirm the deployed logrotate setting]) [TODO: update when #590, which stops logging those query strings, is deployed] |
 | Project edge, journal | Requests the edge refuses before relaying, with path and client IP; relay errors; failed TLS handshakes with client IP. No request bodies or tokens | [journald retention on the deployed edge] |
 | Project edge, database | Your edge account (GitHub user id, login, verified primary email, display name), browser sessions (hashed, 30 days after last use), the servers you can reach, and one monthly total of relayed bytes | As described in [What an edge stores](../privacy.md#what-an-edge-stores) |
 | Project edge, memory | Request and result bodies and tokens while relaying them. TLS ends at the edge so it can route the request | Not written to disk |
 | Your Aether server, connectors table | Your member id, device, app client id and name, redirect host, granted scopes, created and last-used times, and SHA-256 hashes of the tokens | Until revoked, or your member or device is removed |
 | Your Aether server, tokens | Access tokens valid 1 hour; refresh tokens valid 30 days and replaced on every use | Hashes only |
 | Your Aether server, log | One line per write call: connector id, member id, method, target id and result. A line when a connector is authorized, created or revoked. Read calls are not logged | The server administrator's log retention |
-| Your Aether server, audit history | Each call that changes something, made through a connector or the built-in assistant, and each connector created or revoked: time, member, which connector, method, target ids and outcome. Never tokens, message bodies or secrets. Read calls are not recorded. [TODO: confirm against the merged audit change (fix/connector-authz-audit)] | [retention, not yet decided] |
+| Your Aether server, audit history | Not yet implemented (#592). Planned: each call that changes something made through a connector or the built-in assistant, including refused calls; and, from any client including the dashboard and CLI, connectors created or revoked, account shares and revocations, role changes and accepted member merges. Each entry: time, member, how the call arrived (connector with its client and id, assistant, dashboard or CLI), method, workspace, target id and outcome. Never tokens, parameters or message bodies. Read calls are not recorded. [TODO: confirm against #592 as merged] | Planned: each member's newest 10,000 entries |
 | Your Aether server, runs and messages | Runs launched and messages sent through the connector, marked `via ChatGPT` or `via Claude` | With the run, under the server's retention |
 
 ## Why
@@ -85,6 +85,9 @@ to train models. The code does none of these.]
 
 - Choose scopes on the consent page: reading is always granted; launching
   and messaging and stopping and approving are granted separately.
+  [TODO: true only once #591, which checks every call against the granted
+  scopes, is deployed; until then scopes choose which tools are listed but
+  the server does not check each call against them.]
 - Revoke a connector in the Aether app under **Settings → ChatGPT and
   Claude**, or with `aether mcp revoke <id>`. Removing it in ChatGPT or
   Claude alone does not revoke it on the server.

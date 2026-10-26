@@ -41,7 +41,7 @@ Recheck them before submitting; the quotes below are what they said then.
 | Errors | "generic errors such as "Internal Server Error" or "Bad Request" with no detail fail review" ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | Errors carry the server's message ([connectors.md](connectors.md#troubleshooting)) |
 | No conversation data | "Don't query Claude's memory, chat history, conversation summaries, or user files" ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | No tool asks for them (code) |
 | Result size | "~150,000 characters" on claude.ai and Desktop ([building](https://claude.com/docs/connectors/building)) | Capped well below ([connectors.md](connectors.md#what-it-can-do)) |
-| Privacy policy | "Missing or incomplete privacy policies result in immediate rejection." ([submission](https://claude.com/docs/connectors/building/submission)) | Draft only: [legal/privacy-connectors.md](legal/privacy-connectors.md) |
+| Privacy policy | The listing materials include a "privacy policy URL", entered in the Listing step ([submission](https://claude.com/docs/connectors/building/submission)) | Draft only: [legal/privacy-connectors.md](legal/privacy-connectors.md) |
 | Public docs | "required by your publish date. A blog post or help-center article is sufficient" ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | [connectors.md](connectors.md) on GitHub |
 | Test account | "Test credentials: required, and they must be for a fully populated account" ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | Not met; see [Reviewer account](#reviewer-account) |
 | Try it first | "Exercise every tool through the MCP Inspector and as a custom connector in Claude before you submit." ([checklist](https://claude.com/docs/connectors/building/review-criteria)) | See [Test before submitting](#test-before-submitting) |
@@ -54,17 +54,23 @@ asks for, by step of the
 
 | Field | Portal step | Limit or rule |
 | --- | --- | --- |
-| `server_url`, `auth_type`, `callback_url` | Server | Must equal the ChatGPT plugin's URL; `oauth_cimd` |
-| `name`, `one_liner`, `description` | Listing | "server name up to 100 characters, one-liner up to 200 characters, description up to 2,000 characters" |
-| `categories` | Listing | "one to five categories". Anthropic publishes no list; pick the closest to `Developer tools` in the portal |
-| `documentation_url`, `privacy_policy_url`, `support_contact` | Listing | https URLs; support may be an email |
-| `icon` | Listing | Reuses `web/public/icons/icon-512.png`. Anthropic states no size |
-| `slug` | Listing | "The slug is permanent once published." The directory page is `https://claude.ai/directory/connectors/<slug>` |
-| `use_cases`, `prerequisites`, `access` | Use cases | Use cases, "what users need before they can connect", and whether it "reads data, writes data, or both". The policy asks for "at least three working examples" |
-| `example_prompts` | Use cases | At least three |
-| `company` | Company | "Company name and website, plus a primary contact" |
-| `data_handling` | Data handling | API ownership, personal health data, sponsored content. The directory accepts no connector that moves money or generates media |
-| `compliance_acknowledgments` | Compliance | "Seven policy acknowledgments ... All seven are required." The owner accepts each in the portal; the file only lists them |
+| `server_url` | 1. Connection | **Universal URL**: "every user connects to the same URL". Must equal the ChatGPT plugin's URL |
+| `auth_type`, `callback_url` | 6. Authentication | `oauth_cimd`: OAuth sign-in with no client ID or secret entered, since Claude identifies itself with its client metadata document. `callback_url` is the redirect Claude uses; nothing to enter |
+| `name`, `one_liner`, `description` | 3. Listing | "server name up to 100 characters, one-liner up to 200 characters, description up to 2,000 characters" |
+| `categories` | 3. Listing | "one to five categories". Anthropic publishes no list; pick the closest to `Developer tools` in the portal |
+| `documentation_url`, `privacy_policy_url`, `support_contact` | 3. Listing | https URLs; support may be an email |
+| `icon` | 3. Listing | Reuses `web/public/icons/icon-512.png`. Anthropic states no size |
+| `slug` | 3. Listing | "The slug is permanent once published." The directory page is `https://claude.ai/directory/connectors/<slug>` |
+| `use_cases`, `prerequisites`, `access` | 4. Use cases | Use cases, "what users need before they can connect", and whether it "reads data, writes data, or both". The policy asks for "at least three working examples" |
+| `example_prompts` | 4. Use cases | At least three |
+| `company` | 5. Company | "Company name and website, plus a primary contact" |
+| `data_handling` | 7. Data handling | API ownership, personal health data, sponsored content. The directory accepts no connector that moves money or generates media |
+| `compliance_acknowledgments` | 9. Compliance | "Seven policy acknowledgments ... All seven are required." The owner accepts each in the portal; the file only lists them |
+
+Step 2, Tools, syncs from the server, and step 8, Test & launch, takes the
+reviewer account ([Reviewer account](#reviewer-account)); neither has a field
+in the file. The scope sentences in `description` hold only once #591, which
+checks every connector call against its granted scopes, is deployed.
 
 Check it and stage it for the portal:
 
@@ -72,10 +78,11 @@ Check it and stage it for the portal:
 make claude-connector    # writes dist/aether-claude-connector/listing.json and icon.png
 ```
 
-`scripts/claude-connector.sh` enforces the limits above, refuses credential
-fields, and prints a warning for each `PLACEHOLDER:` value. `make
-test-scripts` runs `scripts/claude-connector-test.sh`, which checks the
-shipped listing passes and broken ones are refused. The portal is a form, so
+`scripts/claude-connector.sh` enforces the limits above, requires the seven
+acknowledgments by name, refuses credential fields and an output directory
+that is the package itself, and prints a warning for each `PLACEHOLDER:`
+value. `make test-scripts` runs `scripts/claude-connector-test.sh`, which
+checks the shipped listing passes and broken ones are refused. The portal is a form, so
 copy each field in by hand.
 
 ## Claude Code
@@ -130,14 +137,17 @@ echo "$url/authorize?response_type=code&client_id=$client&redirect_uri=$redirect
 ```
 
 Open the printed address, sign in and allow. Claude's callback page then
-shows an error, as it did not start this sign-in; copy the `code` parameter from
-its address bar within a minute and exchange it:
+shows an error, as it did not start this sign-in; copy the `code` parameter
+from its address bar within a minute and exchange it. The tokens go to a
+`mktemp` file outside the checkout, deleted when the shell exits:
 
 ```sh
+tokens=$(mktemp)
+trap 'rm -f "$tokens"' EXIT
 curl -s "$url/token" -d grant_type=authorization_code -d "code=<code>" \
   --data-urlencode "client_id=$client" --data-urlencode "redirect_uri=$redirect" \
-  -d "code_verifier=$verifier" --data-urlencode "resource=$url" >tokens.json
-token=$(jq -r .access_token tokens.json)
+  -d "code_verifier=$verifier" --data-urlencode "resource=$url" >"$tokens"
+token=$(jq -r .access_token "$tokens")
 inspector=@modelcontextprotocol/inspector@2.12.0
 npx "$inspector" --cli "$url" --transport http \
   --header "Authorization: Bearer $token" --method tools/list
@@ -148,14 +158,14 @@ npx "$inspector" --cli "$url" --transport http \
 Then check rotation, which ends the connector:
 
 ```sh
-old=$(jq -r .refresh_token tokens.json)
+old=$(jq -r .refresh_token "$tokens")
 curl -s "$url/token" -d grant_type=refresh_token --data-urlencode "refresh_token=$old" \
   --data-urlencode "client_id=$client" --data-urlencode "resource=$url" | jq -r .error
 # prints null: a new pair. Wait more than a minute, then send the old token again:
 curl -s "$url/token" -d grant_type=refresh_token --data-urlencode "refresh_token=$old" \
   --data-urlencode "client_id=$client" --data-urlencode "resource=$url"
 # invalid_grant: this refresh token was already used, so its connector was revoked
-rm tokens.json
+rm -f "$tokens"
 ```
 
 Checklist:
@@ -184,21 +194,38 @@ emails a code to a password-only account on each new browser.
 
 ## Submit in the portal
 
-Submitting needs a Claude "Pro, Max, Team, or Enterprise" account
-([publish](https://claude.com/docs/directory/publish)).
+"Anyone on a paid Claude plan can submit through the portal"
+([submission](https://claude.com/docs/connectors/building/submission)). The
+plan must be "Pro, Max, Team, or Enterprise"; "On Team and Enterprise, an
+Owner can submit", or a member an Owner granted the **Directory** permission
+([publish](https://claude.com/docs/directory/publish#confirm-you-can-submit-to-the-directory)).
 
-1. Open the submission portal from
-   [submission](https://claude.com/docs/connectors/building/submission) and
-   enter `server_url` with OAuth (CIMD).
-2. Copy the listing, use case, company and data handling fields from
-   `dist/aether-claude-connector/listing.json`, and upload `icon.png`.
-3. In Test & launch, enter the reviewer credentials and steps, and confirm
+At [claude.ai/directory/manage](https://claude.ai/directory/manage), select
+**Submit new**, choose **MCP connector**, and fill the steps from
+`dist/aether-claude-connector/listing.json`:
+
+1. **Connection**: paste `server_url`. Leave **Users connect to different
+   URLs** unselected: Aether is a **Universal URL** listing.
+2. **Tools**: check all tools synced with titles and annotations.
+3. **Listing**: copy the listing fields and upload `icon.png`.
+4. **Use cases**: copy `use_cases`, `prerequisites`, `access` and
+   `example_prompts`.
+5. **Company**: copy `company`.
+6. **Authentication**: under **Authentication requirement** choose
+   **Always required**; under **Authentication methods** use the **OAuth
+   sign-in** card (**Add OAuth sign-in** if there is none). Do not choose
+   **Anthropic-held client credentials** or enter a client ID or secret:
+   Claude identifies itself with its client metadata document (CIMD).
+7. **Data handling**: copy `data_handling`.
+8. **Test & launch**: enter the reviewer credentials and steps, and confirm
    you ran every tool.
-4. Accept the seven compliance acknowledgments.
-5. Read the quality warnings, then submit. Status moves through Draft, In
-   review, Changes requested or Not approved, Approved and Published
-   ([status](https://claude.com/docs/directory/submission-status)); write to
-   `mcp-review@anthropic.com` to escalate.
+9. **Compliance**: accept the seven acknowledgments.
+10. **Review and submit**: read the quality warnings, then submit.
+
+Status moves through Draft, In review, Changes requested or Not approved,
+Approved and Published
+([status](https://claude.com/docs/directory/submission-status)); write to
+`mcp-review@anthropic.com` to escalate.
 
 Renaming a published listing "requires re-review"
 ([managing](https://claude.com/docs/connectors/building/managing-your-listing)),
@@ -213,6 +240,8 @@ what `edge.onaether.dev` serves.
 | Item | Merged | Deployed | Submitted | Approved |
 | --- | --- | --- | --- | --- |
 | Universal `/mcp` URL with CIMD, S256, `iss` | Yes (#554) | Yes, verified with `curl` 2026-10-26 | No | No |
+| Sign-in hardening: the sign-in assertion bound to the browser and kept out of URLs and logs | No: #590 open | No | n/a | n/a |
+| Per-method scope enforcement: every connector call checked against its granted scopes; the listing's scope sentences depend on it | No: #591 open | No | n/a | n/a |
 | Listing package and check (this page) | This change | n/a | No | No |
 | Privacy policy hosted at a public URL | Draft in [legal/](legal/privacy-connectors.md) | No | No | No |
 | Terms hosted at a public URL | Draft in [legal/](legal/terms-connectors.md) | No | No | No |

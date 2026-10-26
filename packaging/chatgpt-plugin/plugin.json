@@ -70,7 +70,7 @@
               "description": "Review and CI: a demo run has an open pull request with finished checks and one review comment.",
               "prompt": "Is CI green on the README run's pull request, and what did reviewers say?",
               "tools_triggered": "aether_list_runs, aether_pr_status",
-              "expected_behavior": "Reports each check's result, the review state and the reviewer's comment, and links to the pull request."
+              "expected_behavior": "Reports how many checks passed, are pending and are failing, names any failing check with its result, gives the review state and the reviewer's comment, and links to the pull request."
             },
             {
               "description": "Act: a demo run's agent asks which licence to use. ChatGPT asks for confirmation before answering.",
