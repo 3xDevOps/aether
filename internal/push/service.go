@@ -301,8 +301,8 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 	announced := map[string]bool{}
 	// offered is every need a device was sent, as {need, endpoint}, so one
 	// that was interrupted goes on with the devices still without it. Each
-	// maps to the member whose device took it, empty when the push service
-	// did not, so only a device that shows a need is cleared.
+	// maps to the member whose device may show it, empty when the push
+	// service surely did not take it, so only such a device is cleared.
 	offered := map[[2]string]domain.MemberID{}
 	// shown is the need the sink last took, so one announced before and
 	// back after another is shown again.
@@ -342,6 +342,10 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			// A handed-off run's need is its new owner's alone. A former
 			// owner whose devices were told so hears of it again if it
 			// comes back to them.
+			moved := false
+			for _, member := range offered {
+				moved = moved || member != "" && member != n.member
+			}
 			if err = s.withdraw(ctx, run, id, offered, n.member); err != nil {
 				slog.Warn("push: a former owner's device was not told a need moved; trying again later", "run", id, "in", retry, "error", err)
 				wake = time.After(retry)
@@ -350,6 +354,10 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 				if !strings.HasPrefix(key, string(n.member)+"|") {
 					delete(announced, key)
 				}
+			}
+			// Clearing can take a while: announce what the run needs then.
+			if moved && err == nil {
+				continue
 			}
 		}
 		if n != nil && !n.since.IsZero() && n.since.Before(s.startedAt()) {
@@ -473,11 +481,12 @@ func (s *Service) offer(ctx context.Context, run *domain.Run, n *need, offered m
 		if _, sent := offered[device]; sent {
 			continue
 		}
-		offered[device] = ""
+		offered[device] = n.member
 		if err := s.send(ctx, sub, payload, topicOf(string(run.ID)), n.urgency); err != nil {
 			slog.Warn("push: notification not delivered", "member", n.member, "error", err)
-		} else {
-			offered[device] = n.member
+			if !errors.As(err, new(unsure)) {
+				offered[device] = ""
+			}
 		}
 		return true
 	}

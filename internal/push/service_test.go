@@ -59,6 +59,9 @@ type device struct {
 	topic    atomic.Value
 	urgency  atomic.Value
 	answer   atomic.Int32
+	// While drop is set, the push service takes a message and drops the
+	// connection without answering.
+	drop atomic.Bool
 	// While slow is set, the push service takes a message and answers only
 	// once release is closed.
 	slow    atomic.Bool
@@ -180,6 +183,9 @@ func (h *harness) subscribe(member *domain.Member) *device {
 		d.topic.Store(r.Header.Get("Topic"))
 		d.urgency.Store(r.Header.Get("Urgency"))
 		d.received <- n
+		if d.drop.Load() {
+			panic(http.ErrAbortHandler)
+		}
 		if d.slow.Load() {
 			<-d.release
 		}
@@ -726,6 +732,22 @@ func TestTheSinkClearsWhileADeviceCannotBeTold(t *testing.T) {
 	phone.answer.Store(http.StatusInternalServerError)
 	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
 	heard.expect(t, string(run.ID)+" needs nothing")
+}
+
+// A device whose push service may have taken the need, its answer lost, is
+// told the need ended too.
+func TestAClearReachesADeviceWhoseAnswerWasLost(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	phone.drop.Store(true)
+	run := h.run(h.ada, "Fix the login redirect", domain.LaunchTUI)
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: "which region?", Run: string(run.ID)})
+	phone.drop.Store(false)
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: clearedBody, Run: string(run.ID), Clear: true})
 }
 
 func TestTestSendsNowAndReturnsTheRealError(t *testing.T) {
