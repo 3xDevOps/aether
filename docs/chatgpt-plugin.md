@@ -52,7 +52,7 @@ real URL.
 | Publish terms of service | `termsOfServiceURL` |
 | Record a walkthrough of the five positive test cases on the demo server | `review.demo_recording_url` |
 | Serve the portal's challenge token as plain text at `https://edge.onaether.dev/.well-known/openai-apps-challenge` with `aether-edge serve --openai-challenge <token>` or `AETHER_EDGE_OPENAI_CHALLENGE` | aether-edge |
-| Deploy an edge with protocol 3 to `edge.onaether.dev`. Once submitted, its scheme, host and port cannot change without OpenAI support | aether-edge |
+| Deploy an edge with protocol 4 to `edge.onaether.dev`, which binds the sign-in to the browser ([Security notes](#security-notes)). Once submitted, its scheme, host and port cannot change without OpenAI support | aether-edge |
 | Complete business verification for 3xDevOps | OpenAI organization settings |
 | Set up the demo server and reviewer account below | Project edge |
 | Review needs the universal `/mcp` URL live on the project edge, signing a demo server's members in with GitHub and asking for no pairing code under `--edge-access account` (the universal-URL task) | aether-edge, `aether-server` |
@@ -180,7 +180,7 @@ plaintext in memory while relaying.
 
 | Where | What | Kept |
 | --- | --- | --- |
-| Edge, nginx access log | One line per request: client IP, time, method, path with the server id, status, bytes, user agent. No body or token | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
+| Edge, nginx access log | One line per request: client IP, time, method, path with the server id, status, bytes, user agent. No body or token, and no query on `/mcp/authorize`, `/connectors/choose` or `/signin` | `/var/log/nginx/access.log`, 14 days under Debian's default logrotate |
 | Edge journal | A request the edge refuses before relaying, with its path and, from outside the trusted proxies, the client IP; an internal relay failure with its error; failed TLS handshakes with the client IP. No body or token | `MaxRetentionSec=` in journald, per [edge.md](edge.md) |
 | Edge database | One edge-wide total of relayed bytes per month, with no server, member or request detail | Never deleted |
 | Server, `connectors` table | Member, device, client id, client name, redirect host, scopes, created and last used times, SHA-256 hashes of the tokens | Until revoked, or the member or device is removed |
@@ -192,6 +192,19 @@ plaintext in memory while relaying.
 <id>` revokes one; the consent page grants `write` and `control` separately
 ([connectors.md](connectors.md)). Edge account deletion is in
 [privacy.md](privacy.md#what-an-edge-stores).
+
+## Security notes
+
+- Every reviewer and user picks the server on the edge's **Choose a server**
+  page, which asks even when the account has one server. The server's consent
+  page then states the server, member, client and scopes.
+- The edge's signed sign-in statement travels in a form body, never a URL, and
+  the server binds it to the browser that brought it. A leaked authorization
+  or consent link connects nobody.
+- The project edge forwards a server's redirects and forms on `/mcp` only to
+  itself, `chatgpt.com` and `claude.ai`.
+- [edge.md](edge.md#mcp-connectors) and
+  [security.md](security.md#chatgpt-and-claude-connectors) give the details.
 
 ## Who can use it
 

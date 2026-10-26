@@ -549,11 +549,18 @@ there is no terminal, file, settings or git-writing tool.
   server on the edge, but each server still mints, stores and checks its own
   codes and tokens. The edge only routes by their `<server id>.` prefix, so a
   token from one server sent with another's prefix reaches that other server,
-  which holds no hash for it and refuses it. The edge-signed assertion on the
-  choose page names the GitHub account, the server, the client and its PKCE
-  challenge, lasts 5 minutes, and the server takes it once. The server
-  remembers taken assertions only in memory, so it refuses one issued before
-  it last started, and with it any consent form carrying one. Under
+  which holds no hash for it and refuses it. The edge-signed assertion the
+  choose page posts names the GitHub account, the server, the client, its PKCE
+  challenge and redirect URI, and lasts 5 minutes. It travels in a form body,
+  never a URL. The server binds it to the first browser that brings it, by a
+  hash of an edge cookie on the relay host, and only that browser's consent
+  form can take it, once. The server remembers assertions only in memory, so
+  it refuses one issued before it last started, and with it any consent form
+  carrying one. Behind an edge at protocol 3 the assertion still arrives in
+  the URL and is bound to no browser
+  ([edge.md](edge.md#mcp-connectors)). On the universal paths the edge
+  forwards a server's redirects and forms only to itself, `chatgpt.com` and
+  `claude.ai`. Under
   `edge-access account` it replaces the pairing code: the trust is the same as
   a GitHub sign-in admitting a new device, so a taken-over GitHub account or a
   compromised edge (or its key) can authorize a connector as that member.

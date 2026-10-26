@@ -104,10 +104,12 @@ type authRequest struct {
 }
 
 // asserted is the account a ConnectorAssertion named, its nonce, which
-// the consent form spends, and when the assertion was issued and expires.
+// the consent form spends, the edgeproto.HeaderBrowser of the browser
+// that brought it, and when the assertion was issued and expires.
 type asserted struct {
 	Account edgeproto.Account `json:"a"`
 	Nonce   string            `json:"n"`
+	Browser string            `json:"b"`
 	Issued  time.Time         `json:"i"`
 	Expires time.Time         `json:"e"`
 }
@@ -128,12 +130,12 @@ type wrongCodes struct {
 	n     int
 }
 
-// authorizePage checks an authorization request and shows its consent
+// authorizePage checks an authorization request, q, and shows its consent
 // page. Until the client and redirect URI check out there is nowhere safe
 // to send an error, so it is shown on the page; later errors go back to
-// the client.
-func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res resource) {
-	q := r.URL.Query()
+// the client. On the universal URL the edge posts the request with its
+// assertion; anything else arrives as a GET.
+func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res resource, q url.Values) {
 	if res == h.universal && q.Get(edgeproto.ParamServer) != h.serverID {
 		h.renderError(w, fmt.Sprintf("This request names server %q, not this server, %s. Start the connection again from ChatGPT or Claude.",
 			q.Get(edgeproto.ParamServer), h.serverID))
@@ -172,9 +174,15 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res reso
 		h.redirectError(w, r, req, "invalid_target", "resource must be "+res.base)
 		return
 	}
-	page := consentPage{Client: clientLabel(req), Write: true}
+	page := consentPage{Client: clientLabel(req), Write: true, Universal: res == h.universal}
+	bound := h.ssh.EdgeBindsSignIn()
+	if bound && r.Method == http.MethodGet && q.Has(edgeproto.ParamAssertion) {
+		h.renderError(w, "The edge put its sign-in in the URL, where logs and browser history keep it, so it is refused. "+
+			"The edge's operator updates it; until then, connect with a code from aether mcp.")
+		return
+	}
 	if signed := q.Get(edgeproto.ParamAssertion); signed != "" && res == h.universal && h.ssh.EdgeAccess() == edgeproto.PolicyAccount {
-		a, name, aerr := h.assertion(r.Context(), signed, req)
+		a, name, aerr := h.assertion(r.Context(), signed, req, r.Header.Get(edgeproto.HeaderBrowser), bound)
 		if aerr != nil {
 			h.renderError(w, "Cannot connect as your GitHub account: "+aerr.Error()+". Start the connection again from ChatGPT or Claude.")
 			return
@@ -190,25 +198,34 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res reso
 	h.renderConsent(w, http.StatusOK, page)
 }
 
-// assertion checks the edge's assertion for req and maps its account to
-// a member, whose name it returns.
-func (h *handler) assertion(ctx context.Context, signed string, req authRequest) (*asserted, string, error) {
+// assertion checks the edge's assertion for req, binds its nonce to
+// browser, the browser that brought it, and maps its account to a
+// member, whose name it returns. An edge that binds sign-ins must name
+// the browser and the redirect URI; an older one names neither.
+func (h *handler) assertion(ctx context.Context, signed string, req authRequest, browser string, bound bool) (*asserted, string, error) {
+	if bound && browser == "" {
+		return nil, "", fmt.Errorf("the edge sent no %s to bind it to your browser", edgeproto.HeaderBrowser)
+	}
 	now := h.now()
-	a, err := h.ssh.VerifyConnectorAssertion(signed, req.ClientID, req.Challenge, now)
+	a, err := h.ssh.VerifyConnectorAssertion(signed, req.ClientID, req.Challenge, req.RedirectURI, now)
 	if err != nil {
 		return nil, "", fmt.Errorf("the edge's sign-in for it does not check out: %w", err)
+	}
+	if bound && a.RedirectURI == "" {
+		return nil, "", errors.New("the edge's sign-in for it names no redirect_uri")
 	}
 	if err = h.beforeStart(a.IssuedAt); err != nil {
 		return nil, "", err
 	}
-	if h.spentNonce(a.Nonce, now) {
-		return nil, "", errors.New("the edge's sign-in for it was already used")
+	expires := a.ExpiresAt.Add(edgeproto.ClockSkew)
+	if err = h.bindNonce(a.Nonce, browser, expires, now); err != nil {
+		return nil, "", err
 	}
 	_, name, err := h.ssh.ConnectorAccountGrant(ctx, a.Account)
 	if err != nil {
 		return nil, "", err
 	}
-	return &asserted{Account: a.Account, Nonce: a.Nonce, Issued: a.IssuedAt, Expires: a.ExpiresAt.Add(edgeproto.ClockSkew)}, name, nil
+	return &asserted{Account: a.Account, Nonce: a.Nonce, Browser: browser, Issued: a.IssuedAt, Expires: expires}, name, nil
 }
 
 // beforeStart refuses an assertion issued before the handler started,
@@ -221,24 +238,49 @@ func (h *handler) beforeStart(issued time.Time) error {
 	return nil
 }
 
-func (h *handler) spentNonce(nonce string, now time.Time) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	expires, ok := h.spent[nonce]
-	return ok && now.Before(expires)
+// nonceUse is the browser an assertion's nonce is bound to, whether a
+// consent form spent it, and when the assertion expires.
+type nonceUse struct {
+	browser string
+	spent   bool
+	expires time.Time
 }
 
-// spendNonce spends nonce, kept until expires, and reports whether it was
-// unspent.
-func (h *handler) spendNonce(nonce string, expires, now time.Time) bool {
+// bindNonce binds nonce to browser until expires: the first browser to
+// bring an assertion is the only one whose consent form can spend it.
+func (h *handler) bindNonce(nonce, browser string, expires, now time.Time) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	maps.DeleteFunc(h.spent, func(_ string, e time.Time) bool { return !now.Before(e) })
-	if _, ok := h.spent[nonce]; ok {
-		return false
+	maps.DeleteFunc(h.nonces, func(_ string, u nonceUse) bool { return !now.Before(u.expires) })
+	u, ok := h.nonces[nonce]
+	switch {
+	case !ok:
+		h.nonces[nonce] = nonceUse{browser: browser, expires: expires}
+	case u.spent:
+		return errors.New("the edge's sign-in for it was already used")
+	case u.browser != browser:
+		return errors.New("the edge's sign-in for it was already opened in another browser")
 	}
-	h.spent[nonce] = expires
-	return true
+	return nil
+}
+
+// spendNonce spends nonce for browser, which must be the browser it is
+// bound to.
+func (h *handler) spendNonce(nonce, browser string, now time.Time) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	u, ok := h.nonces[nonce]
+	switch {
+	case !ok || !now.Before(u.expires):
+		return errors.New("the edge's sign-in for it is no longer pending here")
+	case u.spent:
+		return errors.New("the edge's sign-in for it was already used")
+	case u.browser != browser:
+		return errors.New("this consent page was opened in another browser than the one that signed in at the edge")
+	}
+	u.spent = true
+	h.nonces[nonce] = u
+	return nil
 }
 
 func accountLabel(a edgeproto.Account) string {
@@ -250,7 +292,6 @@ func accountLabel(a edgeproto.Account) string {
 // bound to the member, the code's device or the asserted account, the
 // client, the redirect URI and the PKCE challenge.
 func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res resource) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 	signed := r.PostFormValue("request")
 	payload, ok := h.open("consent", signed)
 	var req authRequest
@@ -259,11 +300,11 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 		return
 	}
 	scopes := grantedScopes(r.PostForm["scope"])
-	page := consentPage{Request: signed, Client: clientLabel(req),
+	page := consentPage{Request: signed, Client: clientLabel(req), Universal: res == h.universal,
 		Write: slices.Contains(scopes, string(mcpbridge.ScopeWrite)), Control: slices.Contains(scopes, string(mcpbridge.ScopeControl))}
 	now := h.now()
 	if req.Asserted != nil {
-		grant, err := h.assertedGrant(r.Context(), req.Asserted, now)
+		grant, err := h.assertedGrant(r.Context(), req.Asserted, r.Header.Get(edgeproto.HeaderBrowser), now)
 		if err != nil {
 			h.renderError(w, "Cannot connect as your GitHub account: "+err.Error()+". Start the connection again from ChatGPT or Claude.")
 			return
@@ -291,17 +332,18 @@ func (h *handler) authorizeAllow(w http.ResponseWriter, r *http.Request, res res
 	h.issueCode(w, r, req, grant, scopes, now)
 }
 
-// assertedGrant spends the assertion a consent form carries and maps its
-// account to a member again, as the policy now stands.
-func (h *handler) assertedGrant(ctx context.Context, a *asserted, now time.Time) (sshd.ConnectorGrant, error) {
+// assertedGrant spends the assertion a consent form carries, posted from
+// browser, and maps its account to a member again, as the policy now
+// stands.
+func (h *handler) assertedGrant(ctx context.Context, a *asserted, browser string, now time.Time) (sshd.ConnectorGrant, error) {
 	if !now.Before(a.Expires) {
 		return sshd.ConnectorGrant{}, fmt.Errorf("the edge's sign-in for it expired at %s", a.Expires.UTC().Format(time.RFC3339))
 	}
 	if err := h.beforeStart(a.Issued); err != nil {
 		return sshd.ConnectorGrant{}, err
 	}
-	if !h.spendNonce(a.Nonce, a.Expires, now) {
-		return sshd.ConnectorGrant{}, errors.New("the edge's sign-in for it was already used")
+	if err := h.spendNonce(a.Nonce, browser, now); err != nil {
+		return sshd.ConnectorGrant{}, err
 	}
 	grant, _, err := h.ssh.ConnectorAccountGrant(ctx, a.Account)
 	return grant, err
@@ -456,10 +498,14 @@ func clientLabel(req authRequest) string {
 }
 
 type consentPage struct {
-	Client  string
-	Server  string
-	Request string
-	Error   string
+	Client   string
+	Server   string
+	ServerID string
+	Request  string
+	// Universal is set on the universal URL, whose form names the server
+	// for the edge to route it.
+	Universal bool
+	Error     string
 	// Member and Account are the member and edge account an assertion
 	// named, which replace the pairing code.
 	Member  string
@@ -494,11 +540,13 @@ input[type=checkbox]{width:1.25rem;height:1.25rem;font-size:inherit;vertical-ali
 <p class="error">{{.Error}}</p>
 {{else}}
 <h1>Connect <strong>{{.Client}}</strong> to <strong>{{.Server}}</strong>{{if .Member}} as <strong>{{.Member}}</strong>{{end}}</h1>
+<p>Server <strong>{{.Server}}</strong> <code>{{.ServerID}}</code>{{if .Member}}, member <strong>{{.Member}}</strong>{{end}}, client <strong>{{.Client}}</strong>.</p>
 <p>It acts as you. It can always list workspaces, agents and runs and read run history; every member can read every run on this server, so it can read all of them.</p>
 {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
 <form method="post">
 <input type="hidden" name="request" value="{{.Request}}">
-<fieldset>
+{{if .Universal}}<input type="hidden" name="server" value="{{.ServerID}}">
+{{end}}<fieldset>
 <legend>Also allow it to:</legend>
 <p><label><input type="checkbox" name="scope" value="write"{{if .Write}} checked{{end}}> <strong>Launch and message</strong>: launch runs and swarms, message runs, answer agents' questions, pause, resume and mark runs reviewed.</label></p>
 <p><label><input type="checkbox" name="scope" value="control"{{if .Control}} checked{{end}}> <strong>Stop and approve</strong>: decide approvals and permission requests, stop and close runs, cancel swarms. Text an agent wrote that the assistant reads could then talk it into approving or ending work without asking you.</label></p>
@@ -516,7 +564,7 @@ input[type=checkbox]{width:1.25rem;height:1.25rem;font-size:inherit;vertical-ali
 `))
 
 func (h *handler) renderConsent(w http.ResponseWriter, status int, page consentPage) {
-	page.Server = h.serverName()
+	page.Server, page.ServerID = h.serverName(), h.serverID
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)

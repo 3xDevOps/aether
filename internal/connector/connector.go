@@ -101,14 +101,14 @@ type handler struct {
 	mux         *http.ServeMux
 	now         func() time.Time
 
-	// mu guards codes, spent, wrong, wrongAll, wrongSwept, writes and
+	// mu guards codes, nonces, wrong, wrongAll, wrongSwept, writes and
 	// writesSwept.
 	mu    sync.Mutex
 	codes map[string]authCode
-	// spent holds the nonces of the edge assertions consent forms
-	// spent, until each assertion expires. It does not survive a restart,
-	// so assertions issued before started are refused.
-	spent       map[string]time.Time
+	// nonces holds the nonces of the edge assertions consent pages were
+	// shown for, until each assertion expires. It does not survive a
+	// restart, so assertions issued before started are refused.
+	nonces      map[string]nonceUse
 	started     time.Time
 	wrong       map[netip.Prefix]wrongCodes
 	wrongAll    wrongCodes
@@ -148,7 +148,7 @@ func New(cfg Config) (http.Handler, error) {
 		fetch: &http.Client{Transport: cfg.Transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}},
-		mux: http.NewServeMux(), now: time.Now, started: time.Now(), codes: map[string]authCode{}, spent: map[string]time.Time{}, wrong: map[netip.Prefix]wrongCodes{},
+		mux: http.NewServeMux(), now: time.Now, started: time.Now(), codes: map[string]authCode{}, nonces: map[string]nonceUse{}, wrong: map[netip.Prefix]wrongCodes{},
 		writes: map[string]*rate.Limiter{}}
 
 	streamable := mcp.NewStreamableHTTPHandler(h.server, &mcp.StreamableHTTPOptions{
@@ -168,11 +168,26 @@ func New(cfg Config) (http.Handler, error) {
 		verify := func(ctx context.Context, token string, _ *http.Request) (*auth.TokenInfo, error) {
 			return h.verify(ctx, res, token)
 		}
-		h.mux.Handle(res.path, http.NewCrossOriginProtection().Handler(auth.RequireBearerToken(verify, &auth.RequireBearerTokenOptions{
+		// No cross-origin check: the edge rewrites Host to the server id,
+		// ChatGPT and Claude may send their own Origin, and a browser on
+		// another site cannot attach the bearer token, which no cookie
+		// carries.
+		h.mux.Handle(res.path, auth.RequireBearerToken(verify, &auth.RequireBearerTokenOptions{
 			ResourceMetadataURL: h.origin + "/.well-known/oauth-protected-resource" + res.path,
-		})(streamable)))
-		h.mux.HandleFunc("GET "+res.path+"/authorize", func(w http.ResponseWriter, r *http.Request) { h.authorizePage(w, r, res) })
-		h.mux.HandleFunc("POST "+res.path+"/authorize", func(w http.ResponseWriter, r *http.Request) { h.authorizeAllow(w, r, res) })
+		})(streamable))
+		h.mux.HandleFunc("GET "+res.path+"/authorize", func(w http.ResponseWriter, r *http.Request) { h.authorizePage(w, r, res, r.URL.Query()) })
+		h.mux.HandleFunc("POST "+res.path+"/authorize", func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+			if err := r.ParseForm(); err != nil {
+				h.renderError(w, "Cannot read the form: "+err.Error())
+				return
+			}
+			if res == h.universal && !r.PostForm.Has("request") {
+				h.authorizePage(w, r, res, r.PostForm)
+				return
+			}
+			h.authorizeAllow(w, r, res)
+		})
 		h.mux.HandleFunc("POST "+res.path+"/token", func(w http.ResponseWriter, r *http.Request) { h.token(w, r, res) })
 	}
 	return h, nil

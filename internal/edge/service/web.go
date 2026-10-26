@@ -21,6 +21,9 @@ import (
 const (
 	sessionCookie = "__Host-aether_edge_session"
 	signinCookie  = "__Host-aether_edge_signin"
+	// browserCookie, on the relay origin, names the browser a universal
+	// connector sign-in is bound to.
+	browserCookie = "__Host-aether_edge_browser"
 )
 
 //go:embed templates

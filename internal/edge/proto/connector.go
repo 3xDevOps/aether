@@ -2,6 +2,8 @@ package edgeproto
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,9 +19,10 @@ import (
 // the edge forwards PathUniversalMCP by the bearer token's prefix and
 // PathUniversalMCPToken by the code's or refresh token's. A
 // PathUniversalMCPAuthorize request without a server query parameter goes
-// to PathMCPChoose on the sign-in origin, which sends the browser back
-// with the server the signed-in account chose and a ConnectorAssertion.
-// The edge serves the two metadata documents itself.
+// to PathMCPChoose on the sign-in origin, where the signed-in account
+// chooses a server; its form posts the request back with ParamServer and
+// a ConnectorAssertion in ParamAssertion. The edge serves the two
+// metadata documents itself.
 const (
 	PathUniversalMCP                = "/mcp"
 	PathUniversalMCPAuthorize       = "/mcp/authorize"
@@ -34,12 +37,26 @@ const (
 // PathMCPChoose is served on the sign-in origin.
 const PathMCPChoose = "/connectors/choose"
 
-// Query parameters the edge adds to a PathUniversalMCPAuthorize request
-// it sends to a server.
+// Form fields the edge adds to a PathUniversalMCPAuthorize request it
+// sends to a server. ParamServer may also be a query parameter;
+// ParamAssertion never is, so no URL, log or Referer carries it.
 const (
 	ParamServer    = "server"
 	ParamAssertion = "edge_assertion"
 )
+
+// HeaderBrowser carries, on each PathUniversalMCPAuthorize request the
+// edge relays, BrowserBinding of the browser cookie the edge set on the
+// relay origin. A client cannot set it: the edge replaces any it sends,
+// and drops it on every other path.
+const HeaderBrowser = "Aether-Edge-Browser"
+
+// BrowserBinding is what HeaderBrowser carries to serverID for a browser
+// holding cookie: a hash that names the browser to that server alone.
+func BrowserBinding(serverID, cookie string) string {
+	sum := sha256.Sum256([]byte("aether-edge-browser-v1\x00" + serverID + "\x00" + cookie))
+	return hex.EncodeToString(sum[:])
+}
 
 // TokenServer returns the server id a universal code or token is prefixed
 // with.
@@ -59,18 +76,21 @@ const assertionContext = "aether-edge-connector-assertion-v1\x00"
 
 // ConnectorAssertion is the edge's signed statement that Account, signed
 // in to the edge in a browser, chose ServerID for the authorization
-// request of ClientID with PKCE challenge Challenge on the universal
-// connector. Nonce makes it single-use: the server spends it. Issuer is
-// the edge's canonical relay origin.
+// request of ClientID with PKCE challenge Challenge and redirect URI
+// RedirectURI on the universal connector. Nonce makes it single-use: the
+// server binds it to the first browser that brings it and spends it.
+// Issuer is the edge's canonical relay origin. Edges before
+// VersionConnectorSignIn leave RedirectURI empty.
 type ConnectorAssertion struct {
-	Issuer    string    `json:"issuer"`
-	ServerID  string    `json:"server_id"`
-	Nonce     string    `json:"nonce"`
-	Account   Account   `json:"account"`
-	ClientID  string    `json:"client_id"`
-	Challenge string    `json:"challenge"`
-	IssuedAt  time.Time `json:"issued_at"`
-	ExpiresAt time.Time `json:"expires_at"`
+	Issuer      string    `json:"issuer"`
+	ServerID    string    `json:"server_id"`
+	Nonce       string    `json:"nonce"`
+	Account     Account   `json:"account"`
+	ClientID    string    `json:"client_id"`
+	Challenge   string    `json:"challenge"`
+	RedirectURI string    `json:"redirect_uri,omitempty"`
+	IssuedAt    time.Time `json:"issued_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
 }
 
 // Assertion verification errors, beside ErrGrantMalformed and
@@ -89,8 +109,9 @@ func (a ConnectorAssertion) validate() error {
 		return fmt.Errorf("invalid server id %q", a.ServerID)
 	case !ValidConnID(a.Nonce):
 		return fmt.Errorf("invalid nonce %q", a.Nonce)
-	case !validRequiredText(a.ClientID, maxShortText) || !validRequiredText(a.Challenge, maxShortText):
-		return errors.New("client id or challenge is empty, too long or has control characters")
+	case !validRequiredText(a.ClientID, maxShortText) || !validRequiredText(a.Challenge, maxShortText) ||
+		!validText(a.RedirectURI, maxShortText):
+		return errors.New("client id or challenge is empty, or one of them or the redirect URI is too long or has control characters")
 	case a.IssuedAt.IsZero() || !a.ExpiresAt.After(a.IssuedAt):
 		return errors.New("assertion must expire after it is issued")
 	case a.ExpiresAt.Sub(a.IssuedAt) > ConnectorAssertionTTL:
@@ -111,9 +132,9 @@ func SignConnectorAssertion(edgeKey ed25519.PrivateKey, a ConnectorAssertion) (s
 
 // VerifyConnectorAssertion checks signed against the pinned edge key, then
 // that it is from issuer, for serverID and the authorization request of
-// clientID with challenge, and live at now within ClockSkew. It does not
-// spend the nonce.
-func VerifyConnectorAssertion(edgeKey ed25519.PublicKey, signed, issuer, serverID, clientID, challenge string, now time.Time) (ConnectorAssertion, error) {
+// clientID with challenge and, unless it names none, redirectURI, and
+// live at now within ClockSkew. It does not spend the nonce.
+func VerifyConnectorAssertion(edgeKey ed25519.PublicKey, signed, issuer, serverID, clientID, challenge, redirectURI string, now time.Time) (ConnectorAssertion, error) {
 	var a ConnectorAssertion
 	if err := openPayload(edgeKey, assertionContext, signed, &a); err != nil {
 		return ConnectorAssertion{}, err
@@ -124,8 +145,8 @@ func VerifyConnectorAssertion(edgeKey ed25519.PublicKey, signed, issuer, serverI
 	switch {
 	case a.Issuer != issuer || a.ServerID != serverID:
 		return ConnectorAssertion{}, fmt.Errorf("%w: it names %s on %s, this is %s on %s", ErrAssertionScope, a.ServerID, a.Issuer, serverID, issuer)
-	case a.ClientID != clientID || a.Challenge != challenge:
-		return ConnectorAssertion{}, fmt.Errorf("%w: it was issued for another client_id or code_challenge", ErrAssertionScope)
+	case a.ClientID != clientID || a.Challenge != challenge || (a.RedirectURI != "" && a.RedirectURI != redirectURI):
+		return ConnectorAssertion{}, fmt.Errorf("%w: it was issued for another client_id, code_challenge or redirect_uri", ErrAssertionScope)
 	case now.Before(a.IssuedAt.Add(-ClockSkew)):
 		return ConnectorAssertion{}, fmt.Errorf("%w: issued at %s, now %s; check that the server's and the edge's clocks are set", ErrGrantNotYetValid,
 			a.IssuedAt.Format(time.RFC3339), now.UTC().Format(time.RFC3339))

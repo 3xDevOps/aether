@@ -135,7 +135,7 @@ func (h *harness) startEdge() {
 	}
 	svc, err := edge.New(edge.Config{
 		DataDir: h.edgeDir, SigninOrigin: h.signinURL, RelayOrigin: h.relayURL,
-		GitHub: h.github.app(), Clock: h.now,
+		GitHub: h.github.app(), Clock: h.now, ConnectorClientHosts: []string{"127.0.0.1"},
 	})
 	if err != nil {
 		t.Fatal(err)
