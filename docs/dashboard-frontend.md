@@ -531,7 +531,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
 - **Phone:** a right side sheet, a `dialog` named "Assistant".
 - **Header:** an `h2`, because the view beside it owns the page's `h1`. It
   takes the run header's height on a run and the view header's elsewhere, so
-  the two seams line up. It holds the agent and state, **New conversation** (confirms, then
+  the two seams line up. It holds the agent and state, **Actions**, **New conversation** (confirms, then
   `assistant.reset`) and **Close assistant**. While `auto_approve` is on, a
   line under it says the assistant acts without asking, with **Change in
   Settings**.
@@ -562,6 +562,46 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   links **Skip these cards…** to Settings > Assistant; a card with
   `other_member` says that member (`other_owner`) owns the run, so it asks
   even with auto-approval on.
+- **Action cards** (`components/assistant/action-card.tsx`,
+  `lib/assistant-actions.ts`): `assistantView` takes each tool call whose
+  `tool_name` ends in an `aether_*` tool (Claude Code's
+  `mcp__aether__aether_launch_run`, or the bare name) out of its step block
+  and puts it after that block as a card, in order. A block left with no work
+  becomes the rows its prose and notices would have been. The card names the
+  verb and target from the inputs and the store's names ("Launched run on
+  api with Claude Code", "Messaged run fix-login", "Merged PR #42"), a state
+  (`Waiting for your approval`, `Running`, `Done`, `Failed`, `Declined`,
+  `Expired: no answer in time`) with `approved by you` or `auto-approved`,
+  and its time. A failure shows the server's error verbatim. A launch
+  receipt (`result.launch`) or a watch result gets one more line. A done
+  launch whose run or swarm is still active reads **Working in the
+  background**; the header calls the assistant's own turn **Generating…**.
+  The target comes from the result's `link` (a dashboard query such as
+  `?run=<id>`, or an outside address such as a pull request, opened in a new
+  tab), else from the created ids, else from `run_id`, `mission_id` or
+  `workspace_id` in the inputs. A run or workspace the hydrated store no
+  longer holds reads "This run no longer exists" and has no link. Failed,
+  declined and expired cards offer **Retry**, which puts `Retry: <summary>`
+  in the composer and focuses it without sending. **Details** shows the
+  input and result. An `aether_*` tool without words of its own shows its
+  name and inputs. The card is focusable, and Enter opens its link.
+  Consecutive read tools (and any `aether_list_*` or `aether_get_*`) fold into
+  one quiet line, "Read 3 runs and 1 workspace list", that expands to each
+  read. Expansion lives in `expandedRows` under `assistant`.
+- **Outcome:** a notice carrying an action record (`notice.action`, the
+  server's `AssistantAction`) decides the state. Records with the same
+  `action.id` replace earlier ones. Records carry no tool call id, so a record
+  goes to the card already holding its `action.id`, or else to the latest
+  unclaimed call of the same method whose `run_id` matches. Without a record,
+  the state comes from the tool call's status, a `declined` or `did not
+  answer within` error, a pending confirmation of the call's method, and the
+  `Approved:` or `Auto-approved:` note. A matched notice is folded into its
+  card instead of showing as a row.
+- **Actions** (`components/assistant/action-history.tsx`): a header button
+  opening a popover. It lists this conversation's cards (not reads) newest
+  first with outcome, target and time, all read from the loaded transcript.
+  Focus starts on the newest entry. Up, Down, Home and End move, and Enter
+  opens the target and closes the popover.
 - **Auto-approval suggestion** (`components/assistant/suggestion.tsx`): when
   the status has `suggest_auto_approve`, the state is `idle`, no turn runs,
   no confirmation or harness prompt waits and the conversation has items, a

@@ -152,6 +152,20 @@ run is another member's; the [protocol reference](local-gateway.md) gives the
 fields. Resetting the conversation drops the records of actions still in
 flight instead of writing them into the new one.
 
+## See what it did
+
+Each action appears in the conversation as a card. The card names the action
+and its target ("Launched run on api with Claude Code", "Merged PR #42") and
+shows its state: waiting for your approval, running, done, failed, declined or
+expired. It also says whether you approved it or auto-approval passed it, and
+links to the run, swarm, pull request or environment. A failure shows the
+server's error as is. **Retry** puts `Retry: <what it tried>` in the message
+box for you to edit and send. A run the assistant launched that is still going
+reads **Working in the background**; it keeps running after you close the
+panel. Reads fold into one line, such as **Read 3 runs**, that expands. The
+**Actions** button in the panel header lists the conversation's actions,
+newest first.
+
 ## Auto-approval
 
 **Settings → Assistant → Let the assistant act without asking** lets the
