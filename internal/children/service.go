@@ -224,3 +224,21 @@ func rpcErr(method string, err error) *protocol.Error {
 	}
 	return &protocol.Error{Code: code, Message: method + ": " + err.Error()}
 }
+
+// publish tells subscribers a run's child-run fields changed.
+func (s *Service) publish(ctx context.Context, run domain.RunID, actor domain.MemberID) {
+	if s.cfg.Bus == nil {
+		return
+	}
+	r, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		slog.Warn("children: read run for its event", "run", run, "error", err)
+		return
+	}
+	if _, err := s.cfg.Bus.Publish(ctx, events.Event{
+		WorkspaceID: r.WorkspaceID, RunID: r.ID, ActorID: actor,
+		Payload: events.RunChildrenPayload{Children: r.Children, ChildRefused: r.ChildRefused, Detached: r.Detached},
+	}); err != nil {
+		slog.Warn("children: publish run.children", "run", run, "error", err)
+	}
+}

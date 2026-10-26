@@ -118,6 +118,11 @@ func TestIntegrationChildRunEndToEnd(t *testing.T) {
 
 	parent := e.launch(t, ctrl, parentTask, "fake")
 	att := openAttach(t, client, parent.ID)
+	defer func() {
+		if t.Failed() {
+			t.Logf("parent output: %q", att.output())
+		}
+	}()
 	childID := waitValue(t, att, "child:")
 	child := waitRun(t, ctrl, childID, func(r protocol.Run) bool { return r.Status == string(domain.RunRunning) })
 	if child.ParentRunID != parent.ID || child.RootRunID != parent.ID || child.ChildPurpose != "review" || child.MemberID != string(e.ada.id) {

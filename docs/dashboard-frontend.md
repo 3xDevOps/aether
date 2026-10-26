@@ -1055,7 +1055,9 @@ Removal also repairs the selection and open route before any refresh awaits.
   skips an unknown run, whose snapshot carries the holder. `run.account`
   likewise skips an unknown run, and on a known one replaces
   `account_member_id` and `requested_account_member_id` with the payload's, so
-  the header names the new account at once.
+  the header names the new account at once. `run.children` re-reads its run,
+  which carries the run's own child-run setting, `child_refused` and
+  `detached`.
   `run.retention` also fetches an unknown run, then replaces only its runtime
   deadline and cleanup metadata. It does not re-fetch known runs or change
   `finished_at`, `stateChangedAt`, the business status, `outcome_unseen` or

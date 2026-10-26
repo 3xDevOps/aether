@@ -75,15 +75,20 @@ const childCols = `rc.run_id, rc.parent_run_id, rc.root_run_id, rc.tree_key, rc.
 	rc.base_commit, rc.base_branch, rc.fallback_disabled, rc.fallback_order, rc.idempotency_key, rc.state,
 	rc.detached, rc.error, rc.end_notified, rc.created_at, rc.started_at`
 
+// childReported holds for a reservation whose run's latest word is a
+// finalized success or failure report, before its run parks on it.
+const childReported = `EXISTS (SELECT 1 FROM coord_reports cr WHERE cr.run_id = rc.run_id AND cr.state = 'finalized'
+	AND cr.superseded_at IS NULL AND cr.outcome IN ('success', 'failure'))`
+
 // childBusy holds for a reservation that occupies a slot: launching, or
 // started and provisioning or working. A child that reported, waits on its
 // own children or waits for a human holds none.
-const childBusy = `(rc.state = 'launching' OR (rc.state = 'started' AND EXISTS (
+const childBusy = `(rc.state = 'launching' OR (rc.state = 'started' AND NOT ` + childReported + ` AND EXISTS (
 	SELECT 1 FROM runs r WHERE r.id = rc.run_id AND (r.status IN ('queued', 'provisioning')
 		OR (r.status IN ('running', 'needs-attention') AND r.activity IN ('', 'working', 'waiting-ci', 'waiting-tools', 'disconnected'))))))`
 
 // childUnfinished holds for a reservation its parent still waits on.
-const childUnfinished = `(rc.state IN ('queued', 'launching') OR (rc.state = 'started' AND EXISTS (
+const childUnfinished = `(rc.state IN ('queued', 'launching') OR (rc.state = 'started' AND NOT ` + childReported + ` AND EXISTS (
 	SELECT 1 FROM runs r WHERE r.id = rc.run_id AND r.status IN ('queued', 'provisioning', 'running', 'needs-attention')
 		AND r.activity NOT IN ('finished', 'failed', 'answered'))))`
 

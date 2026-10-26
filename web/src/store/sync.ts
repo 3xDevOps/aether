@@ -626,7 +626,8 @@ export async function applyEvent(
       store.getState().applyRunProtected(ev.run_id, p.protected)
       break
     }
-    case 'run.mode': {
+    case 'run.mode':
+    case 'run.children': {
       try {
         store.getState().upsertRun(await client.runGet(ev.run_id))
       } catch (err) {

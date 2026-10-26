@@ -143,10 +143,11 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 		return protocol.ChildReceipt{}, rpcErr(method, err)
 	}
 	if p.refusal != "" {
-		if p.off {
+		if p.off && !p.parent.ChildRefused {
 			if markErr := s.cfg.Store.MarkChildRefused(ctx, run); markErr != nil {
 				return protocol.ChildReceipt{}, rpcErr(method, markErr)
 			}
+			s.publish(ctx, run, "")
 		}
 		return protocol.ChildReceipt{}, denied("%s: %s", method, p.refusal)
 	}
@@ -348,6 +349,7 @@ func (s *Service) detach(ctx context.Context, c *domain.ChildReservation) (proto
 	if err := s.cfg.Store.DetachChild(ctx, c.RunID); err != nil {
 		return protocol.Child{}, rpcErr(protocol.MethodChildDetach, err)
 	}
+	s.publish(ctx, c.RunID, "")
 	return s.wireOrErr(ctx, c.RunID, protocol.MethodChildDetach)
 }
 
@@ -413,6 +415,14 @@ func (s *Service) wire(ctx context.Context, c *domain.ChildReservation) (protoco
 	}
 	if report, err := s.cfg.Store.LatestCoordReport(ctx, c.RunID); err == nil && report != nil {
 		out.Report = &protocol.ChildReport{Outcome: string(report.Outcome), Summary: report.Summary, At: report.CreatedAt.UTC().Format(time.RFC3339)}
+		if out.State == protocol.ChildWorking || out.State == protocol.ChildWaiting {
+			switch report.Outcome {
+			case store.CoordOutcomeSuccess:
+				out.State = protocol.ChildFinished
+			case store.CoordOutcomeFailure:
+				out.State = protocol.ChildFailed
+			}
+		}
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return protocol.Child{}, err
 	}

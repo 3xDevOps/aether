@@ -106,6 +106,7 @@ func (s *Service) Allow(ctx context.Context, actor *domain.Member, run domain.Ru
 	if err := s.cfg.Store.SetRunChildren(ctx, run, value, actor.ID); err != nil {
 		return protocol.RunChildrenAllowResult{}, err
 	}
+	s.publish(ctx, run, actor.ID)
 	s.Kick()
 	return protocol.RunChildrenAllowResult{Children: value}, nil
 }
