@@ -518,15 +518,25 @@ export function launchLine(action: AssistantAction, names: ActionNames): string 
   const workspace = text(launch.workspace_id)
   const harness = text(launch.harness)
   const account = record(launch.account)
-  const owner = text(account.name)
+  const member = text(account.member_id)
+  const own = account.own === true || account.shared === false || (member !== undefined && names.sharer(member) === undefined)
+  const sharer = own ? undefined : text(account.name) ?? (member && names.sharer(member))
   const requested = text(record(launch.requested_account).name) ?? text(launch.requested_account)
   return [
     kind,
     workspace && (names.workspace(workspace) ?? workspace),
     harness && [names.agent(harness) ?? harness, text(launch.model)].filter(Boolean).join(' '),
-    owner && `${owner}'s account${account.shared === true || account.own === false || Object.values(account).includes('shared') ? ', shared' : ''}`,
+    sharer ? `${sharer}'s account, shared` : 'your account',
     requested && `fell back from ${requested}`,
+    fallbackWords(record(launch.fallback), names),
   ].filter(Boolean).join(' · ')
+}
+
+/** The receipt's fallback policy, when it is not the automatic one. */
+function fallbackWords(fallback: Record<string, unknown>, names: ActionNames): string | undefined {
+  if (fallback.policy === 'off' || fallback.no_fallback === true) return 'no fallback'
+  const order = Array.isArray(fallback.order) ? fallback.order.map(text).filter((id): id is string => id !== undefined) : []
+  return order.length ? `then ${order.map((id) => names.sharer(id) ?? 'your account').join(', ')}` : undefined
 }
 
 function askedLaunch(action: AssistantAction, result: Record<string, unknown>, names: ActionNames): string {
