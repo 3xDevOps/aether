@@ -288,14 +288,6 @@ func (o Op) description(s Surface) string {
 // Ops is the registry: every op either surface serves.
 var Ops = slices.Concat(readOps, writeOps, controlOps, assistantOps)
 
-func Lookup(name string) (Op, bool) {
-	i := slices.IndexFunc(Ops, func(o Op) bool { return o.Name == name })
-	if i < 0 {
-		return Op{}, false
-	}
-	return Ops[i], true
-}
-
 // RegisterConnector adds to srv the ops a ChatGPT or Claude connector
 // serves whose scope is granted, so tools/list shows none the connector
 // cannot call.

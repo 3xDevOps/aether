@@ -107,7 +107,10 @@ func TestAssistantSurface(t *testing.T) {
 	var names []string
 	for _, tool := range res.Tools {
 		names = append(names, tool.Name)
-		o, _ := Lookup(tool.Name)
+		var o Op
+		if i := slices.IndexFunc(Ops, func(o Op) bool { return o.Name == tool.Name }); i >= 0 {
+			o = Ops[i]
+		}
 		if o.Tier == TierNone || !strings.HasSuffix(strings.TrimSuffix(tool.Description, " Fails if the member declines or does not answer."), o.Does) ||
 			tool.Annotations.ReadOnlyHint != (o.Tier == TierRead) {
 			t.Errorf("%s: tier %d, description %q, annotations %+v", tool.Name, o.Tier, tool.Description, tool.Annotations)
