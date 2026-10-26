@@ -216,3 +216,12 @@ test('a progress bar with a role reports its value; without one it only draws', 
   expect(quarter.style.width).toBe('25%')
   expect(container.querySelectorAll('[role]')).toHaveLength(1)
 })
+
+test('a progress bar with no value sweeps its track and reports no value', () => {
+  render(<ProgressBar role="progressbar" aria-label="Uploading" />)
+  const bar = screen.getByRole('progressbar', { name: 'Uploading' })
+  expect(bar.hasAttribute('aria-valuenow')).toBe(false)
+  const fill = bar.querySelector<HTMLElement>('[data-slot="progress-fill"]')!
+  expect(fill.className).toContain('animate-progress-sweep')
+  expect(fill.style.width).toBe('')
+})

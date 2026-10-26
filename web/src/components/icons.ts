@@ -128,6 +128,7 @@ import {
   Pin as LucidePin,
   Bell as LucideBell,
   Gauge as LucideGauge,
+  Upload as LucideUpload,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -176,6 +177,7 @@ export const BookMarked = icon(LucideBookMarked)
 export const Pin = icon(LucidePin)
 export const Bell = icon(LucideBell)
 export const Gauge = icon(LucideGauge)
+export const Upload = icon(LucideUpload)
 export const Keyboard = icon(LucideKeyboard)
 export const ListTodo = icon(LucideListTodo)
 export const LoaderCircle = icon(LucideLoaderCircle)

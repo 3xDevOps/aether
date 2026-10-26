@@ -22,6 +22,10 @@ const twMerge = extendTailwindMerge({
         'collapsible-up',
         'entrance',
         'skeleton-sweep',
+        'progress-sweep',
+        'pop-in',
+        'shake',
+        'bob',
       ],
     },
     classGroups: {

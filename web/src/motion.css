@@ -35,6 +35,7 @@
   --duration-270: 270ms;
   --duration-300: 300ms;
   --duration-360: 360ms;
+  --duration-450: 450ms;
   --duration-500: 500ms;
   --duration-720: 720ms;
   --duration-900: 900ms;
@@ -74,6 +75,10 @@
   --animate-collapsible-up: collapsible-up var(--duration-200) var(--ease-standard);
   --animate-entrance: entrance var(--duration-360) var(--ease-enter) backwards;
   --animate-skeleton-sweep: skeleton-sweep var(--duration-1400) var(--ease-in-out) infinite;
+  --animate-progress-sweep: progress-sweep var(--duration-1400) var(--ease-in-out) infinite;
+  --animate-pop-in: pop-in var(--duration-250) var(--ease-pop) backwards;
+  --animate-shake: shake var(--duration-360) var(--ease-in-out);
+  --animate-bob: bob var(--duration-450) var(--ease-in-out) infinite alternate;
 
   /* Overlays grow from the Radix transform origin their content sets. */
   @keyframes overlay-in {
@@ -157,6 +162,36 @@
     }
     to {
       transform: translateX(100%);
+    }
+  }
+  /* A third-width fill crossing its track, for work with no known progress. */
+  @keyframes progress-sweep {
+    from {
+      translate: -100% 0;
+    }
+    to {
+      translate: 300% 0;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      scale: 0.5;
+    }
+  }
+  @keyframes shake {
+    20%,
+    60% {
+      translate: -3px 0;
+    }
+    40%,
+    80% {
+      translate: 3px 0;
+    }
+  }
+  @keyframes bob {
+    to {
+      translate: 0 -3px;
     }
   }
 }

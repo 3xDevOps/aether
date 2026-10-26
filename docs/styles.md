@@ -129,12 +129,11 @@ Identity colour never replaces run-state colour.
 `SectionLabel`, `EmptyState`, `Callout`, `Badge`, `CountBadge`,
 `RequestCard`, `StatusDot` and `StateLine`, `Avatar`, `AgentGlyph`, `Code`
 and `CodeBlock`, `Kbd`, `Markdown`, `RelativeTime`, `Spinner`, `Skeleton`,
-`ProgressBar`, `TextSwap` and `IconSwap`, `CopyButton`, `Separator`, `Toaster`,
-`LineGutter` (a code line's clickable number gutter, for the Changes view's
-comments) and the Session view's timeline rows, step rail (`steps.tsx`) and
-blocks. Reach for one
-before writing markup, and pass its `variant`, `size` or `tone` rather than
-restyling it.
+`ProgressBar`, `DropZone`, `TextSwap` and `IconSwap`, `CopyButton`,
+`Separator`, `Toaster`, `LineGutter` (a code line's clickable number gutter,
+for the Changes view's comments) and the Session view's timeline rows, step
+rail (`steps.tsx`) and blocks. Reach for one before writing markup, and pass
+its `variant`, `size` or `tone` rather than restyling it.
 
 `Button` variants:
 
@@ -174,7 +173,15 @@ The other primitives with motion or a fixed size:
 - `CountBadge` is an 18px chip of tabular figures; a count changes at once.
 - `ProgressBar` is a 4px track whose fill glides to its value. With
   `role="meter"` or `role="progressbar"` it reports `value` of `max`;
-  without one it only draws, for a parent that carries the role.
+  without one it only draws, for a parent that carries the role. With no
+  `value` the fill is a third of the track sweeping across it
+  (`animate-progress-sweep`, 1.4s), for work with no known progress; under
+  reduced motion it fills the track at `--opacity-muted`.
+- `DropZone` is a dashed `rounded-panel` button that opens a chooser through
+  `onBrowse` and takes dragged files through `onFiles`; its border turns
+  `border-control` on hover and `border-accent` over `bg-accent-soft` while a
+  file drag is over it (`data-drag`). `DropIllustration`, its two tilted sheets
+  behind an upload tile, lifts on hover, splays on a drag and bobs the arrow.
 - `Kbd` is an outlined keycap, 20px (`md`) or 16px (`sm`).
 - `RequestCard` (`request-card.tsx`) is anything waiting on the viewer: a
   `bg-raised` card with a seam border and no shadow. Its header holds a 28px
@@ -580,6 +587,10 @@ literal time or curve.
   after the one before (`--stagger-cell`). Nothing runs on open; the number and
   cells move when a new report arrives or the pointer singles out a category,
   and the hover dim moves every cell together.
+- File chips and attachment rows confirm a change the viewer caused: a
+  landed file's check and disc `animate-pop-in` (scale 0.5 to 1 on
+  `--ease-pop`, 250ms), a failed row `animate-shake`s once (360ms) and a
+  dragged-over drop zone's arrow `animate-bob`s 3px (450ms, alternating).
 - Row selection, focus outlines and exits change at once.
 - `state-pulse` (the run header's working dot, the Session view's live row
   and live steps header, a plan's step in progress, the dot under a streaming

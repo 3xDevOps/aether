@@ -6,13 +6,16 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 import { canReopenRun } from '@/lib/commands'
+import { useFileDrop } from '@/lib/file-drag'
 import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
 import type { ConfigOption } from '@/lib/session-types'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
-import { ComposerImagePicker, ComposerImages, hasImages, useComposerImages } from '@/routes/run/composer-images'
+import { AttachmentChips } from '@/routes/run/composer-attachments'
+import { AttachButton, DropOverlay, dropRoom } from '@/routes/run/composer-dropzone'
+import { hasImages, useComposerImages, type ComposerImageState } from '@/routes/run/composer-images'
 import { ContextWindow } from '@/routes/run/context-window'
 import { commandSuggestions, currentChoice, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
 import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type ComposerDraft, type Pill } from '@/routes/run/composer-state'
@@ -98,7 +101,7 @@ const pillLook: Record<Pill, { label: string; Icon: typeof ArrowUp; variant: 'pr
   resume: { label: 'Resume', Icon: Play, variant: 'primary' },
 }
 
-function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox, onPaste, readOnly, images, footer }: {
+function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusChange, onSend, onQueue, onEscape, placeholder, describedBy, menu, onKeyDown, combobox, onPaste, readOnly, images, attach, footer }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
   autoFocus?: boolean
   value: string
@@ -116,9 +119,13 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusCha
   onPaste?: (event: React.ClipboardEvent<HTMLTextAreaElement>) => void
   readOnly?: boolean
   images?: React.ReactNode
+  /** What a file dropped on the box joins, and whether the box takes none now. */
+  attach: { images: ComposerImageState; disabled: boolean }
   footer: React.ReactNode
 }) {
   const coarse = useMediaQuery(coarsePointer)
+  const room = dropRoom(attach.images, attach.disabled)
+  const drop = useFileDrop({ onFiles: (files) => void attach.images.upload(files), limit: room.limit })
   const [focused, setFocused] = useState(false)
   const caretPlaced = useRef(false)
   useEffect(() => {
@@ -139,8 +146,9 @@ function ComposerBox({ textarea, autoFocus, value, onChange, onCaret, onFocusCha
     } : {}),
   } : {})
   return (
-    <div className="relative">
+    <div className="relative" {...drop.handlers}>
       {menu}
+      {drop.count !== null && <DropOverlay count={drop.count} refused={drop.refused} blocked={room.blocked} limit={room.limit} />}
       <div className={cn('overflow-hidden rounded-composer border border-seam bg-chrome', focused && 'border-control')}>
       {images}
       <Textarea
@@ -254,6 +262,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
   const maySteer = allowed('steer', self, { owner: run.member_id, protected: run.protected, steerOthers })
   const block = composerBlock(run, maySteer, maySteer && cap.hasMethod('run.relaunch') && canReopenRun(run))
   const images = useComposerImages(run.id, !block && cap.hasMethod('terminal.file'))
+  const attachOff = busy || !cap.hasMethod('terminal.file')
   const { uploading, uploadError } = images
   const control = useImplicitControl(run, agent)
   const hint = !control.waits
@@ -303,10 +312,11 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
         placeholder="Message the agent"
         describedBy={hintID}
         onPaste={images.onPaste}
-        images={<ComposerImages images={images} disabled={busy} />}
+        images={<AttachmentChips images={images} disabled={busy} />}
+        attach={{ images, disabled: attachOff }}
         footer={(
           <>
-            <ComposerImagePicker images={images} disabled={busy || !cap.hasMethod('terminal.file')} />
+            <AttachButton images={images} disabled={attachOff} textarea={textarea} />
             <SendActions
               pill="send"
               label={late ? stillWaiting : busy ? 'Sending…' : 'Send'}
@@ -383,6 +393,7 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
   const waiting = backgroundWait(run, session) !== null
   const supportsImages = state?.prompt_images === true
   const images = useComposerImages(run.id, !gate && cap.hasMethod('terminal.file'))
+  const attachOff = busy || !cap.hasMethod('terminal.file')
   const refusedImages = !supportsImages && hasImages(images.previews)
   const hasContent = Boolean(body.trim()) || images.previews.length > 0
   const pill = moderated ? 'send' : pillFor({ paused, turnRunning, backgroundWait: waiting, steering: state?.steering ?? false, queueHeld, empty: !hasContent })
@@ -533,12 +544,14 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
         value={body}
         readOnly={busy}
         onPaste={images.onPaste}
-        images={<ComposerImages images={images} disabled={busy} />}
+        images={<AttachmentChips images={images} disabled={busy} />}
+        attach={{ images, disabled: attachOff }}
         footer={(
           <>
-            <ComposerImagePicker
+            <AttachButton
               images={images}
-              disabled={busy || !cap.hasMethod('terminal.file')}
+              disabled={attachOff}
+              textarea={textarea}
               unsupported={refusedImages ? 'This agent does not support image prompts.' : undefined}
             />
             <OptionPills options={state?.config_options ?? []} disabled={busy || moderated} onSet={setOption} />

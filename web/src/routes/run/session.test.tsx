@@ -877,6 +877,35 @@ describe('the Enhanced composer draft', () => {
     })))
   })
 
+  it('shows a veil while files are dragged over the box and attaches them when dropped', async () => {
+    vi.mocked(api.uploadTerminalFile).mockClear()
+    open()
+    acpSocket().open(lease)
+    const field = await box()
+    const files = [new File(['a'], 'a.txt', { type: 'text/plain' }), new File(['b'], 'b.txt', { type: 'text/plain' })]
+    const dataTransfer = { types: ['Files'], items: files.map(() => ({ kind: 'file' })), files }
+
+    fireEvent.dragEnter(field, { dataTransfer })
+    expect(screen.getByText('Drop to attach 2 files')).toBeDefined()
+    expect(document.activeElement).not.toBe(screen.getByText('Drop to attach 2 files'))
+
+    fireEvent.dragLeave(field, { dataTransfer })
+    expect(screen.queryByText('Drop to attach 2 files')).toBeNull()
+
+    fireEvent.dragEnter(field, { dataTransfer })
+    fireEvent.drop(field, { dataTransfer })
+    expect(screen.queryByText('Drop to attach 2 files')).toBeNull()
+    expect(await screen.findByRole('button', { name: 'Remove attached file 2: b.txt' })).toBeDefined()
+    expect(api.uploadTerminalFile).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves a text drag over the box alone', async () => {
+    open()
+    acpSocket().open(lease)
+    fireEvent.dragEnter(await box(), { dataTransfer: { types: ['text/plain'], items: [{ kind: 'string' }], files: [] } })
+    expect(screen.queryByText(/Drop to attach/)).toBeNull()
+  })
+
   it('offers a restored partial command its suggestions again, and follows the selection', async () => {
     useStore.getState().upsertRun(run({ id: 'run_2', mode: 'acp', acp: true }))
     const view = open()
