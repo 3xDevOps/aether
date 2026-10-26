@@ -1556,12 +1556,21 @@ func TestAnsweredKeepsAnOpenQuestion(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
-	if err := e.sched.ReportAnswered(ctx, run.ID, "answered-1", "replied to a peer", time.Now().Add(time.Second)); err != nil {
+	answeredAt := time.Now().Add(time.Second)
+	if err := e.sched.ReportAnswered(ctx, run.ID, "answered-1", "replied to a peer", answeredAt); err != nil {
 		t.Fatalf("ReportAnswered: %v", err)
 	}
+	// The answer takes the watermark, so its retry after the question is
+	// dealt with cannot label a later turn Answered.
+	if err := e.sched.ReportAnswered(ctx, run.ID, "answered-1", "replied to a peer", answeredAt); err != nil {
+		t.Fatalf("replayed ReportAnswered: %v", err)
+	}
 	e.sched.mu.Lock()
-	kept := e.sched.runs[run.ID].idleReason
+	kept, watermark := e.sched.runs[run.ID].idleReason, e.sched.runs[run.ID].idleReportID
 	e.sched.mu.Unlock()
+	if watermark != "answered-1" {
+		t.Fatalf("idle report watermark = %q, want the kept answer's id", watermark)
+	}
 	r, err := e.db.GetRun(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)

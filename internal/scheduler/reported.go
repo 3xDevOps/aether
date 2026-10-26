@@ -292,7 +292,9 @@ func outboxFenced(run domain.RunID, id string, err error) error {
 // recordIdleReportLocked shares the blocked-report watermark and park machinery
 // with interactive outcomes. No native execution report is synthesized. Only
 // id's own retry is accepted without effect: the coord receipt guarantees it
-// carries the same inputs.
+// carries the same inputs. An answer leaves an open question or blocker
+// shown but still takes the watermark, so its retry cannot relabel a later
+// turn.
 func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervised, id, reason string, at time.Time) error {
 	switch {
 	case at.Before(entry.relaunchedAt):
@@ -305,7 +307,10 @@ func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervise
 		return coord.ErrReportSuperseded
 	}
 	old := entry.sidecar()
-	entry.idleReason, entry.idleShown = reason, false
+	kept := strings.HasPrefix(reason, answeredReasonPrefix) && humanReason(entry.idleReason)
+	if !kept {
+		entry.idleReason, entry.idleShown = reason, false
+	}
 	entry.idleReportID, entry.idleReportAt = id, at
 	if err := s.writeSidecar(entry.sidecar()); err != nil {
 		entry.idleReason, entry.idleShown = old.IdleReason, old.IdleShown
@@ -315,6 +320,9 @@ func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervise
 			entry.idleReportAt = *old.IdleReportAt
 		}
 		return fmt.Errorf("scheduler: record idle report for %s: %w", entry.runID, err)
+	}
+	if kept {
+		return nil
 	}
 	if entry.outcomeDue() && !entry.atPrompt() {
 		return s.parkIdleReportLocked(ctx, entry)
@@ -449,9 +457,6 @@ func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason
 		defer s.mu.Unlock()
 		if entry.status.Terminal() || entry.reported != "" {
 			return finished
-		}
-		if strings.HasPrefix(reason, answeredReasonPrefix) && humanReason(entry.idleReason) {
-			return nil
 		}
 		return s.recordIdleReportLocked(ctx, entry, id, reason, at)
 	}
