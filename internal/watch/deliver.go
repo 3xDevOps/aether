@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -165,46 +166,43 @@ func (s *Service) stillDue(ctx context.Context, n *store.WatchNotification, pref
 	if w.TargetKind == protocol.WatchTargetRun && s.runs.Paused(w.RunID) {
 		return w, "", "", errRunPaused
 	}
-	current, err := s.currentNeed(ctx, w)
+	current, err := s.currentNeeds(ctx, w)
 	if err != nil {
 		return nil, "", "", err
 	}
-	if current != n.Key {
+	if !slices.ContainsFunc(current, func(c need) bool { return c.key == n.Key }) {
 		return w, protocol.WatchStatusCleared, "Resolved before the push was sent", nil
 	}
 	return w, "", "", nil
 }
 
-// currentNeed is the key of what w's target waits on its owner for now,
-// empty for nothing.
-func (s *Service) currentNeed(ctx context.Context, w *store.Watch) (string, error) {
-	var n *need
+// currentNeeds is what w's target waits on its owner for now.
+func (s *Service) currentNeeds(ctx context.Context, w *store.Watch) ([]need, error) {
 	switch w.TargetKind {
 	case protocol.WatchTargetRun:
 		run, err := s.store.GetRun(ctx, w.RunID)
 		if errors.Is(err, store.ErrNotFound) {
-			return "", nil
+			return nil, nil
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		n = s.runNeed(run)
+		return s.runNeeds(run), nil
 	case protocol.WatchTargetMission:
 		m, err := s.store.GetMission(ctx, w.MissionID)
 		if errors.Is(err, store.ErrNotFound) {
-			return "", nil
+			return nil, nil
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
-		if n, err = s.missionNeed(ctx, m); err != nil {
-			return "", err
+		n, err := s.missionNeed(ctx, m)
+		if err != nil || n == nil {
+			return nil, err
 		}
+		return []need{*n}, nil
 	}
-	if n == nil {
-		return "", nil
-	}
-	return n.key, nil
+	return nil, nil
 }
 
 // send pushes m to member's devices and records the result on each of

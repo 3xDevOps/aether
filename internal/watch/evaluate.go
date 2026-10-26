@@ -19,6 +19,10 @@ import (
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
+// firedSep joins the keys of a condition's notices that are current
+// together, such as a run's several open questions, in Watch.Fired.
+const firedSep = "\n"
+
 // errRevoked marks a watch whose owner can no longer see its target.
 var errRevoked = errors.New("access revoked")
 
@@ -85,8 +89,12 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 		if notes, err = s.notifications(ctx, w, r.notices, now); err != nil {
 			return err
 		}
+		fired := map[string][]string{}
 		for _, n := range r.notices {
-			w.Fired[n.Condition] = n.Key
+			fired[n.Condition] = append(fired[n.Condition], n.Key)
+		}
+		for condition, keys := range fired {
+			w.Fired[condition] = strings.Join(keys, firedSep)
 		}
 	}
 	switch {
@@ -199,8 +207,10 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 	link := RunLink(run.ID)
 	r.observed = protocol.WatchObserved{RunStatus: string(run.Status), Activity: string(run.Activity)}
 	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
-		if n := s.runNeed(run); n != nil {
-			r.observed.Need = n.body
+		for i, n := range s.runNeeds(run) {
+			if i == 0 {
+				r.observed.Need = n.body
+			}
 			r.notices = append(r.notices, Notice{Condition: protocol.WatchNeedsYou, Key: n.key, Title: r.title, Body: n.body, Link: link})
 		}
 	}
@@ -215,6 +225,7 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 	if prConditions := prConditionsOf(w.Conditions); len(prConditions) > 0 && s.pr != nil {
 		res, err := s.pr.Evaluate(ctx, PRCheck{Member: w.MemberID, Target: targetOf(w), Conditions: prConditions, Previous: prev, Since: w.CreatedAt})
 		if err != nil {
+			r.notices = append(r.notices, res.Notices...)
 			r.final = false
 			r.observed.PRState, r.observed.HeadSHA, r.observed.Checks, r.observed.ReviewState =
 				prev.PRState, prev.HeadSHA, prev.Checks, prev.ReviewState
@@ -240,27 +251,34 @@ type need struct{ key, body string }
 
 var questionKinds = []string{"question", "form", "extension_ui"}
 
-// runNeed is what the run waits on a member for, in the Needs you
-// table's order: its own permission request or question, else its status
-// when domain.Run.NeedsAttention holds. A reported success is the
-// finished condition's, not a need.
-func (s *Service) runNeed(run *domain.Run) *need {
+// runNeeds is what the run waits on a member for, in the Needs you
+// table's order: each of its own open permission requests and questions,
+// else its status when domain.Run.NeedsAttention holds. Each is a need
+// of its own. A reported success is the finished condition's, not a need.
+func (s *Service) runNeeds(run *domain.Run) []need {
 	if !run.Status.Live() || s.runs.Paused(run.ID) {
 		return nil
 	}
+	var out []need
 	if run.MissionRole != "worker" {
 		inputs := s.runs.PendingInputs(run.ID)
-		if input := firstInput(inputs, "permission"); input != nil {
-			return &need{key: inputKey(input), body: s.requestLine(run, input, "Permission requested")}
+		for i := range inputs {
+			if inputs[i].Kind == "permission" {
+				out = append(out, need{key: inputKey(&inputs[i]), body: s.requestLine(run, &inputs[i], "Permission requested")})
+			}
 		}
-		if input := firstInput(inputs, questionKinds...); input != nil && run.Mode != domain.LaunchHeadless {
-			return &need{key: inputKey(input), body: s.requestLine(run, input, "Question")}
+		if run.Mode != domain.LaunchHeadless {
+			for i := range inputs {
+				if slices.Contains(questionKinds, inputs[i].Kind) {
+					out = append(out, need{key: inputKey(&inputs[i]), body: s.requestLine(run, &inputs[i], "Question")})
+				}
+			}
 		}
 	}
-	if !run.NeedsAttention(false) || run.Review == domain.ReviewReady {
-		return nil
+	if len(out) > 0 || !run.NeedsAttention(false) || run.Review == domain.ReviewReady {
+		return out
 	}
-	return &need{key: "status:" + run.NeedKey(), body: push.AttentionBody(run)}
+	return []need{{key: "status:" + run.NeedKey(), body: push.AttentionBody(run)}}
 }
 
 func (s *Service) requestLine(run *domain.Run, input *domain.RunInputRequest, label string) string {
@@ -273,15 +291,6 @@ func (s *Service) requestLine(run *domain.Run, input *domain.RunInputRequest, la
 		return label
 	}
 	return label + ", answer in the terminal"
-}
-
-func firstInput(inputs []domain.RunInputRequest, kinds ...string) *domain.RunInputRequest {
-	for i := range inputs {
-		if slices.Contains(kinds, inputs[i].Kind) {
-			return &inputs[i]
-		}
-	}
-	return nil
 }
 
 func inputKey(r *domain.RunInputRequest) string {
@@ -460,7 +469,7 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 	var prefs *store.NotifyPrefs
 	devices := -1
 	for _, n := range notices {
-		if w.Fired[n.Condition] == n.Key {
+		if slices.Contains(strings.Split(w.Fired[n.Condition], firedSep), n.Key) {
 			continue
 		}
 		if prefs == nil {

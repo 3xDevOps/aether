@@ -67,6 +67,14 @@ func (f *fakeRuns) ask(run domain.RunID, id, title string) {
 	f.pending[run] = []acphost.Request{{ID: id, Kind: "question", Title: title}}
 }
 
+// request adds an open request of kind beside the run's others.
+func (f *fakeRuns) request(run domain.RunID, id, kind, title string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.inputs[run] = append(f.inputs[run], domain.RunInputRequest{ID: id, SessionID: "s1", Kind: kind})
+	f.pending[run] = append(f.pending[run], acphost.Request{ID: id, Kind: kind, Title: title})
+}
+
 func (f *fakeRuns) answer(run domain.RunID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -489,6 +497,44 @@ func TestNeedAnsweredBeforeThePushIsDropped(t *testing.T) {
 	h.eventually("the push to be cleared", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusCleared })
 	if n := phone.received.Load(); n != 0 {
 		t.Fatalf("device received %d pushes, want none", n)
+	}
+}
+
+func TestEveryOpenRequestIsItsOwnNeed(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Two questions")
+	w := h.watch(h.ada, runTarget(run)).Watch
+
+	h.push.Active(h.ada.ID)
+	h.runs.request(run.ID, "q1", "question", "Which region?")
+	h.runs.request(run.ID, "q2", "question", "Which tier?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("a notice per question", func() bool { return len(h.notices(w.ID)) == 2 })
+
+	// A permission request arriving does not clear the questions' held
+	// pushes, and nothing is announced twice.
+	h.runs.request(run.ID, "p1", "permission", "Run make test")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the permission notice", func() bool { return len(h.notices(w.ID)) == 3 })
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	settle()
+	got := h.notices(w.ID)
+	if b := bodies(got); len(b) != 3 || b[0] != "needs_you: Question: Which region?" || b[1] != "needs_you: Question: Which tier?" ||
+		b[2] != "needs_you: Permission requested: Run make test" {
+		t.Fatalf("notices = %q", b)
+	}
+	if err := h.svc.deliverMember(h.ctx, h.ada.ID, got); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range h.notices(w.ID) {
+		if d := pushOf(n); d.Status != protocol.WatchStatusPending {
+			t.Fatalf("push of %q = %+v, want it still pending while every request is open", n.Body, d)
+		}
+	}
+	if phone.received.Load() != 0 {
+		t.Fatal("a push went out while Ada was on a dashboard")
 	}
 }
 

@@ -57,6 +57,7 @@ type PRSource interface {
 	// credentials and returns its title. An error wrapping ErrTransient
 	// creates the watch in the error state; any other refuses it.
 	Validate(ctx context.Context, member domain.MemberID, target protocol.WatchTarget) (string, error)
-	// Evaluate reads the pull request as it stands now.
+	// Evaluate reads the pull request as it stands now. On error, Notices
+	// holds what it read before failing; they are still recorded.
 	Evaluate(ctx context.Context, check PRCheck) (PRResult, error)
 }

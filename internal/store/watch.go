@@ -13,7 +13,7 @@ import (
 )
 
 // Watch is a member's durable subscription to one target. Fired holds,
-// per condition, the dedup key of the last notice recorded for it. Version
+// per condition, the dedup keys of its notices last found current. Version
 // is bumped by every write; UpdateWatch and CommitWatchEvaluation refuse a
 // write whose Version is not the stored one.
 type Watch struct {
