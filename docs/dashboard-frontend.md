@@ -16,8 +16,8 @@ surfaces; the server gateway authenticates each request with Tailscale WhoIs
 and no browser token.
 
 The visual contract is a dense developer workbench on graphite surfaces with
-one teal accent: flat panes and compact controls. `docs/styles.md` defines the
-tokens, type and motion.
+one teal accent: flat panes, compact controls, restrained elevation and short
+token-driven motion. `docs/styles.md` defines the tokens, type and motion.
 
 The gateways and their transport boundaries are documented in
 `docs/local-gateway.md`. The same bundle serves both, gating machine-local
@@ -293,7 +293,7 @@ The slots that exist:
 
 | Slot | Props | Where it renders |
 | --- | --- | --- |
-| `card:meta` | `{ run }` | the run card's meta line, after the agent, owner and diff counts |
+| `card:meta` | `{ run }` | the run card's footer, after the owner avatar and diff counts |
 
 Its contributors are the file-overlap chips (`routes/diff/conflict-chips.tsx`),
 the sync badge (`routes/run-sync`) and a swarm's scope diagnostics
@@ -334,9 +334,14 @@ top to bottom:
    may launch.
 3. **Runs** (`sidebar-runs.tsx`), a `region` with three groups, **Needs you**,
    **Working** and **Finished** (see [Run state](#run-state)), each an `h2`
-   holding an `aria-expanded` disclosure button and its count. Every group
-   starts expanded and lists all of its runs; a group closes only when its
-   header is pressed. Needs you lists every workspace; a row outside the
+   holding an `aria-expanded` disclosure button, a chevron that turns a
+   quarter and the count in a `CountBadge`; the count stays in the button's
+   name. Every group starts expanded and lists all of its runs; a group
+   closes only when its header is pressed, and the list fades back in when
+   the viewer reopens it (rows never glide their height, and a group that
+   mounts with hydration does not fade). Until the first runs arrive, six
+   row-shaped skeletons stand in for them after ~200ms, announced as
+   "Loading runs". Needs you lists every workspace; a row outside the
    selected workspace leads with that workspace's name. Working and Finished
    list the selected workspace, and only the viewer's own runs while **Mine**
    (`mineOnly`, persisted) in the Working header is pressed. The region
@@ -464,7 +469,10 @@ Its first row shows the Aether mark and lowercase `aether` wordmark on the left,
 styling and current-page selection. A `ResizeObserver` measures the row and
 its buttons, including font and text-size changes. Destinations that do not
 fit move into **More navigation**, a click-to-open menu; Board and Swarms
-never move into it. Gateway capability gates still apply. Hidden buttons
+never move into it. The current page's selection is one `SlidingIndicator`
+that glides between buttons; it sits beside the list, not in it, so the
+overflow measuring still counts only buttons, and it hides while the current
+page is in **More navigation**. Gateway capability gates still apply. Hidden buttons
 are inert and excluded from the accessibility tree.
 
 Under 768px a second, 48px toolbar holds **Open sidebar** with an amber dot
@@ -530,14 +538,17 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   button that calls `assistant.start {restart_environment: true}`; `failed`
   shows the server's error above the transcript with **Retry**
   (`assistant.start`). Otherwise the transcript (`role="log"`), which reuses
-  the run Session's `TimelineRow` and `flattenRows` with the constant row
-  context id `assistant`, and the composer (Enter sends, Shift+Enter inserts a
+  the run Session's `TimelineRow` and `useFlatRows`, with the Session's
+  open blocks, and the constant row context id `assistant`, and the composer (Enter sends, Shift+Enter inserts a
   newline, `Mod+Enter` also sends; **Stop** replaces **Send** while a turn
   runs). An empty conversation offers four example prompts that fill the
-  composer. Harness permission and question prompts render as request cards
-  answered with `assistant.answer`; each pending confirmation renders as a
-  card with the summary, the method and exact params, a relative deadline,
-  **Approve** and **Decline** (`assistant.confirm`). A card leaves only when a
+  composer. Harness permission and question prompts render as the Session
+  view's request cards, answered with `assistant.answer`; each pending
+  confirmation renders as a card titled with the summary, the method as its
+  source line, a **Details** section with the exact params (three, then
+  **N more**), a relative deadline with a bar draining toward it, **Decline**
+  and **Approve** (`assistant.confirm`). Confirmations stack above the harness
+  prompts in one 40dvh scroll. A card leaves only when a
   `confirmations` frame stops listing it. While `auto_approve` is off a card
   links **Skip these cards…** to Settings > Assistant; a card with
   `other_member` says that member (`other_owner`) owns the run, so it asks
@@ -721,10 +732,11 @@ its end, exposing the shell or the raw connection error and window controls.
 ### URL state
 
 `src/lib/url-state.ts` keeps the route in the query string. A run view is
-`?run=<id>`, with `&view=session|terminal|changes|files|browser` (an old
+`?run=<id>`, with `&view=session|trace|terminal|changes|files|browser` (an old
 `&view=diff` reads as `changes`; `changes` also takes `&repo=<workspace id>|all` on a
 [multi-repo run](#multi-repo-runs)); any other
-view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page;
+view is `?page=<name>`, plus `&id=<id>` for a swarm or workspace page, a
+Settings section or the selected template (`?page=templates&id=<name>`);
 the name is the route's, so Activity is `?page=timeline`, and Devices is
 `?page=devices`, a tab of the Members view (`pageOf` in
 `src/lib/surfaces.ts`). The board is the bare address. The store starts on
@@ -793,8 +805,9 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
 A layout that only changes size belongs in CSS. Layouts that mount different
 elements for a finger than for a mouse, or for a narrow window, ask
 `useMediaQuery` in `src/lib/hooks.ts`; named constants there are
-`coarsePointer`, `belowSm`, `belowLg` (the board's stacked columns) and
-`phoneScreen`. The `md` edge is `MOBILE_MAX_WIDTH` and `useIsMobile()` in
+`coarsePointer`, `belowSm` and `phoneScreen`. A layout that depends on the
+room a view has rather than the window, such as Board's columns, measures
+itself with `useElementSize`. The `md` edge is `MOBILE_MAX_WIDTH` and `useIsMobile()` in
 `src/lib/breakpoints.ts`. The shell has one breakpoint: under 768px
 (`useIsMobile()`, Tailwind `max-md:`) the top bar and the sidebar sheet
 replace the sidebar.
@@ -859,9 +872,8 @@ What gives way first:
   line on one line: the reason gives up its room first, then the owner, then
   the mode word; the branch truncates only when it alone is wider than the
   line. The view switch always sits on its own row (see [Header](#header)).
-- **The board** stacks its three columns into one list on narrow screens and
-  places them side by side from the `lg`/1024px breakpoint (see
-  [Board](#board)).
+- **The board** places its three columns side by side when its own width
+  fits them and otherwise stacks them into one list (see [Board](#board)).
 
 ## Data flow
 
@@ -1191,27 +1203,45 @@ where a resend is deduped or refused and the eventual result still shows:
 
 `src/routes/board/` is the default center view and the triage surface,
 reached through **Board** in the app header; the sidebar owns the run
-explorer and primary New run action. The view's **Board / Map** choice switches
-between triage columns and a run canvas. **Board** shows three columns,
-**Needs you**, **Working** and **Finished**, each headed by its name and count.
-`board()` in `src/routes/board/selectors.ts` reads `runGroups`, so the board
-has the sidebar's scoping, ordering and Mine filter: Needs you spans every
-workspace and sorts oldest wait first. Under the `lg`/1024px breakpoint the
-columns stack into one list and Finished starts collapsed.
+explorer and primary New run action. The **Board / List / Map / Lanes** tabs
+in the view header choose the layout, stored per workspace in `aether.ui`:
+triage columns, the same groups as one list, a run canvas, or a timeline of
+runs. **Board** shows three columns, **Needs you**, **Working** and
+**Finished**, each a `bg-chrome` well headed by its name and count that
+scrolls on its own under that header. **List** stacks the same three groups
+full width in one scroll, with Finished collapsed until opened. `board()` in
+`src/routes/board/selectors.ts` reads `runGroups`, so the board has the
+sidebar's scoping, ordering and Mine filter: Needs you spans every workspace
+and sorts oldest wait first. The board measures its own width, so the
+sidebar and the assistant panel count: under 648px, where three 200px
+columns do not fit, **Board** renders the list layout and the **List** tab
+is hidden. A group of more than 60 cards renders only the cards its scroll
+shows (`card-list.tsx`, virtua).
 
-A card (`run-card.tsx`, on the `Card` primitive) has exactly three lines:
+A card (`run-card.tsx`, on the `Card` primitive) has three parts:
 
-1. the state line: `StatusDot`, reason, and the wait or change time;
-2. the title (`runLabel`), two lines at most;
-3. the meta line: agent glyph and name (`agent.list` `display_name`, else the
-   run's `harness` value), owner avatar, `+added −deleted` from the newest
-   `run.diff` snapshot (`N files` when that snapshot is `truncated`, because
-   its counts are only a floor), the workspace name for a run outside the
-   active one, and the `card:meta` slot (file overlaps, sync, and on a swarm
-   card the swarm's conflict count).
+1. the head: the agent's coloured `AgentGlyph` and the title (`runLabel`),
+   two lines at most;
+2. the description: the Needs you reason in the text colour, elsewhere the
+   state's reason (`stateDetail`) in muted; two lines at most, one on a
+   Working card, whose live tool activity must not change the card's
+   height; a card whose reason only restates its state has none;
+3. the footer: `StatusDot`, state label, compact wait or change time
+   ("4m") and the workspace name for a run outside the active workspace or
+   across several repos, which truncates first; then the agent name
+   (`agent.list` `display_name`, else the run's `harness` value), owner
+   avatar, `+added −deleted` from the newest `run.diff` snapshot (`N files`
+   when that snapshot is `truncated`, because its counts are only a floor),
+   the `card:meta` slot (file overlaps, sync, and on a swarm card the
+   swarm's conflict count) and the Needs you action.
+
+The agent name shows once the card is 365px wide, where the description and
+footer also indent under the title; a narrower card keeps it for screen
+readers only. Device and merge-proposal cards use the same frame.
 
 A click anywhere on the card opens the run. In **Board**, a swarm is one
-card: the objective, a phase word ("Swarm active") and its workers' counts; it opens
+card: the objective, a phase word ("Swarm active") or the reason a worker
+needs you, and a named `StatusDot` count per worker state ("2 working"); it opens
 the swarm page, or acts for the root run when the root itself needs you, and
 renders `card:meta` for its root run. Workers never appear as separate
 **Board** cards, archived ones included; a swarm whose integrator is not
@@ -1242,7 +1272,13 @@ finish, or the swarm page.
 While a card has focus, `r` replies and `o` opens (the `card`
 key scope, pushed only then and only for the actions that card offers, so
 the keys stay free elsewhere). Closing the reply composer returns focus to
-the card. A failed send keeps the draft and shows the server's error.
+the card. A failed send keeps the draft and shows the server's error. The
+open composer, its draft, the send in flight and its error live outside the
+card, keyed by run (`useReply`), so a card that remounts - its group
+crossing 60 cards, or a move to another group - keeps them and still reads
+**Sending…**. A send closes or marks failed only the reply it was sent
+from, never one opened after it. Authenticating as another member or
+server drops the reply.
 
 **Finished footer.** **Archived (n)** swaps Finished for archived runs in
 scope (Mine applies); **Back to Finished** returns. Archived runs have no
@@ -1272,17 +1308,41 @@ requirement, with one sentence and one button:
 5. otherwise: "A run is one agent working on its own branch in its own
    container." and **New run**, for members who may launch.
 
-Loading shows delayed skeletons; a hydrated empty column says "Nothing here.".
-An unreachable server shows its error in place of the columns.
+Loading shows two delayed card-sized skeletons per group; a hydrated empty
+group says "Nothing here.". An unreachable server shows its error in place
+of the columns.
+
+**Motion.** Switching between Board and List glides every card that is in
+both from its old place to its new one (`useCardGlide` in
+`src/routes/board/glide.ts`); switching to or from Map is instant. A live
+update that moves one to eight cards to another column glides them and the
+cards they displace. Each Board column clips its own scroll, so a card that
+lands in another column glides only vertically there and fades in.
+Hydration, a reconnect's snapshot,
+a change of workspace, Mine or archive view, and reorders within a column
+change at once, and virtualized groups never glide. Under reduced motion
+every change is instant. A polite live region reads "N need you" when the
+Needs you count changes.
 
 ### Map
 
 **Map** exposes every individual run, including each swarm integrator and
 worker. `mapRuns()` reads the unaggregated `runRows()` presentation rather
-than Board's swarm cards. Both views reuse `RunCard`, the five run states,
-agent display names, owner avatars and card actions. A map card opens that
+than Board's swarm cards, and `useMapRuns` reuses unchanged card objects
+(`dequal`), so a `run.agent` event re-renders one card. A map card opens that
 individual run; its primary action still targets the condition that needs
 the viewer.
+
+A map card (`map-card.tsx`) has three rows: the agent glyph in a tile, the
+run's label over a muted line (agent display name, model, and the workspace
+for a run outside the active one) and a state pill (`Badge` with the
+`StatusDot`); the reason, two lines at most, in the text colour when it
+needs you and muted otherwise; and a meta row with the owner avatar when
+it differs from the section's, `+added −deleted`, the compact age, the
+`card:meta` slot, the card's action on hover, focus or a touch screen and, on
+an integrator, the fold button. The action and fold button keep their full
+width; when the row runs out of room, the rest is clipped from the
+`card:meta` end.
 
 The **Map workspace scope** picker selects the active workspace or **All
 workspaces**, without changing the sidebar's selected workspace or Board's
@@ -1294,16 +1354,48 @@ runs while keeping Needs you and Working visible; **Back to Finished**
 returns. Archived runs obey workspace and Mine, and an all-archived scope
 keeps the toggle available.
 
-Named owner boundaries keep workers with their actual owners. Relationships
+The Runs strip counts every run in scope, folded workers included: **Runs
+N**, **N working**, and the **N needs you** and **N failed** chips. Each chip
+opens a list (oldest wait first; newest failure first) whose rows bring the
+run into view: its swarm unfolds if folded, the camera centres it at a
+readable zoom, and its title takes focus.
+
+`map-layout.ts` lays out units: a standalone run, or a swarm tree with the
+integrator above all its visible workers, whoever owns them. Relationships
 require an explicit worker role, matching `workspace_id` and `mission_id`,
-and an `integrator_run_id` identifying a visible integrator. Directed
-connectors cross owner boundaries as dashed lines. A worker whose integrator
-is filtered, archived or not listed remains reachable and is labelled
-"integrator not visible". Task text never establishes a relationship.
-`map-layout.ts` packs fixed 320×160 cards into deterministic owner shelves;
-run state, timestamps and input ordering do not reposition nodes.
-Title, timestamp and owner-profile updates reuse geometry. Changes to visible
-run identities, ownership or swarm relationships repack it.
+and an `integrator_run_id` identifying a visible integrator; task text never
+establishes one. Up to four workers hang in one row from a bus; five or more
+fill four fixed columns row by row, each on a rail, so a new worker is
+appended without moving the others. Workers whose integrator is filtered,
+archived or not listed share one unit captioned "Integrator not visible". A
+swarm's caption is its objective and phase.
+
+Units are placed newest first by the root run's `created_at`: each takes the
+highest free spot in a band of one common width, leftmost on a tie, so the
+newest sit top left and older units fill the room under short neighbours.
+Workers keep spawn order. Sections stack the
+viewer's runs, then other owners by their newest unit, then **Needs you
+elsewhere**: Needs you runs present only because Needs you ignores scope and
+Mine, last so their churn never reflows the rest: the band width and framing
+come from owner sections alone. With two or more owner sections each is
+framed and headed by its owner and count; Needs you elsewhere is always
+framed. A teammate's worker inside your swarm shows its owner's avatar.
+Section headers and swarm captions grow as the camera zooms out so a distant
+map still reads; a caption grows only into the gap above its unit.
+
+Geometry is fixed per text size and pointer. State, reasons, titles,
+timestamps and profile edits never move a node. A repack happens only when
+runs are added or removed, ownership or relationships change, a swarm folds,
+or the text size or pointer changes; moved units and cards glide from their
+old place, new cards fade in, removed ones fade out, and the camera stays.
+
+An integrator's fold button shows its worker count; folded, `+N`. Folding
+fades the workers out and repacks, and the camera follows so the integrator
+stays where it was on screen; a folded swarm never unfolds by itself.
+When hidden workers need you the button turns amber, as `+N · k need you`.
+Unlike the sidebar, whose fold keeps Needs you workers visible, the Map
+never moves cards on a state change. Folds persist in `aether.ui`
+(`boardMapFolded`), pruned to runs that still exist.
 
 - Drag the canvas or a card to pan; releasing a drag never opens the card.
   A press released outside the canvas cannot pan on hover or consume the next
@@ -1313,15 +1405,127 @@ run identities, ownership or swarm relationships repack it.
 - With the canvas focused, arrow keys pan, Shift increases the step,
   `+` / `-` zoom, and `Home` / `0` fit all runs.
 - **Zoom out**, the zoom percentage, **Zoom in** and **Fit** remain available
-  in the wrapping Runs toolbar. Tab reaches every run and its actions,
-  bringing an offscreen focused card into view.
+  in the wrapping Runs toolbar. Tab reaches every run, its action and its
+  fold button in placement order, bringing an offscreen focused card into
+  view.
 
-`aether.ui` stores Board/Map per active workspace and the map camera per
+`aether.ui` stores Board/List/Map/Lanes per active workspace and the map camera per
 workspace/all-workspaces, Mine and archive scope. These origin-local
 preferences survive view switches, navigation and reloads. A new camera
-fits once; live metadata, added or removed runs and viewport resizing never
-reset a chosen camera. Use **Fit** to frame the changed set. Layout switches
-are instant, like other workbench panels.
+fits all runs once, unless that would zoom below 50%: then it opens at 100%
+on the top left, where the newest runs are, panned just enough to show the
+first unit's top card whole, so a wide swarm on a phone opens on its
+integrator. Live metadata, added or removed
+runs and viewport resizing never reset a chosen camera. Use **Fit** to frame
+the changed set. Cameras saved before this layout (persist version 9) are
+dropped once.
+
+### Lanes
+
+**Lanes** (`src/routes/board/lanes/`) draws every run in scope as a lane on
+one time axis, so you can see what ran when and how the runs relate. It shares
+Map's scope picker (labelled **Lanes workspace scope**), **Mine** and
+**Archived (n)**, and Map's merge-proposal and device strips. The toolbar adds:
+
+- **Time window**: 1h, 6h, 24h or 7d. Without a choice it opens on 1h while
+  any run is working, else 6h. Ctrl/Cmd-scroll zooms around the pointer and
+  the control then reads **Custom**.
+- **Show**: which links to draw (Orchestration, Dependencies, Submissions,
+  Agent messages, Overlaps).
+- **Group lanes by**: status or owner.
+- **Legend**: every bar fill and link style with its meaning.
+- **Now**, shown only after panning into the past. While the window ends at
+  now it follows now.
+
+The axis counts back from now ("−20m") up to an hour wide; wider windows
+show clock times, and 7d weekday and date. Shift-scroll, a sideways wheel or
+dragging the track pans; the history page loads as the window reaches it.
+
+**Sections.** By status, sections follow Board: Needs you (oldest wait first),
+Working and Ready for review (newest start first), then Finished (failed
+first, then latest end). Finished starts folded into one summary lane ("37
+finished · 3 failed") whose strip shows each moment's outcome. By owner, there
+is one section per owner, yours first. A section header counts the runs that
+ended before the window and offers the next wider window. When no run reaches
+the window, a line above the lanes says so; the axis stays, so panning and
+zooming still reach older runs. A swarm lists as one header lane (objective,
+phase, worker counts) in the section of its most urgent member, followed by
+its integrator, then its workers in task order ("Worker 2"), retries after the
+first attempt. It starts open while live with eight tasks or fewer, or when a
+worker needs you; folded, it draws its integrator's bar and a strip of its
+workers' most urgent state over time, and still lists any worker that needs
+you. Disclosure choices last until the view unmounts.
+
+**Bars.** A bar runs from the run's creation to its end or now. A dashed
+outline covers Starting (queued and provisioning); then each span takes the
+state `run.status` history gives it. History knows only the server's
+needs-attention, so a past span reads **Needed attention**; the span since
+the last change shows the viewer's own state (`presentRun`), which alone
+knows Needs you, Paused and Ready for review. Once a run ends, its working
+spans take its outcome's colour, so only live work reads Working. Time
+before the history read is a dotted outline that says "History not loaded";
+if the read fails, bars fall back to the current state and a **Run history**
+callout shows the server's error with **Retry**. A working bar has a 2px end
+cap and its activity text shimmers; a Needs you bar ends in a **Needs you**
+tag. Finished bars add "took 18m" after their end when there is room.
+
+**Links.** Integrator to worker (launch), mail between runs
+(`coord.message`, bundled per lane pair within 24px, its glyph naming a
+question, reply or report, the arrowhead hollow until every message is
+acknowledged), submissions (worker to integrator, by decision), task
+dependencies, and, for the hovered or selected run only, file overlaps at the
+now line. A link into a folded swarm or Finished attaches to its header.
+Hovering or selecting a lane keeps its links in colour and greys the rest.
+Clicking a link opens its facts; a mail link reads the bodies through
+`coord.messages.list` (the thread, else each sender's newest page, since a
+link into a folded lane can bundle several senders) and shows them with
+`MessageRow`. [Styles: Lanes](styles.md#lanes) has the colour coding.
+
+**Popovers.** Clicking a bar or pressing Enter on a lane opens its popover:
+"agent · state · elapsed", the title, the reason, next step, branch and diff,
+unread mail, pending inputs, overlaps and the state span under the pointer,
+then the card's primary action (Reply opens the same composer as a card),
+**Open run**, **Open swarm** and, for Enhanced runs, **Show agents**, then the
+lane's **Links**, each opening the same facts as clicking that link. A swarm's
+popover offers **Open integrator** whenever the integrator is known, even when
+Mine hides it. A popover whose lane leaves the view, as when its run folds
+into Finished, closes and puts focus on the lane that now draws the run. Show
+agents inserts the run's subagents as sub-lanes: from the live session when
+the run is open elsewhere in this tab, else from one `run.acp.history` page of
+1000 items, which the empty state says. Selecting a sub-lane opens the
+subagent. Escape closes and returns focus to the lane.
+
+**Keyboard.** The lanes are one `tree` named "Run lanes" with one tab stop: Up
+and Down move, Home and End jump, Right opens a section, swarm or a run's
+agents (or moves into it), Left closes it or moves to its parent, Enter or
+Space opens the popover or toggles a header, and `o` and `r` open and reply as
+on a card; links open from a lane's popover. The axis is a separate tab stop,
+**Timeline window**: Left and Right pan by a tenth, `+` and `-` zoom, `0` or
+Home return to now. A polite status line announces runs that turn Needs you,
+Failed, Ready for review or Completed, gathered for 1.5s and at most three at
+a time (the Workflow panel's announcer, `src/lib/use-announcement.ts`).
+
+**Data.** `useLaneHistory` holds `laneHistory` in `src/store/lanes.ts` while
+the view is mounted and reads `workspace.timeline` backward with
+`types: ["run.status", "coord.message", "coord.message.acked"]`, 1000 a page,
+until it passes the window's start, the log's start or 5000 events per
+workspace; "Older history not loaded" marks the last case. `sync.ts` appends
+live events of those types to held history, which keeps a workspace's newest
+5000 and moves its loaded boundary past what it drops; the last view to leave
+drops it, and a server switch or a new signed-in member clears it for a fresh
+read. Each swarm in the window is read once with `mission.show` and again on
+its `mission.changed`; a failed read shows a **Swarm details** callout with
+the server's error and **Retry**. Lane geometry comes from the model
+(`model.ts`, `segments.ts`, `edges.ts`, `axis.ts`), never from DOM
+measurement; above 60 lanes only those near the viewport render. Live bars
+move on a timer of window width per pixel, between 1s and 30s. Lanes move with
+a glide only when they change section, and lanes added after the first render
+fade in; reduced motion turns both off.
+
+`aether.ui` stores the window choice, the grouping and hidden link kinds.
+Below 768px the label column shrinks to the state dot and agent glyph, and
+each lane's title moves into its bar; swarm members keep their tree elbow and
+section headers keep the ended-before count.
 
 ### Run state
 
@@ -1342,16 +1546,17 @@ Details lists the raw `reason` as **Last reason**.
 state to label, dot colour and dot shape; the sidebar, board, run header,
 run lists, swarm page, activity feed and palette all use it. Each state has
 its own dot shape and a text or `aria-label` label, so no state is told by
-colour alone. Only Working pulses, and not under `prefers-reduced-motion`.
+colour alone. Only Working pulses, breathing in opacity and size, except in
+the sidebar, board, palette and All workspaces, and not under
+`prefers-reduced-motion`.
 Waiting states are a neutral, static glyph; Needs you is the only amber
 state.
 
 `stateTitle` builds the tooltip each surface puts on a state: "*Label*
 since *relative* — *reason*. *What happens next*", for example "Waiting
 since 5 minutes ago — Turn ended without a report. Send a message to
-continue." A board card reads *Label* · *reason* outside Needs you, where
-the reason alone leads. `stateDetail` drops a reason that only restates the
-label. The run header's state line shows only the reason, with `stateTitle`
+continue." A board card puts the label in its footer and the reason in its
+description. `stateDetail` drops a reason that only restates the label. The run header's state line shows only the reason, with `stateTitle`
 as the tooltip of the space it fills, there even when the reason is empty,
 because the Workflow chip under it already shows the dot and
 label; the label stays in a visually hidden `role=status` element, so a
@@ -1830,9 +2035,10 @@ moderation and receipt rules. The launch and message forms are store dialogs
 button on any surface opens one by asking the store, with no dependence on
 the palette being on screen. The template form's open state lives with
 `CommandPalette` in `index.tsx` instead, because the store's dialog union
-does not include it. It lists the active workspace's templates over
-`template.list`, shows the chosen template's agent, mode, model and task, and
-starts the run with `template.launch`, then reveals it.
+does not include it. Its body is the composer's template library (see
+[Templates](#templates)) with **Launch** as the primary action: it starts the
+run with `template.launch`, sending the name and the filled-in parameters,
+then reveals it. A refusal shows the server's error and any setup output.
 
 The launch form lives in `components/launch/`. Its **Run** tab asks for a
 task, an agent, a mode and a model; an account appears only when one is shared with the
@@ -1952,7 +2158,8 @@ a client-side base refresh before trying again.
 ## Run view
 
 `src/routes/run/` is the one `run` route. Its params are `runId` and an
-optional `view` (`session`, `terminal`, `changes`, `files`, `browser`),
+optional `view` (`session`, `trace`, `terminal`, `changes`, `files`,
+`browser`),
 written to the address as `?run=<id>&view=<view>`; the old `?view=diff` reads
 as `changes`.
 Every way into a run navigates to `run`: board card, sidebar row, run list,
@@ -1960,7 +2167,8 @@ palette, feed entry, approval, conflict chip, template, and the launch and
 onboarding forms. A view the address does not name is the one this tab last
 showed for the run (`runViewMemory`, not persisted), else `defaultView`:
 Session for an Enhanced run or any run that streams a session (`acp: true`),
-Terminal otherwise. Files is in the list while the run still has its
+Terminal otherwise. Trace follows Session for a run with `acp: true` only.
+Files is in the list while the run still has its
 checkout, on a gateway that serves `files.tree` (`hasFiles` in
 `src/routes/files/open.ts`): every run the Files tree lists, a completed one
 that is not yet merged or abandoned included. Browser is in the list for
@@ -1976,7 +2184,8 @@ mounted, laid out but `invisible` and `inert`: xterm hidden with
 `display: none` measures zero and would resize the shared PTY, a Publish
 draft (commit message, an uncertain pull request) must survive a view switch,
 and an open file keeps its scroll position, caret and undo history. Browser
-mounts only while shown, so a hidden Browser streams no screencast.
+and Trace mount only while shown, so a hidden Browser streams no screencast
+and a hidden Trace derives nothing and ticks no clock.
 
 The Browser can also sit beside the other three views instead of being a tab:
 its toolbar's **Show beside Session** (**Show beside Terminal** on a Standard
@@ -2179,9 +2388,10 @@ list in a 736px column over `rowsForRun` (`store/sessions.ts`). For a Standard
 run the rows come from the run's `run.agent`, `workspace.timeline` and
 `run.status` events (read with `workspace.timeline` filtered by run and type,
 then kept live by sync), room messages, the run record and its pending inputs:
-`user` (a message to the agent with its delivery word), `note`, `work`
-(consecutive tool calls folded into "Ran 3 commands and read 2 files",
-expanding to verb-first entries), `request` (an agent request reads "Answer in
+`user` (a message to the agent with its delivery word), `note` (the Notes
+thread's row, without the thread's own arrival motion), `steps` (consecutive
+tool calls in one closed block, "Ran 3 commands and read 2 files", expanding
+to verb-first steps), `request` (an agent request reads "Answer in
 the terminal." with **Open terminal**, or "Answer it from the agent's
 session." when the run has no agent terminal; a teammate question offers
 **Reply**, the owner's own question is a plain message), `event`,
@@ -2230,7 +2440,7 @@ the Changes view at that file; **Review** opens its **All changes**. A
 `truncated` snapshot shows no line counts, because they are only a floor.
 The bar is hidden while nothing has changed and once the run is merged or
 abandoned, which removes its checkout; a
-failed read shows the server's error with **Retry**. Conversation rows carry no file lists: each edit's diff stays in its `work` entry.
+failed read shows the server's error with **Retry**. Conversation rows carry no file lists: each edit's diff stays in its edit step.
 
 For a run with `acp: true` (Enhanced, or Background over ACP) the rows come
 from its [session item log](enhanced-runs.md#instructions-and-the-session-log) instead.
@@ -2280,8 +2490,10 @@ they do or history ends. Inactive views and failed reads do not auto-page;
 failures keep the server's error with **Retry**. While older items remain, a
 room message or agent message from before the oldest item held stays hidden
 until the items around it load; a message the agent has not taken yet always
-shows. A page can merge into the first loaded row and change its key (tool
-calls joining a `work` row), so the list matches rows by key from the end.
+shows. A page can merge into the first loaded row and change its key (a block
+gaining the person's message that starts its segment), so the list matches
+rows by key from the end. A step's open or shut choice is stored under the
+step's own id, so it outlives that change.
 While every row below the top visible one keeps its key, it anchors the page
 from the end. That keeps the distance from the end, which moves with any row
 that resizes below the reader, so an unpinned view also restores the first
@@ -2289,26 +2501,64 @@ visible row that survives, by key and offset; that alone places the view when
 live rows arrive with the page. A closed
 turn's rows are derived once and kept; only the open turn re-derives. At most
 three sessions stay whole; the least recently
-opened others keep their newest 200 items. Rows: `user` (the run's
-appended instructions hidden under its task), `assistant` (markdown through
-`react-markdown` and `remark-gfm`, split into blocks with `marked`'s lexer
-so only the streaming block re-renders, code highlighted with the Lezer
-languages), `thinking`, `work` (folded by kind; expanded entries and their
-detail - command, output tail, `DiffBlock` - splice into the same list,
-and a body cut to fit the wire is read whole with `run.acp.item`), `live`,
-`plan`, `answered`, `event` (notices, mode changes, a new
-agent session, an inbox wake), `finished` and `agent-message`. The `live`
-row reads "Waiting for your approval: <command>" (or "Waiting for your
-answer") with the amber dot while a request is pending. A `finished` row
-reads **Finished**, **Cancelled** (stop reason `cancelled`) or **Interrupted**
-(`interrupted`, a turn a restart or lost connection cut off), matching the
-run reasons `turn cancelled` and `turn interrupted`. A person's
+opened others keep their newest 200 items. Rows: `user` (a
+right-aligned bubble; the author shows only when it is not the viewer or the
+message came through a connector, and the run's appended instructions hide
+under its task), `steps`, `assistant` (markdown through `react-markdown` and
+`remark-gfm`, split into blocks with `marked`'s lexer so only the streaming
+block re-renders, code highlighted with the Lezer languages), `live`,
+`event` (a wake, a new agent session, or a notice outside a block),
+`finished` and `agent-message`.
+
+`turnRows` splits a turn into segments at each person's message, wake and
+new agent session (`store/session-steps.ts`). In a segment, every step up to
+the last piece of work (a thought, tool call, plan, subagent launch or
+answered request) joins one `steps` block, and the prose after it is the
+answer. A segment without work, such as `ping` and `pong`, has no block. The
+block's header names the work ("Read 12 files, ran 5 commands and edited 3
+files") with up to three tool icons, failures, plan progress and tools still
+running. While the turn is open and the stream live, the header carries the
+live state instead: the state dot, "Running npm test", "Waiting on 2
+subagents", "Waiting for your approval: <command>" (or "Waiting for your
+answer") in amber, else "Working", with the seconds since the segment began.
+A turn with no block yet keeps the `live` row. Steps sit on a rail: thoughts
+(a two-line preview that expands to the whole thought), narration, lookups
+(consecutive reads, searches and fetches as chips; a chip for a file in the
+checkout opens Files,
+a page chip a new tab; four, then **+N more**), tool calls (the command, the
+edited path with `+a −d`, or an MCP tool's name; a spinner and seconds while
+running, the duration, **Failed** or **Exit N** once returned, and "Waiting
+for approval" while its permission is pending), the plan as its segment
+last updated it, with each entry's state, subagent cards, answered requests, notices and mode changes. A tool
+step with detail expands to the command and output tail, a `DiffBlock` per
+file, or its **Input** and **Result** (JSON highlighted, ten lines until
+**Show all**, which a copy without clipboard access also opens so the
+selection holds every line); a body cut to fit the wire is read whole with `run.acp.item`.
+A block over 40 steps shows its first 5 and last 30 around **Show N more
+steps**, which then reads **Show fewer steps**.
+
+A block is open while its turn is, or while a subagent in it runs, and shuts
+once the turn ends; the viewer's own choice for a block or step
+(`expandedRows`, kept until reload) wins. Those defaults, and how much of a
+growing block folds, change only while the view follows the newest row and
+focus is outside the block, so nothing moves under a reader scrolled up or a
+keyboard in the block. An open block's steps and details splice into the same list after its
+header, so they virtualize. The answer's footer keeps the turn's outcome,
+**Finished in 12s**, in view; its time and **Copy the reply**, which turns
+to a check, show on hover. A turn that ends **Cancelled** (stop reason
+`cancelled`), **Interrupted** (`interrupted`, a turn a restart or lost
+connection cut off) or **Stopped**, or ends without an answer, gets a
+`finished` row with its dot instead, matching the run reasons `turn
+cancelled` and `turn interrupted`. Rows that arrive while the view is open
+rise in, at most eight at a time, and a streaming answer's new blocks fade
+in from a blur above a pulsing dot; a first load, a replay and a history
+page do not animate. A person's
 message is matched to the room message that carried it for its author. While
 older items remain and the same text was sent more than once, a delivered
 room message sent within the loaded items, before the row, is matched first.
 One not in the log yet shows its delivery word. One polite `status` region
 announces a new request, a finished turn and a state change. The row
-components (`components/ui/timeline.tsx`, `session-blocks.tsx`,
+components (`components/ui/timeline.tsx`, `steps.tsx`, `session-blocks.tsx`,
 `markdown.tsx`, `components/messages/message-row.tsx`) serve both modes.
 
 A subagent is the agent that Claude Code's `Agent` or `Task` tool launches,
@@ -2323,7 +2573,7 @@ activity, and start and settle times. `acpFrames` and `acpOlder` update it
 incrementally; a history page that arrives out of order prepends, and a
 reset starts it over. Only the turns' own items reach `turnRows`, so a
 child item re-renders its card, not the conversation. A launch call
-becomes a `subagents` row, and consecutive launches share one row:
+becomes a subagents step, and consecutive launches share one step:
 "3 subagents · 2 running", expanded by default. Each card shows a status dot,
 the description, the subagent type, the tool and nested counts, and the
 elapsed time. A running card shows its latest activity, a settled one the
@@ -2343,7 +2593,7 @@ A subagent whose launch call is not loaded, or was trimmed, shows its card at
 its first held item until a history page brings the launch; without the
 call its state is unknown. A launch id seen again after
 its call settled names a new subagent, keyed `<id>@<seq>`. While the main
-agent only waits on its subagents, the live row reads "Waiting on 2
+agent only waits on its subagents, the live steps header reads "Waiting on 2
 subagents". A fallback launch shows a card with no nested items;
 an agent with neither child sessions nor a launch call renders as before.
 
@@ -2364,8 +2614,8 @@ reopen it. Below them,
 one virtualized list holds the prompt (`raw_input.prompt`, read whole with
 `run.acp.item` when the item was cut; a launch input over the log's
 16 KiB raw limit is kept cut, so the prompt reads as unavailable), the
-subagent's transcript through `turnRows`, `flattenRows` and `TimelineRow`,
-and its report (the completed
+subagent's transcript through `turnRows`, `flattenRows` and `TimelineRow`
+with every block open, and its report (the completed
 call's text content). Until a known subagent's launch call is loaded it pages
 `run.acp.history`, at most five pages, then offers **Load earlier history**;
 an id the loaded history does not name pages only on that button. A failed
@@ -2376,8 +2626,8 @@ A tool call snapshot logged in a later turn than the call's first, as
 when a call outlives its turn, joins that first turn and keeps one row.
 
 A path the agent names opens that file in the run's
-[Files view](#files-in-a-run): in an `assistant` or `thinking` row's prose
-and inline code, in a `work` entry's command and output tail, and in a
+[Files view](#files-in-a-run): in an answer's, narration's or thought's prose
+and inline code, in a tool step's command and output tail, and in a
 `DiffBlock`'s caption. A Markdown link whose target is a repository path
 opens there as well, where it used to open a dead address in a new tab.
 Fenced code blocks, a person's own messages and the entry labels, which
@@ -2415,11 +2665,12 @@ the pill sends. `Enter` is a plain key, which the shortcut table stands down
 for inside a field, so the textarea answers it itself through `isPress`; the
 binding stays registered so the shortcuts reference lists it. A key still composing in an input method
 never sends. The shared upload state in
-`composer-images.tsx` accepts file selection and native file paste, enforces
-the eight-file limit, and uploads PNG, JPEG, GIF and WebP through
-`terminal.image` and every other file through `terminal.file`. File-backed
-object URLs show image thumbnails inside the input, other files a chip with
-name and size; removal, successful send and unmount revoke them. Enhanced
+`composer-images.tsx` accepts file selection, native file paste and drops,
+enforces the eight-file limit, and uploads PNG, JPEG, GIF and WebP through
+`terminal.image` and every other file through `terminal.file`, one at a time
+and stopping at the first failure. A file over its limit (8 MiB for an image,
+64 MiB for anything else) is refused before it joins the draft, naming the
+file in the alert; the rest of the batch still goes up. Enhanced
 sends pass text and ordered attachment references separately through
 `run.inject`; the server resolves images into ACP image blocks and other files
 into `resource_link` blocks. Attachment-only messages are allowed, incomplete
@@ -2427,17 +2678,68 @@ uploads block sending, and failures preserve the draft and previews.
 `prompt_images` from the ACP snapshot gates sending a message with an image
 (`hasImages`), not other files.
 
+Attaching has three surfaces over the one draft. Above the field,
+`composer-attachments.tsx` draws one compact chip per file: a 40px thumbnail
+for an image (an object URL, revoked when the file goes), an icon with the name and size for any other file, and a state
+mark - a spinner while it uploads, a check that shows for a second once it
+lands, a failed dot with "Not uploaded" when it did not. Under a fine pointer
+the **+** (**Attach files**, `composer-dropzone.tsx`) opens a popover holding
+the drop zone, one row per file and a footer. Clicking the zone or pressing
+Enter on it opens the file chooser, and a file dropped on it is attached; its
+hint states the real limits. A row reads size and **Waiting**, **Uploading…**
+(with an indeterminate 2px bar: the upload is a single request with no byte
+progress) or **Attached**, or the failure reason beside **Retry**. Uploads run
+in order, so a failure marks the first unattached file and the rest read **Not
+uploaded**. **Remove** is disabled while an upload runs, because it cannot be
+cancelled. The footer counts "Uploading n of m" with the bytes already
+attached, then "n files attached", or "n of m attached" with **Retry**, and
+**Clear** empties the draft once nothing is uploading. The popover stays open
+while files upload and reads the draft store, so a remounted composer shows
+the same rows; closing it with files attached returns focus to the field unless the viewer clicked into another control, which keeps focus. Rows animate only for changes seen while the popover is open: a reopened popover replays nothing. A
+coarse pointer skips the popover: **+** opens the chooser directly and the
+chips carry the progress.
+
+Dragging files over the box covers it with a dashed veil (accent only while the drop would be accepted) reading "Drop
+to attach n files"; it ignores text and link drags, takes no pointer events so
+the field keeps its caret, and reads "At most n files fit", "Uploading…" or
+"At most 8 files" when the drop would be refused (the cursor then shows no
+drop). `useFileDrop` in `web/src/lib/file-drag.ts` counts the files in the drag (not the link or markup it carries) and the enter and leave
+events so a child never ends the drag early, and stops them so a drag over the
+popover's zone does not also drive the box around it. Folders are not walked:
+a dropped folder fails as a file with the browser's own read error. The Session
+view and Home both call `useRefuseStrayFileDrops`, so a file dropped outside a
+target does nothing instead of replacing the dashboard with that file.
+
 The timeline rows and both composers share `sessionColumn`
 (`session-rows.tsx`): the 736px column with 16px gutters, so message text and
 the message box line up at every width. The box (`rounded-composer`, 14px)
-holds the textarea above one footer row: attach, the agent's mode, model and
-effort pickers, the context meter, and the send pill at the end. The pill is a
+holds the textarea above one footer row: attach, **Insert a template**, the
+agent's mode, model and effort pickers, the context meter, and the send pill
+at the end. The Standard composer's row has attach, **Insert a template** and
+Send. The pill is a
 round arrow while it reads **Send** and widens to its word otherwise. Hints
 and the 45-second delivery notice sit under the box. Footer controls wrap on
 narrow screens. The context meter shows the agent's last ACP `usage_update`
 (`state.usage` in the snapshot, replaced by each `usage` item) as a share of
-its context window, with token counts in its tooltip; it turns
-`state-needs-you` at 90%. An agent that reports no usage shows no meter.
+its context window, and is a button that opens the **Context window** popover
+(`routes/run/context-window.tsx`); hovering it shows the token counts. An agent
+that reports no usage shows no meter. The popover holds the model, the tokens
+used (it counts to each new report, and jumps under reduced motion), a percent badge
+that turns `state-needs-you` at 90%, a 24 by 9 grid of 216 cells, a legend, and
+a footer with the tokens left, or by how much the window is exceeded. The agent
+reports only used and total tokens, so the grid has only what they imply: used
+and free. When the Session view still holds the turn before the newest one that
+reported, and the window grew since, used splits into **Earlier context** and
+**Latest turn**; after a compaction or once that turn is trimmed it is one
+**Used** row. Pointing at a legend row or a cell dims the other cells and
+swaps the headline and footer to that row; touch and a single category skip
+this. **Session cost** shows only when the agent reported one. The single
+`role="meter"` is the headline inside the popover. **Compact** appears only when
+the agent advertises `/compact`; it puts `/compact ` in the message box and
+focuses it, so **Send** (or the pill's steer and queue rules) still decides
+how it goes out. It is inert, with the reason on hover, while a prompt is
+being sent, the box holds text or files (a draft is never replaced), or you do
+not hold control of the session.
 
 An unsent prompt is a per-run draft held by `composer-state.ts`: the text, the
 attached files with their uploaded paths, and the idempotency key of the last
@@ -2466,6 +2768,16 @@ store, not a root-store slice: every root-store write rewrites `aether.ui`,
 and one made while events drain notifies on the next frame, which drops
 keystrokes in a controlled textarea.
 
+**Insert a template** (shown when the gateway offers `template.list`,
+disabled while the draft is locked) opens the template library above the
+button, or as a sheet on a phone, over the run's workspace's templates, with
+a clock on each scheduled one (`schedule.list`). Its primary action,
+**Insert**, writes the filled-in task into the draft: over
+the textarea's selection, or after a blank line when nothing is selected.
+It never sends. The picker closes and the caret lands after the inserted
+text; `Esc` closes it and returns focus to the textarea, while a click
+elsewhere leaves focus where it landed.
+
 User rows keep room-message IDs and attachment indices, not image bytes, and
 the container paths of other files. A path under
 `.aether/terminal-files/<random>/` is a file (`isAttachedFile`); any other
@@ -2491,14 +2803,133 @@ controller approval. `useImplicitControl`
 on any screen: Send, the Standard composer's Send and a request's options
 request the lease and run the action once it is held (given up after 10
 seconds). Pending requests dock above it
-one at a time (`routes/run/session-requests.tsx`), ordered allow-once first
-and allow-always last by ACP `kind`; `1`-`4` pick an option while a card has
-focus, `1` never an allow-always one, and the header's **Answer** focuses the
-docked card on every screen. While Session shows the dock, Details' **Needs
+one at a time, oldest first, with "1 of N" and **Previous request** / **Next
+request** in the card header (`routes/run/request-dock.tsx`). The dock holds
+the card on screen by request id, so arrivals and other answers never swap
+it, and stays empty until the stream has replayed up to the ack's `seq`, so
+a run opened with a request waiting shows it whole and without motion. The
+dock scrolls at 50dvh (40dvh on phones) and the card's footer sticks to its
+bottom.
+
+A request card (`routes/run/session-requests.tsx`, shared with the
+assistant) reads "*agent* wants to *action*": the action comes from the tool
+call's `tool_kind` ("run a command", "edit totals.go", "edit 4 files"), a
+subagent's call names that subagent, and before the tool call arrives it
+reads "asks for permission" over the request title. Below come the tool icon
+and `tool_name`, the agent's own description of the call as a quote, then a
+section: the command, or the files with `+a −d` that open their diff one at a
+time (three, then **N more**), or the locations. A truncated item loads whole
+first; one the session log itself cut shows what the log kept, with a note
+that the preview may be incomplete. Questions show their form and links the
+URL with **Copy link** and
+**Open**. Options with exactly one `allow_once` and one `allow_always`, all
+kinds distinct and set, once the tool call is known and is not a mode switch,
+become **How long** pills,
+**Just once** (the default, never remembered) and **Always**, beside the
+`reject_once` option as Deny, `reject_always` as a quiet extra, and Allow
+named after the chosen option. Anything else keeps one button per option in
+the agent's words, rejects first and the primary (allow once, or accept) last.
+A `delete` call's Allow is `danger`. `1`-`4` pick options in allow-once-first,
+allow-always-last order while a card has focus, `1` never an allow-always one;
+each button shows its digit as a `Kbd` on a fine pointer. A pressed answer
+reads **Sending…**, then "Still waiting for the server…", and errors show
+under the footer. When a request leaves `pending` its card fades out and the
+dock glides to the next card or closes; there is no Escape binding, since
+Escape already closes sheets and an accidental reject cancels the tool call.
+The header's **Answer** focuses the docked card on every screen. While Session shows the dock, Details' **Needs
 you** shows one link, "1 request, shown below the timeline", that closes a
 Details sheet and focuses the card; on other views it lists the cards. `routes/run/session-failure.tsx` shows an adapter failure with
 **Retry Enhanced** and **Open in Standard**, and a sign-in failure with the
 agent's auth methods.
+
+### Trace view
+
+The Trace view (`src/routes/run/trace-view.tsx`) shows when each part of an
+Enhanced run ran, as a span tree beside a time waterfall. A span is one
+timed piece of the run: the run itself, a turn, a tool call, a subagent, a
+wait for a person, an error notice, or, on an integrator, one swarm worker.
+`deriveTrace` in `src/store/trace.ts` builds the tree from data the Session
+view already holds; nothing new is read from the agent:
+
+| Span | Start | End |
+| --- | --- | --- |
+| Run | `started_at`, else `created_at` | `finished_at`, else now |
+| Turn | its `turn_start` item | its `turn_end`, or its last child's end |
+| Tool call | the call's first snapshot | the snapshot that settles it (a background task's own status) |
+| Subagent | `startedAt` from the subagent index | `settledAt`, or its last activity for a Workflow or background agent |
+| Wait | the `request` item opening it | the item answering or cancelling it |
+| Worker | the attempt's `started_at`, else `reserved_at` | `finished_at` |
+
+A subagent whose launch is not held starts at its first held item and sits
+in that item's turn, or under the run when that turn is not held either. An
+integrator's workers are read with `mission.show` when Trace opens and again
+on each `mission.changed`; an answer to an earlier read never replaces a
+later one, and a failed read shows its error with **Retry**.
+
+A call still open when its turn or subagent ended is **Stopped** at that end,
+unless it is a background task of a live run. Item times are log times, so a
+call that settled within 50ms is instant. A turn is named by the first line
+of its prompt, by Aether's wake-up wording ("Woken by new agent messages"),
+or `Turn N`. The run's bar is its `run.status` history, coloured by state;
+`readTraceLog` (`src/store/trace-log.ts`) reads the run's `run.status` and
+`run.cost` events with `workspace.timeline` (newest first, at most 2,000),
+and sync appends later ones while the log is held. Until that read finishes
+the run's bar stays neutral; a failed read shows its error on the bar, and
+the next read starts again from the newest event.
+
+The stats strip shows Duration (shimmering while live), Turns, Tool calls,
+Subagents when there are any, and Errors: failed calls, subagents, turns
+and error notices. Errors is a button that steps through the failures,
+unfolding each one's ancestors and opening its details. Tokens and Cost appear only for a metered
+run (`run.cost` with `metered`: Enhanced increments add, headless totals
+replace) and never as an invented zero; a failed read shows **Not read**
+with the server's error; when the read stopped at 2,000 events they read
+`≥`. While earlier history is not held the counts read `≥`. A neutral **Slowest** pill marks the longest finished tool call once
+three have finished.
+
+The axis is elapsed run time. A stretch with nothing running that is longer
+than a minute and 5% of the active time becomes a fixed break labelled with
+its length ("2h idle"); history before the first held item is a hatched
+**Not loaded** break. An idle stretch reaching now is a break too, its label
+updated once a minute. While the run is live the axis keeps headroom and
+steps through a ladder of round lengths, as does a zoom to a running span; a
+line and dot mark now, moving each second on the server's clock
+(`serverOffset`), and the list follows new rows at its end until you
+scroll; **Jump to now** returns. Bars are placed through CSS variables on
+the list (`--trace-origin`, `--trace-scale`, `--trace-now`), so a zoom or a
+scale step glides; the first layout after opening does not. A tool call's bar is accent; running, failed, stopped and waiting bars
+take those state tones; a turn's or subagent's bar packs its model time and
+its tool calls' density, failures and waits.
+
+Closed turns start folded with a `+N` count; the live and the last turn
+are open, as is a running subagent, and the Workers group while it has 8 or
+fewer. A failed or waiting span shows under its folded parent. **Trace
+actions** has **Expand all** and **Collapse all**. Folds, zoom, the
+keyboard's row and the older pages read so far are kept per run in this tab
+(`traceViews`), not persisted.
+Past 200 visible rows the list renders only those in view. The tree takes
+one tab stop: Up, Down, Home and End move, Right unfolds or enters, Left
+folds or leaves, Enter or Space opens the span's details, and Shift+Enter
+zooms the axis to it. Escape closes the details, then leaves the zoom
+(**Whole run** does too), then falls through to leaving the run. One polite
+status line announces turn starts and ends and new failures, batched over
+1.5 seconds; failures in older history as it loads stay silent.
+
+The details open beside the bar, or as a bottom sheet on a phone: the kind
+("Tool call · Bash", "Turn 4 · autonomous"), state, duration, start and
+end ("+43s", the clock time in its tooltip), exit code, spans below, files
+changed, context window, the command and the stop reason or exit code of a
+failure. **Open subagent**, **Show in Session** (switches views and scrolls
+the Session to that row, opening its block of steps and any fold that hides
+the step; for a wait still open, focuses the docked request), **Open worker
+run**, **Zoom to this span** and **Copy command** act on it.
+
+While earlier history is not held, the view reads up to 5 older pages
+(`run.acp.history`, 1,000 items each), then leaves **Load earlier**. Expired
+history reads "History before 14:02 expired on the server." and a failed
+page shows its error with **Retry**. Below 561px the rows stack: the name
+and duration, then the bar on its own line. The view is not offered for a
+Standard run, which has no turns or timed tool calls.
 
 ### Terminal view
 
@@ -3016,7 +3447,10 @@ both what it renders and the overlap set the conflict chips read.
   Refresh** and loads them on click. The store keeps one patch per run and
   records which comparison it answers for (`from`); choosing another
   comparison shows a loading state and fetches at once, never the previous
-  comparison's text.
+  comparison's text. The loading state, after ~200ms, is a skeleton of a file
+  header and ten lines of code, announced as "Loading the diff…". An empty
+  comparison is an `EmptyState` with a branch icon and a title without a
+  period ("No changes yet").
 - **Files are split by scanning, then parsed when read.** `parsePatch`
   (`parse.ts`) finds each `diff --git` boundary and counts a file's
   additions, deletions and content lines without allocating a row per line,
@@ -3256,10 +3690,17 @@ name, container path, branch, `primary`), the primary first; a single-repo run
 has none and shows none of what follows. The dashboard offers it only when the
 gateway lists the `run.repos` method.
 
-- **Launch.** With another workspace to add, the run tab of the launch dialog
-  shows **Add repos** (`launch/extra-repos.tsx`), a checklist of the member's
-  other workspaces. Each pick becomes a chip and goes out as
-  `extra_workspace_ids`; the repo is checked out at `/repos/<name>`.
+- **Launch.** With another workspace to add, the launch dialog shows **Add
+  repos** (`launch/extra-repos.tsx`) below either tab, a checklist of the
+  member's other workspaces. Each pick becomes a chip and goes out as
+  `extra_workspace_ids` on `run.launch`, or on `mission.create` from the Swarm
+  tab, whose help line adds that candidates combine `/workspace` only; the repo
+  is checked out at `/repos/<name>`. The picks are kept across tabs. The Swarm
+  tab offers it only when `server.info` also lists the `swarm-repos` feature,
+  since an older server drops the field; a pick made on Run is then not sent.
+- **Swarm page.** A swarm with extra repos says `Extra repos: <names>, at
+  /repos/<name> in every run.` under its phase line, naming a workspace that
+  no longer exists by its id.
 - **Changes.** The view gains a **Repos** tab strip above it: one tab per repo
   with its changed-file count, then **All repos**. The choice is the `repo`
   query parameter of `?run=<id>&view=changes` (a workspace id, or `all`; none
@@ -3646,23 +4087,43 @@ phones as a bottom sheet, each a `dialog "Run details"` that returns focus to
 whatever opened it. Sections (`details.tsx`):
 
 - **Needs you**: `RequestCard`s for pending native inputs, teammate messages
-  awaiting the controller with **Approve** / **Deny** through
-  `run.room.decide`, and teammate questions with a reply field. A pending
+  awaiting the controller with **Deny** / **Approve** through
+  `run.room.decide` and a bar draining toward `deliver_after`, and teammate
+  questions with a reply field. Message bodies clamp to six lines with
+  **Show more**. A pending
   decision or reply locks only its own card ([Actions](#actions)). With none of
   these, one card with the needs-you reason and the header's action as a
   secondary button, or "Nothing is waiting on you."
 - **Agent messages**: the run-scoped agent mail, which the Session view also
   shows inline, with **Show older** and **Show all**.
-- **Notes**: notes are `comment` room messages, human to human on the run,
-  with an **Add a note** field and **Add**. **Add** follows
+- **Notes**: a comment thread (`note-thread.tsx`) of `comment` room messages,
+  human to human on the run, and teammates' `question` messages. Each note is
+  a row: the author's `Avatar` ringed in their member colour, the name
+  ("via ChatGPT" after it when a connector posted it, the name the message
+  carried when the member is gone), a **question** badge, the time, and the
+  body indented under the name, clamped to eight lines with **Show more**.
+  A reply to a question nests under it behind an L connector. A teammate
+  question nobody has answered also has **Reply**, which scrolls to its
+  Needs you card; the owner's own question has none. The thread is
+  chronological and shows the newest five loaded notes with **Show N earlier
+  notes** above them; once every loaded note shows and history remains,
+  **Show older** (also shown when the loaded pages hold no notes) pages
+  `run.room.list` back 100 room messages at a time and expands the thread, and a failed read shows the server's error with
+  **Retry**. The count beside the title is the loaded notes, not a total.
+  A note that arrives after the thread settled, yours or a teammate's,
+  fades in and rises 4px once, its body 100ms behind its header;
+  the first page, **Show earlier** and older pages appear at once, and a
+  sent note saved under its server id does not replay it. A teammate's note
+  is also announced politely ("Bob added a note: <text>"). The field **Add a note**
+  and the round **Add note** control (an up arrow) follow
   [Actions](#actions): the field empties and the note shows muted with
-  "Sending…" under its idempotency key as its id, until `run.room.post` or
+  "Sending…" in place of its time, under its idempotency key as its id, until `run.room.post` or
   the `workspace.room_message` refetch brings the server's copy with that
   key. A refusal, the deadline or a failure with no answer removes it and
-  shows the error under the list beside the note's text, one entry per
-  failed note; the text goes back into the field when the field is empty.
+  shows the note's text and the error as a row marked "Not sent" under the
+  thread, one row per failed note; the text goes back into the field when the field is empty.
   Every failure except a refusal adds **Retry**. Until a saved copy arrives, resending the same text by
-  **Retry**, **Add**, or after **Dismiss** reuses its key, so a late answer
+  **Retry**, **Add note**, or after **Dismiss** reuses its key, so a late answer
   never shows twice. A refusal keeps the key too: `run.room.post` can save
   the note and then fail, so the key is dropped only when a saved copy with
   it arrives or the signed-in member changes. The field, pending keys and failures live in the store
@@ -3684,7 +4145,8 @@ Any other failed room action shows its error above the sections with
 ### Workflow panel
 
 The Workflow panel (`src/routes/run/workflow-panel.tsx`) shows what the run
-and its agents are doing as a tree. Its chip sits after the view switch and
+and its agents are doing as a tree; the [Trace view](#trace-view) shows when
+they did it. Its chip sits after the view switch and
 mirrors the run's state: `● Working · 2 agents running` (subagents and
 workflows running at any depth, a background one included) or
 `● Waiting for CI · 3 of 9 checks` (passing checks of the pull request's
@@ -3736,8 +4198,9 @@ virtualized tree the focused row stays mounted while scrolled away. Each
 parent, `aria-expanded`. One polite status region announces rows that come
 to need you, fail, become ready for review or complete: transitions are
 gathered for 1.5 seconds from the first, then up to three are read, Needs
-you and Failed first. Only Working dots pulse, and rows added after the first render fade
-in over 120ms; with reduced motion requested, neither animates.
+you and Failed first. Only Working dots pulse, and rows added after the first
+render enter with `animate-entrance` (a fade and a 4px rise over 360ms); with
+reduced motion requested, neither animates.
 
 ### Captures and candidate review
 
@@ -4189,10 +4652,14 @@ in **Needs you**.
   rows. Raw events does not fold.
 - **One Filter popover.** **Filter** in the Activity header holds Workspace,
   **Show** (every event, one event type, or **Agent messages**), Run and
-  Member; its label counts what is set (`Filter · 2`), so a narrowed feed is
-  not read as an empty log, and **Clear filters** resets it. **More activity
+  Member; its label carries a `CountBadge` of what is set (the button is named
+  "Filter, 2 active"), so a narrowed feed is not read as an empty log, and **Clear filters** resets it. **More activity
   options** holds the **Raw events** checkbox, which prints each row's wire
   type and JSON payload instead of its description.
+- **Loading and empty.** While the first page reads, eight row-shaped
+  skeletons stand in after ~200ms ("Loading activity"; "Loading agent
+  messages" in the Agent messages view). An empty feed is an `EmptyState` with
+  a history icon.
 - **Rows share one time column.** Each row is a grid: relative time, a state
   dot only on `run.status` (the run's new state), the actor's avatar or the
   message kind glyph, the sentence, and the run as a quiet link. On a phone
@@ -4252,7 +4719,12 @@ into a one-hour buffer and polls once more after 1.5 s while a container has
 no CPU figure. `model.ts` builds the donut slices and keeps each run on its
 colour slot (`--series-1` to `--series-8`) while it is present. Charts are
 Recharts, framed by `components/ui/chart.tsx`. The Storage section there
-replaced the disk rows of Settings › Server.
+replaced the disk rows of Settings › Server. The CPU, Memory and Network
+figures glide between polls (`useTween`, one glide per new sample; they never
+count up on mount and snap under reduced motion); the Disk figure is a meter.
+Storage's container and owner rows are an `InsetList`, a row that names a run
+opening it. While the first sample is read, six tile skeletons stand in after
+~200ms.
 
 `src/routes/insights/` is **Insights** (`?page=insights`), what a member's
 agents finished over the last seven local days. It is in the header
@@ -4272,7 +4744,8 @@ section loads, fails and retries on its own.
   above the content instead of sitting in the header. Runs in **Needs you**
   follow as a link to the Board.
 - **My statistics** and **Team statistics.** Two sections with the same
-  layout, mine first. Each has four boxes and one chart:
+  layout, mine first. Each has four `StatTile`s and one chart; until they load, four tile skeletons
+  and a chart skeleton stand in:
   - *Runs / swarms completed*: `outcomes.runs.done` and
     `outcomes.swarms.done` as "7 runs / 1 swarm", with the failed and
     abandoned counts of each below. Every number is from `outcomes`, work
@@ -4348,59 +4821,99 @@ and the chart says nothing ended.
 write, and the brief a new run starts with. It is in the header navigation
 after **Insights** when the gateway offers `memory.search`. It reads
 `memory.search`, `memory.show` and `memory.brief`, writes with `memory.add`,
-`memory.pin`, `memory.unpin` and `memory.rm`, and re-reads the list and the
-brief after each write, on each `memory.change` event for the workspace, and
-when the event stream comes back live, dropping answers to an older request.
+`memory.pin`, `memory.unpin` and `memory.rm`, and re-reads the list, the tab
+counts and the brief after each write, 250 ms after the last of a burst of
+`memory.change` events for the workspace, and when the event stream comes
+back live, dropping answers to an older request.
 
-- **Controls.** **Workspace** (shown with more than one, opening on
-  `activeWorkspace` or the first; notes belong to one workspace, so there is
-  no "all") and **Add note**. A search box sends its words to
-  `memory.search` 250 ms after typing stops. **Show** picks one of **All**,
-  **Pinned**, **Agent notes**, **Outcomes**, **Answers** and **Superseded**,
-  which `memory.search` applies as `pinned: true`, `source: agent`,
-  `kind: outcome`, `source: answer` and `replaced: true`, so a match older
-  than the newest 100 notes is still listed.
-- **List.** Two reads with the same words and filter: the 100 newest
-  pinned notes or best pinned matches (`pinned: true`), and the 100 newest
-  notes or best matches, which **Pinned** skips. **Superseded** makes only the second read, since a
-  replaced note is never pinned. Each note is listed once, pinned first,
-  each group in the server's order, so a pin older than the newest 100
-  still leads the list. A row shows the title, a pin badge
-  ("Pinned by Dana", or "Pinned for you" or "Pinned for Dana" on a pin for
-  one member's briefs),
-  **Superseded**, the kind, the source (Agent note, Member note, Run report,
-  Swarm answer), the author with the agent's display name, the run as a link,
-  the pull request, the first cited file and how many more, and the age.
-  When a read returns 100 notes the page says what the list holds: every
-  pinned note, or the 100 newest pinned notes or best pinned matches, then
-  the 100 newest notes or best matches. Each member's own pins have their
-  own budget, so a workspace can hold more than 100 pins; there is no
-  paging, and an older pin is found by searching. While a new search or filter
-  is read, the previous list stays on screen as it was.
-- **Detail.** A row opens `memory.show`: the note's text, its provenance
-  (author, run and its ID, commit, pull request, files, the report or
-  question it came from, when it was written and pinned, what replaced it)
-  and the supersede chain in replacement order, each other note a link.
-  A member who may push gets **Pin for me only** (`scope: member`, as
-  `aether memory pin --me`), **Pin** on a workspace-scope note (no `scope`,
-  so the note keeps its own, as `aether memory pin`), **Unpin**,
-  **Replace…** and **Remove…**, which asks before `memory.rm`; a replaced
-  note offers no pin and no **Replace…**.
-- **Add note.** Kind (decision, convention, gotcha or preference), the text,
+The header holds **Workspace** (shown with more than one, opening on
+`activeWorkspace` or the first; notes belong to one workspace, so there is no
+"all") and **Brief**, which shows the brief's size against the 3072-byte cap
+and opens it at the top of the page: the bytes `memory.brief` returns for the
+viewing member, in a code block. On a phone both sit in a row at the top of
+the panel instead, which wraps. Below sits one bounded panel, at most 768px
+wide and as tall as the page, bordered from 640px and full-bleed on a phone.
+Top to bottom:
+
+- **Show**, a radio group of pills: **All**, **Pinned**, **Agent notes**,
+  **Outcomes**, **Answers** and **Superseded**, which `memory.search` applies
+  as `pinned: true`, `source: agent`, `kind: outcome`, `source: answer` and
+  `replaced: true`, so a match older than the newest 100 notes is still
+  listed. Arrows move the choice; Home and End pick the first and last. Each
+  pill counts from the unfiltered pair of reads, and only while the count is
+  exact: "100+" when a read stopped at 100, no count for Agent notes,
+  Outcomes and Answers once the newest read stopped, and none for Superseded.
+  **Search notes** swaps the pills for a search field whose placeholder names
+  the filter; its words go to `memory.search` 250 ms after typing stops, with
+  the filter kept. Escape or **Close search** clears them and brings the
+  pills back.
+- **Notes.** Two reads with the same words and filter: the 100 newest pinned
+  notes or best pinned matches (`pinned: true`), and the 100 newest notes or
+  best matches, which **Pinned** skips. **Superseded** makes only the second
+  read, since a replaced note is never pinned. Each note is listed once,
+  pinned first, each group in the server's order, so a pin older than the
+  newest 100 still leads; **Pinned** and **Newest** (**Best matches** while
+  searching) head the groups when both have notes. A row is the title, at
+  most two lines, and one line of kind, source (Agent note, Member note, Run
+  report, Swarm answer), the author with the agent's display name, the pull
+  request or else the run as a link (not on a phone, where the detail lists
+  them), the age, the pin badge ("Pinned by
+  Dana", or "Pinned for you" or "Pinned for Dana" on a pin for one member's
+  briefs) and **Superseded**; cited files are in the detail. Under a mouse,
+  hover or focus shows **Pin for every new run** or **Pin for your new runs**
+  (no `scope`, so the note keeps its own, as `aether memory pin`), **Unpin**,
+  **Replace** and **Remove**; a replaced note offers only **Remove**. On a
+  touch screen a tap opens the detail instead. A pin or unpin glides the row
+  into its group. While a new search or filter is read, the previous list
+  stays on screen, dimmed.
+- **Add note**, which opens the composer in place: the text (first line is the
+  title), **Kind** as pills (decision, convention, gotcha or preference),
   **Files** (cited repository paths, one per line, sent as `files` trimmed
-  and without blank lines), **Only me** (`scope: member`) and **Pin**. A
-  duplicate answers with the live note already holding the text and says
-  so.
-- **Replace…** opens the same form, as `aether memory add --supersedes`:
-  the note's text, its kind (an outcome note's becomes decision), its files
-  and **Only me** for a member-scope note. It sends `supersedes` with the
-  note's ID and, on success, opens the replacement. For a pinned note the
-  server moves the pin to the replacement in its own scope, so **Pin** is
-  hidden and **Only me** is disabled at the note's scope.
-- **Brief**, collapsed, with its size against the 3072-byte cap: the bytes
-  `memory.brief` returns for the viewing member, in a code block.
+  and without blank lines), **Only me** (`scope: member`) and **Pin**.
+  `Mod+Enter` anywhere in the composer adds and Escape cancels; focus returns
+  to **Add note**. On a short screen the composer scrolls. While it holds an
+  edit to any field, **Replace** on another note leaves it open and says to
+  finish or cancel it first. A duplicate answers with the live note already
+  holding the text; its row scrolls into view and flashes.
+- The footer line, a live region: **Undo** after a removal, the composer's
+  keys and byte count against 1024, then the last result ("Added
+  note-…", "Replaced note-… with note-…", "Already kept as note-…") for four
+  seconds, then what the hovered or focused row does for new runs ("Pinned
+  by Dana · in every new run's brief", "Not pinned · runs find it by
+  searching"), and otherwise the count of listed notes and pins, or matches.
+  When a read returns 100 notes it says what the list holds instead: every
+  pinned note, or the 100 newest pinned notes or best pinned matches, then
+  the 100 newest notes or best matches. Each member's own pins have their own
+  budget, so a workspace can hold more than 100 pins; there is no paging, and
+  an older pin is found by searching. With nothing to say, such as on an
+  empty list, the line folds away.
 
-Every refusal shows the server's text unchanged, method included:
+**Remove** hides the note at once and offers **Undo** for five seconds before
+it sends `memory.rm`, which cannot be undone. A second removal, a workspace
+switch and leaving the page or tab send the waiting one at once; if the tab
+closes before that request lands, the note stays. Adding the waiting note's
+text again answers with that note, so the removal is dropped. A refusal comes
+back as a toast with the server's text and the note returns. Focus that was
+on the removed note moves to the next note, else the previous one, else **Add
+note**.
+
+A row opens `memory.show`: the note's text, its provenance (author, run and
+its ID, commit, pull request, files, the report or question it came from,
+when it was written and pinned, what replaced it) and the supersede chain in
+replacement order, each other note a link. A member who may push gets **Pin
+for me only** (`scope: member`, as `aether memory pin --me`), **Pin** on a
+workspace-scope note, **Unpin**, **Replace…** and **Remove**, which closes the
+detail and offers **Undo** in the footer; a replaced note offers no pin and
+no **Replace…**. **Replace**, from a row or the detail, opens the composer as
+`aether memory add --supersedes`: the note's text, its kind (an outcome
+note's becomes decision), its files and **Only me** for a member-scope note.
+It sends `supersedes` with the note's ID; from the detail it then opens the
+replacement. For a pinned note the server moves the pin to the replacement in
+its own scope, so **Pin** is hidden and **Only me** is disabled at the note's
+scope.
+
+Every refusal shows the server's text unchanged, method included, in the
+composer, the detail or, for a row's pin, a toast:
 `memory.add: rejected, gitleaks rule github-pat at 0:22; remove the secret
 and retry`, or `memory.pin: pinned workspace notes use 980 of 1024 bytes;
 this note needs 120; unpin one first`. A pin refused after an add
@@ -4424,7 +4937,8 @@ A live run's file can switch from **File** to **Changes vs base**. The same
 tree and editor are a view of each run, scoped to that run's checkout: see
 [Files in a run](#files-in-a-run).
 
-The tree lists each workspace's `base: <branch>` first, then its live runs
+Folder chevrons turn as a folder opens, and the empty editor pane is an
+`EmptyState` with a folder-tree icon. The tree lists each workspace's `base: <branch>` first, then its live runs
 under **Run checkouts**, then one **Home** row; both start folded, so a
 run's tree or the home is read only when it is opened. Folder expansion is
 kept per view. The tree sits beside the
@@ -4628,17 +5142,46 @@ sheet (`FilesPane`).
 
 ## Templates
 
-`src/routes/templates/` lists the active workspace's templates
-(`template.list`), one row each: agent glyph, name, mode word (Standard,
-Enhanced, Background), whether it is scheduled, the task, and when it next
-launches, last launched or was saved. **Launch** is the row's action and opens
-the new run. The row menu holds **Schedule…**, **Edit**, **Duplicate** and
-**Delete**. **Schedule…** opens the cron editor in a dialog; the preview is
+`src/routes/templates/` is a two-pane library of the active workspace's
+templates (`template.list`). The list, sorted by name, has a search over
+name, task, agent, mode and model, and one row per template: agent glyph,
+name, a clock when it is scheduled and the mode word (Standard, Enhanced,
+Background). The arrow keys, `Home` and `End` move the selection and focus
+together; `ArrowDown` in the search enters the list and `Esc` clears it. The
+selection is the address's `id`; with none, or a name the workspace lacks
+("That template is not in this workspace."), the first row is shown. A new
+or duplicated template is selected once saved, and deleting the selected one
+selects the next.
+
+The detail shows the name, the mode, **Edit** and a menu with **Schedule…**,
+**Duplicate** and **Delete**; a meta line with the agent, the model or
+"agent default", the schedule (`Scheduled <cron> UTC, next in 3 hours`) or
+when it was saved, and the advisory budget; then the task. Each `{{name}}`
+placeholder (the server's pattern in `internal/templates/render.go`) is an
+inline field at its first occurrence, prefilled with the template's default;
+later occurrences mirror it. "N of M filled" counts placeholders with a value
+or a default, and a preview shows the rendered task. The footer shows "~N
+tokens" (characters / 4, an estimate whatever the agent's tokenizer), a
+field's default while it has focus, or "Fill N more to launch" on the
+disabled **Launch**; **Copy** copies the rendered task. `Enter` in a field
+moves to the next empty one, or launches once none is left. **Launch** sends
+`template.launch` with only the values typed over a default, never the task,
+reads "Launching…", with every **Launch** held, until the server answers so
+one click starts one run, and opens the new run; a refusal toasts the
+server's error. Typed values last, per workspace, while the page is open.
+On a phone the list and the detail are one pane at a time, with
+**Templates** to go back. A failed `template.list` read shows the
+server's error with **Retry**.
+
+**Schedule…** opens the cron editor in a dialog; the preview is
 the `next_fire_at` that `schedule.save` returned, shown relative and in UTC,
 never computed in the browser. **Duplicate** opens the form prefilled under
 `<name> copy`. The form's agent select lists the agents from `agent.list` by
 display name and keeps the template's current agent as an extra option when
-the list omits it. With no templates the view says what one is and offers
+the list omits it. Its **Parameters** group lists each `{{name}}` the task
+uses, live, with an optional default (clearing the field removes it); defaults for names the task no longer
+uses are dropped, and the template's budget hint is kept, so an edit never
+wipes either. With no templates the view says what one is and offers
 **New template**.
 
 Save, **Delete** and the schedule save follow [Actions](#actions): the dialog
@@ -4667,13 +5210,15 @@ what it saves.
 **Retry** in a dialog sends what the dialog shows now, so edits made after
 the deadline are not lost. A template whose save the server has not answered, past the deadline
 too, offers no **Launch**, **Delete** or **Schedule…**, since
-`template.launch` sends only the name. **Unschedule** reads "Unscheduling…", then
+`template.launch` sends the name and the filled-in parameters, never the
+task. **Unschedule** reads "Unscheduling…", then
 "Still waiting for the server…" past the deadline; while a schedule save for
 that template in that workspace is unanswered it reads "Saving…" and is disabled, so the delete
 cannot land before the save. Both holds last across leaving Templates and
-coming back, and so do the lists, kept per workspace outside the view:
-coming back shows them at once, and an answer or rollback that arrives
-after you left still lands on them.
+coming back, and so do the lists, kept per workspace in
+`src/store/templates.ts`: coming back shows them at once, an answer or
+rollback that arrives after you left still lands on them, and the composer
+and palette pickers read and refresh the same lists.
 When saves of one template, or of its schedule, overlap, only
 the answer to the last one sent is written; an earlier answer leaves the
 list alone. An earlier save's answer becomes the value a later pending
@@ -4712,8 +5257,10 @@ deleted (`~/.local/bin/<executable>`, plus the Enhanced adapter's link, or the
 member's definition) and what stays; a refusal appears in the open dialog, and
 success reloads the shared agent list, so the launcher's picker updates too. On the Agents page an installed agent's row also has a **Default
 mode** select, shown as "Default: Standard", which writes `launchDefaults`
-without changing which agent **New run** preselects. Once one agent is
-installed the page folds the rest under **More agents (n)**. **What's the
+without changing which agent **New run** preselects. Rows sit in an `InsetList` with the glyph in an `IconTile`. Once one agent is
+installed the page folds the rest under **More agents**, whose count is a
+`CountBadge` (the button is named "More agents (n)"). While `agent.list` is
+pending, three row-shaped skeletons stand in after ~200ms. **What's the
 difference?** beside the page's lead opens the Standard and Enhanced cards
 (`ModeOverview`) in a dialog.
 **Run** remembers the agent and its default mode and opens **New run** on it;
@@ -4887,8 +5434,10 @@ header's **Environment** button (or **More navigation → Environment**) or
 
 The view mounts `TerminalDock` (`terminal-dock.tsx`) with
 `containment="fill"`, so the dock fills the view with no resize handle and no
-collapse control. Before the container exists the view says "Your
-environment starts on first open" with **Open**. On desktop the dock hands
+collapse control. While the status is read the pane shows a spinner and
+"Checking environment…"; a failed read is a `FailureCallout` (with **Retry**
+before the container exists). Before the container exists the view says
+"Your environment starts on first open" with **Open**. On desktop the dock hands
 its actions to the view's header (`header` prop): **Save environment** is the
 header's only filled button while the container runs, **Environment
 actions** (`…`) holds the rest, and the save hint **Installs here reach
@@ -4958,7 +5507,7 @@ Each tab has its own route name (`members`, `devices`), so the address, back
 button and the palette's **Devices** entry land on the right tab, and the
 sidebar's **Members** row stays current on both.
 
-**Members** is a roster table: name, role, whether you and that member share
+**Members** is a roster table, each row filling on hover: name, role, whether you and that member share
 an agent account, and last seen (**Online**, a relative time, or
 **Offline**). An admin changes a role or removes a member from the row's
 menu; giving up your own admin role, and removing anyone, ask first. Members
@@ -5041,7 +5590,9 @@ from that device, which no row shows: **Review** looks the code up with
 `member.device.lookup`, and a dialog shows the device, its account, its
 fingerprint, and the member and role approving admits it as, before
 **Approve** sends `member.device.approve` with the device id and the code.
-It revokes a device too, and shows every server refusal verbatim.
+It revokes a device too, and shows every server refusal verbatim. The
+list is an `InsetList`; until it arrives, three row skeletons stand in after
+~200ms ("Loading devices").
 
 Personal settings are not on this page. The sidebar footer menu's
 **Profile** opens the **Profile** dialog (`src/routes/members/personal.tsx`):
@@ -5134,7 +5685,8 @@ without a reload.
 
 ## Manage workspaces
 
-`src/routes/workspaces/` lists workspaces as rows. Selecting a row opens the
+`src/routes/workspaces/` lists workspaces as rows, with three row skeletons
+while the list loads. Selecting a row opens the
 workspace: it becomes the active one and the board shows. Each row's menu
 holds **Repository** (the repository page), **Environment** (its Environment
 section), **Settings…** (who may message others' runs) and **Delete…**, each
@@ -5300,8 +5852,9 @@ pushed base.
 ## Settings
 
 `src/routes/settings/` is available through either gateway. A nav on the
-left lists categories in three groups; the selected category fills the
-content pane. `registry.ts` holds the categories and one entry per setting
+left lists categories in three groups, the open one marked by a selection
+that glides between them on desktop; the selected category fills the
+content pane, a `PageBody` that fades in when the category changes. `registry.ts` holds the categories and one entry per setting
 (id, label, help, keywords, and a gate over capabilities, admin, assistant
 availability, onboarding and membership). A category shows in the nav only
 while one of its entries is visible, so the nav and search never disagree.
@@ -6175,7 +6728,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `u` | global | Open the next run that needs you |
 | `j` / `k` | global | Focus the next or previous run in the sidebar |
 | `g` then `b`, `l`, `s`, `a`, `f`, `g`, `e`, `,` | global | Go to the board, all workspaces, swarms, activity, files, agents, environment, settings |
-| `[` / `]` | run | Show the previous or next run view |
+| `[` / `]` | run | Show the previous or next run view, Trace included on an Enhanced run |
 | `⌘.` / `Ctrl+.` | run | Show or hide run details |
 | `c` | run | Message the agent (focuses the Session composer) |
 | `Esc` | run | Leave a run for the board |
@@ -6186,7 +6739,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘Shift+C` / `Ctrl+Shift+C` | browser | Annotate the page for the agent |
 | `Enter` | composer | Send the message, or steer the running turn |
 | `⌘Shift+Enter` / `Ctrl+Shift+Enter` | composer | Queue the message for after this turn |
-| `1` to `4` | request | Pick that option of the focused Session request |
+| `1` to `4` | request | Pick that option of the focused Session request; Escape does not deny it |
 
 A component answers its bindings with `useKeybindings(scope, handlers)`, which
 pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
@@ -6351,26 +6904,31 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   Completed, ring with a bar Closed, cross Failed, ring with an exclamation
   mark Interrupted, broken ring Disconnected, bars Paused), named by the state
   word where it stands alone.
-  `StateLine` pairs it with the reason, as on board cards. The states are
+  `StateLine` pairs it with the reason, as on swarm cards. The states are
   described under [Run state](#run-state).
 - **Lists stay still.** Sidebar rows, board cards, the palette and All
   workspaces draw a static dot. Only the run header's dot and the Session
-  view's live row pulse while Working (`state-pulse`, an opacity step).
-- **Motion is optional.** The controlling terminal's 1px teal outline is
-  always static. The state pulse, the Session live row's shimmer, spinners and
-  skeletons stop moving under `prefers-reduced-motion: reduce`. There is no
-  startup scene or reveal-flash animation.
+  view's live row or live steps header pulse while Working (`state-pulse`, a
+  breathe in opacity and size).
+- **Motion is optional.** Every animation and transition stops under
+  `prefers-reduced-motion: reduce`: the state pulse, the Session live
+  shimmer, row and answer-block entrances, overlay and sheet entrances, tab indicators, disclosures, spinners
+  and skeletons. The controlling terminal's 1px teal outline is always static.
+  There is no startup scene or reveal-flash animation.
 - **Primitives first.** `src/components/ui/` holds the house primitives on
   Radix: `Button` (`primary`, `secondary`, `ghost`, `danger`, `link` and the
   muted `quiet` link), `Input`, `Textarea`, `Label`, `FormField`, `Select`,
   `Checkbox`, `Radio`, `Collapsible`, `Dialog`, `AlertDialog`, `Menu`,
   `Popover`, `Tooltip`, `Tabs`, `Command`, `Card`, `Callout`, `Badge`,
-  `ListRow`, `PaneHeader`, `EmptyState`, `RequestCard`, `StatusDot`,
-  `Skeleton` and the Session `timeline` and `session-blocks` rows. They are
-  tuned to the shared scale and `focusRing`, and preserve props, events, refs
-  and accessibility contracts. Use them instead of raw form elements. Fields
-  and buttons are 28px, small buttons 24px, all 44px on a coarse pointer;
-  adjoining panes and rows are square, and controls use the 4px
+  `CountBadge`, `ProgressBar`, `TextSwap`, `IconSwap`, `SlidingIndicator`,
+  `ListRow`, `PageBody`, `InsetList`, `StatTile`, `IconTile`, `PaneHeader`,
+  `EmptyState`, `RequestCard` with its `request-section` and `request-choice`
+  parts, `StatusDot`, `Skeleton`, `CopyButton` and the Session `timeline`,
+  `steps` and `session-blocks` rows. They are tuned to the shared scale and
+  `focusRing`, and preserve props, events, refs and accessibility contracts.
+  Use them instead of raw form elements. Fields and buttons are 28px, small
+  buttons 24px, all 44px on a coarse pointer;
+  adjoining panes and rows are square, and controls use the 8px
   `--radius-control`. `Input`, `Textarea` and `SelectTrigger` compose the
   shared `field` style with contrast-tuned `--control-border` borders,
   readable placeholders and explicit disabled/read-only states.
@@ -6384,7 +6942,8 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   `id`, so the control announces its purpose rather than only its current
   option.
 - **Disclosures normally unmount closed content.** `CollapsibleTrigger`
-  supplies the marker.
+  supplies the marker, which turns over 200ms; the body glides its height
+  open and shut and unmounts once the closing glide ends.
 - **Status and metadata pills are `Badge`.** It takes a run-state `tone` or
   stays neutral. A `Badge` takes no `title` of its own, so a pill whose text
   can be clipped wears one on the span around it. Run and dock tab strips
@@ -6392,7 +6951,8 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 - **A hint a reader needs is a `Tooltip`, not a `title`.** A `title` is drawn
   by the pointer and by nothing else, so on a control a keyboard can land on
   it is information that reader can never get at. A Tooltip opens on focus and
-  hover, with a 300ms hover delay, and points the control's `aria-describedby`
+  hover, with a 250ms hover delay that a tooltip closed in the last 300ms
+  skips, and points the control's `aria-describedby`
   at itself. It is a description rather than the name: an icon-only `Button`
   takes `label`, which sets both. A `title` stays only on what a keyboard
   cannot land on - a truncated path, a timestamp, a breakdown - since a
@@ -6419,7 +6979,17 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   the colour is arbitrary server data with no contrast guarantee in either
   theme.
 - **Loading feedback matches duration.** Skeletons appear only after ~200ms
-  (`useDelayed`), so a fast response never flashes.
+  (`useDelayed`), so a fast response never flashes. A skeleton has the shape
+  of what it stands for (rows, tiles, a diff's header and lines), is capped
+  at about ten rows however long the real list is, and its words stay in a
+  `role="status"` for assistive technology. A failure is a `FailureCallout`
+  with **Retry**, and an empty page is an `EmptyState`: an icon, a title
+  without a period, one line and at most one action.
+- **Pages share one anatomy.** A scrolling page is a `PageBody` (a centred
+  column, 32px between sections, a short fade in), its lists are `InsetList`s
+  of `InsetListItem`s (with `onOpen` the whole row is one button), its figures
+  are `StatTile`s (`text-stat`, 24px) and a glyph that leads a row sits in an
+  `IconTile`.
 
 ## Tests
 
@@ -6446,10 +7016,24 @@ colour and say so in their names until `finish_unopened` clears. They also
 cover a run row's age, owner mark, people stack and details box.
 `src/lib/needs-you.test.ts` has one case per Needs you condition, and the
 device cards an admin and a member see.
+`src/routes/board/lanes/model.test.ts` covers lane segments from status
+history, section order and folding, swarm order, axis ticks and link
+bundling; the board test's `lanes view` cases cover the tree keyboard, the
+run popover and its links, a popover whose lane folds away, a swarm, an empty
+window, bundled mail bodies and failed history and swarm reads.
 
 `src/a11y.test.tsx` exercises the run tab strip, dock tabs and sidebar
 splitter with keyboard events: arrow navigation, Enter and Space activation,
 Delete and Backspace close, focus handoff, clamped resizing and collapse.
+`src/store/trace.test.ts` covers span derivation (open, stopped and
+background calls, subagents with and without a held launch, waits, turn
+names and stop reasons, the status lane), stats, folding, bar segments, idle
+breaks and a 5,000-span derive and flatten budget;
+`src/routes/run/trace-view.test.tsx` covers the Trace tree's keyboard,
+details, zoom and Escape order, the Errors stat, metered-only and capped
+cost, a history read retried after a partial failure, workers re-read in
+order and their read error, history notices, virtualization and which
+failures are announced.
 `src/components/shell/nav-shortcuts.test.tsx` covers the shell shortcut
 precedence across fields, dialogs, menus, lists and selects, and the
 Single-key shortcuts setting; `src/lib/keybindings.test.ts` fails on two
@@ -6478,7 +7062,7 @@ outline, and drags the sidebar resizer. `window-sizing` exercises the updates
 dialog at the smallest desktop window and below it. `run-deep-link` checks
 that the address follows navigation, survives a reload and agrees with back
 and Escape. `run-session` streams an Enhanced run, answers a permission,
-sends a message and stops it with Interrupt.
+sends a message and stops it with Interrupt, then checks its Trace tab.
 
 The touch shell is driven by the `mobile` project, which
 [testing.md](testing.md) describes: `shell-drawer.mobile.spec.ts` opens the
@@ -6515,7 +7099,8 @@ attach, presence and occupied-lease fencing; `src/store/sessions.test.ts`
 covers the Session rows; `src/store/session-rows.test.ts`,
 `acp-sessions.test.ts`, `src/lib/acp-stream.test.ts`,
 `src/routes/run/composer-state.test.ts` and `session.test.tsx` cover the
-Enhanced rows, store, stream client, composer and requests, and
+Enhanced rows and their blocks of steps, store, stream client, composer and
+requests, and
 `src/store/session-perf.test.tsx` (`RUN_PERF=1`) streams 5,000 items and
 opens 2,000. `src/routes/browser/index.test.tsx` covers the first page,
 silent acquisition, takeover, release on blur and on focus elsewhere, the

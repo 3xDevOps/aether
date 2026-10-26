@@ -41,6 +41,13 @@ function seed(self = alice) {
 }
 
 describe('devices tab', () => {
+  it('shows three placeholder rows while the list loads', async () => {
+    seed()
+    render(<DevicesPanel client={fakeApi({ memberDeviceList: vi.fn(() => new Promise<never>(() => {})) })} />)
+
+    expect((await screen.findByRole('status', { name: 'Loading devices' })).querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3)
+  })
+
   it('lists label, status, key, owner and when each device was added and last seen', async () => {
     seed()
     const client = fakeApi({ memberDeviceList: vi.fn(async () => [device(), pendingDesktop]) })

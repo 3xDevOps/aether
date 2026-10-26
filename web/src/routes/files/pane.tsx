@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { FolderTree } from '@/components/icons'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
 import { type Selection, sourceKey } from '@/routes/files/sources'
@@ -25,7 +26,7 @@ export function FilesPane({
         <aside aria-label="Files" className="w-[280px] shrink-0 overflow-y-auto border-r border-seam bg-chrome">{tree}</aside>
         {editor ?? (
           <div className="flex min-w-0 flex-1 items-center justify-center">
-            <EmptyState title="No file open">Pick a file in the tree to read or edit it.</EmptyState>
+            <EmptyState icon={<FolderTree />} title="No file open">Pick a file in the tree to read or edit it.</EmptyState>
           </div>
         )}
       </div>

@@ -1,33 +1,33 @@
-import { useMemo, useState } from 'react'
-import type * as React from 'react'
-import { CircleCheck, Circle, CircleDot, ListTodo } from '@/components/icons'
+import { useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import { CircleCheck } from '@/components/icons'
+import { Button } from '@/components/ui/button'
+import { CodeBlock } from '@/components/ui/code'
+import { CopyButton } from '@/components/ui/copy-button'
+import { Highlighted } from '@/components/ui/markdown'
+import { StatusDot } from '@/components/ui/status-dot'
 import { cn, focusRingInset } from '@/lib/utils'
-import { parsePatch } from '@/routes/diff/parse'
+import { parsePatch, type PatchFile } from '@/routes/diff/parse'
 import { PathText } from '@/routes/files/path-link'
+import type { PlanEntry } from '@/store/session-steps'
 
 const planFold = 20
 
-const planIcon: Record<string, React.ReactNode> = {
-  completed: <CircleCheck aria-label="Done" className="text-muted" />,
-  in_progress: <CircleDot aria-label="In progress" className="text-text" />,
-}
-
-export function PlanCard({ entries }: { entries: { content: string; status?: string }[] }) {
+export function PlanEntries({ entries, live }: { entries: PlanEntry[]; live: boolean }) {
   const [open, setOpen] = useState(false)
   const shown = open ? entries : entries.slice(0, planFold)
   const done = entries.filter((entry) => entry.status === 'completed').length
   return (
-    <section data-slot="plan-card" aria-label="Plan" className="flex flex-col gap-1 text-ui-sm">
-      <div className="flex h-6 items-center gap-2 text-muted">
-        <ListTodo aria-hidden className="size-3.5" />
-        <span>Plan</span>
-        <span className="tabular-nums">{done}/{entries.length}</span>
-      </div>
-      <ol className="flex flex-col">
+    <div data-slot="plan-entries" className="flex flex-col pb-1 text-ui-sm">
+      <ol aria-label="Plan" className="flex flex-col">
         {shown.map((entry, index) => (
-          <li key={index} className="flex min-h-6 items-start gap-2 pl-5 [&_svg]:mt-[5px] [&_svg]:size-3.5 [&_svg]:shrink-0">
-            {planIcon[entry.status ?? ''] ?? <Circle aria-label="To do" className="text-icon-faint" />}
-            <span className={cn('min-w-0 break-words', entry.status === 'completed' ? 'text-muted line-through' : 'text-text')}>
+          <li key={index} className="flex min-h-6 items-start gap-2">
+            <span className="flex h-5 w-3.5 shrink-0 items-center justify-center">
+              {entry.status === 'completed' ? <CircleCheck aria-label="Done" className="size-3.5 text-icon-faint" />
+                : entry.status === 'in_progress' ? <StatusDot tone="working" pulse={live} label="In progress" />
+                : <span role="img" aria-label="To do" className="size-1.5 rounded-full border border-icon-faint" />}
+            </span>
+            <span className={cn('min-w-0 py-0.5 break-words', entry.status === 'completed' ? 'text-muted' : entry.status === 'in_progress' && live ? 'live-shimmer' : 'text-text')}>
               {entry.content}
             </span>
           </li>
@@ -38,12 +38,46 @@ export function PlanCard({ entries }: { entries: { content: string; status?: str
           type="button"
           aria-expanded={open}
           onClick={() => setOpen(!open)}
-          className={cn(focusRingInset, 'self-start rounded-control pl-5 text-accent hover:underline coarse:min-h-11')}
+          className={cn(focusRingInset, 'self-start rounded-control pl-5.5 text-accent hover:underline coarse:min-h-11')}
         >
           {open ? 'Show less' : `Show ${entries.length - planFold} more`}
         </button>
       )}
-    </section>
+      {entries.length > 0 && done === entries.length && (
+        <p className="flex min-h-6 items-center gap-2 text-state-done">
+          <span className="flex w-3.5 shrink-0 justify-center"><StatusDot tone="done" /></span>
+          All {entries.length} {entries.length === 1 ? 'step' : 'steps'} done
+        </p>
+      )}
+    </div>
+  )
+}
+
+const clipLines = 10
+
+export function ToolValue({ label, value, failed = false }: { label: string; value: unknown; failed?: boolean }) {
+  const [all, setAll] = useState(false)
+  const code = useRef<HTMLElement>(null)
+  const json = typeof value !== 'string'
+  const text = useMemo(() => (json ? JSON.stringify(value, null, 2) : value), [json, value])
+  const lines = text.split('\n')
+  const clipped = !all && lines.length > clipLines
+  const shown = clipped ? lines.slice(0, clipLines).join('\n') : text
+  return (
+    <figure data-slot="tool-value" className="flex flex-col gap-0.5">
+      <figcaption className="flex h-6 items-center justify-between text-ui-sm text-muted coarse:h-11">
+        {label}
+        <CopyButton text={text} label={`Copy the ${label.toLowerCase()}`} source={code} reveal={() => flushSync(() => setAll(true))} />
+      </figcaption>
+      <CodeBlock className={cn('max-h-80 overflow-auto px-2 py-1', failed && 'border-state-failed bg-state-failed-soft')}>
+        <code ref={code}>{json ? <Highlighted code={shown} lang="json" /> : shown}</code>
+      </CodeBlock>
+      {clipped && (
+        <Button variant="quiet" className="self-start text-ui-sm" onClick={() => setAll(true)}>
+          Show all {lines.length} lines
+        </Button>
+      )}
+    </figure>
   )
 }
 
@@ -57,8 +91,25 @@ const lineClass = {
 
 const prefix = { add: '+', del: '-', hunk: '', meta: '', context: ' ' }
 
+/** One file's tool-call patch, which arrives without its `diff --git` header. */
+export function patchFile(path: string, patch: string) {
+  return parsePatch(`diff --git a/${path} b/${path}\n${patch.replace(/\n+$/, '')}`)[0]
+}
+
+export function DiffLines({ file }: { file: PatchFile }) {
+  return (
+    <pre className="overflow-x-auto font-code text-ui-sm text-text">
+      {file.lines.map((line, index) => (
+        <code key={index} className={cn('block min-w-max px-2 whitespace-pre', lineClass[line.kind])}>
+          {prefix[line.kind]}{line.text || ' '}
+        </code>
+      ))}
+    </pre>
+  )
+}
+
 export function DiffBlock({ path, patch }: { path: string; patch: string }) {
-  const file = useMemo(() => parsePatch(`diff --git a/${path} b/${path}\n${patch.replace(/\n+$/, '')}`)[0], [path, patch])
+  const file = useMemo(() => patchFile(path, patch), [path, patch])
   if (!file) return null
   return (
     <figure data-slot="diff-block" className="overflow-hidden rounded-control border border-seam">
@@ -67,13 +118,7 @@ export function DiffBlock({ path, patch }: { path: string; patch: string }) {
         <span className="shrink-0 font-code text-diff-add">+{file.additions}</span>
         <span className="shrink-0 font-code text-diff-del">−{file.deletions}</span>
       </figcaption>
-      <pre className="overflow-x-auto font-code text-ui-sm text-text">
-        {file.lines.map((line, index) => (
-          <code key={index} className={cn('block min-w-max px-2 whitespace-pre', lineClass[line.kind])}>
-            {prefix[line.kind]}{line.text || ' '}
-          </code>
-        ))}
-      </pre>
+      <DiffLines file={file} />
     </figure>
   )
 }

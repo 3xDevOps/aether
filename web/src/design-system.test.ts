@@ -117,10 +117,20 @@ describe('icons', () => {
 // WCAG 2.x contrast, read from index.css.
 const css = readFileSync(path.join(src, 'index.css'), 'utf8')
 
-function themeColours(selector: string): Record<string, string> {
+function themeBlock(selector: string): string {
   const block = css.match(new RegExp(`^${selector} \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1]
   if (!block) throw new Error(`index.css has no "${selector} {" token block`)
-  return Object.fromEntries([...block.matchAll(/--([\w-]+):\s*(#[0-9a-f]{6});/gi)].map((m) => [m[1], m[2]]))
+  return block
+}
+
+function themeColours(selector: string): Record<string, string> {
+  return Object.fromEntries([...themeBlock(selector).matchAll(/--([\w-]+):\s*(#[0-9a-f]{6});/gi)].map((m) => [m[1], m[2]]))
+}
+
+/** `fg` at `alpha` composited over `bg`, as a `color-mix(..., transparent)` fill paints. */
+function over(fg: string, bg: string, alpha: number): string {
+  const channel = (hex: string, i: number) => parseInt(hex.slice(i, i + 2), 16)
+  return `#${[1, 3, 5].map((i) => Math.round(channel(fg, i) * alpha + channel(bg, i) * (1 - alpha)).toString(16).padStart(2, '0')).join('')}`
 }
 
 function luminance(hex: string): number {
@@ -162,15 +172,20 @@ describe.each([
     expect(colours[bg], `--${bg} is not a hex colour in ${selector}`).toMatch(/^#/)
     expect(contrast(colours[fg], colours[bg])).toBeGreaterThanOrEqual(min)
   })
+  it.each([...states, 'accent-text', 'text-muted'])('text on a %s lane bar', (fill) => {
+    const tint = Number(themeBlock(selector).match(/--lane-tint:\s*(\d+)%;/)?.[1]) / 100
+    expect(tint).toBeGreaterThan(0)
+    expect(contrast(colours.text, over(colours[fill], colours.canvas, tint))).toBeGreaterThanOrEqual(4.5)
+  })
 })
 
 describe('primitive colour utilities', () => {
   const defined = new Set([...css.matchAll(/^\s*--((?:color|text-color|background-color|text)-[\w-]+):/gm)].map((m) => m[1]))
   const utilities = new Set([...css.matchAll(/^@utility ([\w-]+)/gm)].map((m) => m[1]))
-  const builtIn = new Set(['transparent', 'current', 'inherit', 'white', 'black', 'left', 'center', 'right'])
+  const builtIn = new Set(['transparent', 'current', 'inherit', 'white', 'black', 'left', 'center', 'right', 'linear-to-r'])
   const primitives = sources.filter(({ file }) => file.startsWith('components/ui/')).map(({ file, text }) => [file, text])
   it.each(primitives)('%s names only defined tokens', (_, text) => {
-    const missing = [...text.matchAll(/(?<![\w-])(text|bg)-([a-z][\w-]*)/g)]
+    const missing = [...text.matchAll(/(?<![\w/-])(text|bg)-([a-z][\w-]*)/g)]
       .filter(([match, prop, name]) => {
         if (utilities.has(match) || builtIn.has(name) || defined.has(`color-${name}`)) return false
         return prop === 'bg' ? !defined.has(`background-color-${name}`) : !defined.has(`text-color-${name}`) && !defined.has(`text-${name}`)

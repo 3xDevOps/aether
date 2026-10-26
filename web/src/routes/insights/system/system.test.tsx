@@ -22,6 +22,13 @@ function renderSystem(over: Partial<Api> = {}) {
 const rows = () => within(screen.getByRole('list', { name: 'Containers by usage' })).getAllByRole('listitem')
 
 describe('system tab', () => {
+  it('shows six tile placeholders and keeps the sentence for assistive technology', async () => {
+    renderSystem({ systemStats: vi.fn(() => new Promise<never>(() => {})) })
+
+    const sentence = await screen.findByText('Reading system stats…')
+    expect(sentence.parentElement!.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(6)
+  })
+
   it('shows the host figures as tiles', async () => {
     const client = renderSystem()
     const cpu = await screen.findByRole('group', { name: 'CPU' })

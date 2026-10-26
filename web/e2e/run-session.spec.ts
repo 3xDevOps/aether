@@ -35,11 +35,17 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
   await expect(page.getByText('Answer the request above to continue.')).toBeVisible()
   await page.getByRole('toolbar', { name: 'Run actions' }).getByRole('button', { name: 'Answer' }).click()
   await expect(card).toBeFocused()
-  await expect(card.getByRole('button')).toHaveText(['Allow', 'Reject', 'Always Allow'])
+  await expect(card.getByRole('radio')).toHaveText(['Just once', 'Always'])
+  await expect(card.getByRole('button', { name: 'Reject', exact: true })).toHaveAttribute('aria-keyshortcuts', '2')
+  await expect(card.getByRole('button', { name: 'Allow', exact: true })).toHaveAttribute('aria-keyshortcuts', '1')
   await expect(page.getByRole('log', { name: 'Session' }).getByText('Waiting for your approval: rm -rf build')).toBeVisible()
   await page.keyboard.press('1')
-  await expect(log.getByText(/Approved: run/)).toBeVisible()
   await expect(log.getByText('permission: allow')).toBeVisible()
+  // The command and its answer are steps; once the turn ends their block shuts behind the header.
+  const asked = log.getByRole('button', { name: /^Ran 1 command/ })
+  await expect(asked).toHaveAttribute('aria-expanded', 'false')
+  await asked.click()
+  await expect(log.getByText(/Allowed once · run/)).toBeVisible()
   await expect.poll(async () => {
     const [row, view] = await Promise.all([log.getByText('permission: allow').boundingBox(), log.boundingBox()])
     return Boolean(row && view && row.y >= view.y && row.y + row.height <= view.y + view.height)
@@ -55,12 +61,15 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
 
   await box.fill('demo edit')
   await box.press('Enter')
-  await expect(log.getByRole('button', { name: /Read 2 files, ran 1 command and edited 1 file/ })).toBeVisible({ timeout: 30_000 })
-  await log.getByRole('button', { name: /Read 2 files, ran 1 command and edited 1 file/ }).click()
+  // The mock advertises steering but does not implement it, so wait for the turn to end and its block to shut.
+  const steps = log.getByRole('button', { name: /^Read 2 files, ran 1 command and edited 1 file/ })
+  await expect(steps).toHaveAttribute('aria-expanded', 'false', { timeout: 30_000 })
+  await expect(log.getByText(/^Finished in \d+s$/).last()).toBeVisible()
+  await steps.click()
+  await expect(log.getByText('billing.js', { exact: true })).toBeVisible()
+  await expect(log.getByText('All 3 steps done')).toBeVisible()
   await log.getByRole('button', { name: /Edited src\/billing\.js/ }).click()
   await expect(log.locator('[data-slot="diff-block"]')).toContainText('Math.round')
-  // The mock advertises steering but does not implement it, so wait for the turn to end.
-  await expect(log.getByText(/^Finished in \d+s$/)).toBeVisible()
   await expect(log.getByText(/^Changed \d+ files?$/)).toHaveCount(0)
 
   const changes = page.getByRole('region', { name: 'Changes' })
@@ -94,6 +103,21 @@ test('an Enhanced run streams, answers a permission, takes a message and stops o
     return sent && `${sent.state}/${sent.agent_delivery}`
   }, { message: 'the queued message is recorded as delivered' }).toBe('sent/delivered')
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible()
+
+  await page.getByRole('tab', { name: 'Trace' }).click()
+  const trace = page.getByRole('tree', { name: 'Trace' })
+  await expect(trace.getByRole('treeitem', { name: /^wait, Turn, Stopped/ })).toBeVisible()
+  const edit = trace.getByRole('treeitem', { name: /^demo edit, Turn, Done/ })
+  await expect(edit).toHaveAttribute('aria-expanded', 'false')
+  await edit.focus()
+  await page.keyboard.press('ArrowRight')
+  const call = trace.getByRole('treeitem', { name: /^Edited src\/billing\.js, Tool call, Done/ })
+  await expect(call).toBeVisible()
+  await call.focus()
+  await page.keyboard.press('Enter')
+  await page.getByRole('dialog', { name: 'Edited src/billing.js details' }).getByRole('button', { name: 'Show in Session' }).click()
+  await expect(page.getByRole('tab', { name: 'Session', selected: true })).toBeVisible()
+  await expect(log.getByRole('button', { name: /Edited src\/billing\.js/ })).toBeVisible()
 
   await page.reload()
   await expect(changed).toBeVisible({ timeout: 30_000 })
@@ -178,6 +202,11 @@ test('an Enhanced run keeps subagents out of the conversation and opens each in 
   await box.fill('subagents')
   await box.press('Enter')
   await expect(log.getByText('All three subagents finished.')).toBeVisible({ timeout: 30_000 })
+  // The finished turn's steps, its narration and subagent cards among them, sit behind the block header.
+  const delegated = log.getByRole('button', { name: /^Delegated 3 tasks/ })
+  await expect(delegated).toHaveAttribute('aria-expanded', 'false')
+  await expect(log.getByText('Splitting the work across subagents.')).toHaveCount(0)
+  await delegated.click()
   await expect(log.getByText('Splitting the work across subagents.')).toBeVisible()
   await expect(log.getByRole('button', { name: '3 subagents' })).toHaveAttribute('aria-expanded', 'true')
   const billing = log.getByRole('button', { name: 'Map the billing module, Explore, Done' })
@@ -305,7 +334,7 @@ test('Enhanced multiplayer keeps moderated messages, deliberate release and time
     const bobDetails = bobPage.getByRole('complementary', { name: 'Run details' })
     const note = 'I will check the migration while you work.'
     await bobDetails.getByRole('textbox', { name: 'Add a note' }).fill(note)
-    await bobDetails.getByRole('button', { name: 'Add', exact: true }).click()
+    await bobDetails.getByRole('button', { name: 'Add note', exact: true }).click()
     await expect(aliceDetails.getByRole('region', { name: 'Notes' })).toContainText(note)
 
     const instruction = 'Please inspect the migration'

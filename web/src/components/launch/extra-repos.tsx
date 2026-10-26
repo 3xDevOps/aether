@@ -10,11 +10,13 @@ export function ExtraRepos({
   value,
   onChange,
   disabled,
+  swarm = false,
 }: {
   options: Workspace[]
   value: string[]
   onChange: (ids: string[]) => void
   disabled?: boolean
+  swarm?: boolean
 }) {
   const chosen = options.filter((workspace) => value.includes(workspace.id))
   const toggle = (id: string, on: boolean) => onChange(on ? [...value, id] : value.filter((item) => item !== id))
@@ -56,7 +58,11 @@ export function ExtraRepos({
         ))}
       </div>
       {chosen.length > 0 && (
-        <p className="text-ui-sm text-muted">Each extra repo is checked out beside /workspace, at /repos/&lt;name&gt;, on its own run branch.</p>
+        <p className="text-ui-sm text-muted">
+          {swarm
+            ? 'The integrator and each worker check out every extra repo beside /workspace, at /repos/<name>, on their own run branches. Candidates combine /workspace only.'
+            : 'Each extra repo is checked out beside /workspace, at /repos/<name>, on its own run branch.'}
+        </p>
       )}
     </div>
   )

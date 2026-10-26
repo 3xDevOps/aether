@@ -49,6 +49,13 @@ describe('splitArgv', () => {
 })
 
 describe('agents page', () => {
+  it('shows list-shaped placeholders while agent.list is pending', async () => {
+    vi.mocked(api.agentList).mockReturnValue(new Promise<never>(() => {}))
+    mount()
+
+    expect((await screen.findByRole('status', { name: 'Loading agents' })).querySelectorAll('li')).toHaveLength(3)
+  })
+
   it('reads agent.list once, under the identity hydration sets', async () => {
     vi.mocked(api.agentList).mockClear()
     useStore.setState({ hydrated: false })

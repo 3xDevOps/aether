@@ -8,6 +8,7 @@ import { FailureCallout } from '@/components/ui/failure-callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { StatTile } from '@/components/ui/stat-tile'
 import { money } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import type { InsightsResult, InsightsRun, InsightsSuccessCount } from '@/lib/types'
@@ -24,16 +25,6 @@ export function Section({ title, children }: { title: string; children: ReactNod
   )
 }
 
-function Tile({ label, value, children }: { label: string; value: string; children: ReactNode }) {
-  return (
-    <article aria-label={label} className="flex min-w-0 flex-col gap-1 rounded-panel border border-seam p-3">
-      <h3 className="text-ui-sm text-muted">{label}</h3>
-      <p className="text-title tabular-nums">{value}</p>
-      <div className="flex flex-col gap-0.5 text-ui-sm text-muted">{children}</div>
-    </article>
-  )
-}
-
 function fraction(count: InsightsSuccessCount, unit: string): string {
   return count.finished === 0 ? `No ${unit}s finished` : `${count.succeeded} of ${plural(count.finished, unit)} merged a pull request`
 }
@@ -43,26 +34,28 @@ export function Tiles({ result, agentNames }: { result: InsightsResult; agentNam
   const rate = percent(success.runs.succeeded + success.swarms.succeeded, success.runs.finished + success.swarms.finished)
   const top = cost.by_agent[0]
   return (
-    <div className="grid grid-cols-1 gap-2 min-[30rem]:grid-cols-2 lg:grid-cols-4">
-      <Tile label="Runs / swarms completed" value={`${plural(outcomes.runs.done, 'run')} / ${plural(outcomes.swarms.done, 'swarm')}`}>
-        <span>{plural(outcomes.runs.failed, 'run')} failed, {plural(outcomes.runs.abandoned, 'run')} abandoned</span>
-        <span>{plural(outcomes.swarms.failed, 'swarm')} failed, {plural(outcomes.swarms.abandoned, 'swarm')} abandoned</span>
-      </Tile>
-      <Tile label="Success rate" value={rate === null ? '—' : `${rate}%`}>
-        <span>Runs: {fraction(success.runs, 'run')}</span>
-        <span>Swarms: {fraction(success.swarms, 'swarm')}</span>
-      </Tile>
-      <Tile label="Swarm tasks accepted" value={swarms.tasks_accepted.toLocaleString()}>
-        <span>{plural(swarms.agents, 'agent')} in swarms started in the last 7 days</span>
-      </Tile>
-      <Tile label="Total tokens used" value={tokens(cost.total_tokens)}>
-        {top && cost.total_tokens > 0 ? (
-          <span>{agentNames[top.harness] ?? top.harness} used {percent(top.total_tokens, cost.total_tokens)}% of the {tokens(cost.total_tokens)}</span>
-        ) : (
-          <span>{outcomes.runs.done + outcomes.runs.failed + outcomes.runs.abandoned > 0 ? 'No tokens reported' : 'No runs ended'}</span>
-        )}
-        {cost.unmetered_runs > 0 && <span>{plural(cost.unmetered_runs, 'run')} did not report tokens</span>}
-      </Tile>
+    <div className="@container">
+      <div className="grid grid-cols-1 gap-3 @min-[30rem]:grid-cols-2 @min-[64rem]:grid-cols-4">
+        <StatTile label="Runs / swarms completed" value={`${plural(outcomes.runs.done, 'run')} / ${plural(outcomes.swarms.done, 'swarm')}`}>
+          <span>{plural(outcomes.runs.failed, 'run')} failed, {plural(outcomes.runs.abandoned, 'run')} abandoned</span>
+          <span>{plural(outcomes.swarms.failed, 'swarm')} failed, {plural(outcomes.swarms.abandoned, 'swarm')} abandoned</span>
+        </StatTile>
+        <StatTile label="Success rate" value={rate === null ? '—' : `${rate}%`}>
+          <span>Runs: {fraction(success.runs, 'run')}</span>
+          <span>Swarms: {fraction(success.swarms, 'swarm')}</span>
+        </StatTile>
+        <StatTile label="Swarm tasks accepted" value={swarms.tasks_accepted.toLocaleString()}>
+          <span>{plural(swarms.agents, 'agent')} in swarms started in the last 7 days</span>
+        </StatTile>
+        <StatTile label="Total tokens used" value={tokens(cost.total_tokens)}>
+          {top && cost.total_tokens > 0 ? (
+            <span>{agentNames[top.harness] ?? top.harness} used {percent(top.total_tokens, cost.total_tokens)}% of the {tokens(cost.total_tokens)}</span>
+          ) : (
+            <span>{outcomes.runs.done + outcomes.runs.failed + outcomes.runs.abandoned > 0 ? 'No tokens reported' : 'No runs ended'}</span>
+          )}
+          {cost.unmetered_runs > 0 && <span>{plural(cost.unmetered_runs, 'run')} did not report tokens</span>}
+        </StatTile>
+      </div>
     </div>
   )
 }
@@ -84,9 +77,9 @@ export function StatsSection({
   return (
     <Section title={title}>
       {load.kind === 'loading' && skeleton && (
-        <div aria-hidden className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24" />)}
+        <div aria-hidden className="@container flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3 @min-[64rem]:grid-cols-4">
+            {[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-28 rounded-panel" />)}
           </div>
           <Skeleton className="h-52" />
         </div>

@@ -42,7 +42,7 @@ export function PaneHeader({
           <PanelLeft />
         </Button>
       )}
-      <div className="flex min-w-0 flex-1 flex-col justify-center">
+      <div className="flex min-w-0 flex-1 flex-col justify-center gap-px">
         <Heading ref={titleRef} tabIndex={-1} className="truncate text-title outline-none">
           {title}
         </Heading>
@@ -50,7 +50,7 @@ export function PaneHeader({
       </div>
       {viewSwitch}
       {actions && (
-        <div role="toolbar" aria-label={actionsLabel} className="flex shrink-0 items-center gap-1">
+        <div role="toolbar" aria-label={actionsLabel} className="flex shrink-0 items-center gap-1.5">
           {actions}
         </div>
       )}

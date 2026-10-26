@@ -3,8 +3,9 @@
 ## Workbench language
 
 The dashboard is a dense developer workbench on graphite surfaces with one
-teal accent. Adjoining panes are flat and quiet: do not add saturated colours,
-gradients, blurred cards or elevated nested panels.
+teal accent. Adjoining panes are flat and quiet. Elevation is restrained:
+cards and secondary buttons carry a light shadow, floating surfaces a deeper
+one, panes none. Do not add saturated colours, gradients or backdrop blur.
 The desktop launch splash is an intentional original-animation exception;
 see [Run state and motion](#run-state-and-motion).
 
@@ -47,6 +48,7 @@ The type scale, in `web/src/index.css`:
 | `text-ui` | 13/20 | Default UI text; the body is 13px |
 | `text-prose` | 14/22 | Agent prose and rendered markdown |
 | `text-title` | 16/24, Saira 600 | Pane, dialog, step and empty-state headings |
+| `text-stat` | 24/28, 500 | The figure in a `StatTile` only |
 
 `text-avatar` (10px) is reserved for avatar initials. **Settings >
 General > Text size** (Default, Large, Larger) sets `data-text-size` on
@@ -54,10 +56,13 @@ the root, which raises every step of the scale and the title size;
 terminals keep their own zoom.
 
 Weights are 400 and 500, 600 for titles. Times, counts and `+a -d` use
-`tabular-nums`. Labels are sentence case; nothing is uppercase. `cn()` in
-`web/src/lib/utils.ts` knows the scale, so `cn('text-ui', 'text-muted')`
-keeps both classes. `text-title` sets its own family and weight; do not pair
-it with `font-*` classes.
+`tabular-nums`. Labels are sentence case; nothing is uppercase, and no
+letter-spacing is added. `cn()` in `web/src/lib/utils.ts` knows the scale,
+so `cn('text-ui', 'text-muted')` keeps both classes. It also knows the
+radius, shadow, easing, animation and duration names below, so a later
+`rounded-panel` replaces `rounded-control` and `animate-none` replaces
+`animate-overlay-in`. `text-title` sets its own family and weight; do not
+pair it with `font-*` classes.
 
 ## Semantic palette
 
@@ -86,8 +91,9 @@ follows `prefers-color-scheme` live.
 `bg-accent-hover` darkens the fill for a hovered primary button. The accent
 marks selection, focus, the one primary button per view and links, nothing
 else. Inside a selected row, secondary text uses `text-text`. A floating
-surface is `bg-raised`, a 1px seam and `shadow-overlay` (`0 8px 24px -12px`,
-black 18% light, 60% dark). Dialogs sit over `bg-scrim`.
+surface is `bg-raised`, a 1px seam and `shadow-overlay`; dialogs, the
+palette and sheets take `shadow-dialog` and sit over `bg-scrim`.
+[Geometry](#geometry-and-responsive-behavior) lists every shadow.
 
 The five run states (see
 [dashboard-frontend.md](dashboard-frontend.md#run-state)), used on dots,
@@ -107,8 +113,8 @@ fill. Diffs use `text-diff-add`/`text-diff-del` (the done and failed colours)
 and `bg-diff-add-bg`/`bg-diff-del-bg` at 8% light, 10% dark.
 
 Agent vendor colours (`text-agent-claude`, `-codex`, `-pi`, `-omp`,
-`-opencode`) appear only on the Agents page and the launch picker, through
-`AgentGlyph colored`.
+`-opencode`) appear only on the Agents page, the launch picker and the head
+of a Board card, through `AgentGlyph colored`.
 
 Member colours are the only arbitrary server data applied inline: avatar
 rings, the owner rail in run lists, the owner mark on sidebar run rows and
@@ -120,37 +126,126 @@ Identity colour never replaces run-state colour.
 `web/src/components/ui/` holds the shared primitives: `Button`, `Input`,
 `Textarea`, `Select`, `Checkbox`, `Radio`, `Label`, `FormField`, `Menu`,
 `Popover`, `Tooltip`, `Dialog`, `AlertDialog`, `Command`, `Tabs`,
-`Collapsible`, `Card`, `ListRow`, `PaneHeader`, `SectionLabel`,
-`EmptyState`, `Callout`, `Badge`, `RequestCard`, `StatusDot` and
-`StateLine`, `Avatar`, `AgentGlyph`, `Code` and `CodeBlock`, `Kbd`,
-`Markdown`, `RelativeTime`, `Spinner`, `Skeleton`, `Separator`, `Toaster`,
-`LineGutter` (a code line's clickable number gutter, for the Changes view's
-comments) and the Session view's timeline rows and blocks. Reach for one
-before writing markup, and pass its `variant`, `size` or `tone` rather than
-restyling it.
+`SlidingIndicator`, `Collapsible`, `Card`, `ListRow`, `PageBody`, `InsetList`,
+`PaneHeader`, `SectionLabel`, `EmptyState`, `IconTile`, `StatTile`, `Callout`,
+`Badge`, `CountBadge`, `RadioPills`, `FadeStrip`, `RequestCard`, `StatusDot`
+and `StateLine`, `Avatar`, `AgentGlyph`, `Code` and `CodeBlock`, `Kbd`,
+`Markdown`, `RelativeTime`, `Spinner`, `Skeleton`, `ProgressBar`, `DropZone`,
+`TextSwap` and `IconSwap`, `CopyButton`, `Separator`, `Toaster`, `LineGutter`
+(a code line's clickable number gutter, for the Changes view's comments) and
+the Session view's timeline rows, step rail (`steps.tsx`) and blocks. Reach
+for one before writing markup, and pass its `variant`, `size` or `tone` rather
+than restyling it.
 
 `Button` variants:
 
 | Variant | Look | Use |
 | --- | --- | --- |
 | `primary` (default) | `bg-accent`, `text-on-accent` | The one primary action in a view |
-| `secondary` | Seam border on `bg-raised` | Other actions |
+| `secondary` | Seam border on `bg-raised`, `shadow-button` | Other actions |
 | `ghost` | Muted text, `bg-hover-chrome` on hover | Toolbar and icon buttons |
 | `danger` | `bg-state-failed`, `text-on-failed` | Confirming a destructive action |
 | `link` | Accent text, underline on hover | Inline actions that read as links |
 | `quiet` | Muted text; `text-text` and an underline on hover | Inline secondary actions inside muted copy |
 
 Sizes are `md` (28px, the default), `sm` (24px), `icon` (28px square),
-`icon-sm` (24px square), and the composer's send control: `round` (28px
+`icon-sm` (24px square), and the composer's and the Notes field's send control: `round` (28px
 circle) and `pill` (28px, fully rounded); each grows to 44px on a coarse
 pointer. `link` and `quiet` have no height or padding of their own and widen
 their touch target to 44px. An `icon`, `icon-sm` or `round` button requires
 `label`, which becomes its accessible name and tooltip; `hint` puts a tooltip
-on any button.
+on any button. Colour, fill, border and shadow fade on the hover tokens. Under
+a fine pointer every variant but `link` and `quiet` presses in to
+`--scale-press` (0.97); a finger darkens it instead. Joined buttons and the
+terminal's hold-to-take control never scale.
+
+The other primitives with motion or a fixed size:
+
+- `Tabs` draws one `SlidingIndicator` per list: the underline look slides a
+  2px accent bar, the segmented look a `bg-raised` pill with a seam ring. It
+  follows keyboard selection and stays attached in a scrolling strip.
+  `SlidingIndicator` serves any other set the same way: items carry
+  `data-indicator-key`, and the indicator's parent is the positioned
+  container.
+- `TextSwap` replaces a word in place, the new copy fading in from a 2px
+  blur, and exposes only the incoming copy to assistive technology. Key it
+  by the state word, never by a ticking value. `IconSwap` does the same for
+  an icon; `useTimedFlag` in `web/src/lib/hooks.ts` holds a confirmation
+  such as Copied.
+- `RadioPills` is a single choice as a row of 28px pills with seam borders,
+  one tab stop: arrows move and select, Home and End select the ends, and the
+  checked pill sits on a `SlidingIndicator` (`bg-hover-chrome`, seam ring).
+  A pill may carry a muted count. Memory's filters and kinds use it.
+- `FadeStrip` scrolls a row sideways with no scrollbar and masks whichever
+  edge hides content over 22px, so the fade matches any surface.
+- `CountBadge` is an 18px chip of tabular figures; a count changes at once.
+  A group header, the Activity filter and the Agents
+  disclosure carry one, and the count stays in the control's accessible name.
+- `PageBody` is the centred column of a scrolling page (`md` 3xl, `lg` 4xl,
+  `xl` 6xl), 32px between sections, fading in on arrival. A page that needs
+  a tighter rhythm passes its own `gap-*`.
+- `InsetList` is a bordered, divided list that clips its rows to the 12px
+  edge; an `InsetListItem` is 44px or taller with 12px gutters. With `onOpen`
+  the row is one button, named by its content, and fills `bg-hover` on hover.
+- `StatTile` is a bordered tile: a muted label, the figure in `text-stat`
+  (`compact` for a line of words), detail lines and a `spark` slot pinned to
+  the foot, so tiles of one row align their charts.
+- `IconTile` is a 28px framed square for a glyph; `EmptyState` draws its
+  `icon` in a 32px one above a title that carries no period.
+- `ProgressBar` is a 4px track whose fill glides to its value. With
+  `role="meter"` or `role="progressbar"` it reports `value` of `max`;
+  without one it only draws, for a parent that carries the role. With no
+  `value` the fill is a third of the track sweeping across it
+  (`animate-progress-sweep`, 1.4s), for work with no known progress; under
+  reduced motion it fills the track at `--opacity-muted`.
+- `DropZone` is a dashed `rounded-panel` button that opens a chooser through
+  `onBrowse` and takes dragged files through `onFiles`; its border turns
+  `border-control` on hover and `border-accent` over `bg-accent-soft` while a
+  file drag is over it (`data-drag`). `DropIllustration`, its two tilted sheets
+  behind an upload tile, lifts on hover, splays on a drag and bobs the arrow.
+- `Kbd` is an outlined keycap, 20px (`md`) or 16px (`sm`).
+- `RequestCard` (`request-card.tsx`) is anything waiting on the viewer: a
+  `bg-raised` card with a seam border and no shadow. Its header holds a 28px
+  avatar (`IconTile` for a glyph, or a member `Avatar`), the title over a
+  muted source line, meta and a `StatusDot` in the card's tone. A
+  description follows behind a 2px quote bar, indented to the title column
+  once the card is 21rem wide. `RequestSection` (`request-section.tsx`) adds
+  a seam-topped region with a muted label and `CountBadge`; `RequestRows`
+  shows three rows, then **N more**, whose rows fade in 30ms apart; a row
+  that opens its detail takes a `bg-hover` fill on hover. The card's focus
+  outline sits inside its border, so a scrolling parent never clips it, and
+  the Session dock draws the frame on its scroll box so the frame stays
+  closed around the sticky footer. `RequestFooter` (`request-choice.tsx`) is the `bg-chrome` band that sticks
+  to the bottom of a scrolling parent; `RequestPills` are its 26px **How
+  long** pills (34px coarse) on a `bg-hover-chrome` track, the chosen one
+  `bg-raised` with a seam ring; `RequestAction` crossfades its label through
+  `TextSwap` and shows its answer digit as a `Kbd` on a fine pointer.
+  Answers split a narrow card in halves and sit at their own width on the
+  right of a wide one. `RequestTimeBar` drains 2px of needs-you toward a
+  deadline. Amber appears only in the dot and that bar; accent only on the
+  primary answer.
+- `Spinner` draws a ring: a track at `--opacity-track` under a quarter arc
+  turning every 900ms.
+- `Skeleton` sweeps a `bg-hover-chrome` band across `bg-chrome`. A page that
+  loads shows skeletons shaped like its result, capped at about ten rows,
+  after `useDelayed`'s 200ms.
+- `CopyButton` copies without a toast: its icon turns to a `state-done`
+  check and its name to Copied for 1.8s.
+- The step rail (`steps.tsx`): a 28px `StepsHeader` with up to three 20px
+  tool tiles (`IconStack`, `rounded-chip`, seam border, `bg-chrome`) or, while
+  live, the state dot; `StepRow`s with a 24px gutter holding a 14px
+  `icon-faint` mark and a 1px rail in `icon-faint` at 40% that stops 3px
+  short of each mark;
+  28px `StepLine`s with the `StepStatus` cluster (`Spinner` in
+  `state-working`, an `icon-faint` check, a `state-failed` cross, or the
+  needs-you dot); and 24px `StepChip`s (32px coarse), `font-code` at
+  `text-ui-xs` on `bg-chrome` with a seam border.
 
 ## Charts
 
-Charts are hand-drawn SVG; the dashboard has no chart library. Marks use
+The Insights activity charts, heatmap and sparklines are hand-drawn SVG; the
+Insights > System charts use recharts through `ChartContainer` in
+`web/src/components/ui/chart.tsx`, with recharts' animation off. Marks use
 `fill-*` and `stroke-*` token utilities or `currentColor`, never inline
 colours. Outcomes use the run state tokens (`state-done`, `state-failed`,
 `state-paused`). A neutral count such as runs launched is outlined in
@@ -162,6 +257,76 @@ alone. Axis and legend text stays at `text-ui-xs` or `text-ui-sm` in
 `text-muted`; bars carry no gradients, shadows or animation. A chart scaled
 with `preserveAspectRatio="none"` draws strokes with
 `vector-effect: non-scaling-stroke`.
+
+The Trace waterfall is the exception. Its bars are 14px high (10px stacked)
+with a 3px radius, segments inside them 2px. A finished tool call is
+`bg-accent-soft` with an accent border; running, failed, stopped and waiting
+bars take the `-soft` fill and border of `state-working`, `state-failed`,
+`state-paused` and `state-needs-you`. Turn and subagent bars are `bg-chrome`
+with a seam border, holding `icon-faint` model time and accent tool density
+at 50%, 75% and 100% for one, two and three or more calls at once. The run's
+own bar is its state history in the `-soft` state fills. A running bar
+carries `trace-live`, the live shimmer's band in working blue; history that
+is not loaded is hatched (`trace-unknown`). A duration that would run past
+the track sits inside the bar's end, on the bar's own fill. The **Slowest**
+pill is neutral, `bg-hover-chrome` and muted, because amber means Needs you.
+
+## Lanes
+
+Board's **Lanes** view ([dashboard-frontend.md](dashboard-frontend.md#lanes))
+follows the chart rules: flat fills, token strokes with
+`vector-effect: non-scaling-stroke`, and a **Legend** popover that names every
+fill and link. Every encoding differs by line style or marker as well as
+colour.
+
+Bars, `rounded-control`, 24px in a 36px lane (32px in 44px on a coarse
+pointer), with 1px between state spans. A filled span is its state's text
+colour at `--lane-tint` (16% light, 26% dark), `bg-current/(--lane-tint)`,
+so every state reads as a tinted bar in both themes; bar text is `text-text`,
+which stays at 4.5:1 or more on every fill (`design-system.test.ts` checks
+it). Subagent sub-lanes use the same fills.
+
+| Span | Colour |
+| --- | --- |
+| Working | `text-state-working`; a live bar adds a 2px `border-state-working` end cap and `live-shimmer` on its activity text |
+| Needs you, or Needed attention in history | `text-state-needs-you`; a live bar ends in a `bg-raised` **Needs you** tag with a pulsing dot |
+| Paused | `text-state-paused` |
+| Ready for review | `text-accent`, matching its dot |
+| Done, Failed | `text-state-done`, `text-state-failed`; a finished run's working spans take its outcome's colour |
+| Waiting, answered, closed | `text-muted` |
+| Starting | hollow, dashed `border-seam` |
+| History not loaded | hollow, dotted `border-icon-faint` |
+
+Neighbouring spans that share a fill draw as one. A bar that starts before
+the window fades in over its first 32px (a mask, not a colour). Strips (a
+folded swarm's workers, folded Finished) are 6px and 8px `bg-current` pills
+in the state's text colour, neighbours of one colour drawn as one; each
+stretch is at least 1/300 of the window, so a brief failure still shows. A
+folded swarm's strip takes the most urgent worker state at each moment, in
+the order Needs you, Failed, Working, Ready for review, Paused, Waiting,
+Done, Closed, so every worker in the window shows on it.
+
+Links use the categorical series by meaning:
+
+| Link | Colour | Style | Ends |
+| --- | --- | --- | --- |
+| Integrator launched worker | `text-series-7` | solid 1.5px; dashed `5 3` across owners | arrowhead at the worker's bar |
+| Agent message | `text-series-5` | dotted, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a chip with the kind glyph and count |
+| Submission | `text-state-done` accepted, `text-state-failed` rejected, `text-muted` otherwise | solid 1.25px | open circle at the worker, arrowhead at the integrator, ✓ or ✕ chip |
+| Task dependency | `text-muted` | dashed `2 2` S-curve with 16px handles | none |
+| File overlap | `text-state-needs-you` | dashed `4 2` bracket at the now line | warning chip with the file count |
+| Subagent | `border-icon-faint` | elbow tree connectors in the label column | none |
+
+Links and their chips draw under the bars and labels, over the hover and
+selection fills; only their 10px hit paths sit above. Hovering or selecting a
+lane keeps its links in colour and turns every other link `text-icon-faint`;
+nothing uses opacity. The axis is 28px with `text-ui-xs` muted tabular labels
+over dashed `border-seam` gridlines, dropping any label within 48px of the
+now chip; the now line is 1px `bg-icon-faint` under a neutral `bg-raised`
+**now** chip, never accent. The label column is 240px, 48px under 768px. Lanes that change
+section glide 220ms on `--ease-enter`; new lanes fade in over 250ms, staggered
+by `--stagger-row` up to the eighth. Under reduced motion the pulse, shimmer,
+glide and fade stop.
 
 ## Enforcement
 
@@ -178,11 +343,10 @@ with `preserveAspectRatio="none"` draws strokes with
 | One name per icon | lucide aliases such as `XIcon`, `Loader2`, `AlertTriangle` or `MoreHorizontal` |
 | No bare buttons | `<button` outside `components/ui/`; use `Button` |
 | No opacity on rows | `opacity-*` in `components/shell/` and `routes/board/`; a receding row uses `text-muted` |
-| Primitives are not restyled | A primitive given `text-`, `bg-`, `border-`, `rounded-`, `h-`, `min-h-` or padding classes through `className`, which is for layout only |
 | Token names | Colour names that are not tokens and render nothing: `background`, `foreground`, `card`, `popover`, `sidebar`, `primary`, `secondary`, `muted-foreground`, `destructive`, `input`, `ring`, `border`, `toolbar-hover`, `field`, and `state-attention`, `-success`, `-warn`, `-waiting`, `-needs-attention`, `-idle` |
 
 A rule can carry a legacy list of files that predate it; only no bare
-buttons and primitives are not restyled still have one. The test also fails
+buttons still has one. The test also fails
 when a listed file already complies, so the lists only shrink.
 
 The same file checks contrast in both themes: `text` and `text-muted` on
@@ -213,27 +377,66 @@ Use compact workbench geometry rather than landing-page ornament:
   coarse pointer), 12px form gaps, 4px label gaps, 16px content gutters and
   12px compact gutters. `Label` captions are block-level, so stacked
   caption-to-field spacing measures 4px, including wrapped fields.
-- Two radii: `--radius-control` 4px (`rounded-sm`, `rounded-control`) for
-  buttons, fields, chips, rows, code and keys; `--radius-panel` 6px
-  (`rounded-md`, `rounded-lg`, `rounded-panel`) for cards, dialogs, menus,
-  popovers and callouts. The run composer alone uses `--radius-composer`
-  14px (`rounded-composer`). `rounded-full` is for dots, radios, avatars,
-  meters and the composer's send control only.
-- Only floating surfaces cast `shadow-overlay`; content panels have none.
-  Headers stay at `text-title` or smaller.
+- Four radii: `--radius-chip` 5px (`rounded-chip`) for badges, counts,
+  keys, inline code and checkboxes; `--radius-control` 8px (`rounded-sm`,
+  `rounded-control`) for buttons, fields, rows, menu items and tooltips;
+  `--radius-panel` 12px (`rounded-md` and up, `rounded-panel`) for cards,
+  callouts, dialogs, menus, popovers, toasts and the palette; and
+  `--radius-composer` 14px (`rounded-composer`) for the run composer and
+  Board's column wells. A radius nested
+  in another is the outer one minus the inset: a 12px menu with 4px padding
+  holds 8px items. Edges that meet another surface stay square: sheets at the
+  screen edge, a run's details box where it docks, joined buttons and dock
+  tabs. `rounded-full` is for dots, radios, avatars, meters and the
+  composer's and the Notes field's send control only. The Context window's
+  grid cells and legend swatches are 2px (`rounded-xs`).
+- Elevation: panes and headers have none; cards `shadow-card`, lifting to
+  `shadow-card-hover` on hover; secondary buttons `shadow-button`; menus,
+  popovers, selects, tooltips, toasts and the run details box
+  `shadow-overlay`; dialogs, the palette and sheets `shadow-dialog`. Values
+  differ per theme in `web/src/index.css`. Every shadow sits over a seam
+  border, which forced-colors mode keeps when it drops shadows. A shadow
+  that must read as none is written `0 0 #0000`, never `none`, so it still
+  composes with ring utilities. Headers stay at `text-title` or smaller.
 - Scrollbars are 8px with an `--icon-faint` thumb.
-- A board card is three lines: the state line (shaped dot, reason, relative
-  time), a title of at most two lines, and the meta line (agent glyph and
-  name, owner avatar, `+a −d`, the `card:meta` slot). A Needs you reason reads
-  in the text colour, the others in `muted`, never with a second dot or a
-  **New** pill. See [Dashboard SPA: Board](dashboard-frontend.md#board).
-- Board's **Map** reuses those cards at 320×160 inside a bounded pan/zoom
-  canvas. Owner groups use `bg-chrome` and `border-seam`, cards `bg-canvas`;
-  identity colour stays on the shared avatars. Muted directed connectors
-  link integrators to workers, dashed across owners. The Runs toolbar wraps
-  its scope, Mine, archive and camera controls on phones. Fixed geometry
-  accommodates the larger text settings and coarse-pointer card actions;
-  live presentation updates do not move nodes or reset the camera.
+- The Trace view has a 66px stats strip with 1px seams between cells (a
+  3×2 grid when stacked), a 29px axis header, a 256px span pane and 30px
+  rows (44px coarse). Below 561px of its own width the rows stack to 46px
+  (52px coarse): the name line, then the bar. Each level indents 14px, up to
+  the sixth. Span glyphs sit in 20px seam-bordered `bg-chrome` tiles in
+  `text-muted`; the details use a 30px tile.
+- The template library: a 256px list pane (224px in the composer and palette
+  pickers, stacked above the detail below a 544px container) of 32px rows
+  (44px coarse), each with the agent glyph, the name, a clock when scheduled
+  and a neutral 18px mode badge; a 44px `bg-chrome` footer band. Inline
+  placeholder fields are 22px chips that size to their text: `bg-accent-soft`
+  and `text-accent` once they have a value, `bg-hover-chrome` with a seam ring
+  while empty, and the field focus outline. The fill dots are 6px,
+  `bg-accent` filled and `bg-seam` empty.
+- A Board column is a `bg-chrome` well, 8px from the next, with a 36px
+  header (sentence-case label and `CountBadge`) and a 3px inset around
+  cards 4px apart. Its cards pass `raised` to `Card`: `bg-raised`, keeping
+  that fill and lifting the shadow on hover. A card is a head
+  (coloured agent glyph, title of at most two lines), a description of at
+  most two lines in `text-ui-sm` (one line for live Working activity), and
+  a 16px footer whose 24px action overhangs it (dot, label, compact
+  age, workspace; then agent name, owner avatar, `+a −d`, the `card:meta`
+  slot and the action). A Needs you reason reads in the text colour, the
+  others in `muted`, never with a second dot or a **New** pill. From 365px
+  of card width (`@container`) the description and footer indent under the
+  title. See [Dashboard SPA: Board](dashboard-frontend.md#board).
+- Board's **Map** draws its own compact cards (288×128 by default, larger
+  for the larger text sizes, 20px taller on a coarse pointer) on a
+  `bg-chrome` canvas: `bg-canvas` with `shadow-card`, a 22px `bg-chrome` agent
+  tile, the state as a soft `Badge` led by its `StatusDot`, and no pulse.
+  Swarms are org charts joined by 1.5px `icon-faint` connectors with rounded
+  corners and an 8px ringed dot under the integrator. Owner sections, when
+  there are two or more, and Needs you elsewhere are `border-seam` frames
+  with no fill; identity colour stays on the shared avatars. The **N needs
+  you** and **N failed** chips are small buttons on their state's soft fill,
+  a 20% mix of the state colour on hover and while open. The Runs toolbar
+  wraps its counts, scope, Mine, archive and camera controls on phones. Live
+  presentation updates do not move nodes or reset the camera.
 
 At 390px every operation remains available through compact navigation or
 overflow, stacked forms, bounded dialogs and tree-to-file navigation. The main
@@ -305,7 +508,7 @@ in the header on desktop and under the top bar on a phone.
 
 The command palette is mounted exactly once in `AppShell` and opened from the
 **Search** buttons, `Mod+K` or `Mod+Shift+P`, top-centred, max 600px, with
-compact rows. Theme is in **Settings > General** and the footer menu, with
+32px rows (44px on a coarse pointer). Theme is in **Settings > General** and the footer menu, with
 explicit **System**, **Light** and **Dark** choices and matching palette
 commands.
 
@@ -321,8 +524,8 @@ primitives retain their props, events, refs and accessibility contracts.
 
 The run header shows one primary action for the run's state, a **Details**
 toggle and **More**; destructive verbs stay last in **More**, behind their
-existing gates and confirmations. The view switch (Session, Terminal,
-Changes, Browser) is a segmented tab list. A run with a pull request ends
+existing gates and confirmations. The view switch (Session, Trace on an
+Enhanced run, Terminal, Changes, Files, Browser) is a segmented tab list. A run with a pull request ends
 that row with its number as a muted link and its check state as a ghost
 button led by a `StatusDot`: failed, working, done or neutral. Details is a 320px side panel at
 1280px and wider, a side sheet below that and a bottom sheet on phones; it
@@ -335,9 +538,14 @@ line. The roster scrolls horizontally, and below 34rem watchers show as avatars 
 below 30rem **Multiplayer** as its icon.
 Takeover progress uses `state-failed` with `on-failed` text in both themes.
 One run-owned holder decision dialog sits above every sheet and dialog.
-Request cards use the needs-you soft fill; the Session transcript column is
-736px wide with no row borders. Its composer fills the available pane with
-balanced 16px side gutters, including when Details is open. An empty ACP
+Request cards are neutral, with a needs-you dot in the header; the Session
+transcript column is 736px wide with no row borders and no card around a
+block of steps. In it a person's message is a `bg-chrome` bubble at the
+right, at most 85% wide, with `rounded-composer`; everything the agent wrote
+starts after the step rail's 24px gutter, where state dots and step marks
+sit. Turns are 24px apart and a turn's header and answer 12px. Its composer
+fills the available pane with balanced 16px side gutters, including when
+Details is open. An empty ACP
 conversation shows a subdued Aether mark above the centered run title and
 metadata rows: workspace, agent, branch, owner and creation time. Symmetric
 scrollbar gutters keep the overview centered when its content needs scrolling.
@@ -348,21 +556,112 @@ The `--state-*` tokens in [Semantic palette](#semantic-palette) are the
 status vocabulary for a run's presentation state. Domain status enums remain
 unchanged.
 
-`--duration-overlay` (120ms) and `--ease-out` are the overlay motion
-tokens: menus, popovers, selects, tooltips and dialogs fade and scale in over
-it, sheets slide in from their edge, a run's details box wipes in from the
-row it docks to, and every one leaves at once. Panels
-change instantly. The `state-pulse` dot (the run header's working dot, the
-Session view's live row and the working rows on a swarm's Tasks list) and the `live-shimmer` text sweep (also on those rows' reasons) step through a few
-frames per cycle rather than tweening, and stop under
-`prefers-reduced-motion: reduce`, where the shimmer leaves plain muted text.
+Motion confirms a change the viewer caused or marks the one live thing; it
+never decorates still data. `web/src/motion.css` holds the tokens:
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `--duration-hover`, `--ease-hover` | 150ms, CSS `ease` | Colour, fill, border and shadow fades; the default for a bare `transition-*` |
+| `--duration-press`, `--duration-release`, `--ease-press` | 150ms, 130ms | Button press scale, `--scale-press` (0.97) |
+| `--duration-popover`, `--ease-enter` | 130ms | Menus, popovers, selects and tooltips growing from `--scale-popover` (0.98) |
+| `--duration-glide`, `--ease-glide` | 300ms | Tab indicators, meters and layout glides |
+| `--duration-expand` | 250ms | Disclosures opening |
+| `--duration-pulse` | 1600ms | The live shimmer's period |
+| `--duration-instant` | 0ms | Swaps with no fade |
+
+Raw steps (`--duration-100` to `--duration-1600`) cover the rest: 100ms row,
+menu-item and tab-label fades; 200ms chevron turns, word swaps, dialog
+entrances, scrim fades and disclosures closing; 220ms sheets on
+`--ease-sheet`; 360ms row entrances; 500ms number tweens
+(`useNumberTween`); 1000ms the Working pulse. Each role has
+a `duration-<role>` utility that also sets `--tw-duration`, so a later
+`transition-*` cannot reset it. `web/src/lib/motion.ts` reads the same tokens
+for script animations (`play`, `playEntrance`); code names a token, never a
+literal time or curve.
+
+- Overlays fade and grow from their trigger (the Radix transform origin) and
+  leave at once. A closing tooltip must not animate, or Radix keeps it above
+  the layer the next Escape is meant for. A tooltip opens 250ms after hover,
+  at once on keyboard focus, and at once within 300ms of another closing.
+- Dialogs fade in from `--scale-enter` (0.95) through `transform`, leaving
+  the `translate` that centres them alone. Sheets slide in from their edge; a
+  run's details box wipes in from the row it docks to.
+- `Collapsible` bodies glide their height, clipped only while they move, and
+  unmount once shut.
+- The Session request dock fades a request that left `pending` out over
+  200ms, then glides its height (`--duration-glide`) to the next card, which
+  fades in over 250ms, or to nothing. A preview that arrives late glides the
+  card open; nothing animates on hydration.
+- A selection that moves between a set of buttons, the header navigation and
+  Settings' categories, is one `SlidingIndicator` that sits beside the list
+  and glides on `--duration-glide`; the selected row's own fill is transparent
+  so the two never double up. A sidebar group turns its chevron and fades its
+  list back in when the viewer reopens it; it never glides its height, since
+  a group can hold hundreds of rows.
+- Only rows added after the first render enter: `animate-entrance` fades in
+  and rises 4px. `playEntrance` staggers a burst by `--stagger-row` (30ms) up
+  to the eighth row; the rest arrive with it. The Session list plays it only
+  for rows new since its last render: a streamed burst of at most eight, or
+  the steps a viewer just opened, never a first load, replay or history page.
+  A streaming answer's new Markdown blocks fade in from `--blur-fade` over
+  270ms. Opening a block of steps splices rows into the virtual list, so it
+  does not glide its height.
+  A note in the Notes thread plays it on its header and, 100ms later, its
+  body, on `--ease-glide`; only notes newer than the thread's first page do,
+  each once.
+- `web/src/lib/flip.ts` glides reordered items, translating only, for short
+  lists the viewer reorders; never a virtualized list. The one store-driven
+  use is Board moving at most eight cards between columns; see
+  [Board](dashboard-frontend.md#board).
+- The Map repacks with motion: units and cards glide from their old layout
+  coordinates on `--duration-glide` / `--ease-glide` (never DOM-measured,
+  since the world is scaled), new cards rise 6px and fade in over 220ms after
+  a 150ms hold, staggered by `--stagger-row` up to the eighth, and removed
+  cards fade out over 130ms. Folding fades workers out last to first before
+  the repack. Hydration and scope changes never animate.
+- A popover may animate what it shows: the Context window tweens its token
+  total over 500ms and recolours its grid cells on the glide curve, each 2ms
+  after the one before (`--stagger-cell`). Nothing runs on open; the number and
+  cells move when a new report arrives or the pointer singles out a category,
+  and the hover dim moves every cell together.
+- File chips and attachment rows confirm a change the viewer caused: a
+  landed file's check and disc `animate-pop-in` (scale 0.5 to 1 on
+  `--ease-pop`, 250ms), a failed row `animate-shake`s once (360ms) and a
+  dragged-over drop zone's arrow `animate-bob`s 3px (450ms, alternating).
+- A list the viewer refilters keeps its old rows at half opacity until the
+  answer lands, then fades in rising 3px. Rows arriving from elsewhere enter
+  one by one only when five or fewer arrive together; more just appear.
+- Row selection, focus outlines and exits change at once, except the
+  template library's selected row, whose `bg-hover-chrome` highlight is a
+  `SlidingIndicator`. Its detail fades in over 220ms on `--ease-standard`
+  when the selection changes, never on mount; its footer swaps text with
+  `TextSwap` and Copy's icon with `IconSwap`.
+- `state-pulse` (the run header's working dot, the Session view's live row
+  and live steps header, a plan's step in progress, the dot under a streaming
+  answer and the working rows on a swarm's Tasks list) breathes: opacity to
+  `--opacity-muted` and size to two thirds and back each second.
+  `live-shimmer`, on those rows' reasons and on a working lane's activity in
+  Board's Lanes, sweeps a light band across muted text in 1.4s of each 1.6s.
+  A Needs you tag in Lanes pulses its dot, never its text. Sidebar rows,
+  board cards, the palette and All workspaces never pulse.
+- The Trace view shimmers its live Duration and its running bars on the same
+  period, and moves its now line once a second. A zoom or an axis scale step
+  glides `--trace-scale` and `--trace-origin` over `--duration-glide`; the
+  first measured layout after the view opens jumps into place. Unfolded
+  rows enter with `animate-entrance`, unless more than eight arrive at once.
+
+Under `prefers-reduced-motion: reduce` every animation and transition stops:
+overlays and sheets appear, indicators and bodies jump, the pulse holds, the
+shimmer leaves plain muted text, the spinner shows a still arc and a
+skeleton a flat fill. Holds and timers do not change. `useReducedMotion()` and `prefersReducedMotion()` in
+`web/src/lib/hooks.ts` answer the query in scripts.
 
 The desktop launch splash deliberately retains its original animation,
 independent of these workbench motion tokens: the grain, three drifting cloud
 layers, stepped starfield and coloured stars, satellites and shooting stars,
 700ms logo entrance and 260ms fade. Its status dot uses the local
 `launch-status-pulse`: the original 1.8s `ease-in-out` loop from opacity 1
-to 0.4 and back, not the shared stepped `state-pulse`. The splash's original
+to 0.4 and back, not the shared `state-pulse`. The splash's original
 palette and keyframes stay scoped to `launch-splash` in `web/src/index.css`;
 do not restyle them to match the workbench. Reduced motion skips the splash
 entirely, and its CSS stops animation if the preference changes while it is

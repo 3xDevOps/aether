@@ -40,12 +40,14 @@ func realGitEnv(t *testing.T) (*testEnv, func(domain.WorkspaceID) string) {
 	t.Cleanup(func() { _ = engine.Close() })
 	commits := map[domain.WorkspaceID]string{}
 	e := newTestEnv(t, func(cfg *Config) {
+		cfg.ServerBinary = fakeServerBinary(t, "#!/bin/sh\n")
 		cfg.Git = engine
 		cfg.ReposDir = filepath.Join(root, "repos")
 		cfg.Bases = baseCaptureFunc(func(_ context.Context, ws domain.WorkspaceID, _ string) (mirror.CaptureResult, error) {
 			return mirror.CaptureResult{WorkspaceID: ws, Commit: commits[ws], Branch: "main", CheckedAt: time.Now()}, nil
 		})
 	})
+	withCoordination(t, e)
 	seed := func(ws domain.WorkspaceID) string {
 		t.Helper()
 		bare, err := engine.InitWorkspaceRepo(t.Context(), ws)

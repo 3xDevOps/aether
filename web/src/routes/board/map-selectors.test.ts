@@ -1,5 +1,8 @@
-import { board, mapRuns } from '@/routes/board/selectors'
+import { act, renderHook } from '@testing-library/react'
+import { board, mapRuns, useMapRuns } from '@/routes/board/selectors'
+import { useStore } from '@/store'
 import { alice, bob, mission, otherWorkspace, run, runRecords, stateContext, workspace } from '@/test/fixtures'
+import { toRecord } from '@/store/runs'
 
 it('exposes each swarm run while Board retains one triage card', () => {
   const ctx = stateContext({
@@ -30,9 +33,24 @@ it('keeps Needs you global while workspace and Mine filter individual working an
   const filtered = mapRuns({ workspace: workspace.id, mineOnly: true, ctx })
   expect(filtered.cards.map((card) => card.run.id).sort()).toEqual(['live-with-archive', 'mine', 'needs-you-elsewhere'])
   expect(filtered.cards.find((card) => card.run.id === 'needs-you-elsewhere')?.workspaceName).toBe(otherWorkspace.name)
+  expect(filtered.cards.filter((card) => card.visiting).map((card) => card.run.id)).toEqual(['needs-you-elsewhere'])
   expect(filtered.archivedCards.map((card) => card.run.id)).toEqual(['archived'])
   const all = mapRuns({ workspace: '', mineOnly: false, ctx })
   expect(all.cards.map((card) => card.run.id).sort()).toEqual(['elsewhere', 'live-with-archive', 'mine', 'needs-you-elsewhere', 'teammate'])
   expect(all.cards.find((card) => card.run.member_id === alice.id)?.workspaceName).toBe(workspace.name)
   expect(all.archivedCards.map((card) => card.run.id).sort()).toEqual(['archived', 'archived-teammate'])
+})
+
+it('keeps an unchanged card object when another run changes, so only that card re-renders', () => {
+  useStore.setState({
+    workspaces: { [workspace.id]: workspace },
+    members: { [alice.id]: alice },
+    runs: { quiet: toRecord(run({ id: 'quiet' })), busy: toRecord(run({ id: 'busy' })) },
+  })
+  const { result } = renderHook(() => useMapRuns(workspace.id))
+  const before = new Map(result.current.cards.map((card) => [card.run.id, card]))
+  act(() => useStore.setState((s) => ({ runs: { ...s.runs, busy: { ...s.runs.busy, title: 'Reading main.go' } } })))
+  const after = new Map(result.current.cards.map((card) => [card.run.id, card]))
+  expect(after.get('quiet')).toBe(before.get('quiet'))
+  expect(after.get('busy')).not.toBe(before.get('busy'))
 })

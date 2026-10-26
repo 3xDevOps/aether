@@ -462,6 +462,9 @@ the swarm page's **Agent messages** section lists a swarm's mail grouped by
 thread, with each body and its delivery word (`Sent`, `Delivered`,
 `Acknowledged`)
 ([dashboard-frontend.md](dashboard-frontend.md#agent-messages-on-a-swarm)).
+Board > **Lanes** draws each send as a dotted link from sender to recipient
+at the time it was sent, and clicking it shows the bodies
+([dashboard-frontend.md](dashboard-frontend.md#lanes)).
 An integrator that leaves mail unacknowledged for over two minutes reads
 `Integrator has not read 3 messages (12 min)` in muted text on its swarm card
 and in its sidebar row's tooltip; it leads the card and the swarm page only

@@ -1,68 +1,88 @@
-import { memo, useMemo, useRef, useState } from 'react'
+import { memo, useMemo, useRef } from 'react'
 import { Slot } from '@/components/slots'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
 import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
-import { StateLine } from '@/components/ui/status-dot'
+import { StatusDot, type Tone } from '@/components/ui/status-dot'
 import { runLabel, stateDetail, stateLabel, stateTitle, stateTone } from '@/lib/status'
 import type { MissionPhase } from '@/lib/types'
-import { CardActionButton, cardAction, openCard, ReplyComposer } from '@/routes/board/card-action'
+import { cn } from '@/lib/utils'
+import { CardActionButton, cardAction, openCard, ReplyComposer, setReplying, useReply } from '@/routes/board/card-action'
 import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { diffTotals } from '@/store/diff'
 import type { SwarmSummary } from '@/store/selectors'
 
-const phaseWord: Record<MissionPhase, string> = {
+export const phaseWord: Record<MissionPhase, string> = {
   planning: 'Swarm planning',
   active: 'Swarm active',
   completed: 'Swarm completed',
   cancelled: 'Swarm cancelled',
 }
 
-export const RunCard = memo(function RunCard({ card, agentName, variant = 'board' }: {
+/** Indents a wide card's description and footer under its title, past the 14px glyph and 12px gap. */
+export const wideIndent = '@min-[365px]:pl-6.5'
+
+export const RunCard = memo(function RunCard({ card, agentName }: {
   card: BoardCard
   agentName?: string
-  variant?: 'board' | 'map'
 }) {
   const { run } = card
   const navigate = useStore((s) => s.navigate)
   const mission = useStore((s) => (card.swarm && run.mission_id ? s.missions[run.mission_id] : undefined))
   const snapshot = useStore((s) => s.diffs[run.id]?.snapshots[0])
   const totals = useMemo(() => diffTotals(snapshot?.files), [snapshot])
-  const [replying, setReplying] = useState(false)
+  const replying = useReply((s) => s.reply?.runId === run.id)
   const cardRef = useRef<HTMLElement>(null)
   const action = cardAction(card)
   const needsYou = card.group === 'needs-you'
   const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
   const state = needsYou && !card.needsYou ? 'needs-you' : card.state
+  const label = stateLabel[state]
   const reason = card.swarm ? swarmReason(card, mission?.phase) : card.reason
+  const detail = needsYou || card.swarm ? reason : stateDetail({ state, reason })
+  const description = detail && detail !== label ? detail : undefined
   const owner = card.owner?.display_name ?? run.member_id
   const since = needsYou ? card.waitingSince : run.stateChangedAt
 
   return (
-    <Popover open={replying} onOpenChange={setReplying}>
+    <Popover open={replying} onOpenChange={(open) => setReplying(run.id, open)}>
       <PopoverAnchor asChild>
-        <Card ref={cardRef} data-run-id={run.id} selected={replying} style={variant === 'map' ? { height: '100%' } : undefined}>
-          <StateLine
-            tone={stateTone[state]}
-            label={stateLabel[state]}
-            strong={needsYou}
-            title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next }, since)}
-            trailing={<RelativeTime at={since} />}
-          >
-            {needsYou || card.swarm ? reason : [stateLabel[state], stateDetail({ state, reason })].filter(Boolean).join(' · ')}
-          </StateLine>
-          <CardTitle onOpen={() => variant === 'map' ? navigate('run', { runId: run.id }) : openCard(card, navigate)}>{title}</CardTitle>
-          <div className="flex min-h-4 min-w-0 items-center gap-1.5 text-ui-sm text-muted">
+        <Card
+          ref={cardRef}
+          data-run-id={run.id}
+          raised
+          selected={replying}
+          className="@container"
+        >
+          <div className="flex items-start gap-3">
+            <AgentGlyph agent={run.harness} colored className="mt-0.75" />
+            <CardTitle onOpen={() => openCard(card, navigate)}>{title}</CardTitle>
+          </div>
+          {description && (
+            <p className={cn('mt-0.5 text-ui-sm break-words', wideIndent, needsYou ? 'text-text' : 'text-muted', card.group === 'working' ? 'line-clamp-1' : 'line-clamp-2')}>
+              {description}
+            </p>
+          )}
+          <div className={cn('mt-2 flex min-h-4 min-w-0 flex-wrap items-center gap-2 text-ui-sm text-muted', wideIndent)}>
+            <span
+              className="flex min-w-0 flex-1 items-center gap-1.5"
+              title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next }, since)}
+            >
+              <StatusDot tone={stateTone[state]} label={label} />
+              <span className="min-w-0 truncate">
+                <span>{label}</span> · <RelativeTime compact at={since} className="tabular-nums" />
+                {card.workspaceName && <> · <span>{card.workspaceName}</span></>}
+              </span>
+            </span>
             {card.swarm ? (
-              <span className="min-w-0 truncate">{swarmCounts(card.swarm)}</span>
+              <SwarmCounts swarm={card.swarm} />
             ) : (
-              <>
-                <AgentGlyph agent={run.harness} />
-                <span className="min-w-0 truncate">{agentName ?? run.harness}</span>
-              </>
+              <span className="sr-only @min-[365px]:not-sr-only @min-[365px]:max-w-40 @min-[365px]:shrink-0 @min-[365px]:truncate">
+                {agentName ?? run.harness}
+              </span>
             )}
             <Avatar name={owner} color={card.owner?.color} />
             {snapshot?.truncated ? (
@@ -75,13 +95,12 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
                 </span>
               )
             )}
-            {card.workspaceName && <span className="min-w-0 truncate">{card.workspaceName}</span>}
-            <CardControls className="empty:hidden">
+            <CardControls className="shrink-0 empty:hidden">
               <Slot name="card:meta" run={run} />
             </CardControls>
             {action && (
-              <CardControls className="invisible ml-auto group-focus-within/card:visible group-hover/card:visible coarse:visible">
-                <CardActionButton card={card} action={action} onReply={() => setReplying(true)} />
+              <CardControls className="-my-1 hidden shrink-0 group-focus-within/card:flex group-hover/card:flex coarse:my-0 coarse:flex">
+                <CardActionButton card={card} action={action} onReply={() => setReplying(run.id, true)} />
               </CardControls>
             )}
           </div>
@@ -91,7 +110,7 @@ export const RunCard = memo(function RunCard({ card, agentName, variant = 'board
         <ReplyComposer
           card={card}
           title={title}
-          onDone={() => setReplying(false)}
+          onDone={() => setReplying(run.id, false)}
           returnFocus={() => cardRef.current?.querySelector<HTMLElement>('[data-card-open]')?.focus()}
         />
       )}
@@ -106,15 +125,24 @@ function swarmReason(card: BoardCard, phase: MissionPhase | undefined): string {
   return phase ? phaseWord[phase] : 'Swarm'
 }
 
-function swarmCounts({ counts }: SwarmSummary): string {
+const workerStates: { key: keyof SwarmSummary['counts']; tone: Tone; words: string }[] = [
+  { key: 'needsYou', tone: 'needs-you', words: 'needs you' },
+  { key: 'working', tone: 'working', words: 'working' },
+  { key: 'done', tone: 'done', words: 'done' },
+  { key: 'failed', tone: 'failed', words: 'failed' },
+]
+
+function SwarmCounts({ swarm: { counts } }: { swarm: SwarmSummary }) {
+  const shown = workerStates.filter(({ key }) => counts[key] > 0)
+  if (shown.length === 0) return <span className="shrink-0">No workers yet</span>
   return (
-    [
-      counts.needsYou > 0 && `${counts.needsYou} needs you`,
-      counts.working > 0 && `${counts.working} working`,
-      counts.done > 0 && `${counts.done} done`,
-      counts.failed > 0 && `${counts.failed} failed`,
-    ]
-      .filter(Boolean)
-      .join(' · ') || 'No workers yet'
+    <span className="flex shrink-0 items-center gap-2 tabular-nums">
+      {shown.map(({ key, tone, words }) => (
+        <span key={key} role="img" aria-label={`${counts[key]} ${words}`} title={`${counts[key]} ${words}`} className="flex items-center gap-1">
+          <StatusDot tone={tone} />
+          {counts[key]}
+        </span>
+      ))}
+    </span>
   )
 }

@@ -21,6 +21,7 @@ func (d *DB) CheckWorkspaceDeletion(ctx context.Context, id domain.WorkspaceID) 
 	}{
 		{`SELECT EXISTS (SELECT 1 FROM schedules s JOIN templates t ON t.id = s.template_id WHERE t.workspace_id = ?)`, "remove workspace schedules before deleting the workspace", nil},
 		{`SELECT EXISTS (SELECT 1 FROM run_repos rr JOIN runs r ON r.id = rr.run_id WHERE rr.workspace_id = ? AND r.status IN (` + placeholders + `))`, "workspace is an extra repository of an unfinished run", liveArgs},
+		{`SELECT EXISTS (SELECT 1 FROM missions, json_each(missions.extra_workspace_ids) WHERE json_each.value = ? AND missions.phase NOT IN ('completed', 'cancelled'))`, "workspace is an extra repository of an unfinished swarm", nil},
 		{`SELECT EXISTS (SELECT 1 FROM missions WHERE workspace_id = ? AND phase NOT IN ('completed', 'cancelled') AND integrator_run_launched = 0)`, "workspace has a pending mission integrator launch", nil},
 		{`SELECT EXISTS (SELECT 1 FROM mission_attempts a JOIN missions m ON m.id = a.mission_id WHERE m.workspace_id = ? AND a.state IN ('reserved', 'launching', 'running', 'unknown', 'submitted'))`, "workspace has active or queued mission attempts", nil},
 	}

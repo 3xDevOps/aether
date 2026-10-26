@@ -86,19 +86,23 @@ the checkout ([terminal.md](terminal.md)).
 
 An Enhanced run opens on **Session**: one timeline, newest at the bottom.
 
-- Your messages are filled blocks. The agent's replies and **Thought** traces
-  render Markdown.
-- Consecutive tool calls fold into one line ("Read 2 files, ran 1 command and
-  edited 1 file"). Click it for one line per call, and click a call for its
-  command, output or diff.
-- The agent's plan, the files a turn changed (each opens **Changes** at that
-  file), notices and a **Finished** line per turn sit in between. Messages
-  between agents show inline. **Hide from Session**, under **Agent messages** in
-  Details, turns them off.
-- While a turn runs, one line says what the agent is doing. While it waits on you
-  it reads "Waiting for your approval: <command>" or "Waiting for your answer".
-  When a turn ends with no request, the run says **Waiting for your reply**, and
-  the header's **Reply** focuses the composer.
+- Your messages are bubbles on the right. The agent's answer renders
+  Markdown under them, with the turn's outcome ("Finished in 12s") and
+  **Copy the reply**.
+- Everything the agent did before answering, its thoughts, tool calls, plan,
+  subagents and answered requests, folds into one header per turn ("Read 2
+  files, ran 1 command and edited 1 file"). Click it for one step per call,
+  and click a call for its command, output, diff, or input and result. Files
+  the agent read are chips that open in **Files**.
+- While a turn runs its steps stay open and the header says what the agent is
+  doing, with the seconds since it began. While it waits on you it reads
+  "Waiting for your approval: <command>" or "Waiting for your answer". When
+  the turn ends the steps fold away, unless you opened or closed them yourself
+  or a subagent still runs. When a turn ends with no request, the run says
+  **Waiting for your reply**, and the header's **Reply** focuses the composer.
+- Notices, a turn that was cancelled or stopped, and messages between agents
+  show inline. **Hide from Session**, under **Agent messages** in Details,
+  turns agent messages off.
 - Scrolling near the top loads older items. A failed load shows the server's
   error with **Retry**.
 - `Esc` in an empty composer moves focus to the timeline. `Esc` again leaves the
@@ -129,7 +133,8 @@ and the button sends. The button changes with the turn:
 `Enter` never interrupts. `Mod+Shift+Enter` always queues. `/` lists the agent's
 commands and `@` completes a path in the run's checkout. The menus under the box
 set the agent's mode, model and effort. The footer shows context window use, such
-as **43%**, and turns amber from 90%.
+as **43%**, and turns amber from 90%; click it for the breakdown, and for
+**Compact** when the agent has a `/compact` command.
 
 An unsent message stays with its run across pages, mode switches and reconnects.
 Reloading the page discards it.
@@ -150,15 +155,21 @@ the image before sending.
 A new session starts in the agent's no-prompt setting, so a request arrives only
 after you switch to a mode that asks, or from an agent whose own configuration
 still asks. Each request marks the run **Needs you** and docks above the
-composer, one at a time (`1/N`). The composer stays shut until you answer.
+composer, one at a time (`1 of N`). The composer stays shut until you answer.
 **Interrupt** stops the turn and cancels the request instead.
 
-- Allow-once is the filled button. Keys `1` to `4` pick an option while the
-  card has focus, and `1` never picks an allow-always option.
+- The card names what the agent wants ("Claude Code wants to run a command")
+  and shows the command, or the files it changes with their diffs.
+- When the agent offers allow once and allow always, **How long** chooses
+  between **Just once** (the default) and **Always**, and **Allow** answers
+  with that option; **Reject** sits beside it. Other option sets keep the
+  agent's own buttons, allow once filled.
+- Keys `1` to `4` pick an option while the card has focus, shown on each
+  button, and `1` never picks an allow-always option.
 - A form question shows its fields. A link request shows the URL with **Copy
   link** and **Open**.
-- An answered request stays in the timeline as one line, such as "Approved: run
-  `go test`".
+- An answered request stays in the timeline as one line, such as "Allowed once
+  · run `go test`".
 - A subagent's request is the run's request, answered the same way.
 - From the CLI, `aether runs <run-id>` lists pending requests and `aether
   answer <run-id> <request-id> <option-id>` answers one: allow once or reject once,

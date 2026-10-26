@@ -299,7 +299,8 @@ function callSettled(call: SessionToolCall): boolean {
   return call.status === 'completed' || call.status === 'failed'
 }
 
-function settles(call: SessionToolCall): boolean {
+/** Whether this snapshot ends the call: a background task ends with its own status, any other call when it completes or fails. */
+export function settles(call: SessionToolCall): boolean {
   return call.task ? call.task.status !== 'running' : callSettled(call)
 }
 

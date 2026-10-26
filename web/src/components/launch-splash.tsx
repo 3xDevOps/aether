@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { desktopBridge } from '@/components/shell/window-bar'
+import { prefersReducedMotion } from '@/lib/hooks'
 import { useStore } from '@/store'
 
 /** Held this long so a fast hydrate reads as a beat rather than a flicker. */
@@ -24,7 +25,7 @@ const SHOWN_KEY = 'aether.launchSplashShown'
  */
 function firstLaunch(): boolean {
   if (!desktopBridge()) return false
-  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return false
+  if (prefersReducedMotion()) return false
   try {
     return window.sessionStorage.getItem(SHOWN_KEY) === null
   } catch {

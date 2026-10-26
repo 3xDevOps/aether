@@ -3,6 +3,8 @@ import { enhancedSupported, label, ready, supportWords } from '@/components/agen
 import { Ellipsis } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
+import { IconTile } from '@/components/ui/icon-tile'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '@/components/ui/menu'
 import { StatusDot } from '@/components/ui/status-dot'
 import type { AgentInfo } from '@/lib/types'
@@ -39,15 +41,17 @@ export function AgentList({
     Array.from(actions).find((action) => action.dataset.agentAction === returnFocusTo)?.focus()
   }, [returnFocusTo])
   return (
-    <ul ref={list} aria-label={listLabel} className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
+    <InsetList ref={list} aria-label={listLabel}>
       {agents.map((agent) => {
         const name = label(agent)
         const runnable = ready(agent) && onRun
         const removable = onRemove && (agent.source === 'member' || agent.installed === true)
         const action = runnable ? 'Run' : agent.installed === true ? 'Log in' : 'Set up'
         return (
-          <li key={agent.name} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
-            <AgentGlyph agent={agent.glyph ?? agent.name} colored className="size-5" />
+          <InsetListItem key={agent.name} className="flex-wrap gap-y-2">
+            <IconTile className="size-8">
+              <AgentGlyph agent={agent.glyph ?? agent.name} colored className="size-5" />
+            </IconTile>
             <span className="flex min-w-[60%] flex-1 flex-col">
               <span className="truncate text-ui font-medium text-text">{name}</span>
               <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-ui-sm text-muted">
@@ -84,9 +88,9 @@ export function AgentList({
                 </Menu>
               )}
             </span>
-          </li>
+          </InsetListItem>
         )
       })}
-    </ul>
+    </InsetList>
   )
 }

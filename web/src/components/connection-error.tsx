@@ -32,7 +32,7 @@ type ErrorCopy = {
 /** A command the user is told to run, styled so it reads as one. */
 function Cmd({ children }: { children: string }) {
   return (
-    <code className="inline-flex rounded-control border border-seam/70 bg-chrome px-1.5 py-0.5 font-code text-ui-sm text-text">
+    <code className="inline-flex rounded-chip border border-seam/70 bg-chrome px-1.5 py-0.5 font-code text-ui-sm text-text">
       {children}
     </code>
   )

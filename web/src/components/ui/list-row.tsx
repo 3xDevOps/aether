@@ -23,7 +23,7 @@ export function ListRow({
       data-selected={selected || undefined}
       className={cn(
         'group/row relative flex h-7 min-w-0 items-center rounded-control text-ui text-text coarse:h-11',
-        selected ? 'bg-selection' : 'hover:bg-hover-chrome',
+        selected ? 'bg-selection' : 'hover:bg-hover-chrome hover:transition-colors hover:duration-100 motion-reduce:transition-none',
         className,
       )}
     >

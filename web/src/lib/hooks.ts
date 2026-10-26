@@ -66,8 +66,6 @@ export const coarsePointer = '(pointer: coarse)'
 
 export const belowSm = '(max-width: 639px)'
 
-export const belowLg = '(max-width: 1023px)'
-
 /** A finger on a screen narrower than `sm`: a phone, not a touch laptop. */
 export const phoneScreen = `${coarsePointer} and ${belowSm}`
 
@@ -86,6 +84,30 @@ export function useMediaQuery(query: string): boolean {
     subscribe,
     () => window.matchMedia?.(query).matches ?? false,
   )
+}
+
+const reducedMotion = '(prefers-reduced-motion: reduce)'
+
+export function useReducedMotion(): boolean {
+  return useMediaQuery(reducedMotion)
+}
+
+/** For code outside render, such as an animation started from an effect. */
+export function prefersReducedMotion(): boolean {
+  return window.matchMedia?.(reducedMotion).matches ?? false
+}
+
+/** True for `holdMs` after each `trigger`; a new trigger restarts the hold. */
+export function useTimedFlag(holdMs: number): [on: boolean, trigger: () => void] {
+  const [on, setOn] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const trigger = useCallback(() => {
+    clearTimeout(timer.current)
+    setOn(true)
+    timer.current = setTimeout(() => setOn(false), holdMs)
+  }, [holdMs])
+  return [on, trigger]
 }
 
 let handedOver: HTMLElement | null = null
@@ -138,4 +160,24 @@ export function useCountdown(until: string | undefined): string {
   if (!until) return ''
   const left = Math.max(0, Math.floor((Date.parse(until) - now) / 1000))
   return left === 0 ? 'expired' : `expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
+}
+
+function secondsUntil(at: string | undefined): number {
+  return at ? Math.max(0, Math.ceil((Date.parse(at) - Date.now()) / 1000)) : 0
+}
+
+/** Seconds left until `at`, ticking each second down to zero. */
+export function useSecondsUntil(at: string | undefined): number {
+  const [remaining, setRemaining] = useState(() => secondsUntil(at))
+  useEffect(() => {
+    setRemaining(secondsUntil(at))
+    if (secondsUntil(at) === 0) return
+    const timer = window.setInterval(() => {
+      const next = secondsUntil(at)
+      setRemaining(next)
+      if (next === 0) window.clearInterval(timer)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [at])
+  return remaining
 }

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Confirm } from '@/components/confirm'
 import { Pin } from '@/components/icons'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -11,12 +10,12 @@ import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
-import type { MemoryAddResult, MemoryItem, MemoryShowResult } from '@/lib/types'
-import { AddNote } from '@/routes/memory/add-note'
+import { cn } from '@/lib/utils'
+import type { MemoryItem, MemoryShowResult } from '@/lib/types'
 import { kindLabel, sourceLabel, superseded } from '@/routes/memory/model'
 import { useStore } from '@/store'
 
-function useName(id: string | undefined, name: string | undefined, fallback: string): string {
+export function useName(id: string | undefined, name: string | undefined, fallback: string): string {
   const self = useStore((s) => s.info?.member.id)
   return id && id === self ? 'you' : name || fallback
 }
@@ -37,19 +36,19 @@ export function Byline({ item, agents }: { item: MemoryItem; agents: Record<stri
   return <>{item.harness ? `${name} · ${agents[item.harness] ?? item.harness}` : name}</>
 }
 
-export function RunLink({ id }: { id: string }) {
+export function RunLink({ id, className }: { id: string; className?: string }) {
   const navigate = useStore((s) => s.navigate)
   const title = useStore((s) => s.runs[id]?.title)
   return (
-    <Button variant="link" className="text-ui-sm" onClick={() => navigate('run', { runId: id })}>
+    <Button variant="link" className={cn('text-ui-sm', className)} onClick={() => navigate('run', { runId: id })}>
       {title || 'Open run'}
     </Button>
   )
 }
 
-export function PRLink({ item }: { item: MemoryItem }) {
+export function PRLink({ item, className }: { item: MemoryItem; className?: string }) {
   return (
-    <a href={item.pr_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+    <a href={item.pr_url} target="_blank" rel="noreferrer" className={cn('text-accent hover:underline', className)}>
       {item.pr_number ? `PR #${item.pr_number}` : 'Pull request'}{item.pr_state && ` (${item.pr_state})`}
     </a>
   )
@@ -101,7 +100,7 @@ function Chain({ notes, current, onOpen }: { notes: MemoryItem[]; current: strin
 
 type Load = { kind: 'loading' } | { kind: 'ready'; result: MemoryShowResult } | { kind: 'failed'; message: string }
 
-/** memory.show for one note; pins, unpins, replaces and removes it for a member who may write. */
+/** memory.show for one note; pins and unpins it for a member who may write, and hands Replace and Remove to the page. */
 export function NoteDialog({
   workspaceID,
   id,
@@ -110,8 +109,10 @@ export function NoteDialog({
   agents,
   onOpen,
   onChanged,
-  onReplaced,
+  onReplace,
+  onRemove,
   onClose,
+  onCloseAutoFocus,
 }: {
   workspaceID: string
   id: string
@@ -120,14 +121,14 @@ export function NoteDialog({
   agents: Record<string, string>
   onOpen: (id: string) => void
   onChanged: () => void
-  onReplaced: (result: MemoryAddResult) => void
+  onReplace: (item: MemoryItem) => void
+  onRemove: (item: MemoryItem) => void
   onClose: () => void
+  onCloseAutoFocus: (event: Event) => void
 }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [removing, setRemoving] = useState(false)
-  const [replacing, setReplacing] = useState(false)
   const request = useRef(0)
 
   const read = useCallback(async () => {
@@ -168,7 +169,7 @@ export function NoteDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-2xl" onCloseAutoFocus={onCloseAutoFocus}>
         <DialogHeader>
           <DialogTitle className="break-words">{item?.title ?? 'Note'}</DialogTitle>
           <DialogDescription>{item ? `${kindLabel[item.kind]} · ${sourceLabel[item.source]} · ${item.id}` : id}</DialogDescription>
@@ -191,8 +192,8 @@ export function NoteDialog({
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
         {item && canWrite && (
           <DialogFooter>
-            <Button variant="secondary" className="sm:mr-auto" disabled={busy} onClick={() => setRemoving(true)}>Remove…</Button>
-            {!superseded(item) && <Button variant="secondary" disabled={busy} onClick={() => setReplacing(true)}>Replace…</Button>}
+            <Button variant="secondary" className="sm:mr-auto" disabled={busy} onClick={() => onRemove(item)}>Remove</Button>
+            {!superseded(item) && <Button variant="secondary" disabled={busy} onClick={() => onReplace(item)}>Replace…</Button>}
             {item.pinned_at ? (
               <Button variant="secondary" disabled={busy} onClick={() => void act(() => client.memoryUnpin(workspaceID, item.id))}>Unpin</Button>
             ) : !superseded(item) && (
@@ -202,33 +203,6 @@ export function NoteDialog({
               </>
             )}
           </DialogFooter>
-        )}
-        {removing && item && (
-          <Confirm
-            title={`Remove ${item.id}?`}
-            description="This deletes the note for everyone in the workspace. Runs that already started keep the brief they got."
-            action="Remove note"
-            pending="Removing…"
-            onConfirm={() => client.memoryRm(workspaceID, item.id)}
-            onDone={() => {
-              onChanged()
-              onClose()
-            }}
-            onClose={() => setRemoving(false)}
-          />
-        )}
-        {replacing && item && (
-          <AddNote
-            workspaceID={workspaceID}
-            client={client}
-            replaces={item}
-            onAdded={(result) => {
-              setReplacing(false)
-              onReplaced(result)
-            }}
-            onFailed={onChanged}
-            onClose={() => setReplacing(false)}
-          />
         )}
       </DialogContent>
     </Dialog>

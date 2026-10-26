@@ -23,6 +23,7 @@ test('a toast clears the bottom edge on a phone', async ({ page, aether }) => {
   await page.goto(alice.url)
   await page.getByRole('button', { name: 'More navigation' }).tap()
   await page.getByRole('menuitem', { name: 'Templates', exact: true }).tap()
+  await page.getByRole('option', { name: 'Template nightly' }).tap()
   await page.getByRole('button', { name: 'More for nightly', exact: true }).tap()
   await page.getByRole('menuitem', { name: 'Delete', exact: true }).tap()
   await page

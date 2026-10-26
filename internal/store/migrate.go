@@ -2009,6 +2009,11 @@ INSERT INTO coord_state_reports_v85 SELECT run_id, idempotency_key, outcome, wai
 DROP TABLE coord_state_reports;
 ALTER TABLE coord_state_reports_v85 RENAME TO coord_state_reports;
 `,
+	// v86: the extra repositories every run of a swarm checks out, a JSON
+	// array of workspace IDs.
+	`
+ALTER TABLE missions ADD COLUMN extra_workspace_ids TEXT NOT NULL DEFAULT '[]';
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

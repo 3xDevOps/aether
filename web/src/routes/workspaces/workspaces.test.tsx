@@ -66,6 +66,13 @@ describe('workspaces view', () => {
     expect(client.workspaceMirrorAdopt).not.toHaveBeenCalled()
   })
 
+  it('shows placeholder rows until the workspace list arrives', async () => {
+    seed({ hydrated: false })
+    render(<WorkspacesRoute params={{}} client={fakeApi({ workspaceListFull: vi.fn(() => new Promise<never>(() => {})) })} />)
+
+    expect((await screen.findByRole('status', { name: 'Loading workspaces' })).querySelectorAll('[data-slot="skeleton"]')).toHaveLength(3)
+  })
+
   it('never creates a hosted local workspace or opens a filesystem picker', async () => {
     const client = fakeApi()
     seed()

@@ -61,6 +61,22 @@ Element.prototype.hasPointerCapture = () => false
 Element.prototype.releasePointerCapture = () => {}
 // CodeMirror measures a line of text with a Range before it scrolls to one.
 Range.prototype.getClientRects = () => [] as unknown as DOMRectList
+// Motion runs through the Web Animations API, which jsdom lacks. The stub
+// finishes at once, so code waiting on `finished` moves on.
+if (!Element.prototype.animate) {
+  Element.prototype.animate = function () {
+    return {
+      finished: Promise.resolve(),
+      cancel() {},
+      finish() {},
+      play() {},
+      pause() {},
+      addEventListener() {},
+      removeEventListener() {},
+    } as unknown as Animation
+  }
+}
+if (!Element.prototype.getAnimations) Element.prototype.getAnimations = () => []
 globalThis.ResizeObserver = class {
   observe() {}
   unobserve() {}

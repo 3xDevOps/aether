@@ -1,4 +1,4 @@
-import { compactAge, errorSentence, timeAgo } from '@/lib/format'
+import { compactAge, errorSentence, formatDuration, timeAgo } from '@/lib/format'
 
 describe('errorSentence', () => {
   it('drops the RPC method and Go package names and keeps the sentence', () => {
@@ -37,4 +37,15 @@ describe('compactAge', () => {
     expect(compactAge(at(-5 * minute), now)).toBe('now')
     expect(compactAge('not a time', now)).toBe('')
   })
+})
+
+describe('formatDuration', () => {
+  it.each([
+    [640, '640ms'],
+    [6_940, '6.9s'],
+    [42_000, '42s'],
+    [123_000, '2m 03s'],
+    [4_320_000, '1h 12m'],
+    [278_000_000, '3d 5h'],
+  ])('%d ms reads %s', (ms, text) => expect(formatDuration(ms)).toBe(text))
 })

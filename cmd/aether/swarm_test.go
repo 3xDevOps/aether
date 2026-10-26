@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -123,6 +124,45 @@ func TestSwarmCreateSendsIntegratorTupleAndWorkers(t *testing.T) {
 	}
 }
 
+func TestSwarmCreateSendsRepoIDsOnlyToAServerThatTakesThem(t *testing.T) {
+	spec, err := parseSwarmCreate([]string{"objective", "--agent", "claude", "--mode", "standard", "--workspace", "web", "--repo", "api", "--repo", "ws-shared"}, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("parseSwarmCreate: %v", err)
+	}
+	workspaces := protocol.WorkspaceListResult{Workspaces: []protocol.Workspace{{ID: "ws-web", Name: "web"}, {ID: "ws-api", Name: "api"}, {ID: "ws-shared", Name: "shared"}}}
+	info := protocol.ServerInfoResult{ServerVersion: "v1.0.0", Member: protocol.Member{ID: "mem1"}}
+	serve := func(info protocol.ServerInfoResult) (*protocol.Client, *fakeReply) {
+		created := &fakeReply{result: protocol.MissionCreateResult{Mission: protocol.Mission{ID: "m1", Phase: "planning"}}}
+		return fakeControlMethods(t, map[string]*fakeReply{
+			protocol.MethodWorkspaceList: {result: workspaces},
+			protocol.MethodServerInfo:    {result: info},
+			protocol.MethodMissionCreate: created,
+		}), created
+	}
+
+	c, created := serve(info)
+	want := "--repo: server v1.0.0 does not support swarms with several repositories; update the server with aether server update"
+	if err := submitSwarm(c, io.Discard, spec, "key-1"); err == nil || err.Error() != want {
+		t.Fatalf("submitSwarm to an older server = %v, want %q", err, want)
+	}
+	if created.params() != nil {
+		t.Fatalf("mission.create ran on a server that would drop the repos: %s", created.params())
+	}
+
+	info.Features = []string{protocol.FeatureSwarmRepos}
+	c, created = serve(info)
+	if err := submitSwarm(c, io.Discard, spec, "key-1"); err != nil {
+		t.Fatalf("submitSwarm: %v", err)
+	}
+	var sent protocol.MissionCreateParams
+	if err := json.Unmarshal(created.params(), &sent); err != nil {
+		t.Fatalf("decode sent params: %v", err)
+	}
+	if sent.WorkspaceID != "ws-web" || strings.Join(sent.ExtraWorkspaceIDs, ",") != "ws-api,ws-shared" || sent.Integrator.AccountMemberID != "mem1" {
+		t.Errorf("mission.create params = %+v, want ws-web with repos ws-api and ws-shared on mem1", sent)
+	}
+}
+
 func TestSwarmCreateNamesTheInstallWhenNoDefaultModeCanWake(t *testing.T) {
 	spec, err := parseSwarmCreate([]string{"objective", "--agent", "codex"}, strings.NewReader(""))
 	if err != nil {
@@ -222,6 +262,7 @@ func TestRenderSwarm(t *testing.T) {
 			Integrator:             protocol.MissionIntegrator{AccountMemberID: "mem1", Harness: "claude", Mode: "tui"},
 			CurrentIntegratorRunID: "r1", IntegratorGeneration: 2, OpenQuestions: 1,
 			IntegratorLaunchError: "image missing", IntegratorLaunchErrorAt: "2026-09-25T07:01:00Z",
+			ExtraWorkspaceIDs: []string{"ws-api", "ws-shared"},
 		},
 		Questions: []protocol.MissionQuestion{
 			{ID: "q1", Body: "Which harness?", Answer: "claude", AnsweredAt: &answered},
@@ -243,6 +284,7 @@ func TestRenderSwarm(t *testing.T) {
 	}
 	want := `swarm m1 active
 objective: ship the swarm CLI
+extra repos: ws-api, ws-shared
 accountable human: mem1
 integrator: run r1 generation 2 (claude standard, account mem1)
 launch error: image missing (since 2026-09-25T07:01:00Z)

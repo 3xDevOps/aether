@@ -4,9 +4,11 @@ import { RunDetails, RunDetailsGroup } from '@/components/shell/run-details'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { ChevronDown, ChevronRight, Waypoints } from '@/components/icons'
+import { ChevronRight, Waypoints } from '@/components/icons'
+import { CountBadge } from '@/components/ui/count-badge'
 import { ListRow } from '@/components/ui/list-row'
 import { RelativeTime } from '@/components/ui/relative-time'
+import { Skeleton } from '@/components/ui/skeleton'
 import { StatusDot } from '@/components/ui/status-dot'
 import { useClock } from '@/lib/clock'
 import { timeAgo } from '@/lib/format'
@@ -14,7 +16,7 @@ import { useDelayed } from '@/lib/hooks'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { needsYou, type StateContext } from '@/lib/needs-you'
 import { groupOf, runLabel, stateLabel, stateTone, type PresentationState } from '@/lib/status'
-import { cn } from '@/lib/utils'
+import { chevronTurn, cn } from '@/lib/utils'
 import { targetRoute } from '@/routes/board/card-action'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
@@ -114,7 +116,7 @@ export function SidebarRuns() {
           error !== null ? (
             <p className="px-2 py-1 text-ui-sm text-muted">{dead ? error : 'Cannot reach the server. Retrying.'}</p>
           ) : loading ? (
-            <p className="px-2 py-1 text-ui-sm text-muted">Loading runs</p>
+            <LoadingRuns />
           ) : hydrated && (
             <p className="px-2 py-1 text-ui-sm text-muted">No runs yet.</p>
           )
@@ -126,6 +128,7 @@ export function SidebarRuns() {
                 key={group.key}
                 group={group}
                 expanded={open}
+                toggled={group.key in expanded}
                 onToggle={() => setExpanded((current) => ({ ...current, [group.key]: !open }))}
               />
             )
@@ -133,6 +136,25 @@ export function SidebarRuns() {
         )}
       </RunDetailsGroup>
     </section>
+  )
+}
+
+const loadingWidths = ['w-3/5', 'w-3/4', 'w-1/2', 'w-2/3', 'w-1/2', 'w-3/5']
+
+// The sidebar is chrome, which a default skeleton matches, so these draw one step up.
+const bar = 'bg-hover-chrome after:via-raised'
+
+function LoadingRuns() {
+  return (
+    <div role="status" aria-label="Loading runs" className="flex flex-col pt-2">
+      {loadingWidths.map((width, row) => (
+        <div key={row} className="flex h-7 items-center gap-2 px-2">
+          <Skeleton className={cn(bar, 'size-2.5 shrink-0 rounded-full')} />
+          <Skeleton className={cn(bar, 'h-3', width)} />
+          <Skeleton className={cn(bar, 'ml-auto h-3 w-6 shrink-0')} />
+        </div>
+      ))}
+    </div>
   )
 }
 
@@ -144,7 +166,8 @@ export const connectors = cn(
   'after:absolute after:top-[calc(var(--wire,50%)+0.5px)] after:bottom-0 after:left-[calc(var(--trunk,--spacing(3.25))-0.5px)] after:border-l after:border-icon-faint last:after:hidden',
 )
 
-function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: boolean; onToggle: () => void }) {
+/** `toggled` is true once the viewer has turned this group, so only their own change fades the list in. */
+function Group({ group, expanded, toggled, onToggle }: { group: SidebarGroup; expanded: boolean; toggled: boolean; onToggle: () => void }) {
   const listID = `sidebar-group-${group.key}`
   return (
     <div className="pt-2">
@@ -158,14 +181,14 @@ function Group({ group, expanded, onToggle }: { group: SidebarGroup; expanded: b
             onClick={onToggle}
             className="w-full justify-start"
           >
-            {expanded ? <ChevronDown /> : <ChevronRight />}
+            <ChevronRight className={cn(chevronTurn, expanded && 'rotate-90')} />
             <span className="truncate">{group.label}</span>
-            <span className="ml-auto tabular-nums">{group.count}</span>
+            <CountBadge className="ml-auto">{group.count}</CountBadge>
           </Button>
         </h2>
         {group.key === 'working' && <MineToggle />}
       </div>
-      <ul id={listID} hidden={!expanded}>
+      <ul id={listID} hidden={!expanded} className={cn(toggled && 'animate-fade-in motion-reduce:animate-none')}>
         {expanded && group.key === 'needs-you' && <MergesRow />}
         {expanded && group.key === 'needs-you' && <DevicesRow />}
         {expanded && group.runs.map((tree) => (

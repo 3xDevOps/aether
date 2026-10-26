@@ -133,6 +133,9 @@ type Mission struct {
 	// Fallback is the creator's fallback policy, which the integrator and
 	// every worker launch follows.
 	Fallback AccountFallback
+	// ExtraWorkspaces are checked out beside the primary workspace in the
+	// integrator and every worker, as LaunchOptions.ExtraWorkspaces.
+	ExtraWorkspaces []WorkspaceID
 }
 
 const (

@@ -1,5 +1,5 @@
 import type { SessionItem } from '@/lib/session-types'
-import { appendItems, liveActivity, prependItems, rehome, rowsOfTurn, trimTurns, turnRows, type Turn } from '@/store/session-rows'
+import { appendItems, liveActivity, prependItems, rehome, rowsOfTurn, trimTurns, turnRows, type SessionRow, type Turn } from '@/store/session-rows'
 import { indexItems, noAgents } from '@/store/subagents'
 import { item, resetItems, say, tool } from '@/test/acp-stream'
 
@@ -7,9 +7,10 @@ beforeEach(resetItems)
 
 const turnOf = (items: SessionItem[], closed = true): Turn => ({ turn: items[0]?.turn ?? 1, items, closed })
 const kinds = (turn: Turn) => turnRows(turn).map((row) => row.kind)
+const entries = (rows: SessionRow[]) => rows.flatMap((row) => (row.kind === 'steps' ? row.steps.flatMap((step) => (step.kind === 'tool' ? [step.entry] : step.kind === 'lookup' ? step.entries : [])) : []))
 
 describe('session rows from the item log', () => {
-  it('builds one turn: the person, the work folded, the plan, the answer and the finish', () => {
+  it('builds one turn: the person, one block of steps, and the answer with the outcome under it', () => {
     const rows = turnRows(turnOf([
       item('turn_start', 1),
       say(1, 'user', 'round the totals'),
@@ -23,17 +24,23 @@ describe('session rows from the item log', () => {
       say(1, 'assistant', 'Done.'),
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ]))
-    expect(rows.map((row) => row.kind)).toEqual(['user', 'thinking', 'plan', 'work', 'assistant', 'finished'])
-    expect(rows[2]).toMatchObject({ entries: [{ content: 'Read', status: 'completed' }] })
-    expect(rows[3]).toMatchObject({
+    expect(rows.map((row) => row.kind)).toEqual(['user', 'steps', 'assistant'])
+    expect(rows[1]).toMatchObject({
+      id: 'steps:1:message:1:m2',
       summary: 'Read 1 file, ran 1 command and edited 1 file',
-      entries: [
-        { label: 'Read src/a.js', status: 'done', durationMs: 1000 },
-        { label: 'Ran npm test', command: 'npm test', output: 'ok\n', exitCode: 0 },
-        { label: 'Edited src/a.js' },
+      icons: ['think', 'plan', 'read'],
+      plan: { done: 1, total: 1 },
+      failed: 0,
+      current: false,
+      steps: [
+        { kind: 'thought', text: 'read first' },
+        { kind: 'plan', entries: [{ content: 'Read', status: 'completed' }] },
+        { kind: 'lookup', entries: [{ label: 'Read src/a.js', target: 'src/a.js', status: 'done', durationMs: 1000 }] },
+        { kind: 'tool', entry: { label: 'Ran npm test', command: 'npm test', output: 'ok\n', exitCode: 0 } },
+        { kind: 'tool', entry: { label: 'Edited src/a.js' } },
       ],
     })
-    expect(rows[5]).toMatchObject({ text: 'Finished in 10s', tone: 'done' })
+    expect(rows[2]).toMatchObject({ text: 'Done.', outcome: { text: 'Finished in 10s', tone: 'done' } })
   })
 
   it('appends streamed message segments and command output to the first row they opened', () => {
@@ -44,16 +51,86 @@ describe('session rows from the item log', () => {
       item('message', 1, { message: { role: 'assistant', message_id: 'a', text: 'lo', complete: true } }),
       tool(1, 'x', 'execute', 'make', 'failed', { output: 'two\n', exit_code: 2 }),
     ], false))
-    expect(rows[0]).toMatchObject({ kind: 'assistant', text: 'Hello', streaming: false })
-    expect(rows[1]).toMatchObject({ kind: 'work', entries: [{ output: 'one\ntwo\n', status: 'failed', exitCode: 2 }] })
+    expect(rows).toMatchObject([{
+      kind: 'steps',
+      current: true,
+      failed: 1,
+      steps: [
+        { kind: 'narration', text: 'Hello', streaming: false },
+        { kind: 'tool', entry: { output: 'one\ntwo\n', status: 'failed', exitCode: 2 } },
+      ],
+    }])
+  })
+
+  it('keeps the prose after the last step as the answer and moves it into the block once a step follows', () => {
+    const start = [item('turn_start', 1), say(1, 'user', 'go'), tool(1, 'x', 'execute', 'make', 'completed'), say(1, 'assistant', 'Built.')]
+    expect(kinds(turnOf(start, false))).toEqual(['user', 'steps', 'assistant'])
+    const more = turnRows(turnOf([...start, tool(1, 'y', 'execute', 'make test', 'in_progress')], false))
+    expect(more.map((row) => row.kind)).toEqual(['user', 'steps'])
+    expect(more[1]).toMatchObject({ running: 1, steps: [{ kind: 'tool' }, { kind: 'narration', text: 'Built.' }, { kind: 'tool' }] })
+    expect(kinds(turnOf([item('turn_start', 1), say(1, 'user', 'ping'), say(1, 'assistant', 'pong'), item('turn_end', 1, { stop_reason: 'end_turn' })]))).toEqual(['user', 'assistant'])
+  })
+
+  it('starts a segment at each message from a person, each with its own block', () => {
+    const rows = turnRows(turnOf([
+      item('turn_start', 1),
+      say(1, 'user', 'first', 'u1'),
+      tool(1, 'x', 'execute', 'make', 'completed'),
+      say(1, 'user', 'and docs', 'u2'),
+      tool(1, 'y', 'execute', 'make docs', 'completed'),
+      say(1, 'assistant', 'Both built.'),
+      item('turn_end', 1, { stop_reason: 'cancelled' }),
+    ]))
+    expect(rows.map((row) => [row.kind, row.id])).toEqual([
+      ['user', 'message:1:u1'],
+      ['steps', 'steps:1:message:1:u1'],
+      ['user', 'message:1:u2'],
+      ['steps', 'steps:1:message:1:u2'],
+      ['assistant', 'message:1:m6'],
+      ['finished', 'end:1'],
+    ])
+  })
+
+  it('keeps a plan update with the segment it came in, so a steered turn shows its new plan in the current block', () => {
+    const rows = turnRows(turnOf([
+      item('turn_start', 1),
+      say(1, 'user', 'build it', 'u1'),
+      item('plan', 1, { plan: [{ content: 'Build', status: 'in_progress' }] }),
+      item('plan', 1, { plan: [{ content: 'Build', status: 'completed' }] }),
+      say(1, 'user', 'and docs', 'u2'),
+      item('plan', 1, { plan: [{ content: 'Build', status: 'completed' }, { content: 'Docs', status: 'in_progress' }] }),
+    ], false))
+    expect(rows).toMatchObject([
+      { kind: 'user' },
+      { kind: 'steps', current: false, plan: { done: 1, total: 1 }, steps: [{ kind: 'plan', entries: [{ content: 'Build', status: 'completed' }] }] },
+      { kind: 'user' },
+      { kind: 'steps', current: true, plan: { done: 1, total: 2 }, steps: [{ kind: 'plan', entries: [{ content: 'Build' }, { content: 'Docs', status: 'in_progress' }] }] },
+    ])
+  })
+
+  it('groups consecutive reads, searches and fetches into one lookup step', () => {
+    const [block] = turnRows(turnOf([
+      tool(1, 'r1', 'read', 'Read a.go', 'completed', { locations: [{ path: 'src/a.go' }] }),
+      tool(1, 's1', 'search', 'grep total', 'completed'),
+      tool(1, 'f1', 'fetch', 'Fetch docs', 'in_progress', { raw_input: { url: 'https://example.com/docs' } }),
+      tool(1, 'x1', 'execute', 'make', 'completed'),
+      tool(1, 'r2', 'read', 'Read b.go', 'completed', { locations: [{ path: 'src/b.go' }] }),
+      tool(1, 'm1', 'other', 'lookup issue 7', 'completed', { tool_name: 'mcp__tracker__get', raw_input: { id: 7 }, raw_output: { title: 'Crash' } }),
+    ], false))
+    expect(block).toMatchObject({ kind: 'steps', steps: [
+      { kind: 'lookup', entries: [{ target: 'src/a.go' }, { target: 'grep total' }, { target: 'https://example.com/docs', status: 'running' }] },
+      { kind: 'tool', entry: { command: 'make' } },
+      { kind: 'lookup', entries: [{ target: 'src/b.go' }] },
+      { kind: 'tool', entry: { name: 'mcp__tracker__get', target: 'lookup issue 7', input: { id: 7 }, result: { title: 'Crash' } } },
+    ] })
   })
 
   it('leaves an answered request as a collapsed row and never shows a pending one in the timeline', () => {
     const request = { id: 'q', kind: 'permission' as const, title: 'rm -rf build', tool_call_id: 'x', options: [{ id: 'ok', name: 'Allow', kind: 'allow_once' }] }
     const turn = [item('turn_start', 1), tool(1, 'x', 'execute', 'rm -rf build', 'pending'), item('request', 1, { request: { ...request, status: 'pending' } })]
-    expect(kinds(turnOf(turn, false))).toEqual(['work'])
+    expect(turnRows(turnOf(turn, false))).toMatchObject([{ kind: 'steps', steps: [{ kind: 'tool', entry: { waiting: true } }] }])
     const answered = turnRows(turnOf([...turn, item('request', 1, { request: { ...request, status: 'answered', answer: 'ok' } })], false))
-    expect(answered[1]).toMatchObject({ kind: 'answered', command: 'rm -rf build', request: { status: 'answered', answer: 'ok' } })
+    expect(answered).toMatchObject([{ kind: 'steps', steps: [{ kind: 'tool' }, { kind: 'answered', command: 'rm -rf build', request: { status: 'answered', answer: 'ok' } }] }])
   })
 
   it('turns the inbox wake and the session notices into event rows', () => {
@@ -178,15 +255,13 @@ describe('turns', () => {
     const rows = appendItems([], [...turn(1), ...turn(2)]).flatMap(rowsOfTurn)
     const ids = rows.map((row) => row.id)
     expect(new Set(ids).size).toBe(ids.length)
-    const entries = rows.flatMap((row) => (row.kind === 'work' ? row.entries.map((entry) => entry.id) : []))
-    expect(entries).toEqual(['1:mock-tool', '2:mock-tool'])
+    expect(entries(rows).map((entry) => entry.id)).toEqual(['1:mock-tool', '2:mock-tool'])
   })
 
   it('leaves out a duration too short to matter', () => {
     const started = tool(1, 'r1', 'read', 'Read a.js', 'in_progress')
     const done = { ...tool(1, 'r1', 'read', 'Read a.js', 'completed'), time: started.time }
-    const [work] = turnRows(turnOf([started, done]))
-    expect(work).toMatchObject({ entries: [{ status: 'done', durationMs: undefined }] })
+    expect(entries(turnRows(turnOf([started, done])))).toMatchObject([{ status: 'done', durationMs: undefined }])
   })
 })
 
@@ -203,15 +278,15 @@ describe('subagent rows', () => {
       tool(1, 'r', 'read', 'Read x', 'completed'),
       launch('d'),
     ], false))
-    expect(rows.map((row) => row.kind)).toEqual(['subagents', 'assistant', 'subagents', 'work', 'subagents'])
-    expect(rows[0]).toMatchObject({ id: 'agents:1:a', ids: ['a', 'b'] })
-    expect(rows[2]).toMatchObject({ id: 'agents:1:c', ids: ['c'] })
-    expect(rows[4]).toMatchObject({ ids: ['d'] })
+    expect(rows).toMatchObject([{ kind: 'steps', summary: 'Delegated 4 tasks and read 1 file', agents: ['a', 'b', 'c', 'd'] }])
+    const [block] = rows
+    expect(block?.kind === 'steps' && block.steps.map((step) => step.kind)).toEqual(['subagents', 'narration', 'subagents', 'tool', 'subagents'])
+    expect(block).toMatchObject({ steps: [{ id: 'agents:1:a', ids: ['a', 'b'] }, {}, { id: 'agents:1:c', ids: ['c'] }, {}, { ids: ['d'] }] })
   })
 
   it('renders items without parent metadata exactly as before', () => {
     const rows = turnRows(turnOf([item('turn_start', 1), tool(1, 'r', 'read', 'Read x', 'completed'), tool(1, 'e', 'other', 'Delegate', 'completed', { tool_name: 'Edit' })]))
-    expect(rows.map((row) => row.kind)).toEqual(['work'])
+    expect(rows.map((row) => row.kind)).toEqual(['steps'])
     expect(indexItems(noAgents, [tool(1, 'r', 'read', 'Read x', 'completed')]).index.roots).toEqual([])
   })
 
@@ -223,15 +298,15 @@ describe('subagent rows', () => {
     const turns = appendItems([], main, (it) => home.get(it))
     expect(turns.map((turn) => turn.items.length)).toEqual([4, 1])
     const rows = turns.flatMap(rowsOfTurn)
-    expect(rows.filter((row) => row.kind === 'work')).toHaveLength(1)
+    expect(entries(rows)).toHaveLength(1)
   })
 
   it('keeps a carried call running while its snapshots arrive after its turn ended', () => {
     const items = [item('turn_start', 1), tool(1, 'x', 'execute', 'make', 'in_progress'), item('turn_end', 1), item('turn_start', 2), tool(2, 'x', 'execute', 'make', 'in_progress', { output: 'ok' })]
     const { main, home } = indexItems(noAgents, items)
     const [first] = appendItems([], main, (it) => home.get(it))
-    expect(rowsOfTurn(first!).find((row) => row.kind === 'work')).toMatchObject({ entries: [{ status: 'running' }] })
-    expect(rowsOfTurn({ ...first!, items: first!.items.slice(0, 3) }).find((row) => row.kind === 'work')).toMatchObject({ entries: [{ status: 'done' }] })
+    expect(entries(rowsOfTurn(first!))).toMatchObject([{ status: 'running' }])
+    expect(entries(rowsOfTurn({ ...first!, items: first!.items.slice(0, 3) }))).toMatchObject([{ status: 'done' }])
   })
 
   it('joins an older page with a held turn of the same number after a trim', () => {
@@ -255,7 +330,7 @@ describe('subagent rows', () => {
     const turns = prependItems(held, page.main, (it) => page.home.get(it))
     expect(turns.map((turn) => turn.turn)).toEqual([1, 2])
     expect(turns[0]!.items.map((it) => it.seq)).toEqual([5, 7])
-    expect(turns.flatMap(rowsOfTurn).filter((row) => row.kind === 'work')).toHaveLength(1)
+    expect(entries(turns.flatMap(rowsOfTurn))).toHaveLength(1)
   })
 
   it('keeps a settled call whose id comes back in a later turn as a new call', () => {
@@ -263,7 +338,7 @@ describe('subagent rows', () => {
     const { main, home } = indexItems(noAgents, items)
     const turns = appendItems([], main, (it) => home.get(it))
     expect(turns.map((turn) => turn.items.length)).toEqual([3, 2])
-    expect(turns.flatMap(rowsOfTurn).filter((row) => row.kind === 'work')).toHaveLength(2)
+    expect(entries(turns.flatMap(rowsOfTurn))).toHaveLength(2)
     const older = indexItems(indexItems(noAgents, items.slice(3)).index, items.slice(0, 3), true)
     expect(older.rehomed).toEqual([])
   })
@@ -281,13 +356,11 @@ describe('subagent rows', () => {
     expect(rehome(turns, [{ id: 'x', from: 2, to: 9 }])).toBe(turns)
   })
 
-  it('gives a tool call split across turns of one older page a single finished work row', () => {
+  it('gives a tool call split across turns of one older page a single finished step', () => {
     const page = [item('turn_start', 1), tool(1, 'x', 'execute', 'make', 'in_progress'), item('turn_end', 1), item('turn_start', 2), tool(2, 'x', 'execute', 'make', 'completed')]
     const { main, home } = indexItems(noAgents, page, true)
     const turns = prependItems([], main, (it) => home.get(it))
-    const work = turns.flatMap(rowsOfTurn).filter((row) => row.kind === 'work')
-    expect(work).toHaveLength(1)
-    expect(work[0]).toMatchObject({ entries: [{ status: 'done' }] })
+    expect(entries(turns.flatMap(rowsOfTurn))).toMatchObject([{ status: 'done' }])
   })
 
   it('trims by seq across turns and keeps every segment of a retained user message', () => {

@@ -170,7 +170,7 @@ test('two members share notes, moderated messages, and explicit control transfer
     const aliceNotes = aliceDetails.getByRole('region', { name: 'Notes' })
     const noteBox = aliceDetails.getByRole('textbox', { name: 'Add a note' })
     await noteBox.fill(comment)
-    await aliceDetails.getByRole('button', { name: 'Add', exact: true }).click()
+    await aliceDetails.getByRole('button', { name: 'Add note', exact: true }).click()
     await expect(noteBox).toHaveValue('')
     await expect(aliceNotes).toContainText(comment)
     await expect(aliceNotes.getByText('Sending…')).toHaveCount(0)

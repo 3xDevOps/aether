@@ -36,7 +36,7 @@ test('Activity narrows the log from one filter and switches to agent messages', 
   const filter = page.getByRole('dialog')
   await filter.getByLabel('Show').click()
   await page.getByRole('option', { name: 'Run state' }).click()
-  await expect(page.getByRole('button', { name: 'Filter · 1' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Filter, 1 active' })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(filter).toBeHidden()
   const rows = feed.getByRole('listitem')
@@ -48,7 +48,7 @@ test('Activity narrows the log from one filter and switches to agent messages', 
   await expect(rows.first()).toContainText('run.status')
   await expect(rows.first()).toContainText('"to":')
 
-  await page.getByRole('button', { name: 'Filter · 1' }).click()
+  await page.getByRole('button', { name: 'Filter, 1 active' }).click()
   await filter.getByLabel('Show').click()
   await page.getByRole('option', { name: 'Agent messages' }).click()
   await page.keyboard.press('Escape')

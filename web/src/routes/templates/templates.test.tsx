@@ -4,75 +4,41 @@ import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import type { Schedule, Template } from '@/lib/types'
 import { reopen } from '@/components/failure'
-import { TemplatesRoute } from '@/routes/templates'
-import { useStore, type RootState } from '@/store'
+import { useStore } from '@/store'
 import { optimisticDeadlineMs } from '@/store/optimistic'
-import { agentInfo, alice, fakeApi, otherWorkspace, serverInfo, template, workspace } from '@/test/fixtures'
+import { agentInfo, fakeApi, otherWorkspace, template, workspace } from '@/test/fixtures'
 import { chooseModel } from '@/test/model'
 import { openSelect, pickOption } from '@/test/select'
+import { detail, rowAction, schedule, seed, Templates } from '@/test/templates'
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(() => 'toast'), dismiss: vi.fn() },
 }))
 
-const schedule: Schedule = {
-  id: 'sch_1',
-  workspace_id: workspace.id,
-  template: template.name,
-  cron: '0 3 * * *',
-  member_id: alice.id,
-  created_at: '2026-08-14T09:05:00Z',
-  next_fire_at: '2026-08-23T03:00:00Z',
-}
-
-function seed(extra: Partial<RootState> = {}) {
-  vi.spyOn(api, 'agentList').mockResolvedValue([agentInfo({ display_name: 'Claude Code' }), agentInfo({ name: 'copilot', display_name: 'GitHub Copilot CLI' })])
-  vi.spyOn(api, 'agentModels').mockResolvedValue({ models: [], source: 'none' })
-  useStore.setState({
-    workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace },
-    activeWorkspace: workspace.id,
-    members: { [alice.id]: alice },
-    info: serverInfo,
-    // template.save/delete are gated; an upgraded gateway advertising every
-    // method renders them all.
-    capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
-    hydrated: true,
-    hydrationError: null,
-    agentModels: {},
-    route: { name: 'templates', params: {} },
-    // A new identity drops the saves earlier tests left in flight.
-    identityKey: crypto.randomUUID(),
-    ...extra,
-  })
-}
-
-async function rowAction(name: string) {
-  const trigger = await screen.findByRole('button', { name: `More for ${template.name}` })
-  trigger.focus()
-  await userEvent.keyboard('{Enter}')
-  const item = within(await screen.findByRole('menu')).getByRole('menuitem', { name })
-  item.focus()
-  await userEvent.keyboard('{Enter}')
-}
-
 describe('templates view', () => {
-  it('lists a template as one row with its agent, mode word and task', async () => {
+  it('lists a template as an option and shows the first one with its agent, schedule and task', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => [schedule]) })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
-    const row = within(await screen.findByRole('listitem', { name: `Template ${template.name}` }))
-    expect(row.getByText(template.name)).toBeDefined()
-    expect(row.getByText(/Background · Scheduled · triage the flaky tests/)).toBeDefined()
-    expect(row.getByText(/^Next/)).toBeDefined()
-    expect(row.getByRole('button', { name: `Launch ${template.name}` })).toBeDefined()
+    const option = await screen.findByRole('option', { name: `Template ${template.name}` })
+    expect(option.getAttribute('aria-selected')).toBe('true')
+    expect(option.textContent).toContain('Background')
+    await waitFor(() => expect(option.getAttribute('aria-describedby')).not.toBeNull())
+    const shown = within(detail(template.name))
+    expect(shown.getByText(/Claude Code/)).toBeDefined()
+    expect(shown.getByText('agent default')).toBeDefined()
+    expect(detail(template.name).textContent).toContain('Scheduled 0 3 * * * UTC, next')
+    expect(shown.getByText(template.task)).toBeDefined()
+    expect(shown.getByText('~6 tokens')).toBeDefined()
+    expect(shown.getByRole('button', { name: `Launch ${template.name}` })).toBeDefined()
     expect(screen.queryByRole('form')).toBeNull()
   })
 
   it('saves a template through the gateway', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []), templateSave: vi.fn(async () => template) })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
     const dialog = within(await screen.findByRole('dialog'))
@@ -99,7 +65,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((resolve) => (answer = resolve))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
     const dialog = within(await screen.findByRole('dialog'))
@@ -108,9 +74,9 @@ describe('templates view', () => {
     fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
 
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.getByRole('listitem', { name: 'Template weekly sweep' }).textContent).toContain('sweep the flaky tests')
+    expect(detail('weekly sweep').textContent).toContain('sweep the flaky tests')
     await act(async () => answer({ ...template, id: 'tpl_2', name: 'weekly sweep', task: 'sweep the flaky tests' }))
-    expect(screen.getAllByRole('listitem', { name: 'Template weekly sweep' })).toHaveLength(1)
+    expect(screen.getAllByRole('option', { name: 'Template weekly sweep' })).toHaveLength(1)
     expect(client.templateList).toHaveBeenCalledTimes(1)
   })
 
@@ -122,7 +88,7 @@ describe('templates view', () => {
       }),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Edit')
     const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
@@ -133,13 +99,13 @@ describe('templates view', () => {
     expect(reopened.getByRole('alert').textContent).toContain('harness is not installed')
     expect((reopened.getByLabelText(/^Task/) as HTMLTextAreaElement).value).toBe('sweep instead')
     expect(reopened.queryByRole('button', { name: 'Retry' })).toBeNull()
-    expect(screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true }).textContent).toContain(template.task)
+    expect(detail(template.name).textContent).toContain(template.task)
   })
 
   it('duplicates a template under a new name', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []) })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Duplicate')
     const dialog = within(await screen.findByRole('dialog', { name: 'Duplicate template' }))
@@ -153,7 +119,7 @@ describe('templates view', () => {
   it('lists the agents the server reports and keeps a saved harness it omits', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []), templateList: vi.fn(async () => [{ ...template, harness: 'custom' }]) })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Edit')
     const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
@@ -166,8 +132,8 @@ describe('templates view', () => {
   it('offers the deployment custom agent and a retry when the agent list fails', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []), templateList: vi.fn(async () => []) })
     seed()
-    vi.spyOn(api, 'agentList').mockRejectedValueOnce(new Error('control channel closed'))
-    render(<TemplatesRoute params={{}} client={client} />)
+    const agentList = vi.spyOn(api, 'agentList').mockRejectedValue(new Error('control channel closed'))
+    render(<Templates client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
     const dialog = within(await screen.findByRole('dialog', { name: 'New template' }))
@@ -175,6 +141,7 @@ describe('templates view', () => {
     await openSelect(dialog.getByLabelText(/^Agent$/))
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['claude', 'custom'])
     await userEvent.keyboard('{Escape}')
+    agentList.mockResolvedValue([agentInfo({ display_name: 'Claude Code' })])
     fireEvent.click(dialog.getByRole('button', { name: 'Retry' }))
     await waitFor(() => expect(dialog.queryByRole('alert')).toBeNull())
   })
@@ -182,7 +149,7 @@ describe('templates view', () => {
   it('schedules from a dialog and shows the next launch the server returned', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []), scheduleSave: vi.fn(async () => schedule) })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Schedule…')
     const dialog = within(await screen.findByRole('dialog', { name: `Schedule ${template.name}` }))
@@ -200,7 +167,7 @@ describe('templates view', () => {
       scheduleSave: vi.fn(() => new Promise<Schedule>((resolve) => (answer = resolve))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Schedule…')
     const dialog = within(await screen.findByRole('dialog', { name: `Schedule ${template.name}` }))
@@ -222,7 +189,7 @@ describe('templates view', () => {
       scheduleSave: vi.fn(() => new Promise<Schedule>((resolve) => (answer = resolve))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Schedule…')
     const dialog = within(await screen.findByRole('dialog', { name: `Schedule ${template.name}` }))
@@ -248,11 +215,11 @@ describe('templates view', () => {
   it('launches a template and navigates to the run', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []) })
     seed({ runs: {} })
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     fireEvent.click(await screen.findByRole('button', { name: `Launch ${template.name}` }))
 
-    expect(client.templateLaunch).toHaveBeenCalledWith(workspace.id, template.name)
+    expect(client.templateLaunch).toHaveBeenCalledWith(workspace.id, template.name, undefined)
     // fakeApi's templateLaunch returns run_tpl; navigation lands on it, and
     // the run is seeded with it so the tab does not call it deleted.
     await waitFor(() => {
@@ -271,7 +238,7 @@ describe('templates view', () => {
       templateDelete: vi.fn(() => new Promise<unknown>((resolve) => (answer = () => resolve({})))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Delete')
     const confirm = await screen.findByRole('alertdialog')
@@ -281,10 +248,10 @@ describe('templates view', () => {
     fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }))
 
     expect(screen.queryByRole('alertdialog')).toBeNull()
-    expect(screen.queryByRole('listitem', { name: `Template ${template.name}` })).toBeNull()
+    expect(screen.queryByRole('option', { name: `Template ${template.name}` })).toBeNull()
     expect(client.templateDelete).toHaveBeenCalledWith(workspace.id, template.name)
     await act(async () => answer())
-    expect(screen.queryByRole('listitem', { name: `Template ${template.name}` })).toBeNull()
+    expect(screen.queryByRole('option', { name: `Template ${template.name}` })).toBeNull()
     expect(client.templateList).toHaveBeenCalledTimes(1)
   })
 
@@ -297,7 +264,7 @@ describe('templates view', () => {
       scheduleSave: vi.fn(async () => schedule),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Delete')
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
@@ -314,7 +281,7 @@ describe('templates view', () => {
     await waitFor(() => expect(client.scheduleSave).toHaveBeenCalled())
     await act(async () => answer())
 
-    const row = screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true })
+    const row = detail(template.name)
     expect(row.textContent).toContain('Scheduled')
   })
 
@@ -326,14 +293,14 @@ describe('templates view', () => {
       }),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Delete')
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
 
     const confirm = within(await screen.findByRole('alertdialog'))
     expect(confirm.getByRole('alert').textContent).toContain('a schedule still fires it')
-    expect(screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true }).textContent).toContain('Scheduled')
+    expect(detail(template.name).textContent).toContain('Scheduled')
   })
 
   it('restores nothing when a delete is refused after the signed-in member changed', async () => {
@@ -343,7 +310,7 @@ describe('templates view', () => {
       templateDelete: vi.fn(() => new Promise<unknown>((_, reject) => (refuse = reject))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Delete')
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
@@ -351,7 +318,7 @@ describe('templates view', () => {
     act(() => useStore.setState({ identityKey: crypto.randomUUID() }))
     await act(async () => refuse(new ApiError(200, 'template.delete: a schedule still fires it', -32002)))
 
-    expect(screen.queryByRole('listitem', { name: `Template ${template.name}`, hidden: true })).toBeNull()
+    expect(screen.queryByRole('option', { name: `Template ${template.name}`, hidden: true })).toBeNull()
   })
 
   it('keeps a save answered after the signed-in member changed out of the next member\'s rollback', async () => {
@@ -361,7 +328,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((resolve, reject) => answers.push({ resolve, reject }))),
     })
     seed()
-    const view = render(<TemplatesRoute params={{}} client={client} />)
+    const view = render(<Templates client={client} />)
     const edit = async (task: string) => {
       await rowAction('Edit')
       const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
@@ -372,12 +339,12 @@ describe('templates view', () => {
     await edit('alice edit')
     view.unmount()
     act(() => useStore.setState({ identityKey: crypto.randomUUID() }))
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await edit('bob edit')
     await act(async () => answers[0].resolve({ ...template, task: 'alice edit' }))
     await act(async () => answers[1].reject(new ApiError(200, 'template.save: refused', -32602)))
 
-    expect(screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true }).textContent).toContain(template.task)
+    expect(detail(template.name).textContent).toContain(template.task)
   })
 
   it('removes a template whose delete the server answers after the deadline', async () => {
@@ -387,7 +354,7 @@ describe('templates view', () => {
       templateDelete: vi.fn(() => new Promise<unknown>((resolve) => (answer = () => resolve({})))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Delete')
     const confirm = await screen.findByRole('alertdialog')
@@ -397,11 +364,11 @@ describe('templates view', () => {
       act(() => vi.advanceTimersByTime(optimisticDeadlineMs))
       await act(async () => {})
       expect(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Retry' })).toBeDefined()
-      expect(screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true })).toBeDefined()
+      expect(screen.getByRole('option', { name: `Template ${template.name}`, hidden: true })).toBeDefined()
 
       await act(async () => answer())
       expect(screen.queryByRole('alertdialog')).toBeNull()
-      expect(screen.queryByRole('listitem', { name: `Template ${template.name}` })).toBeNull()
+      expect(screen.queryByRole('option', { name: `Template ${template.name}` })).toBeNull()
     } finally {
       vi.useRealTimers()
     }
@@ -416,7 +383,7 @@ describe('templates view', () => {
         .mockResolvedValueOnce({}),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Delete')
     const confirm = await screen.findByRole('alertdialog')
@@ -434,7 +401,7 @@ describe('templates view', () => {
 
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(toast.error).not.toHaveBeenCalled()
-    expect(screen.queryByRole('listitem', { name: `Template ${template.name}` })).toBeNull()
+    expect(screen.queryByRole('option', { name: `Template ${template.name}` })).toBeNull()
   })
 
   it('keeps a template saved under a deleted name when the delete is refused later', async () => {
@@ -445,7 +412,7 @@ describe('templates view', () => {
       templateSave: vi.fn(async () => ({ ...template, id: 'tpl_2', task: 'sweep instead' })),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Delete')
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
@@ -457,7 +424,7 @@ describe('templates view', () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Template saved'))
     await act(async () => refuse(new ApiError(200, 'template.delete: a schedule still fires it', -32002)))
 
-    const row = screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true })
+    const row = detail(template.name)
     expect(row.textContent).toContain('sweep instead')
   })
 
@@ -469,7 +436,7 @@ describe('templates view', () => {
       templateSave: vi.fn(async () => ({ ...template, id: 'tpl_2', task: 'sweep instead' })),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Delete')
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
@@ -481,7 +448,7 @@ describe('templates view', () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Template saved'))
     await act(async () => answer())
 
-    const row = screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true })
+    const row = detail(template.name)
     expect(row.textContent).toContain('sweep instead')
   })
 
@@ -492,7 +459,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((_, reject) => refusals.push(reject))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     for (const task of ['first edit', 'second edit']) {
       await rowAction('Edit')
@@ -503,7 +470,7 @@ describe('templates view', () => {
     await act(async () => refusals[0](new ApiError(200, 'template.save: refused', -32602)))
     await act(async () => refusals[1](new ApiError(200, 'template.save: refused', -32602)))
 
-    expect(screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true }).textContent).toContain(template.task)
+    expect(detail(template.name).textContent).toContain(template.task)
   })
 
   it('puts back an older save answered while a newer one was pending when the newer one is refused', async () => {
@@ -513,7 +480,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((resolve, reject) => answers.push({ resolve, reject }))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     for (const task of ['first edit', 'second edit']) {
       await rowAction('Edit')
@@ -524,7 +491,7 @@ describe('templates view', () => {
     await act(async () => answers[0].resolve({ ...template, task: 'first edit' }))
     await act(async () => answers[1].reject(new ApiError(200, 'template.save: refused', -32602)))
 
-    expect(screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true }).textContent).toContain('first edit')
+    expect(detail(template.name).textContent).toContain('first edit')
   })
 
   it('puts back an older schedule answered while a newer one was pending when the newer one is refused', async () => {
@@ -534,7 +501,7 @@ describe('templates view', () => {
       scheduleSave: vi.fn(() => new Promise<Schedule>((resolve, reject) => answers.push({ resolve, reject }))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Schedule…')
     const dialog = within(await screen.findByRole('dialog', { name: `Schedule ${template.name}` }))
@@ -545,13 +512,13 @@ describe('templates view', () => {
     await act(async () => answers[0].resolve(schedule))
     await act(async () => answers[1].reject(new ApiError(200, 'schedule.save: refused', -32602)))
 
-    expect(screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true }).textContent).toContain('Scheduled')
+    expect(detail(template.name).textContent).toContain('Scheduled')
   })
 
   it('offers no Launch, Delete or Schedule on a template whose save is pending', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []), templateSave: vi.fn(() => new Promise<Template>(() => {})) })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await rowAction('Edit')
     const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
@@ -564,20 +531,20 @@ describe('templates view', () => {
     const menu = within(await screen.findByRole('menu'))
     expect(menu.getByRole('menuitem', { name: 'Delete' }).getAttribute('aria-disabled')).toBe('true')
     expect(menu.getByRole('menuitem', { name: 'Schedule…' }).getAttribute('aria-disabled')).toBe('true')
-    expect(menu.getByRole('menuitem', { name: 'Edit' }).getAttribute('aria-disabled')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Edit', hidden: true }).hasAttribute('disabled')).toBe(false)
   })
 
   it('still offers no Delete after leaving Templates and coming back while a save is pending', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []), templateSave: vi.fn(() => new Promise<Template>(() => {})) })
     seed()
-    const { unmount } = render(<TemplatesRoute params={{}} client={client} />)
+    const { unmount } = render(<Templates client={client} />)
     await rowAction('Edit')
     const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
     fireEvent.change(dialog.getByLabelText(/^Task/), { target: { value: 'sweep instead' } })
     fireEvent.click(dialog.getByRole('button', { name: 'Save' }))
     unmount()
 
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     ;(await screen.findByRole('button', { name: `More for ${template.name}` })).focus()
     await userEvent.keyboard('{Enter}')
 
@@ -593,7 +560,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((resolve) => (answer = resolve))),
     })
     seed()
-    const { unmount } = render(<TemplatesRoute params={{}} client={client} />)
+    const { unmount } = render(<Templates client={client} />)
     await rowAction('Edit')
     const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
     fireEvent.change(dialog.getByLabelText(/^Task/), { target: { value: 'sweep instead' } })
@@ -601,9 +568,9 @@ describe('templates view', () => {
     unmount()
 
     client.templateList = vi.fn(() => new Promise<Template[]>((resolve) => (list = resolve)))
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await act(async () => list([template]))
-    const row = () => screen.getByRole('listitem', { name: `Template ${template.name}` })
+    const row = () => detail(template.name)
     const launch = () => screen.getByRole('button', { name: `Launch ${template.name}` })
     expect(row().textContent).toContain('sweep instead')
     expect(launch().hasAttribute('disabled')).toBe(true)
@@ -621,14 +588,14 @@ describe('templates view', () => {
       templateList: vi.fn(() => new Promise<Template[]>((resolve) => lists.push(resolve))),
     })
     seed()
-    const { unmount } = render(<TemplatesRoute params={{}} client={client} />)
+    const { unmount } = render(<Templates client={client} />)
     unmount()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await act(async () => lists[1]([{ ...template, task: 'newer task' }]))
     await act(async () => lists[0]([template]))
 
-    expect(screen.getByRole('listitem', { name: `Template ${template.name}` }).textContent).toContain('newer task')
+    expect(detail(template.name).textContent).toContain('newer task')
   })
 
   it('drops a list read answered after the signed-in member changed', async () => {
@@ -638,12 +605,12 @@ describe('templates view', () => {
       templateList: vi.fn(() => new Promise<Template[]>((resolve) => (list = resolve))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     act(() => useStore.setState({ identityKey: crypto.randomUUID() }))
     await act(async () => list([template]))
 
-    expect(screen.queryByRole('listitem', { name: `Template ${template.name}` })).toBeNull()
+    expect(screen.queryByRole('option', { name: `Template ${template.name}` })).toBeNull()
   })
 
   it('keeps the newer save when two saves of a template are answered in reverse order', async () => {
@@ -653,7 +620,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((resolve) => answers.push(resolve))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     for (const task of ['first edit', 'second edit']) {
       await rowAction('Edit')
@@ -664,7 +631,7 @@ describe('templates view', () => {
     await act(async () => answers[1]({ ...template, task: 'second edit' }))
     await act(async () => answers[0]({ ...template, task: 'first edit' }))
 
-    expect(screen.getByRole('listitem', { name: `Template ${template.name}` }).textContent).toContain('second edit')
+    expect(detail(template.name).textContent).toContain('second edit')
   })
 
   it('toasts an earlier save that went unanswered, then its refusal, and leaves a form opened since alone', async () => {
@@ -675,7 +642,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((_, reject) => (refuse = reject))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
     const first = within(await screen.findByRole('dialog'))
     fireEvent.change(first.getByLabelText(/^Name/), { target: { value: 'weekly sweep' } })
@@ -707,7 +674,7 @@ describe('templates view', () => {
     })
     seed()
     vi.mocked(toast.dismiss).mockClear()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await rowAction('Edit')
     const first = within(await screen.findByRole('dialog', { name: 'Edit template' }))
     fireEvent.change(first.getByLabelText(/^Task/), { target: { value: 'sweep instead' } })
@@ -733,7 +700,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((resolve) => (answer = resolve))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await rowAction('Edit')
     const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -760,7 +727,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((resolve) => (answer = resolve))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await rowAction('Edit')
     const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -782,7 +749,7 @@ describe('templates view', () => {
   it('shows a reopened draft in place of the form open when Reopen is pressed', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []) })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await rowAction('Duplicate')
     const open = within(await screen.findByRole('dialog', { name: 'Duplicate template' }))
     fireEvent.change(open.getByLabelText(/^Task/), { target: { value: 'something else' } })
@@ -804,7 +771,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((_, reject) => (refuse = reject))),
     })
     seed()
-    const { unmount } = render(<TemplatesRoute params={{}} client={client} />)
+    const { unmount } = render(<Templates client={client} />)
     await rowAction('Edit')
     const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
     fireEvent.change(dialog.getByLabelText(/^Task/), { target: { value: 'sweep instead' } })
@@ -817,7 +784,7 @@ describe('templates view', () => {
     const [, options] = vi.mocked(toast.error).mock.lastCall as unknown as [string, { cancel: { onClick: () => void } }]
     act(() => options.cancel.onClick())
     expect(useStore.getState().route.name).toBe('templates')
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     const reopened = within(await screen.findByRole('dialog', { name: 'Edit template' }))
     expect((reopened.getByLabelText(/^Task/) as HTMLTextAreaElement).value).toBe('sweep instead')
     expect(reopened.getByRole('alert').textContent).toContain('harness is not installed')
@@ -829,7 +796,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>(() => {})),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await rowAction('Edit')
     const dialog = within(await screen.findByRole('dialog', { name: 'Edit template' }))
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -856,7 +823,7 @@ describe('templates view', () => {
       scheduleSave: vi.fn(async () => schedule),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await rowAction('Schedule…')
     const dialog = within(await screen.findByRole('dialog', { name: `Schedule ${template.name}` }))
     fireEvent.change(dialog.getByLabelText('Schedule (UTC)'), { target: { value: '0 3 * * *' } })
@@ -864,7 +831,7 @@ describe('templates view', () => {
     await waitFor(() => expect(dialog.getByRole('button', { name: 'Unschedule' })).toBeDefined())
     await act(async () => list([]))
 
-    expect(screen.getByRole('listitem', { name: `Template ${template.name}`, hidden: true }).textContent).toContain('Scheduled')
+    expect(detail(template.name).textContent).toContain('Scheduled')
   })
 
   it('keeps a template saved while the list read after a workspace switch was pending', async () => {
@@ -875,7 +842,7 @@ describe('templates view', () => {
       templateSave: vi.fn(async () => ({ ...template, id: 'tpl_2', name: 'weekly sweep', task: 'sweep the flaky tests' })),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await act(async () => list([]))
     fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
     const dialog = within(await screen.findByRole('dialog'))
@@ -887,8 +854,8 @@ describe('templates view', () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Template saved'))
     await act(async () => list([template]))
 
-    expect(screen.getByRole('listitem', { name: 'Template weekly sweep' })).toBeDefined()
-    expect(screen.getByRole('listitem', { name: `Template ${template.name}` })).toBeDefined()
+    expect(screen.getByRole('option', { name: 'Template weekly sweep' })).toBeDefined()
+    expect(screen.getByRole('option', { name: `Template ${template.name}` })).toBeDefined()
   })
 
   it('keeps a save from a form reopened before the first list read answered', async () => {
@@ -900,7 +867,7 @@ describe('templates view', () => {
     })
     seed()
     reopen('templates', { workspaceID: workspace.id, form: { kind: 'new' } })
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     const dialog = within(await screen.findByRole('dialog'))
     fireEvent.change(dialog.getByLabelText(/^Name/), { target: { value: 'weekly sweep' } })
     fireEvent.change(dialog.getByLabelText(/^Task/), { target: { value: 'sweep the flaky tests' } })
@@ -908,7 +875,7 @@ describe('templates view', () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Template saved'))
     await act(async () => list([]))
 
-    expect(screen.getByRole('listitem', { name: 'Template weekly sweep' })).toBeDefined()
+    expect(screen.getByRole('option', { name: 'Template weekly sweep' })).toBeDefined()
   })
 
   it('reopens a failed delete in the workspace it was sent from', async () => {
@@ -919,7 +886,7 @@ describe('templates view', () => {
       templateDelete: vi.fn(() => new Promise<unknown>((_, reject) => (refuse = reject))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await rowAction('Delete')
     fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
     act(() => useStore.setState({ activeWorkspace: otherWorkspace.id }))
@@ -939,7 +906,7 @@ describe('templates view', () => {
       scheduleSave: vi.fn(() => new Promise<Schedule>(() => {})),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     await rowAction('Schedule…')
     const dialog = within(await screen.findByRole('dialog', { name: `Schedule ${template.name}` }))
     fireEvent.change(dialog.getByLabelText('Schedule (UTC)'), { target: { value: '0 3 * * *' } })
@@ -954,8 +921,8 @@ describe('templates view', () => {
   it('labels Unschedule while the server answers, and says when it is slow', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => [schedule]), scheduleDelete: vi.fn(() => new Promise<unknown>(() => {})) })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
-    await screen.findByText(/Scheduled/)
+    render(<Templates client={client} />)
+    await screen.findByText(/^Scheduled .*UTC/)
     await rowAction('Schedule…')
     const dialog = within(await screen.findByRole('dialog', { name: `Schedule ${template.name}` }))
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -977,7 +944,7 @@ describe('templates view', () => {
       templateSave: vi.fn(() => new Promise<Template>((resolve) => (answer = resolve))),
     })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
     fireEvent.click(await screen.findByRole('button', { name: 'New template' }))
     const dialog = within(await screen.findByRole('dialog'))
     fireEvent.change(dialog.getByLabelText(/^Name/), { target: { value: 'weekly sweep' } })
@@ -987,13 +954,13 @@ describe('templates view', () => {
     act(() => useStore.setState({ activeWorkspace: otherWorkspace.id }))
     expect(await screen.findByRole('heading', { name: 'No templates yet' })).toBeDefined()
     await act(async () => answer({ ...template, id: 'tpl_2', name: 'weekly sweep' }))
-    expect(screen.queryByRole('listitem', { name: 'Template weekly sweep' })).toBeNull()
+    expect(screen.queryByRole('option', { name: 'Template weekly sweep' })).toBeNull()
   })
 
   it('explains templates and offers one when the workspace has none', async () => {
     const client = fakeApi({ templateList: vi.fn(async () => []), scheduleList: vi.fn(async () => []) })
     seed()
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     expect(await screen.findByRole('heading', { name: 'No templates yet' })).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: 'New template' }))
@@ -1005,7 +972,7 @@ describe('templates view', () => {
   it('reads the active workspace, not a picker of its own', async () => {
     const client = fakeApi({ scheduleList: vi.fn(async () => []) })
     seed({ activeWorkspace: otherWorkspace.id })
-    render(<TemplatesRoute params={{}} client={client} />)
+    render(<Templates client={client} />)
 
     await waitFor(() => expect(client.templateList).toHaveBeenCalledWith(otherWorkspace.id))
     expect(screen.queryByLabelText('Workspace')).toBeNull()

@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { CodeBlock } from '@/components/ui/code'
 import { FormField } from '@/components/ui/form-field'
+import { InsetList } from '@/components/ui/inset-list'
 import { SectionLabel } from '@/components/ui/section-label'
 import { Textarea } from '@/components/ui/textarea'
 import type { RunGitChange } from '@/lib/types'
@@ -31,7 +32,7 @@ export function CommitStep({ p, wrap, onContinue }: { p: Publish; wrap: boolean;
           </p>
         )}
         {changes.length > 0 ? (
-          <ul className="divide-y divide-seam rounded-panel border border-seam">
+          <InsetList>
             {changes.map((change) => (
               <li key={change.path}>
                 <label className="flex min-w-0 cursor-pointer items-start gap-2 px-2 py-1.5 hover:bg-hover-chrome">
@@ -51,7 +52,7 @@ export function CommitStep({ p, wrap, onContinue }: { p: Publish; wrap: boolean;
                 </label>
               </li>
             ))}
-          </ul>
+          </InsetList>
         ) : (
           !status.error && <p className="text-ui text-muted">No native checkout changes. Anything the agent committed is ready to push.</p>
         )}

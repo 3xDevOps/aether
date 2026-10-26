@@ -497,6 +497,8 @@ describe('settings view', () => {
       const nav = screen.getByRole('navigation', { name: 'Settings' })
       expect(within(nav).getByRole('button', { name: 'General' }).getAttribute('aria-current')).toBe('page')
       expect(screen.getByRole('heading', { level: 2, name: 'General' })).toBeDefined()
+      expect(nav.querySelector(':scope > [data-slot="sliding-indicator"]')).not.toBeNull()
+      expect(nav.querySelectorAll('[data-indicator-key]').length).toBeGreaterThan(1)
 
       fireEvent.click(within(nav).getByRole('button', { name: 'Server' }))
       expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'server' } })

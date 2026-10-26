@@ -644,6 +644,7 @@ export const api = {
     execution_choices: MissionExecutionChoice[]
     fallback_account_member_ids?: string[]
     no_fallback?: boolean
+    extra_workspace_ids?: string[]
     idempotency_key: string
   }) => call<MissionCreateResult>('mission.create', params),
   missionShow: (missionID: string) =>
@@ -821,8 +822,8 @@ export const api = {
     call<{ templates: Template[] }>('template.list', {
       workspace_id: workspaceID,
     }).then((r) => r.templates),
-  templateLaunch: (workspaceID: string, name: string) =>
-    call<TemplateLaunch>('template.launch', { workspace_id: workspaceID, name }),
+  templateLaunch: (workspaceID: string, name: string, params?: Record<string, string>) =>
+    call<TemplateLaunch>('template.launch', { workspace_id: workspaceID, name, ...(params ? { params } : {}) }),
   workspaceTimeline: (query: TimelineQuery) =>
     call<TimelinePage>('workspace.timeline', query),
   runOverlaps: () =>
@@ -983,6 +984,8 @@ export const api = {
     harness: string
     mode?: string
     model?: string
+    params?: Record<string, string>
+    budget_usd?: number
   }) =>
     call<{ template: Template }>('template.save', params).then(
       (r) => r.template,

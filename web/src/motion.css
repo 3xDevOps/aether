@@ -1,0 +1,358 @@
+/* Motion tokens and the keyframes built on them. docs/styles.md, "Run state
+   and motion", lists each role. Every animation here or on a utility that
+   names one has a reduced-motion off-switch. */
+
+@property --tw-duration {
+  syntax: '*';
+  inherits: false;
+}
+
+/* The shimmer band's position, registered so a keyframe can tween it. */
+@property --shimmer-pos {
+  syntax: '<length-percentage>';
+  inherits: false;
+  initial-value: 0%;
+}
+
+@theme static {
+  --ease-hover: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-enter: cubic-bezier(0.2, 0, 0, 1);
+  --ease-glide: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-press: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-in-out: cubic-bezier(0.42, 0, 0.58, 1);
+  --ease-pulse: cubic-bezier(0.22, 0, 0.56, 0.87);
+  --ease-linear: linear;
+
+  --duration-100: 100ms;
+  --duration-130: 130ms;
+  --duration-150: 150ms;
+  --duration-200: 200ms;
+  --duration-220: 220ms;
+  --duration-250: 250ms;
+  --duration-270: 270ms;
+  --duration-300: 300ms;
+  --duration-360: 360ms;
+  --duration-450: 450ms;
+  --duration-500: 500ms;
+  --duration-720: 720ms;
+  --duration-900: 900ms;
+  --duration-1000: 1000ms;
+  --duration-1400: 1400ms;
+  --duration-1600: 1600ms;
+  --duration-instant: 0ms;
+  --duration-hover: var(--duration-150);
+  --duration-press: var(--duration-150);
+  --duration-release: var(--duration-130);
+  --duration-popover: var(--duration-130);
+  --duration-glide: var(--duration-300);
+  --duration-expand: var(--duration-250);
+  --duration-pulse: var(--duration-1600);
+
+  --default-transition-duration: var(--duration-hover);
+  --default-transition-timing-function: var(--ease-hover);
+
+  --scale-press: 0.97;
+  --scale-popover: 0.98;
+  --scale-enter: 0.95;
+  --opacity-track: 0.2;
+  --opacity-muted: 0.45;
+  --blur-fade: 2px;
+  --stagger-row: 30ms;
+  --stagger-cell: 2ms;
+
+  --animate-spin: spin var(--duration-900) linear infinite;
+  --animate-overlay-in: overlay-in var(--duration-popover) var(--ease-enter);
+  --animate-fade-in: fade-in var(--duration-200) var(--ease-enter);
+  --animate-dialog-in: dialog-in var(--duration-200) var(--ease-enter);
+  --animate-scrim-in: fade-in var(--duration-200) var(--ease-standard);
+  --animate-sheet-up: sheet-up var(--duration-220) var(--ease-sheet);
+  --animate-sheet-left: sheet-left var(--duration-220) var(--ease-sheet);
+  --animate-sheet-right: sheet-right var(--duration-220) var(--ease-sheet);
+  --animate-expand-right: expand-right var(--duration-220) var(--ease-enter);
+  --animate-collapsible-down: collapsible-down var(--duration-expand) var(--ease-enter);
+  --animate-collapsible-up: collapsible-up var(--duration-200) var(--ease-standard);
+  --animate-entrance: entrance var(--duration-360) var(--ease-enter) backwards;
+  --animate-skeleton-sweep: skeleton-sweep var(--duration-1400) var(--ease-in-out) infinite;
+  --animate-progress-sweep: progress-sweep var(--duration-1400) var(--ease-in-out) infinite;
+  --animate-pop-in: pop-in var(--duration-250) var(--ease-pop) backwards;
+  --animate-shake: shake var(--duration-360) var(--ease-in-out);
+  --animate-bob: bob var(--duration-450) var(--ease-in-out) infinite alternate;
+
+  /* Overlays grow from the Radix transform origin their content sets. */
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+      transform: scale(var(--scale-popover));
+    }
+  }
+  /* `transform`, never `translate`: a centred dialog holds its place with the
+     separate `translate` property, which this must not replace. */
+  @keyframes dialog-in {
+    from {
+      opacity: 0;
+      transform: scale(var(--scale-enter));
+    }
+  }
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+  }
+  @keyframes sheet-left {
+    from {
+      transform: translateX(-100%);
+    }
+  }
+  @keyframes sheet-right {
+    from {
+      transform: translateX(100%);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  /* The negative insets keep the surface's shadow inside the clip. */
+  @keyframes expand-right {
+    from {
+      clip-path: inset(-2rem 100% -2rem 0);
+    }
+    to {
+      clip-path: inset(-2rem -2rem -2rem 0);
+    }
+  }
+  /* The clip lives in the keyframes alone, so an open body never cuts the
+     focus outlines of the controls inside it. */
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+      padding-block: 0;
+      border-block-width: 0;
+      overflow: hidden;
+    }
+    to {
+      height: var(--radix-collapsible-content-height);
+      overflow: hidden;
+    }
+  }
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height);
+      overflow: hidden;
+    }
+    to {
+      height: 0;
+      padding-block: 0;
+      border-block-width: 0;
+      overflow: hidden;
+    }
+  }
+  @keyframes entrance {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+  }
+  @keyframes skeleton-sweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
+  /* A third-width fill crossing its track, for work with no known progress. */
+  @keyframes progress-sweep {
+    from {
+      translate: -100% 0;
+    }
+    to {
+      translate: 300% 0;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      scale: 0.5;
+    }
+  }
+  @keyframes shake {
+    20%,
+    60% {
+      translate: -3px 0;
+    }
+    40%,
+    80% {
+      translate: 3px 0;
+    }
+  }
+  @keyframes bob {
+    to {
+      translate: 0 -3px;
+    }
+  }
+}
+
+/* Semantic durations have no Tailwind namespace. Each also sets
+   --tw-duration, which every transition-* utility reads: without it a
+   transition-colors under a variant would reset the duration to the default. */
+@utility duration-instant {
+  --tw-duration: var(--duration-instant);
+  transition-duration: var(--duration-instant);
+}
+@utility duration-hover {
+  --tw-duration: var(--duration-hover);
+  transition-duration: var(--duration-hover);
+}
+@utility duration-press {
+  --tw-duration: var(--duration-press);
+  transition-duration: var(--duration-press);
+}
+@utility duration-release {
+  --tw-duration: var(--duration-release);
+  transition-duration: var(--duration-release);
+}
+@utility duration-popover {
+  --tw-duration: var(--duration-popover);
+  transition-duration: var(--duration-popover);
+}
+@utility duration-glide {
+  --tw-duration: var(--duration-glide);
+  transition-duration: var(--duration-glide);
+}
+@utility duration-expand {
+  --tw-duration: var(--duration-expand);
+  transition-duration: var(--duration-expand);
+}
+@utility duration-pulse {
+  --tw-duration: var(--duration-pulse);
+  transition-duration: var(--duration-pulse);
+}
+
+@layer components {
+  /* The Working pulse: the dot dims and shrinks, then returns, each half on
+     the pulse curve. */
+  .state-pulse {
+    animation: breathe var(--duration-1000) var(--ease-pulse) infinite;
+  }
+
+  @keyframes breathe {
+    50% {
+      opacity: var(--opacity-muted);
+      scale: 0.67;
+    }
+  }
+
+  /* The live row: a light band crosses muted text, then rests for the
+     remainder of the period. */
+  .live-shimmer {
+    background: linear-gradient(
+        90deg,
+        var(--text-muted) calc(var(--shimmer-pos) - 30px),
+        var(--text) var(--shimmer-pos),
+        var(--text-muted) calc(var(--shimmer-pos) + 30px)
+      )
+      0 0 / 100% 100%;
+    background-clip: text;
+    color: transparent;
+    animation: live-shimmer var(--duration-pulse) var(--ease-linear) infinite;
+  }
+
+  @keyframes live-shimmer {
+    from {
+      --shimmer-pos: -30px;
+    }
+    87.5%,
+    to {
+      --shimmer-pos: calc(100% + 30px);
+    }
+  }
+
+  .typing-dot {
+    animation: typing-dot 1.2s steps(1, end) infinite;
+  }
+
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  @keyframes typing-dot {
+    0%,
+    60%,
+    100% {
+      opacity: 1;
+    }
+    30% {
+      opacity: 0.3;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .state-pulse,
+    .typing-dot {
+      animation: none;
+    }
+
+    .live-shimmer {
+      animation: none;
+      background: none;
+      color: var(--text-muted);
+    }
+  }
+}
+
+/* The Trace view's axis variables glide on a zoom or a scale step. */
+@property --trace-scale {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --trace-origin {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+@layer components {
+  .trace-axis {
+    transition:
+      --trace-scale var(--duration-glide) var(--ease-glide),
+      --trace-origin var(--duration-glide) var(--ease-glide);
+  }
+
+  /* A running bar: the live shimmer's band crosses the fill. */
+  .trace-live {
+    background-image: linear-gradient(
+      90deg,
+      transparent calc(var(--shimmer-pos) - 28px),
+      color-mix(in srgb, var(--state-working) 35%, transparent) var(--shimmer-pos),
+      transparent calc(var(--shimmer-pos) + 28px)
+    );
+    animation: live-shimmer var(--duration-pulse) var(--ease-linear) infinite;
+  }
+
+  /* History before the first held item: a hatch, so it never reads as idle time. */
+  .trace-unknown {
+    background-image: repeating-linear-gradient(135deg, var(--seam) 0 1px, transparent 1px 5px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .trace-axis {
+      transition: none;
+    }
+
+    .trace-live {
+      animation: none;
+      background-image: none;
+    }
+  }
+}

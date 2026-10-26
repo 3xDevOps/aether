@@ -1,98 +1,58 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 import { useConnectionProblem } from '@/components/shell/connection'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
-import { Card, CardControls, CardTitle } from '@/components/ui/card'
-import { Code, CodeBlock } from '@/components/ui/code'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { EmptyState } from '@/components/ui/empty-state'
-import { FailureCallout } from '@/components/ui/failure-callout'
-import { Input } from '@/components/ui/input'
-import { RelativeTime } from '@/components/ui/relative-time'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Skeleton } from '@/components/ui/skeleton'
 import { ViewHeader } from '@/components/view-header'
-import { api, ApiError, type Api } from '@/lib/api'
+import { api, type Api } from '@/lib/api'
 import { useIsMobile } from '@/lib/breakpoints'
+import { useLayoutGlide } from '@/lib/flip'
 import { message } from '@/lib/format'
-import { useDelayed } from '@/lib/hooks'
+import { prefersReducedMotion, useDelayed } from '@/lib/hooks'
+import { formatKeys } from '@/lib/keybindings'
+import { type Motion, play, playEntrance } from '@/lib/motion'
 import { allowed } from '@/lib/permissions'
 import type { MemoryAddResult, MemoryItem } from '@/lib/types'
 import { agentDisplayNames, useAgentList } from '@/routes/agents/use-agents'
-import { AddNote } from '@/routes/memory/add-note'
-import { briefMaxBytes, filters, kindLabel, listed, listLimit, reads, sourceLabel, superseded, type Filter } from '@/routes/memory/model'
-import { Byline, NoteDialog, PinBadge, PRLink, RunLink } from '@/routes/memory/note'
+import { AddNoteButton, Composer } from '@/routes/memory/add-note'
+import { BriefRegion, BriefToggle } from '@/routes/memory/brief'
+import { FooterBand, hintKey, Line, RowHint, UndoBar } from '@/routes/memory/footer'
+import { NoteList } from '@/routes/memory/list'
+import { byteLength, capNotice, listed, noteMaxBytes, tabCounts, type Filter } from '@/routes/memory/model'
+import { NoteDialog } from '@/routes/memory/note'
+import { NoteRow } from '@/routes/memory/row'
+import { ShowBar } from '@/routes/memory/toolbar'
+import { useNotes } from '@/routes/memory/use-notes'
+import { useRemoval } from '@/routes/memory/use-removal'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
 import { useSelf } from '@/store/hooks'
 
-const METHOD_NOT_FOUND = -32601
 const searchDelay = 250
+const noticeMs = 4000
+/** Rows that arrive together from elsewhere enter one by one only when this few; more just appear. */
+const maxEntrances = 5
 
-type Load =
-  | { kind: 'loading' }
-  | { kind: 'ready'; items: MemoryItem[]; pinsFull: boolean; full: boolean; words: string; filter: Filter }
-  | { kind: 'failed'; message: string }
-  | { kind: 'unsupported' }
+const glides = {
+  pin: { duration: '--duration-glide', easing: '--ease-glide' },
+  remove: { duration: '--duration-130', easing: '--ease-linear' },
+  undo: { duration: '--duration-250', easing: '--ease-pop' },
+} satisfies Record<string, Motion>
 
-type Brief = { kind: 'loading' } | { kind: 'ready'; text: string } | { kind: 'failed'; message: string }
+type Draft = { replaces?: MemoryItem; reopen: boolean }
 
-function NoteRow({ item, agents, onOpen }: { item: MemoryItem; agents: Record<string, string>; onOpen: () => void }) {
-  return (
-    <Card>
-      <div className="flex min-w-0 items-start justify-between gap-2">
-        <CardTitle onOpen={onOpen}>{item.title}</CardTitle>
-        <RelativeTime at={item.created_at} compact className="shrink-0 text-ui-sm tabular-nums text-muted" />
-      </div>
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-ui-sm text-muted">
-        {item.pinned_at && <PinBadge item={item} />}
-        {superseded(item) && <Badge tone="closed">Superseded</Badge>}
-        <Badge>{kindLabel[item.kind]}</Badge>
-        <span>{sourceLabel[item.source]}</span>
-        <span aria-hidden>·</span>
-        <span><Byline item={item} agents={agents} /></span>
-        {item.run_id && <CardControls><RunLink id={item.run_id} /></CardControls>}
-        {item.pr_url && <CardControls><PRLink item={item} /></CardControls>}
-        {item.files?.length ? <span className="min-w-0 truncate font-code" title={item.files.join('\n')}>{item.files.length === 1 ? item.files[0] : `${item.files[0]} +${item.files.length - 1} more`}</span> : null}
-      </div>
-    </Card>
-  )
-}
-
-function BriefPanel({ brief, onRetry }: { brief: Brief; onRetry: () => void }) {
-  const size = brief.kind === 'ready' ? new TextEncoder().encode(brief.text).length : 0
-  return (
-    <Collapsible>
-      <CollapsibleTrigger>
-        Brief{' '}
-        {brief.kind === 'ready' && <span className="text-ui-sm tabular-nums text-muted">· {size} of {briefMaxBytes} bytes</span>}
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <section aria-label="Brief" className="flex min-w-0 flex-col gap-2 px-1 pt-2">
-          <p className="text-ui-sm text-muted">What a run you launch in this workspace gets at start, byte for byte.</p>
-          {brief.kind === 'loading' && <p className="text-ui text-muted">Reading the brief…</p>}
-          {brief.kind === 'failed' && <FailureCallout error={brief.message} onRetry={onRetry} />}
-          {brief.kind === 'ready' && (brief.text
-            ? <CodeBlock className="break-words whitespace-pre-wrap">{brief.text}</CodeBlock>
-            : <p className="text-ui text-muted">Empty: nothing is pinned, no run finished in the last 48 hours and there are no notes.</p>)}
-        </section>
-      </CollapsibleContent>
-    </Collapsible>
-  )
-}
+const nearest = (row: Element, fallback: HTMLElement | null) =>
+  (row.nextElementSibling ?? row.previousElementSibling)?.querySelector<HTMLElement>('[data-card-open]') ?? fallback
 
 export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
-  const connection = useStore((s) => s.connection)
   const hydrated = useStore((s) => s.hydrated)
   const activeWorkspace = useStore((s) => s.activeWorkspace)
   const workspaces = useStore(useShallow((s) => Object.values(s.workspaces)))
-  const self = useSelf()
-  const canWrite = allowed('push', self)
-  const mobile = useIsMobile()
+  const canWrite = allowed('push', useSelf())
   const problem = useConnectionProblem()
+  const mobile = useIsMobile()
   const { agents } = useAgentList(client)
   const agentNames = useMemo(() => agentDisplayNames(agents), [agents])
   const [picked, setPicked] = useState<string | null>(null)
@@ -101,84 +61,196 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
   const [typed, setTyped] = useState('')
   const [words, setWords] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
-  const [load, setLoad] = useState<Load>({ kind: 'loading' })
-  const [brief, setBrief] = useState<Brief>({ kind: 'loading' })
+  const [searching, setSearching] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
-  const [adding, setAdding] = useState(false)
-  const listRequest = useRef(0)
-  const briefRequest = useRef(0)
+  const [draft, setDraft] = useState<Draft | null>(null)
+  const [writing, setWriting] = useState({ text: '', edited: false })
+  const [briefOpen, setBriefOpen] = useState(false)
+  const [lookID, setLookID] = useState<string | null>(null)
+  const [notice, setNotice] = useState('')
+  const notes = useNotes(client, workspaceID, words, filter)
+  const removal = useRemoval(client, workspaceID, notes.refresh)
+  const { load, refresh } = notes
+
+  const listRef = useRef<HTMLDivElement>(null)
+  const addRef = useRef<HTMLButtonElement>(null)
+  const searchRef = useRef<HTMLButtonElement>(null)
+  const refocus = useRef<'add' | 'search' | null>(null)
+  const glideKind = useRef<keyof typeof glides>('pin')
+  const capture = useLayoutGlide(listRef, glides[glideKind.current])
+  const glide = useCallback((kind: keyof typeof glides) => {
+    glideKind.current = kind
+    capture()
+  }, [capture])
 
   useEffect(() => {
     const timer = setTimeout(() => setWords(typed.trim()), searchDelay)
     return () => clearTimeout(timer)
   }, [typed])
 
-  const readList = useCallback(async () => {
-    const id = ++listRequest.current
-    try {
-      const params = reads(workspaceID, words, filter)
-      const results = await Promise.all(params.map((p) => client.memorySearch(p)))
-      const items = results.flatMap((result) => result.items)
-      const filled = (pinned: boolean) => params.some((p, i) => Boolean(p.pinned) === pinned && results[i].items.length >= listLimit)
-      if (id === listRequest.current) setLoad({ kind: 'ready', items, pinsFull: filled(true), full: filled(false), words, filter })
-    } catch (error) {
-      if (id !== listRequest.current) return
-      // A 404 with a code is the server's own answer, such as an unknown workspace.
-      const unsupported = error instanceof ApiError && (error.code === METHOD_NOT_FOUND || (error.status === 404 && error.code === undefined))
-      setLoad(unsupported ? { kind: 'unsupported' } : { kind: 'failed', message: message(error) })
-    }
-  }, [client, workspaceID, words, filter])
-
-  const readBrief = useCallback(async () => {
-    const id = ++briefRequest.current
-    try {
-      const result = await client.memoryBrief(workspaceID)
-      if (id === briefRequest.current) setBrief({ kind: 'ready', text: result.text })
-    } catch (error) {
-      if (id === briefRequest.current) setBrief({ kind: 'failed', message: message(error) })
-    }
-  }, [client, workspaceID])
-
-  // A new search or filter keeps the list on screen until its answer lands; another workspace's notes do not.
   useEffect(() => {
-    setLoad({ kind: 'loading' })
-    setBrief({ kind: 'loading' })
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(''), noticeMs)
+    return () => clearTimeout(timer)
+  }, [notice])
+
+  useEffect(() => {
+    setDraft(null)
+    setOpen(null)
+    setLookID(null)
   }, [workspaceID])
 
   useEffect(() => {
-    if (connection === 'live' && workspaceID) void readList()
-  }, [connection, workspaceID, readList])
+    const target = refocus.current === 'add' ? addRef.current : refocus.current === 'search' ? searchRef.current : null
+    if (!target || (refocus.current === 'add' && draft) || (refocus.current === 'search' && searching)) return
+    refocus.current = null
+    target.focus()
+  }, [draft, searching])
 
-  useEffect(() => {
-    if (connection === 'live' && workspaceID) void readBrief()
-  }, [connection, workspaceID, readBrief])
+  const items = useMemo(
+    () => (load.kind === 'ready' ? listed(load.items).filter((item) => !removal.hidden.has(item.id)) : []),
+    [load, removal.hidden],
+  )
+  const counts = useMemo(() => (notes.all ? tabCounts(notes.all, removal.hidden) : {}), [notes.all, removal.hidden])
+  const stale = load.kind === 'ready' && (load.filter !== filter || load.words !== words)
+  const skeleton = useDelayed(load.kind === 'loading' && !notes.waiting)
 
-  const changed = useCallback(() => {
-    void readList()
-    void readBrief()
-  }, [readList, readBrief])
+  // Entrances only for what the viewer did not just read: a new filter or
+  // search fades the list in, and a few rows arriving in place enter one by one.
+  const shown = useRef<{ key: string; ids: Set<string> } | null>(null)
+  const reveal = useRef<{ id: string; flash: boolean } | null>(null)
+  useLayoutEffect(() => {
+    if (load.kind !== 'ready') return
+    const key = `${workspaceID}\n${load.filter}\n${load.words}`
+    const before = shown.current
+    shown.current = { key, ids: new Set(items.map((item) => item.id)) }
+    // A note added outside this view is not revealed later, when the viewer moves to one that shows it.
+    if (before && before.key !== key) reveal.current = null
+    const rowOf = (id: string) => listRef.current?.querySelector<HTMLElement>(`[data-glide-key="${id}"]`)
+    const target = reveal.current && rowOf(reveal.current.id)
+    if (target && reveal.current) {
+      target.scrollIntoView({ block: 'nearest' })
+      if (reveal.current.flash && !prefersReducedMotion()) {
+        // Read here, not through readToken's cache: --selection changes with the theme.
+        const selection = getComputedStyle(document.documentElement).getPropertyValue('--selection').trim()
+        play(target.querySelector('article') ?? target, [{ backgroundColor: selection }, { backgroundColor: 'transparent' }], { duration: '--duration-1000', easing: '--ease-standard' })
+      }
+      reveal.current = null
+    }
+    if (!before || !listRef.current) return
+    if (before.key !== key) {
+      playEntrance(listRef.current, { motion: { duration: '--duration-220', easing: '--ease-enter', delay: '--duration-100' }, rise: 3 })
+      return
+    }
+    const added = items.filter((item) => !before.ids.has(item.id))
+    if (added.length > maxEntrances) return
+    added.forEach((item, index) => {
+      const row = rowOf(item.id)
+      if (row) playEntrance(row, { motion: { duration: '--duration-360', easing: '--ease-enter' }, rise: 4, index })
+    })
+  }, [load, items, workspaceID])
 
-  useEffect(() => useStore.subscribe((s, previous) => {
-    if (s.memoryChanges[workspaceID] !== previous.memoryChanges[workspaceID]) changed()
-  }), [workspaceID, changed])
+  const { patch } = notes
+  const startRemoval = removal.remove
+  // Stable handlers, so a hover or a keystroke does not re-render every row.
+  const togglePin = useCallback(async (item: MemoryItem) => {
+    try {
+      const { item: next } = item.pinned_at ? await client.memoryUnpin(workspaceID, item.id) : await client.memoryPin(workspaceID, item.id)
+      glide('pin')
+      patch(next)
+      refresh()
+    } catch (error) {
+      toast.error(message(error))
+    }
+  }, [client, workspaceID, glide, patch, refresh])
+
+  const hide = useCallback((item: MemoryItem) => {
+    glide('remove')
+    startRemoval(item)
+  }, [glide, startRemoval])
+
+  // A removed row unmounts with its focus, so a keyboard user lands on the next row, else the previous one, else Add note.
+  const listItem = useCallback((id: string) => listRef.current?.querySelector(`[data-glide-key="${id}"]`)?.closest('li'), [])
+
+  const remove = useCallback((item: MemoryItem) => {
+    const row = listItem(item.id)
+    const next = row?.contains(document.activeElement) ? nearest(row, addRef.current) : null
+    hide(item)
+    next?.focus()
+  }, [hide, listItem])
+
+  const draftHeld = useRef(false)
+  draftHeld.current = Boolean(draft) && writing.edited
+  // Swapping the open composer would throw away what the viewer typed.
+  const keepDraft = useCallback(() => {
+    if (draftHeld.current) toast('Finish or cancel the note you are writing first.')
+    return draftHeld.current
+  }, [])
+
+  const openNote = useCallback((item: MemoryItem) => setOpen(item.id), [])
+  const lookAt = useCallback((item: MemoryItem | null) => setLookID(item?.id ?? null), [])
+  const replace = useCallback((item: MemoryItem) => {
+    if (!keepDraft()) setDraft({ replaces: item, reopen: false })
+  }, [keepDraft])
+
+  // Where focus goes once the detail closes: undefined restores the row that opened it, null leaves it in place.
+  const afterDialog = useRef<HTMLElement | null | undefined>(undefined)
+
+  const undo = () => {
+    glide('undo')
+    removal.undo()
+  }
+
+  const closeDraft = useCallback(() => {
+    refocus.current = 'add'
+    setDraft(null)
+  }, [])
 
   const added = (result: MemoryAddResult) => {
-    setAdding(false)
-    toast.success(result.duplicate ? `Team memory already holds this note as ${result.item.id}` : `Added ${result.item.id}`)
-    changed()
+    const old = draft?.replaces?.id
+    const id = result.item.id
+    removal.keep(id)
+    setNotice(old
+      ? `Replaced ${old} with ${id}${result.duplicate ? ', which already held this text' : ''}`
+      : result.duplicate ? `Already kept as ${id}` : `Added ${id}`)
+    reveal.current = { id, flash: Boolean(result.duplicate) }
+    if (draft?.reopen) {
+      setDraft(null)
+      setOpen(id)
+    } else {
+      closeDraft()
+    }
+    refresh()
   }
 
-  const replaced = (old: string, result: MemoryAddResult) => {
-    setOpen((shown) => (shown === old ? result.item.id : shown))
-    toast.success(`Replaced ${old} with ${result.item.id}${result.duplicate ? ', which already held this text' : ''}`)
-    changed()
+  const openSearch = () => setSearching(true)
+  const closeSearch = () => {
+    refocus.current = 'search'
+    setSearching(false)
+    setTyped('')
+    setWords('')
   }
 
-  const waiting = load.kind === 'loading' && connection !== 'live'
-  const skeleton = useDelayed(load.kind === 'loading' && !waiting)
-  const items = load.kind === 'ready' ? listed(load.items) : []
+  const look = lookID ? items.find((item) => item.id === lookID) : undefined
+  const footer = (() => {
+    if (removal.pending) return { key: `undo\n${removal.pending.id}`, node: <UndoBar item={removal.pending} onUndo={undo} /> }
+    if (draft) {
+      return {
+        key: 'draft',
+        node: <Line>{formatKeys('$mod+Enter')} adds · Esc cancels · <span aria-hidden>{byteLength(writing.text)} of {noteMaxBytes} bytes</span></Line>,
+      }
+    }
+    if (notice) return { key: `notice\n${notice}`, node: <Line>{notice}</Line> }
+    if (look) return { key: `look\n${hintKey(look)}`, node: <RowHint item={look} /> }
+    if (load.kind !== 'ready' || items.length === 0) return { key: '', node: null }
+    const text = capNotice(load, load.words)
+      || (load.words
+        ? `${items.length} ${items.length === 1 ? 'match' : 'matches'} for “${load.words}”`
+        : `${items.length} ${items.length === 1 ? 'note' : 'notes'} · ${items.filter((item) => item.pinned_at).length} pinned`)
+    return { key: text, node: <Line>{text}</Line> }
+  })()
 
-  const controls = (
+  const controls = workspaceID && (
     <>
       {workspaces.length > 1 && (
         <Select value={workspaceID} onValueChange={setPicked}>
@@ -190,74 +262,76 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
           </SelectContent>
         </Select>
       )}
-      {canWrite && workspaceID && <Button variant="secondary" size="sm" onClick={() => setAdding(true)}>Add note</Button>}
+      {load.kind !== 'unsupported' && <BriefToggle brief={notes.brief} open={briefOpen} onToggle={() => setBriefOpen((o) => !o)} />}
     </>
   )
 
+  const ready = Boolean(workspaceID) && load.kind !== 'unsupported' && !notes.waiting
+
   return (
     <div className="flex h-full min-w-0 flex-col">
-      <ViewHeader title="Memory" actions={mobile ? undefined : controls} />
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-4 px-4 py-6 sm:px-6">
-          {mobile && <div role="toolbar" aria-label="Memory actions" className="flex flex-wrap items-center gap-2">{controls}</div>}
-          {waiting && (
-            <Callout tone="neutral" role="status">{problem ?? 'Connecting'}. Team memory loads once the server connection is live.</Callout>
+      <ViewHeader title="Memory" actions={(!mobile && controls) || undefined} />
+      <div className="flex min-h-0 flex-1 flex-col pb-[var(--keyboard-inset,0px)] sm:px-6 sm:py-4">
+        <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-hidden bg-canvas sm:rounded-panel sm:border sm:border-seam">
+          {mobile && controls && (
+            <div role="toolbar" aria-label="Memory actions" className="flex shrink-0 flex-wrap items-center gap-2 border-b border-seam px-4 py-2">{controls}</div>
+          )}
+          {notes.waiting && (
+            <Callout tone="neutral" role="status" className="m-4">{problem ?? 'Connecting'}. Team memory loads once the server connection is live.</Callout>
           )}
           {hydrated && !workspaceID && <EmptyState title="No workspace yet.">Team memory belongs to a workspace. Add one to start keeping notes.</EmptyState>}
           {load.kind === 'unsupported' && (
-            <Callout tone="neutral" role="status">This server does not keep team memory. Update the server to use it.</Callout>
+            <Callout tone="neutral" role="status" className="m-4">This server does not keep team memory. Update the server to use it.</Callout>
           )}
-          {workspaceID && load.kind !== 'unsupported' && !waiting && (
+          {ready && (
             <>
-              <BriefPanel brief={brief} onRetry={() => void readBrief()} />
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <Input
-                  type="search"
-                  aria-label="Search notes"
-                  placeholder="Search titles, text and files"
-                  className="min-w-0 flex-1 basis-56"
-                  value={typed}
-                  onChange={(e) => setTyped(e.target.value)}
-                />
-                <div role="group" aria-label="Show" className="flex flex-wrap items-center gap-0.5">
-                  {filters.map((f) => (
-                    <Button key={f.value} size="sm" variant={filter === f.value ? 'secondary' : 'ghost'} aria-pressed={filter === f.value} onClick={() => setFilter(f.value)}>
-                      {f.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              {load.kind === 'loading' && skeleton && (
-                <div aria-hidden className="flex flex-col gap-2">
-                  {[0, 1, 2].map((i) => <Skeleton key={i} className="h-16" />)}
-                </div>
-              )}
-              {load.kind === 'failed' && <FailureCallout error={load.message} onRetry={() => void readList()} />}
-              {load.kind === 'ready' && items.length === 0 && (
-                load.words || load.filter !== 'all'
-                  ? <p className="text-ui text-muted">{filters.find((f) => f.value === load.filter)!.empty}{load.words ? <> match “{load.words}”</> : null}.</p>
-                  : (
-                    <EmptyState title="No notes yet." action={canWrite && <Button variant="secondary" onClick={() => setAdding(true)}>Add note</Button>}>
-                      Runs add decisions, conventions and gotchas with <Code>aether-internal memory add</Code>, and each run that reports success or failure records its outcome here.
-                    </EmptyState>
-                  )
-              )}
-              {items.length > 0 && (
-                <ul aria-label="Notes" className="flex min-w-0 flex-col gap-2">
-                  {items.map((item) => (
-                    <li key={item.id}>
-                      <NoteRow item={item} agents={agentNames} onOpen={() => setOpen(item.id)} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {load.kind === 'ready' && (load.pinsFull || load.full) && (
-                <p className="text-ui-sm text-muted">
-                  {load.pinsFull ? `The ${listLimit} ${load.words ? 'best pinned matches' : 'newest pinned notes'}` : `Every pinned ${load.words ? 'match' : 'note'}`}
-                  {load.full && `, then the ${listLimit} ${load.words ? 'best matches' : 'newest notes'}`}
-                  .{!load.words && ' Search to find older ones.'}
-                </p>
-              )}
+              <BriefRegion brief={notes.brief} open={briefOpen} onRetry={() => void notes.readBrief()} />
+              <ShowBar
+                filter={filter}
+                onFilter={setFilter}
+                counts={counts}
+                searching={searching}
+                typed={typed}
+                onTyped={setTyped}
+                onOpenSearch={openSearch}
+                onCloseSearch={closeSearch}
+                searchRef={searchRef}
+              />
+              <NoteList
+                load={load}
+                items={items}
+                stale={stale}
+                skeleton={skeleton}
+                listRef={listRef}
+                onRetry={() => void notes.readList()}
+                row={(item) => (
+                  <NoteRow
+                    item={item}
+                    agents={agentNames}
+                    canWrite={canWrite}
+                    onOpen={openNote}
+                    onLook={lookAt}
+                    onPin={togglePin}
+                    onReplace={replace}
+                    onRemove={remove}
+                  />
+                )}
+              />
+              {canWrite && (draft
+                ? (
+                  <Composer
+                    key={draft.replaces?.id ?? 'new'}
+                    workspaceID={workspaceID}
+                    client={client}
+                    replaces={draft.replaces}
+                    onAdded={added}
+                    onRefresh={refresh}
+                    onCancel={closeDraft}
+                    onChange={setWriting}
+                  />
+                )
+                : <AddNoteButton ref={addRef} onOpen={() => setDraft({ reopen: false })} />)}
+              <FooterBand swapKey={footer.key}>{footer.node}</FooterBand>
             </>
           )}
         </div>
@@ -270,13 +344,27 @@ export function MemoryRoute({ client = api }: RouteProps & { client?: Api }) {
           canWrite={canWrite}
           agents={agentNames}
           onOpen={setOpen}
-          onChanged={changed}
-          onReplaced={(result) => replaced(open, result)}
+          onChanged={refresh}
+          onReplace={(item) => {
+            if (keepDraft()) return
+            afterDialog.current = null
+            setOpen(null)
+            setDraft({ replaces: item, reopen: true })
+          }}
+          onRemove={(item) => {
+            const row = listItem(item.id)
+            if (row) afterDialog.current = nearest(row, addRef.current)
+            setOpen(null)
+            hide(item)
+          }}
           onClose={() => setOpen(null)}
+          onCloseAutoFocus={(event) => {
+            if (afterDialog.current === undefined) return
+            event.preventDefault()
+            afterDialog.current?.focus()
+            afterDialog.current = undefined
+          }}
         />
-      )}
-      {adding && workspaceID && (
-        <AddNote workspaceID={workspaceID} client={client} onAdded={added} onFailed={changed} onClose={() => setAdding(false)} />
       )}
     </div>
   )

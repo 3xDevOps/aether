@@ -35,6 +35,12 @@ window.addEventListener(
   true,
 )
 
+// A hover opens after `openDelay`, unless another tooltip closed within
+// `warmWindow`: running the pointer along a toolbar then shows each at once.
+const openDelay = 250
+const warmWindow = 300
+let warmUntil = 0
+
 export function Tooltip({
   content,
   side = 'top',
@@ -47,24 +53,38 @@ export function Tooltip({
   children: React.ReactElement
 }) {
   const [open, setOpen] = React.useState(false)
+  const pending = React.useRef<ReturnType<typeof setTimeout>>(undefined)
+  const cancel = () => clearTimeout(pending.current)
+  React.useEffect(() => cancel, [])
   React.useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
     openTooltips.add(close)
     return () => {
       openTooltips.delete(close)
+      warmUntil = performance.now() + warmWindow
     }
   }, [open])
 
+  const request = (next: boolean) => {
+    cancel()
+    // A focus Radix lets through came from a navigation key; it shows at once.
+    if (!next || navigating || performance.now() < warmUntil) setOpen(next)
+    else pending.current = setTimeout(() => setOpen(true), openDelay)
+  }
+
   if (disabled) return children
   return (
-    <TooltipPrimitive.Provider delayDuration={300}>
-      <TooltipPrimitive.Root open={open} onOpenChange={setOpen}>
+    <TooltipPrimitive.Provider delayDuration={0}>
+      <TooltipPrimitive.Root open={open} onOpenChange={request}>
         <TooltipPrimitive.Trigger
           asChild
           onFocus={(event) => {
             if (!navigating) event.preventDefault()
           }}
+          onBlur={cancel}
+          onPointerLeave={cancel}
+          onPointerDown={cancel}
         >
           {children}
         </TooltipPrimitive.Trigger>
@@ -74,7 +94,7 @@ export function Tooltip({
             side={side}
             sideOffset={4}
             collisionPadding={8}
-            className="z-50 max-w-xs animate-fade-in rounded-control border border-seam bg-raised px-2 py-1 text-ui-sm whitespace-pre-line text-text shadow-overlay data-[state=closed]:animate-none motion-reduce:animate-none"
+            className="z-50 max-w-xs origin-(--radix-tooltip-content-transform-origin) animate-overlay-in rounded-control border border-seam bg-raised px-2 py-1 text-ui-sm whitespace-pre-line text-text shadow-overlay data-[state=closed]:animate-none motion-reduce:animate-none"
           >
             {content}
           </TooltipPrimitive.Content>

@@ -9,6 +9,7 @@ import {
   ChevronRight as LucideChevronRight,
   ChevronLeft as LucideChevronLeft,
   ChevronUp as LucideChevronUp,
+  Clock as LucideClock,
   Copy as LucideCopy,
   Ellipsis as LucideEllipsis,
   FileText as LucideFileText,
@@ -65,6 +66,7 @@ import {
   ClipboardCheck as LucideClipboardCheck,
   File as LucideFile,
   FolderPlus as LucideFolderPlus,
+  FoldVertical as LucideFoldVertical,
   ListFilter as LucideListFilter,
   CircleHelp as LucideCircleHelp,
   Reply as LucideReply,
@@ -102,6 +104,7 @@ import {
   MonitorCog as LucideMonitorCog,
   Moon as LucideMoon,
   Waypoints as LucideWaypoints,
+  ZoomIn as LucideZoomIn,
   PackageX as LucidePackageX,
   Rocket as LucideRocket,
   ServerCog as LucideServerCog,
@@ -112,6 +115,9 @@ import {
   UserPlus as LucideUserPlus,
   WifiOff as LucideWifiOff,
   Columns2 as LucideColumns2,
+  Columns3 as LucideColumns3,
+  Network as LucideNetwork,
+  ChartGantt as LucideChartGantt,
   MousePointer2 as LucideMousePointer2,
   RotateCw as LucideRotateCw,
   Smartphone as LucideSmartphone,
@@ -121,8 +127,11 @@ import {
   ChartColumn as LucideChartColumn,
   BookMarked as LucideBookMarked,
   Pin as LucidePin,
+  PinOff as LucidePinOff,
+  Undo2 as LucideUndo2,
   Bell as LucideBell,
   Gauge as LucideGauge,
+  Upload as LucideUpload,
   type LucideIcon,
   type LucideProps,
 } from 'lucide-react'
@@ -158,6 +167,7 @@ export const Check = icon(LucideCheck)
 export const ChevronDown = icon(LucideChevronDown)
 export const ChevronRight = icon(LucideChevronRight)
 export const ChevronUp = icon(LucideChevronUp)
+export const Clock = icon(LucideClock)
 export const Copy = icon(LucideCopy)
 export const Ellipsis = icon(LucideEllipsis)
 export const FileText = icon(LucideFileText)
@@ -169,8 +179,11 @@ export const History = icon(LucideHistory)
 export const ChartColumn = icon(LucideChartColumn)
 export const BookMarked = icon(LucideBookMarked)
 export const Pin = icon(LucidePin)
+export const PinOff = icon(LucidePinOff)
+export const Undo2 = icon(LucideUndo2)
 export const Bell = icon(LucideBell)
 export const Gauge = icon(LucideGauge)
+export const Upload = icon(LucideUpload)
 export const Keyboard = icon(LucideKeyboard)
 export const ListTodo = icon(LucideListTodo)
 export const LoaderCircle = icon(LucideLoaderCircle)
@@ -220,6 +233,7 @@ export const ClipboardCheck = icon(LucideClipboardCheck)
 export const File = icon(LucideFile)
 export const Folder = icon(LucideFolder)
 export const FolderPlus = icon(LucideFolderPlus)
+export const FoldVertical = icon(LucideFoldVertical)
 export const ListFilter = icon(LucideListFilter)
 export const CircleHelp = icon(LucideCircleHelp)
 export const Reply = icon(LucideReply)
@@ -257,6 +271,7 @@ export const Monitor = icon(LucideMonitor)
 export const MonitorCog = icon(LucideMonitorCog)
 export const Moon = icon(LucideMoon)
 export const Waypoints = icon(LucideWaypoints)
+export const ZoomIn = icon(LucideZoomIn)
 export const PackageX = icon(LucidePackageX)
 export const Rocket = icon(LucideRocket)
 export const ServerCog = icon(LucideServerCog)
@@ -267,6 +282,9 @@ export const Unplug = icon(LucideUnplug)
 export const UserPlus = icon(LucideUserPlus)
 export const WifiOff = icon(LucideWifiOff)
 export const Columns2 = icon(LucideColumns2)
+export const Columns3 = icon(LucideColumns3)
+export const Network = icon(LucideNetwork)
+export const ChartGantt = icon(LucideChartGantt)
 export const MousePointer2 = icon(LucideMousePointer2)
 export const Orbit = icon(LucideOrbit)
 export const RotateCw = icon(LucideRotateCw)

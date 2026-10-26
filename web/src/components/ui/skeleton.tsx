@@ -5,7 +5,11 @@ export function Skeleton({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="skeleton"
-      className={cn('animate-pulse rounded-control bg-chrome motion-reduce:animate-none', className)}
+      className={cn(
+        'relative overflow-hidden rounded-control bg-chrome',
+        'after:absolute after:inset-0 after:animate-skeleton-sweep after:bg-linear-to-r after:from-transparent after:via-hover-chrome after:to-transparent motion-reduce:after:hidden',
+        className,
+      )}
       {...props}
     />
   )

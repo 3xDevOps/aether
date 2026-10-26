@@ -3,6 +3,7 @@ import { FolderGit2 } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Code } from '@/components/ui/code'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { Skeleton } from '@/components/ui/skeleton'
 import { WorkspaceCreate } from '@/components/workspace-create'
 import { WorkspaceRepository } from '@/components/workspace-repository'
@@ -125,18 +126,18 @@ export function RepositoryStep({
       {workspaces && workspaces.length > 0 && (
         <section aria-labelledby="repository-workspaces" className="flex min-w-0 flex-col gap-2">
           <h3 id="repository-workspaces" className="text-ui font-medium text-text">Your workspaces</h3>
-          <ul className="flex min-w-0 flex-col divide-y divide-seam rounded-panel border border-seam">
+          <InsetList>
             {workspaces.map((w) => (
-              <li key={w.id} className="flex min-w-0 items-center gap-2 px-3 py-2">
+              <InsetListItem key={w.id} className="gap-2">
                 <FolderGit2 aria-hidden className="size-4 shrink-0 text-muted" />
                 <span className="min-w-0 flex-1 truncate text-ui font-medium text-text">{w.name}</span>
                 <Code>{w.base_branch}</Code>
                 <Button size="sm" variant="secondary" aria-label={`Use ${w.name}`} onClick={() => choose(w)}>
                   Use
                 </Button>
-              </li>
+              </InsetListItem>
             ))}
-          </ul>
+          </InsetList>
         </section>
       )}
       {askAdmin && (

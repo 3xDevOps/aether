@@ -8,10 +8,13 @@ import { Code } from '@/components/ui/code'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
+import { Skeleton } from '@/components/ui/skeleton'
 import type { Tone } from '@/components/ui/status-dot'
 import type { Api } from '@/lib/api'
+import { useDelayed } from '@/lib/hooks'
 import { message, providerName } from '@/lib/format'
 import { memberName } from '@/lib/member-name'
 import type { Device, DeviceLookup } from '@/lib/types'
@@ -37,6 +40,7 @@ export function DevicesPanel({ client }: { client: Api }) {
   const [looking, setLooking] = useState(false)
   const [confirming, setConfirming] = useState<{ code: string; found: DeviceLookup } | null>(null)
   const [revoking, setRevoking] = useState<Device | null>(null)
+  const loading = useDelayed(devices === null && error === null)
 
   useEffect(() => {
     let live = true
@@ -134,11 +138,16 @@ export function DevicesPanel({ client }: { client: Api }) {
 
       <section aria-label="Device list" className="flex min-w-0 flex-col gap-2">
         <SectionLabel as="h2">{isAdmin ? "Every member's devices" : 'Your devices'}</SectionLabel>
+        {loading && (
+          <div role="status" aria-label="Loading devices" className="flex flex-col gap-2">
+            {[0, 1, 2].map((row) => <Skeleton key={row} className="h-14" />)}
+          </div>
+        )}
         {devices?.length === 0 && <p className="text-ui text-muted">No devices yet. A device is recorded the first time it connects through an edge.</p>}
         {devices && devices.length > 0 && (
-          <ul aria-label="Devices" className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
+          <InsetList aria-label="Devices">
             {devices.map((device) => (
-              <li key={device.id} className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-2">
+              <InsetListItem key={device.id}>
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="flex min-w-0 items-center gap-2">
                     <span className="truncate text-ui font-medium text-text">{device.label}</span>
@@ -155,9 +164,9 @@ export function DevicesPanel({ client }: { client: Api }) {
                 {device.status !== 'revoked' && (
                   <Button size="sm" variant="ghost" aria-label={`Revoke ${device.label}`} onClick={() => setRevoking(device)}>Revoke</Button>
                 )}
-              </li>
+              </InsetListItem>
             ))}
-          </ul>
+          </InsetList>
         )}
       </section>
 

@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './motion.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -153,8 +154,6 @@
      where `env()` is unsupported; a bare `env()` would void them. */
   --safe-top: env(safe-area-inset-top, 0px);
 
-  --duration-overlay: 120ms;
-
   --canvas: #ffffff;
   --chrome: #f7f7f7;
   --hover: #f3f3f3;
@@ -204,8 +203,15 @@
   --agent-cursor: #9a6a00;
   --agent-antigravity: #c2410c;
   --tone-soft: 8%;
+  --lane-tint: 16%;
 
-  --overlay-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.18);
+  /* Seam borders stay under every shadow: forced-colors mode drops shadows. */
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  --card-hover-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 4px 12px -4px rgb(0 0 0 / 0.1);
+  --button-shadow: 0 2px 3px -1px rgb(0 0 0 / 0.09);
+  --button-hover-shadow: 0 2px 4px -1px rgb(0 0 0 / 0.14);
+  --overlay-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -8px rgb(0 0 0 / 0.16);
+  --dialog-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 12px 32px -8px rgb(0 0 0 / 0.2);
   --backdrop: rgb(0 0 0 / 0.28);
   --scrim: rgb(0 0 0 / 0.56);
 }
@@ -262,17 +268,24 @@
   --agent-cursor: #e8b84a;
   --agent-antigravity: #ff9466;
   --tone-soft: 12%;
+  --lane-tint: 26%;
 
-  --overlay-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+  --card-hover-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 12px -4px rgb(0 0 0 / 0.5);
+  --button-shadow: 0 2px 3.5px -1px rgb(0 0 0 / 0.67);
+  --button-hover-shadow: 0 2px 4px -1px rgb(0 0 0 / 0.75);
+  --overlay-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -8px rgb(0 0 0 / 0.55);
+  --dialog-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -8px rgb(0 0 0 / 0.6);
   --backdrop: rgb(0 0 0 / 0.56);
   --scrim: rgb(0 0 0 / 0.56);
 }
 
 /* Theme-independent values. `static` emits every one to :root, so plain CSS
-   (`text-title`, the overlay keyframes) can read them too. */
+   (`text-title`) can read them too. Motion tokens live in motion.css. */
 @theme static {
-  --radius-control: 4px;
-  --radius-panel: 6px;
+  --radius-chip: 5px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
   --radius-composer: 14px;
   --radius-sm: var(--radius-control);
   --radius-md: var(--radius-panel);
@@ -298,51 +311,9 @@
   --text-prose--line-height: 22px;
   --text-avatar: 10px;
   --text-avatar--line-height: 1;
-
-  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-
-  --animate-overlay-in: overlay-in var(--duration-overlay) var(--ease-out);
-  --animate-sheet-up: sheet-up var(--duration-overlay) var(--ease-out);
-  --animate-sheet-left: sheet-left var(--duration-overlay) var(--ease-out);
-  --animate-sheet-right: sheet-right var(--duration-overlay) var(--ease-out);
-  --animate-fade-in: fade-in var(--duration-overlay) var(--ease-out);
-  --animate-expand-right: expand-right var(--duration-overlay) var(--ease-out);
-
-  @keyframes overlay-in {
-    from {
-      opacity: 0;
-      transform: scale(0.98);
-    }
-  }
-  @keyframes sheet-up {
-    from {
-      transform: translateY(100%);
-    }
-  }
-  @keyframes sheet-left {
-    from {
-      transform: translateX(-100%);
-    }
-  }
-  @keyframes sheet-right {
-    from {
-      transform: translateX(100%);
-    }
-  }
-  @keyframes fade-in {
-    from {
-      opacity: 0;
-    }
-  }
-  /* The negative insets keep the surface's shadow inside the clip. */
-  @keyframes expand-right {
-    from {
-      clip-path: inset(-2rem 100% -2rem 0);
-    }
-    to {
-      clip-path: inset(-2rem -2rem -2rem 0);
-    }
-  }
+  --text-stat: 24px;
+  --text-stat--line-height: 28px;
+  --text-stat--font-weight: 500;
 }
 
 @theme inline {
@@ -401,7 +372,12 @@
   --text-color-muted: var(--text-muted);
   --color-scrim: var(--scrim);
 
+  --shadow-card: var(--card-shadow);
+  --shadow-card-hover: var(--card-hover-shadow);
+  --shadow-button: var(--button-shadow);
+  --shadow-button-hover: var(--button-hover-shadow);
   --shadow-overlay: var(--overlay-shadow);
+  --shadow-dialog: var(--dialog-shadow);
   --shadow-field-focus: 0 0 4px color-mix(in srgb, var(--accent-fill) 25%, transparent);
 }
 
@@ -506,93 +482,6 @@
   }
 }
 @layer components {
-  /* Both loops step rather than tween: a handful of frames per cycle instead
-     of one per display refresh. */
-  .state-pulse {
-    animation: state-pulse 1.6s steps(1, end) infinite;
-  }
-
-  @keyframes state-pulse {
-    0%,
-    75%,
-    100% {
-      opacity: 1;
-    }
-    25% {
-      opacity: 0.7;
-    }
-    50% {
-      opacity: 0.4;
-    }
-  }
-
-  /* The Session view's one live row: a light band sweeps across muted text. */
-  .live-shimmer {
-    background: linear-gradient(90deg, var(--text-muted) 40%, var(--text) 50%, var(--text-muted) 60%) 0 0 / 300% 100%;
-    background-clip: text;
-    color: transparent;
-    animation: live-shimmer 2s steps(16, end) infinite;
-  }
-
-  @keyframes live-shimmer {
-    from {
-      background-position: 100% 0;
-    }
-    to {
-      background-position: 0 0;
-    }
-  }
-
-  .workflow-enter {
-    animation: workflow-enter 120ms ease-out;
-  }
-
-  .typing-dot {
-    animation: typing-dot 1.2s steps(1, end) infinite;
-  }
-
-  .typing-dot:nth-child(2) {
-    animation-delay: 0.2s;
-  }
-
-  .typing-dot:nth-child(3) {
-    animation-delay: 0.4s;
-  }
-
-  @keyframes typing-dot {
-    0%,
-    60%,
-    100% {
-      opacity: 1;
-    }
-    30% {
-      opacity: 0.3;
-    }
-  }
-
-  @keyframes workflow-enter {
-    from {
-      opacity: 0;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .state-pulse {
-      animation: none;
-    }
-
-    .live-shimmer {
-      animation: none;
-      background: none;
-      color: var(--text-muted);
-    }
-
-    .workflow-enter,
-    .typing-dot {
-      animation: none;
-    }
-  }
-
   .launch-splash {
     --primary: #367f77;
     position: fixed;

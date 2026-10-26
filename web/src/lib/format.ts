@@ -105,3 +105,20 @@ export const budgetStateLabel: Record<BudgetState, string> = {
   exceeded: 'past the cap',
 }
 
+
+const second = 1000
+const minute = 60 * second
+const hour = 60 * minute
+const day = 24 * hour
+
+const pad = (n: number) => String(n).padStart(2, '0')
+
+/** "640ms", "6.9s", "42s", "2m 03s", "1h 12m", "3d 4h". */
+export function formatDuration(ms: number): string {
+  if (ms < second) return `${Math.max(0, Math.round(ms))}ms`
+  if (ms < 10 * second) return `${(Math.floor(ms / 100) / 10).toFixed(1)}s`
+  if (ms < minute) return `${Math.floor(ms / second)}s`
+  if (ms < hour) return `${Math.floor(ms / minute)}m ${pad(Math.floor((ms % minute) / second))}s`
+  if (ms < day) return `${Math.floor(ms / hour)}h ${pad(Math.floor((ms % hour) / minute))}m`
+  return `${Math.floor(ms / day)}d ${Math.floor((ms % day) / hour)}h`
+}

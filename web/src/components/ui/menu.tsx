@@ -30,7 +30,7 @@ export function MenuContent({
       {/* Radix's portal takes exactly one child. */}
       {sheet && (
         <MenuPrimitive.Portal>
-          <div aria-hidden className="fixed inset-0 z-50 animate-fade-in bg-scrim motion-reduce:animate-none" />
+          <div aria-hidden className="fixed inset-0 z-50 animate-scrim-in bg-scrim motion-reduce:animate-none" />
         </MenuPrimitive.Portal>
       )}
       <MenuPrimitive.Portal>
@@ -45,7 +45,7 @@ export function MenuContent({
             'z-50 min-w-40 overflow-x-hidden overflow-y-auto p-1 outline-none motion-reduce:animate-none',
             sheet
               ? 'max-h-[85dvh] w-screen rounded-b-none border-x-0 border-b-0 pb-[calc(0.25rem+env(safe-area-inset-bottom))] animate-sheet-up'
-              : 'max-h-[min(320px,var(--radix-dropdown-menu-content-available-height))] animate-overlay-in',
+              : 'max-h-[min(320px,var(--radix-dropdown-menu-content-available-height))] origin-(--radix-dropdown-menu-content-transform-origin) animate-overlay-in',
             className,
           )}
           {...props}
@@ -59,7 +59,7 @@ export function MenuContent({
 
 const itemClass = cn(
   focusRingInset,
-  'relative flex h-7 cursor-default items-center gap-2 rounded-control px-2 text-ui text-text select-none coarse:h-11',
+  'relative flex h-7 cursor-default items-center gap-2 rounded-control px-2 text-ui text-text transition-colors duration-100 select-none motion-reduce:transition-none coarse:h-11',
   'data-[highlighted]:bg-hover-chrome data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
   '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-3.5 [&_svg]:text-muted',
 )
@@ -183,7 +183,7 @@ export function MenuSubContent({ className, ...props }: React.ComponentProps<typ
         data-slot="menu-sub-content"
         sideOffset={4}
         collisionPadding={8}
-        className={cn(surface, 'z-50 min-w-32 p-1 outline-none animate-overlay-in motion-reduce:animate-none', className)}
+        className={cn(surface, 'z-50 min-w-32 origin-(--radix-dropdown-menu-content-transform-origin) p-1 outline-none animate-overlay-in motion-reduce:animate-none', className)}
         {...props}
       />
     </MenuPrimitive.Portal>
