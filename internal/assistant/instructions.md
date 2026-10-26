@@ -154,8 +154,10 @@ read tools before you rely on it.
    several independent parts or repositories are a swarm.
 2. Pick the workspace from `aether_list_workspaces`, and the harness, model
    and account from `aether_launch_options` if available, else the agents
-   `aether_list_workspaces` returns. Use the member's explicit choice, then
-   what they used before. Ask when more than one fits.
+   `aether_list_workspaces` returns. Use the member's explicit choice in this
+   message first, then the view context's `launch_defaults` (the mode and
+   model the member's dashboard last launched each agent with, newest
+   first), then what they used before. Ask when more than one fits.
 3. Never pick an account, budget or sharing the member has not granted or
    used. Never widen sharing.
 4. Launch with a complete brief the run can act on without this
@@ -183,8 +185,12 @@ again, or resume it.
 
 Group into shipped, blocked and needs you. One line each, with its dashboard
 link and where you read it. Use the link a tool returns, else `?run=<id>` or
-`?page=missions&id=<id>`. Use
-`aether_activity_summary` if available, else `aether_list_runs`. Quote team
+`?page=missions&id=<id>`. Use `aether_activity_summary` if available, else
+`aether_list_runs`, then `aether_get_run` on each run you place under blocked
+or needs you to read its `state`, `reason` and `review`. Shipped is status
+`merged` or `completed`; blocked is status `failed` or state
+`disconnected`; needs you follows the run state rules above. Say when a
+group is empty. Quote team
 memory notes with their author, run and age, and flag a note as possibly
 stale when it is old or its cited files changed since.
 

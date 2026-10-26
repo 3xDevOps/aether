@@ -11,7 +11,10 @@ import { shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { promptKey, settlePromptKey } from '@/store/assistant'
-import { assistantShareView, draftConflict, draftViewContext, unsharedPart, viewContextKey } from '@/store/view-context'
+import { assistantShareView, draftConflict, draftViewContext, flushViewSync, unsharedPart, viewContextKey } from '@/store/view-context'
+
+/** How long Stop waits on assistant.cancel before it gives the button back. */
+export const stopTimeout = 10_000
 
 export function AssistantComposer({ textarea, running, dock }: {
   textarea: React.RefObject<HTMLTextAreaElement | null>
@@ -67,6 +70,8 @@ export function AssistantComposer({ textarea, running, dock }: {
         }
         now.setAssistantAttempt(attempt)
       }
+      // The prompt keeps the held page; only the sync forgets one the member removed.
+      if (useStore.getState().assistantPageRemoved) await flushViewSync(useStore)
       try {
         await api.assistantPrompt(text, attempt.key, assistantShareView(useStore.getState()) ? attempt.viewContext : unsharedPart(attempt.viewContext))
       } finally {
@@ -89,9 +94,10 @@ export function AssistantComposer({ textarea, running, dock }: {
     state.setAssistantStopping(true)
     state.setAssistantError(null)
     try {
-      await api.assistantCancel()
+      await api.assistantCancel(AbortSignal.timeout(stopTimeout))
     } catch (err) {
-      useStore.getState().setAssistantError(message(err))
+      const timedOut = err instanceof DOMException && err.name === 'TimeoutError'
+      useStore.getState().setAssistantError(timedOut ? `assistant.cancel got no answer within ${stopTimeout / 1000} seconds` : message(err))
     } finally {
       useStore.getState().setAssistantStopping(false)
     }

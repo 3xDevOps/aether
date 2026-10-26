@@ -440,4 +440,42 @@ describe('quiet outcomes and names', () => {
     const launched = await card(aside, /^Launched swarm on main-repo\. Done$/)
     expect(within(launched).getByText('Could not read swarm mis_7: mission.get: mission mis_7 not found (-32004)')).toBeDefined()
   })
+
+  it('reads a launched swarm again on each of its changes, so the card and the history agree', async () => {
+    vi.mocked(api.missionShow).mockResolvedValue({ mission: mission({ id: 'mis_7', phase: 'active' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] })
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Start a swarm'),
+      aether(1, 't1', 'aether_launch_swarm', 'completed', { raw_input: { workspace_id: workspace.id }, raw_output: { ids: { mission_id: 'mis_7' } } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    expect(await card(aside, /^Launched swarm on main-repo\. Working in the background$/)).toBeDefined()
+    await waitFor(() => expect(useStore.getState().missions.mis_7?.phase).toBe('active'))
+
+    vi.mocked(api.missionShow).mockResolvedValue({ mission: mission({ id: 'mis_7', phase: 'completed' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] })
+    act(() => useStore.getState().bumpWorkflowSignal('missionSeq', 'mis_7'))
+    expect(await card(aside, /^Launched swarm on main-repo\. Done$/)).toBeDefined()
+    await userEvent.click(within(aside).getByRole('button', { name: 'Actions' }))
+    const history = await screen.findByRole('dialog', { name: 'Actions in this conversation' })
+    expect(within(history).getByText(/^Done · opens the swarm$/)).toBeDefined()
+  })
+
+  it('says what a launch started without a receipt, and how the member hears back', async () => {
+    useStore.setState({ members: { [alice.id]: alice, mem_bob: { id: 'mem_bob', display_name: 'Bob', color: '#000', role: 'collaborator' } } })
+    act(() => useStore.getState().upsertRun(run({ id: 'run_9', title: 'login-test', status: 'running' })))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Fix the login test on Bob'),
+      aether(1, 't1', 'aether_launch_run', 'completed', {
+        raw_input: { ...launchInput, model: 'opus', account_member_id: 'mem_bob', no_fallback: true },
+        raw_output: { run_id: 'run_9', workspace_id: workspace.id, harness: 'claude', url: '?run=run_9' },
+      }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const launched = await card(aside, /^Launched run on main-repo with Claude Code\. Working in the background$/)
+    expect(within(launched).getByText("run · main-repo · Claude Code opus · Bob's account, shared · no fallback")).toBeDefined()
+    expect(within(launched).getByText(/^Aether notifies you here/)).toBeDefined()
+    await userEvent.click(within(launched).getByRole('button', { name: 'Open run' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_9' } })
+  })
 })

@@ -1,5 +1,6 @@
 import type { AssistantConfirmation, AssistantStatus, ViewContext } from '@/lib/assistant-types'
 import { mobileScreen } from '@/lib/breakpoints'
+import { randomID } from '@/lib/utils'
 import type { RootState } from '@/store'
 import type { SliceCreator } from '@/store/slice'
 import { draftConflict, entityKey, maxAttachments, pinPage, sameAttachment, type AttachedTarget, type DraftPin } from '@/store/view-context'
@@ -41,13 +42,6 @@ export interface AssistantAsk {
 export const duplicateSendWindow = 10_000
 const sentKey = 'aether.assistant.sent'
 
-/** crypto.randomUUID and crypto.subtle exist only in a secure context; a phone on plain HTTP has neither. */
-export function newPromptKey(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
 let tab: string | undefined
 
 interface SentPrompt { tab?: string; hash?: string; key?: string; at?: number }
@@ -66,12 +60,12 @@ function heldPrompt(): SentPrompt | null {
  * Without crypto.subtle there is no hash, and no reuse.
  */
 export async function promptKey(fingerprint: string, now = Date.now()): Promise<string> {
-  if (typeof crypto === 'undefined' || !crypto.subtle) return newPromptKey()
-  tab ??= newPromptKey()
+  if (typeof crypto === 'undefined' || !crypto.subtle) return randomID('assistant')
+  tab ??= randomID('assistant')
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(fingerprint))
   const hash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
   const held = heldPrompt()
-  const key = held?.key && held.tab !== tab && held.hash === hash && now - (held.at ?? 0) < duplicateSendWindow ? held.key : newPromptKey()
+  const key = held?.key && held.tab !== tab && held.hash === hash && now - (held.at ?? 0) < duplicateSendWindow ? held.key : randomID('assistant')
   try {
     localStorage.setItem(sentKey, JSON.stringify({ tab, hash, key, at: now }))
   } catch {

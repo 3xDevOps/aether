@@ -127,5 +127,13 @@ export interface ViewContext {
   route?: ViewEntry
   open_file?: { kind: 'workspace' | 'home'; path: string; run_id?: string; workspace_id?: string }
   recent?: ViewEntry[]
+  /** The modes and models the member's launches remembered, newest first. They travel with the page. */
+  launch_defaults?: LaunchDefault[]
   attachments?: ViewAttachment[]
+}
+
+export interface LaunchDefault {
+  agent: string
+  mode: 'tui' | 'acp' | 'headless'
+  model?: string
 }

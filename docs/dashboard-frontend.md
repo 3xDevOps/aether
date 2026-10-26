@@ -545,7 +545,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   newline, `Mod+Enter` also sends; **Stop** replaces **Send** while a turn
   runs and reads **Stopping…** while `assistant.cancel` is in flight, so a
   double click cancels once and an agent that ignores it can be stopped
-  again). An empty conversation offers four example prompts that fill the
+  again; the call aborts after 10 seconds with `assistant.cancel got no
+  answer within 10 seconds`). An empty conversation offers four example prompts that fill the
   composer, led by the page's own: a failed run offers **Fix this**, one that
   needs you or waits **Why is this stuck?**, one with an open pull request
   (`useOpenPullRequest`) **Review and merge when checks pass**; the board
@@ -555,7 +556,11 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   view's request cards, answered with `assistant.answer`; each pending
   confirmation renders as a card titled with the summary, the method as its
   source line, a **Details** section with the exact params (three, then
-  **N more**), a relative deadline with a bar draining toward it, **Decline**
+  **N more**), or for `run.launch` and `mission.create` a **What starts**
+  list (`components/assistant/launch-summary.tsx`) of kind, workspace,
+  agent with model and mode, account (`Yours` or `<name>'s, shared with
+  you`), fallback, task or objective, and how the member hears back, a
+  relative deadline with a bar draining toward it, **Decline**
   and **Approve** (`assistant.confirm`). Confirmations stack above the harness
   prompts in one 40dvh scroll. A card leaves only when a
   `confirmations` frame stops listing it. While `auto_approve` is off a card
@@ -581,10 +586,15 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   composer dock, and the live line under it is dropped. A failure shows the
   server's error verbatim; a declined, expired or withdrawn card keeps the
   error for **Details**. A launch receipt (`result.launch`) or a watch result
-  gets one more line. A done launch whose run or swarm is still active reads
-  **Working in the background**; a launched swarm the store has not loaded
-  counts as working while the card reads it with `mission.show`, and a read
-  that fails shows its error. The header calls the assistant's own turn
+  gets one more line; a done launch without a receipt gets the same line from
+  the returned run and its inputs (kind, workspace, agent and model, `your
+  account` or `<name>'s account, shared`, `no fallback`). A done launch whose
+  run or swarm is still active reads **Working in the background** and says
+  how the member hears back; `useBackground`, shared with the **Actions**
+  list, reads a launched swarm with `mission.show` and again on each
+  `mission.changed` for it (`missionSeq`), since the store refreshes swarms
+  only for the active workspace. The swarm counts as working until read, and
+  a read that fails shows its error. The header calls the assistant's own turn
   **Generating…**. The target comes from the result's `link` or
   `url`: a dashboard link (`?run=<id>`, `?page=missions&id=<id>`, a watch's
   settings link) opens in the app whatever its host, and any other `http(s)`
@@ -686,7 +696,8 @@ open and sharing is on, `syncViewContext` sends `syncedViewContext`, the
 page the chips show, as `assistant.view` at most once a second when it
 changed, one call at a time, retrying a failed one with backoff and sending
 it again after each prompt. While the draft's page is removed it sends a
-context without `route`, which makes the server forget the page; while a
+context without `route` at once, which makes the server forget the page, and
+Send awaits that call (`flushViewSync`) before `assistant.prompt`; while a
 navigation conflict is unanswered it sends nothing; after **where you
 started** it keeps the pinned page until the prompt is sent.
 
@@ -721,9 +732,12 @@ once; `settlePromptKey` clears the record when a send settles, so a second
 "yes" after the agent asks again is a new message. Only a SHA-256 of the
 draft is stored, in `localStorage` under `aether.assistant.sent`. Over plain
 HTTP, where `crypto.subtle` and `crypto.randomUUID` are missing, keys fall
-back to a timestamp and random suffix and tabs do not share them. Client
+back to a timestamp and random suffix and tabs do not share them. The page part
+also carries `launch_defaults`, `launchDefaults` from the UI slice as
+`{agent, mode, model}`, newest first, at most 4, and **Inspect** lists them
+as **Launch choices**. Client
 `fit` and `sendableAttachment` trim as the server does (recent pages, then
-the open file, then the last attachments, counting bytes as Go's
+the open file, then the launch defaults, then the last attachments, counting bytes as Go's
 `json.Marshal` writes them; a check name over 128 bytes or with a control or
 format character is dropped), so **Inspect** never shows what the server
 drops. A draft or chip changed while the key is being made cancels that

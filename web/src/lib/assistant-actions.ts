@@ -441,6 +441,8 @@ export interface ActionNames {
   workspace: (id: string) => string | undefined
   agent: (name: string) => string | undefined
   run: (id: string) => string | undefined
+  /** The member who shares the account, or undefined for the member's own. */
+  sharer: (id: string) => string | undefined
 }
 
 type Verb = [imperative: string, past: string, present: string]
@@ -504,10 +506,15 @@ export function isKnownAction(tool: string): boolean {
   return tool in phrases
 }
 
+/**
+ * What a launch started: the server's receipt when the tool returns one,
+ * else the run it returned and the choices it was asked for.
+ */
 export function launchLine(action: AssistantAction, names: ActionNames): string | undefined {
-  const launch = record(record(action.result).launch)
+  const result = record(action.result)
+  const launch = record(result.launch)
   const kind = text(launch.kind)
-  if (!kind) return undefined
+  if (!kind) return action.state === 'done' && (action.tool === 'aether_launch_run' || action.tool === 'aether_launch_swarm') ? askedLaunch(action, result, names) : undefined
   const workspace = text(launch.workspace_id)
   const harness = text(launch.harness)
   const account = record(launch.account)
@@ -519,6 +526,23 @@ export function launchLine(action: AssistantAction, names: ActionNames): string 
     harness && [names.agent(harness) ?? harness, text(launch.model)].filter(Boolean).join(' '),
     owner && `${owner}'s account${account.shared === true || account.own === false || Object.values(account).includes('shared') ? ', shared' : ''}`,
     requested && `fell back from ${requested}`,
+  ].filter(Boolean).join(' · ')
+}
+
+function askedLaunch(action: AssistantAction, result: Record<string, unknown>, names: ActionNames): string {
+  const input = action.input
+  const swarm = action.tool === 'aether_launch_swarm'
+  const lead = swarm ? record(input.integrator) : input
+  const workspace = text(result.workspace_id) ?? text(input.workspace_id)
+  const harness = text(result.harness) ?? text(lead.harness)
+  const account = text(lead.account_member_id)
+  const sharer = account ? names.sharer(account) : undefined
+  return [
+    swarm ? 'swarm' : 'run',
+    workspace && (names.workspace(workspace) ?? workspace),
+    harness && [names.agent(harness) ?? harness, text(lead.model)].filter(Boolean).join(' '),
+    sharer ? `${sharer}'s account, shared` : 'your account',
+    input.no_fallback === true ? 'no fallback' : undefined,
   ].filter(Boolean).join(' · ')
 }
 

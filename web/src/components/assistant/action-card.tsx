@@ -1,5 +1,6 @@
 import { useContext, useEffect, useMemo, useState } from 'react'
 import { paramRows } from '@/components/assistant/cards'
+import { hearBack } from '@/components/assistant/launch-summary'
 import { AssistantSheet } from '@/components/assistant/suggestion'
 import { ChevronRight, ExternalLink, RotateCcw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -14,6 +15,7 @@ import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
 import { isTerminal } from '@/store/runs'
+import { missionSeqOf } from '@/store/workflow-signals'
 import { loadWholeItem } from '@/store/session-stream'
 
 export const actionTone: Record<ActionState, Tone> = {
@@ -70,11 +72,14 @@ export function useActionNames(): ActionNames {
   const workspaces = useStore((s) => s.workspaces)
   const agents = useStore((s) => s.agentList?.agents)
   const assistantAgents = useStore((s) => s.assistantStatus?.agents)
+  const members = useStore((s) => s.members)
+  const self = useStore((s) => s.info?.member.id)
   return useMemo(() => ({
     run: (id) => runs[id] && runLabel(runs[id]),
     workspace: (id) => workspaces[id]?.name,
     agent: (name) => agents?.find((a) => a.name === name)?.display_name ?? assistantAgents?.find((a) => a.name === name)?.display_name,
-  }), [runs, workspaces, agents, assistantAgents])
+    sharer: (id) => id === self ? undefined : members[id]?.display_name || id,
+  }), [runs, workspaces, agents, assistantAgents, members, self])
 }
 
 /**
@@ -106,11 +111,29 @@ export function useOpenTarget(): (target: ActionTarget) => void {
 }
 
 /**
- * A launched run or swarm keeps going after the panel closes. Swarms load
- * per page, so a launched swarm the store has not read counts as working.
+ * Whether a launched run or swarm still works in the background after the
+ * panel closes, and why a launched swarm could not be read. The store keeps
+ * runs current but refreshes swarms only for the active workspace, so a
+ * launched swarm is read here, then again on each of its changes; until read
+ * it counts as working.
  */
-export function useBackground(action: AssistantAction): boolean {
-  return useStore((s) => {
+export function useBackground(action: AssistantAction): { background: boolean; swarmError?: string } {
+  const swarm = action.state === 'done' && launches.has(action.tool) && action.target?.kind === 'swarm' ? action.target.id : undefined
+  const seq = useStore((s) => (swarm ? missionSeqOf(swarm)(s) : 0))
+  const [error, setError] = useState<string>()
+  useEffect(() => {
+    if (!swarm) return
+    let live = true
+    api.missionShow(swarm).then((result) => {
+      if (!live) return
+      setError(undefined)
+      useStore.getState().upsertMission(result.mission)
+    }, (err) => live && setError(`Could not read swarm ${swarm}: ${message(err)}`))
+    return () => {
+      live = false
+    }
+  }, [swarm, seq])
+  const background = useStore((s) => {
     if (action.state !== 'done' || !launches.has(action.tool) || !action.target) return false
     if (action.target.kind === 'run') {
       const run = s.runs[action.target.id]
@@ -120,17 +143,7 @@ export function useBackground(action: AssistantAction): boolean {
     const mission = s.missions[action.target.id]
     return mission === undefined || (mission.phase !== 'completed' && mission.phase !== 'cancelled')
   })
-}
-
-function useSwarm(action: AssistantAction): string | undefined {
-  const id = action.state === 'done' && launches.has(action.tool) && action.target?.kind === 'swarm' ? action.target.id : undefined
-  const known = useStore((s) => id !== undefined && s.missions[id] !== undefined)
-  const [error, setError] = useState<string>()
-  useEffect(() => {
-    if (!id || known) return
-    api.missionShow(id).then((result) => useStore.getState().upsertMission(result.mission), (err) => setError(`Could not read swarm ${id}: ${message(err)}`))
-  }, [id, known])
-  return error
+  return { background: background && !error, swarmError: error }
 }
 
 export function retryDraft(action: AssistantAction, names: ActionNames): void {
@@ -144,8 +157,7 @@ export function ActionCard({ action }: { action: AssistantAction }) {
   const names = useActionNames()
   const open = useOpenTarget()
   const gone = useTargetGone(action)
-  const swarmError = useSwarm(action)
-  const background = useBackground(action) && !swarmError
+  const { background, swarmError } = useBackground(action)
   const details = useStore((s) => s.expandedRows[assistantSessionID]?.[action.id] ?? false)
   const setRow = useStore((s) => s.setSessionRow)
   const summary = actionSummary(action, names)
@@ -179,6 +191,7 @@ export function ActionCard({ action }: { action: AssistantAction }) {
       </div>
       <p className={cn('pl-5 text-ui-sm', toneClasses(tone).text)}>{state}</p>
       {facts && <p className="pl-5 text-ui-sm break-words text-muted">{facts}</p>}
+      {background && <p className="pl-5 text-ui-sm break-words text-muted">{action.target?.kind === 'swarm' ? hearBack.swarm : hearBack.run}</p>}
       {!known && <InputRows input={action.input} />}
       {shownError && (
         <p role="alert" className="ml-5 rounded-control bg-state-failed-soft px-2 py-1 font-code text-ui-sm break-words whitespace-pre-wrap text-text">

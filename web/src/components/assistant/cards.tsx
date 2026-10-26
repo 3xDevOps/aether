@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLaunchRows } from '@/components/assistant/launch-summary'
 import { AssistantSettingsLink } from '@/components/assistant/suggestion'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Code } from '@/components/ui/code'
@@ -13,6 +14,7 @@ import { message } from '@/lib/format'
 import { useSecondsUntil } from '@/lib/hooks'
 import type { SessionRequest } from '@/lib/session-types'
 import { AcpRequestCard } from '@/routes/run/session-requests'
+import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
 
@@ -69,6 +71,7 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
   const { busy, error, run } = useAction()
   const { harness } = useAssistantAgent()
   const decide = (approve: boolean) => void run(approve ? 'approve' : 'decline', () => api.assistantConfirm(confirmation.id, approve))
+  const launch = useLaunchRows(confirmation.method, confirmation.params)
   const params = paramRows(confirmation.params)
   const autoApprove = useStore((s) => s.assistantStatus?.auto_approve ?? false)
   const remaining = useSecondsUntil(confirmation.expires_at)
@@ -96,7 +99,18 @@ export function ConfirmationCard({ confirmation }: { confirmation: AssistantConf
         </RequestFooter>
       )}
     >
-      {params.length > 0 && (
+      {launch ? (
+        <RequestSection label="What starts">
+          <dl className="flex min-w-0 flex-col text-ui-sm">
+            {launch.map(([key, value]) => (
+              <div key={key} className="flex min-w-0 gap-3 py-0.5">
+                <dt className="w-24 shrink-0 text-muted">{key}</dt>
+                <dd className={cn('min-w-0 flex-1 break-words whitespace-pre-wrap', key === 'Task' || key === 'Objective' ? 'line-clamp-4' : undefined)}>{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </RequestSection>
+      ) : params.length > 0 && (
         <RequestSection label="Details" count={params.length}>
           <RequestRows
             flush
