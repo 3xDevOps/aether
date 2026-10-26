@@ -36,7 +36,7 @@ var (
 // paths, with forms limited to the relay origin and the test client's
 // host.
 func (h *harness) universalCSP() string {
-	return connectorCSP + "; form-action " + h.relayURL + " https://127.0.0.1"
+	return connectorCSP + "; form-action " + h.relayURL + " https://127.0.0.1 http://localhost:* http://127.0.0.1:*"
 }
 
 // chooseForms are the choose page's forms by the server each picks, with

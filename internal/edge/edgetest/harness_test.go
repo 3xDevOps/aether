@@ -749,7 +749,7 @@ func (s *serverNode) start() {
 		mcp, err = connector.New(connector.Config{
 			BaseURL: s.h.relayURL + edgeproto.MCPPath(edgeproto.ServerID(hostKey.PublicKey())),
 			Store:   db, SSH: srv, KeyPath: filepath.Join(s.dir, "connector", "hmac.key"),
-			ClientHosts: []string{s.client.host}, Transport: s.client.srv.Client().Transport,
+			ClientHosts: []string{s.client.host}, Transport: s.client.srv.Client().Transport, LoopbackClients: s.client.loopback,
 		})
 		if err != nil {
 			t.Fatal(err)

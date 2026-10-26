@@ -544,7 +544,9 @@ there is no terminal, file, settings or git-writing tool.
   300 a minute server-wide, which someone guessing from many addresses can
   reach to pause pairing for everyone while they guess. Revoking that device,
   removing the member or tightening `edge-access` cuts off their connectors.
-  Only clients on `chatgpt.com` and `claude.ai` can connect.
+  Only clients on `chatgpt.com` and `claude.ai` can connect. Claude Code's
+  client id alone may return to `http://localhost` or `http://127.0.0.1` on
+  any port; PKCE keeps a code another local program catches unusable.
 - The universal URL `https://<relay host>/mcp` is one OAuth issuer for every
   server on the edge, but each server still mints, stores and checks its own
   codes and tokens. The edge only routes by their `<server id>.` prefix, so a

@@ -78,6 +78,9 @@ type Config struct {
 	// them; both are for tests that serve their own client.
 	ClientHosts []string
 	Transport   http.RoundTripper
+	// LoopbackClients replaces Claude Code's client id as the clients
+	// that may return to a loopback redirect URI; for tests.
+	LoopbackClients []string
 }
 
 // resource is one connector URL the handler serves: base is the URL,
@@ -96,9 +99,11 @@ type handler struct {
 	ssh         *sshd.Server
 	key         []byte
 	clientHosts []string
-	fetch       *http.Client
-	mux         *http.ServeMux
-	now         func() time.Time
+	// loopbackClients may return to http://localhost or 127.0.0.1.
+	loopbackClients []string
+	fetch           *http.Client
+	mux             *http.ServeMux
+	now             func() time.Time
 
 	// mu guards codes, nonces, wrong, wrongAll, wrongSwept, writes and
 	// writesSwept.
@@ -139,11 +144,15 @@ func New(cfg Config) (http.Handler, error) {
 	if hosts == nil {
 		hosts = clientHosts
 	}
+	loopback := cfg.LoopbackClients
+	if loopback == nil {
+		loopback = loopbackClients
+	}
 	origin := u.Scheme + "://" + u.Host
 	h := &handler{origin: origin, serverID: serverID,
 		own:       resource{base: cfg.BaseURL, path: u.Path},
 		universal: resource{base: origin + edgeproto.PathUniversalMCP, path: edgeproto.PathUniversalMCP, prefix: serverID + "."},
-		store:     cfg.Store, ssh: cfg.SSH, key: key, clientHosts: hosts,
+		store:     cfg.Store, ssh: cfg.SSH, key: key, clientHosts: hosts, loopbackClients: loopback,
 		fetch: &http.Client{Transport: cfg.Transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}},

@@ -35,15 +35,34 @@ type connectorClient struct {
 	host     string
 	id       string
 	redirect string
+	// loopback lists the client as one that may return to a loopback
+	// redirect, as Claude Code is.
+	loopback []string
 }
 
 func newConnectorClient(t *testing.T) *connectorClient {
+	t.Helper()
+	return newClient(t, false)
+}
+
+// newLoopbackClient is a client like Claude Code: its document lists
+// http://127.0.0.1/callback, and it returns there on a port it picked.
+func newLoopbackClient(t *testing.T) *connectorClient {
+	t.Helper()
+	return newClient(t, true)
+}
+
+func newClient(t *testing.T, loopback bool) *connectorClient {
 	t.Helper()
 	mux := http.NewServeMux()
 	srv := httptest.NewUnstartedServer(mux)
 	host := srv.Listener.Addr().String()
 	c := &connectorClient{srv: srv, host: host, id: "https://" + host + "/client.json", redirect: "https://" + host + "/callback"}
-	doc, err := json.Marshal(map[string]any{"client_id": c.id, "client_name": "Test client", "redirect_uris": []string{c.redirect}})
+	listed := c.redirect
+	if loopback {
+		listed, c.redirect, c.loopback = "http://127.0.0.1/callback", "http://127.0.0.1:54321/callback", []string{c.id}
+	}
+	doc, err := json.Marshal(map[string]any{"client_id": c.id, "client_name": "Test client", "redirect_uris": []string{listed}})
 	if err != nil {
 		t.Fatal(err)
 	}

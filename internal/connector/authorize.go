@@ -43,6 +43,31 @@ const (
 // trusts: ChatGPT's and Claude's.
 var clientHosts = []string{"chatgpt.com", "claude.ai"}
 
+// loopbackClients are the client ids that may return to a loopback
+// redirect URI: Claude Code's, which listens on a port it picks on
+// localhost.
+var loopbackClients = []string{"https://claude.ai/oauth/claude-code-client-metadata"}
+
+// redirectAllowed reports whether redirect is one doc lists for
+// clientID: an https URL on the client's own host, or, for a loopback
+// client, http on localhost or 127.0.0.1 whose port is ignored (RFC 8252
+// section 7.3).
+func (h *handler) redirectAllowed(clientID, clientHost, redirect string, doc clientDoc) bool {
+	ru, err := url.Parse(redirect)
+	if err != nil || ru.User != nil || ru.Fragment != "" {
+		return false
+	}
+	if ru.Scheme == "https" && ru.Host == clientHost {
+		return slices.Contains(doc.RedirectURIs, redirect)
+	}
+	if ru.Scheme != "http" || !slices.Contains(h.loopbackClients, clientID) || (ru.Hostname() != "localhost" && ru.Hostname() != "127.0.0.1") {
+		return false
+	}
+	portless := *ru
+	portless.Host = ru.Hostname()
+	return slices.Contains(doc.RedirectURIs, portless.String())
+}
+
 // clientDoc is what the server reads of a client_id metadata document.
 type clientDoc struct {
 	ClientID     string   `json:"client_id"`
@@ -154,9 +179,8 @@ func (h *handler) authorizePage(w http.ResponseWriter, r *http.Request, res reso
 		h.renderError(w, "This client's metadata document cannot be used: "+err.Error())
 		return
 	}
-	ru, err := url.Parse(redirect)
-	if err != nil || ru.Scheme != "https" || ru.Host != u.Host || !slices.Contains(doc.RedirectURIs, redirect) {
-		h.renderError(w, fmt.Sprintf("The redirect_uri %q is not an https URL on %s that %s lists.", redirect, u.Host, clientID))
+	if !h.redirectAllowed(clientID, u.Host, redirect, doc) {
+		h.renderError(w, fmt.Sprintf("The redirect_uri %q is not an https URL on %s, or for Claude Code a loopback URL, that %s lists.", redirect, u.Host, clientID))
 		return
 	}
 	req := authRequest{ClientID: clientID, ClientName: doc.ClientName, RedirectURI: redirect, State: q.Get("state"),
