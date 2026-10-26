@@ -77,5 +77,5 @@ func (s *Server) serveEvents(ctx context.Context, member domain.MemberID, ch sub
 
 	// A drop, a write failure, and a closed subscription all end the
 	// channel the same way: the client re-subscribes from its cursor.
-	_ = events.StreamWire(sub, func(ev protocol.Event) error { return writeJSONLine(ch, ev) })
+	_ = events.StreamWire(sub, member, func(ev protocol.Event) error { return writeJSONLine(ch, ev) })
 }

@@ -65,4 +65,6 @@ type Services struct {
 	Slack SlackService
 	// Memory is team memory: notes, pins and the launch brief.
 	Memory MemoryService
+	// Watches keeps each member's watches and notification preferences.
+	Watches WatchService
 }
