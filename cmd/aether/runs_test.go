@@ -28,6 +28,9 @@ func TestRenderRuns(t *testing.T) {
 		{ID: "r9", Status: "completed", Review: "later", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Later", Task: "task nine"},
 		{ID: "r10", Status: "needs-attention", Activity: "waiting-ci", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "CI", Task: "task ten"},
 		{ID: "r11", Status: "needs-attention", Activity: "idle", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Legacy", Task: "task eleven"},
+		{ID: "r12", Status: "needs-attention", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Parked", Task: "task twelve"},
+		{ID: "r13", Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no token", MissionRole: "worker", Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Blocked", Task: "task thirteen"},
+		{ID: "r14", Status: "needs-attention", Activity: "needs-you", Reason: "blocked: no key", MissionRole: "worker", Paused: true, Harness: "claude", MemberID: "m1", AccountMemberID: "m1", Title: "Paused", Task: "task fourteen"},
 		{ID: "r3", Status: "abandoned", Harness: "claude", MemberID: "m3", AccountMemberID: "m3", Title: "Title three", Task: "task three",
 			ArchivedAt: &archivedAt},
 	}
@@ -43,22 +46,25 @@ func TestRenderRuns(t *testing.T) {
 	}{
 		{
 			name: "default hides archived runs",
-			want: "ID   STATUS              AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
-				"r1   Working             claude  m1      m1                            Title one  task one\n" +
-				"r2   Needs you           claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n" +
-				"r4   Waiting for agents  claude  m1      m1                            Integrate  task four\n" +
-				"r5   Needs you           claude  m1      m1                            Worker     task five\n" +
-				"r6   Failed              claude  m1      m1                            Parked     task six\n" +
-				"r7   Failed              claude  m1      m1                            Ended      task seven\n" +
-				"r8   Ready for review    claude  m1      m1                            Done       task eight\n" +
-				"r9   Ready for review    claude  m1      m1                            Later      task nine\n" +
-				"r10  Waiting for CI      claude  m1      m1                            CI         task ten\n" +
-				"r11  Waiting             claude  m1      m1                            Legacy     task eleven\n",
+			want: "ID   STATUS                      AGENT   MEMBER  ACCOUNT        OVERLAP        TITLE      TASK\n" +
+				"r1   Working                     claude  m1      m1                            Title one  task one\n" +
+				"r2   Needs you                   claude  m2      m1 (fallback)  a.go with bob  Title two  task two\n" +
+				"r4   Waiting for agents          claude  m1      m1                            Integrate  task four\n" +
+				"r5   Waiting for the integrator  claude  m1      m1                            Worker     task five\n" +
+				"r6   Failed                      claude  m1      m1                            Parked     task six\n" +
+				"r7   Failed                      claude  m1      m1                            Ended      task seven\n" +
+				"r8   Ready for review            claude  m1      m1                            Done       task eight\n" +
+				"r9   Ready for review            claude  m1      m1                            Later      task nine\n" +
+				"r10  Waiting for CI              claude  m1      m1                            CI         task ten\n" +
+				"r11  Waiting                     claude  m1      m1                            Legacy     task eleven\n" +
+				"r12  Waiting                     claude  m1      m1                            Parked     task twelve\n" +
+				"r13  Needs you                   claude  m1      m1                            Blocked    task thirteen\n" +
+				"r14  Needs you                   claude  m1      m1                            Paused     task fourteen\n",
 		},
 		{
 			name:     "--needs-you hides archived, waiting, worker, ended and put off runs",
 			needsYou: true,
-			wantIDs:  []string{"r2", "r6", "r8"},
+			wantIDs:  []string{"r2", "r6", "r8", "r13"},
 		},
 		{
 			name:     "--archived shows only archived runs",
@@ -160,7 +166,10 @@ func TestRunViewShowsReportAndAnswerableOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := buf.String()
-	for _, line := range []string{"status     Needs you\n", "report     blocked: no build dir\n", "pending    permission req-1\n",
+	if !strings.HasPrefix(text, "run        r1\nstatus     Needs you\nreason     needs input: which build dir?\n") {
+		t.Errorf("runs <id> = %q, want it to lead with the state and reason", text)
+	}
+	for _, line := range []string{"report     blocked: no build dir\n", "pending    permission req-1\n",
 		"r1 permission req-1: Run rm -rf build\n", "  aether answer r1 req-1 allow-1    # Allow once\n", "  aether answer r1 req-1 reject-1    # Reject\n"} {
 		if !strings.Contains(text, line) {
 			t.Errorf("runs <id> = %q, want the line %q", text, line)

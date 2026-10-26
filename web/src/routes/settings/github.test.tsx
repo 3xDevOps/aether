@@ -97,15 +97,13 @@ it('dismisses the picker and ignores late acceptance after connection context ch
   expect(useStore.getState().route.name).toBe('settings')
 })
 
-it('keeps cancellation in Settings and offers existing workspace management', () => {
+it('keeps cancellation in Settings', () => {
   seed()
   render(<GitHubSection client={fakeApi()} />)
   fireEvent.click(screen.getByRole('button', { name: 'Add repository' }))
   fireEvent.click(screen.getByRole('button', { name: 'Close picker' }))
   expect(useStore.getState().activeWorkspace).toBe(workspace.id)
   expect(useStore.getState().route.name).toBe('settings')
-  fireEvent.click(screen.getByRole('button', { name: 'Manage workspaces' }))
-  expect(useStore.getState().route.name).toBe('workspaces')
 })
 
 it('does not expose administrator connection or repository controls to members', () => {

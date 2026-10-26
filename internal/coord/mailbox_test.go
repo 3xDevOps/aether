@@ -95,6 +95,9 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 	a, b, c, d := h.run(0), h.run(1), h.run(2), h.run(3)
 	h.peers.pair(a, b, "src/auth.go")
 	h.isolate(3)
+	if _, err := h.db.UpdateRunStatus(ctx, c, domain.RunNeedsAttention, "waiting for CI", domain.ActivityWaitingCI, nil, nil); err != nil {
+		t.Fatal(err)
+	}
 
 	st, err := h.svc.Status(ctx, a)
 	if err != nil {
@@ -110,8 +113,9 @@ func TestStatusReportsExactlyTheSendableSet(t *testing.T) {
 		t.Fatalf("peer 0 = %+v, want b as an attributed active peer with files", p)
 	}
 	if p := st.Peers[1]; p.RunID != string(c) || p.State != protocol.CoordPeerWorkspace || p.MemberID == "" ||
-		p.Task != "task 2" || p.RunStatus != string(domain.RunRunning) || len(p.Files) != 0 {
-		t.Fatalf("peer 1 = %+v, want c as a running workspace peer with its task", p)
+		p.Task != "task 2" || p.Activity != string(domain.ActivityWaitingCI) || p.Reason != "waiting for CI" ||
+		p.RunStatus != string(domain.RunNeedsAttention) || len(p.Files) != 0 {
+		t.Fatalf("peer 1 = %+v, want c as a workspace peer waiting for CI with its task", p)
 	}
 	listed := make(map[string]bool, len(st.Peers))
 	for _, p := range st.Peers {

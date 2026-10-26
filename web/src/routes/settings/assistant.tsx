@@ -6,15 +6,13 @@ import { Checkbox } from '@/components/ui/checkbox'
 import type { Api } from '@/lib/api'
 import type { AssistantSettings } from '@/lib/assistant-types'
 import { errorSentence } from '@/lib/format'
-import { SettingRow, SettingsSection } from '@/routes/settings/layout'
+import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 
 export const autoApproveLabel = 'Let the assistant act without asking'
 
 export const autoApproveWarning =
   'The assistant will launch runs, message and stop your runs and save your environment on its own, with no approval card. Text it reads from runs, files or web pages could steer it into doing so.'
-
-const sectionID = 'settings-assistant'
 
 const scope: [string, string][] = [
   ['Without a card', 'Launching runs, messaging and stopping your own runs, saving your environment. Each is noted in the assistant’s conversation before it runs.'],
@@ -30,11 +28,7 @@ export function AssistantSection({ client }: { client: Api }) {
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const linked = useStore((s) => s.route.params.section === 'assistant')
-
-  useEffect(() => {
-    if (linked && available) document.getElementById(sectionID)?.scrollIntoView({ block: 'start' })
-  }, [linked, available])
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     if (!available) return
@@ -46,7 +40,7 @@ export function AssistantSection({ client }: { client: Api }) {
     return () => {
       live = false
     }
-  }, [client, available])
+  }, [client, available, attempt])
 
   if (!available) return null
 
@@ -66,14 +60,18 @@ export function AssistantSection({ client }: { client: Api }) {
     save(false).catch((err: unknown) => setError(errorSentence(err))).finally(() => setBusy(false))
   }
 
+  const help = on === null
+    ? error ? null : 'Reading the setting…'
+    : on
+      ? 'On. The assistant launches runs, messages and stops your runs and saves your environment without a card.'
+      : 'Off. The assistant asks on a card before it launches, messages or stops a run, or saves your environment.'
+
   return (
-    <SettingsSection title="Assistant" id={sectionID}>
+    <SettingsSection title="Approvals" id="auto-approve" scope="Your account">
       <SettingRow
         label={autoApproveLabel}
         labelFor="settings-assistant-auto-approve"
-        help={on
-          ? 'On. The assistant launches runs, messages and stops your runs and saves your environment without a card.'
-          : 'Off. The assistant asks on a card before it launches, messages or stops a run, or saves your environment.'}
+        help={help}
         control={(
           <Checkbox
             id="settings-assistant-auto-approve"
@@ -96,6 +94,9 @@ export function AssistantSection({ client }: { client: Api }) {
           ))}
         </dl>
         {error && <Callout tone="failed" role="alert">{error}</Callout>}
+        {error && on === null && (
+          <TryAgain onClick={() => { setError(null); setAttempt((n) => n + 1) }} />
+        )}
       </SettingRow>
       {confirming && (
         <Confirm

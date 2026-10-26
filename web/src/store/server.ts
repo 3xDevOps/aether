@@ -282,7 +282,7 @@ export const createServerSlice: SliceCreator<ServerSlice> = (set) => {
     resetConnection,
     reconnect: () => {
       resetConnection()
-      set((s) => ({ connectionEpoch: s.connectionEpoch + 1 }))
+      set((s) => ({ connectionEpoch: s.connectionEpoch + 1, sysboxState: null }))
     },
   }
 }

@@ -58,7 +58,11 @@ export function hrefFor(href: string, route: Route): string {
 export function initialRoute(): Route {
   if (typeof window === 'undefined') return boardRoute
   if (handedLink()) return { name: 'onboarding', params: {} }
-  return routeFromQuery(new URLSearchParams(window.location.search))
+  const route = routeFromQuery(new URLSearchParams(window.location.search))
+  const hash = window.location.hash.slice(1)
+  if (route.name !== 'settings' || route.params.section || !hash) return route
+  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+  return { name: 'settings', params: { section: hash } }
 }
 
 export type HandedLink = { kind: 'join' | 'claim'; link: string }

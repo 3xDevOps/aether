@@ -1979,6 +1979,20 @@ CREATE TABLE slack_messages (
 ALTER TABLE connectors ADD COLUMN provider TEXT NOT NULL DEFAULT '';
 ALTER TABLE connectors ADD COLUMN subject TEXT NOT NULL DEFAULT '';
 `,
+	// v84: the receipt of each waiting or needs-input report, so a reused
+	// idempotency key with different inputs is refused instead of dropped.
+	`
+CREATE TABLE coord_state_reports (
+	run_id          TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+	idempotency_key TEXT NOT NULL,
+	outcome         TEXT NOT NULL CHECK (outcome IN ('needs-input', 'waiting')),
+	waiting_for     TEXT NOT NULL DEFAULT '',
+	summary         TEXT NOT NULL,
+	created_at      INTEGER NOT NULL,
+	applied_at      INTEGER,
+	PRIMARY KEY (run_id, idempotency_key)
+);
+`,
 }
 
 // foreignKeysOffMigrations are the versions that drop a table other tables

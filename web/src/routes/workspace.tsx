@@ -45,7 +45,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
       <ViewHeader title={workspace.name} subtitle="Repository" />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-8 px-4 py-6 sm:px-6">
-          <SettingsSection title="Base branch">
+          <SettingsSection title="Base branch" heading="h2">
             <SettingRow
               label={<Code>{workspace.base_branch}</Code>}
               help="New runs fork from this branch. It is fixed when the workspace is created."
@@ -73,7 +73,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
               reveal={params.section === 'environment'}
             />
           )}
-          <SettingsSection title="Team">
+          <SettingsSection title="Team" heading="h2">
             <SettingRow
               label="Budget"
               help={budgetWords(budget)}

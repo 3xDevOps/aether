@@ -349,8 +349,8 @@ top to bottom:
    `src/lib/surfaces.ts`, which also feeds the palette's Navigate group; its
    `palette` entries (Members › Devices, Manage workspaces, and Members for a
    non-admin) are reached from the palette only, and its `link` entries
-   (the board's Needs you; Onboarding, opened from **Settings ›
-   Onboarding**) only from a link.
+   (the board's Needs you; Onboarding, opened from **Settings › General ›
+   Setup guide**) only from a link.
 5. **One update notice row** when a server, CLI or desktop update exists, for
    example "Server 0.5.3 is available · Update"; see
    [Update prompts](#update-prompts).
@@ -5298,28 +5298,72 @@ pushed base.
 
 ## Settings
 
-`src/routes/settings/` is one column of capability-gated sections, available
-through either gateway:
+`src/routes/settings/` is available through either gateway. A nav on the
+left lists categories in three groups; the selected category fills the
+content pane. `registry.ts` holds the categories and one entry per setting
+(id, label, help, keywords, and a gate over capabilities, admin, assistant
+availability, onboarding and membership). A category shows in the nav only
+while one of its entries is visible, so the nav and search never disagree.
 
-- **Appearance**: **Theme** (System, Light, Dark; the palette and the
-  footer menu offer the same), **Text size** (Default, Large, Larger; it
-  scales the interface type tokens through `data-text-size` on the root
-  element and leaves terminal zoom alone), and **Single-key shortcuts** (see
-  [Keyboard and focus](#keyboard-and-focus)).
-- **Notifications**: **Notify this device when a run needs me**, described
-  under [Push notifications](#push-notifications).
-- **Assistant**, where the assistant is available (`useAssistantAvailable`):
-  **Let the assistant act without asking** reads and sets `assistant.settings`
-  `auto_approve`. Under it, **What auto-approval covers** lists what runs
-  without a card, what always asks and that the assistant's shell and file
-  tools are unaffected. Turning it on first asks **Let the assistant act
-  without asking?** with the warning that the assistant will launch runs,
-  message and stop the member's runs and save the environment on its own;
-  turning it off does not ask. A refusal stays in the dialog or under the
-  row. Links from the assistant panel navigate with `{section: "assistant"}`,
-  which scrolls the section into view.
-- **ChatGPT and Claude** (`src/routes/settings/connectors.tsx`, element id
-  and `section` param `connectors`): one exported `ConnectorsSection
+| Group | Category (`id`) | Sections and rows (anchor ids) |
+|---|---|---|
+| You | General (`general`) | Appearance: Theme (`theme`), Text size (`text-size`); Keyboard (`keyboard`); Profile (`profile`); Setup guide (`setup-guide`) |
+| You | Connections (`connections`) | ChatGPT and Claude (`connectors`); GitHub (`github`) |
+| You | Notifications (`notifications`) | Push notifications (`push`); Slack (`slack`) |
+| You | Assistant (`assistant`) | Approvals (`auto-approve`) |
+| You | Usage (`usage`) | Subscription usage (`subscription-usage`) |
+| This computer | This computer (`this-computer`) | Link (`link`); Syncing: Sync daemon (`sync-daemon`), Mirror run files (`mirror`); Danger zone (`danger-zone`) |
+| Server | Server (`server`) | Status: Version (`version`), Tailnet dashboard, Disk and performance (`disk`); Admin: Docker inside runs (`docker`), Retained containers (`retained-containers`) |
+| Server | Remote access (`remote-access`) | Edge (`edge`) |
+
+**Addressing.** The route is `{name: "settings", params: {section}}`, and
+the URL is `?page=settings&id=<id>`. A category id opens that category; a
+section or row id opens its category, scrolls the element to the top, moves
+focus to its first enabled control (or the section heading) and tints it
+with `bg-selection` for 1.5 seconds. An id that is unknown or hidden for this
+member shows `That setting is not available here.` above the default view.
+With no id the desktop shows General and a phone shows the category list;
+`?page=settings` is never rewritten. On first load only, a `#<id>` hash with
+no `id` is read as the id. Choosing a nav item focuses the category's `h2`.
+
+**Search.** The `Search settings` field at the top of the nav (`/` focuses
+it while Settings is open and single-key shortcuts are on) matches every
+whitespace-separated word, as a substring, against an entry's label, help,
+keywords and category title. Label matches come first, then nav order. While
+the query is non-empty the nav lists the results with their category, and a
+polite status reads `N settings` or `No settings match “q”`. Enter opens the
+first result; ArrowDown moves to the results; Escape clears the query, then
+leaves the field. Two results leave the page: **Workspace settings and
+budget** opens the active workspace's Repository page, and **Members and
+devices** opens Members.
+
+**Phone.** Below 768px the category list is the page. A category shows on its
+own, under a **Settings** back button that returns to the list and focuses
+the category it left; browser Back does the same. `/` in a category returns
+to the list and focuses the search field.
+
+**Sections.** `SettingsSection` (`layout.tsx`) is an `h3` with an optional
+neutral scope badge (`This browser`, `This device`, `Your account`,
+`Server · admins`) over a bordered card of `SettingRow`s. `tone="danger"`
+draws the card border in `state-failed`. Below `sm`, a row's select takes the
+full width under its label; checkboxes and icon buttons stay on the right.
+While a row's first read is pending its help reads `Reading …` and its
+controls are disabled. A failed read shows the error verbatim in a
+`role="alert"` callout with **Try again**, which reads again (Slack,
+Assistant, Linked server, Sync daemon, Docker inside runs, Remote access).
+
+Categories:
+
+- **General**: **Theme** (System, Light, Dark; the palette and the footer
+  menu offer the same), **Text size** (Default, Large, Larger; it scales the
+  interface type tokens through `data-text-size` on the root element and
+  leaves terminal zoom alone), **Single-key shortcuts** (see
+  [Keyboard and focus](#keyboard-and-focus)), **Open profile** (the
+  sidebar footer's profile dialog), and **Open guide**, which reopens
+  onboarding where the member left it.
+- **ChatGPT and Claude**, first in **Connections**
+  (`src/routes/settings/connectors.tsx`, element id and `section` param
+  `connectors`): one exported `ConnectorsSection
   {client}`, remounted when `identityKey` changes so a code never outlives
   its member. A ChatGPT / Claude segmented control picks numbered steps.
   **Get a code** calls `connector.code` and shows its `url` and code, the
@@ -5337,97 +5381,97 @@ through either gateway:
   anything else links the connector troubleshooting. The palette's **Connect
   ChatGPT or Claude** and the first run step's optional **Finish setup and
   connect ChatGPT or Claude**, both shown only where the gateway serves
-  `connector.list`, navigate with `{section: "connectors"}`, which scrolls
-  the section into view; `?page=settings&id=<section>` carries the param in
-  the URL.
-- **This computer**, only on the local gateway: the linked **Server** and
-  **Repository** (`link.status`) with **Link another server** (**Link a server**
-before any), **Saved servers** (the default link, then named ones) with
-**Switch**, which calls `link.switch` and reloads the dashboard, the
-  **Sync daemon** (`daemon.status`), and **Mirror run files**, which starts
-  and stops a live run's sync overlay (`sync.status`). Each row says in one
-  sentence what it does and prefills its target read-only: the daemon the
-  linked server and repository, the mirror the newest live run (or the one
-  already mirroring). **Change** edits the target; **Install** and **Start
-  mirroring** are secondary buttons. The server-hosted dashboard omits the
-  section.
-- **Danger zone**, last on the page and only on the local gateway: a red
-  **Clear local state** button. Its confirmation dialog names what goes -
-  `config.json`, the edge device key and tokens, and the dashboard's saved
-  settings - and what stays: the SSH key, the clone and the server's data.
-  Confirming calls `link.reset`, clears `localStorage` and reloads into
-  onboarding, so the computer can link to a different server from scratch.
-  A refusal stays in the dialog.
-- **GitHub**, for admins when the OAuth methods are available: the same
-  `GitHubConnection` and **Add repository** picker used in onboarding and
-  Manage workspaces, not another importer. Existing native authorization is
-  reused. Successful explicit revision acceptance upserts/selects the workspace
-  and opens its repository page. Nonadmins see neither this section nor its
-  repository-add controls.
+  `connector.list`, navigate with `{section: "connectors"}`.
+- **GitHub**, in **Connections** for admins when the GitHub OAuth methods
+  are available: a **Connection** row holding the same `GitHubConnection` used in
+  onboarding, and a **Repositories** row whose **Add repository** opens the
+  shared picker, not another importer. Existing native authorization is
+  reused. Successful explicit revision acceptance upserts/selects the
+  workspace and opens its repository page. Non-admins see neither row.
+- **Notifications**: **Notify this device when a run needs me**, described
+  under [Push notifications](#push-notifications), and Slack direct
+  messages ([slack.md](slack.md)).
+- **Assistant**, where the assistant is available (`useAssistantAvailable`):
+  **Let the assistant act without asking** reads and sets `assistant.settings`
+  `auto_approve`. Under it, **What auto-approval covers** lists what runs
+  without a card, what always asks and that the assistant's shell and file
+  tools are unaffected. Turning it on first asks **Let the assistant act
+  without asking?** with the warning that the assistant will launch runs,
+  message and stop the member's runs and save the environment on its own;
+  turning it off does not ask. A refusal stays in the dialog or under the
+  row. **Change in Settings** in the assistant panel opens
+  `{section: "auto-approve"}`; the Syncing badge opens `mirror` and the
+  Insights quota link opens `usage`.
+- **Usage**: the subscription usage of your account, or of an account
+  shared with you. A provider that reports `unauthenticated` keeps the
+  server's error and adds **Sign in on Agents**.
+- **This computer**, only on the local gateway: the **Linked server** and
+  **Repository** (`link.status`) with **Link another server** (**Link a
+  server** before any) and **Manage workspaces**, **Saved servers** (the
+  default link, then named ones) with **Switch**, which calls `link.switch`
+  and reloads the dashboard, the **Sync daemon** (`daemon.status`), and
+  **Mirror run files**, which starts and stops a live run's sync overlay
+  (`sync.status`). Each row says in one sentence what it does and prefills
+  its target read-only: the daemon the linked server and repository, the
+  mirror the newest live run (or the one already mirroring). **Change** edits
+  the target; **Install** and **Start mirroring** are secondary buttons.
+  The daemon's enable command stays across category changes until a read
+  finds no daemon.
+  **Danger zone** comes last, with a red **Clear local state** button. Its
+  confirmation dialog names what goes - `config.json`, the edge device key
+  and tokens, and the dashboard's saved settings - and what stays: the SSH
+  key, the clone and the server's data. Confirming calls `link.reset`,
+  clears `localStorage` and reloads into onboarding, so the computer can link
+  to a different server from scratch. A refusal stays in the dialog.
 - **Server**: the server version and protocol, **Check for updates…** (named
   **Check now** after a failed check, whose error shows verbatim below it)
   and **Update…** when an update is waiting; **Tailnet dashboard**, only
   when `server.info` carries `tailnet_dashboard_error`, with that error
   verbatim and the restart command a config change needs, re-read every 30
-  seconds while the section is open because the server keeps retrying;
-  data-filesystem used and available space, separate from
-  Aether's attributed worktrees, transcripts, database, repositories, homes,
-  managed caches, evidence and other data. Snapshots are included in worktrees, not added
-  again. Daemon-wide Docker accounting includes non-Aether workloads and has
-  its own block; filesystem used totals are never added together. Docker's
-  unused classification is not permission to delete saved environments.
-  Missing values stay unknown, and partial-measurement warnings and Docker
-  errors remain visible. **Container sizes** expands to each run's and
-  environment's container, largest first, with the bytes it wrote outside its
-  mounted home, checkout and cache, such as `/tmp`. Those files are deleted
-  with the container and are not counted in the categories above. Admins see
-  every container, other members their own. Admins can expand **Largest storage owners** for up
-  to 50 entries with ownership, bytes, retention deadlines and errors; their
-  bytes overlap category totals and are not extra usage. Cache-pool deadlines
-  are age targets, not guaranteed minimum retention. **Free retained containers…**
-  opens the same admin confirmation as the board's Finished menu for the
-  active workspace. It prevents reopening those runs but does not delete
-  all run data: checkouts, homes, repositories and history retain their
-  existing lifecycle. Storage accounting adds no manual pruning controls.
-  Run headers, action confirmations and the Finished release dialog show the
-  exact runtime deadline and cleanup failures. Cleanup-only refreshes preserve
-  the completion time; reopening clears the old retention disclosure.
-- **Docker inside runs**, a row in **Server**, for admins when the server
-  answers `server.sysbox.status` (`src/lib/use-sysbox.ts`). States: **On**,
-  **Off** with **Install**, `Unavailable on this host` plus the server's
-  reason, `Installing… this takes a minute or two`, and **Install failed**
-  with the reason, **Show output** (the install log in a `CodeBlock`) and
-  **Try again**. **Install** calls `server.sysbox.install`, which returns at
-  once; the row then polls `server.sysbox.status` every 2 seconds while the
-  state is `installing`. Reaching **On** from an install announces `New runs
-  get it now. Reopen your Environment to use it there.` in a polite status
-  region, because an existing Environment keeps its old container. On the
-  board, an admin whose server reports `off` sees a neutral callout, `Let
-  agents use Docker in their runs`, with **Install** and **Dismiss**
-  (`src/components/sysbox-nudge.tsx`). It stays through `installing` and
-  `failed`, and shows `unsupported` (with the reason) only after an install
-  the admin started from it; it never shows for a plain `on` or
-  `unsupported`. Dismissal is persisted as `sysboxNudgeDismissed`.
+  seconds while the category is open because the server keeps retrying; and
+  **Disk and performance**, a link to [Insights › System](#insights). For
+  admins, **Free retained containers…** opens the same confirmation as the
+  board's Finished menu for the active workspace. It prevents reopening those
+  runs but does not delete all run data: checkouts, homes, repositories and
+  history retain their existing lifecycle.
+- **Docker inside runs**, a row in **Server › Admin**, for admins when the
+  server answers `server.sysbox.status` (`src/lib/use-sysbox.ts`). States:
+  **On**, **Off** with **Install**, `Unavailable on this host` plus the
+  server's reason, `Installing… this takes a minute or two`, and **Install
+  failed** with the reason, **Show output** (the install log in a
+  `CodeBlock`) and **Try again**. **Install** calls `server.sysbox.install`,
+  which returns at once; the row then polls `server.sysbox.status` every 2
+  seconds while the state is `installing`. Reaching **On** from an install
+  announces `New runs get it now. Reopen your Environment to use it there.`
+  in a polite status region, because an existing Environment keeps its old
+  container. The last state read lives in the store until the dashboard
+  follows another server, so an install that finishes while another
+  category is open still announces itself on return. On the board, an admin whose server reports `off` sees a
+  neutral callout, `Let agents use Docker in their runs`, with **Install**
+  and **Dismiss** (`src/components/sysbox-nudge.tsx`). It stays through
+  `installing` and `failed`, and shows `unsupported` (with the reason) only
+  after an install the admin started from it; it never shows for a plain
+  `on` or `unsupported`. Dismissal is persisted as `sysboxNudgeDismissed`.
   Non-admins and older servers see neither. An `off` reason is shown
   verbatim; the not-root reason, which contains `sudo aether-server sysbox
   install`, hides **Install** and offers that command with a copy button.
 - **Remote access**, when the server answers `server.edge` (the `edge`
-  store slice, read at hydration): the **Edge** URL or `off`, the copyable
-  **Server id**, the **Access policy**, the **Owner** (`<login> (github)`
-  or `none`) and the **Connection**: `connected`, `not connected`, or `the
-  edge has not recorded this server` while the edge reports it unclaimed.
-  For an admin of a server with no owner, a dashboard with the local verbs
-  `edge.status`, `edge.login` and `edge.claim` shows **Connect my GitHub
-  account**, followed by `(<login>)` when `edge.status` reports this
-  machine signed in at the server's edge: it signs in there first if not,
-  showing the sign-in code, calls `server.edge.claimcode`, passes
-  the code to `edge.claim` unless it names another server than the one shown
-  (`The gateway now reaches another server; reload and try again.`), and
-  reads `server.edge` again. A `token-revoked` or `not-signed-in` refusal
-from the claim signs in again and repeats it once. Without those verbs it shows `aether edge
-  connect` to copy ([edge.md](edge.md#server-id-and-claiming)).
-- **Usage**: the subscription usage of your account, or of an account
-  shared with you.
+  store slice, read at hydration): the **Edge** URL or `Off`, the copyable
+  **Server id**, the **Access policy** in words with its raw value beside it
+  (`Approved devices only` `approved-devices`), the **Owner**
+  (`<login> (github)` or `Unclaimed`) and the **Connection**: `Connected`,
+  `Not connected`, or `Connected, but the edge has not recorded this server`
+  while the edge reports it unclaimed. For an admin of a server with no
+  owner, a dashboard with the local verbs `edge.status`, `edge.login` and
+  `edge.claim` shows **Connect my GitHub account**, followed by `(<login>)`
+  when `edge.status` reports this machine signed in at the server's edge: it
+  signs in there first if not, showing the sign-in code, calls
+  `server.edge.claimcode`, passes the code to `edge.claim` unless it names
+  another server than the one shown (`The gateway now reaches another
+  server; reload and try again.`), and reads `server.edge` again. A
+  `token-revoked` or `not-signed-in` refusal from the claim signs in again
+  and repeats it once. Without those verbs it shows `aether edge connect` to
+  copy ([edge.md](edge.md#server-id-and-claiming)).
 
 Repository settings, base freshness and the source mirror live on the
 [Repository page](#repository-page) on either gateway.
@@ -5534,7 +5578,7 @@ In the step header, every step the member has already reached carries a check
 (a dash for a skipped Agent step) and is a button that jumps to it, forwards
 as well as back, so walking backwards does not strand them on a step they
 cannot leave. The current step and the ones never reached are inert text.
-Leaving the wizard keeps its progress, and **Settings › Onboarding › Open
+Leaving the wizard keeps its progress, and **Settings › General › Open
 guide** reopens it at the furthest step reached; only finishing First run
 starts it over.
 
@@ -6175,10 +6219,10 @@ select, a live terminal or its focused history surface, an open menu or list
 box, or an open dialog. A stray `n` typed at an agent has to reach the agent;
 in history it does nothing. In a menu it is that menu's typeahead, and on a
 select it jumps to the option that starts with it. The guard finds a select by
-its `combobox` role, since the control is a button. **Settings > Appearance >
+its `combobox` role, since the control is a button. **Settings > General >
 Single-key shortcuts** (on by default, persisted with the other view
-preferences) turns off every character key: `n`, `?`, `u`, `j`, `k`, the `g`
-sequences and the board card's `r` and `o`. Escape and the chords stay
+preferences) turns off every character key: `n`, `?`, `u`, `j`, `k`, `/` in
+Settings, the `g` sequences and the board card's `r` and `o`. Escape and the chords stay
 live. The `g` prefix waits 1.5s for the key that completes it, and any key
 that goes somewhere else ends the wait.
 
@@ -6286,7 +6330,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   tokens, `--state-*` tokens, geometry, radii, fonts and the one inline-colour
   exception for member attributes. Components use semantic token classes rather
   than route-specific colour literals.
-- **Dark, light, system.** Settings > Appearance and explicit palette commands
+- **Dark, light, system.** Settings > General and explicit palette commands
   set the stored preference; `system` follows `prefers-color-scheme` live.
   There is no additional theme mode or cycling status icon.
 - **Typography and density.** DM Sans at 13px with 12px supporting copy, on
@@ -6524,7 +6568,7 @@ setup, even when other members have created workspaces; completed members
 start on the board. WhoIs already identifies the member. The machine-local
 Link step, update notice, pull, forward and sync controls are absent
 because the descriptor carries no `local` verbs. Repository linking instead
-shows a local-client/CLI handoff. Settings remains available for Appearance.
+shows a local-client/CLI handoff. Settings remains available for General.
 Files and configuration editing also remain available through the
 server-hosted gateway.
 

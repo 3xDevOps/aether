@@ -156,18 +156,21 @@ const (
 // set only in the grace state and is RFC3339. RunStatus is the peer run's
 // lifecycle status.
 type CoordPeer struct {
-	RunID          string            `json:"run_id"`
-	MemberID       string            `json:"member_id"`
-	Task           string            `json:"task,omitempty"`
-	TaskBytes      int               `json:"task_bytes,omitempty"`
-	TaskTruncated  bool              `json:"task_truncated,omitempty"`
-	Files          []string          `json:"files,omitempty"`
-	FileTotal      int               `json:"file_total,omitempty"`
-	FilesTruncated bool              `json:"files_truncated,omitempty"`
-	State          string            `json:"state"`
-	ExpiresAt      string            `json:"expires_at,omitempty"`
-	RunStatus      string            `json:"run_status,omitempty"`
-	LastSent       *CoordSentMessage `json:"last_sent,omitempty"`
+	RunID           string            `json:"run_id"`
+	MemberID        string            `json:"member_id"`
+	Task            string            `json:"task,omitempty"`
+	TaskBytes       int               `json:"task_bytes,omitempty"`
+	TaskTruncated   bool              `json:"task_truncated,omitempty"`
+	Files           []string          `json:"files,omitempty"`
+	FileTotal       int               `json:"file_total,omitempty"`
+	FilesTruncated  bool              `json:"files_truncated,omitempty"`
+	State           string            `json:"state"`
+	ExpiresAt       string            `json:"expires_at,omitempty"`
+	Activity        string            `json:"activity,omitempty"`
+	Reason          string            `json:"reason,omitempty"`
+	ReasonTruncated bool              `json:"reason_truncated,omitempty"`
+	RunStatus       string            `json:"run_status,omitempty"`
+	LastSent        *CoordSentMessage `json:"last_sent,omitempty"`
 }
 
 // CoordSentMessage is the newest message the caller sent one peer and how
@@ -322,7 +325,7 @@ type CoordReportParams struct {
 	Outcome        string   `json:"outcome" jsonschema:"success, failure, blocked, needs-input or waiting"`
 	Summary        string   `json:"summary" jsonschema:"what you verified; for needs-input the question for the user; for blocked what a human must do; for waiting what you wait on"`
 	EvidenceRefs   []string `json:"evidence_refs,omitempty" jsonschema:"retained evidence packet ids; not for needs-input or waiting"`
-	IdempotencyKey string   `json:"idempotency_key" jsonschema:"a stable key you choose per outcome; retry an unchanged report with the same key"`
+	IdempotencyKey string   `json:"idempotency_key" jsonschema:"a fresh key you choose for each new report; reuse it only to retry the same report, since the same key with another outcome or summary is refused"`
 	WaitingFor     string   `json:"waiting_for,omitempty" jsonschema:"only with waiting: agents (the default), ci or process"`
 }
 

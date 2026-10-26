@@ -3,7 +3,7 @@ import { GitHubConnection } from '@/components/github-connection'
 import { Button } from '@/components/ui/button'
 import type { Api } from '@/lib/api'
 import { GitHubRepositoryDialog } from '@/routes/admin-dialogs'
-import { SettingsSection } from '@/routes/settings/layout'
+import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
 
@@ -24,12 +24,15 @@ export function GitHubSection({ client }: { client: Api }) {
   if (!isAdmin) return null
   const version = generation.current
   return (
-    <SettingsSection title="GitHub">
-      {!adding && <GitHubConnection client={client} />}
-      <div className="flex flex-wrap gap-2">
-        {caps.hasMethod('workspace.import') && <Button size="sm" onClick={() => setAdding(true)}>Add repository</Button>}
-        {caps.hasMethod('workspace.list') && <Button size="sm" variant="secondary" onClick={() => useStore.getState().navigate('workspaces')}>Manage workspaces</Button>}
-      </div>
+    <SettingsSection title="GitHub" id="github" scope="Server · admins">
+      <SettingRow label="Connection">{!adding && <GitHubConnection client={client} />}</SettingRow>
+      {caps.hasMethod('workspace.import') && (
+        <SettingRow
+          label="Repositories"
+          help="Import a GitHub repository as a workspace."
+          control={<Button size="sm" variant="secondary" onClick={() => setAdding(true)}>Add repository</Button>}
+        />
+      )}
       {adding && <GitHubRepositoryDialog client={client} onClose={() => setAdding(false)} onCreated={(workspace) => {
         if (version !== generation.current) return
         const state = useStore.getState()

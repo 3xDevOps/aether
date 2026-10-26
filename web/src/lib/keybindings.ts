@@ -57,6 +57,7 @@ export const keybindings = [
   { id: 'go-agents', keys: 'g g', scope: 'global', label: 'Go to agents' },
   { id: 'go-environment', keys: 'g e', scope: 'global', label: 'Go to your environment' },
   { id: 'go-settings', keys: 'g ,', scope: 'global', label: 'Go to settings' },
+  { id: 'settings-search', keys: '/', scope: 'global', label: 'Search settings, while Settings is open' },
   { id: 'run-view-next', keys: ']', scope: 'run', label: 'Show the next run view' },
   { id: 'run-view-previous', keys: '[', scope: 'run', label: 'Show the previous run view' },
   {

@@ -270,7 +270,7 @@ func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 	if err := h.db.UpdateRun(ctx, h.runs[recent]); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
-	if _, err := h.db.UpdateRunStatus(ctx, h.run(recent), domain.RunNeedsAttention, "", "", nil, nil); err != nil {
+	if _, err := h.db.UpdateRunStatus(ctx, h.run(recent), domain.RunNeedsAttention, "needs input: "+strings.Repeat("é", protocol.CoordMaxStatusTaskBytes), domain.ActivityNeedsYou, nil, nil); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
 
@@ -301,8 +301,9 @@ func TestStatusBoundsAndDedupsAllThreeRoutes(t *testing.T) {
 	}
 	if p := st.Peers[5]; p.RunID != string(h.run(recent)) || p.RunStatus != string(domain.RunNeedsAttention) ||
 		p.TaskBytes != 2*protocol.CoordMaxStatusTaskBytes || !p.TaskTruncated ||
-		len(p.Task) > protocol.CoordMaxStatusTaskBytes || !utf8.ValidString(p.Task) {
-		t.Fatalf("first workspace peer = %+v, want the most recently active run %s with its task bounded", p, h.run(recent))
+		len(p.Task) > protocol.CoordMaxStatusTaskBytes || !utf8.ValidString(p.Task) ||
+		p.Activity != string(domain.ActivityNeedsYou) || !p.ReasonTruncated || len(p.Reason) > protocol.CoordMaxStatusTaskBytes || !utf8.ValidString(p.Reason) {
+		t.Fatalf("first workspace peer = %+v, want the most recently active run %s with its task and reason bounded", p, h.run(recent))
 	}
 }
 

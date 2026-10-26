@@ -405,7 +405,7 @@ const (
 	TimelineKill    TimelineKind = "kill"
 	TimelineHandoff TimelineKind = "handoff"
 	TimelineNote    TimelineKind = "note"
-	// TimelineReport records a run-authenticated durable outcome. The
+	// TimelineReport records a run-authenticated report of any outcome. The
 	// envelope's ActorID is intentionally empty for run/server origins.
 	TimelineReport TimelineKind = "report"
 	// TimelineCoAuthor records a member other than the run's owner steering
@@ -426,6 +426,7 @@ type TimelinePayload struct {
 	// projections; the durable report/evidence APIs remain authoritative.
 	ReportID     string   `json:"report_id,omitempty"`
 	Outcome      string   `json:"outcome,omitempty"`
+	WaitingFor   string   `json:"waiting_for,omitempty"`
 	Summary      string   `json:"summary,omitempty"`
 	NextAction   string   `json:"next_action,omitempty"`
 	EvidenceRefs []string `json:"evidence_refs,omitempty"`

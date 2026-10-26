@@ -43,6 +43,7 @@ func TestTimelineDetailNamesAgentMail(t *testing.T) {
 		{events.TimelinePayload{Kind: events.TimelineReport, Outcome: "success", Summary: "added the check\nand its test"}, "success: added the check ..."},
 		{events.RunStatusPayload{From: "running", To: "needs-attention", Reason: "waiting for 2 workers", Activity: "waiting-agents", Cause: events.CauseWorkers},
 			"running -> needs-attention (waiting for 2 workers) · waiting-agents by workers"},
+		{events.TimelinePayload{Kind: events.TimelineReport, Outcome: "waiting", WaitingFor: "ci", Summary: "CI on PR 12"}, "waiting for ci: CI on PR 12"},
 	} {
 		raw, err := json.Marshal(tc.payload)
 		if err != nil {

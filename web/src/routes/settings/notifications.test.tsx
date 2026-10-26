@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { ApiError } from '@/lib/api'
 import type { SlackStatusResult } from '@/lib/types'
 import { disablePush, enablePush, readPush, testPush, type PushState } from '@/lib/push'
-import { NotificationsSection } from '@/routes/settings/notifications'
+import { PushSection, SlackSection } from '@/routes/settings/notifications'
 import { useStore } from '@/store'
 import { fakeApi } from '@/test/fixtures'
 
@@ -21,7 +21,7 @@ function show(state: PushState, slack?: SlackStatusResult) {
   useStore.setState({ capabilities: { gateway: 'server', methods: ['*'], ws: [] } })
   const client = fakeApi()
   if (slack) vi.mocked(client.slackStatus).mockResolvedValue(slack)
-  render(<NotificationsSection client={client} />)
+  render(<><PushSection client={client} /><SlackSection client={client} /></>)
   return client
 }
 
@@ -32,7 +32,7 @@ describe('notification settings', () => {
 
   it('reads this device through the gateway that serves the dashboard', async () => {
     const client = show({ kind: 'off' })
-    expect(screen.getByText('Checking this device…')).toBeDefined()
+    expect(screen.getByText('Reading this device…')).toBeDefined()
     expect(toggle()).toHaveProperty('disabled', true)
     await waitFor(() => expect(toggle()).toHaveProperty('disabled', false))
     expect(readPush).toHaveBeenCalledWith(client, 'server')
@@ -134,7 +134,7 @@ describe('notification settings', () => {
 
     it('points to the admin command when the server has no bot', async () => {
       show({ kind: 'off' })
-      expect(screen.getByText('Checking Slack…')).toBeDefined()
+      expect(screen.getByText('Reading Slack…')).toBeDefined()
       expect(await screen.findByText('sudo aether-server slack setup')).toBeDefined()
       expect(screen.getByRole('link', { name: 'Slack guide' }).getAttribute('href')).toBe(
         'https://github.com/3xDevOps/Aether/blob/main/docs/slack.md',

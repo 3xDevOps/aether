@@ -13,6 +13,9 @@ test('auto-approval is turned on only after the warning and is stored on the ser
 
   await page.goto(alice.url)
   await page.getByRole('navigation', { name: 'Aether' }).getByRole('button', { name: 'Settings', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'Assistant', exact: true }).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Assistant' })).toBeFocused()
+  await expect(page).toHaveURL(/[?&]page=settings&id=assistant\b/)
   const toggle = page.getByRole('checkbox', { name: 'Let the assistant act without asking' })
   await expect(toggle).toBeEnabled()
   await expect(toggle).not.toBeChecked()

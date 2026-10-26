@@ -80,7 +80,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 	}
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        toolStatus,
-		Description: "Report this run's v3 identity, assignment, capabilities, and the peers it may message, each with state mission, active, grace or workspace, task summary, overlapping files, for workspace peers run_status and, for peers you wrote to, last_sent: your newest message and whether it is sent, delivered, acked or retired. A viewer-owned run has none; at the 8-peer cap only swarm peers and existing conversations are listed. Capabilities with no MCP tool, such as dev.terminal.* and dev.browser.*, are aether-internal CLI commands; run the shell command `aether-internal skill` for how to use them.",
+		Description: "Report this run's v3 identity, assignment, capabilities, and the peers it may message, each with state mission, active, grace or workspace, task summary, overlapping files, activity (what it is doing: working, waiting-agents, waiting-ci, waiting-tools, waiting, needs-you, finished, failed or disconnected) with its reason, then run_status, where needs-attention only means parked, and, for peers you wrote to, last_sent: your newest message and whether it is sent, delivered, acked or retired. A viewer-owned run has none; at the 8-peer cap only swarm peers and existing conversations are listed. Capabilities with no MCP tool, such as dev.terminal.* and dev.browser.*, are aether-internal CLI commands; run the shell command `aether-internal skill` for how to use them.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, protocol.CoordStatusResult, error) {
 		out := protocol.CoordStatusResult{Peers: []protocol.CoordPeer{}, Capabilities: []string{}}
 		if err := coordtransport.Call(ctx, socket, protocol.MethodCoordStatus, nil, &out); err != nil {
@@ -174,7 +174,7 @@ func registerTools(srv *mcp.Server, socket string, g *gate) error {
 			"waiting means " + coordhooks.WaitingUse + " The next turn clears it. It takes no evidence_refs. " +
 			"success and failure end the work you own: a worker's success submits its attempt and stops it, an integrator's completes the mission, a Background run has one per launch, and an interactive session stays open for follow-up. " +
 			"blocked means a human must intervene and shows the summary as the Needs you reason at turn end. " +
-			"The shell command `aether-internal skill` lists your role's rules. An explicit stable idempotency_key is required; the server captures evidence before accepting it.",
+			"The shell command `aether-internal skill` lists your role's rules. An explicit idempotency_key is required: choose a fresh one for each new report, waiting and needs-input included, and reuse it only to retry the same report; the same key with another outcome or summary is refused. The server captures evidence for success, failure and blocked before accepting them.",
 		InputSchema: report,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in protocol.CoordReportParams) (*mcp.CallToolResult, protocol.CoordReportResult, error) {
 		var out protocol.CoordReportResult
