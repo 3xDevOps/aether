@@ -99,6 +99,7 @@ type harness struct {
 	bob   *domain.Member
 	swarm atomic.Pointer[protocol.AttentionItem]
 	keys  int
+	pr    PRSource
 }
 
 func newHarness(t *testing.T) *harness {
@@ -155,6 +156,9 @@ func (h *harness) start() {
 	})
 	if err != nil {
 		h.t.Fatalf("New: %v", err)
+	}
+	if h.pr != nil {
+		svc.UsePRSource(h.pr)
 	}
 	if err = svc.Start(h.ctx); err != nil {
 		h.t.Fatalf("Start: %v", err)
@@ -683,5 +687,58 @@ func TestSwarmWatchSaysSwarmTransitionsOnly(t *testing.T) {
 	h.eventually("the swarm to finish", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
 	if got := bodies(h.notices(w.ID)); len(got) != 2 || got[1] != "finished: Swarm completed" {
 		t.Fatalf("notices = %q, want Swarm completed last", got)
+	}
+}
+
+type rateLimited struct{ at time.Time }
+
+func (e rateLimited) Error() string      { return "GitHub rate limit exceeded" }
+func (e rateLimited) RetryAt() time.Time { return e.at }
+
+// fakePR fails with err while it is set.
+type fakePR struct{ err atomic.Pointer[error] }
+
+func (f *fakePR) Validate(context.Context, domain.MemberID, protocol.WatchTarget) (string, error) {
+	return "", nil
+}
+
+func (f *fakePR) Evaluate(context.Context, PRCheck) (PRResult, error) {
+	if err := f.err.Load(); err != nil {
+		return PRResult{}, *err
+	}
+	return PRResult{Observed: protocol.WatchObserved{PRState: "open"}}, nil
+}
+
+func TestPullRequestFailureKeepsTheRunsOwnNotices(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	pr := &fakePR{}
+	h.pr = pr
+	_ = h.svc.Close()
+	h.start()
+	run := h.run(h.ada, "Open the PR")
+	res, err := h.svc.Create(h.ctx, h.ada.ID, protocol.WatchCreateParams{Target: runTarget(run), Conditions: []string{"needs_you", "ci"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry := h.clock.now().Add(time.Hour)
+	var limited error = rateLimited{at: retry}
+	pr.err.Store(&limited)
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which base?")
+	h.eventually("the run's need", func() bool { return len(h.notices(res.Watch.ID)) == 1 })
+	w := h.watchState(res.Watch.ID)
+	if w.State != protocol.WatchError || w.Error != "GitHub rate limit exceeded" {
+		t.Fatalf("watch = %s %q, want error with the pull request's error", w.State, w.Error)
+	}
+	if w.NextCheckAt == nil || w.NextCheckAt.Before(retry) {
+		t.Fatalf("next check = %v, want the rate limit's retry time %v", w.NextCheckAt, retry)
+	}
+
+	pr.err.Store(nil)
+	h.publish(run.ID, events.RunStatusPayload{To: domain.RunNeedsAttention})
+	h.eventually("recovery", func() bool { return h.watchState(res.Watch.ID).State == protocol.WatchActive })
+	if got := h.notices(res.Watch.ID); len(got) != 1 {
+		t.Fatalf("notices = %q, want the need once", bodies(got))
 	}
 }

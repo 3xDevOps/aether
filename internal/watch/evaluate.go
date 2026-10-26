@@ -23,8 +23,11 @@ import (
 var errRevoked = errors.New("access revoked")
 
 // reading is what one evaluation found: the target as it stands, the
-// notices due, and whether the target can change no further.
+// notices due, and whether the target can change no further. ok is set
+// when it holds a read, which a failing pull request evaluation can leave
+// beside its error.
 type reading struct {
+	ok        bool
 	title     string
 	observed  protocol.WatchObserved
 	notices   []Notice
@@ -65,25 +68,16 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 	_ = json.Unmarshal(w.Observed, &prev)
 	w.LastCheckAt, w.UpdatedAt = &now, now
 	var notes []*store.WatchNotification
-	r, err := s.read(ctx, w, prev)
-	switch {
-	case errors.Is(err, errRevoked):
-		w.State, w.Error, w.NextCheckAt = protocol.WatchError, err.Error(), nil
-	case err != nil:
-		w.Failures++
-		next := now.Add(backoff(w.Failures))
-		w.State, w.Error, w.NextCheckAt = protocol.WatchError, err.Error(), &next
-	default:
-		w.State, w.Error, w.Failures, w.NextCheckAt = protocol.WatchActive, "", 0, nil
-		if !r.nextCheck.IsZero() {
-			w.NextCheckAt = &r.nextCheck
-		}
+	r, readErr := s.read(ctx, w, prev)
+	if errors.Is(readErr, errRevoked) {
+		w.State, w.Error, w.NextCheckAt = protocol.WatchError, readErr.Error(), nil
+	} else if r.ok {
 		if r.title != "" {
 			w.TargetTitle = r.title
 		}
-		observed, merr := json.Marshal(r.observed)
-		if merr != nil {
-			return merr
+		observed, err := json.Marshal(r.observed)
+		if err != nil {
+			return err
 		}
 		w.Observed = observed
 		if notes, err = s.notifications(ctx, w, r.notices, now); err != nil {
@@ -92,8 +86,23 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 		for _, n := range r.notices {
 			w.Fired[n.Condition] = n.Key
 		}
-		if r.final {
-			w.State, w.EndedAt, w.NextCheckAt = protocol.WatchDone, &now, nil
+	}
+	switch {
+	case errors.Is(readErr, errRevoked):
+	case readErr != nil:
+		w.Failures++
+		next := now.Add(backoff(w.Failures))
+		var hint interface{ RetryAt() time.Time }
+		if errors.As(readErr, &hint) && hint.RetryAt().After(next) {
+			next = hint.RetryAt()
+		}
+		w.State, w.Error, w.NextCheckAt = protocol.WatchError, readErr.Error(), &next
+	case r.final:
+		w.State, w.Error, w.Failures, w.EndedAt, w.NextCheckAt = protocol.WatchDone, "", 0, &now, nil
+	default:
+		w.State, w.Error, w.Failures, w.NextCheckAt = protocol.WatchActive, "", 0, nil
+		if !r.nextCheck.IsZero() {
+			w.NextCheckAt = &r.nextCheck
 		}
 	}
 	if len(notes) == 0 && !visiblyChanged(&before, w) && maps.Equal(before.Fired, w.Fired) && sameTime(before.NextCheckAt, w.NextCheckAt) {
@@ -177,7 +186,7 @@ func (s *Service) read(ctx context.Context, w *store.Watch, prev protocol.WatchO
 		if err != nil {
 			return reading{}, err
 		}
-		return reading{title: res.Title, observed: res.Observed, notices: res.Notices, final: res.Final, nextCheck: res.NextCheck}, nil
+		return reading{ok: true, title: res.Title, observed: res.Observed, notices: res.Notices, final: res.Final, nextCheck: res.NextCheck}, nil
 	}
 	return reading{}, fmt.Errorf("unknown target kind %q", w.TargetKind)
 }
@@ -187,7 +196,7 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 	if err != nil {
 		return reading{}, fmt.Errorf("read run %s: %w", w.RunID, err)
 	}
-	r := reading{title: push.RunTitle(run), final: run.Status.Final()}
+	r := reading{ok: true, title: push.RunTitle(run), final: run.Status.Final()}
 	link := RunLink(run.ID)
 	r.observed = protocol.WatchObserved{RunStatus: string(run.Status), Activity: string(run.Activity)}
 	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
@@ -207,7 +216,10 @@ func (s *Service) readRun(ctx context.Context, w *store.Watch, prev protocol.Wat
 	if prConditions := prConditionsOf(w.Conditions); len(prConditions) > 0 && s.pr != nil {
 		res, err := s.pr.Evaluate(ctx, PRCheck{Member: w.MemberID, Target: targetOf(w), Conditions: prConditions, Previous: prev, Since: w.CreatedAt})
 		if err != nil {
-			return reading{}, err
+			r.final = false
+			r.observed.PRState, r.observed.HeadSHA, r.observed.Checks, r.observed.ReviewState =
+				prev.PRState, prev.HeadSHA, prev.Checks, prev.ReviewState
+			return r, err
 		}
 		r.notices = append(r.notices, res.Notices...)
 		r.observed.PRState, r.observed.HeadSHA, r.observed.Checks, r.observed.ReviewState =
@@ -317,7 +329,7 @@ func (s *Service) readMission(ctx context.Context, w *store.Watch) (reading, err
 	if err != nil {
 		return reading{}, fmt.Errorf("read swarm %s: %w", w.MissionID, err)
 	}
-	r := reading{title: MissionTitle(m), final: m.Phase.Terminal()}
+	r := reading{ok: true, title: MissionTitle(m), final: m.Phase.Terminal()}
 	r.observed = protocol.WatchObserved{Phase: string(m.Phase)}
 	link := MissionLink(m.ID)
 	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
