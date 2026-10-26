@@ -260,8 +260,9 @@ runs at once when the member turned on
 [auto-approval](assistant.md#auto-approval), except that a message to or stop
 of another member's run always waits for a click, and an answer or approval
 decision always does. The card names what the call acts on: the run's title
-and owner, the request and the option chosen, or the swarm's goal and its
-question. A decline, timeout or closed session fails the call with the reason.
+and owner, the request and the option chosen, a message's attachments and
+anchor, or the swarm's goal, its accountable human when that is someone else,
+and its question, saying so when the question was already answered. A decline, timeout or closed session fails the call with the reason.
 `aether_docs` reads the guides in `docs/`, which the server binary embeds.
 Without `--assistant` the bridge serves the coordination tools above,
 unchanged.

@@ -298,7 +298,7 @@ func (s *Server) summarize(ctx context.Context, req protocol.Request, c *protoco
 		if p.Kind != protocol.RoomMessageReply {
 			verb = fmt.Sprintf("Post a %q message on", truncate(string(p.Kind)))
 		}
-		c.Summary = fmt.Sprintf("%s run %s (%q)%s: %q", verb, p.RunID, runLabel(run), ownedBy(c), truncate(p.Body))
+		c.Summary = fmt.Sprintf("%s run %s (%q)%s: %q%s", verb, p.RunID, runLabel(run), ownedBy(c), truncate(p.Body), attached(p.Attachments, p.Anchor))
 		return nil
 	}
 	return &protocol.Error{Code: protocol.CodeInternal, Message: req.Method + ": no confirmation summary for this method"}
@@ -441,7 +441,7 @@ func (s *Server) summarizeInject(ctx context.Context, req protocol.Request, c *p
 	if rpcErr != nil {
 		return rpcErr
 	}
-	c.Summary = fmt.Sprintf("Send to run %s (%q)%s: %q", p.RunID, runLabel(run), ownedBy(c), truncate(p.Message))
+	c.Summary = fmt.Sprintf("Send to run %s (%q)%s: %q%s", p.RunID, runLabel(run), ownedBy(c), truncate(p.Message), attached(p.Attachments, nil))
 	return nil
 }
 
@@ -467,6 +467,35 @@ func (s *Server) owner(ctx context.Context, member string, c *protocol.Assistant
 		}
 	}
 	return nil
+}
+
+// attached names a message's attachments and the place it is anchored to.
+func attached(files []string, anchor *protocol.RoomMessageAnchor) string {
+	var out string
+	if len(files) > 0 {
+		quoted := make([]string, len(files))
+		for i, f := range files {
+			quoted[i] = fmt.Sprintf("%q", truncate(f))
+		}
+		out = ", attaching " + strings.Join(quoted, ", ")
+	}
+	if anchor == nil {
+		return out
+	}
+	switch {
+	case anchor.Path != "":
+		at := anchor.Path
+		if anchor.StartLine > 0 {
+			at += fmt.Sprintf(":%d", anchor.StartLine)
+		}
+		if anchor.EndLine > anchor.StartLine {
+			at += fmt.Sprintf("-%d", anchor.EndLine)
+		}
+		out += fmt.Sprintf(", anchored at %q", truncate(at))
+	case anchor.Kind != "":
+		out += fmt.Sprintf(", anchored at %s offset %d", truncate(anchor.Kind), anchor.TranscriptOffset)
+	}
+	return out
 }
 
 func ownedBy(c *protocol.AssistantConfirmation) string {
