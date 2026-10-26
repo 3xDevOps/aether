@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { FailureCallout } from '@/components/ui/failure-callout'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { Label } from '@/components/ui/label'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
@@ -149,9 +150,9 @@ export function InvitationsSection({ client }: { client: Api }) {
       {failures.map((failure) => <FailureCallout key={failure.id} error={failure.error} onRetry={failure.retry} />)}
       {invitations?.length === 0 && <p className="text-ui text-muted">No open invitations.</p>}
       {invitations && invitations.length > 0 && (
-        <ul aria-label="Open invitations" className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
+        <InsetList aria-label="Open invitations">
           {invitations.map((invitation) => (
-            <li key={invitation.id} className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-2">
+            <InsetListItem key={invitation.id}>
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-ui font-medium text-text">{invitee(invitation)}</span>
                 <span className="truncate text-ui-sm text-muted">
@@ -165,9 +166,9 @@ export function InvitationsSection({ client }: { client: Api }) {
                   Revoke
                 </Button>
               )}
-            </li>
+            </InsetListItem>
           ))}
-        </ul>
+        </InsetList>
       )}
       {revoking && (
         <Confirm

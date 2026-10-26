@@ -3,6 +3,7 @@ import { Check, ExternalLink, RefreshCw } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { InsetList } from '@/components/ui/inset-list'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
@@ -202,14 +203,14 @@ export function PRFeedback({
             </Button>
           </div>
           {checks.length === 0 && <p className="text-muted">No check has reported on <span className="font-code">{pr.head_oid.slice(0, 8)}</span> yet.</p>}
-          {checks.length > 0 && <ul className="divide-y divide-seam rounded-panel border border-seam">{(pending.length ? pending : passing).map(row)}</ul>}
+          {checks.length > 0 && <InsetList>{(pending.length ? pending : passing).map(row)}</InsetList>}
           {pending.length > 0 && passing.length > 0 && (
             <Collapsible>
               <CollapsibleTrigger>
                 <span className="text-ui-sm text-muted">{passing.length} passed</span>
               </CollapsibleTrigger>
               <CollapsibleContent>
-                <ul className="mt-1 divide-y divide-seam rounded-panel border border-seam">{passing.map(row)}</ul>
+                <InsetList className="mt-1">{passing.map(row)}</InsetList>
               </CollapsibleContent>
             </Collapsible>
           )}
@@ -219,7 +220,7 @@ export function PRFeedback({
           {comments.length === 0 ? (
             <p className="text-muted">No review comments.</p>
           ) : (
-            <ul className="divide-y divide-seam rounded-panel border border-seam">
+            <InsetList>
               {comments.map((comment) => (
                 <li key={comment.key}>
                   <article className="grid min-w-0 gap-1 px-2 py-1.5">
@@ -241,7 +242,7 @@ export function PRFeedback({
                   </article>
                 </li>
               ))}
-            </ul>
+            </InsetList>
           )}
         </section>
       </DialogContent>

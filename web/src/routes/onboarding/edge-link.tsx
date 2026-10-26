@@ -9,6 +9,7 @@ import { Callout } from '@/components/ui/callout'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { StatusDot } from '@/components/ui/status-dot'
 import { ApiError, type Api } from '@/lib/api'
 import { parseClaim, parseJoin } from '@/lib/claim-link'
@@ -552,9 +553,9 @@ function ServerPicker({
         </p>
       )}
       {servers && servers.length > 0 && (
-        <ul aria-label="Your servers" className="flex min-w-0 flex-col divide-y divide-seam rounded-panel border border-seam">
+        <InsetList aria-label="Your servers">
           {servers.map((server) => (
-            <li key={server.id} className="flex min-w-0 items-center gap-3 px-3 py-2">
+            <InsetListItem key={server.id}>
               <StatusDot tone={server.online ? 'done' : 'neutral'} />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate font-medium">{server.name}</span>
@@ -571,9 +572,9 @@ function ServerPicker({
               >
                 Link
               </Button>
-            </li>
+            </InsetListItem>
           ))}
-        </ul>
+        </InsetList>
       )}
       {confirming && (
         <ConfirmPin

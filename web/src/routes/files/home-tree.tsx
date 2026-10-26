@@ -5,7 +5,7 @@ import { Callout } from '@/components/ui/callout'
 import { ListRow } from '@/components/ui/list-row'
 import { Spinner } from '@/components/ui/spinner'
 import type { FileTreeEntry } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { chevronTurn, cn } from '@/lib/utils'
 import { useHomeFiles } from '@/routes/files/home'
 import { HomeMenu, type RowKind } from '@/routes/files/home-menu'
 import { NameRow } from '@/routes/files/home-name'
@@ -59,7 +59,7 @@ function HomeDirectory({
         onClick={toggle}
         leading={
           <>
-            <ChevronRight className={cn(expanded && 'rotate-90')} />
+            <ChevronRight className={cn(chevronTurn, expanded && 'rotate-90')} />
             {root ? <House /> : <Folder />}
           </>
         }

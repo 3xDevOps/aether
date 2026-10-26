@@ -231,7 +231,7 @@ test('nothing changed is an empty state with nothing to publish', async () => {
   seed({ ...ready, patch: '' })
   useStore.setState({ capabilities: { gateway: 'local', methods: ['*'], ws: [] } })
   renderDiff()
-  expect(screen.getByRole('heading', { name: 'No changes yet.' })).toBeTruthy()
+  expect(screen.getByRole('heading', { name: 'No changes yet' })).toBeTruthy()
   expect(screen.queryByRole('button', { name: 'Publish…' })).toBeNull()
 })
 

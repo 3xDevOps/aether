@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Callout } from '@/components/ui/callout'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { Api } from '@/lib/api'
+import { useDelayed } from '@/lib/hooks'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
 import { Charts } from '@/routes/insights/system/charts'
@@ -34,6 +36,7 @@ export function SystemTab({ client }: { client: Api }) {
   const state = useSystemStats(client, connection)
   const [range, setRange] = useState<RangeID>('15m')
   const { stats } = state
+  const reading = useDelayed(!stats && !state.error)
   const rangeMs = ranges.find((r) => r.id === range)!.ms
 
   return (
@@ -46,7 +49,12 @@ export function SystemTab({ client }: { client: Api }) {
             <RangePicker range={range} onChange={setRange} />
             <p role="status" className={cn('min-w-0 whitespace-pre-wrap break-words text-ui-sm', state.error ? 'text-state-failed' : 'text-muted')}>{liveLine(state)}</p>
           </div>
-          {!stats && !state.error && <p className="text-ui text-muted">Reading system stats…</p>}
+          {reading && (
+            <div className="grid grid-cols-1 gap-3 min-[30rem]:grid-cols-2 lg:grid-cols-3">
+              <span role="status" className="sr-only">Reading system stats…</span>
+              {[0, 1, 2, 3, 4, 5].map((tile) => <Skeleton key={tile} className="h-32 rounded-panel" />)}
+            </div>
+          )}
           {stats && (
             <div className={cn('flex min-w-0 flex-col gap-8', state.error && 'opacity-60')}>
               {stats.hostError && <Callout tone="failed" role="alert" className="whitespace-pre-wrap">{stats.hostError}</Callout>}

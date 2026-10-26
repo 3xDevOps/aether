@@ -65,6 +65,7 @@
 
   --animate-spin: spin var(--duration-900) linear infinite;
   --animate-overlay-in: overlay-in var(--duration-popover) var(--ease-enter);
+  --animate-fade-in: fade-in var(--duration-200) var(--ease-enter);
   --animate-dialog-in: dialog-in var(--duration-200) var(--ease-enter);
   --animate-scrim-in: fade-in var(--duration-200) var(--ease-standard);
   --animate-sheet-up: sheet-up var(--duration-220) var(--ease-sheet);

@@ -7,6 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { FailureCallout } from '@/components/ui/failure-callout'
 import { Input } from '@/components/ui/input'
+import { InsetList, InsetListItem } from '@/components/ui/inset-list'
 import { SectionLabel } from '@/components/ui/section-label'
 import { api, type Api } from '@/lib/api'
 import type { Member } from '@/lib/types'
@@ -299,11 +300,11 @@ function AccountSharing({ client, self }: { client: Api; self: Member }) {
       {teammates.length === 0 ? (
         <p className="text-ui text-muted">No teammates yet.</p>
       ) : (
-        <ul className="flex flex-col divide-y divide-seam rounded-panel border border-seam">
+        <InsetList>
           {teammates.map((member) => {
             const shared = sharedWith.some((entry) => entry.id === member.id)
             return (
-              <li key={member.id} className="flex min-h-11 min-w-0 items-center gap-3 px-3 py-1.5">
+              <InsetListItem key={member.id}>
                 <Avatar name={member.display_name} color={member.color} size="header" />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-ui font-medium text-text">{member.display_name}</span>
@@ -312,10 +313,10 @@ function AccountSharing({ client, self }: { client: Api; self: Member }) {
                 <Button size="sm" variant="secondary" disabled={pending.has(member.id)} onClick={() => toggle(member)}>
                   {shared ? 'Revoke access' : 'Share account'}
                 </Button>
-              </li>
+              </InsetListItem>
             )
           })}
-        </ul>
+        </InsetList>
       )}
       {stopping && (
         <StopEnvironmentDialog

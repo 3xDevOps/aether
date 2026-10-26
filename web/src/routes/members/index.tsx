@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { PageBody } from '@/components/ui/page-body'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ViewHeader } from '@/components/view-header'
 import { api, type Api } from '@/lib/api'
@@ -74,7 +75,7 @@ export function MembersPage({ tab, client = api }: { tab: Tab; client?: Api }) {
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Tabs value={tab} onValueChange={(value) => navigate(value)}>
-          <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-6 px-4 py-4 sm:px-6">
+          <PageBody>
             {showDevices && (
               <div className="border-b border-seam">
                 <TabsList aria-label="Members and devices">
@@ -92,7 +93,7 @@ export function MembersPage({ tab, client = api }: { tab: Tab; client?: Api }) {
                 <DevicesPanel client={client} />
               </TabsContent>
             )}
-          </div>
+          </PageBody>
         </Tabs>
       </div>
       {inviting && (

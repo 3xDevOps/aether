@@ -4,7 +4,8 @@ import { Wrench } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { Code } from '@/components/ui/code'
-import { IconTile, RequestCard } from '@/components/ui/request-card'
+import { IconTile } from '@/components/ui/icon-tile'
+import { RequestCard } from '@/components/ui/request-card'
 import { RequestAction, RequestActions, RequestFooter, RequestPills } from '@/components/ui/request-choice'
 import { RequestSection } from '@/components/ui/request-section'
 import { toolIcon } from '@/components/ui/timeline'
@@ -185,7 +186,7 @@ export function AcpRequestCard({ sessionID, request, who, harness, answering, ca
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false)
       }}
       aria-label={`${plainHeadline(headline)} ${request.title}`}
-      avatar={<IconTile><AgentGlyph agent={harness} /></IconTile>}
+      avatar={<IconTile aria-hidden><AgentGlyph agent={harness} className="size-4" /></IconTile>}
       title={<HeadlineText headline={headline} />}
       source={call?.tool_name ? <Source call={call} /> : undefined}
       meta={meta}

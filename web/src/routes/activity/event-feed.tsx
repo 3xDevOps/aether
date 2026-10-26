@@ -1,11 +1,13 @@
 import { useMemo, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
+import { History } from '@/components/icons'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Skeleton } from '@/components/ui/skeleton'
 import type { Api } from '@/lib/api'
+import { useDelayed } from '@/lib/hooks'
 import type { Event } from '@/lib/types'
 import { EventRow, VisitRow } from '@/routes/activity/event-row'
+import { FeedSkeleton } from '@/routes/activity/feed-skeleton'
 import { VirtualList } from '@/routes/activity/virtual-list'
 import { type FeedItem, foldVisits } from '@/routes/activity/visits'
 import { olderFeed, pageBudget } from '@/routes/team/sync'
@@ -23,18 +25,15 @@ export function EventFeed({ client, raw }: { client: Api; raw: boolean }) {
   const truncated = useStore((s) => s.feedTruncated)
   const newestFirst = useMemo(() => feedItems(feed, raw).reverse(), [feed, raw])
   const scroller = useRef<HTMLDivElement>(null)
+  const waiting = useDelayed(loading && feed.length === 0 && !error)
 
   return (
     <>
     {error && <Callout tone="failed" role="alert" className="m-3">{error}</Callout>}
     <div ref={scroller} role="region" aria-label="Activity feed" className="min-h-0 flex-1 overflow-y-auto">
-      {loading && feed.length === 0 && !error && (
-        <div aria-label="Loading activity" className="flex flex-col gap-2 p-4">
-          {[0, 1, 2].map((row) => <div key={row} className="h-5"><Skeleton className="size-full" /></div>)}
-        </div>
-      )}
+      {waiting && <FeedSkeleton label="Loading activity" />}
       {feed.length === 0 && !loading && !error && (
-        <EmptyState title="Nothing here yet">Activity appears here as your team works in this workspace.</EmptyState>
+        <EmptyState icon={<History />} title="Nothing here yet">Activity appears here as your team works in this workspace.</EmptyState>
       )}
       <VirtualList data={newestFirst} scrollRef={scroller}>
         {(item) => (item.kind === 'visit' ? <VisitRow key={item.id} visit={item} /> : <EventRow key={item.event.id} event={item.event} raw={raw} />)}

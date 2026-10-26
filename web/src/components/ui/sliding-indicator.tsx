@@ -52,6 +52,9 @@ export function SlidingIndicator({ activeKey, className }: { activeKey: string |
       (item) => item.dataset.indicatorKey === shownKey.current,
     )
     if (!target) {
+      moving.current?.cancel()
+      moving.current = null
+      box.current = null
       el.style.opacity = '0'
       return
     }

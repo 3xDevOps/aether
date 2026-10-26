@@ -1,7 +1,7 @@
 import { Collapsible as CollapsiblePrimitive } from 'radix-ui'
 import type * as React from 'react'
 import { ChevronRight } from '@/components/icons'
-import { cn, focusRing } from '@/lib/utils'
+import { chevronTurn, cn, focusRing } from '@/lib/utils'
 
 export function Collapsible({
   ...props
@@ -25,7 +25,7 @@ export function CollapsibleTrigger({
       )}
       {...props}
     >
-      <ChevronRight className="size-3 shrink-0 text-muted transition-transform duration-200 ease-standard motion-reduce:transition-none" />
+      <ChevronRight className={cn('size-3 shrink-0 text-muted', chevronTurn)} />
       {children}
     </CollapsiblePrimitive.Trigger>
   )

@@ -12,6 +12,7 @@ const twMerge = extendTailwindMerge({
       ease: ['hover', 'standard', 'enter', 'glide', 'press', 'pop', 'sheet', 'pulse'],
       animate: [
         'overlay-in',
+        'fade-in',
         'dialog-in',
         'scrim-in',
         'sheet-up',
@@ -29,7 +30,7 @@ const twMerge = extendTailwindMerge({
       ],
     },
     classGroups: {
-      'font-size': [{ text: ['ui-xs', 'ui-sm', 'ui', 'prose', 'title', 'avatar'] }],
+      'font-size': [{ text: ['ui-xs', 'ui-sm', 'ui', 'prose', 'title', 'avatar', 'stat'] }],
       duration: [{ duration: ['instant', 'hover', 'press', 'release', 'popover', 'glide', 'expand', 'pulse'] }],
     },
   },
@@ -46,6 +47,9 @@ export const focusRing =
 
 export const focusRingInset =
   'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent focus-visible:transition-none'
+
+/** A disclosure marker that turns as its body opens. */
+export const chevronTurn = 'transition-transform duration-200 ease-standard motion-reduce:transition-none'
 
 export const surface = 'rounded-panel border border-seam bg-raised text-text shadow-overlay'
 
