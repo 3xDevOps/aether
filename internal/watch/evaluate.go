@@ -438,10 +438,12 @@ func prConditionsOf(conditions []string) []string {
 
 // notifications turns notices due into records, skipping any already
 // fired for its condition: the store's uniqueness catches the rest. In-app
-// is recorded delivered at once; push follows the owner's preferences.
+// is recorded delivered at once; the push row says at once what will
+// happen to the push, and is updated as it resolves.
 func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []Notice, now time.Time) ([]*store.WatchNotification, error) {
 	var out []*store.WatchNotification
 	var prefs *store.NotifyPrefs
+	devices := -1
 	for _, n := range notices {
 		if w.Fired[n.Condition] == n.Key {
 			continue
@@ -458,14 +460,34 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 			CreatedAt: now, PushState: store.WatchPushNone,
 			Deliveries: []store.WatchDelivery{{Channel: protocol.WatchChannelInApp, Status: protocol.WatchStatusDelivered, At: now}},
 		}
+		d := store.WatchDelivery{Channel: protocol.WatchChannelPush, At: now}
 		switch {
 		case !prefs.Push:
-			rec.Deliveries = append(rec.Deliveries, store.WatchDelivery{Channel: protocol.WatchChannelPush, Status: protocol.WatchStatusDisabled, Detail: "Push is off in your notification settings", At: now})
+			d.Status, d.Detail = protocol.WatchStatusDisabled, "Push is off in your notification settings"
 		case s.push == nil:
-			rec.Deliveries = append(rec.Deliveries, store.WatchDelivery{Channel: protocol.WatchChannelPush, Status: protocol.WatchStatusNoDestination, Detail: "Web Push is not configured on this server", At: now})
+			d.Status, d.Detail = protocol.WatchStatusDisabled, "Push is not configured on this server"
 		default:
+			if devices < 0 {
+				count, err := s.push.Devices(ctx, w.MemberID)
+				if err != nil {
+					return nil, err
+				}
+				devices = count
+			}
+			if devices == 0 {
+				d.Status, d.Detail = protocol.WatchStatusNoDestination, "No device has notifications turned on"
+				break
+			}
 			rec.PushState, rec.PushNextAt = store.WatchPushPending, &now
+			d.Status, d.Detail = protocol.WatchStatusPending, "Sending"
+			if until, quiet := quietUntil(*prefs, now); quiet {
+				rec.PushState, rec.PushNextAt = store.WatchPushHeld, &until
+				d.Status, d.Detail = protocol.WatchStatusHeldQuiet, quietDetail(*prefs, until)
+			} else if s.push.HeldUntil(w.MemberID).After(now) {
+				d.Detail = dashboardHold
+			}
 		}
+		rec.Deliveries = append(rec.Deliveries, d)
 		out = append(out, rec)
 	}
 	return out, nil

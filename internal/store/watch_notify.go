@@ -132,7 +132,7 @@ func (d *DB) SetWatchPush(ctx context.Context, id, state string, attempts int, n
 		return fmt.Errorf("store: set watch push %s: %w", id, err)
 	}
 	if del != nil {
-		if err := insertWatchDelivery(ctx, tx, id, *del); err != nil {
+		if err := setWatchDelivery(ctx, tx, id, *del); err != nil {
 			return err
 		}
 	}
@@ -184,4 +184,23 @@ func (d *DB) SetWatchCursor(ctx context.Context, seq uint64) error {
 		return fmt.Errorf("store: save watch cursor: %w", err)
 	}
 	return nil
+}
+
+// setWatchDelivery replaces the notification's delivery row on del's
+// channel, or adds one.
+func setWatchDelivery(ctx context.Context, tx *sql.Tx, notification string, del WatchDelivery) error {
+	at, err := encodeTime(del.At)
+	if err != nil {
+		return fmt.Errorf("store: record watch delivery: %w", err)
+	}
+	res, err := tx.ExecContext(ctx,
+		`UPDATE watch_deliveries SET status = ?, detail = ?, at = ? WHERE notification_id = ? AND channel = ?`,
+		del.Status, del.Detail, at, notification, del.Channel)
+	if err != nil {
+		return fmt.Errorf("store: record watch delivery: %w", err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n > 0 {
+		return err
+	}
+	return insertWatchDelivery(ctx, tx, notification, del)
 }

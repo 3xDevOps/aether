@@ -54,6 +54,9 @@ const (
 	WatchChannelDesktop = "desktop"
 	WatchChannelInApp   = "in_app"
 
+	// WatchStatusPending is a push still to be sent: being sent, waiting
+	// for the member to leave a dashboard, or waiting for a retry.
+	WatchStatusPending       = "pending"
 	WatchStatusDelivered     = "delivered"
 	WatchStatusNoDestination = "no_destination"
 	WatchStatusDisabled      = "disabled"

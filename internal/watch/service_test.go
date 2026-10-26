@@ -283,14 +283,25 @@ func bodies(notes []*store.WatchNotification) []string {
 	return out
 }
 
-func pushStatuses(n *store.WatchNotification) []string {
-	var out []string
+// pushOf is the notice's push delivery row.
+func pushOf(n *store.WatchNotification) store.WatchDelivery {
 	for _, d := range n.Deliveries {
 		if d.Channel == protocol.WatchChannelPush {
-			out = append(out, d.Status)
+			return d
 		}
 	}
-	return out
+	return store.WatchDelivery{}
+}
+
+// pushStatus is the push status of the watch's only notice, empty before
+// it has one.
+func (h *harness) pushStatus(id string) string {
+	h.t.Helper()
+	notes := h.notices(id)
+	if len(notes) != 1 {
+		return ""
+	}
+	return pushOf(notes[0]).Status
 }
 
 func (h *harness) watchState(id string) *store.Watch {
@@ -331,8 +342,9 @@ func TestRunNeedsAreNotifiedOncePerNeedAndFinishWordsStayApart(t *testing.T) {
 	if len(got) != 1 || got[0].Body != "which region?" || got[0].Title != "Fix the login redirect" || got[0].Link != "/?run="+string(run.ID) {
 		t.Fatalf("notices = %q, want one for the question", bodies(got))
 	}
-	if s := pushStatuses(h.notices(w.ID)[0]); len(s) != 1 || s[0] != protocol.WatchStatusDelivered {
-		t.Fatalf("push deliveries = %v, want [delivered]", s)
+	h.eventually("the push row to say delivered", func() bool { return pushOf(h.notices(w.ID)[0]).Status == protocol.WatchStatusDelivered })
+	if d := pushOf(h.notices(w.ID)[0]); d.Detail != "1 device" {
+		t.Fatalf("push = %+v, want delivered to 1 device", d)
 	}
 
 	h.runs.ask(run.ID, "q2", "Deploy to staging first?")
@@ -458,12 +470,12 @@ func TestNeedAnsweredBeforeThePushIsDropped(t *testing.T) {
 	h.runs.ask(run.ID, "q1", "Rotate prod too?")
 	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
 	h.eventually("the in-app notice", func() bool { return len(h.notices(w.ID)) == 1 })
+	if d := pushOf(h.notices(w.ID)[0]); d.Status != protocol.WatchStatusPending || d.Detail != dashboardHold {
+		t.Fatalf("push while on a dashboard = %+v, want pending until Ada leaves", d)
+	}
 	h.runs.answer(run.ID)
 	h.publish(run.ID, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
-	h.eventually("the push to settle", func() bool { return len(pushStatuses(h.notices(w.ID)[0])) == 1 })
-	if s := pushStatuses(h.notices(w.ID)[0]); s[0] != protocol.WatchStatusCleared {
-		t.Fatalf("push = %v, want cleared", s)
-	}
+	h.eventually("the push to be cleared", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusCleared })
 	if n := phone.received.Load(); n != 0 {
 		t.Fatalf("device received %d pushes, want none", n)
 	}
@@ -547,12 +559,8 @@ func TestQuietHoursHoldPushesAndSendOneWhenTheyEnd(t *testing.T) {
 	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
 	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")
 	h.eventually("both held", func() bool {
-		na, nb := h.notices(wa.ID), h.notices(wb.ID)
-		return len(na) == 1 && len(nb) == 1 && len(pushStatuses(na[0])) == 1 && len(pushStatuses(nb[0])) == 1
+		return h.pushStatus(wa.ID) == protocol.WatchStatusHeldQuiet && h.pushStatus(wb.ID) == protocol.WatchStatusHeldQuiet
 	})
-	if s := pushStatuses(h.notices(wa.ID)[0]); s[0] != protocol.WatchStatusHeldQuiet {
-		t.Fatalf("push = %v, want held_quiet_hours", s)
-	}
 
 	// The hold survives a restart, and the end of quiet hours sends one.
 	_ = h.svc.Close()
@@ -564,9 +572,8 @@ func TestQuietHoursHoldPushesAndSendOneWhenTheyEnd(t *testing.T) {
 		t.Fatalf("device received %d pushes, want one for both notices", n)
 	}
 	for _, id := range []string{wa.ID, wb.ID} {
-		s := pushStatuses(h.notices(id)[0])
-		if len(s) != 2 || s[1] != protocol.WatchStatusDelivered {
-			t.Fatalf("push of %s = %v, want held_quiet_hours then delivered", id, s)
+		if s := h.pushStatus(id); s != protocol.WatchStatusDelivered {
+			t.Fatalf("push of %s = %s, want delivered", id, s)
 		}
 	}
 }
@@ -581,13 +588,7 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 		t.Fatal("receipt does not say a member without a device is told in-app only")
 	}
 	h.status(none, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: x")
-	h.eventually("no destination", func() bool {
-		n := h.notices(w.ID)
-		return len(n) == 1 && len(pushStatuses(n[0])) == 1
-	})
-	if s := pushStatuses(h.notices(w.ID)[0]); s[0] != protocol.WatchStatusNoDestination {
-		t.Fatalf("push = %v, want no_destination", s)
-	}
+	h.eventually("no destination", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusNoDestination })
 
 	phone := h.subscribe(h.bob)
 	phone.status.Store(http.StatusInternalServerError)
@@ -600,12 +601,15 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 	for attempt := 1; attempt <= maxPushAttempts; attempt++ {
 		h.eventually(fmt.Sprintf("push attempt %d", attempt), func() bool {
 			n := h.notices(w.ID)
-			return len(n) == 1 && len(pushStatuses(n[0])) == attempt
+			return len(n) == 1 && n[0].PushAttempts == attempt
 		})
+		if d := pushOf(h.notices(w.ID)[0]); attempt == 1 && (d.Status != protocol.WatchStatusPending || !strings.HasPrefix(d.Detail, "Retry 2 of 5 at ")) {
+			t.Fatalf("push after a failed attempt = %+v, want pending with the retry", d)
+		}
 		h.clock.advance(maxBackoff)
 	}
 	notes := h.notices(w.ID)
-	last := notes[0].Deliveries[len(notes[0].Deliveries)-1]
+	last := pushOf(notes[0])
 	if last.Status != protocol.WatchStatusFailed || !strings.Contains(last.Detail, "500") || !strings.Contains(last.Detail, "gave up after 5 attempts") {
 		t.Fatalf("last push = %+v, want failed with the push service's error and the give-up", last)
 	}
@@ -614,23 +618,16 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 	ok := h.run(h.bob, "Working device")
 	w = h.watch(h.bob, runTarget(ok)).Watch
 	h.status(ok, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: z")
-	h.eventually("delivered", func() bool {
-		n := h.notices(w.ID)
-		return len(n) == 1 && len(pushStatuses(n[0])) == 1
-	})
-	got := h.notices(w.ID)[0].Deliveries
-	if got[1].Status != protocol.WatchStatusDelivered || got[1].Detail != "1 device" {
-		t.Fatalf("push = %+v, want delivered to 1 device", got[1])
-	}
+	h.eventually("delivered", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
 
 	// A device its push service reports gone is unsubscribed.
 	phone.status.Store(http.StatusGone)
 	gone := h.run(h.bob, "Gone device")
 	w = h.watch(h.bob, runTarget(gone)).Watch
 	h.status(gone, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: g")
-	h.eventually("failed", func() bool {
+	h.eventually("a failed attempt", func() bool {
 		n := h.notices(w.ID)
-		return len(n) == 1 && len(pushStatuses(n[0])) == 1
+		return len(n) == 1 && n[0].PushAttempts == 1
 	})
 	if n, _ := h.push.Devices(h.ctx, h.bob.ID); n != 0 {
 		t.Fatalf("devices after 410 = %d, want 0", n)
@@ -758,8 +755,7 @@ func TestTurningQuietHoursOffReleasesHeldPushesExceptPausedOnes(t *testing.T) {
 	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
 	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")
 	h.eventually("both held", func() bool {
-		na, nb := h.notices(wa.ID), h.notices(wb.ID)
-		return len(na) == 1 && len(nb) == 1 && len(pushStatuses(na[0])) == 1 && len(pushStatuses(nb[0])) == 1
+		return h.pushStatus(wa.ID) == protocol.WatchStatusHeldQuiet && h.pushStatus(wb.ID) == protocol.WatchStatusHeldQuiet
 	})
 	paused := true
 	if _, err := h.svc.Update(h.ctx, h.ada.ID, protocol.WatchUpdateParams{WatchID: wb.ID, Paused: &paused}); err != nil {
@@ -770,10 +766,10 @@ func TestTurningQuietHoursOffReleasesHeldPushesExceptPausedOnes(t *testing.T) {
 	}
 	h.eventually("the released push", func() bool { return phone.received.Load() == 1 })
 	settle()
-	if s := pushStatuses(h.notices(wa.ID)[0]); len(s) != 2 || s[1] != protocol.WatchStatusDelivered {
-		t.Fatalf("kept watch push = %v, want held then delivered", s)
+	if s := h.pushStatus(wa.ID); s != protocol.WatchStatusDelivered {
+		t.Fatalf("kept watch push = %s, want delivered", s)
 	}
-	if s := pushStatuses(h.notices(wb.ID)[0]); len(s) != 1 || phone.received.Load() != 1 {
-		t.Fatalf("paused watch push = %v, want it still held", s)
+	if s := h.pushStatus(wb.ID); s != protocol.WatchStatusHeldQuiet || phone.received.Load() != 1 {
+		t.Fatalf("paused watch push = %s, want it still held", s)
 	}
 }

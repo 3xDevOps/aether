@@ -73,8 +73,7 @@ func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, not
 			if n.PushState == store.WatchPushHeld && n.PushNextAt != nil && n.PushNextAt.Equal(until) {
 				continue
 			}
-			detail := "Until " + until.In(location(prefs)).Format("15:04 MST")
-			if err := s.settle(ctx, n, store.WatchPushHeld, n.PushAttempts, &until, protocol.WatchStatusHeldQuiet, detail); err != nil {
+			if err := s.settle(ctx, n, store.WatchPushHeld, n.PushAttempts, &until, protocol.WatchStatusHeldQuiet, quietDetail(prefs, until)); err != nil {
 				return err
 			}
 		}
@@ -82,7 +81,7 @@ func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, not
 	}
 	if held := s.push.HeldUntil(member); held.After(now) {
 		for _, n := range sendable {
-			if err := s.store.SetWatchPush(ctx, n.ID, n.PushState, n.PushAttempts, &held, nil); err != nil {
+			if err := s.hold(ctx, n, held); err != nil {
 				return err
 			}
 		}
@@ -120,6 +119,20 @@ func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, not
 		}
 	}
 	return nil
+}
+
+// hold puts n's push off until held, saying so once.
+func (s *Service) hold(ctx context.Context, n *store.WatchNotification, held time.Time) error {
+	full, err := s.store.GetWatchNotification(ctx, n.ID)
+	if err != nil {
+		return err
+	}
+	for _, d := range full.Deliveries {
+		if d.Channel == protocol.WatchChannelPush && d.Status == protocol.WatchStatusPending && d.Detail == dashboardHold {
+			return s.store.SetWatchPush(ctx, n.ID, n.PushState, n.PushAttempts, &held, nil)
+		}
+	}
+	return s.settle(ctx, n, n.PushState, n.PushAttempts, &held, protocol.WatchStatusPending, dashboardHold)
 }
 
 func summarize(notes []*store.WatchNotification) string {
@@ -198,7 +211,7 @@ func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Messa
 	status, detail := pushOutcome(results, err)
 	for _, n := range notes {
 		attempts := n.PushAttempts + 1
-		state, next := store.WatchPushNone, (*time.Time)(nil)
+		state, next, rowStatus, rowDetail := store.WatchPushNone, (*time.Time)(nil), status, detail
 		if status == protocol.WatchStatusFailed {
 			if attempts < maxPushAttempts {
 				at := s.now().Add(backoff(attempts))
@@ -206,11 +219,13 @@ func (s *Service) send(ctx context.Context, member domain.MemberID, m push.Messa
 				if n.PushState == store.WatchPushHeld {
 					state = store.WatchPushHeld
 				}
+				rowStatus = protocol.WatchStatusPending
+				rowDetail = fmt.Sprintf("Retry %d of %d at %s: %s", attempts+1, maxPushAttempts, at.UTC().Format("15:04 MST"), detail)
 			} else {
-				detail += fmt.Sprintf("; gave up after %d attempts", attempts)
+				rowDetail += fmt.Sprintf("; gave up after %d attempts", attempts)
 			}
 		}
-		if err := s.settle(ctx, n, state, attempts, next, status, detail); err != nil {
+		if err := s.settle(ctx, n, state, attempts, next, rowStatus, rowDetail); err != nil {
 			return err
 		}
 	}
@@ -251,6 +266,12 @@ func (s *Service) settle(ctx context.Context, n *store.WatchNotification, state 
 		s.changed(ctx, w, "")
 	}
 	return nil
+}
+
+const dashboardHold = "Waiting until you leave the dashboard"
+
+func quietDetail(p store.NotifyPrefs, until time.Time) string {
+	return "Until " + until.In(location(p)).Format("15:04 MST")
 }
 
 func location(p store.NotifyPrefs) *time.Location {

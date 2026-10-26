@@ -135,8 +135,8 @@ type WatchStore interface {
 	// ReleaseHeldWatchPushes makes member's held pushes due at now, for
 	// their quiet hours to be applied again.
 	ReleaseHeldWatchPushes(ctx context.Context, member domain.MemberID, now time.Time) error
-	// SetWatchPush records a notification's push state and appends d when
-	// it is not nil.
+	// SetWatchPush records a notification's push state and, when d is not
+	// nil, replaces its delivery row on d's channel.
 	SetWatchPush(ctx context.Context, id, state string, attempts int, next *time.Time, d *WatchDelivery) error
 
 	GetNotifyPrefs(ctx context.Context, member domain.MemberID) (NotifyPrefs, error)

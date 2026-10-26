@@ -55,17 +55,21 @@ account deletes its watches.
 
 ## Delivery
 
-Every notice records each delivery attempt, per channel:
+Every notice has one delivery row per channel. The push row is written when
+the notice is recorded and updated in place as the push resolves:
 
 | Channel | Status | Meaning |
 | --- | --- | --- |
 | `in_app` | `delivered` | Always recorded when the notice is. The dashboard shows it. |
+| `push` | `pending` | Still to be sent. `detail` says why: `Sending`, `Waiting until you leave the dashboard`, or `Retry 2 of 5 at 14:05: <the push service's error>`. |
 | `push` | `delivered` | At least one of your devices' push services took it. `detail` is the device count, such as `2 devices`. |
-| `push` | `no_destination` | You have no device with notifications turned on, or the server has no Web Push key. |
-| `push` | `disabled` | Push is off in your notification preferences. |
+| `push` | `no_destination` | No device had notifications turned on when the notice was recorded or sent. |
+| `push` | `disabled` | Push is off in your notification preferences, or Web Push is not configured on this server; `detail` says which. |
 | `push` | `held_quiet_hours` | Quiet hours hold it; `detail` says until when. |
-| `push` | `failed` | No device took it; `detail` is the push service's error. Retried with backoff up to 5 attempts, each recorded. |
+| `push` | `failed` | No device took it after 5 attempts with backoff; `detail` is the push service's error. |
 | `push` | `cleared` | A held `needs_you` push whose need was resolved (answered, dismissed, granted) before it could be sent is dropped. |
+
+A paused watch's pending pushes wait until you resume it.
 
 A device whose push service answers `404` or `410` is unsubscribed, as for
 every other notification.
@@ -84,7 +88,8 @@ dashboard shows the notice meanwhile.
 
 `push` sends watch notices to your Web Push devices; it defaults to `true`.
 During quiet hours pushes are held, and when they end the held notices go out
-as one push. The hold is stored, so a server restart does not lose it.
+as one push. Changing or removing quiet hours applies to pushes already held.
+The hold is stored, so a server restart does not lose it.
 In-app notices are not affected. Omit `quiet_hours` to turn them off.
 `destinations.push_devices` in the result counts your subscribed devices.
 
