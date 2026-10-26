@@ -210,31 +210,31 @@ func TestIntegratorWaitingOnWorkers(t *testing.T) {
 	integrator := createRun(mission.CurrentIntegratorRunID)
 	ordinary := createRun("")
 	var since time.Time
-	waiting := func(want bool, what string) {
+	waiting := func(want IntegratorWait, what string) {
 		t.Helper()
 		got, err := db.IntegratorWaiting(ctx, integrator.ID, since)
 		if err != nil || got != want {
-			t.Fatalf("%s: IntegratorWaiting = %v, %v; want %v", what, got, err, want)
+			t.Fatalf("%s: IntegratorWaiting = %+v, %v; want %+v", what, got, err, want)
 		}
 	}
-	waiting(false, "no workers")
+	waiting(IntegratorWait{}, "no workers")
 	attempt, _, err := reserveMissionAttempt(t, db, mission, task, "worker")
 	if err != nil {
 		t.Fatalf("reserve worker: %v", err)
 	}
 	worker := createRun(attempt.RunID)
-	waiting(true, "a live worker")
+	waiting(IntegratorWait{Workers: 1}, "a live worker")
 	if err = db.UpdateAttemptState(ctx, attempt.ID, attempt.RunID, attempt.AuthorityGeneration, attempt.IntegratorGeneration, domain.AttemptCompleted, ""); err != nil {
 		t.Fatalf("complete worker: %v", err)
 	}
 	if err = db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: workspace.ID, FromRun: ordinary.ID, ToRun: integrator.ID, Body: "hi"}, 10); err != nil {
 		t.Fatalf("append peer mail: %v", err)
 	}
-	waiting(false, "the worker finished; only peer mail is unread")
+	waiting(IntegratorWait{}, "the worker finished; only peer mail is unread")
 	if err = db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: workspace.ID, FromRun: worker.ID, ToRun: integrator.ID, Body: "done"}, 10); err != nil {
 		t.Fatalf("append worker mail: %v", err)
 	}
-	waiting(true, "unread worker mail")
+	waiting(IntegratorWait{Unread: 1}, "unread worker mail")
 	_, token, _, err := db.DeliverRunMessages(ctx, integrator.ID, "", 10)
 	if err != nil {
 		t.Fatalf("deliver: %v", err)
@@ -242,16 +242,16 @@ func TestIntegratorWaitingOnWorkers(t *testing.T) {
 	if _, _, _, err = db.DeliverRunMessages(ctx, integrator.ID, token, 10); err != nil {
 		t.Fatalf("acknowledge: %v", err)
 	}
-	waiting(false, "worker mail acknowledged")
+	waiting(IntegratorWait{}, "worker mail acknowledged")
 	if err = db.AppendRunMessage(ctx, &RunMessage{WorkspaceID: workspace.ID, FromRun: worker.ID, ToRun: integrator.ID, Body: "again"}, 10); err != nil {
 		t.Fatalf("append worker mail: %v", err)
 	}
-	waiting(true, "new worker mail")
+	waiting(IntegratorWait{Unread: 1}, "new worker mail")
 	since = time.Now()
-	waiting(false, "worker mail from before the turn")
+	waiting(IntegratorWait{}, "worker mail from before the turn")
 	since = time.Time{}
 	if _, err = db.db.ExecContext(ctx, `UPDATE missions SET phase = 'completed' WHERE id = ?`, mission.ID); err != nil {
 		t.Fatal(err)
 	}
-	waiting(false, "the mission completed")
+	waiting(IntegratorWait{}, "the mission completed")
 }

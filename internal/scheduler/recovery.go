@@ -392,7 +392,7 @@ func (s *Scheduler) Relaunch(ctx context.Context, run domain.RunID, actor domain
 		WorkspaceID: fresh.WorkspaceID,
 		RunID:       run,
 		ActorID:     actor,
-		Payload:     events.RunStatusPayload{From: old.Status, To: domain.RunRunning, Activity: domain.ActivityWorking, StatusSeq: runningRow.StatusSeq},
+		Payload:     events.RunStatusPayload{From: old.Status, To: domain.RunRunning, Activity: domain.ActivityWorking, Cause: events.CauseTurn, StatusSeq: runningRow.StatusSeq},
 	})
 	if werr := s.writeSidecar(entry.sidecar()); werr != nil {
 		slog.Warn("scheduler: clear retained sidecar after relaunch", "run", run, "error", werr)
@@ -1798,6 +1798,7 @@ func (s *Scheduler) entryFromSidecar(r *domain.Run, sc sidecar) *supervised {
 		missionAssigned:     sc.MissionAssigned,
 		status:              r.Status,
 		reason:              r.Reason,
+		workersReason:       sc.WorkersReason,
 		activity:            r.Activity,
 		startedAt:           started,
 		relaunchedAt:        relaunched,

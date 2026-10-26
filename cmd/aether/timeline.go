@@ -204,6 +204,12 @@ func timelineDetail(ev protocol.Event, name func(string) string) string {
 		if v.Reason != "" {
 			detail += " (" + v.Reason + ")"
 		}
+		if v.Activity != "" {
+			detail += " · " + string(v.Activity)
+			if v.Cause != "" {
+				detail += " by " + string(v.Cause)
+			}
+		}
 		return detail
 	case events.TimelinePayload:
 		detail := string(v.Kind)

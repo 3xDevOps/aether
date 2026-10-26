@@ -130,11 +130,11 @@ type Store interface {
 	// FinishRunByMember is UpdateRunStatus that also clears finish_unopened
 	// in the same write, for the close or kill a member asked for.
 	FinishRunByMember(ctx context.Context, id domain.RunID, status domain.RunStatus, reason string, activity domain.RunActivity, startedAt, finishedAt *time.Time) (RunStatusStamp, error)
-	// IntegratorWaiting reports whether run integrates a mission that is
-	// not completed or cancelled and has a worker attempt still live, or
-	// worker mail run has not acknowledged that arrived after since (any,
-	// when since is zero).
-	IntegratorWaiting(ctx context.Context, run domain.RunID, since time.Time) (bool, error)
+	// IntegratorWaiting counts, for the missions run integrates that are not
+	// completed or cancelled, the worker attempts still live and the worker
+	// mail run has not acknowledged that arrived after since (any, when
+	// since is zero).
+	IntegratorWaiting(ctx context.Context, run domain.RunID, since time.Time) (IntegratorWait, error)
 	// SetRunTitle sets only the run's title, leaving every other field
 	// untouched.
 	SetRunTitle(ctx context.Context, id domain.RunID, title string) error

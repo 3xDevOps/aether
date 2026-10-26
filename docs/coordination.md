@@ -1653,8 +1653,10 @@ What a report does depends on the run:
   reason with state `waiting-agents`, `waiting-ci` or `waiting-tools`
   (**Waiting for agents**, **Waiting for CI**, **Waiting for process**)
   instead of `waiting`. It never makes the run **Needs you**. The next turn
-  clears it, and with no activity for three times the stall threshold it
-  becomes `waiting` with `no update for <duration>`. Every role may report
+  clears it. With no activity for three times the stall threshold and
+  nothing it waits on live, its reason becomes `no update for <duration>:
+  <summary>`; an agents wait then shows `waiting`, a CI or process wait
+  keeps its state ([run activity](failure-handling.md#run-activity)). Every role may report
   it, and it may repeat; runs it starts report their own waits, and
   subagents never report. Like needs-input it is nonterminal, takes no
   `--evidence-ref`, and is refused with the same errors for a run that
@@ -1670,8 +1672,9 @@ What a report does depends on the run:
   Nothing re-prompts the agent when CI or a process finishes. An integrator
   of an open mission with a live worker attempt, or worker mail since its
   last turn started that it has not acknowledged, shows `waiting-agents` at
-  turn end without reporting it
-  ([run activity](failure-handling.md#run-activity)).
+  turn end without reporting it, with the reason `waiting for <n> workers`
+  or `<n> unread worker messages`, and its wait does not go stale while
+  that lasts ([run activity](failure-handling.md#run-activity)).
 
 - **Swarm worker.** Success submits the attempt and the server then pauses
   and retains that worker's exact container with the reason

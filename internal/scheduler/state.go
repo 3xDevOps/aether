@@ -307,10 +307,29 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 	if to.Terminal() && !from.Terminal() {
 		finishedAt = &now
 	}
-	public := publicRunStatusReason(reason)
-	activity, err := s.activityLocked(ctx, run, s.runs[run], to, reason)
+	d, err := s.activityLocked(ctx, run, s.runs[run], to, reason)
 	if err != nil {
 		return err
+	}
+	public, activity := d.reason, d.activity
+	e := s.runs[run]
+	// The workers reason Aether wrote stays its own while the run shows it.
+	var workersReason string
+	if e != nil {
+		switch {
+		case d.workers:
+			workersReason = public
+		case public == e.workersReason:
+			workersReason = e.workersReason
+		}
+		// A stale marker is harmless: it only claims the reason it names.
+		if to.Live() && workersReason != e.workersReason {
+			next := e.sidecar()
+			next.WorkersReason = workersReason
+			if writeErr := s.writeSidecar(next); writeErr != nil {
+				return fmt.Errorf("scheduler: persist the workers reason: %w", writeErr)
+			}
+		}
 	}
 	write := s.cfg.Store.UpdateRunStatus
 	switch cause {
@@ -324,12 +343,13 @@ func (s *Scheduler) transitionOutcomeLocked(ctx context.Context, run domain.RunI
 		return err
 	}
 	payload := events.RunStatusPayload{
-		From: from, To: to, Reason: public, Activity: activity, StatusSeq: stamp.StatusSeq,
+		From: from, To: to, Reason: public, Activity: activity, Cause: d.cause, StatusSeq: stamp.StatusSeq,
 		OutcomeUnseen: stamp.OutcomeUnseen, FinishUnopened: stamp.FinishUnopened,
 		Review: stamp.Review, ReviewChangedAt: stamp.ReviewChangedAt,
 	}
-	if e := s.runs[run]; e != nil {
+	if e != nil {
 		e.status, e.reason, e.activity = to, public, activity
+		e.workersReason = workersReason
 		if startedAt != nil {
 			e.startedAt = now
 		}
@@ -421,6 +441,7 @@ type sidecar struct {
 	IdleShown           bool                     `json:"blocked_shown,omitempty"`
 	IdleReportID        string                   `json:"blocked_report_id,omitempty"`
 	IdleReportAt        *time.Time               `json:"blocked_report_at,omitempty"`
+	WorkersReason       string                   `json:"workers_reason,omitempty"`
 	RelaunchedAt        *time.Time               `json:"relaunched_at,omitempty"`
 	ExitObserved        bool                     `json:"exit_observed"`
 	ExitCode            int                      `json:"exit_code"`
@@ -503,6 +524,7 @@ func (e *supervised) sidecar() sidecar {
 		IdleShown:           e.idleShown,
 		IdleReportID:        e.idleReportID,
 		IdleReportAt:        idleReportAt,
+		WorkersReason:       e.workersReason,
 		RelaunchedAt:        relaunchedAt,
 		ExitObserved:        e.exitObserved,
 		ExitCode:            e.exitCode,

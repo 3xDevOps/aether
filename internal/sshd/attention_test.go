@@ -149,6 +149,9 @@ func TestPlainReasonMatchesTheDashboard(t *testing.T) {
 		"turn ended: other":              "The agent's turn ended (other)",
 		"working in background: 2 tasks": "Working in background: 2 tasks",
 		"working in background":          "Working in background",
+		"no update for 30m":              "No update for 30m",
+		"no update for 30m: CI on PR 12": "No update for 30m: CI on PR 12",
+		"waiting for 2 workers":          "Waiting for 2 workers",
 		"something new":                  "something new",
 	} {
 		if got := plainReason(reason); got != want {
