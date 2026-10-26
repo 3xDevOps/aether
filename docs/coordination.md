@@ -515,7 +515,7 @@ is capped at 100. Pending members are refused like every other call.
 | `messages` | `coord.message` | `message` {`message_id`, `from_run_id`, `to_run_id`, `kind`, `correlation_id`}, no body |
 | `pr` | `run.pr` | `pr` {`number`, `state`, `url`, `merged`} |
 | `swarm` | `mission.changed`, `integration.changed` | `swarm` {`change`, `task_id`, `attempt_id`, `deleted`} or {`candidate_id`, `state`} |
-| `lifecycle` | `run.archived`, `run.deleted`, handoffs | `lifecycle` {`action`: `archived`, `restored`, `deleted` or `handoff`, `to_member_id`} |
+| `lifecycle` | `run.archived`, `run.deleted`, `workspace.deleted`, handoffs | `lifecycle` {`action`: `archived`, `restored`, `deleted`, `workspace-deleted` or `handoff`, `to_member_id`} |
 
 `kinds` empty means all six. Diffs, agent activity, presence and cost are
 never in the feed; read them with `workspace.timeline`. A new run's first
@@ -542,10 +542,13 @@ first, with `next_cursor` set to the head. It never replays history from the
 start; pass `"cursor":"0"` for that.
 
 The log is the server's database, so a cursor survives a server restart and
-continues without repeats or gaps. Nothing expires by age. Deleting a run or
-workspace deletes its events; paging skips those holes, and `run.deleted`
-remains. A cursor call scoped to a run or swarm that has since been deleted
-still pages, so it delivers the deletion; without a cursor it is `-32000`. A cursor past the head means the database was reset or restored
+continues without repeats or gaps. Nothing expires by age. Deleting a run
+deletes its events and leaves `run.deleted`; deleting a workspace deletes
+every event in it, its runs' `run.deleted` included, and leaves
+`workspace.deleted`. Paging skips those holes. Drop every run you cached for
+a deleted workspace. A cursor call scoped to a workspace, run or swarm that
+has since been deleted still pages, so it delivers the deletion; without a
+cursor it is `-32000`. A cursor past the head means the database was reset or restored
 from a backup:
 
 ```json
@@ -565,7 +568,7 @@ $ aether changes --since 1 --kinds pr,reports
 SEQ  TIME                 RUN       KIND     DETAIL
 3    2026-10-26 20:08:20  run-demo  reports  waiting for ci: pushed fix ...
 4    2026-10-26 20:08:20  run-demo  pr       #42 OPEN
-next: aether changes --since 4 --kinds="pr,reports"
+next: aether changes --since 4 --kinds pr,reports
 ```
 
 ## `aether-internal` CLI

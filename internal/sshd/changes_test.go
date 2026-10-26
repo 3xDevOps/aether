@@ -328,6 +328,21 @@ func TestChangesSkipDeletedRunHistory(t *testing.T) {
 	if !errors.As(err, &perr) || perr.Code != protocol.CodeNotFound {
 		t.Fatalf("newest changes of a deleted run: err = %v, want CodeNotFound", err)
 	}
+
+	// A deleted workspace's events are gone; its deletion notice is not.
+	gone := &domain.Workspace{Name: "gone", BaseBranch: "main"}
+	if err = e.store.CreateWorkspace(ctx, gone); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	e.publish(t, gone.ID, "", events.RunDeletedPayload{})
+	if err = e.store.DeleteWorkspace(ctx, gone.ID); err != nil {
+		t.Fatalf("delete workspace: %v", err)
+	}
+	notice := e.publish(t, gone.ID, "", events.WorkspaceDeletedPayload{})
+	scoped, _ := pageAll(t, c, protocol.ChangesListParams{Cursor: strconv.FormatUint(deleted, 10), WorkspaceID: string(gone.ID)})
+	if len(scoped) != 1 || scoped[0].Seq != notice || scoped[0].Lifecycle == nil || scoped[0].Lifecycle.Action != "workspace-deleted" {
+		t.Fatalf("changes of the deleted workspace = %+v, want only its deletion at %d", scoped, notice)
+	}
 }
 
 func TestChangesRefusesPendingMember(t *testing.T) {

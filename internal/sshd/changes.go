@@ -37,7 +37,7 @@ var changeKinds = map[string]struct {
 	protocol.ChangeKindMessages:  {types: []events.Type{events.TypeCoordMessage}},
 	protocol.ChangeKindPR:        {types: []events.Type{events.TypeRunPR}},
 	protocol.ChangeKindSwarm:     {types: []events.Type{events.TypeMissionChanged, events.TypeIntegrationChanged}},
-	protocol.ChangeKindLifecycle: {types: []events.Type{events.TypeRunArchived, events.TypeRunDeleted, events.TypeTimeline}, timeline: []events.TimelineKind{events.TimelineHandoff}},
+	protocol.ChangeKindLifecycle: {types: []events.Type{events.TypeRunArchived, events.TypeRunDeleted, events.TypeWorkspaceDeleted, events.TypeTimeline}, timeline: []events.TimelineKind{events.TimelineHandoff}},
 }
 
 var changeKindOrder = []string{
@@ -57,17 +57,18 @@ func changesTarget(s *Server, ctx context.Context, raw json.RawMessage) (permiss
 	if perr != nil {
 		return permissions.Target{}, perr
 	}
-	ws, perr := s.changesScope(ctx, p)
-	if perr != nil {
+	ws, live, perr := s.changesScope(ctx, p)
+	if perr != nil || !live {
 		return permissions.Target{}, perr
 	}
 	return permissions.Target{Workspace: ws}, nil
 }
 
 // changesScope resolves the one workspace the named workspace, run and swarm
-// share. A run or swarm deleted since the caller's cursor was issued scopes
-// nothing, so the feed still delivers its deletion.
-func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams) (domain.WorkspaceID, *protocol.Error) {
+// share, and whether it still exists. A workspace, run or swarm deleted
+// since the caller's cursor was issued is no error, so the feed still
+// delivers its deletion.
+func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams) (domain.WorkspaceID, bool, *protocol.Error) {
 	gone := func(err error) bool { return p.Cursor != "" && errors.Is(err, store.ErrNotFound) }
 	var ws domain.WorkspaceID
 	if p.RunID != "" {
@@ -75,7 +76,7 @@ func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams)
 		switch {
 		case gone(err):
 		case err != nil:
-			return "", rpcError(err)
+			return "", false, rpcError(err)
 		default:
 			ws = run.WorkspaceID
 		}
@@ -83,15 +84,15 @@ func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams)
 	if p.MissionID != "" {
 		ms, ok := s.cfg.Store.(store.MissionStore)
 		if !ok {
-			return "", &protocol.Error{Code: protocol.CodeUnavailable, Message: "changes.list: swarms are not available"}
+			return "", false, &protocol.Error{Code: protocol.CodeUnavailable, Message: "changes.list: swarms are not available"}
 		}
 		m, err := ms.GetMission(ctx, domain.MissionID(p.MissionID))
 		switch {
 		case gone(err):
 		case err != nil:
-			return "", rpcError(err)
+			return "", false, rpcError(err)
 		case ws != "" && ws != m.WorkspaceID:
-			return "", invalidParams("run_id and mission_id are in different workspaces")
+			return "", false, invalidParams("run_id and mission_id are in different workspaces")
 		default:
 			ws = m.WorkspaceID
 		}
@@ -99,14 +100,16 @@ func (s *Server) changesScope(ctx context.Context, p protocol.ChangesListParams)
 	if p.WorkspaceID != "" {
 		id := domain.WorkspaceID(p.WorkspaceID)
 		if ws != "" && ws != id {
-			return "", invalidParams("workspace_id does not contain the named run or swarm")
+			return "", false, invalidParams("workspace_id does not contain the named run or swarm")
 		}
-		if _, err := s.cfg.Store.GetWorkspace(ctx, id); err != nil {
-			return "", rpcError(err)
+		if _, err := s.cfg.Store.GetWorkspace(ctx, id); gone(err) {
+			return id, false, nil
+		} else if err != nil {
+			return "", false, rpcError(err)
 		}
 		ws = id
 	}
-	return ws, nil
+	return ws, ws != "", nil
 }
 
 func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
@@ -118,7 +121,7 @@ func (s *Server) changesList(ctx context.Context, _ domain.MemberID, raw json.Ra
 	if perr != nil {
 		return nil, perr
 	}
-	ws, perr := s.changesScope(ctx, p)
+	ws, _, perr := s.changesScope(ctx, p)
 	if perr != nil {
 		return nil, perr
 	}
@@ -284,6 +287,9 @@ func changeOf(ev events.Event, mission domain.MissionID) (protocol.Change, bool)
 	case events.RunDeletedPayload:
 		c.Kind = protocol.ChangeKindLifecycle
 		c.Lifecycle = &protocol.ChangeLifecycle{Action: "deleted"}
+	case events.WorkspaceDeletedPayload:
+		c.Kind = protocol.ChangeKindLifecycle
+		c.Lifecycle = &protocol.ChangeLifecycle{Action: "workspace-deleted"}
 	default:
 		return protocol.Change{}, false
 	}

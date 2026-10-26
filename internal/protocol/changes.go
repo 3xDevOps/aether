@@ -116,7 +116,8 @@ type ChangeSwarm struct {
 }
 
 // ChangeLifecycle is a run being archived, restored, deleted, or handed
-// off; ToMemberID names a handoff's new owner.
+// off, or its workspace being deleted; ToMemberID names a handoff's new
+// owner.
 type ChangeLifecycle struct {
 	Action     string `json:"action"`
 	ToMemberID string `json:"to_member_id,omitempty"`

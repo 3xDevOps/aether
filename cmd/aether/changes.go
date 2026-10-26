@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/shellquote"
 )
 
 const changesPollInterval = 2 * time.Second
@@ -71,7 +72,7 @@ func runChanges(args []string) error {
 				resume := []string{"aether", "changes", "--since", res.NextCursor}
 				fs.Visit(func(f *flag.Flag) {
 					if f.Name != "since" {
-						resume = append(resume, "--"+f.Name+"="+strconv.Quote(f.Value.String()))
+						resume = append(resume, "--"+f.Name, shellquote.Quote(f.Value.String()))
 					}
 				})
 				_, _ = fmt.Fprintln(os.Stderr, "next: "+strings.Join(resume, " "))
