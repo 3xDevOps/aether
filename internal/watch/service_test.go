@@ -685,7 +685,7 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 	h.status(gone, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: g")
 	h.eventually("a failed attempt", func() bool {
 		n := h.notices(w.ID)
-		return len(n) == 1 && n[0].PushAttempts == 1
+		return len(n) == 1 && strings.HasPrefix(pushOf(n[0]).Detail, "Retry 2 of")
 	})
 	if n, _ := h.push.Devices(h.ctx, h.bob.ID); n != 0 {
 		t.Fatalf("devices after 410 = %d, want 0", n)
