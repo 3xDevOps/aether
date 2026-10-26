@@ -1,6 +1,6 @@
 # Child runs: agents delegating to other agents
 
-**Status:** In progress.
+**Status:** Implemented in the pull request that adds `internal/children`.
 
 **Goal:** An agent in any run (an ordinary run, a swarm integrator or a swarm
 worker) can start a focused **child run** on another agent or model, for

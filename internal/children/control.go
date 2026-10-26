@@ -145,9 +145,9 @@ func (s *Service) Children(ctx context.Context, run domain.RunID) (protocol.RunC
 	out := protocol.RunChildrenResult{RootRunID: string(root), Children: make([]protocol.Child, 0, len(kids)), Limits: limitsWire(limits)}
 	ids := []domain.RunID{run}
 	for _, c := range kids {
-		child, err := s.wire(ctx, c)
-		if err != nil {
-			return protocol.RunChildrenResult{}, err
+		child, wireErr := s.wire(ctx, c)
+		if wireErr != nil {
+			return protocol.RunChildrenResult{}, wireErr
 		}
 		out.Children = append(out.Children, child)
 		if c.State == domain.ChildStarted {

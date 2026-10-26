@@ -95,8 +95,8 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 	}
 	if s.cfg.Cost != nil {
 		if cost := s.cfg.Cost(); cost != nil {
-			if err := cost.Admit(ctx, c.WorkspaceID, c.OwnerID); err != nil {
-				refuse(err.Error())
+			if admitErr := cost.Admit(ctx, c.WorkspaceID, c.OwnerID); admitErr != nil {
+				refuse(admitErr.Error())
 				return
 			}
 		}
@@ -127,8 +127,8 @@ func (s *Service) launch(ctx context.Context, c *domain.ChildReservation) {
 		FromCommit: c.BaseCommit, FromBranch: c.BaseBranch, Admitted: unlock,
 		Created: func(domain.RunID) {
 			created = true
-			if err := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildStarted, "", domain.ChildLaunching); err != nil {
-				slog.Warn("children: mark child started", "child", c.RunID, "error", err)
+			if stateErr := s.cfg.Store.SetChildState(ctx, c.RunID, domain.ChildStarted, "", domain.ChildLaunching); stateErr != nil {
+				slog.Warn("children: mark child started", "child", c.RunID, "error", stateErr)
 			}
 		},
 	})
@@ -154,8 +154,8 @@ func (s *Service) settle(ctx context.Context) error {
 			return err
 		}
 		if !c.Detached && (gone || parent.Status.Terminal()) {
-			if err := s.stop(ctx, c, ""); err != nil {
-				slog.Warn("children: stop the child of an ended run", "child", c.RunID, "parent", parent.ID, "error", err)
+			if stopErr := s.stop(ctx, c, ""); stopErr != nil {
+				slog.Warn("children: stop the child of an ended run", "child", c.RunID, "parent", c.ParentRunID, "error", stopErr)
 			}
 			continue
 		}

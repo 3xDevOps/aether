@@ -28,9 +28,9 @@ func (s *Service) route(ctx context.Context, method string, sender, target *doma
 		return "", deniedPeer(method, sender.ID, target.ID, reason)
 	}
 	if s.cfg.Children != nil {
-		related, err := s.cfg.Children.Related(ctx, sender.ID, target.ID)
-		if err != nil {
-			return "", internalError(method, err)
+		related, relErr := s.cfg.Children.Related(ctx, sender.ID, target.ID)
+		if relErr != nil {
+			return "", internalError(method, relErr)
 		}
 		if related {
 			return protocol.CoordPeerLineage, nil

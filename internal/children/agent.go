@@ -151,9 +151,9 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 		}
 		return protocol.ChildReceipt{}, denied("%s: %s", method, p.refusal)
 	}
-	if loop, err := s.loops(ctx, p, req); err != nil || loop != "" {
-		if err != nil {
-			return protocol.ChildReceipt{}, rpcErr(method, err)
+	if loop, loopErr := s.loops(ctx, p, req); loopErr != nil || loop != "" {
+		if loopErr != nil {
+			return protocol.ChildReceipt{}, rpcErr(method, loopErr)
 		}
 		return protocol.ChildReceipt{}, &protocol.Error{Code: protocol.CodeConflict, Message: method + ": " + loop}
 	}
@@ -161,7 +161,7 @@ func (s *Service) start(ctx context.Context, run domain.RunID, req protocol.Chil
 	if perr != nil {
 		return protocol.ChildReceipt{}, perr
 	}
-	if err := s.admit(ctx, p, spec.account); err != nil {
+	if err = s.admit(ctx, p, spec.account); err != nil {
 		return protocol.ChildReceipt{}, rpcErr(method, err)
 	}
 	base, err := s.cfg.Git.PublishRunBranch(ctx, p.parent.ID)

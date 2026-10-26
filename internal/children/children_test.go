@@ -110,8 +110,6 @@ func (m *fakeMail) Notify(_ context.Context, from, to domain.RunID, body, _, key
 	return nil
 }
 
-type fakeQuota map[domain.MemberID]float64
-
 type harness struct {
 	t      *testing.T
 	ctx    context.Context
@@ -135,7 +133,7 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(func() { _ = db.Close() })
 	h := &harness{t: t, ctx: ctx, db: db, runs: &fakeRuns{db: db}, mail: &fakeMail{keys: map[string]bool{}}, agents: &fakeAgents{missing: map[domain.MemberID]bool{}}}
 	h.ws = &domain.Workspace{Name: "app"}
-	if err := db.CreateWorkspace(ctx, h.ws); err != nil {
+	if err = db.CreateWorkspace(ctx, h.ws); err != nil {
 		t.Fatal(err)
 	}
 	h.ada, h.bob = h.member("Ada", domain.RoleAdmin), h.member("Bob", domain.RoleCollaborator)
