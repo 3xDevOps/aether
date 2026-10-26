@@ -14,7 +14,7 @@ const swapOut: Motion = { duration: '--duration-200', easing: '--ease-standard' 
  * the old copy out underneath; `cut` swaps with no motion, as reduced motion
  * always does. The swap runs when `swapKey` changes (default: the text
  * itself), so key it by the state word, never by a ticking value. Only the
- * incoming copy is exposed to assistive technology.
+ * incoming copy is exposed to assistive technology or takes input.
  */
 export function TextSwap({
   children,
@@ -81,6 +81,7 @@ export function TextSwap({
             else nodes.current.delete(layer.id)
           }}
           aria-hidden={layer.phase === 'out' || undefined}
+          inert={layer.phase === 'out'}
           className={cn('col-start-1 row-start-1', layerClassName)}
         >
           {layer.content}

@@ -1,88 +1,86 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describeEvent } from '@/components/event-words'
-import { api, ApiError, type Api } from '@/lib/api'
+import { ApiError } from '@/lib/api'
 import { surfaces } from '@/lib/surfaces'
-import type { Event, MemoryAddResult, MemoryItem, MemorySearchParams } from '@/lib/types'
+import type { Event, MemoryItem, MemorySearchParams } from '@/lib/types'
 import { MemoryRoute } from '@/routes/memory'
 import { useStore } from '@/store'
 import { capability } from '@/store/hooks'
 import { applyEvent } from '@/store/sync'
-import { alice, bob, fakeApi, memoryItem, otherWorkspace, run, serverInfo, vera, workspace } from '@/test/fixtures'
-import { pickOption } from '@/test/select'
+import { alice, bob, fakeApi, memoryItem, otherWorkspace, vera, workspace } from '@/test/fixtures'
+import {
+  agentNote, answer, footer, myPin, outcome, replaced, rowOf, search, seedMemory as seed, showFilter, titles, workspacePin,
+} from '@/test/memory'
 
-function seed(member = alice) {
-  useStore.setState({
-    workspaces: { [workspace.id]: workspace },
-    activeWorkspace: workspace.id,
-    members: { [alice.id]: alice, [bob.id]: bob },
-    info: { ...serverInfo, member },
-    capabilities: { gateway: 'remote', methods: ['*'], ws: ['events', 'attach'] },
-    connection: 'live',
-    hydrated: true,
-  })
-  useStore.getState().upsertRun(run({ id: 'run_1', title: 'Fix the reattach race' }))
+function pins(count: number): MemoryItem[] {
+  return Array.from({ length: count }, (_, i) => memoryItem({
+    id: `note-pin${String(i).padStart(7, '0')}`, title: `Pinned note ${i}`, body: `Pinned note ${i}`,
+    pinned_by: bob.id, pinned_by_name: 'Bob', pinned_at: '2026-10-18T10:00:00Z',
+  }))
 }
 
-const agentNote = memoryItem({
-  id: 'note-agent00001',
-  kind: 'gotcha',
-  source: 'agent',
-  title: 'Reattach races the lease sweeper',
-  body: 'Reattach races the lease sweeper\nTake the lease before reading the container state.',
-  run_id: 'run_1',
-  harness: 'claude',
-  commit: '1a2b3c4d5e6f7a8b9c0d',
-  pr_number: 312,
-  pr_state: 'merged',
-  pr_url: 'https://github.com/acme/app/pull/312',
-  files: ['internal/scheduler/reattach.go', 'internal/scheduler/lease.go'],
-  created_at: '2026-10-18T12:00:00Z',
-})
-const workspacePin = memoryItem({ id: 'note-pinned0001', pinned_by: bob.id, pinned_by_name: 'Bob', pinned_at: '2026-10-18T10:00:00Z' })
-const myPin = memoryItem({
-  id: 'note-mine000001', kind: 'preference', scope: 'member', title: 'No emoji in commit messages.', body: 'No emoji in commit messages.',
-  pinned_by: alice.id, pinned_by_name: 'Alice', pinned_at: '2026-10-17T10:00:00Z', created_at: '2026-10-17T09:00:00Z',
-})
-const outcome = memoryItem({ id: 'note-outcome001', kind: 'outcome', source: 'report', title: 'success: Fixed the reattach race', run_id: 'run_1', harness: 'codex', created_at: '2026-10-18T11:00:00Z' })
-const answer = memoryItem({ id: 'note-answer0001', kind: 'decision', source: 'answer', title: 'Q: Which flow? A: the guest flow', source_ref: 'mq-1', created_at: '2026-10-18T08:00:00Z' })
-const replaced = memoryItem({ id: 'note-old0000001', title: 'Use npm in web/.', superseded_by: workspacePin.id, invalid_at: '2026-10-18T09:00:00Z', created_at: '2026-10-10T09:00:00Z' })
-
-const live = [agentNote, outcome, workspacePin, answer, myPin]
-
-function search(params: MemorySearchParams): { items: MemoryItem[] } {
-  const items = (params.replaced ? [replaced] : params.all ? [...live, replaced] : live)
-    .filter((item) => (!params.kind || item.kind === params.kind) && (!params.source || item.source === params.source) && (!params.pinned || item.pinned_at))
-  return { items }
-}
-
-function titles(): string[] {
-  return within(screen.getByRole('list', { name: 'Notes' })).getAllByRole('article').map((card) => within(card).getByRole('heading').textContent ?? '')
+function openSearch(words: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Search notes' }))
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search notes' }), { target: { value: words } })
 }
 
 describe('memory page', () => {
-  it('lists pinned notes first with kind, source, author, agent, run, pull request, files and age', async () => {
+  it('lists pinned notes first, then the newest, with kind, source, author, agent, one link and age', async () => {
     seed()
     const client = fakeApi({ memorySearch: vi.fn(async (params: MemorySearchParams) => search(params)) })
     render(<MemoryRoute params={{}} client={client} />)
 
     await screen.findByRole('list', { name: 'Notes' })
     expect(titles()).toEqual([workspacePin.title, myPin.title, agentNote.title, outcome.title, answer.title])
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Pinned', 'Newest'])
+    expect(client.memorySearch).toHaveBeenCalledTimes(2)
     expect(client.memorySearch).toHaveBeenCalledWith({ workspace_id: workspace.id, limit: 100, pinned: true })
     expect(client.memorySearch).toHaveBeenCalledWith({ workspace_id: workspace.id, limit: 100 })
 
-    const pinned = screen.getByRole('button', { name: workspacePin.title }).closest('article')!
-    expect(within(pinned).getByText('Pinned by Bob')).toBeDefined()
-    expect(within(screen.getByRole('button', { name: myPin.title }).closest('article')!).getByText('Pinned for you')).toBeDefined()
+    expect(within(rowOf(workspacePin.title)).getByText('Pinned by Bob')).toBeDefined()
+    expect(within(rowOf(myPin.title)).getByText('Pinned for you')).toBeDefined()
 
-    const card = within(screen.getByRole('button', { name: agentNote.title }).closest('article')!)
-    expect(card.getByText('Gotcha')).toBeDefined()
-    expect(card.getByText('Agent note')).toBeDefined()
-    expect(await card.findByText('You · Claude Code')).toBeDefined()
+    const card = within(rowOf(agentNote.title))
+    expect(await card.findByText(/^Gotcha · Agent note · You · Claude Code$/)).toBeDefined()
     expect(card.getByRole('link', { name: 'PR #312 (merged)' }).getAttribute('href')).toBe(agentNote.pr_url)
-    expect(card.getByText('internal/scheduler/reattach.go +1 more')).toBeDefined()
-    expect(screen.getByRole('button', { name: agentNote.title }).closest('article')!.querySelector('time')?.getAttribute('datetime')).toBe(agentNote.created_at)
-    fireEvent.click(card.getByRole('button', { name: 'Fix the reattach race' }))
+    expect(card.queryByRole('button', { name: 'Fix the reattach race' })).toBeNull()
+    expect(card.queryByText(/reattach\.go/)).toBeNull()
+    expect(rowOf(agentNote.title).querySelector('time')?.getAttribute('datetime')).toBe(agentNote.created_at)
+
+    fireEvent.click(within(rowOf(outcome.title)).getByRole('button', { name: 'Fix the reattach race' }))
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_1' } })
+  })
+
+  it('counts each filter from the unfiltered read, and leaves Superseded uncounted', async () => {
+    seed()
+    const memorySearch = vi.fn(async (params: MemorySearchParams) => search(params))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
+    await screen.findByRole('list', { name: 'Notes' })
+    const show = within(screen.getByRole('radiogroup', { name: 'Show' }))
+    expect(show.getAllByRole('radio').map((radio) => radio.textContent)).toEqual([
+      'All 5', 'Pinned 2', 'Agent notes 1', 'Outcomes 1', 'Answers 1', 'Superseded',
+    ])
+    expect(footer()).toBe('5 notes · 2 pinned')
+
+    showFilter('Outcomes')
+    await waitFor(() => expect(titles()).toEqual([outcome.title]))
+    expect(show.getByRole('radio', { name: 'All 5' })).toBeDefined()
+    expect(memorySearch).toHaveBeenCalledTimes(4)
+  })
+
+  it('keeps the counts from the first read when the filter changes before it lands', async () => {
+    seed()
+    let release = () => {}
+    const held = new Promise<void>((resolve) => { release = resolve })
+    const memorySearch = vi.fn(async (params: MemorySearchParams) => {
+      await held
+      return search(params)
+    })
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
+    showFilter('Outcomes')
+    release()
+    await waitFor(() => expect(titles()).toEqual([outcome.title]))
+    await waitFor(() => expect(within(screen.getByRole('radiogroup', { name: 'Show' })).getByRole('radio', { name: 'All 5' })).toBeDefined())
   })
 
   it('reads every pin apart from the newest 100, so an old pin still leads the list', async () => {
@@ -94,83 +92,113 @@ describe('memory page', () => {
     await screen.findByRole('list', { name: 'Notes' })
     expect(titles()).toHaveLength(101)
     expect(titles()[0]).toBe(old.title)
-    expect(screen.getByText('Every pinned note, then the 100 newest notes. Search to find older ones.')).toBeDefined()
+    expect(footer()).toBe('Every pinned note, then the 100 newest notes. Search to find older ones.')
+    const show = within(screen.getByRole('radiogroup', { name: 'Show' }))
+    expect(show.getByRole('radio', { name: 'All 100+' })).toBeDefined()
+    expect(show.getByRole('radio', { name: 'Pinned 1' })).toBeDefined()
+    expect(show.getByRole('radio', { name: 'Agent notes' })).toBeDefined()
   })
-
-  function pins(count: number): MemoryItem[] {
-    return Array.from({ length: count }, (_, i) => memoryItem({
-      id: `note-pin${String(i).padStart(7, '0')}`, title: `Pinned note ${i}`, body: `Pinned note ${i}`,
-      pinned_by: bob.id, pinned_by_name: 'Bob', pinned_at: '2026-10-18T10:00:00Z',
-    }))
-  }
 
   it('says when the pinned read stops at 100, since older pins are left out', async () => {
     seed()
     const memorySearch = vi.fn(async () => ({ items: pins(100) }))
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
-    expect(await screen.findByText('The 100 newest pinned notes, then the 100 newest notes. Search to find older ones.')).toBeDefined()
+    await waitFor(() => expect(footer()).toBe('The 100 newest pinned notes, then the 100 newest notes. Search to find older ones.'))
 
-    fireEvent.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Pinned' }))
-    expect(await screen.findByText('The 100 newest pinned notes. Search to find older ones.')).toBeDefined()
+    showFilter('Pinned')
+    await waitFor(() => expect(footer()).toBe('The 100 newest pinned notes. Search to find older ones.'))
     expect(titles()).toHaveLength(100)
   })
 
-  it('words a cut-off pinned search as best matches, with no hint to search for older ones', async () => {
+  it('words a cut-off search as best matches, with no hint to search for older ones', async () => {
     seed()
-    const memorySearch = vi.fn(async () => ({ items: pins(100) }))
-    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: pins(100) })) })} />)
     await screen.findByRole('list', { name: 'Notes' })
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search notes' }), { target: { value: 'lease' } })
-    expect(await screen.findByText('The 100 best pinned matches, then the 100 best matches.')).toBeDefined()
-
-    fireEvent.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Pinned' }))
-    expect(await screen.findByText('The 100 best pinned matches.')).toBeDefined()
-    expect(screen.queryByText(/newest|Search to find older ones/)).toBeNull()
+    openSearch('lease')
+    await waitFor(() => expect(footer()).toBe('The 100 best pinned matches, then the 100 best matches.'))
   })
 
-  it('lists fewer than 100 pins without a notice', async () => {
+  it('words a cut-off pinned search as the best pinned matches', async () => {
     seed()
-    const memorySearch = vi.fn(async (params: MemorySearchParams) => ({ items: params.pinned ? pins(99) : [agentNote] }))
-    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
-    await waitFor(() => expect(titles()).toHaveLength(100))
-
-    fireEvent.click(within(screen.getByRole('group', { name: 'Show' })).getByRole('button', { name: 'Pinned' }))
-    await waitFor(() => expect(titles()).toHaveLength(99))
-    expect(screen.queryByText(/Search to find older ones/)).toBeNull()
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async (params: MemorySearchParams) => ({ items: params.pinned ? pins(100) : [] })) })} />)
+    await screen.findByRole('list', { name: 'Notes' })
+    showFilter('Pinned')
+    openSearch('lease')
+    await waitFor(() => expect(footer()).toBe('The 100 best pinned matches.'))
   })
 
-  it('filters to pinned notes, agent notes, outcomes, answers and superseded notes', async () => {
+  it('closes search on Escape, dropping the words and returning focus to Search', async () => {
     seed()
     const memorySearch = vi.fn(async (params: MemorySearchParams) => search(params))
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
     await screen.findByRole('list', { name: 'Notes' })
-    const show = screen.getByRole('group', { name: 'Show' })
+    openSearch('lease')
+    await waitFor(() => expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, words: 'lease' }))
+    await waitFor(() => expect(footer()).toBe('5 matches for “lease”'))
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Pinned', 'Best matches'])
 
-    fireEvent.click(within(show).getByRole('button', { name: 'Pinned' }))
-    expect(within(show).getByRole('button', { name: 'Pinned' }).getAttribute('aria-pressed')).toBe('true')
+    fireEvent.keyDown(screen.getByRole('searchbox', { name: 'Search notes' }), { key: 'Escape' })
+    expect(screen.queryByRole('searchbox')).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Search notes' })))
+    await waitFor(() => expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100 }))
+  })
+
+  it('lists fewer than 100 pins with counts instead of a notice', async () => {
+    seed()
+    const memorySearch = vi.fn(async (params: MemorySearchParams) => ({ items: params.pinned ? pins(99) : [agentNote] }))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
+    await waitFor(() => expect(titles()).toHaveLength(100))
+    expect(footer()).toBe('100 notes · 99 pinned')
+
+    showFilter('Pinned')
+    await waitFor(() => expect(titles()).toHaveLength(99))
+    expect(footer()).toBe('99 notes · 99 pinned')
+  })
+
+  it('filters to pinned notes, agent notes, outcomes, answers and superseded notes, and searches within the filter', async () => {
+    seed()
+    const memorySearch = vi.fn(async (params: MemorySearchParams) => search(params))
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
+    await screen.findByRole('list', { name: 'Notes' })
+    const show = screen.getByRole('radiogroup', { name: 'Show' })
+
+    showFilter('Pinned')
+    expect(within(show).getByRole('radio', { name: /^Pinned/ }).getAttribute('aria-checked')).toBe('true')
     await waitFor(() => expect(titles()).toEqual([workspacePin.title, myPin.title]))
 
-    fireEvent.click(within(show).getByRole('button', { name: 'Agent notes' }))
+    showFilter('Agent notes')
     await waitFor(() => expect(titles()).toEqual([agentNote.title]))
     expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, source: 'agent' })
 
-    fireEvent.click(within(show).getByRole('button', { name: 'Answers' }))
+    showFilter('Answers')
     await waitFor(() => expect(titles()).toEqual([answer.title]))
     expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, source: 'answer' })
 
-    fireEvent.click(within(show).getByRole('button', { name: 'Outcomes' }))
+    showFilter('Outcomes')
     await waitFor(() => expect(titles()).toEqual([outcome.title]))
     expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, kind: 'outcome' })
 
-    fireEvent.click(within(show).getByRole('button', { name: 'Superseded' }))
+    showFilter('Superseded')
     await waitFor(() => expect(titles()).toEqual([replaced.title]))
     expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, replaced: true })
-    expect(within(screen.getByRole('list', { name: 'Notes' })).getByText('Superseded')).toBeDefined()
+    expect(within(rowOf(replaced.title)).getByText('Superseded')).toBeDefined()
 
     memorySearch.mockResolvedValue({ items: [] })
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Search notes' }), { target: { value: '  lease  ' } })
+    openSearch('  lease  ')
+    expect(screen.getByRole('searchbox', { name: 'Search notes' }).getAttribute('placeholder')).toBe('Search superseded notes…')
     await waitFor(() => expect(memorySearch).toHaveBeenLastCalledWith({ workspace_id: workspace.id, limit: 100, words: 'lease', replaced: true }))
     expect(await screen.findByText('No superseded notes match “lease”.')).toBeDefined()
+  })
+
+  it('moves the filter with arrow keys, Home and End', async () => {
+    seed()
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async (params: MemorySearchParams) => search(params)) })} />)
+    await screen.findByRole('list', { name: 'Notes' })
+    const radio = (name: string) => within(screen.getByRole('radiogroup', { name: 'Show' })).getByRole('radio', { name: new RegExp(`^${name}`) })
+    fireEvent.keyDown(radio('All'), { key: 'End' })
+    expect(radio('Superseded').getAttribute('aria-checked')).toBe('true')
+    fireEvent.keyDown(radio('Superseded'), { key: 'Home' })
+    expect(radio('All').getAttribute('aria-checked')).toBe('true')
   })
 
   it('lists agent notes, answers and superseded notes older than the newest 100 notes', async () => {
@@ -179,235 +207,27 @@ describe('memory page', () => {
     const memorySearch = vi.fn(async (params: MemorySearchParams) => ({ items: params.pinned ? [] : params.source || params.replaced ? search(params).items : outcomes }))
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch })} />)
     await screen.findByRole('list', { name: 'Notes' })
-    const show = screen.getByRole('group', { name: 'Show' })
     for (const [filter, note] of [['Agent notes', agentNote], ['Answers', answer], ['Superseded', replaced]] as const) {
-      fireEvent.click(within(show).getByRole('button', { name: filter }))
+      showFilter(filter)
       await waitFor(() => expect(titles()).toEqual([note.title]))
     }
   })
 
-  it("shows the server's refusal word for word and keeps the note to fix", async () => {
+  it('names what a pin does for the row under the pointer', async () => {
     seed()
-    const refusal = 'memory.add: rejected, gitleaks rule github-pat at 0:22; remove the secret and retry'
-    const answers: Record<string, unknown> = { 'memory.search': { items: live }, 'memory.brief': { text: '' }, 'agent.list': { agents: [] } }
-    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
-      const method = input.split('/api/v1/')[1]
-      if (method === 'memory.add') return { ok: false, status: 403, statusText: 'Forbidden', json: async () => ({ error: { code: -32001, message: refusal } }) }
-      return { ok: true, status: 200, json: async () => answers[method] ?? {} }
-    }))
-    try {
-      render(<MemoryRoute params={{}} client={api} />)
-      fireEvent.click(await screen.findByRole('button', { name: 'Add note' }))
-      const dialog = screen.getByRole('dialog', { name: 'Add a note' })
-      fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'token ghp_example' } })
-      fireEvent.click(within(dialog).getByRole('button', { name: 'Add note' }))
-
-      expect((await within(dialog).findByRole('alert')).textContent).toBe(refusal)
-      expect((within(dialog).getByLabelText('Note') as HTMLTextAreaElement).value).toBe('token ghp_example')
-    } finally {
-      vi.unstubAllGlobals()
-    }
+    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async (params: MemorySearchParams) => search(params)) })} />)
+    await screen.findByRole('list', { name: 'Notes' })
+    fireEvent.pointerEnter(rowOf(workspacePin.title), { pointerType: 'mouse' })
+    await waitFor(() => expect(footer()).toBe("Pinned by Bob · in every new run's brief"))
+    fireEvent.pointerEnter(rowOf(myPin.title), { pointerType: 'mouse' })
+    await waitFor(() => expect(footer()).toBe("Pinned for you · in your new runs' briefs"))
+    fireEvent.focus(screen.getByRole('button', { name: agentNote.title }))
+    await waitFor(() => expect(footer()).toBe('Not pinned · runs find it by searching'))
+    fireEvent.pointerLeave(rowOf(agentNote.title))
+    await waitFor(() => expect(footer()).toBe('5 notes · 2 pinned'))
   })
 
-  it('adds a pinned note for the member only, and reports a refused pin as the server words it', async () => {
-    seed()
-    const budget = 'memory.add: note-new0000001 is stored but not pinned: memory.pin: your pinned member notes use 480 of 512 bytes; this note needs 92; unpin one first'
-    const memoryAdd = vi.fn<Api['memoryAdd']>(async () => { throw new ApiError(409, budget, -32003) })
-    const memorySearch = vi.fn(async () => ({ items: live }))
-    const memoryBrief = vi.fn(async () => ({ text: '' }))
-    render(<MemoryRoute params={{}} client={fakeApi({ memoryAdd, memorySearch, memoryBrief })} />)
-    fireEvent.click(await screen.findByRole('button', { name: 'Add note' }))
-    const dialog = screen.getByRole('dialog', { name: 'Add a note' })
-    await pickOption(within(dialog).getByLabelText('Kind'), 'Gotcha')
-    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: 'Run make lint before pushing.' } })
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Only me' }))
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Pin' }))
-    const reads = memorySearch.mock.calls.length
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add note' }))
-
-    expect((await within(dialog).findByRole('alert')).textContent).toBe(budget)
-    expect(memoryAdd).toHaveBeenCalledWith({ workspace_id: workspace.id, kind: 'gotcha', text: 'Run make lint before pushing.', scope: 'member', pin: true })
-    await waitFor(() => expect(memorySearch.mock.calls.length).toBe(reads + 2))
-    expect(memoryBrief).toHaveBeenCalledTimes(2)
-  })
-
-  it('opens a note with its provenance and supersede chain', async () => {
-    seed()
-    // Written in the same second as the note it replaces: only the server's order tells them apart.
-    const replacement = memoryItem({ id: 'note-newer00001', title: 'Use bun in web/ and docs/.', created_at: agentNote.created_at })
-    const shown = { ...agentNote, superseded_by: replacement.id, invalid_at: agentNote.created_at }
-    const older = { ...replaced, superseded_by: shown.id }
-    const memoryShow = vi.fn<Api['memoryShow']>(async (_, id) => (id === shown.id
-      ? { item: shown, chain: [older, replacement] }
-      : { item: replacement, chain: [older, shown] }))
-    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [agentNote] })), memoryShow })} />)
-    fireEvent.click(await screen.findByRole('button', { name: agentNote.title }))
-
-    const dialog = await screen.findByRole('dialog', { name: agentNote.title })
-    expect(within(dialog).getByText(`Gotcha · Agent note · ${agentNote.id}`)).toBeDefined()
-    const provenance = within(dialog.querySelector<HTMLElement>('dl[aria-label="Provenance"]')!)
-    expect(await provenance.findByText('You · Claude Code')).toBeDefined()
-    expect(provenance.getByText('run_1')).toBeDefined()
-    expect(provenance.getByText('1a2b3c4d5e6f')).toBeDefined()
-    expect(provenance.getByText('internal/scheduler/lease.go')).toBeDefined()
-    expect(provenance.getByRole('link', { name: 'PR #312 (merged)' })).toBeDefined()
-
-    const chain = within(within(dialog).getByRole('region', { name: 'Supersede chain' }))
-    expect(chain.getAllByRole('listitem').map((li) => li.lastElementChild?.textContent)).toEqual([
-      older.title, `${agentNote.title} (this note)`, replacement.title,
-    ])
-    fireEvent.click(chain.getByRole('button', { name: replacement.title }))
-    expect(await screen.findByRole('dialog', { name: replacement.title })).toBeDefined()
-    expect(memoryShow).toHaveBeenLastCalledWith(workspace.id, replacement.id)
-  })
-
-  it('pins and unpins a note, and removes it only once confirmed', async () => {
-    seed()
-    const pinned = { ...agentNote, pinned_by: alice.id, pinned_by_name: 'Alice', pinned_at: '2026-10-18T14:00:00Z' }
-    const memoryPin = vi.fn<Api['memoryPin']>(async () => ({ item: pinned }))
-    const memoryUnpin = vi.fn<Api['memoryUnpin']>(async () => ({ item: agentNote }))
-    const memoryRm = vi.fn<Api['memoryRm']>(async () => ({ ids: [agentNote.id] }))
-    const memorySearch = vi.fn(async () => ({ items: [agentNote] }))
-    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch, memoryShow: vi.fn(async () => ({ item: agentNote })), memoryPin, memoryUnpin, memoryRm })} />)
-    fireEvent.click(await screen.findByRole('button', { name: agentNote.title }))
-    const dialog = await screen.findByRole('dialog', { name: agentNote.title })
-
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Pin' }))
-    expect(await within(dialog).findByText('Pinned by you')).toBeDefined()
-    expect(memoryPin).toHaveBeenCalledWith(workspace.id, agentNote.id)
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Unpin' }))
-    expect(await within(dialog).findByRole('button', { name: 'Pin for me only' })).toBeDefined()
-    expect(memoryUnpin).toHaveBeenCalledWith(workspace.id, agentNote.id)
-
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove…' }))
-    const confirm = await screen.findByRole('alertdialog', { name: `Remove ${agentNote.id}?` })
-    expect(memoryRm).not.toHaveBeenCalled()
-    const reads = memorySearch.mock.calls.length
-    fireEvent.click(within(confirm).getByRole('button', { name: 'Remove note' }))
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: agentNote.title })).toBeNull())
-    expect(memoryRm).toHaveBeenCalledWith(workspace.id, agentNote.id)
-    expect(memorySearch.mock.calls.length).toBeGreaterThan(reads)
-  })
-
-  it('pins a member-scope note for the pinning member only, as aether memory pin does', async () => {
-    seed()
-    const mine = { ...myPin, pinned_by: undefined, pinned_by_name: undefined, pinned_at: undefined }
-    const memoryPin = vi.fn<Api['memoryPin']>(async () => ({ item: myPin }))
-    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [mine] })), memoryShow: vi.fn(async () => ({ item: mine })), memoryPin })} />)
-    fireEvent.click(await screen.findByRole('button', { name: mine.title }))
-    const dialog = await screen.findByRole('dialog', { name: mine.title })
-    const only = await within(dialog).findByRole('button', { name: 'Pin for me only' })
-    expect(within(dialog).queryByRole('button', { name: 'Pin' })).toBeNull()
-    fireEvent.click(only)
-    expect(await within(dialog).findByText('Pinned for you')).toBeDefined()
-    expect(memoryPin).toHaveBeenCalledWith(workspace.id, mine.id, 'member')
-  })
-
-  it("shows a refused pin as the server's text", async () => {
-    seed()
-    const refusal = 'memory.pin: pinned workspace notes use 980 of 1024 bytes; this note needs 120; unpin one first'
-    const memoryPin = vi.fn<Api['memoryPin']>(async () => { throw new ApiError(409, refusal, -32003) })
-    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [agentNote] })), memoryShow: vi.fn(async () => ({ item: agentNote })), memoryPin })} />)
-    fireEvent.click(await screen.findByRole('button', { name: agentNote.title }))
-    const dialog = await screen.findByRole('dialog', { name: agentNote.title })
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Pin' }))
-    expect((await within(dialog).findByRole('alert')).textContent).toBe(refusal)
-  })
-
-  it('replaces a note with one pre-filled from it, citing files, then opens the replacement', async () => {
-    seed()
-    const note = { ...agentNote, scope: 'member' as const }
-    const text = 'Reattach races the lease sweeper\nTake the lease, then read the container state, then sweep.'
-    const replacement = memoryItem({ id: 'note-replace001', kind: 'gotcha', scope: 'member', title: 'Reattach races the lease sweeper', body: text })
-    const memoryAdd = vi.fn<Api['memoryAdd']>(async () => ({ item: replacement }))
-    const memoryShow = vi.fn<Api['memoryShow']>(async (_, id) => (id === note.id ? { item: note } : { item: replacement, chain: [{ ...note, superseded_by: replacement.id }] }))
-    const memorySearch = vi.fn(async () => ({ items: [note] }))
-    const memoryBrief = vi.fn(async () => ({ text: '' }))
-    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch, memoryShow, memoryAdd, memoryBrief })} />)
-    fireEvent.click(await screen.findByRole('button', { name: note.title }))
-    fireEvent.click(await within(await screen.findByRole('dialog', { name: note.title })).findByRole('button', { name: 'Replace…' }))
-
-    const dialog = await screen.findByRole('dialog', { name: `Replace ${note.id}` })
-    expect(within(dialog).getByText('The old note stays in history as Superseded. A pin on it moves to the replacement.')).toBeDefined()
-    expect(within(dialog).getByLabelText('Kind').textContent).toBe('Gotcha')
-    expect((within(dialog).getByLabelText('Note') as HTMLTextAreaElement).value).toBe(note.body)
-    expect((within(dialog).getByLabelText('Files') as HTMLTextAreaElement).value).toBe('internal/scheduler/reattach.go\ninternal/scheduler/lease.go')
-    expect(within(dialog).getByRole('checkbox', { name: 'Only me' }).getAttribute('aria-checked')).toBe('true')
-
-    fireEvent.change(within(dialog).getByLabelText('Note'), { target: { value: text } })
-    fireEvent.change(within(dialog).getByLabelText('Files'), { target: { value: ' internal/scheduler/reattach.go \n\n internal/scheduler/sweep.go\n' } })
-    const reads = memorySearch.mock.calls.length
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Replace note' }))
-
-    expect(await screen.findByText(`Gotcha · Member note · ${replacement.id}`)).toBeDefined()
-    expect(memoryAdd).toHaveBeenCalledWith({
-      workspace_id: workspace.id, kind: 'gotcha', text, files: ['internal/scheduler/reattach.go', 'internal/scheduler/sweep.go'], supersedes: note.id, scope: 'member',
-    })
-    expect(screen.queryByRole('dialog', { name: `Replace ${note.id}` })).toBeNull()
-    expect(memoryShow).toHaveBeenLastCalledWith(workspace.id, replacement.id)
-    await waitFor(() => expect(memorySearch.mock.calls.length).toBeGreaterThan(reads))
-    expect(memoryBrief).toHaveBeenCalledTimes(2)
-  })
-
-  it('leaves another open note in place when a cancelled replacement finishes saving', async () => {
-    seed()
-    const replacement = memoryItem({ id: 'note-replace002', title: 'Replaced text', body: 'Replaced text' })
-    let finish: (result: MemoryAddResult) => void = () => {}
-    const memoryAdd = vi.fn<Api['memoryAdd']>(() => new Promise((resolve) => { finish = resolve }))
-    const memoryShow = vi.fn<Api['memoryShow']>(async (_, id) => ({ item: id === workspacePin.id ? workspacePin : id === replacement.id ? replacement : agentNote }))
-    const memorySearch = vi.fn(async () => ({ items: [workspacePin, agentNote] }))
-    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch, memoryShow, memoryAdd })} />)
-    fireEvent.click(await screen.findByRole('button', { name: agentNote.title }))
-    fireEvent.click(await within(await screen.findByRole('dialog', { name: agentNote.title })).findByRole('button', { name: 'Replace…' }))
-    const form = await screen.findByRole('dialog', { name: `Replace ${agentNote.id}` })
-    fireEvent.click(within(form).getByRole('button', { name: 'Replace note' }))
-    await waitFor(() => expect(memoryAdd).toHaveBeenCalled())
-    fireEvent.click(within(form).getByRole('button', { name: 'Cancel' }))
-    fireEvent.click(screen.getAllByRole('button', { name: 'Close' })[0])
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: agentNote.title })).toBeNull())
-    fireEvent.click(await screen.findByRole('button', { name: workspacePin.title }))
-    await screen.findByRole('dialog', { name: workspacePin.title })
-
-    await act(async () => finish({ item: replacement }))
-    expect(screen.getByRole('dialog', { name: workspacePin.title })).toBeDefined()
-    expect(screen.queryByRole('dialog', { name: replacement.title })).toBeNull()
-  })
-
-  it("replaces an outcome note as a decision, keeps a pinned note's pin and scope, and shows a refusal word for word", async () => {
-    seed()
-    const pinned = { ...outcome, scope: 'member' as const, pinned_by: alice.id, pinned_by_name: 'Alice', pinned_at: '2026-10-18T12:00:00Z' }
-    const refusal = 'memory.add: file 1 is 600 bytes; a cited path holds at most 512'
-    const memoryAdd = vi.fn<Api['memoryAdd']>(async () => { throw new ApiError(400, refusal, -32602) })
-    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [pinned] })), memoryShow: vi.fn(async () => ({ item: pinned })), memoryAdd })} />)
-    fireEvent.click(await screen.findByRole('button', { name: pinned.title }))
-    fireEvent.click(await within(await screen.findByRole('dialog', { name: pinned.title })).findByRole('button', { name: 'Replace…' }))
-
-    const dialog = await screen.findByRole('dialog', { name: `Replace ${pinned.id}` })
-    expect(within(dialog).getByLabelText('Kind').textContent).toBe('Decision')
-    expect(within(dialog).queryByRole('checkbox', { name: 'Pin' })).toBeNull()
-    const onlyMe = within(dialog).getByRole('checkbox', { name: 'Only me' }) as HTMLButtonElement
-    expect(onlyMe.getAttribute('aria-checked')).toBe('true')
-    expect(onlyMe.disabled).toBe(true)
-    expect(within(dialog).getByText('Follows the pin, which moves to the replacement.')).toBeDefined()
-    const long = `web/${'x'.repeat(596)}`
-    fireEvent.change(within(dialog).getByLabelText('Files'), { target: { value: long } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Replace note' }))
-
-    expect((await within(dialog).findByRole('alert')).textContent).toBe(refusal)
-    expect(memoryAdd).toHaveBeenCalledWith({ workspace_id: workspace.id, kind: 'decision', text: pinned.body, files: [long], supersedes: pinned.id, scope: 'member' })
-    expect((within(dialog).getByLabelText('Files') as HTMLTextAreaElement).value).toBe(long)
-  })
-
-  it('offers no Replace on a superseded note', async () => {
-    seed()
-    render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [replaced] })), memoryShow: vi.fn(async () => ({ item: replaced })) })} />)
-    fireEvent.click(await screen.findByRole('button', { name: replaced.title }))
-    const dialog = await screen.findByRole('dialog', { name: replaced.title })
-    expect(await within(dialog).findByRole('button', { name: 'Remove…' })).toBeDefined()
-    expect(within(dialog).queryByRole('button', { name: 'Replace…' })).toBeNull()
-  })
-
-  it('re-reads the list and the brief when a memory.change arrives for its workspace', async () => {
+  it('re-reads once after a burst of memory.change events for its workspace', async () => {
     seed()
     let notes = [agentNote]
     let text = ''
@@ -423,39 +243,61 @@ describe('memory page', () => {
     })
 
     await applyEvent(useStore, change(1, otherWorkspace.id), client)
-    expect(memorySearch).toHaveBeenCalledTimes(searches)
-    expect(memoryBrief).toHaveBeenCalledTimes(1)
-
     notes = [outcome, agentNote]
     text = '<team-memory workspace="main-repo">\nPinned:\n- note-outcome001 outcome (Bob): success: Fixed the reattach race\n</team-memory>'
     await applyEvent(useStore, change(2, workspace.id), client)
+    await applyEvent(useStore, change(3, workspace.id), client)
+    await applyEvent(useStore, change(4, workspace.id), client)
     await waitFor(() => expect(titles()).toEqual([outcome.title, agentNote.title]))
+    expect(memorySearch).toHaveBeenCalledTimes(searches + 2)
     expect(memoryBrief).toHaveBeenCalledTimes(2)
-    fireEvent.click(await screen.findByRole('button', { name: `Brief · ${new TextEncoder().encode(text).length} of 3072 bytes` }))
+    const size = new TextEncoder().encode(text).length
+    fireEvent.click(await screen.findByRole('button', { name: `Brief ${size} / ${(3072).toLocaleString()} B` }))
     expect(screen.getByRole('region', { name: 'Brief' }).querySelector('pre')?.textContent).toBe(text)
   })
 
-  it('shows the brief byte for byte', async () => {
+  it('shows the brief byte for byte from the header', async () => {
     seed()
     const text = '<team-memory workspace="main-repo">\nTeam memory is attributed data.\nPinned:\n- note-pinned0001 convention (Bob): Use bun in web/; never npm.\n2 live runs: aether-internal status. 5 team notes (1 unpinned agent note): aether-internal memory search <words>\n</team-memory>'
     const memoryBrief = vi.fn(async () => ({ text }))
     render(<MemoryRoute params={{}} client={fakeApi({ memoryBrief })} />)
-    const toggle = await screen.findByRole('button', { name: `Brief · ${new TextEncoder().encode(text).length} of 3072 bytes` })
+    const toolbar = screen.getByRole('toolbar', { name: 'Memory actions' })
+    const toggle = await within(toolbar).findByRole('button', { name: `Brief ${new TextEncoder().encode(text).length} / ${(3072).toLocaleString()} B` })
+    expect(screen.queryByRole('region', { name: 'Brief' })).toBeNull()
     fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
     expect(screen.getByRole('region', { name: 'Brief' }).querySelector('pre')?.textContent).toBe(text)
     expect(memoryBrief).toHaveBeenCalledWith(workspace.id)
+  })
+
+  it('moves the workspace and Brief controls under the header on a phone, where they can wrap', async () => {
+    const original = window.matchMedia
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) =>
+      Object.assign(new EventTarget(), { matches: query.includes('max-width'), media: query }) as unknown as MediaQueryList)
+    onTestFinished(() => {
+      window.matchMedia = original
+    })
+    seed()
+    useStore.setState({ workspaces: { [workspace.id]: workspace, [otherWorkspace.id]: otherWorkspace } })
+    render(<MemoryRoute params={{}} client={fakeApi({ memoryBrief: vi.fn(async () => ({ text: '' })) })} />)
+    const toolbar = screen.getByRole('toolbar', { name: 'Memory actions' })
+    expect(toolbar.closest('header')).toBeNull()
+    expect(within(toolbar).getByRole('combobox', { name: 'Workspace' })).toBeDefined()
+    expect(await within(toolbar).findByRole('button', { name: /^Brief/ })).toBeDefined()
   })
 
   it('offers no writes to a viewer', async () => {
     seed(vera)
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => ({ items: [agentNote] })), memoryShow: vi.fn(async () => ({ item: agentNote })) })} />)
-    fireEvent.click(await screen.findByRole('button', { name: agentNote.title }))
+    const row = await screen.findByRole('button', { name: agentNote.title })
+    expect(within(row.closest('article')!).queryByRole('button', { name: /^Pin|Remove|Replace/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add note' })).toBeNull()
+    fireEvent.click(row)
     const dialog = await screen.findByRole('dialog', { name: agentNote.title })
     await within(dialog).findByText(`Gotcha · Agent note · ${agentNote.id}`)
     expect(within(dialog).queryByRole('button', { name: 'Pin' })).toBeNull()
-    expect(within(dialog).queryByRole('button', { name: 'Remove…' })).toBeNull()
+    expect(within(dialog).queryByRole('button', { name: 'Remove' })).toBeNull()
     expect(within(dialog).queryByRole('button', { name: 'Replace…' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Add note' })).toBeNull()
   })
 
   it('waits for the connection instead of loading forever', () => {
@@ -470,7 +312,7 @@ describe('memory page', () => {
   it('says so neutrally when the server predates team memory', async () => {
     seed()
     render(<MemoryRoute params={{}} client={fakeApi({ memorySearch: vi.fn(async () => { throw new ApiError(404, 'memory.search: not found') }) })} />)
-    expect((await screen.findByRole('status')).textContent).toBe('This server does not keep team memory. Update the server to use it.')
+    expect((await screen.findByText('This server does not keep team memory. Update the server to use it.')).closest('[role=status]')).not.toBeNull()
   })
 
   it("shows the server's not-found answer instead of calling the server old", async () => {

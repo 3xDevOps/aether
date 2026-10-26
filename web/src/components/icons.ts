@@ -127,6 +127,8 @@ import {
   ChartColumn as LucideChartColumn,
   BookMarked as LucideBookMarked,
   Pin as LucidePin,
+  PinOff as LucidePinOff,
+  Undo2 as LucideUndo2,
   Bell as LucideBell,
   Gauge as LucideGauge,
   Upload as LucideUpload,
@@ -177,6 +179,8 @@ export const History = icon(LucideHistory)
 export const ChartColumn = icon(LucideChartColumn)
 export const BookMarked = icon(LucideBookMarked)
 export const Pin = icon(LucidePin)
+export const PinOff = icon(LucidePinOff)
+export const Undo2 = icon(LucideUndo2)
 export const Bell = icon(LucideBell)
 export const Gauge = icon(LucideGauge)
 export const Upload = icon(LucideUpload)

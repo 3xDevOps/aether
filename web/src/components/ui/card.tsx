@@ -37,7 +37,7 @@ export function CardTitle({
   className?: string
 }) {
   return (
-    <h3 className="min-w-0 text-ui font-medium text-text">
+    <h3 className={cn('min-w-0 text-ui font-medium text-text', className)}>
       <button
         type="button"
         data-card-open
