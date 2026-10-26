@@ -10,7 +10,7 @@ type Handler = (event: Record<string, unknown>) => void
 
 function worker(
   windows: { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void }[] = [],
-  shown: { tag: string; title: string }[] = [],
+  shown: { tag: string; title: string; body?: string; data?: Record<string, unknown> }[] = [],
 ) {
   const handlers: Record<string, Handler> = {}
   const self = {
@@ -64,6 +64,19 @@ describe('service worker', () => {
       silent: true,
       icon: '/icons/icon-192.png',
       data: { run: 'run-7k2m9q4xbd' },
+    })
+  })
+
+  it("keeps an assistant's newer notice about the run when its need clears", async () => {
+    const notice = { tag: 'run-7k2m9q4xbd', title: 'Run "Fix it" finished', body: 'All green', data: { run: 'run-7k2m9q4xbd', notice: true } }
+    const { self, dispatch } = worker([], [notice])
+    await dispatch('push', { data: { json: () => ({ title: 'Fix it', body: 'No longer needs you', run: 'run-7k2m9q4xbd', clear: true }) } })
+    expect(self.registration.showNotification).toHaveBeenCalledWith('Run "Fix it" finished', {
+      body: 'All green',
+      tag: 'run-7k2m9q4xbd',
+      silent: true,
+      icon: '/icons/icon-192.png',
+      data: { run: 'run-7k2m9q4xbd', notice: true },
     })
   })
 

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -148,6 +149,8 @@ type notification struct {
 	Workspace string `json:"workspace,omitempty"`
 	// Clear replaces the run's notification quietly: its need ended.
 	Clear bool `json:"clear,omitempty"`
+	// Notice marks an assistant's notice, which a clear leaves shown.
+	Notice bool `json:"notice,omitempty"`
 }
 
 // clearedBody is what a device shows in place of a need that ended.
@@ -312,11 +315,16 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			slog.Warn("push: read run; trying again later", "run", id, "in", retry, "error", err)
 			wake = time.After(retry)
 		case n == nil:
-			if err = s.withdraw(ctx, run, id, offered, ""); err != nil {
-				slog.Warn("push: a device was not told a need ended; trying again later", "run", id, "in", retry, "error", err)
-				wake = time.After(retry)
-			} else if err = s.sink.Clear(ctx, id); err != nil {
+			// Devices and the sink are cleared independently, each tried
+			// again while it fails.
+			devicesErr := s.withdraw(ctx, run, id, offered, "")
+			if devicesErr != nil {
+				slog.Warn("push: a device was not told a need ended; trying again later", "run", id, "in", retry, "error", devicesErr)
+			}
+			if err = s.sink.Clear(ctx, id); err != nil {
 				slog.Warn("push: the sink did not clear a need; trying again later", "run", id, "in", retry, "error", err)
+			}
+			if devicesErr != nil || err != nil {
 				wake = time.After(retry)
 			} else if s.unwatch(id, signal) {
 				return
@@ -331,10 +339,17 @@ func (s *Service) watch(ctx context.Context, id domain.RunID, signal chan struct
 			shown = ""
 		}
 		if n != nil {
-			// A handed-off run's need is its new owner's alone.
+			// A handed-off run's need is its new owner's alone. A former
+			// owner whose devices were told so hears of it again if it
+			// comes back to them.
 			if err = s.withdraw(ctx, run, id, offered, n.member); err != nil {
 				slog.Warn("push: a former owner's device was not told a need moved; trying again later", "run", id, "in", retry, "error", err)
 				wake = time.After(retry)
+			}
+			for key := range announced {
+				if !strings.HasPrefix(key, string(n.member)+"|") {
+					delete(announced, key)
+				}
 			}
 		}
 		if n != nil && !n.since.IsZero() && n.since.Before(s.startedAt()) {
@@ -524,7 +539,7 @@ func (s *Service) Notify(ctx context.Context, member domain.MemberID, title, bod
 	if current != nil && !current(ctx) {
 		return nil
 	}
-	payload, err := json.Marshal(notification{Title: clip(title, fallbackTitleRunes), Body: clip(body, maxBodyRunes), Run: string(run)})
+	payload, err := json.Marshal(notification{Title: clip(title, fallbackTitleRunes), Body: clip(body, maxBodyRunes), Run: string(run), Notice: true})
 	if err != nil {
 		return fmt.Errorf("push: encode notification: %w", err)
 	}

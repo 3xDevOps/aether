@@ -30,12 +30,14 @@ async function display(message) {
     // subscription on Safari, so the notification is replaced quietly
     // instead of closed.
     const [current] = await self.registration.getNotifications({ tag: message.run })
+    // An assistant's newer notice about the run stays, shown again as it was.
+    const notice = current?.data?.notice === true
     await self.registration.showNotification(current?.title || message.title || 'Aether', {
-      body: message.body,
+      body: notice ? current.body : message.body,
       tag: message.run,
       silent: true,
       icon: '/icons/icon-192.png',
-      data: { run: message.run },
+      data: notice ? current.data : { run: message.run },
     })
     return
   }
@@ -46,7 +48,7 @@ async function display(message) {
     tag: message.run || (message.workspace ? `budget:${message.workspace}` : 'aether'),
     renotify: true,
     icon: '/icons/icon-192.png',
-    data: { run: message.run, workspace: message.workspace },
+    data: { run: message.run, workspace: message.workspace, notice: message.notice },
   })
 }
 

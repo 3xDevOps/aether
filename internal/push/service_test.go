@@ -686,6 +686,48 @@ func TestAClearGoesOnlyToDevicesThatTookTheNeed(t *testing.T) {
 	refused.expectNone(t, testQuiet)
 }
 
+func TestARunHandedBackNotifiesItsOwnerAgain(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone, bobs := h.subscribe(h.ada), h.subscribe(h.bob)
+	run := h.run(h.ada, "Fix the login redirect", domain.LaunchACP)
+	want := notification{Title: "Fix the login redirect", Body: "which region?", Run: string(run.ID)}
+	cleared := notification{Title: "Fix the login redirect", Body: clearedBody, Run: string(run.ID), Clear: true}
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
+	phone.expect(t, want)
+	for _, to := range []*domain.Member{h.bob, h.ada} {
+		if err := h.db.TransferRun(h.ctx, run.ID, to.ID); err != nil {
+			t.Fatalf("TransferRun: %v", err)
+		}
+		h.publish(run, events.TimelinePayload{Kind: events.TimelineHandoff, Message: string(to.ID)})
+		if to == h.bob {
+			bobs.expect(t, want)
+			phone.expect(t, cleared)
+		}
+	}
+	bobs.expect(t, cleared)
+	phone.expect(t, want)
+}
+
+// A device that cannot be told a need ended does not hold back the sink.
+func TestTheSinkClearsWhileADeviceCannotBeTold(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	heard := &sink{heard: make(chan string, 64)}
+	h.sink = heard
+	h.start()
+	phone := h.subscribe(h.ada)
+	run := h.run(h.ada, "Fix the login redirect", domain.LaunchACP)
+
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: which region?")
+	phone.expect(t, notification{Title: "Fix the login redirect", Body: "which region?", Run: string(run.ID)})
+	heard.expect(t, fmt.Sprintf("%s needs %q, answered by %q", run.ID, "which region?", ""))
+	phone.answer.Store(http.StatusInternalServerError)
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "agent resumed")
+	heard.expect(t, string(run.ID)+" needs nothing")
+}
+
 func TestTestSendsNowAndReturnsTheRealError(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -760,7 +802,7 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	if err := h.svc.Notify(h.ctx, h.ada.ID, `Run "Fix the login redirect" finished`, "All green", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
-	phone.expect(t, notification{Title: `Run "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID)})
+	phone.expect(t, notification{Title: `Run "Fix the login redirect" finished`, Body: "All green", Run: string(run.ID), Notice: true})
 	if waited := time.Since(started); waited < testQuiet {
 		t.Fatalf("sent after %v, want it held for the %v quiet window", waited, testQuiet)
 	}
@@ -775,7 +817,7 @@ func TestNotifyUsesTheRunTopicAndWaitsForTheQuietWindow(t *testing.T) {
 	if err := h.svc.Notify(h.ctx, h.ada.ID, "Again", "body", run.ID, true, nil, nil); err != nil {
 		t.Fatalf("Notify: %v", err)
 	}
-	phone.expect(t, notification{Title: "Again", Body: "body", Run: string(run.ID)})
+	phone.expect(t, notification{Title: "Again", Body: "body", Run: string(run.ID), Notice: true})
 	if got, want := phone.topic.Load(), topicOf(string(run.ID)); got != want {
 		t.Fatalf("notify topic = %v, want %v", got, want)
 	}
@@ -826,7 +868,7 @@ func TestNotifyFlushEndsTheQuietWaitButKeepsTheRecheck(t *testing.T) {
 	phone.expectNone(t, testQuiet/3)
 	start := time.Now()
 	close(flush)
-	phone.expect(t, notification{Title: "kept", Body: "b", Run: string(run.ID)})
+	phone.expect(t, notification{Title: "kept", Body: "b", Run: string(run.ID), Notice: true})
 	for range 2 {
 		if err := <-done; err != nil {
 			t.Fatal(err)

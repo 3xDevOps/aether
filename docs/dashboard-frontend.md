@@ -5536,7 +5536,9 @@ service took the need, when the need ends or the run changes hands,
 under the run's Web Push topic, so a need still queued at the push service
 is never shown, and tries again a minute later for a device it could not
 reach. The worker handles pushes in arrival order, so a clear still reading
-the shown notification never lands over a newer need. On
+the shown notification never lands over a newer need. An assistant's notice
+about the run carries `notice`; a clear that finds one shown shows it again,
+silently, as it was. On
 `notificationclick` it focuses a dashboard window that is already open and
 posts it `{type: 'aether:open-run', run}` or
 `{type: 'aether:open-workspace', workspace}`, or opens `/?run=<id>` or
