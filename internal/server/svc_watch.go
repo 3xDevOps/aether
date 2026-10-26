@@ -11,7 +11,8 @@ import (
 )
 
 // Watches: a bus consumer that evaluates each member's watches on runs and
-// swarms and delivers their notices in-app and through Web Push. It reads
+// swarms and delivers their notices in-app, through Web Push and, for the
+// watches the assistant keeps on the runs it launches, to the assistant. It reads
 // the push service svc_push.go builds, which Go initializes first.
 func init() {
 	registerService("watch", func(d Deps) (Service, error) {
@@ -41,6 +42,10 @@ func init() {
 			return nil, err
 		}
 		d.SSH.Services.Watches = svc
+		if d.Assistant != nil {
+			svc.UseAssistant(d.Assistant)
+			d.Assistant.UseWatches(svc)
+		}
 		return svc, nil
 	})
 }

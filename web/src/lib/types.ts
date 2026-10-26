@@ -2155,6 +2155,7 @@ export interface EnvAgentsResult {
 export interface AssistantNoticePayload {
   member_id: string
   run_id: string
+  watch_id?: string
   kind: 'finished' | 'needs_input' | 'needs_approval' | 'needs_attention'
   title: string
   body: string

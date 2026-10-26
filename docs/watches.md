@@ -124,6 +124,8 @@ the notice is recorded and updated in place as the push resolves:
 | `push` | `failed` | No device took it after 5 attempts with backoff; `detail` is the push service's error. Each attempt is counted before it is sent, so a server that stops mid-send retries it rather than sending it more than 5 times. |
 | `push` | `cleared` | Dropped unsent: a `needs_you` push whose need was resolved (answered, dismissed, granted) first, or a push of a watch paused until it expired. |
 | `push` | `withdrawn` | A delivered `needs_you` push whose target then needed nothing more from you. Your devices got a silent replacement reading `No longer needs you` under the same notification, the way a run's own need notification is cleared; it is sent through quiet hours and while you use a dashboard. When a newer need of the same target is open by then, no replacement is sent, since that need's push shares the notification, and `detail` reads `Replaced by a newer need`. A push sent inside a quiet-hours summary (`detail` starts `Sent in one push with other notices`) has no notification of its own and is not withdrawn. If no device takes the replacement after 5 attempts, the row is `failed` and `detail` says the push was delivered and why withdrawing it failed. |
+| `push` | `skipped` | `detail` is `The run notification already sent it`: the run's own notification pushes this to you; see [No double pushes](#no-double-pushes). |
+| `assistant` | `pending`, `delivered`, `failed` | Only on watches whose `source` is `assistant`: the notice written into your assistant conversation. `failed` carries the error; `delivered` with a `detail` means it is in the conversation but its toast could not be raised. One still pending when the server stops is written after it starts again; one of a paused watch waits until you resume it. |
 
 A paused watch's pending pushes wait until you resume it, and are dropped if
 it expires first. A `needs_you` push about a run the server paused waits
@@ -134,6 +136,47 @@ every other notification.
 
 While you are using a dashboard, pushes wait until you have been away from
 every dashboard for a minute, the same hold run notifications use.
+
+### No double pushes
+
+Your own run already pushes you when it needs you
+([push notifications](networking.md#notifications)). A watch on a run you own
+that is not part of a swarm therefore records push `skipped` instead of
+pushing:
+
+- every `needs_you` notice;
+- `Agent reported done` while the result waits for your review, which the
+  run's notification announces as `Agent reported success, review the
+  result`. Once you chose **Later** or accepted it, the watch pushes it;
+- `Failed: ...` while you have not opened the failed run, which the run's
+  notification announces as `Failed, review the result`.
+
+Every other notice is pushed: the run closed as merged or abandoned, stopped,
+completed, its pull request merged or its checks finished. A watch on someone
+else's run, or on a swarm run, pushes every notice.
+
+## Assistant watches
+
+When the [assistant](assistant.md#notifications) launches a run or sends a
+message to one for you, it keeps one watch on that run with `source`
+`assistant` and the run's default conditions, `needs_you` and `finished`. It
+shows in **Settings > Watches** like any other watch; pause it there to stop
+the notices. Messaging the run again returns that watch as it stands: a paused
+one stays paused, an expired one is renewed for 14 days, and a deleted one is
+made again. A run relaunched after its watch was done gets a new watch. A need the run stands in when the assistant acts on it is taken as
+seen, since the assistant has just acted on it. A run that already
+failed, stopped or was closed when the watch began, such as a launch that
+failed at once, has that end announced. A watch you keep on the same
+run from the dashboard is separate and notifies on its own.
+
+Each notice of an assistant watch is also written into your assistant
+conversation, with a link to the watch, and raises the assistant's toast and
+badge.
+
+Servers upgraded from a release before watches turn each run the assistant
+followed into such a watch, expiring 14 days after the upgrade. The state each
+follow last announced is not announced again; follows of runs that had already
+ended are dropped.
 
 ## Notification preferences
 

@@ -128,8 +128,9 @@ func label(raw string) (string, error) {
 
 // resolve checks that target exists and member may watch it, and returns
 // its workspace, its title, and the finish it already reached, which the
-// new watch must not announce.
-func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol.WatchTarget) (domain.WorkspaceID, string, map[string]string, error) {
+// new watch must not announce. With ended set, a run that already ended
+// is accepted and its end left to announce.
+func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol.WatchTarget, ended bool) (domain.WorkspaceID, string, map[string]string, error) {
 	var (
 		ws    domain.WorkspaceID
 		title string
@@ -144,12 +145,12 @@ func (s *Service) resolve(ctx context.Context, member *domain.Member, t protocol
 		if err != nil {
 			return "", "", nil, fmt.Errorf("run %s: %w", t.RunID, err)
 		}
-		if run.Status.Final() {
+		if run.Status.Final() && !ended {
 			_, body, _ := runFinish(run, "")
 			return "", "", nil, invalid("run %s has already ended (%s); there is nothing left to watch", t.RunID, body)
 		}
 		ws, title = run.WorkspaceID, push.RunTitle(run)
-		if key, _, ok := runFinish(run, ""); ok {
+		if key, _, ok := runFinish(run, ""); ok && !run.Status.Final() {
 			fired[protocol.WatchFinished] = key
 		}
 	case protocol.WatchTargetMission:
@@ -198,6 +199,13 @@ var ErrDenied = errors.New("watch: access denied")
 
 // Create starts watching a target for member.
 func (s *Service) Create(ctx context.Context, memberID domain.MemberID, p protocol.WatchCreateParams) (protocol.WatchResult, error) {
+	return s.create(ctx, memberID, p, false)
+}
+
+// create is Create; with baseline set, for the assistant that just acted
+// on the run, the need it stands in now is taken as already announced, and
+// an end it already reached is announced.
+func (s *Service) create(ctx context.Context, memberID domain.MemberID, p protocol.WatchCreateParams, baseline bool) (protocol.WatchResult, error) {
 	if p.IdempotencyKey != "" {
 		w, err := s.store.GetWatchByIdempotencyKey(ctx, memberID, p.IdempotencyKey)
 		if err == nil {
@@ -235,7 +243,7 @@ func (s *Service) Create(ctx context.Context, memberID domain.MemberID, p protoc
 	if !slices.Contains([]string{protocol.WatchSourceDashboard, protocol.WatchSourceAssistant, protocol.WatchSourceMCP}, source) {
 		return protocol.WatchResult{}, invalid("source %q is not one of dashboard, assistant, mcp", source)
 	}
-	ws, title, fired, err := s.resolve(ctx, member, p.Target)
+	ws, title, fired, err := s.resolve(ctx, member, p.Target, baseline)
 	if err != nil {
 		return protocol.WatchResult{}, err
 	}
@@ -257,6 +265,11 @@ func (s *Service) Create(ctx context.Context, memberID domain.MemberID, p protoc
 			return protocol.WatchResult{}, invalid("%s", verr.Error())
 		case prTitle != "" && p.Target.Kind == protocol.WatchTargetPR:
 			w.TargetTitle = prTitle
+		}
+	}
+	if baseline {
+		if err = s.baseline(ctx, w); err != nil {
+			return protocol.WatchResult{}, err
 		}
 	}
 	created, err := s.insert(ctx, w)

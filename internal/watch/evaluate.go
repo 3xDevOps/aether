@@ -134,7 +134,7 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 		}
 		for _, n := range recorded {
 			s.changed(ctx, w, n.ID)
-			if n.PushState != store.WatchPushNone {
+			if n.PushState != store.WatchPushNone || w.Source == protocol.WatchSourceAssistant && s.assistant != nil {
 				s.wake()
 			}
 		}
@@ -534,6 +534,7 @@ func prConditionsOf(conditions []string) []string {
 func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []Notice, now time.Time) ([]*store.WatchNotification, error) {
 	var out []*store.WatchNotification
 	var prefs *store.NotifyPrefs
+	var run *domain.Run
 	devices := -1
 	for _, n := range notices {
 		if slices.Contains(strings.Split(w.Fired[n.Condition], firedSep), n.Key) {
@@ -545,6 +546,11 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 				return nil, err
 			}
 			prefs = &p
+			if w.TargetKind == protocol.WatchTargetRun {
+				if run, err = s.store.GetRun(ctx, w.RunID); err != nil {
+					return nil, err
+				}
+			}
 		}
 		rec := &store.WatchNotification{
 			Condition: n.Condition, Key: n.Key, Title: n.Title, Body: n.Body, Link: cmp.Or(n.Link, WatchLink(w.ID)),
@@ -557,6 +563,8 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 			d.Status, d.Detail = protocol.WatchStatusDisabled, "Push is off in your notification settings"
 		case s.push == nil:
 			d.Status, d.Detail = protocol.WatchStatusDisabled, "Push is not configured on this server"
+		case ownerPushed(w, run, n, s.startedAt()):
+			d.Status, d.Detail = protocol.WatchStatusSkipped, "The run notification already sent it"
 		default:
 			if devices < 0 {
 				count, err := s.push.Devices(ctx, w.MemberID)
@@ -579,6 +587,9 @@ func (s *Service) notifications(ctx context.Context, w *store.Watch, notices []N
 			}
 		}
 		rec.Deliveries = append(rec.Deliveries, d)
+		if w.Source == protocol.WatchSourceAssistant && s.assistant != nil {
+			rec.Deliveries = append(rec.Deliveries, store.WatchDelivery{Channel: protocol.WatchChannelAssistant, Status: protocol.WatchStatusPending, At: now})
+		}
 		out = append(out, rec)
 	}
 	return out, nil
