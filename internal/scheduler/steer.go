@@ -587,12 +587,12 @@ func (s *Scheduler) Paused(run domain.RunID) bool {
 	return entry != nil && entry.paused
 }
 
-// Cause is what chose the live run's activity, empty for an unknown or
-// finished run.
-func (s *Scheduler) Cause(run domain.RunID) events.RunStatusCause {
+// Cause is what chose activity for the live run, empty for an unknown or
+// finished run or one whose activity has since changed.
+func (s *Scheduler) Cause(run domain.RunID, activity domain.RunActivity) events.RunStatusCause {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if entry := s.runs[run]; entry != nil {
+	if entry := s.runs[run]; entry != nil && entry.activity == activity {
 		return entry.cause
 	}
 	return ""

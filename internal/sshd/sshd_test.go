@@ -656,7 +656,7 @@ func (f *fakeRuns) Paused(run domain.RunID) bool {
 	return f.paused[run]
 }
 
-func (f *fakeRuns) Cause(domain.RunID) events.RunStatusCause { return "" }
+func (f *fakeRuns) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
 
 func (f *fakeRuns) PendingInputs(run domain.RunID) []domain.RunInputRequest {
 	f.mu.Lock()

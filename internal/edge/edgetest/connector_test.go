@@ -84,9 +84,9 @@ func (launcher) Paused(domain.RunID) bool { return false }
 func (launcher) DefaultMode(context.Context, domain.MemberID, domain.MemberID, string) (domain.LaunchMode, error) {
 	return domain.LaunchACP, nil
 }
-func (launcher) PendingInputs(domain.RunID) []domain.RunInputRequest { return nil }
-func (launcher) Cause(domain.RunID) events.RunStatusCause            { return "" }
-func (launcher) Switching(domain.RunID) domain.LaunchMode            { return "" }
+func (launcher) PendingInputs(domain.RunID) []domain.RunInputRequest          { return nil }
+func (launcher) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
+func (launcher) Switching(domain.RunID) domain.LaunchMode                     { return "" }
 func (launcher) Retention(*domain.Run) (scheduler.RetentionInfo, error) {
 	return scheduler.RetentionInfo{}, nil
 }
