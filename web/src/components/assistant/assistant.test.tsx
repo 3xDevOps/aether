@@ -8,7 +8,7 @@ import type { AssistantConfirmation, AssistantSettings, AssistantStatus } from '
 import { useStore, createRootStore } from '@/store'
 import { loadWholeItem } from '@/store/session-stream'
 import { viewSyncDelay } from '@/store/view-context'
-import { item, resetItems, ScriptedSession, say, state } from '@/test/acp-stream'
+import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
 import { agentInfo, alice, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 import { atViewport } from '@/test/viewport'
@@ -359,6 +359,22 @@ describe('the conversation', () => {
     assistantSocket().open({ state: state({ turn_in_flight: true }) }, [item('turn_start', 1), say(1, 'user', 'Install Rust')])
     await userEvent.click(await within(aside).findByRole('button', { name: 'Stop' }))
     expect(api.assistantCancel).toHaveBeenCalled()
+  })
+
+  it('keeps a focused step of the reply in place when the turn ends', async () => {
+    const aside = await openPanel()
+    const session = assistantSocket().open({ state: state({ turn_in_flight: true }) }, [
+      item('turn_start', 1),
+      say(1, 'user', 'Check the tests'),
+      tool(1, 'x1', 'execute', 'npm test', 'in_progress'),
+    ])
+    const log = await within(aside).findByRole('log', { name: 'Assistant conversation' })
+    const step = await within(log).findByRole('button', { name: /^Running npm test(?!,)/ })
+    act(() => step.focus())
+    session.items(tool(1, 'x1', 'execute', 'npm test', 'completed', { exit_code: 0 }), say(1, 'assistant', 'All green.'), item('turn_end', 1, { stop_reason: 'end_turn' }))
+    expect(await within(log).findByText('All green.')).toBeDefined()
+    expect(document.activeElement).toBe(step)
+    expect(step.textContent).toContain('Ran npm test')
   })
 
   it('answers a harness permission prompt with assistant.answer', async () => {

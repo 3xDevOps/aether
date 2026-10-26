@@ -97,6 +97,11 @@ const launch = (turn: number, id: string, description: string, status: string, e
 const child = (turn: number, id: string, parent: string, title: string) =>
   tool(turn, id, 'read', title, 'completed', { tool_name: 'Read', parent_id: parent })
 
+/** A finished turn's block is shut; its header opens it. */
+async function openSteps(log: HTMLElement, name: RegExp) {
+  await userEvent.click(await within(log).findByRole('button', { name }))
+}
+
 function transcript(): SessionItem[] {
   return [
     item('turn_start', 1),
@@ -114,6 +119,7 @@ describe('subagents in the session view', () => {
     open()
     acpSocket().open({}, transcript())
     const log = await screen.findByRole('log', { name: 'Session' })
+    await openSteps(log, /^Delegated 2 tasks/)
     expect(await within(log).findByRole('button', { name: /2 subagents · 1 stopped/ })).toBeDefined()
     const card = within(log).getByRole('button', { name: 'Find usages, Explore, Done' })
     expect(within(card).getByText('round() is used in two places.')).toBeDefined()
@@ -376,6 +382,7 @@ describe('subagents in the session view', () => {
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const log = await screen.findByRole('log', { name: 'Session' })
+    await openSteps(log, /^Delegated 2 tasks/)
     expect(within(await within(log).findByRole('button', { name: 'Coverage, Explore, Done' })).getByText('Coverage report')).toBeDefined()
     expect(within(within(log).getByRole('button', { name: 'Listing, Explore, Done' })).getByText('bold item')).toBeDefined()
   })
@@ -390,6 +397,7 @@ describe('subagents in the session view', () => {
       item('turn_end', 1, { stop_reason: 'end_turn' }),
     ])
     const log = await screen.findByRole('log', { name: 'Session' })
+    await openSteps(log, /^Delegated 1 task and edited 1 file/)
     await within(log).findByRole('button', { name: /Edit it/ })
     expect(log.textContent).not.toContain('Changed')
   })
@@ -398,6 +406,7 @@ describe('subagents in the session view', () => {
     open()
     acpSocket().open({}, transcript())
     const log = await screen.findByRole('log', { name: 'Session' })
+    await openSteps(log, /^Delegated 2 tasks/)
     const group = await within(log).findByRole('button', { name: /2 subagents/ })
     const list = document.getElementById(group.getAttribute('aria-controls')!)
     expect(list?.contains(within(log).getByRole('button', { name: 'Find usages, Explore, Done' }))).toBe(true)

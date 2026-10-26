@@ -1,25 +1,9 @@
 import type { Tone } from '@/components/ui/status-dot'
 import type { SessionItem, SessionRequest, SessionToolCall } from '@/lib/session-types'
 import { toolTenses } from '@/store/activity'
+import { segmentTurn, type Part, type Step, type WorkItem, type WorkStatus } from '@/store/session-steps'
 
 export type Delivery = 'Queued' | 'Sent' | 'Not sent' | 'Delivery uncertain' | 'Denied' | 'Cancelled'
-
-export type WorkStatus = 'running' | 'done' | 'failed'
-
-export interface WorkItem {
-  id: string
-  tool: string
-  label: string
-  status: WorkStatus
-  at: string
-  durationMs?: number
-  seq?: number
-  truncated?: boolean
-  command?: string
-  output?: string
-  exitCode?: number
-  diffs?: { path: string; patch: string }[]
-}
 
 export interface MessageImageRef {
   messageID: string
@@ -49,13 +33,27 @@ export type SessionRow =
       failure?: string
     }
   | { kind: 'note'; id: string; at: string; authorID: string; body: string; question?: boolean }
-  | { kind: 'assistant'; id: string; at: string; text: string; streaming: boolean }
-  | { kind: 'thinking'; id: string; at: string; text: string }
-  | { kind: 'work'; id: string; at: string; summary: string; entries: WorkItem[] }
+  | { kind: 'assistant'; id: string; at: string; text: string; streaming: boolean; outcome?: Extract<SessionRow, { kind: 'finished' }> }
+  | {
+      kind: 'steps'
+      id: string
+      at: string
+      /** When the segment began, for the live header's elapsed time. */
+      start: string
+      steps: Step[]
+      summary: string
+      icons: string[]
+      failed: number
+      running: number
+      plan?: { done: number; total: number }
+      agents: string[]
+      /** The last segment of a turn still open. */
+      current: boolean
+      live?: LiveActivity
+    }
   | { kind: 'subagents'; id: string; at: string; ids: string[] }
   | { kind: 'live'; id: string; at: string; label: string; tone: Tone }
   | { kind: 'terminal-note'; id: string; at: string }
-  | { kind: 'plan'; id: string; at: string; entries: { content: string; status?: string }[] }
   | {
       kind: 'request'
       id: string
@@ -66,34 +64,9 @@ export type SessionRow =
       authorID?: string
       reply?: { authorID: string; body: string }
     }
-  | { kind: 'answered'; id: string; at: string; request: SessionRequest; command?: string }
   | { kind: 'event'; id: string; at: string; text: string; detail?: string; tone?: Tone; report?: true }
   | { kind: 'finished'; id: string; at: string; text: string; tone: Tone }
   | { kind: 'agent-message'; id: string; at: string; messageID: string }
-
-const categories: [RegExp, string, string, string][] = [
-  [/^(bash|execute)$/, 'Ran', 'command', 'commands'],
-  [/^(read)$/, 'Read', 'file', 'files'],
-  [/^(edit|multiedit|notebookedit|write|delete|move)$/, 'Edited', 'file', 'files'],
-  [/^(grep|glob|websearch|search)$/, 'Ran', 'search', 'searches'],
-  [/^(webfetch|fetch)$/, 'Fetched', 'page', 'pages'],
-  [/^(todowrite)$/, 'Updated', 'plan', 'plans'],
-  [/^(subagent)$/, 'Delegated', 'task', 'tasks'],
-]
-
-export function workSummary(tools: string[]): string {
-  const counts = new Map<string, { verb: string; one: string; many: string; n: number }>()
-  for (const tool of tools) {
-    const match = categories.find(([pattern]) => pattern.test(tool.toLowerCase())) ?? ['', 'Used', 'tool', 'tools']
-    const key = `${match[1]} ${match[3]}`
-    const entry = counts.get(key) ?? { verb: match[1], one: match[2], many: match[3], n: 0 }
-    entry.n++
-    counts.set(key, entry)
-  }
-  const parts = [...counts.values()].map(({ verb, one, many, n }, index) =>
-    `${index === 0 ? verb : verb.toLowerCase()} ${n} ${n === 1 ? one : many}`)
-  return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0] ?? ''
-}
 
 export interface Turn {
   turn: number
@@ -137,11 +110,32 @@ interface ToolTrack {
   truncated: boolean
 }
 
-function workItem(turn: number, track: ToolTrack, ended: boolean): WorkItem {
+function lookupTarget(call: SessionToolCall): string | undefined {
+  switch (call.tool_kind) {
+    case 'read':
+      return call.locations?.[0]?.path
+    case 'search':
+      return toolTarget(call)
+    case 'fetch': {
+      const url = (call.raw_input as Record<string, unknown> | undefined)?.url
+      return typeof url === 'string' ? url : toolTarget(call)
+    }
+  }
+}
+
+const builtInKinds = new Set(['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'switch_mode'])
+
+function toolResult(call: SessionToolCall): unknown {
+  const text = (call.content ?? []).filter((c) => c.type === 'text' && c.text).map((c) => c.text).join('\n\n')
+  return text || call.raw_output
+}
+
+function workItem(turn: number, track: ToolTrack, ended: boolean, waiting: boolean): WorkItem {
   const { call } = track
   const reported = toolStatus(call)
   const status = ended && reported === 'running' ? 'done' : reported
   const took = Date.parse(track.last.time) - Date.parse(track.first.time)
+  const name = builtInKinds.has(call.tool_kind ?? '') ? undefined : call.tool_name
   return {
     id: `${turn}:${call.id}`,
     tool: call.tool_kind ?? 'other',
@@ -151,10 +145,15 @@ function workItem(turn: number, track: ToolTrack, ended: boolean): WorkItem {
     durationMs: status === 'running' || took < quietDuration ? undefined : took,
     seq: track.last.seq,
     truncated: track.truncated,
+    target: name ? toolTarget(call) : lookupTarget(call),
+    name,
     command: call.tool_kind === 'execute' ? call.title : undefined,
     output: track.output || undefined,
     exitCode: call.exit_code,
     diffs: call.diffs?.length ? call.diffs : undefined,
+    input: call.tool_kind === 'execute' || call.diffs?.length ? undefined : call.raw_input,
+    result: call.tool_kind === 'execute' || call.diffs?.length ? undefined : toolResult(call),
+    waiting: waiting && status === 'running' ? true : undefined,
   }
 }
 
@@ -175,7 +174,8 @@ function seconds(ms: number): string {
 }
 
 type Slot =
-  | { kind: 'row'; row: SessionRow }
+  | { kind: 'step'; step: Step }
+  | { kind: 'reset'; id: string; at: string }
   | { kind: 'message'; id: string; role: string; first: SessionItem; text: string; images: MessageImageRef[]; files: string[]; complete: boolean }
   | { kind: 'tool'; id: string }
   | { kind: 'agent'; id: string }
@@ -223,7 +223,7 @@ export function turnRows(turn: Turn): SessionRow[] {
   const messages = new Map<string, Extract<Slot, { kind: 'message' }>>()
   const tools = new Map<string, ToolTrack>()
   const requests = new Map<string, { request: SessionRequest; item: SessionItem }>()
-  let plan: { item: SessionItem; at: number } | null = null
+  let plan: Extract<Step, { kind: 'plan' }> | null = null
   let started: SessionItem | null = null
   let ended: SessionItem | null = null
 
@@ -251,6 +251,7 @@ export function turnRows(turn: Turn): SessionRow[] {
         const slot = { kind: 'message' as const, id: key, role: item.kind === 'thought' ? 'thought' : m.role, first: item, text: m.text, images: imageRefs(item), files: fileRefs(item), complete: Boolean(m.complete) }
         messages.set(key, slot)
         slots.push(slot)
+        if (slot.role === 'user') plan = null
         break
       }
       case 'tool_call': {
@@ -269,21 +270,24 @@ export function turnRows(turn: Turn): SessionRow[] {
         break
       }
       case 'plan':
-        if (!plan) slots.push({ kind: 'row', row: { kind: 'plan', id: `plan:${turn.turn}`, at: item.time, entries: [] } })
-        plan = { item, at: slots.length }
+        if (!plan) {
+          plan = { kind: 'plan', id: `plan:${turn.turn}:${item.seq}`, at: item.time, entries: [] }
+          slots.push({ kind: 'step', step: plan })
+        }
+        plan.entries = item.plan ?? []
         break
       case 'request': {
         const request = item.request
         if (!request) break
         if (!requests.has(request.id)) {
-          slots.push({ kind: 'row', row: { kind: 'answered', id: `req:${turn.turn}:${request.id}`, at: item.time, request } })
+          slots.push({ kind: 'step', step: { kind: 'answered', id: `req:${turn.turn}:${request.id}`, at: item.time, request } })
         }
         requests.set(request.id, { request, item })
         break
       }
       case 'notice':
         if (item.notice) {
-          slots.push({ kind: 'row', row: {
+          slots.push({ kind: 'step', step: {
             kind: 'event',
             id: `ev:${item.seq}`,
             at: item.time,
@@ -294,73 +298,74 @@ export function turnRows(turn: Turn): SessionRow[] {
         }
         break
       case 'mode_change':
-        if (turn.turn > 0 && item.mode) slots.push({ kind: 'row', row: { kind: 'event', id: `ev:${item.seq}`, at: item.time, text: `Mode set to ${item.mode}` } })
+        if (turn.turn > 0 && item.mode) slots.push({ kind: 'step', step: { kind: 'event', id: `ev:${item.seq}`, at: item.time, text: `Mode set to ${item.mode}` } })
         break
       case 'reset':
-        slots.push({ kind: 'row', row: { kind: 'event', id: `ev:${item.seq}`, at: item.time, text: 'New agent session' } })
+        slots.push({ kind: 'reset', id: `ev:${item.seq}`, at: item.time })
+        plan = null
         break
     }
   }
 
-  const rows: SessionRow[] = []
-  let work: ToolTrack[] = []
-  const flush = () => {
-    if (work.length === 0) return
-    const entries = work.map((track) => workItem(turn.turn, track, (turn.closed || ended !== null) && !(ended && track.last.seq > ended.seq)))
-    rows.push({ kind: 'work', id: `work:${turn.turn}:${work[0]!.call.id}`, at: work[0]!.first.time, summary: workSummary(entries.map((e) => e.tool)), entries })
-    work = []
-  }
+  const isEnded = turn.closed || ended !== null
+  const waitingOn = new Set([...requests.values()].flatMap(({ request }) => (request.status === 'pending' && request.tool_call_id ? [request.tool_call_id] : [])))
+  const parts: Part[] = []
+  const step = (s: Step) => parts.push({ kind: 'step', step: s })
   let agents: string[] = []
   const flushAgents = () => {
     if (agents.length === 0) return
-    rows.push({ kind: 'subagents', id: `agents:${turn.turn}:${agents[0]}`, at: tools.get(agents[0]!)!.first.time, ids: agents })
+    step({ kind: 'subagents', id: `agents:${turn.turn}:${agents[0]}`, at: tools.get(agents[0]!)!.first.time, ids: agents })
     agents = []
   }
   for (const slot of slots) {
     if (slot.kind === 'agent') {
-      flush()
       agents.push(slot.id)
       continue
     }
     flushAgents()
     if (slot.kind === 'tool') {
-      work.push(tools.get(slot.id)!)
+      const track = tools.get(slot.id)!
+      const entry = workItem(turn.turn, track, isEnded && !(ended && track.last.seq > ended.seq), waitingOn.has(slot.id))
+      step({ kind: 'tool', id: entry.id, at: entry.at, entry })
       continue
     }
-    flush()
-    if (slot.kind === 'row') {
-      const row = slot.row
-      if (row.kind === 'plan' && plan) rows.push({ ...row, entries: plan.item.plan ?? [] })
-      else if (row.kind === 'answered') {
-        const latest = requests.get(row.request.id)!.request
+    if (slot.kind === 'reset') {
+      parts.push({ kind: 'boundary', row: { kind: 'event', id: slot.id, at: slot.at, text: 'New agent session' } })
+      continue
+    }
+    if (slot.kind === 'step') {
+      const held = slot.step
+      if (held.kind === 'answered') {
+        const latest = requests.get(held.request.id)!.request
         if (latest.status === 'pending') continue
         const call = latest.tool_call_id ? tools.get(latest.tool_call_id)?.call : undefined
-        rows.push({ ...row, request: latest, command: call?.tool_kind === 'execute' ? call.title : undefined })
-      } else rows.push(row)
+        step({ ...held, request: latest, command: call?.tool_kind === 'execute' ? call.title : undefined })
+      } else step(held)
       continue
     }
     const at = slot.first.time
     if (slot.role === 'user') {
       const attached = slot.images.length > 0 || slot.files.length > 0
-      if (!attached && inboxWake.test(slot.text)) rows.push({ kind: 'event', id: slot.id, at, text: 'Woken by new agent messages' })
-      else if (!attached && missionWake.test(slot.text)) rows.push({ kind: 'event', id: slot.id, at, text: 'Woken by a swarm update' })
-      else rows.push({ kind: 'user', id: slot.id, at, body: slot.text, ...(slot.images.length ? { images: slot.images } : {}), ...(slot.files.length ? { files: slot.files } : {}) })
+      const boundary = (row: SessionRow) => parts.push({ kind: 'boundary', row })
+      if (!attached && inboxWake.test(slot.text)) boundary({ kind: 'event', id: slot.id, at, text: 'Woken by new agent messages' })
+      else if (!attached && missionWake.test(slot.text)) boundary({ kind: 'event', id: slot.id, at, text: 'Woken by a swarm update' })
+      else boundary({ kind: 'user', id: slot.id, at, body: slot.text, ...(slot.images.length ? { images: slot.images } : {}), ...(slot.files.length ? { files: slot.files } : {}) })
     } else if (slot.role === 'thought') {
-      rows.push({ kind: 'thinking', id: slot.id, at, text: slot.text })
+      step({ kind: 'thought', id: slot.id, at, text: slot.text, streaming: !slot.complete && !ended })
     } else if (slot.text.trim()) {
-      rows.push({ kind: 'assistant', id: slot.id, at, text: slot.text, streaming: !slot.complete && !ended })
+      step({ kind: 'narration', id: slot.id, at, text: slot.text, streaming: !slot.complete && !ended })
     }
   }
-  flush()
   flushAgents()
 
+  let outcome: Extract<SessionRow, { kind: 'finished' }> | undefined
   if (ended) {
     const [text, tone] = stopText[ended.stop_reason ?? ''] ?? [`Stopped: ${ended.stop_reason ?? 'unknown reason'}`, 'failed']
     const elapsed = started ? Date.parse(ended.time) - Date.parse(started.time) : 0
     const took = elapsed >= 1000 ? ` in ${seconds(elapsed)}` : ''
-    rows.push({ kind: 'finished', id: `end:${turn.turn}`, at: ended.time, text: `${text}${tone === 'failed' ? '' : took}`, tone })
+    outcome = { kind: 'finished', id: `end:${turn.turn}`, at: ended.time, text: `${text}${tone === 'failed' ? '' : took}`, tone }
   }
-  return rows
+  return segmentTurn(turn.turn, parts, { start: started?.time, open: !isEnded, outcome })
 }
 
 const frozen = new WeakMap<Turn, SessionRow[]>()

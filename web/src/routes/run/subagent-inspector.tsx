@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import { RunFileLinks } from '@/routes/files/path-link'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import type { RunNavigation } from '@/routes/run/header'
-import { flattenRows, rowGap, TimelineRow, useRowContext, type FlatRow } from '@/routes/run/session-rows'
+import { flattenRows, rowGap, TimelineRow, useRowContext, type FlatRow, type OpenPolicy } from '@/routes/run/session-rows'
 import { AgentDot, AgentElapsed, agentStateWord, openAgent } from '@/routes/run/subagent-cards'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
@@ -33,6 +33,9 @@ import {
 
 const bottomSlack = 24
 const autoPages = 5
+
+/** A subagent's transcript is short and read on purpose, so every block starts open. */
+const openAlways: OpenPolicy = () => true
 
 /** The sibling button that opened the next inspector keeps focus across its remount. */
 let stepped: string | null = null
@@ -105,7 +108,7 @@ export function SubagentInspector({ run, agentID, agent: terminal, nav, onClose 
     loadOlder()
   }, [ready, known, incomplete, more, olderLoading, olderError, run.id])
 
-  const flat = useMemo(() => (sub ? flattenRows(agentRows(sub, rowsOfTurn(agentTurn(sub))), expanded) : []), [sub, expanded])
+  const flat = useMemo(() => (sub ? flattenRows(agentRows(sub, rowsOfTurn(agentTurn(sub))), expanded, openAlways) : []), [sub, expanded])
   const entries = useMemo<Entry[]>(() => {
     if (!sub) return []
     return [
@@ -224,7 +227,7 @@ export function SubagentInspector({ run, agentID, agent: terminal, nav, onClose 
             return (
               <div key={entry.key} role="article" aria-posinset={at + 1} aria-setsize={entries.length} className={cn('w-full px-4', rowGap(entry), at === entries.length - 1 && 'pb-4')}>
                 <RunFileLinks run={run}>
-                  <TimelineRow depth={entry.depth} row={entry.depth === 0 ? entry.row : undefined} entry={entry.depth === 0 ? undefined : entry.entry} ctx={ctx} />
+                  <TimelineRow item={entry} ctx={ctx} />
                 </RunFileLinks>
               </div>
             )

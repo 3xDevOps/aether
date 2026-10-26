@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Avatar, initials } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -10,6 +10,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { ListRow } from '@/components/ui/list-row'
 import { PaneHeader } from '@/components/ui/pane-header'
 import { SectionLabel } from '@/components/ui/section-label'
+import { ToolValue } from '@/components/ui/session-blocks'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
@@ -185,4 +186,12 @@ test('the small text primitives render their elements', () => {
   expect(screen.getByText('main').tagName).toBe('CODE')
   expect(screen.getByText('go test ./...').tagName).toBe('PRE')
   expect(screen.getByRole('separator')).toBeDefined()
+})
+
+test('a clipped tool value selects every line for a manual copy', async () => {
+  const value = Array.from({ length: 12 }, (_, n) => `line ${n}`).join('\n')
+  render(<ToolValue label="Result" value={value} />)
+  expect(screen.queryByText(/line 11/)).toBeNull()
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Copy the result' })))
+  expect(window.getSelection()?.toString()).toBe(value)
 })

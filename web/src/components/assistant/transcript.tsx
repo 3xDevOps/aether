@@ -3,7 +3,7 @@ import { type CacheSnapshot, VList, type VListHandle } from 'virtua'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { flattenRows, rowGap, TimelineRow, type FlatRow, type RowContext } from '@/routes/run/session-rows'
+import { EnteringRow, rowGap, TimelineRow, useArrivals, useFlatRows, type FlatRow, type RowContext } from '@/routes/run/session-rows'
 import { enhancedRows } from '@/routes/run/session-view'
 import { useStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
@@ -24,18 +24,26 @@ export function Transcript({ session }: { session: AcpSession }) {
   const self = useStore((s) => s.info?.member.id ?? '')
   const expanded = useStore((s) => s.expandedRows[assistantSessionID])
   const rows = useMemo(() => assistantRows(session), [session])
-  const flat = useMemo(() => flattenRows(rows, expanded), [rows, expanded])
   const list = useRef<VListHandle>(null)
   const generation = useStore((s) => `${s.identityKey}:${s.assistantGeneration}`)
   const conversation = useRef('')
   // The first row changes when earlier messages load, which moves every offset and cached size.
-  conversation.current = `${generation}:${session.epoch}:${session.historyGeneration}:${session.more}:${flat[0]?.key}`
+  conversation.current = `${generation}:${session.epoch}:${session.historyGeneration}:${session.more}:${rows[0]?.id}`
   const [restored] = useState(() => (kept?.conversation === conversation.current ? kept : null))
   const pinned = useRef(restored?.pinned ?? true)
+  const [following, setFollowing] = useState(pinned.current)
+  const pin = (value: boolean) => {
+    pinned.current = value
+    setFollowing(value)
+  }
+  const [focused, setFocused] = useState<string | null>(null)
+  const flat = useFlatRows(rows, expanded, following, focused)
+  const arrivals = useArrivals(flat, expanded)
   const firstKey = useRef(flat[0]?.key)
   const shift = firstKey.current !== undefined && flat[0]?.key !== firstKey.current
   const older = session.more
   const count = flat.length + (older ? 1 : 0)
+  const focusedIndex = focused === null ? -1 : flat.findIndex((item) => item.key === focused)
   useLayoutEffect(() => {
     firstKey.current = flat[0]?.key
     if (pinned.current && count > 0) list.current?.scrollToIndex(count - 1, { align: 'end' })
@@ -68,15 +76,16 @@ export function Transcript({ session }: { session: AcpSession }) {
       data={older ? [null, ...flat] : flat}
       cache={restored?.cache}
       shift={shift}
+      keepMounted={focusedIndex >= 0 ? [focusedIndex + Number(older)] : undefined}
       onScroll={(offset) => {
         const handle = list.current
-        if (handle) pinned.current = offset + handle.viewportSize >= handle.scrollSize - bottomSlack
+        if (handle) pin(offset + handle.viewportSize >= handle.scrollSize - bottomSlack)
       }}
     >
       {(item: FlatRow | null, index: number) => item === null ? (
         <div key="older" className="flex justify-center px-3 pt-3">
           <Button size="sm" variant="ghost" disabled={session.olderLoading} onClick={() => {
-            pinned.current = false
+            pin(false)
             void loadOlderAssistant(useStore, api)
           }}>
             {session.olderLoading ? 'Loading…' : 'Show earlier messages'}
@@ -84,15 +93,21 @@ export function Transcript({ session }: { session: AcpSession }) {
           {session.olderError && <p role="alert" className="text-ui-sm text-state-failed">{session.olderError}</p>}
         </div>
       ) : (
-        <div
+        <EnteringRow
           key={item.key}
+          itemKey={item.key}
+          arrivals={arrivals}
           role="article"
           aria-posinset={index + (older ? 0 : 1)}
           aria-setsize={flat.length}
+          onFocus={() => setFocused(item.key)}
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setFocused(null)
+          }}
           className={cn('w-full px-3', rowGap(item), index === count - 1 && 'pb-3', index === 0 && 'pt-3')}
         >
-          <TimelineRow depth={item.depth} row={item.depth === 0 ? item.row : undefined} entry={item.depth === 0 ? undefined : item.entry} ctx={ctx} />
-        </div>
+          <TimelineRow item={item} ctx={ctx} />
+        </EnteringRow>
       )}
     </VList>
   )

@@ -19,6 +19,10 @@ export function RunFileLinks({ run, children }: { run: Run; children: ReactNode 
   return <CheckoutContext.Provider value={checkout}>{children}</CheckoutContext.Provider>
 }
 
+export function useFileCheckout(): Checkout | null {
+  return useContext(CheckoutContext)
+}
+
 /**
  * One path. It is a link once a directory listing says the file exists;
  * pointing at it, or tapping it, reads that listing. Nothing is asked of the
