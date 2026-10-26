@@ -102,7 +102,8 @@ reads GitHub.
 | `aether_mark_reviewed` | no | yes | no | `complete` closes the run |
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
 | `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | no | yes | no | Ends runs on the user's server |
-| `aether_run_lifecycle` | no | no | yes | Every action has an inverse; a relaunched or switched agent goes on working |
+| `aether_run_lifecycle` | no | no | yes | Every action has an inverse; a relaunched agent goes on working |
+| `aether_switch_run_mode` | no | yes | yes | Discards the turn in progress; the switched agent goes on working |
 | `aether_swarm_manage` | no | yes | yes | Archiving closes the swarm's completed runs; a released worker goes on working under its integrator |
 | `aether_handoff_run` | no | yes | no | Only the teammate can hand the run back |
 | `aether_replace_integrator` | no | yes | yes | The old integrator loses its authority; the new one can push and open PRs |

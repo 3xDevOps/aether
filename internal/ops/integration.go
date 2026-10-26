@@ -31,14 +31,37 @@ var integrationOps = []Op{
 		calling(protocol.MethodIntegrationShow, protocol.MethodIntegrationDecide, protocol.MethodIntegrationDeliver),
 }
 
+// candidateRow keeps the target ref, the delivery request and its receipt,
+// which the integrator agent wrote, under untrusted.
 type candidateRow struct {
-	CandidateID string                    `json:"candidate_id"`
-	State       protocol.CandidateState   `json:"state"`
-	TargetRef   string                    `json:"target_ref"`
-	Revision    string                    `json:"candidate_revision,omitempty"`
-	Request     *protocol.DeliveryRequest `json:"delivery_request,omitempty"`
-	Receipt     *protocol.DeliveryReceipt `json:"delivery_receipt,omitempty"`
-	ExpiresAt   string                    `json:"expires_at"`
+	CandidateID string                  `json:"candidate_id"`
+	State       protocol.CandidateState `json:"state"`
+	Revision    string                  `json:"candidate_revision,omitempty"`
+	Request     *requestRow             `json:"delivery_request,omitempty"`
+	Delivered   bool                    `json:"delivered"`
+	ExpiresAt   string                  `json:"expires_at"`
+	Untrusted   candidateText           `json:"untrusted"`
+}
+
+type requestRow struct {
+	RequestID string                  `json:"request_id"`
+	Action    protocol.DeliveryAction `json:"action"`
+	State     protocol.DeliveryState  `json:"state"`
+}
+
+type candidateText struct {
+	TargetRef string                    `json:"target_ref"`
+	Request   *protocol.DeliveryRequest `json:"delivery_request,omitempty"`
+	Receipt   *protocol.DeliveryReceipt `json:"delivery_receipt,omitempty"`
+}
+
+func candidateOf(id string, state protocol.CandidateState, targetRef, revision string, r *protocol.DeliveryRequest, rc *protocol.DeliveryReceipt, expires time.Time) candidateRow {
+	row := candidateRow{CandidateID: id, State: state, Revision: revision, Delivered: rc != nil, ExpiresAt: expires.UTC().Format(time.RFC3339),
+		Untrusted: candidateText{TargetRef: clip(targetRef, maxReport), Request: r, Receipt: rc}}
+	if r != nil {
+		row.Request = &requestRow{r.RequestID, r.Action, r.State}
+	}
+	return row
 }
 
 func integration(ctx context.Context, c calls, in integrationInput) (string, any, error) {
@@ -63,10 +86,10 @@ func integration(ctx context.Context, c calls, in integrationInput) (string, any
 		for _, path := range cd.Conflicts[:min(len(cd.Conflicts), defaultRows)] {
 			conflicts = append(conflicts, clip(path, maxReport))
 		}
-		out := map[string]any{"candidate": candidateRow{cd.CandidateID, cd.State, cd.TargetRef, cd.CandidateRevision, cd.DeliveryRequest, cd.DeliveryReceipt, cd.ExpiresAt.UTC().Format(time.RFC3339)},
+		out := map[string]any{"candidate": candidateOf(cd.CandidateID, cd.State, cd.TargetRef, cd.CandidateRevision, cd.DeliveryRequest, cd.DeliveryReceipt, cd.ExpiresAt),
 			"swarm_id": cd.MissionID, "inputs": len(cd.Inputs), "applied_inputs": cd.AppliedInputs, "conflicts": len(cd.Conflicts), "verifications": verifications,
 			"untrusted": map[string]any{"verifications": outputs, "conflicts": conflicts, "error": clip(cd.Error, maxText)}}
-		summary := fmt.Sprintf("Candidate %s is %s for %s: %d verifications, %d conflicts.", cd.CandidateID, cd.State, cd.TargetRef, len(verifications), len(cd.Conflicts))
+		summary := fmt.Sprintf("Candidate %s is %s: %d verifications, %d conflicts.", cd.CandidateID, cd.State, len(verifications), len(cd.Conflicts))
 		if r := cd.DeliveryRequest; r != nil {
 			summary += fmt.Sprintf(" Delivery request %s (%s) is %s.", r.RequestID, r.Action, r.State)
 		}
@@ -79,7 +102,7 @@ func integration(ctx context.Context, c calls, in integrationInput) (string, any
 	rows := make([]candidateRow, 0, len(res.Candidates))
 	pending := 0
 	for _, cd := range res.Candidates {
-		rows = append(rows, candidateRow{cd.CandidateID, cd.State, cd.TargetRef, cd.CandidateRevision, cd.DeliveryRequest, cd.DeliveryReceipt, cd.ExpiresAt.UTC().Format(time.RFC3339)})
+		rows = append(rows, candidateOf(cd.CandidateID, cd.State, cd.TargetRef, cd.CandidateRevision, cd.DeliveryRequest, cd.DeliveryReceipt, cd.ExpiresAt))
 		if cd.DeliveryRequest != nil && cd.DeliveryRequest.State == protocol.DeliveryPending {
 			pending++
 		}
@@ -107,19 +130,20 @@ func integrationDecide(ctx context.Context, c calls, in integrationDecideInput) 
 		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
 			"candidate %s's delivery request is no longer %s; call aether_integration with candidate_id and decide what it shows now", cd.CandidateID, in.RequestID)}
 	}
-	out := map[string]any{"candidate_id": cd.CandidateID, "request_id": r.RequestID, "target_ref": cd.TargetRef}
+	untrusted := map[string]any{"target_ref": clip(cd.TargetRef, maxReport)}
+	out := map[string]any{"candidate_id": cd.CandidateID, "request_id": r.RequestID, "untrusted": untrusted}
 	if in.Action == "deliver" {
 		if rc := cd.DeliveryReceipt; rc != nil && rc.RequestID == r.RequestID {
-			out["receipt"] = rc
-			return fmt.Sprintf("Candidate %s was already delivered to %s: %s.", cd.CandidateID, rc.TargetRef, rc.Result), out, nil
+			untrusted["receipt"] = rc
+			return fmt.Sprintf("Candidate %s was already delivered: %s.", cd.CandidateID, rc.Result), out, nil
 		}
 		var res protocol.IntegrationDeliverResult
 		if err := c.act(ctx, protocol.MethodIntegrationDeliver, protocol.IntegrationDeliverParams{WorkspaceID: in.WorkspaceID, CandidateID: cd.CandidateID,
 			RequestID: r.RequestID, RequestVersion: r.RequestVersion}, &res); err != nil {
 			return "", nil, err
 		}
-		out["state"], out["receipt"] = res.Candidate.State, res.Candidate.DeliveryReceipt
-		return fmt.Sprintf("Delivered candidate %s to %s; it is %s.", cd.CandidateID, cd.TargetRef, res.Candidate.State), out, nil
+		out["state"], untrusted["receipt"] = res.Candidate.State, res.Candidate.DeliveryReceipt
+		return fmt.Sprintf("Delivered candidate %s to its target ref; it is %s.", cd.CandidateID, res.Candidate.State), out, nil
 	}
 	want := protocol.DeliveryApproved
 	if in.Action == "reject" {

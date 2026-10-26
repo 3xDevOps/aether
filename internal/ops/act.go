@@ -19,6 +19,11 @@ type lifecycleInput struct {
 	Action string `json:"action"`
 }
 
+type modeInput struct {
+	RunID string `json:"run_id"`
+	Mode  string `json:"mode"`
+}
+
 type handoffInput struct {
 	RunID      string `json:"run_id"`
 	ToMemberID string `json:"to_member_id" jsonschema:"the teammate's member id, or their exact display name"`
@@ -41,12 +46,13 @@ type replaceIntegratorInput struct {
 
 const (
 	lifecycleRelaunch  = "relaunch"
-	lifecycleStandard  = "standard"
-	lifecycleEnhanced  = "enhanced"
 	lifecycleProtect   = "protect"
 	lifecycleUnprotect = "unprotect"
 	lifecycleArchive   = "archive"
 	lifecycleRestore   = "restore"
+
+	lifecycleStandard = "standard"
+	lifecycleEnhanced = "enhanced"
 
 	swarmReleaseWorker = "release_worker"
 	swarmArchive       = "archive"
@@ -55,10 +61,15 @@ const (
 
 var actOps = []Op{
 	opOf("aether_run_lifecycle", "Change run lifecycle", ScopeWrite, false, nextRuns,
-		"Use this when the user wants a stopped run relaunched, a run switched to standard or enhanced mode, protected from cleanup, or archived or restored. Each action but relaunch sets a state, so a repeat changes nothing; relaunch refuses a live run.", runLifecycle).
-		enum("action", lifecycleRelaunch, lifecycleStandard, lifecycleEnhanced, lifecycleProtect, lifecycleUnprotect, lifecycleArchive, lifecycleRestore).
+		"Use this when the user wants a stopped run relaunched, protected from cleanup, or archived or restored. Each action but relaunch sets a state, so a repeat changes nothing; relaunch refuses a live run.", runLifecycle).
+		enum("action", lifecycleRelaunch, lifecycleProtect, lifecycleUnprotect, lifecycleArchive, lifecycleRestore).
 		hints(false, true).offer(TierConfirmed).
-		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodRunRelaunch, protocol.MethodRunModeSwitch, protocol.MethodRunProtect, protocol.MethodRunArchive),
+		calling(protocol.MethodServerInfo, protocol.MethodRunRelaunch, protocol.MethodRunProtect, protocol.MethodRunArchive),
+	opOf("aether_switch_run_mode", "Switch run mode", ScopeControl, true, nextRuns,
+		"Use this when the user wants a live run switched to standard (terminal) or enhanced (structured) mode. It discards a turn in progress; a run already in that mode is left alone.", switchRunMode).
+		enum("mode", lifecycleStandard, lifecycleEnhanced).
+		hints(true, true).offer(TierConfirmed).
+		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodRunModeSwitch),
 	opOf("aether_handoff_run", "Hand off run", ScopeControl, true, "",
 		"Use this when the user gives one of their runs to a teammate, who then owns and controls it; only the teammate can hand it back.", handoffRun).
 		hints(true, false).offer(TierConfirmed).
@@ -90,27 +101,40 @@ func runLifecycle(ctx context.Context, c calls, in lifecycleInput) (string, any,
 		}
 		out := launched(res.Run, l)
 		return fmt.Sprintf("Relaunched run %s (%s).", res.Run.ID, res.Run.Status), out, nil
-	case lifecycleStandard, lifecycleEnhanced:
-		mode := "tui"
-		if in.Action == lifecycleEnhanced {
-			mode = "acp"
-		}
-		r, err := getRunRecord(ctx, c.read, in.RunID)
-		if err != nil {
-			return "", nil, err
-		}
-		if r.Mode == mode {
-			return acted(ctx, c.read, l, in.RunID, "Already in "+in.Action+" mode:")
-		}
-		method, did, params = protocol.MethodRunModeSwitch, "Switched to "+in.Action+" mode:", protocol.RunModeSwitchParams{RunID: in.RunID, Mode: mode}
 	case lifecycleProtect, lifecycleUnprotect:
 		method, did, params = protocol.MethodRunProtect, cases(in.Action)+"ed", protocol.RunProtectParams{RunID: in.RunID, Protected: in.Action == lifecycleProtect}
 	case lifecycleArchive, lifecycleRestore:
 		method, did, params = protocol.MethodRunArchive, cases(in.Action)+"d", protocol.RunArchiveParams{RunID: in.RunID, Archived: in.Action == lifecycleArchive}
 	default:
-		return "", nil, invalid("action %q is not one of relaunch, standard, enhanced, protect, unprotect, archive, restore", in.Action)
+		return "", nil, invalid("action %q is not one of relaunch, protect, unprotect, archive, restore", in.Action)
 	}
 	if err := c.act(ctx, method, params, &struct{}{}); err != nil {
+		return "", nil, err
+	}
+	return acted(ctx, c.read, l, in.RunID, did)
+}
+
+func switchRunMode(ctx context.Context, c calls, in modeInput) (string, any, error) {
+	l, err := dashboardLinks(ctx, c.read)
+	if err != nil {
+		return "", nil, err
+	}
+	mode := "tui"
+	switch in.Mode {
+	case lifecycleStandard:
+	case lifecycleEnhanced:
+		mode = "acp"
+	default:
+		return "", nil, invalid("mode %q is not one of standard, enhanced", in.Mode)
+	}
+	r, err := getRunRecord(ctx, c.read, in.RunID)
+	if err != nil {
+		return "", nil, err
+	}
+	if r.Mode == mode {
+		return acted(ctx, c.read, l, in.RunID, "Already in "+in.Mode+" mode:")
+	}
+	if err := c.act(ctx, protocol.MethodRunModeSwitch, protocol.RunModeSwitchParams{RunID: in.RunID, Mode: mode}, &struct{}{}); err != nil {
 		// A connector or the assistant holds no control lease.
 		var perr *protocol.Error
 		if errors.As(err, &perr) && strings.Contains(perr.Message, "holds the run's control") {
@@ -119,7 +143,7 @@ func runLifecycle(ctx context.Context, c calls, in lifecycleInput) (string, any,
 		}
 		return "", nil, err
 	}
-	return acted(ctx, c.read, l, in.RunID, did)
+	return acted(ctx, c.read, l, in.RunID, "Switched to "+in.Mode+" mode:")
 }
 
 func cases(action string) string {
@@ -182,10 +206,11 @@ func jsonText(v any) string {
 }
 
 func swarmManage(ctx context.Context, c calls, in swarmManageInput) (string, any, error) {
-	l, err := dashboardLinks(ctx, c.read)
+	info, err := serverInfo(ctx, c.read)
 	if err != nil {
 		return "", nil, err
 	}
+	l := links(info.DashboardURL)
 	switch in.Action {
 	case swarmArchive, swarmUnarchive:
 		method := protocol.MethodMissionArchive
@@ -224,8 +249,12 @@ func swarmManage(ctx context.Context, c calls, in swarmManageInput) (string, any
 	if err := c.act(ctx, protocol.MethodMissionWorkerRelease, protocol.MissionWorkerReleaseParams{RunID: a.RunID, ExpectedTakeoverGeneration: a.TakeoverGeneration}, &res); err != nil {
 		return "", nil, err
 	}
-	out["held"] = res.TakeoverActive
-	return fmt.Sprintf("Released control of worker run %s; the integrator steers it again.", a.RunID), out, nil
+	out["held"], out["released_member_id"] = res.TakeoverActive, a.TakeoverMemberID
+	holder := a.TakeoverMemberID + "'s"
+	if a.TakeoverMemberID == info.Member.ID {
+		holder = "your"
+	}
+	return fmt.Sprintf("Released %s control of worker run %s; the integrator steers it again.", holder, a.RunID), out, nil
 }
 
 // replaceIntegrator chooses the replacement among the swarm's execution
@@ -285,7 +314,10 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 	if err := c.act(ctx, protocol.MethodMissionReplaceIntegrator, protocol.MissionReplaceIntegratorParams{MissionID: m.ID, ExpectedGeneration: expected,
 		Integrator: choice, IdempotencyKey: key}, &res); err != nil {
 		var perr *protocol.Error
-		if errors.As(err, &perr) && perr.Code == protocol.CodeConflict {
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		if errors.As(err, &perr) && perr.Code == protocol.CodeConflict && json.Unmarshal(perr.Data, &data) == nil && data.Reason == protocol.ErrorReasonStaleGeneration {
 			return "", nil, &protocol.Error{Code: perr.Code, Data: perr.Data, Message: perr.Message + "; call aether_get_swarm: the integrator was replaced since expected_generation"}
 		}
 		return "", nil, retryable(err, key)

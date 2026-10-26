@@ -3,7 +3,9 @@ package tools
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -30,9 +32,7 @@ var actSummaries = map[string]summarizer{
 		}
 		return "Restore %s from the archive"
 	}),
-	protocol.MethodMissionWorkerRelease: runSummary(func(protocol.MissionWorkerReleaseParams) string {
-		return "Release your control of worker %s"
-	}),
+	protocol.MethodMissionWorkerRelease:     (*Server).summarizeWorkerRelease,
 	protocol.MethodRunHandoff:               (*Server).summarizeHandoff,
 	protocol.MethodMissionArchive:           swarmSummary("Archive, closing its completed runs,"),
 	protocol.MethodMissionUnarchive:         swarmSummary("Unarchive"),
@@ -42,12 +42,12 @@ var actSummaries = map[string]summarizer{
 	protocol.MethodRunPRCreate:              (*Server).summarizePRCreate,
 	protocol.MethodRunPRMerge:               (*Server).summarizePRMerge,
 	protocol.MethodMemoryAdd:                (*Server).summarizeMemoryAdd,
-	protocol.MethodMemoryPin:                noteSummary("Pin, into new runs' briefs,"),
-	protocol.MethodMemoryUnpin:              noteSummary("Unpin"),
+	protocol.MethodMemoryPin:                (*Server).summarizeMemoryPin,
+	protocol.MethodMemoryUnpin:              (*Server).summarizeMemoryUnpin,
 }
 
 type runParams interface {
-	protocol.RunIDParams | protocol.RunModeSwitchParams | protocol.RunProtectParams | protocol.RunArchiveParams | protocol.MissionWorkerReleaseParams
+	protocol.RunIDParams | protocol.RunModeSwitchParams | protocol.RunProtectParams | protocol.RunArchiveParams
 }
 
 // runSummary is the card of a method on one run: verb is what it does, with
@@ -85,6 +85,41 @@ func (s *Server) summarizeHandoff(ctx context.Context, req protocol.Request, c *
 		return rpcErr
 	}
 	c.Summary = fmt.Sprintf("Hand run %s (%q)%s to %s (%s), who then owns it", p.RunID, runLabel(run), commaAfter(ownedBy(c)), to, truncate(p.ToMemberID))
+	return nil
+}
+
+// summarizeWorkerRelease names the member whose control of the worker the
+// release ends, which need not be the caller's.
+func (s *Server) summarizeWorkerRelease(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	p, err := protocol.DecodeParams[protocol.MissionWorkerReleaseParams](req.Params)
+	if err != nil || p.RunID == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": run_id is required"}
+	}
+	params, _ := json.Marshal(protocol.RunIDParams{RunID: p.RunID})
+	run, rpcErr := s.getRun(ctx, params)
+	if rpcErr != nil {
+		return rpcErr
+	}
+	if run.MissionID == "" {
+		return &protocol.Error{Code: protocol.CodeInvalidParams, Message: fmt.Sprintf("%s: run %s is not a swarm worker", req.Method, p.RunID)}
+	}
+	var shown protocol.MissionShowResult
+	if rpcErr := s.call(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: run.MissionID}, &shown); rpcErr != nil {
+		return rpcErr
+	}
+	i := slices.IndexFunc(shown.Attempts, func(a protocol.Attempt) bool { return a.RunID == p.RunID })
+	if i < 0 || !shown.Attempts[i].TakeoverActive {
+		return &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("%s: nobody holds control of worker run %s; its integrator steers it", req.Method, p.RunID)}
+	}
+	worker := fmt.Sprintf("worker run %s (%q) of swarm %s (%q)", p.RunID, runLabel(run), shown.Mission.ID, truncate(shown.Mission.Objective))
+	if holder := shown.Attempts[i].TakeoverMemberID; holder != s.Member {
+		if rpcErr := s.owner(ctx, holder, c); rpcErr != nil {
+			return rpcErr
+		}
+		c.Summary = fmt.Sprintf("Release control of %s, held by %s, so its integrator steers it again", worker, truncate(c.OtherOwner))
+		return nil
+	}
+	c.Summary = fmt.Sprintf("Release your control of %s, so its integrator steers it again", worker)
 	return nil
 }
 
@@ -205,6 +240,8 @@ func (s *Server) summarizePRCreate(ctx context.Context, req protocol.Request, c 
 	return nil
 }
 
+// summarizePRMerge counts what GitHub reports could block the merge, so the
+// member decides with the checks and reviews in view.
 func (s *Server) summarizePRMerge(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
 	p, err := protocol.DecodeParams[protocol.RunPRMergeParams](req.Params)
 	if err != nil || p.RunID == "" {
@@ -214,28 +251,68 @@ func (s *Server) summarizePRMerge(ctx context.Context, req protocol.Request, c *
 	if rpcErr != nil {
 		return rpcErr
 	}
+	var fb protocol.RunPRFeedbackResult
+	if rpcErr := s.call(ctx, protocol.MethodRunPRFeedback, protocol.RunPRFeedbackParams{RunID: p.RunID, Repo: p.Repo, Limit: 30}, &fb); rpcErr != nil {
+		return rpcErr
+	}
 	pr := "its pull request"
 	if p.Repository != "" {
 		pr = fmt.Sprintf("%s#%d", truncate(p.Repository), p.Number)
 	}
-	c.Summary = fmt.Sprintf("Merge (%s) %s of run %s (%q)%s at %.7s into %s", cmp.Or(p.Method, "default"), pr, p.RunID, runLabel(run), commaAfter(ownedBy(c)),
-		p.ExpectedHead, cmp.Or(truncate(p.ExpectedBase), "its base"))
+	c.Summary = fmt.Sprintf("Merge (%s) %s of run %s (%q)%s at %.7s into %s; %s", cmp.Or(p.Method, "default"), pr, p.RunID, runLabel(run), commaAfter(ownedBy(c)),
+		p.ExpectedHead, cmp.Or(truncate(p.ExpectedBase), "its base"), mergeBlockers(fb))
 	return nil
 }
 
-func noteSummary(verb string) summarizer {
-	return func(s *Server, ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
-		p, err := protocol.DecodeParams[protocol.MemoryPinParams](req.Params)
-		if err != nil || p.WorkspaceID == "" || p.ID == "" {
-			return &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and id are required"}
-		}
-		var shown protocol.MemoryShowResult
-		if rpcErr := s.call(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: p.WorkspaceID, ID: p.ID}, &shown); rpcErr != nil {
-			return rpcErr
-		}
-		c.Summary = fmt.Sprintf("%s note %s (%s)%s: %q", verb, p.ID, shown.Item.Kind, forWhom(p.Scope), truncate(cmp.Or(shown.Item.Title, shown.Item.Body)))
-		return nil
+func mergeBlockers(fb protocol.RunPRFeedbackResult) string {
+	if fb.Error != "" {
+		return "GitHub's checks and reviews could not be read: " + truncate(fb.Error)
 	}
+	b := fb.Blockers()
+	return fmt.Sprintf("GitHub reports %d failing checks, %d pending checks and %d reviewers requesting changes", b.FailingChecks, b.PendingChecks, b.ChangesRequested)
+}
+
+func (s *Server) note(ctx context.Context, req protocol.Request) (protocol.MemoryItem, *protocol.Error) {
+	p, err := protocol.DecodeParams[protocol.MemoryShowParams](req.Params)
+	if err != nil || p.WorkspaceID == "" || p.ID == "" {
+		return protocol.MemoryItem{}, &protocol.Error{Code: protocol.CodeInvalidParams, Message: req.Method + ": workspace_id and id are required"}
+	}
+	var shown protocol.MemoryShowResult
+	if rpcErr := s.call(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: p.WorkspaceID, ID: p.ID}, &shown); rpcErr != nil {
+		return protocol.MemoryItem{}, rpcErr
+	}
+	return shown.Item, nil
+}
+
+func (s *Server) summarizeMemoryPin(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	item, rpcErr := s.note(ctx, req)
+	if rpcErr != nil {
+		return rpcErr
+	}
+	p, _ := protocol.DecodeParams[protocol.MemoryPinParams](req.Params)
+	c.Summary = fmt.Sprintf("Pin, into new runs' briefs, note %s (%s)%s: %q", item.ID, item.Kind, forWhom(cmp.Or(p.Scope, item.Scope)), truncate(cmp.Or(item.Title, item.Body)))
+	return nil
+}
+
+// summarizeMemoryUnpin names whose briefs lose the note: a member pin is
+// one member's, a workspace pin everyone's.
+func (s *Server) summarizeMemoryUnpin(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {
+	item, rpcErr := s.note(ctx, req)
+	if rpcErr != nil {
+		return rpcErr
+	}
+	pinned := ", which is not pinned"
+	switch {
+	case item.PinnedAt == nil:
+	case item.Scope != protocol.MemoryScopeMember:
+		pinned = fmt.Sprintf(", taking it out of everyone's briefs (pinned by %s)", truncate(cmp.Or(item.PinnedByName, item.PinnedBy)))
+	case item.PinnedBy == s.Member:
+		pinned = ", taking it out of your briefs"
+	default:
+		pinned = fmt.Sprintf(", taking it out of %s's briefs", truncate(cmp.Or(item.PinnedByName, item.PinnedBy)))
+	}
+	c.Summary = fmt.Sprintf("Unpin note %s (%s)%s: %q", item.ID, item.Kind, pinned, truncate(cmp.Or(item.Title, item.Body)))
+	return nil
 }
 
 func (s *Server) summarizeMemoryAdd(ctx context.Context, req protocol.Request, c *protocol.AssistantConfirmation) *protocol.Error {

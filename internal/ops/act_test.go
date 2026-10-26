@@ -2,6 +2,7 @@ package ops
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -23,21 +24,14 @@ func TestConnectorRunLifecycle(t *testing.T) {
 		t.Fatalf("relaunch called %+v", got)
 	}
 
-	// testRun is Enhanced: switching it to Enhanced again changes nothing.
-	f.calls = nil
-	if text, _ = run(t, cs, "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": "enhanced"}); !strings.HasPrefix(text, "Already in enhanced mode") ||
-		len(called(f, protocol.MethodRunModeSwitch)) != 0 {
-		t.Fatalf("repeated switch = %q", text)
-	}
 	for action, want := range map[string]string{
-		"standard":  `{"run_id":"run-1","mode":"tui","control_session_id":"","control_generation":0}`,
 		"protect":   `{"run_id":"run-1","protected":true}`,
 		"unprotect": `{"run_id":"run-1","protected":false}`,
 		"archive":   `{"run_id":"run-1","archived":true}`,
 		"restore":   `{"run_id":"run-1","archived":false}`,
 	} {
 		g := newFake(t)
-		for _, m := range []string{protocol.MethodRunModeSwitch, protocol.MethodRunProtect, protocol.MethodRunArchive} {
+		for _, m := range []string{protocol.MethodRunProtect, protocol.MethodRunArchive} {
 			g.answers[m] = returns(protocol.RunResult{Run: testRun})
 		}
 		run(t, connectorSession(t, g, ScopeWrite), "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": action})
@@ -46,21 +40,39 @@ func TestConnectorRunLifecycle(t *testing.T) {
 		}
 	}
 
-	// The server's refusal reaches the model unchanged, with the way
-	// forward when another session holds control.
+	// The server's refusal reaches the model unchanged.
 	f = newFake(t)
-	f.errs[protocol.MethodRunModeSwitch] = &protocol.Error{Code: protocol.CodeConflict, Message: "member mem-2 holds the run's control; switch from that session, or take control first"}
 	f.errs[protocol.MethodRunArchive] = &protocol.Error{Code: protocol.CodeDenied, Message: "run.archive: denied: not the run's owner"}
 	cs = connectorSession(t, f, ScopeWrite)
-	if text, _, failed := try(t, cs, "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": "standard"}); !failed ||
-		!strings.Contains(text, "member mem-2 holds the run's control") || !strings.Contains(text, "ask that member to release it") {
-		t.Fatalf("control held = %q", text)
-	}
 	if text, _, failed := try(t, cs, "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": "archive"}); !failed || text != "run.archive: denied: not the run's owner" {
 		t.Fatalf("denied archive = %q", text)
 	}
-	if _, _, failed := try(t, cs, "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": "delete"}); !failed {
-		t.Fatal("an action outside the enum was accepted")
+	for _, action := range []string{"delete", "standard"} {
+		if _, _, failed := try(t, cs, "aether_run_lifecycle", map[string]any{"run_id": "run-1", "action": action}); !failed {
+			t.Fatalf("action %s outside the enum was accepted", action)
+		}
+	}
+}
+
+func TestConnectorSwitchRunMode(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodRunModeSwitch] = returns(protocol.RunResult{Run: testRun})
+	cs := connectorSession(t, f, ScopeControl)
+	// testRun is Enhanced: switching it to Enhanced again changes nothing.
+	if text, _ := run(t, cs, "aether_switch_run_mode", map[string]any{"run_id": "run-1", "mode": "enhanced"}); !strings.HasPrefix(text, "Already in enhanced mode") ||
+		len(called(f, protocol.MethodRunModeSwitch)) != 0 {
+		t.Fatalf("repeated switch = %q", text)
+	}
+	run(t, cs, "aether_switch_run_mode", map[string]any{"run_id": "run-1", "mode": "standard"})
+	if got := f.acted(); got.scope != ScopeControl || got.params != `{"run_id":"run-1","mode":"tui","control_session_id":"","control_generation":0}` {
+		t.Fatalf("switch called %+v", got)
+	}
+
+	// The way forward when another session holds control.
+	f.errs[protocol.MethodRunModeSwitch] = &protocol.Error{Code: protocol.CodeConflict, Message: "member mem-2 holds the run's control; switch from that session, or take control first"}
+	if text, _, failed := try(t, cs, "aether_switch_run_mode", map[string]any{"run_id": "run-1", "mode": "standard"}); !failed ||
+		!strings.Contains(text, "member mem-2 holds the run's control") || !strings.Contains(text, "ask that member to release it") {
+		t.Fatalf("control held = %q", text)
 	}
 }
 
@@ -112,7 +124,7 @@ func TestConnectorSwarmManage(t *testing.T) {
 	cs := connectorSession(t, f, ScopeControl)
 
 	text, out := run(t, cs, "aether_swarm_manage", map[string]any{"swarm_id": "swarm:mis-1", "action": "release_worker", "run_id": "run-7"})
-	if text != "Released control of worker run run-7; the integrator steers it again." || out["held"] != false {
+	if text != "Released mem-1's control of worker run run-7; the integrator steers it again." || out["held"] != false || out["released_member_id"] != "mem-1" {
 		t.Fatalf("release = %q %v", text, out)
 	}
 	if got := f.acted(); got.params != `{"run_id":"run-7","expected_takeover_generation":4}` {
@@ -180,10 +192,17 @@ func TestConnectorReplaceIntegrator(t *testing.T) {
 
 	// A replacement made in between is the server's conflict, which says
 	// to read the swarm again rather than retry.
-	f.errs[protocol.MethodMissionReplaceIntegrator] = &protocol.Error{Code: protocol.CodeConflict, Message: "store: mission stale: expected generation 3, current 4"}
+	f.errs[protocol.MethodMissionReplaceIntegrator] = &protocol.Error{Code: protocol.CodeConflict, Message: "store: stale mission authority: expected generation 3, current 4",
+		Data: json.RawMessage(`{"reason":"` + protocol.ErrorReasonStaleGeneration + `"}`)}
 	if text, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3}); !failed ||
-		text != "store: mission stale: expected generation 3, current 4; call aether_get_swarm: the integrator was replaced since expected_generation" {
+		text != "store: stale mission authority: expected generation 3, current 4; call aether_get_swarm: the integrator was replaced since expected_generation" {
 		t.Fatalf("server conflict = %q", text)
+	}
+	// A key already used for another replacement is not a stale generation.
+	f.errs[protocol.MethodMissionReplaceIntegrator] = &protocol.Error{Code: protocol.CodeConflict, Message: "store: mission idempotency conflict"}
+	if text, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3, "idempotency_key": "k-0"}); !failed ||
+		text != "store: mission idempotency conflict" {
+		t.Fatalf("key conflict = %q", text)
 	}
 	f.errs[protocol.MethodMissionReplaceIntegrator] = &protocol.Error{Code: protocol.CodeUnavailable, Message: "server restarting"}
 	if text, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3, "idempotency_key": "k-1"}); !failed || !strings.Contains(text, "retry with idempotency_key k-1") {
@@ -206,13 +225,14 @@ func TestConnectorIntegrationDecide(t *testing.T) {
 	f.answers[protocol.MethodIntegrationDecide] = returns(protocol.IntegrationDecideResult{Candidate: decided})
 	cs := connectorSession(t, f, ScopeControl)
 
-	text, _ := run(t, cs, "aether_integration", map[string]any{"workspace_id": "ws-1"})
-	if text != "1 candidates, 1 delivery requests awaiting a decision." {
-		t.Fatalf("list = %q", text)
+	// The integrator agent chose the target ref, so it stays under untrusted.
+	text, out := run(t, cs, "aether_integration", map[string]any{"workspace_id": "ws-1"})
+	if text != "1 candidates, 1 delivery requests awaiting a decision." || strings.Contains(trusted(t, out), "refs/heads/main") {
+		t.Fatalf("list = %q %v", text, out)
 	}
-	_, out := run(t, cs, "aether_integration", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1"})
-	if strings.Contains(trusted(t, out), injection) {
-		t.Fatalf("verification output outside untrusted: %v", out)
+	text, out = run(t, cs, "aether_integration", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1"})
+	if strings.Contains(trusted(t, out), injection) || strings.Contains(trusted(t, out), "refs/heads/main") || strings.Contains(text, "refs/heads/main") {
+		t.Fatalf("agent text outside untrusted: %q %v", text, out)
 	}
 
 	text, out = run(t, cs, "aether_integration_decide", map[string]any{"workspace_id": "ws-1", "candidate_id": "cand-1", "request_id": "req-1", "action": "approve"})
@@ -271,7 +291,8 @@ func TestConnectorPRMerge(t *testing.T) {
 	}
 
 	text, out := run(t, cs, "aether_pr_merge", map[string]any{"run_id": "run-1", "number": 7, "expected_head_oid": "abcdef0"})
-	if text != "Merged pull request #7 into main." || out["merged"] != true {
+	if text != "Merged pull request #7 into main." || out["merged"] != true || out["merge_state"] != "BLOCKED" ||
+		fmt.Sprint(out["blockers"]) != "map[changes_requested:1 failing_checks:1 pending_checks:1]" {
 		t.Fatalf("merge = %q %v", text, out)
 	}
 	if got := f.acted(); got.scope != ScopeControl || got.params != `{"run_id":"run-1","method":"squash","expected_head":"abcdef0123456789","repository":"acme/shop","number":7,"expected_login":"octo","expected_base":"main"}` {
@@ -435,5 +456,21 @@ func TestConnectorRunChangesPages(t *testing.T) {
 	}
 	if !strings.HasPrefix(untrusted["diff"].([]any)[0].(string), "diff --git a/fk") {
 		t.Fatalf("second diff page starts %q", untrusted["diff"].([]any)[0])
+	}
+
+	// A page holds its byte budget whatever the files' runes, and names the
+	// files it cut.
+	wide := "diff --git a/w b/w\n+" + strings.Repeat("é", 5000)
+	f.answers[protocol.MethodRunGitDiff] = returns(protocol.RunGitDiffResult{Output: protocol.RunRepoCommandOutput{Stdout: wide + "\n" + wide + "\n" + wide}})
+	_, out = run(t, cs, "aether_run_changes", map[string]any{"run_id": "run-1", "include_diff": true})
+	page, size := out["untrusted"].(map[string]any)["diff"].([]any), 0
+	for _, d := range page {
+		if s := d.(string); len(s) > diffFileText || !strings.HasSuffix(s, "…") {
+			t.Fatalf("wide file is %d bytes, ends %q", len(s), s[len(s)-8:])
+		}
+		size += len(d.(string))
+	}
+	if size > diffPageText || len(page) != 2 || fmt.Sprint(out["diff_clipped_files"]) != "[0 1]" || out["next_diff_file"] != float64(2) {
+		t.Fatalf("wide page = %d bytes, %d files, clipped %v, next %v", size, len(page), out["diff_clipped_files"], out["next_diff_file"])
 	}
 }

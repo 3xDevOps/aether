@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -363,6 +364,38 @@ type RunPRFeedbackResult struct {
 	Truncated        bool                 `json:"truncated"`
 	Output           RunRepoCommandOutput `json:"output"`
 	Error            string               `json:"error,omitempty"`
+}
+
+// RunPRBlockers counts what a pull request's feedback reports could block
+// its merge: checks that failed or have not finished, and reviewers whose
+// latest review requests changes.
+type RunPRBlockers struct {
+	FailingChecks    int `json:"failing_checks"`
+	PendingChecks    int `json:"pending_checks"`
+	ChangesRequested int `json:"changes_requested"`
+}
+
+func (r RunPRFeedbackResult) Blockers() RunPRBlockers {
+	var b RunPRBlockers
+	for _, ch := range r.Checks {
+		switch strings.ToUpper(ch.Conclusion) {
+		case "SUCCESS", "NEUTRAL", "SKIPPED":
+		case "":
+			b.PendingChecks++
+		default:
+			b.FailingChecks++
+		}
+	}
+	latest := map[string]string{}
+	for _, rv := range r.Reviews {
+		latest[rv.Author] = rv.State
+	}
+	for _, state := range latest {
+		if state == "CHANGES_REQUESTED" {
+			b.ChangesRequested++
+		}
+	}
+	return b
 }
 
 // Without Repository and Number, run.pr.merge merges the pull request the run

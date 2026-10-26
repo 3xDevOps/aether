@@ -70,13 +70,19 @@ func (c *attentionCaller) Call(ctx context.Context, method string, params json.R
 				"questions":[{"id":"q-2","mission_id":"mis-2","body":"Which version?","answer":"v2","answered_at":"2026-10-26T10:00:00Z"}]}`), nil
 		}
 		if p.MissionID == "mis-1" {
-			return json.RawMessage(`{"mission":{"id":"mis-1","objective":"Ship the billing page","accountable_human_id":"m2","current_integrator_run_id":"run-9"}}`), nil
+			return json.RawMessage(`{"mission":{"id":"mis-1","objective":"Ship the billing page","accountable_human_id":"m2","current_integrator_run_id":"run-9"},
+				"attempts":[{"run_id":"run-1","takeover_active":true,"takeover_member_id":"m2","takeover_generation":2}]}`), nil
 		}
 		return nil, &protocol.Error{Code: protocol.CodeNotFound, Message: "mission question not found"}
 	case protocol.MethodIntegrationShow:
 		return json.RawMessage(`{"candidate":{"candidate_id":"cand-1","mission_id":"mis-1","target_ref":"refs/heads/main"}}`), nil
 	case protocol.MethodMemoryShow:
-		return json.RawMessage(`{"item":{"id":"mem-1","kind":"gotcha","title":"CI needs Docker"}}`), nil
+		return json.RawMessage(`{"item":{"id":"mem-1","kind":"gotcha","scope":"member","title":"CI needs Docker","pinned_by":"m2","pinned_by_name":"Grace","pinned_at":"2026-10-26T10:00:00Z"}}`), nil
+	case protocol.MethodRunGet:
+		return json.RawMessage(`{"run":{"id":"run-1","title":"Fix login","task":"t","member_id":"m2","mission_id":"mis-1"}}`), nil
+	case protocol.MethodRunPRFeedback:
+		return json.RawMessage(`{"pull_request":{"number":7},"checks":[{"name":"test","conclusion":"FAILURE"},{"name":"e2e"},{"name":"lint","conclusion":"SUCCESS"}],
+			"reviews":[{"author":"grace","state":"CHANGES_REQUESTED"},{"author":"ada","state":"CHANGES_REQUESTED"},{"author":"ada","state":"APPROVED"}]}`), nil
 	}
 	return c.fakeCaller.Call(ctx, method, params)
 }
@@ -126,17 +132,17 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 		protocol.MethodRunProtect:               `Protect run run-1 ("Fix login") from cleanup, owned by Grace`,
 		protocol.MethodRunArchive:               `Restore run run-1 ("Fix login") from the archive, owned by Grace`,
 		protocol.MethodRunHandoff:               `Hand run run-1 ("Fix login"), owned by Grace, to Ada (m1), who then owns it`,
-		protocol.MethodMissionWorkerRelease:     `Release your control of worker run run-1 ("Fix login"), owned by Grace`,
+		protocol.MethodMissionWorkerRelease:     `Release control of worker run run-1 ("Fix login") of swarm mis-1 ("Ship the billing page"), held by Grace, so its integrator steers it again`,
 		protocol.MethodMissionArchive:           `Archive, closing its completed runs, swarm mis-1 ("Ship the billing page"), owned by Grace`,
 		protocol.MethodMissionUnarchive:         `Unarchive swarm mis-1 ("Ship the billing page"), owned by Grace`,
 		protocol.MethodMissionReplaceIntegrator: `Replace integrator run run-9 of swarm mis-1 ("Ship the billing page"), owned by Grace, with codex (acp) on Grace's (m2) account`,
 		protocol.MethodIntegrationDecide:        `Approve delivering candidate cand-1, moving refs/heads/main, for swarm mis-1 ("Ship the billing page"), owned by Grace`,
 		protocol.MethodIntegrationDeliver:       `Deliver candidate cand-1, moving refs/heads/main, for swarm mis-1 ("Ship the billing page"), owned by Grace`,
 		protocol.MethodRunPRCreate:              `Open a draft pull request from run run-1 ("Fix login"), owned by Grace, branch fix-login at 0123456, into the workspace's base branch: "Fix login"`,
-		protocol.MethodRunPRMerge:               `Merge (squash) acme/shop#7 of run run-1 ("Fix login"), owned by Grace, at fedcba9 into main`,
-		protocol.MethodMemoryAdd:                `Remember a gotcha in shop for everyone: "CI needs Docker.", replacing note mem-0 ("CI needs Docker")`,
+		protocol.MethodRunPRMerge:               `Merge (squash) acme/shop#7 of run run-1 ("Fix login"), owned by Grace, at fedcba9 into main; GitHub reports 1 failing checks, 1 pending checks and 1 reviewers requesting changes`,
+		protocol.MethodMemoryAdd:                `Remember a gotcha in shop for everyone: "CI needs Docker.", replacing note mem-0 ("CI needs Docker") and moving its pin`,
 		protocol.MethodMemoryPin:                `Pin, into new runs' briefs, note mem-1 (gotcha) for you only: "CI needs Docker"`,
-		protocol.MethodMemoryUnpin:              `Unpin note mem-1 (gotcha) for everyone: "CI needs Docker"`,
+		protocol.MethodMemoryUnpin:              `Unpin note mem-1 (gotcha), taking it out of Grace's briefs: "CI needs Docker"`,
 	}
 	var got protocol.AssistantConfirmation
 	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
@@ -158,7 +164,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			t.Errorf("%s: %v", method, perr)
 			continue
 		}
-		if got.Summary != want[method] || got.OtherMember != strings.Contains(want[method], "owned by") {
+		if got.Summary != want[method] || got.OtherMember != (strings.Contains(want[method], "owned by") || strings.Contains(want[method], "held by")) {
 			t.Errorf("%s summary = %q (other member %t), want %q", method, got.Summary, got.OtherMember, want[method])
 		}
 	}

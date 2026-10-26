@@ -105,7 +105,7 @@ func prMerge(ctx context.Context, c calls, in prMergeInput) (string, any, error)
 	if pr == nil {
 		return "", nil, &protocol.Error{Code: protocol.CodeNotFound, Message: cmp.Or(fb.Error, "run "+in.RunID+" has no pull request") + "; aether_pr_create opens one"}
 	}
-	out := map[string]any{"run_id": in.RunID, "pr": prOf(pr), "url": l.run(in.RunID)}
+	out := map[string]any{"run_id": in.RunID, "pr": prOf(pr), "url": l.run(in.RunID), "blockers": fb.Blockers(), "merge_state": fb.MergeStateStatus}
 	switch {
 	case pr.Number != in.Number:
 		return "", nil, &protocol.Error{Code: protocol.CodeConflict, Message: fmt.Sprintf(
@@ -143,35 +143,16 @@ func prMerge(ctx context.Context, c calls, in prMergeInput) (string, any, error)
 // reviewers are GitHub users' text, so aether_pr_status returns them under
 // untrusted and the refusal only counts them.
 func blockers(fb protocol.RunPRFeedbackResult) string {
-	failing, pending := 0, 0
-	for _, ch := range fb.Checks {
-		switch strings.ToUpper(ch.Conclusion) {
-		case "SUCCESS", "NEUTRAL", "SKIPPED":
-		case "":
-			pending++
-		default:
-			failing++
-		}
-	}
-	latest := map[string]string{}
-	for _, rv := range fb.Reviews {
-		latest[rv.Author] = rv.State
-	}
-	changes := 0
-	for _, state := range latest {
-		if state == "CHANGES_REQUESTED" {
-			changes++
-		}
-	}
+	b := fb.Blockers()
 	var parts []string
-	if failing > 0 {
-		parts = append(parts, fmt.Sprintf("%d failing checks", failing))
+	if b.FailingChecks > 0 {
+		parts = append(parts, fmt.Sprintf("%d failing checks", b.FailingChecks))
 	}
-	if pending > 0 {
-		parts = append(parts, fmt.Sprintf("%d pending checks", pending))
+	if b.PendingChecks > 0 {
+		parts = append(parts, fmt.Sprintf("%d pending checks", b.PendingChecks))
 	}
-	if changes > 0 {
-		parts = append(parts, fmt.Sprintf("%d reviewers requesting changes", changes))
+	if b.ChangesRequested > 0 {
+		parts = append(parts, fmt.Sprintf("%d reviewers requesting changes", b.ChangesRequested))
 	}
 	if fb.MergeStateStatus != "" && fb.MergeStateStatus != "CLEAN" {
 		parts = append(parts, "merge state "+fb.MergeStateStatus)

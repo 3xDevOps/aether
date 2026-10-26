@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -719,8 +720,8 @@ func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) 
 	return fmt.Sprintf("Swarm %s is %s: %d tasks, %d workers, %d open questions.", m.ID, m.Phase, len(tasks), len(workers), m.OpenQuestions), out, nil
 }
 
-// diffPage bounds one page of a run's diff: its files, the text of each
-// and of the whole page.
+// diffPage bounds one page of a run's diff: its files, and the bytes of
+// each and of the whole page.
 const (
 	diffPageFiles = 10
 	diffFileText  = 6000
@@ -822,15 +823,25 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 				return "", nil, invalid("diff_file %d is past the diff's %d files", in.DiffFile, len(files))
 			}
 			var page []string
+			var clipped []int
 			size := 0
-			for _, f := range files[in.DiffFile:] {
-				f = clip(f, diffFileText)
-				if len(page) == diffPageFiles || (len(page) > 0 && size+len(f) > diffPageText) {
+			for i, f := range files[in.DiffFile:] {
+				cut := len(f) > diffFileText
+				if cut {
+					f = clipBytes(f, diffFileText)
+				}
+				if len(page) == diffPageFiles || size+len(f) > diffPageText {
 					break
+				}
+				if cut {
+					clipped = append(clipped, in.DiffFile+i)
 				}
 				page, size = append(page, f), size+len(f)
 			}
 			out["diff_files"] = len(files)
+			if len(clipped) > 0 {
+				out["diff_clipped_files"] = clipped
+			}
 			if diff.Output.Truncated {
 				// The server cuts the diff before paging sees it.
 				out["diff_truncated"] = true
@@ -843,6 +854,20 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 	}
 	out["untrusted"] = untrusted
 	return summary, out, nil
+}
+
+// clipBytes cuts text to at most n bytes, ellipsis included, at a rune
+// boundary.
+func clipBytes(text string, n int) string {
+	const ellipsis = "…"
+	if len(text) <= n {
+		return text
+	}
+	n -= len(ellipsis)
+	for n > 0 && !utf8.RuneStart(text[n]) {
+		n--
+	}
+	return text[:n] + ellipsis
 }
 
 type prStatusInput struct {

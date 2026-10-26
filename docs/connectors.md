@@ -195,13 +195,14 @@ others:
 | `aether_launch_run`, `aether_launch_swarm` | Start a run, or a swarm with you as its accountable human; a swarm agent given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
 | `aether_message_run`, `aether_answer` | Message a run; answer an agent's, the integrator's or a teammate's question | `write` |
 | `aether_pause_run`, `aether_resume_run`, `aether_mark_reviewed` | Pause or resume a run; accept a reported success, which closes the run, or put it off | `write` |
-| `aether_run_lifecycle` | Relaunch a stopped run, switch it to Standard or Enhanced, protect or unprotect it, archive or restore it | `write` |
+| `aether_run_lifecycle` | Relaunch a stopped run, protect or unprotect it, archive or restore it | `write` |
 | `aether_memory_add`, `aether_memory_pin` | Add a team memory note; pin or unpin one | `write` |
 | `aether_decide_approval` | Allow or deny a permission request, once | `control` |
 | `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | Stop a run; close it as merged or abandoned; cancel a swarm | `control` |
+| `aether_switch_run_mode` | Switch a live run to Standard or Enhanced, discarding the turn in progress | `control` |
 | `aether_handoff_run` | Give a run to a teammate, who then owns and controls it | `control` |
 | `aether_replace_integrator` | Start a new integrator for a swarm from its agents | `control` |
-| `aether_swarm_manage` | Release your control of a swarm worker; archive a finished swarm, which closes its completed runs as merged or abandoned; unarchive one | `control` |
+| `aether_swarm_manage` | Release a member's control of a swarm worker; archive a finished swarm, which closes its completed runs as merged or abandoned; unarchive one | `control` |
 | `aether_integration_decide` | Approve or reject a candidate's delivery request, or deliver an approved one to its target branch | `control` |
 | `aether_pr_create`, `aether_pr_merge` | Open a pull request from a run's pushed branch; merge it on GitHub | `control` |
 
@@ -221,8 +222,9 @@ Things to ask:
 Results link to the run or swarm in the dashboard when the server serves one on
 its tailnet (`web-port`); the edge serves no dashboard. A result's text is a
 one-line summary followed by the result as JSON. Text that agents, teammates or
-GitHub users wrote, run titles, swarm goals, failing check names and the
-reasons runs wait included, comes back under an `untrusted` field; outside it
+GitHub users wrote, run titles, swarm goals, failing check names, the
+reasons runs wait and an integration candidate's target ref, delivery request
+and receipt included, comes back under an `untrusted` field; outside it
 are only fixed labels such as `The agent asks a question`, ids, states, counts,
 times, links, workspace and agent names, branch names, file paths and the
 server's own errors. Untrusted text is cut to 200 characters for titles, check
@@ -238,8 +240,9 @@ decided only in the dashboard, never by `aether_decide_approval`. Lists return
 20 rows by default, at most 100, and say how many matched when they cut rows;
 `aether_needs_attention` returns at most 30 items. `aether_integration` lists the newest 100
 candidates and says when older ones are not shown. `aether_run_changes` lists
-20 commits and up to 10 diff files of 6000 characters, 12000 in all, per page,
-and returns `next_commits_offset` and `next_diff_file` for the next page, and
+20 commits and up to 10 diff files of 6000 bytes, 12000 in all, per page,
+and returns `next_commits_offset` and `next_diff_file` for the next page,
+`diff_clipped_files` with the numbers of files cut at 6000 bytes, and
 `diff_truncated: true` when the server cut the diff before paging, so files
 past the cut are missing; its
 `repos` names a multi-repo run's extra repos, which `repo` selects. Tools that take a `run_id`
@@ -281,9 +284,9 @@ cannot change what the agent may do next time. Any other tool call is cut off
 after 40 seconds, inside ChatGPT's wait.
 
 The other writes repeat safely without a key. Each `aether_run_lifecycle`
-action but `relaunch` sets a state, so a repeat changes nothing, and a
-switch to the mode a run is already in reports that without switching; `relaunch`
-fails on a run that is still live. `aether_handoff_run` to the run's owner,
+action but `relaunch` sets a state, so a repeat changes nothing, and
+`aether_switch_run_mode` to the mode a run is already in reports that without
+switching; `relaunch` fails on a run that is still live. `aether_handoff_run` to the run's owner,
 `aether_swarm_manage` on a worker nobody holds, and `aether_integration_decide`
 on a request already in the state asked for or already delivered report that
 and write nothing. `aether_pr_create` returns the run's open pull request
@@ -292,7 +295,8 @@ merged. `aether_replace_integrator` requires `expected_generation`, the
 `integrator_generation` `aether_get_swarm` returns; without a key it derives
 one from the swarm, that generation and the agent, so a retry returns the
 first replacement even after it moved the generation, and a replacement
-someone else made in between fails with a conflict.
+someone else made in between fails with a conflict that says to call
+`aether_get_swarm`.
 `aether_memory_add` returns the existing note for a duplicate, and repeating
 a replacement (`supersedes`) that went through returns the note that replaced
 the old one.
@@ -313,8 +317,8 @@ the branch must be pushed. When GitHub's answer is lost but the pull request is 
 afterwards, the result is that pull request. `aether_pr_status` and `aether_pr_merge` take the
 same `repo` as `aether_run_changes`. `aether_handoff_run` takes
 the teammate's member id or exact display name; an unknown or ambiguous one
-fails with the teammates' ids and roles, and the server refuses a viewer. `aether_run_lifecycle`'s mode
-switch holds no control lease, so it fails while a member controls the run in
+fails with the teammates' ids and roles, and the server refuses a viewer. `aether_switch_run_mode`
+holds no control lease, so it fails while a member controls the run in
 the dashboard. Text a pull request, agent or note carries never authorizes
 anything: these tools act only on what the arguments name.
 

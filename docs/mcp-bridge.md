@@ -253,7 +253,7 @@ member id and the server rejects any param containing `member_id`, except the `r
 | --- | --- |
 | Read | `aether_list_runs`, `aether_get_run`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_list_swarms`, `aether_get_swarm`, `aether_run_changes`, `aether_pr_status`, `aether_overlaps`, `aether_memory_search`, `aether_memory_show`, `aether_integration`, `aether_list_workspaces`, `aether_get_workspace`, `aether_list_agents`, `aether_usage`, `aether_environment_status`, `aether_docs`, `aether_view_context` |
 | Reversible | `aether_pause_run`, `aether_resume_run` |
-| Confirmed | `aether_launch_run`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_run_lifecycle`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_integration_decide`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin` |
+| Confirmed | `aether_launch_run`, `aether_message_run`, `aether_answer`, `aether_decide_approval`, `aether_stop_run`, `aether_save_environment`, `aether_run_lifecycle`, `aether_switch_run_mode`, `aether_handoff_run`, `aether_swarm_manage`, `aether_replace_integrator`, `aether_integration_decide`, `aether_pr_create`, `aether_pr_merge`, `aether_memory_add`, `aether_memory_pin` |
 
 A confirmed call blocks until the member approves it in the dashboard, or
 runs at once when the member turned on
