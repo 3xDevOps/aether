@@ -133,7 +133,8 @@ and the button sends. The button changes with the turn:
 `Enter` never interrupts. `Mod+Shift+Enter` always queues. `/` lists the agent's
 commands and `@` completes a path in the run's checkout. The menus under the box
 set the agent's mode, model and effort. The footer shows context window use, such
-as **43%**, and turns amber from 90%.
+as **43%**, and turns amber from 90%; click it for the breakdown, and for
+**Compact** when the agent has a `/compact` command.
 
 An unsent message stays with its run across pages, mode switches and reconnects.
 Reloading the page discards it.

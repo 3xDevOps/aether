@@ -65,6 +65,7 @@ import {
   ClipboardCheck as LucideClipboardCheck,
   File as LucideFile,
   FolderPlus as LucideFolderPlus,
+  FoldVertical as LucideFoldVertical,
   ListFilter as LucideListFilter,
   CircleHelp as LucideCircleHelp,
   Reply as LucideReply,
@@ -224,6 +225,7 @@ export const ClipboardCheck = icon(LucideClipboardCheck)
 export const File = icon(LucideFile)
 export const Folder = icon(LucideFolder)
 export const FolderPlus = icon(LucideFolderPlus)
+export const FoldVertical = icon(LucideFoldVertical)
 export const ListFilter = icon(LucideListFilter)
 export const CircleHelp = icon(LucideCircleHelp)
 export const Reply = icon(LucideReply)

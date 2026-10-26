@@ -96,6 +96,10 @@ export function SuggestionList({ id, items, active, onPick }: {
 
 const footerCategories = ['mode', 'model', 'thought_level']
 
+export function currentChoice(option: ConfigOption): ConfigValue | undefined {
+  return (option.options ?? []).flatMap((entry) => ('group' in entry ? entry.options : [entry])).find((choice) => choice.value === option.currentValue)
+}
+
 type OptionPillProps = {
   option: ConfigOption
   disabled: boolean
@@ -109,8 +113,7 @@ function OptionPill({ option, disabled, onSet }: OptionPillProps) {
   useEffect(() => {
     if (disabled) setOpen(false)
   }, [disabled])
-  const choices = (option.options ?? []).flatMap((entry) => ('group' in entry ? entry.options : [entry]))
-  const current = choices.find((choice) => choice.value === option.currentValue)
+  const current = currentChoice(option)
   const unavailable = disabled || busy
   const changeOpen = (next: boolean) => {
     if (next && (unavailable || inFlight.current)) return

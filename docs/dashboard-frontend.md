@@ -2676,8 +2676,25 @@ round arrow while it reads **Send** and widens to its word otherwise. Hints
 and the 45-second delivery notice sit under the box. Footer controls wrap on
 narrow screens. The context meter shows the agent's last ACP `usage_update`
 (`state.usage` in the snapshot, replaced by each `usage` item) as a share of
-its context window, with token counts in its tooltip; it turns
-`state-needs-you` at 90%. An agent that reports no usage shows no meter.
+its context window, and is a button that opens the **Context window** popover
+(`routes/run/context-window.tsx`); hovering it shows the token counts. An agent
+that reports no usage shows no meter. The popover holds the model, the tokens
+used (it counts to each new report, and jumps under reduced motion), a percent badge
+that turns `state-needs-you` at 90%, a 24 by 9 grid of 216 cells, a legend, and
+a footer with the tokens left, or by how much the window is exceeded. The agent
+reports only used and total tokens, so the grid has only what they imply: used
+and free. When the Session view still holds the turn before the newest one that
+reported, and the window grew since, used splits into **Earlier context** and
+**Latest turn**; after a compaction or once that turn is trimmed it is one
+**Used** row. Pointing at a legend row or a cell dims the other cells and
+swaps the headline and footer to that row; touch and a single category skip
+this. **Session cost** shows only when the agent reported one. The single
+`role="meter"` is the headline inside the popover. **Compact** appears only when
+the agent advertises `/compact`; it puts `/compact ` in the message box and
+focuses it, so **Send** (or the pill's steer and queue rules) still decides
+how it goes out. It is inert, with the reason on hover, while a prompt is
+being sent, the box holds text or files (a draft is never replaced), or you do
+not hold control of the session.
 
 An unsent prompt is a per-run draft held by `composer-state.ts`: the text, the
 attached files with their uploaded paths, and the idempotency key of the last

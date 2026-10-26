@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type * as React from 'react'
 import { ArrowUp, CornerUpRight, ListPlus, Play, RefreshCw, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
-import { ProgressBar } from '@/components/ui/progress-bar'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
@@ -11,10 +10,11 @@ import { coarsePointer, useMediaQuery } from '@/lib/hooks'
 import { isPress, shortcutLabel, useKeybindings } from '@/lib/keybindings'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
-import type { ConfigOption, SessionUsage } from '@/lib/session-types'
+import type { ConfigOption } from '@/lib/session-types'
 import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-terminal'
 import { ComposerImagePicker, ComposerImages, hasImages, useComposerImages } from '@/routes/run/composer-images'
-import { commandSuggestions, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
+import { ContextWindow } from '@/routes/run/context-window'
+import { commandSuggestions, currentChoice, OptionPills, SuggestionList, triggerAt, useFileSuggestions, type Suggestion } from '@/routes/run/composer-menus'
 import { beginDraftRequest, composerBlock, composerDraft, draftSendKey, enhancedBlock, pillFor, pillHint, saveComposerDraft, sentDraft, useComposerDraft, type ComposerDraft, type Pill } from '@/routes/run/composer-state'
 import type { RunRoom } from '@/routes/run/room'
 import { TypingIndicator, useTypingSignal } from '@/routes/run/typing'
@@ -25,7 +25,7 @@ import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 import type { RunRecord } from '@/store/runs'
 import { sessionLease } from '@/store/session-stream'
 import { backgroundWait } from '@/store/sessions'
-import { cn, focusRing } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 
 interface ComposerProps {
   run: RunRecord
@@ -86,30 +86,6 @@ function ClosedRun({ run, reason, dock }: { run: RunRecord; reason: string; dock
         action={<Button variant="primary" disabled={busy} onClick={() => void relaunch()}><RefreshCw aria-hidden="true" />{busy ? 'Relaunching…' : 'Relaunch'}</Button>}
       />
     </ComposerFrame>
-  )
-}
-
-const usageFormat = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 })
-
-function ContextMeter({ usage }: { usage: SessionUsage }) {
-  if (usage.size <= 0) return null
-  const percent = Math.min(100, Math.round((usage.used / usage.size) * 100))
-  return (
-    <Tooltip content={`Context window: ${usageFormat.format(usage.used)} of ${usageFormat.format(usage.size)} tokens used`}>
-      <span
-        role="meter"
-        tabIndex={0}
-        aria-label="Context window used"
-        aria-valuemin={0}
-        aria-valuemax={usage.size}
-        aria-valuenow={Math.min(usage.used, usage.size)}
-        aria-valuetext={`${percent}%`}
-        className={cn(focusRing, 'flex h-6 shrink-0 items-center gap-1.5 rounded-control px-1.5 text-ui-sm text-muted tabular-nums coarse:h-11')}
-      >
-        <ProgressBar aria-hidden="true" value={percent} className="w-4 bg-hover-chrome" fillClassName={percent >= 90 ? 'bg-state-needs-you' : 'bg-icon-faint'} />
-        {percent}%
-      </span>
-    </Tooltip>
   )
 }
 
@@ -428,6 +404,23 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
     requestAnimationFrame(() => textarea.current?.setSelectionRange(at, at))
   }
 
+  const modelOption = state?.config_options?.find((option) => option.category === 'model' && option.type === 'select')
+  const modelName = (modelOption && currentChoice(modelOption)?.name) ?? run.model
+  const canCompact = state?.commands?.some((command) => command.name === 'compact') ?? false
+  const compactBlock = moderated
+    ? 'Take control of the session to compact it.'
+    : busy || hasContent
+      ? 'Clear the message box first, so nothing you typed is replaced.'
+      : undefined
+  const compact = () => {
+    setBody('/compact ')
+    setCaret(9)
+    requestAnimationFrame(() => {
+      textarea.current?.focus()
+      textarea.current?.setSelectionRange(9, 9)
+    })
+  }
+
   const attempt = async (action: () => Promise<unknown>) => {
     if (composerDraft(run.id).busy) return
     const request = beginDraftRequest(run.id, 'busy', { error: undefined, busyPrompt: false })
@@ -549,7 +542,15 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
               unsupported={refusedImages ? 'This agent does not support image prompts.' : undefined}
             />
             <OptionPills options={state?.config_options ?? []} disabled={busy || moderated} onSet={setOption} />
-            {state?.usage && <ContextMeter usage={state.usage} />}
+            {state?.usage && state.usage.size > 0 && (
+              <ContextWindow
+                runID={run.id}
+                harness={run.harness}
+                usage={state.usage}
+                model={modelName}
+                compact={canCompact ? { onCompact: compact, blocked: compactBlock } : undefined}
+              />
+            )}
             <SendActions
               pill={pill}
               label={late ? stillWaiting : busy ? 'Sending…' : pillLook[pill].label}
