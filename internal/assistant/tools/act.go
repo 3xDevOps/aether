@@ -14,6 +14,12 @@ type summarizer func(s *Server, ctx context.Context, req protocol.Request, c *pr
 
 var actSummaries = map[string]summarizer{
 	protocol.MethodRunRelaunch: runSummary(func(protocol.RunIDParams) string { return "Relaunch %s" }),
+	protocol.MethodRunClose: runSummary(func(p protocol.RunCloseParams) string {
+		if p.Outcome == "merged" {
+			return "Close %s as merged"
+		}
+		return "Close %s as abandoned"
+	}),
 	protocol.MethodRunModeSwitch: runSummary(func(p protocol.RunModeSwitchParams) string {
 		if p.Mode == "acp" {
 			return "Switch %s to Enhanced mode"
@@ -47,7 +53,7 @@ var actSummaries = map[string]summarizer{
 }
 
 type runParams interface {
-	protocol.RunIDParams | protocol.RunModeSwitchParams | protocol.RunProtectParams | protocol.RunArchiveParams
+	protocol.RunIDParams | protocol.RunCloseParams | protocol.RunModeSwitchParams | protocol.RunProtectParams | protocol.RunArchiveParams
 }
 
 // runSummary is the card of a method on one run: verb is what it does, with

@@ -70,6 +70,7 @@ var tiers = map[string]string{
 	protocol.MethodRunPause:              tierReversible,
 	protocol.MethodRunResume:             tierReversible,
 	protocol.MethodRunKill:               tierConfirmed,
+	protocol.MethodRunClose:              tierConfirmed,
 	protocol.MethodEnvSave:               tierConfirmed,
 	protocol.MethodRunInputRespond:       tierConfirmed,
 	protocol.MethodMissionQuestionAnswer: tierConfirmed,

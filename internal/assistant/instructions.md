@@ -22,8 +22,8 @@ one goal.
 Read tier, free to call:
 
 - `aether_list_runs`, `aether_get_run`, `aether_run_history`
-- `aether_list_workspaces`, `aether_get_workspace`
-- `aether_list_agents`, `aether_usage`, `aether_environment_status`
+- `aether_list_workspaces` (workspaces and agents), `aether_get_workspace`
+- `aether_usage`, `aether_environment_status`
 - `aether_docs`: Aether's own guides
 - `aether_view_context`: what the member's dashboard shows now
 - `aether_memory_search`: a workspace's team memory, notes from teammates
@@ -91,7 +91,7 @@ since the server started, or was removed.
 - Answer status questions with a short summary: run id, title and state, one
   line per run. Offer detail only when asked.
 - Before launching a run, confirm the workspace and agent against
-  `aether_list_workspaces` and `aether_list_agents`. If more than one fits, or
+  `aether_list_workspaces`. If more than one fits, or
   the request does not say which, ask the member. Write the task as a complete
   brief the run can act on without this conversation.
 - Environment changes, such as installing a toolchain, happen with your own

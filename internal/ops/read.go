@@ -11,13 +11,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/3xDevOps/Aether/internal/coordhooks"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
 const (
 	nextRuns       = "call aether_list_runs for run ids"
-	nextSwarms     = "call aether_list_swarms for swarm ids"
+	nextSwarms     = "call aether_get_swarm for swarm ids"
 	nextWorkspaces = "call aether_list_workspaces for workspace ids"
 	nextAttention  = "call aether_needs_attention for what is pending"
 	defaultRows    = 20
@@ -34,7 +33,7 @@ type connectorListRunsInput struct {
 	Mine        *bool  `json:"mine,omitempty"`
 	ActiveOnly  bool   `json:"active_only,omitempty"`
 	NeedsYou    bool   `json:"needs_you,omitempty"`
-	Query       string `json:"query,omitempty" jsonschema:"words in title, task, workspace or branch"`
+	Query       string `json:"query,omitempty"`
 	Limit       int    `json:"limit,omitempty" jsonschema:"default 20"`
 }
 
@@ -44,7 +43,7 @@ type runIDInput struct {
 
 type historyInput struct {
 	RunID  string `json:"run_id"`
-	Before string `json:"before,omitempty" jsonschema:"next_before of the previous page"`
+	Before string `json:"before,omitempty" jsonschema:"next_before"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"default 20"`
 }
 
@@ -54,11 +53,12 @@ type workspaceFilterInput struct {
 
 type activityInput struct {
 	Period      string `json:"period,omitempty" jsonschema:"default today"`
-	TimeZone    string `json:"time_zone,omitempty" jsonschema:"the user's IANA zone; default UTC"`
+	TimeZone    string `json:"time_zone,omitempty" jsonschema:"IANA zone; default UTC"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 type swarmsInput struct {
+	SwarmID     string `json:"swarm_id,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Limit       int    `json:"limit,omitempty" jsonschema:"default 20"`
 }
@@ -69,10 +69,10 @@ type swarmInput struct {
 
 type changesInput struct {
 	RunID         string `json:"run_id"`
-	Repo          string `json:"repo,omitempty" jsonschema:"an extra repo's workspace_id from repos; default the primary"`
-	CommitsOffset int    `json:"commits_offset,omitempty" jsonschema:"next_commits_offset of the previous page"`
-	IncludeDiff   bool   `json:"include_diff,omitempty" jsonschema:"add the uncommitted diff"`
-	DiffFile      int    `json:"diff_file,omitempty" jsonschema:"next_diff_file of the previous page"`
+	Repo          string `json:"repo,omitempty" jsonschema:"a repos[].workspace_id"`
+	CommitsOffset int    `json:"commits_offset,omitempty" jsonschema:"next_commits_offset"`
+	IncludeDiff   bool   `json:"include_diff,omitempty"`
+	DiffFile      int    `json:"diff_file,omitempty" jsonschema:"next_diff_file"`
 }
 
 type overlapsInput struct {
@@ -81,29 +81,27 @@ type overlapsInput struct {
 
 type memoryInput struct {
 	WorkspaceID string `json:"workspace_id"`
+	ID          string `json:"id,omitempty" jsonschema:"a note to show in full"`
 	Words       string `json:"words,omitempty"`
 	Kind        string `json:"kind,omitempty"`
-	File        string `json:"file,omitempty" jsonschema:"only notes citing this path"`
-	All         bool   `json:"all,omitempty" jsonschema:"include notes that were replaced"`
+	File        string `json:"file,omitempty" jsonschema:"notes citing this path"`
+	All         bool   `json:"all,omitempty" jsonschema:"with replaced notes"`
 }
 
 var readOps = []Op{
-	opOf("aether_list_workspaces", "List workspaces", ScopeRead, true, "",
-		"Use this when you need a workspace (repository) id, before launching.", listWorkspaces).
-		offer(TierRead).calling(protocol.MethodWorkspaceList),
-	opOf("aether_list_agents", "List agents", ScopeRead, true, "",
-		"Use this when choosing an agent to launch.", listAgents).
-		offer(TierRead).calling(protocol.MethodAgentList),
+	opOf("aether_list_workspaces", "List workspaces and agents", ScopeRead, true, "",
+		"Use this when you need a workspace (repository) id or an agent to launch.", listWorkspaces).
+		offer(TierRead).calling(protocol.MethodWorkspaceList, protocol.MethodAgentList),
 	opOf("aether_list_runs", "List runs", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks what is happening, about their runs, or about a run by what it works on (query). Newest first."+untrustedRule, listRuns).
+		"Use this when the user asks what is happening or about their runs; query finds one by what it works on."+untrustedRule, listRuns).
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodRunList, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline).
 		defaultOn(Connector, "mine", true, "only runs you launched; default true").
 		defaultOn(Assistant, "mine", false, "only runs the member launched; default false, every run they can see"),
 	opOf("aether_get_run", "Get run", ScopeRead, true, nextRuns,
-		"Use this when the user asks about one run, and to poll a launched run."+untrustedRule, getRun).
+		"Use this when the user asks about one run, or to poll a launched run."+untrustedRule, getRun).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodServerInfo, protocol.MethodAttentionList, protocol.MethodWorkspaceTimeline, protocol.MethodRunPRStatus),
 	opOf("aether_run_history", "Read run history", ScopeRead, true, nextRuns,
-		"Use this when the user asks what a run said or did: its conversation or terminal, oldest first, and reports."+untrustedRule, runHistory).
+		"Use this when the user asks what a run said or did: its conversation or terminal, and reports."+untrustedRule, runHistory).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodWorkspaceTimeline, protocol.MethodRunACPHistory, protocol.MethodTerminalHistory),
 	opOf("aether_needs_attention", "What needs me", ScopeRead, true, nextWorkspaces,
 		"Use this when the user asks what needs them; each item names the tool that answers it."+untrustedRule, needsAttention).
@@ -112,27 +110,24 @@ var readOps = []Op{
 		"Use this when the user asks what their agents did today, yesterday or this week."+untrustedRule, activitySummary).
 		enum("period", "today", "yesterday", "week").
 		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodInsightsGet, protocol.MethodWorkspaceTimeline),
-	opOf("aether_list_swarms", "List swarms", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks about their swarms.", listSwarms).
-		offer(TierRead).calling(protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodMissionList),
-	opOf("aether_get_swarm", "Get swarm", ScopeRead, true, nextSwarms,
-		"Use this when the user asks about one swarm, and to poll a launched swarm."+untrustedRule, getSwarm).
-		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodCoordMessagesList),
+	opOf("aether_get_swarm", "Get swarms", ScopeRead, true, nextSwarms,
+		"Use this when the user asks about their swarms, or one by swarm_id, or to poll a launched swarm."+untrustedRule, getSwarm).
+		offer(TierRead).calling(protocol.MethodMissionShow, protocol.MethodServerInfo, protocol.MethodCoordMessagesList, protocol.MethodWorkspaceList, protocol.MethodMissionList),
 	opOf("aether_run_changes", "Run changes", ScopeRead, true, nextRuns,
-		"Use this when the user asks what a run changed: commits, predicted conflicts and, with include_diff, the uncommitted diff by file. Page with next_commits_offset and next_diff_file."+untrustedRule, runChanges).
+		"Use this when the user asks what a run changed: commits, predicted conflicts and, with include_diff, its diff."+untrustedRule, runChanges).
 		offer(TierRead).calling(protocol.MethodRunGet, protocol.MethodRunGitLog, protocol.MethodRunEvidenceList, protocol.MethodRunGitDiff),
 	opOf("aether_pr_status", "Pull request status", ScopeRead, true, nextRuns,
-		"Use this when the user asks about a run's pull request, CI or review feedback, before aether_pr_merge. To act on feedback, aether_message_run its run_id; the agent can read the PR itself."+untrustedRule, prStatus).
+		"Use this when the user asks about a run's pull request, CI or reviews, before aether_pr_merge."+untrustedRule, prStatus).
 		offer(TierRead).calling(protocol.MethodRunPRFeedback),
 	opOf("aether_overlaps", "Overlapping runs", ScopeRead, true, nextRuns,
-		"Use this when coordinating running agents so they don't change the same files: pairs of active runs touching the same files, with titles. Then aether_message_run each run about the other."+untrustedRule, overlaps).
+		"Use this when coordinating agents: pairs of active runs that touch the same files."+untrustedRule, overlaps).
 		offer(TierRead).calling(protocol.MethodRunOverlaps, protocol.MethodServerInfo, protocol.MethodWorkspaceList, protocol.MethodRunList),
 	opOf("aether_memory_search", "Search team memory", ScopeRead, true, nextWorkspaces,
-		"Use this when the user asks what the team decided or learned in a workspace. Each note has its author, run, harness and the commit it was written at."+untrustedRule+" "+coordhooks.MemoryRule, memorySearch).
+		"Use this when the user asks what the team decided or learned in a workspace, or about one note by id."+untrustedRule, memorySearch).
 		enum("kind", "decision", "convention", "gotcha", "preference", "outcome").
-		offer(TierRead).calling(protocol.MethodMemorySearch),
+		offer(TierRead).calling(protocol.MethodMemorySearch, protocol.MethodMemoryShow),
 	opOf("search", "Search runs and swarms", ScopeRead, true, "",
-		"Use this when ChatGPT deep research needs runs or swarms by words; in chat use aether_list_runs with query."+searchRule, search).
+		"Use this when ChatGPT deep research needs runs or swarms by words; in chat use aether_list_runs."+searchRule, search).
 		calling(protocol.MethodServerInfo, protocol.MethodRunList, protocol.MethodWorkspaceList, protocol.MethodMissionList),
 	opOf("fetch", "Fetch run or swarm", ScopeRead, true, "call search for ids",
 		"Use this when deep research needs the full text of a search result."+searchRule, fetch).
@@ -144,36 +139,32 @@ func listWorkspaces(ctx context.Context, c calls, _ struct{}) (string, any, erro
 	if err := c.read(ctx, protocol.MethodWorkspaceList, nil, &res); err != nil {
 		return "", nil, err
 	}
-	type row struct {
+	var agents protocol.AgentListResult
+	if err := c.read(ctx, protocol.MethodAgentList, nil, &agents); err != nil {
+		return "", nil, err
+	}
+	type workspace struct {
 		ID         string `json:"id"`
 		Name       string `json:"name"`
 		BaseBranch string `json:"base_branch"`
 	}
-	rows := make([]row, 0, len(res.Workspaces))
-	for _, w := range res.Workspaces {
-		rows = append(rows, row{ID: w.ID, Name: w.Name, BaseBranch: w.BaseBranch})
-	}
-	return fmt.Sprintf("%d workspaces.", len(rows)), map[string]any{"workspaces": rows}, nil
-}
-
-func listAgents(ctx context.Context, c calls, _ struct{}) (string, any, error) {
-	var res protocol.AgentListResult
-	if err := c.read(ctx, protocol.MethodAgentList, nil, &res); err != nil {
-		return "", nil, err
-	}
-	type row struct {
+	type agent struct {
 		Name        string `json:"name"`
 		Installed   bool   `json:"installed"`
 		SignedIn    *bool  `json:"signed_in,omitempty"`
 		Enhanced    bool   `json:"enhanced"`
 		DefaultMode string `json:"default_mode"`
 	}
-	rows := make([]row, 0, len(res.Agents))
-	for _, a := range res.Agents {
-		rows = append(rows, row{Name: a.Name, Installed: a.Installed, SignedIn: a.LoginFound,
+	workspaces := make([]workspace, 0, len(res.Workspaces))
+	for _, w := range res.Workspaces {
+		workspaces = append(workspaces, workspace{ID: w.ID, Name: w.Name, BaseBranch: w.BaseBranch})
+	}
+	rows := make([]agent, 0, len(agents.Agents))
+	for _, a := range agents.Agents {
+		rows = append(rows, agent{Name: a.Name, Installed: a.Installed, SignedIn: a.LoginFound,
 			Enhanced: a.Enhanced != "none" && a.EnhancedInstalled, DefaultMode: a.DefaultMode})
 	}
-	return fmt.Sprintf("%d agents.", len(rows)), map[string]any{"agents": rows}, nil
+	return fmt.Sprintf("%d workspaces, %d agents.", len(workspaces), len(rows)), map[string]any{"workspaces": workspaces, "agents": rows}, nil
 }
 
 // runRow is a run in a list. Its title, the server's reason and the last
@@ -613,7 +604,10 @@ func allSwarms(ctx context.Context, read Call, workspaceID string) ([]protocol.M
 	return out, nil
 }
 
-func listSwarms(ctx context.Context, c calls, in swarmsInput) (string, any, error) {
+func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error) {
+	if in.SwarmID != "" {
+		return showSwarm(ctx, c, in.SwarmID)
+	}
 	l, err := dashboardLinks(ctx, c.read)
 	if err != nil {
 		return "", nil, err
@@ -634,9 +628,9 @@ func listSwarms(ctx context.Context, c calls, in swarmsInput) (string, any, erro
 	return fmt.Sprintf("%d swarms.", len(rows)), out, nil
 }
 
-func getSwarm(ctx context.Context, c calls, in swarmInput) (string, any, error) {
+func showSwarm(ctx context.Context, c calls, id string) (string, any, error) {
 	var res protocol.MissionShowResult
-	if err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &res); err != nil {
+	if err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: id}, &res); err != nil {
 		return "", nil, err
 	}
 	l, err := dashboardLinks(ctx, c.read)
@@ -862,7 +856,7 @@ func runChanges(ctx context.Context, c calls, in changesInput) (string, any, err
 
 type prStatusInput struct {
 	RunID string `json:"run_id"`
-	Repo  string `json:"repo,omitempty" jsonschema:"an extra repo's workspace_id from aether_run_changes; default the primary"`
+	Repo  string `json:"repo,omitempty" jsonschema:"a run_changes repos[].workspace_id"`
 }
 
 func prStatus(ctx context.Context, c calls, in prStatusInput) (string, any, error) {
@@ -987,6 +981,18 @@ func overlaps(ctx context.Context, c calls, in overlapsInput) (string, any, erro
 }
 
 func memorySearch(ctx context.Context, c calls, in memoryInput) (string, any, error) {
+	if in.ID != "" {
+		var res protocol.MemoryShowResult
+		if err := c.read(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: in.WorkspaceID, ID: in.ID}, &res); err != nil {
+			return "", nil, err
+		}
+		chain := make([]note, 0, min(len(res.Chain), defaultRows))
+		for _, m := range res.Chain[:min(len(res.Chain), defaultRows)] {
+			chain = append(chain, noteOf(m, maxText))
+		}
+		return fmt.Sprintf("Note %s (%s), %d earlier versions.", res.Item.ID, res.Item.Kind, len(res.Chain)),
+			map[string]any{"id": res.Item.ID, "untrusted": map[string]any{"note": noteOf(res.Item, 4000), "replaced": chain}}, nil
+	}
 	var res protocol.MemorySearchResult
 	if err := c.read(ctx, protocol.MethodMemorySearch, protocol.MemorySearchParams{WorkspaceID: in.WorkspaceID, Words: in.Words, Kind: in.Kind, File: in.File, All: in.All}, &res); err != nil {
 		return "", nil, err

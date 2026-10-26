@@ -11,28 +11,28 @@ import (
 
 type prCreateInput struct {
 	RunID        string `json:"run_id"`
-	Repo         string `json:"repo,omitempty" jsonschema:"an extra repo's workspace_id from aether_run_changes; default the primary"`
+	Repo         string `json:"repo,omitempty"`
 	Title        string `json:"title"`
 	Body         string `json:"body"`
 	Draft        bool   `json:"draft,omitempty"`
-	ExpectedHead string `json:"expected_head,omitempty" jsonschema:"at least 7 characters of the commit the user reviewed; fails if the branch moved"`
+	ExpectedHead string `json:"expected_head,omitempty" jsonschema:"the reviewed commit, 7+ characters"`
 }
 
 type prMergeInput struct {
 	RunID           string `json:"run_id"`
 	Repo            string `json:"repo,omitempty"`
 	Number          int    `json:"number" jsonschema:"pr.number from aether_pr_status"`
-	ExpectedHeadOID string `json:"expected_head_oid" jsonschema:"pr.head_oid from aether_pr_status, at least 7 characters"`
+	ExpectedHeadOID string `json:"expected_head_oid" jsonschema:"its pr.head_oid"`
 	Method          string `json:"method,omitempty" jsonschema:"default squash"`
 }
 
 var prOps = []Op{
 	opOf("aether_pr_create", "Open pull request", ScopeControl, true, nextRuns,
-		"Use this when the user wants a pull request opened from a run's pushed branch into the workspace's base branch, where the dashboard would propose. An open one is returned instead of opening another.", prCreate).
+		"Use this when the user wants a pull request opened from a run's pushed branch; an open one is returned instead.", prCreate).
 		hints(false, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunPRStatus, protocol.MethodRunPRCreate),
 	opOf("aether_pr_merge", "Merge pull request", ScopeControl, true, nextRuns,
-		"Use this when the user wants a run's pull request merged on GitHub after reviewing it with aether_pr_status. Refuses if the head moved from expected_head_oid; GitHub refuses failing required checks and unresolved reviews.", prMerge).
+		"Use this when the user wants a run's pull request merged after reviewing it with aether_pr_status; refused if its head moved.", prMerge).
 		enum("method", "squash", "merge", "rebase").hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunPRFeedback, protocol.MethodRunPRMerge),
 }

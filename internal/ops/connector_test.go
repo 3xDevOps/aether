@@ -233,8 +233,10 @@ func jsonOf(t *testing.T, v any) string {
 
 // Every scope lists its own tools and the ones below it; every tool has a
 // title, hints and a "Use this when" description; fixed values are
-// enumerated; and the whole list stays under 24000 bytes, a budget for the
-// model's context (docs/chatgpt-plugin.md#tool-list-budget).
+// enumerated; and the list stays inside the budget for the model's context
+// (docs/chatgpt-plugin.md#tool-list-budget): at most 40 tools, whose names,
+// descriptions and compact input schemas total at most 15000 bytes and
+// 3500 per tool.
 func TestConnectorToolList(t *testing.T) {
 	list := func(scopes ...Scope) []*mcp.Tool {
 		res, err := connectorSession(t, newFake(t), scopes...).ListTools(t.Context(), nil)
@@ -244,10 +246,21 @@ func TestConnectorToolList(t *testing.T) {
 		return res.Tools
 	}
 	all := list(ScopeWrite, ScopeControl)
-	size := len(jsonOf(t, all))
-	t.Logf("tools/list: %d tools, %d bytes", len(all), size)
-	if size > 24000 {
-		t.Errorf("tools/list is %d bytes, want at most 24000", size)
+	sum, largest := 0, ""
+	sizes := map[string]int{}
+	for _, tool := range all {
+		sizes[tool.Name] = len(tool.Name) + len(tool.Description) + len(jsonOf(t, tool.InputSchema))
+		sum += sizes[tool.Name]
+		if sizes[tool.Name] > sizes[largest] {
+			largest = tool.Name
+		}
+		if sizes[tool.Name] > 3500 {
+			t.Errorf("%s is %d bytes, want at most 3500", tool.Name, sizes[tool.Name])
+		}
+	}
+	t.Logf("tools/list: %d tools, %d bytes as JSON; names, descriptions and schemas %d bytes, largest %s at %d", len(all), len(jsonOf(t, all)), sum, largest, sizes[largest])
+	if len(all) > 40 || sum > 15000 {
+		t.Errorf("tools/list has %d tools in %d bytes, want at most 40 in 15000", len(all), sum)
 	}
 	enums := map[string]string{}
 	for _, tool := range all {
@@ -278,7 +291,7 @@ func TestConnectorToolList(t *testing.T) {
 	// An optional value may be sent empty for its default.
 	if want := map[string]string{"aether_launch_run.mode": ",tui,headless,acp", "aether_launch_swarm.mode": ",tui,acp",
 		"aether_launch_swarm.workers.mode": ",tui,headless,acp", "aether_activity_summary.period": ",today,yesterday,week",
-		"aether_decide_approval.decision": "allow,deny", "aether_close_run.outcome": "merged,abandoned",
+		"aether_decide_approval.decision": "allow,deny", "aether_stop_run.outcome": ",merged,abandoned",
 		"aether_mark_reviewed.action": "complete,later", "aether_memory_search.kind": ",decision,convention,gotcha,preference,outcome",
 		"aether_memory_add.kind": "decision,convention,gotcha,preference", "aether_pr_merge.method": ",squash,merge,rebase",
 		"aether_replace_integrator.mode": ",tui,acp", "aether_integration_decide.action": "approve,reject,deliver",
@@ -300,7 +313,7 @@ func TestConnectorToolList(t *testing.T) {
 		"aether_message_run": {false, true, true}, "aether_answer": {false, true, true},
 		"aether_pause_run": {false, false, false}, "aether_resume_run": {false, false, true},
 		"aether_mark_reviewed": {false, true, false}, "aether_decide_approval": {false, true, true},
-		"aether_stop_run": {false, true, false}, "aether_close_run": {false, true, false}, "aether_cancel_swarm": {false, true, false},
+		"aether_stop_run": {false, true, false}, "aether_cancel_swarm": {false, true, false},
 		"aether_run_lifecycle": {false, false, true}, "aether_switch_run_mode": {false, true, true}, "aether_swarm_manage": {false, true, true}, "aether_handoff_run": {false, true, false},
 		"aether_replace_integrator": {false, true, true}, "aether_integration_decide": {false, true, true},
 		"aether_pr_create": {false, false, true}, "aether_pr_merge": {false, true, true},
@@ -326,13 +339,13 @@ func TestConnectorToolList(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"aether_list_workspaces", "aether_list_agents", "aether_list_runs", "aether_get_run", "aether_run_history",
+	for _, name := range []string{"aether_list_workspaces", "aether_list_runs", "aether_get_run", "aether_run_history",
 		"aether_launch_run", "aether_message_run", "aether_stop_run"} {
 		if !slices.Contains(names[ScopeRead], name) && !slices.Contains(names[ScopeWrite], name) && !slices.Contains(names[ScopeControl], name) {
 			t.Errorf("%s, served before, is missing", name)
 		}
 	}
-	if want := []string{"aether_cancel_swarm", "aether_close_run", "aether_decide_approval", "aether_handoff_run", "aether_integration_decide",
+	if want := []string{"aether_cancel_swarm", "aether_decide_approval", "aether_handoff_run", "aether_integration_decide",
 		"aether_pr_create", "aether_pr_merge", "aether_replace_integrator", "aether_stop_run", "aether_swarm_manage", "aether_switch_run_mode"}; !slices.Equal(names[ScopeControl], want) {
 		t.Errorf("control tools = %v, want %v", names[ScopeControl], want)
 	}
@@ -488,9 +501,9 @@ func TestConnectorReadTools(t *testing.T) {
 		older.ID, older.CreatedAt = "mis-0", "2026-10-21T09:00:00Z"
 		return protocol.MissionListResult{Missions: []protocol.Mission{older}}, nil
 	}
-	if text, out = run(t, cs, "aether_list_swarms", nil); text != "2 swarms." || out["swarms"].([]any)[0].(map[string]any)["url"] != "https://aether.example/?page=missions&id=mis-1" ||
+	if text, out = run(t, cs, "aether_get_swarm", nil); text != "2 swarms." || out["swarms"].([]any)[0].(map[string]any)["url"] != "https://aether.example/?page=missions&id=mis-1" ||
 		out["swarms"].([]any)[1].(map[string]any)["id"] != "mis-0" || strings.Contains(trusted(t, out), injection) {
-		t.Fatalf("aether_list_swarms across pages = %q %v", text, out)
+		t.Fatalf("aether_get_swarm across pages = %q %v", text, out)
 	}
 	f.answers[protocol.MethodMissionShow] = returns(protocol.MissionShowResult{Mission: mission,
 		Tasks: []protocol.Task{{ID: "task-1", Status: "active", Revision: &protocol.TaskRevision{Title: "Tools"}}},
@@ -554,11 +567,11 @@ func TestConnectorReadTools(t *testing.T) {
 	}
 
 	f.answers[protocol.MethodAgentList] = returns(protocol.AgentListResult{Agents: []protocol.AgentInfo{{Name: "claude", Installed: true, Enhanced: "native", EnhancedInstalled: true}}})
-	if _, out = run(t, cs, "aether_list_agents", nil); out["agents"].([]any)[0].(map[string]any)["enhanced"] != true {
-		t.Fatalf("aether_list_agents = %v", out)
+	if _, out = run(t, cs, "aether_list_workspaces", nil); out["agents"].([]any)[0].(map[string]any)["enhanced"] != true {
+		t.Fatalf("aether_list_workspaces = %v", out)
 	}
-	if text, _, failed := try(t, cs, "aether_list_agents", map[string]any{"harness": "claude"}); !failed || text != `unknown argument "harness"; this tool takes no arguments` {
-		t.Fatalf("aether_list_agents with harness = %q", text)
+	if text, _, failed := try(t, cs, "aether_list_workspaces", map[string]any{"harness": "claude"}); !failed || text != `unknown argument "harness"; this tool takes no arguments` {
+		t.Fatalf("aether_list_workspaces with harness = %q", text)
 	}
 	if len(called(f, protocol.MethodAgentModels)) != 0 {
 		t.Fatal("a read tool called agent.models, which may start the member's container")
@@ -959,7 +972,7 @@ func TestConnectorRunActions(t *testing.T) {
 		{"aether_resume_run", map[string]any{"run_id": "run-1"}, protocol.MethodRunResume, ScopeWrite},
 		{"aether_mark_reviewed", map[string]any{"run_id": "run-1", "action": "complete"}, protocol.MethodRunReview, ScopeWrite},
 		{"aether_stop_run", map[string]any{"run_id": "run-1"}, protocol.MethodRunKill, ScopeControl},
-		{"aether_close_run", map[string]any{"run_id": "run-1", "outcome": "merged"}, protocol.MethodRunClose, ScopeControl},
+		{"aether_stop_run", map[string]any{"run_id": "run-1", "outcome": "merged"}, protocol.MethodRunClose, ScopeControl},
 		{"aether_cancel_swarm", map[string]any{"swarm_id": "mis-1"}, protocol.MethodMissionCancel, ScopeControl},
 	} {
 		f.calls = nil
@@ -992,7 +1005,7 @@ func TestConnectorMarkReviewedNeedsReadyRun(t *testing.T) {
 	f.answers[protocol.MethodRunReview] = returns(struct{}{})
 	cs := connectorSession(t, f, ScopeWrite)
 	text, _, failed := try(t, cs, "aether_mark_reviewed", map[string]any{"run_id": "run-1", "action": "complete"})
-	if !failed || text != `run run-1 has no reported success awaiting review (review ""); to end it, aether_close_run or aether_stop_run, which need the control scope` {
+	if !failed || text != `run run-1 has no reported success awaiting review (review ""); to end it, aether_stop_run, which needs the control scope` {
 		t.Fatalf("completing a running run with a write grant = %q", text)
 	}
 	if got := called(f, protocol.MethodRunReview); len(got) != 0 {

@@ -26,19 +26,19 @@ type modeInput struct {
 
 type handoffInput struct {
 	RunID      string `json:"run_id"`
-	ToMemberID string `json:"to_member_id" jsonschema:"the teammate's member id, or their exact display name"`
+	ToMemberID string `json:"to_member_id" jsonschema:"member id or exact display name"`
 }
 
 type swarmManageInput struct {
 	SwarmID string `json:"swarm_id"`
 	Action  string `json:"action"`
-	RunID   string `json:"run_id,omitempty" jsonschema:"the worker, for release_worker"`
+	RunID   string `json:"run_id,omitempty" jsonschema:"for release_worker"`
 }
 
 type replaceIntegratorInput struct {
 	SwarmID            string `json:"swarm_id"`
 	ExpectedGeneration uint64 `json:"expected_generation" jsonschema:"integrator_generation from aether_get_swarm"`
-	Harness            string `json:"harness,omitempty" jsonschema:"one of the swarm's agents; default the current integrator's"`
+	Harness            string `json:"harness,omitempty"`
 	Mode               string `json:"mode,omitempty"`
 	Model              string `json:"model,omitempty"`
 	IdempotencyKey     string `json:"idempotency_key,omitempty"`
@@ -61,27 +61,27 @@ const (
 
 var actOps = []Op{
 	opOf("aether_run_lifecycle", "Change run lifecycle", ScopeWrite, false, nextRuns,
-		"Use this when the user wants a stopped run relaunched, protected from cleanup, or archived or restored. Each action but relaunch sets a state, so a repeat changes nothing; relaunch refuses a live run.", runLifecycle).
+		"Use this when the user wants a stopped run relaunched, or a run protected from cleanup, archived or restored.", runLifecycle).
 		enum("action", lifecycleRelaunch, lifecycleProtect, lifecycleUnprotect, lifecycleArchive, lifecycleRestore).
 		hints(false, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodRunRelaunch, protocol.MethodRunProtect, protocol.MethodRunArchive),
 	opOf("aether_switch_run_mode", "Switch run mode", ScopeControl, true, nextRuns,
-		"Use this when the user wants a live run switched to standard (terminal) or enhanced (structured) mode. It discards a turn in progress; a run already in that mode is left alone.", switchRunMode).
+		"Use this when the user wants a live run switched to standard or enhanced mode; a turn in progress is discarded.", switchRunMode).
 		enum("mode", lifecycleStandard, lifecycleEnhanced).
 		hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodRunModeSwitch),
 	opOf("aether_handoff_run", "Hand off run", ScopeControl, true, "",
-		"Use this when the user gives one of their runs to a teammate, who then owns and controls it; only the teammate can hand it back.", handoffRun).
+		"Use this when the user gives their run to a teammate, who then owns it; only they can hand it back.", handoffRun).
 		hints(true, false).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodRunGet, protocol.MethodMemberList, protocol.MethodRunHandoff),
 	opOf("aether_swarm_manage", "Manage swarm", ScopeControl, true, nextSwarms,
-		"Use this when the user releases their control of a swarm worker (release_worker, with its run_id) so the integrator steers it again, or archives a finished swarm, which closes its completed runs, or unarchives one.", swarmManage).
+		"Use this when the user releases control of a swarm worker, or archives (closing its completed runs) or unarchives a swarm.", swarmManage).
 		enum("action", swarmReleaseWorker, swarmArchive, swarmUnarchive).
 		hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodMissionWorkerRelease, protocol.MethodMissionArchive, protocol.MethodMissionUnarchive),
 	opOf("aether_replace_integrator", "Replace integrator", ScopeControl, true, nextSwarms,
-		"Use this when a swarm's integrator stopped or is stuck: it starts a new integrator from the swarm's agents and the old one loses its authority. Fails if the integrator changed since expected_generation, unless this replacement made that change."+
-			idempotencyRule+"without one, the same replacement at the same expected_generation is made once.", replaceIntegrator).
+		"Use this when a swarm's integrator stopped or is stuck: a new one starts from the swarm's agents; fails if it changed since expected_generation."+
+			idempotencyRule+"without one, a repeat is made once.", replaceIntegrator).
 		enum("mode", "tui", "acp").hints(true, true).offer(TierConfirmed).
 		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodMissionReplaceIntegrator),
 }

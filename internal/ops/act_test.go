@@ -410,7 +410,7 @@ func TestConnectorMemoryWrites(t *testing.T) {
 	if msg, _, failed := try(t, cs, "aether_memory_pin", map[string]any{"workspace_id": "ws-1", "id": "mem-9", "pin": false}); !failed || msg != "memory.unpin: denied" {
 		t.Fatalf("denied unpin = %q", msg)
 	}
-	if _, out = run(t, cs, "aether_memory_show", map[string]any{"workspace_id": "ws-1", "id": "mem-9"}); strings.Contains(trusted(t, out), injection) {
+	if _, out = run(t, cs, "aether_memory_search", map[string]any{"workspace_id": "ws-1", "id": "mem-9"}); strings.Contains(trusted(t, out), injection) {
 		t.Fatalf("note body outside untrusted: %v", out)
 	}
 

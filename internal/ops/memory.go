@@ -14,7 +14,7 @@ type memoryAddInput struct {
 	Kind        string   `json:"kind"`
 	Text        string   `json:"text" jsonschema:"one fact, with why"`
 	Files       []string `json:"files,omitempty" jsonschema:"repo paths it cites"`
-	Supersedes  string   `json:"supersedes,omitempty" jsonschema:"id of the note it replaces"`
+	Supersedes  string   `json:"supersedes,omitempty" jsonschema:"note id it replaces"`
 }
 
 type memoryPinInput struct {
@@ -23,22 +23,14 @@ type memoryPinInput struct {
 	Pin         bool   `json:"pin" jsonschema:"false unpins"`
 }
 
-type memoryShowInput struct {
-	WorkspaceID string `json:"workspace_id"`
-	ID          string `json:"id"`
-}
-
 var memoryOps = []Op{
 	opOf("aether_memory_add", "Add team memory", ScopeWrite, false, nextWorkspaces,
-		"Use this when the user wants a decision, convention, gotcha or preference remembered for the workspace's agents and teammates. A note with a secret is refused; the same note again returns the first.", memoryAdd).
+		"Use this when the user wants a decision, convention, gotcha or preference remembered for the workspace; a note with a secret is refused.", memoryAdd).
 		enum("kind", protocol.MemoryKindDecision, protocol.MemoryKindConvention, protocol.MemoryKindGotcha, protocol.MemoryKindPreference).
 		hints(false, false).offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodMemoryAdd, protocol.MethodMemoryShow),
 	opOf("aether_memory_pin", "Pin team memory", ScopeWrite, true, "call aether_memory_search for note ids",
-		"Use this when the user pins a note, which puts it in every new run's brief in the workspace, or unpins it.", memoryPin).
+		"Use this when the user pins a note into every new run's brief in the workspace, or unpins it.", memoryPin).
 		hints(false, false).offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodMemoryPin, protocol.MethodMemoryUnpin),
-	opOf("aether_memory_show", "Show team memory", ScopeRead, true, "call aether_memory_search for note ids",
-		"Use this when the user asks about one note in full, with the notes it replaced."+untrustedRule, memoryShow).
-		offer(TierRead).calling(protocol.MethodMemoryShow),
 }
 
 type note struct {
@@ -128,17 +120,4 @@ func memoryPin(ctx context.Context, c calls, in memoryPinInput) (string, any, er
 		verb = "Pinned"
 	}
 	return fmt.Sprintf("%s note %s.", verb, item.ID), map[string]any{"id": item.ID, "pinned": item.PinnedAt != nil, "url": url}, nil
-}
-
-func memoryShow(ctx context.Context, c calls, in memoryShowInput) (string, any, error) {
-	var res protocol.MemoryShowResult
-	if err := c.read(ctx, protocol.MethodMemoryShow, protocol.MemoryShowParams{WorkspaceID: in.WorkspaceID, ID: in.ID}, &res); err != nil {
-		return "", nil, err
-	}
-	chain := make([]note, 0, min(len(res.Chain), defaultRows))
-	for _, m := range res.Chain[:min(len(res.Chain), defaultRows)] {
-		chain = append(chain, noteOf(m, maxText))
-	}
-	return fmt.Sprintf("Note %s (%s), %d earlier versions.", res.Item.ID, res.Item.Kind, len(res.Chain)),
-		map[string]any{"id": res.Item.ID, "untrusted": map[string]any{"note": noteOf(res.Item, 4000), "replaced": chain}}, nil
 }

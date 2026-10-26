@@ -183,14 +183,14 @@ others:
 
 | Tools | What they do | Scope |
 | --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_agents` | Workspaces; agents (installed, signed in, Enhanced) | `read` |
+| `aether_list_workspaces` | Workspaces, and agents (installed, signed in, Enhanced) | `read` |
 | `aether_list_runs`, `aether_get_run` | Your runs (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one run with what it waits on, its latest report and its pull request | `read` |
 | `aether_run_history` | A page of a run's conversation (Enhanced) or terminal, with its reports | `read` |
 | `aether_needs_attention` | What needs you, the dashboard's **Needs you** list, each item naming the tool that answers it | `read` |
 | `aether_activity_summary` | What your runs did today, yesterday or this week, in your time zone | `read` |
-| `aether_list_swarms`, `aether_get_swarm` | Swarms; one swarm's tasks, workers with who holds their control and why one failed, questions, recent messages and integrator generation | `read` |
+| `aether_get_swarm` | Your swarms; with `swarm_id`, one swarm's tasks, workers with who holds their control and why one failed, questions, recent messages and integrator generation | `read` |
 | `aether_run_changes`, `aether_pr_status` | A run's commits, conflicts, changed files and optionally its diff, for its primary or an extra repo, paged; its pull request's checks, reviews, comments, merge state and head commit | `read` |
-| `aether_overlaps`, `aether_memory_search`, `aether_memory_show` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md); one note with the notes it replaced | `read` |
+| `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md), or with `id` one note with the notes it replaced | `read` |
 | `aether_integration` | A workspace's or swarm's [integration candidates](teams.md#combine-several-runs-into-one-result), or one with its verifications and delivery request | `read` |
 | `search`, `fetch` | Find runs and swarms by text, in the shape ChatGPT deep research uses | `read` |
 | `aether_launch_run`, `aether_launch_swarm` | Start a run, or a swarm with you as its accountable human; a swarm agent given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
@@ -199,7 +199,7 @@ others:
 | `aether_run_lifecycle` | Relaunch a stopped run, protect or unprotect it, archive or restore it | `write` |
 | `aether_memory_add`, `aether_memory_pin` | Add a team memory note; pin or unpin one | `write` |
 | `aether_decide_approval` | Allow or deny a permission request, once | `control` |
-| `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | Stop a run; close it as merged or abandoned; cancel a swarm | `control` |
+| `aether_stop_run`, `aether_cancel_swarm` | Stop a run, or with `outcome` close it as merged or abandoned; cancel a swarm | `control` |
 | `aether_switch_run_mode` | Switch a live run to Standard or Enhanced, discarding the turn in progress | `control` |
 | `aether_handoff_run` | Give a run to a teammate, who then owns and controls it | `control` |
 | `aether_replace_integrator` | Start a new integrator for a swarm from its agents | `control` |
@@ -276,8 +276,8 @@ same message to the same run still being sent or sent within 60 seconds, so a
 retry is delivered once and its result has `duplicate: true`. To send the same
 text again on purpose, pass a new `idempotency_key`.
 `aether_mark_reviewed` completes only a run whose agent reported success and
-awaits your review; to end any other run, use `aether_stop_run` or
-`aether_close_run` under `control`. A message to your own run that no one
+awaits your review; to end any other run, use `aether_stop_run` under
+`control`. A message to your own run that no one
 controls in the dashboard, or to a run you control, reaches the agent at once. Any other message waits
 about 45 seconds for the member in control to approve it. `aether_decide_approval` allows
 or denies a permission request once; it never picks an "always" option, so it

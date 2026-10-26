@@ -32,7 +32,7 @@ const (
 // ConfirmedMethods wait for the member to decide the assistant's card for
 // them, so a call outlasts the card; internal/assistant/tools checks every
 // method it confirms is here.
-var ConfirmedMethods = []string{protocol.MethodRunKill, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject,
+var ConfirmedMethods = []string{protocol.MethodRunKill, protocol.MethodRunClose, protocol.MethodEnvSave, protocol.MethodRunLaunch, protocol.MethodRunInject,
 	protocol.MethodRunInputRespond, protocol.MethodMissionQuestionAnswer, protocol.MethodRunRoomPost,
 	protocol.MethodRunRelaunch, protocol.MethodRunModeSwitch, protocol.MethodRunProtect, protocol.MethodRunArchive, protocol.MethodRunHandoff,
 	protocol.MethodMissionWorkerRelease, protocol.MethodMissionArchive, protocol.MethodMissionUnarchive, protocol.MethodMissionReplaceIntegrator,

@@ -104,9 +104,9 @@ func answerWith(it protocol.AttentionItem) string {
 	case protocol.AttentionKindNeedsInput, protocol.AttentionKindBlocked:
 		return "aether_message_run"
 	case protocol.AttentionKindReady:
-		return "aether_pr_status, then aether_mark_reviewed or aether_close_run"
+		return "aether_pr_status, then aether_mark_reviewed or aether_stop_run with outcome"
 	case protocol.AttentionKindFailed:
-		return "aether_get_run, then aether_message_run or aether_close_run"
+		return "aether_get_run, then aether_message_run or aether_stop_run with outcome"
 	case protocol.AttentionKindIntegratorDown:
 		return "aether_replace_integrator"
 	case protocol.AttentionKindControlHold:

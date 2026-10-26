@@ -118,7 +118,7 @@ can push branches and open pull requests.
 
 | Tool | Read-only | Destructive | Open world | Justification |
 | --- | --- | --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_agents`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_list_swarms`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
+| `aether_list_workspaces`, `aether_list_runs`, `aether_run_history`, `aether_needs_attention`, `aether_activity_summary`, `aether_get_swarm`, `aether_run_changes`, `aether_overlaps`, `aether_memory_search`, `search`, `fetch` | yes | no | no | Reads records on the user's own Aether server and changes nothing |
 | `aether_get_run` | yes | no | no | Reads one run on the user's server. It also reads the run's pull request state, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_pr_status` | yes | no | no | Reads a run's pull request checks and reviews, which the server fetches from GitHub; open world `yes` is proposed |
 | `aether_launch_run`, `aether_launch_swarm` | no | no | yes | Adds a run or swarm, which can be stopped; its agents can push branches and open pull requests |
@@ -127,7 +127,7 @@ can push branches and open pull requests.
 | `aether_resume_run` | no | no | yes | The agent goes on working and can push |
 | `aether_mark_reviewed` | no | yes | no | `complete` closes the run, which cannot be reopened; records state on the server only |
 | `aether_decide_approval` | no | yes | yes | An allowed action, such as a push, cannot be taken back |
-| `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | no | yes | no | Ends runs on the user's server; cannot be undone |
+| `aether_stop_run`, `aether_cancel_swarm` | no | yes | no | Ends or closes runs on the user's server; cannot be undone |
 | `aether_run_lifecycle` | no | no | yes | Every action has an inverse; a relaunched agent goes on working |
 | `aether_switch_run_mode` | no | yes | yes | Discards the turn in progress; the switched agent goes on working |
 | `aether_swarm_manage` | no | yes | yes | Archiving closes the swarm's completed runs; a released worker goes on working under its integrator |
@@ -146,10 +146,20 @@ scopes.
 
 ### Tool list budget
 
-Neither ChatGPT nor Claude documents a limit on `tools/list`; its cost is the
-model context every conversation spends on it. `TestConnectorToolList` holds
-it under 24000 bytes. Keep each description under about 350 characters and
-schemas free of examples and long enums. There is no room for
+Neither ChatGPT nor Claude documents a limit on `tools/list`. A report on
+OpenAI's developer forum quotes ChatGPT refusing a server because "All tools (including name, description, and input schema)
+must be less than 5000 tokens", possibly for the total; that figure is
+unverified until a live ChatGPT test settles it. Anthropic notes that tool
+selection degrades past 30 to 50 tools.
+
+`TestConnectorToolList` checks the list with every scope granted: at most 40
+tools, and each tool's name, description and compact input schema at most
+3500 bytes, 15000 for all of them together. Today that is 34 tools, 12519
+bytes and 2986 o200k tokens, the largest tool `aether_launch_swarm` at 895
+bytes; the whole `tools/list` JSON is 18434 bytes. Give each tool one "Use
+this when" sentence, describe a property only when its name does not say
+enough, and fold a read into a tool that already answers it. Merge only
+tools of the same scope and hints. There is no room for
 `openai/toolInvocation` status strings.
 
 ## Reviewer setup
@@ -200,7 +210,7 @@ connector tool; the build warns until it is.
 
 | # | Step | Prompt | tools_triggered | expected_behavior |
 | --- | --- | --- | --- | --- |
-| 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_list_workspaces`, `aether_list_agents`, `aether_launch_run` | After confirmation, starts one run and returns its id, state and dashboard link |
+| 1 | Launch | Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md. | `aether_list_workspaces`, `aether_launch_run` | After confirmation, starts one run and returns its id, state and dashboard link |
 | 2 | Track | What changed in my Aether runs since we last checked? | `aether_changes` (planned, after #585) | Lists state changes, new reports and messages, and pull request changes since the previous cursor |
 | 3 | Coordinate | Which runs touch the same files as the Contributing section run? | `aether_list_runs`, `aether_overlaps` | Names the other run editing `README.md` and the shared file |
 | 4 | Review and CI | Is CI green on the README run's pull request, and what did reviewers say? | `aether_list_runs`, `aether_pr_status` | Counts of passed, pending and failing checks, each failing check's name and result, the review state and the comment, with the pull request link |

@@ -69,7 +69,7 @@ run.
 | Pause and resume | Pause or resume a run | No |
 | Launch a run | Start a run with a workspace, agent and task | Yes |
 | Message a run | Send a message to a run's agent | Yes |
-| Stop a run | Stop a run | Yes |
+| Stop or close a run | Stop a run, or close it as merged or abandoned | Yes |
 | Save your environment | Save it as the image new runs and terminals start from | Yes |
 | Run lifecycle | Relaunch a stopped run, switch its mode, protect or archive it, hand it to a teammate | Yes |
 | Swarms | Replace a stopped integrator, release your control of a worker, archive or unarchive a swarm | Yes |
