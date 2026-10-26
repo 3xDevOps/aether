@@ -73,7 +73,11 @@ export function AssistantComposer({ textarea, running, dock }: {
       // The prompt keeps the held page; only the sync forgets one the member removed.
       if (useStore.getState().assistantPageRemoved) {
         await flushViewSync(useStore)
-        if (useStore.getState().assistantGeneration !== generation) return
+        // A chip or the text changed while it waited drops the attempt: send nothing the member no longer sees.
+        if (useStore.getState().assistantGeneration !== generation || useStore.getState().assistantAttempt !== attempt) {
+          settlePromptKey(attempt.key)
+          return
+        }
       }
       try {
         await api.assistantPrompt(text, attempt.key, assistantShareView(useStore.getState()) ? attempt.viewContext : unsharedPart(attempt.viewContext))

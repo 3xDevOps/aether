@@ -178,6 +178,21 @@ describe('attachments', () => {
     vi.mocked(api.assistantView).mockImplementation(async () => ({}))
   })
 
+  it('sends nothing when a chip is removed while Send waits for the page to be forgotten', async () => {
+    let land!: () => void
+    vi.mocked(api.assistantView).mockImplementation((context) => context.route ? Promise.resolve({}) : new Promise((resolve) => { land = () => resolve({}) }))
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
+    await userEvent.click(within(aside).getByRole('button', { name: 'Remove page Fix login test from the message' }))
+    await userEvent.type(box(aside), '{Enter}')
+    await waitFor(() => expect(land).toBeDefined())
+    await userEvent.click(within(aside).getByRole('button', { name: 'Remove check lint from the message' }))
+    act(() => land())
+    await waitFor(() => expect(useStore.getState().assistantSending).toBe(false))
+    expect(api.assistantPrompt).not.toHaveBeenCalled()
+    vi.mocked(api.assistantView).mockImplementation(async () => ({}))
+  })
+
   it('sends nothing and shows the error when the server cannot forget a removed page', async () => {
     vi.mocked(api.assistantView).mockImplementation(async (context) => {
       if (!context.route) throw new Error('connection reset')
