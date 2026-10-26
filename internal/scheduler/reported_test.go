@@ -1560,6 +1560,10 @@ func TestAnsweredIsRefusedWhileAQuestionIsOpen(t *testing.T) {
 	e.sched.mu.Lock()
 	before := e.sched.runs[run.ID].idleReportAt
 	e.sched.mu.Unlock()
+	// An answer older than the question is superseded, keeping its key.
+	if err := e.sched.ReportAnswered(ctx, run.ID, "answered-0", "an earlier reply", before.Add(-time.Second)); !errors.Is(err, coord.ErrReportSuperseded) {
+		t.Fatalf("older ReportAnswered = %v, want ErrReportSuperseded", err)
+	}
 	if err := e.sched.ReportAnswered(ctx, run.ID, "answered-1", "replied to a peer", time.Now().Add(time.Second)); !errors.Is(err, coord.ErrHumanOpen) {
 		t.Fatalf("ReportAnswered = %v, want ErrHumanOpen", err)
 	}

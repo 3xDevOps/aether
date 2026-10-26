@@ -303,6 +303,10 @@ func (s *Scheduler) recordIdleReportLocked(ctx context.Context, entry *supervise
 		return coord.ErrRunFinished
 	case !at.After(entry.idleReportAt):
 		return coord.ErrReportSuperseded
+	case strings.HasPrefix(reason, answeredReasonPrefix) && humanReason(entry.idleReason):
+		// Only after the fences: a refusal releases the report's key, which
+		// an older report must keep.
+		return coord.ErrHumanOpen
 	}
 	old := entry.sidecar()
 	entry.idleReason, entry.idleShown = reason, false
@@ -449,9 +453,6 @@ func (s *Scheduler) reportIdle(ctx context.Context, run domain.RunID, id, reason
 		defer s.mu.Unlock()
 		if entry.status.Terminal() || entry.reported != "" {
 			return finished
-		}
-		if strings.HasPrefix(reason, answeredReasonPrefix) && humanReason(entry.idleReason) {
-			return coord.ErrHumanOpen
 		}
 		return s.recordIdleReportLocked(ctx, entry, id, reason, at)
 	}
