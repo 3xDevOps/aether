@@ -77,6 +77,16 @@ jq -r 'paths(type == "string") as $p | select(getpath($p) | startswith("PLACEHOL
 		echo "chatgpt-plugin: warning: $field is a placeholder; replace it before submitting (docs/chatgpt-plugin.md)" >&2
 	done
 
+# A test case may name a tool another change is still adding; review fails
+# until the server registers it. Connector tools are defined only in these
+# files; the run-side bridge reuses some names.
+jq -r '.extensions["com.openai"].review.test_cases.positive[].tools_triggered | split(", ")[]' "$src/plugin.json" | sort -u |
+	while IFS= read -r tool; do
+		find "$root/internal/mcpbridge" "$root/internal/ops" \( -name 'connector*.go' -o -path '*/ops/*.go' \) \
+			! -name '*_test.go' -exec grep -lF "\"$tool\"" {} + 2>/dev/null | grep -q . ||
+			echo "chatgpt-plugin: warning: a test case triggers $tool, which no connector tool registers yet" >&2
+	done
+
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 mkdir "$stage/assets"
