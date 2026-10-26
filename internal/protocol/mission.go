@@ -268,8 +268,12 @@ type MissionListResult struct {
 	Missions   []Mission `json:"missions"`
 	NextCursor string    `json:"next_cursor,omitempty"`
 }
+
+// MissionShowParams name the mission by MissionID, or by QuestionID, one of
+// its questions, when MissionID is empty.
 type MissionShowParams struct {
-	MissionID string `json:"mission_id"`
+	MissionID  string `json:"mission_id"`
+	QuestionID string `json:"question_id,omitempty"`
 }
 type MissionShowResult struct {
 	Mission     Mission                  `json:"mission"`

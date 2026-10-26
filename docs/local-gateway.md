@@ -601,6 +601,9 @@ takes them and `swarm-repos` when `mission.create` does; an older server drops
 the field. `mission.show` and `mission.list` return a swarm's
 `extra_workspace_ids`.
 
+`mission.show` takes `mission_id`, or `question_id` alone to show the swarm
+that asked that question.
+
 Run snapshots, including mutation results, also expose
 `container_retained_until` (RFC 3339), `cleanup_pending`, and `cleanup_error`
 when applicable. These describe the retained runtime, not the lifetime of
