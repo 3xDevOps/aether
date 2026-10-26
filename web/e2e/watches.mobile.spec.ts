@@ -47,7 +47,7 @@ test('a phone creates, pauses, resumes and deletes a watch, and sees its notice 
   await alice.api.rpc('run.inject', { run_id: run.id, message: 'ask permission', idempotency_key: `watch-mobile-${run.id}` })
   await page.reload()
   const notices = page.getByRole('dialog').getByRole('region', { name: 'Notifications' })
-  await expect(notices.getByText('No push device - in-app only').first()).toBeVisible({ timeout: 60_000 })
+  await expect(notices.getByRole('list', { name: 'Delivery' }).first()).toContainText('In-app', { timeout: 60_000 })
   await testInfo.attach('watch notice', { body: await page.screenshot(), contentType: 'image/png' })
 
   await page.getByRole('dialog').getByRole('button', { name: 'Delete…' }).tap()
