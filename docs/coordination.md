@@ -1844,9 +1844,9 @@ the reporter prints Claude Code's
 `{"decision":"block","reason":"Report your state with aether-internal report (answered, waiting, needs-input, blocked, success or failure) before ending the turn."}`,
 naming only the outcomes the run's role may use,
 and the agent goes on. The next stop of that turn is applied whatever it
-reported. If the server cannot check, the stop is applied. If no hook
-arrives within a minute of the hold, as when the answer never reached Claude
-Code, the server ends the turn itself. Enhanced runs get
+reported. If the server cannot check, the stop is applied. If neither a hook
+nor terminal output follows the hold for a minute, as when the answer never
+reached Claude Code, the server ends the turn itself. Enhanced runs get
 the same rule as a [report reminder](enhanced-runs.md#report-reminder)
 prompt. Background runs, and Standard runs of other agents, are not held.
 

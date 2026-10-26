@@ -12,8 +12,9 @@ import (
 )
 
 // heldStopGrace is how long a Standard turn whose stop was held may go
-// without a hook before Aether applies the stop itself: the reporter may
-// have lost the answer, leaving Claude Code stopped with nothing reported.
+// without a hook or terminal output before Aether applies the stop itself:
+// the reporter may have lost the answer, leaving Claude Code stopped with
+// nothing reported.
 var heldStopGrace = time.Minute
 
 // HoldTurnEnd returns the reminder for the turn run's agent is ending when
@@ -53,14 +54,23 @@ func (s *Scheduler) HoldTurnEnd(ctx context.Context, run domain.RunID) (string, 
 	return reminder, nil
 }
 
-// applyHeldStop ends a held Standard turn that sent no hook since heldAt.
+// applyHeldStop ends a held Standard turn that sent no hook since heldAt
+// and whose terminal stayed quiet for heldStopGrace: Claude Code can think
+// or write for longer than that without a hook, but not without output.
 func (s *Scheduler) applyHeldStop(entry *supervised, started, heldAt time.Time) {
-	if s.superCtx.Err() != nil {
-		return
-	}
 	quiet := func(e *supervised) bool {
 		return e == entry && e.turnStartedAt.Equal(started) && e.reportAsked.Equal(started) &&
 			e.agentReport.State == agentstatus.Working && !e.lastWorking.After(heldAt)
+	}
+	s.mu.Lock()
+	held := quiet(s.runs[entry.runID])
+	s.mu.Unlock()
+	if !held || s.superCtx.Err() != nil {
+		return
+	}
+	if output := s.driver(false).LastActivity(entry.runID); time.Since(output) < heldStopGrace {
+		time.AfterFunc(heldStopGrace-time.Since(output), func() { s.applyHeldStop(entry, started, heldAt) })
+		return
 	}
 	if _, err := s.applyAgentReportIf(s.superCtx, entry.runID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}, quiet); err != nil {
 		slog.Warn("scheduler: end a held turn that went quiet", "run", entry.runID, "error", err)
