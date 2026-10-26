@@ -180,7 +180,7 @@ export function WorkGroup({
         'flex h-6 w-full min-w-0 items-center gap-2 rounded-control text-left text-ui-sm text-muted hover:text-text coarse:h-11',
       )}
     >
-      <ChevronRight className={cn('size-3.5 shrink-0 transition-transform duration-100 motion-reduce:transition-none', expanded && 'rotate-90')} />
+      <ChevronRight className={cn('size-3.5 shrink-0 transition-transform duration-200 ease-standard motion-reduce:transition-none', expanded && 'rotate-90')} />
       <span className="min-w-0 flex-1 truncate">{summary}</span>
       {trailing !== undefined && <span className="shrink-0 tabular-nums">{trailing}</span>}
     </button>

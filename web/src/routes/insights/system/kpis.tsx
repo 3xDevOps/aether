@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ProgressBar } from '@/components/ui/progress-bar'
 import { formatBytes } from '@/lib/format'
 import type { DiskUsage, SystemContainer } from '@/lib/types'
 import { busyPercent, percentText, rateText, uptimeText, type Point } from '@/routes/insights/system/model'
@@ -19,14 +20,6 @@ function Tile({ label, value, compact = false, spark, children }: { label: strin
 
 function Spark({ points, max }: { points: Point[]; max?: number }) {
   return <Sparkline points={points} max={max} className="h-6 w-full text-icon-faint" color="currentColor" />
-}
-
-function Meter({ label, used, total }: { label: string; used: number; total: number }) {
-  return (
-    <span role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={total} aria-valuenow={used} className="block h-1.5 overflow-hidden rounded-full bg-chrome">
-      <span className="block h-full bg-icon-faint" style={{ width: `${Math.min(100, (used / total) * 100)}%` }} />
-    </span>
-  )
 }
 
 export function Kpis({ stats, samples, disk }: { stats: SystemStats; samples: SystemStats['samples']; disk: DiskUsage | undefined }) {
@@ -54,7 +47,7 @@ export function Kpis({ stats, samples, disk }: { stats: SystemStats; samples: Sy
       <Tile
         label="Disk"
         value={disk && diskTotal > 0 ? percentText((disk.used_bytes / diskTotal) * 100) : '—'}
-        spark={disk && diskTotal > 0 ? <Meter label="Data filesystem used" used={disk.used_bytes} total={diskTotal} /> : undefined}
+        spark={disk && diskTotal > 0 ? <ProgressBar role="meter" aria-label="Data filesystem used" value={disk.used_bytes} max={diskTotal} fillClassName="bg-icon-faint" /> : undefined}
       >
         {disk && diskTotal > 0 ? `${formatBytes(disk.used_bytes)} of ${formatBytes(diskTotal)} · data filesystem` : 'Data filesystem usage unavailable'}
       </Tile>

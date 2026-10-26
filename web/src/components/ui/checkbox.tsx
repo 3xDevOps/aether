@@ -12,13 +12,17 @@ export function Checkbox({ className, ...props }: React.ComponentProps<typeof Ch
       className={cn(
         focusRing,
         coarseHitArea,
-        'size-4 shrink-0 rounded-control border border-control bg-canvas text-on-accent transition-colors duration-100 motion-reduce:transition-none',
+        'size-4 shrink-0 rounded-chip border border-control bg-canvas text-on-accent transition-colors duration-100 motion-reduce:transition-none',
         'disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-accent data-[state=checked]:bg-accent',
         className,
       )}
       {...props}
     >
-      <CheckboxPrimitive.Indicator className="flex items-center justify-center">
+      {/* A transition, not a mount animation, so a box that renders checked stays still. */}
+      <CheckboxPrimitive.Indicator
+        forceMount
+        className="flex items-center justify-center transition-[scale] duration-200 ease-pop data-[state=unchecked]:invisible data-[state=unchecked]:scale-60 data-[state=unchecked]:duration-instant motion-reduce:transition-none"
+      >
         <Check className="size-3" strokeWidth={2.5} />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>

@@ -167,7 +167,7 @@ describe.each([
 describe('primitive colour utilities', () => {
   const defined = new Set([...css.matchAll(/^\s*--((?:color|text-color|background-color|text)-[\w-]+):/gm)].map((m) => m[1]))
   const utilities = new Set([...css.matchAll(/^@utility ([\w-]+)/gm)].map((m) => m[1]))
-  const builtIn = new Set(['transparent', 'current', 'inherit', 'white', 'black', 'left', 'center', 'right'])
+  const builtIn = new Set(['transparent', 'current', 'inherit', 'white', 'black', 'left', 'center', 'right', 'linear-to-r'])
   const primitives = sources.filter(({ file }) => file.startsWith('components/ui/')).map(({ file, text }) => [file, text])
   it.each(primitives)('%s names only defined tokens', (_, text) => {
     const missing = [...text.matchAll(/(?<![\w-])(text|bg)-([a-z][\w-]*)/g)]

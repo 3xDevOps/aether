@@ -178,7 +178,7 @@ function ComposerImagePreview({ image, index, disabled, onRemove }: {
   }
   return (
     <div className="relative w-28 shrink-0 rounded-control border border-seam bg-canvas p-1">
-      {preview && <img src={preview} alt={name} className="h-20 w-full rounded-[2px] object-contain" />}
+      {preview && <img src={preview} alt={name} className="h-20 w-full rounded-chip object-contain" />}
       <p className="truncate px-1 pt-1 text-ui-sm text-muted" title={name}>{name}</p>
       {!image.path && <p className="px-1 text-ui-sm text-muted">Not uploaded</p>}
       {remove}

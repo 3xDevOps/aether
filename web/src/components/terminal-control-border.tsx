@@ -1,5 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
-import { useMediaQuery } from '@/lib/hooks'
+import { useReducedMotion } from '@/lib/hooks'
 
 export type TerminalControlAppearance = 'active' | 'release' | 'takeover' | 'hidden'
 
@@ -15,7 +15,7 @@ export function TerminalControlBorder({
   const previousTakeoverProgress = useRef<number | undefined>(undefined)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [settled, setSettled] = useState(false)
-  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+  const reducedMotion = useReducedMotion()
   const steady = settled && appearance === 'active' && takeoverProgress === undefined
   const id = useId()
 

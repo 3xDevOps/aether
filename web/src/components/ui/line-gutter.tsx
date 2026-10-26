@@ -12,7 +12,7 @@ import { cn, focusRingInset } from '@/lib/utils'
 export function LineGutter({ label, focusable, children }: { label: string; focusable: boolean; children: React.ReactNode }) {
   const className = cn(
     'relative flex shrink-0',
-    "after:absolute after:top-0.5 after:right-0.5 after:size-4 after:rounded-control after:bg-accent after:text-center after:font-sans after:text-ui after:leading-4 after:font-medium after:text-on-accent after:opacity-0 after:content-['+']",
+    "after:absolute after:top-0.5 after:right-0.5 after:size-4 after:rounded-chip after:bg-accent after:text-center after:font-sans after:text-ui after:leading-4 after:font-medium after:text-on-accent after:opacity-0 after:content-['+']",
     'group-hover/line:after:opacity-100',
   )
   return focusable ? (

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { ProgressBar } from '@/components/ui/progress-bar'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { formatBytes } from '@/lib/format'
@@ -191,9 +192,7 @@ export function StorageSection() {
               : 'Data filesystem usage unavailable.'}
           </p>
           {disk.total_bytes > 0 && (
-            <span role="meter" aria-label="Disk used" aria-valuemin={0} aria-valuemax={disk.total_bytes} aria-valuenow={disk.used_bytes} className="block h-1.5 overflow-hidden rounded-full bg-chrome">
-              <span className="block h-full bg-icon-faint" style={{ width: `${Math.min(100, (disk.used_bytes / disk.total_bytes) * 100)}%` }} />
-            </span>
+            <ProgressBar role="meter" aria-label="Disk used" value={disk.used_bytes} max={disk.total_bytes} fillClassName="bg-icon-faint" />
           )}
         </div>
         <Block title="Aether data">

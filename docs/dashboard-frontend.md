@@ -16,8 +16,8 @@ surfaces; the server gateway authenticates each request with Tailscale WhoIs
 and no browser token.
 
 The visual contract is a dense developer workbench on graphite surfaces with
-one teal accent: flat panes and compact controls. `docs/styles.md` defines the
-tokens, type and motion.
+one teal accent: flat panes, compact controls, restrained elevation and short
+token-driven motion. `docs/styles.md` defines the tokens, type and motion.
 
 The gateways and their transport boundaries are documented in
 `docs/local-gateway.md`. The same bundle serves both, gating machine-local
@@ -1342,7 +1342,9 @@ Details lists the raw `reason` as **Last reason**.
 state to label, dot colour and dot shape; the sidebar, board, run header,
 run lists, swarm page, activity feed and palette all use it. Each state has
 its own dot shape and a text or `aria-label` label, so no state is told by
-colour alone. Only Working pulses, and not under `prefers-reduced-motion`.
+colour alone. Only Working pulses, breathing in opacity and size, except in
+the sidebar, board, palette and All workspaces, and not under
+`prefers-reduced-motion`.
 Waiting states are a neutral, static glyph; Needs you is the only amber
 state.
 
@@ -3743,8 +3745,9 @@ virtualized tree the focused row stays mounted while scrolled away. Each
 parent, `aria-expanded`. One polite status region announces rows that come
 to need you, fail, become ready for review or complete: transitions are
 gathered for 1.5 seconds from the first, then up to three are read, Needs
-you and Failed first. Only Working dots pulse, and rows added after the first render fade
-in over 120ms; with reduced motion requested, neither animates.
+you and Failed first. Only Working dots pulse, and rows added after the first
+render enter with `animate-entrance` (a fade and a 4px rise over 360ms); with
+reduced motion requested, neither animates.
 
 ### Captures and candidate review
 
@@ -6362,22 +6365,25 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   described under [Run state](#run-state).
 - **Lists stay still.** Sidebar rows, board cards, the palette and All
   workspaces draw a static dot. Only the run header's dot and the Session
-  view's live row pulse while Working (`state-pulse`, an opacity step).
-- **Motion is optional.** The controlling terminal's 1px teal outline is
-  always static. The state pulse, the Session live row's shimmer, spinners and
-  skeletons stop moving under `prefers-reduced-motion: reduce`. There is no
-  startup scene or reveal-flash animation.
+  view's live row pulse while Working (`state-pulse`, a breathe in opacity
+  and size).
+- **Motion is optional.** Every animation and transition stops under
+  `prefers-reduced-motion: reduce`: the state pulse, the Session live row's
+  shimmer, overlay and sheet entrances, tab indicators, disclosures, spinners
+  and skeletons. The controlling terminal's 1px teal outline is always static.
+  There is no startup scene or reveal-flash animation.
 - **Primitives first.** `src/components/ui/` holds the house primitives on
   Radix: `Button` (`primary`, `secondary`, `ghost`, `danger`, `link` and the
   muted `quiet` link), `Input`, `Textarea`, `Label`, `FormField`, `Select`,
   `Checkbox`, `Radio`, `Collapsible`, `Dialog`, `AlertDialog`, `Menu`,
   `Popover`, `Tooltip`, `Tabs`, `Command`, `Card`, `Callout`, `Badge`,
+  `CountBadge`, `ProgressBar`, `TextSwap`, `IconSwap`, `SlidingIndicator`,
   `ListRow`, `PaneHeader`, `EmptyState`, `RequestCard`, `StatusDot`,
   `Skeleton` and the Session `timeline` and `session-blocks` rows. They are
   tuned to the shared scale and `focusRing`, and preserve props, events, refs
   and accessibility contracts. Use them instead of raw form elements. Fields
   and buttons are 28px, small buttons 24px, all 44px on a coarse pointer;
-  adjoining panes and rows are square, and controls use the 4px
+  adjoining panes and rows are square, and controls use the 8px
   `--radius-control`. `Input`, `Textarea` and `SelectTrigger` compose the
   shared `field` style with contrast-tuned `--control-border` borders,
   readable placeholders and explicit disabled/read-only states.
@@ -6391,7 +6397,8 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   `id`, so the control announces its purpose rather than only its current
   option.
 - **Disclosures normally unmount closed content.** `CollapsibleTrigger`
-  supplies the marker.
+  supplies the marker, which turns over 200ms; the body glides its height
+  open and shut and unmounts once the closing glide ends.
 - **Status and metadata pills are `Badge`.** It takes a run-state `tone` or
   stays neutral. A `Badge` takes no `title` of its own, so a pill whose text
   can be clipped wears one on the span around it. Run and dock tab strips
@@ -6399,7 +6406,8 @@ coarse pointer at all and the dock offers collapsed, half and full instead
 - **A hint a reader needs is a `Tooltip`, not a `title`.** A `title` is drawn
   by the pointer and by nothing else, so on a control a keyboard can land on
   it is information that reader can never get at. A Tooltip opens on focus and
-  hover, with a 300ms hover delay, and points the control's `aria-describedby`
+  hover, with a 250ms hover delay that a tooltip closed in the last 300ms
+  skips, and points the control's `aria-describedby`
   at itself. It is a description rather than the name: an icon-only `Button`
   takes `label`, which sets both. A `title` stays only on what a keyboard
   cannot land on - a truncated path, a timestamp, a breakdown - since a

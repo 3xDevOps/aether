@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type * as React from 'react'
 import { ArrowUp, CornerUpRight, ListPlus, Play, RefreshCw, Square } from '@/components/icons'
 import { Button } from '@/components/ui/button'
+import { ProgressBar } from '@/components/ui/progress-bar'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
@@ -104,9 +105,7 @@ function ContextMeter({ usage }: { usage: SessionUsage }) {
         aria-valuetext={`${percent}%`}
         className={cn(focusRing, 'flex h-6 shrink-0 items-center gap-1.5 rounded-control px-1.5 text-ui-sm text-muted tabular-nums coarse:h-11')}
       >
-        <span aria-hidden="true" className="block h-1.5 w-4 overflow-hidden rounded-full bg-hover-chrome">
-          <span className={cn('block h-full', percent >= 90 ? 'bg-state-needs-you' : 'bg-icon-faint')} style={{ width: `${percent}%` }} />
-        </span>
+        <ProgressBar aria-hidden="true" value={percent} className="w-4 bg-hover-chrome" fillClassName={percent >= 90 ? 'bg-state-needs-you' : 'bg-icon-faint'} />
         {percent}%
       </span>
     </Tooltip>

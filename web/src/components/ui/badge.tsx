@@ -13,7 +13,7 @@ export function Badge({
       data-slot="badge"
       data-tone={tone}
       className={cn(
-        'inline-flex h-5 max-w-full shrink-0 items-center gap-1 rounded-control px-1.5 text-ui-sm font-medium whitespace-nowrap tabular-nums [&_svg]:size-3 [&_svg]:shrink-0',
+        'inline-flex h-5 max-w-full shrink-0 items-center gap-1 rounded-chip px-1.5 text-ui-sm font-medium whitespace-nowrap tabular-nums [&_svg]:size-3 [&_svg]:shrink-0',
         text,
         soft,
         className,
