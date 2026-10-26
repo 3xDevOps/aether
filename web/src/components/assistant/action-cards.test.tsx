@@ -107,6 +107,7 @@ describe('action cards', () => {
     assistantSocket().send({ status: status({ state: 'running', confirmations: [launch] }) })
     const pending = await card(aside, /^Launching run on main-repo with Claude Code\. Waiting for your approval$/)
     expect(pending.dataset.state).toBe('approval')
+    expect(aside.querySelector('[data-slot="live-row"]')?.textContent).toBe('Waiting for your approval')
 
     act(() => useStore.getState().upsertRun(run({ id: 'run_9', title: 'login-test', status: 'running' })))
     assistantSocket().send({ status: status({ state: 'running' }) }).items(
@@ -264,7 +265,7 @@ describe('action history', () => {
     const entries = within(list).getAllByRole('button')
     expect(entries.map((entry) => entry.textContent)).toEqual([
       expect.stringMatching(/^Message run fix-loginDeclined · opens the run/),
-      expect.stringMatching(/^Launched run on main-repo with Claude CodeWorking in the background|^Launched run on main-repo with Claude CodeDone · opens the run/),
+      expect.stringMatching(/^Launched run on main-repo with Claude CodeWorking in the background · opens the run/),
     ])
     expect(document.activeElement).toBe(entries[0])
     await userEvent.keyboard('{ArrowDown}')

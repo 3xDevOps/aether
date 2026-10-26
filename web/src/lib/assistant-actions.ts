@@ -348,7 +348,17 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
     action.error = saved?.error ?? error
     action.target = target(action.tool, action.input, record(action.result), saved)
   }
-  return { rows: out, groups, actions }
+  // The live line would name the running call by its raw tool title; its card already says what it does.
+  const calls = new Map(drafts.filter((d) => d.entry.status === 'running').map((d) => [d.entry.label, d.action]))
+  const shown = out.map((row): SessionRow => {
+    const live = row.kind === 'live' ? row : row.kind === 'steps' ? row.live : undefined
+    const action = live && calls.get(live.label)
+    if (!live || !action) return row
+    const said = action.state === 'approval' ? { label: 'Waiting for your approval', tone: 'needs-you' as const } : { label: 'Generating…', tone: live.tone }
+    if (row.kind === 'steps') return { ...row, live: said }
+    return row.kind === 'live' ? { ...row, ...said } : row
+  })
+  return { rows: shown, groups, actions }
 }
 
 /** Display names the transcript knows; a missing one leaves the id. */

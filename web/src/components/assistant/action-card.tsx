@@ -84,7 +84,7 @@ export function useOpenTarget(): (target: ActionTarget) => void {
 }
 
 /** A launched run or swarm keeps going after the panel closes. */
-function useBackground(action: AssistantAction): boolean {
+export function useBackground(action: AssistantAction): boolean {
   return useStore((s) => {
     if (action.state !== 'done' || !launches.has(action.tool) || !action.target) return false
     if (action.target.kind === 'run') {

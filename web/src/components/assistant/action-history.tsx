@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type * as React from 'react'
-import { actionStateWord, actionTone, useActionNames, useOpenTarget, useTargetGone } from '@/components/assistant/action-card'
+import { actionStateWord, actionTone, useActionNames, useBackground, useOpenTarget, useTargetGone } from '@/components/assistant/action-card'
 import { useAssistantView } from '@/components/assistant/transcript'
 import { History } from '@/components/icons'
 import { Button } from '@/components/ui/button'
@@ -10,8 +10,8 @@ import { StatusDot } from '@/components/ui/status-dot'
 import { actionSummary, type AssistantAction } from '@/lib/assistant-actions'
 import type { AcpSession } from '@/store/sessions'
 
-const outcomeWord = (action: AssistantAction) => [
-  actionStateWord[action.state],
+const outcomeWord = (action: AssistantAction, background: boolean) => [
+  background ? 'Working in the background' : actionStateWord[action.state],
   action.approval === 'approved' ? 'approved by you' : action.approval === 'auto-approved' ? 'auto-approved' : undefined,
 ].filter(Boolean).join(' · ')
 
@@ -28,6 +28,7 @@ function Entry({ action, onOpen }: { action: AssistantAction; onOpen: () => void
   const names = useActionNames()
   const open = useOpenTarget()
   const gone = useTargetGone(action.target)
+  const background = useBackground(action)
   const target = action.target && !gone && (action.target.route || action.target.url) ? action.target : undefined
   return (
     <li>
@@ -42,11 +43,11 @@ function Entry({ action, onOpen }: { action: AssistantAction; onOpen: () => void
         }}
         className="h-auto w-full min-w-0 items-start justify-start gap-2 px-2 py-1.5 text-left font-normal whitespace-normal text-text aria-disabled:cursor-default aria-disabled:opacity-100 coarse:h-auto coarse:min-h-11 coarse:px-2"
       >
-        <span className="flex h-5 shrink-0 items-center"><StatusDot tone={actionTone[action.state]} /></span>
+        <span className="flex h-5 shrink-0 items-center"><StatusDot tone={background ? 'working' : actionTone[action.state]} /></span>
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="break-words text-text">{actionSummary(action, names)}</span>
           <span className="text-ui-sm text-muted">
-            {outcomeWord(action)}
+            {outcomeWord(action, background)}
             {gone ? ' · no longer exists' : target ? ` · ${target.url ? 'opens the pull request' : `opens the ${target.kind === 'swarm' ? 'swarm' : target.kind}`}` : ''}
           </span>
         </span>
