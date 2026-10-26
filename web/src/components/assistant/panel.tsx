@@ -22,9 +22,9 @@ import { useDrag } from '@/lib/hooks'
 import { useKeybindings } from '@/lib/keybindings'
 import { splitterTarget } from '@/lib/keys'
 import { cn, focusRing } from '@/lib/utils'
-import { requestTitle } from '@/routes/run/session-requests'
+import { requestAnnouncement } from '@/routes/run/session-requests'
 import { useStore } from '@/store'
-import { assistantWaiting, clampAssistantWidth, maxAssistantWidth, minAssistantWidth } from '@/store/assistant'
+import { assistantSessionID, assistantWaiting, clampAssistantWidth, maxAssistantWidth, minAssistantWidth } from '@/store/assistant'
 import { connectAssistant, refreshAssistant } from '@/store/assistant-stream'
 import { useIdentityKnown } from '@/store/hooks'
 import { assistantShareView, syncViewContext, trackViewContext } from '@/store/view-context'
@@ -62,7 +62,7 @@ function useAssistantState() {
   return { status, session, confirmations, running, waiting }
 }
 
-function useAnnouncement(): string {
+function useAnnouncement(agentName: string): string {
   const { session, confirmations, running } = useAssistantState()
   const [text, setText] = useState('')
   const pending = session?.pending.at(-1)
@@ -72,9 +72,9 @@ function useAnnouncement(): string {
     const prior = seen.current
     seen.current = { pending: pending?.id, confirmation: confirmation?.id, running }
     if (confirmation && confirmation.id !== prior.confirmation) setText(`Approval needed: ${confirmation.summary}`)
-    else if (pending && pending.id !== prior.pending) setText(`${requestTitle(pending)} ${pending.title}`)
+    else if (pending && pending.id !== prior.pending) setText(requestAnnouncement(useStore.getState().acpSessions[assistantSessionID], pending, agentName))
     else if (prior.running && !running) setText('The assistant finished its turn')
-  }, [pending, confirmation, running])
+  }, [pending, confirmation, running, agentName])
   return text
 }
 
@@ -162,8 +162,8 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
 function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextAreaElement | null>; onClose: () => void }) {
   const { status, waiting } = useAssistantState()
   const [confirming, setConfirming] = useState(false)
-  const announcement = useAnnouncement()
   const agent = status?.agents.find((item) => item.name === status.agent)?.display_name ?? status?.agent
+  const announcement = useAnnouncement(agent || 'The assistant')
   const ready = status !== null && status.state !== 'setup' && status.state !== 'needs_restart'
   const onRun = useStore((s) => s.route.name === 'run')
   return (

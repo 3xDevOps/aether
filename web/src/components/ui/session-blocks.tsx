@@ -7,7 +7,7 @@ import { CopyButton } from '@/components/ui/copy-button'
 import { Highlighted } from '@/components/ui/markdown'
 import { StatusDot } from '@/components/ui/status-dot'
 import { cn, focusRingInset } from '@/lib/utils'
-import { parsePatch } from '@/routes/diff/parse'
+import { parsePatch, type PatchFile } from '@/routes/diff/parse'
 import { PathText } from '@/routes/files/path-link'
 import type { PlanEntry } from '@/store/session-steps'
 
@@ -91,8 +91,25 @@ const lineClass = {
 
 const prefix = { add: '+', del: '-', hunk: '', meta: '', context: ' ' }
 
+/** One file's tool-call patch, which arrives without its `diff --git` header. */
+export function patchFile(path: string, patch: string) {
+  return parsePatch(`diff --git a/${path} b/${path}\n${patch.replace(/\n+$/, '')}`)[0]
+}
+
+export function DiffLines({ file }: { file: PatchFile }) {
+  return (
+    <pre className="overflow-x-auto font-code text-ui-sm text-text">
+      {file.lines.map((line, index) => (
+        <code key={index} className={cn('block min-w-max px-2 whitespace-pre', lineClass[line.kind])}>
+          {prefix[line.kind]}{line.text || ' '}
+        </code>
+      ))}
+    </pre>
+  )
+}
+
 export function DiffBlock({ path, patch }: { path: string; patch: string }) {
-  const file = useMemo(() => parsePatch(`diff --git a/${path} b/${path}\n${patch.replace(/\n+$/, '')}`)[0], [path, patch])
+  const file = useMemo(() => patchFile(path, patch), [path, patch])
   if (!file) return null
   return (
     <figure data-slot="diff-block" className="overflow-hidden rounded-control border border-seam">
@@ -101,13 +118,7 @@ export function DiffBlock({ path, patch }: { path: string; patch: string }) {
         <span className="shrink-0 font-code text-diff-add">+{file.additions}</span>
         <span className="shrink-0 font-code text-diff-del">−{file.deletions}</span>
       </figcaption>
-      <pre className="overflow-x-auto font-code text-ui-sm text-text">
-        {file.lines.map((line, index) => (
-          <code key={index} className={cn('block min-w-max px-2 whitespace-pre', lineClass[line.kind])}>
-            {prefix[line.kind]}{line.text || ' '}
-          </code>
-        ))}
-      </pre>
+      <DiffLines file={file} />
     </figure>
   )
 }

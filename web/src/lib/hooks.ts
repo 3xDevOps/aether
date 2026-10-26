@@ -161,3 +161,23 @@ export function useCountdown(until: string | undefined): string {
   const left = Math.max(0, Math.floor((Date.parse(until) - now) / 1000))
   return left === 0 ? 'expired' : `expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
 }
+
+function secondsUntil(at: string | undefined): number {
+  return at ? Math.max(0, Math.ceil((Date.parse(at) - Date.now()) / 1000)) : 0
+}
+
+/** Seconds left until `at`, ticking each second down to zero. */
+export function useSecondsUntil(at: string | undefined): number {
+  const [remaining, setRemaining] = useState(() => secondsUntil(at))
+  useEffect(() => {
+    setRemaining(secondsUntil(at))
+    if (secondsUntil(at) === 0) return
+    const timer = window.setInterval(() => {
+      const next = secondsUntil(at)
+      setRemaining(next)
+      if (next === 0) window.clearInterval(timer)
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [at])
+  return remaining
+}

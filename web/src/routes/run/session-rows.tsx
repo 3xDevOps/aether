@@ -7,6 +7,7 @@ import { CopyButton } from '@/components/ui/copy-button'
 import { Markdown } from '@/components/ui/markdown'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { RequestCard } from '@/components/ui/request-card'
+import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
 import { AssistantRow, EventRow, LiveActivityRow, MessageRow } from '@/components/ui/timeline'
 import { playEntrance, type Entrance } from '@/lib/motion'
 import { memberName } from '@/lib/member-name'
@@ -219,12 +220,17 @@ function Row({ row, open, ctx }: { row: SessionRow; open: boolean; ctx: RowConte
         <RequestCard
           title={row.title}
           meta={<RelativeTime at={row.at} />}
-          actions={row.answer === 'input'
-            ? ctx.hasAgentTerminal && <Button size="sm" variant="secondary" onClick={ctx.openTerminal}>Open terminal</Button>
-            : <Button size="sm" variant="secondary" onClick={() => ctx.reveal(requestCardID.question(row.id))}>Reply</Button>}
-        >
-          {row.answer === 'input' ? inputHint(ctx.hasAgentTerminal) : row.body}
-        </RequestCard>
+          description={row.answer === 'input' ? inputHint(ctx.hasAgentTerminal) : row.body}
+          footer={(row.answer !== 'input' || ctx.hasAgentTerminal) && (
+            <RequestFooter>
+              <RequestActions>
+                {row.answer === 'input'
+                  ? <RequestAction label="Open terminal" onClick={ctx.openTerminal} />
+                  : <RequestAction label="Reply" onClick={() => ctx.reveal(requestCardID.question(row.id))} />}
+              </RequestActions>
+            </RequestFooter>
+          )}
+        />
       )
     case 'event':
       return <EventRow tone={row.tone} detail={row.detail} trailing={<RelativeTime at={row.at} />}>{row.text}</EventRow>

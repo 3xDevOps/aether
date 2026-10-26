@@ -1,13 +1,8 @@
 import { useState } from 'react'
-import { Check, X } from '@/components/icons'
-import { Button } from '@/components/ui/button'
+import { RequestAction } from '@/components/ui/request-choice'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
-export function DecisionButtons({ decide, size = 'sm', icons = false }: {
-  decide: (approve: boolean) => Promise<unknown>
-  size?: 'sm' | 'md'
-  icons?: boolean
-}) {
+export function DecisionButtons({ decide }: { decide: (approve: boolean) => Promise<unknown> }) {
   const [pending, setPending] = useState<{ approve: boolean } | null>(null)
   const late = usePastDeadline(pending !== null)
   const press = (approve: boolean) => {
@@ -20,8 +15,8 @@ export function DecisionButtons({ decide, size = 'sm', icons = false }: {
     : late ? stillWaiting : approve ? 'Approving…' : 'Denying…'
   return (
     <>
-      <Button size={size} disabled={pending !== null} onClick={() => press(true)}>{icons && <Check />}{label(true)}</Button>
-      <Button size={size} variant="secondary" disabled={pending !== null} onClick={() => press(false)}>{icons && <X />}{label(false)}</Button>
+      <RequestAction label={label(false)} disabled={pending !== null} onClick={() => press(false)} />
+      <RequestAction label={label(true)} variant="primary" disabled={pending !== null} onClick={() => press(true)} />
     </>
   )
 }

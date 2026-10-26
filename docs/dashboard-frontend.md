@@ -534,10 +534,13 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   open blocks, and the constant row context id `assistant`, and the composer (Enter sends, Shift+Enter inserts a
   newline, `Mod+Enter` also sends; **Stop** replaces **Send** while a turn
   runs). An empty conversation offers four example prompts that fill the
-  composer. Harness permission and question prompts render as request cards
-  answered with `assistant.answer`; each pending confirmation renders as a
-  card with the summary, the method and exact params, a relative deadline,
-  **Approve** and **Decline** (`assistant.confirm`). A card leaves only when a
+  composer. Harness permission and question prompts render as the Session
+  view's request cards, answered with `assistant.answer`; each pending
+  confirmation renders as a card titled with the summary, the method as its
+  source line, a **Details** section with the exact params (three, then
+  **N more**), a relative deadline with a bar draining toward it, **Decline**
+  and **Approve** (`assistant.confirm`). Confirmations stack above the harness
+  prompts in one 40dvh scroll. A card leaves only when a
   `confirmations` frame stops listing it. While `auto_approve` is off a card
   links **Skip these cards…** to Settings > Assistant; a card with
   `other_member` says that member (`other_owner`) owns the run, so it asks
@@ -2724,10 +2727,40 @@ controller approval. `useImplicitControl`
 on any screen: Send, the Standard composer's Send and a request's options
 request the lease and run the action once it is held (given up after 10
 seconds). Pending requests dock above it
-one at a time (`routes/run/session-requests.tsx`), ordered allow-once first
-and allow-always last by ACP `kind`; `1`-`4` pick an option while a card has
-focus, `1` never an allow-always one, and the header's **Answer** focuses the
-docked card on every screen. While Session shows the dock, Details' **Needs
+one at a time, oldest first, with "1 of N" and **Previous request** / **Next
+request** in the card header (`routes/run/request-dock.tsx`). The dock holds
+the card on screen by request id, so arrivals and other answers never swap
+it, and stays empty until the stream has replayed up to the ack's `seq`, so
+a run opened with a request waiting shows it whole and without motion. The
+dock scrolls at 50dvh (40dvh on phones) and the card's footer sticks to its
+bottom.
+
+A request card (`routes/run/session-requests.tsx`, shared with the
+assistant) reads "*agent* wants to *action*": the action comes from the tool
+call's `tool_kind` ("run a command", "edit totals.go", "edit 4 files"), a
+subagent's call names that subagent, and before the tool call arrives it
+reads "asks for permission" over the request title. Below come the tool icon
+and `tool_name`, the agent's own description of the call as a quote, then a
+section: the command, or the files with `+a −d` that open their diff one at a
+time (three, then **N more**), or the locations. A truncated item loads whole
+first; one the session log itself cut shows what the log kept, with a note
+that the preview may be incomplete. Questions show their form and links the
+URL with **Copy link** and
+**Open**. Options with exactly one `allow_once` and one `allow_always`, all
+kinds distinct and set, once the tool call is known and is not a mode switch,
+become **How long** pills,
+**Just once** (the default, never remembered) and **Always**, beside the
+`reject_once` option as Deny, `reject_always` as a quiet extra, and Allow
+named after the chosen option. Anything else keeps one button per option in
+the agent's words, rejects first and the primary (allow once, or accept) last.
+A `delete` call's Allow is `danger`. `1`-`4` pick options in allow-once-first,
+allow-always-last order while a card has focus, `1` never an allow-always one;
+each button shows its digit as a `Kbd` on a fine pointer. A pressed answer
+reads **Sending…**, then "Still waiting for the server…", and errors show
+under the footer. When a request leaves `pending` its card fades out and the
+dock glides to the next card or closes; there is no Escape binding, since
+Escape already closes sheets and an accidental reject cancels the tool call.
+The header's **Answer** focuses the docked card on every screen. While Session shows the dock, Details' **Needs
 you** shows one link, "1 request, shown below the timeline", that closes a
 Details sheet and focuses the card; on other views it lists the cards. `routes/run/session-failure.tsx` shows an adapter failure with
 **Retry Enhanced** and **Open in Standard**, and a sign-in failure with the
@@ -3886,8 +3919,10 @@ phones as a bottom sheet, each a `dialog "Run details"` that returns focus to
 whatever opened it. Sections (`details.tsx`):
 
 - **Needs you**: `RequestCard`s for pending native inputs, teammate messages
-  awaiting the controller with **Approve** / **Deny** through
-  `run.room.decide`, and teammate questions with a reply field. A pending
+  awaiting the controller with **Deny** / **Approve** through
+  `run.room.decide` and a bar draining toward `deliver_after`, and teammate
+  questions with a reply field. Message bodies clamp to six lines with
+  **Show more**. A pending
   decision or reply locks only its own card ([Actions](#actions)). With none of
   these, one card with the needs-you reason and the header's action as a
   secondary button, or "Nothing is waiting on you."
@@ -6427,7 +6462,7 @@ bindings in overlapping scopes share keys, or one begins the other's sequence.
 | `⌘Shift+C` / `Ctrl+Shift+C` | browser | Annotate the page for the agent |
 | `Enter` | composer | Send the message, or steer the running turn |
 | `⌘Shift+Enter` / `Ctrl+Shift+Enter` | composer | Queue the message for after this turn |
-| `1` to `4` | request | Pick that option of the focused Session request |
+| `1` to `4` | request | Pick that option of the focused Session request; Escape does not deny it |
 
 A component answers its bindings with `useKeybindings(scope, handlers)`, which
 pushes the scope onto the stack in `src/lib/key-scope.ts` while it is mounted.
@@ -6609,10 +6644,10 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   `Checkbox`, `Radio`, `Collapsible`, `Dialog`, `AlertDialog`, `Menu`,
   `Popover`, `Tooltip`, `Tabs`, `Command`, `Card`, `Callout`, `Badge`,
   `CountBadge`, `ProgressBar`, `TextSwap`, `IconSwap`, `SlidingIndicator`,
-  `ListRow`, `PaneHeader`, `EmptyState`, `RequestCard`, `StatusDot`,
-  `Skeleton`, `CopyButton` and the Session `timeline`, `steps` and
-  `session-blocks` rows. They are
-  tuned to the shared scale and `focusRing`, and preserve props, events, refs
+  `ListRow`, `PaneHeader`, `EmptyState`, `RequestCard` with its
+  `request-section` and `request-choice` parts, `StatusDot`, `Skeleton`,
+  `CopyButton` and the Session `timeline`, `steps` and `session-blocks` rows.
+  They are tuned to the shared scale and `focusRing`, and preserve props, events, refs
   and accessibility contracts. Use them instead of raw form elements. Fields
   and buttons are 28px, small buttons 24px, all 44px on a coarse pointer;
   adjoining panes and rows are square, and controls use the 8px

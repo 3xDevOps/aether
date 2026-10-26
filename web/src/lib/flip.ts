@@ -59,3 +59,52 @@ export function useLayoutGlide(container: RefObject<HTMLElement | null>, motion:
     pending.current = capture(container.current)
   }, [container])
 }
+
+const heights = new WeakMap<HTMLElement, { animation: Animation; overflow: string }>()
+
+function stopHeightGlide(el: HTMLElement) {
+  const glide = heights.get(el)
+  if (!glide) return
+  heights.delete(el)
+  glide.animation.cancel()
+  el.style.overflow = glide.overflow
+}
+
+/**
+ * Plays `el` from `from` px tall to `to` (default: its height now), clipped
+ * while it moves, then leaves its height to layout again. A glide still
+ * running is replaced from the height it shows.
+ */
+export function glideHeight(el: HTMLElement, from: number, motion: Motion, to?: number): Animation | null {
+  stopHeightGlide(el)
+  const end = to ?? el.getBoundingClientRect().height
+  if (prefersReducedMotion() || Math.abs(from - end) < 0.5) return null
+  const overflow = el.style.overflow
+  el.style.overflow = 'clip'
+  const animation = play(el, [{ height: `${from}px` }, { height: `${end}px` }], motion, { fill: 'forwards' })
+  heights.set(el, { animation, overflow })
+  const done = () => {
+    if (heights.get(el)?.animation === animation) stopHeightGlide(el)
+  }
+  animation.finished.then(done, done)
+  return animation
+}
+
+/** Glides `ref` from the height it last painted to its new one whenever `key` changes. */
+export function useHeightGlide(ref: RefObject<HTMLElement | null>, key: unknown, motion: Motion) {
+  const last = useRef<{ key: unknown; height: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const prior = last.current
+    if (!prior || prior.key === key) {
+      if (!heights.has(el)) last.current = { key, height: el.getBoundingClientRect().height }
+      return
+    }
+    const from = heights.has(el) ? el.getBoundingClientRect().height : prior.height
+    stopHeightGlide(el)
+    const to = el.getBoundingClientRect().height
+    last.current = { key, height: to }
+    glideHeight(el, from, motion, to)
+  })
+}

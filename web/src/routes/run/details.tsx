@@ -7,6 +7,7 @@ import { Code } from '@/components/ui/code'
 import { FailureCallout } from '@/components/ui/failure-callout'
 import { Input } from '@/components/ui/input'
 import { RequestCard } from '@/components/ui/request-card'
+import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { SectionLabel } from '@/components/ui/section-label'
 import { api } from '@/lib/api'
@@ -223,7 +224,11 @@ function ConditionCard({ run, view, agent, nav }: { run: RunRecord; view: RunVie
     <RequestCard
       tone={stateTone[presented.state]}
       title={presented.reason}
-      actions={primary && <Button size="sm" variant="secondary" onClick={primary.act}>{primary.label}</Button>}
+      footer={primary && (
+        <RequestFooter>
+          <RequestActions><RequestAction label={primary.label} onClick={primary.act} /></RequestActions>
+        </RequestFooter>
+      )}
     />
   )
 }
