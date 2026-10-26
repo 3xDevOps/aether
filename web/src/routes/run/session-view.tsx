@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { api } from '@/lib/api'
+import { useRefuseStrayFileDrops } from '@/lib/file-drag'
 import { memberName } from '@/lib/member-name'
 import { backgroundReason, liveStateOf, runLabel, stateTone } from '@/lib/status'
 import { RunFileLinks } from '@/routes/files/path-link'
@@ -210,6 +211,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
   shells: RunShells
   switchable: boolean
 }) {
+  useRefuseStrayFileDrops()
   const enhanced = run.acp === true
   const showMessages = useStore((s) => !s.hiddenAgentMessages[run.id])
   const { rows, session, missingRoomImages } = useRows(run, enhanced, showMessages)

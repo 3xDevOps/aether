@@ -2655,17 +2655,50 @@ the pill sends. `Enter` is a plain key, which the shortcut table stands down
 for inside a field, so the textarea answers it itself through `isPress`; the
 binding stays registered so the shortcuts reference lists it. A key still composing in an input method
 never sends. The shared upload state in
-`composer-images.tsx` accepts file selection and native file paste, enforces
-the eight-file limit, and uploads PNG, JPEG, GIF and WebP through
-`terminal.image` and every other file through `terminal.file`. File-backed
-object URLs show image thumbnails inside the input, other files a chip with
-name and size; removal, successful send and unmount revoke them. Enhanced
+`composer-images.tsx` accepts file selection, native file paste and drops,
+enforces the eight-file limit, and uploads PNG, JPEG, GIF and WebP through
+`terminal.image` and every other file through `terminal.file`, one at a time
+and stopping at the first failure. A file over its limit (8 MiB for an image,
+64 MiB for anything else) is refused before it joins the draft, naming the
+file in the alert; the rest of the batch still goes up. Enhanced
 sends pass text and ordered attachment references separately through
 `run.inject`; the server resolves images into ACP image blocks and other files
 into `resource_link` blocks. Attachment-only messages are allowed, incomplete
 uploads block sending, and failures preserve the draft and previews.
 `prompt_images` from the ACP snapshot gates sending a message with an image
 (`hasImages`), not other files.
+
+Attaching has three surfaces over the one draft. Above the field,
+`composer-attachments.tsx` draws one compact chip per file: a 40px thumbnail
+for an image (an object URL, revoked when the file goes), an icon with the name and size for any other file, and a state
+mark - a spinner while it uploads, a check that shows for a second once it
+lands, a failed dot with "Not uploaded" when it did not. Under a fine pointer
+the **+** (**Attach files**, `composer-dropzone.tsx`) opens a popover holding
+the drop zone, one row per file and a footer. Clicking the zone or pressing
+Enter on it opens the file chooser, and a file dropped on it is attached; its
+hint states the real limits. A row reads size and **Waiting**, **Uploading…**
+(with an indeterminate 2px bar: the upload is a single request with no byte
+progress) or **Attached**, or the failure reason beside **Retry**. Uploads run
+in order, so a failure marks the first unattached file and the rest read **Not
+uploaded**. **Remove** is disabled while an upload runs, because it cannot be
+cancelled. The footer counts "Uploading n of m" with the bytes already
+attached, then "n files attached", or "n of m attached" with **Retry**, and
+**Clear** empties the draft once nothing is uploading. The popover stays open
+while files upload and reads the draft store, so a remounted composer shows
+the same rows; closing it with files attached returns focus to the field unless the viewer clicked into another control, which keeps focus. Rows animate only for changes seen while the popover is open: a reopened popover replays nothing. A
+coarse pointer skips the popover: **+** opens the chooser directly and the
+chips carry the progress.
+
+Dragging files over the box covers it with a dashed veil (accent only while the drop would be accepted) reading "Drop
+to attach n files"; it ignores text and link drags, takes no pointer events so
+the field keeps its caret, and reads "At most n files fit", "Uploading…" or
+"At most 8 files" when the drop would be refused (the cursor then shows no
+drop). `useFileDrop` in `web/src/lib/file-drag.ts` counts the files in the drag (not the link or markup it carries) and the enter and leave
+events so a child never ends the drag early, and stops them so a drag over the
+popover's zone does not also drive the box around it. Folders are not walked:
+a dropped folder fails as a file with the browser's own read error. The Session
+view and Home both call `useRefuseStrayFileDrops`, so a file dropped outside a
+target does nothing instead of replacing the dashboard with that file.
 
 The timeline rows and both composers share `sessionColumn`
 (`session-rows.tsx`): the 736px column with 16px gutters, so message text and

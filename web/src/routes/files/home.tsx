@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import type { Api } from '@/lib/api'
+import { useRefuseStrayFileDrops } from '@/lib/file-drag'
 import { errorSentence } from '@/lib/format'
 import { DeleteDialog, MoveDialog, ReplaceDialog } from '@/routes/files/home-dialogs'
 import { droppedUploads, useHomeUpload, type UploadState } from '@/routes/files/home-upload'
@@ -70,20 +71,7 @@ export function HomeFiles({ client, onOpen, children }: { client: Api; onOpen: (
     return () => window.clearTimeout(timer)
   }, [dropTarget])
 
-  // A file dropped anywhere else would replace the dashboard with that file.
-  useEffect(() => {
-    const refuse = (event: globalThis.DragEvent) => {
-      if (event.defaultPrevented || !event.dataTransfer?.types.includes('Files')) return
-      event.preventDefault()
-      event.dataTransfer.dropEffect = 'none'
-    }
-    window.addEventListener('dragover', refuse)
-    window.addEventListener('drop', refuse)
-    return () => {
-      window.removeEventListener('dragover', refuse)
-      window.removeEventListener('drop', refuse)
-    }
-  }, [])
+  useRefuseStrayFileDrops()
 
   const endNaming = (focusPath: string | null) => {
     focus.current = focusPath
