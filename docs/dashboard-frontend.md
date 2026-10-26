@@ -1535,9 +1535,9 @@ A run shows one state and one plain-words reason line, derived in
 from a reason string. A live run or stored `run.status` event from before the
 server derived one has no `state`, and a newer server may send a `state`
 this dashboard does not know: a `running` one reads **Running** with a
-neutral dot, never Working, and a `needs-attention` one reads **Waiting**.
-The `idle` older servers wrote reads exactly as `waiting`; no surface says
-Idle. The reason line is the server's `status_reason` (`reason` on the
+neutral dot, never Working, and a `needs-attention` one reads **Turn
+ended**. The `idle` older servers wrote reads exactly as `waiting`; no
+surface says Idle. The reason line is the server's `status_reason` (`reason` on the
 wire) in plain words, such as an agent's waiting summary, "Turn ended
 without a report" or "No update for 12m"; the dashboard never invents one.
 Details lists the raw `reason` as **Last reason**.
@@ -1552,15 +1552,35 @@ the sidebar, board, palette and All workspaces, and not under
 Waiting states are a neutral, static glyph; Needs you is the only amber
 state.
 
-`stateTitle` builds the tooltip each surface puts on a state: "*Label*
-since *relative* — *reason*. *What happens next*", for example "Waiting
-since 5 minutes ago — Turn ended without a report. Send a message to
-continue." A board card puts the label in its footer and the reason in its
-description. `stateDetail` drops a reason that only restates the label. The run header's state line shows only the reason, with `stateTitle`
-as the tooltip of the space it fills, there even when the reason is empty,
-because the Workflow chip under it already shows the dot and
-label; the label stays in a visually hidden `role=status` element, so a
-screen reader hears only a change of state. While a run waits for agents,
+`stateWords` gives a state's words: the reason in place of the label when
+the reason names what the run waits on ("Waiting for 2 workers", "Waiting
+for Ada", "Waiting for the integrator"), else the label and the reason after
+it. `stateDetail` drops a reason that only restates the label or is the
+state's default, so an unreported turn end reads a quiet "Turn ended" and an
+answer "Answered" or "Answered · *summary*". Outside Needs you, where the
+label and the reason alone lead, a board card puts the words' label in its
+footer and their detail in its description ("Waiting for CI", "PR 12
+checks"); the sidebar's accessible row name reads them joined. A run list
+row puts the label in its status chip and the detail in its meta line.
+
+`stateTitle` builds the tooltip each surface puts on a state, and the
+sidebar's run details box shows it: "*Words* since *relative* — *reason*.
+*What happens next*. Why: *cause*.", for example "Waiting for 2 workers
+since 3 minutes ago. Mail from its agents can wake it. Why: its swarm workers
+are live or have unread mail for it." *What happens next* is said only where it is a fact or a request
+of the viewer; no state that asks nothing tells the viewer to send a
+message. *Cause* is the run's `cause` in words; it is shown only while the
+run is live and shows the state the server chose, so not for a paused run,
+a swarm worker's question shown as "Waiting for the integrator", or a
+request shown as "Waiting for *name*".
+
+The run header's state line shows the words beyond the label the Workflow
+chip under it already shows, a CI wait's age first ("42m · PR 12 checks";
+a stale one's reason already says "No update for 30m"), since the header
+prints no age of its own; `stateTitle` is the tooltip of
+the space it fills, there even when the line is empty. The label stays in a
+visually hidden `role=status` element, so a screen reader hears only a
+change of state. While a run waits for agents,
 the header counts the Enhanced session's running subagents, "2 subagents
 running".
 
@@ -1570,7 +1590,8 @@ running".
 | Waiting for agents | clock | `waiting-agents`: held background subagents or workflows, ACP Task agents, an integrator with live workers or unread worker mail, or a `waiting --for agents` report | Working |
 | Waiting for CI | clock | `waiting-ci`: a `waiting --for ci` report | Working |
 | Waiting for process | clock | `waiting-tools`: a background task the agent holds, such as Claude's Monitor, or a `waiting --for process` report | Working |
-| Waiting | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason, or a waiting report went stale | Working |
+| Turn ended | dashed ring | `waiting`, legacy `idle`, or a parked run with no `state`: the turn ended without a verified reason, or a waiting report went stale. Asks nothing | Working |
+| Waiting | dashed ring | a run whose request waits on another member, read "Waiting for *name*" | Working |
 | Answered | dashed ring | `answered`: an `answered` report, the agent replied with nothing pending. Its reason is the summary, with no call to action | Working |
 | Needs you | amber ring | `needs-you`: a reported question or blocker, a pending permission, an unanswered question | Needs you, for the member a condition below names |
 | Ready for review | filled accent circle with a check | `finished` (a reported success on a live run), or a `completed` run whose `review` is `ready` or `later` | Needs you for its owner while `review` is `ready`, else Ready for review |
@@ -1591,7 +1612,7 @@ Live actions (stop, pause, message, Stop waiting) still gate on the wire
 reason, outcome flags or `review`. `applyRunStatus` in `src/store/runs.ts` drops a
 `run.status` event whose `status_seq` is not greater than the one it holds,
 and `toRecord` keeps every field such an event set (status, reason, state,
-`status_seq`, `outcome_unseen`, `finish_unopened`, `review`,
+`cause`, `status_seq`, `outcome_unseen`, `finish_unopened`, `review`,
 `review_changed_at`, `finished_at`) when a
 snapshot is older, so an out-of-order event or a late `run.get` never moves a
 run back. A snapshot at the same `status_seq` never sets `outcome_unseen` or
@@ -6061,11 +6082,22 @@ then in the browser. A failure of either, or of **Send test notification**
 `web/public/sw.js` is the whole worker. On `push` it shows the notification
 with the run's ID as its `tag`, `budget:<workspace>` for a budget notice, or
 the message's `url` for a notice about another page, such as a
-[watch](watches.md) notice about a swarm, so a newer one replaces the older,
-and it shows a fallback for a message it cannot read, because Safari drops a
-subscription whose push shows nothing. On `notificationclick` it focuses a
-dashboard window that is already open and posts it
-`{type: 'aether:open-run', run}`, navigates it to `url`, or posts
+[watch](watches.md) notice about a swarm, so a newer one replaces the older, and it shows a fallback for a message it
+cannot read, because Safari drops a subscription whose push shows nothing.
+A message with `clear` set means the run's need ended: for the same reason it
+is not simply closed but replaced, under the same tag and keeping the shown
+title, by a `silent` notification with the server's body,
+`No longer needs you`. The server sends it only to the devices whose push
+service took the need, when the need ends or the run changes hands,
+under the run's Web Push topic, so a need still queued at the push service
+is never shown, and tries again a minute later for a device it could not
+reach. The worker handles pushes in arrival order, so a clear still reading
+the shown notification never lands over a newer need. An assistant's news
+about the run, such as that it finished, carries `notice`; a clear that
+finds it shown shows it again, silently, as it was. An assistant's notice of
+a need carries no `notice`, so a clear replaces it like any need. On
+`notificationclick` it focuses a dashboard window that is already open and
+posts it `{type: 'aether:open-run', run}`, navigates it to `url`, or posts
 `{type: 'aether:open-workspace', workspace}`. When no window is open, or the
 open one is not the worker's to navigate, it opens `url`, `/?run=<id>` or
 `/?page=workspace&id=<id>`.

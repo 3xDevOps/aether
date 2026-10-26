@@ -3,7 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useClock } from '@/lib/clock'
 import { deviceNeeds, type DeviceNeed, type StateContext } from '@/lib/needs-you'
 import { presentRun, type PresentationState, type RunPresentation } from '@/lib/status'
-import type { GatewayCapabilities, Member, Run } from '@/lib/types'
+import type { GatewayCapabilities, Member, Run, RunStatusCause } from '@/lib/types'
 import { unansweredQuestions } from '@/store/collaboration'
 import { runPeople, runWatchers } from '@/store/presence'
 import type { RunRecord } from '@/store/runs'
@@ -54,11 +54,11 @@ export function useRunPresentation(run: RunRecord): RunPresentation {
   const now = useClock()
   const key = useStore((s) => {
     const shown = presentRun(run, stateContextOf(s, now))
-    return JSON.stringify([shown.state, shown.reason, shown.next])
+    return JSON.stringify([shown.state, shown.reason, shown.next, shown.cause])
   })
   return useMemo(() => {
-    const [state, reason, next] = JSON.parse(key) as [PresentationState, string, string | undefined]
-    return next === undefined ? { state, reason } : { state, reason, next }
+    const [state, reason, next, cause] = JSON.parse(key) as [PresentationState, string, string | undefined, RunStatusCause | undefined]
+    return { state, reason, ...(next !== undefined && { next }), ...(cause !== undefined && { cause }) }
   }, [key])
 }
 

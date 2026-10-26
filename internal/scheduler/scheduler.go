@@ -304,10 +304,11 @@ type supervised struct {
 	// account move keeps it, since turning it off applies to new runs only.
 	egress bool
 	// Mutated only under Scheduler.mu. reason and activity are the row's
-	// since its last transition.
+	// since its last transition; cause is what chose activity.
 	status        domain.RunStatus
 	reason        string
 	activity      domain.RunActivity
+	cause         events.RunStatusCause
 	startedAt     time.Time
 	paused        bool
 	killRequested bool

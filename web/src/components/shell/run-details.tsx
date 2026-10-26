@@ -10,6 +10,7 @@ import { cn, surface } from '@/lib/utils'
 import { modeLabel } from '@/routes/run/agent-name'
 import { useStore } from '@/store'
 import { isTerminal, type RunRecord } from '@/store/runs'
+import type { RunStatusCause } from '@/lib/types'
 
 interface Shown {
   run: RunRecord
@@ -18,6 +19,7 @@ interface Shown {
   waiting: boolean
   reason: string
   next?: string
+  cause?: RunStatusCause
   since: string
   /** A swarm parent's worker counts. */
   counts: string
@@ -83,7 +85,7 @@ const dayAndTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', tim
 // Default and Large text sizes. Larger text or a shorter window gives lines up in `Details`.
 const peopleLines = 7
 
-function Details({ run, state, waiting, reason, next, since, counts, people }: Shown) {
+function Details({ run, state, waiting, reason, next, cause, since, counts, people }: Shown) {
   const self = useStore((s) => s.info?.member.id)
   const members = useStore((s) => s.members)
   const mergedInto = useStore((s) => s.mergedInto)
@@ -132,7 +134,7 @@ function Details({ run, state, waiting, reason, next, since, counts, people }: S
               !waiting && 'text-muted',
             )}
           >
-            {stateTitle({ state, reason, next }, since)}
+            {stateTitle({ state, reason, next, cause }, since)}
           </span>
         </p>
       </div>

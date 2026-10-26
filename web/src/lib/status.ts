@@ -10,14 +10,17 @@ import {
   type NeedsYouCondition,
   type StateContext,
 } from '@/lib/needs-you'
-import { timeAgo } from '@/lib/format'
+import { compactAge, timeAgo } from '@/lib/format'
 import { plainReason } from '@/lib/reasons'
 import type { BackgroundTask } from '@/lib/session-types'
-import type { RunActivity, RunStatus } from '@/lib/types'
+import type { RunActivity, RunStatus, RunStatusCause } from '@/lib/types'
 import { isTerminal, type RunRecord } from '@/store/runs'
 
-/** A live run's state; one without a state is shown by its status. */
-type LiveState = Exclude<RunActivity, 'idle' | 'finished'> | 'ready' | 'running'
+/**
+ * A live run's state; one without a state is shown by its status. `ended` is the wire's `waiting`, a
+ * turn that ended with no report; `waiting` is a run waiting on a member other than the viewer.
+ */
+type LiveState = Exclude<RunActivity, 'idle' | 'finished'> | 'ended' | 'ready' | 'running'
 
 type Outcome = 'completed' | 'merged' | 'closed' | 'interrupted'
 
@@ -33,6 +36,8 @@ export interface RunPresentation {
   next?: string
   needsYou?: NeedsYouCondition
   unread?: number
+  /** What chose the server's state, from the run's `cause`; absent once the run is not live. */
+  cause?: RunStatusCause
 }
 
 export function backgroundReason(tasks: BackgroundTask[]): string {
@@ -40,7 +45,7 @@ export function backgroundReason(tasks: BackgroundTask[]): string {
   return held === 0 ? 'Working in background' : `Working in background: ${held} ${held === 1 ? 'task' : 'tasks'}`
 }
 
-const liveActivities = new Set<string>(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools', 'waiting', 'answered', 'needs-you', 'failed', 'disconnected'])
+const liveActivities = new Set<string>(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools', 'answered', 'needs-you', 'failed', 'disconnected'])
 
 /**
  * A live run's state from its wire status and activity. A reported success reads Ready for review.
@@ -49,9 +54,9 @@ const liveActivities = new Set<string>(['working', 'waiting-agents', 'waiting-ci
  */
 export function liveStateOf(status: 'running' | 'needs-attention', state: string | undefined): LiveState {
   if (state === 'finished') return 'ready'
-  if (state === 'idle') return 'waiting'
+  if (state === 'idle' || state === 'waiting') return 'ended'
   if (state && liveActivities.has(state)) return state as LiveState
-  return status === 'needs-attention' ? 'waiting' : 'running'
+  return status === 'needs-attention' ? 'ended' : 'running'
 }
 
 const stateReasons: Record<LiveState, string> = {
@@ -59,8 +64,9 @@ const stateReasons: Record<LiveState, string> = {
   'waiting-agents': 'Waiting for its agents to report',
   'waiting-ci': 'Waiting for CI',
   'waiting-tools': 'Waiting for a background process',
-  waiting: 'Turn ended without a report',
-  answered: 'Agent answered',
+  ended: 'Turn ended without a report',
+  waiting: 'Waiting',
+  answered: 'Answered',
   'needs-you': 'The agent needs you',
   ready: 'Agent reported success',
   failed: 'Agent reported failure',
@@ -68,13 +74,13 @@ const stateReasons: Record<LiveState, string> = {
   running: 'Running',
 }
 
-const nudge = 'The agent checks back on its next turn; send a message to nudge it.'
+const resumes = 'It resumes on its next message.'
 
+/** What happens next. Only a state that asks something of the viewer says what to do. */
 const stateNext: Partial<Record<PresentationState, string>> = {
-  'waiting-agents': 'Mail from its agents can wake it; send a message to nudge it.',
-  'waiting-ci': nudge,
-  'waiting-tools': nudge,
-  waiting: 'Send a message to continue.',
+  'waiting-agents': 'Mail from its agents can wake it.',
+  'waiting-ci': resumes,
+  'waiting-tools': resumes,
   ready: 'Mark it complete, or send a message to keep going.',
 }
 
@@ -83,7 +89,9 @@ function liveState(run: RunRecord, ctx: StateContext): Omit<RunPresentation, 'ne
   if (run.status === 'provisioning') return { state: 'working', reason: 'Starting' }
   const state = liveStateOf(run.status as 'running' | 'needs-attention', run.state)
   const waiter = waitingOn(run, ctx)
-  if (waiter !== undefined) return { state: state === 'needs-you' ? 'waiting' : state, reason: `Waiting for ${memberName(waiter, ctx)}` }
+  if (waiter !== undefined) {
+    return { state: state === 'needs-you' || state === 'ended' ? 'waiting' : state, reason: `Waiting for ${memberName(waiter, ctx)}` }
+  }
   if (state === 'needs-you' && run.mission_role === 'worker') {
     return { state: 'waiting-agents', reason: 'Waiting for the integrator', next: 'It continues when the integrator answers.' }
   }
@@ -126,6 +134,14 @@ function finishedReason(run: RunRecord): string {
 }
 
 export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
+  const shown = presentation(run, ctx)
+  // The cause explains the server's state only: none where the dashboard shows another.
+  const own = !isTerminal(run.status) && waitingOn(run, ctx) === undefined &&
+    shown.state === liveStateOf(run.status as 'running' | 'needs-attention', run.state)
+  return run.cause && own ? { ...shown, cause: run.cause } : shown
+}
+
+function presentation(run: RunRecord, ctx: StateContext): RunPresentation {
   const condition = needsYou(run, ctx)
   if (condition) {
     return { state: condition.state, reason: condition.reason(run, ctx), next: stateNext[condition.state], needsYou: condition }
@@ -149,19 +165,48 @@ export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
 /** The reason worth printing beside the state's label, without the words that restate it. */
 export function stateDetail({ state, reason }: Pick<RunPresentation, 'state' | 'reason'>): string | undefined {
   const label = stateLabel[state]
-  if (reason === label || reason === stateReasons.working) return undefined
+  if (reason === label || reason === stateReasons[state as LiveState]) return undefined
   return reason.startsWith(`${label}: `) ? reason.slice(label.length + 2) : reason
 }
 
 /**
- * The tooltip every surface gives a run's state: the state, since when, the reason the server
- * gave, and what happens next.
+ * A state's words: what the run waits on when the reason names it ("Waiting for 2 workers",
+ * "Waiting for Ada"), else the state's label, and the detail after it. Given `since`, a CI wait's
+ * detail starts with how long it has run, for a surface that prints no age of its own, unless it
+ * went stale.
  */
-export function stateTitle({ state, reason, next }: Pick<RunPresentation, 'state' | 'reason' | 'next'>, since: string, now = Date.now()): string {
+export function stateWords(shown: Pick<RunPresentation, 'state' | 'reason' | 'cause'>, since?: string, now = Date.now()): { label: string; detail?: string } {
+  const reason = stateDetail(shown)
+  if ((shown.state === 'waiting-agents' || shown.state === 'waiting') && reason?.startsWith('Waiting for ')) return { label: reason }
+  // A stale wait's reason already says how long nothing happened.
+  const ran = since && shown.state === 'waiting-ci' && shown.cause !== 'wait-expired' ? compactAge(since, now) : undefined
+  return { label: stateLabel[shown.state], detail: [ran, reason].filter(Boolean).join(' · ') || undefined }
+}
+
+// Mirrors events.RunStatusCause in internal/events/event.go.
+const causeWords: Record<string, string> = {
+  turn: 'a turn is running',
+  report: 'the agent reported it',
+  'turn-end': 'the turn ended',
+  stall: 'the run stalled',
+  'wait-expired': 'its reported wait went stale',
+  workers: 'its swarm workers are live or have unread mail for it',
+  'tasks-held': 'it holds background tasks',
+  human: 'a request waits on a person',
+  disconnect: 'the agent session ended',
+}
+
+/**
+ * The tooltip every surface gives a run's state: the state, since when, the reason the server
+ * gave, what happens next, and what chose the state.
+ */
+export function stateTitle(shown: Pick<RunPresentation, 'state' | 'reason' | 'next' | 'cause'>, since: string, now = Date.now()): string {
+  const { label, detail } = stateWords(shown)
   const ago = timeAgo(since, now)
-  const head = ago ? `${stateLabel[state]} since ${ago}` : stateLabel[state]
-  const said = reason && reason !== stateLabel[state] ? ` — ${reason.replace(/\.$/, '')}.` : '.'
-  return next ? `${head}${said} ${next}` : `${head}${said}`
+  const head = ago ? `${label} since ${ago}` : label
+  const said = detail ? ` — ${detail.replace(/\.$/, '')}.` : '.'
+  const why = shown.cause ? `Why: ${causeWords[shown.cause] ?? shown.cause}.` : undefined
+  return [`${head}${said}`, shown.next, why].filter(Boolean).join(' ')
 }
 
 /** A row lists in Needs you when a condition applies to the viewer, whatever its label. */
@@ -204,6 +249,7 @@ export const stateLabel: Record<PresentationState, string> = {
   'waiting-agents': 'Waiting for agents',
   'waiting-ci': 'Waiting for CI',
   'waiting-tools': 'Waiting for process',
+  ended: 'Turn ended',
   waiting: 'Waiting',
   answered: 'Answered',
   'needs-you': 'Needs you',
@@ -224,6 +270,7 @@ export const stateTone: Record<PresentationState, Tone> = {
   'waiting-agents': 'waiting',
   'waiting-ci': 'waiting',
   'waiting-tools': 'waiting',
+  ended: 'ended',
   waiting: 'ended',
   answered: 'ended',
   'needs-you': 'needs-you',

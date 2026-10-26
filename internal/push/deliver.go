@@ -26,11 +26,14 @@ type DeviceResult struct {
 
 // Message is a notification Deliver sends. URL is the dashboard path a
 // click opens; Run names the run it is about, when it is about one.
+// Notice keeps it shown when the run's need later ends and its
+// notification is cleared.
 type Message struct {
 	Title, Body, URL string
 	Run              domain.RunID
 	Topic            string
 	Urgent           bool
+	Notice           bool
 }
 
 type message struct {
@@ -43,7 +46,7 @@ type message struct {
 // result means member has no device.
 func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message) ([]DeviceResult, error) {
 	payload, err := json.Marshal(message{
-		notification: notification{Title: clip(m.Title, fallbackTitleRunes), Body: clip(m.Body, maxBodyRunes), Run: string(m.Run)},
+		notification: notification{Title: clip(m.Title, fallbackTitleRunes), Body: clip(m.Body, maxBodyRunes), Run: string(m.Run), Notice: m.Notice},
 		URL:          m.URL,
 	})
 	if err != nil {

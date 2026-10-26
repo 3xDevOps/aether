@@ -23,6 +23,7 @@ export function toRecord(snapshot: Run, previous?: RunRecord): RunRecord {
         status: previous.status,
         reason: previous.reason,
         state: previous.state,
+        cause: previous.cause,
         status_seq: previous.status_seq,
         outcome_unseen: previous.outcome_unseen,
         finish_unopened: previous.finish_unopened,
@@ -192,7 +193,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         deletingRuns: pruneRuns(s.deletingRuns, other),
       }
     }),
-  applyRunStatus: (runID, { to, reason, state, status_seq, outcome_unseen = false, finish_unopened = false, review = '', review_changed_at }, time) =>
+  applyRunStatus: (runID, { to, reason, state, cause, status_seq, outcome_unseen = false, finish_unopened = false, review = '', review_changed_at }, time) =>
     set((s) => {
       const current = s.runs[runID]
       if (!current || status_seq <= current.status_seq) return {}
@@ -204,6 +205,7 @@ export const createRunsSlice: SliceCreator<RunsSlice> = (set) => ({
         status: to,
         reason,
         state,
+        cause,
         status_seq,
         stateChangedAt: timed ? time : current.stateChangedAt,
         stateChangedAtEstimated: !timed && current.stateChangedAtEstimated,

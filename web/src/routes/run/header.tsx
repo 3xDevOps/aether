@@ -17,7 +17,7 @@ import type { AgentInfo } from '@/lib/types'
 import { useClock } from '@/lib/clock'
 import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
-import { runLabel, stateDetail, stateLabel, stateTitle } from '@/lib/status'
+import { runLabel, stateLabel, stateTitle, stateWords } from '@/lib/status'
 import { cn } from '@/lib/utils'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
@@ -97,10 +97,16 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
       ? Object.values(s.acpSessions[run.id]?.agents.agents ?? {}).filter((agent) => agentState(agent) === 'running').length
       : 0,
   )
-  const detail = [subagents > 0 && `${subagents} ${subagents === 1 ? 'subagent' : 'subagents'} running`, stateDetail(presentation)]
+  const since = state === 'ready' && run.review_changed_at ? run.review_changed_at : run.stateChangedAt
+  const words = stateWords(presentation, since, useClock())
+  // The Workflow chip under the header shows the state's own label.
+  const detail = [
+    subagents > 0 && `${subagents} ${subagents === 1 ? 'subagent' : 'subagents'} running`,
+    words.label !== stateLabel[state] && words.label,
+    words.detail,
+  ]
     .filter(Boolean)
     .join(' · ')
-  const since = state === 'ready' && run.review_changed_at ? run.review_changed_at : run.stateChangedAt
   const owner = useStore((s) => resolveMember(s, run.member_id).member)
   const ownerName = useStore((s) => memberName(s, run.member_id))
   const accountID = run.requested_account_member_id ? run.account_member_id ?? '' : ''

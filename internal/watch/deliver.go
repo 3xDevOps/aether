@@ -115,7 +115,8 @@ func (s *Service) deliverMember(ctx context.Context, member domain.MemberID, not
 		errs = append(errs, s.send(ctx, member, m, quietHeld, watches))
 	}
 	for _, n := range single {
-		m := push.Message{Title: n.Title, Body: n.Body, URL: n.Link, Topic: n.WatchID, Urgent: n.Condition == protocol.WatchNeedsYou}
+		needsYou := n.Condition == protocol.WatchNeedsYou
+		m := push.Message{Title: n.Title, Body: n.Body, URL: n.Link, Topic: n.WatchID, Urgent: needsYou, Notice: !needsYou}
 		if w := watches[n.WatchID]; w.TargetKind == protocol.WatchTargetRun {
 			m.Run = w.RunID
 		}

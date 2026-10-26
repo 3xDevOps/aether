@@ -1,11 +1,15 @@
-// Shows push notifications and opens the page, run, or workspace budget one
-// is about. There is no fetch handler: the dashboard is never served or cached
-// from here.
+// Shows push notifications, quietly replaces one whose need ended, and opens
+// the page, run, or workspace budget one is about. There is no fetch
+// handler: the dashboard is never served or cached from here.
 
 self.addEventListener('install', () => {
   // The dashboard changes with the server binary, and so must this.
   self.skipWaiting()
 })
+
+// Pushes are shown in arrival order: a clear still reading the shown
+// notification must not land over a newer need for the same run.
+let shown = Promise.resolve()
 
 self.addEventListener('push', (event) => {
   let message = {}
@@ -15,18 +19,38 @@ self.addEventListener('push', (event) => {
     // Safari drops a subscription whose push shows nothing, so a message
     // this worker cannot read still shows the fallback below.
   }
-  event.waitUntil(
-    self.registration.showNotification(message.title || 'Aether', {
-      body: message.body || 'A run needs you.',
-      // One notification per run, workspace budget or page: a newer one
-      // replaces the older and alerts again.
-      tag: message.run || (message.workspace ? `budget:${message.workspace}` : message.url || 'aether'),
-      renotify: true,
-      icon: '/icons/icon-192.png',
-      data: { run: message.run, workspace: message.workspace, url: message.url },
-    }),
-  )
+  const show = shown.then(() => display(message))
+  shown = show.catch(() => {})
+  event.waitUntil(show)
 })
+
+async function display(message) {
+  if (message.clear && message.run) {
+    // The run's need ended. A push that shows nothing would cost the
+    // subscription on Safari, so the notification is replaced quietly
+    // instead of closed.
+    const [current] = await self.registration.getNotifications({ tag: message.run })
+    // An assistant's newer notice about the run stays, shown again as it was.
+    const notice = current?.data?.notice === true
+    await self.registration.showNotification(current?.title || message.title || 'Aether', {
+      body: notice ? current.body : message.body,
+      tag: message.run,
+      silent: true,
+      icon: '/icons/icon-192.png',
+      data: notice ? current.data : { run: message.run },
+    })
+    return
+  }
+  await self.registration.showNotification(message.title || 'Aether', {
+    body: message.body || 'A run needs you.',
+    // One notification per run, workspace budget or page: a newer one
+    // replaces the older and alerts again.
+    tag: message.run || (message.workspace ? `budget:${message.workspace}` : message.url || 'aether'),
+    renotify: true,
+    icon: '/icons/icon-192.png',
+    data: { run: message.run, workspace: message.workspace, notice: message.notice, url: message.url },
+  })
+}
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
