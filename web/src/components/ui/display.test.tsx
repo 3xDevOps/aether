@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Kbd } from '@/components/ui/kbd'
 import { ListRow } from '@/components/ui/list-row'
 import { PaneHeader } from '@/components/ui/pane-header'
+import { Clamped } from '@/components/ui/request-card'
 import { SectionLabel } from '@/components/ui/section-label'
 import { ToolValue } from '@/components/ui/session-blocks'
 import { Separator } from '@/components/ui/separator'
@@ -194,4 +195,21 @@ test('a clipped tool value selects every line for a manual copy', async () => {
   expect(screen.queryByText(/line 11/)).toBeNull()
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Copy the result' })))
   expect(window.getSelection()?.toString()).toBe(value)
+})
+
+test('clamped text offers Show more once a narrower parent makes it overflow', () => {
+  let resized = () => {}
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) {
+      resized = callback
+    }
+    observe() {}
+    disconnect() {}
+  })
+  const { container } = render(<Clamped className="max-h-[6lh]">The whole plan</Clamped>)
+  expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull()
+  Object.defineProperty(container.firstElementChild, 'scrollHeight', { configurable: true, value: 200 })
+  act(() => resized())
+  expect(screen.getByRole('button', { name: 'Show more' })).toBeDefined()
+  vi.unstubAllGlobals()
 })

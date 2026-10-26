@@ -176,6 +176,26 @@ The other primitives with motion or a fixed size:
   `role="meter"` or `role="progressbar"` it reports `value` of `max`;
   without one it only draws, for a parent that carries the role.
 - `Kbd` is an outlined keycap, 20px (`md`) or 16px (`sm`).
+- `RequestCard` (`request-card.tsx`) is anything waiting on the viewer: a
+  `bg-raised` card with a seam border and no shadow. Its header holds a 28px
+  avatar (`IconTile` for a glyph, or a member `Avatar`), the title over a
+  muted source line, meta and a `StatusDot` in the card's tone. A
+  description follows behind a 2px quote bar, indented to the title column
+  once the card is 21rem wide. `RequestSection` (`request-section.tsx`) adds
+  a seam-topped region with a muted label and `CountBadge`; `RequestRows`
+  shows three rows, then **N more**, whose rows fade in 30ms apart; a row
+  that opens its detail takes a `bg-hover` fill on hover. The card's focus
+  outline sits inside its border, so a scrolling parent never clips it, and
+  the Session dock draws the frame on its scroll box so the frame stays
+  closed around the sticky footer. `RequestFooter` (`request-choice.tsx`) is the `bg-chrome` band that sticks
+  to the bottom of a scrolling parent; `RequestPills` are its 26px **How
+  long** pills (34px coarse) on a `bg-hover-chrome` track, the chosen one
+  `bg-raised` with a seam ring; `RequestAction` crossfades its label through
+  `TextSwap` and shows its answer digit as a `Kbd` on a fine pointer.
+  Answers split a narrow card in halves and sit at their own width on the
+  right of a wide one. `RequestTimeBar` drains 2px of needs-you toward a
+  deadline. Amber appears only in the dot and that bar; accent only on the
+  primary answer.
 - `Spinner` draws a ring: a track at `--opacity-track` under a quarter arc
   turning every 900ms.
 - `Skeleton` sweeps a `bg-hover-chrome` band across `bg-chrome`.
@@ -460,13 +480,14 @@ line. The roster scrolls horizontally, and below 34rem watchers show as avatars 
 below 30rem **Multiplayer** as its icon.
 Takeover progress uses `state-failed` with `on-failed` text in both themes.
 One run-owned holder decision dialog sits above every sheet and dialog.
-Request cards use the needs-you soft fill; the Session transcript column is
-736px wide with no row borders and no card around a block of steps. In it a
-person's message is a `bg-chrome` bubble at the right, at most 85% wide, with
-`rounded-composer`; everything the agent wrote starts after the step rail's
-24px gutter, where state dots and step marks sit. Turns are 24px apart and a
-turn's header and answer 12px. Its composer fills the available pane with
-balanced 16px side gutters, including when Details is open. An empty ACP
+Request cards are neutral, with a needs-you dot in the header; the Session
+transcript column is 736px wide with no row borders and no card around a
+block of steps. In it a person's message is a `bg-chrome` bubble at the
+right, at most 85% wide, with `rounded-composer`; everything the agent wrote
+starts after the step rail's 24px gutter, where state dots and step marks
+sit. Turns are 24px apart and a turn's header and answer 12px. Its composer
+fills the available pane with balanced 16px side gutters, including when
+Details is open. An empty ACP
 conversation shows a subdued Aether mark above the centered run title and
 metadata rows: workspace, agent, branch, owner and creation time. Symmetric
 scrollbar gutters keep the overview centered when its content needs scrolling.
@@ -508,6 +529,10 @@ literal time or curve.
   run's details box wipes in from the row it docks to.
 - `Collapsible` bodies glide their height, clipped only while they move, and
   unmount once shut.
+- The Session request dock fades a request that left `pending` out over
+  200ms, then glides its height (`--duration-glide`) to the next card, which
+  fades in over 250ms, or to nothing. A preview that arrives late glides the
+  card open; nothing animates on hydration.
 - Only rows added after the first render enter: `animate-entrance` fades in
   and rises 4px. `playEntrance` staggers a burst by `--stagger-row` (30ms) up
   to the eighth row; the rest arrive with it. The Session list plays it only

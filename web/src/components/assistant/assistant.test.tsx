@@ -407,6 +407,8 @@ describe('confirmations', () => {
       { ...stop, id: 'm', method: 'run.inject', summary: 'Message a run', params: { run_id: 'run_9', message: 'Please stop and summarise' } },
     ] }) })
     const launch = await within(aside).findByRole('group', { name: 'Approve this action? Launch a run' })
+    expect(within(launch).queryByText('Task')).toBeNull()
+    await userEvent.click(within(launch).getByRole('button', { name: '1 more' }))
     for (const [term, text] of [['Workspace', 'ws_1'], ['Harness', 'claude'], ['Mode', 'acp'], ['Task', /Fix the flaky login test\s+then open a PR/]]) {
       expect(within(launch).getByText(term)).toBeDefined()
       expect(within(launch).getByText(text)).toBeDefined()

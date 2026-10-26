@@ -47,17 +47,16 @@ function ComposerFrame({ children }: { children: React.ReactNode }) {
   )
 }
 
-function Closed({ runID, reason, action, dock, failure }: { runID: string; reason: string; action?: React.ReactNode; dock?: React.ReactNode; failure?: string }) {
+function Closed({ runID, reason, action, failure }: { runID: string; reason: string; action?: React.ReactNode; failure?: string }) {
   return (
-    <ComposerFrame>
-      {dock}
+    <>
       {failure && <p role="alert" className="text-ui-sm text-state-failed">{failure}</p>}
       <TypingIndicator runID={runID} />
       <div className="flex min-h-14 min-w-0 items-center gap-2 rounded-composer border border-seam bg-chrome py-2 pl-4 pr-2">
         <p role="status" className="min-w-0 flex-1 text-ui-sm text-muted">{reason}</p>
         {action}
       </div>
-    </ComposerFrame>
+    </>
   )
 }
 
@@ -78,13 +77,15 @@ function ClosedRun({ run, reason, dock }: { run: RunRecord; reason: string; dock
     }
   }
   return (
-    <Closed
-      runID={run.id}
-      reason={reason}
-      dock={dock}
-      failure={failure}
-      action={<Button variant="primary" disabled={busy} onClick={() => void relaunch()}><RefreshCw aria-hidden="true" />{busy ? 'Relaunching…' : 'Relaunch'}</Button>}
-    />
+    <ComposerFrame>
+      {dock}
+      <Closed
+        runID={run.id}
+        reason={reason}
+        failure={failure}
+        action={<Button variant="primary" disabled={busy} onClick={() => void relaunch()}><RefreshCw aria-hidden="true" />{busy ? 'Relaunching…' : 'Relaunch'}</Button>}
+      />
+    </ComposerFrame>
   )
 }
 
@@ -300,7 +301,7 @@ function StandardComposer({ run, agent, room, textarea, autoFocus, onFocusChange
     else void post()
   }
 
-  if (block) return <Closed runID={run.id} reason={block} />
+  if (block) return <ComposerFrame><Closed runID={run.id} reason={block} /></ComposerFrame>
 
   return (
     <ComposerFrame>
@@ -496,18 +497,20 @@ function EnhancedComposer({ run, agent, textarea, autoFocus, onFocusChange, dock
 
   if (gate) {
     return (
-      <Closed
-        runID={run.id}
-        reason={gate.reason}
-        dock={dock}
-        failure={gate.interrupt ? error : undefined}
-        action={gate.interrupt && turnRunning && (
-          <Button size="sm" variant="danger" aria-label="Interrupt the agent" hint={pillHint.interrupt} disabled={busy} onClick={() => act('interrupt')}>
-            <Square className="fill-current" />
-            Interrupt
-          </Button>
-        )}
-      />
+      <ComposerFrame>
+        {dock}
+        <Closed
+          runID={run.id}
+          reason={gate.reason}
+          failure={gate.interrupt ? error : undefined}
+          action={gate.interrupt && turnRunning && (
+            <Button size="sm" variant="danger" aria-label="Interrupt the agent" hint={pillHint.interrupt} disabled={busy} onClick={() => act('interrupt')}>
+              <Square className="fill-current" />
+              Interrupt
+            </Button>
+          )}
+        />
+      </ComposerFrame>
     )
   }
 

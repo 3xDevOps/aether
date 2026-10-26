@@ -20,7 +20,8 @@ import { Composer } from '@/routes/run/composer'
 import type { RunNavigation } from '@/routes/run/header'
 import type { RunRoom } from '@/routes/run/room'
 import { SessionFailureCallout } from '@/routes/run/session-failure'
-import { RequestDock, requestTitle } from '@/routes/run/session-requests'
+import { RequestDock } from '@/routes/run/request-dock'
+import { requestAnnouncement } from '@/routes/run/session-requests'
 import { EnteringRow, rowGap, sessionColumn, TimelineRow, useArrivals, useFlatRows, useRowContext, type FlatRow, type OpenPolicy } from '@/routes/run/session-rows'
 import type { RunShells } from '@/routes/run/shells'
 import { cn } from '@/lib/utils'
@@ -156,7 +157,7 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
   return { rows, session, missingRoomImages }
 }
 
-function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession | undefined): string {
+function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession | undefined, agentName: string): string {
   const [text, setText] = useState('')
   const ended = [...rows].reverse().find((row) => row.kind === 'finished' || (row.kind === 'assistant' && row.outcome !== undefined))
   const finished = ended?.kind === 'assistant' ? ended.outcome : ended
@@ -165,10 +166,10 @@ function useAnnouncement(run: RunRecord, rows: SessionRow[], session: AcpSession
   useEffect(() => {
     const prior = seen.current
     seen.current = { finished: finished?.id, pending: pending?.id, status: run.status }
-    if (pending && pending.id !== prior.pending) setText(`${requestTitle(pending)} ${pending.title}`)
+    if (pending && pending.id !== prior.pending) setText(requestAnnouncement(useStore.getState().acpSessions[run.id], pending, agentName))
     else if (finished?.kind === 'finished' && finished.id !== prior.finished) setText(`The agent’s turn ended: ${finished.text}`)
     else if (run.status !== prior.status) setText(`Run is now ${run.status.replace('-', ' ')}`)
-  }, [finished, pending, run.status])
+  }, [finished, pending, run.status, run.id, agentName])
   return text
 }
 
@@ -267,7 +268,7 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
     previous.current = { flat, older }
     if (anchor) list.current?.scrollToIndex(anchor.index, { align: 'start', offset: anchor.offset })
   })
-  const announcement = useAnnouncement(run, rows, session)
+  const announcement = useAnnouncement(run, rows, session, agentName)
 
   const ctx = useRowContext(run, agent, nav)
 
@@ -326,10 +327,12 @@ export function SessionView({ run, agent, agentName, room, nav, active, textarea
     return () => cancelAnimationFrame(frame)
   }, [active, enhanced, older, loadingOlder, olderError, roomError, flat])
 
-  const dock = enhanced && session && session.pending.length > 0 && (
+  const dock = enhanced && session && (
     <RequestDock
+      key={run.id}
       run={run}
       requests={session.pending}
+      caughtUp={session.stream !== 'connecting' && session.seq >= session.stateSeq}
       agent={agent}
       className="max-md:max-h-[40dvh]"
     />

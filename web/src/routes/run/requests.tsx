@@ -1,8 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { DecisionButtons } from '@/components/decision-buttons'
+import { AgentGlyph } from '@/components/ui/agent-glyph'
+import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { RequestCard } from '@/components/ui/request-card'
+import { Clamped, IconTile, RequestCard, RequestTimeBar } from '@/components/ui/request-card'
+import { RequestAction, RequestActions, RequestFooter } from '@/components/ui/request-choice'
 import { Textarea } from '@/components/ui/textarea'
+import { useSecondsUntil } from '@/lib/hooks'
 import { memberName, resolveMember } from '@/lib/member-name'
 import { inputHint, inputTitle } from '@/lib/run-requests'
 import type { SessionRequest } from '@/lib/session-types'
@@ -25,23 +29,10 @@ export const requestCardID = {
 const emptyMessages: RoomMessage[] = []
 const emptyRequests: SessionRequest[] = []
 
-function secondsUntil(at: string | undefined): number {
-  return at ? Math.max(0, Math.ceil((Date.parse(at) - Date.now()) / 1000)) : 0
-}
+const deliveryText = (remaining: number) => (remaining ? `Delivers in ${remaining}s` : 'Ready to deliver')
 
 export function DeliveryCountdown({ deliverAfter }: { deliverAfter?: string }) {
-  const [remaining, setRemaining] = useState(() => secondsUntil(deliverAfter))
-  useEffect(() => {
-    setRemaining(secondsUntil(deliverAfter))
-    if (secondsUntil(deliverAfter) === 0) return
-    const timer = window.setInterval(() => {
-      const next = secondsUntil(deliverAfter)
-      setRemaining(next)
-      if (next === 0) window.clearInterval(timer)
-    }, 1000)
-    return () => window.clearInterval(timer)
-  }, [deliverAfter])
-  return <>{remaining ? `Delivers in ${remaining}s` : 'Ready to deliver'}</>
+  return <>{deliveryText(useSecondsUntil(deliverAfter))}</>
 }
 
 export function useRunRequests(run: RunRecord) {
@@ -70,7 +61,7 @@ function ReplyForm({ question, room }: { question: RoomMessage; room: RunRoom })
     if (posted) setBody((current) => (current.trim() === text ? '' : current))
   }
   return (
-    <div className="flex w-full flex-col gap-2">
+    <RequestFooter>
       <Textarea
         aria-label={`Reply to ${question.actor_display_name ?? 'the question'}`}
         rows={2}
@@ -84,14 +75,47 @@ function ReplyForm({ question, room }: { question: RoomMessage; room: RunRoom })
           }
         }}
       />
-      <div className="flex gap-2">
-        <Button size="sm" disabled={!body.trim() || sending !== null} onClick={() => void send()}>
-          {late ? stillWaiting : sending ? 'Replying…' : 'Reply'}
-        </Button>
-        {late && <Button size="sm" variant="ghost" onClick={() => setSending(null)}>Cancel</Button>}
-      </div>
-    </div>
+      <RequestActions>
+        {late && <Button variant="ghost" onClick={() => setSending(null)}>Cancel</Button>}
+        <RequestAction label={late ? stillWaiting : sending ? 'Replying…' : 'Reply'} variant="primary" disabled={!body.trim() || sending !== null} onClick={() => void send()} />
+      </RequestActions>
+    </RequestFooter>
   )
+}
+
+function SteerCard({ steer, name, agent, room, openTerminal }: {
+  steer: RoomMessage
+  name: string
+  agent: AgentTerminal
+  room: RunRoom
+  openTerminal: () => void
+}) {
+  const remaining = useSecondsUntil(steer.deliver_after)
+  const total = steer.deliver_after ? Date.parse(steer.deliver_after) - Date.parse(steer.created_at) : 0
+  return (
+    <RequestCard
+      id={requestCardID.steer(steer.id)}
+      avatar={<MemberAvatar id={steer.actor_id} name={name} />}
+      title={`${name} sent the agent a message${steer.via ? ` via ${steer.via}` : ''}`}
+      meta={deliveryText(remaining)}
+      description={<Clamped className="max-h-[6lh]">{steer.body}</Clamped>}
+      timeBar={remaining > 0 && total > 0 && <RequestTimeBar left={remaining * 1000} total={total} />}
+      footer={(agent.localControl || (agent.steerable && agent.hasAgentTerminal)) && (
+        <RequestFooter>
+          <RequestActions>
+            {agent.localControl
+              ? <DecisionButtons decide={(approve) => room.decide(steer.id, approve ? 'approve' : 'deny')} />
+              : <RequestAction label="Take control to decide" onClick={openTerminal} />}
+          </RequestActions>
+        </RequestFooter>
+      )}
+    />
+  )
+}
+
+function MemberAvatar({ id, name }: { id: string; name: string }) {
+  const member = useStore((s) => resolveMember(s, id).member)
+  return <Avatar name={name} color={member?.color} size="header" />
 }
 
 export function NeedsYouCards({ run, agent, room, nav, docked }: {
@@ -123,37 +147,32 @@ export function NeedsYouCards({ run, agent, room, nav, docked }: {
         <RequestCard
           key={input.id}
           id={requestCardID.input(input.id)}
+          avatar={<IconTile><AgentGlyph agent={run.harness} /></IconTile>}
           title={inputTitle[input.kind]}
-          actions={agent.hasAgentTerminal && <Button size="sm" variant="secondary" onClick={openTerminal}>Open terminal</Button>}
-        >
-          {inputHint(agent.hasAgentTerminal)}
-        </RequestCard>
+          description={inputHint(agent.hasAgentTerminal)}
+          footer={agent.hasAgentTerminal && (
+            <RequestFooter>
+              <RequestActions><RequestAction label="Open terminal" onClick={openTerminal} /></RequestActions>
+            </RequestFooter>
+          )}
+        />
       ))}
       {steers.map((steer) => (
-        <RequestCard
-          key={steer.id}
-          id={requestCardID.steer(steer.id)}
-          title={`${name(steer.actor_id, steer.actor_display_name)} sent the agent a message${steer.via ? ` via ${steer.via}` : ''}`}
-          meta={<DeliveryCountdown deliverAfter={steer.deliver_after} />}
-          actions={agent.localControl ? (
-            <DecisionButtons decide={(approve) => room.decide(steer.id, approve ? 'approve' : 'deny')} />
-          ) : agent.steerable && agent.hasAgentTerminal && (
-            <Button size="sm" variant="secondary" onClick={openTerminal}>Take control to decide</Button>
-          )}
-        >
-          {steer.body}
-        </RequestCard>
+        <SteerCard key={steer.id} steer={steer} name={name(steer.actor_id, steer.actor_display_name)} agent={agent} room={room} openTerminal={openTerminal} />
       ))}
-      {questions.map((question) => (
-        <RequestCard
-          key={question.id}
-          id={requestCardID.question(question.id)}
-          title={`${name(question.actor_id, question.actor_display_name)} asked`}
-          actions={<ReplyForm question={question} room={room} />}
-        >
-          {question.body}
-        </RequestCard>
-      ))}
+      {questions.map((question) => {
+        const asker = name(question.actor_id, question.actor_display_name)
+        return (
+          <RequestCard
+            key={question.id}
+            id={requestCardID.question(question.id)}
+            avatar={<MemberAvatar id={question.actor_id} name={asker} />}
+            title={`${asker} asked`}
+            description={question.body}
+            footer={<ReplyForm question={question} room={room} />}
+          />
+        )
+      })}
     </div>
   )
 }

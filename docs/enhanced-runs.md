@@ -154,15 +154,21 @@ the image before sending.
 A new session starts in the agent's no-prompt setting, so a request arrives only
 after you switch to a mode that asks, or from an agent whose own configuration
 still asks. Each request marks the run **Needs you** and docks above the
-composer, one at a time (`1/N`). The composer stays shut until you answer.
+composer, one at a time (`1 of N`). The composer stays shut until you answer.
 **Interrupt** stops the turn and cancels the request instead.
 
-- Allow-once is the filled button. Keys `1` to `4` pick an option while the
-  card has focus, and `1` never picks an allow-always option.
+- The card names what the agent wants ("Claude Code wants to run a command")
+  and shows the command, or the files it changes with their diffs.
+- When the agent offers allow once and allow always, **How long** chooses
+  between **Just once** (the default) and **Always**, and **Allow** answers
+  with that option; **Reject** sits beside it. Other option sets keep the
+  agent's own buttons, allow once filled.
+- Keys `1` to `4` pick an option while the card has focus, shown on each
+  button, and `1` never picks an allow-always option.
 - A form question shows its fields. A link request shows the URL with **Copy
   link** and **Open**.
-- An answered request stays in the timeline as one line, such as "Approved: run
-  `go test`".
+- An answered request stays in the timeline as one line, such as "Allowed once
+  · run `go test`".
 - A subagent's request is the run's request, answered the same way.
 - From the CLI, `aether runs <run-id>` lists pending requests and `aether
   answer <run-id> <request-id> <option-id>` answers one: allow once or reject once,

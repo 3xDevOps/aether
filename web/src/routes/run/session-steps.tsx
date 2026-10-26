@@ -14,6 +14,7 @@ import { message } from '@/lib/format'
 import { openInFiles } from '@/routes/files/open'
 import { PathText, useFileCheckout } from '@/routes/files/path-link'
 import { parsePath } from '@/routes/files/paths'
+import { answerTone } from '@/routes/run/request-options'
 import { AnsweredText } from '@/routes/run/session-requests'
 import { SubagentGroup } from '@/routes/run/subagent-cards'
 import { useStore } from '@/store'
@@ -222,7 +223,7 @@ export function StepView({ step, first, last, live, runID }: { step: Step; first
       )
     case 'answered':
       return (
-        <StepRow mark={<StatusDot tone={step.request.status === 'cancelled' ? 'neutral' : 'done'} />} first={first} last={last}>
+        <StepRow mark={<StatusDot tone={answerTone(step.request)} />} first={first} last={last}>
           <StepLine className="text-text"><AnsweredText request={step.request} command={step.command} /></StepLine>
         </StepRow>
       )

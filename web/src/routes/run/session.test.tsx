@@ -245,7 +245,7 @@ describe('the Enhanced session view', () => {
     expect(screen.getByText(/Earlier Enhanced history has expired/)).toBeDefined()
     // The tool-call frame expired; the authoritative pending request still permits an answer,
     // but cannot establish a command-specific title without inventing missing history.
-    const card = await screen.findByRole('generic', { name: /Allow this action\? rm -rf build/ })
+    const card = await screen.findByRole('group', { name: /asks for permission rm -rf build/ })
     const allow = within(card).getByRole('button', { name: 'Allow' })
     expect(allow).toHaveProperty('disabled', false)
     await userEvent.click(allow)
@@ -394,9 +394,10 @@ describe('the Enhanced session view', () => {
       tool(1, 'x1', 'execute', 'rm -rf build', 'pending'),
       item('request', 1, { request: permission }),
     ])
-    const card = await screen.findByRole('generic', { name: /Allow this command\? rm -rf build/ })
+    const card = await screen.findByRole('group', { name: /wants to run a command rm -rf build/ })
     expect(screen.getByText('Answer the request above to continue.')).toBeDefined()
-    expect(within(card).getAllByRole('button').map((b) => b.textContent)).toEqual(['Allow', 'Reject', 'Always Allow'])
+    expect(within(card).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Just once', 'Always'])
+    expect(within(card).getAllByRole('button').map((b) => [b.textContent, b.getAttribute('aria-keyshortcuts')])).toEqual([['Reject2', '2'], ['Allow1', '1']])
     act(() => card.focus())
     await userEvent.keyboard('1')
     await waitFor(() => expect(api.runInputAnswer).toHaveBeenCalledWith(
@@ -404,6 +405,68 @@ describe('the Enhanced session view', () => {
     ))
     await userEvent.click(within(card).getByRole('button', { name: 'Reject' }))
     expect(api.runInputAnswer).toHaveBeenLastCalledWith('run_1', 'req_1', 'reject', expect.anything(), undefined)
+    await userEvent.click(within(card).getByRole('radio', { name: 'Always' }))
+    expect(within(card).getByText('The agent remembers this and stops asking.')).toBeDefined()
+    await userEvent.click(await within(card).findByRole('button', { name: 'Always Allow' }))
+    expect(api.runInputAnswer).toHaveBeenLastCalledWith('run_1', 'req_1', 'always', expect.anything(), undefined)
+  })
+
+  it('previews an edit with its files, finds a subagent\'s call, and steps between queued requests', async () => {
+    const edit = { ...permission, id: 'req_e', title: 'Edit totals.go', tool_call_id: 'e1' }
+    const patch = '@@ -1,2 +1,2 @@\n-a\n+b\n c\n'
+    const diffs = ['totals.go', 'rounding.go', 'main.go', 'util.go'].map((path) => ({ path, patch }))
+    open()
+    const session = acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, pending: [edit, permission] }) }, [
+      item('turn_start', 1),
+      tool(1, 'agent1', 'other', 'Round the totals', 'in_progress', { tool_name: 'Agent', subagent: { description: 'Round the totals', type: 'general-purpose' } }),
+      tool(1, 'e1', 'edit', 'Edit totals.go', 'pending', { tool_name: 'Edit', parent_id: 'agent1', diffs }),
+      tool(1, 'x1', 'execute', 'rm -rf build', 'pending', { tool_name: 'Bash' }),
+    ])
+    const card = await screen.findByRole('group', { name: /Round the totals wants to edit 4 files/ })
+    expect(within(card).getByText('1 of 2')).toBeDefined()
+    const files = within(within(card).getByRole('region', { name: /Files/ }))
+    expect(files.getAllByText('+1')).toHaveLength(3)
+    await userEvent.click(files.getByRole('button', { name: '1 more' }))
+    expect(files.getByText('util.go')).toBeDefined()
+    await userEvent.click(files.getByRole('button', { name: /totals\.go/ }))
+    expect(within(card).getByText('+b')).toBeDefined()
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Next request' }))
+    const next = await screen.findByRole('group', { name: /wants to run a command rm -rf build/ })
+    expect(within(next).getByText('2 of 2')).toBeDefined()
+
+    session.items(item('request', 1, { request: { ...permission, status: 'answered', answer: 'allow' } }))
+    expect(await screen.findByRole('group', { name: /Round the totals wants to edit 4 files/ })).toBeDefined()
+    await waitFor(() => expect(screen.queryByRole('group', { name: /run a command/ })).toBeNull())
+    expect(screen.queryByText(/of 2/)).toBeNull()
+  })
+
+  it('previews an edit the session log keeps cut once its read returns it still cut', async () => {
+    const edit = { ...permission, id: 'req_e', title: 'Edit totals.go', tool_call_id: 'e1' }
+    const start = item('turn_start', 1)
+    const cut = { ...tool(1, 'e1', 'edit', 'Edit totals.go', 'pending', { tool_name: 'Edit', diffs: [{ path: 'totals.go', patch: '@@ -1 +1 @@\n-a\n+b\n' }] }), truncated: true }
+    vi.mocked(api.runACPItem).mockResolvedValue(cut)
+    open()
+    acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true, pending: [edit] }) }, [start, cut])
+    const card = await screen.findByRole('group', { name: /wants to edit totals\.go/ })
+    expect(await within(card).findByRole('region', { name: /Files/ })).toBeDefined()
+    expect(within(card).getByText('This call is longer than the session log keeps, so the preview may be incomplete.')).toBeDefined()
+    expect(within(card).queryByText('Loading the full change…')).toBeNull()
+    expect(api.runACPItem).toHaveBeenCalledWith('run_1', cut.seq)
+  })
+
+  it('fades a lone request into the controller\'s dock', async () => {
+    open()
+    const session = acpSocket().open({ has_control: true, control_generation: 4, state: state({ turn_in_flight: true }) }, [
+      item('turn_start', 1),
+      tool(1, 'x1', 'execute', 'rm -rf build', 'pending'),
+    ])
+    await screen.findByRole('combobox', { name: 'Message the agent' })
+    const animate = vi.spyOn(Element.prototype, 'animate')
+    session.items(item('request', 1, { request: permission }))
+    const card = await screen.findByRole('group', { name: /wants to run a command rm -rf build/ })
+    expect(screen.getByText('Answer the request above to continue.')).toBeDefined()
+    expect(animate.mock.contexts).toContain(card.parentElement)
   })
 
   it('drops agent messages from the timeline from Details', async () => {
