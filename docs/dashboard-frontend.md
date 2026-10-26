@@ -293,7 +293,7 @@ The slots that exist:
 
 | Slot | Props | Where it renders |
 | --- | --- | --- |
-| `card:meta` | `{ run }` | the run card's meta line, after the agent, owner and diff counts |
+| `card:meta` | `{ run }` | the run card's footer, after the owner avatar and diff counts |
 
 Its contributors are the file-overlap chips (`routes/diff/conflict-chips.tsx`),
 the sync badge (`routes/run-sync`) and a swarm's scope diagnostics
@@ -793,8 +793,9 @@ that: `src/app/layout.tsx` exports the viewport the shell needs there.
 A layout that only changes size belongs in CSS. Layouts that mount different
 elements for a finger than for a mouse, or for a narrow window, ask
 `useMediaQuery` in `src/lib/hooks.ts`; named constants there are
-`coarsePointer`, `belowSm`, `belowLg` (the board's stacked columns) and
-`phoneScreen`. The `md` edge is `MOBILE_MAX_WIDTH` and `useIsMobile()` in
+`coarsePointer`, `belowSm` and `phoneScreen`. A layout that depends on the
+room a view has rather than the window, such as Board's columns, measures
+itself with `useElementSize`. The `md` edge is `MOBILE_MAX_WIDTH` and `useIsMobile()` in
 `src/lib/breakpoints.ts`. The shell has one breakpoint: under 768px
 (`useIsMobile()`, Tailwind `max-md:`) the top bar and the sidebar sheet
 replace the sidebar.
@@ -859,9 +860,8 @@ What gives way first:
   line on one line: the reason gives up its room first, then the owner, then
   the mode word; the branch truncates only when it alone is wider than the
   line. The view switch always sits on its own row (see [Header](#header)).
-- **The board** stacks its three columns into one list on narrow screens and
-  places them side by side from the `lg`/1024px breakpoint (see
-  [Board](#board)).
+- **The board** places its three columns side by side when its own width
+  fits them and otherwise stacks them into one list (see [Board](#board)).
 
 ## Data flow
 
@@ -1191,27 +1191,44 @@ where a resend is deduped or refused and the eventual result still shows:
 
 `src/routes/board/` is the default center view and the triage surface,
 reached through **Board** in the app header; the sidebar owns the run
-explorer and primary New run action. The view's **Board / Map** choice switches
-between triage columns and a run canvas. **Board** shows three columns,
-**Needs you**, **Working** and **Finished**, each headed by its name and count.
-`board()` in `src/routes/board/selectors.ts` reads `runGroups`, so the board
-has the sidebar's scoping, ordering and Mine filter: Needs you spans every
-workspace and sorts oldest wait first. Under the `lg`/1024px breakpoint the
-columns stack into one list and Finished starts collapsed.
+explorer and primary New run action. The **Board / List / Map** tabs in the
+view header choose the layout, stored per workspace in `aether.ui`. **Board**
+shows three columns, **Needs you**, **Working** and **Finished**, each a
+`bg-chrome` well headed by its name and count that scrolls on its own under
+that header. **List** stacks the same three groups full width in one scroll,
+with Finished collapsed until opened. `board()` in
+`src/routes/board/selectors.ts` reads `runGroups`, so the board has the
+sidebar's scoping, ordering and Mine filter: Needs you spans every workspace
+and sorts oldest wait first. The board measures its own width, so the
+sidebar and the assistant panel count: under 648px, where three 200px
+columns do not fit, **Board** renders the list layout and the **List** tab
+is hidden. A group of more than 60 cards renders only the cards its scroll
+shows (`card-list.tsx`, virtua).
 
-A card (`run-card.tsx`, on the `Card` primitive) has exactly three lines:
+A card (`run-card.tsx`, on the `Card` primitive) has three parts:
 
-1. the state line: `StatusDot`, reason, and the wait or change time;
-2. the title (`runLabel`), two lines at most;
-3. the meta line: agent glyph and name (`agent.list` `display_name`, else the
-   run's `harness` value), owner avatar, `+added −deleted` from the newest
-   `run.diff` snapshot (`N files` when that snapshot is `truncated`, because
-   its counts are only a floor), the workspace name for a run outside the
-   active one, and the `card:meta` slot (file overlaps, sync, and on a swarm
-   card the swarm's conflict count).
+1. the head: the agent's coloured `AgentGlyph` and the title (`runLabel`),
+   two lines at most;
+2. the description: the Needs you reason in the text colour, elsewhere the
+   state's reason (`stateDetail`) in muted; two lines at most, one on a
+   Working card, whose live tool activity must not change the card's
+   height; a card whose reason only restates its state has none;
+3. the footer: `StatusDot`, state label, compact wait or change time
+   ("4m") and the workspace name for a run outside the active workspace or
+   across several repos, which truncates first; then the agent name
+   (`agent.list` `display_name`, else the run's `harness` value), owner
+   avatar, `+added −deleted` from the newest `run.diff` snapshot (`N files`
+   when that snapshot is `truncated`, because its counts are only a floor),
+   the `card:meta` slot (file overlaps, sync, and on a swarm card the
+   swarm's conflict count) and the Needs you action.
+
+The agent name shows once the card is 365px wide, where the description and
+footer also indent under the title; a narrower card keeps it for screen
+readers only. Device and merge-proposal cards use the same frame.
 
 A click anywhere on the card opens the run. In **Board**, a swarm is one
-card: the objective, a phase word ("Swarm active") and its workers' counts; it opens
+card: the objective, a phase word ("Swarm active") or the reason a worker
+needs you, and a named `StatusDot` count per worker state ("2 working"); it opens
 the swarm page, or acts for the root run when the root itself needs you, and
 renders `card:meta` for its root run. Workers never appear as separate
 **Board** cards, archived ones included; a swarm whose integrator is not
@@ -1242,7 +1259,13 @@ finish, or the swarm page.
 While a card has focus, `r` replies and `o` opens (the `card`
 key scope, pushed only then and only for the actions that card offers, so
 the keys stay free elsewhere). Closing the reply composer returns focus to
-the card. A failed send keeps the draft and shows the server's error.
+the card. A failed send keeps the draft and shows the server's error. The
+open composer, its draft, the send in flight and its error live outside the
+card, keyed by run (`useReply`), so a card that remounts - its group
+crossing 60 cards, or a move to another group - keeps them and still reads
+**Sending…**. A send closes or marks failed only the reply it was sent
+from, never one opened after it. Authenticating as another member or
+server drops the reply.
 
 **Finished footer.** **Archived (n)** swaps Finished for archived runs in
 scope (Mine applies); **Back to Finished** returns. Archived runs have no
@@ -1272,8 +1295,21 @@ requirement, with one sentence and one button:
 5. otherwise: "A run is one agent working on its own branch in its own
    container." and **New run**, for members who may launch.
 
-Loading shows delayed skeletons; a hydrated empty column says "Nothing here.".
-An unreachable server shows its error in place of the columns.
+Loading shows two delayed card-sized skeletons per group; a hydrated empty
+group says "Nothing here.". An unreachable server shows its error in place
+of the columns.
+
+**Motion.** Switching between Board and List glides every card that is in
+both from its old place to its new one (`useCardGlide` in
+`src/routes/board/glide.ts`); switching to or from Map is instant. A live
+update that moves one to eight cards to another column glides them and the
+cards they displace. Each Board column clips its own scroll, so a card that
+lands in another column glides only vertically there and fades in.
+Hydration, a reconnect's snapshot,
+a change of workspace, Mine or archive view, and reorders within a column
+change at once, and virtualized groups never glide. Under reduced motion
+every change is instant. A polite live region reads "N need you" when the
+Needs you count changes.
 
 ### Map
 
@@ -1316,12 +1352,12 @@ run identities, ownership or swarm relationships repack it.
   in the wrapping Runs toolbar. Tab reaches every run and its actions,
   bringing an offscreen focused card into view.
 
-`aether.ui` stores Board/Map per active workspace and the map camera per
+`aether.ui` stores Board/List/Map per active workspace and the map camera per
 workspace/all-workspaces, Mine and archive scope. These origin-local
 preferences survive view switches, navigation and reloads. A new camera
 fits once; live metadata, added or removed runs and viewport resizing never
-reset a chosen camera. Use **Fit** to frame the changed set. Layout switches
-are instant, like other workbench panels.
+reset a chosen camera. Use **Fit** to frame the changed set. A map card keeps
+the canvas fill and clamps its description to one line.
 
 ### Run state
 
@@ -1351,9 +1387,8 @@ state.
 `stateTitle` builds the tooltip each surface puts on a state: "*Label*
 since *relative* — *reason*. *What happens next*", for example "Waiting
 since 5 minutes ago — Turn ended without a report. Send a message to
-continue." A board card reads *Label* · *reason* outside Needs you, where
-the reason alone leads. `stateDetail` drops a reason that only restates the
-label. The run header's state line shows only the reason, with `stateTitle`
+continue." A board card puts the label in its footer and the reason in its
+description. `stateDetail` drops a reason that only restates the label. The run header's state line shows only the reason, with `stateTitle`
 as the tooltip of the space it fills, there even when the reason is empty,
 because the Workflow chip under it already shows the dot and
 label; the label stays in a visually hidden `role=status` element, so a
@@ -6361,7 +6396,7 @@ coarse pointer at all and the dock offers collapsed, half and full instead
   Completed, ring with a bar Closed, cross Failed, ring with an exclamation
   mark Interrupted, broken ring Disconnected, bars Paused), named by the state
   word where it stands alone.
-  `StateLine` pairs it with the reason, as on board cards. The states are
+  `StateLine` pairs it with the reason, as on swarm cards. The states are
   described under [Run state](#run-state).
 - **Lists stay still.** Sidebar rows, board cards, the palette and All
   workspaces draw a static dot. Only the run header's dot and the Session
