@@ -614,8 +614,8 @@ Where the instructions go:
 Each launch attempt records where its instructions went as a `note` entry in
 `aether timeline <workspace>`: `run instructions: system prompt`,
 `developer instructions` (Codex), `instructions file` (OpenCode, Copilot
-CLI), `first message` (an Enhanced agent without a system prompt route), or
-`SessionStart hook and MCP server instructions`.
+CLI), `first message` (an agent with no other route, given a task), or
+`SessionStart hook and MCP server instructions` (no route and no task).
 
 `skill` prints the same report decision table as the card, followed by
 shorter notes for the role.

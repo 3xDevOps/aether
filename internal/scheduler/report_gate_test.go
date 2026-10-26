@@ -130,14 +130,15 @@ func TestEnhancedRunWithoutCoordinationIsNeverAsked(t *testing.T) {
 	}
 }
 
-// A Standard launch records where its instructions went.
+// A Standard launch of an agent with no instruction route records that its
+// task carries them.
 func TestStandardLaunchRecordsItsInstructionChannel(t *testing.T) {
 	t.Parallel()
 	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
 	withCoordination(t, e)
 	sub := e.subscribe(t)
 	e.launchFake(t, "add OAuth login")
-	waitNote(t, sub, "run instructions: SessionStart hook and MCP server instructions")
+	waitNote(t, sub, "run instructions: first message")
 }
 
 // A Standard turn is held once, never twice in a row, a report since its
@@ -228,5 +229,21 @@ func TestEnhancedTurnQueuedBehindTheReminderIsReminded(t *testing.T) {
 	})
 	if got := userMessages(items); got[1] != acpmock.PromptWait || got[2] != "after" {
 		t.Fatalf("prompts %q, want the task, the first reminder's turn, the queued message and its reminder", got)
+	}
+}
+
+// A taskless Standard launch loads no idle-wake hook, so its reminder never
+// offers waiting.
+func TestStandardTasklessReminderOffersNoWaiting(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	withCoordination(t, e)
+	run, _ := e.launchFake(t, "")
+	if err := e.sched.ReportAgentState(t.Context(), run.ID, agentstatus.Report{State: agentstatus.Working, TurnStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	reminder, err := e.sched.HoldTurnEnd(t.Context(), run.ID)
+	if err != nil || reminder != reminderPrefix+" (answered, needs-input, blocked, success or failure) before ending the turn." {
+		t.Fatalf("HoldTurnEnd = %q, %v; want a reminder without waiting", reminder, err)
 	}
 }

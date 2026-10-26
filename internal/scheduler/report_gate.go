@@ -30,7 +30,9 @@ func (s *Scheduler) HoldTurnEnd(ctx context.Context, run domain.RunID) (string, 
 		s.mu.Unlock()
 		return "", nil
 	}
-	started, assigned := entry.turnStartedAt, entry.missionAssigned
+	// Mail wakes an Enhanced session, and a Standard launch with a task
+	// loads the idle-wake hook; a taskless one does not.
+	started, assigned, wake := entry.turnStartedAt, entry.missionAssigned, entry.launchMode == domain.LaunchACP || entry.task != ""
 	s.mu.Unlock()
 	last, err := s.cfg.Store.LastCoordReportAt(ctx, run)
 	if err != nil {
@@ -39,7 +41,7 @@ func (s *Scheduler) HoldTurnEnd(ctx context.Context, run domain.RunID) (string, 
 	if !last.Before(started) {
 		return "", nil
 	}
-	reminder := coordhooks.ReportReminder(s.runGuide(ctx, run, assigned, false, true))
+	reminder := coordhooks.ReportReminder(s.runGuide(ctx, run, assigned, false, wake))
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.runs[run] != entry || !entry.turnStartedAt.Equal(started) || !entry.reportOwed() {

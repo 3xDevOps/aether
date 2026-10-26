@@ -573,10 +573,13 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 		return nil, nil, nil, err
 	}
 	if !run.ACP && c.enabled {
-		// Without a launch route, the instructions reach the agent through
-		// its SessionStart hook and the aether MCP server's instructions.
+		// Without a launch route, a task carries the instructions; a
+		// taskless launch gets them only from its SessionStart hook and the
+		// aether MCP server's instructions.
 		channel := "SessionStart hook and MCP server instructions"
 		switch {
+		case instructions == "" && run.Task != "":
+			channel = "first message"
 		case instructions == "":
 		case profile.InstructionsConfig != "":
 			channel = "developer instructions"
