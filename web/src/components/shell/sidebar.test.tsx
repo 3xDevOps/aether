@@ -154,7 +154,7 @@ describe('run rows', () => {
       }))
       render(<AppShell />)
 
-      const row = runList().getByRole('button', { name: 'Working · rewrite the checkout flow · Agent working · 15 minutes ago · your run' })
+      const row = runList().getByRole('button', { name: 'Working · rewrite the checkout flow · 15 minutes ago · your run' })
       const age = within(row).getByText('15m')
       expect(age.getAttribute('dateTime')).toBe('2026-08-14T10:02:00Z')
       // No native tooltip; the exact time is the row's description and is in its details box.
@@ -282,7 +282,7 @@ describe('run rows', () => {
         })
         const shown = within(details()!)
         expect(shown.getByText('rewrite the checkout flow')).toBeDefined()
-        expect(shown.getByText(/^Working since .* — Agent working\.$/)).toBeDefined()
+        expect(shown.getByText(/^Working since [^—]*\.$/)).toBeDefined()
         expect(shown.getByText('main-repo')).toBeDefined()
         expect(shown.getByText('aether/run-1-checkout')).toBeDefined()
         expect(shown.getByText('Started').nextElementSibling?.textContent).toBe(

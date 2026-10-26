@@ -6,7 +6,7 @@ import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { useDelayed } from '@/lib/hooks'
-import { runLabel, stateLabel, stateTitle, stateTone, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, stateTitle, stateTone, stateWords, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useRunPresentation } from '@/store/hooks'
@@ -128,7 +128,7 @@ const foldable = (workers: RunRow[]) => workers.filter((worker) => !worker.needs
 const workersID = (runID: string) => `workers-${runID}`
 
 function Row({
-  row: { run, state, reason, next, since, owner },
+  row: { run, state, reason, next, cause, since, owner },
   toggle,
   nested,
 }: {
@@ -137,6 +137,7 @@ function Row({
   toggle?: { count: number; expanded: boolean; onToggle: () => void }
 }) {
   const navigate = useStore((s) => s.navigate)
+  const words = stateWords({ state, reason })
   return (
     <div
       onClick={(event: MouseEvent<HTMLDivElement>) => {
@@ -207,10 +208,10 @@ function Row({
             >
               {run.branch || 'No branch assigned'}
             </span>
-            {reason && (
+            {words.detail && (
               <>
                 <span aria-hidden> · </span>
-                <span>{reason}</span>
+                <span>{words.detail}</span>
               </>
             )}
           </span>
@@ -224,7 +225,7 @@ function Row({
       </span>
       <span className="col-start-1 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 text-ui-sm text-muted md:col-auto md:row-auto">
         <span className="md:hidden">Status</span>
-        <StatusChip state={state} title={stateTitle({ state, reason, next }, since)} />
+        <StatusChip state={state} label={words.label} title={stateTitle({ state, reason, next, cause }, since)} />
         <RunInputIndicator run={run} />
       </span>
       <RelativeTime
@@ -240,11 +241,11 @@ export function RunStatusChip({ run }: { run: RunRecord }) {
   return <StatusChip state={useRunPresentation(run).state} />
 }
 
-export function StatusChip({ state, title }: { state: PresentationState; title?: string }) {
+export function StatusChip({ state, label = stateLabel[state], title }: { state: PresentationState; label?: string; title?: string }) {
   return (
     <span title={title} className="inline-flex min-h-5 items-center gap-1.5 rounded-chip border border-seam/80 px-1.5 py-px text-ui-sm leading-4 text-text">
       <StatusDot tone={stateTone[state]} />
-      <span>{stateLabel[state]}</span>
+      <span>{label}</span>
     </span>
   )
 }

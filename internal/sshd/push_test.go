@@ -236,14 +236,15 @@ func TestPushTellsOnlyTheSwarmsHuman(t *testing.T) {
 	}
 	publish(changed)
 	heard.expect(t, "nothing")
-	pushed(1)
+	// The answered question's notification is replaced on Bob's device.
+	pushed(2)
 
 	if _, err = db.UpdateRunStatus(ctx, integrator.ID, domain.RunFailed, "agent exited 1", "", nil, nil); err != nil {
 		t.Fatalf("UpdateRunStatus: %v", err)
 	}
 	publish(events.Event{WorkspaceID: e.ws.ID, RunID: integrator.ID, Payload: events.RunStatusPayload{To: domain.RunFailed, Reason: "agent exited 1"}})
 	heard.expect(t, fmt.Sprintf("%s: Integrator stopped, replace it to continue (swarm %s)", bob.ID, mission.ID))
-	pushed(2)
+	pushed(3)
 
 	at := time.Now()
 	if _, err = db.SetRunArchived(ctx, integrator.ID, &at); err != nil {
