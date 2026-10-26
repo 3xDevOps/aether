@@ -5,6 +5,7 @@ import { ArrowLeft } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { flattenWorkflow, isOpen, type WorkflowRow } from '@/components/workflow/flatten'
 import { WorkflowRowItem } from '@/components/workflow/workflow-row'
+import { useAnnouncement } from '@/lib/use-announcement'
 import { cn } from '@/lib/utils'
 import { workflowLabel, type WorkflowNode, type WorkflowState } from '@/store/workflow'
 
@@ -37,35 +38,7 @@ function states(node: WorkflowNode, into = new Map<string, { state: WorkflowStat
 
 const announced = new Set<WorkflowState>(['needs-you', 'failed', 'ready', 'completed'])
 const urgent = new Set<WorkflowState>(['needs-you', 'failed'])
-const announceDelay = 1500
-const announceAtMost = 3
-
-/** A live stream changes the tree constantly, so the window starts at the first transition and is never extended. */
-function useAnnouncement(root: WorkflowNode): string {
-  const [text, setText] = useState('')
-  const before = useRef<Map<string, { state: WorkflowState; label: string }> | null>(null)
-  const queue = useRef<{ text: string; urgent: boolean }[]>([])
-  const timer = useRef<number | undefined>(undefined)
-  useEffect(() => () => clearTimeout(timer.current), [])
-  useEffect(() => {
-    const now = states(root)
-    const previous = before.current
-    before.current = now
-    if (!previous) return
-    for (const [id, { state, label }] of now) {
-      const was = previous.get(id)
-      if (was && was.state !== state && announced.has(state)) queue.current.push({ text: `${label}: ${workflowLabel[state]}`, urgent: urgent.has(state) })
-    }
-    if (queue.current.length === 0 || timer.current !== undefined) return
-    timer.current = window.setTimeout(() => {
-      timer.current = undefined
-      const ordered = [...queue.current.filter((item) => item.urgent), ...queue.current.filter((item) => !item.urgent)]
-      setText(ordered.slice(0, announceAtMost).map((item) => item.text).join('. '))
-      queue.current = []
-    }, announceDelay)
-  }, [root])
-  return text
-}
+const word = (state: WorkflowState) => workflowLabel[state]
 
 export function WorkflowTree({
   root,
@@ -93,7 +66,7 @@ export function WorkflowTree({
   const list = useRef<VListHandle>(null)
   const seen = useRef<Set<string> | null>(null)
   seen.current ??= new Set(rows.map((row) => row.key))
-  const announcement = useAnnouncement(root)
+  const announcement = useAnnouncement(useMemo(() => states(root), [root]), announced, urgent, word)
   const virtual = rows.length > virtualizeAbove
   const activeIndex = rows.findIndex((row) => row.key === active)
 

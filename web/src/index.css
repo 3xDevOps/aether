@@ -203,6 +203,7 @@
   --agent-cursor: #9a6a00;
   --agent-antigravity: #c2410c;
   --tone-soft: 8%;
+  --lane-tint: 16%;
 
   /* Seam borders stay under every shadow: forced-colors mode drops shadows. */
   --card-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
@@ -267,6 +268,7 @@
   --agent-cursor: #e8b84a;
   --agent-antigravity: #ff9466;
   --tone-soft: 12%;
+  --lane-tint: 26%;
 
   --card-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
   --card-hover-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 12px -4px rgb(0 0 0 / 0.5);

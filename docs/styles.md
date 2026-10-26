@@ -196,6 +196,63 @@ alone. Axis and legend text stays at `text-ui-xs` or `text-ui-sm` in
 with `preserveAspectRatio="none"` draws strokes with
 `vector-effect: non-scaling-stroke`.
 
+## Lanes
+
+Board's **Lanes** view ([dashboard-frontend.md](dashboard-frontend.md#lanes))
+follows the chart rules: flat fills, token strokes with
+`vector-effect: non-scaling-stroke`, and a **Legend** popover that names every
+fill and link. Every encoding differs by line style or marker as well as
+colour.
+
+Bars, `rounded-control`, 24px in a 36px lane (32px in 44px on a coarse
+pointer), with 1px between state spans. A filled span is its state's text
+colour at `--lane-tint` (16% light, 26% dark), `bg-current/(--lane-tint)`,
+so every state reads as a tinted bar in both themes; bar text is `text-text`,
+which stays at 4.5:1 or more on every fill (`design-system.test.ts` checks
+it). Subagent sub-lanes use the same fills.
+
+| Span | Colour |
+| --- | --- |
+| Working | `text-state-working`; a live bar adds a 2px `border-state-working` end cap and `live-shimmer` on its activity text |
+| Needs you, or Needed attention in history | `text-state-needs-you`; a live bar ends in a `bg-raised` **Needs you** tag with a pulsing dot |
+| Paused | `text-state-paused` |
+| Ready for review | `text-accent`, matching its dot |
+| Done, Failed | `text-state-done`, `text-state-failed`; a finished run's working spans take its outcome's colour |
+| Waiting, answered, closed | `text-muted` |
+| Starting | hollow, dashed `border-seam` |
+| History not loaded | hollow, dotted `border-icon-faint` |
+
+Neighbouring spans that share a fill draw as one. A bar that starts before
+the window fades in over its first 32px (a mask, not a colour). Strips (a
+folded swarm's workers, folded Finished) are 6px and 8px `bg-current` pills
+in the state's text colour, neighbours of one colour drawn as one; each
+stretch is at least 1/300 of the window, so a brief failure still shows. A
+folded swarm's strip takes the most urgent worker state at each moment, in
+the order Needs you, Failed, Working, Ready for review, Paused, Waiting,
+Done, Closed, so every worker in the window shows on it.
+
+Links use the categorical series by meaning:
+
+| Link | Colour | Style | Ends |
+| --- | --- | --- | --- |
+| Integrator launched worker | `text-series-7` | solid 1.5px; dashed `5 3` across owners | arrowhead at the worker's bar |
+| Agent message | `text-series-5` | dotted, round caps | dot at the sender; arrowhead at the recipient, filled once acknowledged, hollow before; a chip with the kind glyph and count |
+| Submission | `text-state-done` accepted, `text-state-failed` rejected, `text-muted` otherwise | solid 1.25px | open circle at the worker, arrowhead at the integrator, ✓ or ✕ chip |
+| Task dependency | `text-muted` | dashed `2 2` S-curve with 16px handles | none |
+| File overlap | `text-state-needs-you` | dashed `4 2` bracket at the now line | warning chip with the file count |
+| Subagent | `border-icon-faint` | elbow tree connectors in the label column | none |
+
+Links and their chips draw under the bars and labels, over the hover and
+selection fills; only their 10px hit paths sit above. Hovering or selecting a
+lane keeps its links in colour and turns every other link `text-icon-faint`;
+nothing uses opacity. The axis is 28px with `text-ui-xs` muted tabular labels
+over dashed `border-seam` gridlines, dropping any label within 48px of the
+now chip; the now line is 1px `bg-icon-faint` under a neutral `bg-raised`
+**now** chip, never accent. The label column is 240px, 48px under 768px. Lanes that change
+section glide 220ms on `--ease-enter`; new lanes fade in over 250ms, staggered
+by `--stagger-row` up to the eighth. Under reduced motion the pulse, shimmer,
+glide and fade stop.
+
 ## Enforcement
 
 `web/src/design-system.test.ts` scans every non-test source file under
@@ -452,9 +509,10 @@ literal time or curve.
 - `state-pulse` (the run header's working dot, the Session view's live row
   and the working rows on a swarm's Tasks list) breathes: opacity to
   `--opacity-muted` and size to two thirds and back each second.
-  `live-shimmer`, on those rows' reasons, sweeps a light band across muted
-  text in 1.4s of each 1.6s. Sidebar rows, board cards, the palette and All
-  workspaces never pulse.
+  `live-shimmer`, on those rows' reasons and on a working lane's activity in
+  Board's Lanes, sweeps a light band across muted text in 1.4s of each 1.6s.
+  A Needs you tag in Lanes pulses its dot, never its text. Sidebar rows,
+  board cards, the palette and All workspaces never pulse.
 
 Under `prefers-reduced-motion: reduce` every animation and transition stops:
 overlays and sheets appear, indicators and bodies jump, the pulse holds, the

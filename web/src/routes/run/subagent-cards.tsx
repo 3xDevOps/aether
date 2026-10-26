@@ -24,6 +24,7 @@ const tones: Record<AgentState, { tone: Tone; pulse?: boolean; word: string }> =
 }
 
 export const agentStateWord = (state: AgentState) => tones[state].word
+export const agentTone = (state: AgentState) => tones[state].tone
 
 /** replace swaps the open subagent without a history entry. */
 export function openAgent(runID: string, id: string, replace = false) {
