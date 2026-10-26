@@ -114,7 +114,7 @@ func childStart(ctx context.Context, socket string, args []string, in io.Reader,
 	if p.IdempotencyKey, err = mutationKey("child", *key, errOut); err != nil {
 		return protocol.ChildReceipt{}, err
 	}
-	if raw, err := json.Marshal(p); err == nil && len(raw) > maxChildRequestBytes {
+	if raw, marshalErr := json.Marshal(p); marshalErr == nil && len(raw) > maxChildRequestBytes {
 		return protocol.ChildReceipt{}, usageError(fmt.Sprintf("the task escapes to a %d-byte request; the run socket takes %d; shorten the task", len(raw), maxChildRequestBytes))
 	}
 	var out protocol.ChildReceipt
