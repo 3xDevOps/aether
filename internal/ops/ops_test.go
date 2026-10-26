@@ -127,6 +127,12 @@ func TestAssistantSurface(t *testing.T) {
 		t.Fatalf("run.list = %+v, want everyone's runs by default and the member's with mine", lists)
 	}
 
+	f.answers[protocol.MethodWorkspaceGet] = returns(protocol.WorkspaceGetResult{Workspace: protocol.Workspace{ID: "ws-1", Name: "api", SteerOthers: "admins_only"}})
+	if _, out := run(t, cs, "aether_get_workspace", map[string]any{"workspace_id": "ws-1"}); strings.Contains(jsonOf(t, out["workspace"]), "steer_others") ||
+		jsonOf(t, out["untrusted"]) != `{"steer_others":"admins_only"}` {
+		t.Fatalf("aether_get_workspace = %v, want steer_others under untrusted", out)
+	}
+
 	f.errs[protocol.MethodRunGet] = &protocol.Error{Code: protocol.CodeNotFound, Message: "run run-x not found"}
 	call, err := cs.CallTool(t.Context(), &mcp.CallToolParams{Name: "aether_get_run", Arguments: map[string]any{"run_id": "run-x"}})
 	if err != nil {

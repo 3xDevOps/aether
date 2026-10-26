@@ -20,7 +20,7 @@ type workspaceInput struct {
 // for.
 var assistantOps = []Op{
 	opOf("aether_get_workspace", "Get workspace", "", true, nextWorkspaces,
-		"Get one workspace's record: name, repository and base branch.", getWorkspace).
+		"Get one workspace's record: name, repository and base branch."+untrustedRule, getWorkspace).
 		offer(TierRead).calling(protocol.MethodWorkspaceGet),
 	opOf("aether_usage", "Usage", "", true, "",
 		"Show this member's remaining agent usage quota per provider.", passThrough[struct{}](protocol.MethodAccountUsage, "Usage per provider.")).
@@ -57,7 +57,10 @@ func getWorkspace(ctx context.Context, c calls, in workspaceInput) (string, any,
 	if err := c.read(ctx, protocol.MethodWorkspaceGet, protocol.WorkspaceGetParams{WorkspaceID: in.WorkspaceID}, &res); err != nil {
 		return "", nil, err
 	}
-	return fmt.Sprintf("Workspace %s (%s).", res.Workspace.ID, res.Workspace.Name), map[string]any{"workspace": res.Workspace}, nil
+	w := res.Workspace
+	steer := w.SteerOthers
+	w.SteerOthers = ""
+	return fmt.Sprintf("Workspace %s (%s).", w.ID, w.Name), map[string]any{"workspace": w, "untrusted": map[string]any{"steer_others": steer}}, nil
 }
 
 func readDocs(ctx context.Context, c calls, in docsInput) (string, any, error) {
