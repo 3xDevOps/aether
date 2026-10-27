@@ -55,7 +55,7 @@ const goneWord: Partial<Record<ActionTarget['kind'], string>> = {
   workspace: 'This workspace no longer exists',
 }
 
-const launches = new Set(['aether_launch_run', 'aether_launch_swarm', 'aether_launch_template', 'aether_relaunch_run'])
+const launches = new Set(['aether_launch_run', 'aether_launch_swarm', 'aether_relaunch_run'])
 
 /** States the member chose or let lapse: said quietly, with any error kept for the details. */
 const quiet = new Set<ActionState>(['declined', 'expired', 'withdrawn'])

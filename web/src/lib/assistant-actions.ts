@@ -44,8 +44,8 @@ export interface AssistantView {
   actions: AssistantAction[]
 }
 
-/** The RPC method each acting tool calls, by its input where one tool has several: what a pending card and an action record name. */
-const toolMethods: Record<string, string | ((input: Record<string, unknown>) => string | undefined)> = {
+/** The RPC methods each acting tool may call, by its input where it says which: what a pending card and an action record name. */
+const toolMethods: Record<string, string | string[] | ((input: Record<string, unknown>) => string | undefined)> = {
   aether_launch_run: 'run.launch',
   aether_message_run: 'run.inject',
   aether_stop_run: (input) => (text(input.outcome) ? 'run.close' : 'run.kill'),
@@ -53,11 +53,11 @@ const toolMethods: Record<string, string | ((input: Record<string, unknown>) => 
   aether_resume_run: 'run.resume',
   aether_save_environment: 'env.save',
   aether_launch_swarm: 'mission.create',
-  aether_launch_template: 'run.launch',
   aether_pr_merge: 'run.pr.merge',
   aether_pr_create: 'run.pr.create',
   aether_relaunch_run: 'run.relaunch',
-  aether_answer: 'run.input.respond',
+  // The question the answer_id names decides: an agent's, a swarm's or a teammate's.
+  aether_answer: ['run.input.respond', 'mission.question.answer', 'run.room.post'],
   aether_decide_approval: 'run.input.respond',
   aether_run_lifecycle: (input) => ({ relaunch: 'run.relaunch', protect: 'run.protect', unprotect: 'run.protect', archive: 'run.archive', restore: 'run.archive' } as Record<string, string>)[text(input.action) ?? ''],
   aether_switch_run_mode: 'run.mode.switch',
@@ -69,9 +69,10 @@ const toolMethods: Record<string, string | ((input: Record<string, unknown>) => 
   aether_memory_pin: (input) => (input.pin === false ? 'memory.unpin' : 'memory.pin'),
 }
 
-function toolMethod(tool: string, input: Record<string, unknown>): string | undefined {
+function toolMethod(tool: string, input: Record<string, unknown>): string[] {
   const method = toolMethods[tool]
-  return typeof method === 'function' ? method(input) : method
+  const named = typeof method === 'function' ? method(input) : method
+  return named === undefined ? [] : [named].flat()
 }
 
 const readTools: Record<string, [string, string]> = {
@@ -316,7 +317,7 @@ interface Draft {
   entry: WorkItem
   /** The id of the step block the call ran in. */
   block: string
-  method?: string
+  methods: string[]
   noted?: Approval
   saved?: AssistantActionRecord
 }
@@ -332,7 +333,7 @@ interface Draft {
  * summary, so it goes to the one call that fits; with more, it stays a row.
  */
 function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined {
-  const open = drafts.filter((d) => d.method === note.method && !d.noted && !d.saved)
+  const open = drafts.filter((d) => d.methods.includes(note.method) && !d.noted && !d.saved)
   if (!note.saved) {
     const run = (d: Draft) => text(d.action.input.run_id)
     const fits = open.length > 1 ? open.filter((d) => run(d) && words.includes(run(d)!)) : open
@@ -373,7 +374,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       ...callValues(calls.get(entry.id), entry),
       ...(entry.truncated && entry.seq !== undefined ? { seq: entry.seq } : {}),
     }
-    drafts.push({ action, entry, block, method: toolMethod(tool, action.input) })
+    drafts.push({ action, entry, block, methods: toolMethod(tool, action.input) })
     return action
   }
   const claim = (step: Step | SessionRow): boolean => {
@@ -432,7 +433,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
     flush(true)
     if (!working && row.live) out.push({ kind: 'live', id: 'live', at: row.at, ...row.live })
   }
-  for (const { action, entry, method, noted, saved } of drafts) {
+  for (const { action, entry, methods, noted, saved } of drafts) {
     const error = entry.status === 'failed' ? errorText(action.result) : undefined
     // A turn that ends shows its open calls as finished; the call's own status says whether it ever did.
     const status = calls.get(entry.id)?.status
@@ -440,7 +441,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
     const open = !saved || saved.outcome === 'approved' || saved.outcome === 'auto_approved'
     Object.assign(action, cut && open
       ? { state: 'unfinished', approval: saved ? recordApproval(saved) : noted }
-      : actionOutcome(entry, error, method !== undefined && waitingMethods.has(method), noted, saved))
+      : actionOutcome(entry, error, methods.some((method) => waitingMethods.has(method)), noted, saved))
     action.error = saved?.error ?? error
     action.target = target(action.tool, action.input, record(action.result), saved)
   }
@@ -504,7 +505,6 @@ function watchObject(action: AssistantAction, names: ActionNames): string {
 const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb); object: (action: AssistantAction, names: ActionNames) => string }> = {
   aether_launch_run: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('run') },
   aether_launch_swarm: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('swarm') },
-  aether_launch_template: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('run from a template') },
   aether_relaunch_run: runVerb(['Relaunch', 'Relaunched', 'Relaunching']),
   aether_message_run: runVerb(['Message', 'Messaged', 'Messaging']),
   aether_stop_run: {

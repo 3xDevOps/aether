@@ -93,6 +93,16 @@ describe('assistantView', () => {
       return { records, rows }
     }
 
+    it.each(['mission.question.answer', 'run.room.post', 'run.input.respond'])('folds an answer recorded as %s into its aether_answer card', (method) => {
+      const answer = { id: '1:t0', name: 'aether_answer', status: 'running' as const, input: { run_id: 'r1', answer_id: 'q1', answer: 'use main' } }
+      const waiting = [{ id: 'c', method, summary: '', params: {}, created_at: at, expires_at: at }]
+      expect(assistantView([block(answer)], waiting).actions.map((a) => a.state)).toEqual(['approval'])
+      const { records, rows } = notices(1, record({ method, summary: 'Answered', target: { run_id: 'r1' }, outcome: 'succeeded' }))
+      const view = assistantView([block({ ...answer, status: 'done' }), ...rows], [], { records, calls: new Map() })
+      expect(view.actions.map((a) => [a.state, a.approval, a.target?.id])).toEqual([['done', 'approved', 'r1']])
+      expect(view.rows).toEqual([])
+    })
+
     it('gives identical calls of one block their records in the order they ran', () => {
       const message = (id: string, status: WorkItem['status'], result?: string): Partial<WorkItem> => ({ id, name: 'aether_message_run', status, input: { run_id: 'r1', message: 'go' }, result })
       const { records, rows } = notices(1,
