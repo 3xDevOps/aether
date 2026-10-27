@@ -66,6 +66,10 @@ func TestClassifyWaitByItsConditions(t *testing.T) {
 	expired := resolved("expired", 10*time.Minute)
 	expired.DeliveredAt = now.Add(-9 * time.Minute)
 	cancelled := fresh
+	unread := failing
+	unread.SourceCheckedAt = now.Add(-61 * time.Minute)
+	neverOld := WaitCondition{Spec: checksSpec, State: waitPending, CreatedAt: now.Add(-61 * time.Minute)}
+	never.CreatedAt = now.Add(-time.Minute)
 	cancelled.State = waitCancelled
 
 	cases := []struct {
@@ -81,28 +85,34 @@ func TestClassifyWaitByItsConditions(t *testing.T) {
 		{name: "only cancelled", conditions: []WaitCondition{cancelled}, kind: domain.WaitUnverified},
 		{name: "fresh", conditions: []WaitCondition{fresh}, kind: domain.WaitCondition, detail: checksSpec + ": open, 3 checks running", verified: true},
 		{name: "stale read claims nothing live", conditions: []WaitCondition{stale}, kind: domain.WaitSourceUnknown,
-			detail: checksSpec + ": status unknown since Oct 27 01:55 UTC", verified: true},
+			detail: checksSpec + ": status unknown", verified: true},
 		{name: "failing read", conditions: []WaitCondition{failing}, kind: domain.WaitSourceUnknown,
-			detail: checksSpec + ": status unknown since Oct 27 01:50 UTC", err: "gh: API rate limit exceeded", verified: true},
+			detail: checksSpec + ": status unknown", err: "gh: API rate limit exceeded", verified: true},
 		{name: "never read", conditions: []WaitCondition{never}, kind: domain.WaitSourceUnknown,
 			detail: checksSpec + ": status never read", err: "gh: Could not resolve to a PullRequest"},
 		{name: "fresh and stale", conditions: []WaitCondition{fresh, stale}, kind: domain.WaitSourceUnknown,
-			detail: checksSpec + ": open, 3 checks running; " + checksSpec + ": status unknown since Oct 27 01:55 UTC", verified: true},
+			detail: checksSpec + ": open, 3 checks running; " + checksSpec + ": status unknown", verified: true},
 		{name: "resolved, waking", conditions: []WaitCondition{resolved(waitResolved, time.Minute)}, kind: domain.WaitCondition,
 			detail: checksSpec + ": resolved, waking the agent (merged)", verified: true},
 		{name: "errored, waking", conditions: []WaitCondition{errored}, kind: domain.WaitFault,
 			detail: checksSpec + ": error, waking the agent (merged)", err: "gh: pull request 582 not found", verified: true},
 		{name: "delivered", conditions: []WaitCondition{delivered}, kind: domain.WaitCondition,
-			detail: checksSpec + ": resolved, woke the agent at Oct 27 01:51 UTC (merged)", verified: true},
+			detail: checksSpec + ": resolved, woke the agent (merged)", verified: true},
 		{name: "expired and told", conditions: []WaitCondition{expired}, kind: domain.WaitFault,
-			detail: checksSpec + ": expired, woke the agent at Oct 27 01:51 UTC (merged)", verified: true},
+			detail: checksSpec + ": expired, woke the agent (merged)", verified: true},
 		{name: "wake undelivered", conditions: []WaitCondition{undelivered, fresh}, kind: domain.WaitFault,
-			detail:   checksSpec + ": resolved at Oct 27 01:50 UTC and the agent was not woken (merged); " + checksSpec + ": open, 3 checks running",
+			detail:   checksSpec + " resolved, but the agent was not woken (merged); " + checksSpec + ": open, 3 checks running",
 			err:      "coord: inbox write: disk full",
-			stranded: checksSpec + ": resolved at Oct 27 01:50 UTC and the agent was not woken", verified: true},
+			stranded: checksSpec + " resolved, but the agent was not woken", verified: true},
 		{name: "target lost, never told", conditions: []WaitCondition{lost}, kind: domain.WaitFault,
-			detail: checksSpec + ": error at Oct 27 01:50 UTC and the agent was not woken (merged)", err: "gh: pull request 582 not found",
-			stranded: checksSpec + ": error at Oct 27 01:50 UTC and the agent was not woken", verified: true},
+			detail: checksSpec + " errored, but the agent was not woken (merged)", err: "gh: pull request 582 not found",
+			stranded: checksSpec + " errored, but the agent was not woken", verified: true},
+		{name: "unread for an hour", conditions: []WaitCondition{unread}, kind: domain.WaitFault,
+			detail: "cannot read " + checksSpec + " for over 1h, so the agent will not be woken", err: "gh: API rate limit exceeded",
+			stranded: "cannot read " + checksSpec + " for over 1h, so the agent will not be woken", verified: true},
+		{name: "never read for an hour", conditions: []WaitCondition{neverOld}, kind: domain.WaitFault,
+			detail:   "cannot read " + checksSpec + " for over 1h, so the agent will not be woken",
+			stranded: "cannot read " + checksSpec + " for over 1h, so the agent will not be woken"},
 	}
 	for _, tc := range cases {
 		wait, stranded := classifyWait(tc.conditions, now)
@@ -185,7 +195,7 @@ func TestAConditionDecidesWhatAReportedWaitShows(t *testing.T) {
 	stuck.State, stuck.ResolvedAt, stuck.LastDeliveryError = waitResolved, time.Now().Add(-6*time.Minute), "coord: inbox write: disk full"
 	waits.set(nil, stuck)
 	e.sched.refreshActivities(ctx)
-	broken := waitBrokenReasonPrefix + checksSpec + ": resolved at " + clock(stuck.ResolvedAt) + " and the agent was not woken"
+	broken := waitBrokenReasonPrefix + checksSpec + " resolved, but the agent was not woken"
 	p = expect("the wake undelivered past its grace", domain.ActivityNeedsYou, events.CauseWaitFault, broken, domain.WaitFault)
 	if p.Wait.Error != "coord: inbox write: disk full" {
 		t.Fatalf("fault error = %q", p.Wait.Error)

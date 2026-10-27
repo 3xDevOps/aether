@@ -14,7 +14,8 @@ import (
 type WaitCondition struct {
 	// Spec is the condition as the agent wrote it, such as
 	// pr:owner/repo#12:checks.
-	Spec string
+	Spec      string
+	CreatedAt time.Time
 	// State is pending, resolved, cancelled, superseded, expired or error.
 	State string
 	// Summary is the source's last observed status.
@@ -43,6 +44,10 @@ const (
 	waitSuperseded = "superseded"
 )
 
+// unreadBound is how long a pending condition's source may go unread
+// before the run needs a member.
+const unreadBound = time.Hour
+
 // wakeGrace is how long a resolved condition's wake may stay undelivered
 // before the run needs a member: past it the agent will not move on its own.
 const wakeGrace = 5 * time.Minute
@@ -52,8 +57,9 @@ const wakeGrace = 5 * time.Minute
 const waitBrokenReasonPrefix = "wait broken: "
 
 // classifyWait judges a reported wait by its conditions at now. stranded
-// names the conditions that left pending and whose wake was not delivered
-// within wakeGrace; it holds no clock-relative or source-changing text, so
+// names the conditions the agent will not be woken by: one that left
+// pending and whose wake was not delivered within wakeGrace, or one whose
+// source went unread for unreadBound. It holds no time or source status, so
 // the reason built from it stays put while the run needs a member.
 func classifyWait(conditions []WaitCondition, now time.Time) (wait domain.RunWait, stranded string) {
 	rank := map[domain.WaitEvidence]int{domain.WaitUnverified: 0, domain.WaitCondition: 1, domain.WaitSourceUnknown: 2, domain.WaitFault: 3}
@@ -71,22 +77,24 @@ func classifyWait(conditions []WaitCondition, now time.Time) (wait domain.RunWai
 			if c.Summary != "" {
 				detail += ": " + c.Summary
 			}
+		case c.State == waitPending && unreadable(c, now):
+			kind, errText = domain.WaitFault, c.LastError
+			detail = "cannot read " + c.Spec + " for over " + strings.TrimSuffix(unreadBound.String(), "0m0s") + ", so the agent will not be woken"
+			stranded = strings.TrimPrefix(stranded+"; "+detail, "; ")
 		case c.State == waitPending:
-			kind = domain.WaitSourceUnknown
+			kind, errText = domain.WaitSourceUnknown, c.LastError
+			detail += ": status unknown"
 			if c.SourceCheckedAt.IsZero() {
-				detail += ": status never read"
-			} else {
-				detail += ": status unknown since " + clock(c.SourceCheckedAt)
+				detail = c.Spec + ": status never read"
 			}
-			errText = c.LastError
 		case !c.DeliveredAt.IsZero():
-			detail += ": " + c.State + ", woke the agent at " + clock(c.DeliveredAt)
+			detail += ": " + c.State + ", woke the agent"
 			if c.State != waitResolved {
 				kind, errText = domain.WaitFault, c.LastError
 			}
 		case now.Sub(c.ResolvedAt) > wakeGrace:
 			kind = domain.WaitFault
-			detail += ": " + c.State + " at " + clock(c.ResolvedAt) + " and the agent was not woken"
+			detail += " " + ended[c.State] + ", but the agent was not woken"
 			stranded = strings.TrimPrefix(stranded+"; "+detail, "; ")
 			errText = c.LastDeliveryError
 			if c.State != waitResolved {
@@ -122,8 +130,18 @@ func classifyWait(conditions []WaitCondition, now time.Time) (wait domain.RunWai
 	return wait, stranded
 }
 
-func clock(t time.Time) string {
-	return t.UTC().Format("Jan 2 15:04 UTC")
+var ended = map[string]string{waitResolved: "resolved", "expired": "expired", "error": "errored"}
+
+// unreadable reports a pending condition whose source has not been read
+// for unreadBound since its last successful read or, never read, since it
+// was registered: the engine keeps retrying, but the wake it waits for
+// cannot be trusted to come.
+func unreadable(c WaitCondition, now time.Time) bool {
+	since := c.SourceCheckedAt
+	if since.IsZero() {
+		since = c.CreatedAt
+	}
+	return !since.IsZero() && now.Sub(since) > unreadBound
 }
 
 // fresh reports a pending condition whose source was read without error

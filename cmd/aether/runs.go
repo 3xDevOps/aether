@@ -308,9 +308,6 @@ func displayStatus(r protocol.Run) string {
 			return "Ready for review"
 		}
 	}
-	if r.Activity == string(domain.ActivityNeedsYou) && r.Cause == string(events.CauseWaitFault) {
-		return "Wait broken"
-	}
 	if r.MissionRole == "worker" && r.Activity == string(domain.ActivityNeedsYou) && !strings.HasPrefix(r.Reason, domain.BlockedReasonPrefix) {
 		return "Waiting for the integrator"
 	}

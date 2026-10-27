@@ -158,7 +158,10 @@ Status lists the reachable peers in route order: assignment peers with
 reports one; radar peers with `state: "active"` or `"grace"`; then workspace
 peers with `state: "workspace"`, most recently active first. Every peer
 carries its task summary, its `activity` (what it is doing) with its
-`reason` (`reason_truncated` when cut at 512 bytes), and `run_status`. A `run_status` of `needs-attention` only means the
+`reason` (`reason_truncated` when cut at 512 bytes), `wait` while it shows a
+reported wait (what Aether last verified about it, or why it cannot vouch for
+it; see [Waits Aether can check](failure-handling.md#waits-aether-can-check)),
+and `run_status`. A `run_status` of `needs-attention` only means the
 agent is parked: read `activity` to tell waiting on agents, CI or a process
 from a request for a person. Each run appears once, under its first route,
 and status never lists a run the sender cannot message: finished runs, runs
@@ -1925,7 +1928,8 @@ People read reports from the CLI too: `aether timeline` prints one as
 `<outcome>: <summary>`, `aether runs <run-id>` shows the latest, and
 `aether wait <run-id>` returns on a terminal report and on a needs-input or
 blocked one (a swarm worker's only when blocked), exits 4 on an answered
-one, and keeps waiting on a waiting one
+one, keeps waiting on a waiting one, and exits 5 when a condition the wait
+named resolved but its wake never reached the agent
 ([exit codes](quickstart.md#from-a-script-or-agent)).
 
 Before accepting `coord.report`, Aether captures evidence for the run. The

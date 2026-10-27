@@ -19,7 +19,17 @@ export type RunStatus =
 
 /** What a live run waits on, from the scheduler; set only while `status` is `running` or `needs-attention`. */
 /** What chose a live run's state; mirrors events.RunStatusCause in internal/events/event.go. */
-export type RunStatusCause = 'turn' | 'report' | 'turn-end' | 'stall' | 'wait-expired' | 'workers' | 'tasks-held' | 'human' | 'disconnect'
+export type RunStatusCause =
+  | 'turn'
+  | 'report'
+  | 'turn-end'
+  | 'stall'
+  | 'wait-expired'
+  | 'wait-fault'
+  | 'workers'
+  | 'tasks-held'
+  | 'human'
+  | 'disconnect'
 
 export type RunActivity =
   | 'working'

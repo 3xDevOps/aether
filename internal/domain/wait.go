@@ -43,11 +43,15 @@ func (w *RunWait) Text(now time.Time) string {
 		return "not verified: the wait names no condition Aether can check"
 	}
 	text := w.Detail
+	switch {
+	case w.VerifiedAt == nil:
+	case w.Kind == WaitCondition:
+		text += " (checked " + Ago(now.Sub(*w.VerifiedAt)) + ")"
+	case w.Kind == WaitSourceUnknown:
+		text += " (last read " + Ago(now.Sub(*w.VerifiedAt)) + ")"
+	}
 	if w.Error != "" {
 		text += ": " + w.Error
-	}
-	if w.Kind == WaitCondition && w.VerifiedAt != nil {
-		text += " (checked " + Ago(now.Sub(*w.VerifiedAt)) + ")"
 	}
 	return text
 }

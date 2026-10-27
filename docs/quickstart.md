@@ -409,10 +409,14 @@ you by the [Needs you](failure-handling.md#needs-you) rule (a question, a
 permission request, a `needs-input` or `blocked` report, or a disconnected
 agent), 4 when it is parked with nothing pending, because its turn ended with
 an `answered` report or no report or it went silent, and a message continues it (`aether message
-<run-id> "<reply>"`), and 124 on timeout. Before exiting it prints `run
+<run-id> "<reply>"`), 5 when its wait broke (a condition it waited on resolved
+and the wake never reached the agent; see [Waits Aether can
+check](failure-handling.md#waits-aether-can-check)), and 124 on timeout. Before exiting it prints `run
 <run-id> <state>: <reason>`, with the state as `aether runs` labels it. It keeps waiting
 while the run waits on agents, CI or a process, and on a swarm worker's
-question, which its integrator answers. It also exits 1 on its
+question, which its integrator answers. When Aether cannot vouch for that wait
+it says so once on stderr: `run <run-id> still waits, but <condition>: status
+unknown (last read 12m ago): <error>`. It also exits 1 on its
 own error, such as an unknown run id, with the error on stderr and nothing on
 stdout. `aether runs --needs-you` lists the runs waiting on you, and `aether
 runs <run-id>` shows what one needs with the command that answers it. `aether

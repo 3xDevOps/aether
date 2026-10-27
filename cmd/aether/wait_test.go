@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
@@ -43,6 +44,15 @@ func TestWaitExitsWithTheRunsOutcome(t *testing.T) {
 		{name: "stalled", run: protocol.Run{Status: "needs-attention", Activity: "waiting", Reason: "stalled: no output or file changes for 10m"},
 			code: waitWaiting, lines: []string{"  aether message r1 \"<reply>\"\n"}},
 		{name: "waiting for agents", run: protocol.Run{Status: "needs-attention", Activity: "waiting-agents"}, deadline: timedOut, code: waitTimedOut},
+		{name: "waiting on an unreadable condition", run: protocol.Run{Status: "needs-attention", Activity: "waiting-ci", Reason: "CI on #12",
+			Wait: &domain.RunWait{Kind: domain.WaitSourceUnknown, Detail: "pr:o/r#12:checks: status unknown", Error: "gh: API rate limit exceeded"}},
+			deadline: timedOut, code: waitTimedOut,
+			lines: []string{"run r1 Waiting for CI (status unknown): CI on #12\n  pr:o/r#12:checks: status unknown: gh: API rate limit exceeded\n"}},
+		{name: "broken wait", run: protocol.Run{Status: "needs-attention", Activity: "needs-you", Cause: "wait-fault",
+			Reason: "wait broken: pr:o/r#12:checks resolved, but the agent was not woken"}, code: waitBroken,
+			lines: []string{"run r1 Needs you: wait broken: pr:o/r#12:checks resolved, but the agent was not woken\n", "  aether message r1 \"<reply>\"\n"}},
+		{name: "a worker's broken wait", run: protocol.Run{Status: "needs-attention", Activity: "needs-you", Cause: "wait-fault", MissionRole: "worker",
+			Reason: "wait broken: run:run-2:finished resolved, but the agent was not woken"}, code: waitBroken},
 		{name: "paused", run: protocol.Run{Status: "needs-attention", Activity: "needs-you", Paused: true}, deadline: timedOut, code: waitTimedOut},
 		{name: "working", run: protocol.Run{Status: "running", Activity: "working"}, deadline: timedOut, code: waitTimedOut,
 			lines: []string{"run r1 Working\n"}},

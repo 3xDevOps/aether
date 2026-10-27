@@ -159,11 +159,11 @@ test('an interrupted or stopped turn asks for a message; a cancelled one stays q
   const stopped = lead('r12')
   await status(stopped, { status: 'needs-attention', state: 'needs-you', reason: 'turn ended: max_tokens' })
   const stranded = lead('r13')
-  await status(stranded, { status: 'needs-attention', state: 'needs-you', cause: 'wait-fault', reason: 'wait broken: run:run-1:finished: resolved at Oct 27 01:40 UTC and the agent was not woken' })
+  await status(stranded, { status: 'needs-attention', state: 'needs-you', cause: 'wait-fault', reason: 'wait broken: run:run-1:finished resolved, but the agent was not woken' })
   assert.deepEqual(shown.map((n) => n.options.body), [
     'Turn interrupted, send a message to continue',
     'Turn ended (max_tokens), send a message to continue',
-    'Wait broken, send a message to continue: run:run-1:finished: resolved at Oct 27 01:40 UTC and the agent was not woken',
+    'Wait broken, send a message to continue: run:run-1:finished resolved, but the agent was not woken',
   ])
 })
 

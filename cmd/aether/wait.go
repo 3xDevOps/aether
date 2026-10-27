@@ -133,9 +133,9 @@ func waitRun(c *protocol.Client, w io.Writer, runID string, asJSON bool, changed
 		}
 		// A wait Aether cannot vouch for keeps waiting, said once on stderr.
 		if r.Wait != nil && (r.Wait.Kind == domain.WaitSourceUnknown || r.Wait.Kind == domain.WaitFault) {
-			if text := r.Wait.Text(time.Now()); text != doubt {
-				doubt = text
-				fmt.Fprintf(os.Stderr, "run %s still waits, but %s\n", r.ID, printable(text))
+			if r.Wait.Detail+r.Wait.Error != doubt {
+				doubt = r.Wait.Detail + r.Wait.Error
+				fmt.Fprintf(os.Stderr, "run %s still waits, but %s\n", r.ID, printable(r.Wait.Text(time.Now())))
 			}
 		}
 		items, err := attentionItems(c, r.WorkspaceID)
