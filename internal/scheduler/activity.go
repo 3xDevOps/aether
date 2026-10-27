@@ -280,8 +280,16 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 	if entry != nil && !entry.paused && waiting != domain.ActivityAnswered && waiting == d.activity {
 		wait, stranded := s.runWaitLocked(ctx, entry)
 		d.wait = &wait
-		if stranded != "" && parked {
-			d.activity, d.cause, d.reason = domain.ActivityNeedsYou, events.CauseWaitFault, waitBrokenReasonPrefix+stranded
+		// A live swarm or background task can still wake the agent, so a
+		// stranded wait stays quiet until it ends.
+		if stranded != "" && parked && !heldByTasks(entry.agentReport) {
+			swarm, err := s.cfg.Store.IntegratorWaiting(ctx, run, entry.turnStartedAt)
+			if err != nil {
+				return derived{}, fmt.Errorf("scheduler: read the integrator's workers: %w", err)
+			}
+			if !swarm.Live() {
+				d.activity, d.cause, d.reason = domain.ActivityNeedsYou, events.CauseWaitFault, waitBrokenReasonPrefix+stranded
+			}
 		}
 	}
 	return d, nil

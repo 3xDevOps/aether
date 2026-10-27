@@ -258,6 +258,46 @@ func TestAConditionDecidesWhatAReportedWaitShows(t *testing.T) {
 	expect("the wake delivered", domain.ActivityWaitingCI, events.CauseReport, "CI on #582", domain.WaitCondition)
 }
 
+// A stranded condition does not need a member while a live swarm can still
+// wake the agent: the wait shows its fault quietly, and needs a member only
+// once the swarm ends.
+func TestALiveSwarmKeepsAStrandedWaitQuiet(t *testing.T) {
+	t.Parallel()
+	waits := &fakeWaits{}
+	var integrator *integratorStore
+	e := newReportingEnv(t, func(cfg *Config) {
+		integrator = &integratorStore{Store: cfg.Store}
+		cfg.Store = integrator
+		cfg.WaitConditions = waits
+		cfg.StallThreshold = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	integrator.workers.Store(1)
+	stuck := checking(time.Now().Add(-time.Hour))
+	stuck.State, stuck.ResolvedAt = waitResolved, time.Now().Add(-time.Hour)
+	waits.set(nil, stuck)
+	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-agents", "", "two workers", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the quiet fault", func() bool {
+		got := e.sched.Wait(run.ID, domain.ActivityWaitingAgents)
+		return got != nil && got.Kind == domain.WaitFault
+	})
+	e.sched.refreshActivities(ctx)
+	if row := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention); row.NeedsAttention(false) {
+		t.Fatalf("a stranded wait with a live swarm shows %s %q", row.Activity, row.Reason)
+	}
+
+	integrator.workers.Store(0)
+	e.sched.refreshActivities(ctx)
+	waitFor(t, "the broken wait", func() bool { return e.sched.Cause(run.ID, domain.ActivityNeedsYou) == events.CauseWaitFault })
+}
+
 // A member's message is the remedy a broken wait asks for: the turn it
 // starts leaves the stranded condition behind, so the next wait the agent
 // reports is judged without it.

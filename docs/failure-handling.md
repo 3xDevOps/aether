@@ -91,7 +91,10 @@ evidence:
 | `unverified` | The agent named no condition, or only ones that left pending before its current turn. | The state, as described above. | No. |
 
 A broken wait is the only one that needs you, because only then can nothing
-but a person move the run. Its reason holds no time or source status, so it
+but a person move the run. While the run still holds background tasks or, as
+a swarm integrator, has a live worker attempt, a child run or unread worker
+mail, those can wake it: the run keeps its waiting state, marked `(wait fault)`, and needs you
+only once they end. Its reason holds no time or source status, so it
 is announced once. A swarm worker's broken wait is not announced to you: its
 integrator sees it in peer status and from `aether wait` (exit 5). A paused
 run is judged again when it resumes.
