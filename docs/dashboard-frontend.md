@@ -1852,7 +1852,8 @@ the swarm, which the run's `state` does not cover, so push and
 | `state` `failed` with `outcome_unseen` (labelled Failed) | owner | Agent reported failure; review the result / the reason: Turn failed: … |
 
 Failed and Disconnected rows show their reason in full-contrast text, as a
-Needs you row does.
+Needs you row does. A control hold waits since the attempt's
+`takeover_since`.
 
 A device waiting for approval is not a run, so `deviceNeeds` in the same
 file turns it into a card for an admin, and a member's own pending device
@@ -2579,7 +2580,12 @@ with their member name and `Avatar`, protection and the existing
 `ControlButton`: take a free lease, release it, or hold for three seconds to
 request an occupied lease. A local lease acknowledgement takes precedence
 over polled controller metadata; the controller's name remains visible
-beside **You control** or **You control in another tab**.
+beside **You control** or **You control in another session since <time>**.
+That text appears when `run.room.status` names your member with a
+`control_session_id` other than this tab's: another tab, device or
+`aether attach`, held since the lease's `acquired_at`. On a swarm worker the
+strip then adds **Release**, which calls `mission.worker.release` with the
+attempt's `takeover_generation`, so you can free a hold from any tab.
 **Multiplayer** still opens Details for shared notes and run facts.
 The strip is one row whenever the controls fit beside a 6rem roster, which
 covers desktop windows. Only when they cannot, as on a phone with
@@ -3452,10 +3458,11 @@ and the Environment keep native xterm scrollback.
   terminals and other members start as mirrors. The server grants write only
   when no controller exists; a second tab cannot become a second writer. A
   mirror shows who controls ("Nobody controls", "<name> controls", "You
-  control in another tab", with "(last known)" while the status is stale)
-  and **Take control**. Live, acknowledged local control reads "You control"
-  with an accent-filled **Release**, plus teal control dots behind the
-  terminal toolbar while input is writable ([styles.md](styles.md)). They
+  control in another session since <time>", with "(last known)" while the
+  status is stale) and **Take control**. Live, acknowledged local control
+  reads "You control" with an accent-filled **Release**, plus teal control
+  dots behind the terminal toolbar while input is writable
+  ([styles.md](styles.md)). They
   never change layout, and return to neutral during replay or history
   reading and after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
   ended runs show no control and replay their recording, or say **This run

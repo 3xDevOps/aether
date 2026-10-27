@@ -165,6 +165,7 @@ export function useAgentTerminal(run: RunRecord, surfaceShown: boolean) {
     readingHistory,
     setReadingHistory,
     roomControl,
+    controlSessionID: controlMetadata?.control_session_id,
     localControl,
     liveWritable: localControl && !replaying && !readingHistory,
     controlUnavailable: !live || state.steerDenied || !steerable,

@@ -2,15 +2,16 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
+import { clockTime } from '@/lib/format'
 import type { SessionHistory } from '@/lib/session-types'
-import type { Run } from '@/lib/types'
+import type { MissionAttempt, Run } from '@/lib/types'
 import { lookupRoute } from '@/routes/registry'
 import '@/routes/run'
 import type { TakeoverState } from '@/routes/terminal/attach'
 import { useStore } from '@/store'
 import { optimisticDeadlineMs } from '@/store/optimistic'
 import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
-import { alice, bob, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
+import { alice, bob, mission, roomMessage, run, serverInfo, workspace } from '@/test/fixtures'
 import { pickOption } from '@/test/select'
 import { StubSocket } from '@/test/stub-socket'
 
@@ -988,6 +989,33 @@ describe('Enhanced multiplayer controls', () => {
     expect(await controller.findByRole('img', { name: bob.display_name })).toBeDefined()
     expect(controller.queryByRole('img', { name: alice.display_name })).toBeNull()
     expect(screen.getByRole('button', { name: 'Take control' })).toBeDefined()
+  })
+
+  it('names a worker hold in another session and releases its current generation from this tab', async () => {
+    const acquired = '2026-10-08T11:00:00Z'
+    vi.spyOn(api, 'runRoomStatus').mockResolvedValue({
+      ...occupiedRoom, controller: { member_id: alice.id, control_session_id: 'acp-session-other', connected: true, acquired_at: acquired },
+    })
+    const held = { id: 'attempt_1', run_id: 'run_1', number: 2, takeover_active: true, takeover_member_id: alice.id, takeover_generation: 7 } as MissionAttempt
+    vi.mocked(api.missionWorkerRelease).mockClear()
+    vi.mocked(api.missionShow).mockImplementation(async () => ({
+      mission: mission(), tasks: [], submissions: [], diagnostics: [], questions: [],
+      attempts: [{ ...held, takeover_active: vi.mocked(api.missionWorkerRelease).mock.calls.length === 0 }],
+    }))
+    const takenAgain = () => {
+      held.takeover_generation = 8
+      useStore.getState().bumpWorkflowSignal('missionSeq', mission().id)
+    }
+    open({ mission_id: mission().id, mission_role: 'worker' })
+    acpSocket().open({ has_control: false })
+    const controls = within(await screen.findByRole('group', { name: 'Multiplayer controls' }))
+    expect(await controls.findByText(`${alice.display_name} · You control in another session since ${clockTime(acquired)}`)).toBeDefined()
+    await controls.findByRole('button', { name: 'Release' })
+    act(takenAgain)
+    await waitFor(() => expect(useStore.getState().missionDetails[mission().id]?.attempts[0]?.takeover_generation).toBe(8))
+    await userEvent.click(controls.getByRole('button', { name: 'Release' }))
+    expect(api.missionWorkerRelease).toHaveBeenCalledWith({ run_id: 'run_1', expected_takeover_generation: 8 })
+    await waitFor(() => expect(controls.queryByRole('button', { name: 'Release' })).toBeNull())
   })
 
   it('releases the acknowledged lease without closing the session and remains reachable on Terminal', async () => {

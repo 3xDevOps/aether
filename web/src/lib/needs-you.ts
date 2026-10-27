@@ -327,6 +327,7 @@ export const needsYouConditions: NeedsYouCondition[] = [
     resolvers: (run, ctx) => [attemptHold(run, ctx)?.takeover_member_id],
     reason: (run, ctx) => `You hold control of worker ${attemptHold(run, ctx)?.number ?? ''}`.trimEnd(),
     action: () => terminalAction,
+    since: (run, ctx) => attemptHold(run, ctx)?.takeover_since,
   }),
   condition({
     id: 'disconnected',
