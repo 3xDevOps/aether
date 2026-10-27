@@ -119,6 +119,20 @@ describe('new run', () => {
     expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: run().id } })
   })
 
+  it('saves no choice for a member who signed in while the launch was in flight', async () => {
+    let land!: () => void
+    vi.mocked(api.runLaunch).mockImplementationOnce(() => new Promise((resolve) => { land = () => resolve(run()) }))
+    await open()
+    setTask('fix the flaky test')
+    fireEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledTimes(1))
+    act(() => useStore.getState().setIdentityKey('origin\u0000\u0000mem_other'))
+    await act(async () => land())
+    expect(useStore.getState().launchDefaults).toEqual({})
+    expect(useStore.getState().savedLaunchDefaults).toEqual({})
+    useStore.setState({ identityKey: null })
+  })
+
   it('keeps the mode picked for an agent for its next launch', async () => {
     await open()
     await userEvent.click(modeSegment('Standard'))

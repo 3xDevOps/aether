@@ -26,19 +26,22 @@ const (
 	maxViewPath         = 512
 	maxViewAttachments  = 6
 	maxViewCheck        = 128
+	maxViewDefaults     = 4
 )
 
 var (
 	viewID         = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 	viewWord       = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,39}$`)
 	viewRepository = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$`)
+	viewModel      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:/@\[\]-]{0,127}$`)
+	launchMode     = map[string]bool{"tui": true, "headless": true, "acp": true}
 	attachmentKind = map[string]bool{"workspace": true, "run": true, "mission": true, "pr": true, "check": true, "failure": true, "task": true}
 )
 
 // CleanViewContext checks a view context from the dashboard: an id, word or
 // path that is malformed is dropped, recent and attachments are cut to their
-// caps, and the oldest recent pages, then the open file, then the last
-// attachments go until it fits in 4 KiB. An unknown version is dropped whole.
+// caps, and the oldest recent pages, then the open file, then the launch
+// defaults, then the last attachments go until it fits in 4 KiB. An unknown version is dropped whole.
 func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantViewContext, error) {
 	if v == nil || v.Version != viewContextVersion {
 		return nil, nil
@@ -51,6 +54,11 @@ func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantView
 	for _, e := range v.Recent {
 		if e = cleanEntry(e); e.Name != "" && len(out.Recent) < maxViewRecent {
 			out.Recent = append(out.Recent, e)
+		}
+	}
+	for _, d := range v.LaunchDefaults {
+		if clean, ok := cleanLaunchDefault(d); ok && len(out.LaunchDefaults) < maxViewDefaults {
+			out.LaunchDefaults = append(out.LaunchDefaults, clean)
 		}
 	}
 	for _, a := range v.Attachments {
@@ -70,6 +78,8 @@ func CleanViewContext(v *protocol.AssistantViewContext) (*protocol.AssistantView
 			out.Recent = out.Recent[:len(out.Recent)-1]
 		case out.OpenFile != nil:
 			out.OpenFile = nil
+		case len(out.LaunchDefaults) > 0:
+			out.LaunchDefaults = nil
 		case len(out.Attachments) > 0:
 			out.Attachments = out.Attachments[:len(out.Attachments)-1]
 		default:
@@ -83,6 +93,17 @@ func cleanEntry(e protocol.AssistantViewEntry) protocol.AssistantViewEntry {
 		Name: cleanWord(e.Name), WorkspaceID: cleanID(e.WorkspaceID), RunID: cleanID(e.RunID), MissionID: cleanID(e.MissionID),
 		Subagent: cleanID(e.Subagent), View: cleanWord(e.View), At: cleanTime(e.At),
 	}
+}
+
+// cleanLaunchDefault drops a malformed model, and the default when its
+// agent or mode is malformed. A model holding both : and @ is shaped like
+// user:token@host and is dropped: no model name needs both.
+func cleanLaunchDefault(d protocol.AssistantLaunchDefault) (protocol.AssistantLaunchDefault, bool) {
+	out := protocol.AssistantLaunchDefault{Agent: cleanWord(d.Agent), Mode: d.Mode}
+	if viewModel.MatchString(d.Model) && (!strings.Contains(d.Model, ":") || !strings.Contains(d.Model, "@")) {
+		out.Model = d.Model
+	}
+	return out, out.Agent != "" && launchMode[d.Mode]
 }
 
 // cleanAttachment drops malformed fields, and the attachment when its kind

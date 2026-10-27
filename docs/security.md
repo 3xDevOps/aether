@@ -27,7 +27,7 @@ credentials out of the report.
 | [Who can act on a run](#who-can-see-and-act-on-a-run) | Viewers can only watch. Every action is attributed on the workspace timeline. | By default every collaborator can type into, message and kill your runs, which hold your home. |
 | [Account sharing](#account-sharing) | A recipient's run gets your agent login, not your home. | The recipient's run can copy, overwrite or log out your login. Revoking does not stop running runs. An `omp` share is as broad as sharing your home. |
 | [GitHub credentials](#github-credentials-and-signing-keys) | The gh token stays in your home and the private signing key on the server, out of the database and out of saved images. Runs sign through an agent and cannot copy the key. | Any of your runs can act as you on GitHub within the token's scopes, including registering a signing key of its own. |
-| [Workspace secrets](#workspace-secrets) | Hidden in settings, never returned by the API, masked in setup script output. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
+| [Workspace secrets](#workspace-secrets) | Secrets and workspace files are hidden in settings and never returned by the API. Secrets are masked in setup script output; files stay out of git and out of **Files**. | Every process in every run of the workspace reads them, and anyone who can launch or message a run can make it print one. |
 | [Assistant](#the-assistant) | Its own container, home and sign-in, which your runs and account share recipients cannot see or change. Launching, messaging and stopping runs and saving the environment wait for your click. | A prompt that steers it can redirect the rest of its running session. Starting it needs the vendor's sign-in service. Auto-approve removes the click. |
 | [Remote development and browser companion](#remote-development-and-browser-isolation) | Terminals, the app browser and captures need permission to steer the run. Chromium mounts none of your files. | Pages and captures can contain secrets. Anyone who can view the run can read a retained capture. |
 | [Workspace mirrors](#workspace-source-mirrors) | Nobody can push to a mirrored base. A failed refresh blocks the launch instead of using stale code. | The configuring admin's gh token or the deploy key sits on the server, readable by the server administrator. |
@@ -265,6 +265,23 @@ someone who can run code in the workspace.
 - Setup script output has every exact occurrence of a secret replaced with
   `***`. An encoded or split value is not recognized, and nothing masks what
   the agent prints later.
+
+Workspace files ([environments.md](environments.md#files)) are treated the
+same way:
+
+- Their content is stored in `<data-dir>/workspace-secrets/<workspace-id>.files.json`,
+  plain text, mode `0600`, and deleted with the workspace. The API returns
+  only each path and size.
+- Every new run gets them in its checkout, mode `0600`, readable by every
+  process in the run. Anyone who can launch or message a run in the
+  workspace can make it print one.
+- `.git/info/exclude` keeps them out of the run's commits, **Changes** and
+  published branch. A launch whose repository un-ignores one fails before
+  writing any. An agent that edits that file or runs `git add -f` can still
+  commit one.
+- **Files** refuses to open them in a run checkout, so a member who can only
+  view a run cannot read them there. Setup script output does not mask a
+  file's content.
 
 ## The assistant
 

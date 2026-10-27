@@ -119,14 +119,23 @@ type AssistantViewParams struct {
 // names only, never titles, file contents, drafts or terminal text. Its ids
 // are hints for the assistant's member-scoped tools, never permissions. A
 // prompt with the page removed has no route; Attachments are what the member
-// pointed the message at.
+// pointed the message at. LaunchDefaults travel with the page.
 type AssistantViewContext struct {
-	Version     int                       `json:"version"`
-	CapturedAt  time.Time                 `json:"captured_at"`
-	Route       AssistantViewEntry        `json:"route,omitzero"`
-	OpenFile    *AssistantViewFile        `json:"open_file,omitempty"`
-	Recent      []AssistantViewEntry      `json:"recent,omitempty"`
-	Attachments []AssistantViewAttachment `json:"attachments,omitempty"`
+	Version        int                       `json:"version"`
+	CapturedAt     time.Time                 `json:"captured_at"`
+	Route          AssistantViewEntry        `json:"route,omitzero"`
+	OpenFile       *AssistantViewFile        `json:"open_file,omitempty"`
+	Recent         []AssistantViewEntry      `json:"recent,omitempty"`
+	LaunchDefaults []AssistantLaunchDefault  `json:"launch_defaults,omitempty"`
+	Attachments    []AssistantViewAttachment `json:"attachments,omitempty"`
+}
+
+// AssistantLaunchDefault is a mode and model the member's dashboard
+// remembers for an agent from their own launches, newest first.
+type AssistantLaunchDefault struct {
+	Agent string `json:"agent"`
+	Mode  string `json:"mode"`
+	Model string `json:"model,omitempty"`
 }
 
 // AssistantViewAttachment names one thing a prompt is about. Kind is
@@ -257,6 +266,9 @@ type AssistantAction struct {
 	Approval string `json:"approval,omitempty"`
 	// ConfirmationID is the card's id, when the action showed one.
 	ConfirmationID string `json:"confirmation_id,omitempty"`
+	// IdempotencyKey is the call's, when its method takes one, so a client
+	// can tell apart two calls with the same method and target.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	OtherOwner     string `json:"other_owner,omitempty"`
 	// Error is the failure's text: the server's error, or why the approval
 	// could not be read or counted.

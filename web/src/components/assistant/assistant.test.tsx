@@ -5,11 +5,13 @@ import { AppShell } from '@/components/shell/app-shell'
 import type * as apiModule from '@/lib/api'
 import { api } from '@/lib/api'
 import type { AssistantConfirmation, AssistantSettings, AssistantStatus } from '@/lib/assistant-types'
+import { stopTimeout } from '@/components/assistant/composer'
+import { hearBack } from '@/components/assistant/launch-summary'
 import { useStore, createRootStore } from '@/store'
 import { loadWholeItem } from '@/store/session-stream'
 import { viewSyncDelay } from '@/store/view-context'
 import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
-import { alice, serverInfo, workspace } from '@/test/fixtures'
+import { alice, bob, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 import { atViewport } from '@/test/viewport'
 
@@ -345,6 +347,23 @@ describe('the conversation', () => {
     expect(api.assistantCancel).toHaveBeenCalled()
   })
 
+  it('gives Stop back with the real error when assistant.cancel never answers', async () => {
+    let aborted: AbortSignal | undefined
+    let timeOut!: () => void
+    vi.mocked(api.assistantCancel).mockImplementation((signal) => new Promise((_, reject) => {
+      aborted = signal
+      timeOut = () => reject(new DOMException('signal timed out', 'TimeoutError'))
+    }))
+    const aside = await openPanel()
+    assistantSocket().open({ state: state({ turn_in_flight: true }) }, [item('turn_start', 1), say(1, 'user', 'Install Rust')])
+    await userEvent.click(await within(aside).findByRole('button', { name: 'Stop' }))
+    expect(aborted).toBeInstanceOf(AbortSignal)
+    expect(within(aside).getByRole('button', { name: 'Stopping…' })).toBeDefined()
+    act(() => timeOut())
+    expect(await within(aside).findByRole('alert')).toHaveProperty('textContent', `assistant.cancel got no answer within ${stopTimeout / 1000} seconds`)
+    expect(within(aside).getByRole('button', { name: 'Stop' })).toBeDefined()
+  })
+
   it('keeps a focused step of the reply in place when the turn ends', async () => {
     const aside = await openPanel()
     const session = assistantSocket().open({ state: state({ turn_in_flight: true }) }, [
@@ -383,20 +402,27 @@ describe('the conversation', () => {
 })
 
 describe('confirmations', () => {
-  it('renders the params of a launch and a message readably', async () => {
+  it('says what a launch starts and on whose account, and renders a message readably', async () => {
+    useStore.setState({ members: { [alice.id]: alice, [bob.id]: bob } })
     const aside = await openPanel()
     acpOpen()
     assistantSocket().send({ status: status({ confirmations: [
-      { ...stop, id: 'l', method: 'run.launch', summary: 'Launch a run', params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', task: 'Fix the flaky login test\nthen open a PR' } },
+      { ...stop, id: 'l', method: 'run.launch', summary: 'Launch claude (acp) in api on "Bob"\'s account, falling back to "mem_carol"\'s account in order: "Fix the flaky login test"', other_member: true, other_owner: 'Bob', params: { workspace_id: 'ws_1', harness: 'claude', mode: 'acp', model: 'opus', account_member_id: 'mem_bob', fallback_account_member_ids: ['mem_carol'], task: 'Fix the flaky login test\nthen open a PR' } },
       { ...stop, id: 'm', method: 'run.inject', summary: 'Message a run', params: { run_id: 'run_9', message: 'Please stop and summarise' } },
     ] }) })
-    const launch = await within(aside).findByRole('group', { name: 'Approve this action? Launch a run' })
-    expect(within(launch).queryByText('Task')).toBeNull()
-    await userEvent.click(within(launch).getByRole('button', { name: '1 more' }))
-    for (const [term, text] of [['Workspace', 'ws_1'], ['Harness', 'claude'], ['Mode', 'acp'], ['Task', /Fix the flaky login test\s+then open a PR/]]) {
-      expect(within(launch).getByText(term)).toBeDefined()
-      expect(within(launch).getByText(text)).toBeDefined()
-    }
+    const launch = await within(aside).findByRole('group', { name: /^Approve this action\? Launch claude \(acp\) in api on "Bob"'s account/ })
+    expect(within(launch).getByText('Launch claude (acp) in api on "Bob"\'s account, falling back to "mem_carol"\'s account in order')).toBeDefined()
+    expect(within(launch).getByText("Bob's account pays for this launch, so this asks even with auto-approval on.")).toBeDefined()
+    const rows = Object.fromEntries(within(launch).getAllByRole('term').map((term) => [term.textContent, term.nextElementSibling?.textContent]))
+    expect(rows).toEqual({
+      Kind: 'Run: one agent on one task',
+      Workspace: 'ws_1',
+      Agent: 'Claude Code opus (Enhanced)',
+      Account: "Bob's account, shared with you",
+      Fallback: 'Then mem_carol',
+      Task: 'Fix the flaky login test\nthen open a PR',
+      'You hear back': hearBack.run,
+    })
     const inject = within(aside).getByRole('group', { name: 'Approve this action? Message a run' })
     expect(within(inject).getByText('Message')).toBeDefined()
     expect(within(inject).getByText('Please stop and summarise')).toBeDefined()
