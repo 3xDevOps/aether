@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -191,7 +192,13 @@ func assistantLogins(memberHome string, profile harness.Profile) ([]string, []st
 	var logins, identities []string
 	for _, rel := range paths {
 		info, err := root.Lstat(rel)
-		if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("scheduler: inspect the login %s: %w", rel, err)
+		}
+		if !info.Mode().IsRegular() || info.Size() == 0 {
 			continue
 		}
 		id := identityOf(info)
