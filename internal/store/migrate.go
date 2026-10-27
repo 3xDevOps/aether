@@ -2161,14 +2161,14 @@ CREATE INDEX idx_watch_pr_snapshots_checked ON watch_pr_snapshots(checked_at);
 	// assistant start from them.
 	`
 CREATE TABLE launch_defaults (
-	member_id         TEXT PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+	revision          INTEGER PRIMARY KEY AUTOINCREMENT,
+	member_id         TEXT NOT NULL UNIQUE REFERENCES members(id) ON DELETE CASCADE,
 	agent             TEXT NOT NULL DEFAULT '',
 	agents            TEXT NOT NULL DEFAULT '{}',
 	account_member_id TEXT NOT NULL DEFAULT '',
 	fallback_policy   TEXT NOT NULL DEFAULT '' CHECK (fallback_policy IN ('', 'automatic', 'ordered', 'off')),
 	fallback_order    TEXT NOT NULL DEFAULT '[]',
 	source            TEXT NOT NULL CHECK (source IN ('member', 'assistant')),
-	revision          INTEGER NOT NULL,
 	updated_at        INTEGER NOT NULL
 );
 `,

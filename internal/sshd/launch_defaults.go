@@ -50,12 +50,12 @@ func (s *Server) launchDefaultsSet(ctx context.Context, member domain.MemberID, 
 		if fromAssistant(ctx) {
 			saved.Source = protocol.LaunchSourceAssistant
 		}
-		if _, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(saved.Account)); err != nil {
-			return nil, launchDefaultsRefusal("account_member_id", err)
+		if _, rerr := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(saved.Account)); rerr != nil {
+			return nil, launchDefaultsRefusal("account_member_id", rerr)
 		}
 		for _, id := range saved.FallbackOrder {
-			if _, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(id)); err != nil {
-				return nil, launchDefaultsRefusal("fallback.order", err)
+			if _, rerr := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(id)); rerr != nil {
+				return nil, launchDefaultsRefusal("fallback.order", rerr)
 			}
 		}
 		if saved.Account == member {
@@ -182,14 +182,28 @@ func (s *Server) launchDefaultsResult(ctx context.Context, member domain.MemberI
 	unknown := func(field, value, reason string) {
 		out.Unknown = append(out.Unknown, protocol.LaunchDefaultIssue{Field: field, Value: value, Reason: reason})
 	}
-	account, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(saved.Account))
-	if err != nil {
-		issue("account_member_id", string(saved.Account), rpcError(err).Message)
-		account = member
+	usable := func(field string, id domain.MemberID) (bool, *protocol.Error) {
+		_, rerr := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(id))
+		if errors.Is(rerr, permissions.ErrDenied) || errors.Is(rerr, store.ErrNotFound) {
+			issue(field, string(id), rpcError(rerr).Message)
+			return false, nil
+		}
+		if rerr != nil {
+			return false, rpcError(rerr)
+		}
+		return true, nil
+	}
+	ok, perr := usable("account_member_id", saved.Account)
+	if perr != nil {
+		return protocol.LaunchDefaultsResult{}, perr
+	}
+	account := member
+	if ok && saved.Account != "" {
+		account = saved.Account
 	}
 	for _, id := range saved.FallbackOrder {
-		if _, err := fallback.ResolveLaunchAccount(ctx, s.cfg.Store, member, string(id)); err != nil {
-			issue("fallback.order", string(id), rpcError(err).Message)
+		if _, perr := usable("fallback.order", id); perr != nil {
+			return protocol.LaunchDefaultsResult{}, perr
 		}
 	}
 	if saved.Agent == "" && len(saved.Agents) == 0 {
@@ -211,6 +225,9 @@ func (s *Server) launchDefaultsResult(ctx context.Context, member domain.MemberI
 			continue
 		}
 		i := slices.IndexFunc(agents, func(info protocol.AgentInfo) bool { return info.Name == name })
+		if login := agents[i].LoginFound; login != nil && !*login {
+			unknown("agents."+name, name, "no "+name+" login file was found on this account; it launches only if an API key in the environment signs it in")
+		}
 		if a.Mode == domain.LaunchACP && !agents[i].EnhancedInstalled {
 			issue("agents."+name+".mode", string(a.Mode), name+"'s enhanced mode is not installed on this account; install it from the launch dialog")
 		}
@@ -244,8 +261,6 @@ func agentUnusable(agents []protocol.AgentInfo, name string) string {
 		return "the account owner has not signed in to " + name
 	case !agents[i].Installed:
 		return name + " is not installed on this account; install it from the launch dialog"
-	case agents[i].LoginFound != nil && !*agents[i].LoginFound:
-		return name + " is not signed in on this account; sign in from the launch dialog"
 	}
 	return ""
 }

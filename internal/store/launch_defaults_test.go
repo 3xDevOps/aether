@@ -39,38 +39,38 @@ func TestLaunchDefaultsRoundTripRevisionsAndCascade(t *testing.T) {
 		t.Fatalf("LaunchDefaults = %+v, want %+v", *got, saved)
 	}
 	first := got.Revision
-	if err := db.PutLaunchDefaults(ctx, ana.ID, LaunchDefaults{Source: "assistant"}, 0); !errors.Is(err, ErrConflict) {
+	if err = db.PutLaunchDefaults(ctx, ana.ID, LaunchDefaults{Source: "assistant"}, 0); !errors.Is(err, ErrConflict) {
 		t.Fatalf("PutLaunchDefaults over a saved row with revision 0 = %v, want ErrConflict", err)
 	}
-	if err := db.PutLaunchDefaults(ctx, ana.ID, LaunchDefaults{Source: "assistant"}, first); err != nil {
+	if err = db.PutLaunchDefaults(ctx, ana.ID, LaunchDefaults{Source: "assistant"}, first); err != nil {
 		t.Fatal(err)
 	}
 	if got, err = db.LaunchDefaults(ctx, ana.ID); err != nil || got.Agent != "" || len(got.Agents) != 0 || got.Account != "" ||
 		got.Source != "assistant" || got.Revision == first {
 		t.Fatalf("replaced LaunchDefaults = %+v, %v; want every field replaced and a new revision", got, err)
 	}
-	if err := db.PutLaunchDefaults(ctx, ana.ID, LaunchDefaults{Source: "member"}, first); !errors.Is(err, ErrConflict) {
+	if err = db.PutLaunchDefaults(ctx, ana.ID, LaunchDefaults{Source: "member"}, first); !errors.Is(err, ErrConflict) {
 		t.Fatalf("PutLaunchDefaults with a stale revision = %v, want ErrConflict", err)
 	}
-	if err := db.DeleteLaunchDefaults(ctx, ana.ID, first); !errors.Is(err, ErrConflict) {
+	if err = db.DeleteLaunchDefaults(ctx, ana.ID, first); !errors.Is(err, ErrConflict) {
 		t.Fatalf("DeleteLaunchDefaults with a stale revision = %v, want ErrConflict", err)
 	}
-	if err := db.DeleteLaunchDefaults(ctx, ana.ID, got.Revision); err != nil {
+	if err = db.DeleteLaunchDefaults(ctx, ana.ID, got.Revision); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.LaunchDefaults(ctx, ana.ID); !errors.Is(err, ErrNotFound) {
+	if _, err = db.LaunchDefaults(ctx, ana.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cleared LaunchDefaults = %v, want ErrNotFound", err)
 	}
-	if err := db.PutLaunchDefaults(ctx, ana.ID, LaunchDefaults{Source: "member"}, got.Revision); !errors.Is(err, ErrConflict) {
+	if err = db.PutLaunchDefaults(ctx, ana.ID, LaunchDefaults{Source: "member"}, got.Revision); !errors.Is(err, ErrConflict) {
 		t.Fatalf("PutLaunchDefaults with the revision of a cleared row = %v, want ErrConflict", err)
 	}
-	if err := db.DeleteMember(ctx, bo.ID); err != nil {
+	if err = db.DeleteMember(ctx, bo.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.LaunchDefaults(ctx, bo.ID); !errors.Is(err, ErrNotFound) {
+	if _, err = db.LaunchDefaults(ctx, bo.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("a deleted member's LaunchDefaults = %v, want ErrNotFound", err)
 	}
-	if err := db.PutLaunchDefaults(ctx, "m-nobody", LaunchDefaults{Source: "member"}, 0); !errors.Is(err, ErrNotFound) {
+	if err = db.PutLaunchDefaults(ctx, "m-nobody", LaunchDefaults{Source: "member"}, 0); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("PutLaunchDefaults for no member = %v, want ErrNotFound", err)
 	}
 }

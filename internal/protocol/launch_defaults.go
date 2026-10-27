@@ -67,7 +67,7 @@ type LaunchDefaultsSetParams struct {
 
 // LaunchDefaultsResult is the caller's saved defaults, checked when read.
 // Revision 0 means none are saved. Invalid lists each saved choice a launch
-// could not use now and Unknown each one that could not be checked; both
+// could not use now and Unknown each one it could not check; both
 // stay saved until replaced.
 type LaunchDefaultsResult struct {
 	Revision  int64                `json:"revision"`

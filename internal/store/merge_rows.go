@@ -133,7 +133,8 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"notification settings", `UPDATE OR IGNORE notify_prefs SET member_id = ?2 WHERE member_id = ?1`},
 		{"notification settings", `DELETE FROM notify_prefs WHERE member_id = ?1`},
 		{"launch defaults", `UPDATE launch_defaults SET account_member_id = ?2 WHERE account_member_id = ?1`},
-		{"launch defaults", `UPDATE launch_defaults SET fallback_order = replace(fallback_order, '"' || ?1 || '"', '"' || ?2 || '"')
+		{"launch defaults", `UPDATE launch_defaults SET fallback_order = (SELECT json_group_array(member) FROM (
+			SELECT CASE value WHEN ?1 THEN ?2 ELSE value END AS member, MIN(key) AS first FROM json_each(fallback_order) GROUP BY member ORDER BY first))
 			WHERE instr(fallback_order, '"' || ?1 || '"') > 0`},
 		{"memory pins", `UPDATE memory SET pinned_by = ?2 WHERE pinned_by = ?1`},
 		{"connectors", `UPDATE connectors SET member_id = ?2 WHERE member_id = ?1`},

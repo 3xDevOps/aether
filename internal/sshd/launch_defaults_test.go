@@ -9,6 +9,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
+	"github.com/3xDevOps/Aether/internal/store"
 )
 
 // Launch defaults over real control channels: each member reads and
@@ -23,6 +24,12 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 	_, cy := addMember(t, e, "Cy", domain.RoleCollaborator, false)
 	ana, boClient := controlClient(t, e), controlAs(t, e, boSigner)
 	if err := e.store.ShareAccount(ctx, bo.ID, e.member.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	children := e.store.(store.ChildStore)
+	childSettings := store.ChildSettings{Enabled: true, Fallback: false, Configured: true}
+	if err := children.PutChildSettings(ctx, e.member.ID, childSettings); err != nil {
 		t.Fatal(err)
 	}
 
@@ -57,6 +64,9 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 		t.Fatalf("unknown = %+v, want the opencode model, whose list was never read", got.Unknown)
 	}
 	saved := got
+	if after, err := children.ChildSettings(ctx, e.member.ID); err != nil || after != childSettings {
+		t.Fatalf("child settings after launch.defaults.set = %+v, %v; want them untouched, %+v", after, err, childSettings)
+	}
 
 	var bos protocol.LaunchDefaultsResult
 	if err := boClient.Call(protocol.MethodLaunchDefaultsGet, struct{}{}, &bos); err != nil || bos.Revision != 0 {

@@ -70,9 +70,9 @@ func (d *DB) LaunchDefaults(ctx context.Context, member domain.MemberID) (*Launc
 	return &out, nil
 }
 
-// PutLaunchDefaults starts a new row's revision at the current time in
-// milliseconds, so a save that read the revision of a since-cleared row
-// still conflicts.
+// PutLaunchDefaults writes a new row each save: its revision is an
+// AUTOINCREMENT key, which SQLite never hands out twice, so a revision read
+// before a clear stays stale after it.
 func (d *DB) PutLaunchDefaults(ctx context.Context, member domain.MemberID, l LaunchDefaults, revision int64) error {
 	if l.Agents == nil {
 		l.Agents = map[string]AgentLaunchDefault{}
@@ -88,23 +88,30 @@ func (d *DB) PutLaunchDefaults(ctx context.Context, member domain.MemberID, l La
 	if err != nil {
 		return fmt.Errorf("store: encode launch defaults fallback order: %w", err)
 	}
-	var res sql.Result
-	if revision == 0 {
-		res, err = d.db.ExecContext(ctx,
-			`INSERT INTO launch_defaults (member_id, agent, agents, account_member_id, fallback_policy, fallback_order, source, revision, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, unixepoch())`,
-			member, l.Agent, string(agents), l.Account, l.FallbackPolicy, string(order), l.Source, time.Now().UnixMilli())
-	} else {
-		res, err = d.db.ExecContext(ctx,
-			`UPDATE launch_defaults SET agent = ?, agents = ?, account_member_id = ?, fallback_policy = ?, fallback_order = ?,
-			   source = ?, revision = revision + 1, updated_at = unixepoch()
-			 WHERE member_id = ? AND revision = ?`,
-			l.Agent, string(agents), l.Account, l.FallbackPolicy, string(order), l.Source, member, revision)
-	}
+	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("store: put launch defaults: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // committed below
+	if revision != 0 {
+		res, err := tx.ExecContext(ctx, `DELETE FROM launch_defaults WHERE member_id = ? AND revision = ?`, member, revision)
+		if err != nil {
+			return fmt.Errorf("store: put launch defaults: %w", err)
+		}
+		if err := staleRevision(res, "put launch defaults"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO launch_defaults (member_id, agent, agents, account_member_id, fallback_policy, fallback_order, source, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())`,
+		member, l.Agent, string(agents), l.Account, l.FallbackPolicy, string(order), l.Source); err != nil {
 		return fmt.Errorf("store: put launch defaults: %w", mapConstraint(err, ErrNotFound))
 	}
-	return staleRevision(res, "put launch defaults")
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: put launch defaults: %w", err)
+	}
+	return nil
 }
 
 func (d *DB) DeleteLaunchDefaults(ctx context.Context, member domain.MemberID, revision int64) error {

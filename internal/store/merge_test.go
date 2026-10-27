@@ -177,7 +177,7 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for m, l := range map[domain.MemberID]LaunchDefaults{
-		a.ID: {Agent: "claude", Account: b.ID, FallbackPolicy: "ordered", FallbackOrder: []domain.MemberID{b.ID, c.ID}, Source: "member"},
+		a.ID: {Agent: "claude", Account: b.ID, FallbackPolicy: "ordered", FallbackOrder: []domain.MemberID{b.ID, c.ID, a.ID}, Source: "member"},
 		b.ID: {Agent: "codex", Source: "member"},
 		c.ID: {Account: b.ID, Source: "assistant"},
 	} {
