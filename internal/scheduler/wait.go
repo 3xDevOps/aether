@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,15 +60,16 @@ const waitBrokenReasonPrefix = "wait broken: "
 // classifyWait judges a reported wait by its conditions at now. stranded
 // names the conditions the agent will not be woken by: one that left
 // pending and whose wake was not delivered within wakeGrace, or one whose
-// source went unread for unreadBound. It holds no time or source status, so
-// the reason built from it stays put while the run needs a member. A
+// source went unread for unreadBound, sorted so the store's order does not
+// matter. It holds no time or source status, so the reason built from it
+// stays put while the run needs a member. A
 // condition that left pending before turn started backs no wait reported
 // since: its wake, or the message a member sent in its place, started a
 // later turn. Error is that of the highest-ranked condition with one.
 func classifyWait(conditions []WaitCondition, turn, now time.Time) (wait domain.RunWait, stranded string) {
 	rank := map[domain.WaitEvidence]int{domain.WaitUnverified: 0, domain.WaitCondition: 1, domain.WaitSourceUnknown: 2, domain.WaitFault: 3}
 	wait.Kind = domain.WaitUnverified
-	var details []string
+	var details, strandedBy []string
 	var oldest time.Time
 	neverRead, errRank := false, -1
 	for _, c := range conditions {
@@ -83,7 +85,7 @@ func classifyWait(conditions []WaitCondition, turn, now time.Time) (wait domain.
 		case c.State == waitPending && unreadable(c, now):
 			kind, errText = domain.WaitFault, c.LastError
 			detail = "cannot read " + c.Spec + " for over " + strings.TrimSuffix(unreadBound.String(), "0m0s") + ", so the agent will not be woken"
-			stranded = strings.TrimPrefix(stranded+"; "+detail, "; ")
+			strandedBy = append(strandedBy, detail)
 		case c.State == waitPending:
 			kind, errText = domain.WaitSourceUnknown, c.LastError
 			detail += ": status unknown"
@@ -98,7 +100,7 @@ func classifyWait(conditions []WaitCondition, turn, now time.Time) (wait domain.
 		case now.Sub(c.ResolvedAt) > wakeGrace:
 			kind = domain.WaitFault
 			detail += " " + ended[c.State] + ", but the agent was not woken"
-			stranded = strings.TrimPrefix(stranded+"; "+detail, "; ")
+			strandedBy = append(strandedBy, detail)
 			errText = c.LastDeliveryError
 			if c.State != waitResolved {
 				errText = strings.Trim(c.LastError+"; "+errText, "; ")
@@ -127,6 +129,8 @@ func classifyWait(conditions []WaitCondition, turn, now time.Time) (wait domain.
 		}
 	}
 	wait.Detail = strings.Join(details, "; ")
+	slices.Sort(strandedBy)
+	stranded = strings.Join(strandedBy, "; ")
 	if !neverRead && !oldest.IsZero() {
 		wait.VerifiedAt = &oldest
 	}

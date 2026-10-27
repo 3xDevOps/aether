@@ -258,6 +258,23 @@ func TestAConditionDecidesWhatAReportedWaitShows(t *testing.T) {
 	expect("the wake delivered", domain.ActivityWaitingCI, events.CauseReport, "CI on #582", domain.WaitCondition)
 }
 
+// The reason a broken wait shows names its stranded conditions in one
+// order, whatever order the store returns them in, so one need is
+// announced once.
+func TestAStrandedReasonIgnoresTheStoresOrder(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 27, 2, 0, 0, 0, time.UTC)
+	lost := checking(now.Add(-10 * time.Minute))
+	lost.Spec, lost.State, lost.ResolvedAt = "pr:o/b#2:checks", waitResolved, now.Add(-10*time.Minute)
+	unread := checking(now.Add(-2 * time.Hour))
+	unread.Spec, unread.LastError = "pr:o/a#1:checks", "gh: API rate limit exceeded"
+	_, forward := classifyWait([]WaitCondition{lost, unread}, time.Time{}, now)
+	_, backward := classifyWait([]WaitCondition{unread, lost}, time.Time{}, now)
+	if forward == "" || forward != backward {
+		t.Fatalf("stranded reads %q one way and %q the other", forward, backward)
+	}
+}
+
 // A stranded condition does not need a member while a live swarm can still
 // wake the agent: the wait shows its fault quietly, and needs a member only
 // once the swarm ends.
