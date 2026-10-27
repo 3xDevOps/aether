@@ -580,7 +580,7 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *p
 	if p.Children != "" {
 		summary += ", child runs " + p.Children
 	}
-	c.Summary = fmt.Sprintf("%s: %q", summary, truncate(p.Task))
+	c.Summary = fmt.Sprintf("%s: \"%s\"", summary, firstLine(p.Task))
 	return nil
 }
 
@@ -601,8 +601,8 @@ func (s *Server) summarizeMission(ctx context.Context, req protocol.Request, c *
 	for i, choice := range p.ExecutionChoices {
 		agents[i] = fmt.Sprintf("%s (%s) on %s", truncate(choice.Harness), choice.Mode, n.account(choice.AccountMemberID, c))
 	}
-	c.Summary = fmt.Sprintf("Start a swarm in %s with integrator %s (%s) on %s, agents %s%s: %q", ws, truncate(p.Integrator.Harness), p.Integrator.Mode,
-		n.account(p.Integrator.AccountMemberID, c), named(agents), n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c), truncate(p.Objective))
+	c.Summary = fmt.Sprintf("Start a swarm in %s with integrator %s (%s) on %s, agents %s%s: \"%s\"", ws, truncate(p.Integrator.Harness), p.Integrator.Mode,
+		n.account(p.Integrator.AccountMemberID, c), named(agents), n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c), firstLine(p.Objective))
 	return nil
 }
 
@@ -635,7 +635,7 @@ func (s *Server) summarizeTemplate(ctx context.Context, req protocol.Request, c 
 		values, _ := json.Marshal(p.Params)
 		c.Summary += fmt.Sprintf(" with %q", truncate(string(values)))
 	}
-	c.Summary += fmt.Sprintf(": %q", truncate(t.Task))
+	c.Summary += fmt.Sprintf(": \"%s\"", firstLine(t.Task))
 	return nil
 }
 
@@ -770,6 +770,20 @@ func runLabel(run protocol.Run) string {
 }
 
 const maxSummaryText = 120
+
+// firstLine is text's first line, cut to maxSummaryText, ending in "…" when
+// anything was left out, so a card quotes a task without escapes.
+func firstLine(text string) string {
+	line, rest, _ := strings.Cut(strings.TrimSpace(text), "\n")
+	line = strings.TrimSpace(line)
+	if r := []rune(line); len(r) > maxSummaryText {
+		return string(r[:maxSummaryText]) + "…"
+	}
+	if rest != "" {
+		return line + "…"
+	}
+	return line
+}
 
 func truncate(text string) string {
 	if r := []rune(text); len(r) > maxSummaryText {

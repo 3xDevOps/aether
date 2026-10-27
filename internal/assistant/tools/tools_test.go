@@ -413,3 +413,20 @@ func TestPrepareAccountFields(t *testing.T) {
 		}
 	}
 }
+
+// A launch card quotes the task's first line, unescaped.
+func TestLaunchCardQuotesTheTaskFirstLine(t *testing.T) {
+	var card string
+	s := &Server{Caller: &fakeCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		card = c.Summary
+		return nil
+	}}
+	raw, _ := json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Mode: "acp", NoFallback: true,
+		Task: "Fix the \"login\" bug\n\nSteps:\n1. reproduce"})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if want := `Launch claude (acp) in shop, no fallback: "Fix the "login" bug…"`; card != want {
+		t.Fatalf("run.launch card = %q, want %q", card, want)
+	}
+}
