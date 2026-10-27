@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -799,7 +800,7 @@ func TestTerminalAssistantLoginStartsOnlyTheSignIn(t *testing.T) {
 	svc := signInOnly{signedIn: make(chan domain.MemberID, 1)}
 	e := newTestEnv(t, func(c *Config) { c.Services.Assistant = svc })
 	collab, cm := addMember(t, e, "Sign-in user", domain.RoleCollaborator, false)
-	_, ack := rawTerminalRequest(t, e, collab, true, protocol.TerminalRequest{AssistantLogin: "claude"})
+	c, ack := rawTerminalRequest(t, e, collab, true, protocol.TerminalRequest{AssistantLogin: "claude"})
 	if !ack.OK {
 		t.Fatalf("ack = %+v, want ok", ack)
 	}
@@ -810,6 +811,10 @@ func TestTerminalAssistantLoginStartsOnlyTheSignIn(t *testing.T) {
 	if len(calls) == 0 || calls[len(calls)-1] != "assistant-login:"+string(cm.ID)+":claude:80:24" {
 		t.Fatalf("RunController calls = %v, want the assistant sign-in", calls)
 	}
+	_ = c.ch.Close()
+	eventually(t, "the sign-in's end", func() bool {
+		return slices.Contains(e.runs.Calls(), "assistant-login-end:"+string(cm.ID)+":claude")
+	})
 	for _, call := range calls {
 		if strings.HasPrefix(call, "terminal") {
 			t.Fatalf("RunController calls = %v, want no environment terminal", calls)

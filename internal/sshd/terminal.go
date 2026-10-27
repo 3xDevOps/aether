@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -273,6 +274,11 @@ func (s *Server) serveTerminal(ctx context.Context, member domain.MemberID, st *
 			s.revokeOnPolicyChange(attachCtx, revoke, member, "", true)
 		})
 		attachErr = <-errCh
+	}
+	if req.AssistantLogin != "" {
+		if err := s.cfg.Runs.EndAssistantLogin(context.WithoutCancel(ctx), member, req.AssistantLogin); err != nil {
+			slog.Warn("sshd: assistant sign-in ended", "member", member, "agent", req.AssistantLogin, "error", err)
+		}
 	}
 	switch {
 	case errors.Is(context.Cause(attachCtx), errAttachMembershipRevoked):

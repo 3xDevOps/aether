@@ -486,6 +486,34 @@ func (h *Host) StopSession(ctx context.Context, key SessionKey) error {
 	return s.stop()
 }
 
+// RemoveSessionTranscript stops the session of key, unless it was never
+// started, and removes its transcript files.
+func (h *Host) RemoveSessionTranscript(ctx context.Context, key SessionKey) error {
+	if err := h.StopSession(ctx, key); err != nil && !errors.Is(err, ErrNoSession) {
+		return err
+	}
+	transcript := h.transcriptPath(key)
+	lifecycle := acquireTranscriptLifecycle(transcript)
+	lifecycle.entry.mu.Lock()
+	defer func() {
+		lifecycle.entry.mu.Unlock()
+		lifecycle.release()
+	}()
+	archives, err := removablePriorCastPaths(ctx, transcript)
+	if err != nil {
+		return fmt.Errorf("ptyhost: find transcript history: %w", err)
+	}
+	for _, path := range append(archives, transcript, transcript+".next", checkpointPath(transcript), castRetentionPath(transcript), castRetentionPath(transcript)+".next") {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("ptyhost: remove transcript: %w", err)
+		}
+	}
+	h.mu.Lock()
+	delete(h.snapshots, key)
+	h.mu.Unlock()
+	return nil
+}
+
 func (h *Host) ItemLogPath(run domain.RunID) string {
 	return filepath.Join(h.cfg.TranscriptDir, string(run)+".items.jsonl")
 }

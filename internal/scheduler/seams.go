@@ -47,6 +47,7 @@ type PTYHost interface {
 	SessionGeneration(key ptyhost.SessionKey) uint64
 	StopSession(ctx context.Context, key ptyhost.SessionKey) error
 	RemoveRunTranscripts(ctx context.Context, run domain.RunID) error
+	RemoveSessionTranscript(ctx context.Context, key ptyhost.SessionKey) error
 	ItemLogPath(run domain.RunID) string
 	StopSessionsWithPrefix(ctx context.Context, prefix string)
 	ActiveSessions(prefix string) []ptyhost.SessionKey

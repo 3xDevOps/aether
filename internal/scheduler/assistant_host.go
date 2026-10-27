@@ -102,6 +102,30 @@ func (s *Scheduler) StartAssistantLogin(ctx context.Context, member domain.Membe
 	return key, nil
 }
 
+// EndAssistantLogin removes the transcript of agent's sign-in for the
+// member once it exits: it shows the sign-in URL and codes.
+func (s *Scheduler) EndAssistantLogin(ctx context.Context, member domain.MemberID, agent string) error {
+	key := ptyhost.AssistantLoginSession(member, agent)
+	if slices.Contains(s.cfg.PTY.ActiveSessions(string(key)), key) {
+		return nil
+	}
+	if err := s.cfg.PTY.RemoveSessionTranscript(ctx, key); err != nil {
+		return fmt.Errorf("scheduler: remove the %s sign-in transcript: %w", agent, err)
+	}
+	return nil
+}
+
+// removeAssistantLoginTranscripts removes the transcripts of the member's
+// sign-ins that no longer run.
+func (s *Scheduler) removeAssistantLoginTranscripts(ctx context.Context, member domain.MemberID) error {
+	for _, agent := range assistantAgents {
+		if err := s.EndAssistantLogin(ctx, member, agent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // freshAssistantContainer removes the member's assistant container,
 // installs agent's adapter, prepares the assistant home and starts a new
 // container. A new container would end a running sign-in, so it refuses
@@ -113,16 +137,11 @@ func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.M
 	if !ok || profile.ACPInstall == nil {
 		return "", fmt.Errorf("agent %q cannot run the assistant", agent)
 	}
-	release, err := s.tryReserveCapacity(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer release()
 	lock := s.assistantLock(member)
 	lock.Lock()
 	defer lock.Unlock()
 	// A member removed while this waited would get their assistant back.
-	if _, err = s.cfg.Store.GetMember(ctx, member); err != nil {
+	if _, err := s.cfg.Store.GetMember(ctx, member); err != nil {
 		return "", fmt.Errorf("scheduler: the assistant's member: %w", err)
 	}
 	running := s.cfg.PTY.ActiveSessions(string(ptyhost.AssistantLoginSession(member, "")))
@@ -132,6 +151,11 @@ func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.M
 	case len(running) > 0:
 		return "", fmt.Errorf("scheduler: a sign-in for the assistant is running (%s); finish it first", running[0])
 	}
+	release, err := s.tryReserveCapacity(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer release()
 	if err = s.removeAssistantContainer(ctx, member); err != nil {
 		return "", err
 	}
@@ -142,8 +166,28 @@ func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.M
 	if err != nil {
 		return "", err
 	}
-	if signIn == "" && len(removed) > 0 {
+	if err = s.removeAssistantLoginTranscripts(ctx, member); err != nil {
+		return "", err
+	}
+	if err = s.pinAssistantSignIns(member); err != nil {
+		return "", err
+	}
+	if signIn != "" {
+		// What the sign-in writes is what gets recorded, never a file the
+		// agent left.
+		if err = s.forgetAssistantSignIn(member, signIn); err != nil {
+			return "", err
+		}
+		if err = s.markAssistantSignIn(member, signIn); err != nil {
+			return "", err
+		}
+		return s.createAssistantContainer(ctx, member)
+	}
+	if len(removed) > 0 {
 		return "", fmt.Errorf("scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: %s. Retry starts with the rest; if the agent then reports no sign-in, sign in for the assistant again", strings.Join(removed, "; "))
+	}
+	if err = s.checkAssistantSignIn(member, agent); err != nil {
+		return "", fmt.Errorf("scheduler: %w", err)
 	}
 	return s.createAssistantContainer(ctx, member)
 }

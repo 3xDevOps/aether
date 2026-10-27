@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -59,7 +60,9 @@ func seedAssistantInstall(t *testing.T, assistantDir string, member domain.Membe
 	if err := os.Chmod(filepath.Join(dir, "node_modules", ".bin", profile.ACPInstall.Binary), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := json.Marshal(map[string]any{"private": true, "dependencies": map[string]string{profile.ACPInstall.Package: profile.ACPInstall.Version}})
+	deps := map[string]string{profile.ACPInstall.Package: profile.ACPInstall.Version}
+	maps.Copy(deps, assistantPins[agent])
+	manifest, err := json.Marshal(map[string]any{"private": true, "dependencies": deps})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +125,9 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedHome(t, AssistantHomeDir(assistantDir, ada), map[string]string{".claude/.credentials.json": assistantSignIn})
+	if err := e.sched.markAssistantSignIn(ada, "claude"); err != nil {
+		t.Fatal(err)
+	}
 	seedAssistantInstall(t, assistantDir, ada, "claude", "#!/bin/sh\necho \"adapter in $(pwd) as $IS_SANDBOX\"\nexec cat\n")
 	t.Cleanup(func() {
 		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -238,6 +244,34 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	}
 	start()
 
+	seedAssistantInstall(t, assistantDir, ada, "codex", "#!/bin/sh\nexec cat\n")
+	seedHome(t, AssistantInstallDir(assistantDir, ada, "codex"), map[string]string{"node_modules/.bin/codex": "#!/bin/sh\necho \"sign-in $*\"\nexec sleep 60\n"})
+	if err := os.Chmod(filepath.Join(AssistantInstallDir(assistantDir, ada, "codex"), "node_modules", ".bin", "codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	loginCtx, cancelLogin := context.WithCancel(ctx)
+	key, err := e.sched.StartAssistantLogin(loginCtx, ada, "codex", 80, 24)
+	cancelLogin()
+	if err != nil {
+		t.Fatalf("StartAssistantLogin: %v", err)
+	}
+	waitFor(t, "the sign-in's output", func() bool {
+		e.pty.mu.Lock()
+		sess := e.pty.sessions[key]
+		e.pty.mu.Unlock()
+		return sess != nil && strings.Contains(sess.output(), "sign-in login --device-auth")
+	})
+	time.Sleep(time.Second)
+	if !slices.Contains(e.pty.ActiveSessions(string(key)), key) {
+		t.Fatal("the sign-in ended with the request that started it")
+	}
+	if _, err := e.sched.StartAssistantExec(ctx, ada, "claude", runtime.ExecSpec{Argv: claude.ACPArgs, CreationKey: "assistant-integration"}, func() {}); err == nil || !strings.Contains(err.Error(), "sign-in for the assistant is running") {
+		t.Fatalf("a start during the sign-in = %v, want it refused", err)
+	}
+	if err := e.pty.StopSession(ctx, key); err != nil {
+		t.Fatal(err)
+	}
+
 	if _, err := e.sched.EnsureTerminal(ctx, ada); err != nil {
 		t.Fatalf("EnsureTerminal: %v", err)
 	}
@@ -306,6 +340,9 @@ func TestIntegrationAssistantIgnoresPlantedGatewayDocker(t *testing.T) {
 	}
 
 	seedHome(t, AssistantHomeDir(assistantDir, ada), map[string]string{".claude/.credentials.json": `{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic","expiresAt":4102444800000,"scopes":["user:inference"]}}`})
+	if err := e.sched.markAssistantSignIn(ada, "claude"); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		cctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

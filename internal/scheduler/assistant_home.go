@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"syscall"
 
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -25,15 +24,28 @@ var assistantSignIns = map[string]string{".claude": ".credentials.json", ".codex
 // its session reads, which a start keeps besides the sign-in.
 var assistantSessions = map[string]func(name string, dir bool) bool{
 	".claude": func(name string, dir bool) bool { return name == "projects" && dir },
-	".codex": func(name string, dir bool) bool {
-		switch {
-		case name == "sessions", name == "archived_sessions":
-			return dir
-		case name == "session_index.jsonl", strings.HasPrefix(name, "state_") && strings.Contains(name, ".sqlite"):
-			return !dir
-		}
-		return false
-	},
+	// Codex resumes from the rollout files alone. Its sqlite files hold
+	// memories, dynamic tools and config imports.
+	".codex": func(name string, dir bool) bool { return dir && (name == "sessions" || name == "archived_sessions") },
+}
+
+// maxSignInBytes caps a sign-in file the server reads; a real one is a few
+// KiB.
+const maxSignInBytes = 64 << 10
+
+// readSignInFile reads the regular file rel in root, up to maxSignInBytes.
+func readSignInFile(root *os.Root, rel string) ([]byte, error) {
+	info, err := root.Lstat(rel)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", rel)
+	}
+	if info.Size() > maxSignInBytes {
+		return nil, fmt.Errorf("%s is larger than %d KiB", rel, maxSignInBytes>>10)
+	}
+	return root.ReadFile(rel)
 }
 
 // assistantLoginKeys are the keys each sign-in file may hold, with the keys
@@ -147,10 +159,20 @@ func (s *Scheduler) removeAssistantEntry(ctx context.Context, dir string, e fs.D
 // permits and returns what it dropped. A file that is not a JSON object is
 // deleted.
 func sanitizeAssistantLogin(root *os.Root, rel string, allow map[string][]string) ([]string, error) {
-	data, err := root.ReadFile(rel)
+	info, err := root.Lstat(rel)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, fmt.Errorf("scheduler: inspect the assistant's %s: %w", rel, err)
+	}
+	if info.Size() > maxSignInBytes {
+		if err = root.Remove(rel); err != nil {
+			return nil, fmt.Errorf("scheduler: delete the assistant's %s: %w", rel, err)
+		}
+		return []string{fmt.Sprintf("the whole file, larger than %d KiB", maxSignInBytes>>10)}, nil
+	}
+	data, err := root.ReadFile(rel)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: read the assistant's %s: %w", rel, err)
 	}
@@ -204,8 +226,9 @@ func sanitizeAssistantLogin(root *os.Root, rel string, allow map[string][]string
 }
 
 // AssistantLoginFound reports whether agent is signed in for the assistant:
-// a non-empty sign-in file in the assistant home. A sign-in in the member's
-// own home does not count; their runs can write it.
+// a non-empty sign-in file in the assistant home that matches the sign-in
+// the member made. A sign-in in the member's own home does not count; their
+// runs can write it.
 func (s *Scheduler) AssistantLoginFound(member domain.MemberID, agent string) (bool, error) {
 	profile, ok := harness.Lookup(agent)
 	if !ok {
@@ -232,7 +255,11 @@ func (s *Scheduler) AssistantLoginFound(member domain.MemberID, agent string) (b
 			return false, fmt.Errorf("scheduler: inspect the assistant's %s: %w", rel, err)
 		}
 		if info.Mode().IsRegular() && info.Size() > 0 {
-			return true, nil
+			err = s.checkAssistantSignIn(member, agent)
+			if errors.Is(err, ErrAssistantSignInChanged) {
+				return false, nil
+			}
+			return err == nil, err
 		}
 	}
 	return false, nil

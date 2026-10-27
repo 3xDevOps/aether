@@ -36,5 +36,9 @@ func (s *Service) SignIn(ctx context.Context, id domain.MemberID, start func(con
 	if err := s.stop(ctx, m); err != nil {
 		return err
 	}
+	// Removing the member waits on m.op, so a stalled install must not hold
+	// it for longer than a start may take.
+	ctx, cancel := context.WithTimeout(ctx, startTimeout)
+	defer cancel()
 	return start(ctx)
 }

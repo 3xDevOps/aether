@@ -555,6 +555,14 @@ func seedAssistantMember(t *testing.T, ctx context.Context, srv *Server, data st
 	if err := os.WriteFile(login, []byte(`{"claudeAiOauth":{"accessToken":"synthetic"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// As a finished sign-in leaves it: the next start records the sign-in.
+	pending := filepath.Join(data, "assistant", string(member.ID), "signin", "claude.pending")
+	if err := os.MkdirAll(filepath.Dir(pending), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pending, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	return member
 }
 

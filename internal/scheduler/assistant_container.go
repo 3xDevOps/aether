@@ -17,6 +17,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
+	"github.com/3xDevOps/Aether/internal/ptyhost"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
@@ -240,7 +241,11 @@ func (s *Scheduler) RemoveAssistant(ctx context.Context, member domain.MemberID)
 	lock := s.assistantLock(member)
 	lock.Lock()
 	defer lock.Unlock()
-	if err := errors.Join(s.removeAssistantContainer(ctx, member), s.removeByCreationKey(ctx, assistantInstallCreationKey(member))); err != nil {
+	errs := []error{s.removeAssistantContainer(ctx, member), s.removeByCreationKey(ctx, assistantInstallCreationKey(member))}
+	for _, agent := range assistantAgents {
+		errs = append(errs, s.cfg.PTY.RemoveSessionTranscript(ctx, ptyhost.AssistantLoginSession(member, agent)))
+	}
+	if err := errors.Join(errs...); err != nil {
 		return err
 	}
 	if err := s.cfg.RemoveAll(ctx, filepath.Join(s.cfg.AssistantDir, string(member))); err != nil {

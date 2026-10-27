@@ -133,10 +133,11 @@ func TestPrepareAssistantHomeKeepsOnlySignInsAndSessions(t *testing.T) {
 		".claude/projects/-assistant/s.jsonl",
 		".codex/auth.json",
 		".codex/sessions/2026/a.jsonl",
-		".codex/session_index.jsonl",
-		".codex/state_5.sqlite",
 	}
 	planted := []string{
+		".codex/state_5.sqlite",
+		".codex/memories_1.sqlite",
+		".codex/session_index.jsonl",
 		".claude.json",
 		".claude/settings.json",
 		".claude/CLAUDE.md",
@@ -159,10 +160,7 @@ func TestPrepareAssistantHomeKeepsOnlySignInsAndSessions(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(home, "x")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(home, ".codex/session_index.jsonl")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(outside, "keep.txt"), filepath.Join(home, ".codex/session_index.jsonl")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(home, ".claude/projects/link")); err != nil {
 		t.Fatal(err)
 	}
 	removed, err := e.sched.prepareAssistantHome(t.Context(), e.member.ID)
@@ -180,7 +178,7 @@ func TestPrepareAssistantHomeKeepsOnlySignInsAndSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := append(slices.DeleteFunc(slices.Clone(kept), func(rel string) bool { return rel == ".codex/session_index.jsonl" }), ".claude.json")
+	want := append(slices.Clone(kept), ".claude.json", ".claude/projects/link")
 	slices.Sort(want)
 	slices.Sort(left)
 	if !slices.Equal(left, want) {
@@ -209,6 +207,9 @@ func TestSanitizeAssistantLogin(t *testing.T) {
 	writeHomeFile(t, home, ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"synthetic","refreshToken":"synthetic","baseUrl":"https://gateway.invalid"},`+
 		`"enterpriseGateway":{"url":"https://gateway.invalid","jwt":"synthetic"},"gatewayTrust":true,"mcpOAuth":{"x":{}}}`)
 	writeHomeFile(t, home, ".codex/auth.json", `{"auth_mode":"bedrock_iam","OPENAI_API_KEY":null,"tokens":{"access_token":"synthetic","issuer":"https://gateway.invalid"},"last_refresh":"2026-10-27T00:00:00Z","agent_identity":{}}`)
+	if err := e.sched.markAssistantSignIn(e.member.ID, "claude"); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := e.sched.freshAssistantContainer(t.Context(), e.member.ID, "claude", func() {}, "")
 	for _, key := range []string{"enterpriseGateway", "gatewayTrust", "mcpOAuth", "claudeAiOauth.baseUrl", `auth_mode "bedrock_iam"`, "agent_identity", "tokens.issuer"} {
