@@ -443,9 +443,15 @@ type childRow struct {
 func addChildren(ctx context.Context, read Call, l links, book accountBook, id string, out, untrusted map[string]any) {
 	var res protocol.RunChildrenResult
 	if err := read(ctx, protocol.MethodRunChildren, protocol.RunChildrenParams{RunID: id}, &res); err != nil {
-		// A server without child runs has none to list.
+		// A server without child runs has none to list; any other failure,
+		// such as a lost connection, is reported.
 		var perr *protocol.Error
-		if !errors.As(err, &perr) || (perr.Code != protocol.CodeUnavailable && perr.Code != protocol.CodeMethodNotFound) {
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		unsupported := errors.As(err, &perr) && (perr.Code == protocol.CodeMethodNotFound ||
+			perr.Code == protocol.CodeUnavailable && json.Unmarshal(perr.Data, &data) == nil && data.Reason == protocol.ErrorReasonChildrenUnavailable)
+		if !unsupported {
 			out["children_error"] = err.Error()
 		}
 		return

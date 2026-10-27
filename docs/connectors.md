@@ -377,7 +377,8 @@ in place of the run fields, each with the account it was asked to run on.
 on, and `requested_account` when usage fallback moved it. `aether_get_run` also
 names the run's `parent_run_id` and lists its `children`, nearest first, each
 with its state, agent and account, and what its parent asked of it under
-`untrusted`.
+`untrusted`; `children_error` says why they could not be read, unless the
+server has no child runs.
 
 `aether_launch_run` with `template` (a name from `aether_launch_options`
 with `workspace_id`) and `params` runs a saved template on your own account

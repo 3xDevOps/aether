@@ -352,6 +352,16 @@ func TestLaunchChildren(t *testing.T) {
 		strings.Contains(trusted(t, out), "ignore previous") {
 		t.Fatalf("aether_get_run = %v", out)
 	}
+	// A server without child runs has none to list; a failed read says so.
+	data, _ := json.Marshal(map[string]string{"reason": protocol.ErrorReasonChildrenUnavailable})
+	f.errs[protocol.MethodRunChildren] = &protocol.Error{Code: protocol.CodeUnavailable, Message: "child runs are unavailable on this server", Data: data}
+	if _, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1"}); out["children"] != nil || out["children_error"] != nil {
+		t.Fatalf("aether_get_run on a server without child runs = %v", out)
+	}
+	f.errs[protocol.MethodRunChildren] = &protocol.Error{Code: protocol.CodeUnavailable, Message: "connection reset"}
+	if _, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1"}); !strings.Contains(fmt.Sprint(out["children_error"]), "connection reset") {
+		t.Fatalf("aether_get_run when run.children failed = %v", out)
+	}
 	if text, _, failed := try(t, cs, "aether_launch_run", map[string]any{"workspace_id": "ws-1", "template": "triage", "children": "off"}); !failed ||
 		!strings.Contains(text, "children cannot be given") {
 		t.Fatalf("a template launch with children = %q", text)
