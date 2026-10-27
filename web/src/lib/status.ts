@@ -11,7 +11,7 @@ import {
   type StateContext,
 } from '@/lib/needs-you'
 import { compactAge, timeAgo } from '@/lib/format'
-import { plainReason } from '@/lib/reasons'
+import { plainReason, possibleStallPrefix } from '@/lib/reasons'
 import type { BackgroundTask } from '@/lib/session-types'
 import type { RunActivity, RunStatus, RunStatusCause } from '@/lib/types'
 import { isTerminal, type RunRecord } from '@/store/runs'
@@ -24,8 +24,11 @@ type LiveState = Exclude<RunActivity, 'idle' | 'finished'> | 'ended' | 'ready' |
 
 type Outcome = 'completed' | 'merged' | 'closed' | 'interrupted'
 
-/** A live run's state, a finished run's outcome, or Paused. */
-export type PresentationState = LiveState | Outcome | 'paused'
+/**
+ * A live run's state, a finished run's outcome, or Paused. `stalled` is the wire's `waiting` parked by a
+ * stall whose reason names the turn's phase: the turn may still be in flight, so it did not end.
+ */
+export type PresentationState = LiveState | Outcome | 'paused' | 'stalled'
 
 export type RunGroup = 'needs-you' | 'working' | 'review' | 'finished'
 
@@ -43,6 +46,11 @@ export interface RunPresentation {
 export function backgroundReason(tasks: BackgroundTask[]): string {
   const held = tasks.filter((task) => task.holds).length
   return held === 0 ? 'Working in background' : `Working in background: ${held} ${held === 1 ? 'task' : 'tasks'}`
+}
+
+/** A parked Enhanced run whose stall named the turn's phase: it may yet make progress. */
+export function possiblyStalled(run: Pick<RunRecord, 'status' | 'reason'>): boolean {
+  return run.status === 'needs-attention' && run.reason?.startsWith(possibleStallPrefix) === true
 }
 
 const liveActivities = new Set<string>(['working', 'waiting-agents', 'waiting-ci', 'waiting-tools', 'answered', 'needs-you', 'failed', 'disconnected'])
@@ -82,6 +90,7 @@ const stateNext: Partial<Record<PresentationState, string>> = {
   'waiting-ci': resumes,
   'waiting-tools': resumes,
   ready: 'Mark it complete, or send a message to keep going.',
+  stalled: "It returns to Working with the agent's next update.",
 }
 
 function liveState(run: RunRecord, ctx: StateContext): Omit<RunPresentation, 'needsYou' | 'unread'> {
@@ -99,6 +108,7 @@ function liveState(run: RunRecord, ctx: StateContext): Omit<RunPresentation, 'ne
     return { state, reason: `${run.toolActivity.verb} ${run.toolActivity.target}`.trimEnd() }
   }
   const reason = run.reason && run.reason !== 'agent resumed' ? plainReason(run.reason) : stateReasons[state]
+  if (possiblyStalled(run)) return { state: 'stalled', reason, next: stateNext.stalled }
   if (state === 'failed') return { state, reason: `${reason}. Run remains open for follow-up.` }
   // Only Claude Code reports held background tasks, and it starts a turn when one ends.
   if (run.reason?.startsWith('working in background: ')) return { state, reason, next: 'Claude Code resumes it when a background task ends.' }
@@ -137,7 +147,7 @@ export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
   const shown = presentation(run, ctx)
   // The cause explains the server's state only: none where the dashboard shows another.
   const own = !isTerminal(run.status) && waitingOn(run, ctx) === undefined &&
-    shown.state === liveStateOf(run.status as 'running' | 'needs-attention', run.state)
+    (shown.state === liveStateOf(run.status as 'running' | 'needs-attention', run.state) || shown.state === 'stalled')
   return run.cause && own ? { ...shown, cause: run.cause } : shown
 }
 
@@ -263,6 +273,7 @@ export const stateLabel: Record<PresentationState, string> = {
   interrupted: 'Interrupted',
   paused: 'Paused',
   running: 'Running',
+  stalled: 'Possibly stalled',
 }
 
 /** Each state's dot: the tone picks both its colour and its shape. */
@@ -284,6 +295,7 @@ export const stateTone: Record<PresentationState, Tone> = {
   interrupted: 'interrupted',
   paused: 'paused',
   running: 'neutral',
+  stalled: 'waiting',
 }
 
 export const groupLabel: Record<RunGroup, string> = {

@@ -2,6 +2,7 @@ import { connectSessionStream, type SessionStream } from '@/lib/acp-stream'
 import type { Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { SessionLease } from '@/lib/session-types'
+import { randomID } from '@/lib/utils'
 import type { ControlMetadata, TakeoverAction } from '@/routes/terminal/attach'
 import type { RootStore } from '@/store'
 import { assistantSessionID } from '@/store/assistant'
@@ -29,7 +30,7 @@ const autoRetryLimit = 5
 function controlSession(runID: string): string {
   let id = controlSessions.get(runID)
   if (!id) {
-    id = `acp-${crypto.randomUUID()}`
+    id = `acp-${randomID('session')}`
     controlSessions.set(runID, id)
   }
   return id

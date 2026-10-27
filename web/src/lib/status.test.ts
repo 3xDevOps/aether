@@ -239,11 +239,11 @@ describe('run presentation', () => {
   it('labels every state in words and gives each its own dot, so no state is told by colour alone', () => {
     expect(Object.values(stateLabel)).toEqual([
       'Working', 'Waiting for agents', 'Waiting for CI', 'Waiting for process', 'Turn ended', 'Waiting', 'Answered', 'Needs you', 'Ready for review',
-      'Failed', 'Disconnected', 'Completed', 'Merged', 'Closed', 'Interrupted', 'Paused', 'Running',
+      'Failed', 'Disconnected', 'Completed', 'Merged', 'Closed', 'Interrupted', 'Paused', 'Running', 'Possibly stalled',
     ])
     expect(stateTone).toMatchObject({
       'waiting-agents': 'waiting', 'waiting-ci': 'waiting', 'waiting-tools': 'waiting', ended: 'ended', waiting: 'ended',
-      'needs-you': 'needs-you', ready: 'review', completed: 'done', failed: 'failed', disconnected: 'disconnected',
+      'needs-you': 'needs-you', ready: 'review', completed: 'done', failed: 'failed', disconnected: 'disconnected', stalled: 'waiting',
     })
   })
 })
@@ -258,6 +258,9 @@ describe('plainReason', () => {
     ['retained container expired', 'Its container was removed when it expired'],
     ['server restarted: container exited 143', 'Its container had stopped with exit code 143 when the server restarted'],
     ['stalled: no output or file changes for 10m0s', 'No output or file changes for 10m0s'],
+    ["stalled: possibly — no progress for 6m0s, awaiting first event, transport open", "No progress for 6m while awaiting the model's first reply; connection open"],
+    ['stalled: possibly — no progress for 1h0m0s, tool running, transport open', 'No progress for 1h while a tool was running; connection open'],
+    ['stalled: possibly — no progress for 5m30s, streaming, transport closed', 'No progress for 5m30s since the agent last replied; connection closed'],
     ["the agent's turn ended: max_tokens", 'Stopped: the reply reached its token limit'],
     ['needs input: Which database?', 'Agent asks: Which database?'],
     ['turn cancelled', 'Turn cancelled'],
@@ -309,6 +312,22 @@ describe('state words', () => {
     expect(asking.cause).toBeUndefined()
     expect(stateTitle({ state: 'ended', reason: 'Turn ended without a report', cause: 'turn-end' }, since, now)).toBe('Turn ended since 42 minutes ago. Why: the turn ended.')
     expect(stateTitle({ state: 'working', reason: 'Agent working', cause: 'something-new' as never }, since, now)).toBe('Working since 42 minutes ago. Why: something-new.')
+  })
+
+  it('reads a stall that names its phase as Possibly stalled, never Turn ended or Needs you', () => {
+    const reason = 'stalled: possibly — no progress for 6m0s, awaiting first event, transport open'
+    const stalled = shown({ status: 'needs-attention', state: 'waiting', reason, cause: 'stall' })
+    expect(stalled).toMatchObject({ state: 'stalled', cause: 'stall' })
+    expect(stalled.needsYou).toBeUndefined()
+    expect(groupOf(stalled)).toBe('working')
+    expect(stateLine(stalled)).toBe("Possibly stalled · No progress for 6m while awaiting the model's first reply; connection open")
+    expect(stateTitle(stalled, since, now)).toBe(
+      "Possibly stalled since 42 minutes ago — No progress for 6m while awaiting the model's first reply; connection open. It returns to Working with the agent's next update. Why: the run stalled.",
+    )
+    // A stall with no phase is not judged on progress and keeps its words.
+    expect(shown({ status: 'needs-attention', state: 'waiting', reason: 'stalled: no output or file changes for 10m0s', cause: 'stall' }).state).toBe('ended')
+    // A turn end after the stall replaces its reason; a stale reason on a running run is not a stall.
+    expect(shown({ status: 'running', state: 'working', reason }).state).toBe('working')
   })
 
   it('never asks for a message where nothing is required', () => {

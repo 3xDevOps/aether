@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -81,6 +82,9 @@ type Report struct {
 	// TurnStart marks a Working report sent as a prompt starts a turn, also
 	// one that arrives while the agent already works.
 	TurnStart bool `json:"turn_start,omitempty"`
+	// StartedAt is when the turn a Working report starts began, when the
+	// reporter knows it and the report can arrive after the agent acted.
+	StartedAt time.Time `json:"-"`
 	// Stop marks the Idle report of a main agent's stop that a hook may
 	// hold back, once: not one already continuing for a stop hook.
 	Stop bool `json:"stop,omitempty"`

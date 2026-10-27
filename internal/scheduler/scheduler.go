@@ -36,6 +36,10 @@ import (
 
 var ErrInvalidTransition = errors.New("scheduler: invalid run state transition")
 
+// ErrReviewNotReported refuses a reportedOnly complete of a live run whose
+// reported success does not await review.
+var ErrReviewNotReported = errors.New("scheduler: the run has no reported success awaiting review")
+
 type BaseCapture interface {
 	Capture(context.Context, domain.WorkspaceID, string) (mirror.CaptureResult, error)
 }
