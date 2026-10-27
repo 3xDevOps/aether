@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -100,16 +101,21 @@ func NewPRs(cfg PRConfig) (*PRs, error) {
 }
 
 // prError is an evaluation failure as the watch shows it. A transient one
-// creates the watch in the error state instead of refusing it.
+// creates the watch in the error state instead of refusing it. A gone one
+// means the login cannot see the pull request any more, so it is not
+// retried on a timer.
 type prError struct {
 	msg       string
 	transient bool
+	gone      bool
 	retryAt   time.Time
 }
 
 func (e *prError) Error() string { return e.msg }
 
-func (e *prError) Is(target error) bool { return e.transient && target == ErrTransient }
+func (e *prError) Is(target error) bool {
+	return e.transient && target == ErrTransient || e.gone && target == errRevoked
+}
 
 // RetryAt is when GitHub accepts requests again after a rate limit; zero
 // otherwise.
@@ -213,6 +219,10 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 	if snap, err = p.read(ctx, member, m, repo, number, prev); err != nil {
 		return github.Snapshot{}, false, err
 	}
+	snap.HeadSince = p.now()
+	if prev != nil && prev.HeadSHA == snap.HeadSHA && !prev.HeadSince.IsZero() {
+		snap.HeadSince = prev.HeadSince
+	}
 	data, err := json.Marshal(snap)
 	if err != nil {
 		return github.Snapshot{}, false, err
@@ -239,6 +249,7 @@ func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, rep
 		snap, err = p.github.PullRequestSnapshot(ctx, token, repo, number, prev)
 	}
 	var limited *github.RateLimitError
+	var refused *github.APIError
 	switch {
 	case err == nil:
 		return snap, nil
@@ -247,8 +258,16 @@ func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, rep
 	case errors.Is(err, github.ErrUnauthorized):
 		m.token = ""
 		return github.Snapshot{}, credentialsError(err)
-	case errors.Is(err, github.ErrNotFound), errors.Is(err, github.ErrMoved):
-		return github.Snapshot{}, &prError{msg: fmt.Sprintf("pull request %s#%d is not reachable with your GitHub login: %v", repo, number, err)}
+	case errors.Is(err, github.ErrMoved):
+		return github.Snapshot{}, &prError{gone: true, msg: fmt.Sprintf(
+			"pull request %s#%d is not reachable with your GitHub login: GitHub answers 301, the repository was renamed or transferred (%v); create the watch again under its new owner/name", repo, number, err)}
+	case errors.Is(err, github.ErrNotFound), errors.As(err, &refused) && refused.Status == http.StatusForbidden:
+		cause := "GitHub answers 404, so the pull request or repository is gone or your login lost access to it"
+		if refused != nil && refused.Status == http.StatusForbidden {
+			cause = "GitHub answers 403, so your login may no longer read it"
+		}
+		return github.Snapshot{}, &prError{gone: true, msg: fmt.Sprintf(
+			"pull request %s#%d is not reachable with your GitHub login: %s (%v); give that login access, or connect one that has it with aether github connect, then create the watch again", repo, number, cause, err)}
 	case ctx.Err() != nil:
 		return github.Snapshot{}, err
 	}
@@ -304,11 +323,16 @@ func (p *PRs) Evaluate(ctx context.Context, check PRCheck) (PRResult, error) {
 		if err == nil && t.run != "" {
 			err = p.refreshRun(ctx, t, snap)
 		}
+		var gone *prError
+		if errors.As(err, &gone) && gone.gone && check.Target.Kind != protocol.WatchTargetPR {
+			// Its run still has conditions to watch.
+			err = &prError{msg: gone.msg}
+		}
 		if err != nil {
 			failed = cmp.Or(failed, err)
 			continue
 		}
-		r := evaluatePR(snap, check.Conditions, check.Since)
+		r := evaluatePR(snap, check.Conditions, check.Since, p.now())
 		res.Notices = append(res.Notices, r.notices...)
 		if i == 0 {
 			res.Title, res.Observed = r.title, r.observed

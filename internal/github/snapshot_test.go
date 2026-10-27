@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -87,6 +88,8 @@ const (
 	statusPage1    = commitPath + "/status?per_page=100&page=1"
 	reviewsPage1   = pullPath + "/reviews?per_page=100&page=1"
 	workflowsPage1 = "/repos/acme/app/actions/runs?head_sha=" + headSHA + "&per_page=100&page=1"
+	branchPath     = "/repos/acme/app/branches/main"
+	rulesPath      = "/repos/acme/app/rules/branches/main?per_page=100"
 )
 
 func checkSuite(id int64, status, slug string, runs int) string {
@@ -103,6 +106,8 @@ func standardPR(f *fakeGitHub) {
 	f.bodies[suitesPage1] = checkSuitesBody(`{"id":9,"status":"completed","conclusion":"success","latest_check_runs_count":1,"app":{"name":"GitHub Actions","slug":"github-actions"}}`)
 	f.bodies[statusPage1] = `{"state":"success","statuses":[]}`
 	f.bodies[reviewsPage1] = `[]`
+	f.bodies[branchPath] = `{"name":"main","protected":false}`
+	f.bodies[rulesPath] = `[]`
 }
 
 func snapshotService(t *testing.T, f *fakeGitHub) *Service {
@@ -160,17 +165,17 @@ func TestPullRequestSnapshotReusesNotModifiedPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.notMod != 0 || len(first.Pages) != 5 {
+	if f.notMod != 0 || len(first.Pages) != 7 {
 		t.Fatalf("first poll: notModified=%d pages=%+v", f.notMod, first.Pages)
 	}
 	second, err := s.PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, &first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.notMod != 5 || second.Title != first.Title || second.HeadSHA != headSHA || len(second.CheckRuns) != 1 || second.CheckRuns[0].ID != 1 {
+	if f.notMod != 7 || second.Title != first.Title || second.HeadSHA != headSHA || len(second.CheckRuns) != 1 || second.CheckRuns[0].ID != 1 {
 		t.Fatalf("unchanged poll did not reuse 304 pages: notModified=%d %+v", f.notMod, second)
 	}
-	if second.Checks() != first.Checks() {
+	if !reflect.DeepEqual(second.Checks(), first.Checks()) {
 		t.Fatal("reused snapshot summarizes differently")
 	}
 
@@ -179,7 +184,7 @@ func TestPullRequestSnapshotReusesNotModifiedPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if f.notMod != 9 || len(third.Reviews) != 1 || third.Reviews[0].State != "CHANGES_REQUESTED" || len(third.CheckRuns) != 1 {
+	if f.notMod != 13 || len(third.Reviews) != 1 || third.Reviews[0].State != "CHANGES_REQUESTED" || len(third.CheckRuns) != 1 {
 		t.Fatalf("changed page not refetched: notModified=%d %+v", f.notMod, third)
 	}
 
@@ -355,7 +360,7 @@ func TestPullRequestSnapshotDropsSupersededRuns(t *testing.T) {
 		t.Fatalf("run cancelled by concurrency counted: %+v", c)
 	}
 	f.bodies[workflowsPage1] = workflowRunsBody(workflowRun(50, 100, 9), workflowRun(51, 200, 10))
-	if c := checks(); c.Failed != 1 || c.Passed != 2 {
+	if c := checks(); c.Cancelled != 1 || c.Failed != 0 || c.Passed != 2 || !slices.Equal(c.CancelledNames, []string{"test"}) {
 		t.Fatalf("another workflow's job with the same name hid a cancelled run: %+v", c)
 	}
 
@@ -400,7 +405,7 @@ func TestPullRequestSnapshotKeepsCancelledRunWhenActionsRunsAreRefused(t *testin
 		if !strings.Contains(snap.WorkflowsUnreadable, tc.message) {
 			t.Fatalf("HTTP %d: workflows unreadable = %q", tc.status, snap.WorkflowsUnreadable)
 		}
-		if c := snap.Checks(); c.Failed != 1 || c.Passed != 1 {
+		if c := snap.Checks(); c.Cancelled != 1 || c.Failed != 0 || c.Passed != 1 {
 			t.Fatalf("HTTP %d: cancelled run not counted: %+v", tc.status, c)
 		}
 	}
