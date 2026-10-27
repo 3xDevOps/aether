@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -147,4 +148,50 @@ func TestLaunchDefaultsBelongToTheCallerAndReportWhatTheyCannotUse(t *testing.T)
 	if err := boClient.Call(protocol.MethodLaunchDefaultsGet, struct{}{}, &bos); err != nil || bos.Revision == 0 || bos.Defaults.Agent != "codex" {
 		t.Fatalf("Bo's launch defaults after Ana cleared hers = %+v, %v", bos, err)
 	}
+}
+
+// Saves are refused over their shape before anything is stored, and to
+// members who may not launch.
+func TestLaunchDefaultsSetRefusesOversizedShapesAndMembersWhoCannotLaunch(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ana := controlClient(t, e)
+	tooMany := map[string]protocol.AgentLaunchDefault{}
+	for i := range protocol.LaunchDefaultsMaxAgents + 1 {
+		tooMany[fmt.Sprintf("agent%d", i)] = protocol.AgentLaunchDefault{}
+	}
+	var order []string
+	for i := range protocol.LaunchDefaultsMaxFallback + 1 {
+		order = append(order, fmt.Sprintf("m-%d", i))
+	}
+	for _, refused := range []struct {
+		defaults protocol.LaunchDefaults
+		want     string
+	}{
+		{protocol.LaunchDefaults{Agents: tooMany}, "at most 32 agents"},
+		{protocol.LaunchDefaults{Fallback: &protocol.LaunchFallbackDefault{Policy: protocol.FallbackOrdered, Order: order}}, "1 to 8 member IDs"},
+		{protocol.LaunchDefaults{Fallback: &protocol.LaunchFallbackDefault{}}, "fallback.policy must be"},
+		{protocol.LaunchDefaults{Agent: strings.Repeat("a", protocol.LaunchDefaultsMaxAgentName+1)}, "longer than 64 bytes"},
+		{protocol.LaunchDefaults{Agents: map[string]protocol.AgentLaunchDefault{strings.Repeat("b", protocol.LaunchDefaultsMaxAgentName+1): {}}}, "longer than 64 bytes"},
+		{protocol.LaunchDefaults{Agent: "claude\x1b[2J"}, "control character"},
+		{protocol.LaunchDefaults{Agents: map[string]protocol.AgentLaunchDefault{"co\x7fdex": {}}}, "control character"},
+	} {
+		d := refused.defaults
+		var pe *protocol.Error
+		if err := ana.Call(protocol.MethodLaunchDefaultsSet, protocol.LaunchDefaultsSetParams{Defaults: &d}, nil); !errors.As(err, &pe) ||
+			pe.Code != protocol.CodeInvalidParams || !strings.Contains(pe.Message, refused.want) {
+			t.Fatalf("launch.defaults.set %+v = %v, want invalid params saying %q", d, err, refused.want)
+		}
+	}
+	if _, err := e.store.LaunchDefaults(context.Background(), e.member.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("launch defaults after refused saves = %v, want none saved", err)
+	}
+
+	set := protocol.LaunchDefaultsSetParams{Defaults: &protocol.LaunchDefaults{Agent: "claude"}}
+	viewerSigner, _ := addMember(t, e, "Vi", domain.RoleViewer, false)
+	pendingSigner, _ := addMember(t, e, "Pat", domain.RoleCollaborator, true)
+	wantDenied(t, controlAs(t, e, viewerSigner).Call(protocol.MethodLaunchDefaultsSet, set, nil), "viewer launch.defaults.set")
+	pending := controlAs(t, e, pendingSigner)
+	wantDenied(t, pending.Call(protocol.MethodLaunchDefaultsSet, set, nil), "pending member launch.defaults.set")
+	wantDenied(t, pending.Call(protocol.MethodLaunchDefaultsGet, struct{}{}, nil), "pending member launch.defaults.get")
 }

@@ -11,6 +11,8 @@ const (
 const (
 	LaunchDefaultsMaxAgents   = 32
 	LaunchDefaultsMaxFallback = 8
+	// LaunchDefaultsMaxAgentName is in bytes.
+	LaunchDefaultsMaxAgentName = 64
 )
 
 const (

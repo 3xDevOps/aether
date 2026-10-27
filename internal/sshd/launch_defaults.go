@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/fallback"
@@ -96,7 +98,7 @@ func launchDefaultsFromWire(d protocol.LaunchDefaults) (store.LaunchDefaults, er
 		Account: domain.MemberID(d.AccountMemberID),
 	}
 	if d.Agent != "" {
-		if err := harness.ValidateName(d.Agent); err != nil {
+		if err := validLaunchAgentName(d.Agent); err != nil {
 			return out, fmt.Errorf("agent: %w", err)
 		}
 	}
@@ -104,7 +106,7 @@ func launchDefaultsFromWire(d protocol.LaunchDefaults) (store.LaunchDefaults, er
 		return out, fmt.Errorf("agents: at most %d agents", protocol.LaunchDefaultsMaxAgents)
 	}
 	for name, a := range d.Agents {
-		if err := harness.ValidateName(name); err != nil {
+		if err := validLaunchAgentName(name); err != nil {
 			return out, fmt.Errorf("agents: %w", err)
 		}
 		mode := domain.LaunchMode(a.Mode)
@@ -139,6 +141,16 @@ func launchDefaultsFromWire(d protocol.LaunchDefaults) (store.LaunchDefaults, er
 		return out, fmt.Errorf(`fallback.policy must be %q, %q or %q`, protocol.FallbackAutomatic, protocol.FallbackOrdered, protocol.FallbackOff)
 	}
 	return out, nil
+}
+
+func validLaunchAgentName(name string) error {
+	if len(name) > protocol.LaunchDefaultsMaxAgentName {
+		return fmt.Errorf("agent name is longer than %d bytes", protocol.LaunchDefaultsMaxAgentName)
+	}
+	if strings.ContainsFunc(name, unicode.IsControl) {
+		return fmt.Errorf("agent name %q contains a control character", name)
+	}
+	return harness.ValidateName(name)
 }
 
 // launchDefaultsResult reads member's saved defaults and checks each choice
