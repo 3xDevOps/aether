@@ -144,8 +144,8 @@ than `offline_access`.
 | Scope | On the page | Grants |
 | --- | --- | --- |
 | `read` | Always granted | Every read-only tool |
-| `write` | **Launch and message**, checked by default | Launching runs and swarms; messaging, pausing, resuming, relaunching, protecting and archiving runs and switching their mode; answering agents' and teammates' questions; marking runs reviewed; adding and pinning team memory |
-| `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing runs, cancelling, archiving and unarchiving swarms, releasing a swarm worker, handing runs to teammates, replacing a swarm's integrator, deciding and delivering integration candidates, opening and merging pull requests. Text an agent wrote could talk the assistant into approving or ending work without asking you |
+| `write` | **Launch and message**, checked by default | Launching runs and swarms; messaging, pausing, resuming, relaunching, protecting and archiving runs; answering agents' and teammates' questions; marking runs reviewed; adding and pinning team memory |
+| `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing runs, switching a run's mode, cancelling, archiving and unarchiving swarms, releasing a swarm worker, handing runs to teammates, replacing a swarm's integrator, deciding and delivering integration candidates, opening and merging pull requests. Text an agent wrote could talk the assistant into approving or ending work without asking you |
 
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
@@ -190,7 +190,7 @@ others:
 | `aether_activity_summary` | What your runs did today, yesterday or this week, in your time zone | `read` |
 | `aether_get_swarm` | Your swarms; with `swarm_id`, one swarm's tasks, workers with who holds their control and why one failed, questions, recent messages and integrator generation | `read` |
 | `aether_run_changes`, `aether_pr_status` | A run's commits, conflicts, changed files and optionally its diff, for its primary or an extra repo, paged; its pull request's checks, reviews, comments, merge state and head commit | `read` |
-| `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md), or with `id` one note with the notes it replaced | `read` |
+| `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md), or with `id` one note with the notes that replaced it or that it replaced | `read` |
 | `aether_integration` | A workspace's or swarm's [integration candidates](teams.md#combine-several-runs-into-one-result), or one with its verifications and delivery request | `read` |
 | `search`, `fetch` | Find runs and swarms by text, in the shape ChatGPT deep research uses | `read` |
 | `aether_launch_run`, `aether_launch_swarm` | Start a run, or a swarm with you as its accountable human; a swarm agent given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
@@ -307,7 +307,7 @@ the old one.
 pull request is now another one or its head has moved since, before asking
 GitHub. A merge GitHub accepts but has not done, as with a merge queue,
 returns `write: "pending"`; follow it with `aether_pr_status`. That refusal and GitHub's own count the failing and pending
-checks and the reviewers requesting changes, and give the merge state;
+checks and the reviewers requesting changes, as lower bounds when GitHub's feedback was cut off, and give the merge state;
 `aether_pr_status` names them under `untrusted`. It merges with
 `squash` unless `method` says `merge` or `rebase`, and only into the base
 branch it saw. `aether_pr_create` opens the pull request from the run's

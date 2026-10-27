@@ -128,11 +128,14 @@ func prMerge(ctx context.Context, c calls, in prMergeInput) (string, any, error)
 		out["merged"], out["write"] = false, writePending
 		return fmt.Sprintf("GitHub accepted pull request #%d but has not merged it yet, as with a merge queue; call aether_pr_status to follow it.", pr.Number), out, nil
 	}
-	if res.Error != "" {
+	if res.Error != "" && !res.Merged {
 		return "", nil, &protocol.Error{Code: protocol.CodeInvalidState, Message: fmt.Sprintf("GitHub did not merge pull request #%d: %s%s",
 			pr.Number, cmp.Or(res.Error, "it is not merged"), blockers(fb))}
 	}
 	out["merged"] = true
+	if res.Error != "" {
+		out["merge_error"] = res.Error
+	}
 	if res.PullRequest != nil {
 		out["pr"] = prOf(res.PullRequest)
 	}
@@ -157,8 +160,13 @@ func blockers(fb protocol.RunPRFeedbackResult) string {
 	if fb.MergeStateStatus != "" && fb.MergeStateStatus != "CLEAN" {
 		parts = append(parts, "merge state "+fb.MergeStateStatus)
 	}
-	if len(parts) == 0 {
+	switch {
+	case len(parts) == 0 && b.Partial:
+		return "; GitHub's feedback was cut off, so blockers may be missing; aether_pr_status reads it"
+	case len(parts) == 0:
 		return ""
+	case b.Partial:
+		return "; GitHub reports at least " + strings.Join(parts, ", ") + " in feedback that was cut off; aether_pr_status names them"
 	}
 	return "; GitHub reports " + strings.Join(parts, ", ") + "; aether_pr_status names them"
 }

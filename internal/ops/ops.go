@@ -352,7 +352,7 @@ func stripIDPrefixes(in any) {
 		switch v.Type().Field(i).Tag.Get("json") {
 		case "run_id", "run_id,omitempty":
 			f.SetString(strings.TrimPrefix(f.String(), runPrefix))
-		case "swarm_id":
+		case "swarm_id", "swarm_id,omitempty":
 			f.SetString(strings.TrimPrefix(f.String(), swarmPrefix))
 		}
 	}

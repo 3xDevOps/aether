@@ -49,6 +49,7 @@ var tiers = map[string]string{
 	protocol.MethodWorkspaceTimeline:     tierRead,
 	protocol.MethodAgentList:             tierRead,
 	protocol.MethodAccountUsage:          tierRead,
+	protocol.MethodAccountList:           tierRead,
 	protocol.MethodTerminalStatus:        tierRead,
 	protocol.MethodAssistantDocs:         tierRead,
 	protocol.MethodAssistantViewContext:  tierRead,

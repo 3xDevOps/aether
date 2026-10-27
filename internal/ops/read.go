@@ -140,9 +140,7 @@ func listWorkspaces(ctx context.Context, c calls, _ struct{}) (string, any, erro
 		return "", nil, err
 	}
 	var agents protocol.AgentListResult
-	if err := c.read(ctx, protocol.MethodAgentList, nil, &agents); err != nil {
-		return "", nil, err
-	}
+	agentsErr := c.read(ctx, protocol.MethodAgentList, nil, &agents)
 	type workspace struct {
 		ID         string `json:"id"`
 		Name       string `json:"name"`
@@ -164,7 +162,12 @@ func listWorkspaces(ctx context.Context, c calls, _ struct{}) (string, any, erro
 		rows = append(rows, agent{Name: a.Name, Installed: a.Installed, SignedIn: a.LoginFound,
 			Enhanced: a.Enhanced != "none" && a.EnhancedInstalled, DefaultMode: a.DefaultMode})
 	}
-	return fmt.Sprintf("%d workspaces, %d agents.", len(workspaces), len(rows)), map[string]any{"workspaces": workspaces, "agents": rows}, nil
+	out := map[string]any{"workspaces": workspaces, "agents": rows}
+	if agentsErr != nil {
+		out["agents_error"] = agentsErr.Error()
+		return fmt.Sprintf("%d workspaces; reading agents failed: %v.", len(workspaces), agentsErr), out, nil
+	}
+	return fmt.Sprintf("%d workspaces, %d agents.", len(workspaces), len(rows)), out, nil
 }
 
 // runRow is a run in a list. Its title, the server's reason and the last
@@ -605,36 +608,28 @@ func allSwarms(ctx context.Context, read Call, workspaceID string) ([]protocol.M
 }
 
 func getSwarm(ctx context.Context, c calls, in swarmsInput) (string, any, error) {
-	if in.SwarmID != "" {
-		return showSwarm(ctx, c, in.SwarmID)
-	}
 	l, err := dashboardLinks(ctx, c.read)
 	if err != nil {
 		return "", nil, err
 	}
-	missions, err := allSwarms(ctx, c.read, in.WorkspaceID)
-	if err != nil {
-		return "", nil, err
+	if in.SwarmID == "" {
+		missions, err := allSwarms(ctx, c.read, in.WorkspaceID)
+		if err != nil {
+			return "", nil, err
+		}
+		rows := []swarmRow{}
+		for _, m := range missions[:min(len(missions), rowLimit(in.Limit))] {
+			rows = append(rows, swarmRowOf(m, l, maxReport))
+		}
+		out := map[string]any{"swarms": rows}
+		if len(missions) > len(rows) {
+			out["total"], out["truncated"] = len(missions), true
+			return fmt.Sprintf("%d of %d swarms.", len(rows), len(missions)), out, nil
+		}
+		return fmt.Sprintf("%d swarms.", len(rows)), out, nil
 	}
-	rows := []swarmRow{}
-	for _, m := range missions[:min(len(missions), rowLimit(in.Limit))] {
-		rows = append(rows, swarmRowOf(m, l, maxReport))
-	}
-	out := map[string]any{"swarms": rows}
-	if len(missions) > len(rows) {
-		out["total"], out["truncated"] = len(missions), true
-		return fmt.Sprintf("%d of %d swarms.", len(rows), len(missions)), out, nil
-	}
-	return fmt.Sprintf("%d swarms.", len(rows)), out, nil
-}
-
-func showSwarm(ctx context.Context, c calls, id string) (string, any, error) {
 	var res protocol.MissionShowResult
-	if err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: id}, &res); err != nil {
-		return "", nil, err
-	}
-	l, err := dashboardLinks(ctx, c.read)
-	if err != nil {
+	if err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &res); err != nil {
 		return "", nil, err
 	}
 	m := res.Mission
@@ -714,8 +709,6 @@ func showSwarm(ctx context.Context, c calls, id string) (string, any, error) {
 	return fmt.Sprintf("Swarm %s is %s: %d tasks, %d workers, %d open questions.", m.ID, m.Phase, len(tasks), len(workers), m.OpenQuestions), out, nil
 }
 
-// diffPage bounds one page of a run's diff: its files, and the bytes of
-// each and of the whole page.
 const (
 	diffPageFiles = 10
 	diffFileText  = 6000
@@ -990,8 +983,8 @@ func memorySearch(ctx context.Context, c calls, in memoryInput) (string, any, er
 		for _, m := range res.Chain[:min(len(res.Chain), defaultRows)] {
 			chain = append(chain, noteOf(m, maxText))
 		}
-		return fmt.Sprintf("Note %s (%s), %d earlier versions.", res.Item.ID, res.Item.Kind, len(res.Chain)),
-			map[string]any{"id": res.Item.ID, "untrusted": map[string]any{"note": noteOf(res.Item, 4000), "replaced": chain}}, nil
+		return fmt.Sprintf("Note %s (%s), %d other notes in its replacement chain.", res.Item.ID, res.Item.Kind, len(res.Chain)),
+			map[string]any{"id": res.Item.ID, "untrusted": map[string]any{"note": noteOf(res.Item, 4000), "chain": chain}}, nil
 	}
 	var res protocol.MemorySearchResult
 	if err := c.read(ctx, protocol.MethodMemorySearch, protocol.MemorySearchParams{WorkspaceID: in.WorkspaceID, Words: in.Words, Kind: in.Kind, File: in.File, All: in.All}, &res); err != nil {

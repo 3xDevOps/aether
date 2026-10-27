@@ -83,7 +83,7 @@ var actOps = []Op{
 		"Use this when a swarm's integrator stopped or is stuck: a new one starts from the swarm's agents; fails if it changed since expected_generation."+
 			idempotencyRule+"without one, a repeat is made once.", replaceIntegrator).
 		enum("mode", "tui", "acp").hints(true, true).offer(TierConfirmed).
-		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodMissionReplaceIntegrator),
+		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodAccountList, protocol.MethodMissionReplaceIntegrator),
 }
 
 func runLifecycle(ctx context.Context, c calls, in lifecycleInput) (string, any, error) {
@@ -288,12 +288,25 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 	if in.Harness == "" && model == "" {
 		model = m.Integrator.Model
 	}
+	var accounts protocol.AccountListResult
+	if err := c.read(ctx, protocol.MethodAccountList, nil, &accounts); err != nil {
+		return "", nil, err
+	}
+	usable := func(id string) bool {
+		return slices.ContainsFunc(accounts.Accounts, func(a protocol.Member) bool { return a.ID == id })
+	}
 	var offered []protocol.MissionExecutionChoice
 	for _, ch := range m.ExecutionChoices {
 		if ch.Harness == harness && ch.Model == model {
 			offered = append(offered, ch)
 		}
 	}
+	if len(offered) > 0 && !slices.ContainsFunc(offered, func(ch protocol.MissionExecutionChoice) bool { return usable(ch.AccountMemberID) }) {
+		return "", nil, &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
+			"swarm %s offers %s only on accounts that are not yours or shared with you; pick another agent, or ask an account's owner to share it",
+			m.ID, strings.TrimSuffix(harness+" "+model, " "))}
+	}
+	offered = slices.DeleteFunc(offered, func(ch protocol.MissionExecutionChoice) bool { return !usable(ch.AccountMemberID) })
 	if len(offered) == 0 {
 		var agents []string
 		for _, ch := range m.ExecutionChoices {
@@ -307,10 +320,17 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 			account = prefer
 		}
 	}
-	choice := protocol.MissionIntegrator{AccountMemberID: account, Harness: harness, Mode: cmp.Or(in.Mode, m.Integrator.Mode), Model: model}
+	mode := cmp.Or(in.Mode, m.Integrator.Mode)
+	if mode == "headless" {
+		// Older swarms may have a headless integrator; a replacement must be interactive.
+		mode = "acp"
+	}
+	choice := protocol.MissionIntegrator{AccountMemberID: account, Harness: harness, Mode: mode, Model: model}
 	key := in.IdempotencyKey
 	if key == "" {
-		sum := sha256.Sum256([]byte(jsonText(choice)))
+		// The key is the request's, not the resolved choice's: the choice
+		// follows the current integrator, which a later replacement changes.
+		sum := sha256.Sum256([]byte(jsonText([]string{in.Harness, in.Mode, in.Model})))
 		key = fmt.Sprintf("ops-replace-%s-%d-%s", m.ID, expected, hex.EncodeToString(sum[:8]))
 	}
 	var res protocol.MissionReplaceIntegratorResult
@@ -322,6 +342,11 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 		}
 		if errors.As(err, &perr) && perr.Code == protocol.CodeConflict && json.Unmarshal(perr.Data, &data) == nil && data.Reason == protocol.ErrorReasonStaleGeneration {
 			return "", nil, &protocol.Error{Code: perr.Code, Data: perr.Data, Message: perr.Message + "; call aether_get_swarm: the integrator was replaced since expected_generation"}
+		}
+		if perr != nil && perr.Code == protocol.CodeConflict && in.IdempotencyKey == "" && m.IntegratorGeneration > expected+1 {
+			return "", nil, &protocol.Error{Code: perr.Code, Data: perr.Data, Message: fmt.Sprintf(
+				"%s; swarm %s's integrator was replaced again after this request (now generation %d), so its defaults changed; call aether_get_swarm",
+				perr.Message, m.ID, m.IntegratorGeneration)}
 		}
 		return "", nil, retryable(err, key)
 	}
