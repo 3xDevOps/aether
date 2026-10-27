@@ -126,9 +126,9 @@ func (c *preferenceCaller) list(ctx context.Context, raw json.RawMessage) (any, 
 	}
 	out := protocol.AssistantPreferencesResult{Preferences: []protocol.AssistantPreference{}}
 	if p.ID != "" {
-		got, err := c.s.cfg.Preferences.Get(ctx, c.m.id, p.ID)
-		if err != nil {
-			return nil, err
+		got, gerr := c.s.cfg.Preferences.Get(ctx, c.m.id, p.ID)
+		if gerr != nil {
+			return nil, gerr
 		}
 		out.Preferences = append(out.Preferences, shown(got))
 		return out, nil

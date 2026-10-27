@@ -89,7 +89,7 @@ func TestAddRefusesBadText(t *testing.T) {
 		text, ws string
 		code     int
 	}{
-		{" ​ ", "", protocol.CodeInvalidParams},
+		{" \u200b ", "", protocol.CodeInvalidParams},
 		{strings.Repeat("a", MaxText+1), "", protocol.CodeInvalidParams},
 		{"Prefer table output", "ws-missing", protocol.CodeInvalidParams},
 	} {

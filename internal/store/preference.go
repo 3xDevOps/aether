@@ -245,13 +245,13 @@ func (d *DB) ApplyPreferenceTombstones(ctx context.Context, deleted []string, ed
 	defer tx.Rollback() //nolint:errcheck // no-op after Commit
 	var removed int64
 	exec := func(query string, args ...any) error {
-		res, err := tx.ExecContext(ctx, query, args...)
-		if err != nil {
-			return err
+		res, xerr := tx.ExecContext(ctx, query, args...)
+		if xerr != nil {
+			return xerr
 		}
-		n, err := res.RowsAffected()
+		n, xerr := res.RowsAffected()
 		removed += n
-		return err
+		return xerr
 	}
 	for _, id := range deleted {
 		if err = exec(`DELETE FROM member_preferences WHERE id = ?`, id); err != nil {
