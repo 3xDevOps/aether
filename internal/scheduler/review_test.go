@@ -205,6 +205,14 @@ func TestAcceptRefusesAReopenedRun(t *testing.T) {
 	if _, err := e.sched.Review(ctx, run.ID, e.member.ID, protocol.RunReviewComplete, true); !errors.Is(err, ErrReviewNotReported) {
 		t.Fatalf("reportedOnly complete of a reopened run = %v, want ErrReviewNotReported", err)
 	}
+	// So is one that passed Review's read and reached the close after the
+	// run was completed and reopened: the close judges it again under the
+	// run's lifecycle lock.
+	spec := humanClose(domain.RunCompleted, e.member.ID)
+	spec.reportedOnly = true
+	if err := e.sched.closeRun(ctx, run.ID, spec); !errors.Is(err, ErrReviewNotReported) {
+		t.Fatalf("reportedOnly close of a reopened run = %v, want ErrReviewNotReported", err)
+	}
 	if row, err := e.db.GetRun(ctx, run.ID); err != nil || row.Status != domain.RunRunning {
 		t.Fatalf("reopened run after a refused complete = %s, %v; want still running", row.Status, err)
 	}
