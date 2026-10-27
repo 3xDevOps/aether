@@ -77,21 +77,21 @@ export function RunLimitsFields({ idPrefix, value, onChange, placeholders, disab
 }) {
   const shown = placeholders ? draftOf(placeholders) : emptyLimits
   const fields = [
-    ['cpus', 'CPUs', '0.5', shown.cpus],
-    ['memory', 'Memory (GiB)', '0.5', shown.memory],
-    ['pids', 'Processes', '1', shown.pids],
+    ['cpus', 'CPUs', shown.cpus],
+    ['memory', 'Memory (GiB)', shown.memory],
+    ['pids', 'Processes', shown.pids],
   ] as const
   return (
     <div className="grid grid-cols-3 gap-2 max-sm:grid-cols-1">
-      {fields.map(([key, label, step, placeholder]) => (
+      {fields.map(([key, label, placeholder]) => (
         <div key={key} className="flex min-w-0 flex-col gap-1">
           <Label htmlFor={`${idPrefix}-${key}`}>{label}</Label>
           <Input
             id={`${idPrefix}-${key}`}
             type="number"
             inputMode="decimal"
-            min={step}
-            step={step}
+            min={key === 'pids' ? 1 : undefined}
+            step={key === 'pids' ? 1 : 'any'}
             placeholder={placeholder || 'Automatic'}
             value={value[key]}
             disabled={disabled}

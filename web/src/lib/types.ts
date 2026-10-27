@@ -2140,6 +2140,8 @@ export interface RunLimits {
  * with no override of its own gets. */
 export interface ServerRunLimits {
   limits: RunLimits
+  /** What an unset field gets: the server's flag or automatic value. */
+  default: RunLimits
   effective: RunLimits
 }
 

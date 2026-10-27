@@ -300,7 +300,7 @@ export function LaunchDialog() {
           >
             <TabsContent value="run" className="flex flex-col gap-4">
               <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
-              {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
+              {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} error={serverLimits.error} onRetry={serverLimits.reload} disabled={launching} />}
               {childRunsOffered && (
                 <>
                   <ChildRunsOption value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} disabled={launching} />

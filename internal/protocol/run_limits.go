@@ -20,10 +20,11 @@ type ServerRunLimitsParams struct {
 	Pids        *int64   `json:"pids,omitempty"`
 }
 
-// ServerRunLimits is the result of MethodServerRunLimits. Effective is what
-// a run with no override gets: the server limits with the automatic values
-// filling the unset ones.
+// ServerRunLimits is the result of MethodServerRunLimits. Default is what a
+// field gets when Limits leaves it unset: the server's flag or automatic
+// value. Effective is what a run with no override gets, Limits over Default.
 type ServerRunLimits struct {
 	Limits    RunLimits `json:"limits"`
+	Default   RunLimits `json:"default"`
 	Effective RunLimits `json:"effective"`
 }

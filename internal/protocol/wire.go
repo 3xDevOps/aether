@@ -457,7 +457,7 @@ type RunLaunchParams struct {
 	Children string `json:"children,omitempty"`
 	// Limits override the server's run limits for this run; a zero field
 	// follows them.
-	Limits RunLimits `json:"limits,omitempty"`
+	Limits *RunLimits `json:"limits,omitempty"`
 }
 
 // RunLaunchResult is a RunResult; Replayed is true when IdempotencyKey

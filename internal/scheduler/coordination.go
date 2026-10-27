@@ -256,7 +256,7 @@ func (s *Scheduler) PrepareVerificationRuntime(ctx context.Context, spec *runtim
 	}()
 	limits, err := s.runLimits(ctx, domain.RunLimits{CPUs: spec.CPULimit, MemoryBytes: spec.MemoryLimitBytes, Pids: spec.PidsLimit})
 	if err != nil {
-		return nil, err
+		return release, err
 	}
 	spec.CPULimit, spec.MemoryLimitBytes, spec.PidsLimit = limits.CPUs, limits.MemoryBytes, limits.Pids
 	c := s.coordinationSeam()

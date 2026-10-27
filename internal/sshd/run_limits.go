@@ -14,10 +14,6 @@ func init() {
 	registerMethod(protocol.MethodServerRunLimits, (*Server).serverRunLimits)
 }
 
-func wireRunLimits(l domain.RunLimits) protocol.RunLimits {
-	return protocol.RunLimits{CPUs: l.CPUs, MemoryBytes: l.MemoryBytes, Pids: l.Pids}
-}
-
 func (s *Server) serverRunLimits(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.ServerRunLimitsParams](raw)
 	if perr != nil {
@@ -49,7 +45,8 @@ func (s *Server) serverRunLimits(ctx context.Context, member domain.MemberID, ra
 	}
 	auto := s.cfg.RunLimits
 	return protocol.ServerRunLimits{
-		Limits: wireRunLimits(limits),
+		Limits:  protocol.RunLimits{CPUs: limits.CPUs, MemoryBytes: limits.MemoryBytes, Pids: limits.Pids},
+		Default: protocol.RunLimits{CPUs: auto.CPUs, MemoryBytes: auto.MemoryBytes, Pids: auto.Pids},
 		Effective: protocol.RunLimits{
 			CPUs:        cmp.Or(limits.CPUs, auto.CPUs),
 			MemoryBytes: cmp.Or(limits.MemoryBytes, auto.MemoryBytes),

@@ -6,7 +6,7 @@ import { useStore } from '@/store'
 import { alice, serverInfo } from '@/test/fixtures'
 
 const gib = 2 ** 30
-const initial: ServerRunLimits = { limits: {}, effective: { cpus: 8, memory_bytes: 8 * gib, pids: 4096 } }
+const initial: ServerRunLimits = { limits: {}, default: { cpus: 8, memory_bytes: 8 * gib, pids: 4096 }, effective: { cpus: 8, memory_bytes: 8 * gib, pids: 4096 } }
 
 function seed() {
   useStore.setState({
@@ -25,7 +25,7 @@ describe('Run limits row', () => {
     const serverRunLimits = vi.fn(async (params?: Parameters<Api['serverRunLimits']>[0]) =>
       params?.memory_bytes === undefined
         ? initial
-        : { limits: { memory_bytes: params.memory_bytes }, effective: { cpus: 8, memory_bytes: params.memory_bytes, pids: 4096 } })
+        : { limits: { memory_bytes: params.memory_bytes }, default: initial.default, effective: { cpus: 8, memory_bytes: params.memory_bytes, pids: 4096 } })
     const client = { serverRunLimits, serverInfo: vi.fn(async () => serverInfo) } as unknown as Api
     render(<ServerSection client={client} />)
     await act(async () => {})

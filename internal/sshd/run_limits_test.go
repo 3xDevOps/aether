@@ -20,6 +20,7 @@ func TestServerRunLimits(t *testing.T) {
 	}
 	want := protocol.ServerRunLimits{
 		Limits:    protocol.RunLimits{CPUs: 2, MemoryBytes: 1 << 30},
+		Default:   protocol.RunLimits{CPUs: 4, MemoryBytes: 8 << 30, Pids: 4096},
 		Effective: protocol.RunLimits{CPUs: 2, MemoryBytes: 1 << 30, Pids: 4096},
 	}
 	if got != want {

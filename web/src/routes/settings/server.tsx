@@ -161,7 +161,7 @@ function RunLimitsRow({ client }: { client: Api }) {
         </Button>
       )}
     >
-      <RunLimitsFields idPrefix="run-limit" value={shown} onChange={setDraft} placeholders={limits.effective} disabled={saving} />
+      <RunLimitsFields idPrefix="run-limit" value={shown} onChange={setDraft} placeholders={limits.default} disabled={saving} />
       {(parsed.error ?? saveError) && <p role="alert" className="text-ui-sm text-state-failed">{parsed.error ?? saveError}</p>}
     </SettingRow>
   )
