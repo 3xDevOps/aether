@@ -2708,9 +2708,13 @@ for the lease once it has shown Session and the stream has acked, when the
 terminal would (the owner, not a phone, not a swarm worker). A refused
 automatic request shows no error: it retries with backoff while the holder is
 the viewer or nobody, and again when `run.controller` reports the lease free.
-Leaving the page releases a held lease, so a reload takes it straight back;
-closing the stream resets the run's stream and lease state. Frames go through
-`batchNotifications`, so a burst re-renders once per frame.
+Leaving the run page, by navigating elsewhere in the dashboard or by closing
+or reloading the tab, releases a held lease before the stream closes, so a
+reload takes it straight back and a swarm worker's hold does not outlive the
+page. Navigating away waits up to 2 s for the release's answer, because the
+server commits it on the stream's context. Closing the stream resets the
+run's stream and lease state. Frames go through `batchNotifications`, so a
+burst re-renders once per frame.
 
 An ack or history page's `truncated_before` displays the expired-prefix
 boundary. The page's `oldest_seq` stops older-page requests at the actual
