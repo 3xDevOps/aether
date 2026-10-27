@@ -183,8 +183,8 @@ serve` gets `--reviewer-account-file`, and it is never a GitHub account
 (provider `reviewer`). It reaches one server, the one its file names, and
 only one that turned on `edge-reviewer` and whose admin bound it to a
 member who is no admin. It starts no edge session, so it cannot sign in a
-device, claim a server or open an invitation. Ten wrong logins or passwords
-in a row lock it for 15 minutes, besides the sign-in rate limit per
+device, claim a server or open an invitation. Ten wrong passwords in a row
+for its login lock it for 15 minutes, besides the sign-in rate limit per
 address. Each attempt writes one line, with the client address, to the
 edge's log (`edge: reviewer signed in` or `edge: reviewer sign-in
 refused`). Turning it on for `edge.onaether.dev` is the owner's step; this
@@ -209,9 +209,12 @@ Set it up, with the demo server's id from `aether-server edge status` or
    An admin member is refused, and a member made admin later is cut off.
 
 Revoke it with `aether member unlink <member-id> reviewer:openai-review`,
-which cuts off its connectors at their next call, or by removing the flag
-and restarting the edge. Rotate the password for each review: run step 1
-again and restart the edge.
+or by turning `edge-reviewer` off on the demo server and restarting it:
+either cuts off its connectors at their next call. Removing the flag from
+the edge, or a new password, only stops new sign-ins; connectors already
+authorized keep working. After each review, unlink the login, run step 1
+again for a new password, restart the edge and bind the login again
+(step 4).
 
 The rest of the setup:
 

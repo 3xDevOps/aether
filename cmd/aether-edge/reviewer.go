@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 
-	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	edge "github.com/3xDevOps/Aether/internal/edge/service"
 )
 
@@ -32,11 +31,8 @@ func reviewerCmd(args []string, out io.Writer) error {
 		return err
 	}
 	a := edge.ReviewerAccount{Login: *login, PasswordHash: hash, ServerID: *serverID}
-	if !edgeproto.ValidReviewerLogin(a.Login) {
-		return fmt.Errorf("--login %q is not 1 to 39 lowercase letters, digits and dashes", a.Login)
-	}
-	if !edgeproto.ValidServerID(a.ServerID) {
-		return fmt.Errorf("--server-id %q is not a server id", a.ServerID)
+	if err = a.Validate(); err != nil {
+		return err
 	}
 	raw, err := json.MarshalIndent(a, "", "  ")
 	if err != nil {

@@ -509,10 +509,10 @@ alone. Its assertion names the account `reviewer:<login>`, a provider no
 GitHub account has; no grant, directory entry or control message can carry
 it. The edge starts no session for it: it reaches no other page, so it
 cannot sign in a device, claim a server or open an invitation. The sign-in
-rate limit per address applies, and 10 wrong logins or passwords in a row,
-from any address, lock it for 15 minutes:
-`429 the reviewer sign-in is locked after 10 wrong logins or passwords in a
-row; try again after <time>`. The lock lives in memory, so a restart lifts
+rate limit per address applies, and 10 wrong passwords in a row for its
+login, from any address, lock it for 15 minutes:
+`429 the reviewer sign-in is locked after 10 wrong passwords in a row; try
+again after <time>`. A wrong login does not count. The lock lives in memory, so a restart lifts
 it. Each attempt logs `edge: reviewer signed in` or `edge: reviewer sign-in
 refused`, with `client_ip`.
 
@@ -525,8 +525,9 @@ consent page refuses with the reason; under `approved-devices` it asks for a
 pairing code as for anyone. A connector the reviewer authorized acts as that
 member, and every call checks again: `aether member unlink <member-id>
 reviewer:<login>`, turning `edge-reviewer` off or making the member an admin
-cuts it off at its next call. Rotate the password for each review: run
-`aether-edge reviewer` again and restart the edge.
+cuts it off at its next call. A new password, written by `aether-edge
+reviewer` and read at the edge's next start, only stops new sign-ins; unlink
+the login too to cut off connectors already authorized.
 
 Edge protocol 5 brings the reviewer account. A server before protocol 5
 refuses its assertion as malformed, so **Choose a server** lists such a

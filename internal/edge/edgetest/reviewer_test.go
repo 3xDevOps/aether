@@ -232,6 +232,8 @@ func TestReviewerSignIn(t *testing.T) {
 
 // TestReviewerLockout gets the reviewer password wrong until the sign-in
 // locks: then even the right password is refused until the lock ends.
+// Wrong logins never count, and a login or password in the
+// authorization URL does not override what the reviewer types.
 func TestReviewerLockout(t *testing.T) {
 	t.Parallel()
 	h, _, _ := reviewerEdge(t)
@@ -241,7 +243,10 @@ func TestReviewerLockout(t *testing.T) {
 		t.Fatal(err)
 	}
 	authURL, _ := authRequest(h, client)
-	for i := range 10 {
+	if resp, page := reviewerSignIn(t, b, authURL+"&login=x&password=y", reviewerLogin, reviewerPassword); resp.StatusCode != http.StatusOK {
+		t.Fatalf("an authorization URL naming a login and password: %s\n%s", resp.Status, page)
+	}
+	for i := range 19 {
 		login, password := reviewerLogin, "wrong"
 		if i%2 == 1 {
 			login, password = "someone-else", reviewerPassword
@@ -251,8 +256,9 @@ func TestReviewerLockout(t *testing.T) {
 			t.Fatalf("attempt %d with %s: %s, want 403\n%s", i+1, login, resp.Status, page)
 		}
 	}
+	h.advance(time.Minute)
 	resp, page := reviewerSignIn(t, b, authURL, reviewerLogin, reviewerPassword)
-	if resp.StatusCode != http.StatusTooManyRequests || !strings.Contains(page, "the reviewer sign-in is locked after 10 wrong logins or passwords in a row") {
+	if resp.StatusCode != http.StatusTooManyRequests || !strings.Contains(page, "the reviewer sign-in is locked after 10 wrong passwords in a row") {
 		t.Fatalf("the right password while locked: %s, want 429\n%s", resp.Status, page)
 	}
 	h.advance(15 * time.Minute)

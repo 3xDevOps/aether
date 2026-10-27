@@ -147,7 +147,16 @@ func memberLink(args []string) error {
 		return err
 	}
 	if *reviewer != "" && *github == "" && *email == "" && fs.NArg() == 1 {
-		return memberLinkReviewer(*reviewer, fs.Arg(0))
+		member := fs.Arg(0)
+		return withControl(func(c *protocol.Client) error {
+			var res protocol.Identity
+			if err := c.Call(protocol.MethodMemberReviewerLink, protocol.MemberReviewerLinkParams{MemberID: member, Login: *reviewer}, &res); err != nil {
+				return err
+			}
+			fmt.Printf("bound %s:%s to member %s; unbind it with aether member unlink %s %s:%s\n",
+				res.Provider, res.Subject, member, member, res.Provider, res.Subject)
+			return nil
+		})
 	}
 	if (*github == "") == (*email == "") || fs.NArg() != 0 || *reviewer != "" {
 		return fmt.Errorf("usage: aether member link --github <login> | --email <address>\nlinks a GitHub account to your own member; to join two members you already are, use aether member merge start\n" +
@@ -162,20 +171,6 @@ func memberLink(args []string) error {
 		printInvitationLink(res)
 		fmt.Printf("%s can link to member %s until %s: open the link on a device signed in with that account\n",
 			inviteeOf(res.Invitation), res.Invitation.MemberID, res.Invitation.ExpiresAt)
-		return nil
-	})
-}
-
-// memberLinkReviewer binds the edge's reviewer account to member, so a
-// connector authorized by signing in with it acts as that member.
-func memberLinkReviewer(login, member string) error {
-	return withControl(func(c *protocol.Client) error {
-		var res protocol.Identity
-		if err := c.Call(protocol.MethodMemberReviewerLink, protocol.MemberReviewerLinkParams{MemberID: member, Login: login}, &res); err != nil {
-			return err
-		}
-		fmt.Printf("bound %s:%s to member %s; unbind it with aether member unlink %s %s:%s\n",
-			res.Provider, res.Subject, member, member, res.Provider, res.Subject)
 		return nil
 	})
 }

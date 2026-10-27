@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -24,8 +23,9 @@ import (
 const PathReviewerSignin = "/connectors/reviewer"
 
 // The reviewer sign-in locks for reviewerLockout after
-// reviewerMaxFailures wrong logins or passwords in a row, from any
-// address.
+// reviewerMaxFailures wrong passwords in a row for its login, from any
+// address. A wrong login does not count, so only someone who holds the
+// login can lock it.
 const (
 	reviewerMaxFailures = 10
 	reviewerLockout     = 15 * time.Minute
@@ -52,13 +52,14 @@ func LoadReviewerAccount(path string) (*ReviewerAccount, error) {
 	if err = dec.Decode(&a); err != nil {
 		return nil, fmt.Errorf("edge: reviewer account file %s: %w", path, err)
 	}
-	if err = a.validate(); err != nil {
+	if err = a.Validate(); err != nil {
 		return nil, fmt.Errorf("edge: reviewer account file %s: %w", path, err)
 	}
 	return &a, nil
 }
 
-func (a *ReviewerAccount) validate() error {
+// Validate checks the login, the server id and that the hash is bcrypt.
+func (a *ReviewerAccount) Validate() error {
 	if !edgeproto.ValidReviewerLogin(a.Login) {
 		return fmt.Errorf("login %q is not 1 to 39 lowercase letters, digits and dashes", a.Login)
 	}
@@ -79,10 +80,6 @@ func HashReviewerPassword(password string) (string, error) {
 		return "", fmt.Errorf("edge: hash reviewer password: %w", err)
 	}
 	return string(hash), nil
-}
-
-func (a *ReviewerAccount) account() edgeproto.Account {
-	return edgeproto.Account{Provider: edgeproto.ProviderReviewer, Subject: a.Login, Login: a.Login}
 }
 
 // reviewerLock counts the reviewer sign-in's failures in a row and when
@@ -136,6 +133,9 @@ func (s *Service) reviewerPage(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, nil, err)
 		return
 	}
+	// A hidden field would come first and win over what the reviewer types.
+	q.Del("login")
+	q.Del("password")
 	s.render(w, http.StatusOK, "reviewer", s.view(nil, "Reviewer sign-in", reviewerData{Fields: requestFields(q)}))
 }
 
@@ -157,7 +157,7 @@ func (s *Service) reviewerSignin(w http.ResponseWriter, r *http.Request) {
 	if until := s.reviewerLock.locked(now); !until.IsZero() {
 		slog.Warn("edge: reviewer sign-in refused: locked", "client_ip", ip, "until", until)
 		s.fail(w, r, nil, pageErr(http.StatusTooManyRequests,
-			"the reviewer sign-in is locked after %d wrong logins or passwords in a row; try again after %s",
+			"the reviewer sign-in is locked after %d wrong passwords in a row; try again after %s",
 			reviewerMaxFailures, until.UTC().Format(time.RFC3339)))
 		return
 	}
@@ -175,40 +175,35 @@ func (s *Service) reviewerSignin(w http.ResponseWriter, r *http.Request) {
 	loginOK := subtle.ConstantTimeCompare([]byte(login), []byte(s.reviewer.Login)) == 1
 	passwordOK := bcrypt.CompareHashAndPassword([]byte(s.reviewer.PasswordHash), []byte(password)) == nil
 	if !loginOK || !passwordOK {
-		n := s.reviewerLock.fail(now)
-		slog.Warn("edge: reviewer sign-in refused: wrong login or password", "client_ip", ip, "failures", n)
+		failures := 0
+		if loginOK {
+			failures = s.reviewerLock.fail(now)
+		}
+		slog.Warn("edge: reviewer sign-in refused: wrong login or password", "client_ip", ip, "failures", failures)
 		s.fail(w, r, nil, pageErr(http.StatusForbidden, "wrong reviewer login or password"))
 		return
 	}
 	s.reviewerLock.succeed()
 	slog.Info("edge: reviewer signed in", "login", s.reviewer.Login, "server", s.reviewer.ServerID, "client_ip", ip)
-	c, err := s.reviewerChoice(r, q)
-	if err != nil {
+	c := choice{ServerInfo: edgeproto.ServerInfo{ID: s.reviewer.ServerID, Name: s.reviewer.ServerID, Role: "reviewer"}}
+	srv, err := s.store.Server(r.Context(), s.reviewer.ServerID)
+	switch {
+	case errors.Is(err, edgestore.ErrNotFound):
+		c.Reason = "no account claimed this server at this edge"
+	case err != nil:
 		s.fail(w, r, nil, err)
 		return
+	default:
+		c.Name, c.AccessPolicy, c.Kind, c.Online = srv.Name, srv.AccessPolicy, srv.Kind, s.link.Online(srv.ID)
+		account := edgeproto.Account{Provider: edgeproto.ProviderReviewer, Subject: s.reviewer.Login, Login: s.reviewer.Login}
+		if err = s.offer(&c, account, q, time.Now(), edgeproto.VersionReviewer); err != nil {
+			s.fail(w, r, nil, err)
+			return
+		}
 	}
 	if c.Reason == "" {
 		s.renderChoose(w, nil, q, []choice{c}, nil)
 	} else {
 		s.renderChoose(w, nil, q, nil, []choice{c})
 	}
-}
-
-// reviewerChoice is the reviewer account's one server on the choose
-// page.
-func (s *Service) reviewerChoice(r *http.Request, q url.Values) (choice, error) {
-	c := choice{ServerInfo: edgeproto.ServerInfo{ID: s.reviewer.ServerID, Name: s.reviewer.ServerID, Role: "reviewer"}}
-	srv, err := s.store.Server(r.Context(), s.reviewer.ServerID)
-	switch {
-	case errors.Is(err, edgestore.ErrNotFound):
-		c.Reason = "no account claimed this server at this edge"
-		return c, nil
-	case err != nil:
-		return choice{}, err
-	}
-	c.Name, c.AccessPolicy, c.Kind, c.Online = srv.Name, srv.AccessPolicy, srv.Kind, s.link.Online(srv.ID)
-	if err = s.offer(&c, s.reviewer.account(), q, time.Now(), edgeproto.VersionReviewer); err != nil {
-		return choice{}, err
-	}
-	return c, nil
 }

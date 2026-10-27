@@ -584,9 +584,11 @@ there is no terminal, file, settings or git-writing tool.
   review. Anyone holding its password authorizes a connector as the member it
   is bound to, so a server takes it only with `edge-reviewer` on, under
   `edge-access account`, and only for a member who is no admin; it gets no
-  edge session. Ten wrong attempts in a row lock it for 15 minutes, which
-  also lets anyone who knows the login keep it locked. Bind it to a member
-  of a server kept for the review: every member reads every workspace.
+  edge session. Ten wrong passwords in a row for its login lock it for 15
+  minutes, which also lets anyone who knows the login keep it locked. A new
+  password stops only new sign-ins; unlinking the login cuts off its
+  connectors. Bind it to a member of a server kept for the review: every
+  member reads every workspace.
 - Under `edge-access account` the consent page has no code, so an
   authorization link someone started in their own ChatGPT or Claude, opened
   by a member signed in at the edge, is one **Allow** away from connecting
