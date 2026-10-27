@@ -385,7 +385,9 @@ reports a merged one as merged. `aether_replace_integrator` requires
 without a key it derives one from the swarm, that generation and the agent, so a
 retry returns the first replacement even after it moved the generation, and a
 replacement someone else made in between fails with a conflict that says to call
-`aether_get_swarm`. `aether_memory_add` returns the existing note for a
+`aether_get_swarm`. A replacement on another agent given no `mode` starts in
+the first integrator mode that agent can take. `aether_memory_add` returns the
+existing note for a
 duplicate, and repeating a replacement (`supersedes`) that went through returns
 the note that replaced the old one.
 

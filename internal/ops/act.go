@@ -84,7 +84,7 @@ var actOps = []Op{
 		"Use this when a swarm's integrator stopped or is stuck: a new one starts from the swarm's agents; fails if it changed since expected_generation."+
 			idempotencyRule+"without one, a repeat is made once.", replaceIntegrator).
 		enum("mode", "tui", "acp").hints(true, true).offer(TierConfirmed).
-		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodAccountList, protocol.MethodMissionReplaceIntegrator),
+		calling(protocol.MethodServerInfo, protocol.MethodMissionShow, protocol.MethodAccountList, protocol.MethodAgentList, protocol.MethodMissionReplaceIntegrator),
 }
 
 func runLifecycle(ctx context.Context, c calls, in lifecycleInput) (string, any, error) {
@@ -279,7 +279,7 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 	}
 	l := links(info.DashboardURL)
 	var shown protocol.MissionShowResult
-	if err := c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &shown); err != nil {
+	if err = c.read(ctx, protocol.MethodMissionShow, protocol.MissionShowParams{MissionID: in.SwarmID}, &shown); err != nil {
 		return "", nil, err
 	}
 	m := shown.Mission
@@ -296,7 +296,7 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 		model = m.Integrator.Model
 	}
 	var accounts protocol.AccountListResult
-	if err := c.read(ctx, protocol.MethodAccountList, nil, &accounts); err != nil {
+	if err = c.read(ctx, protocol.MethodAccountList, nil, &accounts); err != nil {
 		return "", nil, err
 	}
 	usable := func(id string) bool {
@@ -327,7 +327,30 @@ func replaceIntegrator(ctx context.Context, c calls, in replaceIntegratorInput) 
 			account = prefer
 		}
 	}
-	mode := cmp.Or(in.Mode, m.Integrator.Mode)
+	mode := in.Mode
+	if mode == "" && harness != m.Integrator.Harness {
+		// Another agent starts in the first integrator mode it can take, as
+		// the launch dialog's integrator does.
+		param := account
+		if account == info.Member.ID {
+			param = ""
+		}
+		var agents protocol.AgentListResult
+		if err = c.read(ctx, protocol.MethodAgentList, protocol.AgentListParams{AccountMemberID: param}, &agents); err != nil {
+			return "", nil, fmt.Errorf("list agents to choose the integrator's mode (or pass mode): %w", err)
+		}
+		if i := slices.IndexFunc(agents.Agents, func(a protocol.AgentInfo) bool { return a.Name == harness }); i >= 0 {
+			if modes := rowOfAgent(agents.Agents[i]).Integrator; len(modes) > 0 {
+				mode = modes[0]
+			}
+		}
+		if mode == "" {
+			if mode, err = protocol.SwarmMode(agents.Agents, harness); err != nil {
+				return "", nil, err
+			}
+		}
+	}
+	mode = cmp.Or(mode, m.Integrator.Mode)
 	if mode == "headless" {
 		// Older swarms may have a headless integrator; a replacement must be interactive.
 		mode = "acp"

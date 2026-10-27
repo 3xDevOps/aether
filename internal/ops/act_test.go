@@ -201,6 +201,14 @@ func TestConnectorReplaceIntegrator(t *testing.T) {
 	if got := f.acted(); !strings.Contains(got.params, `"account_member_id":"mem-2","harness":"codex","mode":"tui"`) {
 		t.Fatalf("codex replacement sent %s", got.params)
 	}
+	// Another agent given no mode starts in one it can take, not the
+	// current integrator's acp.
+	f.answers[protocol.MethodAgentList] = returns(protocol.AgentListResult{Agents: []protocol.AgentInfo{{Name: "codex", Installed: true, Enhanced: "adapter"}}})
+	f.calls = nil
+	run(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3, "harness": "codex"})
+	if got := f.acted(); !strings.Contains(got.params, `"harness":"codex","mode":"tui"`) {
+		t.Fatalf("codex replacement without a mode sent %s", got.params)
+	}
 	if msg, _, failed := try(t, cs, "aether_replace_integrator", map[string]any{"swarm_id": "mis-1", "expected_generation": 3, "harness": "gemini"}); !failed || !strings.Contains(msg, "its agents are claude, codex") {
 		t.Fatalf("an agent the swarm lacks = %q", msg)
 	}
