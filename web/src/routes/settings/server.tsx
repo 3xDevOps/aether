@@ -144,12 +144,14 @@ function RunLimitsRow({ client }: { client: Api }) {
     if (!parsed.limits) return
     setSaving(true)
     setSaveError(null)
+    const current = () => useStore.getState().identityKey === identityKey
     client.serverRunLimits({ cpus: parsed.limits.cpus ?? 0, memory_bytes: parsed.limits.memory_bytes ?? 0, pids: parsed.limits.pids ?? 0 }).then(
       (next) => {
+        if (!current()) return
         set(next)
         setDraft(null)
       },
-      (err: unknown) => setSaveError(errorSentence(err)),
+      (err: unknown) => current() && setSaveError(errorSentence(err)),
     ).finally(() => setSaving(false))
   }
   return (
