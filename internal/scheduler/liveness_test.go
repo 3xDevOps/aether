@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/acphost/acpmock"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
@@ -65,6 +66,34 @@ func TestEnhancedTurnWithoutProgressParksAsAPossibleStall(t *testing.T) {
 				t.Fatalf("Liveness = %+v, %v; want %s, open", l, ok, tc.phase)
 			}
 		})
+	}
+}
+
+// The session queues a turn's start notice behind its other callbacks, so on
+// a loaded host it can reach the scheduler after a possible stall parked that
+// same turn. It says nothing new about the turn and must not release it.
+func TestPossibleStallHoldsAgainstItsTurnsLateStartNotice(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t, func(cfg *Config) {
+		cfg.StallThreshold = time.Hour
+		cfg.FirstEventGrace = 300 * time.Millisecond
+		cfg.PollInterval = 20 * time.Millisecond
+	})
+	sub := e.subscribe(t)
+	e.startStalls(t)
+	run := e.launchACP(t, acpmock.PromptWait)
+	parked := waitStatusEvent(t, sub, run.ID, domain.RunNeedsAttention).Payload.(events.RunStatusPayload)
+	e.sched.mu.Lock()
+	entry := e.sched.runs[run.ID]
+	e.sched.mu.Unlock()
+	e.sched.acp.turnState(entry, false, acphost.TurnState{Working: true})
+	time.Sleep(10 * 20 * time.Millisecond)
+	r, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Status != domain.RunNeedsAttention || r.StatusSeq != parked.StatusSeq {
+		t.Fatalf("the turn's late start notice released its possible stall: %+v", r)
 	}
 }
 

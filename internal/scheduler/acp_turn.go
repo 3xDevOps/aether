@@ -10,6 +10,8 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/agentstatus"
+	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 )
 
 // The dashboard matches these reason prefixes (web/src/lib/needs-you.ts).
@@ -80,6 +82,18 @@ func (d *acpDriver) turnState(entry *supervised, oneShot bool, st acphost.TurnSt
 	case st.Working && st.Reason == "background":
 		report.Reason, report.Tools = agentstatus.BackgroundReason(st.Tasks), st.Tasks > 0 && st.Agents == 0
 	case st.Working:
+		// The session queues this notice behind its other callbacks, so it
+		// can arrive after a stall parked the very turn it announces. It is
+		// not progress then, and would release the stall as if it were.
+		if sess := d.session(entry.runID); sess != nil {
+			turn := sess.Log().TurnStartSeq()
+			d.s.mu.Lock()
+			stale := entry.status == domain.RunNeedsAttention && entry.cause == events.CauseStall && entry.stallTurn == turn
+			d.s.mu.Unlock()
+			if stale {
+				return
+			}
+		}
 		report.TurnStart = true
 	case st.Failed != nil:
 		// Not a turn end: a waiting outcome report must not finish the run
