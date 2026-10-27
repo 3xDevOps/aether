@@ -211,8 +211,8 @@ in `internal/localgw/backend.go`. Their lost response may follow a committed wri
 so uncertainty surfaces immediately. A subsequent explicit request can
 reconnect. A call with no answer after 60 seconds fails with `-32004`
 `server did not answer <method> within 1m0s` and is not retried;
-`home.upload`, `home.download` and `terminal.file`, which carry up to
-64 MiB, and `workspace.import`, whose first fetch of a large repository is
+`home.upload`, `home.download`, `files.upload` and `terminal.file`, which
+carry up to 64 MiB, and `workspace.import`, whose first fetch of a large repository is
 slow, get 15 minutes. Only that call's channel closes: a slow server
 handler is not a dead connection, so the connection, its streams and its
 other calls stay up. The keepalive below drops a dead one. A server refusal passes through untouched as that `protocol.Error`;
@@ -1075,6 +1075,7 @@ unavailable owned source remains the server's protocol error.
 | `files.tree` | `{"workspace_id":"...","run_id":"...","path":"src"}` (`run_id` optional; an empty, omitted or `"."` path is the root) | `{"entries":[{"name":"main.go","kind":"file","size":1234},...]}` |
 | `files.read` | `{"workspace_id":"...","run_id":"...","path":"README.md"}` (`run_id` optional) | `{"content":"...","truncated":false,"binary":false,"size":1234,"revision":"<sha256>","writable":true}` |
 | `files.write` | `{"workspace_id":"...","run_id":"...","path":"README.md","content":"...","revision":"<sha256>"}` (`run_id` optional; an empty `revision` creates a new file) | the same `FileRead` shape as `files.read`, for the saved bytes |
+| `files.upload` | `{"workspace_id":"...","run_id":"...","path":"assets/logo.png","content_base64":"..."}` | empty result |
 | `files.diff` | `{"run_id":"...","path":"README.md"}` | `{"patch":"...","truncated":false}` |
 | `config.roots` | `{}` | `{"roots":[{"harness":"claude","display_name":"Claude Code","path":"~/.claude","runtime_ignores":["projects/","shell-snapshots/","statsig/","todos/","file-history/","history.jsonl","daemon/","transcripts/",...],"credential_names":[".credentials.json",...]}]}` |
 | `config.tree` | `{"harness":"claude","path":"."}` (`path` may be omitted, empty, or `"."` for the root) | `{"entries":[{"name":"settings.json","kind":"file","size":1234},...]}` |
@@ -1303,7 +1304,9 @@ rebinds to the current admin's verified account (and can check
 ### Files and member configuration
 
 `files.tree` and `files.read` address a workspace's base branch when
-`run_id` is omitted, or a live run checkout when it is present. Complete
+`run_id` is omitted, or a live run checkout when it is present. A run
+checkout's tree lists tracked, untracked and ignored files, but not a folder
+that is ignored as a whole, such as `node_modules/`. Complete
 valid UTF-8 text without NUL bytes is returned with an exact SHA-256
 `revision` and may be writable. Binary content is read-only with an empty
 revision. File reads, diffs, and editor writes carry complete content up to 64
@@ -1317,7 +1320,13 @@ requires **Steer** and changes that run's uncommitted checkout. Existing file
 modes are preserved and new files use `0644`. Run-checkout saves recheck the
 revision immediately before atomic rename under Aether's root lock. Base
 commits compare-and-swap the branch head. Aether's locks do not serialize
-arbitrary live-agent filesystem writers.
+arbitrary live-agent filesystem writers. `content` is text without NUL bytes.
+
+`files.upload` adds one new file of any bytes, up to the same 64 MiB, to a
+run's checkout, the dashboard's **Upload files…**. It requires `run_id` and
+**Steer**, like a run-checkout `files.write`, and never replaces a file: a path
+the checkout already has answers `-32003` `files.upload: file changed; reload
+before saving`.
 
 `config.roots`, `config.tree`, `config.read`, `config.stat`, `config.write`,
 and `config.import` always address the authenticated member's own persistent
@@ -1467,7 +1476,7 @@ delivery guarantee.
 
 The generic HTTP proxy caps ordinary `/api/v1` JSON bodies at 1 MiB,
 `files.write` and `config.write` at 385 MiB to allow worst-case JSON escaping,
-and `config.import` and `terminal.file` at 96 MiB. The 64 MiB file and
+and `config.import`, `home.upload`, `files.upload` and `terminal.file` at 96 MiB. The 64 MiB file and
 per-request import limits remain authoritative after JSON decoding. The SSH control-channel line cap is
 96 MiB, allowing base64 import requests without unbounded framing.
 The HTTP gateway admits at most two imports at once, before reading their

@@ -155,13 +155,26 @@ func (e *Engine) listBare(ctx context.Context, repoPath, ref, dir string) ([]Tre
 }
 
 func (e *Engine) listCheckout(ctx context.Context, run domain.RunID, checkout, dir string) ([]TreeEntry, error) {
-	args := []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}
+	var pathspec []string
 	if dir != "" {
-		args = append(args, "--", strings.TrimSuffix(dir, "/")+"/")
+		pathspec = []string{"--", strings.TrimSuffix(dir, "/") + "/"}
 	}
-	output, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, args...)
+	output, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, append([]string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}, pathspec...)...)
 	if err != nil {
 		return nil, err
+	}
+	// Ignored files such as an uploaded .env are listed; --directory reports a
+	// wholly ignored folder such as node_modules as one "name/" record, which
+	// is skipped rather than walked.
+	ignored, _, err := e.gitCheckoutBounded(ctx, run, checkout, -1, append([]string{"ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"}, pathspec...)...)
+	if err != nil {
+		return nil, err
+	}
+	records := strings.Split(output, "\x00")
+	for _, record := range strings.Split(ignored, "\x00") {
+		if !strings.HasSuffix(record, "/") {
+			records = append(records, record)
+		}
 	}
 	root, err := e.openCheckoutRoot(checkout)
 	if err != nil {
@@ -173,11 +186,10 @@ func (e *Engine) listCheckout(ctx context.Context, run domain.RunID, checkout, d
 	if prefix != "" {
 		prefix += "/"
 	}
-	for _, record := range bytes.Split([]byte(output), []byte{0}) {
-		if len(record) == 0 {
+	for _, name := range records {
+		if name == "" {
 			continue
 		}
-		name := string(record)
 		if err := ValidatePath(name); err != nil {
 			continue
 		}
@@ -478,8 +490,8 @@ func (e *Engine) readBareFile(ctx context.Context, repo, ref, name string, maxBy
 	return content, truncated, entry.size, nil
 }
 
-// FilesWrite writes one complete UTF-8 text file to a run checkout or to a
-// workspace branch. The caller supplies the authenticated member identity for
+// FilesWrite writes one complete file to a run checkout or to a workspace
+// branch. The caller supplies the authenticated member identity for
 // base-branch commit attribution.
 func (e *Engine) FilesWrite(ctx context.Context, workspace domain.WorkspaceID, run domain.RunID, ref, name string, content []byte, revision string, author domain.GitIdentity, signingKey []byte) (FileRead, error) {
 	if err := ValidatePath(name); err != nil {
@@ -487,9 +499,6 @@ func (e *Engine) FilesWrite(ctx context.Context, workspace domain.WorkspaceID, r
 	}
 	if name == "" {
 		return FileRead{}, fmt.Errorf("%w: file path is required", ErrInvalidPath)
-	}
-	if !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
-		return FileRead{}, fmt.Errorf("%w: file must be valid UTF-8 text", ErrInvalidPath)
 	}
 	if len(content) > MaxFileBytes {
 		return FileRead{}, fmt.Errorf("%w: file exceeds %d bytes", ErrInvalidPath, MaxFileBytes)
