@@ -77,8 +77,13 @@ container: `claude-agent-acp --cli auth login` for Claude Code, which prints a
 URL and asks for the code the page shows, or `codex login --device-auth` for
 Codex, which prints a URL and a code to enter there. It installs the adapter
 first if needed. The sign-in is written to the assistant's home only. Starting
-it stops a running assistant session; the next prompt starts it again. Select
-**Done** when it exits.
+it stops a running assistant session; the next prompt starts it again, and a
+prompt sent while the sign-in runs fails until it exits. Select **Done** when
+it exits.
+
+Aether checks only that the sign-in file exists, not that it still works. When
+the sign-in expires or you want another account, use **Settings > Assistant >
+Sign-in > Sign in again**.
 
 The first conversation uses the first ready agent, Claude Code before Codex. A
 conversation keeps its agent, because another agent cannot continue it. If that

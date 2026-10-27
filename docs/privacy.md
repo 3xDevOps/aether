@@ -402,7 +402,9 @@ prompts and the files the agent reads go to the agent's vendor under the
 account you signed the assistant in to.
 
 **New conversation** deletes `items.jsonl` and everything in `home/` but the
-sign-in. Removing a member deletes the whole directory. Assistant state
+sign-in. The output of a sign-in terminal, which shows the sign-in URL and,
+for Codex, a one-time code, is kept with other terminal transcripts in
+`<data-dir>/transcripts/assistant-login-<member>-<agent>.cast`. Removing a member deletes the whole directory. Assistant state
 from before the assistant had its own container is in your home;
 [assistant.md](assistant.md#earlier-assistant-state-in-your-home) says how to
 delete it.
