@@ -15,6 +15,7 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 	"golang.org/x/text/cases"
 
+	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/preference"
@@ -39,10 +40,22 @@ type preferenceCaller struct {
 	tools.Caller
 	s *Service
 	m *member
+	// prompt is the member's message of the turn running now.
+	prompt func() (acphost.UserMessage, bool)
 
 	mu    sync.Mutex
 	turn  int64
 	saves int
+}
+
+func (s *Service) preferenceCaller(m *member, next tools.Caller) *preferenceCaller {
+	return &preferenceCaller{Caller: next, s: s, m: m, prompt: func() (acphost.UserMessage, bool) {
+		live := m.live()
+		if live == nil {
+			return acphost.UserMessage{}, false
+		}
+		return live.acp.CurrentPrompt()
+	}}
 }
 
 func (c *preferenceCaller) Call(ctx context.Context, method string, params json.RawMessage) (json.RawMessage, *protocol.Error) {
@@ -157,11 +170,7 @@ func (c *preferenceCaller) remember(ctx context.Context, raw json.RawMessage) (a
 	if err = c.memoryOff(ctx); err != nil {
 		return nil, err
 	}
-	live := c.m.live()
-	if live == nil {
-		return nil, ErrNotRunning
-	}
-	msg, ok := live.acp.CurrentPrompt()
+	msg, ok := c.prompt()
 	if !ok {
 		return nil, &protocol.Error{Code: protocol.CodeDenied, Message: "a preference is saved only while answering the member's own message " +
 			"that asked for it; ask them to say it again"}
