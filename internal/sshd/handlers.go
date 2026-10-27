@@ -188,8 +188,14 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if perr != nil {
 		return nil, perr
 	}
+	// A run whose child-run choice was not recorded must not go on under the
+	// member setting it overrode, and must not survive to be launched again
+	// by a retry of this failed call.
 	if childrenErr != nil {
-		return nil, childrenErr
+		if killErr := s.cfg.Runs.Kill(context.WithoutCancel(ctx), run.ID, member); killErr != nil {
+			return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; stopping run %s also failed: %v", childrenErr.Message, run.ID, killErr)}
+		}
+		return nil, &protocol.Error{Code: childrenErr.Code, Message: fmt.Sprintf("%s; run %s was stopped, so launch again", childrenErr.Message, run.ID)}
 	}
 	return protocol.RunLaunchResult{Run: s.runSnapshot(run), Replayed: replayed}, nil
 }
