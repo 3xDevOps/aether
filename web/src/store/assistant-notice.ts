@@ -6,7 +6,7 @@ import type { RootStore } from '@/store'
  * The subscribe ack carries no sequence head, so nothing marks an event as
  * replayed. An event older than this on the server's clock is a catch-up.
  */
-const liveWindowMs = 30_000
+export const liveWindowMs = 30_000
 
 const serverOffsets = new WeakMap<RootStore, number>()
 

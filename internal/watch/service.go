@@ -11,12 +11,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/push"
 	"github.com/3xDevOps/Aether/internal/store"
 )
@@ -82,6 +85,11 @@ type Config struct {
 	Tick     time.Duration
 	// Now replaces time.Now, for tests.
 	Now func() time.Time
+
+	// Recovered closes once the scheduler has reconciled the runs a restart
+	// left. Until then a run's open requests are not known yet, and its
+	// standing alone would be announced as a need of its own.
+	Recovered <-chan struct{}
 }
 
 // Service evaluates watches and delivers their notices.
@@ -97,6 +105,8 @@ type Service struct {
 	now      func() time.Time
 	pr       PRSource
 
+	recovered <-chan struct{}
+
 	kick chan struct{}
 	wg   sync.WaitGroup
 	stop context.CancelFunc
@@ -109,6 +119,9 @@ type Service struct {
 	closed bool
 	// cursor is the last event sequence whose evaluations are committed.
 	cursor uint64
+	// unsaved holds watches whose startup check failed and whose retry
+	// could not be saved; housekeep retries them until one is.
+	unsaved map[string]bool
 }
 
 // New builds the service; call Start to begin.
@@ -126,7 +139,7 @@ func New(cfg Config) (*Service, error) {
 		cfg.Now = time.Now
 	}
 	return &Service{
-		store: cfg.Store, bus: cfg.Bus, runs: cfg.Runs, swarm: cfg.Swarm, push: cfg.Push, head: cfg.Head,
+		store: cfg.Store, bus: cfg.Bus, runs: cfg.Runs, swarm: cfg.Swarm, push: cfg.Push, head: cfg.Head, recovered: cfg.Recovered,
 		debounce: cfg.Debounce, tick: cfg.Tick, now: cfg.Now, kick: make(chan struct{}, 1),
 	}, nil
 }
@@ -156,11 +169,43 @@ func (s *Service) Start(ctx context.Context) error {
 	s.cursor, s.stop = cursor, cancel
 	s.mu.Unlock()
 	s.wg.Go(func() {
-		s.evaluateAll(loopCtx)
-		s.consume(loopCtx)
+		if s.awaitRecovery(loopCtx) {
+			s.evaluateAll(loopCtx)
+			s.consume(loopCtx)
+		}
 	})
-	s.wg.Go(func() { s.background(loopCtx) })
+	s.wg.Go(func() {
+		if s.awaitRecovery(loopCtx) {
+			s.background(loopCtx)
+		}
+	})
 	return nil
+}
+
+// ready reports whether scheduler recovery has finished, so a run's needs
+// read as they stand.
+func (s *Service) ready() bool {
+	if s.recovered == nil {
+		return true
+	}
+	select {
+	case <-s.recovered:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) awaitRecovery(ctx context.Context) bool {
+	if s.recovered == nil {
+		return true
+	}
+	select {
+	case <-s.recovered:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // Close stops the service and waits for it. Idempotent.
@@ -180,17 +225,84 @@ func (s *Service) Close() error {
 	return nil
 }
 
+// evaluateAll evaluates every live watch once. Events replay only from
+// the cursor, so a watch whose evaluation fails here is scheduled to be
+// retried, as a failing read is.
 func (s *Service) evaluateAll(ctx context.Context) {
 	ids, err := s.store.DueWatchIDs(ctx, s.now(), true)
-	if err != nil {
-		slog.Warn("watch: list watches to recover; the next events and checks evaluate them", "error", err)
-		return
+	for wait := time.Second; err != nil; wait = min(wait*2, time.Minute) {
+		slog.Warn("watch: list watches to recover; trying again", "in", wait, "error", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		ids, err = s.store.DueWatchIDs(ctx, s.now(), true)
 	}
 	for _, id := range ids {
-		if err := s.evaluate(ctx, id); err != nil && ctx.Err() == nil {
-			slog.Warn("watch: evaluate after start", "watch", id, "error", err)
-		}
+		s.recheck(ctx, id)
 	}
+}
+
+// recheck evaluates watch id and, when that fails, saves when to retry it;
+// when that fails too, id is kept in unsaved for the next housekeep.
+func (s *Service) recheck(ctx context.Context, id string) {
+	err := s.evaluate(ctx, id)
+	if err == nil {
+		s.markUnsaved(id, false)
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	slog.Warn("watch: evaluate after start; retrying with backoff", "watch", id, "error", err)
+	if rerr := s.retryLater(ctx, id, err); rerr != nil {
+		if ctx.Err() == nil {
+			slog.Warn("watch: schedule the retry; trying again next tick", "watch", id, "error", rerr)
+		}
+		s.markUnsaved(id, true)
+		return
+	}
+	s.markUnsaved(id, false)
+}
+
+func (s *Service) markUnsaved(id string, unsaved bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !unsaved {
+		delete(s.unsaved, id)
+		return
+	}
+	if s.unsaved == nil {
+		s.unsaved = map[string]bool{}
+	}
+	s.unsaved[id] = true
+}
+
+// retryLater records failure on watch id and when to evaluate it again.
+func (s *Service) retryLater(ctx context.Context, id string, failure error) error {
+	w, err := s.store.GetWatch(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if w.State != protocol.WatchActive && w.State != protocol.WatchError {
+		return nil
+	}
+	now := s.now()
+	w.Failures++
+	next := now.Add(backoff(w.Failures))
+	w.State, w.Error, w.NextCheckAt, w.UpdatedAt = protocol.WatchError, failure.Error(), &next, now
+	if _, err := s.store.CommitWatchEvaluation(ctx, w, nil); err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			return nil
+		}
+		return err
+	}
+	s.changed(ctx, w, "")
+	return nil
 }
 
 var watchedTypes = []events.Type{
@@ -354,6 +466,12 @@ func (s *Service) housekeep(ctx context.Context) {
 		if err := s.evaluate(ctx, id); err != nil && ctx.Err() == nil {
 			slog.Warn("watch: evaluate due watch", "watch", id, "error", err)
 		}
+	}
+	s.mu.Lock()
+	unsaved := slices.Collect(maps.Keys(s.unsaved))
+	s.mu.Unlock()
+	for _, id := range unsaved {
+		s.recheck(ctx, id)
 	}
 	s.deliverDue(ctx)
 	if _, err := s.store.PurgeWatches(ctx, now.Add(-Retention)); err != nil {

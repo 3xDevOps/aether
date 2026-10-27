@@ -91,6 +91,14 @@ import type {
   RoomMessageAnchor,
   RoomMessageKind,
   UsageResult,
+  Watch,
+  WatchCreateParams,
+  WatchGetResult,
+  WatchListParams,
+  WatchResult,
+  WatchUpdateParams,
+  NotifyPrefs,
+  NotifyPrefsSetParams,
   WorkspaceMirrorAuth,
   WorkspaceMirrorResult,
   FileDiff,
@@ -310,6 +318,7 @@ export type ApiErrorData = { refusal?: EdgeRefusal; edge_path?: EdgePath } & Rec
 // internal/protocol's error codes.
 export const codeNotFound = -32000
 export const codeInvalidState = -32002
+export const codeUnavailable = -32004
 export const codeUpgradeRequired = -32005
 export const codeMethodNotFound = -32601
 
@@ -1058,6 +1067,13 @@ export const api = {
   slackStatus: () => call<SlackStatusResult>('slack.status'),
   slackLink: () => call<SlackLinkResult>('slack.link'),
   slackUnlink: () => call<SlackUnlinkResult>('slack.unlink'),
+  watchCreate: (params: WatchCreateParams) => call<WatchResult>('watch.create', params),
+  watchList: (params: WatchListParams = {}) => call<{ watches: Watch[] }>('watch.list', params).then((r) => r.watches),
+  watchGet: (watchID: string) => call<WatchGetResult>('watch.get', { watch_id: watchID }),
+  watchUpdate: (params: WatchUpdateParams) => call<WatchResult>('watch.update', params),
+  watchDelete: (watchID: string) => call<unknown>('watch.delete', { watch_id: watchID }),
+  notifyPrefsGet: () => call<NotifyPrefs>('notify.prefs.get'),
+  notifyPrefsSet: (prefs: NotifyPrefsSetParams) => call<NotifyPrefs>('notify.prefs.set', prefs),
   // Not RPC methods; see docs/local-gateway.md. Without a range this is the
   // diff against the run's effective base; with `from`, everything since that
   // snapshot tree, and `base` is the `from` tree.

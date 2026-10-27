@@ -550,7 +550,9 @@ there is no terminal, file, settings or git-writing tool.
   300 a minute server-wide, which someone guessing from many addresses can
   reach to pause pairing for everyone while they guess. Revoking that device,
   removing the member or tightening `edge-access` cuts off their connectors.
-  Only clients on `chatgpt.com` and `claude.ai` can connect.
+  Only clients on `chatgpt.com` and `claude.ai` can connect. Claude Code's
+  client id alone may return to `http://localhost` or `http://127.0.0.1` on
+  any port; PKCE keeps a code another local program catches unusable.
 - The universal URL `https://<relay host>/mcp` is one OAuth issuer for every
   server on the edge, but each server still mints, stores and checks its own
   codes and tokens. The edge only routes by their `<server id>.` prefix, so a
@@ -566,8 +568,9 @@ there is no terminal, file, settings or git-writing tool.
   one. Behind an edge at protocol 3 the assertion still arrives in
   the URL and is bound to no browser
   ([edge.md](edge.md#mcp-connectors)). On the universal paths the edge
-  forwards a server's redirects and forms only to itself, `chatgpt.com` and
-  `claude.ai`. Under
+  forwards a server's redirects and forms only to itself, `chatgpt.com`,
+  `claude.ai` and Claude Code's loopback callback, `/callback` on
+  `http://localhost` or `http://127.0.0.1` at any port. Under
   `edge-access account` it replaces the pairing code: the trust is the same as
   a GitHub sign-in admitting a new device, so a taken-over GitHub account or a
   compromised edge (or its key) can authorize a connector as that member.

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,9 +45,11 @@ func TestAStaleClearNeverHidesANewerNeed(t *testing.T) {
 	phone.status.Store(http.StatusInternalServerError)
 	h.runs.answer(run.ID)
 	h.publish(run.ID, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
+	// The attempt is counted before it is sent: wait for the device's
+	// answer, or the clear could still reach it once it accepts again.
 	h.eventually("the clear to fail", func() bool {
 		n := h.notices(w.ID)[0]
-		return n.PushState == store.WatchPushWithdraw && n.PushAttempts == 1
+		return n.PushState == store.WatchPushWithdraw && n.PushAttempts == 1 && phone.refused.Load() == 1
 	})
 	phone.status.Store(http.StatusCreated)
 	h.runs.ask(run.ID, "q2", "Rotate staging?")
@@ -59,6 +62,127 @@ func TestAStaleClearNeverHidesANewerNeed(t *testing.T) {
 	h.eventually("the stale clear settled", func() bool { return pushOf(h.notices(w.ID)[0]).Detail == "Replaced by a newer need" })
 	if n := phone.received.Load(); n != 2 {
 		t.Fatalf("device received %d pushes, want the two questions and no clear", n)
+	}
+}
+
+func TestDroppingNeedsYouSettlesItsPushes(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.bob)
+	run := h.run(h.ada, "Rotate the keys")
+	w := h.watch(h.bob, runTarget(run)).Watch
+	h.runs.ask(run.ID, "q1", "Rotate prod too?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the first push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
+
+	// The second question's push fails and waits for its retry.
+	phone.status.Store(http.StatusInternalServerError)
+	h.runs.request(run.ID, "q2", "question", "Rotate staging?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the second push to wait", func() bool {
+		return len(h.notices(w.ID)) == 2 && strings.HasPrefix(pushOf(h.notices(w.ID)[1]).Detail, "Retry")
+	})
+	phone.status.Store(http.StatusCreated)
+
+	if _, err := h.svc.Update(h.ctx, h.bob.ID, protocol.WatchUpdateParams{WatchID: w.ID, Conditions: []string{protocol.WatchFinished}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	h.eventually("the delivered need withdrawn", func() bool {
+		return pushOf(h.notices(w.ID)[0]).Status == protocol.WatchStatusWithdrawn
+	})
+	notes := h.notices(w.ID)
+	if d := pushOf(notes[0]); d.Detail != "Withdrawn: You stopped watching for needs you" {
+		t.Fatalf("first push row = %+v, want it withdrawn because needs you is no longer watched", d)
+	}
+	if d := pushOf(notes[1]); d.Status != protocol.WatchStatusCleared || d.Detail != "You stopped watching for needs you" || notes[1].PushState != store.WatchPushNone {
+		t.Fatalf("second push = %+v, %s; want it dropped as cleared", d, notes[1].PushState)
+	}
+	h.clock.advance(time.Hour)
+	settle()
+	if n := phone.received.Load(); n != 2 {
+		t.Fatalf("device received %d pushes, want the first question and its withdrawal", n)
+	}
+}
+
+// failingDrop fails dropping a watch's need pushes while fail is set.
+type failingDrop struct {
+	*store.DB
+	fail atomic.Bool
+}
+
+func (f *failingDrop) DropWatchNeedPushes(ctx context.Context, watch string, now time.Time, detail string) error {
+	if f.fail.Load() {
+		return errors.New("database is locked")
+	}
+	return f.DB.DropWatchNeedPushes(ctx, watch, now, detail)
+}
+
+func TestRetryingAnUpdateThatFailedCleanupSettlesAPausedWatchsNeeds(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.bob)
+	run := h.run(h.ada, "Rotate the keys")
+	w := h.watch(h.bob, runTarget(run)).Watch
+	h.runs.ask(run.ID, "q1", "Rotate prod too?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
+
+	_ = h.svc.Close()
+	st := &failingDrop{DB: h.db}
+	svc, err := New(Config{
+		Store: st, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	paused := true
+	if _, err := svc.Update(h.ctx, h.bob.ID, protocol.WatchUpdateParams{WatchID: w.ID, Paused: &paused}); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	drop := protocol.WatchUpdateParams{WatchID: w.ID, Conditions: []string{protocol.WatchFinished}}
+	st.fail.Store(true)
+	if _, err := svc.Update(h.ctx, h.bob.ID, drop); err == nil {
+		t.Fatal("Update succeeded while its cleanup failed")
+	}
+	st.fail.Store(false)
+	if _, err := svc.Update(h.ctx, h.bob.ID, drop); err != nil {
+		t.Fatalf("retried Update: %v", err)
+	}
+	h.eventually("the need withdrawn", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusWithdrawn })
+	if n := phone.received.Load(); n != 2 {
+		t.Fatalf("device received %d pushes, want the question and its withdrawal", n)
+	}
+}
+
+func TestANeedSentWhileNeedsYouIsDroppedIsWithdrawn(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.bob)
+	g := &gate{arrived: make(chan struct{}, 1), release: make(chan struct{})}
+	phone.gate.Store(g)
+	run := h.run(h.ada, "Rotate the keys")
+	w := h.watch(h.bob, runTarget(run)).Watch
+	h.runs.ask(run.ID, "q1", "Rotate prod too?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	select {
+	case <-g.arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the push was never sent")
+	}
+
+	if _, err := h.svc.Update(h.ctx, h.bob.ID, protocol.WatchUpdateParams{WatchID: w.ID, Conditions: []string{protocol.WatchFinished}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	phone.gate.Store(nil)
+	close(g.release)
+	h.eventually("the need withdrawn", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusWithdrawn })
+	if n := phone.received.Load(); n != 2 {
+		t.Fatalf("device received %d pushes, want the question and its withdrawal", n)
 	}
 }
 
@@ -188,7 +312,13 @@ type device struct {
 	server   *httptest.Server
 	received atomic.Int32
 	status   atomic.Int32
+	// refused counts the pushes it answered with an error status.
+	refused atomic.Int32
+	// While gate is set, the push service answers once it is released.
+	gate atomic.Pointer[gate]
 }
+
+type gate struct{ arrived, release chan struct{} }
 
 type harness struct {
 	t     *testing.T
@@ -207,6 +337,8 @@ type harness struct {
 	swarm atomic.Pointer[protocol.AttentionItem]
 	keys  int
 	pr    PRSource
+	// recovered, when set, is the scheduler recovery the next start waits for.
+	recovered chan struct{}
 }
 
 func newHarness(t *testing.T) *harness {
@@ -259,7 +391,7 @@ func (h *harness) start() {
 	h.t.Helper()
 	svc, err := New(Config{
 		Store: h.db, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
-		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
+		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now, Recovered: h.recovered,
 	})
 	if err != nil {
 		h.t.Fatalf("New: %v", err)
@@ -291,8 +423,13 @@ func (h *harness) subscribe(member *domain.Member) *device {
 	d.status.Store(http.StatusCreated)
 	d.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
+		if g := d.gate.Load(); g != nil {
+			g.arrived <- struct{}{}
+			<-g.release
+		}
 		if status := int(d.status.Load()); status != http.StatusCreated {
 			http.Error(w, "push service refused", status)
+			d.refused.Add(1)
 			return
 		}
 		d.received.Add(1)
@@ -538,6 +675,155 @@ func TestASuccessAfterResumedWorkIsAnnouncedAgain(t *testing.T) {
 	}
 }
 
+func TestARetainedRunThatCompletesAgainIsAnnouncedAgain(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Rebuild the index")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.status(run, domain.RunCompleted, "", "exited; retained container")
+	h.eventually("the first completion", func() bool { return len(h.notices(w.ID)) == 1 })
+
+	// Relaunched in its retained container, it completes again.
+	h.status(run, domain.RunRunning, domain.ActivityWorking, "")
+	h.status(run, domain.RunCompleted, "", "exited; retained container")
+	h.eventually("the second completion", func() bool { return len(h.notices(w.ID)) == 2 })
+	settle()
+	if got := bodies(h.notices(w.ID)); len(got) != 2 || got[0] != "finished: Completed" || got[1] != "finished: Completed" {
+		t.Fatalf("notices = %q, want Completed twice", got)
+	}
+}
+
+// failingPrefs fails reading notification preferences while fail is set.
+type failingPrefs struct {
+	*store.DB
+	fail atomic.Bool
+}
+
+func (f *failingPrefs) GetNotifyPrefs(ctx context.Context, member domain.MemberID) (store.NotifyPrefs, error) {
+	if f.fail.Load() {
+		return store.NotifyPrefs{}, errors.New("database is locked")
+	}
+	return f.DB.GetNotifyPrefs(ctx, member)
+}
+
+func TestAFailedCheckAtStartIsRetried(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Ship the release")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.eventually("the first check", func() bool { return h.watchState(w.ID).LastCheckAt != nil })
+
+	// A need arises while the server is down, and no event will replay it.
+	_ = h.svc.Close()
+	if _, err := h.db.UpdateRunStatus(h.ctx, run.ID, domain.RunNeedsAttention, "needs input: which tag?", domain.ActivityNeedsYou, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := &failingPrefs{DB: h.db}
+	st.fail.Store(true)
+	svc, err := New(Config{
+		Store: st, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	h.eventually("the failure recorded", func() bool {
+		got := h.watchState(w.ID)
+		return got.State == protocol.WatchError && got.NextCheckAt != nil && strings.Contains(got.Error, "database is locked")
+	})
+
+	st.fail.Store(false)
+	h.clock.advance(maxBackoff)
+	h.eventually("the retried need", func() bool { return len(h.notices(w.ID)) == 1 })
+	h.eventually("the watch recovered", func() bool {
+		got := h.watchState(w.ID)
+		return got.State == protocol.WatchActive && got.Error == "" && got.NextCheckAt == nil
+	})
+}
+
+// failingSaves fails reading notification preferences and saving
+// evaluations while fail is set.
+type failingSaves struct{ failingPrefs }
+
+func (f *failingSaves) CommitWatchEvaluation(ctx context.Context, w *store.Watch, notices []*store.WatchNotification) ([]*store.WatchNotification, error) {
+	if f.fail.Load() {
+		return nil, errors.New("database is locked")
+	}
+	return f.DB.CommitWatchEvaluation(ctx, w, notices)
+}
+
+func TestAStartCheckWhoseRetryCannotBeSavedIsRetried(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Ship the release")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.eventually("the first check", func() bool { return h.watchState(w.ID).LastCheckAt != nil })
+
+	_ = h.svc.Close()
+	if _, err := h.db.UpdateRunStatus(h.ctx, run.ID, domain.RunNeedsAttention, "needs input: which tag?", domain.ActivityNeedsYou, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := &failingSaves{failingPrefs{DB: h.db}}
+	st.fail.Store(true)
+	svc, err := New(Config{
+		Store: st, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	settle()
+	if got := h.watchState(w.ID); got.NextCheckAt != nil {
+		t.Fatalf("next_check_at = %v, want none saved while saves fail", got.NextCheckAt)
+	}
+
+	// No event and no saved next_check_at bring the watch back; the
+	// service must remember it.
+	st.fail.Store(false)
+	h.eventually("the need missed while down", func() bool { return len(h.notices(w.ID)) == 1 })
+}
+
+func TestChecksBeforeRecoveryWaitForIt(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Ship the release")
+	_ = h.svc.Close()
+	h.recovered = make(chan struct{})
+	h.start()
+
+	// Before recovery the run reads as needing the owner, as a run whose
+	// requests are not restored yet does.
+	if _, err := h.db.UpdateRunStatus(h.ctx, run.ID, domain.RunNeedsAttention, "needs input: stale", domain.ActivityNeedsYou, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	w := h.watch(h.ada, runTarget(run)).Watch
+	if w.LastCheckAt != "" {
+		t.Fatalf("last_check_at = %q, want no check before recovery", w.LastCheckAt)
+	}
+	settle()
+	if got := h.notices(w.ID); len(got) != 0 {
+		t.Fatalf("notices before recovery = %q, want none", bodies(got))
+	}
+
+	if _, err := h.db.UpdateRunStatus(h.ctx, run.ID, domain.RunRunning, "", domain.ActivityWorking, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	close(h.recovered)
+	h.eventually("the check after recovery", func() bool { return h.watchState(w.ID).LastCheckAt != nil })
+	settle()
+	if got := h.notices(w.ID); len(got) != 0 {
+		t.Fatalf("notices = %q, want none for the need that recovery settled", bodies(got))
+	}
+}
+
 func TestAStartingRunHasNotFinished(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -572,12 +858,11 @@ func TestEvaluationReadsCurrentStateWhateverTheEventsSay(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.publish(run.ID, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityNeedsYou, Reason: "needs input: stale"})
-	settle()
+	h.eventually("the run as it stands", func() bool {
+		return strings.Contains(string(h.watchState(w.ID).Observed), `"activity":"working"`)
+	})
 	if got := h.notices(w.ID); len(got) != 0 {
 		t.Fatalf("notices from a stale event = %q, want none", bodies(got))
-	}
-	if got := h.watchState(w.ID).Observed; !strings.Contains(string(got), `"activity":"working"`) {
-		t.Fatalf("observed = %s, want the run as it stands", got)
 	}
 }
 
@@ -620,6 +905,53 @@ func TestRestartRecoversMissedNeedsWithoutRepeatingNotifiedOnes(t *testing.T) {
 	}
 	if seq < last {
 		t.Fatalf("cursor = %d, want it past the last event applied, %d", seq, last)
+	}
+}
+
+func TestRestartWaitsForTheSchedulerToRecoverRuns(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Ship the release")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.status(run, domain.RunRunning, domain.ActivityNeedsYou, "")
+	h.runs.ask(run.ID, "q1", "Tag it?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the question", func() bool { return len(h.notices(w.ID)) == 1 })
+
+	// The server stops; the new one knows no open request until the
+	// scheduler has reconciled the run, which interrupts its turn.
+	_ = h.svc.Close()
+	h.runs.answer(run.ID)
+	h.recovered = make(chan struct{})
+	h.start()
+	settle()
+	if got := h.notices(w.ID); len(got) != 1 {
+		t.Fatalf("notices before recovery = %q, want the question only", bodies(got))
+	}
+	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "turn interrupted")
+	close(h.recovered)
+	h.eventually("the interrupted turn", func() bool { return len(h.notices(w.ID)) == 2 })
+	settle()
+	if got := bodies(h.notices(w.ID)); len(got) != 2 || got[1] != "needs_you: Turn interrupted, send a message to continue" {
+		t.Fatalf("notices = %q, want the question, then the interrupted turn once", got)
+	}
+}
+
+func TestAServerThatNeverRecoversStillStops(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	_ = h.svc.Close()
+	h.recovered = make(chan struct{})
+	h.start()
+	closed := make(chan struct{})
+	go func() {
+		_ = h.svc.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return while recovery never finished")
 	}
 }
 
@@ -738,10 +1070,14 @@ func TestRevokedAccessStopsNoticesWithoutAnnouncingThem(t *testing.T) {
 	run := h.run(h.ada, "Audit the logs")
 	w := h.watch(h.bob, runTarget(run)).Watch
 
+	// Revoked while the server is down: a check that began with access
+	// could otherwise still read the need below and announce it.
+	_ = h.svc.Close()
 	h.bob.Pending = true
 	if err := h.db.UpdateMember(h.ctx, h.bob); err != nil {
 		t.Fatal(err)
 	}
+	h.start()
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: no access")
 	h.eventually("the watch to fail", func() bool { return h.watchState(w.ID).State == protocol.WatchError })
 	if got := h.watchState(w.ID); !strings.HasPrefix(got.Error, "access revoked") {
@@ -1002,6 +1338,41 @@ func TestSwarmWatchSaysSwarmTransitionsOnly(t *testing.T) {
 	h.setPhase(m.ID, domain.MissionPhaseCancelled)
 	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
 	h.eventually("the watch to end", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
+}
+
+func TestACancelledSwarmNoLongerNeedsYou(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.subscribe(h.ada)
+	m := &domain.Mission{WorkspaceID: h.ws.ID, Objective: "Ship watches", AccountableHumanID: h.ada.ID,
+		Integrator: domain.MissionIntegrator{AccountMemberID: h.ada.ID, Harness: "claude", Mode: domain.LaunchTUI}, IdempotencyKey: "swarm"}
+	if err := h.db.CreateMission(h.ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	integrator := &domain.Run{ID: m.CurrentIntegratorRunID, WorkspaceID: h.ws.ID, MemberID: h.ada.ID, Task: "integrate",
+		Harness: "claude", Mode: domain.LaunchTUI, Status: domain.RunRunning, MissionID: m.ID, MissionRole: "integrator"}
+	if err := h.db.CreateRunWithID(h.ctx, integrator); err != nil {
+		t.Fatal(err)
+	}
+	w := h.watch(h.ada, protocol.WatchTarget{Kind: protocol.WatchTargetMission, MissionID: string(m.ID)}).Watch
+	if _, err := h.db.InsertMissionQuestion(h.ctx, m.ID, integrator.ID, "merge now?", "q-1"); err != nil {
+		t.Fatal(err)
+	}
+	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
+	h.eventually("the question's push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
+
+	// Its question stays unanswered, but nobody can act on it any more.
+	h.setPhase(m.ID, domain.MissionPhaseCancelled)
+	h.publish(integrator.ID, events.MissionChangedPayload{MissionID: m.ID})
+	h.eventually("the watch to end", func() bool { return h.watchState(w.ID).State == protocol.WatchDone })
+	h.eventually("the withdrawal", func() bool { return pushOf(h.notices(w.ID)[0]).Status == protocol.WatchStatusWithdrawn })
+	var observed protocol.WatchObserved
+	if err := json.Unmarshal(h.watchState(w.ID).Observed, &observed); err != nil || observed.Need != "" || observed.Summary != "Swarm cancelled" {
+		t.Fatalf("observed = %+v, %v; want no need and Swarm cancelled", observed, err)
+	}
+	if got := bodies(h.notices(w.ID)); len(got) != 2 || got[1] != "finished: Swarm cancelled" {
+		t.Fatalf("notices = %q, want the question and the finish", got)
+	}
 }
 
 func TestAnIntegratorThatNeverLaunchedNeedsYou(t *testing.T) {

@@ -56,6 +56,7 @@ type logIndex struct {
 	offsets   []int64
 	size      int64
 	last      itemHeader
+	turnStart int64
 	openTurn  bool
 	mode      string
 	prefixSeq int64
@@ -168,7 +169,7 @@ func (l *Log) note(h itemHeader, mode string, off int64) {
 	l.last = h
 	switch h.Kind {
 	case KindTurnStart:
-		l.openTurn = true
+		l.openTurn, l.turnStart = true, h.Seq
 	case KindTurnEnd, KindReset:
 		l.openTurn = false
 	}
@@ -379,6 +380,13 @@ func (l *Log) LastSeq() int64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.last.Seq
+}
+
+// TurnStartSeq is the Seq of the newest turn start, zero when there is none.
+func (l *Log) TurnStartSeq() int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.turnStart
 }
 
 // Mode includes the latest mode carried by a legacy prefix checkpoint.
