@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -203,15 +204,15 @@ func TestIntegrationRealAgents(t *testing.T) {
 							return turnWant{activity: domain.ActivityAnswered, cause: events.CauseReport, outcome: protocol.CoordOutcomeAnswered, summary: turn}
 						},
 					}, {
-						// The report lands after the agent's turn ended, so the
-						// turn end races it, and a Stop may be held for it.
+						// The report lands after the turn ended, which a
+						// reminder may race.
 						name: "late-report",
 						steps: func(turn string) []step {
 							// A reminder gets the same report, so whichever lands
 							// last leaves the run where the late one should.
 							model.remind(turn, "waiting --for process")
 							// Codex ends a command's process group with it.
-							return []step{{command: "setsid sh -c \"sleep 2; " + reportCommand("waiting --for process", turn) + "\" >/dev/null 2>&1 &"}}
+							return []step{{command: "setsid sh -c \"sleep 5; " + reportCommand("waiting --for process", turn) + "\" >/dev/null 2>&1 &"}}
 						},
 						want: func(turn string) turnWant {
 							return turnWant{activity: domain.ActivityWaitingTools, cause: events.CauseReport, outcome: protocol.CoordOutcomeWaiting, waitingFor: protocol.CoordWaitingForProcess, summary: turn, reminders: -1, late: true}
@@ -258,28 +259,35 @@ func TestIntegrationRealAgents(t *testing.T) {
 								t.Fatalf("run.inject: %v", err)
 							}
 							if want.subagent != "" {
-								a.waitFor(ctx, t, "the subagent's first request", func() bool { return len(a.subagentBodies(want.subagent)) > 0 })
-								r := a.get(t)
-								if needsYou(r) {
-									t.Errorf("while the subagent runs the run needs you: %s/%s (%s: %q)", r.Status, r.Activity, r.Cause, r.Reason)
+								// Its answer is its last request. Standard Claude Code
+								// runs it in the background, so the main turn can end
+								// waiting on it.
+								var gaps, wrong []string
+								a.waitFor(ctx, t, "the subagent's answer", func() bool {
+									started := len(a.subagentBodies(want.subagent))
+									if started == 0 {
+										return false
+									}
+									r := a.get(t)
+									state := fmt.Sprintf("%s/%s (%s: %q)", r.Status, r.Activity, r.Cause, r.Reason)
+									held := domain.RunActivity(r.Activity) == domain.ActivityWaitingAgents && events.RunStatusCause(r.Cause) == events.CauseTasksHeld
+									switch {
+									case needsYou(r):
+										wrong = append(wrong, state)
+									case r.Status == string(domain.RunRunning) && (domain.RunActivity(r.Activity) == domain.ActivityWorking || held):
+									default:
+										gaps = append(gaps, state)
+									}
+									return started >= 2
+								})
+								if len(gaps) > 0 {
+									t.Logf("known gap: Aether misses this agent's subagent, so the run showed %s while it worked", strings.Join(slices.Compact(gaps), ", "))
 								}
-								// Standard Claude Code runs the subagent in the
-								// background, so the main turn may end waiting on it.
-								working := domain.RunActivity(r.Activity) == domain.ActivityWorking && events.RunStatusCause(r.Cause) == events.CauseTurn
-								held := domain.RunActivity(r.Activity) == domain.ActivityWaitingAgents && events.RunStatusCause(r.Cause) == events.CauseTasksHeld
-								switch {
-								case agent == "codex":
-									t.Logf("known gap: Aether gets no signal for a Codex subagent, so the run shows %s/%s (%s) while it works", r.Status, r.Activity, r.Cause)
-								case r.Status != string(domain.RunRunning) || !working && !held:
-									t.Errorf("while the subagent runs the run is %s/%s (%s: %q), want running and working, or waiting on its task", r.Status, r.Activity, r.Cause, r.Reason)
+								if len(wrong) > 0 {
+									t.Errorf("while the subagent ran the run needed you: %s", strings.Join(slices.Compact(wrong), ", "))
 								}
 							}
 							a.check(ctx, t, turn, seq, want)
-							if want.subagent != "" {
-								// Its answer is its last request, so the next turn
-								// starts with the subagent done.
-								a.waitFor(ctx, t, "the subagent's answer", func() bool { return len(a.subagentBodies(want.subagent)) >= 2 })
-							}
 						}) {
 							return
 						}
@@ -343,7 +351,6 @@ func TestIntegrationRealAgents(t *testing.T) {
 	})
 }
 
-// reportCommand reports outcome, with its flags, for turn.
 func reportCommand(outcome, turn string) string {
 	return coordtransport.CLIPath + " report --outcome " + outcome + " --summary '" + turn + "'"
 }
@@ -360,8 +367,7 @@ type turnWant struct {
 	reminders  int
 	compacted  bool
 	subagent   string
-	// late is set when one report lands after the turn ended, besides
-	// any the reminders made.
+	// late is set when the turn's report lands after the turn ended.
 	late bool
 }
 
@@ -400,9 +406,11 @@ func needsYou(r protocol.Run) bool {
 // went and the agent's first request carries the reporting rules.
 func (a *realAgentRun) instructed(t *testing.T) {
 	t.Helper()
-	if note := a.timeline(t, func(p events.TimelinePayload) bool {
-		return p.Kind == events.TimelineNote && strings.HasPrefix(p.Message, "run instructions: ")
-	}); len(note) == 0 {
+	noted := false
+	a.events(t, func(_ protocol.Event, p events.TimelinePayload) {
+		noted = noted || (p.Kind == events.TimelineNote && strings.HasPrefix(p.Message, "run instructions: "))
+	})
+	if !noted {
 		t.Errorf("instruction missing: no run instructions note on the timeline")
 	}
 	bodies := a.model.bodies(a.marker)
@@ -417,12 +425,15 @@ func (a *realAgentRun) instructed(t *testing.T) {
 // recorded but misclassified.
 func (a *realAgentRun) check(ctx context.Context, t *testing.T, turn string, after int64, want turnWant) {
 	t.Helper()
+	// A reminder's summary names its turn, so only a turn that may be
+	// reminded may settle on it.
+	reason := func(r protocol.Run) bool {
+		return want.summary == "" || strings.Contains(r.Reason, want.summary) &&
+			(strings.HasPrefix(want.summary, remindedPrefix) || want.reminders < 0 || !strings.Contains(r.Reason, remindedPrefix))
+	}
 	settled := func(r protocol.Run) bool {
-		if want.late && len(a.receipts(t, want.summary)) != a.reminders(turn)+1 {
-			return false
-		}
 		return r.StatusSeq > after && r.Status == string(domain.RunNeedsAttention) && domain.RunActivity(r.Activity) == want.activity &&
-			events.RunStatusCause(r.Cause) == want.cause && (want.summary == "" || strings.Contains(r.Reason, want.summary))
+			events.RunStatusCause(r.Cause) == want.cause && reason(r) && (!want.late || len(a.receipts(t, want.summary)) > 0)
 	}
 	deadline, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -444,15 +455,17 @@ func (a *realAgentRun) check(ctx context.Context, t *testing.T, turn string, aft
 		problems = append(problems, "instruction missing: the turn's last request does not carry the reporting rules")
 	}
 	if want.compacted {
-		after := a.model.bodies(tagged(compacted(turn)))
+		compactedBodies := a.model.bodies(tagged(compacted(turn)))
 		switch {
-		case len(after) == 0:
+		case len(compactedBodies) == 0:
 			problems = append(problems, "the agent never compacted")
-		case !strings.Contains(after[0], realAgentContract):
+		case !strings.Contains(compactedBodies[0], realAgentContract):
 			problems = append(problems, "instruction missing: the first request after compaction does not carry the reporting rules")
 		}
 	}
 	if want.subagent != "" {
+		// The subagent answered before check, so a reminder held for its
+		// stop would show.
 		for _, body := range a.subagentBodies(want.subagent) {
 			if strings.Contains(body, coordhooks.ReportReminderLead) {
 				problems = append(problems, "the subagent was reminded to report")
@@ -460,19 +473,29 @@ func (a *realAgentRun) check(ctx context.Context, t *testing.T, turn string, aft
 			}
 		}
 	}
-	if n := a.reminders(turn); (want.reminders >= 0 && n != want.reminders) || n > 1 {
+	switch n := a.reminders(turn); {
+	case want.reminders < 0 && n > 1:
+		problems = append(problems, fmt.Sprintf("the turn was reminded %d times, want at most 1", n))
+	case want.reminders >= 0 && n != want.reminders:
 		problems = append(problems, fmt.Sprintf("the turn was reminded %d times, want %d", n, want.reminders))
 	}
 	if want.outcome != "" {
-		// The report's output, as a tool output inside the request.
-		accepted := a.model.saw(a.marker, `\"summary\":\"`+want.summary+`\"`)
+		// The report's output, as a tool output inside a request. A late
+		// report's output goes nowhere.
+		accepted := want.late || a.model.saw(a.marker, `\"summary\":\"`+want.summary+`\"`)
 		switch {
 		case len(receipts) == 0 && !accepted:
 			problems = append(problems, "report never made: no report output reached the model")
 		case len(receipts) == 0:
-			problems = append(problems, "report lost: the server answered the agent's report but recorded no timeline receipt")
-		case receipts[len(receipts)-1].Outcome != want.outcome || receipts[len(receipts)-1].WaitingFor != want.waitingFor:
-			problems = append(problems, fmt.Sprintf("report recorded as %s/%s, want %s/%s", receipts[len(receipts)-1].Outcome, receipts[len(receipts)-1].WaitingFor, want.outcome, want.waitingFor))
+			problems = append(problems, "report lost: no timeline receipt for the report")
+		case !accepted:
+			problems = append(problems, "report lost: the timeline has the report but its output never reached the model")
+		case len(receipts) != 1:
+			problems = append(problems, fmt.Sprintf("%d report receipts, want 1", len(receipts)))
+		case receipts[0].Outcome != want.outcome || receipts[0].WaitingFor != want.waitingFor:
+			problems = append(problems, fmt.Sprintf("report recorded as %s/%s, want %s/%s", receipts[0].Outcome, receipts[0].WaitingFor, want.outcome, want.waitingFor))
+		case want.late && !a.parkedBefore(t, after, want.summary):
+			problems = append(problems, "the late report landed before the turn ended")
 		}
 	}
 	if !settled(r) {
@@ -526,36 +549,60 @@ func (a *realAgentRun) reminders(turn string) int {
 	return n
 }
 
-// receipts are the run's report timeline entries whose summary has text.
-func (a *realAgentRun) receipts(t *testing.T, text string) []events.TimelinePayload {
-	t.Helper()
-	return a.timeline(t, func(p events.TimelinePayload) bool {
-		return p.Kind == events.TimelineReport && strings.Contains(p.Summary, text)
-	})
-}
-
-func (a *realAgentRun) timeline(t *testing.T, keep func(events.TimelinePayload) bool) []events.TimelinePayload {
+// receipts are the run's report timeline entries with summary.
+func (a *realAgentRun) receipts(t *testing.T, summary string) []events.TimelinePayload {
 	t.Helper()
 	var out []events.TimelinePayload
+	a.events(t, func(_ protocol.Event, p events.TimelinePayload) {
+		if p.Kind == events.TimelineReport && p.Summary == summary {
+			out = append(out, p)
+		}
+	})
+	return out
+}
+
+// parkedBefore reports whether the run parked after status seq after and
+// before its report with summary reached the timeline.
+func (a *realAgentRun) parkedBefore(t *testing.T, after int64, summary string) bool {
+	t.Helper()
+	parked := false
+	landed := false
+	a.events(t, func(ev protocol.Event, p events.TimelinePayload) {
+		if ev.Type == string(events.TypeRunStatus) {
+			var status events.RunStatusPayload
+			if err := json.Unmarshal(ev.Payload, &status); err != nil {
+				t.Fatal(err)
+			}
+			parked = parked || (!landed && status.StatusSeq > after && status.To == domain.RunNeedsAttention)
+		}
+		landed = landed || (p.Kind == events.TimelineReport && p.Summary == summary)
+	})
+	return parked && landed
+}
+
+// events visits the run's timeline and status events, oldest first; p is
+// zero for a status event.
+func (a *realAgentRun) events(t *testing.T, visit func(ev protocol.Event, p events.TimelinePayload)) {
+	t.Helper()
 	var after uint64
 	for {
 		var page protocol.WorkspaceTimelineResult
 		if err := a.ctrl.Call(protocol.MethodWorkspaceTimeline, protocol.WorkspaceTimelineParams{
-			WorkspaceID: a.workspace, RunID: a.run.ID, Types: []string{string(events.TypeTimeline)}, AfterSeq: after,
+			WorkspaceID: a.workspace, RunID: a.run.ID, Types: []string{string(events.TypeTimeline), string(events.TypeRunStatus)}, AfterSeq: after,
 		}, &page); err != nil {
 			t.Fatalf("workspace.timeline: %v", err)
 		}
 		for _, ev := range page.Events {
 			var p events.TimelinePayload
-			if err := json.Unmarshal(ev.Payload, &p); err != nil {
-				t.Fatal(err)
+			if ev.Type == string(events.TypeTimeline) {
+				if err := json.Unmarshal(ev.Payload, &p); err != nil {
+					t.Fatal(err)
+				}
 			}
-			if keep(p) {
-				out = append(out, p)
-			}
+			visit(ev, p)
 		}
 		if !page.More {
-			return out
+			return
 		}
 		after = page.NextSeq
 	}

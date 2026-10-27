@@ -225,8 +225,8 @@ sends carries a tag, `aether-script:<turn>;`, naming the script the mock
 plays for that turn: one tool call per step, then a text answer. The mock
 answers each report reminder Aether sends with `aether-internal report`.
 
-One Standard and one Enhanced run per agent play these turns in order, each
-started with `run.inject`:
+One Standard and one Enhanced run per agent play these turns in order. The
+launch starts `turn`, mail starts `wake`, and `run.inject` starts the rest:
 
 | Turn | The agent | The run must show |
 | --- | --- | --- |
@@ -234,26 +234,29 @@ started with `run.inject`:
 | `wake` | gets mail while idle | a new turn, where Aether can wake the run |
 | `waiting` | reports `waiting --for ci` | `waiting-ci` with the summary |
 | `answered` | reports `answered` | `answered`, not Needs you |
-| `late-report` | reports `waiting --for process` two seconds after the turn ends | `waiting-tools` once the late report lands |
+| `late-report` | reports `waiting --for process` from a detached process five seconds later | the report landing after the run parked, then `waiting-tools` |
 | `compaction` | claims more tokens than its context holds, compacts, then reports | the reporting rules still in the next request, then `answered` |
-| `subagent` | starts a subagent that runs for eight seconds | not Needs you while it runs, the subagent never reminded, then the turn ends like `turn` |
+| `subagent` | starts a subagent that runs for eight seconds | not Needs you at any point while it runs, the subagent never reminded, then the turn ends like `turn` |
 | `needs-input` | reports `needs-input` | `needs-you`, Needs you |
 
-Each check also reads the run's `cause` and its report entries on the
-timeline. A failure names the broken link: the reporting rules missing from a
-request (`instruction missing`), no report output reaching the model
-(`report never made`), a report the server answered with no timeline entry
-(`report lost`), or a report recorded but shown as the wrong state
-(`misclassified`). Every check also requires the run's launch to record where
+Each check also reads the run's `cause`, its report entries on the timeline,
+and whether the report's output reached the model. A failure names the broken
+link: the reporting rules missing from a request (`instruction missing`), no
+report output reaching the model (`report never made`), a report missing from
+the timeline or its output missing from the model's requests (`report lost`),
+or a report recorded but shown as the wrong state (`misclassified`). The
+first turn and every Background run also require the launch to record where
 its instructions went.
 
 The `wake` turn runs where Aether can wake the run: every Enhanced run, and a
 Standard run whose agent sets `IdleWake` in its capabilities
-(`internal/harness/capabilities.go`); the others skip it. While a Claude Code
-subagent runs, the run must show `working`, or `waiting-agents` with cause
-`tasks-held`: Standard Claude Code starts the subagent in the background and
-ends the turn. Aether gets no signal for a Codex subagent, so a Codex run can
-read as idle while one works; the test logs that state as a known gap.
+(`internal/harness/capabilities.go`); the others skip it. A run must never
+need you while its subagent works. It should show `working`, or
+`waiting-agents` with cause `tasks-held` when Standard Claude Code ends the
+turn with the subagent still running in the background. Aether gets no
+signal for a Codex subagent, and Standard Claude Code's Stop hook can arrive
+without the subagent among its background tasks, so such a run can read as
+idle; the test logs each idle state it sees as a known gap.
 
 Two Background runs per agent check that a Background run is never reminded:
 one reports `success` and finishes awaiting review, the only Background state

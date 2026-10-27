@@ -60,10 +60,8 @@ const (
 	subagentTag = "aether-subagent:"
 )
 
-// tagged is the text that makes a request play script.
 func tagged(script string) string { return scriptTag + script + ";" }
 
-// subagentTagged is the text that makes a subagent's request play script.
 func subagentTagged(script string) string { return subagentTag + script + ";" }
 
 // compacted is the script a compaction summary of script's conversation
@@ -138,11 +136,15 @@ func (m *mockModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (m *mockModel) record(body, last []byte, tools []string) {
+// record keeps a request without its team memory, which lists other runs'
+// tasks and so their tags, and returns the body it kept.
+func (m *mockModel) record(body, last []byte, tools []string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	agent := slices.ContainsFunc(tools, func(name string) bool { return shellTools[name] != nil })
-	m.requests = append(m.requests, modelRequest{body: string(body), last: string(last), agent: agent})
+	kept := teamMemory.ReplaceAllString(string(body), "")
+	m.requests = append(m.requests, modelRequest{body: kept, last: string(last), agent: agent})
+	return kept
 }
 
 func (m *mockModel) saw(marker, want string) bool {
@@ -225,8 +227,7 @@ func (m *mockModel) messages(w http.ResponseWriter, body []byte) {
 	for i, tool := range req.Tools {
 		tools[i] = tool.Name
 	}
-	m.record(body, last, tools)
-	rep := m.reply(tools, string(body), string(last), claudeCompactPrompt, segments)
+	rep := m.reply(tools, m.record(body, last, tools), string(last), claudeCompactPrompt, segments)
 	start := map[string]any{"type": "text", "text": ""}
 	delta := map[string]any{"type": "text_delta", "text": rep.text}
 	stop := "end_turn"
@@ -282,8 +283,7 @@ func (m *mockModel) responses(w http.ResponseWriter, body []byte) {
 	for i, tool := range req.Tools {
 		tools[i] = tool.Name
 	}
-	m.record(body, last, tools)
-	rep := m.reply(tools, string(body), string(last), codexCompactTrigger, segments)
+	rep := m.reply(tools, m.record(body, last, tools), string(last), codexCompactTrigger, segments)
 	var item map[string]any
 	var events []map[string]any
 	switch {
@@ -394,6 +394,7 @@ func (m *mockModel) reply(tools []string, body, last, compactPrompt string, segm
 	s := steps[done]
 	rep := shellCall(tools, s.command+stepMark(name, done))
 	if s.subagent != "" {
+		rep = reply{text: "the request offers no subagent tool"}
 		for _, tool := range tools {
 			if start, ok := subagentTools[tool]; ok {
 				rep = start(s.subagent+stepMark(name, done), stepMark(name, done))
@@ -404,8 +405,6 @@ func (m *mockModel) reply(tools []string, body, last, compactPrompt string, segm
 	return rep
 }
 
-// teamMemory matches the team memory a run's instructions carry. It lists
-// other runs' tasks, so their tags too.
 var teamMemory = regexp.MustCompile(`(?s)<team-memory.*?</team-memory>`)
 
 // stepMark ends the call that plays step i of script, as a shell comment.
