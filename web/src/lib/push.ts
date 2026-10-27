@@ -4,6 +4,7 @@
 
 import { desktopBridge } from '@/components/shell/window-bar'
 import { ApiError, type Api } from '@/lib/api'
+import { routeFromQuery } from '@/lib/url-state'
 import { runRoute } from '@/routes/run/views'
 import type { RootStore } from '@/store'
 import { capability } from '@/store/hooks'
@@ -98,14 +99,25 @@ const methodNotFound = -32601
 const denied = -32001
 
 /**
- * Opens the run or workspace budget a tapped notification names, which the
- * worker posts to a dashboard that is already open, and tells the server
- * while a person is using this one: it holds their notifications until they
- * have left every dashboard alone for a minute.
+ * Opens the run, page or workspace budget a tapped notification names,
+ * which the worker posts to a dashboard that is already open, and tells
+ * the server while a person is using this one: it holds their
+ * notifications until they have left every dashboard alone for a minute.
  */
 export function watchPush(store: RootStore, client: Api): () => void {
   const open = (event: MessageEvent) => {
-    const data = event.data as { type?: unknown; run?: unknown; workspace?: unknown } | null
+    const data = event.data as { type?: unknown; run?: unknown; workspace?: unknown; url?: unknown } | null
+    if (data?.type === 'aether:open-url' && typeof data.url === 'string') {
+      event.ports[0]?.postMessage(true)
+      const url = new URL(data.url, window.location.origin)
+      if (url.origin !== window.location.origin) return
+      // Kept in the address bar, so query keys the route does not carry,
+      // such as the watch to show, still reach the page.
+      window.history.pushState(null, '', url)
+      const route = routeFromQuery(url.searchParams)
+      store.getState().navigate(route.name, route.params)
+      return
+    }
     if (data?.type === 'aether:open-workspace' && typeof data.workspace === 'string') {
       store.getState().navigate('workspace', { workspaceId: data.workspace })
       return
