@@ -487,6 +487,12 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
     // GitHub's reply to the create was lost and no pull request was found after: it may exist or not.
     if (action.state === 'done' && action.tool === 'aether_pr_create' && record(action.result).write === 'pending') action.state = 'unconfirmed'
     action.error = saved?.error ?? error
+    // The server creates a watch that cannot check its target, such as a pull request without GitHub connected, in state error.
+    const watched = record(action.result)
+    if (action.state === 'done' && action.tool === 'aether_watch' && watched.state === 'error') {
+      action.state = 'failed'
+      action.error ??= text(watched.error)
+    }
     action.target = target(action.tool, action.input, record(action.result), saved)
   }
   // The live line would name the running call by its raw tool title; its card already says what it does, and the approval card asks for a call waiting on it.
@@ -538,6 +544,10 @@ function prName(action: AssistantAction, names: ActionNames): string {
   return number ? `PR #${number}` : `the pull request of run ${runName(action, names)}`
 }
 
+function alreadyGone(action: AssistantAction): boolean {
+  return action.state === 'done' && record(action.result).state === 'not_found'
+}
+
 function watchObject(action: AssistantAction, names: ActionNames): string {
   const pr = text(action.input.pr) ?? text(action.input.pr_number)
   if (pr) return `PR ${/^\d+$/.test(pr) ? `#${pr}` : pr}`
@@ -584,7 +594,10 @@ const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb)
       : a.input.paused === true ? ['Pause', 'Paused', 'Pausing'] : a.input.paused === false ? ['Resume', 'Resumed', 'Resuming'] : ['Change', 'Changed', 'Changing'],
     object: (a, n) => (text(a.input.watch_id) ? `watch ${text(a.input.watch_id)}` : watchObject(a, n)),
   },
-  aether_unwatch: { verb: ['Delete', 'Deleted', 'Deleting'], object: (a) => `watch ${text(a.input.watch_id) ?? ''}`.trimEnd() },
+  aether_unwatch: {
+    verb: (a) => (alreadyGone(a) ? ['Delete', 'Found no', 'Deleting'] : ['Delete', 'Deleted', 'Deleting']),
+    object: (a) => `watch ${text(a.input.watch_id) ?? ''}`.trimEnd() + (alreadyGone(a) ? ' to delete' : ''),
+  },
 }
 
 export function actionSummary(action: AssistantAction, names: ActionNames): string {

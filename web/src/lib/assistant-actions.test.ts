@@ -223,6 +223,16 @@ describe('the lifecycle, swarm, pull request and memory tools', () => {
     expect(actionSummary(finished!, names)).toBe(done)
   })
 
+  it("shows a watch that cannot check its target as failed, with the server's error", () => {
+    const [created] = assistantView([block({ id: '1:t0', name: 'aether_watch', input: { pr: 'acme/api#7' }, result: { watch_id: 'w-1', state: 'error', error: 'GitHub is not connected' } })], []).actions
+    expect([created!.state, created!.error, actionSummary(created!, names)]).toEqual(['failed', 'GitHub is not connected', 'Watch PR acme/api#7'])
+  })
+
+  it('says a delete that found no watch deleted nothing', () => {
+    const [deleted] = assistantView([block({ id: '1:t0', name: 'aether_unwatch', input: { watch_id: 'w-1' }, result: { watch_id: 'w-1', state: 'not_found' } })], []).actions
+    expect(actionSummary(deleted!, names)).toBe('Found no watch w-1 to delete')
+  })
+
   it('counts aether_watches as a read, not an action', () => {
     const view = assistantView([block({ id: '1:t0', name: 'aether_watches', input: {}, result: { watches: [] } })], [])
     expect(view.actions).toEqual([])
