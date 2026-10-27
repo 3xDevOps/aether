@@ -36,6 +36,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	edgeproto "github.com/3xDevOps/Aether/internal/edge/proto"
 	"github.com/3xDevOps/Aether/internal/mcpbridge"
+	"github.com/3xDevOps/Aether/internal/ops"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/sshd"
 	"github.com/3xDevOps/Aether/internal/store"
@@ -81,6 +82,10 @@ type Config struct {
 	// LoopbackClients replaces Claude Code's client id as the clients
 	// that may return to a loopback redirect URI; for tests.
 	LoopbackClients []string
+	// Started is when the server started, time.Now when zero. Tests that
+	// sign in within edgeproto.ClockSkew of starting a server set it
+	// earlier.
+	Started time.Time
 }
 
 // resource is one connector URL the handler serves: base is the URL,
@@ -156,7 +161,7 @@ func New(cfg Config) (http.Handler, error) {
 		fetch: &http.Client{Transport: cfg.Transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}},
-		mux: http.NewServeMux(), now: time.Now, started: time.Now(), codes: map[string]authCode{}, nonces: map[string]nonceUse{}, wrong: map[netip.Prefix]wrongCodes{},
+		mux: http.NewServeMux(), now: time.Now, started: cmp.Or(cfg.Started, time.Now()), codes: map[string]authCode{}, nonces: map[string]nonceUse{}, wrong: map[netip.Prefix]wrongCodes{},
 		writes: map[string]*rate.Limiter{}}
 
 	streamable := mcp.NewStreamableHTTPHandler(h.server, &mcp.StreamableHTTPOptions{
@@ -235,10 +240,10 @@ func grantOf(c *store.Connector) sshd.ConnectorGrant {
 // scopes its connector was granted, which call as the connector.
 func (h *handler) server(r *http.Request) *mcp.Server {
 	c := auth.TokenInfoFromContext(r.Context()).Extra["connector"].(*store.Connector)
-	local := h.ssh.ConnectorLocal(grantOf(c), c.ID, c.ClientName)
+	local := h.ssh.ConnectorLocal(grantOf(c), c.ID, c.ClientName, c.Scopes)
 	srv := mcp.NewServer(&mcp.Implementation{Name: mcpbridge.ServerName, Title: "Aether", Version: version.String()},
 		&mcp.ServerOptions{Instructions: instructions})
-	mcpbridge.RegisterConnectorTools(srv, func(ctx context.Context, method string, params, out any) error {
+	ops.RegisterConnector(srv, func(ctx context.Context, method string, params, out any) error {
 		var raw json.RawMessage
 		if params != nil {
 			var err error
@@ -246,11 +251,11 @@ func (h *handler) server(r *http.Request) *mcp.Server {
 				return err
 			}
 		}
-		if mcpbridge.CallScope(ctx) == mcpbridge.ScopeRead {
+		if ops.CallScope(ctx) == ops.ScopeRead {
 			return call(ctx, local, c.Member, method, raw, out)
 		}
 		var err error
-		if !mcpbridge.Replay(ctx) {
+		if !ops.Replay(ctx) {
 			err = h.allowWrite(c.ID, h.now())
 		}
 		if err == nil {
@@ -263,7 +268,7 @@ func (h *handler) server(r *http.Request) *mcp.Server {
 		slog.Info("connector: write call", "connector", c.ID, "member", c.Member, "method", method,
 			"target", callTarget(raw), "result", result)
 		return err
-	}, func(s mcpbridge.Scope) bool { return slices.Contains(c.Scopes, string(s)) })
+	}, func(s ops.Scope) bool { return slices.Contains(c.Scopes, string(s)) })
 	return srv
 }
 

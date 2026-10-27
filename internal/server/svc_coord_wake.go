@@ -28,11 +28,23 @@ type coordWakeAdmission struct {
 	authorizationMu *sync.Mutex
 	missionControl  func() sshd.MissionControl
 	observe         func(context.Context, domain.RunID) (scheduler.MissionRunObservation, error)
+	// unheld refuses an ordinary run a member controls.
+	unheld bool
 }
 
 func newCoordWakeAdmission(d Deps) coord.WakeAdmission {
+	return coordAdmission(d, false)
+}
+
+// newCoordReminderAdmission is the wake admission that also refuses a run a
+// member controls: the next prompt is theirs.
+func newCoordReminderAdmission(d Deps) coord.WakeAdmission {
+	return coordAdmission(d, true)
+}
+
+func coordAdmission(d Deps, unheld bool) coord.WakeAdmission {
 	admission := coordWakeAdmission{
-		store: d.Store, control: d.Control, mission: lazyMission{ssh: d.SSH},
+		store: d.Store, control: d.Control, mission: lazyMission{ssh: d.SSH}, unheld: unheld,
 		missionControl: func() sshd.MissionControl {
 			if d.SSH == nil {
 				return nil
@@ -125,6 +137,9 @@ func (a coordWakeAdmission) Admit(ctx context.Context, run domain.RunID, dispatc
 	}
 	if initial.MissionID != "" && (initial.Role != "integrator" || initial.IntegratorRunID != string(run)) {
 		return store.ErrMissionStale
+	}
+	if a.unheld {
+		return a.control.TryAdmitUnheld(string(run), admit)
 	}
 	return a.control.TryAdmit(string(run), admit)
 }

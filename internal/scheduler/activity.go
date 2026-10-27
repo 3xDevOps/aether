@@ -222,6 +222,10 @@ func (s *Scheduler) activityLocked(ctx context.Context, run domain.RunID, entry 
 		case inferred && (written == turnEndedReason || ours):
 			workers = true
 			switch {
+			case swarm.Workers == 0 && swarm.Children == 1:
+				public = "waiting for 1 child run"
+			case swarm.Workers == 0 && swarm.Children > 1:
+				public = fmt.Sprintf("waiting for %d child runs", swarm.Children)
 			case swarm.Workers == 1:
 				public = "waiting for 1 worker"
 			case swarm.Workers > 1:
@@ -287,8 +291,13 @@ func (s *Scheduler) refreshActivityLocked(ctx context.Context, entry *supervised
 		reason = entry.idleReason
 	}
 	d, err := s.activityLocked(ctx, entry.runID, entry, entry.status, reason)
-	if err != nil || (d.activity == entry.activity && d.reason == entry.reason) {
+	if err != nil {
 		return err
+	}
+	if d.activity == entry.activity && d.reason == entry.reason {
+		// Recovery restores the activity from the row but not its cause.
+		entry.cause = d.cause
+		return nil
 	}
 	return s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, entry.status, reason, "")
 }

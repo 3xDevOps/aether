@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -229,46 +230,58 @@ func parseCredential(data []byte) (string, string, error) {
 	return token, active.User, nil
 }
 
-// get never forwards redirects or returns provider-controlled errors. Status
-// codes retain the useful native API failure context without reflecting tokens,
-// authorization headers, response bodies, or transport error strings.
+// get never forwards redirects or returns transport error strings. API
+// failures carry the status and GitHub's own message with the token redacted.
 func (s *Service) get(ctx context.Context, token, path string, dst any) (http.Header, error) {
+	header, _, err := s.fetch(ctx, token, path, "", dst)
+	return header, err
+}
+
+// fetch sends If-None-Match when etag is set; on 304 it reports notModified
+// and leaves dst untouched.
+func (s *Service) fetch(ctx context.Context, token, path, etag string, dst any) (header http.Header, notModified bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com"+path, nil)
 	if err != nil || req.URL.Scheme != "https" || req.URL.Host != "api.github.com" || req.URL.User != nil {
-		return nil, errors.New("github: invalid API request")
+		return nil, false, errors.New("github: invalid API request")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	req.Header.Set("User-Agent", "Aether")
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
 	response, err := s.client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("github: API request: %w", ctx.Err())
+			return nil, false, fmt.Errorf("github: API request: %w", ctx.Err())
 		}
 		var timeout net.Error
 		if errors.As(err, &timeout) && timeout.Timeout() {
-			return nil, errors.New("github: API request timed out")
+			return nil, false, errors.New("github: API request timed out")
 		}
-		return nil, errors.New("github: API request failed")
+		return nil, false, errors.New("github: API request failed")
 	}
 	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode == http.StatusNotModified && etag != "" {
+		return response.Header, true, nil
+	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github: API request: HTTP %d %s", response.StatusCode, http.StatusText(response.StatusCode))
+		return nil, false, responseError(response, token, time.Now())
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, responseLimit+1))
 	if err != nil {
-		return nil, errors.New("github: cannot read API response")
+		return nil, false, errors.New("github: cannot read API response")
 	}
 	if len(body) > responseLimit {
-		return nil, errors.New("github: API response exceeds size limit")
+		return nil, false, errors.New("github: API response exceeds size limit")
 	}
 	if err := json.Unmarshal(body, dst); err != nil {
-		return nil, errors.New("github: invalid API response")
+		return nil, false, errors.New("github: invalid API response")
 	}
-	return response.Header, nil
+	return response.Header, false, nil
 }
 
 type repositoryResponse struct {
@@ -347,35 +360,36 @@ func validFullName(fullName string) bool {
 }
 
 func nextPage(headers []string, current int) (int, error) {
+	location, ok := nextLink(headers)
+	if !ok {
+		return 0, nil
+	}
+	if !strings.HasPrefix(location, "<") || !strings.HasSuffix(location, ">") {
+		return 0, errors.New("github: invalid API pagination link")
+	}
+	u, err := url.Parse(location[1 : len(location)-1])
+	if err != nil || u.Scheme != "https" || u.Host != "api.github.com" || u.User != nil || u.Path != "/user/repos" || u.Fragment != "" {
+		return 0, errors.New("github: invalid API pagination link")
+	}
+	page, err := strconv.Atoi(u.Query().Get("page"))
+	if err != nil || page <= current || u.Query().Get("per_page") != "100" {
+		return 0, errors.New("github: invalid API pagination page")
+	}
+	return page, nil
+}
+
+// nextLink returns the raw target of the first rel="next" Link entry.
+func nextLink(headers []string) (string, bool) {
 	for _, header := range headers {
 		for _, link := range strings.Split(header, ",") {
 			parts := strings.Split(strings.TrimSpace(link), ";")
-			isNext := false
 			for _, parameter := range parts[1:] {
 				key, value, ok := strings.Cut(strings.TrimSpace(parameter), "=")
-				if ok && key == "rel" {
-					for _, relation := range strings.Fields(strings.Trim(value, "\"")) {
-						isNext = isNext || relation == "next"
-					}
+				if ok && key == "rel" && slices.Contains(strings.Fields(strings.Trim(value, "\"")), "next") {
+					return strings.TrimSpace(parts[0]), true
 				}
 			}
-			if !isNext {
-				continue
-			}
-			location := strings.TrimSpace(parts[0])
-			if !strings.HasPrefix(location, "<") || !strings.HasSuffix(location, ">") {
-				return 0, errors.New("github: invalid API pagination link")
-			}
-			u, err := url.Parse(location[1 : len(location)-1])
-			if err != nil || u.Scheme != "https" || u.Host != "api.github.com" || u.User != nil || u.Path != "/user/repos" || u.Fragment != "" {
-				return 0, errors.New("github: invalid API pagination link")
-			}
-			page, err := strconv.Atoi(u.Query().Get("page"))
-			if err != nil || page <= current || u.Query().Get("per_page") != "100" {
-				return 0, errors.New("github: invalid API pagination page")
-			}
-			return page, nil
 		}
 	}
-	return 0, nil
+	return "", false
 }

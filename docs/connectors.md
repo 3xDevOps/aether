@@ -107,7 +107,8 @@ The connector then works in Claude on the web, desktop and mobile.
 
 `https://<edge>/mcp` is one URL for every Aether server, so one ChatGPT
 plugin can serve every Aether user. Once Aether is listed in ChatGPT's plugin
-directory ([chatgpt-plugin.md](chatgpt-plugin.md)), install it from there
+directory ([chatgpt-plugin.md](chatgpt-plugin.md)) or Claude's connector
+directory ([claude-connector.md](claude-connector.md)), install it from there
 instead of adding a custom MCP server; connecting then works as described here.
 
 When you connect, the edge's sign-in page opens: sign in with GitHub if you
@@ -182,7 +183,29 @@ than `offline_access`, the only one the OAuth metadata lists in
 
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
-each connector's scopes. To change them, revoke the connector and connect
+each connector's scopes.
+
+The server also checks the scope of every call a connector makes, whatever the
+member's role. Reads such as `run.get`, `workspace.timeline`, `member.list`,
+`memory.show` and `integration.show` need `read`; `run.launch`,
+`mission.create`, `run.inject`, `run.room.post`, `run.pause`, `run.resume`,
+`run.review`, `run.relaunch`, `run.protect`, `run.archive`, `memory.add`,
+`memory.pin` and `memory.unpin` need `write`; `run.kill`, `run.close`,
+`run.mode.switch` (it discards a turn in progress), `run.handoff`,
+`mission.cancel`, `mission.worker.release`, `mission.archive`,
+`mission.unarchive`, `mission.replace-integrator`, `integration.decide`,
+`integration.deliver`, `run.pr.create` and `run.pr.merge` need `control`. `run.input.respond` needs `control` to decide a permission request
+and `write` to answer a question. `run.review` with `complete` needs `control`
+for a live run unless its agent reported success and the run awaits review,
+since completing any other live run ends it. Every other method, such as `member.role` or
+`connector.revoke`, is refused to every connector:
+
+```
+run.kill needs the control scope, which ChatGPT connector con-7k2m9q4xbd was not granted; select Reconnect next to it in Settings → ChatGPT and Claude and check Stop and approve on the consent page
+member.role: ChatGPT connector con-7k2m9q4xbd cannot call this method; no connector can, so use the Aether app or the aether CLI
+```
+
+To change scopes, revoke the connector and connect
 again, or select **Reconnect** in Settings. It gets a new code, then revokes
 the connector. Connectors added before scopes existed have all three.
 
@@ -243,8 +266,14 @@ or `swarm_id` also accept the `run:` and `swarm:` ids `search` returns. When
 the server no longer keeps the start of a run's conversation or terminal,
 `aether_run_history` returns `truncated_before: true` and a `note` saying so.
 
-A launch, swarm or message takes an optional `idempotency_key`; a retry with
-the same key returns the first result. A launch or swarm still starting after
+A launch, swarm, message or answer takes an optional `idempotency_key`; a
+retry with the same key returns the first result. A write's result has
+`write: "done"`, or `"pending"` while a launch is starting or a message waits
+for approval, and the key it used. A failure that leaves it unknown whether the
+write happened, such as a timeout, ends with the key to retry with. A
+swarm or teammate answer retried with its key after the question stopped
+waiting returns the saved answer; an `answer_id` that is neither a swarm
+question nor a teammate question on the run fails and writes nothing. A launch or swarm still starting after
 30 seconds, such as one pulling its image, keeps starting after the tool call
 ends. The tool then repeats the call with the key to look up the run or swarm,
 which does not count as a write call. If the lookup answers within 5 seconds,
@@ -256,7 +285,11 @@ the same workspace, agent, task, mode and model within 60 seconds returns your
 earlier run, unless it failed, was interrupted or was abandoned, and a swarm
 with the same workspace, objective and agents within 60 seconds returns your
 earlier swarm, unless it was cancelled, instead of starting another; so does an
-identical launch still starting. A retried message without a key is sent again.
+identical launch still starting, or one that failed in the last 60 seconds
+without saying whether it started. A message without a key reuses the key of the
+same message to the same run still being sent or sent within 60 seconds, so a
+retry is delivered once and its result has `duplicate: true`. To send the same
+text again on purpose, pass a new `idempotency_key`.
 `aether_mark_reviewed` completes only a run whose agent reported success and
 awaits your review; to end any other run, use `aether_stop_run` or
 `aether_close_run` under `control`. A message to your own run that no one
@@ -301,8 +334,9 @@ Select **Revoke** next to it in **Settings → ChatGPT and Claude**, or run:
 aether mcp revoke con-7k2m9q4xbd
 ```
 
-The connector's next call fails, and the app asks you to connect again with a
-new code. You can revoke your own connectors, and an admin can revoke anyone's.
+The connector's next call fails, including one in a session the app already
+has open, and so does its refresh token; the app asks you to connect again
+with a new code. You can revoke your own connectors, and an admin can revoke anyone's.
 Removing the connector in ChatGPT or Claude does not revoke it on the server.
 Revoke it here too.
 
@@ -332,6 +366,13 @@ with `aether mcp revoke`.
 | `method not found: connector.code; the server is older than this CLI, and an admin updates it with aether server update` | Update the server |
 | `connector.revoke: no connector <id>; aether mcp lists yours` | The id is wrong or already revoked |
 
+A tool call can fail with:
+
+| Message | Fix |
+| --- | --- |
+| `<method> needs the <scope> scope, which <client> connector <id> was not granted; ...` | Select **Reconnect** next to the connector and check the box the message names |
+| `<method>: <client> connector <id> cannot call this method; ...` | No connector can. Use the app or the CLI |
+
 On the page that opens when you connect:
 
 | Message | Cause |
@@ -343,7 +384,7 @@ On the page that opens when you connect:
 | `None of your servers can take this connection.` (edge sign-in page) | Each server listed under **Not available** says why: not connected, too old for the universal URL (an admin runs `sudo aether-server update`), or an invitation you have not joined |
 | The edge sign-in page does not list your server | Your GitHub account is not bound to a member there. Bind it (`aether member identities`) or use the `<edge>/mcp/<server id>` URL `aether mcp` prints |
 | `Cannot connect as your GitHub account: <account> is not a member of <server>; ...` | That GitHub account is not bound to a member. Sign in at the edge as the right account, or connect with a code |
-| `Cannot connect as your GitHub account: the edge's sign-in for it was already used.`, `... expired at <time>` or `... was issued at <time>, before this server last started at <time>` | Start again from ChatGPT or Claude |
+| `Cannot connect as your GitHub account: the edge's sign-in for it was already used.`, `... expired at <time>` or `... was issued at <time>, and this server takes only sign-ins issued from <time>, 30s after it last started` | Start again from ChatGPT or Claude |
 | `Cannot connect as your GitHub account: the edge's sign-in for it was already opened in another browser.` or `... this consent page was opened in another browser than the one that signed in at the edge.` | The page was opened or posted from a browser other than the one that chose the server. Start again from ChatGPT or Claude in one browser |
 | `The edge put its sign-in in the URL, where logs and browser history keep it, so it is refused.` | The server's edge speaks protocol 4, but something sent the old hand-off. Start again from ChatGPT or Claude |
 

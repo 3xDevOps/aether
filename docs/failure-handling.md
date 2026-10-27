@@ -55,7 +55,7 @@ A live run carries a state that says what it is doing. The dashboard and
 | `waiting-ci` | Waiting for CI | The agent reported `waiting --for ci`. |
 | `waiting-tools` | Waiting for process | The agent waits on a background task it holds, or reported `waiting --for process`. |
 | `answered` | Answered | The agent reported `answered`: it replied or discussed, with nothing pending. Never needs you and sends no notification. |
-| `waiting` | Waiting | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). |
+| `waiting` | Turn ended (`aether runs`: Waiting) | The turn ended with no report (`turn ended without a report`), the run stalled, a turn was cancelled, or a wait on agents went stale (`no update for <duration>`). Nothing is asked of you. |
 | `needs-you` | Needs you | A person is needed: a `needs-input` or `blocked` report, an open permission request or question, a usage limit Aether cannot continue from, or an Enhanced turn that waits for a reply. |
 | `finished` | Ready for review | An interactive run reported `success`. |
 | `failed` | Failed | The run reported `failure`, or its turn failed. |
@@ -75,10 +75,13 @@ tasks lasts exactly as long as they do.
 
 Each `run.status` event for a live run carries a `cause` naming what chose
 its state: `turn`, `report` (the agent's own report), `turn-end`, `stall`,
-`wait-expired`, `workers`, `tasks-held`, `human`, or `disconnect`.
-`aether timeline <run-id>` prints it after the state, for example
+`wait-expired`, `workers`, `tasks-held`, `human`, or `disconnect`. A live
+run's record carries its latest `cause` too. `aether timeline <run-id>`
+prints it after the state, for example
 `running -> needs-attention (waiting for 2 workers) · waiting-agents by
-workers`.
+workers`. The dashboard ends each state's tooltip with it, for example
+`Waiting for 2 workers since 3 minutes ago. Mail from its agents can wake it.
+Why: its swarm workers or child runs are live or have unread mail for it.`
 
 An agent's `blocked` report reads `blocked: <summary>`, and its question reads
 `needs input: <question>`.
@@ -119,7 +122,10 @@ waiting on agents, CI or a process and a reported success.
 | A swarm worker | Only for its `blocked` report | Its other requests go to its integrator. |
 
 A need is announced once: opening the run or restarting the server does not
-repeat it.
+repeat it. When it ends, or the run is handed to another member, each
+browser that showed it gets a silent `No longer needs you` in place of the
+notification, and the desktop app closes its own. A server restart forgets
+which browsers showed a need, so one announced before it is not replaced.
 
 ## Recover from disk pressure
 

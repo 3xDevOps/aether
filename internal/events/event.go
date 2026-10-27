@@ -33,6 +33,9 @@ const (
 	TypeWorkspaceDeleted Type = "workspace.deleted"
 	// TypeRunTitle carries the latest title for a run.
 	TypeRunTitle Type = "run.title"
+	// TypeRunChildren carries a run's child-run setting, refusal and
+	// detachment.
+	TypeRunChildren Type = "run.children"
 	// TypeRunProtected carries a run's protection state.
 	TypeRunProtected  Type = "run.protected"
 	TypeRunController Type = "run.controller"
@@ -208,6 +211,19 @@ type RunProtectedPayload struct {
 func (RunProtectedPayload) EventType() Type { return TypeRunProtected }
 
 func init() { registerPayload[RunProtectedPayload](TypeRunProtected) }
+
+// RunChildrenPayload is a run's own child-run setting ("", "on" or "off"),
+// whether its agent tried to start a child while child runs were off, and
+// whether it is a child detached from its parent.
+type RunChildrenPayload struct {
+	Children     string `json:"children,omitempty"`
+	ChildRefused bool   `json:"child_refused,omitempty"`
+	Detached     bool   `json:"detached,omitempty"`
+}
+
+func (RunChildrenPayload) EventType() Type { return TypeRunChildren }
+
+func init() { registerPayload[RunChildrenPayload](TypeRunChildren) }
 
 // An empty MemberID means nobody holds the run's control lease. LastMemberID
 // is the latest member to hold it, the current holder included.

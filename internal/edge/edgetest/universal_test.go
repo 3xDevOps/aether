@@ -360,9 +360,9 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 					t.Fatalf("alice's connectors on server 2 = %+v %v, want one bound to her GitHub account and no device", conns, err)
 				}
 				grant := sshd.ConnectorGrant{Member: conns[0].Member, Provider: conns[0].Provider, Subject: conns[0].Subject}
-				_, perr := s2.ssh.ConnectorLocal(grant, conns[0].ID, "Test client").Call(t.Context(), protocol.MethodMemberInvite, json.RawMessage(`{}`))
-				if want := "member.invite needs an approved device, a member SSH key or a tailnet connection; Test client connector " + conns[0].ID +
-					" was authorized by signing in at the edge, with no device"; perr == nil || perr.Message != want {
+				_, perr := s2.ssh.ConnectorLocal(grant, conns[0].ID, "Test client", conns[0].Scopes).Call(t.Context(), protocol.MethodMemberInvite, json.RawMessage(`{}`))
+				if want := "member.invite: Test client connector " + conns[0].ID +
+					" cannot call this method; no connector can, so use the Aether app or the aether CLI"; perr == nil || perr.Message != want {
 					t.Fatalf("member.invite through alice's connector = %v, want %q", perr, want)
 				}
 				bobID := s1.memberOf(t, bob).ID
@@ -374,7 +374,7 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 				s1.restart(edgeproto.PolicyAccount)
 				eventually(t, "server 1 to refuse, after restarting, the consent form it issued before", func() error {
 					if r, page := bobBrowser.send(t, http.MethodPost, flow.action, flow.consent); r.StatusCode != http.StatusBadRequest ||
-						!strings.Contains(page, "before this server last started") {
+						!strings.Contains(page, "this server takes only sign-ins issued from") {
 						return fmt.Errorf("%s %s", r.Status, page)
 					}
 					return nil

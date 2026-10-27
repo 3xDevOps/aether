@@ -106,8 +106,8 @@ func (s *Server) assistantPrompt(ctx context.Context, member domain.MemberID, ra
 	return struct{}{}, nil
 }
 
-// assistantView replaces the caller's latest view context, which the
-// assistant reads with its view context tool.
+// assistantView offers a navigation update as the caller's held view
+// context, which the assistant reads with its view context tool.
 func (s *Server) assistantView(ctx context.Context, member domain.MemberID, raw json.RawMessage) (any, *protocol.Error) {
 	svc := s.cfg.Services.Assistant
 	if svc == nil {

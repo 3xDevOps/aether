@@ -6,14 +6,14 @@ import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
-import { runLabel, stateDetail, stateLabel, stateTitle, stateTone } from '@/lib/status'
+import { runLabel, stateLabel, stateTitle, stateTone, stateWords } from '@/lib/status'
 import type { MissionPhase } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { CardActionButton, cardAction, openCard, ReplyComposer, setReplying, useReply } from '@/routes/board/card-action'
 import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { diffTotals } from '@/store/diff'
-import type { SwarmSummary } from '@/store/selectors'
+import { childRunsText, type TreeSummary } from '@/store/selectors'
 
 export const phaseWord: Record<MissionPhase, string> = {
   planning: 'Swarm planning',
@@ -40,9 +40,11 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
   const needsYou = card.group === 'needs-you'
   const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
   const state = needsYou && !card.needsYou ? 'needs-you' : card.state
-  const label = stateLabel[state]
-  const reason = card.swarm ? swarmReason(card, mission?.phase) : card.reason
-  const detail = needsYou || card.swarm ? reason : stateDetail({ state, reason })
+  const asking = !card.needsYou && card.childRuns ? card.children[0] : undefined
+  const reason = card.swarm ? swarmReason(card, mission?.phase) : asking ? `${runLabel(asking.run)}: ${asking.reason}` : card.reason
+  const words = stateWords({ state, reason: asking ? reason : card.reason })
+  const label = needsYou ? stateLabel[state] : words.label
+  const detail = needsYou || card.swarm ? reason : words.detail
   const description = detail && detail !== label ? detail : undefined
   const owner = card.owner?.display_name ?? run.member_id
   const since = needsYou ? card.waitingSince : run.stateChangedAt
@@ -69,7 +71,7 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
           <div className={cn('mt-2 flex min-h-4 min-w-0 flex-wrap items-center gap-2 text-ui-sm text-muted', wideIndent)}>
             <span
               className="flex min-w-0 flex-1 items-center gap-1.5"
-              title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next }, since)}
+              title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next, cause: card.cause }, since)}
             >
               <StatusDot tone={stateTone[state]} label={label} />
               <span className="min-w-0 truncate">
@@ -84,6 +86,7 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
                 {agentName ?? run.harness}
               </span>
             )}
+            {card.childRuns && <SwarmCounts swarm={card.childRuns} noun={childRunsText(card.childRuns)} />}
             <Avatar name={owner} color={card.owner?.color} />
             {snapshot?.truncated ? (
               <span className="shrink-0 tabular-nums">{snapshot.files.length} files</span>
@@ -125,18 +128,19 @@ function swarmReason(card: BoardCard, phase: MissionPhase | undefined): string {
   return phase ? phaseWord[phase] : 'Swarm'
 }
 
-const workerStates: { key: keyof SwarmSummary['counts']; tone: Tone; words: string }[] = [
+const workerStates: { key: keyof TreeSummary['counts']; tone: Tone; words: string }[] = [
   { key: 'needsYou', tone: 'needs-you', words: 'needs you' },
   { key: 'working', tone: 'working', words: 'working' },
   { key: 'done', tone: 'done', words: 'done' },
   { key: 'failed', tone: 'failed', words: 'failed' },
 ]
 
-function SwarmCounts({ swarm: { counts } }: { swarm: SwarmSummary }) {
+function SwarmCounts({ swarm: { counts }, noun = '' }: { swarm: TreeSummary; noun?: string }) {
   const shown = workerStates.filter(({ key }) => counts[key] > 0)
   if (shown.length === 0) return <span className="shrink-0">No workers yet</span>
   return (
     <span className="flex shrink-0 items-center gap-2 tabular-nums">
+      {noun && <span>{noun}</span>}
       {shown.map(({ key, tone, words }) => (
         <span key={key} role="img" aria-label={`${counts[key]} ${words}`} title={`${counts[key]} ${words}`} className="flex items-center gap-1">
           <StatusDot tone={tone} />

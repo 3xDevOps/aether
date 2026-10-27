@@ -13,6 +13,7 @@ import { budgetStateLabel, money } from '@/lib/format'
 import type { BudgetReport } from '@/lib/types'
 import { BudgetDialog, WorkspaceSettingsDialog } from '@/routes/admin-dialogs'
 import { registerRoute, type RouteProps } from '@/routes/registry'
+import { ChildLimitsRow } from '@/routes/settings/children'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
 import { useStore } from '@/store'
 import { useCapability, useIsAdmin } from '@/store/hooks'
@@ -31,6 +32,7 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
   const caps = useCapability()
   const isAdmin = useIsAdmin()
   const [dialog, setDialog] = useState<'budget' | 'settings' | null>(null)
+  const [settingsClosed, setSettingsClosed] = useState(0)
 
   if (!workspace) {
     return (
@@ -92,11 +94,21 @@ export function WorkspaceView({ params, client = api }: RouteProps & { client?: 
                 <Button size="sm" variant="secondary" onClick={() => setDialog('settings')}>Change…</Button>
               )}
             />
+            {caps.hasMethod('workspace.child_limits') && (
+              <ChildLimitsRow
+                client={client}
+                workspaceID={workspaceID}
+                seq={settingsClosed}
+                control={isAdmin && caps.hasMethod('workspace.settings') && (
+                  <Button size="sm" variant="secondary" onClick={() => setDialog('settings')}>Change…</Button>
+                )}
+              />
+            )}
           </SettingsSection>
         </PageBody>
       </div>
       {dialog === 'budget' && <BudgetDialog workspaceID={workspaceID} client={client} onClose={() => setDialog(null)} />}
-      {dialog === 'settings' && <WorkspaceSettingsDialog workspaceID={workspaceID} client={client} onClose={() => setDialog(null)} />}
+      {dialog === 'settings' && <WorkspaceSettingsDialog workspaceID={workspaceID} client={client} onClose={() => { setDialog(null); setSettingsClosed((n) => n + 1) }} />}
     </div>
   )
 }

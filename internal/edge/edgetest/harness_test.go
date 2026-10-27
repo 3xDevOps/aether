@@ -746,10 +746,17 @@ func (s *serverNode) start() {
 	}
 	mcp := s.mcp
 	if s.client != nil {
+		// A first start is backdated by ClockSkew so a test signs in right
+		// away; a restart is not, so sign-ins from before it stay refused.
+		var started time.Time
+		if s.addr == "127.0.0.1:0" {
+			started = time.Now().Add(-edgeproto.ClockSkew)
+		}
 		mcp, err = connector.New(connector.Config{
 			BaseURL: s.h.relayURL + edgeproto.MCPPath(edgeproto.ServerID(hostKey.PublicKey())),
 			Store:   db, SSH: srv, KeyPath: filepath.Join(s.dir, "connector", "hmac.key"),
 			ClientHosts: []string{s.client.host}, Transport: s.client.srv.Client().Transport, LoopbackClients: s.client.loopback,
+			Started: started,
 		})
 		if err != nil {
 			t.Fatal(err)

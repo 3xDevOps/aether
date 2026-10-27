@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -125,8 +126,9 @@ func TestUniversalGuardsServerAnswers(t *testing.T) {
 	s := h.newMCPServer(edgeproto.PolicyAccount, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen <- r.Header.Get(edgeproto.HeaderBrowser)
 		http.SetCookie(w, &http.Cookie{Name: "__Host-aether_edge_browser", Value: "fixed", Path: "/"})
-		if to := r.URL.Query().Get("to"); to != "" {
-			http.Redirect(w, r, to, http.StatusSeeOther)
+		if to := r.URL.Query()["to"]; len(to) > 0 {
+			w.Header()["Location"] = to
+			w.WriteHeader(http.StatusSeeOther)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html")
@@ -140,26 +142,28 @@ func TestUniversalGuardsServerAnswers(t *testing.T) {
 	at := h.relayURL + edgeproto.PathUniversalMCPAuthorize + "?" + edgeproto.ParamServer + "=" + s.id
 	var binding string
 	for _, tt := range []struct {
-		to   string
+		to   []string
 		pass bool
 	}{
-		{"", true},
-		{"https://evil.example/steal", false},
-		{"//evil.example/steal", false},
-		{"http://evil.example/callback", false},
-		{"http://127.0.0.1:8080/admin", false},
-		{"http://127.0.0.1:54321/callback?code=x", true},
-		{"http://localhost/callback", true},
-		{"https://user@" + client.host + "/callback", false},
-		{"/mcp/authorize?next=1", true},
-		{h.relayURL + "/mcp/authorize", true},
-		{"/mcp/" + s.id + "/authorize", false},
-		{h.relayURL + "/mcp/" + s.id + "/", false},
-		{client.redirect + "?code=x", true},
+		{nil, true},
+		{[]string{"https://evil.example/steal"}, false},
+		{[]string{"//evil.example/steal"}, false},
+		{[]string{"http://evil.example/callback"}, false},
+		{[]string{"http://127.0.0.1:8080/admin"}, false},
+		{[]string{"http://127.0.0.1:54321/callback?code=x"}, true},
+		{[]string{"http://localhost/callback"}, true},
+		{[]string{"https://user@" + client.host + "/callback"}, false},
+		{[]string{"/mcp/authorize?next=1"}, true},
+		{[]string{h.relayURL + "/mcp/authorize"}, true},
+		{[]string{"/mcp/" + s.id + "/authorize"}, false},
+		{[]string{h.relayURL + "/mcp/" + s.id + "/"}, false},
+		{[]string{client.redirect + "?code=x"}, true},
+		{[]string{"/mcp/authorize", client.redirect}, true},
+		{[]string{"/mcp/authorize", "https://evil.example/steal"}, false},
 	} {
 		target := at
-		if tt.to != "" {
-			target += "&to=" + url.QueryEscape(tt.to)
+		for _, to := range tt.to {
+			target += "&to=" + url.QueryEscape(to)
 		}
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
 		if err != nil {
@@ -178,9 +182,9 @@ func TestUniversalGuardsServerAnswers(t *testing.T) {
 			t.Fatalf("to %q: the server saw browser %q, want the edge's one binding %q", tt.to, got, binding)
 		case resp.Header.Get("Content-Security-Policy") != h.universalCSP() && tt.pass:
 			t.Fatalf("to %q: Content-Security-Policy %q, want %q", tt.to, resp.Header.Get("Content-Security-Policy"), h.universalCSP())
-		case tt.pass && tt.to != "" && (resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != tt.to):
-			t.Fatalf("to %q: %s %q, want it passed", tt.to, resp.Status, resp.Header.Get("Location"))
-		case !tt.pass && (resp.StatusCode != http.StatusBadGateway || resp.Header.Get("Location") != "" ||
+		case tt.pass && tt.to != nil && (resp.StatusCode != http.StatusSeeOther || !slices.Equal(resp.Header.Values("Location"), tt.to)):
+			t.Fatalf("to %q: %s %q, want it passed", tt.to, resp.Status, resp.Header.Values("Location"))
+		case !tt.pass && (resp.StatusCode != http.StatusBadGateway || resp.Header.Values("Location") != nil ||
 			!strings.Contains(string(body), "the server sent the browser to")):
 			t.Fatalf("to %q: %s %q %s, want 502 and no Location", tt.to, resp.Status, resp.Header.Get("Location"), body)
 		}
@@ -191,7 +195,7 @@ func TestUniversalGuardsServerAnswers(t *testing.T) {
 				t.Fatalf("to %q: cookie %v, want only the edge's, Secure, HttpOnly, SameSite=None and Path /", tt.to, c)
 			}
 		}
-		if tt.to == "" && len(resp.Cookies()) != 1 {
+		if tt.to == nil && len(resp.Cookies()) != 1 {
 			t.Fatalf("the first answer set cookies %v, want the edge's browser cookie", resp.Cookies())
 		}
 		binding = got

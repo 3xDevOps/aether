@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 
+	"github.com/3xDevOps/Aether/internal/children"
 	"github.com/3xDevOps/Aether/internal/coord"
 	"github.com/3xDevOps/Aether/internal/evidence"
 	"github.com/3xDevOps/Aether/internal/overlap"
@@ -21,6 +22,11 @@ func init() {
 		mail, ok := d.Store.(store.MessageStore)
 		if !ok {
 			return nil, errors.New("coordination needs a store with the run mailbox")
+		}
+		childSvc, _ := d.SSH.Services.Children.(*children.Service)
+		var childAuthority coord.ChildService
+		if childSvc != nil {
+			childAuthority = childSvc
 		}
 		svc, err := coord.New(coord.Config{
 			Dir:              filepath.Join(d.DataDir, "coord"),
@@ -39,14 +45,19 @@ func init() {
 			// coord.report captures evidence before accepting the durable
 			// outcome; the coordination service publishes its evidence event
 			// only after finalization.
-			Evidence:        coordEvidenceCapture{service: d.Evidence},
-			EvidencePackets: d.Store,
-			Mission:         lazyMission{ssh: d.SSH, runs: d.Runs},
-			WakeAdmission:   newCoordWakeAdmission(d),
-			Waker:           d.Runs,
+			Evidence:          coordEvidenceCapture{service: d.Evidence},
+			EvidencePackets:   d.Store,
+			Mission:           lazyMission{ssh: d.SSH, runs: d.Runs},
+			Children:          childAuthority,
+			WakeAdmission:     newCoordWakeAdmission(d),
+			Waker:             d.Runs,
+			ReminderAdmission: newCoordReminderAdmission(d),
 		})
 		if err != nil {
 			return nil, err
+		}
+		if childSvc != nil {
+			childSvc.SetMailer(svc)
 		}
 		// Every new container receives the verified CLI; runs receive identity
 		// transport even when conflict coordination is disabled. The policy flag

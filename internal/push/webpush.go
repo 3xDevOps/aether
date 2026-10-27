@@ -58,6 +58,12 @@ const (
 
 var b64 = base64.RawURLEncoding
 
+// unsure wraps a send whose request may have reached the push service, which
+// may then have taken the message.
+type unsure struct{ error }
+
+func (u unsure) Unwrap() error { return u.error }
+
 // errGone means the push service no longer has the subscription.
 var errGone = errors.New("the push service no longer has this subscription")
 
@@ -256,7 +262,7 @@ func (k *vapidKey) send(ctx context.Context, client *http.Client, to *target, pa
 		if errors.As(err, &urlErr) {
 			err = urlErr.Err
 		}
-		return fmt.Errorf("%s: %w", to.endpoint.Host, err)
+		return unsure{fmt.Errorf("%s: %w", to.endpoint.Host, err)}
 	}
 	defer resp.Body.Close() //nolint:errcheck // nothing to do about a failed close of a read body
 	switch {
