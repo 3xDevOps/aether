@@ -115,18 +115,21 @@ export function useOpenTarget(): (target: ActionTarget) => void {
  * panel closes, and why a launched swarm could not be read. The store keeps
  * runs current but refreshes swarms only for the active workspace, so a
  * launched swarm is read here, then again on each of its changes; until read
- * it counts as working.
+ * it counts as working. The phase read is kept, since another workspace's
+ * list can replace the store's swarms.
  */
 export function useBackground(action: AssistantAction): { background: boolean; swarmError?: string } {
   const swarm = action.state === 'done' && launches.has(action.tool) && action.target?.kind === 'swarm' ? action.target.id : undefined
   const seq = useStore((s) => (swarm ? missionSeqOf(swarm)(s) : 0))
   const [error, setError] = useState<string>()
+  const [phase, setPhase] = useState<string>()
   useEffect(() => {
     if (!swarm) return
     let live = true
     api.missionShow(swarm).then((result) => {
       if (!live) return
       setError(undefined)
+      setPhase(result.mission.phase)
       useStore.getState().upsertMission(result.mission)
     }, (err) => live && setError(`Could not read swarm ${swarm}: ${message(err)}`))
     return () => {
@@ -140,8 +143,8 @@ export function useBackground(action: AssistantAction): { background: boolean; s
       return run !== undefined && !isTerminal(run.status)
     }
     if (action.target.kind !== 'swarm') return false
-    const mission = s.missions[action.target.id]
-    return mission === undefined || (mission.phase !== 'completed' && mission.phase !== 'cancelled')
+    const shown = s.missions[action.target.id]?.phase ?? phase
+    return shown !== 'completed' && shown !== 'cancelled'
   })
   return { background: background && !error, swarmError: error }
 }

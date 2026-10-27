@@ -600,7 +600,9 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   list, reads a launched swarm with `mission.show` and again on each
   `mission.changed` for it (`missionSeq`), since the store refreshes swarms
   only for the active workspace. The swarm counts as working until read, and
-  a read that fails shows its error. The header calls the assistant's own turn
+  a read that fails shows its error; the phase read is kept, so another
+  workspace's swarm list replacing the store's cannot turn a finished swarm
+  back to working. The header calls the assistant's own turn
   **Generating…**. The target comes from the result's `link` or
   `url`: a dashboard link (`?run=<id>`, `?page=missions&id=<id>`, a watch's
   settings link) opens in the app whatever its host, and any other `http(s)`

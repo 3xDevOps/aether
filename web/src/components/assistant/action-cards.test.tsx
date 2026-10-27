@@ -465,6 +465,8 @@ describe('quiet outcomes and names', () => {
     expect(api.missionShow).toHaveBeenCalledWith('mis_7')
     act(() => finish({ mission: mission({ id: 'mis_7', phase: 'completed' }), tasks: [], attempts: [], submissions: [], diagnostics: [], questions: [] }))
     expect(await card(aside, /^Launched swarm on main-repo\. Done$/)).toBeDefined()
+    act(() => useStore.setState({ missions: {} }))
+    expect(await card(aside, /^Launched swarm on main-repo\. Done$/)).toBeDefined()
   })
 
   it('shows why a launched swarm could not be read instead of calling it working', async () => {
