@@ -60,17 +60,17 @@ It recovers on its own once you log in. `watch.create` refuses a pull
 request your login cannot read (`... is not reachable with your GitHub
 login: github: API request: HTTP 404 Not Found; ...`) and one that is
 already merged or closed. When the pull request itself later answers HTTP
-301, or HTTP 404 or 403 (other than a rate limit) on two reads in a row, a
-`pr` watch stays in `error` with a message that names the cause, such as
-`GitHub answers 404, so the pull request or repository is gone or your
-login lost access to it`, and is not read again: give your login access, or
-connect one that has it, and create the watch again. A run watch keeps
-watching its run and retries the pull request with backoff. A 403 on the
-head commit's checks, statuses or the reviews only retries with backoff and
-shows GitHub's answer; a fine-grained token needs Checks, Commit statuses
-and Pull requests read. A 403 GitHub sends with `X-GitHub-SSO` retries too,
-and says the token needs SAML single sign-on authorization for the
-organization.
+301, or HTTP 404 or 403 (other than a rate limit) on reads in a row that
+span at least 15 seconds, a `pr` watch stays in `error` with a message that
+names the cause, such as `GitHub answers 404, so the pull request or
+repository is gone or your login lost access to it`, and is not read again:
+give your login access, or connect one that has it, and create the watch
+again. A run watch keeps watching its run and retries the pull request
+with backoff. A 403 on the head commit's checks, statuses or the reviews
+only retries with backoff and shows GitHub's answer; a fine-grained token
+needs Checks, Commit statuses and Pull requests read. A 403 GitHub sends
+with `X-GitHub-SSO` retries too, and says the token needs SAML single
+sign-on authorization for the organization.
 
 When the base branch requires status checks, `ci` decides on those only:
 the required checks of its classic branch protection (`GET

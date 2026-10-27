@@ -279,14 +279,15 @@ func (p *prHarness) login(m *domain.Member) {
 }
 
 // poll moves past the longest poll interval, so the next pass reads
-// GitHub again, and waits for it.
+// GitHub again, and waits for it. An evaluation that began before the move
+// may still commit a reused read, so only a check from after it counts.
 func (p *prHarness) poll(id string) {
 	p.t.Helper()
-	before := p.watchState(id).LastCheckAt
+	moved := p.clock.now().Add(PRPollIdle + PRPollIdle/5)
 	p.clock.advance(PRPollIdle + PRPollIdle/5)
 	p.eventually("a poll", func() bool {
 		after := p.watchState(id).LastCheckAt
-		return after != nil && (before == nil || after.After(*before))
+		return after != nil && !after.Before(moved)
 	})
 	p.settle()
 }
@@ -678,7 +679,7 @@ func TestPRLostAccessStopsTheWatch(t *testing.T) {
 	}
 	_, before, _ := p.gh.reads()
 	p.clock.advance(time.Hour)
-	settle()
+	p.settle()
 	if _, after, _ := p.gh.reads(); after != before {
 		t.Fatalf("%d requests after access was lost", after-before)
 	}
@@ -697,6 +698,23 @@ func TestPROne404ThenAnAnswerKeepsWatching(t *testing.T) {
 	p.poll(w.ID)
 	if got := p.watchState(w.ID); got.NextCheckAt == nil || !strings.Contains(got.Error, "asking once more") {
 		t.Fatalf("a 404 after an answer = %s %q, want it counted from one again", got.State, got.Error)
+	}
+}
+
+func TestPROne404ReadByTwoWatchesStopsNeither(t *testing.T) {
+	p := newPRHarness(t)
+	ci := p.watchOn(p.ada, prTarget7(), protocol.WatchCI).Watch
+	review := p.watchOn(p.ada, prTarget7(), protocol.WatchReview).Watch
+	p.eventually("the first reads", func() bool {
+		return p.watchState(ci.ID).LastCheckAt != nil && p.watchState(review.ID).LastCheckAt != nil
+	})
+	p.gh.set(func(f *fakeGitHub) { f.gone = true })
+	p.poll(ci.ID)
+	p.eventually("the second watch's poll", func() bool { return p.watchState(review.ID).State == protocol.WatchError })
+	for _, id := range []string{ci.ID, review.ID} {
+		if got := p.watchState(id); got.NextCheckAt == nil || !strings.Contains(got.Error, "asking once more") {
+			t.Fatalf("watch %s after one 404 = %s %q, want a retry", id, got.State, got.Error)
+		}
 	}
 }
 

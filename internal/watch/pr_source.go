@@ -83,9 +83,10 @@ type prMember struct {
 	token    string
 	tokenAt  time.Time
 	limitErr *prError
-	// refused counts consecutive 403 or 404 answers to each pull request,
-	// by repo#number; one alone may be GitHub's own glitch.
-	refused map[string]int
+	// refused is when each pull request, by repo#number, began answering
+	// 403 or 404; one alone may be GitHub's own glitch, and every read
+	// within prReuse of it counts as that one.
+	refused map[string]time.Time
 }
 
 // NewPRs builds the pull request source for Service.UsePRSource.
@@ -137,7 +138,7 @@ func (p *PRs) member(id domain.MemberID) *prMember {
 	defer p.mu.Unlock()
 	m := p.members[id]
 	if m == nil {
-		m = &prMember{turn: make(chan struct{}, 1), refused: map[string]int{}}
+		m = &prMember{turn: make(chan struct{}, 1), refused: map[string]time.Time{}}
 		p.members[id] = m
 	}
 	return m
@@ -276,7 +277,7 @@ func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, rep
 		snap, err = get(token)
 	}
 	ref := fmt.Sprintf("%s#%d", repo, number)
-	refusedBefore := m.refused[ref]
+	firstRefused, refusedBefore := m.refused[ref]
 	delete(m.refused, ref)
 	var limited *github.RateLimitError
 	var apiErr *github.APIError
@@ -302,8 +303,11 @@ func (p *PRs) read(ctx context.Context, member domain.MemberID, m *prMember, rep
 			cause = "GitHub answers 403, so your login may no longer read it"
 		}
 		msg := fmt.Sprintf("pull request %s is not reachable with your GitHub login: %s (%v); give that login access, or connect one that has it with aether github connect", ref, cause, err)
-		if refusedBefore == 0 && prev != nil {
-			m.refused[ref] = 1
+		if !refusedBefore {
+			firstRefused = p.now()
+		}
+		if prev != nil && p.now().Sub(firstRefused) < prReuse {
+			m.refused[ref] = firstRefused
 			return github.Snapshot{}, &prError{msg: msg + "; asking once more before the watch stops"}
 		}
 		return github.Snapshot{}, &prError{gone: true, msg: msg + ", then create the watch again"}
