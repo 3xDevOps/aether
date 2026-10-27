@@ -9,7 +9,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// Device statuses of a Deliver result.
 const (
 	DeviceDelivered = "delivered"
 	DeviceFailed    = "failed"
@@ -24,11 +23,11 @@ type DeviceResult struct {
 	Err      error
 }
 
-// Message is a notification Deliver sends. URL is the dashboard path a
-// click opens; Run names the run it is about, when it is about one.
-// Notice keeps it shown when the run's need later ends and its
-// notification is cleared. Clear quietly replaces the need shown under the
-// same run, or URL when there is no run, as a need that ended is.
+// Message is a notification for Deliver. URL is the dashboard path a click
+// opens. Notice keeps it shown when the run's need ends and is cleared.
+// Topic also tags it on the device, apart from the run's own notification,
+// so the run's clears never replace it; Clear quietly replaces the one
+// under the same tag.
 type Message struct {
 	Title, Body, URL string
 	Run              domain.RunID
@@ -41,17 +40,17 @@ type Message struct {
 type message struct {
 	notification
 	URL string `json:"url,omitempty"`
+	Tag string `json:"tag,omitempty"`
 }
 
-// Deliver sends m to every device member subscribed now, without waiting
-// for them to leave a dashboard, and returns each device's result. No
-// result means member has no device.
+// Deliver does not wait for member to leave a dashboard. No result means
+// member has no device.
 func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message) ([]DeviceResult, error) {
 	n := notification{Title: clip(m.Title, fallbackTitleRunes), Body: clip(m.Body, maxBodyRunes), Run: string(m.Run), Notice: m.Notice}
 	if m.Clear {
 		n.Body, n.Clear = clearedBody, true
 	}
-	payload, err := json.Marshal(message{notification: n, URL: m.URL})
+	payload, err := json.Marshal(message{notification: n, URL: m.URL, Tag: m.Topic})
 	if err != nil {
 		return nil, fmt.Errorf("push: encode notification: %w", err)
 	}
@@ -78,7 +77,6 @@ func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message
 	return results, nil
 }
 
-// Devices counts the devices member subscribed.
 func (s *Service) Devices(ctx context.Context, member domain.MemberID) (int, error) {
 	subs, err := s.store.ListPushSubscriptions(ctx, member)
 	if err != nil {

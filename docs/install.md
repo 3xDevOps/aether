@@ -37,9 +37,10 @@ flowchart LR
 - Linux; a headless server is fine. Windows and macOS run only clients.
 - Docker Engine, running
   ([install Docker Engine](https://docs.docker.com/engine/install/)). Every run
-  and member environment is a container. Sharing an agent account between
-  members ([teams.md](teams.md#agent-accounts)) needs Docker Engine 26.0 or
-  newer; `docker version --format '{{.Server.Version}}'` prints yours.
+  and member environment is a container. The snap package does not work: the
+  `aether-server` unit requires `docker.service`. Sharing an agent account
+  between members ([teams.md](teams.md#agent-accounts)) needs Docker Engine
+  26.0 or newer; `docker version --format '{{.Server.Version}}'` prints yours.
 - git, and `ssh-keygen` (package `openssh-client` on Debian and Ubuntu), which
   git uses to sign the commits Aether makes for members who connected GitHub.
 - At least 2.5 GiB of available memory and 6 GiB of free disk, plus disk for

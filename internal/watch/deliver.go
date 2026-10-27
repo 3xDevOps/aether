@@ -179,6 +179,8 @@ func (s *Service) withdraw(ctx context.Context, member domain.MemberID, n *store
 		return nil
 	case status == protocol.WatchStatusFailed:
 		detail = fmt.Sprintf("Delivered, then withdrawing it failed after %d attempts: %s", attempts, detail)
+	case !slices.Contains(w.Conditions, protocol.WatchNeedsYou):
+		status, detail = protocol.WatchStatusWithdrawn, "Withdrawn: "+stoppedNeeds
 	default:
 		status, detail = protocol.WatchStatusWithdrawn, "Withdrawn: no longer needs you"
 	}
@@ -186,8 +188,10 @@ func (s *Service) withdraw(ctx context.Context, member domain.MemberID, n *store
 }
 
 // topicOf is the push topic of n, under which a push service keeps only
-// the newest message a device has yet to receive. A watch's needs have one
-// of their own, so withdrawing one never displaces its other notices.
+// the newest message a device has yet to receive, and the tag of its
+// notification there. A watch's needs have one of their own, so
+// withdrawing one never displaces its other notices, and the run's own
+// clears never replace them.
 func topicOf(n *store.WatchNotification) string {
 	if n.Condition == protocol.WatchNeedsYou {
 		return n.WatchID + "|" + protocol.WatchNeedsYou
@@ -234,6 +238,9 @@ func (s *Service) stillDue(ctx context.Context, n *store.WatchNotification, pref
 	if n.Condition != protocol.WatchNeedsYou {
 		return w, "", "", nil
 	}
+	if !slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
+		return w, protocol.WatchStatusCleared, stoppedNeeds, nil
+	}
 	if w.TargetKind == protocol.WatchTargetRun && s.runs.Paused(w.RunID) {
 		return w, "", "", errRunPaused
 	}
@@ -247,8 +254,12 @@ func (s *Service) stillDue(ctx context.Context, n *store.WatchNotification, pref
 	return w, "", "", nil
 }
 
-// currentNeeds is what w's target waits on its owner for now.
+// currentNeeds is what w's target waits on its owner for now, as far as
+// they still watch for it.
 func (s *Service) currentNeeds(ctx context.Context, w *store.Watch) ([]need, error) {
+	if !slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
+		return nil, nil
+	}
 	switch w.TargetKind {
 	case protocol.WatchTargetRun:
 		run, err := s.store.GetRun(ctx, w.RunID)
@@ -325,15 +336,24 @@ func (s *Service) send(ctx context.Context, member domain.MemberID, notes []*sto
 		}
 		errs = append(errs, s.settle(ctx, watches[n.WatchID], n, state, attempts, next, rowStatus, rowDetail))
 		if rowStatus == protocol.WatchStatusDelivered && n.Condition == protocol.WatchNeedsYou {
-			errs = append(errs, s.withdrawIfEnded(ctx, watches[n.WatchID]))
+			errs = append(errs, s.withdrawIfEnded(ctx, n.WatchID))
 		}
 	}
 	return errors.Join(errs...)
 }
 
 // withdrawIfEnded withdraws a needs_you push delivered after its need
-// ended, which the evaluation that saw it end could not.
-func (s *Service) withdrawIfEnded(ctx context.Context, w *store.Watch) error {
+// ended, or after its owner stopped watching for it, which the evaluation
+// or update that saw it could not. The watch is read again: it can have
+// changed while the push was sent.
+func (s *Service) withdrawIfEnded(ctx context.Context, id string) error {
+	w, err := s.store.GetWatch(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("watch %s: %w", id, err)
+	}
 	current, err := s.currentNeeds(ctx, w)
 	if err != nil || len(current) > 0 {
 		return err
@@ -381,6 +401,8 @@ func (s *Service) settle(ctx context.Context, w *store.Watch, n *store.WatchNoti
 }
 
 const dashboardHold = "Waiting until you leave the dashboard"
+
+const stoppedNeeds = "You stopped watching for needs you"
 
 func quietDetail(p store.NotifyPrefs, until time.Time) string {
 	return "Until " + until.In(location(p)).Format("15:04 MST")
