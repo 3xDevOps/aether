@@ -8,10 +8,6 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 )
 
-// TestProgressCountsOnlyAgentWork: a session/load replay, Aether's own calls
-// and usage or command updates leave LastProgress alone; a thought, a tool
-// call or a compaction moves it, and the open tool and compaction show. A
-// compaction left open in the replayed history is not open now.
 func TestProgressCountsOnlyAgentWork(t *testing.T) {
 	m := newMockAgent(t, loadFixture(t, "codex"))
 	m.resume = func() *acp.RequestError { return &acp.RequestError{Code: -32603, Message: "Internal error"} }

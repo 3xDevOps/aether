@@ -10,11 +10,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/events"
 )
 
-// TestEnhancedTurnWithoutProgressParksAsAPossibleStall: a turn the agent
-// accepted and then went silent on, or answered only with usage and command
-// updates, parks after the first-event grace as a stall: waiting, never
-// disconnected or needing a person. A streaming reply or a running tool is
-// not flagged at the short graces.
 func TestEnhancedTurnWithoutProgressParksAsAPossibleStall(t *testing.T) {
 	t.Parallel()
 	const grace = 300 * time.Millisecond
@@ -53,7 +48,6 @@ func TestEnhancedTurnWithoutProgressParksAsAPossibleStall(t *testing.T) {
 				p.Activity != domain.ActivityWaiting || p.Cause != events.CauseStall {
 				t.Fatalf("parked with %q, %q by %q; want a possible stall ending %q, waiting by stall", p.Reason, p.Activity, p.Cause, want)
 			}
-			// Nothing new arrives, so nothing releases it.
 			time.Sleep(10 * 20 * time.Millisecond)
 			r, err := e.db.GetRun(t.Context(), run.ID)
 			if err != nil {
@@ -74,10 +68,6 @@ func TestEnhancedTurnWithoutProgressParksAsAPossibleStall(t *testing.T) {
 	}
 }
 
-// TestReportReminderTurnKeepsTheStallThreshold: the turn the report gate
-// starts to ask for a missing report is not judged as a new turn of work. A
-// turn that is not the reminder's, such as a member's prompt queued behind
-// it, or any turn while the reminder's start is unknown, is.
 func TestReportReminderTurnKeepsTheStallThreshold(t *testing.T) {
 	t.Parallel()
 	const grace = 300 * time.Millisecond
@@ -116,8 +106,6 @@ func TestReportReminderTurnKeepsTheStallThreshold(t *testing.T) {
 	}
 }
 
-// TestEnhancedFailedFirstPromptShowsItsError: the task prompt the agent
-// refuses at launch fails the run's turn with the agent's own error.
 func TestEnhancedFailedFirstPromptShowsItsError(t *testing.T) {
 	t.Parallel()
 	e, _ := newACPEnv(t)
@@ -129,9 +117,6 @@ func TestEnhancedFailedFirstPromptShowsItsError(t *testing.T) {
 	})
 }
 
-// TestEnhancedAdapterExitIsDisconnected: losing the agent process is the
-// one thing that reads disconnected, and its liveness then reads closed. A
-// provisioning run is in setup.
 func TestEnhancedAdapterExitIsDisconnected(t *testing.T) {
 	t.Parallel()
 	e, rt := newACPEnv(t, func(cfg *Config) {
@@ -160,8 +145,6 @@ func TestEnhancedAdapterExitIsDisconnected(t *testing.T) {
 	}
 }
 
-// TestResumeRestartsTheStallClock: a run paused for longer than the stall
-// threshold does not park on the first poll after it resumes.
 func TestResumeRestartsTheStallClock(t *testing.T) {
 	t.Parallel()
 	const threshold = 400 * time.Millisecond
@@ -188,8 +171,6 @@ func TestResumeRestartsTheStallClock(t *testing.T) {
 	})
 }
 
-// TestRestartRestartsTheStallClock: a server restart reattaching a run that
-// started long ago does not park it on the first poll.
 func TestRestartRestartsTheStallClock(t *testing.T) {
 	t.Parallel()
 	const threshold = 400 * time.Millisecond
