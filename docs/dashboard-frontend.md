@@ -2510,9 +2510,9 @@ copyable commands for whoever has not set the host up. For a swarm worker
 (`mission_role === 'worker'`) a `needs-you` callout above the buttons,
 **Connecting takes control of this swarm worker**, says that a shell,
 command or file transfer over SSH stops the integrator from steering it
-until control is released on the swarm page. The item is not offered for a
-run whose id is not one lowercase host label (`runHost`), the only kind the
-links and the command are built from. The dashboard calls
+until you disconnect or control is released on the swarm page. The item is
+not offered for a run whose id is not one lowercase host label (`runHost`),
+the only kind the links and the command are built from. The dashboard calls
 nothing: the server authorizes when the editor connects
 ([terminal.md](terminal.md#ssh-and-editors)). The desktop app lets exactly
 those three link shapes out of its window.
