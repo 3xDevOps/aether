@@ -368,7 +368,7 @@ func TestUniversalConnectorThroughTheEdge(t *testing.T) {
 				bobID := s1.memberOf(t, bob).ID
 				call[protocol.MemberIdentityRemoveResult](t, h.control(al, s1), protocol.MethodMemberIdentityRemove, protocol.MemberIdentityRemoveParams{
 					MemberID: string(bobID), Provider: edgeproto.ProviderGitHub, Subject: bob.account().Subject})
-				if resp, body = bearer(rotated.AccessToken); resp.StatusCode != http.StatusUnauthorized || !strings.Contains(body, "github account 1002, which authorized it, is no longer bound to member "+string(bobID)) {
+				if resp, body = bearer(rotated.AccessToken); resp.StatusCode != http.StatusUnauthorized || !strings.Contains(body, "no connector holds this access token") {
 					t.Fatalf("bob's connector once his GitHub account is unbound: %s %s", resp.Status, body)
 				}
 				s1.restart(edgeproto.PolicyAccount)

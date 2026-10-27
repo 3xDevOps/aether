@@ -197,7 +197,8 @@ func memberIdentities(id string) error {
 }
 
 // memberUnlink removes one edge account from a member: its devices are
-// revoked and their connections closed. The member, its role, its other
+// revoked and their connections closed, and the connectors its sign-in
+// authorized are deleted. The member, its role, its other
 // accounts, SSH key and tailnet identity stay.
 func memberUnlink(args []string) error {
 	const usage = "usage: aether member unlink <member-id> <provider>:<subject>\n" +

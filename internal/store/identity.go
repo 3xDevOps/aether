@@ -55,15 +55,17 @@ type IdentityStore interface {
 	// the account is bound already.
 	BindIdentity(ctx context.Context, identity *domain.Identity) error
 
-	// RemoveIdentity unbinds (provider, subject) from its member and
-	// deletes every device that signed in with that account, returning
-	// that member, empty when the account had none, and those devices;
-	// ErrNotFound when there was neither. The member, its role and its
-	// other credentials stay.
+	// RemoveIdentity unbinds (provider, subject) from its member, deletes
+	// every device that signed in with that account and every connector
+	// its sign-in authorized, and returns that member, empty when the
+	// account had none, and those devices; ErrNotFound when there was
+	// neither. The member, its role and its other credentials stay.
 	RemoveIdentity(ctx context.Context, provider, subject string) (domain.MemberID, []domain.DeviceID, error)
 	// UnlinkIdentity unbinds (provider, subject) from member, revokes the
-	// devices that signed in with it and returns them. The revoked devices
-	// stay listed, so their keys stay refused.
+	// devices that signed in with it and returns them, and deletes the
+	// connectors its sign-in authorized for member. The revoked devices
+	// stay listed, so their keys stay refused; binding the account again
+	// revives neither.
 	UnlinkIdentity(ctx context.Context, member domain.MemberID, provider, subject string) ([]domain.DeviceID, error)
 
 	// RegisterDevice records a new device of d.Member through its identity
@@ -218,6 +220,10 @@ func (d *DB) RemoveIdentity(ctx context.Context, provider, subject string) (doma
 		`DELETE FROM member_identities WHERE provider = ? AND subject = ?`, provider, subject); err != nil {
 		return "", nil, fmt.Errorf("store: remove identity: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM connectors WHERE provider = ? AND subject = ?`, provider, subject); err != nil {
+		return "", nil, fmt.Errorf("store: remove identity: delete connectors: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return "", nil, fmt.Errorf("store: commit remove identity: %w", err)
 	}
@@ -246,6 +252,10 @@ func (d *DB) UnlinkIdentity(ctx context.Context, member domain.MemberID, provide
 		`UPDATE member_devices SET status = 'revoked', approval_code = ''
 		 WHERE provider = ? AND subject = ? AND member_id = ?`, provider, subject, member); err != nil {
 		return nil, fmt.Errorf("store: unlink identity: revoke devices: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM connectors WHERE provider = ? AND subject = ? AND member_id = ?`, provider, subject, member); err != nil {
+		return nil, fmt.Errorf("store: unlink identity: delete connectors: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("store: commit unlink identity: %w", err)

@@ -121,7 +121,8 @@ func TestReviewerSignInOff(t *testing.T) {
 // server the account file names. The reviewer sees only that server, and
 // gets no edge session: no device sign-in, server claim or invitation.
 // The consent page names bob, and the connector works until the account
-// is bound to an admin or unbound. Binding needs an admin and refuses an
+// is bound to an admin or unbound; unbinding deletes it, so binding the
+// login again does not revive it. Binding needs an admin and refuses an
 // admin member.
 func TestReviewerSignIn(t *testing.T) {
 	t.Parallel()
@@ -225,9 +226,24 @@ func TestReviewerSignIn(t *testing.T) {
 		MemberID: string(bobID), Provider: edgeproto.ProviderReviewer, Subject: reviewerLogin}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if resp, body = toolsList(); resp.StatusCode != http.StatusUnauthorized || !strings.Contains(body, "is no longer bound to member "+string(bobID)) {
-		t.Fatalf("tools/list once unbound: %s %s, want 401", resp.Status, body)
+	refresh := func() (*http.Response, string) {
+		return mcpRequest(t, http.MethodPost, base+"/token", http.Header{"Content-Type": {"application/x-www-form-urlencoded"}},
+			strings.NewReader(url.Values{"grant_type": {"refresh_token"}, "client_id": {client.id}, "refresh_token": {tok.RefreshToken}, "resource": {base}}.Encode()))
 	}
+	refused := func(when string) {
+		t.Helper()
+		if resp, body := toolsList(); resp.StatusCode != http.StatusUnauthorized || !strings.Contains(body, "no connector holds this access token") {
+			t.Fatalf("tools/list %s: %s %s, want 401", when, resp.Status, body)
+		}
+		if resp, body := refresh(); resp.StatusCode == http.StatusOK {
+			t.Fatalf("refresh %s: %s %s, want refused", when, resp.Status, body)
+		}
+	}
+	refused("once unbound")
+	if err = link(aliceID, bobID); err != nil {
+		t.Fatal(err)
+	}
+	refused("once bound again")
 }
 
 // TestReviewerLockout gets the reviewer password wrong until the sign-in
