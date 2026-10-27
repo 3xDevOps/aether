@@ -230,12 +230,17 @@ export function ActionCard({ action }: { action: AssistantAction }) {
 }
 
 function WholeItem({ seq }: { seq: number | undefined }) {
-  const [error, setError] = useState<string>()
+  const [read, setRead] = useState<{ seq: number; error?: string }>()
   useEffect(() => {
     if (seq === undefined) return
-    loadWholeItem(useStore, api, assistantSessionID, seq).catch((err) => setError(message(err)))
+    let live = true
+    loadWholeItem(useStore, api, assistantSessionID, seq).then(() => live && setRead({ seq }), (err) => live && setRead({ seq, error: message(err) }))
+    return () => {
+      live = false
+    }
   }, [seq])
-  if (seq === undefined) return null
+  if (seq === undefined || (read?.seq === seq && !read.error)) return null
+  const error = read?.seq === seq ? read.error : undefined
   return <p role={error ? 'alert' : 'status'} className={cn('text-ui-sm', error ? 'text-state-failed' : 'text-muted')}>{error ?? 'Loading the whole call…'}</p>
 }
 

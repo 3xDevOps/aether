@@ -329,6 +329,17 @@ describe('review fixes', () => {
     expect(await within(aside).findByText(/the whole message/)).toBeDefined()
   })
 
+  it('stops saying it is loading once the whole item is read, even if the call still reads as cut', async () => {
+    const head = [item('turn_start', 1), say(1, 'user', 'Message')]
+    const cut = { ...aether(1, 't1', 'aether_message_run', 'completed', { raw_input: { run_id: 'run_fix' } }), truncated: true }
+    vi.mocked(api.assistantItem).mockResolvedValue(cut)
+    const aside = await openPanel([...head, cut, item('turn_end', 1, { stop_reason: 'end_turn' })])
+    const messaged = await card(aside, /^Messaged run fix-login\. Done$/)
+    await userEvent.click(within(messaged).getByRole('button', { name: 'Details' }))
+    await waitFor(() => expect(api.assistantItem).toHaveBeenCalledWith(cut.seq))
+    await waitFor(() => expect(within(messaged).queryByText('Loading the whole call…')).toBeNull())
+  })
+
   it('loads earlier actions into the history when the conversation has more', async () => {
     const older = [item('turn_start', 1), say(1, 'user', 'Launch'), aether(1, 'o1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_fix' } } }), item('turn_end', 1, { stop_reason: 'end_turn' })]
     const recent = [item('turn_start', 2), say(2, 'user', 'Read'), aether(2, 'r1', 'aether_get_run', 'completed', { raw_input: { run_id: 'run_fix' } }), item('turn_end', 2, { stop_reason: 'end_turn' })]
