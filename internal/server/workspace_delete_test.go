@@ -79,13 +79,20 @@ func TestWorkspaceDeletePopulatedInactiveWorkspace(t *testing.T) {
 	if _, err := s.ssh.Local(member.ID).Call(ctx, protocol.MethodWorkspaceMirrorConfigure, mirrorParams); err != nil {
 		t.Fatal(err)
 	}
-	secretParams, _ := json.Marshal(protocol.WorkspaceEnvironmentSetParams{WorkspaceID: string(ws.ID), Set: []protocol.WorkspaceVariable{{Name: "NPM_TOKEN", Value: "token", Secret: true}}})
+	secretParams, _ := json.Marshal(protocol.WorkspaceEnvironmentSetParams{
+		WorkspaceID: string(ws.ID),
+		Set:         []protocol.WorkspaceVariable{{Name: "NPM_TOKEN", Value: "token", Secret: true}},
+		Files:       []protocol.WorkspaceFile{{Path: ".env", Content: "NPM_TOKEN=token\n"}},
+	})
 	if _, err := s.ssh.Local(member.ID).Call(ctx, protocol.MethodWorkspaceEnvironmentSet, secretParams); err != nil {
 		t.Fatal(err)
 	}
 	secretFile := filepath.Join(root, "workspace-secrets", string(ws.ID)+".json")
-	if _, err := os.Stat(secretFile); err != nil {
-		t.Fatalf("workspace secret file: %v", err)
+	filesFile := filepath.Join(root, "workspace-secrets", string(ws.ID)+".files.json")
+	for _, file := range []string{secretFile, filesFile} {
+		if _, err := os.Stat(file); err != nil {
+			t.Fatalf("workspace secret file: %v", err)
+		}
 	}
 	candidateID := "finished-candidate"
 	candidate, _ := json.Marshal(protocol.Candidate{CandidateID: candidateID, WorkspaceID: string(ws.ID), State: protocol.CandidateUnavailable})
@@ -136,7 +143,7 @@ func TestWorkspaceDeletePopulatedInactiveWorkspace(t *testing.T) {
 	if _, err := s.db.GetWorkspaceBudget(ctx, ws.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("deleted budget: %v", err)
 	}
-	removed = append(removed, filepath.Join(root, "repos", string(ws.ID)+".git"), filepath.Join(root, "mirrors", string(ws.ID)), secretFile)
+	removed = append(removed, filepath.Join(root, "repos", string(ws.ID)+".git"), filepath.Join(root, "mirrors", string(ws.ID)), secretFile, filesFile)
 	for _, path := range removed {
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("deleted artifact %s: %v", path, err)

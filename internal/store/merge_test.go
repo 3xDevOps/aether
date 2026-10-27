@@ -162,14 +162,6 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, f := range []struct {
-		m domain.MemberID
-		r domain.RunID
-	}{{b.ID, runB.ID}, {a.ID, runC.ID}, {b.ID, runC.ID}} {
-		if err := db.PutAssistantFollow(ctx, f.m, f.r); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if err := db.PutPushSubscription(ctx, &PushSubscription{Endpoint: "https://push.example/b", MemberID: b.ID, P256DH: "k", Auth: "a"}); err != nil {
 		t.Fatal(err)
 	}
@@ -281,11 +273,6 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	}
 	if steerers, gerr := db.ListRunSteerers(ctx, runC.ID); gerr != nil || len(steerers) != 1 || steerers[0].ID != a.ID {
 		t.Fatalf("steerers = %v, %v", steerers, gerr)
-	}
-	for _, run := range []domain.RunID{runB.ID, runC.ID} {
-		if follows, gerr := db.ListAssistantFollows(ctx, run); gerr != nil || len(follows) != 1 || follows[0].MemberID != a.ID {
-			t.Fatalf("follows of %s = %+v, %v; want the survivor's alone", run, follows, gerr)
-		}
 	}
 	if owners, gerr := db.ListAccountOwners(ctx, a.ID); gerr != nil || len(owners) != 1 || owners[0].ID != c.ID {
 		t.Fatalf("accounts shared with the survivor = %v, %v", owners, gerr)

@@ -1,5 +1,6 @@
 import { ApiError, type Api } from '@/lib/api'
-import type { ViewAttachment, ViewContext, ViewEntry } from '@/lib/assistant-types'
+import { message } from '@/lib/format'
+import type { LaunchDefault, ViewAttachment, ViewContext, ViewEntry } from '@/lib/assistant-types'
 import { isRunView, type RunView } from '@/routes/run/views'
 import type { RootState, RootStore } from '@/store'
 import type { SliceCreator } from '@/store/slice'
@@ -9,9 +10,12 @@ export const maxAttachments = 6
 export const maxViewContextBytes = 4096
 export const maxViewPathBytes = 512
 export const maxViewCheckBytes = 128
+export const maxLaunchDefaults = 4
 /** Navigation sends at most one view context per second. */
 export const viewSyncDelay = 1000
 export const shareRetryDelay = 3000
+/** How long a send waits for the view context to reach the server. */
+export const viewFlushTimeout = 10_000
 const maxRetryDelay = 60_000
 
 /** The server refused the call for good (unavailable, invalid params): retrying cannot help. */
@@ -119,11 +123,27 @@ function pageContext(s: RootState): PageContext {
   return { route, open_file: openFile(s, route), recent: s.viewHistory.filter((entry) => !sameEntity(entry, route)) }
 }
 
-/** Trims as the server does: the oldest recent pages, then the open file, then the last attachments. */
+/** A model the server keeps: one with both : and @ is shaped like user:token@host. */
+function sendableModel(model: string | undefined): model is string {
+  return model !== undefined && /^[A-Za-z0-9][A-Za-z0-9_.:/@[\]-]{0,127}$/.test(model) && !(model.includes(':') && model.includes('@'))
+}
+
+/** The member's remembered launches, newest first, as the server keeps them. */
+export function launchDefaults(s: RootState): LaunchDefault[] | undefined {
+  const list = Object.entries(s.launchDefaults)
+    .filter(([agent, held]) => /^[a-z][a-z0-9_.-]{0,39}$/.test(agent) && ['tui', 'acp', 'headless'].includes(held.mode))
+    .sort(([, a], [, b]) => b.at - a.at)
+    .slice(0, maxLaunchDefaults)
+    .map(([agent, { mode, model }]): LaunchDefault => (sendableModel(model) ? { agent, mode, model } : { agent, mode }))
+  return list.length ? list : undefined
+}
+
+/** Trims as the server does: the oldest recent pages, then the open file, then the launch defaults, then the last attachments. */
 function fit(context: ViewContext): ViewContext {
   while (marshalledBytes(context) > maxViewContextBytes) {
     if (context.recent?.length) context.recent = context.recent.slice(0, -1)
     else if (context.open_file) context.open_file = undefined
+    else if (context.launch_defaults) context.launch_defaults = undefined
     else if (context.attachments?.length) context.attachments = context.attachments.slice(0, -1)
     else break
   }
@@ -178,7 +198,14 @@ export function draftViewContext(s: RootState): ViewContext | undefined {
   const attachments = s.assistantAttachments.map(sendableAttachment)
   const page = assistantShareView(s) && !s.assistantPageRemoved ? draftPage(s).page : undefined
   if (!page && !attachments.length) return undefined
-  return fit({ version: 1, captured_at: s.assistantPin?.captured_at ?? new Date().toISOString(), ...page, ...(attachments.length ? { attachments } : {}) })
+  const defaults = page && launchDefaults(s)
+  return fit({
+    version: 1,
+    captured_at: s.assistantPin?.captured_at ?? new Date().toISOString(),
+    ...page,
+    ...(defaults ? { launch_defaults: defaults } : {}),
+    ...(attachments.length ? { attachments } : {}),
+  })
 }
 
 /** What a prompt retried with sharing now off may still carry. */
@@ -213,7 +240,26 @@ export function viewContextKey(context: ViewContext): string {
 export function syncedViewContext(s: RootState, now = new Date()): ViewContext | undefined {
   if (s.assistantPageRemoved) return { version: 1, captured_at: now.toISOString() }
   const { page, moved } = draftPage(s)
-  return moved ? undefined : fit({ version: 1, captured_at: now.toISOString(), ...page })
+  const defaults = launchDefaults(s)
+  return moved ? undefined : fit({ version: 1, captured_at: now.toISOString(), ...page, ...(defaults ? { launch_defaults: defaults } : {}) })
+}
+
+const syncs = new WeakMap<RootStore, () => Promise<void>>()
+
+/**
+ * Sends the view context now, once any send in flight lands, so a prompt
+ * sent next cannot reach an agent that still reads a page the member just
+ * removed. Rejects with the server's error when it is not sent, or after
+ * `timeout`. Resolves at once while no sync runs.
+ */
+export function flushViewSync(store: RootStore, timeout = viewFlushTimeout): Promise<void> {
+  const settled = syncs.get(store)
+  if (!settled) return Promise.resolve()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`assistant.view got no answer within ${timeout / 1000} seconds`)), timeout)
+  })
+  return Promise.race([settled(), late]).finally(() => clearTimeout(timer))
 }
 
 /** While it runs, sends the server each changed view context, one at a time and debounced, retrying a failed one with backoff. */
@@ -221,43 +267,56 @@ export function syncViewContext(store: RootStore, client: Pick<Api, 'assistantVi
   let sent = ''
   let refused = ''
   let failures = 0
-  let sending = false
+  let failure = ''
+  let sending: Promise<void> | null = null
   let stopped = false
   let timer: ReturnType<typeof setTimeout> | undefined
   const schedule = (delay = viewSyncDelay) => {
     if (!stopped && timer === undefined) timer = setTimeout(flush, delay)
   }
-  const flush = () => {
+  const flush = (): Promise<void> => {
+    clearTimeout(timer)
     timer = undefined
+    if (sending) return sending.then(flush)
     const s = store.getState()
-    if (sending || !assistantShareView(s)) return
+    if (stopped || !assistantShareView(s)) return Promise.resolve()
     const context = syncedViewContext(s)
-    if (!context) return
+    if (!context) return Promise.resolve()
     const key = viewContextKey(context)
-    if (key === sent || key === refused) return
-    sending = true
-    client.assistantView(context).then(() => {
+    if (key === sent || key === refused) return Promise.resolve()
+    sending = client.assistantView(context).then(() => {
       sent = key
       failures = 0
     }, (err: unknown) => {
+      failure = message(err)
       if (permanent(err)) refused = key
       else failures++
     }).finally(() => {
-      sending = false
+      sending = null
       clearTimeout(timer)
       timer = undefined
       schedule(backoff(viewSyncDelay, failures))
     })
+    return sending
   }
+  const settled = async () => {
+    await flush()
+    const s = store.getState()
+    const context = assistantShareView(s) ? syncedViewContext(s) : undefined
+    if (context && viewContextKey(context) !== sent) throw new Error(`assistant.view: ${failure}`)
+  }
+  syncs.set(store, settled)
   schedule()
   const stop = store.subscribe((s, prior) => {
     // A prompt may leave its own, older context on the server; send the current one again.
     if (prior.assistantSending && !s.assistantSending) sent = ''
-    schedule()
+    if (s.assistantPageRemoved && !prior.assistantPageRemoved) void flush()
+    else schedule()
   })
   return () => {
     stopped = true
     stop()
+    if (syncs.get(store) === settled) syncs.delete(store)
     if (timer !== undefined) clearTimeout(timer)
   }
 }

@@ -220,7 +220,7 @@ func TestANeedSentInASummaryIsNotWithdrawnOnItsOwn(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	a, b := h.run(h.ada, "First"), h.run(h.ada, "Second")
+	a, b := h.run(h.bob, "First"), h.run(h.bob, "Second")
 	wa, wb := h.watch(h.ada, runTarget(a)).Watch, h.watch(h.ada, runTarget(b)).Watch
 	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
 	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")
@@ -378,6 +378,8 @@ type harness struct {
 	swarm atomic.Pointer[protocol.AttentionItem]
 	keys  int
 	pr    PRSource
+	// assistant, when set, is the conversation the next start writes to.
+	assistant Assistant
 	// recovered, when set, is the scheduler recovery the next start waits for.
 	recovered chan struct{}
 }
@@ -440,6 +442,9 @@ func (h *harness) start() {
 	}
 	if h.pr != nil {
 		svc.UsePRSource(h.pr)
+	}
+	if h.assistant != nil {
+		svc.UseAssistant(h.assistant)
 	}
 	if err = svc.Start(h.ctx); err != nil {
 		h.t.Fatalf("Start: %v", err)
@@ -624,7 +629,9 @@ func TestRunNeedsAreNotifiedOncePerNeedAndFinishWordsStayApart(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	phone := h.subscribe(h.ada)
-	run := h.run(h.ada, "Fix the login redirect")
+	// Bob owns the run: its owner's needs reach their devices as the run's
+	// own notification, which the watch does not push again.
+	run := h.run(h.bob, "Fix the login redirect")
 	w := h.watch(h.ada, runTarget(run)).Watch
 
 	// Waiting on workers, CI or nothing, an answered question and an
@@ -1036,7 +1043,7 @@ func TestNeedAnsweredBeforeThePushIsDropped(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	phone := h.subscribe(h.ada)
-	run := h.run(h.ada, "Rotate the keys")
+	run := h.run(h.bob, "Rotate the keys")
 	w := h.watch(h.ada, runTarget(run)).Watch
 
 	// Ada is on a dashboard: the in-app toast covers it and push waits.
@@ -1199,7 +1206,7 @@ func TestQuietHoursHoldPushesAndSendOneWhenTheyEnd(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	a, b := h.run(h.ada, "First"), h.run(h.ada, "Second")
+	a, b := h.run(h.bob, "First"), h.run(h.bob, "Second")
 	wa, wb := h.watch(h.ada, runTarget(a)).Watch, h.watch(h.ada, runTarget(b)).Watch
 	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
 	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")
@@ -1259,7 +1266,7 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 
-	none := h.run(h.ada, "No device")
+	none := h.run(h.bob, "No device")
 	w := h.watch(h.ada, runTarget(none)).Watch
 	if !strings.Contains(h.watch(h.ada, runTarget(none)).Receipt, "in-app only") {
 		t.Fatal("receipt does not say a member without a device is told in-app only")
@@ -1269,7 +1276,7 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 
 	phone := h.subscribe(h.bob)
 	phone.status.Store(http.StatusInternalServerError)
-	failing := h.run(h.bob, "Failing device")
+	failing := h.run(h.ada, "Failing device")
 	w = h.watch(h.bob, runTarget(failing)).Watch
 	if r := h.watch(h.bob, runTarget(failing)).Receipt; !strings.Contains(r, "Push: 1 device.") {
 		t.Fatalf("receipt = %q, want it to count the device", r)
@@ -1293,14 +1300,14 @@ func TestPushResultsAreTheDevicesOwn(t *testing.T) {
 	}
 
 	phone.status.Store(http.StatusCreated)
-	ok := h.run(h.bob, "Working device")
+	ok := h.run(h.ada, "Working device")
 	w = h.watch(h.bob, runTarget(ok)).Watch
 	h.status(ok, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: z")
 	h.eventually("delivered", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
 
 	// A device its push service reports gone is unsubscribed.
 	phone.status.Store(http.StatusGone)
-	gone := h.run(h.bob, "Gone device")
+	gone := h.run(h.ada, "Gone device")
 	w = h.watch(h.bob, runTarget(gone)).Watch
 	h.status(gone, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: g")
 	h.eventually("a failed attempt", func() bool {
@@ -1462,7 +1469,7 @@ func TestPushOfAPausedRunWaitsForItsResumption(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	run := h.run(h.ada, "Paused mid-question")
+	run := h.run(h.bob, "Paused mid-question")
 	w := h.watch(h.ada, runTarget(run)).Watch
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "needs input: keep going?")
 	h.eventually("the held push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusHeldQuiet })
@@ -1618,7 +1625,7 @@ func TestTurningQuietHoursOffReleasesHeldPushesExceptPausedOnes(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	a, b := h.run(h.ada, "Kept"), h.run(h.ada, "Paused")
+	a, b := h.run(h.bob, "Kept"), h.run(h.bob, "Paused")
 	wa, wb := h.watch(h.ada, runTarget(a)).Watch, h.watch(h.ada, runTarget(b)).Watch
 	h.status(a, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: one")
 	h.status(b, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: two")

@@ -678,6 +678,28 @@ func (s *Scheduler) CloseRun(ctx context.Context, run domain.RunID, actor domain
 
 // closeRun shares exact-container retention between human Close and accepted
 // mission outcomes. Mission completion never makes a worker relaunchable.
+// reportedOnlyRefusalLocked refuses a reportedOnly close of a run that is
+// neither live with its reported success awaiting review nor already
+// completed, as by a concurrent complete, whose acceptance setReview checks.
+// The caller holds s.mu, under which setReview moves the review, and the
+// run's lifecycle lock when it has an owner, under which Relaunch reopens it.
+func (s *Scheduler) reportedOnlyRefusalLocked(ctx context.Context, run domain.RunID, spec closeSpec) error {
+	if !spec.reportedOnly {
+		return nil
+	}
+	current, err := s.cfg.Store.GetRun(ctx, run)
+	if err != nil {
+		return err
+	}
+	if current.Status == domain.RunCompleted {
+		return nil
+	}
+	if !current.Status.Live() || current.Review != domain.ReviewReady {
+		return fmt.Errorf("%w: run %s", ErrReviewNotReported, run)
+	}
+	return nil
+}
+
 func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSpec) error {
 	outcome, actor, mission := spec.outcome, spec.actor, spec.mission
 	closeReason := spec.retained
@@ -741,7 +763,10 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 				return nil
 			}
 			s.mu.Lock()
-			err = s.transitionOutcomeLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor, spec.cause())
+			err = s.reportedOnlyRefusalLocked(ctx, run, spec)
+			if err == nil {
+				err = s.transitionOutcomeLocked(ctx, run, r.WorkspaceID, r.Status, outcome, "closed", actor, spec.cause())
+			}
 			s.mu.Unlock()
 			if err != nil {
 				return err
@@ -765,6 +790,10 @@ func (s *Scheduler) closeRun(ctx context.Context, run domain.RunID, spec closeSp
 	entry.lifecycleMu.Lock()
 	defer entry.lifecycleMu.Unlock()
 	s.mu.Lock()
+	if err := s.reportedOnlyRefusalLocked(ctx, run, spec); err != nil {
+		s.mu.Unlock()
+		return err
+	}
 	status, workspace := entry.status, entry.workspaceID
 	live := s.runs[run] == entry
 	if !live {

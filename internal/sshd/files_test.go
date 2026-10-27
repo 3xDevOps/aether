@@ -3,6 +3,7 @@ package sshd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -69,6 +70,20 @@ func TestFilesReadDoesNotEchoServicePath(t *testing.T) {
 	}
 	if strings.Contains(pe.Message, "/var/lib/aether") {
 		t.Fatalf("files.read leaked host path: %q", pe.Message)
+	}
+}
+
+func TestFilesReadRefusesAWorkspaceFile(t *testing.T) {
+	t.Parallel()
+	reader := &fakeFiles{readErr: fmt.Errorf(".env: %w", gitengine.ErrWorkspaceFile)}
+	e := newTestEnv(t, func(c *Config) { c.Services.Files = reader })
+	viewerSigner, _ := addMember(t, e, "Viewer", domain.RoleViewer, false)
+	err := controlAs(t, e, viewerSigner).Call(protocol.MethodFilesRead, protocol.FilesReadParams{
+		WorkspaceID: string(e.ws.ID), RunID: string(e.run.ID), Path: ".env",
+	}, nil)
+	pe := wireErrOf(t, err)
+	if want := "files.read: .env: a workspace file is readable only inside the run, by its agent or in its terminal"; pe.Code != protocol.CodeDenied || pe.Message != want {
+		t.Fatalf("files.read of a workspace file = %+v, want CodeDenied %q", pe, want)
 	}
 }
 
