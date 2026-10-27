@@ -57,7 +57,7 @@ func (s *Service) Transcribe(ctx context.Context, member domain.MemberID, n watc
 	if body != "" {
 		body = truncate(body, maxNoticeBodyRunes) + "\n\n"
 	}
-	body += "Stop or change this watch: " + n.WatchLink
+	body += "[Stop or change this watch](" + strings.TrimPrefix(n.WatchLink, "/") + ")"
 	done := make(chan error, 1)
 	go func() {
 		done <- s.note(ctx, s.member(member), acphost.Notice{Severity: severity, Title: title, Description: body})

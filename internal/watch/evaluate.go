@@ -146,10 +146,11 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 }
 
 // withdrawEnded queues the quiet replacement of w's delivered needs_you
-// pushes, once its target needs nothing from the owner. A paused run's
-// needs read as none while they are still open, so they stay.
+// pushes, once its target needs nothing from the owner or they stopped
+// watching for it. A paused run's needs read as none while they are still
+// open, so they stay.
 func (s *Service) withdrawEnded(ctx context.Context, w *store.Watch) error {
-	if !slices.Contains(w.Conditions, protocol.WatchNeedsYou) || w.TargetKind == protocol.WatchTargetRun && s.runs.Paused(w.RunID) {
+	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) && w.TargetKind == protocol.WatchTargetRun && s.runs.Paused(w.RunID) {
 		return nil
 	}
 	n, err := s.store.WithdrawWatchNeeds(ctx, w.ID, s.now())
@@ -339,12 +340,13 @@ func inputKey(r *domain.RunInputRequest) string {
 }
 
 // runFinish words how the run ended, keeping apart what the agent
-// reported from what a member decided. A success the agent reported is
-// keyed by when the run entered that standing, so a later one is announced
-// again; prev is the finished key last fired. A live reported success that
-// then completes, by its report or by a member accepting or closing it,
-// keeps that key: it is the same finish. The caller clears prev when the
-// run went back to work since, so a later finish is a new one.
+// reported from what a member decided. A completion, and a success the
+// agent reported, is keyed by when the run entered that standing, so a
+// retained run that completes again is announced again; prev is the
+// finished key last fired. A live reported success that then completes,
+// by its report or by a member accepting or closing it, keeps that key: it
+// is the same finish. The caller clears prev when the run went back to
+// work since, so a later finish is a new one.
 func runFinish(run *domain.Run, prev string) (key, body string, ok bool) {
 	reason := strings.TrimSuffix(run.Reason, "; retained container")
 	if run.Status == domain.RunCompleted && strings.HasPrefix(prev, "reported|live|") {
@@ -364,7 +366,7 @@ func runFinish(run *domain.Run, prev string) (key, body string, ok bool) {
 		return "interrupted", "Stopped", true
 	case domain.RunCompleted:
 		if reason != domain.ReportedSuccessReason {
-			return "completed", "Completed", true
+			return "completed|" + changedAt(run), "Completed", true
 		}
 	}
 	if run.Status != domain.RunCompleted && (!run.Status.Live() || run.Activity != domain.ActivityFinished) {
@@ -374,10 +376,14 @@ func runFinish(run *domain.Run, prev string) (key, body string, ok bool) {
 	if run.Status.Live() {
 		key += "live|"
 	}
-	if run.StatusChangedAt != nil {
-		key += strconv.FormatInt(run.StatusChangedAt.UnixNano(), 10)
+	return key + changedAt(run), "Agent reported done", true
+}
+
+func changedAt(run *domain.Run) string {
+	if run.StatusChangedAt == nil {
+		return ""
 	}
-	return key, "Agent reported done", true
+	return strconv.FormatInt(run.StatusChangedAt.UnixNano(), 10)
 }
 
 func (s *Service) readMission(ctx context.Context, w *store.Watch) (reading, error) {
@@ -446,8 +452,12 @@ func (s *Service) missionFinish(ctx context.Context, m *domain.Mission) (string,
 // you table its current integrator carries otherwise, such as the
 // integrator down. An integrator that failed to launch before its run row
 // existed carries none, so its launch error is read from the swarm. Each
-// is a need of its own.
+// is a need of its own. A swarm that ended needs nothing: whatever it
+// still asked is moot.
 func (s *Service) missionNeeds(ctx context.Context, m *domain.Mission) ([]need, error) {
+	if m.Phase.Terminal() {
+		return nil, nil
+	}
 	var out []need
 	if m.OpenQuestions > 0 {
 		questions, err := s.store.ListMissionQuestions(ctx, m.ID)

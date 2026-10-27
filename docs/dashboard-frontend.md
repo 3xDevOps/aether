@@ -531,7 +531,7 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
 - **Phone:** a right side sheet, a `dialog` named "Assistant".
 - **Header:** an `h2`, because the view beside it owns the page's `h1`. It
   takes the run header's height on a run and the view header's elsewhere, so
-  the two seams line up. It holds the agent and state, **New conversation** (confirms, then
+  the two seams line up. It holds the agent and state, **Actions**, **New conversation** (confirms, then
   `assistant.reset`) and **Close assistant**. While `auto_approve` is on, a
   line under it says the assistant acts without asking, with **Change in
   Settings**.
@@ -562,6 +562,69 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   links **Skip these cards…** to Settings > Assistant; a card with
   `other_member` says that member (`other_owner`) owns the run, so it asks
   even with auto-approval on.
+- **Action cards** (`components/assistant/action-card.tsx`,
+  `lib/assistant-actions.ts`): `assistantView` takes each Aether tool call out
+  of its step block as a card: one whose `tool_name` ends in an `aether_*`
+  tool (Claude Code's `mcp__aether__aether_launch_run`, or the bare name), or
+  a Codex call titled `mcp.aether.aether_*`, whose `{server, tool, arguments}`
+  input and `{result, error}` output are unwrapped from the call's latest
+  snapshot. The block splits at each call, so the card sits where the call
+  ran; a part left with no work becomes the rows its prose and notices would
+  have been. The card names the verb and target from the inputs and the
+  store's names ("Launched run on api with Claude Code", "Messaged run
+  fix-login", "Merged PR #42"; a run is named by `runLabel`), a state
+  (`Running`, `Done`, `Failed`, `You declined`, `No answer in 10 minutes`,
+  `Withdrawn: the turn ended before you answered`, or `Did not finish: the
+  turn ended first` for a call still open when its turn ended, approved or
+  not) with `approved by you` or `auto-approved`, and its time. A call
+  waiting for approval is one line that points at the approval card in the
+  composer dock, and the live line under it is dropped. A failure shows the
+  server's error verbatim; a declined, expired or withdrawn card keeps the
+  error for **Details**. A launch receipt (`result.launch`) or a watch result
+  gets one more line. A done launch whose run or swarm is still active reads
+  **Working in the background**; a launched swarm the store has not loaded
+  counts as working while the card reads it with `mission.show`, and a read
+  that fails shows its error. The header calls the assistant's own turn
+  **Generating…**. The target comes from the result's `link` or
+  `url`: a dashboard link (`?run=<id>`, `?page=missions&id=<id>`, a watch's
+  settings link) opens in the app whatever its host, and any other `http(s)`
+  address, such as a pull request, opens in a new tab. Without one it comes
+  from the created ids, then from `run_id`, `mission_id` or `workspace_id` in
+  the inputs. A run or workspace the hydrated store no longer holds reads
+  "This run no longer exists" and has no link; a launch's own run never does,
+  since the transcript can show it before the store hears of it. Failed,
+  declined, expired and unfinished cards offer **Retry**, which adds `Retry:
+  <summary>` under any text in the composer and focuses it without sending.
+  **Details** shows the input and result, and first reads a cut-down item
+  whole with `assistant.item`, as does an expanded read. An `aether_*` tool
+  without words of its own shows its name and inputs. The card is not a tab
+  stop; Tab reaches its link, Retry and Details buttons. Consecutive read tools (and any `aether_list_*` or
+  `aether_get_*`) fold into one quiet line, "Read 3 runs and 1 workspace
+  list", that expands to each read. Expansion lives in `expandedRows` under
+  `assistant`.
+- **Outcome:** a notice carrying an action record (`notice.action`, the
+  server's `AssistantAction`) decides the state. Records with the same
+  `action.id` replace earlier ones. Records carry no tool call id, so a record
+  goes to the card already holding its `action.id`, or else to an unclaimed
+  call of the same method whose input names no `run_id` or `workspace_id`
+  other than the record's target: the oldest such call in the newest block
+  that has one, so identical calls of one block take their records in turn
+  and an older block's unrecorded call does not take a new record. An older
+  server's `Approved:` note names its run only in the summary: it goes to the
+  one unclaimed call of its method, or to the one whose `run_id` the summary
+  names, and otherwise stays a row. Without a record, the state comes from the
+  tool call's status, a `declined`, `did not answer within` or `ended before
+  the member answered` error, a pending
+  confirmation of the call's method, and the `Approved:` or `Auto-approved:`
+  note. A matched notice is folded into its card instead of showing as a row.
+- **Actions** (`components/assistant/action-history.tsx`): a header button
+  opening a popover that reads the transcript only while open. It lists this
+  conversation's cards (not reads) newest first with outcome, target and
+  time, all read from the loaded transcript.
+  While earlier messages are not loaded it says so and offers **Show earlier
+  actions**, which loads them as **Show earlier messages** does. Focus starts
+  on the newest entry. Up, Down, Home and End move, and Enter opens the target
+  and closes the popover.
 - **Auto-approval suggestion** (`components/assistant/suggestion.tsx`): when
   the status has `suggest_auto_approve`, the state is `idle`, no turn runs,
   no confirmation or harness prompt waits and the conversation has items, a
@@ -6024,7 +6087,8 @@ while one of its entries is visible, so the nav and search never disagree.
 |---|---|---|
 | You | General (`general`) | Appearance: Theme (`theme`), Text size (`text-size`); Keyboard (`keyboard`); Profile (`profile`); Setup guide (`setup-guide`) |
 | You | Connections (`connections`) | ChatGPT and Claude (`connectors`); GitHub (`github`) |
-| You | Notifications (`notifications`) | Push notifications (`push`); Slack (`slack`) |
+| You | Notifications (`notifications`) | Push notifications (`push`); Watch notifications: push devices (`watch-push`), Quiet hours (`quiet-hours`); Slack (`slack`) |
+| You | Watches (`watches`) | Watches (`watch-list`) |
 | You | Assistant (`assistant`) | Approvals (`auto-approve`) |
 | You | Child runs (`children`) | Child runs (`child-runs`): Allow automatic fallback (`child-fallback`), Use subscriptions shared with me (`child-shared`), Limits (`child-limits`) |
 | You | Usage (`usage`) | Subscription usage (`subscription-usage`) |
@@ -6105,8 +6169,18 @@ Categories:
   reused. Successful explicit revision acceptance upserts/selects the
   workspace and opens its repository page. Non-admins see neither row.
 - **Notifications**: **Notify this device when a run needs me**, described
-  under [Push notifications](#push-notifications), and Slack direct
-  messages ([slack.md](slack.md)).
+  under [Push notifications](#push-notifications), **Watch notifications**
+  and Slack direct messages ([slack.md](slack.md)). Watch notifications
+  (`notify.prefs.get` and `notify.prefs.set`, shown when the server has
+  them) holds **Watch notifications on push devices**, whose help states
+  where notices go now (`Push to 2 devices`, `Push is off`, `No push
+  device subscribed, so in-app only`, or `No push (<push.status error>), so
+  in-app only` when the server has no Web Push, then the desktop app and
+  in-app; it is re-read when this device subscribes or unsubscribes above), and **Quiet hours**: turning it on saves 22:00 to 07:00 in the browser's time
+  zone; **From**, **Until** and **Time zone** change it, with **Save**; a
+  quiet-hours save leaves `push` out so the server keeps its value; a
+  refused change shows its error on that row. See
+  [Watches](#watches).
 - **Assistant**, where the assistant is available (`useAssistantAvailable`):
   **Let the assistant act without asking** reads and sets `assistant.settings`
   `auto_approve`. Under it, **What auto-approval covers** lists what runs
@@ -6204,6 +6278,68 @@ Categories:
 Repository settings, base freshness and the source mirror live on the
 [Repository page](#repository-page) on either gateway.
 
+### Watches
+
+A **watch** is a member's standing request that the server tell them when a
+run, a swarm or a pull request needs them or finishes; the server evaluates
+it, so it keeps checking with every page closed. Notices appear in the
+dashboard and go to the member's push devices when push is on. The server side and the
+conditions are in [watches.md](watches.md). The dashboard's parts:
+
+- **Settings › Watches** (`src/routes/settings/watches.tsx`), shown when the
+  server has `watch.list`: the member's watches from the `watches` store
+  slice (`src/store/watches.ts`, read at hydration and on wake) in an
+  `InsetList`. A row holds the label or target title, the target kind, a
+  `StateLine` (`Watching`, `Paused`, `Cannot check`, `Done`, `Expired`) with
+  the conditions, the server's error verbatim for `error`, the last notice
+  and the last and next check. **Active** (the default) hides done and
+  expired watches; **All** shows them. With none, the empty state says what
+  a watch is and where to add one.
+- **Detail** (`src/routes/settings/watch-detail.tsx`): a row opens
+  `?page=settings&id=watches&watch=<id>`, a dialog that is a full-screen
+  sheet under 768px. Its **Open run**, **Open swarm** or **Open pull
+  request** link is built from `watch.target`, since `watch.link` is the
+  watch's own page. It reads `watch.get` and shows what the server sees
+  (`observed`), the conditions, label and end date to change
+  (`watch.update` with only the fields the member changed, the end at most
+  90 days from now). An untouched form follows changes made elsewhere, such
+  as by the assistant. An expired watch shows the same form with **Watch
+  again**, which needs a new end date; a done watch shows when it finished.
+  **Pause** or **Resume**,
+  **Delete…** (confirmed), and up to 50 notices, each with one line per
+  delivery: `Push delivered to 2 devices`, `Push off: <why>`, `No push
+  device - in-app only`, `Held for quiet hours: Until 07:00 CET`, `Push
+  pending: <why>`, `Push not sent: resolved before delivery`, `Push skipped:
+  <why>`, `Push withdrawn from your devices: the need ended` (or the
+  server's detail), `Push failed: <error>`, and `In the assistant chat` for a notice
+  the assistant also wrote into its chat. Opening or closing it keeps focus in
+  the dialog's hands rather than the category heading.
+- **Creating**: **Watch…** in a live run's menu and the palette
+  (`runCommands`, when the server has `watch.create`), **Watch…** in a live
+  swarm's menu, and **Watch PR** beside a run's pull request status open
+  `WatchDialog` (`src/components/palette/watch-dialog.tsx`). It pre-checks
+  the target's default conditions, describes each (Finished means the agent
+  reported done; Merged means GitHub merged the PR), and sends one
+  idempotency key per open form. The success toast is the server's receipt
+  with **View watch**; a refusal stays in the form verbatim.
+- **Watched runs**: the run header's state line shows **Watch on** (or
+  **Watch paused**, **Watch failing**) while the member has a live watch on
+  the run; its hint names the watch's conditions, or why it is paused or
+  failing, and it opens the watch. A watched pull request shows **Watching PR**.
+- **Live**: `watch.changed` reaches only the watch's owner. The dashboard
+  re-reads `watch.get` (`src/store/watch-notice.ts`); when the event names a
+  new notice and is not a replayed catch-up (older than 30 seconds on the
+  server's clock), it toasts the notice's title and body with **Open**,
+  which follows the notice's link: a dashboard link in place, a GitHub link
+  in a new tab. A watch the assistant made (`source: assistant`) toasts
+  through its `assistant.notice` instead, here and in the desktop app.
+- **Desktop app**: `desktop/notify.js` shows each new watch notice natively
+  and opens its link on click. A run's needs-you or finished notice shares
+  the run's five-second duplicate window with `run.status`, so one need or
+  one outcome shows once, in either order. A live failure the owner has not
+  seen is a needs-you notice on the server, so it shares the need's window. A need's notice closes when the
+  need is answered, a finish's when its outcome is seen or put off.
+
 ### Push notifications
 
 `src/routes/settings/notifications.tsx` is one row over `src/lib/push.ts`.
@@ -6233,12 +6369,13 @@ then in the browser. A failure of either, or of **Send test notification**
 (`push.test`), is shown as the error the browser or the server gave.
 
 `web/public/sw.js` is the whole worker. On `push` it shows the notification
-with the run's ID as its `tag`, `budget:<workspace>` for a budget notice, or
-the message's `url` for a notice about another page, such as a
-[watch](watches.md) notice about a swarm, so a newer one replaces the older, and it shows a fallback for a message it
+under the message's own `tag` when it has one, as every [watch](watches.md)
+notice does so the run's clears never replace it; otherwise under the run's
+ID, `budget:<workspace>` for a budget notice, or the message's `url` for a
+notice about another page. A newer one replaces the older, and it shows a fallback for a message it
 cannot read, because Safari drops a subscription whose push shows nothing.
-A message with `clear` set means the run's need ended: for the same reason it
-is not simply closed but replaced, under the same tag and keeping the shown
+A message with `clear` set means the run's need, or the watch's, ended: for
+the same reason it is not simply closed but replaced, under the same tag and keeping the shown
 title, by a `silent` notification with the server's body,
 `No longer needs you`. The server sends it only to the devices whose push
 service took the need, when the need ends or the run changes hands,
@@ -6250,12 +6387,16 @@ about the run, such as that it finished, carries `notice`; a clear that
 finds it shown shows it again, silently, as it was. An assistant's notice of
 a need carries no `notice`, so a clear replaces it like any need. On
 `notificationclick` it focuses a dashboard window that is already open and
-posts it `{type: 'aether:open-run', run}`, navigates it to `url`, or posts
-`{type: 'aether:open-workspace', workspace}`. When no window is open, or the
-open one is not the worker's to navigate, it opens `url`, `/?run=<id>` or
-`/?page=workspace&id=<id>`.
+posts it `{type: 'aether:open-run', run}`, `{type: 'aether:open-url', url}`
+or `{type: 'aether:open-workspace', workspace}`; it never reloads the page,
+which would lose its unsent drafts. The page acknowledges
+`aether:open-url` on the message's port; a dashboard from an older build
+that does not within a second is navigated to `url`, or a new window opens
+when the worker cannot navigate it. When no window is open, it opens `url`,
+`/?run=<id>` or `/?page=workspace&id=<id>`.
 `watchPush`, started with the connection in `src/store/sync.ts`, navigates on
-that message. It also calls `push.active` at most every 20 seconds while the
+that message; for `url` on this origin it also puts the full `url` in the
+address bar, so query keys the route does not carry still reach the page. It also calls `push.active` at most every 20 seconds while the
 pointer, the keyboard or the wheel is in use, which is what makes the server
 hold a member's notifications while they are at a dashboard. A server that
 has no such method, or that the member is still pending on, is not asked
@@ -6275,6 +6416,7 @@ failure and on a `run.review` event that sets `later` or `accepted`. A
 review `ready` gets one silent, low-urgency notice per entry into `ready`,
 counted in the badge; an unseen failure of a run that already ended gets
 one outside it.
+It also shows watch notices; see [Watches](#watches).
 `cd desktop && node --test` runs `desktop/notify.test.js`; `make
 test-scripts` includes it.
 Clicking it pushes `?run=<id>` onto the page's history and dispatches
@@ -7312,6 +7454,9 @@ links in the Session view, `paths.test.ts` what reads as a path, and
 Notifications row, `src/lib/push.test.ts` the browser side behind it
 (permission before anything else, the server key, the activity report), and
 `src/sw.test.ts` runs `public/sw.js` against a stand-in for the worker scope.
+`src/routes/settings/watches.test.tsx` covers the Watches list, detail,
+delivery lines, pause, resume and delete, the Watch form, the watch
+notification preferences, the phone sheet and `watch.changed` toasts.
 `src/components/workspace-environment.test.tsx` covers the workspace
 Environment section: the change a save sends, replacing a secret, the `.env`
 preview, rows that cannot be saved, egress control, the server's refusal and

@@ -67,7 +67,7 @@ func TestTranscribeWordsEachNoticeAndLinksItsWatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	log := string(b)
-	for _, want := range []string{`needs your input`, `Question: Which region?`, `failed`, `Stop or change this watch: /?page=settings`, `watch=wat-1`} {
+	for _, want := range []string{`needs your input`, `Question: Which region?`, `failed`, `[Stop or change this watch](?page=settings`, `watch=wat-1`} {
 		if !strings.Contains(log, want) {
 			t.Fatalf("transcript = %s, want %q", log, want)
 		}
