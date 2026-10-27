@@ -354,6 +354,9 @@ type RunPRFeedbackResult struct {
 	Comments       []RunPRComment       `json:"comments"`
 	Reviews        []RunPRReview        `json:"reviews"`
 	ReviewComments []RunPRReviewComment `json:"review_comments"`
+	// CommentsUnavailable means Comments and ReviewComments were not read,
+	// so their emptiness says nothing about the pull request.
+	CommentsUnavailable bool `json:"comments_unavailable,omitempty"`
 	// GitHub's own verdict on the merge: Mergeable is MERGEABLE, CONFLICTING
 	// or UNKNOWN, MergeStateStatus is CLEAN, BEHIND, DIRTY, BLOCKED, UNSTABLE,
 	// DRAFT, HAS_HOOKS or UNKNOWN.

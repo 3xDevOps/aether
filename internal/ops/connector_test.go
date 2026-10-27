@@ -547,6 +547,11 @@ func TestConnectorReadTools(t *testing.T) {
 	if text, out = run(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !strings.Contains(text, "0 comments (truncated: at least these many)") || out["truncated"] != true {
 		t.Fatalf("aether_pr_status of truncated feedback = %q %v", text, out)
 	}
+	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{PullRequest: &protocol.RunPullRequest{Number: 7, State: "MERGED"}, CommentsUnavailable: true})
+	if text, out = run(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !strings.Contains(text, "0 reviews, comments unavailable (the run's environment is gone);") ||
+		strings.Contains(text, "0 comments") || out["comments_unavailable"] != true {
+		t.Fatalf("aether_pr_status of a finished run without comments = %q %v", text, out)
+	}
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Error: "no pull request for branch x"})
 	if msg, _, failed := try(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !failed || !strings.Contains(msg, "no pull request for branch x; aether_message_run") {
 		t.Fatalf("aether_pr_status without a PR = %q", msg)

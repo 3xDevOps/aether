@@ -448,7 +448,7 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 			return nil, perr
 		}
 		out := protocol.RunPRFeedbackResult{Repo: p.Repo, Identity: status.Identity, AccountMemberID: status.AccountMemberID, PullRequest: status.PullRequest,
-			Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, Error: status.Error}
+			Checks: feedback.Checks, Comments: feedback.Comments, Reviews: feedback.Reviews, ReviewComments: feedback.ReviewComments, CommentsUnavailable: true, Error: status.Error}
 		if s.cfg.Services.GitHub == nil {
 			out.Error = strings.TrimSuffix("checks and review feedback need the run's environment, which is gone: "+err.Error()+"; "+status.Error, "; ")
 			return out, nil

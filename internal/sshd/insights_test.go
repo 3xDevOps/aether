@@ -473,12 +473,12 @@ func TestInsightsGet(t *testing.T) {
 	}
 	wantChecks := []protocol.RunPRCheck{{Name: "test", Status: "COMPLETED", Conclusion: "SUCCESS"}, {Name: "lint", Status: "IN_PROGRESS"},
 		{Name: "ci/legacy", Status: "COMPLETED", Conclusion: "FAILURE"}}
-	if perr != nil || feedback.Error != "" || !feedback.Truncated || feedback.PullRequest == nil ||
+	if perr != nil || feedback.Error != "" || !feedback.Truncated || !feedback.CommentsUnavailable || feedback.PullRequest == nil ||
 		feedback.PullRequest.HeadOID != gh.snap.HeadSHA || feedback.PullRequest.BaseBranch != "main" || feedback.PullRequest.Title != "Fix login" ||
 		feedback.PullRequest.State != "merged" || feedback.PullRequest.MergedAt == nil || !feedback.PullRequest.Draft || feedback.Identity != "octocat" || !reflect.DeepEqual(feedback.Checks, wantChecks) ||
 		len(feedback.Reviews) != 1 || feedback.Reviews[0].Author != "grace" || feedback.Reviews[0].State != "CHANGES_REQUESTED" ||
 		gh.lookups[len(gh.lookups)-1] != "snapshot "+string(alice)+" acme/app#4 page 2" {
-		t.Errorf("run.pr.feedback of a finished run = %+v, %+v, lookups %v; want GitHub's checks and reviews, truncated by the clipped review", feedback, perr, gh.lookups)
+		t.Errorf("run.pr.feedback of a finished run = %+v, %+v, lookups %v; want GitHub's checks and reviews, truncated by the clipped review, comments marked unavailable", feedback, perr, gh.lookups)
 	}
 	// Bob revoking his share while the read is between pages stops it,
 	// with the access error and nothing read after.

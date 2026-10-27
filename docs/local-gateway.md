@@ -1025,9 +1025,9 @@ gone, both report the pull request the run last recorded (`number`, `url`,
 `state`). `run.pr.feedback` then reads the pull request, its checks and its
 reviews from GitHub in one read, with the GitHub login of the run's home, as
 `gh` in the run did, so `head_oid`, `state` and `merged_at` match the checks;
-it has no
-comments, `mergeable` or `merge_state_status`, within the same `limit` and
-byte budget; `truncated` is also set when a review body was cut at 2000
+it has no comments, `mergeable` or `merge_state_status`, and sets
+`comments_unavailable: true` so empty comment lists do not read as none,
+within the same `limit` and byte budget; `truncated` is also set when a review body was cut at 2000
 characters, and `error` says why when that read fails.
 
 A server without child runs answers their methods with `-32004` and
