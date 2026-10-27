@@ -525,9 +525,9 @@ none are saved. It also checks each choice now. `invalid` lists the choices a
 launch could not use, with the reason: an agent not installed on the account,
 an Enhanced mode that is not installed, a model the agent no longer offers, or
 an account or fallback member who stopped sharing with you. `unknown` lists
-what it could not check: a model with no current model list, or an agent
-with no login file, which still launches if an API key in the environment
-signs it in. Choices that fail a check stay saved until you replace them.
+what it could not check: a model with no current model list, an agent with
+no login file, which still launches if an API key in the environment signs it
+in, or every agent when the account's agents could not be listed. Choices that fail a check stay saved until you replace them.
 
 `launch.defaults.set` replaces all your choices (`defaults`) or deletes them
 (`clear: true`). It takes the `revision` you last read. If someone saved since

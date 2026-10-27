@@ -223,7 +223,14 @@ func (s *Server) launchDefaultsResult(ctx context.Context, member domain.MemberI
 	}
 	agents, err := s.ListAgents(ctx, member, account)
 	if err != nil {
-		return protocol.LaunchDefaultsResult{}, rpcError(err)
+		reason := "Aether could not list the agents on this account to check it: " + rpcError(err).Message
+		if saved.Agent != "" {
+			unknown("agent", saved.Agent, reason)
+		}
+		for _, name := range slices.Sorted(maps.Keys(saved.Agents)) {
+			unknown("agents."+name, name, reason)
+		}
+		return out, nil
 	}
 	if saved.Agent != "" {
 		if reason := agentUnusable(agents, saved.Agent); reason != "" {
