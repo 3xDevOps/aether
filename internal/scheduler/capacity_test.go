@@ -572,3 +572,19 @@ func TestUpdaterCapacityRefusalAndCreateFailureRelease(t *testing.T) {
 	}
 	release()
 }
+
+func TestRunLimitsPrecedence(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(c *Config) { c.RunCPULimit, c.RunMemoryBytes, c.RunPidsLimit = 8, 8<<30, 4096 })
+	ctx := context.Background()
+	if err := e.sched.cfg.Store.PutServerRunLimits(ctx, domain.RunLimits{CPUs: 4, MemoryBytes: 2 << 30}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.sched.runLimits(ctx, domain.RunLimits{MemoryBytes: 1 << 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (domain.RunLimits{CPUs: 4, MemoryBytes: 1 << 30, Pids: 4096}); got != want {
+		t.Fatalf("runLimits = %+v, want %+v: the run beats the server, the server beats the flags", got, want)
+	}
+}

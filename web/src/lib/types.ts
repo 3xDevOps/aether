@@ -2128,6 +2128,21 @@ export interface SysboxStatus {
   log?: string
 }
 
+/** Caps on a run's container. A missing field is unset: a run's own limits
+ * fall back to the server's, the server's to its automatic values. */
+export interface RunLimits {
+  cpus?: number
+  memory_bytes?: number
+  pids?: number
+}
+
+/** server.run_limits: `limits` is what an admin set, `effective` what a run
+ * with no override of its own gets. */
+export interface ServerRunLimits {
+  limits: RunLimits
+  effective: RunLimits
+}
+
 /** When an update applies: immediately, at the next idle moment, or never
  * (which clears the pending one). */
 export type ServerUpdateWhen = 'now' | 'idle' | 'cancel'

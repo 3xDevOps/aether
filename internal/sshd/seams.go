@@ -55,7 +55,7 @@ func launchWithOptions(ctx context.Context, runs RunController, workspace domain
 	if launcher, ok := runs.(RunLauncherWithOptions); ok {
 		return launcher.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 	}
-	if opts.CachedBase != "" || opts.Model != "" || len(opts.ExtraWorkspaces) > 0 {
+	if opts.CachedBase != "" || opts.Model != "" || len(opts.ExtraWorkspaces) > 0 || opts.Limits != (domain.RunLimits{}) {
 		return nil, errLaunchOptionsUnsupported
 	}
 	return runs.Launch(ctx, workspace, member, account, task, harness, mode)

@@ -306,6 +306,7 @@ func (s *Scheduler) LaunchWithOptions(ctx context.Context, workspace domain.Work
 		Harness:         harness,
 		Mode:            mode,
 		Model:           opts.Model,
+		Limits:          opts.Limits,
 		Via:             domain.ViaFrom(ctx),
 		ACP:             acp,
 		Status:          domain.RunQueued,
@@ -546,7 +547,11 @@ func (s *Scheduler) startRunContainer(ctx context.Context, entry *supervised, ru
 	s.mu.Lock()
 	entry.appServer = appServer
 	s.mu.Unlock()
-	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, persistSupervisor))
+	limits, err := s.runLimits(ctx, run.Limits)
+	if err != nil {
+		return nil, err
+	}
+	cid, err := s.cfg.Runtime.Create(ctx, s.containerSpec(run, actor, argv, plan, limits, persistSupervisor))
 	if err != nil {
 		return nil, fmt.Errorf("create container: %w", err)
 	}

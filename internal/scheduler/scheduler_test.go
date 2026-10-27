@@ -499,7 +499,7 @@ func TestHeadlessContainerKeepsTheAgentAsTheMainProcess(t *testing.T) {
 	e := newTestEnv(t, nil)
 	run := &domain.Run{ID: "run-headless", Mode: domain.LaunchHeadless}
 	plan := &EnvironmentPlan{Env: map[string]string{}}
-	spec := e.sched.containerSpec(run, e.member, []string{"agent", "--json"}, plan, false)
+	spec := e.sched.containerSpec(run, e.member, []string{"agent", "--json"}, plan, domain.RunLimits{}, false)
 	if want := []string{"agent", "--json"}; !slices.Equal(spec.Command, want) {
 		t.Fatalf("headless container command = %v, want %v", spec.Command, want)
 	}
@@ -511,7 +511,7 @@ func TestTUIContainerUsesSafePersistentSupervisor(t *testing.T) {
 	run := &domain.Run{ID: "run-tui", WorkspaceID: e.ws.ID, MemberID: e.member.ID, Mode: domain.LaunchTUI}
 	plan := &EnvironmentPlan{Env: map[string]string{}}
 	argv := []string{"agent", "--task", `$(touch compromised)`}
-	spec := e.sched.containerSpec(run, e.member, argv, plan, false)
+	spec := e.sched.containerSpec(run, e.member, argv, plan, domain.RunLimits{}, false)
 	if len(spec.Command) < 5 || spec.Command[0] != "/bin/sh" || spec.Command[1] != "-c" {
 		t.Fatalf("TUI command = %v, want POSIX supervisor", spec.Command)
 	}
@@ -527,7 +527,7 @@ func TestTUIContainerUsesSafePersistentSupervisor(t *testing.T) {
 	}
 	headless := *run
 	headless.Mode = domain.LaunchHeadless
-	headlessSpec := e.sched.containerSpec(&headless, e.member, argv, plan, false)
+	headlessSpec := e.sched.containerSpec(&headless, e.member, argv, plan, domain.RunLimits{}, false)
 	if !slices.Equal(headlessSpec.Command, argv) {
 		t.Fatalf("headless argv changed: %v", headlessSpec.Command)
 	}
@@ -539,7 +539,7 @@ func TestMissionAssignedHeadlessUsesPersistentSupervisor(t *testing.T) {
 	run := &domain.Run{ID: "run-mission-headless", WorkspaceID: e.ws.ID, MemberID: e.member.ID, Mode: domain.LaunchHeadless}
 	plan := &EnvironmentPlan{Env: map[string]string{}}
 	argv := []string{"agent", "--task", `$(touch compromised)`}
-	spec := e.sched.containerSpec(run, e.member, argv, plan, true)
+	spec := e.sched.containerSpec(run, e.member, argv, plan, domain.RunLimits{}, true)
 	if len(spec.Command) < 5 || spec.Command[0] != "/bin/sh" || spec.Command[1] != "-c" {
 		t.Fatalf("mission headless command = %v, want POSIX supervisor", spec.Command)
 	}
@@ -1218,7 +1218,7 @@ func TestContainerSpecNonRootHome(t *testing.T) {
 	e := newTestEnv(t, nil)
 	run := &domain.Run{ID: "run-x", WorkspaceID: e.ws.ID, MemberID: e.member.ID}
 	plan := &EnvironmentPlan{Image: "busybox:1.36", Env: map[string]string{"HOME": "/home/aether"}, User: "1000:1000"}
-	spec := e.sched.containerSpec(run, e.member, []string{"agent"}, plan, false)
+	spec := e.sched.containerSpec(run, e.member, []string{"agent"}, plan, domain.RunLimits{}, false)
 	if spec.Env["HOME"] != "/home/aether" {
 		t.Errorf("HOME = %q, want /home/aether", spec.Env["HOME"])
 	}

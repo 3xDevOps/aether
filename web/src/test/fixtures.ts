@@ -993,6 +993,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     })),
     localUpdateStatus: vi.fn(async () => ({ phase: 'idle' as const })),
     serverUpdateStatus: vi.fn(async () => serverUpdateStatus()),
+    serverRunLimits: vi.fn<Api['serverRunLimits']>(async () => ({ limits: {}, effective: { cpus: 8, memory_bytes: 8 * 2 ** 30, pids: 4096 } })),
     sysboxStatus: vi.fn(async () => ({ state: 'on' as const })),
     sysboxInstall: vi.fn(async () => ({ state: 'installing' as const })),
     serverUpdate: vi.fn(async () => ({

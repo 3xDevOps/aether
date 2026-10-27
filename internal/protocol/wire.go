@@ -455,6 +455,9 @@ type RunLaunchParams struct {
 	// Children is the run's own child-run setting: "on", "off", or empty to
 	// follow the launcher's.
 	Children string `json:"children,omitempty"`
+	// Limits override the server's run limits for this run; a zero field
+	// follows them.
+	Limits RunLimits `json:"limits,omitempty"`
 }
 
 // RunLaunchResult is a RunResult; Replayed is true when IdempotencyKey

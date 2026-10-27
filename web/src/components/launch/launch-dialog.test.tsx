@@ -85,7 +85,7 @@ describe('new run', () => {
     expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true')
   })
 
-  it('lists every agent with its login and install state, and sends setup to Agents', async () => {
+  it('lists only installed agents with their login state, and sends Install more agents to Agents', async () => {
     vi.mocked(api.agentList).mockResolvedValue([
       claude(),
       agentInfo({ name: 'codex', display_name: 'Codex', login_found: false }),
@@ -95,13 +95,24 @@ describe('new run', () => {
 
     expect(agentRow(/^Claude Code/).textContent).toBe('Claude CodeLogin found')
     expect(agentRow(/^Codex/).textContent).toBe('CodexNo login found')
-    expect(agentRow(/^Pi/).disabled).toBe(true)
-    expect(agentRow(/^Pi/).textContent).toBe('PiNot installed')
+    expect(screen.queryByRole('radio', { name: /^Pi/ })).toBeNull()
     expect(agentRow(/^custom/).disabled).toBe(false)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Set up Pi' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install more agents...' }))
     expect(useStore.getState().route.name).toBe('agents')
     expect(useStore.getState().paletteDialog).toBeNull()
+  })
+
+  it('sends the run limits the launcher fills in, and nothing when none are', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] } })
+    await open()
+    await userEvent.click(screen.getByRole('button', { name: /Resource limits/ }))
+    expect((screen.getByLabelText('Memory (GiB)') as HTMLInputElement).placeholder).toBe('8')
+    await userEvent.type(screen.getByLabelText('Memory (GiB)'), '1.5')
+    await userEvent.type(screen.getByLabelText('Processes'), '256')
+    await userEvent.type(screen.getByLabelText('Task'), 'write the changelog')
+    await userEvent.click(launchButton())
+    await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith(expect.objectContaining({ limits: { memory_bytes: 1.5 * 2 ** 30, pids: 256 } })))
   })
 
   it('launches a never-launched agent in Enhanced when available and remembers the choice', async () => {

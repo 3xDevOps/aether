@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useCheckForUpdates, useUpdateNotice, useUpdateTargets } from '@/components/update-banner'
 import { checkedTime, packagedLine, verbatim } from '@/components/update-banner-shared'
+import { draftOf, limitsText, parseLimits, RunLimitsFields, useServerRunLimits } from '@/components/launch/run-limits'
 import { CopyableCommand } from '@/components/copyable-command'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
@@ -8,6 +9,7 @@ import { CodeBlock } from '@/components/ui/code'
 import { Spinner } from '@/components/ui/spinner'
 import { releaseFinishedPlan } from '@/lib/commands'
 import { api, type Api } from '@/lib/api'
+import { errorSentence } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { rootCommand, useSysbox } from '@/lib/use-sysbox'
 import { workspaceRuns } from '@/routes/board/selectors'
@@ -107,13 +109,61 @@ export function ServerSection({ client = api }: { client?: Api } = {}) {
           control={<Button size="sm" variant="secondary" onClick={() => navigate('insights', { tab: 'system' })}>Open Insights › System</Button>}
         />
       </SettingsSection>
-      {admin && (caps.hasMethod('server.sysbox.status') || caps.hasMethod('run.release')) && (
+      {admin && (caps.hasMethod('server.sysbox.status') || caps.hasMethod('run.release') || caps.hasMethod('server.run_limits')) && (
         <SettingsSection title="Admin" scope="Server · admins">
+          <RunLimitsRow client={client} />
           <DockerInRunsRow client={client} />
           <RetainedContainersRow />
         </SettingsSection>
       )}
     </>
+  )
+}
+
+function RunLimitsRow({ client }: { client: Api }) {
+  const caps = useCapability()
+  const offered = caps.hasMethod('server.run_limits')
+  const { limits, error, set, reload } = useServerRunLimits(client, offered)
+  const [draft, setDraft] = useState<ReturnType<typeof draftOf> | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  if (!offered) return null
+  if (!limits) {
+    return (
+      <SettingRow id="run-limits" label="Run limits" help={error ? null : 'Reading run limits…'}>
+        {error && <Callout tone="failed" role="alert">{error}</Callout>}
+        {error && <TryAgain onClick={reload} />}
+      </SettingRow>
+    )
+  }
+  const shown = draft ?? draftOf(limits.limits)
+  const parsed = parseLimits(shown)
+  const save = () => {
+    if (!parsed.limits) return
+    setSaving(true)
+    setSaveError(null)
+    client.serverRunLimits({ cpus: parsed.limits.cpus ?? 0, memory_bytes: parsed.limits.memory_bytes ?? 0, pids: parsed.limits.pids ?? 0 }).then(
+      (next) => {
+        set(next)
+        setDraft(null)
+      },
+      (err: unknown) => setSaveError(errorSentence(err)),
+    ).finally(() => setSaving(false))
+  }
+  return (
+    <SettingRow
+      id="run-limits"
+      label="Run limits"
+      help={`Memory, CPU and process ceiling for every run's container, applied to runs started after you save. A run's launch options can override them. Now: ${limitsText(limits.effective)}.`}
+      control={(
+        <Button size="sm" disabled={draft === null || saving || !parsed.limits} onClick={save}>
+          {saving ? 'Saving…' : 'Save'}
+        </Button>
+      )}
+    >
+      <RunLimitsFields idPrefix="run-limit" value={shown} onChange={setDraft} placeholders={limits.effective} disabled={saving} />
+      {(parsed.error ?? saveError) && <p role="alert" className="text-ui-sm text-state-failed">{parsed.error ?? saveError}</p>}
+    </SettingRow>
   )
 }
 

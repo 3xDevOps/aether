@@ -230,6 +230,7 @@ type Store interface {
 	InsightsStore
 	LaunchReceiptStore
 	LaunchDefaultsStore
+	RunLimitStore
 
 	Close() error
 }

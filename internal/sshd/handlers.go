@@ -166,6 +166,9 @@ func (s *Server) runLaunch(ctx context.Context, member domain.MemberID, params j
 	if p.Children != "" && p.Children != domain.ChildrenOn && p.Children != domain.ChildrenOff {
 		return nil, invalidParams(`children must be "on", "off" or empty`)
 	}
+	if err := scheduler.ValidateRunBudgets(p.Limits.CPUs, p.Limits.MemoryBytes, p.Limits.Pids); err != nil {
+		return nil, invalidParams(err.Error())
+	}
 	key := p.IdempotencyKey
 	p.IdempotencyKey = ""
 	// Cancelling a launch mid-provisioning fails the run it is creating, so
@@ -232,6 +235,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 		CachedBase: p.CachedBase, Model: p.Model, RequestedAccount: requested, Fallback: policy,
 		Admitted: unlockAuthorization, Created: created,
 		ExtraWorkspaces: workspaceIDs(p.ExtraWorkspaceIDs),
+		Limits:          domain.RunLimits{CPUs: p.Limits.CPUs, MemoryBytes: p.Limits.MemoryBytes, Pids: p.Limits.Pids},
 	})
 	if err != nil {
 		if errors.Is(err, errLaunchOptionsUnsupported) {
