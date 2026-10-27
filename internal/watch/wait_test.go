@@ -593,7 +593,7 @@ func TestAPullRequestClosedUnmergedResolvesAsAFailure(t *testing.T) {
 	h.mustReport(other, "pr:acme/app#7:merged")
 	gh.set(func(f *fakeGitHub) { f.state = "closed" })
 	h.clock.advance(2 * PRPollIdle)
-	h.eventually("the wake", func() bool { return len(h.inbox.messages(other.ID)) == 1 })
+	h.awaitWake(other.ID)
 	if body := h.inbox.messages(other.ID)[0].body; !strings.Contains(body, "closed without merging") || !strings.Contains(body, "https://github.com/acme/app/pull/7") {
 		t.Fatalf("message = %q", body)
 	}
@@ -657,7 +657,8 @@ func TestChecksResolveOnlyOnTheirHeadCommit(t *testing.T) {
 	}
 	gh.set(func(f *fakeGitHub) { f.head = shaTwo })
 	h.clock.advance(2 * PRPollIdle)
-	h.eventually("both wakes", func() bool { return len(h.inbox.messages(named.ID)) == 1 && len(h.inbox.messages(pending.ID)) == 1 })
+	h.awaitWake(named.ID)
+	h.awaitWake(pending.ID)
 	for _, run := range []domain.RunID{named.ID, pending.ID} {
 		if w := h.only(run); w.Outcome != "passed" || !strings.HasPrefix(shaTwo, w.HeadSHA) || w.Observed.HeadSHA != shaTwo {
 			t.Fatalf("wait = %+v, want passed on %s", w, shaTwo)
@@ -735,7 +736,7 @@ func TestChecksOnAnOlderOrReplacedHeadAreNoVerdict(t *testing.T) {
 	h.mustReport(named, "pr:acme/app#7:checks@"+shaTwo)
 	gh.set(func(f *fakeGitHub) { f.head = shaOne })
 	h.clock.advance(2 * PRPollIdle)
-	h.eventually("the replaced head's wake", func() bool { return len(h.inbox.messages(named.ID)) == 1 })
+	h.awaitWake(named.ID)
 	if w := h.only(named.ID); w.Outcome != "superseded" || !strings.Contains(h.inbox.messages(named.ID)[0].body, "a newer commit replaced the one you named") {
 		t.Fatalf("named wait = %+v, want superseded", w)
 	}
@@ -889,5 +890,22 @@ func TestAWakeStillDueIsNotPurged(t *testing.T) {
 	h.settle()
 	if n := h.waitRows(owner.ID); n != 1 {
 		t.Fatalf("%d wait rows after the purge, want the one still due", n)
+	}
+}
+
+// awaitWake waits for run's one wake, moving the clock a poll at a time as
+// a pull request poll can read GitHub just before a change reaches it, and
+// says where its wait stands when none comes.
+func (h *waitHarness) awaitWake(run domain.RunID) {
+	h.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for i := 1; len(h.inbox.messages(run)) != 1; i++ {
+		if time.Now().After(deadline) {
+			h.t.Fatalf("no wake for %s at %s; wait = %+v", run, h.clock.now().UTC().Format(time.RFC3339), h.waits(run))
+		}
+		if i%50 == 0 {
+			h.clock.advance(PRPollBusy + PRPollBusy/5)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
