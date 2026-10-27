@@ -128,7 +128,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 	want := map[string]string{
 		protocol.MethodRunLaunch:      `Launch claude (default mode) in shop on "Grace"'s account, falling back to your account in order, with repositories "web": "fix it"`,
 		protocol.MethodTemplateLaunch: `Launch template "triage" in shop: claude (acp, opus) on your account with "{\"issue\":\"42\"}": "triage issue {{issue}}"`,
-		protocol.MethodMissionCreate: `Start a swarm in shop with integrator claude (acp) on your account, agents claude (acp) on your account, codex (tui) on "Grace"'s account: "ship it". ` +
+		protocol.MethodMissionCreate: `Start a swarm in shop with integrator claude (acp) on your account, agents claude (acp) on your account, codex (tui) on "Grace"'s account, may fall back to accounts shared with you: "ship it". ` +
 			`The assistant's reason: "the member asked for codex workers"`,
 		protocol.MethodRunInject:                `Send to run run-1 ("Fix login"), owned by Grace: "hi", attaching "shot.png"`,
 		protocol.MethodRunKill:                  `Stop run run-1 ("Fix login"), owned by Grace`,
@@ -220,5 +220,21 @@ func TestFallbackToATeammateAlwaysAsks(t *testing.T) {
 	}
 	if !got.OtherMember || got.OtherOwner != "Grace" || !strings.Contains(got.Summary, `falling back to "Grace"'s account in order`) {
 		t.Fatalf("confirmation = %+v, want it marked as Grace's", got)
+	}
+}
+
+// A launch card says when the run may start child runs.
+func TestLaunchCardNamesChildRuns(t *testing.T) {
+	var got protocol.AssistantConfirmation
+	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
+		got = c
+		return nil
+	}}
+	raw, _ := json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", NoFallback: true, Children: "on"})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if want := `Launch claude (default mode) in shop, no fallback, child runs on: "fix it"`; got.Summary != want {
+		t.Fatalf("summary = %q, want %q", got.Summary, want)
 	}
 }

@@ -342,7 +342,9 @@ its parent asked of it under `untrusted`.
 with `workspace_id`) and `params` runs a saved template on your own account
 with its agent, mode and model. It takes no task, agent, mode, model, account,
 fallback or extra repositories, since `template.launch` has none, and refuses
-them by name. Without `template`, it needs `task` and `harness`.
+them by name. Without `template`, it needs `task` and `harness`. Without an
+`idempotency_key`, a template launch is deduplicated only while an identical
+one is still starting.
 
 ### Changes
 

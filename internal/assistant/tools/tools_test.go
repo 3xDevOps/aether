@@ -213,7 +213,7 @@ func TestConfirmedCallsNameAnotherMembersRun(t *testing.T) {
 	if rpcCode(t, err) != protocol.CodeDenied {
 		t.Fatalf("launch: %v", err)
 	}
-	if want := `Launch claude (acp) in shop: "` + strings.Repeat("x", 120) + `…"`; got.Summary != want {
+	if want := `Launch claude (acp) in shop, may fall back to accounts shared with you: "` + strings.Repeat("x", 120) + `…"`; got.Summary != want {
 		t.Fatalf("launch summary %q, want %q", got.Summary, want)
 	}
 	err = coordtransport.Call(t.Context(), sock, protocol.MethodRunInject, protocol.RunInjectParams{RunID: "run-1", Message: "hi"}, nil)

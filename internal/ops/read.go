@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -438,7 +439,11 @@ type childRow struct {
 func addChildren(ctx context.Context, read Call, l links, book accountBook, id string, out, untrusted map[string]any) {
 	var res protocol.RunChildrenResult
 	if err := read(ctx, protocol.MethodRunChildren, protocol.RunChildrenParams{RunID: id}, &res); err != nil {
-		out["children_error"] = err.Error()
+		// A server without child runs has none to list.
+		var perr *protocol.Error
+		if !errors.As(err, &perr) || (perr.Code != protocol.CodeUnavailable && perr.Code != protocol.CodeMethodNotFound) {
+			out["children_error"] = err.Error()
+		}
 		return
 	}
 	if len(res.Children) == 0 {

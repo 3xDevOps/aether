@@ -105,7 +105,7 @@ const idempotencyRule = " Reuse idempotency_key on a retry; "
 var writeOps = []Op{
 	opOf("aether_launch_run", "Launch run", ScopeWrite, false, nextWorkspaces,
 		"Use this when the user asks to start an agent on a task or a saved template, one call per task; options from aether_launch_options; then poll aether_get_run."+
-			idempotencyRule+"without one, a repeat within 60s returns the first run.", launchRun).
+			idempotencyRule+"without one, a repeat within 60s, or of a template while it starts, returns the first run.", launchRun).
 		enum("mode", "tui", "headless", "acp").enum("children", "on", "off").hints(false, true).hide(Connector, "reason").
 		offer(TierConfirmed).calling(protocol.MethodServerInfo, protocol.MethodAccountList, protocol.MethodRunList, protocol.MethodRunLaunch, protocol.MethodTemplateLaunch),
 	opOf("aether_launch_swarm", "Launch swarm", ScopeWrite, false, nextWorkspaces,

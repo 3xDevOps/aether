@@ -72,15 +72,20 @@ func TestConnectorProtocolThroughTheEdge(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || len(tools) != 36 || resp.Header.Get("Mcp-Session-Id") != "" {
 		t.Fatalf("tools/list without initialize: %s %v", resp.Status, out)
 	}
-	raw, err := json.Marshal(tools)
-	if err != nil {
-		t.Fatal(err)
+	// The budget of docs/chatgpt-plugin.md#tool-list-budget, as a client
+	// receives the list: names, descriptions and input schemas.
+	counted := 0
+	for _, tool := range tools {
+		tool := tool.(map[string]any)
+		schema, err := json.Marshal(tool["inputSchema"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		counted += len(tool["name"].(string)) + len(tool["description"].(string)) + len(schema)
 	}
-	// ChatGPT budgets about 5000 tokens for a connector's tool
-	// definitions; JSON runs about 4 bytes a token.
-	t.Logf("tools/list: %d tools, %d bytes of definitions, about %d tokens", len(tools), len(raw), len(raw)/4)
-	if len(raw) > 5000*4 {
-		t.Errorf("tools/list is %d bytes, over ChatGPT's budget of about %d", len(raw), 5000*4)
+	t.Logf("tools/list: %d tools, %d bytes of names, descriptions and schemas", len(tools), counted)
+	if counted > 15000 {
+		t.Errorf("tools/list has %d bytes of names, descriptions and schemas, want at most 15000", counted)
 	}
 
 	resp, out = rpc(t, base, token.AccessToken, "tools/call", map[string]any{"name": "aether_list_workspaces", "arguments": map[string]any{}})

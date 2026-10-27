@@ -512,6 +512,8 @@ func (n launchNames) options(order []string, off bool, extras []string, c *proto
 	switch {
 	case off:
 		out = ", no fallback"
+	case len(order) == 0 && len(n.accounts) > 1:
+		out = ", may fall back to accounts shared with you"
 	case len(order) > 0:
 		accounts := make([]string, len(order))
 		for i, id := range order {
@@ -550,7 +552,11 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *p
 	if p.AccountMemberID != "" && p.AccountMemberID != s.Member {
 		summary += " on " + n.account(p.AccountMemberID, c)
 	}
-	c.Summary = fmt.Sprintf("%s%s: %q", summary, n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c), truncate(p.Task))
+	summary += n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c)
+	if p.Children != "" {
+		summary += ", child runs " + p.Children
+	}
+	c.Summary = fmt.Sprintf("%s: %q", summary, truncate(p.Task))
 	return nil
 }
 
