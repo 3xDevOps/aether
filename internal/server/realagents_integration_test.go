@@ -266,11 +266,15 @@ func TestIntegrationRealAgents(t *testing.T) {
 								gapAllowed := agent == "codex" || mode == domain.LaunchTUI
 								var gaps, wrong []string
 								a.waitFor(ctx, t, "the subagent's answer", func() bool {
-									started := len(a.subagentBodies(want.subagent))
-									if started == 0 {
+									if len(a.subagentBodies(want.subagent)) == 0 {
 										return false
 									}
+									// A state read after the subagent answered may be
+									// the turn's end.
 									r := a.get(t)
+									if len(a.subagentBodies(want.subagent)) >= 2 {
+										return true
+									}
 									state := fmt.Sprintf("%s/%s (%s: %q)", r.Status, r.Activity, r.Cause, r.Reason)
 									held := domain.RunActivity(r.Activity) == domain.ActivityWaitingAgents
 									switch {
@@ -280,7 +284,7 @@ func TestIntegrationRealAgents(t *testing.T) {
 									default:
 										gaps = append(gaps, state)
 									}
-									return started >= 2
+									return false
 								})
 								if len(gaps) > 0 {
 									t.Logf("known gap: Aether misses this agent's subagent, so the run showed %s while it worked", strings.Join(slices.Compact(gaps), ", "))
