@@ -459,3 +459,24 @@ test('a watched need or finish that ends while its watch is read never shows', a
     mock.restoreAll()
   }
 })
+
+test('a watch notice read when the connection drops never shows', async () => {
+  const fetched = globalThis.fetch
+  let release
+  const held = new Promise((resolve) => { release = resolve })
+  globalThis.fetch = async (url, init) => {
+    if (url.endsWith('/watch.get')) await held
+    return fetched(url, init)
+  }
+  try {
+    watchWith('wat-15', { kind: 'pr', repo: 'acme/app', number: 12 }, { condition: 'merged' })
+    const pending = watchChanged({ watch_id: 'wat-15', member_id: 'me', notification_id: 'not-1' })
+    socket.onclose()
+    release()
+    await pending
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(shown.length, 0)
+  } finally {
+    globalThis.fetch = fetched
+  }
+})

@@ -29,6 +29,8 @@ const reading = new Map()
 // the `ends` count; a watch notice read from before then is stale.
 const ended = new Map()
 let ends = 0
+// The `ends` count when the socket last closed; no read from before then shows.
+let cleared = 0
 
 let socket = null
 let stopped = false
@@ -199,7 +201,7 @@ async function showWatchNotice(p) {
   const runId = target.kind === 'run' ? target.run_id : ''
   const need = runId && notice.condition === 'needs_you'
   const finished = runId && notice.condition === 'finished'
-  if ((need && (ended.get(runId) || 0) > since) || (finished && (ended.get(`${runId} done`) || 0) > since)) return
+  if (cleared > since || (need && (ended.get(runId) || 0) > since) || (finished && (ended.get(`${runId} done`) || 0) > since)) return
   if ((need && recentlyShown(runId)) || (finished && recentlyShown(`${runId} done`))) return
   const notification = new Notification({ title: clip(notice.title || 'Watch', 120), body: clip(notice.body || '', 240) })
   notification.on('click', () => openLink(notice.link || got.watch.link || ''))
@@ -217,6 +219,7 @@ function closeFinished(runId) {
 // Without the socket nothing tells us when these notices' needs and
 // finishes end, so they close now rather than outlive them.
 function closeShown() {
+  cleared = ++ends
   for (const list of watchShown.values()) for (const { notification } of list) notification.close()
   for (const list of finishedShown.values()) for (const notification of list) notification.close()
   watchShown.clear()
