@@ -193,6 +193,19 @@ describe('attachments', () => {
     vi.mocked(api.assistantView).mockImplementation(async () => ({}))
   })
 
+  it('keeps a check attached while the previous send was in flight', async () => {
+    let reply!: () => void
+    vi.mocked(api.assistantPrompt).mockImplementationOnce(() => new Promise((resolve) => { reply = () => resolve({}) }))
+    const aside = await openPanel(<CheckPills feedback={feedback} target={{ runId: login.id, workspaceId: workspace.id }} />)
+    await userEvent.type(box(aside), 'Why is this stuck?{Enter}')
+    await waitFor(() => expect(api.assistantPrompt).toHaveBeenCalledTimes(1))
+    await userEvent.click(screen.getByRole('button', { name: 'Fix lint with the assistant' }))
+    act(() => reply())
+    await waitFor(() => expect(useStore.getState().assistantSending).toBe(false))
+    expect(within(aside).getByRole('button', { name: 'Remove check lint from the message' })).toBeDefined()
+    expect(box(aside).value).toBe('Why is this stuck?')
+  })
+
   it('sends nothing and shows the error when the server cannot forget a removed page', async () => {
     vi.mocked(api.assistantView).mockImplementation(async (context) => {
       if (!context.route) throw new Error('connection reset')

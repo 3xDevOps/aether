@@ -86,7 +86,8 @@ export function AssistantComposer({ textarea, running, dock }: {
       }
       const now = useStore.getState()
       if (now.assistantGeneration !== generation) return
-      if (now.assistantDraft.trim() === text) now.clearAssistantDraft()
+      // A chip changed during the send drops the attempt; that draft was not sent and stays.
+      if (now.assistantDraft.trim() === text && now.assistantAttempt === attempt) now.clearAssistantDraft()
       else now.setAssistantAttempt(null)
     } catch (err) {
       if (useStore.getState().assistantGeneration === generation) useStore.getState().setAssistantError(message(err))
