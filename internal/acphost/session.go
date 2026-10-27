@@ -102,6 +102,10 @@ type TurnState struct {
 	// Failed is the error a turn's prompt failed with while the agent stayed
 	// connected.
 	Failed error
+	// At is when the session entered the state. A prompt's working state
+	// is stamped before the prompt reaches the agent, while its callback
+	// can run after the agent already acted on the prompt.
+	At time.Time
 }
 
 // Receipt says what happened to a prompt.

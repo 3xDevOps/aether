@@ -247,3 +247,51 @@ func TestStandardTasklessReminderOffersNoWaiting(t *testing.T) {
 		t.Fatalf("HoldTurnEnd = %q, %v; want a reminder without waiting", reminder, err)
 	}
 }
+
+// A turn that reports before its start reaches the scheduler, as a mail
+// wake's turn can while the state callback that started it still runs, is
+// not reminded; the next turn, which reports nothing, is.
+func TestEnhancedTurnReportedBeforeItsStartIsNotReminded(t *testing.T) {
+	t.Parallel()
+	e, _ := newACPEnv(t, withServerBinary(fakeServerBinary(t, "#!/bin/sh\necho aether\n")))
+	coord, _ := withCoordination(t, e)
+	var mu sync.Mutex
+	var reminded []int
+	coord.remind = func(ctx context.Context, r domain.RunID, prompt string) error {
+		page, err := e.sched.ACPHistory(r, 0, 0)
+		if err != nil {
+			return err
+		}
+		mu.Lock()
+		reminded = append(reminded, len(userMessages(page.Items)))
+		mu.Unlock()
+		return e.sched.Wake(ctx, r, prompt)
+	}
+	var mail sync.Once
+	coord.mu.Lock()
+	coord.onWake = func(r domain.RunID) {
+		mail.Do(func() {
+			if err := e.sched.WakeEnhanced(context.Background(), r, "say pong"); err != nil {
+				t.Error(err)
+				return
+			}
+			receipt := &store.CoordStateReport{RunID: r, IdempotencyKey: "waiting-1", Outcome: "waiting", WaitingFor: "agents", Summary: "waits", CreatedAt: time.Now().UTC()}
+			if _, err := e.db.RecordCoordStateReport(context.Background(), receipt); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	coord.mu.Unlock()
+	run := e.launchACP(t, "say pong")
+	waitItems(t, e.sched, run.ID, "the mail turn", turnEnded("end_turn", 3))
+	e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if _, err := e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: "say pong"}, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitItems(t, e.sched, run.ID, "the unreported turn's reminder", turnEnded("end_turn", 5))
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(reminded, []int{1, 4}) {
+		t.Fatalf("reminded after prompts %v, want after the task and the unreported turn only", reminded)
+	}
+}
