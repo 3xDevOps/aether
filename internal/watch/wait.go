@@ -82,9 +82,10 @@ func (s *Service) RegisterWait(ctx context.Context, owner *domain.Run, report *s
 }
 
 // SettleBound is how long SettleRunWaits reads conditions before it
-// leaves the rest to the background. A wake the background finds first is
-// held until it is past.
-const SettleBound = store.RunWaitSettle
+// leaves the rest to the background. A wake the background finds within
+// SettleBound of the condition's registration, before the report read it,
+// is held until then, so the report returns it instead.
+const SettleBound = 10 * time.Second
 
 const returnedInReport = "Returned in the report that registered it"
 
@@ -195,9 +196,8 @@ type waitReading struct {
 var errWaitUnreadable = errors.New("unreadable")
 
 // evaluateWait reads wait id unless it is not due: a pull request wait in
-// backoff, between polls or not yet read by the report that registered it
-// is left to its next check, as events about the owner run say nothing
-// about it. A run target is read on its every event. inline marks the read of the report
+// backoff or between polls is left to its next check, as events about the
+// owner run say nothing about it. A run target is read on its every event. inline marks the read of the report
 // that registered it, which returns a resolution to the agent itself and
 // reads GitHub afresh.
 func (s *Service) evaluateWait(ctx context.Context, id string, inline bool) error {
@@ -301,10 +301,9 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait, inline bool)
 		case inline:
 			w.DeliveredAt = &now
 			d.Status, d.Detail = protocol.WatchStatusDelivered, returnedInReport
-		case before.LastCheckAt == nil && notDue:
-			// Resolved before the report's own read: its wake waits out the
-			// report's window, so the report returns it instead.
-			w.DeliveryNextAt = before.NextCheckAt
+		case before.LastCheckAt == nil && now.Before(w.CreatedAt.Add(SettleBound)):
+			held := w.CreatedAt.Add(SettleBound)
+			w.DeliveryNextAt = &held
 		default:
 			w.DeliveryNextAt = &now
 		}

@@ -127,10 +127,6 @@ type RunWaitStore interface {
 	SetRunWaitDelivery(ctx context.Context, w *RunWait, d WatchDelivery) error
 }
 
-// RunWaitSettle is how long after a report is applied its conditions are
-// left to the report's own read before the background reads them.
-const RunWaitSettle = 10 * time.Second
-
 // MaxWaitReportsPerHour bounds the waiting reports with conditions one run
 // records in an hour.
 const MaxWaitReportsPerHour = 30
@@ -178,7 +174,7 @@ func (d *DB) RecordWaitingReport(ctx context.Context, report *CoordStateReport, 
 }
 
 // armRunWaits makes the conditions report key registered pending as the
-// run's next revision, due once RunWaitSettle has passed, and supersedes the run's pending ones.
+// run's next revision, due at once, and supersedes the run's pending ones.
 // Only the new revision and the latest that woke the run are kept.
 func armRunWaits(ctx context.Context, tx *sql.Tx, run domain.RunID, key string, now time.Time) error {
 	var registered int
@@ -196,13 +192,9 @@ func armRunWaits(ctx context.Context, tx *sql.Tx, run domain.RunID, key string, 
 	if err != nil {
 		return fmt.Errorf("store: arm waits: %w", err)
 	}
-	due, err := encodeTime(now.Add(RunWaitSettle))
-	if err != nil {
-		return fmt.Errorf("store: arm waits: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE watches SET state = 'active', wait_state = 'pending', next_check_at = ?4, updated_at = ?1,
+	if _, err := tx.ExecContext(ctx, `UPDATE watches SET state = 'active', wait_state = 'pending', next_check_at = ?1, updated_at = ?1,
 		wait_revision = (SELECT COALESCE(MAX(wait_revision), 0) + 1 FROM watches WHERE owner_run_id = ?2), version = version + 1
-		WHERE owner_run_id = ?2 AND wait_report_key = ?3 AND wait_state = 'registered'`, at, run, key, due); err != nil {
+		WHERE owner_run_id = ?2 AND wait_report_key = ?3 AND wait_state = 'registered'`, at, run, key); err != nil {
 		return fmt.Errorf("store: arm waits: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM watches WHERE owner_run_id = ?1 AND wait_state <> 'registered'

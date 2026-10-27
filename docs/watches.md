@@ -266,9 +266,9 @@ for at most 10 seconds, without taking that state as already seen. A
 condition already resolved, such as a pull request that already merged or a
 run that already ended, comes back in the report's `resolved` list and its
 `next_action` says so: the agent learns it in the same turn and no wake
-follows. The background leaves a condition to that read for its 10
-seconds; one it resolved and began waking the run for meanwhile is left to
-that wake instead. Conditions still pending, or whose read did not finish,
+follows. A wake the background finds for a condition in its first 10
+seconds, before the report read it, is held until then, so the report
+returns it; one an inbox delivery already began on is left to that wake. Conditions still pending, or whose read did not finish,
 are read from then on: pull requests as [Pull requests and CI](#pull-requests-and-ci)
 describes, every minute while checks run and every 5 minutes otherwise, and
 in backoff after a failed read; a run target on each of its events and every

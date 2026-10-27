@@ -96,8 +96,8 @@ func (h *waitHarness) restart() {
 	h.t.Helper()
 	_ = h.svc.Close()
 	svc, err := New(Config{
-		Store: h.db, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
-		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
+		Store: h.bg, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now, Recovered: h.recovered,
 	})
 	if err != nil {
 		h.t.Fatalf("New: %v", err)
@@ -186,7 +186,7 @@ func TestAWaitOnARunThatAlreadyEndedResolvesInTheReport(t *testing.T) {
 			t.Fatalf("resolved = %+v, want the failed run returned in the report", resolved)
 		}
 	}
-	settle()
+	h.settle()
 	if n := len(h.inbox.messages(owner.ID)); n != 0 {
 		t.Fatalf("%d inbox wakes for a condition the report already returned, want none", n)
 	}
@@ -197,6 +197,8 @@ func TestAWaitOnARunThatAlreadyEndedResolvesInTheReport(t *testing.T) {
 func TestAnEndRacingTheRegistrationIsNeverMissed(t *testing.T) {
 	t.Parallel()
 	h := newWaitHarness(t)
+	inline := map[domain.RunID]bool{}
+	var owners []domain.RunID
 	for i := range 10 {
 		owner, target := h.run(h.ada, fmt.Sprintf("Owner %d", i)), h.run(h.ada, fmt.Sprintf("Target %d", i))
 		var wg sync.WaitGroup
@@ -204,16 +206,20 @@ func TestAnEndRacingTheRegistrationIsNeverMissed(t *testing.T) {
 		wg.Go(func() { h.status(target, domain.RunCompleted, "", "") })
 		wg.Go(func() { resolved = h.mustReport(owner, finished(target.ID)) })
 		wg.Wait()
-		if len(resolved) == 1 {
-			settle()
-			if n := len(h.inbox.messages(owner.ID)); n != 0 {
-				t.Fatalf("run %d: resolved in the report and woken %d times", i, n)
-			}
-			continue
-		}
-		h.eventually(fmt.Sprintf("wake %d", i), func() bool { return len(h.inbox.messages(owner.ID)) == 1 })
+		owners, inline[owner.ID] = append(owners, owner.ID), len(resolved) == 1
 	}
-	settle()
+	h.clock.advance(SettleBound)
+	for _, owner := range owners {
+		if !inline[owner] {
+			h.eventually("the wake of "+string(owner), func() bool { return len(h.inbox.messages(owner)) == 1 })
+		}
+	}
+	h.settle()
+	for _, owner := range owners {
+		if want, n := map[bool]int{true: 0, false: 1}[inline[owner]], len(h.inbox.messages(owner)); n != want {
+			t.Fatalf("run %s: resolved in the report %v and woken %d times", owner, inline[owner], n)
+		}
+	}
 	h.inbox.mu.Lock()
 	defer h.inbox.mu.Unlock()
 	if len(h.inbox.calls) != len(h.inbox.kept) {
@@ -258,7 +264,7 @@ func TestANewReportSupersedesAndAnotherOutcomeCancels(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.status(b, domain.RunCompleted, "", "")
-	settle()
+	h.settle()
 	if w := h.only(owner.ID); w.State != protocol.WaitCancelled || w.EndedCause != "the run reported answered" {
 		t.Fatalf("wait = %+v, want cancelled by the report", w)
 	}
@@ -275,7 +281,7 @@ func TestTheFirstConditionWakesOnceAndEndsTheOthers(t *testing.T) {
 	h.status(a, domain.RunCompleted, "", "")
 	h.eventually("the wake", func() bool { return len(h.inbox.messages(owner.ID)) == 1 })
 	h.status(b, domain.RunAbandoned, "", "")
-	settle()
+	h.settle()
 	states := map[string]string{}
 	for _, w := range h.waits(owner.ID) {
 		states[w.RunID] = w.State
@@ -301,7 +307,7 @@ func TestAPendingWakeSurvivesARestartAndIsSentOnce(t *testing.T) {
 	h.restart()
 	h.clock.advance(maxBackoff)
 	h.eventually("the wake", func() bool { return h.only(owner.ID).DeliveredAt != "" })
-	settle()
+	h.settle()
 	if n := len(h.inbox.messages(owner.ID)); n != 1 {
 		t.Fatalf("%d wakes, want one", n)
 	}
@@ -353,7 +359,7 @@ func TestAnUnappliedReportLeavesTheWaitsAlone(t *testing.T) {
 	if err := h.register(owner, "refused", finished(b.ID)); err != nil {
 		t.Fatal(err)
 	}
-	settle()
+	h.settle()
 	if w := h.only(owner.ID); w.ID != before.ID || w.State != protocol.WaitPending {
 		t.Fatalf("waits = %+v, want the earlier one pending", h.waits(owner.ID))
 	}
@@ -371,8 +377,14 @@ func TestARunCanRegisterOnlySoManyWaitsAnHour(t *testing.T) {
 	t.Parallel()
 	h := newWaitHarness(t)
 	owner, target := h.run(h.ada, "Integrate"), h.run(h.ada, "Build")
-	for range store.MaxWaitReportsPerHour {
-		h.mustReport(owner, finished(target.ID))
+	for i := range store.MaxWaitReportsPerHour {
+		key := fmt.Sprintf("k%d", i)
+		if err := h.register(owner, key, finished(target.ID)); err != nil {
+			t.Fatal(err)
+		}
+		if err := h.db.MarkCoordStateReportApplied(h.ctx, owner.ID, key); err != nil {
+			t.Fatal(err)
+		}
 	}
 	_, err := h.report(owner, "one-too-many", finished(target.ID))
 	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "waiting reports with conditions in the last hour") {
@@ -409,7 +421,7 @@ func TestAnEndedOwnerCancelsItsWaitsAndUndeliveredWake(t *testing.T) {
 	h.status(owner, domain.RunAbandoned, "", "")
 	h.eventually("the cancel", func() bool { return h.only(owner.ID).State == protocol.WaitCancelled })
 	h.status(target, domain.RunCompleted, "", "")
-	settle()
+	h.settle()
 	if n := len(h.inbox.messages(owner.ID)); n != 0 {
 		t.Fatalf("%d wakes to an ended run", n)
 	}
@@ -650,12 +662,13 @@ func TestOwnerEventsDoNotReadGitHubBeforeTheWaitIsDue(t *testing.T) {
 	h, gh := newWaitPRHarness(t)
 	owner := h.run(h.ada, "Ship")
 	h.mustReport(owner, "pr:acme/app#7:merged")
+	h.settle()
 	before, _, _ := gh.reads()
 	for range 5 {
 		h.status(owner, domain.RunRunning, domain.ActivityWorking, "")
 		h.status(owner, domain.RunNeedsAttention, domain.ActivityWaitingCI, "waiting for ci: merge")
 	}
-	settle()
+	h.settle()
 	if after, _, _ := gh.reads(); after != before {
 		t.Fatalf("%d pull request reads from owner events, want none", after-before)
 	}
@@ -675,7 +688,7 @@ func TestAPromptDropsAWakeNotYetWritten(t *testing.T) {
 	}
 	h.inbox.fail.Store(false)
 	h.clock.advance(maxBackoff)
-	settle()
+	h.settle()
 	if n := len(h.inbox.messages(owner.ID)); n != 0 {
 		t.Fatalf("%d wakes after the prompt", n)
 	}
@@ -717,7 +730,7 @@ func TestChecksOnAnOlderOrReplacedHeadAreNoVerdict(t *testing.T) {
 	if w := h.only(named.ID); w.Outcome != "superseded" || !strings.Contains(h.inbox.messages(named.ID)[0].body, "a newer commit replaced the one you named") {
 		t.Fatalf("named wait = %+v, want superseded", w)
 	}
-	settle()
+	h.settle()
 	if w := h.only(unnamed.ID); w.State != protocol.WaitPending || w.HeadSHA != shaTwo || len(h.inbox.messages(unnamed.ID)) != 0 {
 		t.Fatalf("unnamed wait = %+v, want still pending on %s", w, shaTwo)
 	}
@@ -750,7 +763,7 @@ func TestAMergedPullRequestResolvesInTheReport(t *testing.T) {
 		}
 	}
 	h.clock.advance(time.Minute)
-	settle()
+	h.settle()
 	if n := len(h.inbox.messages(owner.ID)); n != 0 {
 		t.Fatalf("%d wakes, want none", n)
 	}
