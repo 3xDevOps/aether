@@ -1,6 +1,6 @@
 import { awaitingReview } from '@/lib/needs-you'
 import { plainReason } from '@/lib/reasons'
-import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateTitle, stateTone, stateWords, toneOf } from '@/lib/status'
+import { backgroundReason, clipLabel, groupOf, presentRun, runLabel, stateDetail, stateLabel, stateName, stateTitle, stateTone, stateWords, toneOf } from '@/lib/status'
 import { clockTime } from '@/lib/format'
 import type { RunActivity, RunWait } from '@/lib/types'
 import { isTerminal, toRecord } from '@/store/runs'
@@ -321,6 +321,8 @@ describe('state words', () => {
     expect(stalled).toMatchObject({ state: 'stalled', cause: 'stall' })
     expect(stalled.needsYou).toBeUndefined()
     expect(groupOf(stalled)).toBe('working')
+    expect(stateName(stalled)).toBe('Possibly stalled')
+    expect(toneOf(stalled)).toBe('waiting')
     expect(stateLine(stalled)).toBe("Possibly stalled · No progress for 6m while awaiting the model's first reply; connection open")
     expect(stateTitle(stalled, since, now)).toBe(
       "Possibly stalled since 42 minutes ago — No progress for 6m while awaiting the model's first reply; connection open. It returns to Working with the agent's next update. Why: the run stalled.",
