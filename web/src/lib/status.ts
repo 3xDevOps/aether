@@ -190,7 +190,7 @@ const causeWords: Record<string, string> = {
   'turn-end': 'the turn ended',
   stall: 'the run stalled',
   'wait-expired': 'its reported wait went stale',
-  workers: 'its swarm workers are live or have unread mail for it',
+  workers: 'its swarm workers or child runs are live or have unread mail for it',
   'tasks-held': 'it holds background tasks',
   human: 'a request waits on a person',
   disconnect: 'the agent session ended',
@@ -237,8 +237,9 @@ export function clipLabel(line: string): string {
   return `${(space > fallbackLabelLength / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
-export function runLabel(run: { task: string; title?: string }): string {
-  const title = run.title?.trim()
+/** A child run's purpose is the label its parent chose for it. */
+export function runLabel(run: { task: string; title?: string; child_purpose?: string }): string {
+  const title = run.child_purpose?.trim() || run.title?.trim()
   if (title) return title
   const line = run.task.split('\n').find((l) => l.trim())?.trim() ?? ''
   return line ? clipLabel(line) : 'Untitled run'

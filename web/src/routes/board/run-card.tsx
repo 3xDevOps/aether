@@ -13,7 +13,7 @@ import { CardActionButton, cardAction, openCard, ReplyComposer, setReplying, use
 import type { BoardCard } from '@/routes/board/selectors'
 import { useStore } from '@/store'
 import { diffTotals } from '@/store/diff'
-import type { SwarmSummary } from '@/store/selectors'
+import { childRunsText, type TreeSummary } from '@/store/selectors'
 
 export const phaseWord: Record<MissionPhase, string> = {
   planning: 'Swarm planning',
@@ -40,8 +40,9 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
   const needsYou = card.group === 'needs-you'
   const title = card.swarm ? mission?.objective ?? runLabel(run) : runLabel(run)
   const state = needsYou && !card.needsYou ? 'needs-you' : card.state
-  const reason = card.swarm ? swarmReason(card, mission?.phase) : card.reason
-  const words = stateWords({ state, reason: card.reason })
+  const asking = !card.needsYou && card.childRuns ? card.children[0] : undefined
+  const reason = card.swarm ? swarmReason(card, mission?.phase) : asking ? `${runLabel(asking.run)}: ${asking.reason}` : card.reason
+  const words = stateWords({ state, reason: asking ? reason : card.reason })
   const label = needsYou ? stateLabel[state] : words.label
   const detail = needsYou || card.swarm ? reason : words.detail
   const description = detail && detail !== label ? detail : undefined
@@ -85,6 +86,7 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
                 {agentName ?? run.harness}
               </span>
             )}
+            {card.childRuns && <SwarmCounts swarm={card.childRuns} noun={childRunsText(card.childRuns)} />}
             <Avatar name={owner} color={card.owner?.color} />
             {snapshot?.truncated ? (
               <span className="shrink-0 tabular-nums">{snapshot.files.length} files</span>
@@ -126,18 +128,19 @@ function swarmReason(card: BoardCard, phase: MissionPhase | undefined): string {
   return phase ? phaseWord[phase] : 'Swarm'
 }
 
-const workerStates: { key: keyof SwarmSummary['counts']; tone: Tone; words: string }[] = [
+const workerStates: { key: keyof TreeSummary['counts']; tone: Tone; words: string }[] = [
   { key: 'needsYou', tone: 'needs-you', words: 'needs you' },
   { key: 'working', tone: 'working', words: 'working' },
   { key: 'done', tone: 'done', words: 'done' },
   { key: 'failed', tone: 'failed', words: 'failed' },
 ]
 
-function SwarmCounts({ swarm: { counts } }: { swarm: SwarmSummary }) {
+function SwarmCounts({ swarm: { counts }, noun = '' }: { swarm: TreeSummary; noun?: string }) {
   const shown = workerStates.filter(({ key }) => counts[key] > 0)
   if (shown.length === 0) return <span className="shrink-0">No workers yet</span>
   return (
     <span className="flex shrink-0 items-center gap-2 tabular-nums">
+      {noun && <span>{noun}</span>}
       {shown.map(({ key, tone, words }) => (
         <span key={key} role="img" aria-label={`${counts[key]} ${words}`} title={`${counts[key]} ${words}`} className="flex items-center gap-1">
           <StatusDot tone={tone} />

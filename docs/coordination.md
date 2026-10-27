@@ -1599,6 +1599,74 @@ and `reply` accept the same `--body-file` and standard-input forms as `send`.
 The example IDs are ordinary non-secret values. Replace them with the peer
 run ID and question ID returned by the run's own status and inbox results.
 
+### Child runs
+
+A **child run** is a run another run started to hand off a focused piece of
+work, such as an adversarial review by another agent. The caller is its
+**parent**; the top of the chain is its **root**. A child is an ordinary run
+with its own container, checkout and branch, owned by the parent's owner,
+and it appears under its parent in the dashboard. Who may start one is in
+[teams.md](teams.md#child-runs).
+
+```sh
+/usr/local/bin/aether-internal child options
+/usr/local/bin/aether-internal child start --harness codex \
+  --purpose 'adversarial review of the auth change' \
+  --task-file review.md --idempotency-key review-auth-1
+/usr/local/bin/aether-internal child list
+/usr/local/bin/aether-internal child fetch --run-id run-child
+```
+
+- `child options` says whether this run may start children and, if not,
+  the exact reason `child start` would give. It lists the limits, how many
+  children of the tree are busy, queued and started in all, and each agent
+  and account a child may use with its state: `ready`, `exhausted` (95% of
+  its quota used), `not-installed` or `not-signed-in`, with the sentence
+  that says how to fix it. `--harness` adds that agent's models.
+- `child start` takes `--harness`, `--purpose` (3-8 words, shown in the
+  dashboard) and `--task` or `--task-file` (at most 24 KiB, so the escaped request fits the socket's 64 KiB; `-` reads
+  standard input), plus optional `--model`, `--mode
+  standard|enhanced|background` and `--account <member-id>`. The server
+  publishes the parent's branch and checks the child out from that commit;
+  uncommitted changes are not included. The receipt carries the child's
+  `run_id`, its `state` (`queued` when the tree has no free slot) and `next`.
+  A retry with the same `--idempotency-key` returns the first receipt; the
+  same key with other inputs is refused with `-32003`. The CLI generates a
+  key when none is given and prints it to stderr.
+- `child list` returns each child's `state` (`queued`, `starting`,
+  `working`, `waiting`, `needs-you`, `finished`, `failed`, `ended`,
+  `cancelled` or `refused`), its latest report, branch, the account it runs
+  on, its cost when metered, and `stale` when the parent's branch moved past
+  the commit the child started from.
+- `child cancel` stops a child or drops it from the queue; a child still
+  starting answers `-32002`, so cancel again a few seconds later. `child
+  detach` lets a started child run on without the parent, which then can no longer
+  cancel, fetch or message it outside the usual rules. A handoff of either
+  run detaches it the same way. `child fetch` publishes the child's
+  branch and copies it into the parent's checkout at
+  `refs/remotes/children/<run-id>`.
+
+Parent and child may always message each other with `send`, `ask` and
+`reply`; `status` lists them with state `lineage`. A child's success,
+failure or blocked report reaches its parent's inbox as an ordinary message
+whose `correlation_id` is the report ID, as a worker's report reaches its
+integrator. A child that ends without a report sends one message saying so.
+A child's `needs-input` question goes to its owner, and the parent is told in
+its inbox so it can answer within the task.
+
+While a parked parent has unfinished children (queued, starting, working,
+waiting or needing input), it is `waiting-agents` with the reason `waiting
+for 2 child runs`. Its `success` report is refused with `-32002` until it
+cancels or detaches them. When a parent run ends, killed, failed, closed or
+deleted, the server stops its attached children that are still working and
+cancels the queued ones; their own children follow. A child that already
+reported its result is detached instead and stays for review. Pausing a parent does not pause its children.
+
+Refusals name the cause: child runs off for the owner, a Background parent
+(it exits before a result can reach it), a cancelled swarm, the depth or total
+limit, the same agent on the exact task of the parent or an
+ancestor, an account outside the allowed set, or the workspace budget.
+
 ### Integrator candidate integration
 
 A candidate freezes selected accepted revisions for combined verification and

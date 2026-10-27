@@ -1,6 +1,6 @@
 // steer_others mirrors protocol.WorkspaceSettingsParams: "" is the permissive default.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { message } from '@/lib/format'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
   Select,
@@ -22,11 +23,19 @@ import {
 } from '@/components/ui/select'
 import { api, type Api } from '@/lib/api'
 import { useReturnFocus } from '@/lib/hooks'
+import type { ChildLimits } from '@/lib/types'
 import { useStore } from '@/store'
+import { useCapability } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 /** The permissive default's form value; see the Styleguide in docs/dashboard-frontend.md. */
 const everyone = 'everyone'
+
+const limitFields: { key: keyof ChildLimits; label: string; help: string }[] = [
+  { key: 'max_live', label: 'Busy at once', help: 'Child runs of one tree working at the same time; more wait in a queue.' },
+  { key: 'max_depth', label: 'Levels deep', help: 'A run’s children are level 1, their children level 2.' },
+  { key: 'max_total', label: 'Per run tree', help: 'Child runs one tree may ever start.' },
+]
 
 export function WorkspaceSettingsDialog({
   workspaceID,
@@ -46,11 +55,30 @@ export function WorkspaceSettingsDialog({
   const late = usePastDeadline(busy)
   const [error, setError] = useState<string | null>(null)
   const returnFocus = useReturnFocus()
+  const limitsOffered = useCapability().hasMethod('workspace.child_limits')
+  const [savedLimits, setSavedLimits] = useState<ChildLimits | null>(null)
+  const [limits, setLimits] = useState<Record<keyof ChildLimits, string> | null>(null)
+  const [limitsError, setLimitsError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!limitsOffered) return
+    let live = true
+    client.workspaceChildLimits(workspaceID).then((read) => {
+      if (!live) return
+      setSavedLimits(read)
+      setLimits({ max_live: String(read.max_live), max_depth: String(read.max_depth), max_total: String(read.max_total) })
+    }, (err: unknown) => live && setLimitsError(message(err)))
+    return () => { live = false }
+  }, [client, workspaceID, limitsOffered])
 
   const save = async () => {
     setBusy(true)
     setError(null)
     try {
+      const changed = limits && savedLimits
+        ? Object.fromEntries(limitFields.filter(({ key }) => Number(limits[key]) !== savedLimits[key]).map(({ key }) => [key, Number(limits[key])]))
+        : {}
+      if (Object.keys(changed).length > 0) setSavedLimits(await client.workspaceChildLimits(workspaceID, changed))
       const updated = await client.workspaceSettings({
         workspace_id: workspaceID,
         steer_others: steerOthers,
@@ -112,6 +140,28 @@ export function WorkspaceSettingsDialog({
               Applies to runs started by another member.
             </p>
           </div>
+          {limitsOffered && (
+            <fieldset className="min-w-0 space-y-2 border-t pt-3 text-ui">
+              <legend className="float-left mb-1 font-medium">Child runs</legend>
+              <p className="clear-left text-ui-sm text-muted">Limits for each tree of runs that agents start from one another. Swarm workers are not counted; their child runs are.</p>
+              {limitsError && <p role="alert" className="text-ui-sm text-state-failed">{limitsError}</p>}
+              {limits && limitFields.map(({ key, label, help }) => (
+                <div key={key} className="grid grid-cols-[minmax(0,1fr)_6rem] items-center gap-x-3">
+                  <Label htmlFor={`workspace-child-${key}`}>{label}</Label>
+                  <Input
+                    id={`workspace-child-${key}`}
+                    type="number"
+                    min={1}
+                    required
+                    value={limits[key]}
+                    aria-describedby={`workspace-child-${key}-help`}
+                    onChange={(event) => setLimits({ ...limits, [key]: event.target.value })}
+                  />
+                  <p id={`workspace-child-${key}-help`} className="col-span-2 text-ui-sm text-muted">{help}</p>
+                </div>
+              ))}
+            </fieldset>
+          )}
           {error && (
             <p role="alert" className="text-ui-sm text-state-failed">
               {error}

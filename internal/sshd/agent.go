@@ -117,6 +117,16 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 	if perr != nil {
 		return nil, perr
 	}
+	agents, err := s.ListAgents(ctx, member, account)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.AgentListResult{Agents: agents}, nil
+}
+
+// ListAgents describes every agent member can launch on account, which the
+// caller has already authorized.
+func (s *Server) ListAgents(ctx context.Context, member, account domain.MemberID) ([]protocol.AgentInfo, error) {
 	describe := func(profile harness.Profile, source, executable string) (protocol.AgentInfo, error) {
 		info, err := s.describeAgent(member, account, profile, source, executable)
 		if err != nil {
@@ -149,13 +159,13 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		}
 		info, err := describe(p, "shipped", p.TUIArgs[0])
 		if err != nil {
-			return nil, rpcError(err)
+			return nil, err
 		}
 		agents = append(agents, info)
 	}
-	rows, serr := s.cfg.Store.ListHarnessDefinitions(ctx, member)
-	if serr != nil {
-		return nil, rpcError(serr)
+	rows, err := s.cfg.Store.ListHarnessDefinitions(ctx, member)
+	if err != nil {
+		return nil, err
 	}
 	for _, row := range rows {
 		if _, shipped := harness.Lookup(row.Name); shipped {
@@ -163,18 +173,18 @@ func (s *Server) agentList(ctx context.Context, member domain.MemberID, raw json
 		}
 		var def harness.Definition
 		if err := json.Unmarshal(row.Definition, &def); err != nil {
-			return nil, rpcError(fmt.Errorf("decode harness %q definition: %w", row.Name, err))
+			return nil, fmt.Errorf("decode harness %q definition: %w", row.Name, err)
 		}
 		info, err := describe(def.Profile(), "member", def.Executable)
 		if err != nil {
-			return nil, rpcError(err)
+			return nil, err
 		}
 		agents = append(agents, info)
 	}
 	// Shipped names and a member's rows are each sorted, but the merged
 	// view must be sorted by name across both sources.
 	sort.Slice(agents, func(i, j int) bool { return agents[i].Name < agents[j].Name })
-	return protocol.AgentListResult{Agents: agents}, nil
+	return agents, nil
 }
 
 // describeAgent describes a launch by member on account. A member's own

@@ -101,6 +101,31 @@ function detailOf(state: WorkflowState, reason: string | undefined): string | un
   return reason && reason !== workflowLabel[state] ? reason : undefined
 }
 
+/** A child run as a workflow row, under the run that started it. */
+export interface ChildRunFacts extends RunFacts {
+  runId: string
+  parentRunId: string
+}
+
+function childRunNodes(parentRunID: string, parentId: string, childRuns: ChildRunFacts[]): WorkflowNode[] {
+  return childRuns.filter((child) => child.parentRunId === parentRunID).map((child) => {
+    const id = `run:${child.runId}`
+    return {
+      id,
+      parentId,
+      kind: 'run',
+      state: child.state,
+      label: child.label,
+      detail: detailOf(child.state, child.reason),
+      startedAt: child.startedAt,
+      endedAt: child.endedAt,
+      runId: child.runId,
+      branch: child.branch,
+      children: childRunNodes(child.runId, id, childRuns),
+    }
+  })
+}
+
 const agentStates: Record<AgentState, { state: WorkflowState; detail?: string }> = {
   running: { state: 'working' },
   done: { state: 'completed' },
@@ -162,7 +187,8 @@ function agentTree(index: AgentIndex, ids: string[], parentId: string, seen: Set
   return nodes
 }
 
-export function deriveRunWorkflow(runID: string, run: RunFacts, agents: AgentIndex): WorkflowNode {
+/** `childRuns` holds the run's descendants; a cycle among them is never reached from the run. */
+export function deriveRunWorkflow(runID: string, run: RunFacts, agents: AgentIndex, childRuns: ChildRunFacts[] = []): WorkflowNode {
   const id = `run:${runID}`
   const seen = new Set<string>()
   const children = agentTree(agents, agents.roots, id, seen)
@@ -171,7 +197,7 @@ export function deriveRunWorkflow(runID: string, run: RunFacts, agents: AgentInd
     .filter((agent) => !seen.has(agent.id) && (!agent.parentID || !agents.agents[agent.parentID]))
     .sort((a, b) => (a.items[0]?.seq ?? 0) - (b.items[0]?.seq ?? 0))
     .map((agent) => agent.id)
-  children.push(...agentTree(agents, unplaced, id, seen))
+  children.push(...agentTree(agents, unplaced, id, seen), ...childRunNodes(runID, id, childRuns))
   if (run.needsYou) {
     children.unshift({ id: `request:${runID}`, parentId: id, kind: 'request', state: 'needs-you', label: run.reason, runId: runID, children: [] })
   }
@@ -256,7 +282,7 @@ function submissionNode(submission: MissionSubmission, task: MissionTask, parent
   }
 }
 
-function attemptNode(attempt: MissionAttempt, name: string, note: string | undefined, submissions: MissionSubmission[], task: MissionTask, run: RunFacts | undefined, parentId: string): WorkflowNode {
+function attemptNode(attempt: MissionAttempt, name: string, note: string | undefined, submissions: MissionSubmission[], task: MissionTask, run: RunFacts | undefined, childRuns: ChildRunFacts[], parentId: string): WorkflowNode {
   const id = `attempt:${attempt.id}`
   const live = run && !['cancelled', 'superseded', 'abandoned'].includes(attempt.state)
   const state: WorkflowState = live ? run.state : attemptStates[attempt.state]
@@ -272,7 +298,10 @@ function attemptNode(attempt: MissionAttempt, name: string, note: string | undef
     endedAt: attempt.finished_at ?? run?.endedAt,
     runId: attempt.run_id || undefined,
     branch: run?.branch,
-    children: submissions.filter((item) => item.attempt_id === attempt.id).map((item) => submissionNode(item, task, id)),
+    children: [
+      ...submissions.filter((item) => item.attempt_id === attempt.id).map((item) => submissionNode(item, task, id)),
+      ...(attempt.run_id ? childRunNodes(attempt.run_id, id, childRuns) : []),
+    ],
   }
 }
 
@@ -347,11 +376,13 @@ export interface SwarmInput {
   detail: MissionDetail
   runs: Record<string, RunFacts>
   candidates: CandidateFacts[]
+  /** Child runs the integrator and workers started, at any depth. */
+  childRuns?: ChildRunFacts[]
   integratorLabel: string
   workerLabel?: (attempt: MissionAttempt, name: string) => string
 }
 
-export function deriveSwarmWorkflow({ detail, runs, candidates, integratorLabel, workerLabel = (_, name) => name }: SwarmInput): WorkflowNode {
+export function deriveSwarmWorkflow({ detail, runs, candidates, childRuns = [], integratorLabel, workerLabel = (_, name) => name }: SwarmInput): WorkflowNode {
   const { mission } = detail
   const rootID = `integrator:${mission.id}`
   const runID = mission.current_integrator_run_id
@@ -368,7 +399,7 @@ export function deriveSwarmWorkflow({ detail, runs, candidates, integratorLabel,
     const { task } = entry
     const id = `task:${task.id}`
     const attempts = entry.attempts.map((item) =>
-      attemptNode(item.attempt, workerLabel(item.attempt, item.name), item.earlierIntegrator ? 'from a replaced integrator' : undefined, detail.submissions, task, runs[item.attempt.run_id], id),
+      attemptNode(item.attempt, workerLabel(item.attempt, item.name), item.earlierIntegrator ? 'from a replaced integrator' : undefined, detail.submissions, task, runs[item.attempt.run_id], childRuns, id),
     )
     const waitingOn = (task.dependencies ?? []).filter((item) => unfinished.has(item.depends_on_task_id)).map((item) => titles.get(item.depends_on_task_id) ?? item.depends_on_task_id)
     const current = attempts[entry.attempts.findIndex((item) => item.attempt.task_revision === task.current_revision)]
@@ -387,7 +418,11 @@ export function deriveSwarmWorkflow({ detail, runs, candidates, integratorLabel,
       children: attempts,
     }
   })
-  const children = [...tasks, ...candidates.map((candidate) => candidateNode(candidate, rootID))]
+  const children = [
+    ...tasks,
+    ...candidates.map((candidate) => candidateNode(candidate, rootID)),
+    ...(runID ? childRunNodes(runID, rootID, childRuns) : []),
+  ]
   const state: WorkflowState = integrator?.state ?? (mission.phase === 'completed' ? 'completed' : mission.phase === 'cancelled' ? 'closed' : 'unknown')
   return {
     id: rootID,

@@ -21,7 +21,7 @@ interface Shown {
   next?: string
   cause?: RunStatusCause
   since: string
-  /** A swarm parent's worker counts. */
+  /** A swarm's worker counts, or a run's child-run counts. */
   counts: string
   people: string[]
 }
@@ -147,7 +147,7 @@ function Details({ run, state, waiting, reason, next, cause, since, counts, peop
         <dd className="truncate font-code">{run.branch}</dd>
         {counts && (
           <>
-            <dt>Swarm</dt>
+            <dt>{run.mission_id ? 'Swarm' : 'Child runs'}</dt>
             <dd>{counts}</dd>
           </>
         )}
