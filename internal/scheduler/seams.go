@@ -11,6 +11,20 @@ import (
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
+// UseBaseCapture attaches the base-capture service, built after the scheduler.
+func (s *Scheduler) UseBaseCapture(c BaseCapture) {
+	s.mu.Lock()
+	s.cfg.Bases = c
+	s.mu.Unlock()
+}
+
+// UseEvidence attaches the evidence service, built after the scheduler.
+func (s *Scheduler) UseEvidence(e EvidenceService) {
+	s.mu.Lock()
+	s.evidence = e
+	s.mu.Unlock()
+}
+
 type EvidenceService interface {
 	Capture(context.Context, evidence.Request) (protocol.EvidencePacket, error)
 	CaptureBeforeCleanup(context.Context, evidence.Request, func(context.Context) error) (protocol.EvidencePacket, error)

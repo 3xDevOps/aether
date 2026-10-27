@@ -934,6 +934,7 @@ func (*fakeRuns) DefaultMode(context.Context, domain.MemberID, domain.MemberID, 
 }
 func (*fakeRuns) PendingInputs(domain.RunID) []domain.RunInputRequest          { return nil }
 func (*fakeRuns) Cause(domain.RunID, domain.RunActivity) events.RunStatusCause { return "" }
+func (*fakeRuns) Wait(domain.RunID, domain.RunActivity) *domain.RunWait        { return nil }
 func (*fakeRuns) Liveness(domain.RunID) (domain.RunLiveness, bool) {
 	return domain.RunLiveness{}, false
 }

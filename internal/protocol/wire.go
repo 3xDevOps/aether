@@ -35,6 +35,9 @@ type Run struct {
 	// Cause comes from the scheduler: what chose Activity, as in the
 	// run.status event.
 	Cause string `json:"cause,omitempty"`
+	// Wait comes from the scheduler too: the evidence behind a reported wait
+	// the run shows, judged from the conditions the agent named.
+	Wait *domain.RunWait `json:"wait,omitempty"`
 	// Liveness comes from the scheduler for a live or provisioning Enhanced
 	// run only.
 	Liveness *RunLiveness `json:"liveness,omitempty"`
