@@ -115,6 +115,10 @@ type Config struct {
 	// and admitted; under PolicyApprovedDevices, which empty selects, it
 	// waits until a person approves it.
 	EdgeAccess edgeproto.AccessPolicy
+	// EdgeReviewer lets an admin bind the edge's reviewer account to a
+	// member who is no admin, and a connector authorized by signing in
+	// with it act as that member. False refuses both.
+	EdgeReviewer bool
 	// Name is the server's host name, as its edge refusals name it.
 	Name string
 

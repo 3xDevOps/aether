@@ -158,7 +158,7 @@ func TestOperatorCommandsOnlyRemoveAndBlock(t *testing.T) {
 		got   []string
 		want  []string
 	}{
-		{"aether-edge", slices.Collect(maps.Keys(commands)), []string{"accounts", "backup", "healthcheck", "release-check", "restore", "schema", "serve", "servers", "version"}},
+		{"aether-edge", slices.Collect(maps.Keys(commands)), []string{"accounts", "backup", "healthcheck", "release-check", "restore", "reviewer", "schema", "serve", "servers", "version"}},
 		{"aether-edge servers", slices.Collect(maps.Keys(serverCommands)), []string{"block", "list", "remove", "unblock"}},
 		{"aether-edge accounts", slices.Collect(maps.Keys(accountCommands)), []string{"block", "delete", "list", "unblock"}},
 	} {

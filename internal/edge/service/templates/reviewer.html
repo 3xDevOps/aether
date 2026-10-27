@@ -1,0 +1,9 @@
+{{define "reviewer"}}{{template "top" .}}
+<p>Sign in with the reviewer account this edge's operator gave the app directory. It reaches one Aether server and nothing else on this edge.</p>
+<form method="post" action="/connectors/reviewer">
+{{range .Data.Fields}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">
+{{end}}<label>Login <input name="login" autocomplete="username" required></label>
+<label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+<button type="submit">Sign in</button>
+</form>
+{{template "bottom" .}}{{end}}
