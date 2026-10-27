@@ -6388,7 +6388,10 @@ a need carries no `notice`, so a clear replaces it like any need. On
 `notificationclick` it focuses a dashboard window that is already open and
 posts it `{type: 'aether:open-run', run}`, `{type: 'aether:open-url', url}`
 or `{type: 'aether:open-workspace', workspace}`; it never reloads the page,
-which would lose its unsent drafts. When no window is open, it opens `url`,
+which would lose its unsent drafts. The page acknowledges
+`aether:open-url` on the message's port; a dashboard from an older build
+that does not within a second is navigated to `url`, or a new window opens
+when the worker cannot navigate it. When no window is open, it opens `url`,
 `/?run=<id>` or `/?page=workspace&id=<id>`.
 `watchPush`, started with the connection in `src/store/sync.ts`, navigates on
 that message; for `url` on this origin it also puts the full `url` in the

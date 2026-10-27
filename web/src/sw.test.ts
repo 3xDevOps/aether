@@ -8,7 +8,12 @@ const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url
 
 type Handler = (event: Record<string, unknown>) => void
 
-type Window = { focused: boolean; focus: () => Promise<void>; postMessage: (m: unknown) => void }
+type Window = {
+  focused: boolean
+  focus: () => Promise<void>
+  postMessage: (m: unknown, ports?: MessagePort[]) => void
+  navigate: (url: string) => Promise<unknown>
+}
 
 function worker(
   windows: Window[] = [],
@@ -38,7 +43,15 @@ function worker(
   return { self, dispatch }
 }
 
-const window = (focused: boolean): Window => ({ focused, focus: vi.fn(async () => {}), postMessage: vi.fn() })
+// A dashboard acknowledges aether:open-url; one from an older build does not.
+const window = (focused: boolean, acknowledges = true): Window => ({
+  focused,
+  focus: vi.fn(async () => {}),
+  postMessage: vi.fn((_m: unknown, ports?: MessagePort[]) => {
+    if (acknowledges) ports?.[0]?.postMessage(true)
+  }),
+  navigate: vi.fn(async () => null),
+})
 
 describe('service worker', () => {
   it('shows one notification per run, replacing the older one', async () => {
@@ -185,9 +198,28 @@ describe('service worker', () => {
     const front = window(true)
     const open = worker([front])
     await open.dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
-    expect(front.postMessage).toHaveBeenCalledWith({ type: 'aether:open-url', url })
+    expect(front.postMessage).toHaveBeenCalledWith({ type: 'aether:open-url', url }, expect.any(Array))
     expect(front.focus).toHaveBeenCalled()
+    expect(front.navigate).not.toHaveBeenCalled()
     expect(open.self.clients.openWindow).not.toHaveBeenCalled()
+  })
+
+  it('sends a dashboard from an older build that ignores the page to open there itself', async () => {
+    const url = '/?page=missions&id=mis-rtgje8zxp6'
+    const old = window(true, false)
+    const open = worker([old])
+    await open.dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
+    expect(old.navigate).toHaveBeenCalledWith(url)
+    expect(open.self.clients.openWindow).not.toHaveBeenCalled()
+
+    // A window this worker does not control cannot be navigated.
+    const uncontrolled = window(true, false)
+    uncontrolled.navigate = vi.fn(async () => {
+      throw new TypeError('not controlled')
+    })
+    const other = worker([uncontrolled])
+    await other.dispatch('notificationclick', { notification: { close: vi.fn(), data: { url } } })
+    expect(other.self.clients.openWindow).toHaveBeenCalledWith(url)
   })
 
   it('opens the dashboard itself from a test notification', async () => {

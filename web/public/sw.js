@@ -69,9 +69,25 @@ self.addEventListener('notificationclick', (event) => {
       }
       // The page routes itself: reloading it would lose its unsent drafts.
       if (run) open.postMessage({ type: 'aether:open-run', run })
-      else if (url) open.postMessage({ type: 'aether:open-url', url })
       else if (workspace) open.postMessage({ type: 'aether:open-workspace', workspace })
       await open.focus()
+      if (url && !(await acknowledged(open, { type: 'aether:open-url', url }))) {
+        await open.navigate(url).catch(() => self.clients.openWindow(url))
+      }
     })(),
   )
 })
+
+// A dashboard built before aether:open-url ignores it, so one that does not
+// answer within a second is sent to the page instead.
+function acknowledged(client, message) {
+  const channel = new MessageChannel()
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), 1000)
+    channel.port1.onmessage = () => {
+      clearTimeout(timer)
+      resolve(true)
+    }
+    client.postMessage(message, [channel.port2])
+  }).finally(() => channel.port1.close())
+}

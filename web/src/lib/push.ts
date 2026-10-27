@@ -108,6 +108,7 @@ export function watchPush(store: RootStore, client: Api): () => void {
   const open = (event: MessageEvent) => {
     const data = event.data as { type?: unknown; run?: unknown; workspace?: unknown; url?: unknown } | null
     if (data?.type === 'aether:open-url' && typeof data.url === 'string') {
+      event.ports[0]?.postMessage(true)
       const url = new URL(data.url, window.location.origin)
       if (url.origin !== window.location.origin) return
       // Kept in the address bar, so query keys the route does not carry,
