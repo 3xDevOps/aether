@@ -160,7 +160,7 @@ export function Composer({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-2">
           <Checkbox id={`${id}-only-me`} checked={onlyMe} disabled={pinMoves} onCheckedChange={(checked) => setOnlyMe(checked === true)} />
-          <Label htmlFor={`${id}-only-me`}>Only me</Label>
+          <Label htmlFor={`${id}-only-me`}>Pin to my runs only</Label>
         </div>
         {!pinMoves && (
           <div className="flex items-center gap-2">
@@ -176,9 +176,11 @@ export function Composer({
       <p className="text-ui-sm text-muted">{pinMoves
           ? 'The pin moves to the replacement, at the note\'s scope.'
           : pin
-            ? `${onlyMe ? 'Your new runs get' : 'Every new run in this workspace gets'} its title in the brief.`
+            ? onlyMe
+              ? 'Your new runs get its title in the brief. Everyone in the workspace can still read it.'
+              : 'Every new run in this workspace gets its title in the brief.'
             : onlyMe
-              ? 'A pin on it enters only your own runs\' briefs. Everyone can still search it.'
+              ? 'A pin on it enters only your own runs\' briefs. Everyone in the workspace can still read it.'
               : 'Every run in this workspace can search it.'}</p>
       {error && <Callout tone="failed" role="alert">{error}</Callout>}
     </section>

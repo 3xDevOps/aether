@@ -1,4 +1,4 @@
-import type { MemoryItem, MemoryKind, MemorySearchParams, MemorySource } from '@/lib/types'
+import type { Member, MemoryItem, MemoryKind, MemorySearchParams, MemorySource } from '@/lib/types'
 
 /** protocol.MemoryBriefMaxBytes */
 export const briefMaxBytes = 3 << 10
@@ -28,6 +28,12 @@ export const kindLabel: Record<MemoryKind, string> = {
   gotcha: 'Gotcha',
   preference: 'Preference',
   outcome: 'Outcome',
+}
+
+/** Mirrors the server: a member note is its pinner's, or unpinned its author's; only they or an admin change it. */
+export function mayChange(item: MemoryItem, self: { id: string | null; role: Member['role'] | null }): boolean {
+  if (item.scope !== 'member' || self.role === null || self.role === 'admin') return true
+  return (item.pinned_at ? item.pinned_by : item.author_id) === self.id
 }
 
 export const writableKinds = ['decision', 'convention', 'gotcha', 'preference'] as const
