@@ -767,6 +767,7 @@ export function fakeApi(over: Partial<Api> = {}): Api {
       methods: ['*'],
       ws: ['events', 'attach', 'terminal'],
     })),
+    assistantLoginSocket: vi.fn((agent: string) => `ws://localhost/ws/terminal?assistant_login=${agent}`),
     eventsSocket: vi.fn(() => 'ws://localhost/ws/events'),
     attachSocket: vi.fn((runID: string) => `ws://localhost/ws/attach/${runID}`),
     assistantSocket: vi.fn(() => 'ws://localhost/ws/assistant'),

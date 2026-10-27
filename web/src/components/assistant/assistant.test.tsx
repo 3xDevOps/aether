@@ -9,7 +9,7 @@ import { useStore, createRootStore } from '@/store'
 import { loadWholeItem } from '@/store/session-stream'
 import { viewSyncDelay } from '@/store/view-context'
 import { item, resetItems, ScriptedSession, say, state, tool } from '@/test/acp-stream'
-import { agentInfo, alice, serverInfo, workspace } from '@/test/fixtures'
+import { alice, serverInfo, workspace } from '@/test/fixtures'
 import { StubSocket } from '@/test/stub-socket'
 import { atViewport } from '@/test/viewport'
 
@@ -219,48 +219,42 @@ describe('states', () => {
       ],
     }))
     const aside = await openPanel()
-    expect(await within(aside).findByText(/runs on your own agent/)).toBeDefined()
+    expect(await within(aside).findByText(/with a sign-in of its own/)).toBeDefined()
     const agents = within(within(aside).getByRole('list', { name: 'Agents' }))
     expect(agents.getByText('No login was found')).toBeDefined()
     expect(agents.getByText('The Enhanced adapter is not installed')).toBeDefined()
     expect(StubSocket.opened).toHaveLength(0)
   })
 
-  it('sets an agent up in Enhanced mode only and leaves setup once it is ready', async () => {
+  it('signs an agent in for the assistant alone and leaves setup once it is ready', async () => {
     const setup = status({
       state: 'setup',
       agent: undefined,
       agents: [
-        { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Enhanced adapter not installed' },
-        { name: 'codex', display_name: 'Codex', ready: false, reason: 'Not installed' },
+        { name: 'claude', display_name: 'Claude Code', ready: false, reason: 'Not signed in for the assistant' },
+        { name: 'codex', display_name: 'Codex', ready: true },
       ],
     })
     vi.mocked(api.assistantStatus).mockResolvedValue(setup)
-    const claude = agentInfo({ display_name: 'Claude Code', enhanced: 'adapter', installed: true, enhanced_installed: false, login_found: true })
-    vi.mocked(api.agentList).mockResolvedValue([claude, agentInfo({ name: 'codex', enhanced: 'none', installed: false })])
     const aside = await openPanel()
-    const buttons = await within(aside).findAllByRole('button', { name: 'Set up' })
+    const buttons = await within(aside).findAllByRole('button', { name: 'Sign in' })
     expect(buttons).toHaveLength(1)
     await userEvent.click(buttons[0]!)
-    expect(await within(aside).findByText(/uses Claude Code in Enhanced mode/)).toBeDefined()
-    expect(within(aside).queryByText('Choose how runs show it')).toBeNull()
-    expect(within(aside).getByRole('region', { name: 'Install and log in' })).toBeDefined()
-    expect(within(aside).getByRole('region', { name: 'Check' })).toBeDefined()
+    expect(within(aside).getByRole('region', { name: 'Sign in to Claude Code' })).toBeDefined()
+    await waitFor(() => expect(StubSocket.opened.some((socket) => socket.url.endsWith('/ws/terminal?assistant_login=claude'))).toBe(true))
+    expect(StubSocket.opened.some((socket) => socket.url.includes('tab='))).toBe(false)
 
-    vi.mocked(api.agentList).mockResolvedValue([{ ...claude, enhanced_installed: true }])
     const reads = vi.mocked(api.assistantStatus).mock.calls.length
     vi.mocked(api.assistantStatus).mockResolvedValue(status())
-    await userEvent.click(within(aside).getByRole('button', { name: 'Check' }))
-    await userEvent.click(await within(aside).findByRole('button', { name: 'Done' }))
+    await userEvent.click(within(aside).getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(vi.mocked(api.assistantStatus).mock.calls.length).toBeGreaterThan(reads))
     await waitFor(() => expect(useStore.getState().assistantStatus?.state).toBe('idle'))
-    expect(useStore.getState().launchDefaults).toEqual({})
   })
 
   it('hides New conversation until there is a conversation', async () => {
     vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'setup', agent: undefined }))
     const aside = await openPanel()
-    await within(aside).findByText(/runs on your own agent/)
+    await within(aside).findByText(/with a sign-in of its own/)
     expect(within(aside).queryByRole('button', { name: 'New conversation' })).toBeNull()
   })
 

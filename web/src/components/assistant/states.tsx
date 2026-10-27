@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { enhancedSupported } from '@/components/agents/agent-copy'
-import { AgentSetup } from '@/components/agents/agent-setup'
+import { AssistantSignIn } from '@/components/assistant/sign-in'
 import { ArrowLeft } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
@@ -10,7 +9,6 @@ import { api } from '@/lib/api'
 import type { AssistantStatus } from '@/lib/assistant-types'
 import { assistantAsk } from '@/lib/commands'
 import { message } from '@/lib/format'
-import { useAgentList } from '@/routes/agents/use-agents'
 import { useOpenPullRequest } from '@/routes/diff/publish-pr'
 import { useStore } from '@/store'
 import { refreshAssistant } from '@/store/assistant-stream'
@@ -52,23 +50,20 @@ function usePagePrompts(): Example[] {
 }
 
 export function AssistantSetup({ status }: { status: AssistantStatus }) {
-  const { agents, reload } = useAgentList(api, true)
-  const [setting, setSetting] = useState('')
-  const settingUp = agents?.find((agent) => agent.name === setting)
-  if (settingUp) {
+  const [signing, setSigning] = useState('')
+  const signingIn = status.agents.find((agent) => agent.name === signing)
+  if (signingIn) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         <div>
-          <Button size="sm" variant="ghost" onClick={() => setSetting('')}><ArrowLeft />Back</Button>
+          <Button size="sm" variant="ghost" onClick={() => setSigning('')}><ArrowLeft />Back</Button>
         </div>
-        <AgentSetup
-          key={settingUp.name}
-          agent={settingUp}
+        <AssistantSignIn
+          key={signingIn.name}
+          agent={signingIn}
           client={api}
-          requireEnhanced
           onDone={() => {
-            reload()
-            setSetting('')
+            setSigning('')
             void refreshAssistant(useStore, api)
           }}
         />
@@ -78,7 +73,7 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
       <p className="text-ui">
-        The assistant runs on your own agent, in your environment. Set up Claude Code or Codex to start.
+        The assistant runs Claude Code or Codex in a container of its own, with a sign-in of its own. Sign in to one to start.
       </p>
       <ul aria-label="Agents" className="flex flex-col gap-3">
         {status.agents.map((agent) => (
@@ -91,15 +86,12 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
               </p>
               <p className="text-ui-sm break-words text-muted">{agent.ready ? 'Ready' : agent.reason}</p>
             </div>
-            {!agent.ready && agents?.some((item) => item.name === agent.name && enhancedSupported(item)) && (
-              <Button size="sm" variant="secondary" onClick={() => setSetting(agent.name)}>Set up</Button>
+            {!agent.ready && (
+              <Button size="sm" variant="secondary" onClick={() => setSigning(agent.name)}>Sign in</Button>
             )}
           </li>
         ))}
       </ul>
-      <div>
-        <Button size="sm" variant="link" onClick={() => useStore.getState().navigate('agents')}>Open Agents</Button>
-      </div>
     </div>
   )
 }
