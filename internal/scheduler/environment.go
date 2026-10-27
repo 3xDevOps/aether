@@ -631,7 +631,7 @@ func (s *Scheduler) DefaultMode(ctx context.Context, member, account domain.Memb
 
 // FallbackLaunchable reports whether a launch in member's home of harnessName
 // in mode on account can stand in for one on requested as a usage fallback:
-// the owner's login is there to share, an enhanced launch finds its ACP
+// the owner's login is there, member's own included, an enhanced launch finds its ACP
 // server, and the agent runs from member's own installation, or from the
 // image when the launch on requested would too. It never borrows the owner's
 // installation, whose executables only a launcher who picked that account
@@ -647,6 +647,17 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 	profile, argvs, err := s.launchProfile(ctx, member, account, harnessName)
 	if err != nil {
 		return false, err
+	}
+	// CheckSharedLaunch does not look for member's own login, and a fallback
+	// to an account whose usage cannot be read must not land on none.
+	if account == member {
+		_, loginErr := s.accountLogins(ctx, account, profile)
+		if errors.Is(loginErr, errNotLoggedIn) {
+			return false, nil
+		}
+		if loginErr != nil {
+			return false, loginErr
+		}
 	}
 	if mode == domain.LaunchACP {
 		installed, adapterErr := s.adapterInstalled(member, account, profile, argvs)

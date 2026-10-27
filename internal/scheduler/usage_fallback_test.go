@@ -190,6 +190,33 @@ func TestEnhancedRunContinuesOnAnAccountWithUnknownUsage(t *testing.T) {
 	e.assertMovedToOwner(t, run.ID, notes)
 }
 
+// A run on Grace's shared account whose usage cannot be read is not moved
+// to Ada's own account when Ada has no login there.
+func TestRunDoesNotMoveToASignedOutOwnAccount(t *testing.T) {
+	t.Parallel()
+	e, _, notes := newFallbackEnv(t, enhancedClaude)
+	e.sched.UseUsageFallback(UsageFallback{Usage: unreadableUsage{}, AuthorizationMu: &sync.Mutex{}, Note: notes.post})
+	e.share(t)
+	run, err := e.sched.Launch(t.Context(), e.ws.ID, e.member.ID, e.owner.ID, "", "claude", domain.LaunchACP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "session", func() bool { return e.sched.acp.session(run.ID) != nil })
+	_, _ = e.sched.Inject(t.Context(), run.ID, e.member.ID, domain.AgentPrompt{Text: acpmock.PromptUsageLimit}, false, nil)
+	waitFor(t, "the usage-limit reason", func() bool {
+		row, getErr := e.db.GetRun(t.Context(), run.ID)
+		return getErr == nil && strings.HasPrefix(row.Reason, "Usage limit reached")
+	})
+	got, err := e.db.GetRun(t.Context(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Reason != "Usage limit reached on Grace's account; no account that may have usage left can run claude here" ||
+		got.AccountMemberID != e.owner.ID || len(notes.all()) != 0 {
+		t.Fatalf("run = reason %q account %s notes %v; want it kept on Grace's account", got.Reason, got.AccountMemberID, notes.all())
+	}
+}
+
 // When the run does not move, the Enhanced run waits for its owner in the
 // container it had, with the real reason: no account qualifies, fallback is
 // off for the run, the replacement would not be admitted for capacity, or

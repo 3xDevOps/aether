@@ -214,7 +214,8 @@ func TestSharedLaunchIgnoresASymlinkedInstallation(t *testing.T) {
 // the launcher's own, an account qualifies only when the launch it replaces
 // also ran the image's agent: a launch that borrowed the requested account's
 // installation would find no agent there. The launcher's own installation
-// makes every logged-in account a fallback.
+// makes every logged-in account a fallback, the launcher's own included only
+// with a login.
 func TestFallbackLaunchableRefusesABorrowedInstallation(t *testing.T) {
 	t.Parallel()
 	e := newShareEnv(t, nil)
@@ -247,6 +248,10 @@ func TestFallbackLaunchableRefusesABorrowedInstallation(t *testing.T) {
 		t.Fatal("a launch that ran the image's agent cannot fall back to another account that does")
 	}
 	installAgent(t, e.adaHome, "claude", ".local/bin/claude", "")
+	if launchable(e.owner.ID, e.member.ID) {
+		t.Fatal("the launcher's own account with no login is a fallback")
+	}
+	writeHomeFiles(t, e.adaHome, ".claude/.credentials.json")
 	for _, account := range []domain.MemberID{e.owner.ID, lin.ID, e.member.ID} {
 		if !launchable(e.owner.ID, account) {
 			t.Fatalf("account %s with a login, launched with the launcher's own installation, is not a fallback", account)
