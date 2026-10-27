@@ -2,10 +2,16 @@
 // server: a member adds, edits and forgets one, and a second member never
 // sees it. Data is synthetic.
 
+import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 import { seedWorkspace } from './harness/setup'
 
-test('a member adds, edits and forgets a preference that a teammate never sees', async ({ page, browser, aether }, testInfo) => {
+async function shot(page: Page, name: string) {
+  const dir = process.env.PREFERENCE_SHOTS
+  if (dir) await page.screenshot({ path: `${dir}/${name}.png`, fullPage: true })
+}
+
+test('a member adds, edits and forgets a preference that a teammate never sees', async ({ page, browser, aether }) => {
   const alice = await aether.member('alice')
   await seedWorkspace(alice, aether.server.addr, await aether.seedRepo('project'))
   const invite = await aether.invite(alice)
@@ -25,12 +31,12 @@ test('a member adds, edits and forgets a preference that a teammate never sees',
   const row = list.getByRole('listitem').first()
   await expect(row).toContainText('Added in Settings')
   await expect(row).toContainText('All my workspaces')
-  await page.screenshot({ path: testInfo.outputPath('memory-desktop.png') })
-  await testInfo.attach('memory desktop', { body: await page.screenshot(), contentType: 'image/png' })
+  await shot(page, 'memory-list-desktop')
 
   await row.getByRole('button', { name: 'Edit' }).click()
   const box = row.getByRole('textbox', { name: 'Preference text' })
   await box.fill('Prefer JSON output please')
+  await shot(page, 'memory-edit-desktop')
   await row.getByRole('button', { name: 'Save' }).click()
   await expect(list.getByText('Prefer JSON output please')).toBeVisible()
 
@@ -42,6 +48,7 @@ test('a member adds, edits and forgets a preference that a teammate never sees',
   await other.goto(`${bob.url}&page=settings&id=memory`)
   await expect(other.getByRole('heading', { name: 'Nothing remembered yet' })).toBeVisible()
   await expect(other.getByText('Prefer JSON output please')).toHaveCount(0)
+  await shot(other, 'memory-second-member')
   const seen = await bob.api.rpc<{ preferences: unknown[] }>('preference.list', { include_disabled: true })
   expect(seen.preferences).toEqual([])
   await other.close()
@@ -49,13 +56,15 @@ test('a member adds, edits and forgets a preference that a teammate never sees',
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`${alice.url}&page=settings&id=memory&entry=${id}`)
   await expect(page.locator(`#preference-${id}`)).toBeVisible()
-  await testInfo.attach('memory mobile', { body: await page.screenshot(), contentType: 'image/png' })
+  await shot(page, 'memory-list-mobile')
   await page.locator(`#preference-${id}`).getByRole('button', { name: 'Actions' }).click()
   await page.getByRole('menuitem', { name: 'Forget' }).click()
   await expect(page.getByText(/Forget this preference\?/)).toBeVisible()
+  await shot(page, 'memory-forget-mobile')
   await page.getByRole('button', { name: 'Forget', exact: true }).click()
   await expect(page.getByText('Forgotten: Prefer JSON output please')).toBeVisible()
   await expect(page.getByText(/Server backups and update snapshots taken earlier may still contain it/)).toBeVisible()
+  await shot(page, 'memory-forgotten-mobile')
   const after = await alice.api.rpc<{ preferences: unknown[] }>('preference.list', { include_disabled: true })
   expect(after.preferences).toEqual([])
   expect(errors).toEqual([])
