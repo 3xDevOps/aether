@@ -363,8 +363,10 @@ integrator's `account_member_id`, each worker's `harness`, `mode`, `model` and
 swarm. A worker given no mode starts in the `worker_mode`
 `aether_launch_options` reports, as the launch dialog's workers do. The server
 checks every account before anything starts: a launch, or a swarm with any agent
-or fallback account not shared with you, fails with the server's error. A
-launch, swarm or template launch the server does not understand fails with
+or fallback account not shared with you, fails with the server's error. A retry
+of a swarm with the same `idempotency_key` still returns that swarm after an
+account it uses stops being shared: a mode that account's agents would have
+chosen is taken from the swarm already recorded. A launch, swarm or template launch the server does not understand fails with
 `unknown param "<name>"` instead of starting without it.
 
 Each launch's result, and `aether_get_run` and `aether_get_swarm`, has a

@@ -420,6 +420,32 @@ func recentSwarm(ctx context.Context, read Call, member string, in protocol.Miss
 	return protocol.Mission{}, false, nil
 }
 
+// keyedSwarm is the member's swarm in the workspace that in, whose empty
+// modes match any, may replay.
+func keyedSwarm(ctx context.Context, read Call, member string, in protocol.MissionCreateParams) (protocol.Mission, bool, error) {
+	var res protocol.MissionListResult
+	if err := read(ctx, protocol.MethodMissionList, protocol.MissionListParams{WorkspaceID: in.WorkspaceID, Limit: defaultRows}, &res); err != nil {
+		return protocol.Mission{}, false, err
+	}
+	same := func(want, got protocol.MissionExecutionChoice) bool {
+		want.Mode = cmp.Or(want.Mode, got.Mode)
+		return want == got
+	}
+	for _, m := range res.Missions {
+		if m.AccountableHumanID != member || m.Objective != in.Objective || !same(protocol.MissionExecutionChoice(in.Integrator), protocol.MissionExecutionChoice(m.Integrator)) ||
+			len(m.ExecutionChoices) != len(in.ExecutionChoices) || !slices.Equal(m.FallbackAccountMemberIDs, in.FallbackAccountMemberIDs) ||
+			m.NoFallback != in.NoFallback || !sameRepos(m.ExtraWorkspaceIDs, in.ExtraWorkspaceIDs) {
+			continue
+		}
+		if !slices.ContainsFunc(in.ExecutionChoices, func(want protocol.MissionExecutionChoice) bool {
+			return !slices.ContainsFunc(m.ExecutionChoices, func(got protocol.MissionExecutionChoice) bool { return same(want, got) })
+		}) {
+			return m, true, nil
+		}
+	}
+	return protocol.Mission{}, false, nil
+}
+
 // sameRepos compares two sets of extra workspace ids.
 func sameRepos(a, b []string) bool {
 	return slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
@@ -449,9 +475,13 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	}
 	own := cmp.Or(in.AccountMemberID, book.self())
 	listed := map[string][]protocol.AgentInfo{}
-	agentsOn := func(account string) ([]protocol.AgentInfo, error) {
+	// unresolved is why a keyed launch left a mode empty: the account's
+	// agents could not be listed, as once its share is revoked. A retry
+	// then takes the modes of the swarm it may replay.
+	var unresolved error
+	agentsOn := func(account string) ([]protocol.AgentInfo, bool, error) {
 		if agents, ok := listed[account]; ok {
-			return agents, nil
+			return agents, true, nil
 		}
 		param := account
 		if account == book.self() {
@@ -459,19 +489,28 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 		}
 		var res protocol.AgentListResult
 		if listErr := c.read(ctx, protocol.MethodAgentList, protocol.AgentListParams{AccountMemberID: param}, &res); listErr != nil {
-			return nil, fmt.Errorf("list agents to choose their modes (or pass every mode): %w", listErr)
+			listErr = fmt.Errorf("list agents to choose their modes (or pass every mode): %w", listErr)
+			if in.IdempotencyKey == "" {
+				return nil, false, listErr
+			}
+			if unresolved == nil {
+				unresolved = listErr
+			}
+			return nil, false, nil
 		}
 		listed[account] = res.Agents
-		return res.Agents, nil
+		return res.Agents, true, nil
 	}
 	integratorMode := in.Mode
 	if integratorMode == "" {
-		agents, listErr := agentsOn(own)
+		agents, ok, listErr := agentsOn(own)
 		if listErr != nil {
 			return "", nil, listErr
 		}
-		if integratorMode, err = protocol.SwarmMode(agents, in.Harness); err != nil {
-			return "", nil, err
+		if ok {
+			if integratorMode, err = protocol.SwarmMode(agents, in.Harness); err != nil {
+				return "", nil, err
+			}
 		}
 	}
 	integrator := protocol.MissionExecutionChoice{AccountMemberID: own, Harness: in.Harness, Mode: integratorMode, Model: in.Model}
@@ -480,7 +519,7 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 		account := cmp.Or(w.AccountMemberID, book.self())
 		workerMode := w.Mode
 		if workerMode == "" {
-			agents, listErr := agentsOn(account)
+			agents, ok, listErr := agentsOn(account)
 			if listErr != nil {
 				return "", nil, listErr
 			}
@@ -490,7 +529,7 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 			if i := slices.IndexFunc(agents, func(a protocol.AgentInfo) bool { return a.Name == w.Harness }); i >= 0 {
 				workerMode = rowOfAgent(agents[i]).Worker
 			}
-			if workerMode == "" {
+			if ok && workerMode == "" {
 				if workerMode, err = protocol.SwarmMode(agents, w.Harness); err != nil {
 					return "", nil, err
 				}
@@ -506,6 +545,18 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	params := protocol.MissionCreateParams{WorkspaceID: in.WorkspaceID, Objective: in.Objective,
 		Integrator: protocol.MissionIntegrator(integrator), ExecutionChoices: choices, IdempotencyKey: in.IdempotencyKey,
 		FallbackAccountMemberIDs: in.FallbackAccountMemberIDs, NoFallback: in.NoFallback, ExtraWorkspaceIDs: in.ExtraWorkspaceIDs}
+	if unresolved != nil {
+		prior, ok, findErr := keyedSwarm(ctx, c.read, info.Member.ID, params)
+		if findErr != nil {
+			return "", nil, findErr
+		}
+		if !ok {
+			return "", nil, unresolved
+		}
+		// The server replays the key only for the choices it recorded, and
+		// judges anything else as a new launch.
+		params.Integrator, params.ExecutionChoices = prior.Integrator, prior.ExecutionChoices
+	}
 	dup, done := false, func(error) {}
 	if params.IdempotencyKey == "" {
 		var prior protocol.Mission

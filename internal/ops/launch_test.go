@@ -135,6 +135,51 @@ func TestConnectorSwarmAccounts(t *testing.T) {
 	}
 }
 
+// A keyed swarm retry whose worker account was revoked since, so its
+// agents cannot be listed for an omitted mode, sends the recorded swarm's
+// choices for the server to replay; a new keyed launch is refused.
+func TestConnectorSwarmRetryAfterRevoke(t *testing.T) {
+	f := newFake(t)
+	f.answers[protocol.MethodServerInfo] = returns(protocol.ServerInfoResult{Member: protocol.Member{ID: "mem-me"}})
+	revoked := &protocol.Error{Code: protocol.CodeDenied, Message: "permission denied: member mem-ada has not shared their account with you"}
+	f.answers[protocol.MethodAgentList] = func(raw json.RawMessage) (any, error) {
+		var p protocol.AgentListParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, err
+		}
+		if p.AccountMemberID == "mem-ada" {
+			return nil, revoked
+		}
+		return protocol.AgentListResult{Agents: []protocol.AgentInfo{{Name: "claude", Enhanced: "adapter", EnhancedInstalled: true}}}, nil
+	}
+	integrator := protocol.MissionExecutionChoice{AccountMemberID: "mem-me", Harness: "claude", Mode: "acp"}
+	worker := protocol.MissionExecutionChoice{AccountMemberID: "mem-ada", Harness: "codex", Mode: "tui"}
+	recorded := protocol.Mission{ID: "mis-1", WorkspaceID: "ws-1", Objective: "o", AccountableHumanID: "mem-me", Phase: "planning",
+		Integrator: protocol.MissionIntegrator(integrator), ExecutionChoices: []protocol.MissionExecutionChoice{integrator, worker}}
+	f.answers[protocol.MethodMissionList] = returns(protocol.MissionListResult{Missions: []protocol.Mission{recorded}})
+	f.answers[protocol.MethodMissionCreate] = returns(protocol.MissionCreateResult{Mission: recorded})
+	cs := connectorSession(t, f, ScopeWrite)
+	args := map[string]any{"workspace_id": "ws-1", "objective": "o", "harness": "claude",
+		"workers": []any{map[string]any{"harness": "codex", "account_member_id": "mem-ada"}}, "idempotency_key": "s1"}
+	if _, out := run(t, cs, "aether_launch_swarm", args); out["swarm_id"] != "mis-1" {
+		t.Fatalf("a keyed retry after the worker's account was revoked = %v, want swarm mis-1", out)
+	}
+	var p protocol.MissionCreateParams
+	if err := json.Unmarshal([]byte(f.acted().params), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.IdempotencyKey != "s1" || !slices.Equal(p.ExecutionChoices, recorded.ExecutionChoices) || p.Integrator != recorded.Integrator {
+		t.Fatalf("mission.create on the retry = %+v, want the recorded choices under key s1", p)
+	}
+
+	f.answers[protocol.MethodMissionList] = returns(protocol.MissionListResult{})
+	f.calls = nil
+	args["idempotency_key"] = "s2"
+	if text, _, failed := try(t, cs, "aether_launch_swarm", args); !failed || !strings.Contains(text, revoked.Message) || len(called(f, protocol.MethodMissionCreate)) != 0 {
+		t.Fatalf("a new keyed swarm on the revoked account = %q, want the agent list refusal and no mission.create", text)
+	}
+}
+
 // aether_launch_options lists the caller's accounts with their usage and
 // agents as the launch dialog offers them, the workspace's templates on
 // request, and models only when asked for.
