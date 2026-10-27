@@ -590,13 +590,14 @@ function askedLaunch(action: AssistantAction, result: Record<string, unknown>, n
   const lead = swarm ? record(input.integrator) : input
   const workspace = text(result.workspace_id) ?? text(input.workspace_id)
   const harness = text(result.harness) ?? text(lead.harness)
+  // Without account_member_id the server picks the account, and usage fallback may move it: name none.
   const account = text(lead.account_member_id)
   const sharer = account ? names.sharer(account) : undefined
   return [
     swarm ? 'swarm' : 'run',
     workspace && (names.workspace(workspace) ?? workspace),
     harness && [names.agent(harness) ?? harness, text(lead.model)].filter(Boolean).join(' '),
-    sharer ? `${sharer}'s account, shared` : 'your account',
+    account && (sharer ? `${sharer}'s account, shared` : 'your account'),
     input.no_fallback === true ? 'no fallback' : undefined,
   ].filter(Boolean).join(' · ')
 }

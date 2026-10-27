@@ -122,7 +122,7 @@ export async function fixThisJourney(page: Page, aether: Aether, testInfo: TestI
     { status: status() },
   )
   const action = assistant.getByRole('group', { name: /^Launched run on / })
-  await expect(action).toContainText(`run · ${workspace.name} · fake · your account`)
+  await expect(action).toContainText(`run · ${workspace.name} · fake`)
   await expect(action).toContainText('approved by you')
   await action.scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath(`${shot}-action.png`) })

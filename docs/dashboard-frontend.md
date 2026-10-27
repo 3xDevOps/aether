@@ -593,8 +593,8 @@ launch runs (`useAssistantAvailable`); the same check gates every entry point.
   `access` own, shared or other, the integrator's for a swarm, `fell back
   from` its `requested_account`, `no fallback` for policy `off` or the
   `ordered` accounts) or a watch result gets one more line; a done launch without a receipt gets the same line from
-  the returned run and its inputs (kind, workspace, agent and model, `your
-  account` or `<name>'s account, shared`, `no fallback`). A done launch whose
+  the returned run and its inputs (kind, workspace, agent and model, the
+  account only when the call named one, `no fallback`). A done launch whose
   run or swarm is still active reads **Working in the background** and says
   how the member hears back; `useBackground`, shared with the **Actions**
   list, reads a launched swarm with `mission.show` and again on each
