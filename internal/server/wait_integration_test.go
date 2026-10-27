@@ -40,11 +40,6 @@ func (w *serverWaits) set(conditions ...scheduler.WaitCondition) {
 	w.conditions = conditions
 }
 
-// TestIntegrationAConditionDecidesWhetherAWaitNeedsYou drives one run
-// through a real server: a CI wait with a checked condition stays quiet
-// long past the point an unchecked wait goes stale, and the same wait whose
-// condition resolved without waking the agent needs its owner, in run.get,
-// attention.list and the push body alike.
 func TestIntegrationAConditionDecidesWhetherAWaitNeedsYou(t *testing.T) {
 	requireBinary(t, "git")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)

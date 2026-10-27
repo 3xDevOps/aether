@@ -149,10 +149,6 @@ func TestAnEarlierTurnsConditionBacksNoWait(t *testing.T) {
 	}
 }
 
-// TestAConditionDecidesWhatAReportedWaitShows walks a CI wait through every
-// judgement of its condition: a checked one never goes stale and never
-// needs anyone, an unreadable source says so, and only a wake that never
-// reached the agent needs a member.
 func TestAConditionDecidesWhatAReportedWaitShows(t *testing.T) {
 	t.Parallel()
 	waits := &fakeWaits{}
