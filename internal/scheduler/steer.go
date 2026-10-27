@@ -571,6 +571,9 @@ func (s *Scheduler) setPaused(entry *supervised, paused bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry.paused = paused
+	if !paused {
+		entry.quietFrom = time.Now().UTC()
+	}
 	if s.runs[entry.runID] != entry {
 		// Finalized concurrently: the sidecar is gone and must stay gone.
 		return

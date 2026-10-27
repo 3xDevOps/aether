@@ -23,9 +23,10 @@ func init() {
 			return nil, errors.New("watch: the store does not keep watches")
 		}
 		cfg := watch.Config{
-			Store: st,
-			Bus:   d.Bus,
-			Runs:  d.Runs,
+			Store:     st,
+			Bus:       d.Bus,
+			Runs:      d.Runs,
+			Recovered: d.Runs.RecoveryReady(),
 			Swarm: func(ctx context.Context, run *domain.Run) (*protocol.AttentionItem, domain.MemberID, error) {
 				return d.SSHServer().SwarmAttention(ctx, run)
 			},
