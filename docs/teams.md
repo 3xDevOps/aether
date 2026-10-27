@@ -516,28 +516,26 @@ and the built-in assistant can start from the same ones. They hold the agent
 to preselect, each agent's mode and model, the account to launch on, and the
 fallback policy: `automatic` (every account you may launch on), `ordered` (at
 most 8 member IDs, your own allowed), or `off`. They hold no credentials and
-grant nothing. Every launch is authorized as if nothing were saved.
+grant nothing. `run.launch` does not read them: a client fills a launch from
+them, and the launch is authorized as if nothing were saved.
 
 `launch.defaults.get` returns your choices with a `revision`, which is 0 when
 none are saved. It also checks each choice now. `invalid` lists the choices a
-launch could not use, with the reason: an agent not installed or not signed in
-on the account, an Enhanced mode that is not installed, a model the agent no
-longer offers, or an account or fallback member who stopped sharing with you.
-`unknown` lists models Aether has no current model list to check against.
-Choices that fail a check stay saved until you replace them.
+launch could not use, with the reason: an agent not installed on the account,
+an Enhanced mode that is not installed, a model the agent no longer offers, or
+an account or fallback member who stopped sharing with you. `unknown` lists
+what it could not check: a model with no current model list, or an agent
+with no login file, which still launches if an API key in the environment
+signs it in. Choices that fail a check stay saved until you replace them.
 
 `launch.defaults.set` replaces all your choices (`defaults`) or deletes them
 (`clear: true`). It takes the `revision` you last read. If someone saved since
 then, it fails with code `-32003`, and the error's data holds the current
 choices. Saving an account or fallback member who has not shared with you
 fails with `account_member_id: permission denied: member <id> has not shared
-their account with you`. Both methods act only on the caller, admins included. A save records
-whether the built-in assistant or the member made it (`source`).
-
-Saved choices apply to a swarm as follows: the agent, mode and model fill in
-the integrator only, and workers keep defaulting to the integrator's agent.
-The account fills in the integrator and any worker launched without one. The
-fallback policy applies to the whole swarm.
+their account with you`. Both methods act only on the caller, admins included.
+A save records whether the built-in assistant or the member made it
+(`source`).
 
 A [member merge](#link-or-merge-sign-ins) keeps the survivor's saved choices.
 Any account or fallback member that names the absorbed member, in anyone's
