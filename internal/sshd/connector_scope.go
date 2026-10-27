@@ -35,7 +35,7 @@ var (
 // one of. A connector may call no method missing here, whatever its
 // member's role. run.input.respond also needs the scope of the request it
 // answers (connectorAnswerRefusal), and run.review the scope of the run it
-// would close (connectorReviewRefusal).
+// would close (connectorReviewReportedOnly).
 var connectorMethodScopes = map[string][]string{
 	protocol.MethodServerInfo:               scopeRead,
 	protocol.MethodWorkspaceList:            scopeRead,
@@ -157,20 +157,12 @@ func (s *Server) connectorAnswerRefusal(ctx context.Context, run domain.RunID, r
 	return scopeRefusal(id, protocol.MethodRunInputRespond, need)
 }
 
-// connectorReviewRefusal refuses a connector's complete of a live run
-// unless it holds control or the run's reported success awaits review:
-// completing any other live run ends it, as run.close would.
-func (s *Server) connectorReviewRefusal(ctx context.Context, run domain.RunID, action string) *protocol.Error {
+// connectorReviewReportedOnly is whether the call is a connector's without
+// control, which may complete a live run only when its reported success
+// awaits review: completing any other live run ends it, as run.close would.
+// The scheduler checks it against the state it completes, so a relaunch
+// cannot slip in between.
+func connectorReviewReportedOnly(ctx context.Context) bool {
 	id, ok := ctx.Value(connIdentityKey{}).(connIdentity)
-	if !ok || id.connector == "" || action != protocol.RunReviewComplete {
-		return nil
-	}
-	r, err := s.cfg.Store.GetRun(ctx, run)
-	if err != nil {
-		return rpcError(err)
-	}
-	if !r.Status.Live() || r.Review == domain.ReviewReady {
-		return nil
-	}
-	return scopeRefusal(id, protocol.MethodRunReview+" complete of a run with no reported success awaiting review", scopeControl)
+	return ok && id.connector != "" && scopeRefusal(id, protocol.MethodRunReview, scopeControl) != nil
 }

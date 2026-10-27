@@ -5,7 +5,7 @@ import type { SessionRow, Turn } from '@/store/session-rows'
 import { asRow, stepsBlock, workKinds, type Step, type WorkItem } from '@/store/session-steps'
 import type { Route } from '@/store/ui'
 
-export type ActionState = 'approval' | 'running' | 'done' | 'failed' | 'declined' | 'expired' | 'withdrawn' | 'unfinished'
+export type ActionState = 'approval' | 'running' | 'done' | 'unconfirmed' | 'failed' | 'declined' | 'expired' | 'withdrawn' | 'unfinished'
 
 export type Approval = 'approved' | 'auto-approved'
 
@@ -44,18 +44,35 @@ export interface AssistantView {
   actions: AssistantAction[]
 }
 
-/** The RPC method each acting tool calls: what a pending card and an action record name. */
-const toolMethods: Record<string, string> = {
+/** The RPC methods each acting tool may call, by its input where it says which: what a pending card and an action record name. */
+const toolMethods: Record<string, string | string[] | ((input: Record<string, unknown>) => string | undefined)> = {
   aether_launch_run: 'run.launch',
   aether_message_run: 'run.inject',
-  aether_stop_run: 'run.kill',
+  aether_stop_run: (input) => (text(input.outcome) ? 'run.close' : 'run.kill'),
   aether_pause_run: 'run.pause',
   aether_resume_run: 'run.resume',
   aether_save_environment: 'env.save',
   aether_launch_swarm: 'mission.create',
   aether_pr_merge: 'run.pr.merge',
+  aether_pr_create: 'run.pr.create',
   aether_relaunch_run: 'run.relaunch',
-  aether_answer: 'run.input.respond',
+  // The question the answer_id names decides: an agent's, a swarm's or a teammate's.
+  aether_answer: ['run.input.respond', 'mission.question.answer', 'run.room.post'],
+  aether_decide_approval: 'run.input.respond',
+  aether_run_lifecycle: (input) => ({ relaunch: 'run.relaunch', protect: 'run.protect', unprotect: 'run.protect', archive: 'run.archive', restore: 'run.archive' } as Record<string, string>)[text(input.action) ?? ''],
+  aether_switch_run_mode: 'run.mode.switch',
+  aether_handoff_run: 'run.handoff',
+  aether_swarm_manage: (input) => ({ release_worker: 'mission.worker.release', archive: 'mission.archive', unarchive: 'mission.unarchive' } as Record<string, string>)[text(input.action) ?? ''],
+  aether_replace_integrator: 'mission.replace-integrator',
+  aether_integration_decide: (input) => (input.action === 'deliver' ? 'integration.deliver' : 'integration.decide'),
+  aether_memory_add: 'memory.add',
+  aether_memory_pin: (input) => (input.pin === false ? 'memory.unpin' : 'memory.pin'),
+}
+
+function toolMethod(tool: string, input: Record<string, unknown>): string[] {
+  const method = toolMethods[tool]
+  const named = typeof method === 'function' ? method(input) : method
+  return named === undefined ? [] : [named].flat()
 }
 
 const readTools: Record<string, [string, string]> = {
@@ -79,6 +96,7 @@ const readTools: Record<string, [string, string]> = {
   aether_activity_summary: ['activity summary', 'activity summaries'],
   aether_changes: ['change list', 'change lists'],
   aether_launch_options: ['launch options', 'launch options'],
+  aether_integration: ['integration status', 'integration statuses'],
   aether_list_watches: ['watch list', 'watch lists'],
   aether_get_watch: ['watch', 'watches'],
 }
@@ -117,12 +135,14 @@ export function readSummary(actions: AssistantAction[]): string {
   return `${actions.some((action) => action.state === 'running') ? 'Reading' : 'Read'} ${list}`
 }
 
+/** A tool's result: JSON, or as Aether's tools write it, a one-line summary then JSON. */
 function parsed(value: unknown): unknown {
   if (typeof value !== 'string') return value
   const text = value.trim()
-  if (!text.startsWith('{') && !text.startsWith('[')) return value
+  const json = text.startsWith('{') || text.startsWith('[') ? text : text.slice(text.indexOf('\n') + 1).trimStart()
+  if (!json.startsWith('{') && !json.startsWith('[')) return value
   try {
-    return JSON.parse(text)
+    return JSON.parse(json)
   } catch {
     return value
   }
@@ -167,19 +187,21 @@ export function swarmTarget(id: string): ActionTarget {
 }
 
 function target(tool: string, input: Record<string, unknown>, result: Record<string, unknown>, saved?: AssistantActionRecord): ActionTarget | undefined {
-  const link = text(result.link) ?? text(result.url) ?? text(record(result.launch).link)
+  if (tool === 'aether_pr_merge' || tool === 'aether_pr_create') {
+    const url = text(record(result.pull_request).url) ?? text(result.pr_url) ?? text(record(result.pr).url)
+    if (url) return { kind: 'pr', id: url, url }
+  }
+  const link = text(result.link) ?? text(result.url) ?? text(record(result.launch).url)
   const linked = link ? linkTarget(link) : undefined
   if (linked) return linked
   const ids = record(result.ids)
-  const run = text(saved?.result?.run_id) ?? text(record(result.run).id) ?? text(ids.run_id)
-  const swarm = text(record(result.mission).id) ?? text(record(result.swarm).id) ?? text(ids.mission_id) ?? text(ids.swarm_id)
-  if (tool === 'aether_pr_merge') {
-    const url = text(result.url) ?? text(result.pr_url) ?? text(record(result.pr).url)
-    if (url) return { kind: 'pr', id: url, url }
-  }
-  if (tool === 'aether_save_environment') return { kind: 'environment', id: 'environment', route: { name: 'environment', params: {} } }
-  if (swarm || (tool.endsWith('_swarm') && text(input.mission_id))) return swarmTarget(swarm ?? text(input.mission_id)!)
+  const run = text(saved?.result?.run_id) ?? text(result.run_id) ?? text(record(result.run).id) ?? text(ids.run_id)
+  const swarm = text(result.swarm_id) ?? text(record(result.mission).id) ?? text(record(result.swarm).id) ?? text(ids.mission_id) ?? text(ids.swarm_id)
   const runID = run ?? text(input.run_id)
+  if (tool === 'aether_swarm_manage' && input.action === 'release_worker' && runID) return runTarget(runID)
+  if (tool === 'aether_save_environment') return { kind: 'environment', id: 'environment', route: { name: 'environment', params: {} } }
+  const named = text(input.mission_id) ?? text(input.swarm_id)?.replace(/^swarm:/, '')
+  if (swarm || ((tool.endsWith('_swarm') || tool === 'aether_swarm_manage' || tool === 'aether_replace_integrator') && named)) return swarmTarget(swarm ?? named!)
   if (runID) return runTarget(runID)
   const workspace = text(input.workspace_id)
   if (workspace) return { kind: 'workspace', id: workspace, route: { name: 'workspace', params: { workspaceId: workspace } } }
@@ -243,7 +265,8 @@ export function actionOutcome(
     case 'failed':
       return { state: 'failed', approval }
     case 'succeeded':
-      return { state: 'done', approval }
+      // The call can still fail after its method succeeded, as when GitHub refuses a merge it was asked for.
+      return { state: entry.status === 'failed' ? 'failed' : 'done', approval }
   }
   if (entry.status === 'failed') {
     if (!saved && error?.includes('the member declined this action')) return { state: 'declined' }
@@ -296,9 +319,13 @@ interface Draft {
   entry: WorkItem
   /** The id of the step block the call ran in. */
   block: string
-  method?: string
+  methods: string[]
   noted?: Approval
   saved?: AssistantActionRecord
+}
+
+function callKey(action: AssistantAction): string | undefined {
+  return text(action.input.idempotency_key) ?? text(record(action.result).idempotency_key)
 }
 
 /**
@@ -312,7 +339,7 @@ interface Draft {
  * summary, so it goes to the one call that fits; with more, it stays a row.
  */
 function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined {
-  const open = drafts.filter((d) => d.method === note.method && !d.noted && !d.saved)
+  const open = drafts.filter((d) => d.methods.includes(note.method) && !d.noted && !d.saved)
   if (!note.saved) {
     const run = (d: Draft) => text(d.action.input.run_id)
     const fits = open.length > 1 ? open.filter((d) => run(d) && words.includes(run(d)!)) : open
@@ -321,7 +348,10 @@ function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined 
   const saved = note.saved
   const held = drafts.find((d) => d.saved?.id === saved.id)
   if (held) return held
-  const fits = open.filter((d) => (['run_id', 'workspace_id'] as const).every((key) => {
+  // A call's idempotency key, which the record repeats, names it exactly; a call with another key is not it.
+  const keyed = saved.idempotency_key ? open.find((d) => callKey(d.action) === saved.idempotency_key) : undefined
+  if (keyed) return keyed
+  const fits = open.filter((d) => (!saved.idempotency_key || !callKey(d.action)) && (['run_id', 'workspace_id'] as const).every((key) => {
     const named = text(d.action.input[key])
     return !named || !saved.target?.[key] || named === saved.target[key]
   }))
@@ -353,7 +383,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
       ...callValues(calls.get(entry.id), entry),
       ...(entry.truncated && entry.seq !== undefined ? { seq: entry.seq } : {}),
     }
-    drafts.push({ action, entry, block, method: toolMethods[tool] })
+    drafts.push({ action, entry, block, methods: toolMethod(tool, action.input) })
     return action
   }
   const claim = (step: Step | SessionRow): boolean => {
@@ -412,7 +442,7 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
     flush(true)
     if (!working && row.live) out.push({ kind: 'live', id: 'live', at: row.at, ...row.live })
   }
-  for (const { action, entry, method, noted, saved } of drafts) {
+  for (const { action, entry, methods, noted, saved } of drafts) {
     const error = entry.status === 'failed' ? errorText(action.result) : undefined
     // A turn that ends shows its open calls as finished; the call's own status says whether it ever did.
     const status = calls.get(entry.id)?.status
@@ -420,7 +450,9 @@ export function assistantView(rows: SessionRow[], confirmations: AssistantConfir
     const open = !saved || saved.outcome === 'approved' || saved.outcome === 'auto_approved'
     Object.assign(action, cut && open
       ? { state: 'unfinished', approval: saved ? recordApproval(saved) : noted }
-      : actionOutcome(entry, error, method !== undefined && waitingMethods.has(method), noted, saved))
+      : actionOutcome(entry, error, methods.some((method) => waitingMethods.has(method)), noted, saved))
+    // GitHub's reply to the create was lost and no pull request was found after: it may exist or not.
+    if (action.state === 'done' && action.tool === 'aether_pr_create' && record(action.result).write === 'pending') action.state = 'unconfirmed'
     action.error = saved?.error ?? error
     action.target = target(action.tool, action.input, record(action.result), saved)
   }
@@ -441,9 +473,16 @@ export interface ActionNames {
   workspace: (id: string) => string | undefined
   agent: (name: string) => string | undefined
   run: (id: string) => string | undefined
+  /** The member who shares the account, or undefined for the member's own. */
+  sharer: (id: string) => string | undefined
 }
 
 type Verb = [imperative: string, past: string, present: string]
+
+const words = (verb: string): Verb => {
+  const stem = verb.replace(/e$/, '')
+  return [verb.charAt(0).toUpperCase() + verb.slice(1), `${verb.charAt(0).toUpperCase() + verb.slice(1)}${verb.endsWith('e') ? 'd' : 'ed'}`, `${stem.charAt(0).toUpperCase() + stem.slice(1)}ing`]
+}
 
 const runVerb = (verb: Verb, suffix = '') => ({ verb, object: (a: AssistantAction, n: ActionNames) => `run ${runName(a, n)}${suffix}` })
 
@@ -462,7 +501,7 @@ function launchObject(kind: string) {
 
 function prName(action: AssistantAction, names: ActionNames): string {
   const result = record(action.result)
-  const number = text(result.number) ?? text(record(result.pr).number) ?? text(action.input.pr_number)
+  const number = text(result.number) ?? text(record(result.pull_request).number) ?? text(record(result.pr).number) ?? text(action.input.number) ?? text(action.input.pr_number)
   return number ? `PR #${number}` : `the pull request of run ${runName(action, names)}`
 }
 
@@ -474,12 +513,15 @@ function watchObject(action: AssistantAction, names: ActionNames): string {
   return text(action.input.run_id) ? `run ${runName(action, names)}` : text(action.input.watch_id) ?? ''
 }
 
-const phrases: Record<string, { verb: Verb; object: (action: AssistantAction, names: ActionNames) => string }> = {
+const phrases: Record<string, { verb: Verb | ((action: AssistantAction) => Verb); object: (action: AssistantAction, names: ActionNames) => string }> = {
   aether_launch_run: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('run') },
   aether_launch_swarm: { verb: ['Launch', 'Launched', 'Launching'], object: launchObject('swarm') },
   aether_relaunch_run: runVerb(['Relaunch', 'Relaunched', 'Relaunching']),
   aether_message_run: runVerb(['Message', 'Messaged', 'Messaging']),
-  aether_stop_run: runVerb(['Stop', 'Stopped', 'Stopping']),
+  aether_stop_run: {
+    verb: (a) => (text(a.input.outcome) ? ['Close', 'Closed', 'Closing'] : ['Stop', 'Stopped', 'Stopping']),
+    object: (a, n) => `run ${runName(a, n)}${text(a.input.outcome) ? ` as ${text(a.input.outcome)}` : ''}`,
+  },
   aether_pause_run: runVerb(['Pause', 'Paused', 'Pausing']),
   aether_resume_run: runVerb(['Resume', 'Resumed', 'Resuming']),
   aether_close_run: runVerb(['Close', 'Closed', 'Closing']),
@@ -487,15 +529,30 @@ const phrases: Record<string, { verb: Verb; object: (action: AssistantAction, na
   aether_answer: runVerb(['Answer', 'Answered', 'Answering']),
   aether_decide_approval: { verb: ['Decide', 'Decided', 'Deciding'], object: (a, n) => `an approval for run ${runName(a, n)}` },
   aether_cancel_swarm: { verb: ['Cancel', 'Cancelled', 'Cancelling'], object: (a) => `swarm ${text(a.input.mission_id) ?? a.target?.id ?? ''}`.trimEnd() },
-  aether_pr_merge: { verb: ['Merge', 'Merged', 'Merging'], object: prName },
+  aether_pr_merge: {
+    verb: (a) => (record(a.result).write === 'pending' && record(a.result).merged === false ? ['Queue to merge', 'Queued to merge', 'Queueing to merge'] : ['Merge', 'Merged', 'Merging']),
+    object: prName,
+  },
   aether_save_environment: { verb: ['Save', 'Saved', 'Saving'], object: () => 'your environment' },
+  aether_run_lifecycle: { verb: (a) => words(text(a.input.action) ?? 'change'), object: (a, n) => `run ${runName(a, n)}` },
+  aether_switch_run_mode: { verb: ['Switch', 'Switched', 'Switching'], object: (a, n) => `run ${runName(a, n)} to ${text(a.input.mode) ?? 'another'} mode` },
+  aether_handoff_run: { verb: ['Hand off', 'Handed off', 'Handing off'], object: (a, n) => `run ${runName(a, n)} to ${text(a.input.to_member_id) ?? 'a teammate'}` },
+  aether_swarm_manage: {
+    verb: (a) => (a.input.action === 'release_worker' ? ['Release', 'Released', 'Releasing'] : words(text(a.input.action) ?? 'change')),
+    object: (a, n) => a.input.action === 'release_worker' ? `worker run ${runName(a, n)}` : `swarm ${text(a.input.swarm_id)?.replace(/^swarm:/, '') ?? ''}`.trimEnd(),
+  },
+  aether_replace_integrator: { verb: ['Replace', 'Replaced', 'Replacing'], object: (a) => `the integrator of swarm ${text(a.input.swarm_id)?.replace(/^swarm:/, '') ?? ''}`.trimEnd() },
+  aether_integration_decide: { verb: (a) => words(text(a.input.action) ?? 'decide'), object: (a) => `candidate ${text(a.input.candidate_id) ?? ''}`.trimEnd() },
+  aether_pr_create: { verb: ['Open', 'Opened', 'Opening'], object: (a, n) => `a pull request for run ${runName(a, n)}` },
+  aether_memory_add: { verb: ['Add', 'Added', 'Adding'], object: (a) => (text(a.input.kind) ? `a ${text(a.input.kind)} note` : 'a note') },
+  aether_memory_pin: { verb: (a) => (a.input.pin === false ? ['Unpin', 'Unpinned', 'Unpinning'] : ['Pin', 'Pinned', 'Pinning']), object: (a) => `note ${text(a.input.id) ?? ''}`.trimEnd() },
   aether_watch_create: { verb: ['Watch', 'Started watching', 'Starting to watch'], object: watchObject },
   aether_watch_delete: { verb: ['Stop watching', 'Stopped watching', 'Stopping watching'], object: watchObject },
 }
 
 export function actionSummary(action: AssistantAction, names: ActionNames): string {
   const phrase = phrases[action.tool] ?? { verb: ['Use', 'Used', 'Using'] as Verb, object: () => action.tool }
-  const [imperative, past, present] = phrase.verb
+  const [imperative, past, present] = typeof phrase.verb === 'function' ? phrase.verb(action) : phrase.verb
   const verb = action.state === 'done' ? past : action.state === 'running' || action.state === 'approval' ? present : imperative
   return `${verb} ${phrase.object(action, names)}`.trimEnd()
 }
@@ -504,21 +561,58 @@ export function isKnownAction(tool: string): boolean {
   return tool in phrases
 }
 
+/**
+ * What a launch started: the server's receipt when the tool returns one,
+ * else the run it returned and the choices it was asked for.
+ */
 export function launchLine(action: AssistantAction, names: ActionNames): string | undefined {
-  const launch = record(record(action.result).launch)
+  const result = record(action.result)
+  const launch = record(result.launch)
   const kind = text(launch.kind)
-  if (!kind) return undefined
+  if (!kind) return action.state === 'done' && (action.tool === 'aether_launch_run' || action.tool === 'aether_launch_swarm') ? askedLaunch(action, result, names) : undefined
+  const lead = kind === 'swarm' ? record(launch.integrator) : launch
   const workspace = text(launch.workspace_id)
-  const harness = text(launch.harness)
-  const account = record(launch.account)
-  const owner = text(account.name)
-  const requested = text(record(launch.requested_account).name) ?? text(launch.requested_account)
+  const harness = text(lead.harness)
+  const requested = record(launch.requested_account)
   return [
     kind,
     workspace && (names.workspace(workspace) ?? workspace),
-    harness && [names.agent(harness) ?? harness, text(launch.model)].filter(Boolean).join(' '),
-    owner && `${owner}'s account${account.shared === true || account.own === false || Object.values(account).includes('shared') ? ', shared' : ''}`,
-    requested && `fell back from ${requested}`,
+    harness && [names.agent(harness) ?? harness, text(lead.model)].filter(Boolean).join(' '),
+    accountWords(record(lead.account), names),
+    Object.keys(requested).length > 0 && `fell back from ${accountWords(requested, names)}`,
+    fallbackWords(record(launch.fallback), names),
+  ].filter(Boolean).join(' · ')
+}
+
+/** A receipt's account: `access` is own, shared (with the member) or other (a teammate's run on their own account). */
+function accountWords(account: Record<string, unknown>, names: ActionNames): string {
+  const member = text(account.member_id)
+  const name = text(account.name) ?? (member && (names.sharer(member) ?? member))
+  if (account.access === 'own' || !name) return 'your account'
+  return account.access === 'shared' ? `${name}'s account, shared` : `${name}'s account`
+}
+
+/** The receipt's fallback policy, when it is not the automatic one. */
+function fallbackWords(fallback: Record<string, unknown>, names: ActionNames): string | undefined {
+  if (fallback.policy === 'off') return 'no fallback'
+  const order = Array.isArray(fallback.order) ? fallback.order.map(text).filter((id): id is string => id !== undefined) : []
+  return order.length ? `then ${order.map((id) => names.sharer(id) ?? 'your account').join(', ')}` : undefined
+}
+
+function askedLaunch(action: AssistantAction, result: Record<string, unknown>, names: ActionNames): string {
+  const input = action.input
+  const swarm = action.tool === 'aether_launch_swarm'
+  const workspace = text(result.workspace_id) ?? text(input.workspace_id)
+  const harness = text(result.harness) ?? text(input.harness)
+  // Without account_member_id the server picks the account, and usage fallback may move it: name none.
+  const account = text(input.account_member_id)
+  const sharer = account ? names.sharer(account) : undefined
+  return [
+    swarm ? 'swarm' : 'run',
+    workspace && (names.workspace(workspace) ?? workspace),
+    harness && [names.agent(harness) ?? harness, text(input.model)].filter(Boolean).join(' '),
+    account && (sharer ? `${sharer}'s account, shared` : 'your account'),
+    input.no_fallback === true ? 'no fallback' : undefined,
   ].filter(Boolean).join(' · ')
 }
 

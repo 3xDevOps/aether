@@ -116,7 +116,7 @@ const persistedUi = (s: RootState) => ({
   laneWindow: s.laneWindow,
   laneGroup: s.laneGroup,
   laneHidden: s.laneHidden,
-  launchDefaults: s.launchDefaults,
+  savedLaunchDefaults: s.savedLaunchDefaults,
   dismissedUpdates: s.dismissedUpdates,
   sysboxNudgeDismissed: s.sysboxNudgeDismissed,
   onboarded: s.onboarded,
@@ -169,7 +169,7 @@ export function createRootStore() {
       }),
       {
         name: 'aether.ui',
-        version: 9,
+        version: 10,
         // Before 2 the Repository step record is unusable and is dropped, so
         // the step asks the gateway again. Before 3 the resume point is an
         // index. Before 4 there is no furthest step, so the resume point
@@ -177,6 +177,8 @@ export function createRootStore() {
         // the stored width sized the old run pane, not the sidebar. Before 8
         // the step names are the six-step wizard's and the run dock height is
         // still stored. Before 9 map cameras frame the old packed geometry.
+        // Before 10 launch defaults are not kept per member, so whose they
+        // are is unknown and they are dropped.
         migrate: (persisted, version): PersistedState => {
           const state: PersistedState = { ...((persisted ?? {}) as PersistedState) }
           if (version < 2) {
@@ -209,6 +211,7 @@ export function createRootStore() {
             delete (state as { runDockHeight?: unknown }).runDockHeight
           }
           if (version < 9) delete state.boardMapViewports
+          if (version < 10) delete (state as { launchDefaults?: unknown }).launchDefaults
           return state
         },
         // `migrate` only runs on a version change, and xterm does not validate

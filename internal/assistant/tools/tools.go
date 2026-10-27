@@ -712,3 +712,13 @@ func (c *capReader) Read(p []byte) (int, error) {
 	c.left -= n
 	return n, err
 }
+
+// OwnerName names the member who owns run when it is not member: their
+// display name, else their id. It is empty for member's own run.
+func OwnerName(ctx context.Context, c Caller, member, run string) (string, *protocol.Error) {
+	var conf protocol.AssistantConfirmation
+	if _, rpcErr := (&Server{Caller: c, Member: member}).ownedRun(ctx, run, &conf); rpcErr != nil {
+		return "", rpcErr
+	}
+	return conf.OtherOwner, nil
+}
