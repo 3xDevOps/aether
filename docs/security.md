@@ -526,16 +526,16 @@ there is no terminal, file, settings or git-writing tool.
   on, so a method that needs an approved device refuses a connector minted on
   a registered or pending one, under either `edge-access` policy. Audit
   records name the connector, such as `ChatGPT connector con-7k2m9q4xbd`.
-- Scopes: the member picks them on the consent page, not the client. `read`
-  is always granted, and every member can read every run on the server, so a
+- Scopes: the member picks them on the consent page, not the client. `read` is
+  always granted, and every member can read every run on the server, so a
   connector can read all of them. `write` (launch runs and swarms, message,
   pause and resume runs, answer questions, mark runs reviewed) is checked by
-  default; `control` (decide permission requests, stop and close
-  runs, cancel swarms) is not, because text an agent wrote could talk the
-  assistant into approving or ending work. A connector serves only
-  its scopes' tools, and the server checks every call's method against its
-  scopes, a permission decision against `control`, and refuses every method
-  outside its table ([connectors.md](connectors.md#scopes)). It can make 30 write calls at once,
+  default; `control` (decide permission requests, stop and close runs, cancel
+  swarms) is not, because text an agent wrote could talk the assistant into
+  approving or ending work. A connector serves only its scopes' tools, and the
+  server checks every call's method against its scopes, a permission decision
+  against `control`, and refuses every method outside its table
+  ([connectors.md](connectors.md#scopes)). It can make 30 write calls at once,
   then one every 2 seconds.
 - A connector minted over a member SSH key or a tailnet connection has no
   device: revoking a device does not cut it off. `aether mcp revoke` does.
@@ -598,10 +598,10 @@ there is no terminal, file, settings or git-writing tool.
 
 ## Slack
 
-The [Slack bot](slack.md) acts as the member who linked a Slack account, the
-way a connector does: with that member's role checks, judged by the device
-`aether slack link` ran on, and with audit records naming
-`Slack connector <Slack user id>`. It holds all three [scopes](connectors.md#scopes), since deciding a
+The [Slack bot](slack.md) acts as the member who linked a Slack account, the way
+a connector does: with that member's role checks, judged by the device `aether
+slack link` ran on, and with audit records naming `Slack connector <Slack user
+id>`. It holds all three [scopes](connectors.md#scopes), since deciding a
 permission request takes `control`, and calls only the methods its buttons and
 replies need.
 

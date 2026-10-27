@@ -145,24 +145,25 @@ scopes.
 
 ### Tool list budget
 
-Neither ChatGPT nor Claude documents a limit on `tools/list`. A
-[report on OpenAI's developer forum](https://community.openai.com/t/token-limit-when-connecting-chatgpt-with-external-mcp/1371022)
+Neither ChatGPT nor Claude documents a limit on `tools/list`. A [report on
+OpenAI's developer
+forum](https://community.openai.com/t/token-limit-when-connecting-chatgpt-with-external-mcp/1371022)
 (2026-01-05) quotes ChatGPT refusing a server because "All tools (including
-name, description, and input schema) must be less than 5000 tokens",
-possibly for the total; that figure is unverified until a live ChatGPT test
-settles it. 15000 bytes is about 4300 tokens at 3.5 bytes per token, under
-5000 even as a total. Anthropic notes that tool selection "degrades once you
-exceed 30–50 available tools"
-([tool search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)).
+name, description, and input schema) must be less than 5000 tokens", possibly
+for the total; that figure is unverified until a live ChatGPT test settles it.
+15000 bytes is about 4300 tokens at 3.5 bytes per token, under 5000 even as a
+total. Anthropic notes that tool selection "degrades once you exceed 30–50
+available tools" ([tool
+search](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)).
 
 `TestConnectorToolList` checks the list with every scope granted: at most 40
-tools, and each tool's name, description and compact input schema at most
-3500 bytes, 15000 for all of them together. Today that is 36 tools, 14257
-bytes and 3388 o200k tokens, the largest tool `aether_launch_swarm` at 1160
-bytes; the whole `tools/list` JSON is 20511 bytes and 4857 tokens. Measure offline with the
+tools, and each tool's name, description and compact input schema at most 3500
+bytes, 15000 for all of them together. Today that is 36 tools, 14292 bytes and
+3397 o200k tokens, the largest tool `aether_launch_run` at 1192 bytes; the
+whole `tools/list` JSON is 20546 bytes and 4866 tokens. Measure offline with the
 `o200k_base` tokenizer and update these numbers when tools change. Give each
-tool one "Use this when" sentence, describe a property only when its name
-does not say enough, and fold a read into a tool that already answers it, as
+tool one "Use this when" sentence, describe a property only when its name does
+not say enough, and fold a read into a tool that already answers it, as
 `aether_launch_options` carries templates and models. Merge only tools of the
 same scope and hints. There is no room for `openai/toolInvocation` status
 strings.
