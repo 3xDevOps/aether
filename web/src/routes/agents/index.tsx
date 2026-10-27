@@ -26,6 +26,7 @@ import { useAgentList } from '@/routes/agents/use-agents'
 import { GitHubConnect } from '@/routes/onboarding/github-connect'
 import { registerRoute, type RouteProps } from '@/routes/registry'
 import { useStore } from '@/store'
+import { rememberChoice } from '@/store/launch-defaults'
 import { useCapability } from '@/store/hooks'
 
 const addScreen = '@add'
@@ -33,10 +34,9 @@ const githubScreen = '@github'
 
 function DefaultMode({ agent }: { agent: AgentInfo }) {
   const remembered = useStore((s) => s.launchDefaults[agent.name]?.mode)
-  const setLaunchDefault = useStore((s) => s.setLaunchDefault)
   const value = defaultMode(agent, remembered)
   return (
-    <Select value={value} onValueChange={(mode) => setLaunchDefault(agent.name, mode as LaunchMode)}>
+    <Select value={value} onValueChange={(mode) => rememberChoice(agent.name, mode as LaunchMode, undefined, false)}>
       <SelectTrigger aria-label={`Default mode for ${label(agent)}`} className="w-auto">
         <SelectValue>Default: {modes.find((mode) => mode.value === value)?.label}</SelectValue>
       </SelectTrigger>
@@ -118,7 +118,7 @@ export function AgentsRoute({ client = api }: RouteProps & { client?: Api }) {
 
   const run = (agent: AgentInfo) => {
     const state = useStore.getState()
-    state.rememberLaunch(agent.name, defaultMode(agent, state.launchDefaults[agent.name]?.mode))
+    rememberChoice(agent.name, defaultMode(agent, state.launchDefaults[agent.name]?.mode))
     state.openPaletteDialog('launch')
   }
 

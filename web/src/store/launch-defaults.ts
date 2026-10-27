@@ -1,10 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { create } from 'zustand'
 import { api, ApiError, type Api } from '@/lib/api'
-import { errorSentence } from '@/lib/format'
-import type { LaunchDefaultIssue, LaunchDefaultsResult, LaunchMode, SavedLaunchDefaults } from '@/lib/types'
+import { errorSentence, message } from '@/lib/format'
+import type { LaunchDefaultsResult, LaunchMode, SavedLaunchDefaults } from '@/lib/types'
 import { sameIdentity, useStore } from '@/store'
-import { useCapability } from '@/store/hooks'
+import { capability, useCapability } from '@/store/hooks'
 
 const codeConflict = -32003
 
@@ -16,69 +17,104 @@ useStore.subscribe((state, previous) => {
 })
 
 // Every save bumps writes, so a read that started before it never replaces
-// what the save stored; one read is shared by every caller.
+// what the save stored.
 let writes = 0
-let pending: { identity: string | null; read: Promise<LaunchDefaultsResult> } | null = null
+// Saves run one at a time, each from the choices the one before stored, so
+// an older answer never replaces a newer one.
+let saving: Promise<unknown> = Promise.resolve()
 
-/** Whether this gateway keeps saved launch choices; without it the dialog uses this browser's copy. */
 export function useLaunchDefaultsSupported(): boolean {
   return useCapability().hasMethod('launch.defaults.get')
 }
 
-/** Reads the saved choices once per identity, or again after `attempt` changes. */
-export function useLaunchDefaultsRead(client: Api = api, attempt = 0): { result: LaunchDefaultsResult | null; error: string | null } {
+function read(client: Api): Promise<void> {
+  const same = sameIdentity()
+  const before = writes
+  return client.launchDefaultsGet().then(
+    (result) => { if (same() && writes === before) useLaunchDefaults.setState({ result, error: null }) },
+    (err: unknown) => { if (same()) useLaunchDefaults.setState({ error: errorSentence(err) }) },
+  )
+}
+
+/**
+ * Reads the saved choices on mount, again after `attempt` changes, and when
+ * the signed-in member changes. `fresh` turns true once this mount's read
+ * settles, since another device or the assistant may have saved since the
+ * cached copy was read.
+ */
+export function useLaunchDefaultsRead(client: Api = api, attempt = 0): { result: LaunchDefaultsResult | null; error: string | null; fresh: boolean } {
   const readable = useLaunchDefaultsSupported()
   const identity = useStore((s) => s.identityKey)
   const result = useLaunchDefaults((s) => s.result)
   const error = useLaunchDefaults((s) => s.error)
+  const [fresh, setFresh] = useState(false)
   useEffect(() => {
-    if (!readable || useLaunchDefaults.getState().result) return
-    const same = sameIdentity()
-    const before = writes
-    let shared = pending?.identity === identity ? pending.read : null
-    if (!shared) {
-      const read = client.launchDefaultsGet().finally(() => { if (pending?.read === read) pending = null })
-      pending = { identity, read }
-      shared = read
-    }
-    shared.then(
-      (read) => same() && writes === before && useLaunchDefaults.setState({ result: read, error: null }),
-      (err: unknown) => same() && useLaunchDefaults.setState({ error: errorSentence(err) }),
-    )
+    if (!readable) return
+    let live = true
+    setFresh(false)
+    void read(client).finally(() => { if (live) setFresh(true) })
+    return () => { live = false }
   }, [client, readable, identity, attempt])
-  return readable ? { result, error } : { result: null, error: null }
+  return readable ? { result, error, fresh } : { result: null, error: null, fresh: true }
 }
 
 /**
  * Saves `change` applied to the saved choices; null clears them. When another
  * device saved since they were read, the server's refusal carries its current
- * choices, and `change` is applied to those and saved once more.
+ * choices, and `change` is applied to those and saved once more. A failed
+ * save reads the choices again, so the shared copy is the server's.
  */
-export async function saveLaunchDefaults(change: (current: SavedLaunchDefaults) => SavedLaunchDefaults | null, client: Api = api): Promise<LaunchDefaultsResult> {
+export function saveLaunchDefaults(change: (current: SavedLaunchDefaults) => SavedLaunchDefaults | null, client: Api = api): Promise<LaunchDefaultsResult> {
   const same = sameIdentity()
-  writes++
-  const save = (base: LaunchDefaultsResult) => {
-    const next = change(base.defaults)
-    return client.launchDefaultsSet(next ? { defaults: next, revision: base.revision } : { clear: true, revision: base.revision })
+  const run = async () => {
+    writes++
+    const save = (base: LaunchDefaultsResult) => {
+      if (!same()) throw new Error('Launch choices not saved: the signed-in member changed.')
+      const next = change(base.defaults)
+      if (same() && useLaunchDefaults.getState().result) useLaunchDefaults.setState({ result: { ...base, defaults: next ?? {} } })
+      return client.launchDefaultsSet(next ? { defaults: next, revision: base.revision } : { clear: true, revision: base.revision })
+    }
+    try {
+      const current = useLaunchDefaults.getState().result ?? await client.launchDefaultsGet()
+      let result: LaunchDefaultsResult
+      try {
+        result = await save(current)
+      } catch (err) {
+        if (!(err instanceof ApiError && err.code === codeConflict && err.data)) throw err
+        result = await save(err.data as unknown as LaunchDefaultsResult)
+      }
+      if (same()) useLaunchDefaults.setState({ result, error: null })
+      return result
+    } catch (err) {
+      if (same()) await read(client)
+      throw err
+    }
   }
-  const current = useLaunchDefaults.getState().result ?? await client.launchDefaultsGet()
-  let result: LaunchDefaultsResult
-  try {
-    result = await save(current)
-  } catch (err) {
-    if (!(err instanceof ApiError && err.code === codeConflict && err.data)) throw err
-    result = await save(err.data as unknown as LaunchDefaultsResult)
-  }
-  if (same()) useLaunchDefaults.setState({ result, error: null })
-  return result
+  const next = saving.then(run, run)
+  saving = next.catch(() => {})
+  return next
 }
 
-/** `defaults` with `agent` preferred and its mode and model replaced; an empty model forgets the saved one. */
-export function withAgentChoice(defaults: SavedLaunchDefaults, agent: string, mode: LaunchMode, model: string): SavedLaunchDefaults {
-  return { ...defaults, agent, agents: { ...defaults.agents, [agent]: { mode, ...(model ? { model } : {}) } } }
+/** `agent`'s mode and model replaced, and `agent` preselected when `preferred`; an empty model forgets the saved one and undefined keeps it. */
+export function withAgentChoice(defaults: SavedLaunchDefaults, agent: string, mode: LaunchMode, model?: string, preferred = true): SavedLaunchDefaults {
+  const kept = model ?? defaults.agents?.[agent]?.model
+  return {
+    ...defaults,
+    ...(preferred ? { agent } : {}),
+    agents: { ...defaults.agents, [agent]: { mode, ...(kept ? { model: kept } : {}) } },
+  }
 }
 
-/** The saved choices the server found unusable, by field. */
-export function invalidFields(result: LaunchDefaultsResult | null): Map<string, LaunchDefaultIssue> {
-  return new Map((result?.invalid ?? []).map((issue) => [issue.field, issue]))
+/**
+ * Records a launch choice the member made outside the launch dialog, such as
+ * Run or Default mode on Agents, on this browser and, where the server keeps
+ * them, in the saved choices every device starts from.
+ */
+export function rememberChoice(agent: string, mode: LaunchMode, model?: string, preferred = true): void {
+  const state = useStore.getState()
+  if (preferred) state.rememberLaunch(agent, mode, model)
+  else state.setLaunchDefault(agent, mode)
+  if (!capability(state.capabilities).hasMethod('launch.defaults.set')) return
+  saveLaunchDefaults((current) => withAgentChoice(current, agent, mode, model, preferred))
+    .catch((err) => toast.error(`Launch choices not saved: ${message(err)}`))
 }

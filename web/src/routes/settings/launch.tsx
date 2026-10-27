@@ -27,6 +27,8 @@ export function LaunchDefaultsSection({ client }: { client: Api }) {
   const [attempt, setAttempt] = useState(0)
   const { result, error: readError } = useLaunchDefaultsRead(client, attempt)
   const [accounts, setAccounts] = useState<Member[]>([])
+  const [accountsError, setAccountsError] = useState<string | null>(null)
+  const [accountsAttempt, setAccountsAttempt] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [clearing, setClearing] = useState(false)
@@ -34,9 +36,13 @@ export function LaunchDefaultsSection({ client }: { client: Api }) {
 
   useEffect(() => {
     let live = true
-    client.accountList().then((access) => live && setAccounts(access.accounts)).catch(() => {})
+    setAccountsError(null)
+    client.accountList().then(
+      (access) => live && setAccounts(access.accounts),
+      (err: unknown) => live && setAccountsError(`Shared accounts could not be read: ${errorSentence(err)}`),
+    )
     return () => { live = false }
-  }, [client])
+  }, [client, accountsAttempt])
 
   if (!cap.hasMethod('launch.defaults.get')) return null
 
@@ -107,6 +113,12 @@ export function LaunchDefaultsSection({ client }: { client: Api }) {
             </ul>
           )}
         </SettingRow>
+      )}
+      {accountsError && (
+        <>
+          <Callout tone="failed" role="alert">{accountsError}</Callout>
+          <TryAgain onClick={() => setAccountsAttempt((n) => n + 1)} />
+        </>
       )}
       <SettingRow
         label="Account"

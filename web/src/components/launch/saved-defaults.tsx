@@ -13,8 +13,9 @@ export function fallbackFromSaved(saved: SavedLaunchDefaults['fallback'], accoun
   return { off: false, order, excluded: accounts.map((member) => member.id).filter((id) => !order.includes(id)) }
 }
 
-export function fallbackToSaved(fallback: Fallback, accounts: Member[]): NonNullable<SavedLaunchDefaults['fallback']> {
-  const params = fallbackParams(fallback, accounts, '')
+/** The policy a launch with `fallback` sends; `skip` is the account the Run tab leaves out of its list, as the launch does. */
+export function fallbackToSaved(fallback: Fallback, accounts: Member[], skip: string): NonNullable<SavedLaunchDefaults['fallback']> {
+  const params = fallbackParams(fallback, accounts, skip)
   if (params.no_fallback) return { policy: 'off' }
   if (params.fallback_account_member_ids) return { policy: 'ordered', order: params.fallback_account_member_ids }
   return { policy: 'automatic' }
@@ -28,7 +29,6 @@ export function issueField(field: string): string {
   return part ? `${name} ${part}` : name
 }
 
-/** Saved choices the server found unusable, each with its reason. */
 export function SavedIssues({ issues, title }: { issues: LaunchDefaultIssue[]; title: string }) {
   if (!issues.length) return null
   return (

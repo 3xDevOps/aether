@@ -2303,7 +2303,9 @@ refused by `run.launch` and shown under "Launch failed".
 Where the gateway offers `launch.defaults.get`, the form starts from the
 member's [saved launch choices](teams.md#saved-launch-choices) on the
 server (`store/launch-defaults.ts`), so every browser and device opens on
-the same ones. It waits for that read before its first pick, then
+the same ones. Each open reads them again, since another device or the
+assistant may have saved since. The first pick waits for that read and for
+the saved account to be applied, then
 preselects the saved agent if it can launch, else the agent of the newest
 run, else the first launchable one, in that agent's saved mode, else
 Enhanced, with its saved model. A successful launch or swarm saves only the
@@ -2315,7 +2317,13 @@ saved account is preselected when `account.list` still lists it and `get`
 does not mark it invalid, and the saved fallback policy fills the fallback
 list, keeping only listed accounts. A launch never saves the account or the
 fallback; **Save as my default** under **Options** does, and says "Saved
-for every device." A **Saved defaults not used** note lists each saved
+for every device." On the Run tab it saves the fallback list as the run sends
+it, without the selected account. **Run**, **Default mode** and **Set up** on
+Agents, and the onboarding wizard, save their agent and mode the same way
+(`rememberChoice`); **Default mode** leaves the preselected agent alone. Saves
+run one at a time, each from the last one's answer; a save after the
+signed-in member changes is refused, and a failed save reads the choices
+again. A **Saved defaults not used** note lists each saved
 account, fallback member, agent, and the chosen agent's mode or model that
 `get` reports in `invalid`, with the server's reason.
 

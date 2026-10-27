@@ -924,3 +924,36 @@ describe('saved launch defaults', () => {
     await waitFor(() => expect(api.runLaunch).toHaveBeenCalledWith({ workspace_id: workspace.id, harness: 'claude', mode: 'acp' }))
   })
 })
+
+describe('saved launch defaults across devices', () => {
+  beforeEach(() => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['*'], ws: [] }, launchDefaults: {} })
+  })
+
+  it('reads the saved choices again on each open, so another device\'s save wins', async () => {
+    vi.mocked(api.agentList).mockResolvedValue([claude(), agentInfo({ name: 'codex', display_name: 'Codex', login_found: true })])
+    useLaunchDefaults.setState({ result: { revision: 1, defaults: { agent: 'codex' } }, error: null })
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 2, defaults: { agent: 'claude' } })
+    await open()
+    expect(agentRow(/^Claude Code/).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('switches to the saved account before picking the saved agent there', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob], shared_with: [] })
+    vi.mocked(api.agentList).mockImplementation(async (account?: string) => account === bob.id
+      ? [claude(), agentInfo({ name: 'codex', display_name: 'Codex', login_found: true })]
+      : [claude()])
+    vi.mocked(api.launchDefaultsGet).mockResolvedValue({ revision: 1, defaults: { agent: 'codex', account_member_id: bob.id } })
+    render(<LaunchDialog />)
+    await waitFor(() => expect(agentRow(/^Codex/).getAttribute('aria-checked')).toBe('true'))
+  })
+
+  it('saves the Run tab\'s fallback without the account it runs on', async () => {
+    vi.mocked(api.accountList).mockResolvedValue({ accounts: [alice, bob, vera], shared_with: [] })
+    await open()
+    fireEvent.click(screen.getByRole('button', { name: /^Options/ }))
+    fireEvent.click(screen.getByRole('checkbox', { name: `${vera.display_name} (shared)` }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save as my default' }))
+    await waitFor(() => expect(api.launchDefaultsSet).toHaveBeenCalledWith({ defaults: { account_member_id: '', fallback: { policy: 'ordered', order: [bob.id] } }, revision: 0 }))
+  })
+})

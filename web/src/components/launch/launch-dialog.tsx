@@ -26,7 +26,7 @@ import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/li
 import { useReturnFocus } from '@/lib/hooks'
 import { sameIdentity, useStore } from '@/store'
 import { useChildSettingsRead } from '@/store/children'
-import { saveLaunchDefaults, useLaunchDefaultsRead, withAgentChoice } from '@/store/launch-defaults'
+import { rememberChoice, saveLaunchDefaults, useLaunchDefaultsRead } from '@/store/launch-defaults'
 import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
@@ -43,7 +43,6 @@ export function LaunchDialog() {
   const close = useStore((s) => s.closePaletteDialog)
   const navigate = useStore((s) => s.navigate)
   const upsertRun = useStore((s) => s.upsertRun)
-  const rememberLaunch = useStore((s) => s.rememberLaunch)
   const self = useStore((s) => s.info?.member)
   const features = useStore((s) => s.info?.features)
   const capabilities = useStore((s) => s.capabilities)
@@ -68,13 +67,14 @@ export function LaunchDialog() {
   const [accountsRead, setAccountsRead] = useState(false)
   const [account, setAccount] = useState(self?.id ?? '')
   const [fallback, setFallback] = useState(automaticFallback)
-  const saved = useLaunchDefaultsRead().result
+  const savedRead = useLaunchDefaultsRead()
+  const saved = savedRead.result
   const savesDefaults = cap.hasMethod('launch.defaults.set')
-  const presetFromSaved = useRef(false)
+  const [presetDone, setPresetDone] = useState(false)
   const childRunsOffered = cap.hasMethod('run.children.allow')
   const childSettings = useChildSettingsRead()
   const [childRuns, setChildRuns] = useState<ChildRunsChoice>('')
-  const choice = useAgentChoice({ account, ownAccountID })
+  const choice = useAgentChoice({ account, ownAccountID, hold: !presetDone })
   const { agents, agentError, agent, harness, mode, model, noAgents } = choice
   const [task, setTask] = useState('')
   const [objective, setObjective] = useState('')
@@ -120,20 +120,22 @@ export function LaunchDialog() {
     api.accountList().then((access) => {
       if (!live) return
       setAccounts(access.accounts)
-      setAccountsRead(true)
       setAccount((current) => current || access.accounts[0]?.id || '')
-    }).catch(() => {})
+    }).catch(() => {}).finally(() => {
+      if (live) setAccountsRead(true)
+    })
     return () => { live = false }
   }, [])
 
   useEffect(() => {
-    if (presetFromSaved.current || !saved || !accountsRead) return
-    presetFromSaved.current = true
+    if (presetDone || !savedRead.fresh || !accountsRead) return
+    setPresetDone(true)
+    if (!saved) return
     const { account_member_id: savedAccount, fallback: savedFallback } = saved.defaults
     const refused = saved.invalid?.some((issue) => issue.field === 'account_member_id')
     if (savedAccount && !refused && accounts.some((member) => member.id === savedAccount)) setAccount(savedAccount)
     if (savedFallback) setFallback(fallbackFromSaved(savedFallback, accounts))
-  }, [saved, accounts, accountsRead])
+  }, [presetDone, savedRead.fresh, saved, accounts, accountsRead])
 
   useEffect(() => {
     if (kind !== 'swarm' || !accounts.length) return
@@ -157,17 +159,10 @@ export function LaunchDialog() {
     return () => { live = false }
   }, [accounts, account, kind, ownAccountID])
 
-  const rememberChoice = (agentName: string, chosenMode: LaunchMode, chosenModel: string) => {
-    rememberLaunch(agentName, chosenMode, chosenModel)
-    if (!savesDefaults) return
-    saveLaunchDefaults((current) => withAgentChoice(current, agentName, chosenMode, chosenModel))
-      .catch((err) => toast.error(`Launch choices not saved: ${message(err)}`))
-  }
-
   const saveAccountDefault = () => saveLaunchDefaults((current) => ({
     ...current,
     account_member_id: account === ownAccountID ? '' : account,
-    fallback: fallbackToSaved(fallback, accounts),
+    fallback: fallbackToSaved(fallback, accounts, kind === 'swarm' ? '' : account),
   }))
 
   const setUp = () => {

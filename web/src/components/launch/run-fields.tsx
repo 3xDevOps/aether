@@ -9,7 +9,7 @@ import { api, type Api } from '@/lib/api'
 import { message } from '@/lib/format'
 import type { AgentInfo, LaunchDefaultsResult, LaunchMode } from '@/lib/types'
 import { useStore } from '@/store'
-import { useLaunchDefaultsRead, useLaunchDefaultsSupported } from '@/store/launch-defaults'
+import { useLaunchDefaultsRead } from '@/store/launch-defaults'
 
 /** The mode and model last chosen for `name`: saved on the server when it keeps them, else on this browser. */
 function remembered(name: string, saved: LaunchDefaultsResult | null): { mode?: LaunchMode; model?: string } {
@@ -36,22 +36,24 @@ function preselect(list: AgentInfo[], saved: LaunchDefaultsResult | null, prefer
  * wins the first pick when that agent can launch, with `preferredModel` as its model.
  * The first pick waits for the server's saved choices, or uses this browser's
  * when the server keeps none or cannot be read. */
-export function useAgentChoice({ account, ownAccountID, preferred, preferredModel, client = api }: {
+export function useAgentChoice({ account, ownAccountID, preferred, preferredModel, hold = false, client = api }: {
   account: string
   ownAccountID: string
   preferred?: string
   preferredModel?: string
+  /** Holds the first pick while the caller may still switch `account`. */
+  hold?: boolean
   client?: Api
 }) {
-  const [agents, setAgents] = useState<AgentInfo[] | null>(null)
+  const [listed, setListed] = useState<{ account: string; agents: AgentInfo[] } | null>(null)
+  const agents = listed?.account === account ? listed.agents : null
   const [agentError, setAgentError] = useState<string | null>(null)
   const [harness, setHarness] = useState('')
   const [mode, setMode] = useState<LaunchMode>('tui')
   const [model, setModel] = useState('')
   const [attempt, setAttempt] = useState(0)
-  const supported = useLaunchDefaultsSupported()
   const read = useLaunchDefaultsRead(client)
-  const savedReady = !supported || read.result !== null || read.error !== null
+  const savedReady = read.fresh
   const choice = useRef({ harness, mode, preferred, preferredModel, saved: read.result })
   choice.current = { ...choice.current, harness, mode, saved: read.result }
 
@@ -65,20 +67,20 @@ export function useAgentChoice({ account, ownAccountID, preferred, preferredMode
 
   useEffect(() => {
     let live = true
-    setAgents(null)
+    setListed(null)
     setAgentError(null)
     client.agentList(account && account !== ownAccountID ? account : undefined).then((list) => {
-      if (live) setAgents(list)
+      if (live) setListed({ account, agents: list })
     }).catch((err) => {
       if (!live) return
-      setAgents([])
+      setListed({ account, agents: [] })
       setAgentError(message(err))
     })
     return () => { live = false }
   }, [account, ownAccountID, client, attempt])
 
   useEffect(() => {
-    if (!agents || agentError !== null || !savedReady) return
+    if (!agents || agentError !== null || !savedReady || hold) return
     const current = choice.current
     const keep = current.harness === customAgent || agents.some((item) => item.name === current.harness && launchable(item))
     if (!keep) {
@@ -87,7 +89,7 @@ export function useAgentChoice({ account, ownAccountID, preferred, preferredMode
       if (name === current.preferred && current.preferredModel !== undefined) setModel(current.preferredModel)
     }
     else if (modeRefusal(agents.find((item) => item.name === current.harness), current.harness, current.mode)) setMode('tui')
-  }, [agents, agentError, savedReady, choose])
+  }, [agents, agentError, savedReady, hold, choose])
 
   const agent = agents?.find((item) => item.name === harness)
   const noAgents = agents !== null && agentError === null && !agents.some((item) => item.installed)
