@@ -276,10 +276,13 @@ A confirmed call blocks until the member approves it in the dashboard, or runs
 at once when the member turned on [auto-approval](assistant.md#auto-approval),
 except that a message to or stop of another member's run always waits for a
 click, and an answer, an approval decision, a swarm launch, a template launch,
-and a launch on a teammate's shared account or one that may fall back to it (in
-its fallback order, or by automatic fallback while any account is shared with
-the member) always do: the card's `other_member` and `other_owner` name the
-account's owner. The card names what the call acts on: the run's title and
+and a launch with automatic fallback (no `fallback_account_member_ids` and no
+`no_fallback`) while any account is shared with the member always do: the
+card's `other_member` and `other_owner` name the accounts' owners. A launch
+that names a shared account itself, in `account_member_id` or
+`fallback_account_member_ids`, does not wait: the member chose it, the card
+names it and its owner, and the server refuses an account not shared with the
+member. The card names what the call acts on: the run's title and
 owner, the request and the option chosen, a message's attachments and anchor, a
 launch's account when it is a teammate's, its fallback (saying when it may fall
 back to accounts shared with the member), extra repositories and child-run

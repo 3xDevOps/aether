@@ -193,9 +193,11 @@ not covered   the assistant's own shell and file tools, which never ask
 ```
 
 - Messaging or stopping another member's run always asks, with the owner named
-  on the card. So does a launch that may run on a teammate's shared account:
-  on it, in its fallback order, or by automatic fallback while any account is
-  shared with you.
+  on the card. So does a launch with automatic fallback while any account is
+  shared with you, since it may move to an account nobody chose. A launch that
+  names a teammate's shared account itself, to run on or in its fallback
+  order, passes without a card; the transcript note names the account and its
+  owner.
 - A change applies to the live session at once. The assistant cannot change the
   setting.
 - Every auto-approved action is still recorded in the transcript as

@@ -176,7 +176,7 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 			continue
 		}
 		if got.Summary != want[method] || got.OtherMember != (strings.Contains(want[method], "owned by") || strings.Contains(want[method], "held by") ||
-			strings.Contains(want[method], `"Grace"'s account`)) {
+			strings.Contains(want[method], "may fall back to accounts shared with you")) {
 			t.Errorf("%s summary = %q (other member %t), want %q", method, got.Summary, got.OtherMember, want[method])
 		}
 	}
@@ -206,9 +206,11 @@ func TestEveryConfirmedMethodHasItsOwnSummary(t *testing.T) {
 	}
 }
 
-// A launch on the member's own account that may fall back to a teammate's
-// can spend the teammate's usage, so its card always asks.
-func TestFallbackToATeammateAlwaysAsks(t *testing.T) {
+// A launch that may fall back automatically to a teammate's shared account
+// can spend usage nobody chose, so its card always asks; one that names a
+// shared account, to run on or in its fallback order, does not, and its
+// card still names the account's owner.
+func TestOnlyAutomaticFallbackToATeammateAlwaysAsks(t *testing.T) {
 	var got protocol.AssistantConfirmation
 	s := &Server{Caller: &attentionCaller{}, Member: "m1", Confirm: func(_ context.Context, c protocol.AssistantConfirmation) error {
 		got = c
@@ -218,8 +220,15 @@ func TestFallbackToATeammateAlwaysAsks(t *testing.T) {
 	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
 		t.Fatal(perr)
 	}
-	if !got.OtherMember || got.OtherOwner != "Grace" || !strings.Contains(got.Summary, `falling back to "Grace"'s account in order`) {
-		t.Fatalf("confirmation = %+v, want it marked as Grace's", got)
+	if got.OtherMember || !strings.Contains(got.Summary, `falling back to "Grace"'s account in order`) {
+		t.Fatalf("explicit fallback confirmation = %+v, want Grace named and the card the member's own", got)
+	}
+	raw, _ = json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it", AccountMemberID: "m2", NoFallback: true})
+	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {
+		t.Fatal(perr)
+	}
+	if got.OtherMember || !strings.Contains(got.Summary, `on "Grace"'s account`) {
+		t.Fatalf("explicit account confirmation = %+v, want Grace named and the card the member's own", got)
 	}
 	raw, _ = json.Marshal(protocol.RunLaunchParams{WorkspaceID: "ws-1", Harness: "claude", Task: "fix it"})
 	if _, perr := s.dispatch(t.Context(), protocol.Request{Method: protocol.MethodRunLaunch, Params: raw}); perr != nil {

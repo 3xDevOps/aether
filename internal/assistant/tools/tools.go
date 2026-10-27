@@ -507,14 +507,12 @@ func (n launchNames) owner(id string) string {
 	return truncate(cmp.Or(n.accounts[id], id))
 }
 
-// account is whose account id is, marking c when it is another member's,
-// which spends their usage and so always asks.
-func (n launchNames) account(id string, c *protocol.AssistantConfirmation) string {
+// account is whose account id is. A shared account the launch names does
+// not mark the card: the member chose it, and the server refuses one not
+// shared with them.
+func (n launchNames) account(id string) string {
 	if id == "" || id == n.member {
 		return "your account"
-	}
-	if !c.OtherMember {
-		c.OtherMember, c.OtherOwner = true, n.owner(id)
 	}
 	return fmt.Sprintf("%q's account", n.owner(id))
 }
@@ -530,9 +528,10 @@ func named(items []string) string {
 	return strings.Join(shown, ", ")
 }
 
-// options names a launch's fallback order and extra repositories. A
-// teammate's account the launch may fall back to, in the order or, with
-// none, any shared with the member, marks c as its owner's.
+// options names a launch's fallback order and extra repositories. Automatic
+// fallback while any account is shared with the member marks c as their
+// owners', since the launch may spend usage nobody chose; an explicit order
+// does not.
 func (n launchNames) options(order []string, off bool, extras []string, c *protocol.AssistantConfirmation) string {
 	var out string
 	switch {
@@ -550,7 +549,7 @@ func (n launchNames) options(order []string, off bool, extras []string, c *proto
 	case len(order) > 0:
 		accounts := make([]string, len(order))
 		for i, id := range order {
-			accounts[i] = n.account(id, c)
+			accounts[i] = n.account(id)
 		}
 		out = ", falling back to " + named(accounts) + " in order"
 	}
@@ -583,7 +582,7 @@ func (s *Server) summarizeLaunch(ctx context.Context, req protocol.Request, c *p
 	}
 	summary := fmt.Sprintf("Launch %s (%s) in %s", p.Harness, mode, ws)
 	if p.AccountMemberID != "" && p.AccountMemberID != s.Member {
-		summary += " on " + n.account(p.AccountMemberID, c)
+		summary += " on " + n.account(p.AccountMemberID)
 	}
 	summary += n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c)
 	if p.Children != "" {
@@ -608,10 +607,10 @@ func (s *Server) summarizeMission(ctx context.Context, req protocol.Request, c *
 	}
 	agents := make([]string, len(p.ExecutionChoices))
 	for i, choice := range p.ExecutionChoices {
-		agents[i] = fmt.Sprintf("%s (%s) on %s", truncate(choice.Harness), choice.Mode, n.account(choice.AccountMemberID, c))
+		agents[i] = fmt.Sprintf("%s (%s) on %s", truncate(choice.Harness), choice.Mode, n.account(choice.AccountMemberID))
 	}
 	c.Summary = fmt.Sprintf("Start a swarm in %s with integrator %s (%s) on %s, agents %s%s: \"%s\"", ws, truncate(p.Integrator.Harness), p.Integrator.Mode,
-		n.account(p.Integrator.AccountMemberID, c), named(agents), n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c), firstLine(p.Objective))
+		n.account(p.Integrator.AccountMemberID), named(agents), n.options(p.FallbackAccountMemberIDs, p.NoFallback, p.ExtraWorkspaceIDs, c), firstLine(p.Objective))
 	return nil
 }
 
