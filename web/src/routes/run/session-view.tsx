@@ -159,10 +159,10 @@ function useRows(run: RunRecord, enhanced: boolean, showMessages: boolean): { ro
   return { rows, session, missingRoomImages }
 }
 
-function lastPrompt(rows: SessionRow[]): string | undefined {
+function lastPrompt(rows: SessionRow[]): Extract<SessionRow, { kind: 'user' }> | undefined {
   for (let i = rows.length - 1; i >= 0; i--) {
     const row = rows[i]!
-    if (row.kind === 'user') return row.body
+    if (row.kind === 'user') return row
   }
   return undefined
 }

@@ -22,6 +22,7 @@ import { useImplicitControl, type AgentTerminal } from '@/routes/run/agent-termi
 import type { RunNavigation } from '@/routes/run/header'
 import { useStore } from '@/store'
 import type { RunRecord } from '@/store/runs'
+import type { SessionRow } from '@/store/session-rows'
 import { sessionLease } from '@/store/session-stream'
 
 function useLiveness(runID: string, reason: string | undefined): { liveness?: RunLiveness; error?: string } {
@@ -55,7 +56,7 @@ function LastProgress({ liveness, now }: { liveness: RunLiveness; now: number })
 export function StallCallout({ run, agent, lastPrompt, nav }: {
   run: RunRecord
   agent: AgentTerminal
-  lastPrompt: string | undefined
+  lastPrompt: Extract<SessionRow, { kind: 'user' }> | undefined
   nav: RunNavigation
 }) {
   const now = useClock()
@@ -64,6 +65,9 @@ export function StallCallout({ run, agent, lastPrompt, nav }: {
   const control = useImplicitControl(run, agent)
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState(false)
+  useEffect(() => {
+    if (!stalled) setConfirm(false)
+  }, [stalled])
   if (!stalled) return null
 
   const attempt = async (what: string, act: () => Promise<unknown>) => {
@@ -81,9 +85,9 @@ export function StallCallout({ run, agent, lastPrompt, nav }: {
     if (lease) void attempt('Stop turn', () => api.runACPCancel(run.id, lease))
   })
   const resend = () => {
-    const text = lastPrompt!
+    const { body, files } = lastPrompt!
     const send = () => void attempt('Resend', async () => {
-      const result = await api.runInject(run.id, text, crypto.randomUUID(), { lease: sessionLease(useStore, run.id) })
+      const result = await api.runInject(run.id, body, crypto.randomUUID(), { lease: sessionLease(useStore, run.id), attachments: files })
       useStore.getState().upsertRoomMessage(result.message)
       const delivery = result.receipt === 'not_sent' || result.receipt === 'uncertain' ? result.receipt : result.message.state
       if (delivery === 'uncertain') throw new Error(result.message.failure?.message ?? 'Delivery is uncertain; check the conversation before resending')
@@ -107,7 +111,13 @@ export function StallCallout({ run, agent, lastPrompt, nav }: {
               Open trace
             </Button>
             {lastPrompt !== undefined && (
-              <Button size="sm" variant="ghost" disabled={busy} hint="Sends your last prompt again. Costs tokens." onClick={() => setConfirm(true)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={busy || Boolean(lastPrompt.images?.length)}
+                hint={lastPrompt.images?.length ? 'Your last prompt had images; send it again from the composer' : 'Sends your last prompt again. Costs tokens.'}
+                onClick={() => setConfirm(true)}
+              >
                 Resend last prompt…
               </Button>
             )}
@@ -142,7 +152,8 @@ export function StallCallout({ run, agent, lastPrompt, nav }: {
               stop it to send now.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <pre className="max-h-32 overflow-y-auto rounded-control bg-chrome px-2 py-1 font-code text-ui-sm break-words whitespace-pre-wrap">{lastPrompt}</pre>
+          <pre className="max-h-32 overflow-y-auto rounded-control bg-chrome px-2 py-1 font-code text-ui-sm break-words whitespace-pre-wrap">{lastPrompt?.body}</pre>
+          {lastPrompt?.files?.length ? <p className="text-ui-sm text-muted">With {lastPrompt.files.length === 1 ? '1 attached file' : `${lastPrompt.files.length} attached files`}.</p> : null}
           <AlertDialogFooter>
             <AlertDialogCancel>Keep waiting</AlertDialogCancel>
             <AlertDialogAction onClick={resend}>Resend and spend tokens</AlertDialogAction>
