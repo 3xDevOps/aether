@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type * as React from 'react'
-import { Camera, Copy, GitBranch, Lock, PanelRight, ScrollText } from '@/components/icons'
+import { Camera, Copy, Eye, GitBranch, Lock, PanelRight, ScrollText } from '@/components/icons'
 import { RunChildNudge } from '@/components/child-nudge'
 import { RunActions } from '@/components/run-actions'
 import { RunRetention } from '@/components/run-retention'
@@ -20,6 +20,7 @@ import { shortcutLabel } from '@/lib/keybindings'
 import { needsYou, terminalAction } from '@/lib/needs-you'
 import { runLabel, stateLabel, stateTitle, stateWords } from '@/lib/status'
 import { cn } from '@/lib/utils'
+import { watchHint, watchRoute } from '@/lib/watches'
 import { modeLabel } from '@/routes/run/agent-name'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { RunLineage, useChildRunsItems } from '@/routes/run/child-runs'
@@ -34,6 +35,7 @@ import { useHeaderPrimary, useNeedsYouRuns, useRunPresentation } from '@/store/h
 import type { RunRecord } from '@/store/runs'
 import { agentState } from '@/store/subagents'
 import { stateContextOf } from '@/store/selectors'
+import { runWatch } from '@/store/watches'
 
 export interface RunNavigation {
   go: (view: RunView) => void
@@ -114,6 +116,8 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
   const accountID = run.requested_account_member_id ? run.account_member_id ?? '' : ''
   const accountOwner = useStore((s) => memberName(s, accountID))
   const mode = modeLabel[run.mode] ?? run.mode
+  const watch = useStore((s) => runWatch(s, run.id))
+  const navigate = useStore((s) => s.navigate)
   return (
     <div className="@container/state flex w-full min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap text-ui-sm text-muted">
       <span role="status" className="sr-only">{stateLabel[state]}</span>
@@ -155,6 +159,24 @@ function StateLine({ run, agentName }: { run: RunRecord; agentName: string }) {
         <>
           <span aria-hidden>·</span>
           <span className="min-w-0 truncate">Launched via {run.via}</span>
+        </>
+      )}
+      {watch && (
+        <>
+          <span aria-hidden>·</span>
+          <Button
+            variant="quiet"
+            size="sm"
+            hint={watchHint(watch)}
+            className="shrink-0"
+            onClick={() => {
+              const route = watchRoute(watch.id)
+              navigate(route.name, route.params)
+            }}
+          >
+            <Eye aria-hidden />
+            <span className="sr-only @lg/state:not-sr-only">{watch.state === 'paused' ? 'Watch paused' : watch.state === 'error' ? 'Watch failing' : 'Watch on'}</span>
+          </Button>
         </>
       )}
       <span className="flex min-w-0 flex-1 basis-0 items-center gap-1.5 self-stretch overflow-hidden" title={stateTitle(presentation, since)}>

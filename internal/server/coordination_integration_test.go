@@ -202,6 +202,8 @@ type coordEnv struct {
 	dataDir      string
 	keyPath      string
 	usage        fallback.QuotaReader
+	// tune adjusts the server's config before it starts.
+	tune func(*Config)
 
 	ws  *domain.Workspace
 	ada coordMember
@@ -298,7 +300,7 @@ func (e *coordEnv) seedRepo(t *testing.T, addr string) {
 // SSH port is fresh on every start, so clients redial after a restart.
 func (e *coordEnv) start(ctx context.Context, t *testing.T, disabled bool) *coordServer {
 	t.Helper()
-	srv, err := New(ctx, Config{
+	cfg := Config{
 		DataDir:              e.dataDir,
 		Addr:                 "127.0.0.1:0",
 		Runtime:              e.rt,
@@ -307,7 +309,11 @@ func (e *coordEnv) start(ctx context.Context, t *testing.T, disabled bool) *coor
 		CoordinationDisabled: disabled,
 		ServerBinary:         e.serverBinary,
 		Usage:                e.usage,
-	})
+	}
+	if e.tune != nil {
+		e.tune(&cfg)
+	}
+	srv, err := New(ctx, cfg)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}

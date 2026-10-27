@@ -6,6 +6,7 @@ import { CloseDialog } from '@/components/palette/close-dialog'
 import { ForwardDialog } from '@/components/palette/forward-dialog'
 import { LaunchDialog } from '@/components/launch/launch-dialog'
 import { InjectDialog } from '@/components/palette/inject-dialog'
+import { WatchDialog } from '@/components/palette/watch-dialog'
 import { useStore } from '@/store'
 
 export function PaletteDialogs() {
@@ -18,6 +19,7 @@ export function PaletteDialogs() {
       {dialog === 'close' && <CloseDialog />}
       {dialog === 'clear-done' && <ClearDoneDialog />}
       {dialog === 'release-finished' && <ReleaseFinishedDialog />}
+      {dialog === 'watch' && <WatchDialog />}
     </>
   )
 }

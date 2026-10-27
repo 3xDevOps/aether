@@ -144,6 +144,21 @@ type State struct {
 	AuthMethods   json.RawMessage `json:"auth_methods,omitempty"`
 	AgentCommand  string          `json:"agent_command,omitempty"`
 	Usage         *Usage          `json:"usage,omitempty"`
+	// LastProgress is when the agent last did work in this connection, zero
+	// before it did: a message, thought, tool call, plan, subagent,
+	// compaction, background task progress or request. Aether's own calls,
+	// a session/load replay and mode, command and usage updates are not
+	// work.
+	LastProgress time.Time `json:"last_progress,omitzero"`
+	OpenedAt     time.Time `json:"opened_at"`
+	// TurnStartedAt is when the latest prompt or autonomous turn started.
+	TurnStartedAt time.Time `json:"turn_started_at,omitzero"`
+	// ToolsOpen is true while a tool call of the turn is pending or running,
+	// Compacting while the agent compacts its context.
+	ToolsOpen  bool `json:"tools_open,omitempty"`
+	Compacting bool `json:"compacting,omitempty"`
+	// Closed is true once the agent connection ended or its input broke.
+	Closed bool `json:"-"`
 }
 
 // promptAcceptGrace is how long a prompt that starts a turn waits for the
@@ -236,6 +251,10 @@ type Session struct {
 	endedTasks map[string]string
 	endedOrder []string
 	lastUpdate time.Time
+	progressAt time.Time
+	openedAt   time.Time
+	turnAt     time.Time
+	compacting bool
 	// quietAt is when the armed check of the autonomous turn's quiet fires.
 	quietAt time.Time
 	// owedUntil bounds the wait for the turn reporting back on a task the
@@ -277,6 +296,7 @@ func Start(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) (*Ses
 		taskCalls:  make(map[string]ToolCall),
 		endedTasks: make(map[string]string),
 		spend:      Spend{Total: cfg.Cost},
+		openedAt:   time.Now(),
 	}
 	s.turnEnded = sync.NewCond(&s.mu)
 	s.ctx, s.stop = context.WithCancel(context.Background())
@@ -580,6 +600,7 @@ func (s *Session) startTurnLocked(blocks []acp.ContentBlock, delivered func(erro
 	s.starting = ack
 	s.turn++
 	s.turnActive, s.holdIdle, s.owedUntil = true, false, time.Time{}
+	s.turnAt = time.Now()
 	s.emitLocked(Item{Kind: KindTurnStart})
 	s.relogTasksLocked()
 	s.userMessageLocked(blocks)
@@ -693,6 +714,7 @@ func (s *Session) runTurn(blocks []acp.ContentBlock, ack *turnAck, sent func()) 
 		return
 	}
 	s.proj.endTurn()
+	s.compacting = false
 	reason := stop
 	var failed error
 	switch {
@@ -812,6 +834,9 @@ func (s *Session) State() State {
 	st.Queued = len(s.queue)
 	st.Pending = s.conn.pendingRequests()
 	st.LastActivity = s.conn.LastActivity()
+	st.LastProgress, st.OpenedAt, st.TurnStartedAt = s.progressAt, s.openedAt, s.turnAt
+	st.ToolsOpen, st.Compacting = s.proj.toolsOpen(), s.compacting
+	st.Closed = s.closingLocked()
 	info := s.conn.Info()
 	st.Steering, st.AuthMethods = info.Steering, info.AuthMethods
 	st.PromptImages = info.PromptImages
@@ -992,6 +1017,14 @@ func (s *Session) update(parent string, raw json.RawMessage) {
 	if main && head.opensTurn() {
 		s.openAutonomousLocked()
 	}
+	if !s.conn.replaying.Load() {
+		if head.progress() {
+			s.progressAt = time.Now()
+		}
+		if head.Kind == "compaction_update" {
+			s.compacting = head.Status == "in_progress"
+		}
+	}
 	s.proj.update(parent, raw)
 	s.trackLocked(head)
 	s.settleLocked()
@@ -1010,7 +1043,7 @@ func (s *Session) requestOpened(r Request) {
 	s.awaitTurnEndsLocked(s.conn.answers.Load())
 	s.acceptedLocked()
 	s.openAutonomousLocked()
-	s.lastUpdate = time.Now()
+	s.lastUpdate, s.progressAt = time.Now(), time.Now()
 	s.proj.flushText()
 	s.emitLocked(Item{Kind: KindRequest, Request: &r})
 	s.inputsLocked()
@@ -1023,7 +1056,7 @@ func (s *Session) requestClosed(r Request) {
 	s.emitLocked(Item{Kind: KindRequest, Request: &r})
 	s.inputsLocked()
 	// The agent resumes only after this returns; its quiet wait starts now.
-	s.lastUpdate = time.Now()
+	s.lastUpdate, s.progressAt = time.Now(), time.Now()
 	s.settleLocked()
 }
 
@@ -1054,7 +1087,7 @@ func (s *Session) watch() {
 	if s.turnActive || s.backgroundLocked() {
 		s.stateLocked(TurnState{Reason: "interrupted"})
 	}
-	s.turnActive, s.autonomous = false, false
+	s.turnActive, s.autonomous, s.compacting = false, false, false
 	for _, queued := range s.queue {
 		if queued.delivered != nil {
 			s.callback(func() { queued.delivered(ErrClosed) })

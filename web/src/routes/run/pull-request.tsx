@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import type * as React from 'react'
 import { AskAssistantButton } from '@/components/assistant/ask'
-import { GitPullRequest, Sparkles } from '@/components/icons'
+import { Eye, GitPullRequest, Sparkles } from '@/components/icons'
 import { Button } from '@/components/ui/button'
 import { StatusDot } from '@/components/ui/status-dot'
 import { PRFeedback } from '@/routes/diff/publish-feedback'
 import { summarizePR, usePullRequest } from '@/routes/diff/publish-pr'
 import type { AgentTerminal } from '@/routes/run/agent-terminal'
 import { useRepoPullRequests } from '@/routes/run/repo-pull-requests'
+import { pullRequestTarget, isLive, watchRoute } from '@/lib/watches'
+import { useStore } from '@/store'
 import { useCapability } from '@/store/hooks'
 import type { RunRecord } from '@/store/runs'
 
@@ -24,6 +26,13 @@ export function useRunPullRequest(run: RunRecord, agent: AgentTerminal, agentNam
   const tracked = usePullRequest(run, watch && !multiRepo)
   const repos = useRepoPullRequests(run, agent, agentName, watch && multiRepo)
   const [open, setOpen] = useState(false)
+  const url = tracked.feedback?.pull_request?.url
+  const watched = useStore((s) => {
+    const target = url ? pullRequestTarget(url) : null
+    return target && Object.values(s.watches).find((w) => w.target.kind === 'pr' && w.target.repo === target.repo && w.target.number === target.number && isLive(w))
+  })
+  const navigate = useStore((s) => s.navigate)
+  const openWatchDialog = useStore((s) => s.openWatchDialog)
   if (repos) return repos
   const feedback = tracked.feedback
   const pr = feedback?.pull_request
@@ -57,6 +66,19 @@ export function useRunPullRequest(run: RunRecord, agent: AgentTerminal, agentNam
             <Sparkles />
           </AskAssistantButton>
         )}
+        {watched
+          ? (
+            <Button variant="ghost" size="sm" hint="Open the watch on this pull request" onClick={() => navigate(watchRoute(watched.id).name, watchRoute(watched.id).params)}>
+              <Eye aria-hidden />
+              <span className="sr-only @min-[480px]/views:not-sr-only">Watching PR</span>
+            </Button>
+          )
+          : caps.hasMethod('watch.create') && pullRequestTarget(pr.url) && (
+            <Button variant="ghost" size="sm" hint="Get notified when checks finish, a review lands or it merges" aria-haspopup="dialog" onClick={() => openWatchDialog(pullRequestTarget(pr.url, run.id)!)}>
+              <Eye aria-hidden />
+              <span className="sr-only @min-[480px]/views:not-sr-only">Watch PR</span>
+            </Button>
+          )}
         {watch && (
           <Button variant="ghost" size="sm" hint="Checks and review comments" aria-haspopup="dialog" onClick={() => setOpen(true)}>
             <StatusDot tone={tone} pulse={tone === 'working'} />
