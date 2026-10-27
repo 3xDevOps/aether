@@ -439,8 +439,14 @@ func (s *Service) open(ctx context.Context, m *member, agent string, row *store.
 	if err != nil {
 		return nil, fmt.Errorf("assistant: %w", err)
 	}
-	if err = writeInstructions(scheduler.AssistantInstructionsDir(s.cfg.Dir, m.id)); err != nil {
-		return nil, err
+	dir := scheduler.AssistantInstructionsDir(s.cfg.Dir, m.id)
+	if err = os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("assistant: create the instructions directory: %w", err)
+	}
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		if err = os.WriteFile(filepath.Join(dir, name), []byte(Instructions), 0o644); err != nil {
+			return nil, fmt.Errorf("assistant: write %s: %w", name, err)
+		}
 	}
 	sessCtx, cancel := context.WithCancel(s.ctx)
 	ln, err := s.listen(m.id)

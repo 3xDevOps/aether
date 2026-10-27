@@ -117,8 +117,12 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	if len(volumes) != 1 || !strings.HasSuffix(volumes[0], " at /root/.claude/.credentials.json") || len(binds) > 0 {
 		t.Fatalf("assistant mounts from the member's home: volumes %v, binds %v; want only the login", volumes, binds)
 	}
+	resolvedDir, err := filepath.EvalSymlinks(assistantDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, m := range info.Container.Mounts {
-		if m.Type == mount.TypeBind && !strings.HasPrefix(m.Source, mustResolve(t, assistantDir)) && m.Destination != coordtransport.BinaryPath && m.Destination != coordtransport.CLIPath {
+		if m.Type == mount.TypeBind && !strings.HasPrefix(m.Source, resolvedDir) && m.Destination != coordtransport.BinaryPath && m.Destination != coordtransport.CLIPath {
 			t.Errorf("assistant bind mount from outside its directory: %s at %s", m.Source, m.Destination)
 		}
 	}
@@ -170,13 +174,4 @@ func TestIntegrationAssistantContainerIsolationDocker(t *testing.T) {
 	if slices.Contains(terminal.MountTargets, coordtransport.AssistantMountDir) || slices.Contains(terminal.MountTargets, coordtransport.BinaryPath) {
 		t.Fatalf("the terminal mounts the assistant's socket or binary: %v", terminal.MountTargets)
 	}
-}
-
-func mustResolve(t *testing.T, p string) string {
-	t.Helper()
-	resolved, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return resolved
 }

@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -220,5 +222,33 @@ func TestAssistantInstallsOnlyWhenMissing(t *testing.T) {
 	runs := e.rt.execRuns()
 	if calls != 1 || len(runs) != 3 || !slices.Contains(runs[1].argv, codex.InstallCommand(true)) {
 		t.Fatalf("installing called %d times, execs %+v; want one install between two checks", calls, runs)
+	}
+}
+
+// TestAssistantInstallCancelledDestroysTheContainer stops an install whose
+// exec was cancelled, so a retry cannot race it in a kept container.
+func TestAssistantInstallCancelledDestroysTheContainer(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, func(c *Config) {
+		c.ServerBinary = fakeServerBinary(t, "current build")
+		c.AssistantDir = filepath.Join(t.TempDir(), "assistant")
+	})
+	withCoordination(t, e)
+	claude, _ := harness.Lookup("claude")
+	cid, err := e.sched.ensureAssistantContainer(t.Context(), e.member.ID, claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.rt.execHandler = func(_ runtime.ID, argv []string) (int, string, error) {
+		if strings.Contains(argv[2], "npm install") {
+			return 0, "", context.Canceled
+		}
+		return 1, "", nil
+	}
+	if err = e.sched.installAssistant(t.Context(), cid, claude, func() {}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("installAssistant = %v, want the cancellation", err)
+	}
+	if _, err = e.rt.get(cid); err == nil {
+		t.Fatal("the container of a cancelled install still exists")
 	}
 }

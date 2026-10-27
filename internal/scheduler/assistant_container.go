@@ -335,19 +335,15 @@ func (s *Scheduler) RemoveAssistant(ctx context.Context, member domain.MemberID)
 	return nil
 }
 
-// assistantInstalled is a shell test that agent's CLI and its pinned
-// adapter are installed in the assistant home.
-func assistantInstalled(profile harness.Profile) string {
+// installAssistant installs profile's CLI and pinned adapter in the assistant
+// container cid unless they are there, calling installing first. The check
+// reads the adapter's version, so a newly pinned one is installed too.
+func (s *Scheduler) installAssistant(ctx context.Context, cid runtime.ID, profile harness.Profile, installing func()) error {
 	a := profile.ACPInstall
-	return strings.NewReplacer("{cli}", profile.TUIArgs[0], "{exe}", a.Binary, "{pkg}", a.Package, "{version}", a.Version).Replace(
+	installed := strings.NewReplacer("{cli}", profile.TUIArgs[0], "{exe}", a.Binary, "{pkg}", a.Package, "{version}", a.Version).Replace(
 		`[ -x "$HOME/.local/bin/{cli}" ] && [ -x "$HOME/.local/bin/{exe}" ] &&
 [ "$(node -p 'require(process.argv[1]).version' "$HOME/.local/lib/node_modules/{pkg}/package.json" 2>/dev/null)" = "{version}" ]`)
-}
-
-// installAssistant installs profile's CLI and pinned adapter in the assistant
-// container cid unless they are there, calling installing first.
-func (s *Scheduler) installAssistant(ctx context.Context, cid runtime.ID, profile harness.Profile, installing func()) error {
-	code, _, _, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", assistantInstalled(profile)}, AssistantCwd)
+	code, _, _, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", installed}, AssistantCwd)
 	if err != nil {
 		return fmt.Errorf("scheduler: check the assistant's %s install: %w", profile.Label(), err)
 	}
@@ -357,7 +353,8 @@ func (s *Scheduler) installAssistant(ctx context.Context, cid runtime.ID, profil
 	installing()
 	code, stdout, stderr, err := s.cfg.Runtime.Exec(ctx, cid, []string{"/bin/sh", "-c", profile.InstallCommand(true)}, AssistantCwd)
 	if err != nil {
-		return fmt.Errorf("scheduler: install %s for the assistant: %w", profile.Label(), err)
+		// A cancelled Exec leaves the install running; a retry would race it.
+		return errors.Join(fmt.Errorf("scheduler: install %s for the assistant: %w", profile.Label(), err), s.destroyTerminalContainer(ctx, cid))
 	}
 	if code != 0 {
 		out := strings.TrimSpace(stderr)
