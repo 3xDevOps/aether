@@ -297,6 +297,9 @@ aether pull <run-id>
 ```
 
 Publish before you close: a finished run needs `aether reopen <run-id>` first.
+Publish pushes commits only; if it reports uncommitted changes, ask the agent
+to commit with `aether message <run-id> "commit your changes"`, then publish
+again.
 
 `aether pull` fetches the run's branch into the linked clone without merging.
 The branch gets the agent's work when the run closes, so pull after close.
