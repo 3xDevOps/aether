@@ -196,8 +196,8 @@ repository** adds another repository later.
 | A clone on your computer | **From a local clone → Create from local clone**, then push the base branch. Needs the desktop app or `aether gui` on that computer. Or [from the CLI](#from-the-cli). |
 
 [teams.md](teams.md) covers each source. A workspace can also run a setup script
-(such as `npm ci`) and set variables in new runs: **Environment** on its
-**Repository** page, or `aether workspace env`
+(such as `npm ci`), set variables and put files such as `.env` in new runs:
+**Environment** on its **Repository** page, or `aether workspace env`
 ([environments.md](environments.md#workspace-environment)).
 
 ### From the CLI

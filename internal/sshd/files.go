@@ -256,6 +256,8 @@ func filesReadError(method, run string, err error) *protocol.Error {
 		return invalidParams("workspace_id does not own run_id")
 	case errors.Is(err, gitengine.ErrRevisionConflict):
 		return &protocol.Error{Code: protocol.CodeConflict, Message: method + ": file changed; reload before saving"}
+	case errors.Is(err, gitengine.ErrWorkspaceFile):
+		return &protocol.Error{Code: protocol.CodeDenied, Message: method + ": " + err.Error()}
 	case errors.Is(err, gitengine.ErrSnapshotStorageLimit):
 		return &protocol.Error{Code: protocol.CodeUnavailable, Message: method + ": current diff input exceeds 128 MiB or available disk headroom"}
 	}
