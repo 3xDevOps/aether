@@ -125,7 +125,8 @@ describe('deriveTrace', () => {
       id: `e${seconds}`, seq: seconds, time: new Date(t0 + seconds * 1000).toISOString(), workspace_id: 'w', run_id: 'r1', actor_id: '', type: 'run.status',
       payload: { to, state, status_seq: seconds },
     })
-    const root = trace([], { statusEvents: [event(0, 'running', 'working'), event(30, 'needs-attention', 'needs-you')] })
+    const reread = { ...event(45, 'needs-attention', 'needs-you'), payload: { to: 'needs-attention', state: 'needs-you', status_seq: 45, reread: true } }
+    const root = trace([], { statusEvents: [event(0, 'running', 'working'), event(30, 'needs-attention', 'needs-you'), reread] })
     expect(root.lane).toEqual([
       { from: t0, to: t0 + 30_000, tone: 'working', label: 'Working' },
       { from: t0 + 30_000, to: null, tone: 'needs-you', label: 'Needs you' },

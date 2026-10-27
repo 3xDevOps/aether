@@ -1,6 +1,8 @@
 // Names for the event types the server emits, shared by the feed row and the
 // Activity filter so a row and its filter option cannot drift.
 
+import type { Event, RunStatusPayload } from '@/lib/types'
+
 export const eventLabel = {
   'run.status': 'Run state',
   'run.retention': 'Runtime retention',
@@ -49,4 +51,9 @@ export type EventType = keyof typeof eventLabel
 /** A server newer than this dashboard can emit a type the map has never seen. */
 export function typeLabel(type: string): string {
   return Object.hasOwn(eventLabel, type) ? eventLabel[type as EventType] : 'Other'
+}
+
+/** A same-status `run.status` whose only news is a newer read of the run's wait: no change of state. */
+export function isReread(event: Event): boolean {
+  return event.type === 'run.status' && (event.payload as RunStatusPayload | undefined)?.reread === true
 }

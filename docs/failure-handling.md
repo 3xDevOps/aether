@@ -113,7 +113,8 @@ its state: `turn`, `report` (the agent's own report), `turn-end`, `stall`,
 carries `wait` too. A wait whose source was read again at least a minute
 later is published as a same-status event with `reread: true`;
 `aether timeline` and the dashboard's activity feed leave it out unless
-filtered to `run.status`, and `changes.list` leaves it out. A live
+filtered to `run.status`, `changes.list` leaves it out, and the
+dashboard's lanes and trace bars never draw it as a state change. A live
 run's record carries its latest `cause` too. `aether timeline <run-id>`
 prints it after the state, for example
 `running -> needs-attention (waiting for 2 workers) · waiting-agents by

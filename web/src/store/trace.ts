@@ -1,4 +1,5 @@
 import type { Tone } from '@/components/ui/status-dot'
+import { isReread } from '@/lib/events'
 import type { SessionItem, SessionRequest, SessionToolCall } from '@/lib/session-types'
 import { liveStateOf, outcomeState, stateLabel, stateTone } from '@/lib/status'
 import type { Event, RunStatus, RunStatusPayload } from '@/lib/types'
@@ -347,7 +348,7 @@ function laneTone(to: RunStatus, state: string | undefined): { tone: Tone; label
 
 function lane(sources: TraceSources, start: number): LaneSegment[] | undefined {
   if (!sources.statusEvents) return undefined
-  const changes = sources.statusEvents.map((event) => ({ at: Date.parse(event.time), ...(event.payload as RunStatusPayload) }))
+  const changes = sources.statusEvents.filter((event) => !isReread(event)).map((event) => ({ at: Date.parse(event.time), ...(event.payload as RunStatusPayload) }))
   if (changes.length === 0) return [{ from: start, to: sources.end, ...laneTone(sources.runStatus, sources.runState) }]
   return changes.map((change, i) => ({
     from: Math.max(change.at, start),
