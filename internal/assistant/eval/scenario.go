@@ -10,7 +10,17 @@ import (
 	"strings"
 )
 
-var urlPattern = regexp.MustCompile(`https?://\S+`)
+var (
+	urlPattern      = regexp.MustCompile(`https?://\S+|\S*\?[a-z_]+=\S*`)
+	codePattern     = regexp.MustCompile("(?s)```.*?```|`[^`\n]*`")
+	questionPattern = regexp.MustCompile(`[^.!?\n]*\?`)
+	offerPattern    = regexp.MustCompile(`(?i)\b(show|see|edit|change|tweak|adjust|review)\b[^?]*\b(brief|task|prompt)\b|\b(brief|task|prompt)\b[^?]*\b(show|edit|change|tweak|adjust)`)
+	negationBefore  = regexp.MustCompile(`(?i)\b(no|not|never|without|don't|dont|do not|doesn't|avoid|skip)\b(\s+[\w'-]+){0,2}\s*$`)
+)
+
+func wordPattern(w string) *regexp.Regexp {
+	return regexp.MustCompile(`(?i)(^|[^\p{L}\p{N}])` + regexp.QuoteMeta(w) + `s?([^\p{L}\p{N}]|$)`)
+}
 
 //go:embed testdata/scenarios.json
 var scenariosJSON []byte
@@ -50,15 +60,15 @@ type Stub struct {
 }
 
 // Checks are a scenario's deterministic expectations. Text matches are
-// case-insensitive substrings; each group in a list is satisfied by any one
-// of its alternatives.
+// case-insensitive whole words or phrases, with an optional plural "s"; each
+// group in a list is satisfied by any one of its alternatives.
 type Checks struct {
 	// Launches is the number of aether_launch_run and aether_launch_swarm
 	// calls expected; nil does not check it.
 	Launches *int `json:"launches,omitempty"`
-	// Saves is the number of successful aether_save_* or aether_remember
-	// calls.
-	Saves *int `json:"saves,omitempty"`
+	// Saves is the number of successful calls to SaveTool.
+	Saves    *int   `json:"saves,omitempty"`
+	SaveTool string `json:"save_tool,omitempty"`
 	// Params are the fields the launch call must carry.
 	Params map[string]string `json:"params,omitempty"`
 	// BriefAll and BriefNone apply to the task or objective of every launch.
@@ -123,9 +133,12 @@ type CheckResult struct {
 // Flags are the counted failure modes.
 type Flags struct {
 	UnnecessaryQuestions int `json:"unnecessary_questions"`
-	UnwantedLaunches     int `json:"unwanted_launches"`
-	MustNotDropped       int `json:"must_not_dropped"`
-	InventedScope        int `json:"invented_scope"`
+	// OfferedFollowUps are questions after a completed launch that offer to
+	// show or edit the brief; they are reported, not counted as unnecessary.
+	OfferedFollowUps int `json:"offered_follow_ups"`
+	UnwantedLaunches int `json:"unwanted_launches"`
+	MustNotDropped   int `json:"must_not_dropped"`
+	InventedScope    int `json:"invented_scope"`
 }
 
 type launch struct {
@@ -158,8 +171,22 @@ func launches(calls []ToolCall, rejected bool) []launch {
 }
 
 func has(text string, group []string) bool {
-	text = strings.ToLower(text)
-	return slices.ContainsFunc(group, func(alt string) bool { return strings.Contains(text, strings.ToLower(alt)) })
+	return slices.ContainsFunc(group, func(alt string) bool { return wordPattern(alt).MatchString(text) })
+}
+
+// affirms reports whether text uses word other than to rule it out, as in
+// "no refactors" or "do not merge".
+func affirms(text, word string) bool {
+	for _, m := range wordPattern(word).FindAllStringIndex(text, -1) {
+		before := text[:m[0]]
+		if i := strings.LastIndexAny(before, ".;:!?\n"); i >= 0 {
+			before = before[i+1:]
+		}
+		if !negationBefore.MatchString(before) {
+			return true
+		}
+	}
+	return false
 }
 
 // Score checks an outcome against the scenario's expectations.
@@ -178,7 +205,7 @@ func Score(s Scenario, o Outcome) ([]CheckResult, Flags) {
 	if c.Saves != nil {
 		n := 0
 		for _, call := range o.Calls {
-			if (strings.HasPrefix(call.Tool, "aether_save_") || call.Tool == "aether_remember") && !call.Error {
+			if call.Tool == c.SaveTool && !call.Error {
 				n++
 			}
 		}
@@ -186,10 +213,11 @@ func Score(s Scenario, o Outcome) ([]CheckResult, Flags) {
 	}
 	for _, k := range sortedKeys(c.Params) {
 		ok := len(ls) > 0
-		got := ""
+		var got []string
 		for _, l := range ls {
-			got, _ = l.args[k].(string)
-			ok = ok && strings.EqualFold(got, c.Params[k])
+			v, _ := l.args[k].(string)
+			got = append(got, v)
+			ok = ok && strings.EqualFold(v, c.Params[k])
 		}
 		add("launch "+k, ok, fmt.Sprintf("want %q, got %q", c.Params[k], got))
 	}
@@ -205,7 +233,7 @@ func Score(s Scenario, o Outcome) ([]CheckResult, Flags) {
 		for _, l := range ls {
 			ok = ok && has(l.brief(), g)
 		}
-		if !ok {
+		if !ok && len(ls) > 0 {
 			fl.MustNotDropped++
 		}
 		add("brief keeps must-not "+strings.Join(g, "|"), ok, "")
@@ -215,7 +243,7 @@ func Score(s Scenario, o Outcome) ([]CheckResult, Flags) {
 		add("brief omits "+w, !bad, "")
 	}
 	for _, w := range c.Invented {
-		bad := slices.ContainsFunc(ls, func(l launch) bool { return has(l.brief(), []string{w}) })
+		bad := slices.ContainsFunc(ls, func(l launch) bool { return affirms(l.brief(), w) })
 		if bad {
 			fl.InventedScope++
 		}
@@ -228,9 +256,15 @@ func Score(s Scenario, o Outcome) ([]CheckResult, Flags) {
 		add("answer omits "+w, !has(o.Answer, []string{w}), "")
 	}
 	if c.NoQuestions {
-		q := strings.Count(urlPattern.ReplaceAllString(o.Answer, ""), "?")
-		fl.UnnecessaryQuestions = q
-		add("no question asked", q == 0, fmt.Sprintf("%d question marks", q))
+		text := urlPattern.ReplaceAllString(codePattern.ReplaceAllString(o.Answer, ""), "")
+		for _, q := range questionPattern.FindAllString(text, -1) {
+			if len(ls) > 0 && offerPattern.MatchString(q) {
+				fl.OfferedFollowUps++
+			} else {
+				fl.UnnecessaryQuestions++
+			}
+		}
+		add("no question asked", fl.UnnecessaryQuestions == 0, fmt.Sprintf("%d questions", fl.UnnecessaryQuestions))
 	}
 	for _, t := range c.Forbidden {
 		used := slices.ContainsFunc(o.Calls, func(call ToolCall) bool { return call.Tool == t })

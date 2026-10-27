@@ -25,7 +25,7 @@ func envOr(key, def string) string {
 
 // TestAssistantEval drives the real Claude Code agent through every
 // scenario. It spends model tokens, so it never runs in CI; see
-// docs/assistant.md.
+// docs/testing.md.
 func TestAssistantEval(t *testing.T) {
 	scenarios, err := Load()
 	if err != nil {
@@ -64,6 +64,18 @@ func TestAssistantEval(t *testing.T) {
 		wg      sync.WaitGroup
 		slots   = make(chan struct{}, parallel)
 	)
+	write := func() string {
+		md := Summary("real Claude Code (model "+modelName(results, model)+"), "+label+", "+strconv.Itoa(runs)+" runs per scenario", picked, results)
+		raw, _ := json.MarshalIndent(results, "", " ")
+		if err := os.WriteFile(filepath.Join(out, label+".json"), raw, 0o600); err != nil {
+			t.Error(err)
+		}
+		if err := os.WriteFile(filepath.Join(out, label+".md"), []byte(md), 0o600); err != nil {
+			t.Error(err)
+		}
+		return md
+	}
+	deadline, hasDeadline := t.Deadline()
 	for _, s := range picked {
 		for n := 1; n <= runs; n++ {
 			wg.Add(1)
@@ -73,24 +85,22 @@ func TestAssistantEval(t *testing.T) {
 				defer func() { <-slots }()
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 				defer cancel()
+				if hasDeadline {
+					var stop context.CancelFunc
+					ctx, stop = context.WithDeadline(ctx, deadline.Add(-time.Minute))
+					defer stop()
+				}
 				r := RunOnce(ctx, agent, s, n)
 				mu.Lock()
 				results = append(results, r)
+				write()
 				mu.Unlock()
 			}()
 		}
 	}
 	wg.Wait()
 
-	md := Summary("real Claude Code (model "+modelName(results, model)+"), "+label+", "+strconv.Itoa(runs)+" runs per scenario", picked, results)
-	raw, _ := json.MarshalIndent(results, "", " ")
-	if err := os.WriteFile(filepath.Join(out, label+".json"), raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(out, label+".md"), []byte(md), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("results written to %s\n%s", out, md)
+	t.Logf("results written to %s\n%s", out, write())
 }
 
 func modelName(results []Result, requested string) string {

@@ -9,7 +9,9 @@ import (
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
 
-func tc(tool, args string) ToolCall { return ToolCall{Tool: tool, Args: json.RawMessage(args)} }
+func launchCall(args string) ToolCall {
+	return ToolCall{Tool: "aether_launch_run", Args: json.RawMessage(args)}
+}
 
 func scenario(t *testing.T, id string) Scenario {
 	t.Helper()
@@ -40,12 +42,12 @@ func failed(rs []CheckResult) []string {
 // separates a faithful launch from an expanded one.
 func TestScoreNegation(t *testing.T) {
 	s := scenario(t, "negation")
-	good := Outcome{Calls: []ToolCall{tc("aether_launch_run", `{"workspace_id":"ws-shop","harness":"claude","task":"Add an export button for orders. Do not touch billing/."}`)}, Answer: "Launched run run-1."}
+	good := Outcome{Calls: []ToolCall{launchCall(`{"workspace_id":"ws-shop","harness":"claude","task":"Add an export button for orders. Do not touch billing/."}`)}, Answer: "Launched run run-1."}
 	goodChecks, _ := Score(s, good)
 	if bad := failed(goodChecks); len(bad) != 0 {
 		t.Errorf("faithful launch failed %v", bad)
 	}
-	dropped := Outcome{Calls: []ToolCall{tc("aether_launch_run", `{"workspace_id":"ws-shop","harness":"claude","task":"Add an export button for orders with a PDF refactor."}`)}, Answer: "Which format?"}
+	dropped := Outcome{Calls: []ToolCall{launchCall(`{"workspace_id":"ws-shop","harness":"claude","task":"Add an export button for orders with a PDF refactor."}`)}, Answer: "Which format?"}
 	rs, fl := Score(s, dropped)
 	if fl.MustNotDropped != 1 || fl.InventedScope != 2 || fl.UnnecessaryQuestions != 1 {
 		t.Errorf("flags = %+v, failed %v", fl, failed(rs))
@@ -54,7 +56,7 @@ func TestScoreNegation(t *testing.T) {
 
 func TestScoreQuestionMustNotLaunch(t *testing.T) {
 	s := scenario(t, "question-only")
-	_, fl := Score(s, Outcome{Calls: []ToolCall{tc("aether_launch_run", `{"task":"x"}`)}, Answer: "fallback"})
+	_, fl := Score(s, Outcome{Calls: []ToolCall{launchCall(`{"task":"x"}`)}, Answer: "fallback"})
 	if fl.UnwantedLaunches != 1 {
 		t.Errorf("flags = %+v", fl)
 	}
@@ -106,5 +108,40 @@ func TestScenarioStateIsReadable(t *testing.T) {
 				read("aether_get_swarm", map[string]any{"swarm_id": m.ID})
 			}
 		})
+	}
+}
+
+func TestWordMatching(t *testing.T) {
+	if has("both of us wrote a note about the board", []string{"bo", "not", "red"}) || has("a required field", []string{"red"}) {
+		t.Error("matched inside a longer word")
+	}
+	if !has("bo's account, orders", []string{"bo"}) || !has("export orders", []string{"order"}) {
+		t.Error("missed a whole word")
+	}
+	if affirms("No refactors. Do not merge to main.", "refactor") || affirms("do not merge", "merge") || affirms("emerge", "merge") {
+		t.Error("counted a negation or a substring as invented scope")
+	}
+	if !affirms("Do not touch billing. Also refactor the page.", "refactor") {
+		t.Error("missed invented scope after a negated sentence")
+	}
+}
+
+func TestQuestionCount(t *testing.T) {
+	s := scenario(t, "voice-feature")
+	launched := []ToolCall{launchCall(`{"task":"x"}`)}
+	_, fl := Score(s, Outcome{Calls: launched, Answer: "Launched [run](/?run=run-1&page=2) with `a?b`. Want me to show the brief?"})
+	if fl.UnnecessaryQuestions != 0 || fl.OfferedFollowUps != 1 {
+		t.Errorf("flags = %+v", fl)
+	}
+	_, fl = Score(s, Outcome{Calls: launched, Answer: "Which format do you want?"})
+	if fl.UnnecessaryQuestions != 1 {
+		t.Errorf("flags = %+v", fl)
+	}
+}
+
+func TestMustKeepNeedsALaunch(t *testing.T) {
+	_, fl := Score(scenario(t, "negation"), Outcome{Answer: "Which part?"})
+	if fl.MustNotDropped != 0 {
+		t.Errorf("flags = %+v", fl)
 	}
 }

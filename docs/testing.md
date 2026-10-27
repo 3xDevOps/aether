@@ -290,13 +290,20 @@ preference against a one-off override, two members with different defaults, a
 launch with no dashboard view, a shared account, an unavailable saved target,
 merged against released, a failing PR behind a success report, an open task in
 a completed swarm, and a reopened session. The checks are keyword and
-tool-call tests, so they are deterministic but coarse; the Markdown report ends
+tool-call tests, so they are deterministic but coarse: text matches are whole
+words (so `bo` does not match `both`), an invented-scope keyword does not count
+when the brief negates it ("no refactors"), and a question counts only when it
+is a sentence addressed to the member, not a `?run=` link or inline code. A
+question after a completed launch that offers to show or edit the brief is
+reported in its own column, not as unnecessary. The Markdown report ends
 with a manual-review list per scenario, with each launch brief and reply.
 
-The report has a row per scenario: runs passed, unnecessary questions, launches
+The report has a row per scenario: runs passed, unnecessary questions, brief offers, launches
 that should not have happened, dropped prohibitions, invented-scope keywords,
 tool calls and latency per run, and cost. Cost is the figure `claude` reports,
-and "not measured" when it reports none.
+and "not measured" when it reports none. Results are rewritten after every
+run, and each run's timeout is capped by the test's `-timeout`, so a run that
+hits the limit still leaves a report.
 
 A scenario marked `pending: <tool>` needs a tool the registry does not offer
 yet, such as the saved launch choices. The eval serves an eval-only stub of the

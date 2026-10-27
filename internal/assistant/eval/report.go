@@ -13,8 +13,8 @@ import (
 func Summary(label string, scenarios []Scenario, results []Result) string {
 	w := &strings.Builder{}
 	fmt.Fprintf(w, "# Assistant eval: %s\n\n", label)
-	fmt.Fprintln(w, "| scenario | capability | pass | questions | bad launches | must-not dropped | invented | tool calls | latency | cost |")
-	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
+	fmt.Fprintln(w, "| scenario | capability | pass | questions | brief offers | bad launches | must-not dropped | invented | tool calls | latency | cost |")
+	fmt.Fprintln(w, "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
 	var pass, total int
 	for _, s := range scenarios {
 		var rs []Result
@@ -38,6 +38,7 @@ func Summary(label string, scenarios []Scenario, results []Result) string {
 			calls += len(r.Calls)
 			lat += r.Latency
 			f.UnnecessaryQuestions += r.Flags.UnnecessaryQuestions
+			f.OfferedFollowUps += r.Flags.OfferedFollowUps
 			f.UnwantedLaunches += r.Flags.UnwantedLaunches
 			f.MustNotDropped += r.Flags.MustNotDropped
 			f.InventedScope += r.Flags.InventedScope
@@ -58,8 +59,8 @@ func Summary(label string, scenarios []Scenario, results []Result) string {
 		if costed > 0 {
 			costCol = fmt.Sprintf("$%.3f", cost/float64(costed))
 		}
-		fmt.Fprintf(w, "| %s | %s | %d/%d | %d | %d | %d | %d | %d | %s | %s |\n", s.ID, capability, p, n,
-			f.UnnecessaryQuestions, f.UnwantedLaunches, f.MustNotDropped, f.InventedScope,
+		fmt.Fprintf(w, "| %s | %s | %d/%d | %d | %d | %d | %d | %d | %d | %s | %s |\n", s.ID, capability, p, n,
+			f.UnnecessaryQuestions, f.OfferedFollowUps, f.UnwantedLaunches, f.MustNotDropped, f.InventedScope,
 			calls/n, (lat / time.Duration(n)).Round(time.Second), costCol)
 	}
 	fmt.Fprintf(w, "\nScenarios whose capability exists: %d/%d runs passed. Rows marked pending use an eval-only stub of a tool the registry does not offer yet; their rate is a baseline for that stub, not product behavior. Counts are totals over the runs; tool calls, latency and cost are per-run means.\n", pass, total)
