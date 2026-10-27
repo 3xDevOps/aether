@@ -82,6 +82,10 @@ func plainReason(reason string) string {
 	return reason
 }
 
+// waitBrokenPrefix mirrors waitBrokenReasonPrefix in
+// internal/scheduler/wait.go.
+const waitBrokenPrefix = "wait broken: "
+
 func turnCutShort(reason string) bool {
 	return reason == "turn interrupted" || strings.HasPrefix(reason, "turn ended: ")
 }

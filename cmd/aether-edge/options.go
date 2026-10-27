@@ -43,6 +43,8 @@ type options struct {
 	// openAIChallenge is OpenAI's domain verification token for the
 	// relay host, served at edgeproto.PathOpenAIChallenge.
 	openAIChallenge string
+	// reviewer is the reviewer account --reviewer-account-file names.
+	reviewer *edge.ReviewerAccount
 }
 
 const maxSecretFileSize = 4 << 10
@@ -83,6 +85,9 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 		"bytes the relay may send per calendar month (UTC) before it throttles every connection; 0 = no budget")
 	fs.StringVar(&o.openAIChallenge, "openai-challenge", env("AETHER_EDGE_OPENAI_CHALLENGE", ""),
 		"OpenAI's domain verification token for the relay host, served as text/plain at <relay origin>"+edgeproto.PathOpenAIChallenge+"; empty serves 404")
+	reviewerFile := fs.String("reviewer-account-file", env("AETHER_EDGE_REVIEWER_ACCOUNT_FILE", ""),
+		"reviewer account file, as aether-edge reviewer writes it: an app directory's reviewer signs in with its login and password at "+
+			"<signin origin>"+edge.PathReviewerSignin+" and is offered its one server; empty serves 404 there")
 	githubID := fs.String("github-client-id", env("AETHER_EDGE_GITHUB_CLIENT_ID", ""), "GitHub OAuth app client id")
 	githubSecretFile := fs.String("github-client-secret-file", env("AETHER_EDGE_GITHUB_CLIENT_SECRET_FILE", ""),
 		"file holding the GitHub client secret, instead of AETHER_EDGE_GITHUB_CLIENT_SECRET")
@@ -143,6 +148,11 @@ func parseOptions(args []string, getenv func(string) string) (options, error) {
 	if host(o.signinOrigin) == host(o.relayOrigin) {
 		return options{}, fmt.Errorf("--signin-origin %s and --relay-origin %s must name different hosts, such as auth.example.com and edge.example.com",
 			o.signinOrigin, o.relayOrigin)
+	}
+	if *reviewerFile != "" {
+		if o.reviewer, err = edge.LoadReviewerAccount(*reviewerFile); err != nil {
+			return options{}, err
+		}
 	}
 	if o.github, err = githubApp(*githubID, getenv("AETHER_EDGE_GITHUB_CLIENT_SECRET"), *githubSecretFile); err != nil {
 		return options{}, err

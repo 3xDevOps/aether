@@ -69,6 +69,7 @@ var connectorMethodScopes = map[string][]string{
 	protocol.MethodTemplateList:             scopeRead,
 	protocol.MethodChangesList:              scopeRead,
 	protocol.MethodRunChildren:              scopeRead,
+	protocol.MethodLaunchDefaultsGet:        scopeRead,
 	protocol.MethodRunLaunch:                scopeWrite,
 	protocol.MethodTemplateLaunch:           scopeWrite,
 	protocol.MethodRunRelaunch:              scopeWrite,

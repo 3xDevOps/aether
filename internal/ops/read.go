@@ -192,6 +192,7 @@ type runRow struct {
 type runText struct {
 	Title      string `json:"title,omitempty"`
 	Reason     string `json:"reason,omitempty"`
+	Wait       string `json:"wait,omitempty"`
 	LastReport string `json:"last_report,omitempty"`
 }
 
@@ -202,7 +203,7 @@ func runTitle(r protocol.Run) string {
 func rowOf(r protocol.Run, l links, workspaces map[string]string) runRow {
 	return runRow{ID: r.ID, State: r.Status, Activity: r.Activity, WorkspaceID: r.WorkspaceID, Workspace: workspaces[r.WorkspaceID],
 		Harness: r.Harness, MissionID: r.MissionID, CreatedAt: r.CreatedAt, URL: l.run(r.ID),
-		Untrusted: &runText{Title: runTitle(r), Reason: clip(r.Reason, maxReport)}}
+		Untrusted: &runText{Title: runTitle(r), Reason: clip(r.Reason, maxReport), Wait: clip(r.Wait.Text(time.Now()), maxReport)}}
 }
 
 func rowLimit(n int) int {

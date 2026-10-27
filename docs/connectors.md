@@ -187,19 +187,21 @@ each connector's scopes.
 
 The server also checks the scope of every call a connector makes, whatever the
 member's role. Reads such as `run.get`, `workspace.timeline`, `member.list`,
-`memory.show`, `integration.show`, `template.list` and `changes.list` need
-`read`; `run.launch`, `template.launch`, `mission.create`, `run.inject`,
-`run.room.post`, `run.pause`, `run.resume`, `run.review`, `run.relaunch`,
-`run.protect`, `run.archive`, `memory.add`, `memory.pin` and `memory.unpin` need
-`write`; `run.kill`, `run.close`, `run.mode.switch` (it discards a turn in
-progress), `run.handoff`, `mission.cancel`, `mission.worker.release`,
-`mission.archive`, `mission.unarchive`, `mission.replace-integrator`,
-`integration.decide`, `integration.deliver`, `run.pr.create` and `run.pr.merge`
-need `control`. `run.input.respond` needs `control` to decide a permission
-request and `write` to answer a question. `run.review` with `complete` needs
-`control` for a live run unless its agent reported success and the run awaits
-review, since completing any other live run ends it. Every other method, such as
-`member.role` or `connector.revoke`, is refused to every connector:
+`memory.show`, `integration.show`, `template.list`, `changes.list` and
+`launch.defaults.get` need `read`; `run.launch`, `template.launch`,
+`mission.create`, `run.inject`, `run.room.post`, `run.pause`, `run.resume`,
+`run.review`, `run.relaunch`, `run.protect`, `run.archive`, `memory.add`,
+`memory.pin` and `memory.unpin` need `write`; `run.kill`, `run.close`,
+`run.mode.switch` (it discards a turn in progress), `run.handoff`,
+`mission.cancel`, `mission.worker.release`, `mission.archive`,
+`mission.unarchive`, `mission.replace-integrator`, `integration.decide`,
+`integration.deliver`, `run.pr.create` and `run.pr.merge` need `control`.
+`run.input.respond` needs `control` to decide a permission request and `write`
+to answer a question. `run.review` with `complete` needs `control` for a live
+run unless its agent reported success and the run awaits review, since
+completing any other live run ends it. Every other method, such as
+`member.role`, `connector.revoke` or `launch.defaults.set`, is refused to every
+connector:
 
 ```
 run.kill needs the control scope, which ChatGPT connector con-7k2m9q4xbd was not granted; select Reconnect next to it in Settings → ChatGPT and Claude and check Stop and approve on the consent page
@@ -258,6 +260,9 @@ Things to ask:
 - "Which runs touch the same files as the migration run?"
 - "Merge the login fix PR if CI is green."
 - "The billing swarm's integrator stopped; replace it."
+
+The connector tells ChatGPT and Claude to launch and write the task as
+Aether's assistant does: [What a launch's task holds](assistant.md#what-a-launchs-task-holds).
 
 Results link to the run or swarm in the dashboard when the server serves one on
 its tailnet (`web-port`); the edge serves no dashboard. A result's text is a

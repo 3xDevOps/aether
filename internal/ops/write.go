@@ -32,7 +32,7 @@ type accountChoice struct {
 
 type connectorLaunchInput struct {
 	WorkspaceID string            `json:"workspace_id"`
-	Task        string            `json:"task,omitempty" jsonschema:"a complete brief"`
+	Task        string            `json:"task,omitempty" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
 	Harness     string            `json:"harness,omitempty"`
 	Template    string            `json:"template,omitempty" jsonschema:"a saved template to run instead of task"`
 	Params      map[string]string `json:"params,omitempty" jsonschema:"the template's placeholder values"`
@@ -57,7 +57,7 @@ type swarmWorker struct {
 
 type launchSwarmInput struct {
 	WorkspaceID string        `json:"workspace_id"`
-	Objective   string        `json:"objective" jsonschema:"the goal, as a complete brief"`
+	Objective   string        `json:"objective" jsonschema:"the user's request in their meaning: goal, every must-not; add no scope; prefix guesses Assumption:"`
 	Harness     string        `json:"harness" jsonschema:"the integrator's agent"`
 	Mode        string        `json:"mode,omitempty"`
 	Model       string        `json:"model,omitempty"`
