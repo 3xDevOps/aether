@@ -9,7 +9,6 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// Device statuses of a Deliver result.
 const (
 	DeviceDelivered = "delivered"
 	DeviceFailed    = "failed"
@@ -24,13 +23,11 @@ type DeviceResult struct {
 	Err      error
 }
 
-// Message is a notification Deliver sends. URL is the dashboard path a
-// click opens; Run names the run it is about, when it is about one.
-// Notice keeps it shown when the run's need later ends and its
-// notification is cleared. Topic, when set, also tags the notification on
-// the device, so it is shown and cleared apart from the run's own: a clear
-// of the run never replaces it. Clear quietly replaces the notification
-// shown under the same tag, as a need that ended is.
+// Message is a notification for Deliver. URL is the dashboard path a click
+// opens. Notice keeps it shown when the run's need ends and is cleared.
+// Topic also tags it on the device, apart from the run's own notification,
+// so the run's clears never replace it; Clear quietly replaces the one
+// under the same tag.
 type Message struct {
 	Title, Body, URL string
 	Run              domain.RunID
@@ -46,9 +43,8 @@ type message struct {
 	Tag string `json:"tag,omitempty"`
 }
 
-// Deliver sends m to every device member subscribed now, without waiting
-// for them to leave a dashboard, and returns each device's result. No
-// result means member has no device.
+// Deliver does not wait for member to leave a dashboard. No result means
+// member has no device.
 func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message) ([]DeviceResult, error) {
 	n := notification{Title: clip(m.Title, fallbackTitleRunes), Body: clip(m.Body, maxBodyRunes), Run: string(m.Run), Notice: m.Notice}
 	if m.Clear {
@@ -81,7 +77,6 @@ func (s *Service) Deliver(ctx context.Context, member domain.MemberID, m Message
 	return results, nil
 }
 
-// Devices counts the devices member subscribed.
 func (s *Service) Devices(ctx context.Context, member domain.MemberID) (int, error) {
 	subs, err := s.store.ListPushSubscriptions(ctx, member)
 	if err != nil {
