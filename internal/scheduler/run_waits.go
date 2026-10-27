@@ -36,11 +36,3 @@ func (s *Scheduler) endRunWaits(ctx context.Context, run domain.RunID, cause str
 	}
 	return nil
 }
-
-// UseWaitConditions judges reported waits by the conditions w reads, for a
-// condition store built after the scheduler.
-func (s *Scheduler) UseWaitConditions(w WaitConditions) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.cfg.WaitConditions = w
-}

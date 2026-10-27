@@ -126,6 +126,9 @@ func (s *Service) SettleRunWaits(ctx context.Context, run domain.RunID) ([]proto
 	}
 	var out []protocol.WaitCondition
 	for _, w := range waits {
+		// Readers learn the report's conditions once they are armed and
+		// read, however they stand.
+		s.waitChanged(ctx, w)
 		if !w.Woke() {
 			continue
 		}
@@ -272,7 +275,7 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait, inline bool)
 		}
 		next = minTime(next, w.ExpiresAt)
 		w.NextCheckAt = &next
-		if _, err = s.store.CommitRunWait(ctx, w, nil); err == nil {
+		if _, err = s.store.CommitRunWait(ctx, w, nil); err == nil && waitMoved(&before, w) {
 			s.waitChanged(ctx, w)
 		}
 		return err
@@ -328,7 +331,9 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait, inline bool)
 	if err != nil {
 		return err
 	}
-	s.waitChanged(ctx, w)
+	if waitMoved(&before, w) {
+		s.waitChanged(ctx, w)
+	}
 	for _, e := range ended {
 		s.waitChanged(ctx, e)
 	}
@@ -336,6 +341,16 @@ func (s *Service) commitWait(ctx context.Context, w *store.RunWait, inline bool)
 		s.wake()
 	}
 	return nil
+}
+
+// waitMoved reports a change a reader of the wait shows: not a read that
+// found the target as it was, which only moves the check times the
+// scheduler reads on its own sweeps.
+func waitMoved(before, after *store.RunWait) bool {
+	return before.WaitState != after.WaitState || before.Summary != after.Summary || before.Detail != after.Detail ||
+		before.Error != after.Error || before.Failures != after.Failures || before.HeadSHA != after.HeadSHA ||
+		string(before.Observed) != string(after.Observed) || (before.DeliveryNextAt == nil) != (after.DeliveryNextAt == nil) ||
+		(before.DeliveredAt == nil) != (after.DeliveredAt == nil)
 }
 
 func minTime(a, b time.Time) time.Time {

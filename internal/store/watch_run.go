@@ -138,6 +138,9 @@ const MaxWaitReportsPerHour = 30
 var ErrRunWaitLimit = fmt.Errorf("store: this run recorded %d waiting reports with conditions in the last hour; wait on the conditions it has, or report waiting without them", MaxWaitReportsPerHour)
 
 func (d *DB) RecordWaitingReport(ctx context.Context, report *CoordStateReport, waits []*RunWait) (bool, error) {
+	if report.CreatedAt.IsZero() {
+		report.CreatedAt = time.Now().UTC()
+	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("store: record waiting report: %w", err)
@@ -399,7 +402,7 @@ func (d *DB) EndRunWaits(ctx context.Context, run domain.RunID, wait, state, cau
 }
 
 // endRunWaitsWhere ends the pending waits that match where, and drops the
-// undelivered wakes of the woken ones.
+// undelivered wakes of the woken ones. It returns both.
 func endRunWaitsWhere(ctx context.Context, tx *sql.Tx, where string, args []any, state, cause string, by domain.MemberID, now time.Time) ([]*RunWait, error) {
 	at, err := encodeTime(now)
 	if err != nil {
@@ -412,22 +415,30 @@ func endRunWaitsWhere(ctx context.Context, tx *sql.Tx, where string, args []any,
 		append([]any{"Not delivered: " + cause, at}, args...)...); err != nil {
 		return nil, fmt.Errorf("store: end waits: drop wakes: %w", err)
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE watches SET wait_delivery_next_at = NULL, wait_delivery_error = ?, version = version + 1
-		WHERE wait_delivery_next_at IS NOT NULL AND `+where, append([]any{"Not delivered: " + cause}, args...)...); err != nil {
+	rows, err := tx.QueryContext(ctx, `UPDATE watches SET wait_delivery_next_at = NULL, wait_delivery_error = ?, version = version + 1
+		WHERE wait_delivery_next_at IS NOT NULL AND `+where+` RETURNING `+runWaitColumns, append([]any{"Not delivered: " + cause}, args...)...)
+	if err != nil {
+		return nil, fmt.Errorf("store: end waits: drop wakes: %w", err)
+	}
+	dropped, err := collect(rows, scanRunWait)
+	if err != nil {
 		return nil, fmt.Errorf("store: end waits: drop wakes: %w", err)
 	}
 	finalState := "done"
 	if state == waitExpired {
 		finalState = "expired"
 	}
-	rows, err := tx.QueryContext(ctx, `UPDATE watches SET state = ?, wait_state = ?, wait_cause = ?, wait_ended_by = ?, ended_at = ?, updated_at = ?,
+	if rows, err = tx.QueryContext(ctx, `UPDATE watches SET state = ?, wait_state = ?, wait_cause = ?, wait_ended_by = ?, ended_at = ?, updated_at = ?,
 		next_check_at = NULL, version = version + 1
 		WHERE wait_state = 'pending' AND `+where+` RETURNING `+runWaitColumns,
-		append([]any{finalState, state, cause, by, at, at}, args...)...)
-	if err != nil {
+		append([]any{finalState, state, cause, by, at, at}, args...)...); err != nil {
 		return nil, fmt.Errorf("store: end waits: %w", err)
 	}
-	return collect(rows, scanRunWait)
+	ended, err := collect(rows, scanRunWait)
+	if err != nil {
+		return nil, err
+	}
+	return append(ended, dropped...), nil
 }
 
 func (d *DB) DueRunWaitDeliveries(ctx context.Context, now time.Time) ([]*RunWait, error) {

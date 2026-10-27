@@ -111,7 +111,7 @@ func TestTheSchedulerReadsTheRunsWaitConditions(t *testing.T) {
 	if _, err = svc.SettleRunWaits(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	reader := waitConditions{svc}
+	reader := storeWaitConditions{db}
 	conditions, err := reader.RunWaits(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)

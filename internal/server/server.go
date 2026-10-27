@@ -385,11 +385,15 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		s.egress = egress.New(s.docker, s.db, s.bus)
 		egressProxy = s.egress
 	}
+	var waitConditions scheduler.WaitConditions = storeWaitConditions{s.db}
+	if cfg.WaitConditions != nil {
+		waitConditions = cfg.WaitConditions
+	}
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:          s.db,
 		Runtime:        s.rt,
 		Bus:            s.bus,
-		WaitConditions: cfg.WaitConditions,
+		WaitConditions: waitConditions,
 		Egress:         egressProxy,
 		EventSeq:       s.log.LastSeq,
 		Git:            lazyGit{s.git},

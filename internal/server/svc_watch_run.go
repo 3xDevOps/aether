@@ -22,7 +22,8 @@ import (
 // watches the watch service svc_watch.go builds evaluates, and their wakes
 // go to the run's inbox through the coordination service svc_coord.go
 // builds. Both are built first. The scheduler judges a reported wait by
-// the same conditions, read again on every run.wait.changed.
+// the same conditions (storeWaitConditions), again on every
+// run.wait.changed.
 func init() {
 	registerService("watch-run", func(d Deps) (Service, error) {
 		watches, ok := d.SSH.Services.Watches.(*watch.Service)
@@ -35,45 +36,37 @@ func init() {
 			}
 		}
 		d.Runs.UseRunWaits(watches)
-		if d.Config.WaitConditions != nil {
-			return nil, nil
-		}
-		d.Runs.UseWaitConditions(waitConditions{watches})
 		return &waitRefresher{bus: d.Bus, runs: d.Runs}, nil
 	})
 }
 
-// waitConditions is the scheduler's view of a run's wait conditions.
-type waitConditions struct{ watches *watch.Service }
+// storeWaitConditions is the scheduler's view of a run's wait conditions,
+// read from the store the watch service keeps them in, so it is there
+// from the scheduler's first judgement after a start.
+type storeWaitConditions struct{ db *store.DB }
 
-func (w waitConditions) RunWaits(ctx context.Context, run domain.RunID) ([]scheduler.WaitCondition, error) {
-	waits, err := w.watches.RunWaits(ctx, run)
+func (w storeWaitConditions) RunWaits(ctx context.Context, run domain.RunID) ([]scheduler.WaitCondition, error) {
+	waits, err := w.db.RunWaitConditions(ctx, run)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]scheduler.WaitCondition, 0, len(waits))
 	for _, c := range waits {
-		sc := scheduler.WaitCondition{
-			Spec: c.Spec, State: c.State, Summary: c.Summary, ConsecutiveFailures: c.ConsecutiveFailures,
-			LastError: c.LastError, LastDeliveryError: c.LastDeliveryError,
-		}
-		for _, f := range []struct {
-			to   *time.Time
-			from string
-		}{
-			{&sc.CreatedAt, c.CreatedAt}, {&sc.LastCheckedAt, c.LastCheckedAt}, {&sc.SourceCheckedAt, c.SourceCheckedAt},
-			{&sc.NextCheckAt, c.NextCheckAt}, {&sc.ResolvedAt, c.ResolvedAt}, {&sc.DeliveredAt, c.DeliveredAt},
-		} {
-			if f.from == "" {
-				continue
-			}
-			if *f.to, err = time.Parse(time.RFC3339Nano, f.from); err != nil {
-				return nil, fmt.Errorf("wait %s: %w", c.ID, err)
-			}
-		}
-		out = append(out, sc)
+		out = append(out, scheduler.WaitCondition{
+			Spec: c.Spec, CreatedAt: c.CreatedAt, State: c.WaitState, Summary: c.Summary,
+			LastCheckedAt: timeOf(c.LastCheckAt), SourceCheckedAt: timeOf(c.SourceCheckedAt), NextCheckAt: timeOf(c.NextCheckAt),
+			ConsecutiveFailures: c.Failures, LastError: c.Error, ResolvedAt: timeOf(c.ResolvedAt), DeliveredAt: timeOf(c.DeliveredAt),
+			LastDeliveryError: c.DeliveryError,
+		})
 	}
 	return out, nil
+}
+
+func timeOf(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
 }
 
 // waitRefresher has the scheduler judge a run's wait again whenever one of
