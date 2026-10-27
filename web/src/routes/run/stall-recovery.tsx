@@ -28,21 +28,6 @@ import { sessionLease } from '@/store/session-stream'
 // Mirrors coordhooks.ReportReminderLead in internal/coordhooks/guide.go: Aether's prompt, not the member's.
 const reportReminderLead = 'Report your state with aether-internal report'
 
-function useLiveness(runID: string, reason: string | undefined): { liveness?: RunLiveness; error?: string } {
-  const [read, setRead] = useState<{ liveness?: RunLiveness; error?: string }>({})
-  useEffect(() => {
-    if (reason === undefined) return
-    let current = true
-    api.runGet(runID)
-      .then((run) => { if (current) setRead({ liveness: run.liveness }) })
-      .catch((err: unknown) => { if (current) setRead({ error: errorSentence(err) }) })
-    return () => {
-      current = false
-    }
-  }, [runID, reason])
-  return read
-}
-
 function LastProgress({ liveness, now }: { liveness: RunLiveness; now: number }) {
   if (liveness.last_progress_at) {
     return <>{clockTime(liveness.last_progress_at, now)} ({timeAgo(liveness.last_progress_at, now)})</>
@@ -59,7 +44,18 @@ export function StallCallout({ run, agent, rows, nav }: {
 }) {
   const now = useClock()
   const stalled = possiblyStalled(run)
-  const { liveness, error } = useLiveness(run.id, stalled ? run.reason : undefined)
+  const stallReason = stalled ? run.reason : undefined
+  const [{ liveness, error }, setRead] = useState<{ liveness?: RunLiveness; error?: string }>({})
+  useEffect(() => {
+    if (stallReason === undefined) return
+    let current = true
+    api.runGet(run.id)
+      .then((read) => { if (current) setRead({ liveness: read.liveness }) })
+      .catch((err: unknown) => { if (current) setRead({ error: errorSentence(err) }) })
+    return () => {
+      current = false
+    }
+  }, [run.id, stallReason])
   const control = useImplicitControl(run, agent)
   const [busy, setBusy] = useState(false)
   const [confirm, setConfirm] = useState(false)

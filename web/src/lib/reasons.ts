@@ -28,9 +28,6 @@ const stallPhases: Record<string, string> = {
   'between turns': 'between turns',
 }
 
-/** A Go duration with its zero tail dropped: 6m0s reads 6m, 1h0m0s reads 1h. */
-const goSpan = (span: string) => span.replace(/([hm])0s$/, '$1').replace(/h0m$/, 'h')
-
 const savedResults = "the worker's saved results"
 
 const plainReasons: [RegExp, (...groups: string[]) => string][] = [
@@ -56,7 +53,7 @@ const plainReasons: [RegExp, (...groups: string[]) => string][] = [
   [/^agent resumed$/, () => 'Agent resumed'],
   [/^agent failed$/, () => 'Agent failed'],
   [/^stalled: no output or file changes for (.+)$/, (span) => `No output or file changes for ${span}`],
-  [/^stalled: possibly — no progress for (\S+), (.+), transport (\w+)$/, (span, phase, transport) => `No progress for ${goSpan(span)} ${stallPhases[phase] ?? phase}; connection ${transport}`],
+  [/^stalled: possibly — no progress for (\S+), (.+), transport (\w+)$/, (span, phase, transport) => `No progress for ${span.replace(/([hm])0s$/, '$1').replace(/h0m$/, 'h')} ${stallPhases[phase] ?? phase}; connection ${transport}`],
   [/^blocked: (.*)$/s, (why) => `Blocked: ${why}`],
   [/^needs input: (.*)$/s, (question) => `Agent asks: ${question}`],
   [/^working in background(: \d+ tasks?)?$/, (count = '') => `Working in background${count}`],
