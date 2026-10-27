@@ -435,10 +435,11 @@ func getRun(ctx context.Context, c calls, in getRunInput) (string, any, error) {
 	}
 	addChildren(ctx, c.read, l, book, r.ID, out, untrusted)
 	if in.Evidence {
-		addRunEvidence(ctx, c.read, r, got.PullRequests, reps, &pr, out)
+		unconfirmed := addRunEvidence(ctx, c.read, r, got.PullRequests, reps, &pr, out)
 		if cs := out["evidence"].(map[string]any)["conflicts"].([]string); len(cs) > 0 {
 			summary += " Its report conflicts with the evidence: " + strings.Join(cs, ", ") + "."
 		}
+		summary += unconfirmed
 	}
 	return summary, out, nil
 }

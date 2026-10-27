@@ -395,15 +395,26 @@ child runs.
 to answer "what is left" and "did we ship" from evidence rather than from an
 agent's own report. Without it they make no GitHub lookups for this.
 Every part carries its source and the time it was read (`as_of` or
-`checked_at`); a lookup that failed returns its `error` instead of a guess.
-Both add `released` and `deployed` as `{"state": "unknown", "reason": "Aether
-does not track releases or deployments of this repository"}`.
+`checked_at`); a lookup that failed returns its `error` instead of a guess,
+and the summary line ends with `Not confirmed:` and the number of lookups
+that returned an error, runs with pull requests not checked live, and
+unreadable reports. Both add `released` and `deployed` as `{"state":
+"unknown", "reason": "Aether does not track releases or deployments of this
+repository"}`.
+
+The lookups are the same as `aether_pr_status`'s, for at most 5 runs per
+call: one may record what GitHub showed in Aether and tell open dashboards
+that the run's pull request changed.
 
 `aether_get_run`'s `evidence` has:
 
 - `pull_requests`: each pull request the run opened, as Aether recorded it
-  (`source: "aether record"`, with `checked_at`), or as GitHub just showed it
-  (`source: "github"`). A run closed as merged adds `closed_as_merged`: a
+  (`source: "aether record"`, with the `checked_at` of that record), or as
+  GitHub just showed it (`source: "github"`). Only a lookup that reached
+  GitHub without an error relabels one; a finished run's lookup can answer
+  from Aether's record without asking GitHub, and a recorded merge stays as
+  recorded. A pull request not merged that no lookup confirmed has
+  `not_checked_live`. A run closed as merged adds `closed_as_merged`: a
   person closed it, which is not a GitHub merge.
 - `reviewed`: for a run with a pull request not merged, GitHub's checks
   (`total`, `failing`, `pending`), `approvals` and `changes_requested` from
@@ -420,22 +431,32 @@ does not track releases or deployments of this repository"}`.
 - `requested`: each task's `status`, `revision`, `depends_on`,
   `plan_accepted_by` (a member or a run) and `plan_accepted_at`, the first 20
   with `tasks_total`; titles and objectives are under `untrusted.progress_tasks`.
-- `implemented`: each attempt's run, state and times, and its newest
-  submission's `state`, `accepted_by` (the integrator run), `accepted_at` and
-  number of `scope_violations`.
+- `implemented`: each attempt's run, task revision, state and times, and its
+  newest submission's `state`, `accepted_by` (the integrator run),
+  `accepted_at`, `accepted_for_revision` and number of `scope_violations`.
+  `accepted` is true only for a submission accepted for the task's current
+  revision; revising a task leaves earlier acceptances in place but no longer
+  accepted.
 - `merged`, `reviewed`, `reports` and `children`: per run, as for one run,
-  for the integrator and the first 20 worker runs (`runs_total` when there
-  are more). At most 5 runs are checked on GitHub per call, 4 at a time:
-  first those with a pull request not merged, then those with none recorded,
-  whose agent may have opened one with `gh` (`pr_lookup_error` says why none
-  was found). The rest have `not_checked_live` and keep Aether's record and
-  its `checked_at`. Reports come from the workspace's last
-  100; their summaries are under `untrusted.progress_reports`.
-- `aether_delivery`: the swarm's delivery receipts, which land in Aether's
-  own git, not on GitHub.
+  for the first 20 of the integrator, earlier integrators that decided a
+  submission, and the worker runs, each with its `role` (`runs_total` when
+  there are more). At most 5 runs are checked on GitHub per call, 4 at a
+  time: the integrator first, then runs with a pull request not merged, then
+  unfinished runs with none recorded, whose agent may have opened one with
+  `gh` (`pr_lookup_error` says why none was found). A run's pull requests
+  are capped at 20 with `pull_requests_total`. Reports come from the
+  workspace's last 100; their summaries are under
+  `untrusted.progress_reports`. With `integrator_generation` above 1,
+  `integrator_note` counts earlier integrators no submission names, which
+  are not listed.
+- `aether_delivery`: the swarm's first 20 delivery receipts
+  (`receipts_total` when there are more), which land in Aether's own git,
+  not on GitHub.
 - `flags`: `open_tasks_in_completed_swarm`, tasks neither done nor abandoned
   in a completed swarm, and `report_conflicts`, which adds
-  `success_without_accepted_submission` for a worker.
+  `success_without_accepted_submission` for a worker with no submission
+  accepted for its task's current revision. Superseded and abandoned
+  attempts and abandoned tasks do not raise it.
 
 `aether_launch_run` with `template` (a name from `aether_launch_options`
 with `workspace_id`) and `params` runs a saved template on your own account

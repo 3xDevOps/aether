@@ -27,13 +27,13 @@ func shopSwarm() protocol.MissionShowResult {
 				Dependencies: []protocol.TaskDependency{{TaskID: "task-2", DependsOnTaskID: "task-1"}}},
 		},
 		Attempts: []protocol.Attempt{
-			{ID: "att-a", TaskID: "task-1", RunID: "run-a", State: "completed"},
-			{ID: "att-b", TaskID: "task-2", RunID: "run-b", State: "submitted"},
+			{ID: "att-a", TaskID: "task-1", TaskRevision: 1, RunID: "run-a", State: "completed"},
+			{ID: "att-b", TaskID: "task-2", TaskRevision: 1, RunID: "run-b", State: "submitted"},
 		},
 		Submissions: []protocol.Submission{
-			{ID: "sub-a", AttemptID: "att-a", State: "accepted", ScopeViolations: []string{"web/x.ts"}, CreatedAt: "2026-10-26T07:00:00Z",
-				Acceptance: &protocol.Acceptance{AcceptedByRunID: "run-int", AcceptedAt: accepted, ScopeDisposition: "allowed"}},
-			{ID: "sub-b", AttemptID: "att-b", State: "proposed", CreatedAt: "2026-10-26T07:30:00Z"},
+			{ID: "sub-a", AttemptID: "att-a", TaskRevision: 1, State: "accepted", ScopeViolations: []string{"web/x.ts"}, CreatedAt: "2026-10-26T07:00:00Z",
+				Acceptance: &protocol.Acceptance{TaskRevision: 1, AcceptedByRunID: "run-int", AcceptedAt: accepted, ScopeDisposition: "allowed"}},
+			{ID: "sub-b", AttemptID: "att-b", TaskRevision: 1, State: "proposed", CreatedAt: "2026-10-26T07:30:00Z"},
 		},
 	}
 }
@@ -103,8 +103,13 @@ func byRun(t *testing.T, rows any, id string) map[string]any {
 	return nil
 }
 
+// shown is what a live lookup as the GitHub login ana returns.
+func shown(n int, state string) protocol.RunPRStatusResult {
+	return protocol.RunPRStatusResult{Identity: "ana", PullRequest: &protocol.RunPullRequest{Number: n, State: state, Repository: "acme/shop"}}
+}
+
 func feedback(conclusions ...string) protocol.RunPRFeedbackResult {
-	res := protocol.RunPRFeedbackResult{PullRequest: &protocol.RunPullRequest{Number: 2, State: "open", Repository: "acme/shop"},
+	res := protocol.RunPRFeedbackResult{Identity: "ana", PullRequest: &protocol.RunPullRequest{Number: 2, State: "open", Repository: "acme/shop"},
 		Reviews: []protocol.RunPRReview{{Author: "bo", State: "APPROVED"}}}
 	for i, c := range conclusions {
 		res.Checks = append(res.Checks, protocol.RunPRCheck{Name: fmt.Sprintf("check-%d", i), Conclusion: c})
@@ -123,14 +128,17 @@ func TestSwarmProgress(t *testing.T) {
 	merged.State, merged.MergedAt = "merged", &checkedLongAgo
 	f.answers[protocol.MethodRunGet] = runsAt(map[string]protocol.RunResult{
 		"run-int": runWith("run-int", "merged", openPR(3)),
-		"run-a":   runWith("run-a", "succeeded", merged),
-		"run-b":   runWith("run-b", "succeeded", openPR(2)),
+		"run-a":   runWith("run-a", "completed", merged),
+		"run-b":   runWith("run-b", "completed", openPR(2)),
 	})
 	f.answers[protocol.MethodRunPRStatus] = answerTo(func(p protocol.RunPRStatusParams) any {
-		n := map[string]int{"run-int": 3, "run-b": 2}[p.RunID]
-		return protocol.RunPRStatusResult{PullRequest: &protocol.RunPullRequest{Number: n, State: "open", Repository: "acme/shop"}}
+		return shown(map[string]int{"run-int": 3, "run-b": 2}[p.RunID], "open")
 	})
-	f.answers[protocol.MethodRunPRFeedback] = returns(feedback("SUCCESS", "FAILURE", ""))
+	f.answers[protocol.MethodRunPRFeedback] = answerTo(func(p protocol.RunPRFeedbackParams) any {
+		fb := feedback("SUCCESS", "FAILURE", "")
+		fb.PullRequest.Number = map[string]int{"run-int": 3, "run-b": 2}[p.RunID]
+		return fb
+	})
 	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-a", "success", "done"), reportEvent("run-b", "success", injection))
 	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{Candidates: []protocol.CandidateSummary{
 		{CandidateID: "cand-1", TargetRef: injection, DeliveryReceipt: &protocol.DeliveryReceipt{ReceiptID: "rcpt-1", Result: protocol.DeliveryResultLanded, CreatedAt: checkedLongAgo}}}})
@@ -143,7 +151,7 @@ func TestSwarmProgress(t *testing.T) {
 
 	text, out := run(t, cs, "aether_get_swarm", map[string]any{"swarm_id": "mis-1", "evidence": true})
 	p := out["progress"].(map[string]any)
-	if !strings.Contains(text, "1 open tasks in a completed swarm, 2 runs whose reports conflict") {
+	if !strings.Contains(text, "1 open tasks in a completed swarm, 2 runs whose reports conflict") || strings.Contains(text, "Not confirmed") {
 		t.Errorf("summary = %q", text)
 	}
 	if got := dig(t, p, "flags", "open_tasks_in_completed_swarm"); jsonOf(t, got) != `["task-2"]` {
@@ -154,7 +162,7 @@ func TestSwarmProgress(t *testing.T) {
 		t.Errorf("requested = %v", dig(t, p, "requested"))
 	}
 	sub := dig(t, p, "implemented", "attempts", 0, "submission").(map[string]any)
-	if sub["accepted_by"] != "integrator run run-int" || sub["scope_violations"] != float64(1) || dig(t, p, "implemented", "attempts", 1, "submission", "accepted_by") != nil {
+	if sub["accepted"] != true || sub["accepted_for_revision"] != float64(1) || sub["accepted_by"] != "integrator run run-int" || sub["scope_violations"] != float64(1) || dig(t, p, "implemented", "attempts", 1, "submission", "accepted_by") != nil {
 		t.Errorf("implemented = %v", dig(t, p, "implemented"))
 	}
 	if got := ranFor(f, protocol.MethodRunPRStatus); !slices.Equal(got, []string{"run-b", "run-int"}) {
@@ -165,7 +173,7 @@ func TestSwarmProgress(t *testing.T) {
 		t.Errorf("run-a's merged pull request = %v, want Aether's record with when it was checked", pr)
 	}
 	mi := byRun(t, p["merged"], "run-int")
-	if mi["closed_as_merged"] == nil || dig(t, mi, "pull_requests", 0, "source") != sourceGitHub || dig(t, mi, "pull_requests", 0, "state") != "open" {
+	if mi["closed_as_merged"] == nil || mi["role"] != "integrator" || dig(t, mi, "pull_requests", 0, "source") != sourceGitHub || dig(t, mi, "pull_requests", 0, "state") != "open" {
 		t.Errorf("run-int closed as merged = %v", mi)
 	}
 	rb := byRun(t, p["reviewed"], "run-b")
@@ -215,22 +223,37 @@ func TestSwarmProgressBoundsLiveLookups(t *testing.T) {
 	}
 	f.answers[protocol.MethodMissionShow] = returns(show)
 	f.answers[protocol.MethodRunGet] = runsAt(runs)
-	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{})
+	var cands protocol.IntegrationListResult
+	for i := range defaultRows + 2 {
+		cands.Candidates = append(cands.Candidates, protocol.CandidateSummary{CandidateID: fmt.Sprintf("cand-%d", i),
+			DeliveryReceipt: &protocol.DeliveryReceipt{ReceiptID: fmt.Sprintf("rcpt-%d", i), Result: protocol.DeliveryResultLanded, CreatedAt: checkedLongAgo}})
+	}
+	f.answers[protocol.MethodIntegrationList] = returns(cands)
 	f.errs[protocol.MethodRunPRStatus] = errors.New("github.com: dial tcp: i/o timeout")
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Error: "gh: could not reach api.github.com"})
-	_, out := run(t, connectorSession(t, f), "aether_get_swarm", map[string]any{"swarm_id": "mis-1", "evidence": true})
+	f.errs[protocol.MethodWorkspaceTimeline] = errors.New("timeline: database is locked")
+	text, out := run(t, connectorSession(t, f), "aether_get_swarm", map[string]any{"swarm_id": "mis-1", "evidence": true})
 	p := out["progress"].(map[string]any)
+	if !strings.Contains(text, "Not confirmed: 5 GitHub lookups returned an error, 2 runs have pull requests not checked live, reports could not be read.") {
+		t.Errorf("summary = %q, want what it could not confirm", text)
+	}
+	if !strings.Contains(p["reports_error"].(string), "database is locked") {
+		t.Errorf("reports_error = %v", p["reports_error"])
+	}
+	if n := len(dig(t, p, "aether_delivery", "receipts").([]any)); n != defaultRows || dig(t, p, "aether_delivery", "receipts_total") != float64(defaultRows+2) {
+		t.Errorf("%d receipts, total %v", n, dig(t, p, "aether_delivery", "receipts_total"))
+	}
 	if n := len(called(f, protocol.MethodRunPRStatus)); n != evidenceLive {
 		t.Fatalf("%d live lookups, want %d", n, evidenceLive)
 	}
 	skipped := 0
 	for _, row := range p["merged"].([]any) {
-		m := row.(map[string]any)
-		if m["not_checked_live"] == true {
+		pr := dig(t, row, "pull_requests", 0).(map[string]any)
+		if pr["source"] != sourceRecord || pr["checked_at"] != "2026-10-20T09:00:00Z" {
+			t.Errorf("pull request %v, want Aether's record and its checked_at whether or not the lookup failed", pr)
+		}
+		if pr["not_checked_live"] == true {
 			skipped++
-			if dig(t, m, "pull_requests", 0, "checked_at") != "2026-10-20T09:00:00Z" || dig(t, m, "pull_requests", 0, "source") != sourceRecord {
-				t.Errorf("unchecked run %v, want Aether's record and its checked_at", m)
-			}
 		}
 	}
 	if skipped != 2 {
@@ -252,8 +275,8 @@ func TestSwarmProgressBoundsLiveLookups(t *testing.T) {
 // conflict between a success report and failing checks.
 func TestRunEvidence(t *testing.T) {
 	f := newFake(t)
-	f.answers[protocol.MethodRunGet] = returns(runWith("run-1", "succeeded", openPR(2)))
-	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{PullRequest: &protocol.RunPullRequest{Number: 2, State: "open", Repository: "acme/shop"}})
+	f.answers[protocol.MethodRunGet] = returns(runWith("run-1", "completed", openPR(2)))
+	f.answers[protocol.MethodRunPRStatus] = returns(shown(2, "open"))
 	f.answers[protocol.MethodRunPRFeedback] = returns(feedback("FAILURE"))
 	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-1", "success", "all green"))
 	f.answers[protocol.MethodRunChildren] = returns(protocol.RunChildrenResult{Children: []protocol.Child{
@@ -282,7 +305,7 @@ func TestRunEvidence(t *testing.T) {
 	}
 
 	f.answers[protocol.MethodRunGet] = returns(runWith("run-1", "running"))
-	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{PullRequest: &protocol.RunPullRequest{Number: 4, State: "MERGED", Repository: "acme/shop"}})
+	f.answers[protocol.MethodRunPRStatus] = returns(shown(4, "MERGED"))
 	_, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
 	if pr := dig(t, out, "evidence", "pull_requests", 0).(map[string]any); pr["number"] != float64(4) || pr["source"] != sourceGitHub || pr["checked_at"] == nil {
 		t.Errorf("a pull request GitHub shows but Aether has not recorded = %v", pr)
@@ -315,7 +338,9 @@ func TestSwarmProgressFindsUnrecordedPullRequests(t *testing.T) {
 		if p.RunID == "run-b" {
 			return protocol.RunPRStatusResult{Error: "no pull request for branch aether/run-b"}
 		}
-		return protocol.RunPRStatusResult{PullRequest: &protocol.RunPullRequest{Number: 9, State: "OPEN", Repository: "acme/shop", HeadOID: "aaa"}}
+		res := shown(9, "OPEN")
+		res.PullRequest.HeadOID = "aaa"
+		return res
 	})
 	fb := feedback("FAILURE")
 	fb.PullRequest.Number, fb.PullRequest.HeadOID = 9, "bbb"
@@ -337,5 +362,100 @@ func TestSwarmProgressFindsUnrecordedPullRequests(t *testing.T) {
 	}
 	if mb := byRun(t, p["merged"], "run-b"); !strings.Contains(mb["pr_lookup_error"].(string), "no pull request") || len(mb["pull_requests"].([]any)) != 0 {
 		t.Errorf("run-b with no pull request = %v", mb)
+	}
+}
+
+// An acceptance of an earlier task revision does not count once the task
+// moves on; superseded attempts and abandoned tasks raise no conflict. The
+// integrator generation names earlier integrators that decided a
+// submission, and a finished run with no recorded pull request is not
+// looked up.
+func TestSwarmProgressAcceptanceFollowsRevision(t *testing.T) {
+	f := newFake(t)
+	show := shopSwarm()
+	show.Mission.Phase, show.Mission.CurrentIntegratorRunID, show.Mission.IntegratorGeneration = "active", "run-int2", 3
+	show.Tasks[0].CurrentRevision = 2
+	abandoned := "2026-10-26T10:00:00Z"
+	show.Tasks[1].Status, show.Tasks[1].AbandonedAt = "abandoned", &abandoned
+	show.Attempts = append(show.Attempts, protocol.Attempt{ID: "att-c", TaskID: "task-1", TaskRevision: 1, RunID: "run-c", State: "superseded"})
+	f.answers[protocol.MethodMissionShow] = returns(show)
+	f.answers[protocol.MethodRunGet] = runsAt(map[string]protocol.RunResult{
+		"run-int": runWith("run-int", "completed"), "run-int2": runWith("run-int2", "running"),
+		"run-a": runWith("run-a", "completed"), "run-b": runWith("run-b", "completed"), "run-c": runWith("run-c", "completed"),
+	})
+	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{Identity: "ana", Error: "no pull request for branch aether/run-int2"})
+	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Identity: "ana", Error: "no pull request for branch aether/run-int2"})
+	f.answers[protocol.MethodIntegrationList] = returns(protocol.IntegrationListResult{})
+	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-a", "success", "done"), reportEvent("run-b", "success", "done"),
+		reportEvent("run-c", "success", "done"))
+	_, out := run(t, connectorSession(t, f), "aether_get_swarm", map[string]any{"swarm_id": "mis-1", "evidence": true})
+	p := out["progress"].(map[string]any)
+
+	sub := dig(t, p, "implemented", "attempts", 0, "submission").(map[string]any)
+	if sub["accepted"] != false || sub["accepted_for_revision"] != float64(1) {
+		t.Errorf("submission accepted for revision 1 of a task now at 2 = %v", sub)
+	}
+	flags := dig(t, p, "flags", "report_conflicts")
+	if got := jsonOf(t, byRun(t, flags, "run-a")["conflicts"]); got != `["success_without_accepted_submission"]` {
+		t.Errorf("run-a conflicts = %s", got)
+	}
+	if len(flags.([]any)) != 1 {
+		t.Errorf("conflicts = %v, want none for the abandoned task's run-b or the superseded run-c", flags)
+	}
+	if byRun(t, p["merged"], "run-int")["role"] != "earlier integrator" || byRun(t, p["merged"], "run-int2")["role"] != "integrator" {
+		t.Errorf("merged = %v", p["merged"])
+	}
+	if note, _ := p["integrator_note"].(string); !strings.Contains(note, "generation 3: 1 earlier integrator runs") {
+		t.Errorf("integrator_note = %q", note)
+	}
+	if got := ranFor(f, protocol.MethodRunPRStatus); !slices.Equal(got, []string{"run-int2"}) {
+		t.Errorf("live lookups for %v, want only the unfinished integrator", got)
+	}
+}
+
+// A finished run's lookup can answer from Aether's record without asking
+// GitHub; the pull request then keeps its source and checked_at, the
+// failure is carried, and the summary says what was not confirmed. A
+// pull request in another repository is marked not checked live, and one
+// GitHub shows in a different repository does not replace a recorded one
+// with the same number.
+func TestRunEvidenceFromRecordWithoutGitHub(t *testing.T) {
+	f := newFake(t)
+	docs := openPR(5)
+	docs.Repo, docs.Repository = "ws-docs", "acme/docs"
+	f.answers[protocol.MethodRunGet] = returns(runWith("run-1", "completed", openPR(2), docs))
+	recordOnly := shown(2, "open")
+	recordOnly.Identity = ""
+	f.answers[protocol.MethodRunPRStatus] = returns(recordOnly)
+	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{PullRequest: recordOnly.PullRequest,
+		Error: "checks and review feedback need the run's environment, which is gone: no live environment"})
+	f.answers[protocol.MethodWorkspaceTimeline] = timeline(t, reportEvent("run-1", "success", "shipped"))
+	cs := connectorSession(t, f)
+
+	text, out := run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
+	ev := out["evidence"].(map[string]any)
+	pr := dig(t, ev, "pull_requests", 0).(map[string]any)
+	if pr["source"] != sourceRecord || pr["checked_at"] != "2026-10-20T09:00:00Z" || pr["not_checked_live"] != nil {
+		t.Errorf("recorded pull request = %v, want Aether's record and its checked_at", pr)
+	}
+	if e, _ := dig(t, ev, "reviewed", "error").(string); !strings.Contains(e, "environment, which is gone") || dig(t, ev, "reviewed", "checks") != nil {
+		t.Errorf("reviewed = %v", ev["reviewed"])
+	}
+	if dig(t, ev, "pull_requests", 1, "not_checked_live") != true {
+		t.Errorf("the other repository's pull request = %v", dig(t, ev, "pull_requests", 1))
+	}
+	if !strings.Contains(text, "Not confirmed: 1 GitHub lookups returned an error, 1 runs have pull requests not checked live.") {
+		t.Errorf("summary = %q", text)
+	}
+
+	f.answers[protocol.MethodRunGet] = returns(runWith("run-1", "running", openPR(2)))
+	other := shown(2, "open")
+	other.PullRequest.Repository = "acme/other"
+	f.answers[protocol.MethodRunPRStatus] = returns(other)
+	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Identity: "ana", PullRequest: other.PullRequest})
+	_, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
+	prs := dig(t, out, "evidence", "pull_requests").([]any)
+	if len(prs) != 2 || dig(t, prs, 1, "repository") != "acme/shop" || dig(t, prs, 1, "source") != sourceRecord {
+		t.Errorf("pull requests = %v, want acme/other#2 beside the recorded acme/shop#2", prs)
 	}
 }

@@ -268,9 +268,10 @@ link Settings > Child runs (`?page=settings&id=children`).
    `checked_at`) and link, or "unknown" when no source covers it; say so when
    a lookup returned an error or was not checked live.
 3. An agent's success report alone proves nothing. Accepted by an
-   integrator is not reviewed; only PR review verdicts are. A run closed as
-   merged is not a GitHub merge. A delivery receipt lands in Aether's git,
-   not on GitHub. Name every `report_conflicts` and
+   integrator is not reviewed; only PR review verdicts are. A submission is
+   accepted only with `accepted: true`, for the task's current revision. A
+   run closed as merged is not a GitHub merge. A delivery receipt lands in
+   Aether's git, not on GitHub. Name every `report_conflicts` and
    `open_tasks_in_completed_swarm` entry.
 4. "Continue" never replays what was done: no relaunch, re-message or
    re-merge. Propose the next action from the evidence, and launch only when
