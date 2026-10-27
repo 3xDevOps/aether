@@ -2144,7 +2144,20 @@ CREATE TABLE watch_cursor (
 	seq INTEGER NOT NULL
 );
 `,
-	// v89: audit history of writes by connectors and the assistant, and of
+	// v89: the last read of each pull request a member's watches follow,
+	// with its ETags, so a restart asks GitHub conditionally.
+	`
+CREATE TABLE watch_pr_snapshots (
+	member_id  TEXT NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	repo       TEXT NOT NULL,
+	pr_number  INTEGER NOT NULL,
+	snapshot   TEXT NOT NULL,
+	checked_at INTEGER NOT NULL,
+	PRIMARY KEY (member_id, repo, pr_number)
+);
+CREATE INDEX idx_watch_pr_snapshots_checked ON watch_pr_snapshots(checked_at);
+`,
+	// v90: audit history of writes by connectors and the assistant, and of
 	// connector, account-share, member and Slack link changes. Rows hold
 	// ids, never params, and outlive the members and connectors they name;
 	// security marks a change that took effect, which is kept apart from

@@ -45,6 +45,10 @@ func TestRunPRStatusDefaultsExpectedAndTarget(t *testing.T) {
 	if err := json.Unmarshal(value, &status); err != nil {
 		t.Fatal(err)
 	}
+	want := protocol.RunPRTarget{Repository: "acme/app", BaseBranch: "main", HeadRepository: "acme/app", HeadBranch: "aether/run-x"}
+	if status.Target == nil || *status.Target != want || status.Expected == nil || status.Expected.Branch != "aether/run-x" || status.Expected.Head != expected.Head {
+		t.Fatalf("run.pr.status used expected %+v, target %+v; want %+v", status.Expected, status.Target, want)
+	}
 	if status.Error != "" || status.PullRequest == nil || status.PullRequest.Number != 7 || status.PullRequest.HeadBranch != "aether/run-x" {
 		t.Fatalf("run.pr.status = %+v", status)
 	}

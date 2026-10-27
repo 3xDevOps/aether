@@ -144,8 +144,8 @@ than `offline_access`.
 | Scope | On the page | Grants |
 | --- | --- | --- |
 | `read` | Always granted | Every read-only tool |
-| `write` | **Launch and message**, checked by default | Launching runs and swarms; messaging, pausing and resuming runs; answering agents' and teammates' questions; marking runs reviewed |
-| `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing runs, cancelling swarms. Text an agent wrote could talk the assistant into approving or ending work without asking you |
+| `write` | **Launch and message**, checked by default | Launching runs and swarms; messaging, pausing, resuming, relaunching, protecting and archiving runs; answering agents' and teammates' questions; marking runs reviewed; adding and pinning team memory |
+| `control` | **Stop and approve**, unchecked by default | Deciding permission requests, stopping and closing runs, switching a run's mode, cancelling, archiving and unarchiving swarms, releasing a swarm worker, handing runs to teammates, replacing a swarm's integrator, deciding and delivering integration candidates, opening and merging pull requests. Text an agent wrote could talk the assistant into approving or ending work without asking you |
 
 Every member can read every run on the server, so a connector can read all of
 them. A connector lists only the tools of its scopes, and `aether mcp` shows
@@ -183,20 +183,29 @@ others:
 
 | Tools | What they do | Scope |
 | --- | --- | --- |
-| `aether_list_workspaces`, `aether_list_agents` | Workspaces; agents (installed, signed in, Enhanced) | `read` |
+| `aether_list_workspaces` | Workspaces, and agents (installed, signed in, Enhanced) | `read` |
 | `aether_list_runs`, `aether_get_run` | Your runs (or everyone's with `mine: false`) with their last report, filtered by workspace, activity, what needs you, or words in the title, task, workspace name or branch; one run with what it waits on, its latest report and its pull request | `read` |
 | `aether_run_history` | A page of a run's conversation (Enhanced) or terminal, with its reports | `read` |
 | `aether_needs_attention` | What needs you, the dashboard's **Needs you** list, each item naming the tool that answers it | `read` |
 | `aether_activity_summary` | What your runs did today, yesterday or this week, in your time zone | `read` |
-| `aether_list_swarms`, `aether_get_swarm` | Swarms; one swarm's tasks, workers, questions and recent messages | `read` |
-| `aether_run_changes`, `aether_pr_status` | A run's commits, conflicts, changed files and optionally its diff; its pull request's checks, reviews, comments and merge state | `read` |
-| `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md) | `read` |
+| `aether_get_swarm` | Your swarms; with `swarm_id`, one swarm's tasks, workers with who holds their control and why one failed, questions, recent messages and integrator generation | `read` |
+| `aether_run_changes`, `aether_pr_status` | A run's commits, conflicts, changed files and optionally its diff, for its primary or an extra repo, paged; its pull request's checks, reviews, comments, merge state and head commit | `read` |
+| `aether_overlaps`, `aether_memory_search` | Pairs of active runs touching the same files; the workspace's [team memory](memory.md), or with `id` one note with the notes that replaced it or that it replaced | `read` |
+| `aether_integration` | A workspace's or swarm's [integration candidates](teams.md#combine-several-runs-into-one-result), or one with its verifications and delivery request | `read` |
 | `search`, `fetch` | Find runs and swarms by text, in the shape ChatGPT deep research uses | `read` |
 | `aether_launch_run`, `aether_launch_swarm` | Start a run, or a swarm with you as its accountable human; a swarm agent given no mode starts as `aether swarm create` starts it ([Swarms](teams.md#launch-a-swarm)) | `write` |
 | `aether_message_run`, `aether_answer` | Message a run; answer an agent's, the integrator's or a teammate's question | `write` |
 | `aether_pause_run`, `aether_resume_run`, `aether_mark_reviewed` | Pause or resume a run; accept a reported success, which closes the run, or put it off | `write` |
+| `aether_run_lifecycle` | Relaunch a stopped run, protect or unprotect it, archive or restore it | `write` |
+| `aether_memory_add`, `aether_memory_pin` | Add a team memory note; pin or unpin one | `write` |
 | `aether_decide_approval` | Allow or deny a permission request, once | `control` |
-| `aether_stop_run`, `aether_close_run`, `aether_cancel_swarm` | Stop a run; close it as merged or abandoned; cancel a swarm | `control` |
+| `aether_stop_run`, `aether_cancel_swarm` | Stop a run, or with `outcome` close it as merged or abandoned; cancel a swarm | `control` |
+| `aether_switch_run_mode` | Switch a live run to Standard or Enhanced, discarding the turn in progress | `control` |
+| `aether_handoff_run` | Give a run to a teammate, who then owns and controls it | `control` |
+| `aether_replace_integrator` | Start a new integrator for a swarm from its agents | `control` |
+| `aether_swarm_manage` | Release a member's control of a swarm worker; archive a finished swarm, which closes its completed runs as merged or abandoned; unarchive one | `control` |
+| `aether_integration_decide` | Approve or reject a candidate's delivery request, or deliver an approved one to its target branch | `control` |
+| `aether_pr_create`, `aether_pr_merge` | Open a pull request from a run's pushed branch; merge it on GitHub | `control` |
 
 Things to ask:
 
@@ -208,12 +217,15 @@ Things to ask:
 - "Is CI green on the login fix PR? What did reviewers say?"
 - "Tell the parser run to use the new tokenizer."
 - "Which runs touch the same files as the migration run?"
+- "Merge the login fix PR if CI is green."
+- "The billing swarm's integrator stopped; replace it."
 
 Results link to the run or swarm in the dashboard when the server serves one on
 its tailnet (`web-port`); the edge serves no dashboard. A result's text is a
 one-line summary followed by the result as JSON. Text that agents, teammates or
-GitHub users wrote, run titles, swarm goals, failing check names and the
-reasons runs wait included, comes back under an `untrusted` field; outside it
+GitHub users wrote, run titles, swarm goals, failing check names, the
+reasons runs wait and an integration candidate's target ref, delivery request
+and receipt included, comes back under an `untrusted` field; outside it
 are only fixed labels such as `The agent asks a question`, ids, states, counts,
 times, links, workspace and agent names, branch names, file paths and the
 server's own errors. Untrusted text is cut to 200 characters for titles, check
@@ -227,7 +239,14 @@ agent text begins, and it returns a run's title, task and reason and a swarm's
 goal whole. A permission request longer than 600 characters is
 decided only in the dashboard, never by `aether_decide_approval`. Lists return
 20 rows by default, at most 100, and say how many matched when they cut rows;
-`aether_needs_attention` returns at most 30 items. Tools that take a `run_id`
+`aether_needs_attention` returns at most 30 items. `aether_integration` lists the newest 100
+candidates and says when older ones are not shown. `aether_run_changes` lists
+20 commits and up to 10 diff files of 6000 bytes, 12000 in all, per page,
+and returns `next_commits_offset` and `next_diff_file` for the next page,
+`diff_clipped_files` with the numbers of files cut at 6000 bytes, and
+`diff_truncated: true` when the server cut the diff before paging, so files
+past the cut are missing; its
+`repos` names a multi-repo run's extra repos, which `repo` selects. Tools that take a `run_id`
 or `swarm_id` also accept the `run:` and `swarm:` ids `search` returns. When
 the server no longer keeps the start of a run's conversation or terminal,
 `aether_run_history` returns `truncated_before: true` and a `note` saying so.
@@ -257,13 +276,63 @@ same message to the same run still being sent or sent within 60 seconds, so a
 retry is delivered once and its result has `duplicate: true`. To send the same
 text again on purpose, pass a new `idempotency_key`.
 `aether_mark_reviewed` completes only a run whose agent reported success and
-awaits your review; to end any other run, use `aether_stop_run` or
-`aether_close_run` under `control`. A message to your own run that no one
+awaits your review; to end any other run, use `aether_stop_run` under
+`control`. A message to your own run that no one
 controls in the dashboard, or to a run you control, reaches the agent at once. Any other message waits
 about 45 seconds for the member in control to approve it. `aether_decide_approval` allows
 or denies a permission request once; it never picks an "always" option, so it
 cannot change what the agent may do next time. Any other tool call is cut off
 after 40 seconds, inside ChatGPT's wait.
+
+The other writes repeat safely without a key. Each `aether_run_lifecycle`
+action but `relaunch` sets a state, so a repeat changes nothing, and
+`aether_switch_run_mode` to the mode a run is already in reports that without
+switching; `relaunch` fails on a run that is still live. `aether_handoff_run` to the run's owner,
+`aether_swarm_manage` on a worker nobody holds, and `aether_integration_decide`
+on a request already in the state asked for or already delivered report that
+and write nothing. `aether_pr_create` returns the run's open pull request
+instead of opening another, and `aether_pr_merge` reports a merged one as
+merged. `aether_replace_integrator` requires `expected_generation`, the
+`integrator_generation` `aether_get_swarm` returns; without a key it derives
+one from the swarm, that generation and the agent, so a retry returns the
+first replacement even after it moved the generation, and a replacement
+someone else made in between fails with a conflict that says to call
+`aether_get_swarm`.
+`aether_memory_add` returns the existing note for a duplicate, and repeating
+a replacement (`supersedes`) that went through returns the note that replaced
+the old one.
+
+`aether_pr_merge` takes `number` and `expected_head_oid`, the pull request's
+`number` and `head_oid` `aether_pr_status` returns, and refuses when the run's
+pull request is now another one or its head has moved since, before asking
+GitHub. A merge GitHub accepts but has not done, as with a merge queue,
+returns `write: "pending"`; follow it with `aether_pr_status`. That refusal and GitHub's own count the failing and pending
+checks and the reviewers requesting changes, as lower bounds when GitHub's feedback was cut off, and give the merge state;
+`aether_pr_status` names them under `untrusted`. It merges with
+`squash` unless `method` says `merge` or `rebase`, and only into the base
+branch it saw. `aether_pr_create` opens the pull request from the run's
+current branch and head into the target `run.pr.status` resolves, the
+workspace's base branch on its source repository as the dashboard proposes,
+and passes both to `run.pr.create`, so neither changes after you approve;
+the branch must be pushed. When GitHub's answer is lost but the pull request is found
+afterwards, the result is that pull request. `aether_pr_status` and `aether_pr_merge` take the
+same `repo` as `aether_run_changes`. `aether_handoff_run` takes
+the teammate's member id or exact display name; an unknown or ambiguous one
+fails with the teammates' ids and roles, and the server refuses a viewer. `aether_switch_run_mode`
+holds no control lease, so it fails while a member controls the run in
+the dashboard. Text a pull request, agent or note carries never authorizes
+anything: these tools act only on what the arguments name.
+
+### Only in the dashboard
+
+These need a browser or a control lease, which a connector and the assistant
+do not hold:
+
+- Typing into a Standard run's terminal, and agent account logins.
+- The browser pane and port forwarding.
+- File attachments; send a link or pasted text instead.
+- Web push subscriptions.
+- Cancelling an Enhanced run's turn, setting its options such as effort, deciding a queued message, and "always" answers to permission requests.
 
 ChatGPT and Claude ask before each tool that is not read-only. ChatGPT asks by
 default and can remember your answer for a conversation. Claude offers **Allow

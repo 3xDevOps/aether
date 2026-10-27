@@ -157,9 +157,10 @@ func readMemory(ctx context.Context, q memoryQuerier, workspace domain.Workspace
 	return m, nil
 }
 
-// memoryHash ignores case and whitespace, so a note retyped with another
-// line wrap is still a duplicate.
-func memoryHash(body string) string {
+// MemoryHash is a note body's duplicate key. It ignores case and
+// whitespace, so a note retyped with another line wrap is still a
+// duplicate.
+func MemoryHash(body string) string {
 	sum := sha256.Sum256([]byte(strings.Join(strings.Fields(strings.ToLower(body)), " ")))
 	return hex.EncodeToString(sum[:])
 }
@@ -276,7 +277,7 @@ func insertMemory(ctx context.Context, tx *sql.Tx, m *Memory) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("store: insert memory: %w", err)
 	}
-	title, scope, hash := m.Title, m.Scope, memoryHash(m.Body)
+	title, scope, hash := m.Title, m.Scope, MemoryHash(m.Body)
 	if title == "" {
 		title = memoryTitle(m.Body)
 	}
@@ -794,7 +795,7 @@ func upsertReportMemory(ctx context.Context, tx *sql.Tx, m *Memory) (OutcomeNote
 			updated_at = excluded.updated_at
 		RETURNING id`,
 		id, m.WorkspaceID, m.Kind, m.Scope, m.Source, m.SourceRef, m.Title, m.Body, strings.Join(m.Files, "\n"),
-		m.Commit, memoryHash(m.Body), now, now, m.RunID).Scan(&note); err != nil {
+		m.Commit, MemoryHash(m.Body), now, now, m.RunID).Scan(&note); err != nil {
 		return OutcomeNote{}, fmt.Errorf("store: record run %s outcome in memory: %w", m.RunID, err)
 	}
 	rewritten := note == live
