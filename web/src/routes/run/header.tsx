@@ -93,7 +93,10 @@ export function usePrimaryAction(run: RunRecord, view: RunView, agent: AgentTerm
 /** A phone's header line cuts what a wait last read short, so it gets a line of its own. */
 function WaitLine({ run }: { run: RunRecord }) {
   const shown = useRunPresentation(run)
-  const line = waitLine(shown.wait, shown.state, useClock())
+  const now = useClock()
+  const line = shown.state === 'needs-you' && shown.wait?.kind === 'system_fault'
+    ? stateWords(shown, undefined, now).detail
+    : waitLine(shown.wait, shown.state, now)
   if (!line) return null
   return (
     <p className="flex gap-1.5 border-b border-seam px-4 py-1 text-ui-sm text-muted">
