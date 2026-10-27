@@ -82,18 +82,22 @@ func TestConnectorLaunchUnsharedAccount(t *testing.T) {
 		t.Fatalf("launch on an unshared account = %q %v %t", text, out, failed)
 	}
 
-	// A swarm worker on an account not shared with the caller is refused
-	// before mission.create, which would only check it at worker.start.
+	// The server refuses a swarm worker, or models, on an account not
+	// shared with the caller, and the tools pass its error on.
+	f.errs[protocol.MethodMissionCreate] = &protocol.Error{Code: protocol.CodeDenied, Message: "permission denied: member mem-x has not shared their account with you"}
 	text, _, failed = try(t, cs, "aether_launch_swarm", map[string]any{"workspace_id": "ws-1", "objective": "o", "harness": "claude", "mode": "acp",
 		"workers": []any{map[string]any{"harness": "codex", "mode": "acp", "account_member_id": "mem-x"}}, "idempotency_key": "s1"})
-	if !failed || !strings.Contains(text, "account mem-x is not shared with you") || len(called(f, protocol.MethodMissionCreate)) != 0 {
+	if !failed || !strings.Contains(text, "mem-x has not shared their account with you") {
 		t.Fatalf("a swarm worker on an unshared account = %q", text)
 	}
-
-	// Models of an account not shared with the caller are not read.
+	f.errs[protocol.MethodAgentModels] = &protocol.Error{Code: protocol.CodeDenied, Message: "permission denied: member mem-x has not shared their account with you"}
 	text, _, failed = try(t, cs, "aether_launch_options", map[string]any{"models": "claude", "account_member_id": "mem-x"})
-	if !failed || !strings.Contains(text, "not shared with you") || len(called(f, protocol.MethodAgentModels)) != 0 {
+	if !failed || !strings.Contains(text, "mem-x has not shared their account with you") {
 		t.Fatalf("models of an unshared account = %q", text)
+	}
+	text, _, failed = try(t, cs, "aether_launch_options", map[string]any{"account_member_id": "mem-ada"})
+	if !failed || !strings.Contains(text, "pass models too") {
+		t.Fatalf("account_member_id without models = %q", text)
 	}
 }
 

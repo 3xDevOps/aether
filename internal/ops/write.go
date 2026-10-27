@@ -267,10 +267,9 @@ func starting(tool, key string, replayErr error) (string, any, error) {
 	return text, out, nil
 }
 
-// recentLaunch is the member's run of the same task, agent, mode, model,
-// account, fallback policy, extra repositories and child-run setting in the
-// workspace created
-// within duplicateWindow that has not stopped, if any. An omitted mode or
+// recentLaunch is the member's run in the workspace, created within
+// duplicateWindow and not stopped, with the same task, agent, mode, model,
+// account, fallback policy, extra repositories and child-run setting. An omitted mode or
 // model matches any; an omitted account is self, the member's own.
 func recentLaunch(ctx context.Context, read Call, in connectorLaunchInput, self string, now time.Time) (protocol.Run, bool, error) {
 	params := struct {
@@ -461,11 +460,6 @@ func launchSwarm(ctx context.Context, c calls, in launchSwarmInput) (string, any
 	book, err := accounts(ctx, c.read)
 	if err != nil {
 		return "", nil, err
-	}
-	for _, w := range in.Workers {
-		if usableErr := book.usable(w.AccountMemberID); usableErr != nil {
-			return "", nil, usableErr
-		}
 	}
 	own := cmp.Or(in.AccountMemberID, book.self())
 	listed := map[string][]protocol.AgentInfo{}

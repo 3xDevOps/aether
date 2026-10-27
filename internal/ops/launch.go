@@ -67,17 +67,6 @@ func (b accountBook) ref(id string) *accountRef {
 	return &accountRef{MemberID: id, Access: accessOther}
 }
 
-// usable refuses an account the caller may not launch on, before a swarm
-// names it for a worker, which the server checks only when the worker
-// starts.
-func (b accountBook) usable(id string) error {
-	if id == "" || slices.ContainsFunc(b, func(m protocol.Member) bool { return m.ID == id }) {
-		return nil
-	}
-	return &protocol.Error{Code: protocol.CodeDenied, Message: fmt.Sprintf(
-		"account %s is not shared with you; aether_launch_options lists the accounts you may use", id)}
-}
-
 // fallbackPolicy is where a launch may move when its account's usage is
 // exhausted: automatic, the accounts in order, or off.
 type fallbackPolicy struct {
@@ -294,6 +283,9 @@ func accountRows(ctx context.Context, read Call, book accountBook) []accountRow 
 }
 
 func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string, any, error) {
+	if in.AccountMemberID != "" && in.Models == "" {
+		return "", nil, invalid("account_member_id names the account whose models to list; pass models too")
+	}
 	info, err := serverInfo(ctx, c.read)
 	if err != nil {
 		return "", nil, err
@@ -343,9 +335,6 @@ func launchOptions(ctx context.Context, c calls, in launchOptionsInput) (string,
 		}
 	}
 	if in.Models != "" {
-		if err := book.usable(in.AccountMemberID); err != nil {
-			return "", nil, err
-		}
 		var res protocol.AgentModelsResult
 		if err := c.read(ctx, protocol.MethodAgentModels, protocol.AgentModelsParams{Name: in.Models, AccountMemberID: in.AccountMemberID}, &res); err != nil {
 			return "", nil, err
