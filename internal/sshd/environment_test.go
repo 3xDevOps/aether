@@ -230,6 +230,94 @@ func TestWorkspaceEgress(t *testing.T) {
 	}
 }
 
+func TestWorkspaceFiles(t *testing.T) {
+	t.Parallel()
+	const content = "DATABASE_URL=postgres://db.example.test/app # a comment parsing would drop\n"
+	secretsDir := filepath.Join(t.TempDir(), "workspace-secrets")
+	e := newTestEnv(t, func(cfg *Config) { cfg.Secrets = secretstore.New(secretsDir) })
+	ctx := context.Background()
+	viewer, _ := addMember(t, e, "Vera", domain.RoleViewer, false)
+	collab, _ := addMember(t, e, "Cody", domain.RoleCollaborator, false)
+	admin := controlAs(t, e, e.signer)
+	ws := string(e.ws.ID)
+	sub, err := e.bus.Subscribe(ctx, events.SubscribeOptions{Filter: events.Filter{Types: []events.Type{events.TypeTimeline}}})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer sub.Close() //nolint:errcheck
+
+	change := protocol.WorkspaceEnvironmentSetParams{WorkspaceID: ws, Files: []protocol.WorkspaceFile{
+		{Path: ".env", Content: content},
+		{Path: "apps/web/.env.local", Content: "NEXT_PUBLIC_A=1\n"},
+	}}
+	for who, signer := range map[string]*protocol.Client{"viewer": controlAs(t, e, viewer), "collaborator": controlAs(t, e, collab)} {
+		wantDenied(t, signer.Call(protocol.MethodWorkspaceEnvironmentSet, change, nil), who+" setting workspace files")
+	}
+	var saved json.RawMessage
+	if err = admin.Call(protocol.MethodWorkspaceEnvironmentSet, change, &saved); err != nil {
+		t.Fatalf("admin sets files: %v", err)
+	}
+	note := waitTimelineNote(t, sub)
+	if want := "workspace environment: files set: .env, apps/web/.env.local"; note != want {
+		t.Fatalf("timeline note = %q, want %q", note, want)
+	}
+	var read json.RawMessage
+	if err = controlAs(t, e, viewer).Call(protocol.MethodWorkspaceEnvironmentGet, protocol.WorkspaceEnvironmentGetParams{WorkspaceID: ws}, &read); err != nil {
+		t.Fatalf("viewer workspace.environment.get: %v", err)
+	}
+	var got protocol.WorkspaceEnvironmentResult
+	if err = json.Unmarshal(read, &got); err != nil {
+		t.Fatal(err)
+	}
+	if want := []protocol.WorkspaceFileInfo{{Path: ".env", Size: len(content)}, {Path: "apps/web/.env.local", Size: 16}}; !slices.Equal(got.Files, want) {
+		t.Fatalf("files = %+v, want %+v", got.Files, want)
+	}
+	for where, text := range map[string]string{"set result": string(saved), "get result": string(read), "timeline": note} {
+		if strings.Contains(text, "postgres://") || strings.Contains(text, "NEXT_PUBLIC_A") {
+			t.Errorf("%s carries a file's content: %s", where, text)
+		}
+	}
+	if file, readErr := os.ReadFile(filepath.Join(secretsDir, ws+".files.json")); readErr != nil || !strings.Contains(string(file), "postgres://") {
+		t.Fatalf("files file = %q, %v, want it to hold the content", file, readErr)
+	}
+
+	var next protocol.WorkspaceEnvironmentResult
+	if err = admin.Call(protocol.MethodWorkspaceEnvironmentSet, protocol.WorkspaceEnvironmentSetParams{WorkspaceID: ws, RemoveFiles: []string{".env", "never-set"}}, &next); err != nil {
+		t.Fatalf("remove a file: %v", err)
+	}
+	if want := []protocol.WorkspaceFileInfo{{Path: "apps/web/.env.local", Size: 16}}; !slices.Equal(next.Files, want) {
+		t.Fatalf("files after removing .env = %+v, want %+v", next.Files, want)
+	}
+	if note = waitTimelineNote(t, sub); note != "workspace environment: files removed: .env" {
+		t.Fatalf("timeline note = %q", note)
+	}
+
+	many := make([]protocol.WorkspaceFile, protocol.MaxWorkspaceFiles)
+	for i := range many {
+		many[i] = protocol.WorkspaceFile{Path: fmt.Sprintf("config/%d.env", i)}
+	}
+	for name, refused := range map[string]struct {
+		files   []protocol.WorkspaceFile
+		message string
+	}{
+		"absolute":   {[]protocol.WorkspaceFile{{Path: "/etc/app.env"}}, `file path "/etc/app.env" must be relative`},
+		"parent":     {[]protocol.WorkspaceFile{{Path: "../.env"}}, `file path "../.env" must be relative`},
+		"under .git": {[]protocol.WorkspaceFile{{Path: ".git/hooks/pre-commit"}}, `file path ".git/hooks/pre-commit" must be relative`},
+		"not clean":  {[]protocol.WorkspaceFile{{Path: "apps/"}}, `file path "apps/" must be relative`},
+		"empty":      {[]protocol.WorkspaceFile{{Path: ""}}, `file path "" must be relative`},
+		"spaced end": {[]protocol.WorkspaceFile{{Path: ".env "}}, `file path ".env " has a name that starts or ends with whitespace`},
+		"spaced dir": {[]protocol.WorkspaceFile{{Path: " apps/.env"}}, `file path " apps/.env" has a name that starts or ends with whitespace`},
+		"too big":    {[]protocol.WorkspaceFile{{Path: ".env", Content: strings.Repeat("x", protocol.MaxWorkspaceVariableValueBytes+1)}}, "file .env is larger than 65536 bytes"},
+		"too many":   {many, "a workspace holds at most 20 files"},
+	} {
+		var pe *protocol.Error
+		err := admin.Call(protocol.MethodWorkspaceEnvironmentSet, protocol.WorkspaceEnvironmentSetParams{WorkspaceID: ws, Files: refused.files}, nil)
+		if !errors.As(err, &pe) || pe.Code != protocol.CodeInvalidParams || !strings.Contains(pe.Message, refused.message) {
+			t.Errorf("%s = %v, want CodeInvalidParams naming %q", name, err, refused.message)
+		}
+	}
+}
+
 type refusingEnvironmentStore struct {
 	store.Store
 	err error
