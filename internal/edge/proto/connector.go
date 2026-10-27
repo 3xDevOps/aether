@@ -80,7 +80,9 @@ const assertionContext = "aether-edge-connector-assertion-v1\x00"
 // RedirectURI on the universal connector. Nonce makes it single-use: the
 // server binds it to the first browser that brings it and spends it.
 // Issuer is the edge's canonical relay origin. Edges before
-// VersionConnectorSignIn leave RedirectURI empty.
+// VersionConnectorSignIn leave RedirectURI empty. Account may be the
+// ProviderReviewer account, which servers before VersionReviewer refuse
+// as malformed.
 type ConnectorAssertion struct {
 	Issuer      string    `json:"issuer"`
 	ServerID    string    `json:"server_id"`
@@ -116,6 +118,12 @@ func (a ConnectorAssertion) validate() error {
 		return errors.New("assertion must expire after it is issued")
 	case a.ExpiresAt.Sub(a.IssuedAt) > ConnectorAssertionTTL:
 		return fmt.Errorf("assertion lifetime %s exceeds %s", a.ExpiresAt.Sub(a.IssuedAt), ConnectorAssertionTTL)
+	}
+	if a.Account.Provider == ProviderReviewer {
+		if !ValidReviewerLogin(a.Account.Subject) || a.Account.Login != a.Account.Subject || a.Account.Email != "" {
+			return fmt.Errorf("reviewer account %q is not a reviewer login, or has an email or another login", a.Account.Subject)
+		}
+		return a.Account.validateFields()
 	}
 	return a.Account.Validate()
 }

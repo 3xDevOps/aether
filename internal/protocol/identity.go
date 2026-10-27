@@ -39,6 +39,11 @@ const (
 	// connections: the member or an admin, and under approved-devices not
 	// on a connection that signed in with a device no person approved.
 	MethodMemberIdentityRemove = "member.identity.remove"
+	// MethodMemberReviewerLink binds the edge's reviewer account to a
+	// member who is no admin, while edge-reviewer is on: admin only, and
+	// not on a connection that signed in with a device no person approved.
+	// member.identity.remove unbinds it.
+	MethodMemberReviewerLink = "member.reviewer.link"
 	// MethodServerOwnerTransfer makes another admin, through one of their
 	// edge identities, the server's owner at its edge: admin only.
 	MethodServerOwnerTransfer = "server.owner.transfer"
@@ -200,6 +205,14 @@ type MemberIdentityRemoveParams struct {
 // devices that signed in with the removed identity, now revoked.
 type MemberIdentityRemoveResult struct {
 	Revoked []Device `json:"revoked"`
+}
+
+// MemberReviewerLinkParams are the params of member.reviewer.link: the
+// member and the login in the edge's reviewer account file. The result
+// is the Identity bound.
+type MemberReviewerLinkParams struct {
+	MemberID string `json:"member_id"`
+	Login    string `json:"login"`
 }
 
 // ServerOwnerTransferParams are the params of server.owner.transfer. The

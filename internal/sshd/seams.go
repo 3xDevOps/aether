@@ -55,7 +55,7 @@ func launchWithOptions(ctx context.Context, runs RunController, workspace domain
 	if launcher, ok := runs.(RunLauncherWithOptions); ok {
 		return launcher.LaunchWithOptions(ctx, workspace, member, account, task, harness, mode, opts)
 	}
-	if opts.CachedBase != "" || opts.Model != "" || len(opts.ExtraWorkspaces) > 0 {
+	if opts.CachedBase != "" || opts.Model != "" || len(opts.ExtraWorkspaces) > 0 || opts.Limits != (domain.RunLimits{}) {
 		return nil, errLaunchOptionsUnsupported
 	}
 	return runs.Launch(ctx, workspace, member, account, task, harness, mode)
@@ -95,6 +95,9 @@ type RunController interface {
 	// Cause is what chose activity for the live run; empty when unknown or
 	// when the run's activity has since changed.
 	Cause(run domain.RunID, activity domain.RunActivity) events.RunStatusCause
+	// Wait is the evidence behind the reported wait the live, unpaused run
+	// shows with activity; nil when it shows none.
+	Wait(run domain.RunID, activity domain.RunActivity) *domain.RunWait
 	// Liveness is the live or provisioning Enhanced run's turn phase, last
 	// agent progress and connection state; ok is false for any other run.
 	Liveness(run domain.RunID) (domain.RunLiveness, bool)

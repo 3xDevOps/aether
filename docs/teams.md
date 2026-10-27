@@ -145,8 +145,9 @@ terminal or swarm role. Nothing undoes a merge.
 
 `aether member remove <id>` deletes a member, their environment and their
 private signing key, and closes their connections. `aether device revoke <id>` refuses a device key everywhere.
-`aether member unlink <member-id> github:<user id>` unbinds one GitHub account
-and revokes the devices that signed in with it. `aether invite revoke <id>` kills
+`aether member unlink <member-id> github:<user id>` unbinds one GitHub account,
+revokes the devices that signed in with it and deletes the connectors its
+sign-in authorized. `aether invite revoke <id>` kills
 a link.
 
 `aether member remove` fails with `in use` while runs or schedules still belong

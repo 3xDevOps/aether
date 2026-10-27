@@ -2253,13 +2253,13 @@ caller. The agent picker is a list of rows from `agent.list`: the vendor glyph
 in its colour, the display name, and "Login found" or "No login found" for a
 shipped agent (`login_found` checks the launch home for login files, not for a
 working session; a server that does not report it shows nothing). An agent
-that is not installed stays listed, disabled, with **Set up**, which closes
-the dialog and opens Agents. The last row is `custom`, the escape hatch that
+that is not installed is not listed. **Install more agents...** below the
+list closes the dialog and opens Agents. The last row is `custom`, the escape hatch that
 `agent.list` never returns and that only launches where the deployment pinned
 an agent definition with `--agent-definitions`. With nothing installed,
 nothing is preselected, Launch stays disabled, and the form says "No agent is
 installed in your environment." with a **Set up an agent** button in place of
-the per-row links. The list is read each time the dialog opens; a failed read
+**Install more agents...**. The list is read each time the dialog opens; a failed read
 shows its error and no setup button, and Launch stays disabled.
 
 **Mode** is a segmented control with one line per mode: **Enhanced** (`acp`,
@@ -2634,24 +2634,29 @@ do not cancel a held gesture. Explicit control choices and revocations stop
 automatic acquisition for the open stream; release carries the current lease
 generation. Takeover denials belong to the requester, not the holder.
 
-`SessionView` reuses `TerminalControlBorder` along the top of the Enhanced
-timeline, under the frame toolbar. The component is one SVG strip, 5.6rem tall,
-over the top of its parent: a single top-edge path, drawn from right to left
-so the light pours out of the control button, rendered as a blurred wide
-glow, a tight halo and a rim. All three inherit the SVG's animated
-`stroke-dashoffset` and colour, which is what the acquisition, release, hold
-and takeover animations drive. Strength is the SVG's own opacity, a separate
-animation: 70% while the light moves or a hold is under way, then half once
-acquisition settles, breathing on an infinite 8-second loop. Animating the
-`<svg>` element's opacity, not its blurred strokes, lets the compositor run
-the loop without repainting. During a hold the teal copy takes a dash
-pattern that leaves out the span the red copy covers. Its appearance follows
-the acknowledged ACP lease, not the unused agent terminal's history or
-connection state. Voluntary release retracts it; takeover feedback requires
-an explicit revocation matching the held session and generation.
-Disconnects, permission loss and other fencing hide it immediately. The
-shared component supplies acquisition, holder progress, takeover loss and
-reduced-motion behavior.
+`MultiplayerControls` renders `ControlMatrix` as the strip's background,
+and `TerminalPane` renders it behind the agent terminal's toolbar. The
+component is a neutral dot layer, one `radial-gradient` tile, under a
+colored copy of the same dots. The bars give each group of text and
+buttons `.control-matrix-clear`, a 90% `--chrome` fill with a blurred
+shadow of the same colour that hides the dots under the group and fades
+them back in around it. A `:has(> .control-matrix)` rule turns
+`text-muted` on the bar to `--text`. The copy is clipped from the left by
+`--control-reach`, a registered `@property` number (1 empty, 0 full), so it
+is revealed from the right edge, where the control button sits. The
+acquisition, release and takeover animations drive `--control-reach` and
+`color` on the colored layer. Its opacity is a separate animation: 70%
+while the dots move or a hold is under way, then half once acquisition
+settles, breathing on an infinite 8-second loop. During a hold
+`--control-hold` moves a 4rem gradient mask that fades the teal out and a
+red copy in. In
+Enhanced runs its appearance follows the acknowledged ACP lease, not the
+unused agent terminal's history or connection state, and it shows on every
+view that shows the strip. Voluntary release retracts it; takeover
+feedback requires an explicit revocation matching the held session and
+generation. Disconnects, permission loss and other fencing return it to
+neutral immediately. The shared component supplies acquisition, holder
+progress, takeover loss and reduced-motion behavior.
 
 ### Session view
 
@@ -3481,10 +3486,10 @@ and the Environment keep native xterm scrollback.
   mirror shows who controls ("Nobody controls", "<name> controls", "You
   control in another tab", with "(last known)" while the status is stale)
   and **Take control**. Live, acknowledged local control reads "You control"
-  with an accent-filled **Release**, plus the control light along the
-  terminal's top edge while input is writable ([styles.md](styles.md)). It
-  never changes layout, and is hidden during replay or history reading and
-  after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
+  with an accent-filled **Release**, plus teal control dots behind the
+  terminal toolbar while input is writable ([styles.md](styles.md)). They
+  never change layout, and return to neutral during replay or history
+  reading and after release, mirroring, disconnect or a refused write. Starting runs keep their spinner;
   ended runs show no control and replay their recording, or say **This run
   has ended and left no recorded terminal to replay.** Whether a member may
   write is the server's answer: `-32001` downgrades the attach to a mirror
@@ -5235,9 +5240,8 @@ tree and editor are a view of each run, scoped to that run's checkout: see
 Folder chevrons turn as a folder opens, and the empty editor pane is an
 `EmptyState` with a folder-tree icon. The tree lists each workspace's `base: <branch>` first, then its live runs
 under **Run checkouts**, then one **Home** row; both start folded, so a
-run's tree or the home is read only when it is opened. For an admin, each
-workspace ends with a muted **Add .env files for runs** that opens its
-**Environment** section. Folder expansion is kept per view. The tree sits beside the
+run's tree or the home is read only when it is opened. Folder expansion is
+kept per view. The tree sits beside the
 editor from `md` up. On a phone it is the first view; once a file is open the
 editor fills the screen and **Browse** opens the tree as a side sheet.
 CodeMirror provides syntax highlighting for JSON/JSONC, JavaScript/TypeScript,
@@ -5293,6 +5297,18 @@ on the Files route. The pane is measured: below 640px, with the Browser
 docked beside it for instance, it shows the tree until a file is open and
 then the editor with **Browse**, as a phone does.
 
+A live run's checkout root, here and under **Run checkouts** on the Files
+route, is a `RunCheckoutTree` (`tree.tsx`). When the gateway serves
+`files.upload`, its row has an **Upload files…** icon button, and files and
+folders dropped on its tree upload into the root of the repository it shows,
+folders kept (`droppedUploads`). `useUpload` sends one `files.upload` per
+file, so a path the checkout has
+fails as **README.md already exists in this run; open it to edit**; there is
+no **Replace**. `UploadStatus` under that tree shows progress and failures as
+on Home, and `invalidateRun` rereads the run's listings afterwards. The
+upload state lives in the tree: closing the phone sheet or folding **Run
+checkouts** hides an upload's progress, not the upload.
+
 `openInFiles(runID, { path, line, column })` (`open.ts`) is the one way in
 from outside the tree. It navigates to the run route with `view: 'files'`,
 `file` and, when named, `line` and `column`; those three are not written to
@@ -5337,9 +5353,10 @@ a whole checkout.
 **Home** is one root row with a trailing `~`, shown when the gateway serves
 `home.tree`. Under it is the member's whole persistent home, the directory
 that is `$HOME` in their Environment and runs, read one folder at a time
-through `home.tree` with nothing filtered. Only this tree changes files;
-base and run-checkout trees are read and edited as before. The methods and
-the server's rules are in
+through `home.tree` with nothing filtered. Only this tree creates, renames,
+moves and deletes entries; base and run-checkout trees are read and edited,
+and a live run's takes uploads ([Files in a run](#files-in-a-run)). The
+methods and the server's rules are in
 [local-gateway.md](local-gateway.md#files-and-member-configuration).
 
 | File | Holds |
@@ -5349,7 +5366,7 @@ the server's rules are in
 | `home-menu.tsx` | `HomeMenu`, a row's actions |
 | `home-name.tsx` | `NameRow`, the field a name is typed into |
 | `home-dialogs.tsx` | The delete, move and replace confirmations |
-| `home-upload.ts` | `useHomeUpload` and `droppedUploads` |
+| `home-upload.ts` | `useUpload` and `droppedUploads`, shared with run checkouts |
 
 `HomeFiles` wraps the whole route, above `FilesPane`: a phone remounts the
 tree in its side sheet, and an upload in progress or an open dialog must
@@ -5396,7 +5413,7 @@ that folder, a file row its parent, and the **Home** row or the empty pane
 below the tree is `~`. The folder that would receive them is outlined, and
 a folded one opens after 600ms. `droppedUploads` walks dropped folders with
 `webkitGetAsEntry`, so their structure is kept; empty folders are not
-created. `useHomeUpload` sends one `home.upload` per file, in order, first
+created. `useUpload` sends one `home.upload` per file, in order, first
 without `overwrite`, while `HomeStatus` shows **Uploading 3 of 12 · name**
 pinned to the bottom of the tree pane. A file over 64 MiB fails without being
 read. Files the server already has are collected and asked about once at the
@@ -6088,7 +6105,7 @@ server-side permission; a member without it reads the same facts. The page
 lists no runs: the board does.
 
 **Environment** (`components/workspace-environment.tsx`) is the workspace's
-setup script, variables, files and egress control ([environments.md](environments.md#workspace-environment)),
+setup script, variables and egress control ([environments.md](environments.md#workspace-environment)),
 read with `workspace.environment.get` when the page opens. Opening the page
 through an **Environment** menu item passes `section: 'environment'`, and the
 section scrolls into view once it has loaded.
@@ -6111,15 +6128,6 @@ section scrolls into view once it has loaded.
   plain; over a saved secret it stays a secret with no value, which **Save**
   refuses, so the saved one is not removed unnoticed. **Add _n_ variables**
   puts them in the list; nothing is sent yet.
-- **Files** lists each workspace file's path and size with **Remove**; the
-  page never holds a saved file's content. **Add file…**, or a file dropped
-  on the list, adds a row whose path starts as the file's name and stays
-  editable until saved. While an added row has a saved file's path, the
-  saved row is hidden and the save replaces it; a saved file is removed only
-  by its own **Remove**. A file
-  over 64 KB is refused before it is read, and one that is not UTF-8 text
-  before anything is sent. A server from before workspace files gets no such
-  row.
 - **Limit outbound traffic** is a checkbox. While it is ticked, the allowed
   hosts show, each with **Remove**, over a field with **Allow** that refuses a
   URL, a port or a repeat before anything is sent. Its help says that on and
@@ -6130,12 +6138,11 @@ section scrolls into view once it has loaded.
   differs; **Unsaved changes.** and **Discard** show while it does. Beside it
   the page says what a save reaches: runs launched afterwards, not containers
   that exist. A row that cannot be saved - no name, a name used twice, `=` in
-  a name, a secret with no value, a file with no path or one used twice - is
-  marked on **Save**, which focuses it and
+  a name, a secret with no value - is marked on **Save**, which focuses it and
   sends nothing. The server's refusal shows verbatim under **Not saved**, and
   the edits stay. A result's `warning` shows under **Saved**.
 - Any other member reads the script, each name and each plain value, with
-  **Secret** in place of a secret's value, each file's path and size, whether egress is limited and to
+  **Secret** in place of a secret's value, whether egress is limited and to
   which hosts, and **Only an admin can change this.** A failed read shows the server's error with **Retry**.
 
 When the setup script fails a launch, the New run and template launch
@@ -6337,6 +6344,11 @@ Categories:
   board's Finished menu for the active workspace. It prevents reopening those
   runs but does not delete all run data: checkouts, homes, repositories and
   history retain their existing lifecycle.
+- **Run limits**, a row in **Server › Admin**, for admins when the server
+  answers `server.run_limits`: CPUs, memory in GiB and processes, empty
+  meaning the flag or automatic value shown in grey, and **Save**. The launch
+  dialog's **Run** tab reads the same method for the grey values and sends a
+  run's own `limits` under **Resource limits**.
 - **Docker inside runs**, a row in **Server › Admin**, for admins when the
   server answers `server.sysbox.status` (`src/lib/use-sysbox.ts`). States:
   **On**, **Off** with **Install**, `Unavailable on this host` plus the
@@ -7549,7 +7561,8 @@ terminal links.
 `src/routes/files/home.test.tsx` covers the Home tree: each row's menu,
 naming in place, delete, upload from the picker and from a drop, and moving
 a dragged row.
-`src/routes/files/run-files.test.tsx` covers the run's Files view and path
+`src/routes/files/run-files.test.tsx` covers the run's Files view, a drop
+uploaded into its checkout, and path
 links in the Session view, `paths.test.ts` what reads as a path, and
 `src/routes/run/terminal-links.test.tsx` a path link in a terminal.
 `src/routes/settings/settings.test.tsx` covers Appearance without local RPCs.
@@ -7562,8 +7575,8 @@ delivery lines, pause, resume and delete, the Watch form, the watch
 notification preferences, the phone sheet and `watch.changed` toasts.
 `src/components/workspace-environment.test.tsx` covers the workspace
 Environment section: the change a save sends, replacing a secret, the `.env`
-preview, adding, replacing and removing files, rows that cannot be saved,
-egress control, the server's refusal and the read-only view.
+preview, rows that cannot be saved, egress control, the server's refusal and
+the read-only view.
 
 Use the browser workflow for real computed geometry, top bar and sidebar
 behavior, responsive overflow, keyboard focus and gateway-backed transitions.

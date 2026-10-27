@@ -73,6 +73,9 @@ type Config struct {
 	Store   store.Store
 	Runtime runtime.Runtime
 	Bus     events.Bus
+	// WaitConditions reads the conditions agents' waiting reports name; nil
+	// leaves every reported wait unverified.
+	WaitConditions WaitConditions
 	// EventSeq reads the newest sequence of the log behind Bus, nil when Bus
 	// keeps none. A usage-limit stream that drops events replays from it.
 	EventSeq func(context.Context) (uint64, error)
@@ -310,16 +313,21 @@ type supervised struct {
 	// account move keeps it, since turning it off applies to new runs only.
 	egress bool
 	// Mutated only under Scheduler.mu. reason and activity are the row's
-	// since its last transition; cause is what chose activity.
-	status        domain.RunStatus
-	reason        string
-	activity      domain.RunActivity
-	cause         events.RunStatusCause
-	startedAt     time.Time
-	quietFrom     time.Time // a resume or restart; the stall clock starts no earlier
-	paused        bool
-	killRequested bool
-	killActor     domain.MemberID
+	// since its last transition; cause is what chose activity and wait is
+	// the evidence behind the reported wait it shows.
+	status   domain.RunStatus
+	reason   string
+	activity domain.RunActivity
+	cause    events.RunStatusCause
+	wait     *domain.RunWait
+	// waitsFailingSince is when reads of the run's wait conditions started
+	// failing, zero after one succeeds. A restart forgets it.
+	waitsFailingSince time.Time
+	startedAt         time.Time
+	quietFrom         time.Time // a resume or restart; the stall clock starts no earlier
+	paused            bool
+	killRequested     bool
+	killActor         domain.MemberID
 	// agentReport is the last native execution report, independent of outcome
 	// presentation. Input deltas are never retained or replayed.
 	agentReport agentstatus.Report
@@ -758,20 +766,6 @@ func (s *Scheduler) Close() error {
 	return s.DetachDevelopmentTerminals(context.Background())
 }
 
-// UseBaseCapture attaches the base-capture service, built after the scheduler.
-func (s *Scheduler) UseBaseCapture(c BaseCapture) {
-	s.mu.Lock()
-	s.cfg.Bases = c
-	s.mu.Unlock()
-}
-
-// UseEvidence attaches the evidence service, built after the scheduler.
-func (s *Scheduler) UseEvidence(e EvidenceService) {
-	s.mu.Lock()
-	s.evidence = e
-	s.mu.Unlock()
-}
-
 func (s *Scheduler) ContainerAddr(ctx context.Context, run domain.RunID) (string, error) {
 	s.mu.Lock()
 	entry := s.runs[run]
@@ -943,7 +937,7 @@ func (s *Scheduler) memberHarnessSpec(ctx context.Context, member domain.MemberI
 
 // containerSpec converts one fully assembled environment plan into a runtime
 // spec. Callers must not assemble workspace mounts or environment fields here.
-func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, persistSupervisor bool) runtime.Spec {
+func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv []string, plan *EnvironmentPlan, limits domain.RunLimits, persistSupervisor bool) runtime.Spec {
 	env := make(map[string]string, len(plan.Env)+8)
 	maps.Copy(env, plan.Env)
 	env[coordtransport.RunIDEnv] = string(run.ID)
@@ -983,9 +977,9 @@ func (s *Scheduler) containerSpec(run *domain.Run, member *domain.Member, argv [
 		Mounts:            plan.Mounts,
 		ExtraWorktrees:    plan.Worktrees,
 		User:              plan.User,
-		CPULimit:          s.cfg.RunCPULimit,
-		MemoryLimitBytes:  s.cfg.RunMemoryBytes,
-		PidsLimit:         s.cfg.RunPidsLimit,
+		CPULimit:          limits.CPUs,
+		MemoryLimitBytes:  limits.MemoryBytes,
+		PidsLimit:         limits.Pids,
 		CreationKey:       string(run.ID),
 		NestedDocker:      true,
 		Egress:            plan.Egress,

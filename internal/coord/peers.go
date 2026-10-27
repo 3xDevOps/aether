@@ -159,6 +159,9 @@ func (s *Service) statusPeers(ctx context.Context, self *domain.Run, missionPeer
 			TaskTruncated: r.TaskBytes > protocol.CoordMaxStatusTaskBytes, State: state,
 			Activity: string(r.Activity), Reason: reason, ReasonTruncated: reasonTrunc, RunStatus: string(r.Status),
 		}
+		if s.cfg.Waits != nil {
+			peer.Wait, _, _ = boundStatusText(s.cfg.Waits.Wait(r.ID, r.Activity).Text(time.Now()))
+		}
 		if overlap.state != "" {
 			peer.Files, peer.FileTotal, peer.FilesTruncated = boundStatusFiles(overlap.files)
 		}

@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { AgentPicker, launchable, RefusalNotes } from '@/components/launch/agent-picker'
 import { LaunchChildHint } from '@/components/child-nudge'
-import { AccountOptions, automaticFallback, ChildRunsOption, type ChildRunsChoice, fallbackParams, WorkspaceLine } from '@/components/launch/launch-options'
+import { AccountOptions, automaticFallback, ChildRunsOption, type ChildRunsChoice, fallbackParams, RunLimitsOption, WorkspaceLine } from '@/components/launch/launch-options'
 import { ModeControl } from '@/components/launch/mode-control'
 import { integratorModes } from '@/components/launch/modes'
 import { ExtraRepos } from '@/components/launch/extra-repos'
 import { ModelField, needsTask, RunFields, useAgentChoice } from '@/components/launch/run-fields'
+import { emptyLimits, parseLimits, useServerRunLimits } from '@/components/launch/run-limits'
 import { fallbackFromSaved, fallbackToSaved, SaveAccountDefault, SavedIssues } from '@/components/launch/saved-defaults'
 import { SetupOutput, setupOutput } from '@/components/launch/setup-output'
 import { sameWorker, WorkerAgents, type WorkerChoice, workerMode, workerRefusals } from '@/components/launch/worker-agents'
@@ -78,6 +79,9 @@ export function LaunchDialog() {
   const childRunsOffered = cap.hasMethod('run.children.allow')
   const childSettings = useChildSettingsRead()
   const [childRuns, setChildRuns] = useState<ChildRunsChoice>('')
+  const limitsOffered = cap.hasMethod('server.run_limits')
+  const serverLimits = useServerRunLimits(api, limitsOffered)
+  const [limits, setLimits] = useState(emptyLimits)
   const choice = useAgentChoice({ account, ownAccountID, saved: savedRead, hold: preset === 'pending', pick })
   const { agents, agentError, agent, harness, mode, model, noAgents } = choice
   const [task, setTask] = useState('')
@@ -191,6 +195,12 @@ export function LaunchDialog() {
     const trimmed = task.trim()
     const chosenModel = model.trim()
     const signedIn = sameIdentity()
+    const parsedLimits = limitsOffered ? parseLimits(limits) : { limits: {} }
+    if (parsedLimits.error !== undefined) throw new Error(parsedLimits.error)
+    // An older server drops limits it does not know and reports success, so send none it has not confirmed.
+    if (Object.keys(parsedLimits.limits).length && serverLimits.limits === null) {
+      throw new Error(`Run limits need a server that answers server.run_limits: ${serverLimits.error ?? 'still reading the server limits, try again in a moment'}`)
+    }
     const run = await api.runLaunch({
       workspace_id: workspaceID,
       harness,
@@ -201,6 +211,7 @@ export function LaunchDialog() {
       ...fallbackParams(fallback, accounts, account),
       ...extraRepos,
       ...(childRunsOffered && childRuns ? { children: childRuns } : {}),
+      ...(Object.keys(parsedLimits.limits).length ? { limits: parsedLimits.limits } : {}),
     })
     if (signedIn()) rememberChoice(harness, mode, chosenModel)
     upsertRun(run)
@@ -335,6 +346,7 @@ export function LaunchDialog() {
           >
             <TabsContent value="run" className="flex flex-col gap-4">
               <RunFields choice={choice} task={task} onTask={setTask} onSetUp={setUp} onChoice={() => setError(null)} disabled={launching} autoFocus />
+              {limitsOffered && <RunLimitsOption value={limits} onChange={setLimits} effective={serverLimits.limits?.effective} disabled={launching} />}
               {childRunsOffered && (
                 <>
                   <ChildRunsOption value={childRuns} onChange={setChildRuns} enabled={childSettings?.enabled} disabled={launching} />

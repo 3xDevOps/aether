@@ -12,7 +12,7 @@ import { FileEditor, type ViewerMode } from '@/routes/files/editor'
 import { closeTab, FilesPane } from '@/routes/files/pane'
 import type { FileTarget } from '@/routes/files/paths'
 import { fileTabFromSource, fileTabToSelection, sourceKey, type FileSource, type WorkspaceSource } from '@/routes/files/sources'
-import { touchedPaths, TreeDirectory, TreeExpansion } from '@/routes/files/tree'
+import { RunCheckoutTree, touchedPaths, TreeExpansion } from '@/routes/files/tree'
 import { isRunRoute } from '@/routes/run/views'
 import { useStore } from '@/store'
 
@@ -82,9 +82,8 @@ export function RunFiles({ run, shown, client = api }: { run: Run; shown: boolea
           </TabsList>
         </Tabs>
       )}
-      <TreeDirectory
+      <RunCheckoutTree
         source={{ ...source, label: chosen?.branch ?? run.branch }}
-        path=""
         depth={0}
         client={client}
         onSelect={(_, path) => open(path, null)}

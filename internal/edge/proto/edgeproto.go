@@ -18,13 +18,16 @@ import (
 // universal connector paths and whose servers serve them.
 // VersionConnectorSignIn is the first whose edges deliver a
 // ConnectorAssertion in a form post bound to the browser, and whose
-// servers take it no other way.
+// servers take it no other way. VersionReviewer is the first whose
+// servers can take a ConnectorAssertion for a ProviderReviewer account:
+// an edge offers its reviewer account no server before it.
 const (
-	Version                = 4
+	Version                = 5
 	MinVersion             = 1
 	VersionHTTP            = 2
 	VersionUniversalMCP    = 3
 	VersionConnectorSignIn = 4
+	VersionReviewer        = 5
 )
 
 // CheckVersion refuses a peer older than MinVersion with
