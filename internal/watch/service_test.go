@@ -736,6 +736,39 @@ func TestAStartCheckWhoseRetryCannotBeSavedIsRetried(t *testing.T) {
 	h.eventually("the need missed while down", func() bool { return len(h.notices(w.ID)) == 1 })
 }
 
+func TestChecksBeforeRecoveryWaitForIt(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Ship the release")
+	_ = h.svc.Close()
+	h.recovered = make(chan struct{})
+	h.start()
+
+	// Before recovery the run reads as needing the owner, as a run whose
+	// requests are not restored yet does.
+	if _, err := h.db.UpdateRunStatus(h.ctx, run.ID, domain.RunNeedsAttention, "needs input: stale", domain.ActivityNeedsYou, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	w := h.watch(h.ada, runTarget(run)).Watch
+	if w.LastCheckAt != "" {
+		t.Fatalf("last_check_at = %q, want no check before recovery", w.LastCheckAt)
+	}
+	settle()
+	if got := h.notices(w.ID); len(got) != 0 {
+		t.Fatalf("notices before recovery = %q, want none", bodies(got))
+	}
+
+	if _, err := h.db.UpdateRunStatus(h.ctx, run.ID, domain.RunRunning, "", domain.ActivityWorking, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	close(h.recovered)
+	h.eventually("the check after recovery", func() bool { return h.watchState(w.ID).LastCheckAt != nil })
+	settle()
+	if got := h.notices(w.ID); len(got) != 0 {
+		t.Fatalf("notices = %q, want none for the need that recovery settled", bodies(got))
+	}
+}
+
 func TestAStartingRunHasNotFinished(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

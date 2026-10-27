@@ -344,9 +344,13 @@ func (s *Service) settled(ctx context.Context, id string) (protocol.WatchResult,
 	return s.result(ctx, w)
 }
 
+// Before scheduler recovery a run's needs are not restored yet, so the
+// check is left to the startup sweep, which evaluates every live watch.
 func (s *Service) settledWatch(ctx context.Context, id string) (*store.Watch, error) {
-	if err := s.evaluate(ctx, id); err != nil {
-		return nil, err
+	if s.ready() {
+		if err := s.evaluate(ctx, id); err != nil {
+			return nil, err
+		}
 	}
 	w, err := s.store.GetWatch(ctx, id)
 	if err != nil {

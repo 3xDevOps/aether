@@ -182,6 +182,20 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
+// ready reports whether scheduler recovery has finished, so a run's needs
+// read as they stand.
+func (s *Service) ready() bool {
+	if s.recovered == nil {
+		return true
+	}
+	select {
+	case <-s.recovered:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Service) awaitRecovery(ctx context.Context) bool {
 	if s.recovered == nil {
 		return true
