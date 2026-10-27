@@ -238,21 +238,20 @@ covers Close, Kill, **Free container…** and Delete.
 
 A workspace is a repository you run agents against. Its environment applies
 to every new run in it, whoever launches it: a **setup script** that runs
-before the agent, **variables** set in the run's container, **files** such as
-`.env` written into the run's checkout, and optional **egress control**,
-which limits the hosts runs can reach. A variable can be marked **secret**.
+before the agent, **variables** set in the run's container, and optional
+**egress control**, which limits the hosts runs can reach. A variable can be
+marked **secret**.
 
-An admin edits them under **Environment** on the workspace's Repository page
+An admin edits both under **Environment** on the workspace's Repository page
 (workspace switcher → **Environment**), or with `aether workspace env`. Every
-member can read the script, the variable names, the non-secret values and the
-file paths.
+member can read the script, the variable names and the non-secret values.
 
 A change applies to runs launched afterwards. An existing container keeps its
-variables and files and never reruns the script, so pausing, reopening or
-switching the mode of a run changes nothing. The egress host list is the
-exception: it applies at once. Candidate verification containers
-([integration.md](integration.md)) also get it, except the files. Your own
-environment terminal does not.
+variables and never reruns the script, so pausing, reopening or switching the
+mode of a run changes nothing. The egress host list is the exception: it
+applies at once. Candidate verification containers
+([integration.md](integration.md)) also get it. Your own environment terminal
+does not.
 
 ### Setup script
 
@@ -328,56 +327,6 @@ aether workspace env import --plain .env
 > is an ordinary environment variable, so the agent can read it, and so can
 > anyone who can launch a run in the workspace or message one.
 > [security.md](security.md#workspace-secrets) lists where the value is kept.
-
-### Files
-
-A workspace file is written into every new run's checkout. Use one when the
-project needs the file itself: docker compose's `env_file`, a
-`godotenv.Load()` that fails without `.env`, or `${VAR}` references and
-comments that an imported `.env` loses.
-
-```sh
-aether workspace env file put .env
-aether workspace env file put ~/keys/app-sa.json --path config/service-account.json
-aether workspace env file rm .env
-aether workspace env list       # also lists each file with its size
-```
-
-The repository path defaults to the local path when that is relative and
-clean, such as `apps/web/.env.local`; otherwise pass `--path`. A path is
-relative to the repository root, with no `.` or `..` component, no name that
-starts or ends with whitespace and nothing under `.git`. Putting a path again
-replaces its file. A workspace holds up to
-20 files of up to 64 KiB of UTF-8 text each. In the dashboard, **Add file…**
-under **Files** picks one, or drop it on the list.
-
-Every new run, including child runs, swarm workers and template launches,
-gets each file at its path, mode `0600`, before its container starts, so the
-setup script and the agent find it. Aether appends each path to the
-checkout's `.git/info/exclude`, so `git add -A`, the commit made when the run
-closes, **Changes** and publishing leave it out. Extra repos
-(`aether run --repo`) get none.
-
-The launch fails instead of overwriting a file the repository tracks at the
-run's base commit:
-
-```
-run run-<id> failed: provisioning: write workspace files: gitengine: workspace file .env is tracked in the repository; remove it from the repository, or run aether workspace env file rm --workspace <workspace-id> .env
-```
-
-It also fails, before writing any file, when the repository's own ignore
-rules, which outrank `.git/info/exclude`, un-ignore a path, as `!.env` in a
-`.gitignore` does:
-
-```
-run run-<id> failed: provisioning: write workspace files: gitengine: workspace file .env would not be ignored by git: the repository's ignore rules un-ignore it; remove the negation or rename the file
-```
-
-Like a secret's value, a file's content is never returned, to admins either.
-**Files** does not list or open it in a run checkout:
-`files.read` answers `a workspace file is readable only inside the run, by its agent or in its terminal`.
-Inside the run it is an ordinary file, so anyone who can launch a run in the
-workspace or message one can have it printed.
 
 ### Egress control
 

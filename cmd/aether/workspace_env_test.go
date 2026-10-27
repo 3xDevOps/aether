@@ -164,69 +164,6 @@ func TestPrintWorkspaceVariablesHidesNothingButSecretValues(t *testing.T) {
 	if err := printWorkspaceVariables(&b, ws, protocol.WorkspaceEnvironmentResult{}); err != nil || b.String() != "workspace ws-1 app\nno variables\n" {
 		t.Errorf("empty output = %q, %v", b.String(), err)
 	}
-	b.Reset()
-	if err := printWorkspaceVariables(&b, ws, protocol.WorkspaceEnvironmentResult{Files: []protocol.WorkspaceFileInfo{{Path: ".env", Size: 412}, {Path: "apps/web/.env.local", Size: 0}}}); err != nil {
-		t.Fatal(err)
-	}
-	if want := "workspace ws-1 app\nno variables\nfile .env (412 bytes)\nfile apps/web/.env.local (0 bytes)\n"; b.String() != want {
-		t.Errorf("output with files = %q, want %q", b.String(), want)
-	}
-}
-
-func TestParseWorkspaceEnvFilePut(t *testing.T) {
-	dir := t.TempDir()
-	t.Chdir(dir)
-	write := func(name, content string) string {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(name, []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return name
-	}
-	write(".env", "API_URL=${HOST}/api # kept as written\n")
-	write("apps/web/.env.local", "NEXT_PUBLIC_A=1\n")
-	key := write(filepath.Join(dir, "sa.json"), `{"type":"service_account"}`)
-
-	for args, want := range map[string]protocol.WorkspaceFile{
-		".env":                         {Path: ".env", Content: "API_URL=${HOST}/api # kept as written\n"},
-		"apps/web/.env.local":          {Path: "apps/web/.env.local", Content: "NEXT_PUBLIC_A=1\n"},
-		key + " --path config/sa.json": {Path: "config/sa.json", Content: `{"type":"service_account"}`},
-		"--path config/sa.json " + key: {Path: "config/sa.json", Content: `{"type":"service_account"}`},
-	} {
-		workspace, got, err := parseWorkspaceEnvFilePut(append([]string{"--workspace", "app"}, strings.Fields(args)...))
-		if err != nil || workspace != "app" || got != want {
-			t.Errorf("put %s = (%q, %+v, %v), want (app, %+v)", args, workspace, got, err, want)
-		}
-	}
-
-	for name, args := range map[string][]string{
-		"no file":           {},
-		"two files":         {".env", "apps/web/.env.local"},
-		"absolute, no path": {key},
-		"not clean":         {"./.env"},
-		"outside":           {"../x"},
-	} {
-		if _, _, err := parseWorkspaceEnvFilePut(args); err == nil {
-			t.Errorf("%s: parseWorkspaceEnvFilePut(%v) succeeded", name, args)
-		}
-	}
-	if _, _, err := parseWorkspaceEnvFilePut([]string{key}); err == nil || !strings.Contains(err.Error(), "--path") {
-		t.Errorf("an absolute path without --path = %v, want it to name --path", err)
-	}
-	binary := write("cert.der", "\x30\x82\xff\xfe")
-	if _, _, err := parseWorkspaceEnvFilePut([]string{binary}); err == nil || !strings.Contains(err.Error(), "not UTF-8 text") {
-		t.Errorf("a binary file = %v, want it refused as not UTF-8", err)
-	}
-	big := write("big.env", strings.Repeat("x", protocol.MaxWorkspaceVariableValueBytes+1))
-	if _, _, err := parseWorkspaceEnvFilePut([]string{big}); err == nil || !strings.Contains(err.Error(), "larger than 65536 bytes") {
-		t.Errorf("a file over the limit = %v, want it refused before sending", err)
-	}
-	if err := workspaceEnvFile([]string{"rm", ".env", "apps/web/.env.local"}); err == nil || err.Error() != workspaceEnvFileRmUsage {
-		t.Errorf("rm of two paths = %v, want the usage", err)
-	}
 }
 
 func TestWorkspaceEnvEgress(t *testing.T) {

@@ -668,28 +668,34 @@ entirely, and its CSS stops animation if the preference changes while it is
 visible. [Launch splash](dashboard-frontend.md#launch-splash) defines the
 session and startup timing.
 
-Live local control lights the top edge of the terminal viewport or the
-Enhanced Session conversation, just under the toolbar; the other edges stay
-dark. The light is a uniform bar across the whole edge: a 1.5px
-`--control-light` rim with a tight halo and a soft glow spilling down. It is
-at 70% strength while it moves or turns red. Once acquisition settles it
-dims to half over 1.2s, then breathes between 42% and 60% on an 8-second
-cycle. `--control-light` is the accent teal in light
-theme and a brighter teal in dark; `--control-glow` dims the glow to 0.3 in
-light theme. **Release**, shown while you control, has the accent fill;
-**Take control** is a secondary button. The light is pointer-transparent and
-does not change layout. It appears only with live, acknowledged writable
-control. Terminal replay and history reading hide it; reading earlier
-Enhanced items does not disable the composer or hide its light. The right
-end, under **Take control** and **Release**, is the light's source:
-acquisition pours it leftward across the edge and voluntary release drains
-it back to the right, each over 720ms and decelerating toward the endpoint.
-A control-lost takeover turns the light red over 540ms and drains it to the
-right over 1440ms. An occupied three-second hold fills **Take control** and
-the holder's **Release** diagonally in red and spreads red light leftward
-from the right end of the holder's edge, replacing the teal it reaches; text
-on either side of the fill edge keeps its own contrast. The fill decelerates (logarithmic) while the countdown stays linear. A seven-second holder
-decision follows. Under `prefers-reduced-motion: reduce`, ownership changes
-are instant, the settled light holds at half without breathing, and takeover
-fills and light become static red indicators with countdowns; labels keep the state meaning. Loading spinners and delayed skeletons remain functional
-feedback.
+The bar that holds **Take control** and **Release** shows who steers: the
+Enhanced Multiplayer strip, or the agent terminal's toolbar in a Standard
+run. Its background is a grid of 2px round dots on a 6px pitch, behind the
+bar's text and controls. The dots are neutral, `--text` at 24%, until this
+tab has live, acknowledged writable control; then they turn
+`--control-light`, the accent teal in light theme and a brighter teal in
+dark. A lost takeover and an occupied hold turn them `--state-failed`.
+Colored dots sit at `--control-dots` opacity (100% light, 70% dark), scaled
+by a strength of 70% while they move or turn red. Once acquisition settles
+the strength dims to half over 1.2s, then breathes between 42% and 60% on
+an 8-second cycle. The dots fade out around each group of text and
+buttons on the bar, to 10% under them over about 20px, and the bar's text
+uses `--text`, not `--text-muted`. `src/design-system.test.ts` checks text
+over the faded teal and red dots at full strength. **Release**, shown while you
+control, has the accent fill; **Take control** is a secondary button. The matrix is pointer-transparent and does not change
+layout. Terminal replay and history reading return it to neutral; reading
+earlier Enhanced items does not disable the composer or clear its color.
+The right end, under **Take control** and **Release**, is the color's
+source: acquisition pours it leftward across the bar and voluntary release
+drains it back to the right, each over 720ms and decelerating toward the
+endpoint. A control-lost takeover turns the dots red over 540ms and drains
+them to the right over 1440ms. An occupied three-second hold fills **Take
+control** and the holder's **Release** diagonally in red and spreads red
+dots leftward from the right end of the holder's bar, blending into the
+teal over 4rem; text on either side of the fill edge keeps its own contrast.
+The fill decelerates (logarithmic) while the countdown stays linear. A
+seven-second holder decision follows. Under
+`prefers-reduced-motion: reduce`, ownership changes are instant, settled
+dots hold at half without breathing, and takeover fills and dots become
+static red indicators with countdowns; labels keep the state meaning.
+Loading spinners and delayed skeletons remain functional feedback.

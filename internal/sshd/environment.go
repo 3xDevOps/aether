@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"path"
 	"slices"
 	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/egress"
 	"github.com/3xDevOps/Aether/internal/events"
-	"github.com/3xDevOps/Aether/internal/gitengine"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 )
@@ -23,20 +21,16 @@ func init() {
 	registerGuarded(protocol.MethodWorkspaceEnvironmentSet, permissions.WorkspaceAdmin, workspaceTarget, (*Server).workspaceEnvironmentSet)
 }
 
-func (s *Server) workspaceSecrets(id domain.WorkspaceID) (secrets, files map[string]string, err error) {
+func (s *Server) workspaceSecrets(id domain.WorkspaceID) (map[string]string, error) {
 	if s.cfg.Secrets == nil {
-		return map[string]string{}, map[string]string{}, nil
+		return map[string]string{}, nil
 	}
-	if secrets, err = s.cfg.Secrets.Get(id); err != nil {
-		return nil, nil, err
-	}
-	files, err = s.cfg.Secrets.Files(id)
-	return secrets, files, err
+	return s.cfg.Secrets.Get(id)
 }
 
-// environmentResult never carries a secret's value or a file's content: only
-// the name and the path and size leave the server.
-func environmentResult(ws *domain.Workspace, secrets, files map[string]string) protocol.WorkspaceEnvironmentResult {
+// environmentResult never carries a secret's value: only its name leaves the
+// server.
+func environmentResult(ws *domain.Workspace, secrets map[string]string) protocol.WorkspaceEnvironmentResult {
 	variables := make([]protocol.WorkspaceVariable, 0, len(ws.Environment.Variables)+len(secrets))
 	for name := range secrets {
 		variables = append(variables, protocol.WorkspaceVariable{Name: name, Secret: true})
@@ -47,15 +41,10 @@ func environmentResult(ws *domain.Workspace, secrets, files map[string]string) p
 		}
 	}
 	slices.SortFunc(variables, func(a, b protocol.WorkspaceVariable) int { return strings.Compare(a.Name, b.Name) })
-	listed := make([]protocol.WorkspaceFileInfo, 0, len(files))
-	for _, name := range slices.Sorted(maps.Keys(files)) {
-		listed = append(listed, protocol.WorkspaceFileInfo{Path: name, Size: len(files[name])})
-	}
 	return protocol.WorkspaceEnvironmentResult{
 		WorkspaceID: string(ws.ID),
 		SetupScript: ws.Environment.SetupPolicy.Script,
 		Variables:   variables,
-		Files:       listed,
 		Egress:      ws.Environment.Egress.On,
 		EgressHosts: append([]string{}, slices.Sorted(slices.Values(egress.Hosts(ws.Environment.Egress)))...),
 	}
@@ -85,11 +74,11 @@ func (s *Server) workspaceEnvironmentGet(ctx context.Context, _ domain.MemberID,
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	secrets, files, err := s.workspaceSecrets(id)
+	secrets, err := s.workspaceSecrets(id)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return environmentResult(ws, secrets, files), nil
+	return environmentResult(ws, secrets), nil
 }
 
 // The timeline note names what changed and never a value.
@@ -117,20 +106,6 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 			return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "workspace secrets are not configured"}
 		}
 	}
-	for _, f := range p.Files {
-		if err := gitengine.ValidatePath(f.Path); err != nil || f.Path == "" || path.Clean(f.Path) != f.Path {
-			return nil, invalidParams(fmt.Sprintf(`file path %q must be relative to the repository root, with no "." or ".." component and nothing under .git`, f.Path))
-		}
-		if slices.ContainsFunc(strings.Split(f.Path, "/"), func(part string) bool { return strings.TrimSpace(part) != part }) {
-			return nil, invalidParams(fmt.Sprintf("file path %q has a name that starts or ends with whitespace", f.Path))
-		}
-		if len(f.Content) > protocol.MaxWorkspaceVariableValueBytes {
-			return nil, invalidParams(fmt.Sprintf("file %s is larger than %d bytes", f.Path, protocol.MaxWorkspaceVariableValueBytes))
-		}
-	}
-	if (len(p.Files) > 0 || len(p.RemoveFiles) > 0) && s.cfg.Secrets == nil {
-		return nil, &protocol.Error{Code: protocol.CodeUnavailable, Message: "workspace files are not configured"}
-	}
 	allow, perr := normalizeHosts(p.EgressAllow)
 	if perr != nil {
 		return nil, perr
@@ -147,11 +122,11 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	secrets, files, err := s.workspaceSecrets(id)
+	secrets, err := s.workspaceSecrets(id)
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	saved, savedFiles := maps.Clone(secrets), maps.Clone(files)
+	saved := maps.Clone(secrets)
 	variables := maps.Clone(ws.Environment.Variables)
 	if variables == nil {
 		variables = map[string]string{}
@@ -191,27 +166,6 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 		changes = append(changes, "removed "+strings.Join(removed, ", "))
 	}
 	ws.Environment.Variables = variables
-
-	var removedFiles, setFiles []string
-	for _, name := range p.RemoveFiles {
-		if _, ok := files[name]; ok {
-			removedFiles = append(removedFiles, name)
-			delete(files, name)
-		}
-	}
-	for _, f := range p.Files {
-		files[f.Path] = f.Content
-		setFiles = append(setFiles, f.Path)
-	}
-	if len(files) > protocol.MaxWorkspaceFiles {
-		return nil, invalidParams(fmt.Sprintf("a workspace holds at most %d files; remove one first", protocol.MaxWorkspaceFiles))
-	}
-	if len(setFiles) > 0 {
-		changes = append(changes, "files set: "+strings.Join(setFiles, ", "))
-	}
-	if len(removedFiles) > 0 {
-		changes = append(changes, "files removed: "+strings.Join(removedFiles, ", "))
-	}
 
 	policy := ws.Environment.Egress
 	if p.Egress != nil && *p.Egress != policy.On {
@@ -255,25 +209,22 @@ func (s *Server) workspaceEnvironmentSet(ctx context.Context, member domain.Memb
 		s.cfg.Secrets.Lock()
 		defer s.cfg.Secrets.Unlock()
 		err = s.cfg.Secrets.Put(id, secrets)
-		if err == nil {
-			err = s.cfg.Secrets.PutFiles(id, files)
-		}
 	}
 	if err == nil {
 		err = s.cfg.Store.SetWorkspaceEnvironment(ctx, id, ws.Environment)
 	}
 	if err != nil {
-		// The secret files go back to what they were: a secret that was
-		// turning plain would otherwise be gone from both places. A Put that
-		// failed may already have replaced its file.
+		// The secret file goes back to what it was: a secret that was turning
+		// plain would otherwise be gone from both places. A Put that failed may
+		// already have replaced the file.
 		if s.cfg.Secrets != nil {
-			if restoreErr := errors.Join(s.cfg.Secrets.Put(id, saved), s.cfg.Secrets.PutFiles(id, savedFiles)); restoreErr != nil {
-				err = errors.Join(err, fmt.Errorf("restore the workspace's secrets and files: %w", restoreErr))
+			if restoreErr := s.cfg.Secrets.Put(id, saved); restoreErr != nil {
+				err = errors.Join(err, fmt.Errorf("restore the workspace's secrets: %w", restoreErr))
 			}
 		}
 		return nil, rpcError(err)
 	}
-	result := environmentResult(ws, secrets, files)
+	result := environmentResult(ws, secrets)
 	if len(changes) > 0 {
 		if _, err := s.cfg.Bus.Publish(ctx, events.Event{
 			WorkspaceID: id,
