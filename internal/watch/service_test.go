@@ -690,6 +690,52 @@ func TestAFailedCheckAtStartIsRetried(t *testing.T) {
 	})
 }
 
+// failingSaves fails reading notification preferences and saving
+// evaluations while fail is set.
+type failingSaves struct{ failingPrefs }
+
+func (f *failingSaves) CommitWatchEvaluation(ctx context.Context, w *store.Watch, notices []*store.WatchNotification) ([]*store.WatchNotification, error) {
+	if f.fail.Load() {
+		return nil, errors.New("database is locked")
+	}
+	return f.DB.CommitWatchEvaluation(ctx, w, notices)
+}
+
+func TestAStartCheckWhoseRetryCannotBeSavedIsRetried(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	run := h.run(h.ada, "Ship the release")
+	w := h.watch(h.ada, runTarget(run)).Watch
+	h.eventually("the first check", func() bool { return h.watchState(w.ID).LastCheckAt != nil })
+
+	_ = h.svc.Close()
+	if _, err := h.db.UpdateRunStatus(h.ctx, run.ID, domain.RunNeedsAttention, "needs input: which tag?", domain.ActivityNeedsYou, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st := &failingSaves{failingPrefs{DB: h.db}}
+	st.fail.Store(true)
+	svc, err := New(Config{
+		Store: st, Bus: h.bus, Runs: h.runs, Swarm: h.swarmOf, Push: h.push, Head: h.log.LastSeq,
+		Debounce: 50 * time.Millisecond, Tick: 50 * time.Millisecond, Now: h.clock.now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Start(h.ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	settle()
+	if got := h.watchState(w.ID); got.NextCheckAt != nil {
+		t.Fatalf("next_check_at = %v, want none saved while saves fail", got.NextCheckAt)
+	}
+
+	// No event and no saved next_check_at bring the watch back; the
+	// service must remember it.
+	st.fail.Store(false)
+	h.eventually("the need missed while down", func() bool { return len(h.notices(w.ID)) == 1 })
+}
+
 func TestAStartingRunHasNotFinished(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

@@ -99,7 +99,7 @@ the run, so every surface that shows the run's pull request sees it.
 | --- | --- |
 | `active` | Evaluated on every event about the target. |
 | `paused` | You paused it. Nothing is evaluated or sent until you resume it. |
-| `error` | Evaluation failed, including the check every live watch gets when the server starts; `error` holds the real error. It retries with backoff from 30 seconds, doubling to at most 15 minutes, and returns to `active` once an evaluation succeeds. `access revoked: ...` means you no longer exist, await approval, or cannot see the workspace; it is not retried on a timer, only on the target's next event. |
+| `error` | Evaluation failed, including the check every live watch gets when the server starts; `error` holds the real error. It retries with backoff from 30 seconds, doubling to at most 15 minutes, and returns to `active` once an evaluation succeeds. A startup check whose retry cannot be saved either is retried every tick until one is. `access revoked: ...` means you no longer exist, await approval, or cannot see the workspace; it is not retried on a timer, only on the target's next event. |
 | `done` | The target reached its final state (a run merged, abandoned, failed or stopped; a swarm cancelled) and its last notice is recorded. |
 | `expired` | It passed `expires_at`. Give it a new `expires_at` to watch again. |
 

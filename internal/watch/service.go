@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -117,6 +119,9 @@ type Service struct {
 	closed bool
 	// cursor is the last event sequence whose evaluations are committed.
 	cursor uint64
+	// unsaved holds watches whose startup check failed and whose retry
+	// could not be saved; housekeep retries them until one is.
+	unsaved map[string]bool
 }
 
 // New builds the service; call Start to begin.
@@ -221,13 +226,43 @@ func (s *Service) evaluateAll(ctx context.Context) {
 		ids, err = s.store.DueWatchIDs(ctx, s.now(), true)
 	}
 	for _, id := range ids {
-		if err := s.evaluate(ctx, id); err != nil && ctx.Err() == nil {
-			slog.Warn("watch: evaluate after start; retrying with backoff", "watch", id, "error", err)
-			if rerr := s.retryLater(ctx, id, err); rerr != nil && ctx.Err() == nil {
-				slog.Warn("watch: schedule the retry", "watch", id, "error", rerr)
-			}
-		}
+		s.recheck(ctx, id)
 	}
+}
+
+// recheck evaluates watch id and, when that fails, saves when to retry it;
+// when that fails too, id is kept in unsaved for the next housekeep.
+func (s *Service) recheck(ctx context.Context, id string) {
+	err := s.evaluate(ctx, id)
+	if err == nil {
+		s.markUnsaved(id, false)
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	slog.Warn("watch: evaluate after start; retrying with backoff", "watch", id, "error", err)
+	if rerr := s.retryLater(ctx, id, err); rerr != nil {
+		if ctx.Err() == nil {
+			slog.Warn("watch: schedule the retry; trying again next tick", "watch", id, "error", rerr)
+		}
+		s.markUnsaved(id, true)
+		return
+	}
+	s.markUnsaved(id, false)
+}
+
+func (s *Service) markUnsaved(id string, unsaved bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !unsaved {
+		delete(s.unsaved, id)
+		return
+	}
+	if s.unsaved == nil {
+		s.unsaved = map[string]bool{}
+	}
+	s.unsaved[id] = true
 }
 
 // retryLater records failure on watch id and when to evaluate it again.
@@ -417,6 +452,12 @@ func (s *Service) housekeep(ctx context.Context) {
 		if err := s.evaluate(ctx, id); err != nil && ctx.Err() == nil {
 			slog.Warn("watch: evaluate due watch", "watch", id, "error", err)
 		}
+	}
+	s.mu.Lock()
+	unsaved := slices.Collect(maps.Keys(s.unsaved))
+	s.mu.Unlock()
+	for _, id := range unsaved {
+		s.recheck(ctx, id)
 	}
 	s.deliverDue(ctx)
 	if _, err := s.store.PurgeWatches(ctx, now.Add(-Retention)); err != nil {
