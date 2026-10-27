@@ -245,7 +245,7 @@ type Server struct {
 	// holds counts the live sessions behind each swarm worker's durable
 	// hold (see holdUntil); holdsStop ends their watchers on Close.
 	holdsMu   sync.Mutex
-	holds     map[domain.RunID]int
+	holds     map[domain.RunID]map[<-chan struct{}]struct{}
 	holdsStop chan struct{}
 }
 
@@ -306,7 +306,7 @@ func New(cfg Config) (*Server, error) {
 		controlFrames:    make(map[domain.MemberID]struct{}),
 		controlAttaches:  make(map[string]map[string]controlAttach),
 		runSSHConns:      make(map[domain.RunID]map[domain.MemberID]int),
-		holds:            make(map[domain.RunID]int),
+		holds:            make(map[domain.RunID]map[<-chan struct{}]struct{}),
 		holdsStop:        make(chan struct{}),
 		baseCtx:          context.Background(),
 	}

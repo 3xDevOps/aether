@@ -1148,6 +1148,9 @@ func (s *Service) heldWorker(ctx context.Context, run domain.RunID) (bool, error
 }
 
 func (s *Service) receiptStatus(ctx context.Context, method string, to domain.RunID, recipient domain.RunStatus) (string, *protocol.Error) {
+	if recipient.Terminal() {
+		return string(recipient), nil
+	}
 	held, err := s.heldWorker(ctx, to)
 	if err != nil {
 		return "", internalError(method, err)

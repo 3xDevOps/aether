@@ -2,7 +2,9 @@ package sshd
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/control"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -34,17 +36,28 @@ type MissionControl interface {
 	AdmitInput(context.Context, domain.RunID, domain.RunID, uint64, func() error) error
 }
 
+// holdRetry spaces attempts to release a hold whose store write failed.
+const holdRetry = 5 * time.Second
+
 // holdUntil counts a live session behind a swarm worker's durable hold until
-// done closes. A session without a control lease must call it before it takes
-// the hold. Once the last session ends with no control lease left, nobody
-// controls the worker, so the hold is released.
+// done closes; registering the same done again counts it once. A session
+// without a control lease must call it before it takes the hold. Once the
+// last session ends with no control lease left, nobody controls the worker,
+// so the hold is released.
 func (s *Server) holdUntil(run domain.RunID, done <-chan struct{}) {
 	mission := s.cfg.Services.MissionControl
 	if mission == nil || s.cfg.Control == nil {
 		return
 	}
 	s.holdsMu.Lock()
-	s.holds[run]++
+	if _, ok := s.holds[run][done]; ok {
+		s.holdsMu.Unlock()
+		return
+	}
+	if s.holds[run] == nil {
+		s.holds[run] = make(map[<-chan struct{}]struct{})
+	}
+	s.holds[run][done] = struct{}{}
 	s.holdsMu.Unlock()
 	s.spawn(func() {
 		select {
@@ -53,21 +66,38 @@ func (s *Server) holdUntil(run domain.RunID, done <-chan struct{}) {
 			return
 		}
 		s.holdsMu.Lock()
-		if s.holds[run]--; s.holds[run] == 0 {
+		delete(s.holds[run], done)
+		if len(s.holds[run]) == 0 {
 			delete(s.holds, run)
 		}
 		s.holdsMu.Unlock()
-		err := s.cfg.Control.AdmitSnapshot(string(run), func(_ control.Snapshot, held bool) error {
-			s.holdsMu.Lock()
-			live := s.holds[run] > 0
-			s.holdsMu.Unlock()
-			if held || live {
-				return nil
+		for {
+			err := s.releaseIdleHold(mission, run)
+			if err == nil {
+				return
 			}
-			return mission.ReleaseIdle(context.Background(), run)
-		})
-		if err != nil {
-			slog.Warn("sshd: release swarm worker hold", "run", run, "error", err)
+			slog.Warn("sshd: release swarm worker hold, retrying", "run", run, "retry_in", holdRetry, "error", err)
+			select {
+			case <-time.After(holdRetry):
+			case <-s.holdsStop:
+				return
+			}
 		}
+	})
+}
+
+// releaseIdleHold keeps holdsMu through the release, so a session that
+// registers meanwhile takes its hold after the release, not before it.
+func (s *Server) releaseIdleHold(mission MissionControl, run domain.RunID) error {
+	return s.cfg.Control.AdmitSnapshot(string(run), func(_ control.Snapshot, held bool) error {
+		s.holdsMu.Lock()
+		defer s.holdsMu.Unlock()
+		if held || len(s.holds[run]) > 0 {
+			return nil
+		}
+		if err := mission.ReleaseIdle(context.Background(), run); err != nil {
+			return fmt.Errorf("release the hold on worker %s: %w", run, err)
+		}
+		return nil
 	})
 }

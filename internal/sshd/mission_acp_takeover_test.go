@@ -70,13 +70,7 @@ func TestReproACPMissionTakeoverStaysActiveAfterLeaseExpiry(t *testing.T) {
 		t.Fatalf("lease outlived its reconnect window: %+v", lease)
 	}
 
-	assignment, err := db.GetMissionWorkerAssignment(t.Context(), e.run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if assignment.Active {
-		t.Errorf("takeover_active=true (member %s, generation %d) with no control lease left", assignment.MemberID, assignment.Generation)
-	}
+	waitMissionHold(t, db, e.run.ID, false)
 	if err = integratorAdmitted(t, e, mission); err != nil {
 		t.Errorf("integrator input with nobody in control = %v, want admitted", err)
 	}
