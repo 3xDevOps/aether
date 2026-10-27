@@ -61,6 +61,9 @@ type Filter struct {
 	Member        domain.MemberID
 	Types         []events.Type
 	TimelineKinds []events.TimelineKind
+	// NoRereads leaves out run.status rereads even when Types asks for
+	// run.status.
+	NoRereads bool
 }
 
 type MissionRuns interface {
@@ -240,11 +243,8 @@ func (f Filter) keeps(e events.Event) bool {
 	if p, ok := e.Payload.(events.TimelinePayload); ok && len(f.TimelineKinds) > 0 && !slices.Contains(f.TimelineKinds, p.Kind) {
 		return false
 	}
-	if len(f.Types) > 0 {
-		return true
-	}
-	if p, ok := e.Payload.(events.RunStatusPayload); ok && p.Reread {
+	if p, ok := e.Payload.(events.RunStatusPayload); ok && p.Reread && (f.NoRereads || len(f.Types) == 0) {
 		return false
 	}
-	return !detailTypes[e.Type]
+	return len(f.Types) > 0 || !detailTypes[e.Type]
 }

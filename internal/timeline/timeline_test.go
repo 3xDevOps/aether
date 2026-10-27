@@ -156,6 +156,9 @@ func TestARereadStatusIsLeftOutUnlessAskedForByType(t *testing.T) {
 	if !(Filter{Types: []events.Type{events.TypeRunStatus}}).keeps(reread) {
 		t.Fatal("asking for run.status by type should return a reread")
 	}
+	if (Filter{Types: []events.Type{events.TypeRunStatus}, NoRereads: true}).keeps(reread) {
+		t.Fatal("NoRereads should leave a reread out even when run.status is asked for")
+	}
 }
 
 // A read without a workspace has no index to bound it, so a page covers at

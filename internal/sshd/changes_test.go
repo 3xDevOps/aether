@@ -273,6 +273,24 @@ func TestChangesCursorSurvivesRestart(t *testing.T) {
 	}
 }
 
+// A wait's newer source reads are not changes: they neither show up nor
+// fill the page an earlier status change belongs on.
+func TestChangesLeaveOutWaitRereads(t *testing.T) {
+	t.Parallel()
+	e := newChangesEnv(t, "")
+	changed := e.publish(t, e.ws.ID, e.run.ID, events.RunStatusPayload{From: domain.RunRunning, To: domain.RunNeedsAttention, Activity: domain.ActivityWaitingCI})
+	for range 3 {
+		e.publish(t, e.ws.ID, e.run.ID, events.RunStatusPayload{From: domain.RunNeedsAttention, To: domain.RunNeedsAttention, Activity: domain.ActivityWaitingCI, Reread: true})
+	}
+	c := controlClient(t, e.testEnv)
+	if res := listChanges(t, c, protocol.ChangesListParams{Limit: 2}); !slices.Equal(changeSeqs(res.Changes), []uint64{changed}) {
+		t.Fatalf("newest changes = %v, want only the status change %d", changeSeqs(res.Changes), changed)
+	}
+	if got, _ := pageAll(t, c, protocol.ChangesListParams{Cursor: "0", Limit: 1}); !slices.Equal(changeSeqs(got), []uint64{changed}) {
+		t.Fatalf("paged changes = %v, want only the status change %d", changeSeqs(got), changed)
+	}
+}
+
 func TestChangesCursorAheadOfHeadIsRefused(t *testing.T) {
 	t.Parallel()
 	e := newChangesEnv(t, "")
