@@ -280,15 +280,32 @@ func (p *prHarness) login(m *domain.Member) {
 
 // poll moves past the longest poll interval, so the next pass reads
 // GitHub again, and waits for it. An evaluation that began before the move
-// may still commit a reused read, so only a check from after it counts.
+// may still commit a check stamped before it, scheduling its next check
+// from after the move; the clock then moves to that check, so only a check
+// from after the move counts and no extra one is asked for.
 func (p *prHarness) poll(id string) {
 	p.t.Helper()
 	moved := p.clock.now().Add(PRPollIdle + PRPollIdle/5)
 	p.clock.advance(PRPollIdle + PRPollIdle/5)
-	p.eventually("a poll", func() bool {
-		after := p.watchState(id).LastCheckAt
-		return after != nil && !after.Before(moved)
-	})
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		w := p.watchState(id)
+		if w.LastCheckAt != nil && !w.LastCheckAt.Before(moved) {
+			break
+		}
+		now := p.clock.now()
+		if w.NextCheckAt != nil && w.NextCheckAt.After(now) {
+			p.clock.advance(w.NextCheckAt.Sub(now) + time.Second)
+		}
+		if time.Now().After(deadline) {
+			p.gh.mu.Lock()
+			asked := slices.Clone(p.gh.requests[max(0, len(p.gh.requests)-10):])
+			p.gh.mu.Unlock()
+			p.t.Fatalf("timed out waiting for a poll after %s: now %s, state %s %q, failures %d, last_check_at %v, next_check_at %v; last requests %q",
+				moved.Format(time.RFC3339Nano), p.clock.now().Format(time.RFC3339Nano), w.State, w.Error, w.Failures, w.LastCheckAt, w.NextCheckAt, asked)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	p.settle()
 }
 
@@ -298,6 +315,7 @@ func (p *prHarness) watchOn(member *domain.Member, target protocol.WatchTarget, 
 	if err != nil {
 		p.t.Fatalf("Create: %v", err)
 	}
+	p.settle()
 	return res
 }
 
