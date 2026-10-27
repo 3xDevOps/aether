@@ -97,6 +97,7 @@ import type {
   WatchResult,
   WatchUpdateParams,
   NotifyPrefs,
+  NotifyPrefsSetParams,
   WorkspaceMirrorAuth,
   WorkspaceMirrorResult,
   FileDiff,
@@ -1071,7 +1072,7 @@ export const api = {
   watchUpdate: (params: WatchUpdateParams) => call<WatchResult>('watch.update', params),
   watchDelete: (watchID: string) => call<unknown>('watch.delete', { watch_id: watchID }),
   notifyPrefsGet: () => call<NotifyPrefs>('notify.prefs.get'),
-  notifyPrefsSet: (prefs: NotifyPrefs) => call<NotifyPrefs>('notify.prefs.set', prefs),
+  notifyPrefsSet: (prefs: NotifyPrefsSetParams) => call<NotifyPrefs>('notify.prefs.set', prefs),
   // Not RPC methods; see docs/local-gateway.md. Without a range this is the
   // diff against the run's effective base; with `from`, everything since that
   // snapshot tree, and `base` is the `from` tree.

@@ -130,6 +130,7 @@ describe('watches in settings', () => {
           { ...notice, id: 'not-d', title: 'Waiting', deliveries: [at('push', 'pending', 'you are active at a dashboard')] },
           { ...notice, id: 'not-c', title: 'Broken', deliveries: [at('push', 'failed', '410 Gone from fcm.googleapis.com')] },
           { ...notice, id: 'not-e', title: 'Skipped', deliveries: [at('push', 'skipped', 'The run notification already sent it'), at('assistant', 'delivered')] },
+          { ...notice, id: 'not-f', title: 'Withdrawn', deliveries: [at('push', 'withdrawn')] },
         ],
       })),
     })
@@ -147,6 +148,7 @@ describe('watches in settings', () => {
     expect(within(dialog).getByText('Push failed: 410 Gone from fcm.googleapis.com')).toBeDefined()
     expect(within(dialog).getByText('Push skipped: The run notification already sent it')).toBeDefined()
     expect(within(dialog).getByText('In the assistant chat')).toBeDefined()
+    expect(within(dialog).getByText('Push withdrawn from your devices: the need ended')).toBeDefined()
   })
 
   it('pauses, resumes and deletes with the server receipt', async () => {
@@ -296,11 +298,11 @@ describe('watch notification preferences', () => {
     seed()
   })
 
-  it('states the destinations and saves the push toggle without them', async () => {
+  it('states the destinations and saves the push toggle with the quiet hours it keeps', async () => {
     const user = userEvent.setup()
     const client = fakeApi({
       notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 2 } })),
-      notifyPrefsSet: vi.fn(async (prefs) => ({ ...prefs, destinations: { push_devices: 2 } })),
+      notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 2 } })),
     })
     render(<WatchNotifySection client={client} />)
     expect(await screen.findByText(/Push to 2 devices · the desktop app while it is open · in-app on every dashboard/)).toBeDefined()
@@ -313,13 +315,13 @@ describe('watch notification preferences', () => {
     const user = userEvent.setup()
     const client = fakeApi({
       notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 0 } })),
-      notifyPrefsSet: vi.fn(async (prefs) => prefs),
+      notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 0 } })),
     })
     render(<WatchNotifySection client={client} />)
     expect(await screen.findByText(/No push device subscribed, so in-app only/)).toBeDefined()
     await user.click(screen.getByRole('checkbox', { name: 'Quiet hours' }))
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
-    expect(client.notifyPrefsSet).toHaveBeenCalledWith({ push: true, quiet_hours: { start: '22:00', end: '07:00', tz: zone } })
+    expect(client.notifyPrefsSet).toHaveBeenCalledWith({ quiet_hours: { start: '22:00', end: '07:00', tz: zone } })
     expect(await screen.findByLabelText('Time zone')).toHaveProperty('value', zone)
   })
 

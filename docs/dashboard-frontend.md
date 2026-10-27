@@ -6114,6 +6114,7 @@ Categories:
   in-app only` when the server has no Web Push, then the desktop app and
   in-app), and **Quiet hours**: turning it on saves 22:00 to 07:00 in the browser's time
   zone; **From**, **Until** and **Time zone** change it, with **Save**; a
+  quiet-hours save leaves `push` out so the server keeps its value; a
   refused change shows its error on that row. See
   [Watches](#watches).
 - **Assistant**, where the assistant is available (`useAssistantAvailable`):
@@ -6243,7 +6244,8 @@ conditions are in [watches.md](watches.md). The dashboard's parts:
   delivery: `Push delivered to 2 devices`, `Push off: <why>`, `No push
   device - in-app only`, `Held for quiet hours: Until 07:00 CET`, `Push
   pending: <why>`, `Push not sent: resolved before delivery`, `Push skipped:
-  <why>`, `Push failed: <error>`, and `In the assistant chat` for a notice
+  <why>`, `Push withdrawn from your devices: the need ended` (or the
+  server's detail), `Push failed: <error>`, and `In the assistant chat` for a notice
   the assistant also wrote into its chat. Opening or closing it keeps focus in
   the dialog's hands rather than the category heading.
 - **Creating**: **Watch…** in a live run's menu and the palette

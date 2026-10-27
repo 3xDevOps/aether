@@ -894,8 +894,8 @@ export function fakeApi(over: Partial<Api> = {}): Api {
     watchGet: vi.fn(async () => needsOverride('watchGet')),
     watchUpdate: vi.fn(async () => needsOverride('watchUpdate')),
     watchDelete: vi.fn(async () => needsOverride('watchDelete')),
-    notifyPrefsGet: vi.fn(async () => ({ push: true })),
-    notifyPrefsSet: vi.fn(async (prefs) => prefs),
+    notifyPrefsGet: vi.fn(async () => ({ push: true, destinations: { push_devices: 0 } })),
+    notifyPrefsSet: vi.fn(async (prefs) => ({ push: prefs.push ?? true, quiet_hours: prefs.quiet_hours, destinations: { push_devices: 0 } })),
     localWorkspaceSelection: vi.fn(async () => ({ workspace_id: '' })),
     localLinkStatus: vi.fn(async () => ({
       server_configured: true,

@@ -84,6 +84,8 @@ export function deliveryText(delivery: WatchDelivery): string {
           return 'Push not sent: resolved before delivery'
         case 'pending':
           return detail ? `Push pending: ${detail}` : 'Push pending'
+        case 'withdrawn':
+          return detail ? `Push withdrawn: ${detail}` : 'Push withdrawn from your devices: the need ended'
         case 'skipped':
           return `Push skipped: ${detail || 'the run notification already sent it'}`
       }

@@ -2312,8 +2312,8 @@ export interface WatchObserved {
 
 export type WatchDeliveryChannel = 'push' | 'in_app' | 'assistant'
 
-/** pending: not sent yet, with why in detail. cleared: a held push dropped because its need was resolved before it could be sent. */
-export type WatchDeliveryStatus = 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'failed' | 'cleared' | 'pending' | 'skipped'
+/** pending: not sent yet, with why in detail. cleared: dropped unsent because its need was resolved first or its watch stayed paused. withdrawn: delivered, then replaced on the devices because its need ended. */
+export type WatchDeliveryStatus = 'pending' | 'delivered' | 'no_destination' | 'disabled' | 'held_quiet_hours' | 'failed' | 'cleared' | 'withdrawn' | 'skipped'
 
 export interface WatchDelivery {
   channel: WatchDeliveryChannel
@@ -2389,12 +2389,20 @@ export interface WatchGetResult {
   notifications: WatchNotification[]
 }
 
+export type QuietHours = { start: string; end: string; tz: string }
+
 export interface NotifyPrefs {
   /** Watch notices to Web Push devices. */
   push: boolean
-  quiet_hours?: { start: string; end: string; tz: string }
-  /** Read-only: where notices go now. Absent on servers that do not report it. */
-  destinations?: { push_devices: number }
+  quiet_hours?: QuietHours
+  /** Read-only: where notices go now. */
+  destinations: { push_devices: number }
+}
+
+/** notify.prefs.set replaces quiet_hours and keeps push as it is when push is left out. */
+export interface NotifyPrefsSetParams {
+  push?: boolean
+  quiet_hours?: QuietHours
 }
 
 export interface WatchChangedPayload {
