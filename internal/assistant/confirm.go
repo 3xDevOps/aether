@@ -329,8 +329,16 @@ func (s *Service) SetSettings(ctx context.Context, id domain.MemberID, p protoco
 func newAction(c protocol.AssistantConfirmation) protocol.AssistantAction {
 	a := protocol.AssistantAction{ID: rand.Text(), Method: c.Method, Summary: c.Summary, OtherOwner: c.OtherOwner, CreatedAt: c.CreatedAt.UTC()}
 	// The socket validated the params, and every action method names its
-	// target with these fields; env.save has none.
+	// target with these fields; env.save has none, and watch.create nests
+	// its target.
 	_ = json.Unmarshal(c.Params, &a.Target)
+	if c.Method == protocol.MethodWatchCreate {
+		var p struct {
+			Target *protocol.WatchTarget `json:"target"`
+		}
+		_ = json.Unmarshal(c.Params, &p)
+		a.Target.Watch = p.Target
+	}
 	var keyed struct {
 		IdempotencyKey string `json:"idempotency_key"`
 	}

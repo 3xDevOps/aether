@@ -1,4 +1,4 @@
-import type { AssistantActionRecord, AssistantConfirmation } from '@/lib/assistant-types'
+import type { AssistantActionRecord, AssistantActionTarget, AssistantConfirmation } from '@/lib/assistant-types'
 import { routeFromQuery } from '@/lib/url-state'
 import type { SessionToolCall } from '@/lib/session-types'
 import type { SessionRow, Turn } from '@/store/session-rows'
@@ -329,11 +329,40 @@ function callKey(action: AssistantAction): string | undefined {
   return text(action.input.idempotency_key) ?? text(record(action.result).idempotency_key)
 }
 
+type TargetNames = Partial<Record<'run_id' | 'workspace_id' | 'watch_id' | 'swarm' | 'pr', string>>
+
+function inputNames(input: Record<string, unknown>): TargetNames {
+  return {
+    run_id: text(input.run_id),
+    workspace_id: text(input.workspace_id),
+    watch_id: text(input.watch_id),
+    swarm: text(input.swarm_id)?.replace(/^swarm:/, ''),
+    pr: prKey(text(input.pr)),
+  }
+}
+
+function recordNames(target: AssistantActionTarget | undefined): TargetNames {
+  const watch = target?.watch
+  return {
+    run_id: target?.run_id ?? watch?.run_id,
+    workspace_id: target?.workspace_id,
+    watch_id: target?.watch_id,
+    swarm: watch?.mission_id?.replace(/^swarm:/, ''),
+    pr: watch?.repo && watch.number ? prKey(`${watch.repo}#${watch.number}`) : undefined,
+  }
+}
+
+/** `owner/name#7` from that or a pull request URL, lowercased as GitHub matches names. */
+function prKey(pr: string | undefined): string | undefined {
+  const match = pr ? /([\w.-]+\/[\w.-]+?)(?:#|\/pull\/)(\d+)/.exec(pr) : null
+  return match ? `${match[1]}#${match[2]}`.toLowerCase() : undefined
+}
+
 /**
  * The call a note belongs to. A record carries no tool call id; it is written
  * while its call runs, so it follows the call's first appearance. It goes to
  * the call that already holds its action, else to an unclaimed call of its
- * method whose input names no other run or workspace than its target: the
+ * method whose input names no other target than the record's: the
  * oldest such call of the newest block holding one, since a block's
  * identical calls are approved in turn and an older block's call may never
  * have been recorded. An older server's note names the run only in its
@@ -352,9 +381,12 @@ function ownerOf(drafts: Draft[], note: Note, words: string): Draft | undefined 
   // A call's idempotency key, which the record repeats, names it exactly; a call with another key is not it.
   const keyed = saved.idempotency_key ? open.find((d) => callKey(d.action) === saved.idempotency_key) : undefined
   if (keyed) return keyed
-  const fits = open.filter((d) => (!saved.idempotency_key || !callKey(d.action)) && (['run_id', 'workspace_id'] as const).every((key) => {
-    const named = text(d.action.input[key])
-    return !named || !saved.target?.[key] || named === saved.target[key]
+  const recorded = recordNames(saved.target)
+  // A watch record names its call's whole target, so a call naming less is another call.
+  const whole = saved.target?.watch !== undefined || saved.target?.watch_id !== undefined
+  const fits = open.filter((d) => (!saved.idempotency_key || !callKey(d.action)) && Object.entries(inputNames(d.action.input)).every(([key, named]) => {
+    const other = recorded[key as keyof TargetNames]
+    return whole ? named === other : !named || !other || named === other
   }))
   const newest = fits.at(-1)?.block
   return fits.find((d) => d.block === newest)

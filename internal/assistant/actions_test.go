@@ -281,6 +281,9 @@ func TestReversibleCallIsRecordedWithoutApproval(t *testing.T) {
 		got[1][0].Approval != "" || got[2][0].Approval != "" {
 		t.Fatalf("records = %+v, want the watch created and paused with no approval", got)
 	}
+	if w := got[1][0].Target.Watch; w == nil || *w != create.Target || got[2][0].Target.WatchID != "w-1" {
+		t.Fatalf("targets = %+v and %+v, want the created watch's target and the paused watch's id", got[1][0].Target, got[2][0].Target)
+	}
 }
 
 func TestReversibleWatchSummaryNamesWhatItCanRead(t *testing.T) {

@@ -280,6 +280,8 @@ type AssistantAction struct {
 }
 
 type AssistantActionTarget struct {
-	WorkspaceID string `json:"workspace_id,omitempty"`
-	RunID       string `json:"run_id,omitempty"`
+	WorkspaceID string       `json:"workspace_id,omitempty"`
+	RunID       string       `json:"run_id,omitempty"`
+	WatchID     string       `json:"watch_id,omitempty"`
+	Watch       *WatchTarget `json:"watch,omitempty"`
 }

@@ -103,6 +103,28 @@ describe('assistantView', () => {
       expect(view.rows).toEqual([])
     })
 
+    it('gives parallel watch calls the records of their own targets', () => {
+      const watch = (id: string, input: Record<string, unknown>, status: WorkItem['status'], result?: string): Partial<WorkItem> => ({ id, name: 'aether_watch', status, input, result })
+      const { records, rows } = notices(1,
+        record({ id: 'a1', method: 'watch.create', target: { watch: { kind: 'pr', repo: 'Acme/API', number: 7 } }, outcome: 'failed', approval: undefined, error: 'pull request not found' }),
+        record({ id: 'a2', method: 'watch.create', target: { watch: { kind: 'run', run_id: 'r1' } }, outcome: 'succeeded', approval: undefined }),
+        record({ id: 'a3', method: 'watch.update', target: { watch_id: 'w-2' }, outcome: 'succeeded', approval: undefined }),
+      )
+      const view = assistantView([block(
+        watch('1:t0', { run_id: 'r1' }, 'done'),
+        watch('1:t1', { pr: 'https://github.com/acme/api/pull/7' }, 'failed', 'pull request not found'),
+        watch('1:t2', { watch_id: 'w-1', paused: true }, 'done'),
+        watch('1:t3', { watch_id: 'w-2', paused: true }, 'done'),
+      ), ...rows], [], { records, calls: new Map() })
+      expect(view.actions.map((a) => [a.id, a.state, a.error])).toEqual([
+        ['1:t0', 'done', undefined],
+        ['1:t1', 'failed', 'pull request not found'],
+        ['1:t2', 'done', undefined],
+        ['1:t3', 'done', undefined],
+      ])
+      expect(view.rows).toEqual([])
+    })
+
     it('gives identical calls of one block their records in the order they ran', () => {
       const message = (id: string, status: WorkItem['status'], result?: string): Partial<WorkItem> => ({ id, name: 'aether_message_run', status, input: { run_id: 'r1', message: 'go' }, result })
       const { records, rows } = notices(1,
