@@ -25,6 +25,20 @@ function openSearch(words: string) {
 }
 
 describe('memory page', () => {
+  it('points to the private preferences in Settings only where the server keeps them', async () => {
+    seed()
+    const client = fakeApi({ memorySearch: vi.fn(async (params: MemorySearchParams) => search(params)) })
+    render(<MemoryRoute params={{}} client={client} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Settings → Memory' }))
+    expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'memory' } })
+    cleanup()
+
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['memory.search'], ws: [] } })
+    render(<MemoryRoute params={{}} client={client} />)
+    await screen.findByRole('list', { name: 'Notes' })
+    expect(screen.queryByRole('button', { name: 'Settings → Memory' })).toBeNull()
+  })
+
   it('lists pinned notes first, then the newest, with kind, source, author, agent, one link and age', async () => {
     seed()
     const client = fakeApi({ memorySearch: vi.fn(async (params: MemorySearchParams) => search(params)) })

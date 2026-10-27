@@ -1,0 +1,75 @@
+import { useState } from 'react'
+import { ChevronRight, Undo2 } from '@/components/icons'
+import { Button } from '@/components/ui/button'
+import { api } from '@/lib/api'
+import type { AssistantAction, PreferenceFacts } from '@/lib/assistant-actions'
+import { errorSentence } from '@/lib/format'
+import { cn } from '@/lib/utils'
+import { useStore } from '@/store'
+import { assistantSessionID } from '@/store/assistant'
+
+type Facts = Exclude<PreferenceFacts, { kind: 'used' }>
+
+async function undo(facts: Facts): Promise<void> {
+  if (facts.kind === 'saved') await api.preferenceDelete(facts.id)
+  else if (facts.kind === 'updated') await api.preferenceUpdate({ id: facts.id, text: facts.previous.text })
+  else await api.preferenceAdd({ text: facts.text, ...(facts.workspace_id ? { workspace_id: facts.workspace_id } : {}) })
+}
+
+/** Undo for a saved, updated or forgotten preference, with the server's refusal shown as it came. */
+function UndoPreference({ facts }: { facts: Facts }) {
+  const [state, setState] = useState<{ kind: 'idle' } | { kind: 'busy' } | { kind: 'undone' } | { kind: 'failed'; error: string }>({ kind: 'idle' })
+  if (state.kind === 'undone') return <span role="status" className="text-ui-sm text-muted">Undone</span>
+  return (
+    <>
+      <Button
+        variant="secondary"
+        size="sm"
+        disabled={state.kind === 'busy'}
+        onClick={() => {
+          setState({ kind: 'busy' })
+          undo(facts).then(() => setState({ kind: 'undone' }), (err: unknown) => setState({ kind: 'failed', error: errorSentence(err) }))
+        }}
+      >
+        <Undo2 aria-hidden />
+        Undo
+      </Button>
+      {state.kind === 'failed' && <span role="alert" className="min-w-0 text-ui-sm break-words text-state-failed">{state.error}</span>}
+    </>
+  )
+}
+
+export function PreferenceDetail({ facts }: { facts: PreferenceFacts }) {
+  if (facts.kind === 'updated') return <p className="pl-5 text-ui-sm break-words text-muted">was: {facts.previous.text}</p>
+  return null
+}
+
+export function PreferenceUndo({ facts }: { facts: PreferenceFacts }) {
+  return facts.kind === 'used' ? null : <UndoPreference facts={facts} />
+}
+
+/** "Used N of your preferences": the list is the reason the answer looks the way it does. */
+export function UsedPreferences({ action, items }: { action: AssistantAction; items: { id: string; text: string; scope: string }[] }) {
+  const key = `${action.id}:used`
+  const open = useStore((s) => s.expandedRows[assistantSessionID]?.[key] ?? false)
+  const setRow = useStore((s) => s.setSessionRow)
+  if (items.length === 0) return null
+  return (
+    <div className="flex min-w-0 flex-col gap-1 pl-5">
+      <Button variant="quiet" size="sm" aria-expanded={open} className="self-start" onClick={() => setRow(assistantSessionID, key, !open)}>
+        <ChevronRight aria-hidden className={cn('size-3.5 transition-transform', open && 'rotate-90')} />
+        {open ? 'Hide preferences' : 'Show preferences'}
+      </Button>
+      {open && (
+        <ul aria-label="Preferences used" className="flex min-w-0 flex-col gap-1 text-ui-sm">
+          {items.map((item) => (
+            <li key={item.id} className="min-w-0 break-words">
+              {item.text}
+              <span className="text-muted"> · {item.scope === 'workspace' ? 'This workspace' : 'All my workspaces'}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}

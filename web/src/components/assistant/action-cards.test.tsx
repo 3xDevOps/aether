@@ -441,3 +441,82 @@ describe('quiet outcomes and names', () => {
     expect(within(launched).getByText('Could not read swarm mis_7: mission.get: mission mis_7 not found (-32004)')).toBeDefined()
   })
 })
+
+describe('preference cards', () => {
+  const saved = { id: 'pref-1', text: 'Prefer table output', enabled: true, source: 'assistant', created_at: '2026-10-27T10:00:00Z', updated_at: '2026-10-27T10:00:00Z' }
+
+  it('shows what was saved, undoes it by deleting the row and edits it in Settings', async () => {
+    vi.mocked(api.preferenceDelete).mockResolvedValue({ deleted: { ...saved, source: 'assistant' } } as never)
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Remember that I prefer table output'),
+      aether(1, 't1', 'aether_remember', 'completed', { raw_input: { text: 'Prefer table output' }, raw_output: { preference: saved } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Saved: Prefer table output\. Done$/)
+    await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
+    expect(api.preferenceDelete).toHaveBeenCalledWith('pref-1')
+    expect(await within(notice).findByText('Undone')).toBeDefined()
+
+    await userEvent.click(within(notice).getByRole('button', { name: 'Edit' }))
+    expect(useStore.getState().route).toEqual({ name: 'settings', params: { section: 'memory', entry: 'pref-1' } })
+  })
+
+  it('shows an update with the text it replaced and undoes it back to that text', async () => {
+    vi.mocked(api.preferenceUpdate).mockResolvedValue({ preference: saved } as never)
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Actually I prefer JSON'),
+      aether(1, 't1', 'aether_remember', 'completed', {
+        raw_input: { text: 'Prefer JSON output', replaces: 'pref-1' },
+        raw_output: { preference: { ...saved, text: 'Prefer JSON output' }, previous: saved },
+      }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Updated: Prefer JSON output\. Done$/)
+    expect(within(notice).getByText('was: Prefer table output')).toBeDefined()
+    await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
+    expect(api.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-1', text: 'Prefer table output' })
+  })
+
+  it('shows a forgotten preference, undoes it by adding the text again and shows a refusal verbatim', async () => {
+    vi.mocked(api.preferenceAdd).mockRejectedValueOnce(new Error('preference.add: memory is off: you turned it off in Settings'))
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Forget the table thing'),
+      aether(1, 't1', 'aether_forget', 'completed', { raw_input: { id: 'pref-1' }, raw_output: { deleted: { ...saved, workspace_id: workspace.id } } }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Forgotten: Prefer table output\. Done$/)
+    expect(within(notice).queryByRole('button', { name: 'Edit' })).toBeNull()
+    await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
+    expect((await within(notice).findByRole('alert')).textContent).toBe('memory is off: you turned it off in Settings')
+
+    vi.mocked(api.preferenceAdd).mockResolvedValueOnce({ preference: saved } as never)
+    await userEvent.click(within(notice).getByRole('button', { name: 'Undo' }))
+    expect(api.preferenceAdd).toHaveBeenLastCalledWith({ text: 'Prefer table output', workspace_id: workspace.id })
+    expect(await within(notice).findByText('Undone')).toBeDefined()
+  })
+
+  it('says how many preferences the assistant used and lists them on request', async () => {
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Show the failing tests'),
+      aether(1, 't1', 'aether_my_preferences', 'completed', {
+        raw_output: { preferences: [
+          { id: 'pref-1', text: 'Prefer table output', scope: 'all', source: 'assistant', updated_at: '2026-10-27T10:00:00Z' },
+          { id: 'pref-2', text: 'Use pnpm here', scope: 'workspace', source: 'settings', updated_at: '2026-10-27T10:00:00Z' },
+        ] },
+      }),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const notice = await card(aside, /^Used 2 of your preferences\. Done$/)
+    expect(within(notice).queryByText('Use pnpm here')).toBeNull()
+    await userEvent.click(within(notice).getByRole('button', { name: 'Show preferences' }))
+    const list = within(notice).getByRole('list', { name: 'Preferences used' })
+    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      'Prefer table output · All my workspaces',
+      'Use pnpm here · This workspace',
+    ])
+  })
+})

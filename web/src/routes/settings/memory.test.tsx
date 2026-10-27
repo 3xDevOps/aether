@@ -1,0 +1,203 @@
+import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { ApiError } from '@/lib/api'
+import type { Preference } from '@/lib/types'
+import { SettingsRoute } from '@/routes/settings'
+import { forgetWarning } from '@/routes/settings/memory-row'
+import { MemorySection, preferencesLabel } from '@/routes/settings/memory'
+import { useStore } from '@/store'
+import { alice, fakeApi, serverInfo, workspace } from '@/test/fixtures'
+
+function pref(over: Partial<Preference> = {}): Preference {
+  return {
+    id: 'pref-1',
+    text: 'Prefer table output',
+    enabled: true,
+    source: 'assistant',
+    created_at: '2026-10-27T10:00:00Z',
+    updated_at: '2026-10-27T10:00:00Z',
+    ...over,
+  }
+}
+
+function seed(entry?: string) {
+  useStore.setState({
+    ...useStore.getInitialState(),
+    info: serverInfo,
+    members: { [alice.id]: alice },
+    workspaces: { [workspace.id]: workspace },
+    activeWorkspace: workspace.id,
+    hydrated: true,
+    capabilities: { gateway: 'remote', methods: ['*'], ws: [] },
+    route: { name: 'settings', params: { section: 'memory', ...(entry ? { entry } : {}) } },
+  }, true)
+}
+
+function show(preferences: Preference[], over: Parameters<typeof fakeApi>[0] = {}, enabled = true) {
+  const client = fakeApi({ preferenceList: vi.fn(async () => ({ preferences, enabled })), ...over })
+  render(<MemorySection client={client} />)
+  return client
+}
+
+describe('memory in settings', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    seed()
+  })
+
+  it('is a Settings category only where the server has preferences', async () => {
+    useStore.setState({ capabilities: { gateway: 'remote', methods: ['preference.list'], ws: [] } })
+    const client = fakeApi({ preferenceList: vi.fn(async () => ({ preferences: [pref()], enabled: true })) })
+    render(<SettingsRoute params={{ section: 'memory' }} client={client} />)
+    expect(await screen.findByRole('heading', { name: 'Memory' })).toBeDefined()
+    expect(await screen.findByText('Prefer table output')).toBeDefined()
+  })
+
+  it('says who can see the preferences and lists each with its scope, source and times', async () => {
+    show([
+      pref({ last_used_at: '2026-10-27T11:00:00Z' }),
+      pref({ id: 'pref-2', text: 'Use pnpm here', workspace_id: workspace.id, source: 'settings', updated_at: '2026-10-26T10:00:00Z' }),
+    ])
+    expect(screen.getByText(/Only you can see these\. Teammates, their runs and connected apps can't\. Server operators can read the server database\./)).toBeDefined()
+    expect(screen.getByText('The assistant uses them when they fit; what you say in a message always wins.')).toBeDefined()
+    const rows = within(await screen.findByRole('list', { name: 'Preferences' })).getAllByRole('listitem')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.textContent).toContain('Prefer table output')
+    expect(rows[0]!.textContent).toContain('All my workspaces')
+    expect(rows[0]!.textContent).toMatch(/You said in the assistant · [A-Z][a-z]{2} \d+/)
+    expect(rows[0]!.textContent).toContain('Last used')
+    expect(rows[1]!.textContent).toContain(workspace.name)
+    expect(rows[1]!.textContent).toContain('Added in Settings')
+    expect(rows[1]!.textContent).toContain('Not used yet')
+  })
+
+  it('filters by text', async () => {
+    const user = userEvent.setup()
+    show([pref(), pref({ id: 'pref-2', text: 'Use pnpm here' })])
+    await screen.findByText('Use pnpm here')
+    await user.type(screen.getByRole('searchbox', { name: 'Search preferences' }), 'pnpm')
+    expect(screen.queryByText('Prefer table output')).toBeNull()
+    expect(screen.getByText('Use pnpm here')).toBeDefined()
+  })
+
+  it('reads the real error when the list cannot load', async () => {
+    const client = fakeApi({ preferenceList: vi.fn(async () => { throw new ApiError(-32001, 'preference.list: database is locked') }) })
+    render(<MemorySection client={client} />)
+    expect((await screen.findByRole('alert')).textContent).toContain('database is locked')
+  })
+
+  it('adds a preference for all workspaces or this one, and keeps the draft with the server error', async () => {
+    const user = userEvent.setup()
+    const client = show([], {
+      preferenceAdd: vi.fn()
+        .mockRejectedValueOnce(new ApiError(-32003, 'preference.add: memory is off: the owner turned memory off'))
+        .mockImplementation(async (params) => ({ preference: pref({ id: 'pref-9', text: params.text, workspace_id: params.workspace_id, source: 'settings' }) })),
+    })
+    await screen.findByRole('heading', { name: 'Nothing remembered yet' })
+    const box = screen.getByRole('textbox', { name: 'Add a preference' })
+    await user.type(box, 'Reply in English')
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('memory is off: the owner turned memory off')
+    expect((box as HTMLTextAreaElement).value).toBe('Reply in English')
+
+    await user.click(screen.getByRole('radio', { name: 'This workspace' }))
+    await user.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(client.preferenceAdd).toHaveBeenLastCalledWith({ text: 'Reply in English', workspace_id: workspace.id }))
+    expect(await screen.findByText('Added in Settings')).toBeDefined()
+    expect((box as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('edits a preference in place and shows a refusal verbatim', async () => {
+    const user = userEvent.setup()
+    const client = show([pref()], {
+      preferenceUpdate: vi.fn()
+        .mockRejectedValueOnce(new ApiError(-32602, 'preference.update: text looks like an API key (aws access key); not saved'))
+        .mockImplementation(async (params) => ({ preference: pref({ text: params.text }), previous: pref() })),
+    })
+    await user.click(await screen.findByRole('button', { name: 'Edit' }))
+    const box = screen.getByRole('textbox', { name: 'Preference text' })
+    await user.clear(box)
+    await user.type(box, 'Prefer JSON output')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('text looks like an API key (aws access key); not saved')
+
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(client.preferenceUpdate).toHaveBeenLastCalledWith({ id: 'pref-1', text: 'Prefer JSON output' }))
+    expect(await screen.findByText('Prefer JSON output')).toBeDefined()
+    expect(screen.queryByRole('textbox', { name: 'Preference text' })).toBeNull()
+  })
+
+  it('turns a preference off and on without forgetting it', async () => {
+    const user = userEvent.setup()
+    const client = show([pref()], {
+      preferenceUpdate: vi.fn(async (params) => ({ preference: pref({ enabled: params.enabled }), previous: pref() })),
+    })
+    await user.click(await screen.findByRole('button', { name: 'Turn off' }))
+    expect(client.preferenceUpdate).toHaveBeenCalledWith({ id: 'pref-1', enabled: false })
+    expect(await screen.findByText('Off')).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Turn on' }))
+    expect(client.preferenceUpdate).toHaveBeenLastCalledWith({ id: 'pref-1', enabled: true })
+  })
+
+  it('asks before forgetting, says what forgetting does not undo, and offers undo', async () => {
+    const user = userEvent.setup()
+    const client = show([pref()], {
+      preferenceDelete: vi.fn(async () => ({ deleted: pref() })),
+      preferenceAdd: vi.fn(async (params) => ({ preference: pref({ id: 'pref-2', text: params.text }) })),
+    })
+    await user.click(await screen.findByRole('button', { name: 'Forget' }))
+    expect(screen.getByText(new RegExp(`Forget this preference\\? ${forgetWarning.slice(0, 40)}`))).toBeDefined()
+    expect(client.preferenceDelete).not.toHaveBeenCalled()
+    await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    expect(client.preferenceDelete).toHaveBeenCalledWith('pref-1')
+    const notice = await screen.findByRole('status')
+    expect(notice.textContent).toContain('Forgotten: Prefer table output')
+    expect(notice.textContent).toContain(`Forgotten. ${forgetWarning}`)
+    expect(screen.queryByRole('list', { name: 'Preferences' })).toBeNull()
+
+    await user.click(within(notice).getByRole('button', { name: 'Undo' }))
+    expect(client.preferenceAdd).toHaveBeenCalledWith({ text: 'Prefer table output' })
+    expect(await screen.findByRole('list', { name: 'Preferences' })).toBeDefined()
+  })
+
+  it('keeps a preference and shows the error when forgetting fails', async () => {
+    const user = userEvent.setup()
+    show([pref()], { preferenceDelete: vi.fn(async () => { throw new ApiError(-32004, 'preference.delete: preference pref-1 not found') }) })
+    await user.click(await screen.findByRole('button', { name: 'Forget' }))
+    await user.click(screen.getAllByRole('button', { name: 'Forget' }).at(-1)!)
+    expect((await screen.findByRole('alert')).textContent).toBe('preference pref-1 not found')
+    expect(screen.getByText('Prefer table output')).toBeDefined()
+  })
+
+  it('switches use in the assistant with the setting the server returns', async () => {
+    const user = userEvent.setup()
+    const client = show([pref()], {
+      assistantSettings: vi.fn(async () => ({ auto_approve: false, suggest_auto_approve: false, suggestion_off: false, share_view: true, preferences_enabled: false })),
+    })
+    const toggle = await screen.findByRole('checkbox', { name: preferencesLabel })
+    await waitFor(() => expect(toggle).toHaveProperty('disabled', false))
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    await user.click(toggle)
+    expect(client.assistantSettings).toHaveBeenCalledWith({ preferences_enabled: false })
+    await waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('false'))
+    expect(screen.getByText(/Off\. The assistant doesn't read or save your preferences/)).toBeDefined()
+  })
+
+  it('highlights the entry in the address and says when it is gone', async () => {
+    seed('pref-2')
+    show([pref(), pref({ id: 'pref-2', text: 'Use pnpm here' })])
+    const row = await waitFor(() => {
+      const el = document.getElementById('preference-pref-2')
+      if (!el || !el.hasAttribute('data-highlight')) throw new Error('not highlighted')
+      return el
+    })
+    expect(row.textContent).toContain('Use pnpm here')
+    expect(document.getElementById('preference-pref-1')?.hasAttribute('data-highlight')).toBe(false)
+  })
+
+  it('says so when the entry in the address no longer exists', async () => {
+    seed('pref-gone')
+    show([pref()])
+    expect(await screen.findByText(/That preference no longer exists/)).toBeDefined()
+  })
+})

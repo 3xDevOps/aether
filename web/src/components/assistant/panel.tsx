@@ -5,6 +5,7 @@ import { ActionHistory } from '@/components/assistant/action-history'
 import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
 import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
 import { AssistantComposer } from '@/components/assistant/composer'
+import { TemporaryChatToggle } from '@/components/assistant/temporary'
 import { AssistantFailed, AssistantRestart, AssistantSetup, EmptyConversation } from '@/components/assistant/states'
 import { AssistantSheet, AutoApproveSuggestion } from '@/components/assistant/suggestion'
 import { assistantRows, Transcript } from '@/components/assistant/transcript'
@@ -182,6 +183,7 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
         actions={
           <>
             {ready && <ActionHistory session={session} />}
+            {ready && <TemporaryChatToggle temporary={status?.temporary === true} />}
             {ready && (
               <Button variant="ghost" size="icon-sm" label="New conversation" onClick={() => setConfirming(true)}>
                 <MessageSquarePlus />

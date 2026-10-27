@@ -60,6 +60,8 @@ export interface AssistantStatus {
   suggest_auto_approve: boolean
   /** Prompts carry the member's view context. */
   share_view: boolean
+  /** Temporary chat: the assistant neither uses nor saves preferences, and the chat is discarded on New conversation. */
+  temporary?: boolean
 }
 
 export interface AssistantSettings {
@@ -68,6 +70,9 @@ export interface AssistantSettings {
   /** The suggestion will not show again. */
   suggestion_off: boolean
   share_view: boolean
+  /** Use the member's private preferences in the assistant; absent reads as on. */
+  preferences_enabled?: boolean
+  temporary?: boolean
 }
 
 /** Fields left out are not changed; none reads the settings. */
@@ -76,6 +81,8 @@ export interface AssistantSettingsParams {
   /** Answers the suggestion: `later` snoozes it, `never` stops it. */
   suggestion?: 'later' | 'never'
   share_view?: boolean
+  preferences_enabled?: boolean
+  temporary?: boolean
 }
 
 export interface AssistantStartParams {

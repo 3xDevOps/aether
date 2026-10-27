@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type * as React from 'react'
 import { conflictChoiceID, ContextChips } from '@/components/assistant/context-chips'
 import { ArrowUp, Square } from '@/components/icons'
+import { TemporaryBanner } from '@/components/assistant/temporary'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
@@ -108,6 +109,7 @@ export function AssistantComposer({ textarea, running, dock }: {
     <div className="shrink-0 border-t border-seam bg-canvas pb-[var(--keyboard-inset,0px)]">
       <div className="flex flex-col gap-2 px-3 py-3">
         {dock}
+        <TemporaryBanner />
         {error && <p role="alert" className="text-ui-sm break-words text-state-failed">{error}</p>}
         <ContextChips textarea={textarea} />
         <div className={cn('overflow-hidden rounded-control border border-control bg-canvas', focused && 'outline-1 -outline-offset-1 outline-accent shadow-field-focus')}>

@@ -2410,3 +2410,56 @@ export interface WatchChangedPayload {
   member_id: string
   notification_id?: string
 }
+
+// Wire types of preference.* (internal/protocol/preference.go).
+
+export type PreferenceSource = 'assistant' | 'settings' | 'cli'
+
+export interface Preference {
+  id: string
+  /** Absent: applies in all the member's workspaces. */
+  workspace_id?: string
+  text: string
+  enabled: boolean
+  source: PreferenceSource
+  /** The assistant message the member said it in. */
+  source_ref?: string
+  created_at: string
+  updated_at: string
+  last_used_at?: string
+}
+
+export interface PreferenceListParams {
+  workspace_id?: string
+  query?: string
+  include_disabled?: boolean
+}
+
+export interface PreferenceListResult {
+  preferences: Preference[]
+  /** The member's "use my preferences" setting. */
+  enabled: boolean
+}
+
+export interface PreferenceAddParams {
+  text: string
+  workspace_id?: string
+}
+
+export interface PreferenceUpdateParams {
+  id: string
+  text?: string
+  workspace_id?: string
+  clear_workspace?: boolean
+  enabled?: boolean
+}
+
+export interface PreferenceResult {
+  preference: Preference
+  /** The row before the change. */
+  previous?: Preference
+}
+
+export interface PreferenceDeleteResult {
+  deleted: Preference
+}

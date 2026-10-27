@@ -20,6 +20,7 @@ const opensWord: Record<ActionTarget['kind'], string> = {
   workspace: 'opens the workspace',
   environment: 'opens the environment',
   watch: 'opens the watch',
+  preference: 'opens the preference',
   link: 'opens the link',
 }
 
