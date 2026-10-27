@@ -88,7 +88,10 @@ func TestPossibleStallHoldsAgainstItsTurnsLateStartNotice(t *testing.T) {
 	entry := e.sched.runs[run.ID]
 	e.sched.mu.Unlock()
 	turnAt := e.sched.acp.session(run.ID).State().TurnStartedAt
-	e.sched.acp.turnState(entry, false, acphost.TurnState{Working: true, TurnStartedAt: turnAt})
+	// An earlier turn's notice, queued as long, says no more than the parked turn's own.
+	for _, started := range []time.Time{turnAt.Add(-time.Second), turnAt} {
+		e.sched.acp.turnState(entry, false, acphost.TurnState{Working: true, TurnStartedAt: started})
+	}
 	time.Sleep(10 * 20 * time.Millisecond)
 	r, err := e.db.GetRun(t.Context(), run.ID)
 	if err != nil {

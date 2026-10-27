@@ -97,11 +97,11 @@ func (s *Scheduler) applyAgentReportIf(ctx context.Context, run domain.RunID, re
 		entry.exitObserved || entry.finalizing || entry.retained || entry.destroyPending {
 		return nil, fmt.Errorf("scheduler: agent status report for %s: the run is no longer active (%s)", run, entry.status)
 	}
-	// The start notice of the turn a stall parked can arrive after the park.
-	// It says nothing new about that turn, so it neither releases the run nor
-	// counts as activity.
+	// The start notice of the turn a stall parked, or of an earlier one, can
+	// arrive after the park. It says nothing new, so it neither releases the
+	// run nor counts as activity.
 	if report.TurnStart && entry.status == domain.RunNeedsAttention && entry.cause == events.CauseStall &&
-		!entry.stallTurnAt.IsZero() && report.StartedAt.Equal(entry.stallTurnAt) {
+		!entry.stallTurnAt.IsZero() && !report.StartedAt.IsZero() && !report.StartedAt.After(entry.stallTurnAt) {
 		return nil, nil
 	}
 	if report.Subagent && report.State == "" && len(report.InputUpdates) == 0 {
