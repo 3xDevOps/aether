@@ -3,12 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { WatchDialog } from '@/components/palette/watch-dialog'
 import type { Event, Watch, WatchDelivery, WatchNotification } from '@/lib/types'
-import { ApiError, codeUnavailable } from '@/lib/api'
+import { ApiError, codeNotFound, codeUnavailable } from '@/lib/api'
 import { SettingsRoute } from '@/routes/settings'
 import { WatchNotifySection } from '@/routes/settings/notifications'
 import { useStore, type RootState } from '@/store'
 import { toRecord } from '@/store/runs'
 import { applyWatchChanged } from '@/store/watch-notice'
+import { deleteWatch, loadWatches, readWatch, updateWatch } from '@/store/watches'
 import { fakeApi, run, serverInfo, workspace } from '@/test/fixtures'
 import { atViewport } from '@/test/viewport'
 
@@ -291,6 +292,102 @@ describe('creating a watch', () => {
     await user.click(screen.getByRole('button', { name: 'Watch' }))
     expect((await screen.findByRole('alert')).textContent).toContain('acme/app is not reachable with your GitHub credentials')
     expect(useStore.getState().paletteDialog).toBe('watch')
+  })
+})
+
+function held<T>() {
+  let release!: (value: T) => void
+  const promise = new Promise<T>((resolve) => { release = resolve })
+  return { promise, release }
+}
+
+describe('watch answers that arrive late', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    seed()
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('opens the watch dialog where crypto.randomUUID is missing, as on plain HTTP', async () => {
+    vi.stubGlobal('crypto', {})
+    seed({ paletteDialog: 'watch', paletteRunID: fixRun.id })
+    const user = userEvent.setup()
+    const client = fakeApi({ watchCreate: vi.fn(async () => ({ watch: watch(), receipt: 'Watching run fix-login.' })) })
+    render(<WatchDialog client={client} />)
+    await user.click(screen.getByRole('checkbox', { name: 'CI finished' }))
+    await user.click(screen.getByRole('button', { name: 'Watch' }))
+    expect(vi.mocked(client.watchCreate).mock.calls[0]![0].idempotency_key).toMatch(/^watch-/)
+  })
+
+  it("drops a create, change or read answered after the member switched, and never shows the first member's watch", async () => {
+    seed({ paletteDialog: 'watch', paletteRunID: fixRun.id })
+    const created = held<{ watch: Watch; receipt: string }>()
+    const client = fakeApi({ watchCreate: vi.fn(() => created.promise) })
+    render(<WatchDialog client={client} />)
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Watch' }))
+    useStore.setState({ identityKey: 'other', watches: {}, watchesFor: 'other' })
+    created.release({ watch: watch(), receipt: 'Watching run fix-login.' })
+    await waitFor(() => expect(useStore.getState().paletteDialog).toBeNull())
+    expect(useStore.getState().watches).toEqual({})
+    expect(toast.success).not.toHaveBeenCalled()
+
+    useStore.setState({ identityKey: 'me', watches: {}, watchesFor: 'me' })
+    const updated = held<{ watch: Watch; receipt: string }>()
+    const got = held<{ watch: Watch; notifications: WatchNotification[] }>()
+    const listed = held<Watch[]>()
+    const later = fakeApi({ watchUpdate: vi.fn(() => updated.promise), watchGet: vi.fn(() => got.promise), watchList: vi.fn(() => listed.promise) })
+    const update = updateWatch(useStore, later, { watch_id: 'wat-1', paused: true })
+    const read = readWatch(useStore, later, 'wat-1')
+    const list = loadWatches(useStore, later)
+    useStore.setState({ identityKey: 'other', watches: {}, watchesFor: 'other' })
+    updated.release({ watch: watch({ state: 'paused' }), receipt: 'Paused.' })
+    got.release({ watch: watch(), notifications: [notice] })
+    listed.release([watch()])
+    expect(await update).toBeNull()
+    await read
+    await list
+    expect(useStore.getState().watches).toEqual({})
+    expect(useStore.getState().watchNotices).toEqual({})
+  })
+
+  it('keeps a deleted watch gone when an older read or list answers after the delete', async () => {
+    const got = held<{ watch: Watch; notifications: WatchNotification[] }>()
+    const listed = held<Watch[]>()
+    const client = fakeApi({ watchGet: vi.fn(() => got.promise), watchList: vi.fn(() => listed.promise), watchDelete: vi.fn(async () => ({})) })
+    useStore.getState().putWatch(watch())
+    const read = readWatch(useStore, client, 'wat-1')
+    const list = loadWatches(useStore, client)
+    await deleteWatch(useStore, client, 'wat-1')
+    got.release({ watch: watch(), notifications: [notice] })
+    listed.release([watch()])
+    await read
+    await list
+    expect(useStore.getState().watches['wat-1']).toBeUndefined()
+  })
+
+  it('keeps the newest state when watch.changed reads answer out of order', async () => {
+    const first = held<{ watch: Watch; notifications: WatchNotification[] }>()
+    const second = held<{ watch: Watch; notifications: WatchNotification[] }>()
+    const answers = [first.promise, second.promise]
+    const client = fakeApi({ watchGet: vi.fn(() => answers.shift()!) })
+    const event = (): Event => ({ id: 'ev-1', seq: 1, type: 'watch.changed', time: '2026-01-01T00:00:00Z', workspace_id: '', run_id: '', actor_id: '', payload: { watch_id: 'wat-1', member_id: serverInfo.member.id } })
+    const older = applyWatchChanged(useStore, client, event())
+    const newer = applyWatchChanged(useStore, client, event())
+    second.release({ watch: watch({ state: 'paused' }), notifications: [notice] })
+    await newer
+    first.release({ watch: watch(), notifications: [] })
+    await older
+    expect(useStore.getState().watches['wat-1']?.state).toBe('paused')
+    expect(useStore.getState().watchNotices['wat-1']).toEqual([notice])
+
+    const gone = fakeApi({ watchGet: vi.fn(async () => { throw new ApiError(404, 'watch.get: no such watch', codeNotFound) }) })
+    const stale = held<{ watch: Watch; notifications: WatchNotification[] }>()
+    const slow = fakeApi({ watchGet: vi.fn(() => stale.promise) })
+    const before = applyWatchChanged(useStore, slow, event())
+    await applyWatchChanged(useStore, gone, event())
+    stale.release({ watch: watch(), notifications: [] })
+    await before
+    expect(useStore.getState().watches['wat-1']).toBeUndefined()
   })
 })
 

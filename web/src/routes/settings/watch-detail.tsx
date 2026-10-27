@@ -19,7 +19,7 @@ import { errorSentence } from '@/lib/format'
 import type { Watch, WatchCondition, WatchNotification } from '@/lib/types'
 import { conditionChoices, conditionLabel, deliveryText, deliveryTone, isLive, linkTarget, maxExpiryDays, targetLink, stateWords, targetKindLabel } from '@/lib/watches'
 import { useStore } from '@/store'
-import { readWatch } from '@/store/watches'
+import { deleteWatch, readWatch, updateWatch } from '@/store/watches'
 
 const dayMs = 24 * 60 * 60 * 1000
 
@@ -153,13 +153,13 @@ function Edit({ watch, client }: { watch: Watch; client: Api }) {
     setBusy(true)
     setError(null)
     try {
-      const result = await client.watchUpdate({
+      const result = await updateWatch(useStore, client, {
         watch_id: watch.id,
         ...(conditionsChanged ? { conditions: form.conditions } : {}),
         ...(labelChanged ? { label: form.label.trim() } : {}),
         ...(expiresChanged ? { expires_at: endOfDay(form.expires, latestEnd()) } : {}),
       })
-      useStore.getState().putWatch(result.watch)
+      if (!result) return
       const next = { at: result.watch.updated_at, fields: editFields(result.watch) }
       setBase(next)
       setForm(next.fields)
@@ -247,9 +247,8 @@ export function WatchDetail({ watchID, client, onClose }: { watchID: string; cli
     if (!watch) return
     setBusy(true)
     try {
-      const result = await client.watchUpdate({ watch_id: watch.id, paused })
-      useStore.getState().putWatch(result.watch)
-      toast.success(result.receipt)
+      const result = await updateWatch(useStore, client, { watch_id: watch.id, paused })
+      if (result) toast.success(result.receipt)
     } catch (err) {
       toast.error(`${paused ? 'Pause' : 'Resume'} failed: ${errorSentence(err)}`)
     } finally {
@@ -305,9 +304,8 @@ export function WatchDetail({ watchID, client, onClose }: { watchID: string; cli
             description="The server stops checking it and forgets its notifications. The target itself is not touched."
             action="Delete watch"
             pending="Deleting…"
-            onConfirm={() => client.watchDelete(watch.id)}
+            onConfirm={() => deleteWatch(useStore, client, watch.id)}
             onDone={() => {
-              useStore.getState().dropWatch(watch.id)
               toast.success('Watch deleted')
               onClose()
             }}
