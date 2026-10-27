@@ -552,6 +552,12 @@ func TestConnectorReadTools(t *testing.T) {
 		strings.Contains(text, "0 comments") || out["comments_unavailable"] != true {
 		t.Fatalf("aether_pr_status of a finished run without comments = %q %v", text, out)
 	}
+	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{PullRequest: &protocol.RunPullRequest{Number: 7, State: "MERGED"},
+		Checks: []protocol.RunPRCheck{{Name: "test", Conclusion: "FAILURE"}}, CommentsUnavailable: true, ReviewsUnavailable: true, Error: "read reviews from GitHub: HTTP 502"})
+	if text, out = run(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); text != "PR #7 is MERGED: 0 checks passed, 1 failing, 0 pending; reviews unavailable (read reviews from GitHub: HTTP 502), comments unavailable (the run's environment is gone); merge state unknown." ||
+		out["reviews_unavailable"] != true || out["error"] != "read reviews from GitHub: HTTP 502" {
+		t.Fatalf("aether_pr_status whose reviews read failed = %q %v", text, out)
+	}
 	f.answers[protocol.MethodRunPRFeedback] = returns(protocol.RunPRFeedbackResult{Error: "no pull request for branch x"})
 	if msg, _, failed := try(t, cs, "aether_pr_status", map[string]any{"run_id": "run-1"}); !failed || !strings.Contains(msg, "no pull request for branch x; aether_message_run") {
 		t.Fatalf("aether_pr_status without a PR = %q", msg)

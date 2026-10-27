@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -496,6 +497,20 @@ func TestInsightsGet(t *testing.T) {
 	if err := db.ShareAccount(ctx, bob, alice); err != nil {
 		t.Fatal(err)
 	}
+	// A failed reviews read keeps the checks read before it.
+	read := gh.snap
+	gh.snap.Reviews, gh.err = nil, &githubservice.ReviewsError{Err: errors.New("github: API request: HTTP 502 Bad Gateway")}
+	feedback = protocol.RunPRFeedbackResult{}
+	if out, perr = e.srv.dispatch(ctx, alice, protocol.MethodRunPRFeedback, repoParams(t, protocol.RunPRFeedbackParams{RunID: "top2", Limit: 30})); perr == nil {
+		if err := json.Unmarshal(out, &feedback); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if perr != nil || !feedback.ReviewsUnavailable || !reflect.DeepEqual(feedback.Checks, wantChecks) || len(feedback.Reviews) != 0 ||
+		feedback.Error != "read reviews from GitHub: github: API request: HTTP 502 Bad Gateway" || !feedback.Blockers().Partial {
+		t.Errorf("run.pr.feedback whose reviews read failed = %+v, %+v; want the checks, reviews marked unavailable with the error", feedback, perr)
+	}
+	gh.snap, gh.err = read, nil
 	lookup = slices.Clone(gh.lookups)
 	if _, perr = status("top6"); perr == nil || perr.Code != protocol.CodeInvalidState {
 		t.Errorf("run.pr.status without a live environment or a recorded PR: error = %+v, want invalid state", perr)

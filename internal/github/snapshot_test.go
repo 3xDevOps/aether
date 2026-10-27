@@ -522,6 +522,21 @@ func TestPullRequestSnapshotTypedErrorsCarryGitHubMessage(t *testing.T) {
 	}
 }
 
+// A failed reviews read returns the pull request and checks read before it.
+func TestPullRequestSnapshotKeepsChecksWhenReviewsFail(t *testing.T) {
+	f := newFakeGitHub(t)
+	standardPR(f)
+	delete(f.bodies, reviewsPage1)
+	snap, err := snapshotService(t, f).PullRequestSnapshot(context.Background(), testToken, "acme/app", 7, nil)
+	var reviewsErr *ReviewsError
+	if !errors.As(err, &reviewsErr) || !errors.Is(err, ErrNotFound) || !strings.HasPrefix(err.Error(), "read reviews: github: API request: HTTP 404") {
+		t.Fatalf("snapshot whose reviews read failed: error = %v, want a ReviewsError wrapping the 404", err)
+	}
+	if snap.HeadSHA != headSHA || len(snap.CheckRuns) != 1 || snap.CheckRuns[0].Name != "build" || snap.Reviews != nil {
+		t.Fatalf("snapshot whose reviews read failed = %+v, want the pull request and its checks", snap)
+	}
+}
+
 func TestPullRequestSnapshotBoundsPagination(t *testing.T) {
 	f := newFakeGitHub(t)
 	standardPR(f)

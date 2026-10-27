@@ -16,6 +16,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/fallback"
+	githubservice "github.com/3xDevOps/Aether/internal/github"
 	"github.com/3xDevOps/Aether/internal/permissions"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runrepo"
@@ -464,7 +465,8 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 		if errors.Is(snapErr, permissions.ErrDenied) {
 			return nil, rpcError(snapErr)
 		}
-		if snapErr != nil {
+		var reviewsErr *githubservice.ReviewsError
+		if snapErr != nil && !errors.As(snapErr, &reviewsErr) {
 			out.Error = strings.TrimSuffix("read checks and reviews from GitHub: "+repoError(snapErr)+"; "+status.Error, "; ")
 			return out, nil
 		}
@@ -473,6 +475,10 @@ func (s *Server) runPRFeedback(ctx context.Context, member domain.MemberID, raw 
 		out.PullRequest = &protocol.RunPullRequest{Number: pr.Number, URL: cmp.Or(snap.URL, pr.URL), State: snap.State, Title: snap.Title, Draft: snap.Draft,
 			Repository: pr.Repository, BaseBranch: snap.BaseRef, HeadOID: snap.HeadSHA, MergedAt: snap.MergedAt}
 		out.Checks, out.Reviews, out.Truncated = snapshotFeedback(snap, cmp.Or(p.Limit, protocol.MaxRunPRFeedbackEntries))
+		if reviewsErr != nil {
+			out.ReviewsUnavailable = true
+			out.Error = strings.TrimSuffix("read reviews from GitHub: "+repoError(reviewsErr.Err)+"; "+status.Error, "; ")
+		}
 		return out, nil
 	}
 	if err != nil {

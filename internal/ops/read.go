@@ -987,8 +987,13 @@ func prStatus(ctx context.Context, c calls, in prStatusInput) (string, any, erro
 		out["comments_unavailable"] = true
 		commented = "comments unavailable (the run's environment is gone)"
 	}
-	return fmt.Sprintf("PR #%d is %s: %d checks passed, %d failing, %d pending; %d reviews, %s%s; merge state %s.",
-		pr.Number, pr.State, passed, len(failing), pending, len(reviews), commented, counted, cmp.Or(res.MergeStateStatus, "unknown")), out, nil
+	reviewed := fmt.Sprintf("%d reviews", len(reviews))
+	if res.ReviewsUnavailable {
+		out["reviews_unavailable"] = true
+		reviewed = "reviews unavailable (" + res.Error + ")"
+	}
+	return fmt.Sprintf("PR #%d is %s: %d checks passed, %d failing, %d pending; %s, %s%s; merge state %s.",
+		pr.Number, pr.State, passed, len(failing), pending, reviewed, commented, counted, cmp.Or(res.MergeStateStatus, "unknown")), out, nil
 }
 
 func overlaps(ctx context.Context, c calls, in overlapsInput) (string, any, error) {

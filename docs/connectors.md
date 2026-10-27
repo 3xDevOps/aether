@@ -456,7 +456,9 @@ afterwards, the result is that pull request. `aether_pr_status` and
 run's container is gone, `aether_pr_status` still reports its recorded pull
 request's checks and reviews, read from GitHub, without merge state or
 comments: its result sets `comments_unavailable` and its summary says
-`comments unavailable` instead of a count.
+`comments unavailable` instead of a count. When only the reviews read fails,
+it keeps the checks, sets `reviews_unavailable` and puts the error in its
+summary in place of the review count.
 `aether_handoff_run` takes the teammate's member id or exact display name; an
 unknown or ambiguous one fails with the teammates' ids and roles, and the server
 refuses a viewer. `aether_switch_run_mode` holds no control lease, so it fails

@@ -311,7 +311,7 @@ func (s *Service) pullRequestSnapshot(ctx context.Context, token, repo string, n
 		return out
 	})
 	if err != nil {
-		return Snapshot{}, err
+		return snap, &ReviewsError{Err: err}
 	}
 	snap.Reviews, snap.Pages = reviews, append(snap.Pages, pages...)
 	return snap, nil
