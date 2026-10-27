@@ -6,7 +6,7 @@ import { Card, CardControls, CardTitle } from '@/components/ui/card'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot, type Tone } from '@/components/ui/status-dot'
-import { runLabel, stateLabel, stateTitle, stateTone, stateWords } from '@/lib/status'
+import { runLabel, stateLabel, stateTitle, stateWords, toneOf } from '@/lib/status'
 import type { MissionPhase } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { CardActionButton, cardAction, openCard, ReplyComposer, setReplying, useReply } from '@/routes/board/card-action'
@@ -42,7 +42,8 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
   const state = needsYou && !card.needsYou ? 'needs-you' : card.state
   const asking = !card.needsYou && card.childRuns ? card.children[0] : undefined
   const reason = card.swarm ? swarmReason(card, mission?.phase) : asking ? `${runLabel(asking.run)}: ${asking.reason}` : card.reason
-  const words = stateWords({ state, reason: asking ? reason : card.reason })
+  const wait = asking ? undefined : card.wait
+  const words = stateWords({ state, reason: asking ? reason : card.reason, cause: card.cause, wait })
   const label = needsYou ? stateLabel[state] : words.label
   const detail = needsYou || card.swarm ? reason : words.detail
   const description = detail && detail !== label ? detail : undefined
@@ -71,9 +72,9 @@ export const RunCard = memo(function RunCard({ card, agentName }: {
           <div className={cn('mt-2 flex min-h-4 min-w-0 flex-wrap items-center gap-2 text-ui-sm text-muted', wideIndent)}>
             <span
               className="flex min-w-0 flex-1 items-center gap-1.5"
-              title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next, cause: card.cause }, since)}
+              title={card.swarm ? undefined : stateTitle({ state, reason, next: card.next, cause: card.cause, wait }, since)}
             >
-              <StatusDot tone={stateTone[state]} label={label} />
+              <StatusDot tone={toneOf({ state, wait })} label={label} />
               <span className="min-w-0 truncate">
                 <span>{label}</span> · <RelativeTime compact at={since} className="tabular-nums" />
                 {card.workspaceName && <> · <span>{card.workspaceName}</span></>}

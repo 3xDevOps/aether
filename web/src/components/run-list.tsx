@@ -1,12 +1,13 @@
 import { useMemo, useState, type MouseEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { ChevronDown, ChevronRight } from '@/components/icons'
-import { StatusDot } from '@/components/ui/status-dot'
+import { StatusDot, type Tone } from '@/components/ui/status-dot'
 import { RunInputIndicator } from '@/components/run-input-indicator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { RelativeTime } from '@/components/ui/relative-time'
+import { useClock } from '@/lib/clock'
 import { useDelayed } from '@/lib/hooks'
-import { runLabel, stateLabel, stateTitle, stateTone, stateWords, type PresentationState } from '@/lib/status'
+import { runLabel, stateLabel, stateTitle, stateTone, stateWords, toneOf, type PresentationState } from '@/lib/status'
 import { cn, focusRing } from '@/lib/utils'
 import { useStore } from '@/store'
 import { useRunPresentation } from '@/store/hooks'
@@ -131,7 +132,7 @@ const foldable = (workers: RunRow[]) => workers.filter((worker) => !worker.needs
 const workersID = (runID: string) => `workers-${runID}`
 
 function Row({
-  row: { run, state, reason, next, cause, since, owner },
+  row: { run, state, reason, next, cause, wait, since, owner },
   toggle,
   nested,
 }: {
@@ -140,7 +141,9 @@ function Row({
   toggle?: { count: number; expanded: boolean; noun: string; onToggle: () => void }
 }) {
   const navigate = useStore((s) => s.navigate)
-  const words = stateWords({ state, reason })
+  const now = useClock()
+  const words = stateWords({ state, reason, cause, wait }, undefined, now)
+  const title = stateTitle({ state, reason, next, cause, wait }, since, now)
   return (
     <div
       onClick={(event: MouseEvent<HTMLDivElement>) => {
@@ -173,7 +176,7 @@ function Row({
             {toggle.expanded ? <ChevronDown /> : <ChevronRight />}
           </Button>
         )}
-        <StatusDot tone={stateTone[state]} label={stateLabel[state]} className="mt-1.5" />
+        <StatusDot tone={toneOf({ state, wait })} label={stateLabel[state]} className="mt-1.5" />
         <div className="min-w-0 flex-1">
           <button
             type="button"
@@ -214,7 +217,7 @@ function Row({
             {words.detail && (
               <>
                 <span aria-hidden> · </span>
-                <span>{words.detail}</span>
+                <span title={title}>{words.detail}</span>
               </>
             )}
           </span>
@@ -228,7 +231,7 @@ function Row({
       </span>
       <span className="col-start-1 row-start-2 flex min-w-0 flex-wrap items-center gap-1.5 text-ui-sm text-muted md:col-auto md:row-auto">
         <span className="md:hidden">Status</span>
-        <StatusChip state={state} label={words.label} title={stateTitle({ state, reason, next, cause }, since)} />
+        <StatusChip state={state} tone={toneOf({ state, wait })} label={words.label} title={title} />
         <RunInputIndicator run={run} />
       </span>
       <RelativeTime
@@ -241,13 +244,14 @@ function Row({
 }
 
 export function RunStatusChip({ run }: { run: RunRecord }) {
-  return <StatusChip state={useRunPresentation(run).state} />
+  const shown = useRunPresentation(run)
+  return <StatusChip state={shown.state} tone={toneOf(shown)} />
 }
 
-export function StatusChip({ state, label = stateLabel[state], title }: { state: PresentationState; label?: string; title?: string }) {
+export function StatusChip({ state, tone = stateTone[state], label = stateLabel[state], title }: { state: PresentationState; tone?: Tone; label?: string; title?: string }) {
   return (
     <span title={title} className="inline-flex min-h-5 items-center gap-1.5 rounded-chip border border-seam/80 px-1.5 py-px text-ui-sm leading-4 text-text">
-      <StatusDot tone={stateTone[state]} />
+      <StatusDot tone={tone} />
       <span>{label}</span>
     </span>
   )

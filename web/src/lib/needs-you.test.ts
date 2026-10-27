@@ -279,6 +279,28 @@ describe('needs you conditions', () => {
     expect(presented.needsYou?.action(parked)).toEqual({ kind: 'reply', label: 'Reply' })
   })
 
+  it.each([
+    ['condition', 'pr:o/r#12:checks: open, 3 checks running'],
+    ['source_unknown', 'pr:o/r#12:checks: status unknown'],
+    ['system_fault', 'pr:o/r#12:checks: error, waking the agent'],
+    ['system_fault', 'cannot read pr:o/r#12:checks for over 1h, so the agent will not be woken'],
+    ['unverified', undefined],
+  ] as const)('leaves a %s wait out of Needs you until the server parks it there (%j)', (kind, detail) => {
+    for (const state of ['waiting-agents', 'waiting-ci', 'waiting-tools'] as const) {
+      const parked = record({ status: 'needs-attention', state, reason: 'CI on #12', wait: { kind, detail, error: 'gh: HTTP 502' } })
+      expect(needsYou(parked, stateContext())).toBeUndefined()
+      expect(presentRun(parked, stateContext()).state).toBe(state)
+    }
+    const broken = record({
+      status: 'needs-attention', state: 'needs-you', cause: 'wait-fault',
+      reason: 'wait broken: pr:o/r#12:checks resolved, but the agent was not woken',
+      wait: { kind: 'system_fault', detail: 'pr:o/r#12:checks resolved, but the agent was not woken', error: 'deliver wake: session closed' },
+    })
+    expect(needsYou(broken, stateContext())?.id).toBe('needs-input')
+    // A swarm worker's broken wait is its integrator's to handle.
+    expect(needsYou({ ...broken, mission_role: 'worker' }, stateContext())).toBeUndefined()
+  })
+
   it("labels a disconnected agent with the server's reason", () => {
     const parked = record({ status: 'needs-attention', state: 'disconnected', reason: "enhanced session ended: the agent's ACP server exited with code 1" })
     expect(presentRun(parked, stateContext())).toMatchObject({ state: 'disconnected', reason: "Agent disconnected: the agent's ACP server exited with code 1" })

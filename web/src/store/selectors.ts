@@ -10,7 +10,7 @@ import {
 } from '@/lib/status'
 import { extraRepoCount, repoLabel } from '@/lib/repos'
 import { rootKey, runKey, runParents } from '@/routes/board/map-layout'
-import type { Member, RunStatusCause } from '@/lib/types'
+import type { Member, RunStatusCause, RunWait } from '@/lib/types'
 import type { RootState } from '@/store'
 import { isArchivable, type RunRecord } from '@/store/runs'
 
@@ -27,6 +27,7 @@ export interface RunRow {
   reason: string
   next?: string
   cause?: RunStatusCause
+  wait?: RunWait
   needsYou?: NeedsYouID
   unread?: number
   group: RunGroup
@@ -101,6 +102,7 @@ export function runRows(ctx: StateContext): RunRow[] {
       reason: shown.reason,
       next: shown.next,
       cause: shown.cause,
+      wait: shown.wait,
       needsYou: shown.needsYou?.id,
       unread: shown.unread,
       group: groupOf(shown),
