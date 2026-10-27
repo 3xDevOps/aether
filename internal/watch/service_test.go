@@ -63,6 +63,45 @@ func TestAStaleClearNeverHidesANewerNeed(t *testing.T) {
 	}
 }
 
+func TestDroppingNeedsYouSettlesItsPushes(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.bob)
+	run := h.run(h.ada, "Rotate the keys")
+	w := h.watch(h.bob, runTarget(run)).Watch
+	h.runs.ask(run.ID, "q1", "Rotate prod too?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the first push", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusDelivered })
+
+	// The second question's push fails and waits for its retry.
+	phone.status.Store(http.StatusInternalServerError)
+	h.runs.request(run.ID, "q2", "question", "Rotate staging?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	h.eventually("the second push to wait", func() bool {
+		return len(h.notices(w.ID)) == 2 && strings.HasPrefix(pushOf(h.notices(w.ID)[1]).Detail, "Retry")
+	})
+	phone.status.Store(http.StatusCreated)
+
+	if _, err := h.svc.Update(h.ctx, h.bob.ID, protocol.WatchUpdateParams{WatchID: w.ID, Conditions: []string{protocol.WatchFinished}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	h.eventually("the delivered need withdrawn", func() bool {
+		return pushOf(h.notices(w.ID)[0]).Status == protocol.WatchStatusWithdrawn
+	})
+	notes := h.notices(w.ID)
+	if d := pushOf(notes[0]); d.Detail != "Withdrawn: You stopped watching for needs you" {
+		t.Fatalf("first push row = %+v, want it withdrawn because needs you is no longer watched", d)
+	}
+	if d := pushOf(notes[1]); d.Status != protocol.WatchStatusCleared || d.Detail != "You stopped watching for needs you" || notes[1].PushState != store.WatchPushNone {
+		t.Fatalf("second push = %+v, %s; want it dropped as cleared", d, notes[1].PushState)
+	}
+	h.clock.advance(time.Hour)
+	settle()
+	if n := phone.received.Load(); n != 2 {
+		t.Fatalf("device received %d pushes, want the first question and its withdrawal", n)
+	}
+}
+
 func TestAQueuedClearStopsAtItsAttemptLimit(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

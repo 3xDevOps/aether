@@ -537,6 +537,7 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 			return protocol.WatchResult{}, invalid("watch %s is done: its target reached its final state", w.ID)
 		}
 		now := s.now()
+		watchedNeeds := slices.Contains(w.Conditions, protocol.WatchNeedsYou)
 		if len(p.Conditions) > 0 {
 			if w.Conditions, err = s.normalize(w.TargetKind, p.Conditions); err != nil {
 				return protocol.WatchResult{}, err
@@ -578,7 +579,16 @@ func (s *Service) Update(ctx context.Context, member domain.MemberID, p protocol
 		if err != nil {
 			return protocol.WatchResult{}, err
 		}
-		return s.settled(context.WithoutCancel(ctx), w.ID)
+		ctx = context.WithoutCancel(ctx)
+		if watchedNeeds && !slices.Contains(w.Conditions, protocol.WatchNeedsYou) {
+			if err := s.store.DropWatchNeedPushes(ctx, w.ID, now, stoppedNeeds); err != nil {
+				return protocol.WatchResult{}, err
+			}
+			if err := s.withdrawEnded(ctx, w); err != nil {
+				return protocol.WatchResult{}, err
+			}
+		}
+		return s.settled(ctx, w.ID)
 	}
 	return protocol.WatchResult{}, fmt.Errorf("watch %s: changed by every concurrent update", p.WatchID)
 }

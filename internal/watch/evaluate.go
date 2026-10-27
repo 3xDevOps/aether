@@ -146,10 +146,11 @@ func (s *Service) commit(ctx context.Context, w *store.Watch) error {
 }
 
 // withdrawEnded queues the quiet replacement of w's delivered needs_you
-// pushes, once its target needs nothing from the owner. A paused run's
-// needs read as none while they are still open, so they stay.
+// pushes, once its target needs nothing from the owner or they stopped
+// watching for it. A paused run's needs read as none while they are still
+// open, so they stay.
 func (s *Service) withdrawEnded(ctx context.Context, w *store.Watch) error {
-	if !slices.Contains(w.Conditions, protocol.WatchNeedsYou) || w.TargetKind == protocol.WatchTargetRun && s.runs.Paused(w.RunID) {
+	if slices.Contains(w.Conditions, protocol.WatchNeedsYou) && w.TargetKind == protocol.WatchTargetRun && s.runs.Paused(w.RunID) {
 		return nil
 	}
 	n, err := s.store.WithdrawWatchNeeds(ctx, w.ID, s.now())
