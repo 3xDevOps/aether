@@ -588,16 +588,15 @@ function fallbackWords(fallback: Record<string, unknown>, names: ActionNames): s
 function askedLaunch(action: AssistantAction, result: Record<string, unknown>, names: ActionNames): string {
   const input = action.input
   const swarm = action.tool === 'aether_launch_swarm'
-  const lead = swarm ? record(input.integrator) : input
   const workspace = text(result.workspace_id) ?? text(input.workspace_id)
-  const harness = text(result.harness) ?? text(lead.harness)
+  const harness = text(result.harness) ?? text(input.harness)
   // Without account_member_id the server picks the account, and usage fallback may move it: name none.
-  const account = text(lead.account_member_id)
+  const account = text(input.account_member_id)
   const sharer = account ? names.sharer(account) : undefined
   return [
     swarm ? 'swarm' : 'run',
     workspace && (names.workspace(workspace) ?? workspace),
-    harness && [names.agent(harness) ?? harness, text(lead.model)].filter(Boolean).join(' '),
+    harness && [names.agent(harness) ?? harness, text(input.model)].filter(Boolean).join(' '),
     account && (sharer ? `${sharer}'s account, shared` : 'your account'),
     input.no_fallback === true ? 'no fallback' : undefined,
   ].filter(Boolean).join(' · ')

@@ -1,4 +1,4 @@
-import { actionSummary, aetherTool, assistantView, readSummary, type AssistantAction } from '@/lib/assistant-actions'
+import { actionSummary, aetherTool, assistantView, launchLine, readSummary, type AssistantAction } from '@/lib/assistant-actions'
 import type { AssistantActionRecord } from '@/lib/assistant-types'
 import type { SessionRow } from '@/store/session-rows'
 import { stepsBlock, type WorkItem } from '@/store/session-steps'
@@ -181,5 +181,13 @@ describe('the lifecycle, swarm, pull request and memory tools', () => {
       { id: '1:t1', name: 'aether_pr_create', input: { run_id: 'r1' }, result: { pull_request: { number: 7, url: 'https://github.com/acme/api/pull/7' }, url: '?run=r1' } },
     )], [])
     expect(view.actions.map((a) => [a.target?.kind, a.target?.id])).toEqual([['swarm', 'mis-1'], ['pr', 'https://github.com/acme/api/pull/7']])
+  })
+})
+
+describe('launchLine', () => {
+  it('names a swarm launch\'s agent and model from the tool\'s own inputs', () => {
+    const names = { run: () => undefined, workspace: () => 'api', agent: () => 'Claude Code', sharer: () => undefined }
+    const [swarm] = assistantView([block({ id: '1:t0', name: 'aether_launch_swarm', input: { workspace_id: 'ws1', harness: 'claude', model: 'opus', objective: 'x' }, result: { ids: { mission_id: 'mis-1' } } })], []).actions
+    expect(launchLine(swarm!, names)).toBe('swarm · api · Claude Code opus')
   })
 })
