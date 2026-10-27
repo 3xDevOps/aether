@@ -340,6 +340,22 @@ describe('review fixes', () => {
     await waitFor(() => expect(within(messaged).queryByText('Loading the whole call…')).toBeNull())
   })
 
+  it('opens a dashboard link in an assistant message in the app, and any other link in a new tab', async () => {
+    const opened = vi.spyOn(window, 'open').mockReturnValue(null)
+    const aside = await openPanel([
+      item('turn_start', 1),
+      say(1, 'user', 'Briefing'),
+      say(1, 'assistant', 'Shipped: [fix-login](?run=run_fix). Docs: [guide](https://example.com/guide)'),
+      item('turn_end', 1, { stop_reason: 'end_turn' }),
+    ])
+    const external = await within(aside).findByRole('link', { name: 'guide' })
+    expect(external.getAttribute('target')).toBe('_blank')
+    await userEvent.click(within(aside).getByRole('link', { name: 'fix-login' }))
+    expect(useStore.getState().route).toEqual({ name: 'run', params: { runId: 'run_fix' } })
+    expect(opened).not.toHaveBeenCalled()
+    opened.mockRestore()
+  })
+
   it('loads earlier actions into the history when the conversation has more', async () => {
     const older = [item('turn_start', 1), say(1, 'user', 'Launch'), aether(1, 'o1', 'aether_launch_run', 'completed', { raw_input: launchInput, raw_output: { run: { id: 'run_fix' } } }), item('turn_end', 1, { stop_reason: 'end_turn' })]
     const recent = [item('turn_start', 2), say(2, 'user', 'Read'), aether(2, 'r1', 'aether_get_run', 'completed', { raw_input: { run_id: 'run_fix' } }), item('turn_end', 2, { stop_reason: 'end_turn' })]

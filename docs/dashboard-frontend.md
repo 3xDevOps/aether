@@ -2853,7 +2853,10 @@ A path the agent names opens that file in the run's
 [Files view](#files-in-a-run): in an answer's, narration's or thought's prose
 and inline code, in a tool step's command and output tail, and in a
 `DiffBlock`'s caption. A Markdown link whose target is a repository path
-opens there as well, where it used to open a dead address in a new tab.
+opens there as well, where it used to open a dead address in a new tab. A link to a
+same-origin dashboard route (`?run=<id>`, `?page=...`) opens in the app
+(`OpenRoute`, which the assistant panel supplies so its phone sheet closes
+too); any other link opens in a new tab.
 Fenced code blocks, a person's own messages and the entry labels, which
 toggle their detail, are left as text.
 
