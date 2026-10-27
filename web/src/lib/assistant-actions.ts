@@ -95,6 +95,7 @@ const readTools: Record<string, [string, string]> = {
   aether_activity_summary: ['activity summary', 'activity summaries'],
   aether_changes: ['change list', 'change lists'],
   aether_launch_options: ['launch options', 'launch options'],
+  aether_integration: ['integration status', 'integration statuses'],
   aether_list_watches: ['watch list', 'watch lists'],
   aether_get_watch: ['watch', 'watches'],
 }
