@@ -562,7 +562,9 @@ and swarms carry the policy back in the same two fields. A fallback account
 whose check failed, rather than one that is exhausted or not shared, is left
 out, and `run.launch` and `mission.create` list it in
 `skipped_fallback_accounts` `[{account_member_id, error}]` (an entry with no
-account means listing the candidates failed); a replay does not repeat them.
+account means listing the candidates failed); `error` is a fixed reason, such
+as `the account's agent could not be checked`, and the server log has the
+detail. A replay does not repeat them.
 Swarm attempts carry `launch_account_id`, the account the worker's run
 launched on.
 
@@ -1003,14 +1005,15 @@ again, so look the run up instead.
 
 `run.pr.status` and `run.pr.feedback` default an omitted `expected` to the
 checkout's branch and head, and an omitted `target` to the pull request the
-dashboard proposes: the branch's upstream (else `origin`, when the
-workspace sets an origin) as the head, into the run's base branch on the
-workspace's GitHub source, or on the head repository without one. A
-checkout with no GitHub push remote answers `error` saying to pass
-`target`, and one on a detached HEAD answers `error` saying to pass both. `run.pr.status`
-returns the `expected` and `target` it used, to pass to `run.pr.create`. Once a finished run's container is gone, both report the pull
-request the run last recorded (`number`, `url`, `state`); `run.pr.feedback`
-then has no checks or comments, and `error` says why.
+dashboard proposes: the branch's upstream (else `origin`, when the workspace
+sets an origin) as the head, into the run's base branch on the workspace's
+GitHub source, or on the head repository without one. A checkout with no GitHub
+push remote answers `error` saying to pass `target`, and one on a detached HEAD
+answers `error` saying to pass both. `run.pr.status` returns the `expected` and
+`target` it used, to pass to `run.pr.create`. Once a finished run's container is
+gone, both report the pull request the run last recorded (`number`, `url`,
+`state`); `run.pr.feedback` then has no checks or comments, and `error` says
+why.
 
 `server.info` carries `dashboard_url`, the tailnet dashboard's base URL
 without a trailing slash, only while that dashboard serves. Links use the

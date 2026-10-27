@@ -199,7 +199,7 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 		}
 		if _, authErr := ResolveLaunchAccount(ctx, st, launcher, string(candidate)); authErr != nil {
 			if !errors.Is(authErr, permissions.ErrDenied) && !errors.Is(authErr, store.ErrNotFound) {
-				failures = append(failures, &Skip{Account: candidate, Err: authErr})
+				failures = append(failures, &Skip{Account: candidate, Reason: ReasonAccess, Err: authErr})
 			}
 			continue
 		}
@@ -210,7 +210,7 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 		if launchable != nil {
 			allowed, launchErr := launchable(ctx, candidate)
 			if launchErr != nil {
-				failures = append(failures, &Skip{Account: candidate, Err: launchErr})
+				failures = append(failures, &Skip{Account: candidate, Reason: ReasonAgent, Err: launchErr})
 				continue
 			}
 			if !allowed {
@@ -234,9 +234,19 @@ func Select(ctx context.Context, st store.Store, measured Measured, launcher, re
 	return found[0].account, errors.Join(failures...)
 }
 
+// The reasons Skipped gives launchers for a left-out account. The errors
+// behind them can name member homes and other members, so they stay in the
+// server log.
+const (
+	ReasonAccess = "your access to the account could not be checked"
+	ReasonAgent  = "the account's agent could not be checked"
+	ReasonList   = "the fallback accounts could not be listed"
+)
+
 // Skip is a fallback candidate Select left out because checking it failed.
 type Skip struct {
 	Account domain.MemberID
+	Reason  string
 	Err     error
 }
 
@@ -244,8 +254,8 @@ func (s *Skip) Error() string { return fmt.Sprintf("account %s: %v", s.Account, 
 
 func (s *Skip) Unwrap() error { return s.Err }
 
-// Skipped lists what excluded, Select's second result, left out; a failure
-// to list the candidates names no account.
+// Skipped lists what excluded, Select's second result, left out, each with
+// its reason; a failure to list the candidates names no account.
 func Skipped(excluded error) []protocol.SkippedAccount {
 	if excluded == nil {
 		return nil
@@ -258,10 +268,10 @@ func Skipped(excluded error) []protocol.SkippedAccount {
 	for _, err := range errs {
 		var skip *Skip
 		if errors.As(err, &skip) {
-			out = append(out, protocol.SkippedAccount{AccountMemberID: string(skip.Account), Error: skip.Err.Error()})
+			out = append(out, protocol.SkippedAccount{AccountMemberID: string(skip.Account), Error: skip.Reason})
 			continue
 		}
-		out = append(out, protocol.SkippedAccount{Error: err.Error()})
+		out = append(out, protocol.SkippedAccount{Error: ReasonList})
 	}
 	return out
 }

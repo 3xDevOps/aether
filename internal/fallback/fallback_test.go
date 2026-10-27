@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/quota"
 	"github.com/3xDevOps/Aether/internal/store/storetest"
 )
@@ -151,9 +153,22 @@ func TestSelect(t *testing.T) {
 			}
 			skipped := Skipped(excluded)
 			if tc.failing != "" && (len(skipped) != 1 || skipped[0].AccountMemberID != string(ids[tc.failing]) ||
-				skipped[0].Error != "read the installation: input/output error") {
-				t.Fatalf("Skipped = %+v, want %s with its error", skipped, tc.failing)
+				skipped[0].Error != ReasonAgent) {
+				t.Fatalf("Skipped = %+v, want %s with the fixed reason", skipped, tc.failing)
 			}
 		})
+	}
+}
+
+func TestSkippedGivesFixedReasons(t *testing.T) {
+	t.Parallel()
+	excluded := errors.Join(
+		&Skip{Account: "mem-a", Reason: ReasonAccess, Err: errors.New("get member mem-b: database is locked")},
+		&Skip{Account: "mem-c", Reason: ReasonAgent, Err: errors.New("open /var/lib/aether/memberhome/mem-c/.claude: permission denied")},
+		errors.New("list fallback accounts: database is locked"))
+	got := Skipped(excluded)
+	want := []protocol.SkippedAccount{{AccountMemberID: "mem-a", Error: ReasonAccess}, {AccountMemberID: "mem-c", Error: ReasonAgent}, {Error: ReasonList}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Skipped = %+v, want %+v", got, want)
 	}
 }
