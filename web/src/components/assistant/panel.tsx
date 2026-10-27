@@ -1,6 +1,7 @@
 import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type * as React from 'react'
 import { MessageSquarePlus, X } from '@/components/icons'
+import { ActionHistory } from '@/components/assistant/action-history'
 import { assistantTriggerID, useAssistantAvailable } from '@/components/assistant/button'
 import { AssistantRequestCard, ConfirmationCard } from '@/components/assistant/cards'
 import { AssistantComposer } from '@/components/assistant/composer'
@@ -34,7 +35,7 @@ const stateWord: Record<AssistantState, string> = {
   needs_restart: 'Restart needed',
   idle: 'Ready',
   starting: 'Starting',
-  running: 'Working',
+  running: 'Generating…',
   failed: 'Failed',
 }
 
@@ -148,7 +149,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
           textarea={textarea}
           running={running}
           dock={(confirmations.length > 0 || (session?.pending.length ?? 0) > 0) && (
-            <div className="flex max-h-[40dvh] flex-col gap-2 overflow-y-auto">
+            <div className="flex max-h-[30dvh] flex-col gap-2 overflow-y-auto [@media(min-height:50rem)]:max-h-[40dvh]">
               {confirmations.map((confirmation) => <ConfirmationCard key={confirmation.id} confirmation={confirmation} />)}
               {session?.pending.map((request) => <AssistantRequestCard key={request.id} request={request} />)}
             </div>
@@ -160,7 +161,7 @@ function Body({ textarea }: { textarea: React.RefObject<HTMLTextAreaElement | nu
 }
 
 function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextAreaElement | null>; onClose: () => void }) {
-  const { status, waiting } = useAssistantState()
+  const { status, session, waiting } = useAssistantState()
   const [confirming, setConfirming] = useState(false)
   const agent = status?.agents.find((item) => item.name === status.agent)?.display_name ?? status?.agent
   const announcement = useAnnouncement(agent || 'The assistant')
@@ -180,6 +181,7 @@ function Content({ textarea, onClose }: { textarea: React.RefObject<HTMLTextArea
         actionsLabel="Assistant actions"
         actions={
           <>
+            {ready && <ActionHistory session={session} />}
             {ready && (
               <Button variant="ghost" size="icon-sm" label="New conversation" onClick={() => setConfirming(true)}>
                 <MessageSquarePlus />
