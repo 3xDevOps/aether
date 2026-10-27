@@ -1,6 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, File, Folder, GitBranch } from '@/components/icons'
-import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { ListRow } from '@/components/ui/list-row'
 import type { Api } from '@/lib/api'
@@ -11,7 +10,6 @@ import { chevronTurn, cn } from '@/lib/utils'
 import { type FileSource, type SelectFile, type Selection, sourceKey } from '@/routes/files/sources'
 import { useStore } from '@/store'
 import type { FileTreeState } from '@/store/files'
-import { useCapability, useIsAdmin } from '@/store/hooks'
 
 interface Expansion {
   open: (key: string, fallback: boolean) => boolean
@@ -72,9 +70,6 @@ export function FileTree({
   selected: Selection | null
 }) {
   const several = workspaces.length > 1
-  const navigate = useStore((s) => s.navigate)
-  const caps = useCapability()
-  const offerFiles = useIsAdmin() && caps.hasMethod('workspace.environment.set')
   return (
     <div className="flex flex-1 flex-col gap-3 p-2">
       {workspaces.map((workspace) => {
@@ -100,11 +95,6 @@ export function FileTree({
                   />
                 ))}
               </Disclosure>
-            )}
-            {offerFiles && (
-              <Button variant="quiet" size="sm" className="self-start px-2 py-1" onClick={() => navigate('workspace', { workspaceId: workspace.id, section: 'environment' })}>
-                Add .env files for runs
-              </Button>
             )}
           </section>
         )

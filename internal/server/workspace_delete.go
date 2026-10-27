@@ -45,23 +45,18 @@ func (d *workspaceDeletion) Delete(ctx context.Context, workspace domain.Workspa
 			if err := d.git.RemoveWorkspaceRepo(ctx, workspace); err != nil {
 				return err
 			}
-			// The files never outlive the row, so they go first; a removal
-			// that fails, or a row that then stays, gets them back. An
-			// unreadable file has nothing to put back and does not stop the
-			// deletion.
+			// The file never outlives the row, so it goes first; a row that
+			// then stays gets it back. An unreadable file has nothing to put
+			// back and does not stop the deletion.
 			secrets, _ := d.secrets.Get(workspace)
-			files, _ := d.secrets.Files(workspace)
-			restore := func(err error) error {
-				if restoreErr := errors.Join(d.secrets.Put(workspace, secrets), d.secrets.PutFiles(workspace, files)); restoreErr != nil {
-					err = errors.Join(err, fmt.Errorf("workspace.delete: restore the workspace's secrets and files: %w", restoreErr))
-				}
-				return err
-			}
 			if err := d.secrets.Delete(workspace); err != nil {
-				return restore(fmt.Errorf("workspace.delete: %w", err))
+				return fmt.Errorf("workspace.delete: %w", err)
 			}
 			if err := d.store.DeleteWorkspace(ctx, workspace); err != nil {
-				return restore(err)
+				if restoreErr := d.secrets.Put(workspace, secrets); restoreErr != nil {
+					err = errors.Join(err, fmt.Errorf("workspace.delete: restore the workspace's secrets: %w", restoreErr))
+				}
+				return err
 			}
 			if _, err := d.bus.Publish(ctx, events.Event{
 				WorkspaceID: workspace, ActorID: actor, Payload: events.WorkspaceDeletedPayload{},
