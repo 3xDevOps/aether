@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -855,6 +856,15 @@ func (s *Service) Create(ctx context.Context, actor domain.MemberID, p protocol.
 	}
 	if validateErr == nil {
 		validateErr = s.validateModelChoices(ctx, domain.MemberID(p.AccountableHumanID), choices)
+	}
+	accounts := slices.Clone(policy.Order)
+	for _, c := range choices {
+		accounts = append(accounts, c.AccountMemberID)
+	}
+	for _, account := range accounts {
+		if validateErr == nil {
+			_, validateErr = fallback.ResolveLaunchAccount(ctx, s.cfg.Store, actor, string(account))
+		}
 	}
 	var extras []domain.WorkspaceID
 	for _, id := range p.ExtraWorkspaceIDs {

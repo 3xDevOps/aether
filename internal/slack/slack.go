@@ -35,6 +35,11 @@ const (
 	writeRefill = 2 * time.Second
 )
 
+// Scopes are a link's connector scopes: it reads needs, replies to runs
+// and answers their questions, and decides permission requests, which
+// takes control.
+var Scopes = []string{sshd.ConnectorScopeRead, sshd.ConnectorScopeWrite, sshd.ConnectorScopeControl}
+
 type Store interface {
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
