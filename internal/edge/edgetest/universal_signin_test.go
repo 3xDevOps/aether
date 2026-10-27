@@ -149,7 +149,9 @@ func TestUniversalGuardsServerAnswers(t *testing.T) {
 		{[]string{"https://evil.example/steal"}, false},
 		{[]string{"//evil.example/steal"}, false},
 		{[]string{"http://evil.example/callback"}, false},
-		{[]string{"http://127.0.0.1:54321/callback?code=x"}, false},
+		{[]string{"http://127.0.0.1:8080/admin"}, false},
+		{[]string{"http://127.0.0.1:54321/callback?code=x"}, true},
+		{[]string{"http://localhost/callback"}, true},
 		{[]string{"https://user@" + client.host + "/callback"}, false},
 		{[]string{"/mcp/authorize?next=1"}, true},
 		{[]string{h.relayURL + "/mcp/authorize"}, true},
@@ -269,5 +271,43 @@ func TestUniversalSignInAcrossVersions(t *testing.T) {
 	header := http.Header{"Content-Type": {"application/json"}, "Accept": {"application/json, text/event-stream"}, "Authorization": {"Bearer " + tok.AccessToken}}
 	if resp, body = mcpRequest(t, http.MethodPost, base, header, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)); resp.StatusCode != http.StatusOK {
 		t.Fatalf("tools/list: %s %s", resp.Status, body)
+	}
+}
+
+// TestUniversalLoopbackClient connects a client like Claude Code, whose
+// document lists http://127.0.0.1/callback, through the universal URL:
+// it returns to the loopback port it picked with a code, which redeems
+// with PKCE. The same redirect is refused for a client not listed as a
+// loopback client, though its document lists it.
+func TestUniversalLoopbackClient(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	client := newClient(t, true)
+	s := h.newConnectorServer(edgeproto.PolicyAccount, client, sshd.Services{})
+	h.claimServer(h.login(alice)[0], s)
+	b, err := h.signIn(alice)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := h.relayURL + edgeproto.PathUniversalMCP
+	verifier := oauth2.GenerateVerifier()
+	request := url.Values{"response_type": {"code"}, "client_id": {client.id}, "redirect_uri": {client.redirect},
+		"code_challenge": {oauth2.S256ChallengeFromVerifier(verifier)}, "code_challenge_method": {"S256"}, "resource": {base}}
+	res, _ := universalConsent(t, b, base+"/authorize?"+request.Encode(), s.id, s.memberOf(t, alice).DisplayName, "", edgeproto.PolicyAccount)
+	form := http.Header{"Content-Type": {"application/x-www-form-urlencoded"}}
+	resp, body := mcpRequest(t, http.MethodPost, base+"/token", form, strings.NewReader(url.Values{"grant_type": {"authorization_code"},
+		"client_id": {client.id}, "code": {res.Code}, "code_verifier": {verifier}, "redirect_uri": {client.redirect}, "resource": {base}}.Encode()))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("token exchange for the loopback client: %s %s", resp.Status, body)
+	}
+
+	other := newClient(t, true)
+	other.loopback = nil
+	s2 := h.newConnectorServer(edgeproto.PolicyAccount, other, sshd.Services{})
+	h.claimServer(h.login(alice)[0], s2)
+	request.Set("client_id", other.id)
+	resp, page := b.get(t, h.relayURL+edgeproto.MCPPath(s2.id)+"/authorize?"+request.Encode())
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(page, "is not an https URL on") {
+		t.Fatalf("a loopback redirect for a client not listed as one: %s\n%s", resp.Status, page)
 	}
 }
