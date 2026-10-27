@@ -148,10 +148,12 @@ function finishedReason(run: RunRecord): string {
 export function presentRun(run: RunRecord, ctx: StateContext): RunPresentation {
   const shown = presentation(run, ctx)
   // The cause and the wait explain the server's state only: none where the dashboard shows another.
+  // A request the viewer answers still shows the wait; one that waits on someone else names them instead.
   const served = !isTerminal(run.status) &&
     (shown.state === liveStateOf(run.status as 'running' | 'needs-attention', run.state) || shown.state === 'stalled')
   const own = served && waitingOn(run, ctx) === undefined
-  return { ...shown, ...(own && run.cause && { cause: run.cause }), ...(served && run.wait && { wait: run.wait }) }
+  const wait = run.wait && (own || (served && shown.needsYou !== undefined))
+  return { ...shown, ...(own && run.cause && { cause: run.cause }), ...(wait && { wait: run.wait }) }
 }
 
 function presentation(run: RunRecord, ctx: StateContext): RunPresentation {

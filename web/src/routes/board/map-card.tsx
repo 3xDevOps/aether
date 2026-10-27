@@ -11,6 +11,7 @@ import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { StatusDot } from '@/components/ui/status-dot'
 import { runLabel, stateName, stateTitle, stateWords, toneOf } from '@/lib/status'
+import { useClock } from '@/lib/clock'
 import { cn } from '@/lib/utils'
 import { CardActionButton, cardAction, ReplyComposer } from '@/routes/board/card-action'
 import type { MapCard } from '@/routes/board/selectors'
@@ -43,6 +44,7 @@ export const MapNodeCard = memo(function MapNodeCard({ card, agentName, showOwne
   const needsYou = card.group === 'needs-you'
   const label = runLabel(run)
   const since = needsYou ? card.waitingSince : run.stateChangedAt
+  const now = useClock()
   const owner = card.owner?.display_name ?? run.member_id
 
   return (
@@ -61,7 +63,7 @@ export const MapNodeCard = memo(function MapNodeCard({ card, agentName, showOwne
             </div>
             <Badge
               tone={toneOf(card)}
-              title={stateTitle(card, since)}
+              title={stateTitle(card, since, now)}
               className="mt-0.5 text-ui-xs"
             >
               <StatusDot tone={toneOf(card)} />
@@ -69,7 +71,7 @@ export const MapNodeCard = memo(function MapNodeCard({ card, agentName, showOwne
             </Badge>
           </div>
           <p className={cn('mt-1.5 line-clamp-2 text-ui-sm break-words', needsYou ? 'text-text' : 'text-muted')}>
-            {stateWords(card).detail ?? card.reason}
+            {stateWords(card, undefined, now).detail ?? card.reason}
           </p>
           <div className="mt-auto flex min-h-6 min-w-0 items-center gap-1.5 text-ui-sm text-muted">
             <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-clip">

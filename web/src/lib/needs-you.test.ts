@@ -472,6 +472,20 @@ describe('viewer scoping', () => {
     expect(shown.cause).toBeUndefined()
   })
 
+  it("names the teammate a run waits on over the wait Aether checks for it", () => {
+    const ctx = stateContext({
+      missions: { mission_1: mission({ accountable_human_id: bob.id, open_questions: 1 }) },
+      viewerID: 'mem_carol',
+      viewerRole: 'collaborator',
+    })
+    const wait = { kind: 'condition', detail: 'pr:o/r#12:checks: open', verified_at: '2026-08-14T10:00:00Z' } as const
+    const waiting = record({ ...integrator, status: 'needs-attention', state: 'waiting-agents', reason: 'reviewers', cause: 'report', wait })
+    const shown = presentRun(waiting, ctx)
+    expect(shown).toMatchObject({ state: 'waiting-agents', reason: 'Waiting for Bob' })
+    expect(shown.wait).toBeUndefined()
+    expect(presentRun(waiting, stateContext({ viewerID: 'mem_carol', viewerRole: 'collaborator' })).wait).toEqual(wait)
+  })
+
   it("keeps a paused integrator's open swarm question", () => {
     const ctx = stateContext({
       missions: { mission_1: mission() },

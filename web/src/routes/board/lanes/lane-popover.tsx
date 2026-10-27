@@ -6,7 +6,7 @@ import { PopoverContent } from '@/components/ui/popover'
 import { api } from '@/lib/api'
 import { clockTime } from '@/lib/format'
 import { unreadMail, unreadReason } from '@/lib/needs-you'
-import { stateLabel } from '@/lib/status'
+import { stateName, stateWords } from '@/lib/status'
 import { CardActionButton, cardAction } from '@/routes/board/card-action'
 import type { LaneEdge } from '@/routes/board/lanes/edges'
 import type { RunLane, SwarmLane } from '@/routes/board/lanes/model'
@@ -54,17 +54,16 @@ export function RunPopover({ lane, at, agentName, now, onReply, onAgents }: {
   const overlaps = useStore((s) => s.overlaps[run.id])
   const totals = diffTotals(snapshot?.files)
   const action = cardAction(card)
-  const { state } = card
   const segment = at === undefined ? undefined : lane.segments.find((s) => at >= s.start && at <= s.end)
   const unread = unreadMail(run, now)
   const pending = run.pending_inputs?.length ?? 0
   return (
     <>
-      <Header>{[lane.handle ?? agentName ?? run.harness, stateLabel[state], elapsed(run.created_at, lane.end)].join(' · ')}</Header>
+      <Header>{[lane.handle ?? agentName ?? run.harness, stateName(card), elapsed(run.created_at, lane.end)].join(' · ')}</Header>
       <p className="mt-0.5 text-ui font-medium break-words">{lane.title}</p>
       <Facts
         items={[
-          card.reason !== stateLabel[state] && card.reason,
+          stateWords(card, undefined, now).detail,
           card.next,
           run.branch && `${run.branch}${totals ? ` +${totals.additions} −${totals.deletions}` : ''}`,
           unread > 0 && unreadReason(unread, run.oldest_unacked_at!, now),
