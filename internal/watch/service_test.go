@@ -102,6 +102,33 @@ func TestDroppingNeedsYouSettlesItsPushes(t *testing.T) {
 	}
 }
 
+func TestANeedSentWhileNeedsYouIsDroppedIsWithdrawn(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	phone := h.subscribe(h.bob)
+	g := &gate{arrived: make(chan struct{}, 1), release: make(chan struct{})}
+	phone.gate.Store(g)
+	run := h.run(h.ada, "Rotate the keys")
+	w := h.watch(h.bob, runTarget(run)).Watch
+	h.runs.ask(run.ID, "q1", "Rotate prod too?")
+	h.publish(run.ID, events.RunInputPayload{PendingInputs: h.runs.PendingInputs(run.ID)})
+	select {
+	case <-g.arrived:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the push was never sent")
+	}
+
+	if _, err := h.svc.Update(h.ctx, h.bob.ID, protocol.WatchUpdateParams{WatchID: w.ID, Conditions: []string{protocol.WatchFinished}}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	phone.gate.Store(nil)
+	close(g.release)
+	h.eventually("the need withdrawn", func() bool { return h.pushStatus(w.ID) == protocol.WatchStatusWithdrawn })
+	if n := phone.received.Load(); n != 2 {
+		t.Fatalf("device received %d pushes, want the question and its withdrawal", n)
+	}
+}
+
 func TestAQueuedClearStopsAtItsAttemptLimit(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -228,7 +255,11 @@ type device struct {
 	server   *httptest.Server
 	received atomic.Int32
 	status   atomic.Int32
+	// While gate is set, the push service answers once it is released.
+	gate atomic.Pointer[gate]
 }
+
+type gate struct{ arrived, release chan struct{} }
 
 type harness struct {
 	t     *testing.T
@@ -331,6 +362,10 @@ func (h *harness) subscribe(member *domain.Member) *device {
 	d.status.Store(http.StatusCreated)
 	d.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
+		if g := d.gate.Load(); g != nil {
+			g.arrived <- struct{}{}
+			<-g.release
+		}
 		if status := int(d.status.Load()); status != http.StatusCreated {
 			http.Error(w, "push service refused", status)
 			return
