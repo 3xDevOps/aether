@@ -687,13 +687,14 @@ func (s *Scheduler) FallbackLaunchable(ctx context.Context, member, requested, a
 // cannot be shared is left unpinned rather than refused: it cannot be shared
 // either, and refusing would keep the member from the terminal that fixes it.
 // A grantee still pending approval counts: approval takes effect while this
-// member's containers keep running.
+// member's containers keep running. The member's assistant container mounts
+// the same logins, so a member who has one pins them too.
 func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, homePath, home string, planned []runtime.Mount) ([]runtime.Mount, error) {
 	grantees, err := s.cfg.Store.ListAccountGrantees(ctx, member)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: list account grantees: %w", err)
 	}
-	if len(grantees) == 0 {
+	if len(grantees) == 0 && !s.hasAssistantHome(member) {
 		return nil, nil
 	}
 	var pins []runtime.Mount
@@ -714,6 +715,14 @@ func (s *Scheduler) pinnedLogins(ctx context.Context, member domain.MemberID, ho
 		}
 	}
 	return pins, nil
+}
+
+func (s *Scheduler) hasAssistantHome(member domain.MemberID) bool {
+	if s.cfg.AssistantDir == "" {
+		return false
+	}
+	_, err := os.Stat(AssistantHomeDir(s.cfg.AssistantDir, member))
+	return err == nil
 }
 
 func worktreePath(run *domain.Run) string {

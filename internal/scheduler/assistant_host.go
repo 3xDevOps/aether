@@ -5,43 +5,29 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"path"
-	"path/filepath"
 	"slices"
 
-	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
 
-// ErrAssistantNeedsRestart means the member's terminal was created without
-// the assistant's mounts, which only creation can add.
-var ErrAssistantNeedsRestart = errors.New("scheduler: the environment was created before the assistant existed; restart it to add the assistant's mounts")
-
-// AssistantSocketDir is the host directory mounted read-only at
-// coordtransport.AssistantMountDir in the member's terminal.
-func AssistantSocketDir(root string, member domain.MemberID) string {
-	return filepath.Join(root, string(member), "sock")
-}
-
-// AssistantLaunch is how the assistant starts agent's ACP server: the same
-// command, session mode and agent environment an Enhanced run uses. Claude
-// Code refuses its bypass mode as root without the profile's IS_SANDBOX.
+// AssistantLaunch is how the assistant starts agent's ACP server: the
+// shipped profile's adapter, session mode and agent environment. Claude Code
+// refuses its bypass mode as root without the profile's IS_SANDBOX.
 type AssistantLaunch struct {
 	Argv []string
 	Mode string
 	Env  []string
 }
 
-func (s *Scheduler) AssistantAdapter(ctx context.Context, member domain.MemberID, agent string) (AssistantLaunch, error) {
-	profile, argvs, err := s.launchProfile(ctx, member, member, agent)
-	if err != nil {
-		return AssistantLaunch{}, err
-	}
-	argv := argvs[domain.LaunchACP]
-	if len(argv) == 0 {
-		return AssistantLaunch{}, fmt.Errorf("agent %q has no ACP command", agent)
+// AssistantAdapter resolves agent from the shipped registry only: neither a
+// member's definition nor a server-wide override decides what runs beside
+// the assistant's tool socket.
+func (s *Scheduler) AssistantAdapter(agent string) (AssistantLaunch, error) {
+	profile, ok := harness.Lookup(agent)
+	if !ok || profile.ACPInstall == nil || profile.InstallScript == "" || len(profile.TUIArgs) == 0 {
+		return AssistantLaunch{}, fmt.Errorf("agent %q cannot run the assistant", agent)
 	}
 	if profile.ACPMode == "" {
 		return AssistantLaunch{}, fmt.Errorf("agent %q has no mode that acts without asking", agent)
@@ -51,53 +37,39 @@ func (s *Scheduler) AssistantAdapter(ctx context.Context, member domain.MemberID
 		return AssistantLaunch{}, fmt.Errorf("scheduler: apply %s's permission setting: %w", profile.Name, err)
 	}
 	maps.Copy(env, profile.Env)
-	launch := AssistantLaunch{Argv: argv, Mode: profile.ACPMode}
+	maps.Copy(env, assistantEnv)
+	launch := AssistantLaunch{Argv: profile.ACPArgs, Mode: profile.ACPMode}
 	for _, key := range slices.Sorted(maps.Keys(env)) {
 		launch.Env = append(launch.Env, key+"="+env[key])
 	}
 	return launch, nil
 }
 
-// AssistantTerminalStale reports whether the member's running terminal lacks
-// the assistant's mounts. A terminal that is not running is not stale: the
-// next one is created with them.
-func (s *Scheduler) AssistantTerminalStale(ctx context.Context, member domain.MemberID) (bool, error) {
-	sup := s.lookupLiveTerminal(member)
-	if sup == nil {
-		return false, nil
-	}
-	info, err := s.cfg.Runtime.Inspect(ctx, sup.containerID)
-	if err != nil {
-		return false, fmt.Errorf("inspect the environment terminal: %w", err)
-	}
-	return !slices.Contains(info.MountTargets, coordtransport.AssistantMountDir) ||
-		!slices.Contains(info.MountTargets, coordtransport.BinaryPath), nil
-}
+// assistantEnv turns off what would keep notes across conversations, which
+// a reset could not discard. Codex keeps none in a fresh home.
+var assistantEnv = map[string]string{"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
 
-// StartAssistantExec starts spec in the member's environment terminal,
-// starting the terminal if needed, with spec.WorkingDir resolved against the
-// member's $HOME; it returns the resolved directory. The terminal lock is not
-// held across the exec.
-func (s *Scheduler) StartAssistantExec(ctx context.Context, member domain.MemberID, spec runtime.ExecSpec) (runtime.ManagedExec, string, error) {
+// StartAssistantExec starts spec in the member's assistant container,
+// starting the container and installing agent there first when needed, and
+// calls installing before an install. The exec runs in AssistantCwd.
+func (s *Scheduler) StartAssistantExec(ctx context.Context, member domain.MemberID, agent string, spec runtime.ExecSpec, installing func()) (runtime.ManagedExec, error) {
 	managed, ok := s.cfg.Runtime.(runtime.ManagedExecRuntime)
 	if !ok {
-		return nil, "", fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable)
+		return nil, fmt.Errorf("%w: the runtime cannot run a managed exec", runtime.ErrExecUnavailable)
 	}
-	if _, err := s.EnsureTerminal(ctx, member); err != nil {
-		return nil, "", err
+	profile, ok := harness.Lookup(agent)
+	if !ok {
+		return nil, fmt.Errorf("agent %q cannot run the assistant", agent)
 	}
-	sup := s.lookupLiveTerminal(member)
-	if sup == nil {
-		return nil, "", ErrTerminalNotRunning
+	cid, err := s.ensureAssistantContainer(ctx, member, profile)
+	if err != nil {
+		return nil, err
 	}
-	if stale, err := s.AssistantTerminalStale(ctx, member); err != nil {
-		return nil, "", err
-	} else if stale {
-		return nil, "", ErrAssistantNeedsRestart
+	if err := s.installAssistant(ctx, cid, profile, installing); err != nil {
+		return nil, err
 	}
-	spec.WorkingDir = path.Join(sup.home, spec.WorkingDir)
-	exec, err := managed.StartExecPipe(ctx, sup.containerID, spec)
-	return exec, spec.WorkingDir, err
+	spec.WorkingDir = AssistantCwd
+	return managed.StartExecPipe(ctx, cid, spec)
 }
 
 // StopAssistantExec stops an adapter an earlier session or server process

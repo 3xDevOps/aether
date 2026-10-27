@@ -14,10 +14,10 @@ func TestReadiness(t *testing.T) {
 	agents := readiness([]protocol.AgentInfo{
 		listed("opencode", true, true, true),
 		listed("codex", true, true, false),
-		listed("claude", true, false, true),
+		listed("claude", false, false, true),
 	})
 	want := []protocol.AssistantAgent{
-		{Name: "claude", DisplayName: "claude", Reason: "Enhanced adapter not installed"},
+		{Name: "claude", DisplayName: "claude", Ready: true},
 		{Name: "codex", DisplayName: "codex", Reason: "No sign-in found"},
 	}
 	if len(agents) != len(want) {
@@ -27,9 +27,6 @@ func TestReadiness(t *testing.T) {
 		if agents[i] != want[i] {
 			t.Errorf("agent %d = %+v, want %+v", i, agents[i], want[i])
 		}
-	}
-	if got := readiness([]protocol.AgentInfo{listed("claude", false, false, false)}); got[0].Reason != "Not installed" {
-		t.Errorf("uninstalled agent reason = %q", got[0].Reason)
 	}
 }
 

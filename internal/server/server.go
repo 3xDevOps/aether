@@ -468,8 +468,8 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 	s.assistant = assistant.New(assistant.Config{
 		Dir:     filepath.Join(cfg.DataDir, "assistant"),
 		Store:   s.db,
-		Homes:   homes,
 		Runs:    s.sched,
+		Host:    s.sched,
 		Caller:  func(member domain.MemberID) tools.Caller { return s.ssh.Local(member) },
 		Bus:     s.bus,
 		Follows: s.db,

@@ -258,20 +258,10 @@ describe('states', () => {
   })
 
   it('hides New conversation until there is a conversation', async () => {
-    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'needs_restart' }))
+    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'setup', agent: undefined }))
     const aside = await openPanel()
-    await within(aside).findByText(/closes any shells/)
+    await within(aside).findByText(/runs on your own agent/)
     expect(within(aside).queryByRole('button', { name: 'New conversation' })).toBeNull()
-  })
-
-  it('asks before restarting the environment', async () => {
-    vi.mocked(api.assistantStatus).mockResolvedValue(status({ state: 'needs_restart' }))
-    vi.mocked(api.assistantStart).mockResolvedValue(status({ state: 'starting' }))
-    const aside = await openPanel()
-    expect(await within(aside).findByText(/closes any shells open in it/)).toBeDefined()
-    await userEvent.click(within(aside).getByRole('button', { name: 'Restart environment' }))
-    expect(api.assistantStart).toHaveBeenCalledWith({ restart_environment: true })
-    await waitFor(() => expect(useStore.getState().assistantStatus?.state).toBe('starting'))
   })
 
   it('shows the real error of a failed assistant and retries', async () => {

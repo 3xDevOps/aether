@@ -65,6 +65,11 @@ func (r *assistantRuntime) StartExecPipe(_ context.Context, id runtime.ID, spec 
 	return e, nil
 }
 
+// Exec answers the assistant's install check: the agent is installed.
+func (r *assistantRuntime) Exec(context.Context, runtime.ID, []string, string) (int, string, string, error) {
+	return 0, "", "", nil
+}
+
 func (r *assistantRuntime) RecoverExec(_ context.Context, identity runtime.ExecIdentity) (runtime.ManagedExec, error) {
 	for _, e := range r.started() {
 		if e.identity == identity {
@@ -179,8 +184,8 @@ func (e *assistantEnv) stop() {
 	_ = e.srv.Close()
 }
 
-// startAssistantServer runs a server whose claude ACP command is the mock
-// agent; a non-nil prior reuses its data directory, runtime and member.
+// startAssistantServer runs a server whose runtime serves every adapter with
+// the mock agent; a non-nil prior reuses its data directory, runtime and member.
 func startAssistantServer(t *testing.T, ctx context.Context, prior *assistantEnv) *assistantEnv {
 	t.Helper()
 	env := &assistantEnv{t: t}
@@ -196,7 +201,6 @@ func startAssistantServer(t *testing.T, ctx context.Context, prior *assistantEnv
 	}
 	srv, err := New(ctx, Config{
 		DataDir: env.data, Addr: "127.0.0.1:0", Runtime: env.rt, StandardImage: "e2e/fake",
-		Harnesses: map[string]scheduler.HarnessSpec{"claude": {ACPArgs: []string{"acp-mock"}}},
 	})
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -318,14 +322,14 @@ func TestIntegrationAssistant(t *testing.T) {
 	if len(execs) != 1 {
 		t.Fatalf("%d adapters started, want 1", len(execs))
 	}
-	if got := strings.Join(execs[0].spec.Env, " "); got != "AETHER_ASSISTANT=1 NO_BROWSER=1 IS_SANDBOX=1" {
+	if got := strings.Join(execs[0].spec.Env, " "); got != "AETHER_ASSISTANT=1 NO_BROWSER=1 CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 IS_SANDBOX=1" {
 		t.Fatalf("adapter env = %q", got)
 	}
-	if !strings.HasSuffix(execs[0].spec.WorkingDir, "/.aether/assistant") {
-		t.Fatalf("adapter working directory = %q, want $HOME/.aether/assistant", execs[0].spec.WorkingDir)
+	if execs[0].spec.WorkingDir != scheduler.AssistantCwd {
+		t.Fatalf("adapter working directory = %q, want %s", execs[0].spec.WorkingDir, scheduler.AssistantCwd)
 	}
 	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
-		b, err := os.ReadFile(filepath.Join(env.data, "homes", string(env.member.ID), ".aether", "assistant", name))
+		b, err := os.ReadFile(filepath.Join(scheduler.AssistantInstructionsDir(filepath.Join(env.data, "assistant"), env.member.ID), name))
 		if err != nil || len(b) == 0 {
 			t.Fatalf("%s in the assistant directory = %q, %v", name, b, err)
 		}

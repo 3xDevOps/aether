@@ -5,7 +5,6 @@ import { ArrowLeft } from '@/components/icons'
 import { AgentGlyph } from '@/components/ui/agent-glyph'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
-import { Code } from '@/components/ui/code'
 import { StatusDot } from '@/components/ui/status-dot'
 import { api } from '@/lib/api'
 import type { AssistantStatus } from '@/lib/assistant-types'
@@ -101,34 +100,6 @@ export function AssistantSetup({ status }: { status: AssistantStatus }) {
       <div>
         <Button size="sm" variant="link" onClick={() => useStore.getState().navigate('agents')}>Open Agents</Button>
       </div>
-    </div>
-  )
-}
-
-export function AssistantRestart() {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string>()
-  const restart = async () => {
-    setBusy(true)
-    setError(undefined)
-    try {
-      useStore.getState().setAssistantStatus(await api.assistantStart({ restart_environment: true }))
-    } catch (err) {
-      setError(message(err))
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <div className="flex flex-col gap-3 p-4">
-      <Callout
-        tone="needs-you"
-        title="Restart your environment"
-        actions={<Button size="sm" disabled={busy} onClick={() => void restart()}>{busy ? 'Restarting…' : 'Restart environment'}</Button>}
-      >
-        The assistant needs a newer environment than the one running. Restarting it closes any shells open in it and discards anything installed outside your home since you last saved the environment. Run <Code>aether env save</Code> first to keep those changes.
-      </Callout>
-      {error && <Callout tone="failed" role="alert">{error}</Callout>}
     </div>
   )
 }

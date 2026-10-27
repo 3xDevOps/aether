@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
+	"github.com/3xDevOps/Aether/internal/scheduler"
 	"github.com/3xDevOps/Aether/internal/store"
 )
 
@@ -173,8 +175,16 @@ func TestPersistedPromptKeyIsIgnoredAfterRestart(t *testing.T) {
 func TestResetStartsANewGeneration(t *testing.T) {
 	dir := t.TempDir()
 	db := newMemStore()
-	s := New(Config{Dir: dir, Store: db})
+	host := &fakeHost{}
+	s := New(Config{Dir: dir, Store: db, Host: host})
 	m := s.member("m1")
+	agentState := filepath.Join(scheduler.AssistantHomeDir(dir, "m1"), ".claude", "projects", "-assistant", "session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(agentState), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(agentState, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	log := func(items int) {
 		l, err := acphost.OpenLog(s.logPath("m1"))
 		if err != nil {
@@ -197,6 +207,9 @@ func TestResetStartsANewGeneration(t *testing.T) {
 	}
 	if _, statErr := os.Stat(s.logPath("m1")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("log after reset: %v", statErr)
+	}
+	if _, statErr := os.Stat(agentState); !errors.Is(statErr, os.ErrNotExist) || !slices.Equal(host.removed, []domain.MemberID{"m1"}) {
+		t.Fatalf("agent state after reset: %v; containers removed %v", statErr, host.removed)
 	}
 	if generation, _ := s.Generation(t.Context(), "m1"); generation != 1 {
 		t.Fatalf("generation = %d, want 1", generation)
@@ -223,7 +236,7 @@ func TestResetStartsANewGeneration(t *testing.T) {
 
 func TestRemoveDeletesMemberFiles(t *testing.T) {
 	dir := t.TempDir()
-	s := New(Config{Dir: dir})
+	s := New(Config{Dir: dir, Host: &fakeHost{}})
 	if err := os.MkdirAll(filepath.Join(dir, "m1", "sock"), 0o755); err != nil {
 		t.Fatal(err)
 	}
