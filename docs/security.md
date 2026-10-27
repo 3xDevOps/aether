@@ -288,8 +288,9 @@ permissions, and it uses the account you signed it in to.
   sign-in and the session files, rewrites the sign-in file to the keys a
   sign-in writes, and refuses the start if it removed any. It also checks the
   sign-in against the one the server recorded when you signed in, and refuses
-  a start that does not match: a Codex sign-in of another ChatGPT account or
-  API key, or a Claude Code sign-in with another key set or plan.
+  a start that does not match: a Codex sign-in in another mode, of another
+  ChatGPT account or with another API key, or a Claude Code sign-in with other
+  scopes or another plan.
 - What a steered agent can still do:
   - Within its running session, change what that session reads again: Claude
     Code rereads `.credentials.json` and `~/.claude/settings.json`, so it can
@@ -299,6 +300,9 @@ permissions, and it uses the account you signed it in to.
     has the same plan and scopes. The file names no account, so the check
     cannot tell, and a token refresh changes the tokens anyway. Later sessions
     use that account until you sign in again.
+  - Keep a Codex access token naming your account but put another account's
+    refresh token beside it. The next refresh, within the session, moves it to
+    that account; the next start refuses it.
   - Write text into the session files, which the same conversation reads back
     when it resumes, until **New conversation**.
 - Reading runs and pausing or resuming them happen at once. Launching,

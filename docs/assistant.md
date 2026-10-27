@@ -45,12 +45,13 @@ prompts, is removed, and that start fails with the keys it removed. **Retry**
 starts with the rest. A sign-in file over 64 KiB is deleted.
 
 The server also records, outside the home, which sign-in you made, and every
-start checks the file against it. For Codex that is the ChatGPT account the
-access token names, or the API key. For Claude Code, whose file names no
-account, it is the set of keys and the `scopes`, `subscriptionType` and
-`rateLimitTier` values; a refresh changes only the tokens and their expiry. A
-file that no longer matches makes the agent not ready, and a start fails with
-`the assistant's sign-in changed since you signed in. Sign in again`.
+start checks the file against it. For Codex that is the mode Codex will use
+(`auth_mode`, else an API key over tokens), the ChatGPT account the access
+token names, and any API key. For Claude Code, whose file names no account, it
+is the `scopes`, `subscriptionType` and `rateLimitTier` values, which a token
+refresh keeps. A file that no longer matches makes the agent not ready, and a
+start fails with `the assistant's sign-in changed since you signed in. Sign in
+again`. A plan change on your account needs a new sign-in too.
 
 On the first start, and after a server upgrade that pins a newer adapter, the
 panel shows **Installing** while a short-lived container,
@@ -329,6 +330,7 @@ A failed start shows **The assistant stopped** with the error and **Retry**.
 | Message | Fix |
 | --- | --- |
 | `assistant: no agent is ready; sign in to Claude Code or Codex for the assistant` | [Sign in for the assistant](#first-use) |
+| `scheduler: not signed in for the assistant. Sign in for the assistant first` | No sign-in was recorded, or the sign-in wrote no usable file. [Sign in](#first-use) |
 | `scheduler: the assistant's sign-in changed since you signed in. Sign in again` | The sign-in file is not the one you made; only the assistant's own agent writes it. [Sign in again](#first-use) |
 | `scheduler: the assistant's sign-in held what Aether does not keep, and it was removed: ...` | The keys follow the colon. Only the assistant's own agent writes that file. **Retry**, and sign in again if the agent then reports no sign-in |
 | `scheduler: install Claude Code for the assistant exited 1: ...` | The adapter install failed; npm's output follows the colon. Fix the cause (often network access), then **Retry** |
