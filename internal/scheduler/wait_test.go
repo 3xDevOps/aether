@@ -417,6 +417,49 @@ func TestHeldTasksKeepAStrandedWaitQuiet(t *testing.T) {
 	waitFor(t, "the broken wait", func() bool { return e.sched.Cause(run.ID, domain.ActivityNeedsYou) == events.CauseWaitFault })
 }
 
+// A checked wait's verified time reaches subscribers as its source is read
+// again, at most once a minute, without moving the run's standing.
+func TestANewerSourceReadIsPublished(t *testing.T) {
+	t.Parallel()
+	waits := &fakeWaits{}
+	e := newReportingEnv(t, func(cfg *Config) {
+		cfg.WaitConditions = waits
+		cfg.StallThreshold = time.Hour
+	})
+	ctx := t.Context()
+	run, _ := e.launchReporting(t)
+	e.waitStoreStatus(t, run.ID, domain.RunRunning)
+	start := time.Now()
+	waits.set(nil, checking(start.Add(-110*time.Second)))
+	if err := e.sched.ReportWaiting(ctx, run.ID, "wait-ci", protocol.CoordWaitingForCI, "CI on #582", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sched.ReportAgentState(ctx, run.ID, agentstatus.Report{State: agentstatus.Idle, Reason: agentstatus.ReasonIdle}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the checked wait", func() bool { return e.sched.Wait(run.ID, domain.ActivityWaitingCI) != nil })
+	before := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	seq := before.StatusSeq
+	sub := e.subscribe(t)
+
+	for _, ago := range []time.Duration{100 * time.Second, 90 * time.Second} {
+		waits.set(nil, checking(start.Add(-ago)))
+		e.sched.refreshActivities(ctx)
+	}
+	expectNoStatusEvent(t, sub, run.ID, "reads within a minute of the shown one")
+
+	waits.set(nil, checking(start))
+	e.sched.refreshActivities(ctx)
+	p := nextActivity(t, sub, run.ID, &seq)
+	if p.Wait == nil || p.Wait.VerifiedAt == nil || !p.Wait.VerifiedAt.Equal(start) || p.Reason != "CI on #582" {
+		t.Fatalf("published %q wait %+v, want the read at %s", p.Reason, p.Wait, start)
+	}
+	after := e.waitStoreStatus(t, run.ID, domain.RunNeedsAttention)
+	if after.NeedKey() != before.NeedKey() {
+		t.Fatalf("NeedKey moved from %q to %q", before.NeedKey(), after.NeedKey())
+	}
+}
+
 // A member's message is the remedy a broken wait asks for: the turn it
 // starts leaves the stranded condition behind, so the next wait the agent
 // reports is judged without it.

@@ -219,6 +219,19 @@ func (s *Scheduler) WaitChanged(ctx context.Context, run domain.RunID) error {
 	return s.refreshActivityLocked(ctx, entry)
 }
 
+// verifiedStep is how far a wait's last source read must move before the
+// run's status is published again to show it.
+const verifiedStep = time.Minute
+
+// readSince reports a judgement whose source was read at least
+// verifiedStep after the one shown.
+func readSince(next, shown *domain.RunWait) bool {
+	if next == nil || next.VerifiedAt == nil || shown == nil {
+		return false
+	}
+	return shown.VerifiedAt == nil || next.VerifiedAt.Sub(*shown.VerifiedAt) >= verifiedStep
+}
+
 // sameWait reports two judgements that differ at most in when the source
 // was last read.
 func sameWait(a, b *domain.RunWait) bool {

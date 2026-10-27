@@ -311,10 +311,9 @@ func (s *Scheduler) refreshActivityLocked(ctx context.Context, entry *supervised
 	if err != nil {
 		return err
 	}
-	if d.activity == entry.activity && d.reason == entry.reason && sameWait(d.wait, entry.wait) {
+	if d.activity == entry.activity && d.reason == entry.reason && sameWait(d.wait, entry.wait) && !readSince(d.wait, entry.wait) {
 		// Recovery restores the activity from the row but not its cause.
-		// A newer source read moves only the verified time.
-		entry.cause, entry.wait = d.cause, d.wait
+		entry.cause = d.cause
 		return nil
 	}
 	return s.transitionLocked(ctx, entry.runID, entry.workspaceID, entry.status, entry.status, reason, "")
