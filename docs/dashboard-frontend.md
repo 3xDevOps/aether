@@ -6205,9 +6205,9 @@ Categories:
   a `url`, `server.edge` only says whether the server has an edge or is
   connected to it. While a code or watch lives, `connector.list` is polled
   every 3 s, and once more when it ends; a
-  connector absent at mint time, or for a sign-in absent from the list shown
-  before **Watch for the connection**, since the sign-in may be done already,
-  shows **<client> (<host>) connected** in the section's one `role="status"`
+  connector of the tab's app at the URL shown, absent at mint time, or for a
+  sign-in absent from the list shown before **Watch for the connection**,
+  since the sign-in may be done already, shows **<client> (<host>) connected** in the section's one `role="status"`
   region and focuses its **Done** button. A
   failed poll shows its error until the next one succeeds. Rows list each
   connector's scopes, its `resource` as **Universal URL** or the server's own
@@ -6218,12 +6218,16 @@ Categories:
   once it has one; `localStorage` key `aether:connector-move-claims`
   records which move took which new connector, so two tabs never revoke two
   connectors for one; a move that ends without one says the old connector
-  was kept), **Reconnect** (confirm, a new code on that client's tab, the
-  tab from the `client_id` host or, from an older server, the
-  `redirect_host`, then `connector.revoke`; a failed
-  mint revokes nothing; a connector at the server's own URL reconnects there
-  with a code even under `sign_in`) and **Revoke**
-  (confirm). Errors show verbatim with a fix:
+  was kept), **Reconnect** (confirm, then the same watch on that client's
+  tab, the tab from the `client_id` host or, from an older server, the
+  `redirect_host`, at the connector's own `resource`: a connector at the
+  server's own URL reconnects there with a code even under `sign_in`; a
+  failed mint revokes nothing) and **Revoke** (confirm). A move or
+  reconnect stays in progress past its code or watch, so **Get a code** or
+  **Watch for the connection** continues it at its URL, until its
+  replacement calls Aether or **Stop** ends it; until then the status region
+  names it and the other **Move** and **Reconnect** buttons are disabled.
+  Errors show verbatim with a fix:
   a server without `connector.list` (`-32601`) gets the update command and
   hides the steps, the no-edge and not-connected errors link `docs/edge.md`,
   anything else links the connector troubleshooting. The palette's **Connect

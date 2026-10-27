@@ -238,8 +238,9 @@ member.role: ChatGPT connector con-7k2m9q4xbd cannot call this method; no connec
 ```
 
 To change scopes, revoke the connector and connect
-again, or select **Reconnect** in Settings. It gets a new code, then revokes
-the connector. Connectors added before scopes existed have all three.
+again, or select **Reconnect** in Settings. It gets a new code where the page
+asks for one, and revokes the old connector once the new connection calls
+Aether. Connectors added before scopes existed have all three.
 
 ## What it can do
 

@@ -107,27 +107,23 @@ it('tells an admin to update a server too old for connectors', async () => {
   expect(screen.queryByRole('button', { name: 'Get a code' })).toBeNull()
 })
 
-it('reconnects by minting a code on the connector’s own tab before revoking it, from a server that lists no client_id', async () => {
+it('reconnects on the connector’s own tab with a code, revoking it only once its replacement calls Aether, from a server that lists no client_id', async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
-  let revoked = () => {}
   const older = { ...claude, client_id: undefined }
+  const replacement = { ...older, id: 'con-claude00002', last_used_at: '2026-10-25T12:00:05Z' }
   const client = show({
-    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [older] }).mockResolvedValueOnce({ connectors: [older] }).mockResolvedValue({ connectors: [] }),
-    connectorRevoke: vi.fn(() => new Promise<{ connector: Connector }>((resolve) => {
-      revoked = () => resolve({ connector: claude })
-    })),
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [older] }).mockResolvedValueOnce({ connectors: [older] })
+      .mockResolvedValue({ connectors: [older, replacement] }),
   })
   fireEvent.click(await screen.findByRole('button', { name: 'Reconnect Claude (claude.ai)' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }))
   expect(await screen.findByText('ABCD-EFGH')).toBeTruthy()
-  await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-claude00001'))
-  expect(screen.getByRole('button', { name: 'New code', hidden: true }).hasAttribute('disabled')).toBe(true)
-  act(() => revoked())
-  await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
-  expect(vi.mocked(client.connectorCode).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.connectorRevoke).mock.invocationCallOrder[0])
   expect(screen.getByRole('tab', { name: 'Claude' }).getAttribute('aria-selected')).toBe('true')
   expect(screen.getByText('Waiting for Claude to connect…')).toBeTruthy()
-  expect(await screen.findByText('No connectors yet')).toBeTruthy()
+  expect(client.connectorRevoke).not.toHaveBeenCalled()
+  await vi.advanceTimersByTimeAsync(3000)
+  await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-claude00001'))
+  expect(await screen.findByText('Claude (claude.ai) connected')).toBeTruthy()
 })
 
 it('keeps the connector when reconnecting cannot get a code', async () => {
@@ -206,14 +202,25 @@ it('reconnects a connector on the server’s own URL there with a code, even whe
   })
   fireEvent.click(await screen.findByRole('button', { name: 'Reconnect Claude (claude.ai)' }))
   const dialog = await screen.findByRole('alertdialog')
-  expect(dialog.textContent).toContain('This gets a new code, then revokes the connector.')
+  expect(dialog.textContent).toContain('This gets a new code. Connect Aether again in Claude and paste the code; you can choose other scopes. Once the new connection calls Aether, this connector is revoked.')
   fireEvent.click(within(dialog).getByRole('button', { name: 'Reconnect' }))
-  await waitFor(() => expect(client.connectorRevoke).toHaveBeenCalledWith('con-claude00001'))
   expect(await screen.findByText('ABCD-EFGH')).toBeTruthy()
   const panel = screen.getByRole('tabpanel', { name: 'Claude' })
   expect(within(panel).getByText(own)).toBeTruthy()
   expect(within(panel).getByText(/where the connector you are reconnecting was added/)).toBeTruthy()
   expect(within(panel).queryByText(/No code is needed/)).toBeNull()
+
+  // The code expires: the connector is still there, and a new code is for its own URL.
+  await vi.advanceTimersByTimeAsync(600_000)
+  expect(await screen.findByText(/The last code expired\./)).toBeTruthy()
+  expect(client.connectorRevoke).not.toHaveBeenCalled()
+  expect(within(panel).getByText(own)).toBeTruthy()
+  expect(within(panel).queryByText(/No code is needed/)).toBeNull()
+  expect(screen.getByText(/Reconnecting Claude \(claude\.ai\): get a new code to continue\./)).toBeTruthy()
+  fireEvent.click(within(panel).getByRole('button', { name: 'Get a code' }))
+  await waitFor(() => expect(client.connectorCode).toHaveBeenCalledTimes(2))
+  expect(await screen.findByText('Waiting for Claude to connect…')).toBeTruthy()
+  expect(within(panel).getByText(own)).toBeTruthy()
 })
 
 async function move(name: string) {
@@ -328,7 +335,7 @@ it('keeps the old connector and says why when the browser cannot record the move
     throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
   })
   await vi.advanceTimersByTimeAsync(3000)
-  expect((await screen.findByRole('alert')).textContent).toContain('This browser cannot record the move (QuotaExceededError: The quota has been exceeded.), so ChatGPT (chatgpt.com) was kept.')
+  expect((await screen.findByRole('alert')).textContent).toContain('This browser cannot record which connection replaces ChatGPT (chatgpt.com) (QuotaExceededError: The quota has been exceeded.), so it was kept.')
   expect(screen.queryByText('Waiting for ChatGPT to connect…')).toBeNull()
   expect(client.connectorRevoke).not.toHaveBeenCalled()
 })
@@ -342,4 +349,37 @@ it('starts a move where crypto.randomUUID is missing, as on plain HTTP', async (
   } finally {
     vi.unstubAllGlobals()
   }
+})
+
+it('watches only for the app it was started for', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const other = { ...claude, id: 'con-claudeuni01', resource: universal }
+  const wanted = { ...chatgpt, id: 'con-chatgptu01', resource: universal }
+  show({
+    connectorList: vi.fn().mockResolvedValueOnce({ connectors: [], ...signedIn }).mockResolvedValueOnce({ connectors: [], ...signedIn })
+      .mockResolvedValueOnce({ connectors: [other], ...signedIn }).mockResolvedValue({ connectors: [other, wanted], ...signedIn }),
+  })
+  await screen.findByText('No connectors yet')
+  fireEvent.click(screen.getByRole('button', { name: 'Watch for the connection' }))
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(screen.queryByText(/connected$/)).toBeNull()
+  expect(screen.getByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(await screen.findByText('ChatGPT (chatgpt.com) connected')).toBeTruthy()
+})
+
+it('holds off another move or reconnect while one is in progress, until it is stopped', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse('2026-10-25T12:00:00Z') })
+  const first = { ...chatgpt, resource: own }
+  const second = { ...claude, resource: own }
+  show({ connectorList: vi.fn().mockResolvedValue({ connectors: [first, second], ...signedIn }) })
+  await move('ChatGPT (chatgpt.com)')
+  expect(await screen.findByText('Waiting for ChatGPT to connect…')).toBeTruthy()
+  expect(screen.getByText(/Moving ChatGPT \(chatgpt\.com\)\. .*another move or reconnect waits until this one ends\./)).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'Move Claude (claude.ai) to the universal URL' }).hasAttribute('disabled')).toBe(true)
+  expect(screen.getByRole('button', { name: 'Reconnect Claude (claude.ai)' }).hasAttribute('disabled')).toBe(true)
+  fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+  expect(screen.queryByText('Waiting for ChatGPT to connect…')).toBeNull()
+  expect(screen.getByRole('button', { name: 'Move Claude (claude.ai) to the universal URL' }).hasAttribute('disabled')).toBe(false)
 })
