@@ -474,6 +474,12 @@ func (s *Server) runReview(ctx context.Context, member domain.MemberID, params j
 	if p.Action != protocol.RunReviewComplete && p.Action != protocol.RunReviewLater {
 		return nil, invalidParams(`action must be "complete" or "later"`)
 	}
+	if id, ok := ctx.Value(connIdentityKey{}).(connIdentity); ok && id.connector != "" && p.Action == protocol.RunReviewComplete {
+		// run.relaunch reopens a run under authorizationMu, so the run the
+		// scope check read stays the run Review completes.
+		s.authorizationMu.Lock()
+		defer s.authorizationMu.Unlock()
+	}
 	if perr := s.connectorReviewRefusal(ctx, domain.RunID(p.RunID), p.Action); perr != nil {
 		return nil, perr
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/domain"
@@ -137,5 +138,57 @@ func TestConnectorAnswerNeedsTheRequestsScope(t *testing.T) {
 				t.Fatalf("respond = %v, want CodeDenied %q", perr, tc.denied)
 			}
 		})
+	}
+}
+
+// A write-scope connector's complete of a finished run waits for a relaunch
+// in progress, then sees the run live again and is refused, instead of
+// closing the reopened run.
+func TestConnectorReviewWaitsForARelaunch(t *testing.T) {
+	t.Parallel()
+	e := newTestEnv(t, nil)
+	ctx := context.Background()
+	if _, err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunCompleted, "", "", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	started, release := e.runs.blockRelaunch()
+	relaunched := make(chan *protocol.Error, 1)
+	go func() {
+		_, perr := e.srv.Local(e.member.ID).Call(ctx, protocol.MethodRunRelaunch, json.RawMessage(`{"run_id":"`+string(e.run.ID)+`"}`))
+		relaunched <- perr
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("relaunch did not reach the scheduler")
+	}
+	reviewed := make(chan *protocol.Error, 1)
+	connector := e.srv.ConnectorLocal(ConnectorGrant{Member: e.member.ID}, "con-test", "ChatGPT", []string{ConnectorScopeRead, ConnectorScopeWrite})
+	go func() {
+		_, perr := connector.Call(ctx, protocol.MethodRunReview, json.RawMessage(`{"run_id":"`+string(e.run.ID)+`","action":"complete"}`))
+		reviewed <- perr
+	}()
+	select {
+	case perr := <-reviewed:
+		close(release)
+		t.Fatalf("run.review during a relaunch = %v, want it to wait", perr)
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, err := e.store.UpdateRunStatus(ctx, e.run.ID, domain.RunRunning, "", "", nil, nil); err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	close(release)
+	if perr := <-relaunched; perr != nil {
+		t.Fatalf("run.relaunch = %v", perr)
+	}
+	if perr := <-reviewed; perr == nil || perr.Code != protocol.CodeDenied || !strings.Contains(perr.Message, "needs the control scope") {
+		t.Fatalf("run.review after the relaunch = %v, want refused without control", perr)
+	}
+	for _, call := range e.runs.Calls() {
+		if strings.HasPrefix(call, "review:") {
+			t.Fatalf("the reopened run was reviewed: %v", e.runs.Calls())
+		}
 	}
 }
