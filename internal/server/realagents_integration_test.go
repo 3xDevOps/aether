@@ -18,7 +18,11 @@ import (
 
 	"github.com/moby/moby/client"
 
+	"github.com/3xDevOps/Aether/internal/coord"
+	"github.com/3xDevOps/Aether/internal/coordhooks"
+	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/protocol"
 	"github.com/3xDevOps/Aether/internal/runtime"
@@ -29,9 +33,16 @@ const (
 	realAgentCommand = "echo aether-$((40+2))"
 	realAgentOutput  = "aether-42"
 	realAgentAnswer  = "aether-turn-done"
+	// realAgentContract starts the reporting rules every launch route
+	// carries.
+	realAgentContract = "END EVERY TURN WITH EXACTLY ONE REPORT"
+	// codexCompactLimit is the token count past which the test's Codex
+	// compacts; a compaction step claims more than any model's context.
+	codexCompactLimit = 100000
+	compactingUsage   = 1500000
 )
 
-var realAgentModes = map[domain.LaunchMode]string{domain.LaunchTUI: "standard", domain.LaunchACP: "enhanced"}
+var realAgentModes = map[domain.LaunchMode]string{domain.LaunchTUI: "standard", domain.LaunchHeadless: "background", domain.LaunchACP: "enhanced"}
 
 func TestIntegrationRealAgents(t *testing.T) {
 	image := os.Getenv("AETHER_AGENTS_IMAGE")
@@ -41,7 +52,7 @@ func TestIntegrationRealAgents(t *testing.T) {
 	if !dockerReachable(t) {
 		t.Fatal("AETHER_AGENTS_IMAGE is set but the Docker daemon is unreachable")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	// dockerRuntime's containers have no network, and these must reach the
@@ -81,7 +92,7 @@ func TestIntegrationRealAgents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listen for the mock model: %v", err)
 	}
-	model := &mockModel{command: realAgentCommand, answer: realAgentAnswer}
+	model := &mockModel{answer: realAgentAnswer}
 	modelServer := &httptest.Server{Listener: ln, Config: &http.Server{Handler: model}}
 	modelServer.Start()
 	t.Cleanup(modelServer.Close)
@@ -100,8 +111,8 @@ func TestIntegrationRealAgents(t *testing.T) {
 		".claude.json":          string(claudeState),
 		".claude/settings.json": `{"skipDangerousModePermissionPrompt": true}`,
 		".codex/auth.json":      `{"auth_mode": "apikey", "OPENAI_API_KEY": "` + realAgentKey + `"}`,
-		".codex/config.toml": fmt.Sprintf("openai_base_url = %q\nmodel = \"mock-model\"\ncheck_for_update_on_startup = false\n\n[projects.%q]\ntrust_level = \"trusted\"\n",
-			modelServer.URL+"/v1", domain.PrimaryRepoPath),
+		".codex/config.toml": fmt.Sprintf("openai_base_url = %q\nmodel = \"mock-model\"\ncheck_for_update_on_startup = false\nmodel_auto_compact_token_limit = %d\n\n[projects.%q]\ntrust_level = \"trusted\"\n",
+			modelServer.URL+"/v1", codexCompactLimit, domain.PrimaryRepoPath),
 	} {
 		path := filepath.Join(e.dataDir, "homes", string(e.ada.id), name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -112,38 +123,48 @@ func TestIntegrationRealAgents(t *testing.T) {
 		}
 	}
 
+	launch := func(t *testing.T, a *realAgentRun, task string) {
+		t.Helper()
+		var launched protocol.RunLaunchResult
+		if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
+			WorkspaceID: string(e.ws.ID), Task: task, Harness: a.agent, Mode: string(a.mode),
+		}, &launched); err != nil {
+			t.Fatalf("run.launch %s %s: %v", a.agent, a.mode, err)
+		}
+		a.run = launched.Run
+		if a.mode == domain.LaunchTUI {
+			a.observer = openMissionObserver(t, sshClient, a.run.ID)
+		}
+	}
+
 	t.Run("agents", func(t *testing.T) {
 		for _, agent := range []string{"claude", "codex"} {
 			for mode, modeName := range realAgentModes {
+				if mode == domain.LaunchHeadless {
+					continue
+				}
 				t.Run(agent+"-"+modeName, func(t *testing.T) {
 					t.Parallel()
-					a := &realAgentRun{srv: srv, ctrl: ctrl, model: model, agent: agent, mode: mode, marker: "real-agent-" + agent + "-" + modeName}
-					var launched protocol.RunLaunchResult
-					if err := ctrl.Call(protocol.MethodRunLaunch, protocol.RunLaunchParams{
-						WorkspaceID: string(e.ws.ID), Task: a.marker + ": run the command, then stop.",
-						Harness: agent, Mode: string(mode),
-					}, &launched); err != nil {
-						t.Fatalf("run.launch %s %s: %v", agent, mode, err)
-					}
-					a.run = launched.Run
-					if mode == domain.LaunchTUI {
-						a.observer = openMissionObserver(t, sshClient, a.run.ID)
-					}
+					a := &realAgentRun{srv: srv, ctrl: ctrl, model: model, workspace: string(e.ws.ID), agent: agent, mode: mode, marker: "real-agent-" + agent + "-" + modeName}
+					// Aether asks a turn that ended without a report for one: a
+					// Standard Claude Code stop is held, an Enhanced session is
+					// prompted. Standard Codex is not asked: Aether loads no
+					// hooks into it, so its silent turn parks as waiting.
+					gated := agent != "codex" || mode != domain.LaunchTUI
+					gate := a.marker + "/gate"
+					model.script(gate, step{command: realAgentCommand})
+					launch(t, a, tagged(gate)+" run the command, then stop.")
 
 					if !t.Run("turn", func(t *testing.T) {
-						a.waitFor(ctx, t, "the tool call's output", func() bool { return model.saw(a.marker, realAgentOutput) })
+						a.waitFor(ctx, t, "the tool call's output", func() bool { return model.saw(tagged(gate), realAgentOutput) })
+						a.instructed(t)
 						a.waitIdle(ctx, t, 0)
 						a.waitFor(ctx, t, "the model's answer in the run", func() bool { return strings.Contains(a.transcript(), realAgentAnswer) })
-						// Aether asks a turn that ended without a report for one: a
-						// Standard Claude Code stop is held, an Enhanced session is
-						// prompted. Standard Codex is not asked.
-						want := domain.ActivityAnswered
-						if agent == "codex" && mode == domain.LaunchTUI {
-							want = domain.ActivityWaiting
+						want := turnWant{activity: domain.ActivityAnswered, cause: events.CauseReport, outcome: protocol.CoordOutcomeAnswered, summary: remindedPrefix + gate, reminders: 1}
+						if !gated {
+							want = turnWant{activity: domain.ActivityWaiting, cause: events.CauseTurnEnd}
 						}
-						if got := domain.RunActivity(a.get(t).Activity); got != want {
-							t.Fatalf("activity %q after the turn, want %q", got, want)
-						}
+						a.check(ctx, t, gate, 0, want)
 					}) {
 						return
 					}
@@ -162,19 +183,196 @@ func TestIntegrationRealAgents(t *testing.T) {
 						a.waitFor(ctx, t, "a turn prompted by the mail", func() bool { return model.saw(a.marker, prompt) })
 						a.waitIdle(ctx, t, seq)
 					})
+
+					// Every turn below reports, or is reminded to, so a failure
+					// says which link broke.
+					turns := []struct {
+						name  string
+						steps func(turn string) []step
+						want  func(turn string) turnWant
+					}{{
+						name:  "waiting",
+						steps: func(turn string) []step { return []step{{command: reportCommand("waiting --for ci", turn)}} },
+						want: func(turn string) turnWant {
+							return turnWant{activity: domain.ActivityWaitingCI, cause: events.CauseReport, outcome: protocol.CoordOutcomeWaiting, waitingFor: protocol.CoordWaitingForCI, summary: turn}
+						},
+					}, {
+						name:  "answered",
+						steps: func(turn string) []step { return []step{{command: reportCommand("answered", turn)}} },
+						want: func(turn string) turnWant {
+							return turnWant{activity: domain.ActivityAnswered, cause: events.CauseReport, outcome: protocol.CoordOutcomeAnswered, summary: turn}
+						},
+					}, {
+						// The report lands after the agent's turn ended, so the
+						// turn end races it, and a Stop may be held for it.
+						name: "late-report",
+						steps: func(turn string) []step {
+							// A reminder gets the same report, so whichever lands
+							// last leaves the run where the late one should.
+							model.remind(turn, "waiting --for process")
+							// Codex ends a command's process group with it.
+							return []step{{command: "setsid sh -c \"sleep 2; " + reportCommand("waiting --for process", turn) + "\" >/dev/null 2>&1 &"}}
+						},
+						want: func(turn string) turnWant {
+							return turnWant{activity: domain.ActivityWaitingTools, cause: events.CauseReport, outcome: protocol.CoordOutcomeWaiting, waitingFor: protocol.CoordWaitingForProcess, summary: turn, reminders: -1, late: true}
+						},
+					}, {
+						name: "compaction",
+						steps: func(turn string) []step {
+							model.script(compacted(turn), step{command: reportCommand("answered", turn)})
+							return []step{{command: realAgentCommand, usage: compactingUsage}}
+						},
+						want: func(turn string) turnWant {
+							// Claude Code may compact only after a held stop, so
+							// the reminder can come first.
+							return turnWant{activity: domain.ActivityAnswered, cause: events.CauseReport, outcome: protocol.CoordOutcomeAnswered, summary: turn, reminders: -1, compacted: true}
+						},
+					}, {
+						name: "subagent",
+						steps: func(turn string) []step {
+							model.script(turn+"/sub", step{command: "sleep 8"})
+							return []step{{subagent: subagentTagged(turn+"/sub") + " run the subagent's step."}}
+						},
+						want: func(turn string) turnWant {
+							if !gated {
+								return turnWant{activity: domain.ActivityWaiting, cause: events.CauseTurnEnd, subagent: turn + "/sub"}
+							}
+							return turnWant{activity: domain.ActivityAnswered, cause: events.CauseReport, outcome: protocol.CoordOutcomeAnswered, summary: remindedPrefix + turn, reminders: 1, subagent: turn + "/sub"}
+						},
+					}, {
+						name:  "needs-input",
+						steps: func(turn string) []step { return []step{{command: reportCommand("needs-input", turn)}} },
+						want: func(turn string) turnWant {
+							return turnWant{activity: domain.ActivityNeedsYou, cause: events.CauseHuman, outcome: protocol.CoordOutcomeNeedsInput, summary: turn, needsYou: true}
+						},
+					}}
+					for i, tc := range turns {
+						if !t.Run(tc.name, func(t *testing.T) {
+							turn := a.marker + "/" + tc.name
+							model.script(turn, tc.steps(turn)...)
+							want := tc.want(turn)
+							seq := a.get(t).StatusSeq
+							if err := ctrl.Call(protocol.MethodRunInject, protocol.RunInjectParams{
+								RunID: a.run.ID, Message: tagged(turn) + " do the scripted step.", IdempotencyKey: fmt.Sprintf("%s-%d", a.marker, i),
+							}, nil); err != nil {
+								t.Fatalf("run.inject: %v", err)
+							}
+							if want.subagent != "" {
+								a.waitFor(ctx, t, "the subagent's first request", func() bool { return len(a.subagentBodies(want.subagent)) > 0 })
+								r := a.get(t)
+								if needsYou(r) {
+									t.Errorf("while the subagent runs the run needs you: %s/%s (%s: %q)", r.Status, r.Activity, r.Cause, r.Reason)
+								}
+								// Standard Claude Code runs the subagent in the
+								// background, so the main turn may end waiting on it.
+								working := domain.RunActivity(r.Activity) == domain.ActivityWorking && events.RunStatusCause(r.Cause) == events.CauseTurn
+								held := domain.RunActivity(r.Activity) == domain.ActivityWaitingAgents && events.RunStatusCause(r.Cause) == events.CauseTasksHeld
+								switch {
+								case agent == "codex":
+									t.Logf("known gap: Aether gets no signal for a Codex subagent, so the run shows %s/%s (%s) while it works", r.Status, r.Activity, r.Cause)
+								case r.Status != string(domain.RunRunning) || !working && !held:
+									t.Errorf("while the subagent runs the run is %s/%s (%s: %q), want running and working, or waiting on its task", r.Status, r.Activity, r.Cause, r.Reason)
+								}
+							}
+							a.check(ctx, t, turn, seq, want)
+							if want.subagent != "" {
+								// Its answer is its last request, so the next turn
+								// starts with the subagent done.
+								a.waitFor(ctx, t, "the subagent's answer", func() bool { return len(a.subagentBodies(want.subagent)) >= 2 })
+							}
+						}) {
+							return
+						}
+					}
 				})
 			}
+		}
+
+		// A Background run ends with its turn: it is never reminded, cannot
+		// ask its user, and finishes on its report.
+		for _, agent := range []string{"claude", "codex"} {
+			t.Run(agent+"-background", func(t *testing.T) {
+				t.Parallel()
+				for _, tc := range []struct {
+					name    string
+					steps   func(turn string) []step
+					outcome string
+				}{{
+					name:    "success",
+					steps:   func(turn string) []step { return []step{{command: reportCommand("success", turn)}} },
+					outcome: protocol.CoordOutcomeSuccess,
+				}, {
+					name: "silent",
+					steps: func(turn string) []step {
+						return []step{{command: realAgentCommand}, {command: reportCommand("needs-input", turn)}}
+					},
+				}} {
+					t.Run(tc.name, func(t *testing.T) {
+						t.Parallel()
+						a := &realAgentRun{srv: srv, ctrl: ctrl, model: model, workspace: string(e.ws.ID), agent: agent, mode: domain.LaunchHeadless, marker: "real-agent-" + agent + "-background-" + tc.name}
+						turn := a.marker + "/turn"
+						model.script(turn, tc.steps(turn)...)
+						launch(t, a, tagged(turn)+" do the scripted steps.")
+						a.waitFor(ctx, t, "the run to finish", func() bool { return domain.RunStatus(a.get(t).Status).Terminal() })
+						a.instructed(t)
+						r := a.get(t)
+						if got := domain.RunStatus(r.Status); got != domain.RunCompleted {
+							t.Errorf("finished %s (%q), want %s", got, r.Reason, domain.RunCompleted)
+						}
+						if n := a.reminders(turn); n != 0 {
+							t.Errorf("a Background run was reminded %d times", n)
+						}
+						receipts := a.receipts(t, turn)
+						switch {
+						case tc.outcome == "" && len(receipts) != 0:
+							t.Errorf("unexpected report receipts %+v", receipts)
+						case tc.outcome != "" && (len(receipts) != 1 || receipts[0].Outcome != tc.outcome):
+							t.Errorf("report receipts %+v, want one %s", receipts, tc.outcome)
+						}
+						if tc.outcome == "" && !model.saw(tagged(turn), coord.ErrCannotAsk.Error()) {
+							t.Errorf("the agent was not told it cannot ask:%s", model.tails(tagged(turn)))
+						}
+						// Only a success awaiting review needs a member.
+						if got, want := needsYou(r), tc.outcome == protocol.CoordOutcomeSuccess; got != want {
+							t.Errorf("needs you = %v (review %q), want %v", got, r.Review, want)
+						}
+					})
+				}
+			})
 		}
 	})
 }
 
+// reportCommand reports outcome, with its flags, for turn.
+func reportCommand(outcome, turn string) string {
+	return coordtransport.CLIPath + " report --outcome " + outcome + " --summary '" + turn + "'"
+}
+
+// turnWant is where a turn must leave the run. Reminders is how many
+// report reminders the turn's conversation may hold, -1 for at most one.
+type turnWant struct {
+	activity   domain.RunActivity
+	cause      events.RunStatusCause
+	outcome    string
+	waitingFor string
+	summary    string
+	needsYou   bool
+	reminders  int
+	compacted  bool
+	subagent   string
+	// late is set when one report lands after the turn ended, besides
+	// any the reminders made.
+	late bool
+}
+
 type realAgentRun struct {
-	srv    *coordServer
-	ctrl   *protocol.Client
-	model  *mockModel
-	agent  string
-	mode   domain.LaunchMode
-	marker string
+	srv       *coordServer
+	ctrl      *protocol.Client
+	model     *mockModel
+	workspace string
+	agent     string
+	mode      domain.LaunchMode
+	marker    string
 
 	run      protocol.Run
 	observer *attachConn
@@ -187,6 +385,180 @@ func (a *realAgentRun) get(t *testing.T) protocol.Run {
 		t.Fatalf("run.get %s: %v", a.run.ID, err)
 	}
 	return res.Run
+}
+
+// needsYou is the rule the dashboard's Needs you list applies.
+func needsYou(r protocol.Run) bool {
+	run := domain.Run{
+		Status: domain.RunStatus(r.Status), Activity: domain.RunActivity(r.Activity), Reason: r.Reason,
+		OutcomeUnseen: r.OutcomeUnseen, MissionRole: r.MissionRole, Review: domain.RunReview(r.Review),
+	}
+	return run.NeedsAttention(r.Paused)
+}
+
+// instructed fails unless the launch recorded where the run instructions
+// went and the agent's first request carries the reporting rules.
+func (a *realAgentRun) instructed(t *testing.T) {
+	t.Helper()
+	if note := a.timeline(t, func(p events.TimelinePayload) bool {
+		return p.Kind == events.TimelineNote && strings.HasPrefix(p.Message, "run instructions: ")
+	}); len(note) == 0 {
+		t.Errorf("instruction missing: no run instructions note on the timeline")
+	}
+	bodies := a.model.bodies(a.marker)
+	if len(bodies) == 0 || !strings.Contains(bodies[0], realAgentContract) {
+		t.Errorf("instruction missing: the first request does not carry %q", realAgentContract)
+	}
+}
+
+// check waits for turn to leave the run as want says, then names the
+// broken link when it does not: the reporting rules missing from the
+// requests, a report never made, a report made but lost, or a report
+// recorded but misclassified.
+func (a *realAgentRun) check(ctx context.Context, t *testing.T, turn string, after int64, want turnWant) {
+	t.Helper()
+	settled := func(r protocol.Run) bool {
+		if want.late && len(a.receipts(t, want.summary)) != a.reminders(turn)+1 {
+			return false
+		}
+		return r.StatusSeq > after && r.Status == string(domain.RunNeedsAttention) && domain.RunActivity(r.Activity) == want.activity &&
+			events.RunStatusCause(r.Cause) == want.cause && (want.summary == "" || strings.Contains(r.Reason, want.summary))
+	}
+	deadline, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	r := a.get(t)
+	for !settled(r) && deadline.Err() == nil {
+		select {
+		case <-deadline.Done():
+		case <-time.After(250 * time.Millisecond):
+		}
+		r = a.get(t)
+	}
+	receipts := a.receipts(t, want.summary)
+	bodies := a.turnBodies(turn)
+	var problems []string
+	switch {
+	case len(bodies) == 0:
+		problems = append(problems, "the model never saw the turn")
+	case !strings.Contains(bodies[len(bodies)-1], realAgentContract):
+		problems = append(problems, "instruction missing: the turn's last request does not carry the reporting rules")
+	}
+	if want.compacted {
+		after := a.model.bodies(tagged(compacted(turn)))
+		switch {
+		case len(after) == 0:
+			problems = append(problems, "the agent never compacted")
+		case !strings.Contains(after[0], realAgentContract):
+			problems = append(problems, "instruction missing: the first request after compaction does not carry the reporting rules")
+		}
+	}
+	if want.subagent != "" {
+		for _, body := range a.subagentBodies(want.subagent) {
+			if strings.Contains(body, coordhooks.ReportReminderLead) {
+				problems = append(problems, "the subagent was reminded to report")
+				break
+			}
+		}
+	}
+	if n := a.reminders(turn); (want.reminders >= 0 && n != want.reminders) || n > 1 {
+		problems = append(problems, fmt.Sprintf("the turn was reminded %d times, want %d", n, want.reminders))
+	}
+	if want.outcome != "" {
+		// The report's output, as a tool output inside the request.
+		accepted := a.model.saw(a.marker, `\"summary\":\"`+want.summary+`\"`)
+		switch {
+		case len(receipts) == 0 && !accepted:
+			problems = append(problems, "report never made: no report output reached the model")
+		case len(receipts) == 0:
+			problems = append(problems, "report lost: the server answered the agent's report but recorded no timeline receipt")
+		case receipts[len(receipts)-1].Outcome != want.outcome || receipts[len(receipts)-1].WaitingFor != want.waitingFor:
+			problems = append(problems, fmt.Sprintf("report recorded as %s/%s, want %s/%s", receipts[len(receipts)-1].Outcome, receipts[len(receipts)-1].WaitingFor, want.outcome, want.waitingFor))
+		}
+	}
+	if !settled(r) {
+		problems = append(problems, fmt.Sprintf("misclassified: the run is %s/%s (cause %q, reason %q), want needs-attention/%s (cause %q, reason with %q)",
+			r.Status, r.Activity, r.Cause, r.Reason, want.activity, want.cause, want.summary))
+	}
+	if got := needsYou(r); got != want.needsYou {
+		problems = append(problems, fmt.Sprintf("Needs you = %v, want %v", got, want.needsYou))
+	}
+	if len(problems) > 0 {
+		shown := a.transcript()
+		t.Fatalf("%s %s %s:\n  %s\nreceipts: %+v\nmodel requests:%s\nshown:\n%s", a.agent, realAgentModes[a.mode], turn,
+			strings.Join(problems, "\n  "), receipts, a.model.tails(a.marker), shown[max(0, len(shown)-4000):])
+	}
+}
+
+// turnBodies are the requests that play turn: its tag is their last.
+func (a *realAgentRun) turnBodies(turn string) []string {
+	var out []string
+	for _, body := range a.model.bodies(tagged(turn)) {
+		body = teamMemory.ReplaceAllString(body, "")
+		if strings.LastIndex(body, scriptTag) == strings.LastIndex(body, tagged(turn)) {
+			out = append(out, body)
+		}
+	}
+	return out
+}
+
+// subagentBodies are the requests of the subagent playing script.
+func (a *realAgentRun) subagentBodies(script string) []string {
+	var out []string
+	for _, body := range a.model.bodies(subagentTagged(script)) {
+		if !strings.Contains(body, scriptTag) {
+			out = append(out, body)
+		}
+	}
+	return out
+}
+
+// reminders is how many report reminders the mock answered in turn,
+// before or after compaction.
+func (a *realAgentRun) reminders(turn string) int {
+	n := 0
+	for _, script := range []string{turn, compacted(turn)} {
+		most := 0
+		for _, body := range a.model.bodies(remindedMark(script)) {
+			most = max(most, strings.Count(body, remindedMark(script)))
+		}
+		n += most
+	}
+	return n
+}
+
+// receipts are the run's report timeline entries whose summary has text.
+func (a *realAgentRun) receipts(t *testing.T, text string) []events.TimelinePayload {
+	t.Helper()
+	return a.timeline(t, func(p events.TimelinePayload) bool {
+		return p.Kind == events.TimelineReport && strings.Contains(p.Summary, text)
+	})
+}
+
+func (a *realAgentRun) timeline(t *testing.T, keep func(events.TimelinePayload) bool) []events.TimelinePayload {
+	t.Helper()
+	var out []events.TimelinePayload
+	var after uint64
+	for {
+		var page protocol.WorkspaceTimelineResult
+		if err := a.ctrl.Call(protocol.MethodWorkspaceTimeline, protocol.WorkspaceTimelineParams{
+			WorkspaceID: a.workspace, RunID: a.run.ID, Types: []string{string(events.TypeTimeline)}, AfterSeq: after,
+		}, &page); err != nil {
+			t.Fatalf("workspace.timeline: %v", err)
+		}
+		for _, ev := range page.Events {
+			var p events.TimelinePayload
+			if err := json.Unmarshal(ev.Payload, &p); err != nil {
+				t.Fatal(err)
+			}
+			if keep(p) {
+				out = append(out, p)
+			}
+		}
+		if !page.More {
+			return out
+		}
+		after = page.NextSeq
+	}
 }
 
 func (a *realAgentRun) waitIdle(ctx context.Context, t *testing.T, after int64) {
@@ -218,8 +590,11 @@ func (a *realAgentRun) waitFor(ctx context.Context, t *testing.T, what string, d
 var terminalControl = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>78]|\s`)
 
 func (a *realAgentRun) transcript() string {
-	if a.observer != nil {
+	switch a.mode {
+	case domain.LaunchTUI:
 		return terminalControl.ReplaceAllString(a.observer.output(), "")
+	case domain.LaunchHeadless:
+		return ""
 	}
 	page, err := a.srv.srv.sched.ACPHistory(domain.RunID(a.run.ID), 0, 0)
 	if err != nil {
