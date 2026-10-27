@@ -90,14 +90,14 @@ describe('memory in settings', () => {
     const user = userEvent.setup()
     const client = show([], {
       preferenceAdd: vi.fn()
-        .mockRejectedValueOnce(new ApiError(-32003, 'preference.add: memory is off: the owner turned memory off'))
+        .mockRejectedValueOnce(new ApiError(-32003, 'preference.add: a preference needs at least 3 words and 12 characters'))
         .mockImplementation(async (params) => ({ preference: pref({ id: 'pref-9', text: params.text, workspace_id: params.workspace_id, source: 'settings' }) })),
     })
     await screen.findByRole('heading', { name: 'Nothing remembered yet' })
     const box = screen.getByRole('textbox', { name: 'Add a preference' })
     await user.type(box, 'Reply in English')
     await user.click(screen.getByRole('button', { name: 'Add' }))
-    expect((await screen.findByRole('alert')).textContent).toBe('memory is off: the owner turned memory off')
+    expect((await screen.findByRole('alert')).textContent).toBe('a preference needs at least 3 words and 12 characters')
     expect((box as HTMLTextAreaElement).value).toBe('Reply in English')
 
     await user.click(screen.getByRole('radio', { name: 'This workspace' }))
