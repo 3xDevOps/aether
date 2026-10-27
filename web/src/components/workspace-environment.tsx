@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import type { Api } from '@/lib/api'
-import { message } from '@/lib/format'
+import { formatBytes, message } from '@/lib/format'
 import { useDelayed } from '@/lib/hooks'
 import type { WorkspaceEnvironment, WorkspaceVariable } from '@/lib/types'
 import { SettingRow, SettingsSection } from '@/routes/settings/layout'
@@ -29,6 +29,9 @@ const scriptHelp = (
 
 const variablesHelp =
   'Set in every new run’s container. Anyone who can launch a run here can print them inside it, secrets included. A secret’s value is never shown on this page again.'
+
+const filesHelp =
+  'Written into every new run’s checkout at their path before the setup script runs, mode 0600, and kept out of its commits. Anyone who can launch a run here can read them inside it. A file’s content is never shown on this page again.'
 
 const egressHelp = (
   <>
@@ -64,6 +67,35 @@ function savedRow(variable: WorkspaceVariable): Row {
 
 const untouched = (row: Row) => !row.from && row.name === '' && row.value === ''
 
+/** protocol.MaxWorkspaceVariableValueBytes, checked before a larger file is read. */
+const maxFileBytes = 64 << 10
+
+interface FileEntry {
+  id: number
+  path: string
+  size: number
+  /** Only a file added on this page has it: the server never returns one. */
+  content?: string
+}
+
+const savedFiles = (environment: WorkspaceEnvironment): FileEntry[] =>
+  (environment.files ?? []).map((file) => ({ id: ++rowIDs, ...file }))
+
+const shownFiles = (files: FileEntry[]) =>
+  files.filter((file) => file.content !== undefined || !files.some((other) => other.content !== undefined && other.path === file.path))
+
+function fileProblems(files: FileEntry[]): Map<number, string> {
+  const found = new Map<number, string>()
+  const seen = new Set<string>()
+  for (const file of files) {
+    if (file.content === undefined) continue
+    if (file.path === '') found.set(file.id, 'Give this file a path.')
+    else if (seen.has(file.path)) found.set(file.id, `${file.path} is already in this list.`)
+    seen.add(file.path)
+  }
+  return found
+}
+
 interface Problem {
   field: 'name' | 'value'
   text: string
@@ -83,7 +115,7 @@ function problems(rows: Row[]): Map<number, Problem> {
   return found
 }
 
-function changes(environment: WorkspaceEnvironment, script: string, rows: Row[], egress: boolean, hosts: string[]) {
+function changes(environment: WorkspaceEnvironment, script: string, rows: Row[], files: FileEntry[], egress: boolean, hosts: string[]) {
   const listed = rows.filter((row) => !untouched(row))
   const names = new Set(listed.map((row) => row.name))
   const set = listed
@@ -93,6 +125,9 @@ function changes(environment: WorkspaceEnvironment, script: string, rows: Row[],
       return !(from && from.name === row.name && !from.secret && !row.secret && (from.value ?? '') === row.value)
     })
     .map((row): WorkspaceVariable => (row.secret ? { name: row.name, value: row.value, secret: true } : { name: row.name, value: row.value }))
+  const added = files.flatMap(({ path, content }) => (content === undefined ? [] : [{ path, content }]))
+  const kept = new Set(files.flatMap(({ path, content }) => (content === undefined ? [path] : [])))
+  const removed = (environment.files ?? []).map((file) => file.path).filter((path) => !kept.has(path))
   const saved = environment.egress_hosts ?? []
   const allow = hosts.filter((host) => !saved.includes(host))
   const deny = saved.filter((host) => !hosts.includes(host))
@@ -100,6 +135,8 @@ function changes(environment: WorkspaceEnvironment, script: string, rows: Row[],
     ...(script === environment.setup_script ? {} : { setup_script: script }),
     set,
     unset: environment.variables.map((variable) => variable.name).filter((name) => !names.has(name)),
+    ...(added.length > 0 ? { files: added } : {}),
+    ...(removed.length > 0 ? { remove_files: removed } : {}),
     ...(egress === (environment.egress ?? false) ? {} : { egress }),
     ...(allow.length > 0 ? { egress_allow: allow } : {}),
     ...(deny.length > 0 ? { egress_deny: deny } : {}),
@@ -190,6 +227,22 @@ function ReadOnly({ environment }: { environment: WorkspaceEnvironment }) {
               </ul>
             )}
       </SettingRow>
+      {environment.files && (
+        <SettingRow label="Files" help={filesHelp}>
+          {environment.files.length === 0
+            ? <p className="text-ui-sm text-muted">No files.</p>
+            : (
+                <ul aria-label="Files" className="flex min-w-0 flex-col gap-1.5">
+                  {environment.files.map((file) => (
+                    <li key={file.path} className="flex min-w-0 items-baseline gap-2">
+                      <Code className="min-w-0">{file.path}</Code>
+                      <span className="shrink-0 text-ui-sm text-muted tabular-nums">{formatBytes(file.size)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+        </SettingRow>
+      )}
       {environment.egress_hosts && (
         <SettingRow label="Limit outbound traffic" help={egressHelp}>
           <p className="text-ui-sm text-muted">{environment.egress ? 'On.' : 'Off.'}</p>
@@ -229,13 +282,19 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
   const [hosts, setHosts] = useState(environment.egress_hosts ?? [])
   const [draft, setDraft] = useState('')
   const [draftProblem, setDraftProblem] = useState<string | null>(null)
+  const [files, setFiles] = useState(() => savedFiles(environment))
+  const [fileError, setFileError] = useState<string | null>(null)
   const list = useRef<HTMLUListElement>(null)
+  const fileList = useRef<HTMLUListElement>(null)
+  const picker = useRef<HTMLInputElement>(null)
   const focusNext = useRef<{ id: number; field: Problem['field'] } | null>(null)
 
-  const change = changes(environment, script, rows, egress, hosts)
+  const change = changes(environment, script, rows, files, egress, hosts)
   const dirty = change.setup_script !== undefined || change.set.length > 0 || change.unset.length > 0 ||
+    change.files !== undefined || change.remove_files !== undefined ||
     change.egress !== undefined || change.egress_allow !== undefined || change.egress_deny !== undefined
   const wrong = problems(rows)
+  const wrongFiles = fileProblems(files)
 
   const focus = (id: number, field: Problem['field']) =>
     list.current?.querySelector<HTMLInputElement>(`[data-row="${id}"] [data-field="${field}"]`)?.focus()
@@ -274,11 +333,34 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
     })
   }
 
+  const addFile = async (file: File | undefined) => {
+    if (!file) return
+    setFileError(null)
+    if (file.size > maxFileBytes) {
+      setFileError(`${file.name} is ${formatBytes(file.size)}. A workspace file holds at most 64 KB.`)
+      return
+    }
+    let content: string
+    try {
+      // ignoreBOM keeps a byte order mark in the content instead of dropping it.
+      content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer())
+    } catch (err) {
+      setFileError(err instanceof TypeError ? `${file.name} is not UTF-8 text. A workspace file must be.` : `${file.name}: ${message(err)}`)
+      return
+    }
+    setFiles((all) => [...all, { id: ++rowIDs, path: file.name, size: file.size, content }])
+  }
+
   const save = async () => {
     setChecked(true)
     const first = rows.find((row) => wrong.has(row.id))
     if (first) {
       focus(first.id, wrong.get(first.id)!.field)
+      return
+    }
+    const firstFile = files.find((file) => wrongFiles.has(file.id))
+    if (firstFile) {
+      fileList.current?.querySelector<HTMLInputElement>(`[data-file="${firstFile.id}"] input`)?.focus()
       return
     }
     setBusy(true)
@@ -296,6 +378,8 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
   const discard = () => {
     setScript(environment.setup_script)
     setRows(environment.variables.map(savedRow))
+    setFiles(savedFiles(environment))
+    setFileError(null)
     setEgress(environment.egress ?? false)
     setHosts(environment.egress_hosts ?? [])
     setDraft('')
@@ -366,6 +450,77 @@ function Editor({ environment, client, onSaved }: { environment: WorkspaceEnviro
               </ul>
             )}
       </SettingRow>
+      {environment.files && (
+        <SettingRow
+          label="Files"
+          help={filesHelp}
+          control={<Button size="sm" variant="secondary" disabled={busy} onClick={() => picker.current?.click()}>Add file…</Button>}
+        >
+          <div
+            className="flex min-w-0 flex-col gap-2"
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault()
+              if (!busy) void addFile(event.dataTransfer.files[0])
+            }}
+          >
+            {files.length === 0
+              ? <p className="text-ui-sm text-muted">No files. Choose Add file… or drop one here.</p>
+              : (
+                  <ul ref={fileList} aria-label="Files" className="flex min-w-0 flex-col gap-2">
+                    {shownFiles(files).map((file) => {
+                      const problem = checked ? wrongFiles.get(file.id) : undefined
+                      const problemID = `workspace-file-${file.id}-problem`
+                      return (
+                        <li key={file.id} data-file={file.id} className="flex min-w-0 flex-col gap-1">
+                          <div className="flex min-w-0 items-center gap-2">
+                            {file.content === undefined
+                              ? <Code className="min-w-0 flex-1">{file.path}</Code>
+                              : (
+                                  <Input
+                                    aria-label="Path"
+                                    aria-invalid={problem ? true : undefined}
+                                    aria-describedby={problem ? problemID : undefined}
+                                    className="font-code text-ui-sm"
+                                    placeholder=".env"
+                                    spellCheck={false}
+                                    autoCapitalize="off"
+                                    autoCorrect="off"
+                                    value={file.path}
+                                    disabled={busy}
+                                    onChange={(event) => {
+                                      const path = event.target.value
+                                      setFiles((all) => all.map((other) => (other.id === file.id ? { ...other, path } : other)))
+                                    }}
+                                  />
+                                )}
+                            <span className="shrink-0 text-ui-sm text-muted tabular-nums">{formatBytes(file.size)}</span>
+                            <Button variant="ghost" size="icon-sm" label={`Remove ${file.path || 'this file'}`} disabled={busy} onClick={() => setFiles((all) => all.filter((other) => other.id !== file.id))}>
+                              <X />
+                            </Button>
+                          </div>
+                          {problem && <p id={problemID} className="text-ui-sm text-state-failed">{problem}</p>}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
+            {fileError && <Callout tone="failed" role="alert">{fileError}</Callout>}
+            <input
+              ref={picker}
+              type="file"
+              className="sr-only"
+              tabIndex={-1}
+              aria-label="Choose a file"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0]
+                event.currentTarget.value = ''
+                void addFile(file)
+              }}
+            />
+          </div>
+        </SettingRow>
+      )}
       {environment.egress_hosts && (
         <SettingRow
           label="Limit outbound traffic"

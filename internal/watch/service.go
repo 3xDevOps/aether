@@ -45,6 +45,7 @@ const (
 // Store is the persistence the service reads and writes.
 type Store interface {
 	store.WatchStore
+	store.WatchAssistantStore
 	GetRun(ctx context.Context, id domain.RunID) (*domain.Run, error)
 	GetMember(ctx context.Context, id domain.MemberID) (*domain.Member, error)
 	GetWorkspace(ctx context.Context, id domain.WorkspaceID) (*domain.Workspace, error)
@@ -105,7 +106,12 @@ type Service struct {
 	now      func() time.Time
 	pr       PRSource
 
-	recovered <-chan struct{}
+	assistant Assistant
+	amu       sync.Mutex
+	// transcribing holds the members whose assistant notices are being
+	// written.
+	transcribing map[domain.MemberID]bool
+	recovered    <-chan struct{}
 
 	kick chan struct{}
 	wg   sync.WaitGroup
@@ -117,6 +123,8 @@ type Service struct {
 
 	mu     sync.Mutex
 	closed bool
+	// started is when Start ran.
+	started time.Time
 	// cursor is the last event sequence whose evaluations are committed.
 	cursor uint64
 	// unsaved holds watches whose startup check failed and whose retry
@@ -141,6 +149,7 @@ func New(cfg Config) (*Service, error) {
 	return &Service{
 		store: cfg.Store, bus: cfg.Bus, runs: cfg.Runs, swarm: cfg.Swarm, push: cfg.Push, head: cfg.Head, recovered: cfg.Recovered,
 		debounce: cfg.Debounce, tick: cfg.Tick, now: cfg.Now, kick: make(chan struct{}, 1),
+		transcribing: map[domain.MemberID]bool{},
 	}, nil
 }
 
@@ -166,7 +175,7 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	loopCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	s.mu.Lock()
-	s.cursor, s.stop = cursor, cancel
+	s.cursor, s.stop, s.started = cursor, cancel, time.Now()
 	s.mu.Unlock()
 	s.wg.Go(func() {
 		if s.awaitRecovery(loopCtx) {
@@ -180,6 +189,12 @@ func (s *Service) Start(ctx context.Context) error {
 		}
 	})
 	return nil
+}
+
+func (s *Service) startedAt() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.started
 }
 
 // ready reports whether scheduler recovery has finished, so a run's needs
@@ -474,6 +489,7 @@ func (s *Service) housekeep(ctx context.Context) {
 		s.recheck(ctx, id)
 	}
 	s.deliverDue(ctx)
+	s.deliverAssistant(ctx)
 	if _, err := s.store.PurgeWatches(ctx, now.Add(-Retention)); err != nil {
 		if ctx.Err() == nil {
 			slog.Warn("watch: purge ended watches", "error", err)

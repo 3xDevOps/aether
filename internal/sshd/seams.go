@@ -133,7 +133,7 @@ type RunController interface {
 	Seen(ctx context.Context, run domain.RunID, actor domain.MemberID) (*domain.Run, error)
 	// Review records actor's complete or later on the run's outcome
 	// (protocol.RunReview*).
-	Review(ctx context.Context, run domain.RunID, actor domain.MemberID, action string) (*domain.Run, error)
+	Review(ctx context.Context, run domain.RunID, actor domain.MemberID, action string, reportedOnly bool) (*domain.Run, error)
 	// RecordHandoff credits the outgoing owner of a run as a steerer and
 	// refreshes the co-author list its container reads. Called after the
 	// run row already names the new owner.

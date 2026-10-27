@@ -64,3 +64,8 @@ export const field = cn(
   'disabled:cursor-not-allowed disabled:opacity-50',
   'read-only:cursor-default read-only:bg-chrome read-only:text-muted',
 )
+
+/** A random id. crypto.randomUUID exists only in a secure context; a phone on plain HTTP lacks it. */
+export function randomID(prefix: string): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}

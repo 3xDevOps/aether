@@ -19,21 +19,16 @@ import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { message } from '@/lib/format'
 import { allowed } from '@/lib/permissions'
+import { randomID } from '@/lib/random'
 import { multiRepoFeature, multiRepoMethod, swarmReposFeature } from '@/lib/repos'
 import type { AgentInfo, LaunchMode, Member, MissionExecutionChoice } from '@/lib/types'
 import { useReturnFocus } from '@/lib/hooks'
-import { useStore } from '@/store'
+import { sameIdentity, useStore } from '@/store'
 import { useChildSettingsRead } from '@/store/children'
 import { useCapability, useSelf } from '@/store/hooks'
 import { stillWaiting, usePastDeadline } from '@/store/optimistic'
 
 type Kind = 'run' | 'swarm'
-
-function idempotencyKey(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `mission-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
 
 // Outlives the dialog: a failed create may already have stored the mission,
 // and resending the same contents under the same key replays it.
@@ -164,6 +159,7 @@ export function LaunchDialog() {
   const launchRun = async () => {
     const trimmed = task.trim()
     const chosenModel = model.trim()
+    const signedIn = sameIdentity()
     const run = await api.runLaunch({
       workspace_id: workspaceID,
       harness,
@@ -175,7 +171,7 @@ export function LaunchDialog() {
       ...extraRepos,
       ...(childRunsOffered && childRuns ? { children: childRuns } : {}),
     })
-    rememberLaunch(harness, mode, chosenModel)
+    if (signedIn()) rememberLaunch(harness, mode, chosenModel)
     upsertRun(run)
     close()
     navigate('run', { runId: run.id })
@@ -213,11 +209,12 @@ export function LaunchDialog() {
       ...extraRepos,
     }
     const serialized = JSON.stringify(contents)
-    const key = swarmKeys.get(serialized) ?? idempotencyKey()
+    const key = swarmKeys.get(serialized) ?? randomID('mission')
     swarmKeys.set(serialized, key)
+    const signedIn = sameIdentity()
     const result = await api.missionCreate({ ...contents, idempotency_key: key })
     swarmKeys.delete(serialized)
-    rememberLaunch(harness, integratorMode, integratorModel)
+    if (signedIn()) rememberLaunch(harness, integratorMode, integratorModel)
     close()
     navigate('missions', { missionId: result.mission.id })
     toast.success('Swarm created')

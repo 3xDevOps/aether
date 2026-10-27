@@ -36,6 +36,10 @@ import (
 
 var ErrInvalidTransition = errors.New("scheduler: invalid run state transition")
 
+// ErrReviewNotReported refuses a reportedOnly complete of a live run whose
+// reported success does not await review.
+var ErrReviewNotReported = errors.New("scheduler: the run has no reported success awaiting review")
+
 type BaseCapture interface {
 	Capture(context.Context, domain.WorkspaceID, string) (mirror.CaptureResult, error)
 }
@@ -760,20 +764,6 @@ func (s *Scheduler) Close() error {
 	s.appServer.shutdown()
 	s.flushPendingRunTitles()
 	return s.DetachDevelopmentTerminals(context.Background())
-}
-
-// UseBaseCapture attaches the base-capture service, built after the scheduler.
-func (s *Scheduler) UseBaseCapture(c BaseCapture) {
-	s.mu.Lock()
-	s.cfg.Bases = c
-	s.mu.Unlock()
-}
-
-// UseEvidence attaches the evidence service, built after the scheduler.
-func (s *Scheduler) UseEvidence(e EvidenceService) {
-	s.mu.Lock()
-	s.evidence = e
-	s.mu.Unlock()
 }
 
 func (s *Scheduler) ContainerAddr(ctx context.Context, run domain.RunID) (string, error) {

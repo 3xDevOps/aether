@@ -188,9 +188,8 @@ type runRow struct {
 }
 
 type runText struct {
-	Title  string `json:"title,omitempty"`
-	Reason string `json:"reason,omitempty"`
-	// Wait is domain.RunWait.Text: it quotes the conditions the agent named.
+	Title      string `json:"title,omitempty"`
+	Reason     string `json:"reason,omitempty"`
 	Wait       string `json:"wait,omitempty"`
 	LastReport string `json:"last_report,omitempty"`
 }

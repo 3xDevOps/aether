@@ -25,6 +25,12 @@ const announced = new Map()
 const seqs = new Map()
 // The run.get read in flight per run; a newer event supersedes it.
 const reading = new Map()
+// When each run's need, or under `<run> done` its finish, last ended, on
+// the `ends` count; a watch notice read from before then is stale.
+const ended = new Map()
+let ends = 0
+// The `ends` count when the socket last closed; no read from before then shows.
+let cleared = 0
 
 let socket = null
 let stopped = false
@@ -63,8 +69,6 @@ function start(addr, url, onOpen, onLink = () => {}) {
   openLink = onLink
   selfID = null
   lastShown.clear()
-  watchShown.clear()
-  finishedShown.clear()
   announced.clear()
   seqs.clear()
 
@@ -129,8 +133,7 @@ function connect(wsURL) {
       standing.clear()
       updateBadge()
     }
-    watchShown.clear()
-  finishedShown.clear()
+    closeShown()
     reading.clear()
     scheduleReconnect(wsURL)
   }
@@ -183,6 +186,7 @@ async function showNotice(p) {
 // closes when it is answered, a finish when its outcome is seen or put off.
 async function showWatchNotice(p) {
   if (!p.notification_id || !Notification.isSupported()) return
+  const since = ends
   try {
     if (p.member_id !== (await memberID())) return
   } catch (err) {
@@ -197,6 +201,7 @@ async function showWatchNotice(p) {
   const runId = target.kind === 'run' ? target.run_id : ''
   const need = runId && notice.condition === 'needs_you'
   const finished = runId && notice.condition === 'finished'
+  if (cleared > since || (need && (ended.get(runId) || 0) > since) || (finished && (ended.get(`${runId} done`) || 0) > since)) return
   if ((need && recentlyShown(runId)) || (finished && recentlyShown(`${runId} done`))) return
   const notification = new Notification({ title: clip(notice.title || 'Watch', 120), body: clip(notice.body || '', 240) })
   notification.on('click', () => openLink(notice.link || got.watch.link || ''))
@@ -206,8 +211,19 @@ async function showWatchNotice(p) {
 }
 
 function closeFinished(runId) {
+  ended.set(`${runId} done`, ++ends)
   for (const notification of finishedShown.get(runId) || []) notification.close()
   finishedShown.delete(runId)
+}
+
+// Without the socket nothing tells us when these notices' needs and
+// finishes end, so they close now rather than outlive them.
+function closeShown() {
+  cleared = ++ends
+  for (const list of watchShown.values()) for (const { notification } of list) notification.close()
+  for (const list of finishedShown.values()) for (const notification of list) notification.close()
+  watchShown.clear()
+  finishedShown.clear()
 }
 
 async function readWatch(watchId) {
@@ -321,6 +337,7 @@ function announce(runId, run) {
 // resolve ends runId's need and closes its watch notices shown before `before`.
 function resolve(runId, before = Infinity) {
   reading.delete(runId)
+  if (before === Infinity) ended.set(runId, ++ends)
   const kept = (watchShown.get(runId) || []).filter(({ notification, at }) => {
     if (at < before) notification.close()
     return at >= before
@@ -473,8 +490,7 @@ function stop() {
     socket = null
   }
   standing.clear()
-  watchShown.clear()
-  finishedShown.clear()
+  closeShown()
   reading.clear()
   updateBadge()
 }
