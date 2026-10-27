@@ -77,6 +77,11 @@ server, `sudo aether-server edge status` also prints it. Before edge protocol
 `https://edge.onaether.dev/mcp/<server id>`. The code works once, within 10
 minutes. Running `aether mcp` again replaces a code you have not used.
 
+That URL's page asks for a code even when the universal URL needs none, so a
+connector added there reconnects with one. `aether mcp code` prints a code
+alone. In Settings, **Reconnect** on such a connector shows the server's own
+URL and a code.
+
 ## Add it in ChatGPT
 
 Custom MCP servers are added on the web only, at chatgpt.com
@@ -166,8 +171,10 @@ A connector keeps the URL it was added at. Settings marks each one
 `universal URL` or `at <url>`. Once Settings shows the universal URL for you,
 **Move to the universal URL** next to a connector on the server's own URL
 starts a new connection: add Aether again in the app with the universal URL.
-Once it connects, Settings revokes the old connector. Remove the old Aether
-connector in ChatGPT or Claude yourself. From a terminal, connect again at the
+Settings revokes the old connector once a new one from the same client, such as
+ChatGPT or Claude Code, connects at the universal URL and calls Aether. If none
+calls within 10 minutes, it leaves the old one and says so. Remove the old
+Aether connector in ChatGPT or Claude yourself. From a terminal, connect again at the
 universal URL, then run `aether mcp revoke <old id>`.
 
 ### Self-hosted and custom edges

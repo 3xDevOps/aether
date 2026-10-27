@@ -39,7 +39,7 @@ test('Settings shows the universal URL without a code and offers to move an olde
       url: universal,
       universal_url: universal,
       sign_in: true,
-      connectors: [{ id: 'con-7k2m9q4xbd', member_id: 'mem_1', client_name: 'ChatGPT', redirect_host: 'chatgpt.com', resource: own, scopes: ['read', 'write'], created_at: '2026-10-18T10:00:00Z' }],
+      connectors: [{ id: 'con-7k2m9q4xbd', member_id: 'mem_1', client_id: 'https://chatgpt.com/oauth/client.json', client_name: 'ChatGPT', redirect_host: 'chatgpt.com', resource: own, scopes: ['read', 'write'], created_at: '2026-10-18T10:00:00Z' }],
     }),
   }))
   await page.route('**/api/v1/connector.code', (route) => {
@@ -55,7 +55,7 @@ test('Settings shows the universal URL without a code and offers to move an olde
   await expect(section.getByText(own)).toBeVisible()
   await section.getByRole('button', { name: 'Move ChatGPT (chatgpt.com) to the universal URL' }).click()
   const dialog = page.getByRole('alertdialog')
-  await expect(dialog).toContainText(`Add Aether again in ChatGPT with ${universal} and sign in. Once it connects, this connector is revoked`)
+  await expect(dialog).toContainText(`Add Aether again in ChatGPT with ${universal} and sign in. Once the new connection calls Aether, this connector is revoked`)
   await dialog.getByRole('button', { name: 'Move' }).click()
   await expect(section.getByText('Waiting for ChatGPT to connect…')).toBeVisible()
   expect(minted).toEqual([])

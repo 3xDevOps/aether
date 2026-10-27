@@ -44,6 +44,7 @@ Connected:
   con-1  ChatGPT (chatgpt.com)  scopes read,write  added 2026-10-18  last used 2h ago  at https://edge.onaether.dev/mcp/abc
   con-2  Claude (claude.ai)  scopes read,write,control  added 2026-10-18  never used  universal URL
 Move con-1 to the universal URL: connect again at https://edge.onaether.dev/mcp, then aether mcp revoke <id>
+Reconnecting one at the server's own URL asks for a code: aether mcp code
 Remove one: aether mcp revoke <id>
 `},
 	} {

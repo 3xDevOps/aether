@@ -22,13 +22,15 @@ type ConnectorCodeResult struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-// Connector is one authorized connector. RedirectHost is the host its
-// OAuth client returns to, such as chatgpt.com; DeviceID is the edge
-// device its code was minted on, empty for none. Times are RFC 3339;
-// LastUsedAt is empty until it first calls a tool.
+// Connector is one authorized connector. ClientID is its OAuth client_id
+// metadata URL; RedirectHost is the host that client returns to, such as
+// chatgpt.com; DeviceID is the edge device its code was minted on, empty
+// for none. Times are RFC 3339; LastUsedAt is empty until it first calls
+// a tool.
 type Connector struct {
 	ID           string `json:"id"`
 	MemberID     string `json:"member_id"`
+	ClientID     string `json:"client_id"`
 	ClientName   string `json:"client_name"`
 	RedirectHost string `json:"redirect_host"`
 	DeviceID     string `json:"device_id,omitempty"`

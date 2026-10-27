@@ -285,7 +285,7 @@ func (s *Server) CheckConnectorGrant(ctx context.Context, g ConnectorGrant) erro
 }
 
 func connectorToWire(c *store.Connector) protocol.Connector {
-	out := protocol.Connector{ID: c.ID, MemberID: string(c.Member), ClientName: c.ClientName, RedirectHost: c.RedirectHost,
+	out := protocol.Connector{ID: c.ID, MemberID: string(c.Member), ClientID: c.ClientID, ClientName: c.ClientName, RedirectHost: c.RedirectHost,
 		DeviceID: string(c.Device), Resource: c.Resource, Scopes: c.Scopes, CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339)}
 	if c.LastUsedAt != nil {
 		out.LastUsedAt = c.LastUsedAt.UTC().Format(time.RFC3339)

@@ -6025,15 +6025,22 @@ Categories:
   a `url`, `server.edge` only says whether the server has an edge or is
   connected to it. While a code or watch lives, `connector.list` is polled
   every 3 s, and once more when it ends; a
-  connector absent at mint time shows **<client> (<host>) connected** in the
-  section's one `role="status"` region and focuses its **Done** button. A
+  connector absent at mint time, or for a sign-in absent from the list shown
+  before **Watch for the connection**, since the sign-in may be done already,
+  shows **<client> (<host>) connected** in the section's one `role="status"`
+  region and focuses its **Done** button. A
   failed poll shows its error until the next one succeeds. Rows list each
   connector's scopes, its `resource` as **Universal URL** or the server's own
   URL, added and last-used times, **Move to the universal URL** (where `url`
-  is universal and the connector's is not: confirm, start watching, and
-  `connector.revoke` the old connector only once the new one appears),
-  **Reconnect** (confirm, a new code on that client's tab, then
-  `connector.revoke`; a failed mint revokes nothing) and **Revoke**
+  is universal and the connector's is not: confirm, start watching for a
+  connector at `universal_url` with the old one's `client_id`, and
+  `connector.revoke` the old connector only once that one has a
+  `last_used_at`; `localStorage` key `aether:connector-move-claims` records
+  which move took which new connector, so two tabs never revoke two
+  connectors for one), **Reconnect** (confirm, a new code on that client's
+  tab, the tab from the `client_id` host, then `connector.revoke`; a failed
+  mint revokes nothing; a connector at the server's own URL reconnects there
+  with a code even under `sign_in`) and **Revoke**
   (confirm). Errors show verbatim with a fix:
   a server without `connector.list` (`-32601`) gets the update command and
   hides the steps, the no-edge and not-connected errors link `docs/edge.md`,
