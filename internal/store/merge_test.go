@@ -176,6 +176,7 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 	if err := db.PutNotifyPrefs(ctx, b.ID, NotifyPrefs{Push: false}); err != nil {
 		t.Fatal(err)
 	}
+	launchRevisions := map[domain.MemberID]int64{}
 	for m, l := range map[domain.MemberID]LaunchDefaults{
 		a.ID: {Agent: "claude", Account: b.ID, FallbackPolicy: "ordered", FallbackOrder: []domain.MemberID{b.ID, c.ID, a.ID}, Source: "member"},
 		b.ID: {Agent: "codex", Source: "member"},
@@ -184,6 +185,11 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 		if err := db.PutLaunchDefaults(ctx, m, l, 0); err != nil {
 			t.Fatal(err)
 		}
+		saved, err := db.LaunchDefaults(ctx, m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		launchRevisions[m] = saved.Revision
 	}
 	watchB := &Watch{MemberID: b.ID, WorkspaceID: w.ID, TargetKind: "run", RunID: runB.ID, Conditions: []string{"finished"},
 		State: "active", Source: "dashboard", CreatedAt: time.Now(), UpdatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
@@ -291,11 +297,14 @@ func TestAcceptMergeMovesOngoingWorkAndKeepsHistory(t *testing.T) {
 		t.Fatalf("survivor's notification settings = %+v, %v; want the absorbed member's, push off", p, gerr)
 	}
 	if l, gerr := db.LaunchDefaults(ctx, a.ID); gerr != nil || l.Agent != "claude" || l.Account != a.ID ||
-		!slices.Equal(l.FallbackOrder, []domain.MemberID{a.ID, c.ID}) {
-		t.Fatalf("survivor's launch defaults = %+v, %v; want its own, naming the survivor for the absorbed member", l, gerr)
+		!slices.Equal(l.FallbackOrder, []domain.MemberID{a.ID, c.ID}) || l.Revision == launchRevisions[a.ID] {
+		t.Fatalf("survivor's launch defaults = %+v, %v; want its own, naming the survivor for the absorbed member, at a new revision", l, gerr)
 	}
-	if l, gerr := db.LaunchDefaults(ctx, c.ID); gerr != nil || l.Account != a.ID {
-		t.Fatalf("Cy's launch defaults = %+v, %v; want the account moved to the survivor", l, gerr)
+	if l, gerr := db.LaunchDefaults(ctx, c.ID); gerr != nil || l.Account != a.ID || l.Source != "assistant" || l.Revision == launchRevisions[c.ID] {
+		t.Fatalf("Cy's launch defaults = %+v, %v; want the account moved to the survivor at a new revision", l, gerr)
+	}
+	if perr := db.PutLaunchDefaults(ctx, c.ID, LaunchDefaults{Source: "member"}, launchRevisions[c.ID]); !errors.Is(perr, ErrConflict) {
+		t.Fatalf("PutLaunchDefaults with the revision read before the merge = %v, want ErrConflict", perr)
 	}
 	if got, gerr := db.GetWatch(ctx, watchB.ID); gerr != nil || got.MemberID != a.ID || got.Version == watchB.Version {
 		t.Fatalf("absorbed member's watch = %+v, %v; want it moved with a new version", got, gerr)

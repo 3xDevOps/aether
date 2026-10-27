@@ -132,10 +132,12 @@ func mergeRows(ctx context.Context, tx *sql.Tx, survivor, absorbed domain.Member
 		{"watches", `UPDATE watches SET member_id = ?2, idempotency_key = NULL, version = version + 1 WHERE member_id = ?1`},
 		{"notification settings", `UPDATE OR IGNORE notify_prefs SET member_id = ?2 WHERE member_id = ?1`},
 		{"notification settings", `DELETE FROM notify_prefs WHERE member_id = ?1`},
-		{"launch defaults", `UPDATE launch_defaults SET account_member_id = ?2 WHERE account_member_id = ?1`},
-		{"launch defaults", `UPDATE launch_defaults SET fallback_order = (SELECT json_group_array(member) FROM (
-			SELECT CASE value WHEN ?1 THEN ?2 ELSE value END AS member, MIN(key) AS first FROM json_each(fallback_order) GROUP BY member ORDER BY first))
-			WHERE instr(fallback_order, '"' || ?1 || '"') > 0`},
+		{"launch defaults", `INSERT OR REPLACE INTO launch_defaults (member_id, agent, agents, account_member_id, fallback_policy, fallback_order, source, updated_at)
+			SELECT l.member_id, l.agent, l.agents, CASE l.account_member_id WHEN ?1 THEN ?2 ELSE l.account_member_id END, l.fallback_policy,
+				(SELECT json_group_array(member ORDER BY first) FROM (
+					SELECT CASE value WHEN ?1 THEN ?2 ELSE value END AS member, MIN(key) AS first FROM json_each(l.fallback_order) GROUP BY member)),
+				l.source, l.updated_at
+			FROM launch_defaults l WHERE l.account_member_id = ?1 OR instr(l.fallback_order, '"' || ?1 || '"') > 0`},
 		{"memory pins", `UPDATE memory SET pinned_by = ?2 WHERE pinned_by = ?1`},
 		{"connectors", `UPDATE connectors SET member_id = ?2 WHERE member_id = ?1`},
 		{"slack links", `UPDATE OR IGNORE slack_links SET member_id = ?2 WHERE member_id = ?1`},
