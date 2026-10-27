@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/3xDevOps/Aether/internal/acphost"
 	"github.com/3xDevOps/Aether/internal/assistant/tools"
@@ -163,6 +164,8 @@ func TestRememberSavesQuotedWordsAtMostThreeTimesATurn(t *testing.T) {
 		t.Fatalf("a 4th save in one turn = %v, want denied", err)
 	}
 
+	// Updated rows sort newest first by their millisecond timestamps.
+	time.Sleep(2 * time.Millisecond)
 	f.say(2, "Actually, prefer markdown lists over tables.")
 	updated, err := f.remember(protocol.AssistantRememberParams{Text: "prefer markdown lists over tables", Replaces: saved.Preference.ID})
 	if err != nil || updated.Previous == nil || updated.Previous.Text != "Prefer table output." || updated.Preference.ID != saved.Preference.ID ||

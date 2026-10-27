@@ -73,7 +73,7 @@ func scanPreference(row interface{ Scan(...any) error }) (Preference, error) {
 
 func (d *DB) ListPreferences(ctx context.Context, member domain.MemberID) ([]Preference, error) {
 	rows, err := d.db.QueryContext(ctx,
-		`SELECT `+preferenceColumns+` FROM member_preferences WHERE member_id = ? ORDER BY updated_at DESC, id`, member)
+		`SELECT `+preferenceColumns+` FROM member_preferences WHERE member_id = ? ORDER BY updated_at DESC, rowid DESC`, member)
 	if err != nil {
 		return nil, fmt.Errorf("store: list preferences: %w", err)
 	}
