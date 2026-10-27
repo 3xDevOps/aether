@@ -69,7 +69,7 @@ func TestUntilRegistersWaitsForTheReportingRunOnly(t *testing.T) {
 	outcomes := &recordingOutcomes{}
 	h, _ := newStateReportHarness(t, outcomes)
 	waits := &recordingWaits{db: h.db}
-	h.svc.cfg.Waits = waits
+	h.svc.cfg.Until = waits
 	run := h.run(0)
 
 	for name, params := range map[string]protocol.CoordReportParams{
@@ -146,7 +146,7 @@ func TestOtherReportsCancelOnlyEarlierWaits(t *testing.T) {
 	outcomes := &recordingOutcomes{}
 	h, _ := newStateReportHarness(t, outcomes)
 	waits := &recordingWaits{db: h.db}
-	h.svc.cfg.Waits = waits
+	h.svc.cfg.Until = waits
 	run := h.run(0)
 
 	report(t, h, run, protocol.CoordOutcomeBlocked, "need the staging key", "b1")

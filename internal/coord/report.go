@@ -47,13 +47,13 @@ type OutcomeSink interface {
 	ReportAnswered(ctx context.Context, run domain.RunID, id, summary string, at time.Time) error
 }
 
-// RunWaits keeps the conditions a run waits on: the watch service.
+// UntilRegistry keeps the conditions a run waits on: the watch service.
 // RegisterWait records the waiting report's receipt and its conditions in
 // one transaction; an *InvalidWait error refuses them as asked. Applying
 // the report arms them. SettleRunWaits then reads them as they stand, for
 // a bounded time, and returns the ones already resolved, which the report
 // result carries instead of a wake. EndRunWaits cancels them.
-type RunWaits interface {
+type UntilRegistry interface {
 	RegisterWait(ctx context.Context, owner *domain.Run, report *store.CoordStateReport, specs []protocol.WaitSpec) (bool, error)
 	SettleRunWaits(ctx context.Context, run domain.RunID) ([]protocol.WaitCondition, error)
 	EndRunWaits(ctx context.Context, run domain.RunID, cause string, before time.Time) error
@@ -105,10 +105,10 @@ func specTexts(specs []protocol.WaitSpec) []string {
 // them again; one replayed after a newer waiting report leaves that
 // report's conditions alone.
 func (s *Service) endWaits(ctx context.Context, run domain.RunID, outcome string, at time.Time) error {
-	if s.cfg.Waits == nil {
+	if s.cfg.Until == nil {
 		return nil
 	}
-	if err := s.cfg.Waits.EndRunWaits(ctx, run, "the run reported "+outcome, at); err != nil {
+	if err := s.cfg.Until.EndRunWaits(ctx, run, "the run reported "+outcome, at); err != nil {
 		return fmt.Errorf("cancel the run's wait conditions: %w", err)
 	}
 	return nil
@@ -126,7 +126,7 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 	if len(p.EvidenceRefs) > 0 {
 		return protocol.CoordReportResult{}, invalidParams(method, p.Outcome+" takes no evidence_refs")
 	}
-	if len(specs) > 0 && s.cfg.Waits == nil {
+	if len(specs) > 0 && s.cfg.Until == nil {
 		return protocol.CoordReportResult{}, invalidParams(method, "this server does not keep until conditions")
 	}
 	if p.Outcome == protocol.CoordOutcomeNeedsInput && s.cfg.Mission != nil {
@@ -157,7 +157,7 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 		Summary: summary, Until: specTexts(specs)}
 	var err error
 	if len(specs) > 0 {
-		_, err = s.cfg.Waits.RegisterWait(ctx, self, receipt, specs)
+		_, err = s.cfg.Until.RegisterWait(ctx, self, receipt, specs)
 	} else {
 		_, err = s.cfg.Mail.RecordCoordStateReport(ctx, receipt)
 	}
@@ -204,7 +204,7 @@ func (s *Service) reportState(ctx context.Context, run domain.RunID, p protocol.
 	switch {
 	case len(specs) > 0:
 		nextAction = "end your turn; Aether wakes you when " + strings.Join(receipt.Until, " or ") + " resolves, or when mail or a prompt arrives"
-		resolved, err = s.cfg.Waits.SettleRunWaits(ctx, run)
+		resolved, err = s.cfg.Until.SettleRunWaits(ctx, run)
 		if err != nil {
 			slog.Warn("coord: read the run's new wait conditions; the background reads them", "run", run, "error", err)
 		}
