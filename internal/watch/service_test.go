@@ -45,9 +45,11 @@ func TestAStaleClearNeverHidesANewerNeed(t *testing.T) {
 	phone.status.Store(http.StatusInternalServerError)
 	h.runs.answer(run.ID)
 	h.publish(run.ID, events.RunInputPayload{PendingInputs: []domain.RunInputRequest{}})
+	// The attempt is counted before it is sent: wait for the device's
+	// answer, or the clear could still reach it once it accepts again.
 	h.eventually("the clear to fail", func() bool {
 		n := h.notices(w.ID)[0]
-		return n.PushState == store.WatchPushWithdraw && n.PushAttempts == 1
+		return n.PushState == store.WatchPushWithdraw && n.PushAttempts == 1 && phone.refused.Load() == 1
 	})
 	phone.status.Store(http.StatusCreated)
 	h.runs.ask(run.ID, "q2", "Rotate staging?")
@@ -255,6 +257,8 @@ type device struct {
 	server   *httptest.Server
 	received atomic.Int32
 	status   atomic.Int32
+	// refused counts the pushes it answered with an error status.
+	refused atomic.Int32
 	// While gate is set, the push service answers once it is released.
 	gate atomic.Pointer[gate]
 }
@@ -368,6 +372,7 @@ func (h *harness) subscribe(member *domain.Member) *device {
 		}
 		if status := int(d.status.Load()); status != http.StatusCreated {
 			http.Error(w, "push service refused", status)
+			d.refused.Add(1)
 			return
 		}
 		d.received.Add(1)
@@ -717,12 +722,11 @@ func TestEvaluationReadsCurrentStateWhateverTheEventsSay(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.publish(run.ID, events.RunStatusPayload{To: domain.RunNeedsAttention, Activity: domain.ActivityNeedsYou, Reason: "needs input: stale"})
-	settle()
+	h.eventually("the run as it stands", func() bool {
+		return strings.Contains(string(h.watchState(w.ID).Observed), `"activity":"working"`)
+	})
 	if got := h.notices(w.ID); len(got) != 0 {
 		t.Fatalf("notices from a stale event = %q, want none", bodies(got))
-	}
-	if got := h.watchState(w.ID).Observed; !strings.Contains(string(got), `"activity":"working"`) {
-		t.Fatalf("observed = %s, want the run as it stands", got)
 	}
 }
 
@@ -883,10 +887,14 @@ func TestRevokedAccessStopsNoticesWithoutAnnouncingThem(t *testing.T) {
 	run := h.run(h.ada, "Audit the logs")
 	w := h.watch(h.bob, runTarget(run)).Watch
 
+	// Revoked while the server is down: a check that began with access
+	// could otherwise still read the need below and announce it.
+	_ = h.svc.Close()
 	h.bob.Pending = true
 	if err := h.db.UpdateMember(h.ctx, h.bob); err != nil {
 		t.Fatal(err)
 	}
+	h.start()
 	h.status(run, domain.RunNeedsAttention, domain.ActivityNeedsYou, "blocked: no access")
 	h.eventually("the watch to fail", func() bool { return h.watchState(w.ID).State == protocol.WatchError })
 	if got := h.watchState(w.ID); !strings.HasPrefix(got.Error, "access revoked") {
