@@ -281,6 +281,13 @@ func TestRunEvidence(t *testing.T) {
 		t.Errorf("released = %v", out["released"])
 	}
 
+	f.answers[protocol.MethodRunGet] = returns(runWith("run-1", "running"))
+	f.answers[protocol.MethodRunPRStatus] = returns(protocol.RunPRStatusResult{PullRequest: &protocol.RunPullRequest{Number: 4, State: "MERGED", Repository: "acme/shop"}})
+	_, out = run(t, cs, "aether_get_run", map[string]any{"run_id": "run-1", "evidence": true})
+	if pr := dig(t, out, "evidence", "pull_requests", 0).(map[string]any); pr["number"] != float64(4) || pr["source"] != sourceGitHub || pr["checked_at"] == nil {
+		t.Errorf("a pull request GitHub shows but Aether has not recorded = %v", pr)
+	}
+
 	merged := openPR(2)
 	merged.State = "merged"
 	f.answers[protocol.MethodRunGet] = returns(runWith("run-1", "merged", merged))

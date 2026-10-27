@@ -185,11 +185,19 @@ func fanOut(n int, f func(i int)) {
 
 // addRunEvidence adds getRun's evidence: the run's recorded pull requests,
 // GitHub's checks and reviews of one not merged, and conflicts with its
-// latest report. status is getRun's lookup of the run's own repository.
+// latest report. status is getRun's lookup of the run's own repository,
+// whose pull request is listed even when Aether has not recorded it.
 func addRunEvidence(ctx context.Context, read Call, r protocol.Run, recordedPRs []protocol.RecordedPullRequest, reps []report,
 	status *protocol.RunPRStatusResult, out map[string]any) {
 	prs := recorded(recordedPRs)
-	ev := map[string]any{"as_of": time.Now().UTC().Format(time.RFC3339), "pull_requests": prs}
+	asOf := time.Now().UTC()
+	if shown := status.PullRequest; shown != nil && !slices.ContainsFunc(prs, func(pr mergedPR) bool {
+		return pr.Number == shown.Number && strings.EqualFold(pr.Repository, shown.Repository)
+	}) {
+		prs = append([]mergedPR{{RecordedPullRequest: protocol.RecordedPullRequest{Repository: shown.Repository, Number: shown.Number, URL: shown.URL,
+			State: shown.State, MergedAt: shown.MergedAt, CheckedAt: asOf}, Source: sourceGitHub}}, prs...)
+	}
+	ev := map[string]any{"as_of": asOf.Format(time.RFC3339)}
 	var o *observation
 	if repo, open := unmerged(prs); open {
 		if repo != "" {
@@ -200,6 +208,7 @@ func addRunEvidence(ctx context.Context, read Call, r protocol.Run, recordedPRs 
 		o = &got
 		ev["reviewed"] = got
 	}
+	ev["pull_requests"] = prs
 	if why := closedAs(r); why != "" {
 		ev["closed_as_merged"] = why
 	}
