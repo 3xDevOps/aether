@@ -75,10 +75,9 @@ tasks lasts exactly as long as they do.
 
 ### Waits Aether can check
 
-An agent can name what it waits for: `aether-internal report --outcome
-waiting --for ci --until pr:<owner>/<repo>#<n>:checks`. Aether checks each
-such condition and wakes the agent when one resolves. While the run shows
-that wait, `aether runs <run-id>` prints a `wait` line, the run record carries
+A waiting report can name conditions Aether checks for the agent, such as
+a pull request's checks finishing, so it wakes the agent when one resolves.
+While the run shows such a wait, `aether runs <run-id>` prints a `wait` line, the run record carries
 `wait {kind, detail, verified_at, error}`, and the state is judged by the
 evidence:
 

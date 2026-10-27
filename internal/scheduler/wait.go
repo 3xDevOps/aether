@@ -9,8 +9,8 @@ import (
 	"github.com/3xDevOps/Aether/internal/domain"
 )
 
-// WaitCondition is one durable condition a run's waiting report named
-// (aether-internal report --until), as the scheduler reads it.
+// WaitCondition is one durable condition a run's waiting report named, as
+// the scheduler reads it.
 type WaitCondition struct {
 	// Spec is the condition as the agent wrote it, such as
 	// pr:owner/repo#12:checks.

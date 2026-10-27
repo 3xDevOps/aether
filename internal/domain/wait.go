@@ -6,7 +6,7 @@ import (
 )
 
 // WaitEvidence is what Aether can tell about a wait an agent reported from
-// the conditions it named (aether-internal report --until).
+// the conditions it named.
 type WaitEvidence string
 
 const (
