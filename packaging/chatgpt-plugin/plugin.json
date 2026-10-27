@@ -51,7 +51,7 @@
             {
               "description": "Launch: start an agent on a small task in the demo workspace. ChatGPT asks for confirmation first.",
               "prompt": "Launch a Claude Code run in the aether-demo workspace to add a Contributing section to README.md.",
-              "tools_triggered": "aether_list_workspaces, aether_list_agents, aether_launch_run",
+              "tools_triggered": "aether_list_workspaces, aether_launch_run",
               "expected_behavior": "After the reviewer confirms, starts one run in aether-demo with Claude Code and returns its run id, state and dashboard link."
             },
             {
