@@ -169,6 +169,11 @@ func (s *Scheduler) freshAssistantContainer(ctx context.Context, member domain.M
 	if err = s.removeAssistantLoginTranscripts(ctx, member); err != nil {
 		return "", err
 	}
+	// The container mounts every agent's sign-in, so a sign-in still waiting
+	// for its record is recorded before anything runs that could rewrite it.
+	if err = s.recordPendingSignIns(ctx, member, agent); err != nil {
+		return "", err
+	}
 	if signIn != "" {
 		// What the sign-in writes is what gets recorded, never a file the
 		// agent left.

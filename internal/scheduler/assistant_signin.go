@@ -85,7 +85,8 @@ func (s *Scheduler) markAssistantSignIn(member domain.MemberID, agent string) er
 	return nil
 }
 
-// forgetAssistantSignIn deletes agent's sign-in file and its record.
+// forgetAssistantSignIn deletes agent's sign-in file, its record and a
+// pending one.
 func (s *Scheduler) forgetAssistantSignIn(member domain.MemberID, agent string) error {
 	root, err := os.OpenRoot(AssistantHomeDir(s.cfg.AssistantDir, member))
 	if err != nil {
@@ -95,9 +96,33 @@ func (s *Scheduler) forgetAssistantSignIn(member domain.MemberID, agent string) 
 	for _, err := range []error{
 		root.Remove(assistantSignInRel[agent]),
 		os.Remove(filepath.Join(assistantSignInDir(s.cfg.AssistantDir, member), agent+".json")),
+		os.Remove(filepath.Join(assistantSignInDir(s.cfg.AssistantDir, member), agent+".pending")),
 	} {
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("scheduler: forget the assistant's %s sign-in: %w", agent, err)
+		}
+	}
+	return nil
+}
+
+// recordPendingSignIns records the account of every agent but except whose
+// sign-in waits for its record. One that cannot be verified now is
+// forgotten, leaving that agent not signed in rather than refusing a start
+// of another.
+func (s *Scheduler) recordPendingSignIns(ctx context.Context, member domain.MemberID, except string) error {
+	for _, agent := range assistantAgents {
+		if agent == except {
+			continue
+		}
+		_, err := os.Stat(filepath.Join(assistantSignInDir(s.cfg.AssistantDir, member), agent+".pending"))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err == nil && s.verifyAssistantSignIn(ctx, member, agent) == nil {
+			continue
+		}
+		if err := s.forgetAssistantSignIn(member, agent); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -177,7 +202,7 @@ func (s *Scheduler) verifyAssistantSignIn(ctx context.Context, member domain.Mem
 		return fmt.Errorf("scheduler: %w", err)
 	}
 	if rotated != nil {
-		if err = root.WriteFile(rel, rotated, 0o600); err != nil {
+		if err = writeFileAtomic(root, rel, rotated); err != nil {
 			return fmt.Errorf("scheduler: write back the assistant's %s sign-in: %w", agent, err)
 		}
 	}
@@ -192,6 +217,30 @@ func (s *Scheduler) verifyAssistantSignIn(ctx context.Context, member domain.Mem
 	}
 	if account != string(want) {
 		return fmt.Errorf("scheduler: %w", ErrAssistantSignInChanged)
+	}
+	return nil
+}
+
+// writeFileAtomic replaces rel in root with data through a temporary file,
+// so a crash leaves the old or the new sign-in, never part of one.
+func writeFileAtomic(root *os.Root, rel string, data []byte) error {
+	tmp := rel + ".aether-new"
+	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if syncErr := f.Sync(); err == nil {
+		err = syncErr
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = root.Rename(tmp, rel)
+	}
+	if err != nil {
+		return errors.Join(err, root.Remove(tmp))
 	}
 	return nil
 }
@@ -378,7 +427,8 @@ func (i AssistantIssuer) post(ctx context.Context, vendor, url string, body map[
 }
 
 // do sends req and decodes a 2xx answer into out. A 400 or 401 is the
-// issuer refusing the sign-in; any other failure is reported as it came.
+// issuer refusing the sign-in; any other failure is reported with the
+// issuer's answer.
 func (i AssistantIssuer) do(req *http.Request, vendor string, out any) error {
 	resp, err := i.Client.Do(req)
 	if err != nil {
@@ -392,7 +442,8 @@ func (i AssistantIssuer) do(req *http.Request, vendor string, out any) error {
 	detail := strings.TrimSpace(string(body[:min(len(body), 512)]))
 	switch {
 	case resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized:
-		return fmt.Errorf("%s answered %s: %s: %w", vendor, resp.Status, detail, ErrAssistantSignInRefused)
+		// A refusal's body can echo the token it refused.
+		return fmt.Errorf("%s answered %s: %w", vendor, resp.Status, ErrAssistantSignInRefused)
 	case resp.StatusCode/100 != 2:
 		return fmt.Errorf("couldn't verify the assistant's sign-in with %s: %s: %s", vendor, resp.Status, detail)
 	}

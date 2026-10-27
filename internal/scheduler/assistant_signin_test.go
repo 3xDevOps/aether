@@ -266,3 +266,92 @@ func TestAssistantSignInThatWroteNothingUsable(t *testing.T) {
 		t.Fatalf("a sign-in after the unusable one: %v", err)
 	}
 }
+
+// TestAssistantPendingSignInIsRecordedBeforeAnotherAgentRuns records a
+// Codex sign-in when Claude Code starts first, so a Claude Code session that
+// rewrites the Codex sign-in cannot have its account recorded; and a pending
+// sign-in that cannot be verified leaves its agent not signed in without
+// refusing the other's start.
+func TestAssistantPendingSignInIsRecordedBeforeAnotherAgentRuns(t *testing.T) {
+	t.Parallel()
+	assistantDir := filepath.Join(t.TempDir(), "assistant")
+	e := newTestEnv(t, func(c *Config) {
+		c.ServerBinary = fakeServerBinary(t, "current build")
+		c.AssistantDir = assistantDir
+		_, c.AssistantIssuer = newFakeIssuer(t)
+	})
+	withCoordination(t, e)
+	home := AssistantHomeDir(assistantDir, e.member.ID)
+	start := func(agent string) error {
+		_, err := e.sched.freshAssistantContainer(t.Context(), e.member.ID, agent, func() {}, "")
+		return err
+	}
+	signIn := func(agent, rel, content string) {
+		t.Helper()
+		if err := e.sched.markAssistantSignIn(e.member.ID, agent); err != nil {
+			t.Fatal(err)
+		}
+		writeHomeFile(t, home, rel, content)
+	}
+	signIn("claude", ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a","refreshToken":"alice~0"}}`)
+	if err := start("claude"); err != nil {
+		t.Fatal(err)
+	}
+	signIn("codex", ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"refresh_token":"acct-alice~0"}}`)
+	if err := start("claude"); err != nil {
+		t.Fatalf("the Claude Code start with a Codex sign-in pending: %v", err)
+	}
+	// What a steered Claude Code session could write into the shared home.
+	writeHomeFile(t, home, ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"refresh_token":"acct-mallory~0"}}`)
+	if err := start("codex"); !errors.Is(err, ErrAssistantSignInChanged) {
+		t.Fatalf("the first Codex start after the rewrite = %v, want the sign-in refused", err)
+	}
+
+	signIn("codex", ".codex/auth.json", `{"auth_mode":"chatgpt","tokens":{"refresh_token":"acct-alice~0"}}`)
+	if err := start("claude"); err != nil {
+		t.Fatalf("a Codex sign-in the issuer refuses refused the Claude Code start: %v", err)
+	}
+	if found, err := e.sched.AssistantLoginFound(e.member.ID, "codex"); err != nil || found {
+		t.Fatalf("Codex after its sign-in was refused: ready %v, %v; want not signed in", found, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "auth.json")); !os.IsNotExist(err) {
+		t.Fatalf("the refused Codex sign-in is still there: %v", err)
+	}
+}
+
+// TestAssistantSignInRefusalAndWriteBack keeps a refusal's answer, which can
+// echo the token, out of the error, and leaves no temporary file behind the
+// rotated sign-in.
+func TestAssistantSignInRefusalAndWriteBack(t *testing.T) {
+	t.Parallel()
+	assistantDir := filepath.Join(t.TempDir(), "assistant")
+	e := newTestEnv(t, func(c *Config) {
+		c.ServerBinary = fakeServerBinary(t, "current build")
+		c.AssistantDir = assistantDir
+		_, c.AssistantIssuer = newFakeIssuer(t)
+	})
+	withCoordination(t, e)
+	home := AssistantHomeDir(assistantDir, e.member.ID)
+	for _, refresh := range []string{"alice~0", "unknown-token"} {
+		if err := e.sched.markAssistantSignIn(e.member.ID, "claude"); err != nil {
+			t.Fatal(err)
+		}
+		writeHomeFile(t, home, ".claude/.credentials.json", `{"claudeAiOauth":{"accessToken":"a","refreshToken":"`+refresh+`"}}`)
+		_, err := e.sched.freshAssistantContainer(t.Context(), e.member.ID, "claude", func() {}, "")
+		if refresh == "alice~0" && err != nil {
+			t.Fatal(err)
+		}
+		if refresh != "alice~0" && (!errors.Is(err, ErrAssistantSignInRefused) || strings.Contains(err.Error(), "invalid_grant")) {
+			t.Fatalf("a refused start = %v, want the refusal without the issuer's answer", err)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Join(home, ".claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".aether-new") {
+			t.Errorf("the write-back left %s", e.Name())
+		}
+	}
+}
