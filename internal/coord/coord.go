@@ -166,6 +166,10 @@ type Config struct {
 	WakeAdmission WakeAdmission
 	// Nil leaves the runs it wakes to read mail on their own.
 	Waker SessionWaker
+	// ReminderAdmission is WakeAdmission for a report reminder, which also
+	// refuses a run a member controls: the next prompt is theirs. Nil sends
+	// no reminders.
+	ReminderAdmission WakeAdmission
 	// Reports is where run.report lands: the scheduler. Leaving it unset
 	// makes run.report an internal error rather than a silent success -
 	// the agent's hook would otherwise be told its state was recorded.

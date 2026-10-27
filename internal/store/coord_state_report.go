@@ -99,3 +99,22 @@ func (d *DB) ReleaseCoordStateReport(ctx context.Context, run domain.RunID, key 
 	}
 	return nil
 }
+
+// LastCoordReportAt is when run last reported an outcome of any kind, zero
+// when it never did. A refused state report released its receipt and does
+// not count.
+func (d *DB) LastCoordReportAt(ctx context.Context, run domain.RunID) (time.Time, error) {
+	var last sql.NullInt64
+	err := d.db.QueryRowContext(ctx,
+		`SELECT MAX(at) FROM (
+		   SELECT MAX(created_at) AS at FROM coord_reports WHERE run_id = ?
+		   UNION ALL
+		   SELECT MAX(created_at) FROM coord_state_reports WHERE run_id = ?)`, run, run).Scan(&last)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("store: last coord report of %s: %w", run, err)
+	}
+	if !last.Valid {
+		return time.Time{}, nil
+	}
+	return decodeTime(last.Int64), nil
+}

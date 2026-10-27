@@ -20,6 +20,7 @@ import (
 
 	"github.com/3xDevOps/Aether/internal/coordtransport"
 	"github.com/3xDevOps/Aether/internal/domain"
+	"github.com/3xDevOps/Aether/internal/events"
 	"github.com/3xDevOps/Aether/internal/harness"
 	"github.com/3xDevOps/Aether/internal/runtime"
 )
@@ -44,6 +45,9 @@ type Coordinator interface {
 	WakeIdle(run domain.RunID)
 	EnhancedSessionOpened(ctx context.Context, run domain.RunID)
 	ProvisionalReport(ctx context.Context, run domain.RunID, since time.Time, message string) error
+	// RemindReport prompts an idle session the server drives as a mail
+	// wake would, under the same admission.
+	RemindReport(ctx context.Context, run domain.RunID, prompt string) error
 }
 
 // coordination attaches the run transport and staged binaries. enabled controls
@@ -567,6 +571,24 @@ func (s *Scheduler) provisionCoordination(ctx context.Context, c *coordination, 
 	}
 	if err = fsyncDir(s.cfg.StateDir); err != nil {
 		return nil, nil, nil, err
+	}
+	if !run.ACP && c.enabled {
+		// Without a launch route, a task carries the instructions; a
+		// taskless launch gets them only from its SessionStart hook and the
+		// aether MCP server's instructions.
+		channel := "SessionStart hook and MCP server instructions"
+		switch {
+		case instructions == "" && run.Task != "":
+			channel = "first message"
+		case instructions == "":
+		case profile.InstructionsConfig != "":
+			channel = "developer instructions"
+		case len(profile.InstructionArgs) > 0:
+			channel = "system prompt"
+		default:
+			channel = "instructions file"
+		}
+		s.publishTimeline(ctx, run.WorkspaceID, run.ID, "", events.TimelineNote, "run instructions: "+channel)
 	}
 	return mounts, launchArgs, launchEnv, nil
 }

@@ -135,6 +135,9 @@ type Store interface {
 	// mail run has not acknowledged that arrived after since (any, when
 	// since is zero).
 	IntegratorWaiting(ctx context.Context, run domain.RunID, since time.Time) (IntegratorWait, error)
+	// LastCoordReportAt is when run last reported an outcome of any kind,
+	// zero when it never did.
+	LastCoordReportAt(ctx context.Context, run domain.RunID) (time.Time, error)
 	// SetRunTitle sets only the run's title, leaving every other field
 	// untouched.
 	SetRunTitle(ctx context.Context, id domain.RunID, title string) error

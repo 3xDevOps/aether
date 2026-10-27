@@ -64,6 +64,18 @@ func TestClaudeDoesNotInventInput(t *testing.T) {
 			t.Errorf("%s must only end execution: %+v", event, got)
 		}
 	}
+	if got, _ := FromClaudeHook([]byte(`{"hook_event_name":"Stop","session_id":"root"}`)); !got.Stop {
+		t.Errorf("a main agent's first stop must be one Aether may hold back: %+v", got)
+	}
+	for _, payload := range []string{
+		`{"hook_event_name":"Stop","session_id":"root","stop_hook_active":true}`,
+		`{"hook_event_name":"StopFailure","session_id":"root"}`,
+		`{"hook_event_name":"Stop","session_id":"root","background_tasks":[{"id":"a","type":"local_agent"}]}`,
+	} {
+		if got, _ := FromClaudeHook([]byte(payload)); got.Stop {
+			t.Errorf("%s must never be held back: %+v", payload, got)
+		}
+	}
 	for _, tc := range []struct {
 		tasks string
 		want  Report

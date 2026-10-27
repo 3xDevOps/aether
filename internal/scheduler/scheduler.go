@@ -415,6 +415,11 @@ type supervised struct {
 	// turnStartedAt is when the agent's last turn started; worker mail an
 	// integrator got before it is mail that turn could handle.
 	turnStartedAt time.Time
+	// reportAsked is the turnStartedAt of the last turn whose end was held
+	// for a missing report (HoldTurnEnd), and stopHeld marks a Standard run
+	// whose held stop no idle report has followed yet.
+	reportAsked time.Time
+	stopHeld    bool
 	// relaunchedAt is when the last relaunch reopened the run; a report
 	// finalized before it belongs to the launch that relaunch ended.
 	relaunchedAt time.Time

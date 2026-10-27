@@ -6,6 +6,9 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/3xDevOps/Aether/internal/domain"
 )
 
 // Widening the receipt table for answered keeps every v84 receipt, applied
@@ -50,5 +53,40 @@ func TestCoordStateReportsMigrationFromV84(t *testing.T) {
 	answered := &CoordStateReport{RunID: "r1", IdempotencyKey: "answered-1", Outcome: "answered", Summary: "replied"}
 	if created, err := db.RecordCoordStateReport(ctx, answered); err != nil || !created {
 		t.Fatalf("answered receipt = %v, %v; want a new receipt", created, err)
+	}
+}
+
+// The latest of a run's outcome reports and state receipts is its last
+// report; a released receipt never took effect and does not count.
+func TestLastCoordReportAt(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+	w := mustCreateWorkspace(t, db)
+	m := mustCreateMember(t, db)
+	run := mustCreateRun(t, db, w.ID, m.ID, domain.RunRunning)
+	if last, err := db.LastCoordReportAt(ctx, run.ID); err != nil || !last.IsZero() {
+		t.Fatalf("LastCoordReportAt before any report = %v, %v; want zero", last, err)
+	}
+	base := time.Now().UTC().Truncate(time.Second)
+	blocked := &CoordReport{WorkspaceID: w.ID, RunID: run.ID, Outcome: CoordOutcomeBlocked, Summary: "stuck", IdempotencyKey: "blocked-1", CreatedAt: base}
+	if _, err := db.ReserveCoordReport(ctx, blocked); err != nil {
+		t.Fatalf("ReserveCoordReport: %v", err)
+	}
+	waiting := &CoordStateReport{RunID: run.ID, IdempotencyKey: "wait-1", Outcome: "waiting", Summary: "CI", CreatedAt: base.Add(time.Minute)}
+	if _, err := db.RecordCoordStateReport(ctx, waiting); err != nil {
+		t.Fatalf("RecordCoordStateReport: %v", err)
+	}
+	if last, err := db.LastCoordReportAt(ctx, run.ID); err != nil || !last.Equal(waiting.CreatedAt) {
+		t.Fatalf("LastCoordReportAt = %v, %v; want the waiting receipt's %v", last, err, waiting.CreatedAt)
+	}
+	refused := &CoordStateReport{RunID: run.ID, IdempotencyKey: "answered-1", Outcome: "answered", Summary: "replied", CreatedAt: base.Add(2 * time.Minute)}
+	if _, err := db.RecordCoordStateReport(ctx, refused); err != nil {
+		t.Fatalf("RecordCoordStateReport: %v", err)
+	}
+	if err := db.ReleaseCoordStateReport(ctx, run.ID, refused.IdempotencyKey); err != nil {
+		t.Fatalf("ReleaseCoordStateReport: %v", err)
+	}
+	if last, err := db.LastCoordReportAt(ctx, run.ID); err != nil || !last.Equal(waiting.CreatedAt) {
+		t.Fatalf("LastCoordReportAt after a released receipt = %v, %v; want %v", last, err, waiting.CreatedAt)
 	}
 }
