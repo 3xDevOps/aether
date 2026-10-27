@@ -29,7 +29,6 @@ export function ScopePills({ value, onChange, label }: { value: Scope; onChange:
 export function sourceLine(preference: Preference): string {
   const day = new Date(preference.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   if (preference.source === 'assistant') return `You said in the assistant · ${day}`
-  if (preference.source === 'cli') return `Added with the CLI · ${day}`
   return 'Added in Settings'
 }
 

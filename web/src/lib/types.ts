@@ -2413,7 +2413,7 @@ export interface WatchChangedPayload {
 
 // Wire types of preference.* (internal/protocol/preference.go).
 
-export type PreferenceSource = 'assistant' | 'settings' | 'cli'
+export type PreferenceSource = 'assistant' | 'settings'
 
 export interface Preference {
   id: string

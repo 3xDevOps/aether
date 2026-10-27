@@ -56,7 +56,7 @@ const toolMethods: Record<string, string> = {
   aether_pr_merge: 'run.pr.merge',
   aether_relaunch_run: 'run.relaunch',
   aether_answer: 'run.input.respond',
-  aether_forget: 'preference.delete',
+  aether_forget: 'assistant.forget',
 }
 
 const readTools: Record<string, [string, string]> = {
