@@ -162,6 +162,7 @@ func TestResumeRestartsTheStallClock(t *testing.T) {
 	if err := e.sched.Resume(t.Context(), run.ID, e.member.ID); err != nil {
 		t.Fatal(err)
 	}
+	waitQuietFrom(t, e.sched, run.ID, resumed)
 	waitStalledAfter(t, e, run.ID, resumed, threshold)
 }
 
@@ -180,7 +181,28 @@ func TestRestartRestartsTheStallClock(t *testing.T) {
 	restarted := time.Now()
 	s2 := e.newScheduler(t, e.rt, newFakePTY())
 	startScheduler(t, s2)
+	waitQuietFrom(t, s2, run.ID, restarted)
 	waitStalledAfter(t, e, run.ID, restarted, threshold)
+}
+
+// waitQuietFrom waits for s to supervise the run and fails unless its stall
+// clock starts no earlier than from. Unlike the stall's timing, this holds
+// however slowly s starts.
+func waitQuietFrom(t *testing.T, s *Scheduler, id domain.RunID, from time.Time) {
+	t.Helper()
+	var quiet time.Time
+	waitFor(t, "the scheduler to supervise the run", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		entry := s.runs[id]
+		if entry != nil {
+			quiet = entry.quietFrom
+		}
+		return entry != nil
+	})
+	if quiet.Before(from) {
+		t.Fatalf("the stall clock starts at %s, before %s", quiet, from)
+	}
 }
 
 // waitStalledAfter waits for the run to park as stalled and fails if it
