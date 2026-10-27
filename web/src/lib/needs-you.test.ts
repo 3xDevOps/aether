@@ -268,6 +268,10 @@ describe('needs you conditions', () => {
   it.each([
     ['turn interrupted', 'Turn interrupted · reply to continue'],
     ['turn ended: max_tokens', 'Stopped: the reply reached its token limit · reply to continue'],
+    [
+      'wait broken: pr:o/r#12:checks resolved, but the agent was not woken',
+      'Wait broken: pr:o/r#12:checks resolved, but the agent was not woken · reply to continue',
+    ],
   ])('asks for a reply to continue an Enhanced run parked with %j', (reason, shown) => {
     const parked = record({ mode: 'acp', acp: true, status: 'needs-attention', state: 'needs-you', reason })
     const presented = presentRun(parked, stateContext())

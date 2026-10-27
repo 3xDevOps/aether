@@ -77,6 +77,8 @@ type ChangeStatus struct {
 	To    string `json:"to"`
 	State string `json:"state,omitempty"`
 	Cause string `json:"cause,omitempty"`
+	// Wait is the kind of evidence behind a reported wait (domain.RunWait).
+	Wait string `json:"wait,omitempty"`
 }
 
 // ChangeInput is a run.input update: how many input requests are open.
