@@ -62,6 +62,8 @@ export interface Server {
   memberHome: (memberID: string) => string
   output: () => string
   stop: () => Promise<void>
+  /** Kills the server, as a crash would, and starts it again on the same address and data. */
+  restart: () => Promise<void>
 }
 
 export interface ServerOptions {
@@ -104,7 +106,7 @@ export async function startServer(dir: string, options: ServerOptions = {}): Pro
     const second = await seedRepo(path.join(dir, 'repos'), 'second')
     execFileSync('git', ['-C', second, 'branch', '-m', 'main', 'trunk'])
   }
-  const child: Child = start(
+  const spawn = (): Child => start(
     options.githubProvider ? githubProviderServer() : binaries().server,
     options.githubProvider ? ['-test.run=^TestGitHubBrowserProviderHarness$', '-test.timeout=0'] : [
       'serve',
@@ -128,19 +130,29 @@ export async function startServer(dir: string, options: ServerOptions = {}): Pro
       } : {}),
     },
   )
-
-  try {
-    await waitFor(`aether-server on ${addr}`, () => portOpen(port))
-  } catch (err) {
-    await child.stop()
-    throw new Error(`${(err as Error).message}\n${child.output()}`)
+  const ready = async (started: Child) => {
+    try {
+      await waitFor(`aether-server on ${addr}`, () => portOpen(port))
+    } catch (err) {
+      await started.stop()
+      throw new Error(`${(err as Error).message}\n${started.output()}`)
+    }
   }
+  let child = spawn()
+  await ready(child)
+  let earlier = ''
 
   return {
     addr,
     dataDir,
     memberHome: (memberID) => path.join(dataDir, 'homes', memberID),
-    output: child.output,
-    stop: child.stop,
+    output: () => earlier + child.output(),
+    stop: () => child.stop(),
+    restart: async () => {
+      await child.kill()
+      earlier += child.output()
+      child = spawn()
+      await ready(child)
+    },
   }
 }
