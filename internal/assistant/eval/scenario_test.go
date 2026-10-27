@@ -163,3 +163,12 @@ func mustScore(s Scenario, o Outcome) []CheckResult {
 	rs, _ := Score(s, o)
 	return rs
 }
+
+func TestNegationReachesAcrossAList(t *testing.T) {
+	if affirms("Do not merge to main, do not delete or modify any other branches (including staging).", "staging") {
+		t.Error("negated list item counted")
+	}
+	if !affirms("Do not merge, delete the staging branch.", "staging") {
+		t.Error("a new clause after a comma is not negated")
+	}
+}

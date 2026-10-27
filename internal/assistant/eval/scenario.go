@@ -15,7 +15,7 @@ var (
 	codePattern     = regexp.MustCompile("(?s)```.*?```|`[^`\n]*`")
 	questionPattern = regexp.MustCompile(`[^.!?\n]*\?`)
 	offerPattern    = regexp.MustCompile(`(?i)\b(show|see|edit|change|tweak|adjust|review)\b[^?]*\b(brief|task|prompt)\b|\b(brief|task|prompt)\b[^?]*\b(show|edit|change|tweak|adjust)`)
-	negationBefore  = regexp.MustCompile(`(?i)\b(no|not|never|without|don't|dont|do not|doesn't|avoid|skip)\b(\s+[\w'-]+){0,2}\s*$`)
+	negationBefore  = regexp.MustCompile(`(?i)\b(no|not|never|without|don't|dont|do not|doesn't|avoid|skip)\b(\s+[\w'()-]+){0,8}\s*$`)
 )
 
 func wordPattern(w string) *regexp.Regexp {
@@ -179,7 +179,7 @@ func has(text string, group []string) bool {
 func affirms(text, word string) bool {
 	for _, m := range wordPattern(word).FindAllStringIndex(text, -1) {
 		before := text[:m[0]]
-		if i := strings.LastIndexAny(before, ".;:!?\n"); i >= 0 {
+		if i := strings.LastIndexAny(before, ".,;:!?\n"); i >= 0 {
 			before = before[i+1:]
 		}
 		if !negationBefore.MatchString(before) {
