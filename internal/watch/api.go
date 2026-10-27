@@ -496,7 +496,7 @@ func (s *Service) owned(ctx context.Context, member domain.MemberID, id string) 
 	if err != nil {
 		return nil, err
 	}
-	if w.MemberID != member {
+	if w.MemberID != member || w.OwnerRunID != "" {
 		return nil, fmt.Errorf("store: watch %s: %w", id, store.ErrNotFound)
 	}
 	return w, nil

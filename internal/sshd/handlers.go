@@ -252,7 +252,7 @@ func (s *Server) launchRun(ctx context.Context, member domain.MemberID, p protoc
 	return run, nil
 }
 
-func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) runList(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := decodeParams[protocol.RunListParams](params)
 	if perr != nil {
 		return nil, perr
@@ -284,6 +284,7 @@ func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.Raw
 		return nil, rpcError(err)
 	}
 	out := make([]protocol.Run, 0, len(runs))
+	listed := make([]*domain.Run, 0, len(runs))
 	for _, r := range runs {
 		if p.MemberID != "" && r.MemberID != domain.MemberID(p.MemberID) {
 			continue
@@ -292,11 +293,15 @@ func (s *Server) runList(ctx context.Context, _ domain.MemberID, params json.Raw
 			continue
 		}
 		out = append(out, s.runSnapshot(r))
+		listed = append(listed, r)
+	}
+	if err := s.fillWaitConditions(ctx, member, listed, out); err != nil {
+		return nil, rpcError(err)
 	}
 	return protocol.RunListResult{Runs: out}, nil
 }
 
-func (s *Server) runGet(ctx context.Context, _ domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
+func (s *Server) runGet(ctx context.Context, member domain.MemberID, params json.RawMessage) (any, *protocol.Error) {
 	p, perr := runIDParams(params)
 	if perr != nil {
 		return nil, perr
@@ -305,7 +310,11 @@ func (s *Server) runGet(ctx context.Context, _ domain.MemberID, params json.RawM
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	return protocol.RunResult{Run: s.runSnapshot(run)}, nil
+	out := []protocol.Run{s.runSnapshot(run)}
+	if err := s.fillWaitConditions(ctx, member, []*domain.Run{run}, out); err != nil {
+		return nil, rpcError(err)
+	}
+	return protocol.RunResult{Run: out[0]}, nil
 }
 
 // runSnapshot decorates every run response, including mutation results. A

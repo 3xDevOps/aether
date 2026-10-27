@@ -62,11 +62,14 @@ type Run struct {
 	Switching              string `json:"switching,omitempty"`
 	// Always a list, including [].
 	PendingInputs []domain.RunInputRequest `json:"pending_inputs"`
-	Branch        string                   `json:"branch"`
-	LastCommit    string                   `json:"last_commit,omitempty"`
-	LastCommitAt  *string                  `json:"last_commit_at,omitempty"`
-	Protected     bool                     `json:"protected,omitempty"`
-	ArchivedAt    *string                  `json:"archived_at,omitempty"`
+	// WaitConditions are the run's latest coord.report until conditions,
+	// live or ended, on run.get and run.list.
+	WaitConditions []WaitCondition `json:"wait_conditions,omitempty"`
+	Branch         string          `json:"branch"`
+	LastCommit     string          `json:"last_commit,omitempty"`
+	LastCommitAt   *string         `json:"last_commit_at,omitempty"`
+	Protected      bool            `json:"protected,omitempty"`
+	ArchivedAt     *string         `json:"archived_at,omitempty"`
 	// run.seen clears OutcomeUnseen for the owner and FinishUnopened for
 	// any member.
 	OutcomeUnseen     bool    `json:"outcome_unseen,omitempty"`

@@ -105,6 +105,9 @@ type prError struct {
 	msg       string
 	transient bool
 	retryAt   time.Time
+	// noLogin marks a member whose GitHub login is missing or rejected, not
+	// one GitHub did not answer for.
+	noLogin bool
 }
 
 func (e *prError) Error() string { return e.msg }
@@ -118,7 +121,9 @@ func (e *prError) RetryAt() time.Time { return e.retryAt }
 const connectFix = "run aether github connect on your computer, or use Onboarding → Agent → GitHub → Connect GitHub in the dashboard"
 
 func credentialsError(err error) *prError {
-	return &prError{msg: "no usable GitHub login in your Aether home (" + err.Error() + "); " + connectFix, transient: true}
+	var api *github.APIError
+	unanswered := errors.Is(err, github.ErrUnreachable) || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &api) && api.Status >= 500
+	return &prError{msg: "no usable GitHub login in your Aether home (" + err.Error() + "); " + connectFix, transient: true, noLogin: !unanswered}
 }
 
 func (p *PRs) member(id domain.MemberID) *prMember {
@@ -182,8 +187,9 @@ func (p *PRs) limited(m *prMember, err *github.RateLimitError) *prError {
 
 // snapshot reads repo#number with member's credentials, conditionally
 // against the last read, which it reuses outright when it is younger than
-// prReuse. moved reports a fresh read that differs from the last one.
-func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string, number int) (snap github.Snapshot, moved bool, err error) {
+// prReuse unless fresh is set. moved reports a fresh read that differs
+// from the last one.
+func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string, number int, fresh bool) (snap github.Snapshot, moved bool, err error) {
 	m := p.member(member)
 	if err = p.lock(ctx, m); err != nil {
 		return github.Snapshot{}, false, err
@@ -198,7 +204,7 @@ func (p *PRs) snapshot(ctx context.Context, member domain.MemberID, repo string,
 	default:
 		var s github.Snapshot
 		if json.Unmarshal(saved.Snapshot, &s) == nil {
-			if p.now().Sub(saved.CheckedAt) < prReuse {
+			if !fresh && p.now().Sub(saved.CheckedAt) < prReuse {
 				return s, false, nil
 			}
 			prev = &s
@@ -266,7 +272,7 @@ func (p *PRs) Validate(ctx context.Context, member domain.MemberID, target proto
 		_, err := p.token(ctx, member, m, false)
 		return "", err
 	}
-	snap, _, err := p.snapshot(ctx, member, strings.ToLower(target.Repo), target.Number)
+	snap, _, err := p.snapshot(ctx, member, strings.ToLower(target.Repo), target.Number, false)
 	if err != nil {
 		return "", err
 	}
@@ -300,7 +306,7 @@ func (p *PRs) Evaluate(ctx context.Context, check PRCheck) (PRResult, error) {
 	var failed error
 	busy := false
 	for i, t := range targets {
-		snap, moved, err := p.snapshot(ctx, check.Member, t.repo, t.number)
+		snap, moved, err := p.snapshot(ctx, check.Member, t.repo, t.number, false)
 		if err == nil && t.run != "" {
 			err = p.refreshRun(ctx, t, snap)
 		}

@@ -278,7 +278,7 @@ Use task propose --help or task revise --help for revision JSON and required fla
 Worker mutations use the mission authority on the run socket. Dispatch keys
 are explicit identities for retry-safe starts and retries.
 `,
-	"report": `usage: aether-internal report [--outcome] <success|failure|blocked|needs-input|waiting|answered> [--for <agents|ci|process>] (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
+	"report": `usage: aether-internal report [--outcome] <success|failure|blocked|needs-input|waiting|answered> [--for <agents|ci|process>] [--until <condition>]... (--summary <text> | --summary-file <path>) [--evidence-ref <ref>] [--idempotency-key <key>]
 
 Record your state: end every turn with exactly one report, as your last
 action. aether-internal skill lists which outcome your role reports when.
@@ -305,6 +305,15 @@ runs, managed Claude Code launches and native pi/omp/OpenCode integrations are
 resumed by mail while idle; elsewhere, in Background runs and while status
 shows protected, never report waiting: wait inside your turn with
 inbox --wait 30 instead.
+--until, only with waiting and at most 4 times, names a condition Aether
+watches for you: pr:<owner>/<repo>#<n>:merged,
+pr:<owner>/<repo>#<n>:checks[@<head-sha>] (name the commit you pushed) or
+run:<run-id>:finished. One already resolved comes back in the result's
+resolved list: act on it in this turn. Otherwise, when the first one
+resolves, fails or expires (7 days), Aether writes what it saw and what to
+do next to your inbox, which wakes you once. A new waiting report with --until replaces the conditions;
+waiting without --until keeps them; any other report, a person's prompt or
+a relaunch cancels them.
 Answered is nonterminal, takes no --evidence-ref and is allowed for every
 role: ` + coordhooks.AnsweredUse + ` The run shows Answered, which never
 needs you and sends no notification. A worker's answered submits nothing and
@@ -312,7 +321,7 @@ leaves its attempt open. A Background run ends with success or failure
 instead.
 Use a fresh idempotency key for each new report, including each new waiting,
 answered or needs-input report. Only a retry of the same report reuses its
-key: the same key with another outcome, --for or summary is refused with a
+key: the same key with another outcome, --for, --until or summary is refused with a
 conflict, and so is a superseded report's key. Every accepted report appears in aether timeline.
 A summary file of "-" reads standard input.
 When live capabilities advertise artifact retain, deliberately retain reviewed
@@ -797,6 +806,8 @@ func report(ctx context.Context, socket string, args []string, in io.Reader, err
 	key := fs.String("idempotency-key", "", "stable key used to replay this mutation")
 	refs := stringList{}
 	fs.Var(&refs, "evidence-ref", "evidence reference (repeatable)")
+	until := untilList{}
+	fs.Var(&until, "until", "with waiting: wake when this resolves, one of "+protocol.WaitGrammar+" (repeatable, at most 4)")
 	positional := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		positional, args = args[0], args[1:]
@@ -821,12 +832,23 @@ func report(ctx context.Context, socket string, args []string, in io.Reader, err
 	if err != nil {
 		return protocol.CoordReportResult{}, err
 	}
-	p := protocol.CoordReportParams{Outcome: *outcome, Summary: text, EvidenceRefs: append([]string(nil), refs...), IdempotencyKey: idempotencyKey, WaitingFor: *waitingFor}
+	p := protocol.CoordReportParams{Outcome: *outcome, Summary: text, EvidenceRefs: append([]string(nil), refs...), IdempotencyKey: idempotencyKey, WaitingFor: *waitingFor, Until: append([]string(nil), until...)}
 	var out protocol.CoordReportResult
 	if err := coordtransport.Call(ctx, socket, protocol.MethodCoordReport, p, &out); err != nil {
 		return out, err
 	}
 	return out, nil
+}
+
+type untilList []string
+
+func (u *untilList) String() string { return strings.Join(*u, ",") }
+func (u *untilList) Set(value string) error {
+	if value == "" {
+		return errors.New("until cannot be empty")
+	}
+	*u = append(*u, value)
+	return nil
 }
 
 type stringList []string

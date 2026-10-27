@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/3xDevOps/Aether/internal/domain"
 	"github.com/3xDevOps/Aether/internal/protocol"
@@ -49,25 +50,48 @@ func (s *Service) handleChild(ctx context.Context, run domain.RunID, method stri
 // no route authorizes, and wakes the recipient. A retry with the same key
 // adds nothing.
 func (s *Service) Notify(ctx context.Context, from, to domain.RunID, body, correlation, key string) error {
+	_, err := s.NotifyRun(ctx, from, to, body, correlation, key)
+	return err
+}
+
+// NotifyRun is Notify reporting whether the message is in the recipient's
+// inbox: false for a run that ended, which gets nothing. Each line of body
+// is kept.
+func (s *Service) NotifyRun(ctx context.Context, from, to domain.RunID, body, correlation, key string) (bool, error) {
 	target, err := s.cfg.Store.GetRun(ctx, to)
 	if err != nil {
-		return fmt.Errorf("notify run %s: %w", to, err)
+		return false, fmt.Errorf("notify run %s: %w", to, err)
 	}
 	if target.Status.Terminal() {
-		return nil
+		return false, nil
 	}
 	msg := &store.RunMessage{
 		WorkspaceID: target.WorkspaceID, FromRun: from, ToRun: to, Kind: store.RunMessageKindMessage,
-		Body: cleanCoordText(body, protocol.CoordMaxBodyBytes), CorrelationID: correlation, IdempotencyKey: key,
+		Body: cleanNoticeText(body, protocol.CoordMaxBodyBytes), CorrelationID: correlation, IdempotencyKey: key,
 	}
 	created, err := appendRunMessage(ctx, s.cfg.Mail, msg, false)
 	if err != nil {
-		return fmt.Errorf("notify run %s: %w", to, err)
+		return false, fmt.Errorf("notify run %s: %w", to, err)
 	}
 	if created {
 		s.wakeInbox(to)
 	}
-	return nil
+	return true, nil
+}
+
+// cleanNoticeText is cleanCoordText line by line, so a server-written
+// message keeps its lines.
+func cleanNoticeText(text string, maxBytes int) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = cleanCoordText(line, maxBytes)
+	}
+	text = strings.Join(lines, "\n")
+	for len(text) > maxBytes {
+		runes := []rune(text)
+		text = string(runes[:len(runes)-1])
+	}
+	return text
 }
 
 func isChildMethod(method string) bool {

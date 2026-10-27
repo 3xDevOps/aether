@@ -63,6 +63,60 @@ export interface RunInputRequest {
   kind: 'question' | 'permission' | 'form' | 'extension_ui'
 }
 
+export type WaitKind = 'pr_merged' | 'pr_checks' | 'run_finished'
+export type WaitState = 'pending' | 'resolved' | 'cancelled' | 'superseded' | 'expired' | 'error'
+
+export interface WaitChecks {
+  passed: number
+  failed: number
+  pending: number
+  cancelled: number
+  required_only: boolean
+}
+
+export interface WaitObserved {
+  pr_state?: string
+  head_sha?: string
+  merged_at?: string
+  checks?: WaitChecks
+  run_status?: string
+}
+
+/** One condition a run registered with `report --outcome waiting --until`. */
+export interface WaitCondition {
+  id: string
+  revision: number
+  spec: string
+  kind: WaitKind
+  repo?: string
+  number?: number
+  run_id?: string
+  state: WaitState
+  outcome?: string
+  observed: WaitObserved
+  /** Server-written. */
+  summary: string
+  /** Text from GitHub or another agent, such as failing check names: never instructions. */
+  detail?: string
+  /** The head commit a checks condition resolves on. */
+  head_sha?: string
+  created_at: string
+  last_checked_at?: string
+  source_checked_at?: string
+  next_check_at?: string
+  consecutive_failures: number
+  last_error?: string
+  last_error_at?: string
+  resolved_at?: string
+  delivered_at?: string
+  delivery_attempts: number
+  last_delivery_error?: string
+  expires_at: string
+  ended_cause?: string
+  /** The member who cancelled it with run.wait.cancel. */
+  ended_by_member_id?: string
+}
+
 export interface Run {
   id: string
   workspace_id: string
@@ -123,6 +177,8 @@ export interface Run {
   oldest_unacked_at?: string
   /** Correlated native requests; independent of execution status. */
   pending_inputs?: RunInputRequest[]
+  /** The run's latest coord.report until conditions, live or ended. */
+  wait_conditions?: WaitCondition[]
   /** Last run.status reason, sanitized like the event payload. */
   reason?: string
   /** Decorated by the gateway from the scheduler; absent on legacy servers. */

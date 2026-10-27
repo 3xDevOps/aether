@@ -96,9 +96,8 @@ type Config struct {
 	Runtime runtime.Runtime
 	// Usage overrides the vendor quota reader, primarily for tests.
 	Usage fallback.QuotaReader
-	// WaitConditions reads the conditions agents' waiting reports name;
-	// nil leaves every reported wait unverified. Primarily for tests until
-	// the condition store is wired.
+	// WaitConditions replaces the watch service as the reader of the
+	// conditions agents' waiting reports name, for tests.
 	WaitConditions scheduler.WaitConditions
 	// IntegrationAdmission is the server-controlled policy seam for
 	// consequential candidate mutations. It is never populated from a
@@ -386,11 +385,15 @@ func New(ctx context.Context, cfg Config) (srv *Server, err error) {
 		s.egress = egress.New(s.docker, s.db, s.bus)
 		egressProxy = s.egress
 	}
+	var waitConditions scheduler.WaitConditions = storeWaitConditions{s.db}
+	if cfg.WaitConditions != nil {
+		waitConditions = cfg.WaitConditions
+	}
 	if s.sched, err = scheduler.New(scheduler.Config{
 		Store:          s.db,
 		Runtime:        s.rt,
 		Bus:            s.bus,
-		WaitConditions: cfg.WaitConditions,
+		WaitConditions: waitConditions,
 		Egress:         egressProxy,
 		EventSeq:       s.log.LastSeq,
 		Git:            lazyGit{s.git},

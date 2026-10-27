@@ -48,6 +48,7 @@ func init() {
 			// only after finalization.
 			Evidence:          coordEvidenceCapture{service: d.Evidence},
 			EvidencePackets:   d.Store,
+			Until:             lazyWaits{ssh: d.SSH},
 			Mission:           lazyMission{ssh: d.SSH, runs: d.Runs},
 			Children:          childAuthority,
 			WakeAdmission:     newCoordWakeAdmission(d),

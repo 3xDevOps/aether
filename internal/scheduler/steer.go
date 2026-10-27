@@ -637,6 +637,11 @@ func (s *Scheduler) injectLive(ctx context.Context, entry *supervised, workspace
 	if err != nil {
 		return "", err
 	}
+	// The run stops waiting before the prompt reaches it, so a condition it
+	// registers in answer stays.
+	if err = s.endRunWaits(ctx, run, "a person sent a new prompt"); err != nil {
+		return "", err
+	}
 	outcome, err := s.entryDriver(entry).Deliver(ctx, r, m, prompt, steer, delivered)
 	if err != nil {
 		return "", err
