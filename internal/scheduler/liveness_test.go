@@ -150,7 +150,6 @@ func TestReportReminderTurnKeepsTheStallThreshold(t *testing.T) {
 			e, _ := newACPEnv(t, func(cfg *Config) {
 				cfg.StallThreshold = time.Hour
 				cfg.FirstEventGrace, cfg.StreamQuietGrace = grace, grace
-				cfg.PollInterval = 20 * time.Millisecond
 			})
 			run := e.launchACP(t, acpmock.PromptWait)
 			e.waitStoreStatus(t, run.ID, domain.RunRunning)
@@ -158,8 +157,8 @@ func TestReportReminderTurnKeepsTheStallThreshold(t *testing.T) {
 			r := e.sched.acp.runs[run.ID]
 			r.asked = &askedTurn{start: tc.start(r.session.Log().TurnStartSeq())}
 			e.sched.acp.mu.Unlock()
-			e.startStalls(t)
-			time.Sleep(4 * grace)
+			time.Sleep(2 * grace)
+			e.sched.checkStalls(t.Context())
 			got, err := e.db.GetRun(t.Context(), run.ID)
 			if err != nil {
 				t.Fatal(err)
