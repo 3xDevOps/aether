@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +68,7 @@ func TestWaitExitsWithTheRunsOutcome(t *testing.T) {
 				protocol.MethodWorkspaceTimeline: {result: protocol.WorkspaceTimelineResult{}},
 			})
 			var out bytes.Buffer
-			err := waitRun(c, &out, "r1", false, make(chan struct{}), time.Hour, tc.deadline, time.Minute)
+			err := waitRun(c, &out, io.Discard, "r1", false, make(chan struct{}), time.Hour, tc.deadline, time.Minute)
 			code := 0
 			var status *exitStatusError
 			if errors.As(err, &status) {
@@ -100,7 +102,7 @@ func TestWaitWakesOnAStatusEvent(t *testing.T) {
 	})
 	changed := make(chan struct{}, 1)
 	done := make(chan error, 1)
-	go func() { done <- waitRun(c, &bytes.Buffer{}, "r1", false, changed, time.Hour, nil, 0) }()
+	go func() { done <- waitRun(c, &bytes.Buffer{}, io.Discard, "r1", false, changed, time.Hour, nil, 0) }()
 	for run.params() == nil {
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -113,6 +115,56 @@ func TestWaitWakesOnAStatusEvent(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("a status event did not wake the wait")
+	}
+}
+
+// A wait Aether cannot vouch for keeps aether wait going and is said once
+// on stderr, however its source's error reads from poll to poll; --json
+// keeps stdout to the run alone.
+func TestWaitWarnsOnceOnAnUnknownSource(t *testing.T) {
+	unknown := func(err string) protocol.RunResult {
+		return protocol.RunResult{Run: protocol.Run{ID: "r1", WorkspaceID: "ws1", Status: "needs-attention", Activity: "waiting-ci",
+			Wait: &domain.RunWait{Kind: domain.WaitSourceUnknown, Detail: "pr:o/r#12:checks: status unknown", Error: err}}}
+	}
+	run := &fakeReply{result: unknown("gh: API rate limit exceeded, resets in 40s")}
+	c := fakeControlMethods(t, map[string]*fakeReply{
+		protocol.MethodRunGet:            run,
+		protocol.MethodAttentionList:     {result: protocol.AttentionListResult{}},
+		protocol.MethodWorkspaceList:     {result: protocol.WorkspaceListResult{}},
+		protocol.MethodWorkspaceTimeline: {result: protocol.WorkspaceTimelineResult{}},
+	})
+	changed := make(chan struct{})
+	var out, stderr bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- waitRun(c, &out, &stderr, "r1", true, changed, time.Hour, nil, 0) }()
+	for run.params() == nil {
+		time.Sleep(10 * time.Millisecond)
+	}
+	run.answer(unknown("gh: API rate limit exceeded, resets in 5s"))
+	// A send is taken only between reads, so the second read sees the new
+	// error before the run completes.
+	changed <- struct{}{}
+	changed <- struct{}{}
+	run.answer(protocol.RunResult{Run: protocol.Run{ID: "r1", WorkspaceID: "ws1", Status: "completed"}})
+	timeout := time.After(5 * time.Second)
+	for ended := false; !ended; {
+		select {
+		case changed <- struct{}{}:
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("wait after the run completed = %v", err)
+			}
+			ended = true
+		case <-timeout:
+			t.Fatal("the wait did not end")
+		}
+	}
+	if want := "run r1 still waits, but pr:o/r#12:checks: status unknown: gh: API rate limit exceeded, resets in 40s\n"; stderr.String() != want {
+		t.Fatalf("stderr = %q, want once %q", stderr.String(), want)
+	}
+	var v runView
+	if err := json.Unmarshal(out.Bytes(), &v); err != nil || v.State != "completed" {
+		t.Fatalf("stdout = %q (%v), want the run as JSON", out.String(), err)
 	}
 }
 

@@ -96,7 +96,7 @@ func runWait(args []string) error {
 		go signalLines(stream, changed)
 		every = waitRecheck
 	}
-	err = waitRun(c, os.Stdout, runID, *asJSON, changed, every, deadline, *timeout)
+	err = waitRun(c, os.Stdout, os.Stderr, runID, *asJSON, changed, every, deadline, *timeout)
 	return timedOutAfterCut(err, cutOff.Load(), *timeout, runID)
 }
 
@@ -122,7 +122,7 @@ func signalLines(stream io.Reader, changed chan<- struct{}) {
 	}
 }
 
-func waitRun(c *protocol.Client, w io.Writer, runID string, asJSON bool, changed <-chan struct{}, every time.Duration, deadline <-chan time.Time, timeout time.Duration) error {
+func waitRun(c *protocol.Client, w, stderr io.Writer, runID string, asJSON bool, changed <-chan struct{}, every time.Duration, deadline <-chan time.Time, timeout time.Duration) error {
 	tick := time.NewTicker(every)
 	defer tick.Stop()
 	var doubt string
@@ -132,10 +132,12 @@ func waitRun(c *protocol.Client, w io.Writer, runID string, asJSON bool, changed
 			return err
 		}
 		// A wait Aether cannot vouch for keeps waiting, said once on stderr.
+		// The source's error text can change on every read, so it does not
+		// make the doubt new.
 		if r.Wait != nil && (r.Wait.Kind == domain.WaitSourceUnknown || r.Wait.Kind == domain.WaitFault) {
-			if r.Wait.Detail+r.Wait.Error != doubt {
-				doubt = r.Wait.Detail + r.Wait.Error
-				fmt.Fprintf(os.Stderr, "run %s still waits, but %s\n", r.ID, printable(r.Wait.Text(time.Now())))
+			if key := string(r.Wait.Kind) + "|" + r.Wait.Detail; key != doubt {
+				doubt = key
+				_, _ = fmt.Fprintf(stderr, "run %s still waits, but %s\n", r.ID, printable(r.Wait.Text(time.Now())))
 			}
 		}
 		items, err := attentionItems(c, r.WorkspaceID)
