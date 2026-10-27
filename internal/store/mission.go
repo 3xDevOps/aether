@@ -762,7 +762,8 @@ func (d *DB) ReleaseMissionWorkerTakeover(ctx context.Context, workerRun domain.
 	return &a, nil
 }
 
-// ReleaseMissionWorkerTakeovers clears every active hold.
+// ReleaseMissionWorkerTakeovers is only safe while no session can hold a
+// worker, as when the server starts.
 func (d *DB) ReleaseMissionWorkerTakeovers(ctx context.Context) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
