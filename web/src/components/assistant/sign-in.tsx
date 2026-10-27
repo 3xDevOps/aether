@@ -21,11 +21,18 @@ export function AssistantSignIn({ agent, client, onDone }: { agent: AssistantAge
     if (!terminal) return
     const attached = connectAttach(() => client.assistantLoginSocket(agent.name), {
       onData: (chunk) => terminal.write(chunk),
-      onAttached: () => setRefused(undefined),
+      onAttached: () => {
+        terminal.reset()
+        setRefused(undefined)
+      },
       onState: () => {},
       onRefused: (detail) => setRefused(detail),
       onWriteDenied: (detail) => setRefused(detail ?? 'Terminal input was denied'),
-      onExit: () => setEnded(true),
+      // A reconnect after the sign-in exits would start another one.
+      onExit: () => {
+        attached.close()
+        setEnded(true)
+      },
       geometry,
       wantsWrite: () => true,
     })

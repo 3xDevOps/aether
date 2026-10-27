@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useAssistantAvailable } from '@/components/assistant/button'
+import { AssistantSignIn } from '@/components/assistant/sign-in'
 import { Confirm } from '@/components/confirm'
+import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Checkbox } from '@/components/ui/checkbox'
 import type { Api } from '@/lib/api'
@@ -8,6 +10,7 @@ import type { AssistantSettings } from '@/lib/assistant-types'
 import { errorSentence } from '@/lib/format'
 import { SettingRow, SettingsSection, TryAgain } from '@/routes/settings/layout'
 import { useStore } from '@/store'
+import { refreshAssistant } from '@/store/assistant-stream'
 
 export const autoApproveLabel = 'Let the assistant act without asking'
 
@@ -67,6 +70,8 @@ export function AssistantSection({ client }: { client: Api }) {
       : 'Off. The assistant asks on a card before it launches, messages or stops a run, or saves your environment.'
 
   return (
+    <>
+    <SignInSection client={client} />
     <SettingsSection title="Approvals" id="auto-approve" scope="Your account">
       <SettingRow
         label={autoApproveLabel}
@@ -109,6 +114,39 @@ export function AssistantSection({ client }: { client: Api }) {
           onClose={() => setConfirming(false)}
         />
       )}
+    </SettingsSection>
+    </>
+  )
+}
+
+/** Signs an agent in again for the assistant, as when its sign-in expired: a sign-in that is still there counts as ready. */
+function SignInSection({ client }: { client: Api }) {
+  const agents = useStore((s) => s.assistantStatus?.agents)
+  const [signing, setSigning] = useState('')
+  if (!agents?.length) return null
+  return (
+    <SettingsSection title="Sign-in" id="assistant-sign-in" scope="Your account">
+      {agents.map((agent) => (
+        <SettingRow
+          key={agent.name}
+          label={agent.display_name}
+          help={agent.ready ? 'Signed in for the assistant.' : agent.reason}
+          control={signing !== agent.name && (
+            <Button size="sm" variant="secondary" onClick={() => setSigning(agent.name)}>{agent.ready ? 'Sign in again' : 'Sign in'}</Button>
+          )}
+        >
+          {signing === agent.name && (
+            <AssistantSignIn
+              agent={agent}
+              client={client}
+              onDone={() => {
+                setSigning('')
+                void refreshAssistant(useStore, client)
+              }}
+            />
+          )}
+        </SettingRow>
+      ))}
     </SettingsSection>
   )
 }
